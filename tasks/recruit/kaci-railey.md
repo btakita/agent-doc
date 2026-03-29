@@ -183,7 +183,7 @@ Regarding the SKILL.md question: I'd add the chatbox formatting guidance to the 
 I manually sent it. continue
 - [ ] Add chatbox formatting docs to chromium-bridge SKILL.md
 
-### Re: Post-send cleanup (HEAD)
+### Re: Post-send cleanup
 
 Done:
 1. **Saved sent reply** to `mail/contacts/kaci-railey/20260329-linkedin-brian-takita.txt`
@@ -193,7 +193,7 @@ Done:
    - Platform-specific selectors (LinkedIn, Gmail, Messenger)
    - `input` event dispatch requirement
    - How to click conversation items by heading text
-<!-- agent:boundary:3bdd0a3b -->
+<!-- agent:boundary:fe13580d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

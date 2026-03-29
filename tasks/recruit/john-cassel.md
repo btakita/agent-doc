@@ -442,7 +442,7 @@ This is important for the LinkedIn message -- I shouldn't imply scope/resolution
 
 Want me to revise the full draft with these corrections, or are there more refinements first?
 
-### Re: Bounded attention, pneuma/phenomena, and creative systems (HEAD)
+### Re: Bounded attention, pneuma/phenomena, and creative systems
 
 **Bounded attention correction -- accepted.** I was describing attention as if it must background some dimensions -- that's only true when attention is bounded (finite information per moment). But the ontology itself is unbounded: the full set of entities is expressed across all attention entities. Nothing is necessarily backgrounded in the ontology -- only in any particular bounded application of it. The backgrounding is a property of the observer's bounded attention, not of the ontology.
 
@@ -454,7 +454,7 @@ This is a better framing than the microscope analogy: a microscope constrains wh
 
 **Updated understanding for the LinkedIn message:**
 The message should not imply that applying the ontology involves trade-offs or backgrounding. It should convey that the ontology expresses the pneuma of Existence -- the full structure of any system -- and that precision communicates the possibility space at any level without inherently constraining what's expressible.
-<!-- agent:boundary:777ec681 -->
+<!-- agent:boundary:dc79f925 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

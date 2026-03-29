@@ -174,7 +174,7 @@ The through-line is remarkably aligned with Existence Lang's philosophy: entitie
 Should I create an existence-lang ontology for permaculture?
 Would it help the reply to have the permaculture existence-lang ontology repo to share?
 
-### Re: Permaculture ontology for Existence Lang (HEAD)
+### Re: Permaculture ontology for Existence Lang
 
 **Yes, absolutely.** A permaculture domain overlay for Existence Lang would be a compelling thing to share. Rather than a full repo, I'd suggest creating a single overlay file that maps permaculture concepts to Existence Lang terms -- something John could read in 5 minutes and immediately see the resonance.
 
@@ -227,7 +227,7 @@ Updated draft reply incorporating the ontology:
 > -- Brian
 
 Want me to create the overlay file in the existence-lang repo so we have a shareable link?
-<!-- agent:boundary:e98b0838 -->
+<!-- agent:boundary:02914f13 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

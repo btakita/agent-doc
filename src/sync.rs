@@ -491,8 +491,8 @@ fn run_with_options(
                     if !tmux.pane_alive(pane) {
                         return false;
                     }
-                    // A pane in a stash window is alive but not usable — treat as dead
-                    // so auto-start creates a fresh pane in the correct window.
+                    // A pane in a stash window is alive — rescue it back to the
+                    // agent-doc window instead of creating a new session.
                     if let Ok(win_id) = tmux.pane_window(pane) {
                         let win_name = tmux
                             .cmd()
@@ -504,9 +504,31 @@ fn run_with_options(
                             .unwrap_or_default();
                         if win_name == "stash" || win_name.starts_with("stash-") {
                             eprintln!(
-                                "[sync] pane {} for {} is in stash window '{}', treating as dead",
+                                "[sync] pane {} for {} is in stash window '{}', rescuing",
                                 pane, file_path.display(), win_name
                             );
+                            // Rescue: swap the stashed pane into the agent-doc window
+                            if let Some(target_win) = window {
+                                let agent_doc_window = format!("{}:agent-doc", target_win);
+                                let target_panes = tmux.list_window_panes(&agent_doc_window).unwrap_or_default();
+                                if let Some(target) = target_panes.first() {
+                                    match tmux.swap_pane(pane, target) {
+                                        Ok(()) => {
+                                            eprintln!("[sync] rescued pane {} via swap-pane", pane);
+                                            return true;
+                                        }
+                                        Err(e) => {
+                                            eprintln!("[sync] swap-pane rescue failed ({}), trying join-pane", e);
+                                            if tmux.join_pane(pane, target, "-dh").is_ok() {
+                                                eprintln!("[sync] rescued pane {} via join-pane", pane);
+                                                return true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // Rescue failed — treat as dead
+                            eprintln!("[sync] rescue failed for pane {}, treating as dead", pane);
                             return false;
                         }
                     }

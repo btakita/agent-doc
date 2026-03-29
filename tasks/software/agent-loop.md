@@ -51,7 +51,7 @@ All submodules clean, all releases published.
 
 Commit and push all submodules.
 Release any unreleased software.
-### Re: commit all submodules + release unreleased software (HEAD)
+### Re: commit all submodules + release unreleased software
 
 **Submodules committed & pushed:**
 - `mail` — sync contacts, conversations, drafts, social (132 files)
@@ -68,7 +68,7 @@ Release any unreleased software.
 **Parent commit** `7312fce`: Updated 6 submodule pointers (mail, philosophy, agent-doc, corky, drmanny-dev, tmux-router). Pushed to origin.
 
 **Not committed:** `src/briantakita.me-dev` has submodule mismatch but no new changes inside.
-<!-- agent:boundary:4f874a81 -->
+<!-- agent:boundary:edc0d8eb -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

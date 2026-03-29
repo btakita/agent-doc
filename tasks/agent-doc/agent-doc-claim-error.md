@@ -114,7 +114,7 @@ A `curl | sh` installer could be added — it would download the prebuilt binary
 
 Yes
 Make sure that Linux, OSX, and Windows are supported.
-### Install script updated (HEAD)
+### Install script updated
 
 `install.sh` already existed but only supported Linux/macOS with the old asset naming convention. Updated to:
 
@@ -142,7 +142,7 @@ curl -fsSL https://raw.githubusercontent.com/btakita/agent-doc/main/install.sh |
 Pushed to main. The install URL will work for any tagged release that completes CI.
 
 **Note:** The v0.27.3 release was created manually (Linux binary only). Future tag pushes will trigger CI and produce all 5 platform binaries automatically.
-<!-- agent:boundary:3669b8ba -->
+<!-- agent:boundary:285d282f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

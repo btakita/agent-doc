@@ -719,7 +719,7 @@ Updated `mail/contacts/john-cassel/AGENTS.md` communication timeline needed.
 
 It was sent as a wall of text. Please edit the message to be correctly formatted.
 
-### Re: Formatting fix (HEAD)
+### Re: Formatting fix
 
 I wasn't able to edit the sent message -- LinkedIn's dropdown menu items aren't loading consistently via JavaScript automation. The message was sent and saved but paragraph breaks weren't preserved.
 
@@ -731,7 +731,7 @@ I wasn't able to edit the sent message -- LinkedIn's dropdown menu items aren't 
 The issue is that LinkedIn's contenteditable doesn't preserve `<br>` tags when editing, and the `chromium-bridge type` paragraph handling (Shift+Enter) didn't create visible breaks in the edit save. For future LinkedIn messages, I should type each paragraph separately with Enter key presses between them rather than using the `type` command's paragraph handling.
 
 Which approach do you prefer?
-<!-- agent:boundary:e6669463 -->
+<!-- agent:boundary:915b7eb0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

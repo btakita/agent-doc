@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Both videos transcribed. Spectra welcome + interview recording saved to tmp/.
+3 videos downloaded & transcribed. Resume + favorite experience interviews + Spectra welcome.
 <!-- /agent:status -->
 
 ## Exchange
@@ -148,15 +148,30 @@ Spectra video transcribed.
 **Both transcriptions complete:**
 1. `tmp/handshake-spectra-video-1.txt` — Project Spectra welcome (6:59)
 2. `tmp/handshake-interview-video-1.txt` — Your interview recording (2:01)
-<!-- agent:boundary:72f37191 -->
+
+Get and transcribe the next video at https://ai.joinhandshake.com/fellow/forms/d6a5a8ad-257c-4b89-8c24-513653204040
+
+### Re: Next video downloaded & transcribed (HEAD)
+
+Downloaded and transcribed the second interview video (question: "Tell us about your favorite career experience so far").
+
+**Downloaded:** `tmp/handshake-interview-video-2.mp4` (1280x720, 2:01, 33.2MB)
+**Transcription:** `tmp/handshake-interview-video-2.txt` (0.8s, 150x realtime)
+
+**Content summary:** You talk about your favorite current experience — working with AgentDoc and Existence Lang. You explain how you apply philosophy (ontology) to agent loops for human-agent alignment, and how this helped when building Module Harness evals. You caught a conceptual gap where "eval" lacked quantifiable criteria vs automated testing, and fixed it using the ontology.
+
+**All transcriptions:**
+1. `tmp/handshake-spectra-video-1.txt` — Spectra welcome (6:59)
+2. `tmp/handshake-interview-video-1.txt` — Resume walkthrough (2:01)
+3. `tmp/handshake-interview-video-2.txt` — Favorite career experience (2:01)
+<!-- agent:boundary:55af1f9c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Connect to Chromium browser
-- [x] Download videos
-- [x] Add joinhandshake topic
-- [x] Transcribe interview video (tmp/handshake-interview-video-1.txt)
-- [x] Transcribe spectra video (tmp/handshake-spectra-video-1.txt)
+- [x] Download & transcribe all videos
+- [x] Spectra welcome video
+- [x] Interview video 1 (resume walkthrough)
+- [x] Interview video 2 (favorite career experience)
 <!-- /agent:pending -->

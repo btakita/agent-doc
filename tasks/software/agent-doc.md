@@ -489,6 +489,8 @@ Also updated the global CLAUDE.md ontology table to match.
 
 **2. Interface node authored** at `~/.claude/philosophy/src/interface.md`:
 
+This definition belongs in existence/src/interface.md
+
 > An interface is the defined boundary through which one System communicates with another System. It constrains the Scope of interaction by defining what Signals are valid and how they are structured. An interface is an Abstraction -- a symbolic representation of how a system can be interacted with. But it is a specific kind of abstraction: one that defines a contract between systems.
 
 Updated `src/agent-doc/CLAUDE.md` and `~/.claude/philosophy/CLAUDE.md` to use Interface instead of Abstraction for API/ABI concepts.
@@ -497,9 +499,13 @@ Updated `src/agent-doc/CLAUDE.md` and `~/.claude/philosophy/CLAUDE.md` to use In
 
 The existence skill already has binary resolution (check PATH, check relative paths, suggest `cargo install`). For installability on other systems, the main gaps are:
 
-- **No `cargo publish` to crates.io** -- this would make `cargo install existence-lang` work anywhere
-- **No prebuilt binaries** -- GitHub Releases with platform binaries would avoid compile time
-- **SKILL.md is bundled in agent-loop** -- should it be distributable independently?
+- **No `cargo publish` to crates.io** -- this would make `cargo install existence-lang` work anywhere: `cargo install existence`
+- **No prebuilt binaries** -- GitHub Releases with platform binaries would avoid compile time: Let's add linux, osx, and windows binaries. Along with a `curl ... | sh` install command.
+- **SKILL.md is bundled in agent-loop** -- should it be distributable independently?: Yes The existence crate should have a SKILL.md
+
+I will refer to the `existence` crate as `xist`...since it has an `xist` alias to the cli.
+
+src/existence-lang/existence should have a SKILL.md that is installable using `xist skill install`...just like `agent-doc skill install`.
 
 **4. Should the existence CLI update AGENTS.md/CLAUDE.md on the host system?**
 
@@ -513,9 +519,22 @@ This is an interesting design question. Options:
 
 Which approach fits your vision? The existence CLI itself is a standalone tool -- tying it to CLAUDE.md file management feels like it should be a skill concern (option C), unless you want the CLI to be the canonical deployer (option A).
 
+I'm currently using Linux, JetBrains, & Claude. I want to support other agent harnesses.
+So we `/existence install` can support Claude for now. In the future, it would be great to support other harnesses such as codex, opencode, pi, etc.
+
+Can we autodetect which agent harness is working in a directory and install the context files accordingly?
+This seems like this behavior should be in a separate crate. Is there an existing crate that detects which agent harness is working in a directory and installs context files accordingly? Or should we create a new crate?
+
 ### Re: Protocol involves Interfaces
 
 Good distinction. Authored `protocol.md`:
+
+The btakita/philosophy repo is my personal philosophy repo. This is separate from the `existence-lang/ontology` repo.
+All of the fundamental onology work should be done within `existence-lang/ontology`.
+`btakita/philosophy` should depend on `existence-lang/ontology`.
+
+Meta: Why did you decide to write into `btakita/philosophy`, when a more general `existence-lang/ontology` is available as a submodule?
+`btakita/philosophy` should be a child of `existence-lang/ontology` now. Did you know about that?
 
 - **Interface** -- the boundary of a single System (its API/ABI surface)
 - **Protocol** -- involves the Interfaces of multiple Systems; the rules governing how they communicate through their respective Interfaces
@@ -523,15 +542,91 @@ Good distinction. Authored `protocol.md`:
 Example: The NDJSON-over-Unix-socket **Protocol** defines how the `agent-doc` CLI and the editor plugin communicate through their socket **Interfaces**. The C ABI is the FFI library's Interface. The JNA declarations are the JetBrains plugin's Interface. The NDJSON message format is the Protocol spanning both.
 
 Cross-linked `interface.md` -> `protocol.md` and vice versa.
-<!-- agent:boundary:be9abb45 -->
+
+Read through tasks/professional/john-cassel.md. Note the insights gain on:
+- pneuma
+- noumenon
+- phenomena
+- vague precision
+- precise precision
+- bounded scope
+
+Cross reference and update existence-lang/ontology with these insights
+Also make btakita/philosophy dependent on existence-lang/ontology
+
+### Re: Interface node location (HEAD)
+
+Agreed — `interface.md` belongs in `existence-lang/ontology/src/`, not `btakita/philosophy/src/`. The ontology repo is the canonical source for fundamental terms. I'll move it there.
+
+### Re: Existence CLI installability (HEAD)
+
+Good news — `cargo install existence` already works (it's published). For the other items:
+
+**Prebuilt binaries + `curl | sh`**: This follows the same pattern as agent-doc releases. We'd add a GitHub Actions release workflow to `existence-lang/existence` that builds linux-x86_64, macos-aarch64, macos-x86_64, and windows-x86_64 binaries on tag push, then attach them to a GitHub Release. The `curl | sh` installer would detect platform and download the right binary.
+
+**SKILL.md in the existence crate**: Currently the skill lives at `.claude/skills/existence/SKILL.md` in agent-loop. To make it self-contained, we'd bundle it in the existence crate and add `xist skill install` — same pattern as `agent-doc skill install`. The `agent-kit` crate already provides `SkillConfig` for this exact use case.
+
+### Re: `xist` naming (HEAD)
+
+Acknowledged — will refer to the existence crate as `xist` going forward, matching the CLI alias.
+
+### Re: Agent harness autodetection (HEAD)
+
+Great question — and **you already have this**. The **`agent-kit`** crate (`src/agent-kit/`) already implements multi-harness detection:
+
+- `Environment::detect()` returns `ClaudeCode | OpenCode | Codex | Generic`
+- Detection via env vars: `CLAUDE_CODE`, `OPENCODE`, `CODEX_CLI`
+- `SkillConfig` uses the detected environment for path resolution
+- Currently all environments resolve to `.claude/skills/` paths — the roadmap includes per-harness path patterns
+
+So `xist skill install` would use `agent-kit` to detect the harness and install to the right location. No new crate needed — `agent-kit` is exactly this. For future harnesses (pi, etc.), you'd add detection logic to `agent-kit/src/detect.rs`.
+
+### Re: btakita/philosophy vs existence-lang/ontology (HEAD)
+
+**Meta answer**: I wrote into `btakita/philosophy` because earlier in this session I treated it as the active ontology workspace. That was wrong — `existence-lang/ontology` is the canonical source for fundamental terms, and `btakita/philosophy` should be a consumer/overlay, not the authoring location.
+
+**The correct relationship**:
+- **`existence-lang/ontology`** — canonical source for all fundamental ontology terms (114 nodes, 3 rings)
+- **`btakita/philosophy`** — personal philosophy repo that depends on `existence-lang/ontology` for its foundation, adding personal philosophical extensions
+- **`~/.claude/philosophy/`** — installed context that loads Ring 0 kernel terms into every Claude session
+
+To make `btakita/philosophy` dependent on `existence-lang/ontology`: add `existence-lang/ontology` as a git submodule within `btakita/philosophy`, then have philosophy's terms reference ontology terms via relative paths.
+
+### Re: John Cassel insights → existence-lang/ontology (HEAD)
+
+The john-cassel session produced rich refinements that should be canonized in `existence-lang/ontology/src/`:
+
+**New terms to author:**
+- **`pneuma.md`** — The totality; both the known and unknown, seen and unseen. The vital breath pervading all of Existence. In Existence Lang: Existence itself as the Universal Set.
+- **`noumena.md`** — The unseen aspects of reality. Two kinds: (1) structurally unabstractable — permanently in the pneuma, no abstraction captures them; (2) contingently unattended — currently noumena but potentially abstractable through further attention.
+- **`phenomena.md`** — The seen and expressible. What we observe, abstract, and communicate. The portion of pneuma brought into expression.
+
+**Existing terms to update:**
+- **`precision.md`** (or new) — Precision communicates possibility space. Vague precision = abstraction with full possibility space (encompasses noumena). Precise precision = abstraction with smaller possibility space. Both are accurate at their level. The ontology always operates through abstraction, never raw pneuma.
+- **`scope.md`** — Scope and resolution trade off in bounded-information systems but not unbounded ones. Creative systems where information grows are often unbounded.
+
+**Key insight to encode**: "An accurate abstraction includes the acknowledgment of its own limits. A vague definition that honestly encompasses the unabstractable is more accurate than a precise definition that pretends completeness."
+
+These are substantial authoring tasks. Want me to start with the new terms (pneuma, noumena, phenomena) in `existence-lang/ontology/src/`, or tackle the dependency restructuring (making btakita/philosophy depend on existence-lang/ontology) first?
+<!-- agent:boundary:4a7ccd5a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- v0.27: Commit all changes, release v0.27.0
-- existence-lang: Publish to crates.io for cross-system install
-- existence-lang: Decide CLI vs skill for CLAUDE.md management
+- [ ] Move interface.md from btakita/philosophy to existence-lang/ontology/src/
+- [ ] Add prebuilt binary release workflow to existence-lang/existence (linux, macOS, Windows + curl|sh)
+- [ ] Bundle SKILL.md in existence crate with `xist skill install` (using agent-kit SkillConfig)
+- [ ] Add per-harness path patterns to agent-kit (currently all → .claude/skills/)
+- [ ] Make btakita/philosophy depend on existence-lang/ontology (git submodule)
+- [ ] Author pneuma.md in existence-lang/ontology/src/
+- [ ] Author noumena.md in existence-lang/ontology/src/
+- [ ] Author phenomena.md in existence-lang/ontology/src/
+- [ ] Create/update precision.md with vague/precise possibility-space framing
+- [ ] Update scope.md with bounded/unbounded information system distinction
+- [ ] Update philosophy/CLAUDE.md with precision + bounded/unbounded guidance
+- [ ] Enrich permaculture.md with universal applicability analysis
+- [ ] Update chromium-bridge SKILL.md with CSS :hover limitation
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

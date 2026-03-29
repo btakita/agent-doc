@@ -569,14 +569,33 @@ Both confirmed sent with screenshots. The Suno link generated a nice preview car
 ### Re: Send Lisa DM
 
 Already done — Lisa's DM was sent in the previous cycle along with the OHANA teaser. Both confirmed delivered with screenshots. The DM went to Lisa Kondrat-Dauphin's personal Messenger chat with all 7 paragraphs (CapCut, Pika, Kling AI, ElevenLabs, Canva Video, formula, and intro) properly formatted.
-<!-- agent:boundary:7884a1bd -->
+
+Draft a response to Laura's message.
+### Re: Draft response to Laura (HEAD)
+
+Laura said two things worth responding to:
+1. "I use ChatGPT and Grammarly at work to clean up my emails and docs" (Fri 9:47 PM)
+2. Shared 10 LA photos with Hayley's social media restriction (Sat 12:40 PM)
+
+**Draft reply to Laura (in OHANA, replying to her ChatGPT message):**
+
+> That's awesome! ChatGPT and Grammarly are great for that. If you ever want to try something more hands-on, Claude Code can do a lot more — like browse the web, organize files, even build tools for your team. Happy to show you sometime!
+
+**Separate reply to Laura's photos:**
+
+> Love the photos! Great seeing everyone together 😊
+
+Two short replies — one engaging her AI interest, one for the photos. Keep it light in the group chat. The deeper Claude Code conversation can happen 1:1 if she's curious.
+
+Should I send both via chromium-bridge? Or adjust the drafts?
+<!-- agent:boundary:51056f47 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [active] Draft/send Laura response (ChatGPT + photos)
 - [active] Creating 7 family contacts in mail/contacts/
-- Laura using ChatGPT/Grammarly — potential Claude Code intro
 - Start posting family photos/updates consistently via Claude Code
 - Laura's LA photos — Hayley social media restriction noted
 <!-- /agent:pending -->

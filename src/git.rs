@@ -203,14 +203,11 @@ pub fn commit(file: &Path) -> Result<()> {
             // cache conflicts in the IDE.
 
             // Reposition boundary in snapshot AND via IPC to the plugin.
-            // Working tree is NOT written directly (would lose user keystrokes)
-            // UNLESS stale boundaries are detected — then a one-time cleanup is needed.
-            // The IPC signal tells the plugin to reposition in its Document buffer.
+            // Working tree is NEVER written directly — that causes IDE "externally modified"
+            // dialogs and loses user keystrokes. The IPC signal tells the plugin to
+            // reposition in its Document buffer, which handles stale boundaries too.
             let t_reposition = std::time::Instant::now();
             let snap_changed = reposition_boundary_in_snapshot(file);
-            // Clean stale boundaries from working tree if >1 detected.
-            // This is a safety net for when the plugin IPC reposition misses stale markers.
-            clean_stale_boundaries_in_working_tree(file);
             // Send IPC reposition signal to plugin only if boundary actually moved.
             // Skipping no-op repositions eliminates ~64% of unnecessary Document API writes.
             if snap_changed {
@@ -263,51 +260,6 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
     }
     false
 }
-
-/// Clean stale boundary markers from the working tree file.
-///
-/// Counts boundary markers in the working tree. If more than 1 exists (outside
-/// code blocks), rewrites the file with all stale boundaries removed and a single
-/// fresh one at end-of-exchange. This is a safety net for when the plugin IPC
-/// reposition misses stale markers scattered through older exchange sections.
-///
-/// Only triggers when stale boundaries are detected — no disk write otherwise.
-fn clean_stale_boundaries_in_working_tree(file: &Path) {
-    let content = match std::fs::read_to_string(file) {
-        Ok(c) => c,
-        Err(_) => return,
-    };
-
-    // Count real boundary markers (outside code blocks)
-    let prefix = "<!-- agent:boundary:";
-    let suffix = " -->";
-    let code_ranges = agent_doc::component::find_code_ranges(&content);
-    let in_code = |pos: usize| code_ranges.iter().any(|&(s, e)| pos >= s && pos < e);
-    let mut count = 0;
-    let mut offset = 0;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with(prefix) && trimmed.ends_with(suffix) && !in_code(offset) {
-            count += 1;
-        }
-        offset += line.len() + 1;
-    }
-
-    if count <= 1 {
-        return; // Clean or single boundary — nothing to do
-    }
-
-    eprintln!("[commit] detected {} stale boundaries in working tree, cleaning", count);
-    let cleaned = agent_doc::template::reposition_boundary_to_end(&content);
-    if cleaned != content {
-        if let Err(e) = std::fs::write(file, &cleaned) {
-            eprintln!("[commit] failed to clean working tree boundaries: {}", e);
-        } else {
-            eprintln!("[commit] cleaned stale boundaries from working tree");
-        }
-    }
-}
-
 
 /// Strip ` (HEAD)` suffix from markdown heading lines only.
 fn strip_head_markers(content: &str) -> String {

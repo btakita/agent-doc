@@ -142,13 +142,25 @@ curl -fsSL https://raw.githubusercontent.com/btakita/agent-doc/main/install.sh |
 Pushed to main. The install URL will work for any tagged release that completes CI.
 
 **Note:** The v0.27.3 release was created manually (Linux binary only). Future tag pushes will trigger CI and produce all 5 platform binaries automatically.
-<!-- agent:boundary:285d282f -->
+
+Update docs.
+### Docs updated (HEAD)
+
+README.md updated with `curl | sh` as the primary install method:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/btakita/agent-doc/main/install.sh | sh
+```
+
+Existing methods (cargo install, pip install, source build) moved under "Alternatives". Committed and pushed.
+<!-- agent:boundary:f431be5d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.27.0–v0.27.3: Stash rescue, boundary fix, auto-kill revert
-- [x] Multi-platform install.sh (Linux, macOS, Windows)
-- All shipped.
+- [x] v0.27.0–v0.27.3: All bug fixes shipped
+- [x] Multi-platform install.sh
+- [x] README updated with curl install
+- All complete.
 <!-- /agent:pending -->

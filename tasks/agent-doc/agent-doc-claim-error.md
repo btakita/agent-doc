@@ -88,7 +88,7 @@ The v0.27.2 auto-cleanup (`is_idle_claude_pane()`) was **too aggressive**. It ki
 The orphaned pane accumulation problem remains unsolved but is less harmful than killing active sessions. A better approach would be a separate `agent-doc gc` command that cleans up panes with no registered file, rather than inline cleanup during resync.
 
 Ready to release v0.27.3 with the revert.
-<!-- agent:boundary:4070ec72 -->
+<!-- agent:boundary:bec2eda5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

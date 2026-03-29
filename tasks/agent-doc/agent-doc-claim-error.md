@@ -497,7 +497,7 @@ Typo fix noted.
 
 audit docs
 update docs, ontology, module-harness
-### Committed and docs audited (HEAD)
+### Committed and docs audited
 
 **Commits in agent-doc submodule:**
 1. `594cdbb` — fix: remove `clean_stale_boundaries_in_working_tree()` disk write
@@ -510,7 +510,7 @@ update docs, ontology, module-harness
 - **make check** — 38 tests pass, clippy clean
 
 Ready to bump version and release.
-<!-- agent:boundary:f8b54035 -->
+<!-- agent:boundary:6ef5aa75 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

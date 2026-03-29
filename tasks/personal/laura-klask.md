@@ -464,7 +464,7 @@ Katarina, their daughter, lives in Mar Vista (LA). Near where we are considered 
 But most likely, we will spend some time in Florida and live in Southern Oregon
 
 **Why it works:** It signals you're paying attention to her life and willing to help — without overcommitting. If she needs anything, she'll ask. If not, it reads as thoughtful and moves on.
-### Re: hosting concern (HEAD)
+### Re: hosting concern
 
 Good call — don't promise hosting if you're not there yet. Since Laura & Ken are in San Jose and Katarina is in Mar Vista, the framing should be "get together" not "come visit us." Updated draft:
 
@@ -475,7 +475,7 @@ Good call — don't promise hosting if you're not there yet. Since Laura & Ken a
 > When you have a free moment after things settle down, would love to catch up on a call. No rush.
 
 **What changed:** "You and Ken should come visit" → "would be great to get together when we're closer." No hosting promise, keeps it open, and mentioning Southern Oregon / LA signals proximity to both San Jose and Mar Vista.
-<!-- agent:boundary:6130e0ed -->
+<!-- agent:boundary:399aa8cd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

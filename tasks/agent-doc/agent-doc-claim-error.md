@@ -165,7 +165,7 @@ The `agent-doc audit-docs` CLI command is CPU-intensive (parses all source files
 - **git.rs module comments** — updated after boundary fix ✓
 
 The resync.rs stale doc warnings are from the bulk metadata refactor (function renames like `return_stashed_panes` → `return_stashed_panes_bulk`). These are cosmetic — the functions exist under their new names. Can be cleaned up separately.
-<!-- agent:boundary:16d315b3 -->
+<!-- agent:boundary:e8a11c6f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

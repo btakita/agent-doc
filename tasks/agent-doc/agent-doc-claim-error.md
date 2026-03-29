@@ -510,7 +510,22 @@ update docs, ontology, module-harness
 - **make check** — 38 tests pass, clippy clean
 
 Ready to bump version and release.
-<!-- agent:boundary:912f8006 -->
+Add tests
+### Test added (HEAD)
+
+Added `reposition_boundary_cleans_multiple_stale` test in `git.rs`:
+- Creates a document with 2 stale boundary markers
+- Verifies all stale boundaries are removed
+- Verifies exactly 1 fresh boundary remains
+- Verifies the boundary is positioned after user text
+
+**Commits in submodule (3 total):**
+1. `594cdbb` — fix: remove `clean_stale_boundaries_in_working_tree()` disk write
+2. `85ddb7f` — docs: update git.rs module comments
+3. `12a1e98` — test: add `reposition_boundary_cleans_multiple_stale`
+
+All tests pass. Ready to release.
+<!-- agent:boundary:4a212505 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -521,6 +536,6 @@ Ready to bump version and release.
 - [x] Bump to v0.27.0, publish (crates.io, PyPI, GitHub Release)
 - [x] cargo install
 - [x] Plugin: "Run Agent Doc" — already calls `agent-doc route <path>` (verified in source)
-- [x] Fix: removed `clean_stale_boundaries_in_working_tree()` — committed + docs audited
+- [x] Fix: removed `clean_stale_boundaries_in_working_tree()` — committed, tested, docs audited
 - [ ] Bump version, release (crates.io, PyPI, GitHub Release)
 <!-- /agent:pending -->

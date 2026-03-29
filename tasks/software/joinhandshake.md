@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Clicked Start — Typeform modal opened, step 1 (name/email). No video visible yet.
+Chromium has no debug port — can't access video. Need user to provide URL or restart Chromium with debugging.
 <!-- /agent:status -->
 
 ## Exchange
@@ -42,13 +42,27 @@ Could you clarify:
 - Are you seeing a video playing right now on this tab that I'm not detecting?
 - Or should I close this modal and look elsewhere on the page?
 - Or do you want me to fill in the form to advance to the video step?
-<!-- agent:boundary:62a1db67 -->
+
+Yes.
+The video is in chromium, not brave.
+
+### Re: Video in Chromium (HEAD)
+
+chromium-bridge is connected to **Brave** (port 9222), not Chromium. Chromium is running (`/usr/lib/chromium/chromium`, PID 3014781) but was launched **without `--remote-debugging-port`**, so I can't connect to it.
+
+**Options:**
+1. **Restart Chromium with debugging** — close Chromium, relaunch with `chromium --remote-debugging-port=9223`, then I can connect and find/download the video
+2. **Copy the video URL manually** — right-click the video in Chromium, "Copy video address", paste it here, and I'll download it with `curl`/`wget`
+3. **Open the same Handshake URL in Brave** — then I can access it via chromium-bridge
+
+Which approach do you prefer?
+<!-- agent:boundary:10d71cc7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Locate the video on the Handshake page (awaiting user clarification)
+- [ ] Connect to Chromium browser (needs debug port or alternative approach)
 - [ ] Download video to local filesystem
 - [ ] Transcribe video
 <!-- /agent:pending -->

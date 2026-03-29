@@ -734,11 +734,11 @@ Audit complete. Here's the current state:
 
 Yes
 
-### Re: External modifications to john-cassel.md (HEAD)
+### Re: External modifications to john-cassel.md
 
 That's a real bug. If no `/agent-doc` command was running and the Claude session was idle, john-cassel.md should not have been modified. The commits at 18:03 and 18:05 came from `agent-doc(john-cassel)` — which means either a stashed tmux pane was still active (the v0.27.4 rescue fix may have revived it unexpectedly), or a watch daemon triggered. I'll add this to the bug investigation list.
 
-### Re: Document linking/unlinking (HEAD)
+### Re: Document linking/unlinking
 
 **Recommendation: Hybrid** — the agent proposes links/unlinks, the human approves.
 
@@ -748,7 +748,7 @@ That's a real bug. If no `/agent-doc` command was running and the Claude session
 
 This keeps the human in control while leveraging the agent's ability to detect connections. The SKILL.md handles both — link proposals are part of the response, and the `related_docs` frontmatter is the source of truth.
 
-### Re: `existence fetch` update checking (HEAD)
+### Re: `existence fetch` update checking
 
 For change detection after fetch:
 
@@ -758,7 +758,7 @@ For change detection after fetch:
 
 Workflow: `existence fetch --check` → review changes → `existence fetch` → `existence lint`.
 
-### Re: Noumena and the NULL analogy (HEAD)
+### Re: Noumena and the NULL analogy
 
 Insightful correction. You're right — we *can* abstract the unknowable; the abstraction is just "noumena" itself. The word is the abstraction. But it carries no descriptive content beyond "unknown aspects exist."
 
@@ -774,7 +774,7 @@ So the two kinds aren't "abstractable vs unabstractable" — they're:
 1. **Content-free noumena** — abstractable only as "unknown" (NULL-like). The content is structurally inaccessible to phenomena.
 2. **Contingently unattended** — abstractable with content once attention is applied. Currently NULL but resolvable.
 
-### Re: agent-kit crate assessments (HEAD)
+### Re: agent-kit crate assessments
 
 Noted:
 - **module-harness**: yes → add agent-kit + SKILL.md
@@ -782,10 +782,10 @@ Noted:
 - **agent-resume**: yes → add agent-kit + SKILL.md
 - **eval-runner**: yes → add agent-kit + SKILL.md
 
-### Re: Upstream git superproject detection (HEAD)
+### Re: Upstream git superproject detection
 
 Confirmed — will add git root detection to agent-kit so all consumers benefit.
-<!-- agent:boundary:e1c75a09 -->
+<!-- agent:boundary:bb98a259 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

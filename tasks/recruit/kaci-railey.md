@@ -48,7 +48,7 @@ Copied Kaci's LinkedIn InMail (Mar 26, 6:17 PM) to `mail/contacts/kaci-railey/20
 **Status:** No reply sent yet. The InMail has quick-reply buttons: "Yes, interested..." / "No thanks..."
 
 Updated `AGENTS.md` with accurate title (Lead, Technical Recruiting), email (kaci.railey@cdw.com), and communication timeline.
-<!-- agent:boundary:15ad6fb0 -->
+<!-- agent:boundary:f93f610f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

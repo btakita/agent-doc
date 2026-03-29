@@ -692,6 +692,22 @@ fn return_stashed_panes_bulk(
                         pane_id, key
                     );
                     deregistered.push(key.to_string());
+                } else if (cmd == "agent-doc" || cmd == "claude")
+                    && is_idle_claude_pane(tmux, pane_id)
+                {
+                    // Idle Claude session at ❯ prompt with no valid return target —
+                    // kill the pane to prevent orphan accumulation.
+                    eprintln!(
+                        "resync: killing idle stashed pane {} ({}): no valid target found",
+                        pane_id, key
+                    );
+                    if let Err(e) = tmux.kill_pane(pane_id) {
+                        eprintln!(
+                            "resync: could not kill pane {} ({}), deregistering anyway: {}",
+                            pane_id, key, e
+                        );
+                    }
+                    deregistered.push(key.to_string());
                 } else {
                     eprintln!(
                         "resync: cannot return stashed pane {} ({}): no valid target found — keeping registered (running '{}')",
@@ -735,6 +751,22 @@ fn return_stashed_panes_bulk(
 
     if returned > 0 {
         eprintln!("resync: returned {} stashed pane(s) to their sessions", returned);
+    }
+}
+
+/// Check if a pane is an idle Claude session by looking for `❯` in the last few lines.
+fn is_idle_claude_pane(tmux: &Tmux, pane_id: &str) -> bool {
+    match sessions::capture_pane(tmux, pane_id) {
+        Ok(content) => {
+            // Check last 3 non-empty lines for the Claude idle prompt marker
+            content
+                .lines()
+                .rev()
+                .filter(|line| !line.trim().is_empty())
+                .take(3)
+                .any(|line| line.contains('❯'))
+        }
+        Err(_) => false,
     }
 }
 

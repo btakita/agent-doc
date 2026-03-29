@@ -334,7 +334,7 @@ Done: 1 created, 0 updated, 0 errors
 Anil Podduturi is now in your Google Contacts with name + LinkedIn URL. The `resourceName` is tracked in `.people-sync-state.json` — future pushes will update instead of creating duplicates.
 
 Include Anil's phone number and hit linkedin profile.
-### Re: Enrich Anil's Contact (HEAD)
+### Re: Enrich Anil's Contact
 
 Updated AGENTS.md with structured fields that `contact push` parses:
 - `**Role:** Managing Director & Partner at BCG (BCG X / BCG Digital Ventures)` → org + title
@@ -347,7 +347,7 @@ Re-pushed to Google Contacts — now includes name, org/title, and LinkedIn URL.
 **LinkedIn scraping:** Browser automation couldn't connect (CDP timeout). The Research section already has good data from a prior session (location, education, specialization).
 
 **Note:** A duplicate contact may exist from the first push (`people/c2459970024107071866`). The new one (`people/c8069343841925028707`) has the enriched data. You may want to merge/delete the old one in Google Contacts.
-<!-- agent:boundary:13e6a666 -->
+<!-- agent:boundary:9b6076cb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

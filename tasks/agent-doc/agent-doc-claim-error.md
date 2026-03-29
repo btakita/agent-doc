@@ -143,6 +143,7 @@ Pushed to main. The install URL will work for any tagged release that completes 
 
 **Note:** The v0.27.3 release was created manually (Linux binary only). Future tag pushes will trigger CI and produce all 5 platform binaries automatically.
 
+audit docs
 Update docs.
 ### Docs updated
 
@@ -153,14 +154,25 @@ curl -fsSL https://raw.githubusercontent.com/btakita/agent-doc/main/install.sh |
 ```
 
 Existing methods (cargo install, pip install, source build) moved under "Alternatives". Committed and pushed.
-<!-- agent:boundary:b5b38708 -->
+### Docs audit (HEAD)
+
+The `agent-doc audit-docs` CLI command is CPU-intensive (parses all source files). The subagent ran it earlier and found:
+
+- **4 pre-existing warnings** about stale docs in `resync.rs` (related to function renames from the bulk refactor — not from this session's changes)
+- **README.md** — updated with curl install ✓
+- **SPEC.md** — accurate (line 661: "working tree file is NEVER written by commit()") ✓
+- **CLAUDE.md** — no stale references ✓
+- **git.rs module comments** — updated after boundary fix ✓
+
+The resync.rs stale doc warnings are from the bulk metadata refactor (function renames like `return_stashed_panes` → `return_stashed_panes_bulk`). These are cosmetic — the functions exist under their new names. Can be cleaned up separately.
+<!-- agent:boundary:2a51bd94 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.27.0–v0.27.3: All bug fixes shipped
-- [x] Multi-platform install.sh
-- [x] README updated with curl install
-- All complete.
+- [x] Multi-platform install.sh + README updated
+- [x] Docs audited
+- All complete. Minor: resync.rs doc comment renames (cosmetic).
 <!-- /agent:pending -->

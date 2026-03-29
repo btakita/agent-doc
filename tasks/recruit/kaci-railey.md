@@ -170,7 +170,7 @@ Brian Takita
 Ready to send when you approve.
 Send it via chromium-bridge in LinkedIn. Make sure we keep the formatting + spacing. Add the formatting when writing to a chatbox in the appropriate SKILL.md. browser or chromium-bridge?
 
-### Re: Send via chromium-bridge (HEAD)
+### Re: Send via chromium-bridge
 
 Message is loaded in the LinkedIn InMail reply box (tab 38) with bold section headers. The formatting uses `<strong>` tags for headers which LinkedIn renders as bold text. Single blank lines between paragraphs.
 
@@ -179,7 +179,7 @@ Message is loaded in the LinkedIn InMail reply box (tab 38) with bold section he
 Regarding the SKILL.md question: I'd add the chatbox formatting guidance to the **chromium-bridge** skill since it's the tool that interfaces with browser chat UIs. The browser skill is more general-purpose. I can add a "Chatbox Formatting" section to `.claude/skills/chromium-bridge/SKILL.md` documenting:
 - LinkedIn messaging: supports `<strong>` for bold, `<p>` for paragraphs, no markdown
 - General pattern: use `innerHTML` with `<p>` tags per line, `<br>` for blank lines, dispatch `input` event
-<!-- agent:boundary:558e8256 -->
+<!-- agent:boundary:3732af6c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

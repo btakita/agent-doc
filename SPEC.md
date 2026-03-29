@@ -375,7 +375,7 @@ Supported editors: `jetbrains`, `vscode`. Downloads plugin assets from GitHub Re
 
 Mirrors a columnar editor layout in tmux. Each `--col` is a comma-separated list of files. Columns arrange left-to-right; files stack top-to-bottom within each column.
 
-**Pre-sync file resolution:** Before the layout algorithm runs, sync parses file paths from `--col` args and resolves each file. Files without a session UUID in frontmatter are treated as **unmanaged** and skipped (no auto-initialization of frontmatter). Only `agent-doc claim` adds session UUIDs. For managed files (those with session UUIDs) that have no alive panes, sync auto-starts Claude sessions (via `route::auto_start()`) to ensure it has panes to arrange.
+**Pre-sync file resolution:** Before the layout algorithm runs, sync parses file paths from `--col` args and resolves each file. Files without a session UUID in frontmatter are treated as **unmanaged** and skipped (no auto-initialization of frontmatter). Only `agent-doc claim` adds session UUIDs. For managed files (those with session UUIDs) whose registered pane is in a stash window, sync **rescues** the pane back to the agent-doc window (via `swap-pane`, falling back to `join-pane`) — preserving the existing Claude session context. Only if rescue fails, or if no alive pane exists at all, does sync auto-start a fresh Claude session (via `route::auto_start()`).
 
 **Reconciliation algorithm** (simple 2-step detach/attach):
 1. **SNAPSHOT** — query current pane order in target window
@@ -649,6 +649,7 @@ The stash system preserves running Claude sessions when the user switches editor
 | — | target selection | Targets the LARGEST pane in the stash (by height) to avoid "pane too small" errors |
 | — | overflow | If join fails, `break_pane_to_stash()` creates an overflow stash window (also named `"stash"`) |
 | ATTACH | `reconcile()` | Joins a stashed pane back into `@0` when needed again |
+| RESCUE | `sync` pre-resolution | Rescues stashed panes back to agent-doc window via `swap-pane`/`join-pane` before layout |
 
 **Discovery:** `find_all_stash_windows()` returns all stash windows — both the primary stash and any overflow windows. All windows named `"stash"` or matching `"stash-*"` (tmux auto-deduplication) are treated as stash windows by `is_stash_window_name()`.
 

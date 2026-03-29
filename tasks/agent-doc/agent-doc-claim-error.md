@@ -466,7 +466,7 @@ Option 1 is cleanest since the comment at line 207 already says "Working tree is
 
 Want me to implement the fix?
 Yes...Also explain what the clean stale boundries does.
-### What `clean_stale_boundaries_in_working_tree()` does (HEAD)
+### What `clean_stale_boundaries_in_working_tree()` does
 
 **Boundary markers** (`<!-- agent:boundary:HASH -->`) are inserted at the end of the exchange component after each agent response. They mark where the agent last wrote — the plugin uses them to position the visual separator between agent output and user input.
 
@@ -491,7 +491,7 @@ The problem: `std::fs::write()` bypasses the IDE's Document API, triggering "ext
 **Build:** 38 tests pass, clippy clean. Release binary built and installed to `~/.cargo/bin/agent-doc`.
 
 The fix is live now. The "externally modified" popup while typing should not happen anymore.
-<!-- agent:boundary:c1ceb987 -->
+<!-- agent:boundary:cde8f57a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

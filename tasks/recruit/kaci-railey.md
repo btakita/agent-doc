@@ -86,7 +86,7 @@ Brian Takita
 
 **Notes:** This draft emphasizes API/cloud experience (strongest fit) while being honest about payments being adjacent rather than deep domain expertise. Let me know if you'd like to adjust the tone or emphasis before sending.
 
-### Re: Corrections to draft (HEAD)
+### Re: Corrections to draft
 
 Good catches on both:
 
@@ -120,7 +120,7 @@ Brian Takita
 ---
 
 **Note:** This version is much more honest. The tradeoff is that the payments-specific experience (POS, PCI, tokenization) is thin. The strongest fits are API integrations and cloud — both genuinely deep. If you feel the payments gap is too large for this particular role, it might not be worth pursuing. Up to you.
-<!-- agent:boundary:23e888f9 -->
+<!-- agent:boundary:0eeffdbd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -140,7 +140,7 @@ Want me to rewrite the full draft with this correction incorporated?
 
 Yes
 
-### Re: Final draft (HEAD)
+### Re: Final draft
 
 Here's the complete revised draft:
 
@@ -168,7 +168,7 @@ Brian Takita
 ---
 
 Ready to send when you approve.
-<!-- agent:boundary:76f4884d -->
+<!-- agent:boundary:b9dc3b0c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -151,7 +151,7 @@ Spectra video transcribed.
 
 Get and transcribe the next video at https://ai.joinhandshake.com/fellow/forms/d6a5a8ad-257c-4b89-8c24-513653204040
 
-### Re: Next video downloaded & transcribed (HEAD)
+### Re: Next video downloaded & transcribed
 
 Downloaded and transcribed the second interview video (question: "Tell us about your favorite career experience so far").
 
@@ -164,7 +164,7 @@ Downloaded and transcribed the second interview video (question: "Tell us about 
 1. `tmp/handshake-spectra-video-1.txt` — Spectra welcome (6:59)
 2. `tmp/handshake-interview-video-1.txt` — Resume walkthrough (2:01)
 3. `tmp/handshake-interview-video-2.txt` — Favorite career experience (2:01)
-<!-- agent:boundary:55af1f9c -->
+<!-- agent:boundary:42795c4e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

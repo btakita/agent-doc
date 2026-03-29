@@ -213,7 +213,7 @@ Seems to be working.
 audit docs
 add docs
 update README, SPEC, module-harness, ontology
-### Docs updated for sync rescue (HEAD)
+### Docs updated for sync rescue
 
 **sync.rs module docs** — Updated to describe rescue behavior: stashed panes are rescued via swap-pane/join-pane before falling back to auto-start.
 
@@ -222,7 +222,7 @@ update README, SPEC, module-harness, ontology
 - Section 8.4 (Stash Window Routing): Added RESCUE row to stash lifecycle table
 
 Committed `ef6f728` and pushed. Ready to release.
-<!-- agent:boundary:9ca20245 -->
+<!-- agent:boundary:82e2473c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

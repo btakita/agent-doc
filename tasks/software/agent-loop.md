@@ -135,7 +135,7 @@ evals/
 The `cases.yaml` has 30 test cases for diff interpretation — each with a diff, document context, expected behaviors, and `llm-rubric` grading (LLM-as-judge).
 
 **`src/eval-runner/`** — Rust CLI that executes evals:
-- Reads YAML cases, calls Claude API to generate responses, uses a second call to grade
+- Reads YAML cases, calls Claude API to generate responses, uses a second call to grade: Can we use toml instead of yaml?
 - Computes stats: pass rate, mean score, token usage, latency percentiles
 - Supports baseline comparison for regression detection
 - General-purpose — doesn't hardcode the `evals/` path, takes any YAML file
@@ -150,7 +150,47 @@ The `cases.yaml` has 30 test cases for diff interpretation — each with a diff,
 - `evals/` feeds into `eval-runner` (YAML → Claude API → scored results)
 - `module-harness` embeds evals in source for agents to read during development
 - They're independent systems — module-harness could theoretically share scoring logic with eval-runner but doesn't currently
-<!-- agent:boundary:f05b7c15 -->
+### Re: TOML instead of YAML for eval cases? (HEAD)
+
+Yes, but with tradeoffs. The cases have multi-line diffs and document context that benefit from YAML's `|` block scalar syntax. In TOML, the equivalent would be:
+
+```toml
+[[cases]]
+id = "simple-question"
+description = "User asks a straightforward question"
+diff = """
+--- snapshot
++++ document
+@@ -14,6 +14,7 @@
+ &lt;!-- agent:exchange patch=append --&gt;
++How do I add a new component?
+ &lt;!-- /agent:exchange --&gt;
+"""
+document_context = """
+Template-mode document with empty exchange component.
+"""
+expected_behavior = [
+    "Responds with instructions",
+    "Mentions &lt;!-- agent:name --&gt; syntax",
+    "Does NOT flag as incomplete edit",
+]
+grading = "llm-rubric"
+```
+
+**Pros of TOML:**
+- Consistent with Rust ecosystem conventions (Cargo.toml, etc.)
+- Stricter typing — catches errors at parse time
+- No YAML gotchas (e.g., `yes`/`no` as booleans, indentation sensitivity)
+
+**Cons:**
+- Multi-line strings are more verbose (triple-quoted `"""`)
+- Nested arrays of tables (`[[cases]]`) are noisier than YAML's `- id:` list syntax
+- 30 cases x multi-line diffs = significantly longer file
+
+**My recommendation:** switch to TOML. The Rust ecosystem alignment matters, the file is machine-consumed not hand-edited frequently, and the YAML gotchas are real risks with diff content that might contain bare `yes`/`no`. The code change is small — swap `serde_yaml` for `toml` crate and update the deserializer call.
+
+Want me to make the switch?
+<!-- agent:boundary:f9d845e2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

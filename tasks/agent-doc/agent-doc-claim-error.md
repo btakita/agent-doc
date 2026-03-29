@@ -165,14 +165,28 @@ The `agent-doc audit-docs` CLI command is CPU-intensive (parses all source files
 - **git.rs module comments** — updated after boundary fix ✓
 
 The resync.rs stale doc warnings are from the bulk metadata refactor (function renames like `return_stashed_panes` → `return_stashed_panes_bulk`). These are cosmetic — the functions exist under their new names. Can be cleaned up separately.
-<!-- agent:boundary:e8a11c6f -->
+
+Got an error pane with `Claim for Tmux Pane`. I thought it was fixed. Why did it happen?
+![img_1.png](img_1.png)
+### Claim succeeded — warnings are noise (HEAD)
+
+The claim for `john-cassel.md` **worked correctly** — pane %129 was created and claimed. The "errors" you see are resync warnings about stashed panes that can't find a return target. They're harmless but noisy.
+
+**What's happening:** On every claim/route/sync call, `return_stashed_panes_bulk()` iterates ALL stashed panes and prints a warning for each one that has no return target. With 5+ stashed panes, that's 5+ warning lines before the actual claim output.
+
+**Two fixes available:**
+1. **Reduce noise:** Only log stashed pane warnings at debug level, not stderr. The user doesn't need to see them on every claim.
+2. **Better auto-cleanup:** The v0.27.2 approach (kill panes at `❯` prompt) was wrong because stashed sessions normally show `❯`. A safer heuristic: kill stashed panes that have been registered for >10 minutes AND have no alive tmux window with the same session name. This targets truly orphaned sessions without killing recently-stashed ones.
+
+Want me to implement option 1 (quiet warnings) now? Option 2 requires more design thought.
+<!-- agent:boundary:520cc3ab -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.27.0–v0.27.3: All bug fixes shipped
-- [x] Multi-platform install.sh + README updated
-- [x] Docs audited
-- All complete. Minor: resync.rs doc comment renames (cosmetic).
+- [x] v0.27.0–v0.27.3: Bug fixes shipped
+- [x] Multi-platform install.sh + README
+- [ ] Reduce resync warning noise (stderr → debug level)
+- [ ] Better orphan cleanup heuristic (time-based, not prompt-based)
 <!-- /agent:pending -->

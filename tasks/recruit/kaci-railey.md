@@ -12,6 +12,9 @@ agent_doc_write: crdt
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+Please create a contact for kaci-railey: https://www.linkedin.com/in/kacirailey/
+
+Copy the current correspondence over LinkedIn messenger in mail/contacts/kaci-railey/
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

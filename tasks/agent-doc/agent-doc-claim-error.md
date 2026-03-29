@@ -34,7 +34,7 @@ All 7 stashed panes (%104, %109, %106, %108, %102, %107, %111) are idle Claude s
 
 Want me to kill the orphaned panes and implement the auto-cleanup in resync?
 yes.
-### Done (HEAD)
+### Done
 
 **Killed 7 orphaned panes:** %104, %109, %106, %108, %102, %107, %111 — all idle Claude sessions.
 
@@ -53,7 +53,7 @@ Previously these panes accumulated forever because tmux reported them as running
 **Installed:** `~/.cargo/bin/agent-doc` updated
 
 Ready to release when you want, or test first.
-<!-- agent:boundary:23863f6d -->
+<!-- agent:boundary:53093452 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -457,8 +457,25 @@ Should we offer help with the roof? Or no need? Not sure if there's anything tha
 >
 > When you have a free moment after things settle down, would love to catch up on a call. No rush.
 
+> Once we're settled on the west coast, you and Ken should come visit.
+
+I'm not sure if we will be in a place to host yet. Laura & Ken live in San Jose.
+Katarina, their daughter, lives in Mar Vista (LA). Near where we are considered spending some time at or even living.
+But most likely, we will spend some time in Florida and live in Southern Oregon
+
 **Why it works:** It signals you're paying attention to her life and willing to help — without overcommitting. If she needs anything, she'll ask. If not, it reads as thoughtful and moves on.
-<!-- agent:boundary:ca5acd7e -->
+### Re: hosting concern (HEAD)
+
+Good call — don't promise hosting if you're not there yet. Since Laura & Ken are in San Jose and Katarina is in Mar Vista, the framing should be "get together" not "come visit us." Updated draft:
+
+> That sounds like a lot! I hope the roof goes smoothly in Maui — let me know if you need help researching anything for it. Give Mom & Dad a big hug from us when you see them in Florida.
+>
+> I'd love for Leilani to meet you too — she's 4 now and full of energy. We're looking at the west coast — maybe Southern Oregon or the LA area. Would be great to get together when we're closer.
+>
+> When you have a free moment after things settle down, would love to catch up on a call. No rush.
+
+**What changed:** "You and Ken should come visit" → "would be great to get together when we're closer." No hosting promise, keeps it open, and mentioning Southern Oregon / LA signals proximity to both San Jose and Mar Vista.
+<!-- agent:boundary:6130e0ed -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

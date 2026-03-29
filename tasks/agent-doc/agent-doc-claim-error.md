@@ -511,7 +511,7 @@ update docs, ontology, module-harness
 
 Ready to bump version and release.
 Add tests
-### Test added (HEAD)
+### Test added
 
 Added `reposition_boundary_cleans_multiple_stale` test in `git.rs`:
 - Creates a document with 2 stale boundary markers
@@ -525,7 +525,7 @@ Added `reposition_boundary_cleans_multiple_stale` test in `git.rs`:
 3. `12a1e98` — test: add `reposition_boundary_cleans_multiple_stale`
 
 All tests pass. Ready to release.
-<!-- agent:boundary:4a212505 -->
+<!-- agent:boundary:a4f8a11b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

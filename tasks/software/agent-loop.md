@@ -113,7 +113,7 @@ Please look at evals/
 Explain these files.
 Are they used with eval-runner?
 Do they relate with module-harness?
-### Re: evals/ directory, eval-runner, module-harness (HEAD)
+### Re: evals/ directory, eval-runner, module-harness
 
 **`evals/` directory** — a YAML-based test case repository for benchmarking agent behavior:
 
@@ -150,7 +150,7 @@ The `cases.yaml` has 30 test cases for diff interpretation — each with a diff,
 - `evals/` feeds into `eval-runner` (YAML → Claude API → scored results)
 - `module-harness` embeds evals in source for agents to read during development
 - They're independent systems — module-harness could theoretically share scoring logic with eval-runner but doesn't currently
-<!-- agent:boundary:c1ef1668 -->
+<!-- agent:boundary:f05b7c15 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

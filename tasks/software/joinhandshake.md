@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Both videos downloaded. Spectra welcome (6:59) + interview recording (2:01). Ready to transcribe.
+Interview video transcribed to tmp/handshake-interview-video-1.txt. joinhandshake topic created.
 <!-- /agent:status -->
 
 ## Exchange
@@ -94,7 +94,9 @@ The page says "This is only the first video! Watch the rest under Modules!" — 
 
 Ready to transcribe with `corky transcribe`.
 
-transcribe
+Add joinhandshake topic.
+transcribe interview-video-1 into the joinhandshake topic.
+use the --gpu flag
 
 ### Re: Interview video from forms tab
 
@@ -111,14 +113,27 @@ So now we have two videos:
 2. `tmp/handshake-interview-video.mp4` — Interview recording from Typeform (2:01, 720p)
 
 Which one(s) do you want transcribed?
-<!-- agent:boundary:7d26fb7f -->
+
+### Re: Transcribe interview video (HEAD)
+
+Done.
+
+**Topic added:** `joinhandshake` (keywords: handshake, spectra)
+
+**Transcription:** `tmp/handshake-interview-video-1.txt`
+- GPU: RTX 5090 (171x realtime, 0.7s for 2min audio)
+- Model: large-v3-turbo
+- Diarization detected 4 speakers but it's a single-speaker recording (you) — the speaker splits are just diarization artifacts
+
+**Content summary:** You discuss your resume — Presence AI (real-time lip avatars, multimodal systems, image generation), open source work (AgentDoc, Corky), and prior work at Martin Investment/Sensible (ESG data, investment tools, consulting).
+<!-- agent:boundary:f2af3c1e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] Connect to Chromium browser
-- [x] Download Project Spectra video (tmp/handshake-spectra-video.mp4, 6:59)
-- [x] Download interview video from Typeform (tmp/handshake-interview-video.mp4, 2:01)
-- [ ] Transcribe video(s) with corky
+- [x] Download videos
+- [x] Add joinhandshake topic
+- [x] Transcribe interview video (tmp/handshake-interview-video-1.txt)
 <!-- /agent:pending -->

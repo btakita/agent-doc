@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.27.0 released to crates.io, PyPI, GitHub. Stash rescue fix verified working.
+v0.27.1 released. Fix for "externally modified" popup shipped.
 <!-- /agent:status -->
 
 ## Exchange
@@ -525,17 +525,27 @@ Added `reposition_boundary_cleans_multiple_stale` test in `git.rs`:
 3. `12a1e98` — test: add `reposition_boundary_cleans_multiple_stale`
 
 All tests pass. Ready to release.
-<!-- agent:boundary:a4f8a11b -->
+release
+### v0.27.1 released (HEAD)
+
+**Published everywhere:**
+- **crates.io:** agent-doc v0.27.1 ✓
+- **PyPI:** agent_doc v0.27.1 ✓
+- **GitHub Release:** [v0.27.1](https://github.com/btakita/agent-doc/releases/tag/v0.27.1) with prebuilt binary ✓
+- **cargo install:** `~/.cargo/bin/agent-doc` updated to v0.27.1 ✓
+
+**Changelog:**
+- Fix: remove `clean_stale_boundaries_in_working_tree()` disk write — prevents "file externally modified" popup and lost keystrokes in JetBrains
+<!-- agent:boundary:267a87e7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] Fix return_stashed_panes_bulk: don't deregister active stashed panes
-- [x] Commit, test, install locally
-- [x] Bump to v0.27.0, publish (crates.io, PyPI, GitHub Release)
-- [x] cargo install
-- [x] Plugin: "Run Agent Doc" — already calls `agent-doc route <path>` (verified in source)
-- [x] Fix: removed `clean_stale_boundaries_in_working_tree()` — committed, tested, docs audited
-- [ ] Bump version, release (crates.io, PyPI, GitHub Release)
+- [x] Bump to v0.27.0, publish
+- [x] Fix: removed `clean_stale_boundaries_in_working_tree()` disk write
+- [x] Tests + docs audited
+- [x] v0.27.1 released (crates.io, PyPI, GitHub Release, cargo install)
+- All tasks complete.
 <!-- /agent:pending -->

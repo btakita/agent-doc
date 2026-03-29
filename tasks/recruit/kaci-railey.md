@@ -50,7 +50,7 @@ Copied Kaci's LinkedIn InMail (Mar 26, 6:17 PM) to `mail/contacts/kaci-railey/20
 Updated `AGENTS.md` with accurate title (Lead, Technical Recruiting), email (kaci.railey@cdw.com), and communication timeline.
 Please draft a respone to the message.
 
-### Re: Draft response to Kaci's InMail (HEAD)
+### Re: Draft response to Kaci's InMail
 
 Here's a draft reply addressing each of her questions:
 
@@ -78,7 +78,7 @@ Brian Takita
 ---
 
 **Notes:** This draft emphasizes API/cloud experience (strongest fit) while being honest about payments being adjacent rather than deep domain expertise. Let me know if you'd like to adjust the tone or emphasis before sending.
-<!-- agent:boundary:442d5177 -->
+<!-- agent:boundary:3d82b8b8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

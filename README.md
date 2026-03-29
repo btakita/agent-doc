@@ -9,8 +9,17 @@ Edit a markdown file, press a hotkey, and the tool diffs your changes, sends the
 ## Install
 
 ```sh
+curl -fsSL https://raw.githubusercontent.com/btakita/agent-doc/main/install.sh | sh
+```
+
+**Alternatives:**
+
+```sh
 # From crates.io
 cargo install agent-doc
+
+# From PyPI
+pip install agent-doc
 
 # From source
 cargo build --release

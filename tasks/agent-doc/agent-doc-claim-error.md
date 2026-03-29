@@ -181,6 +181,7 @@ The claim for `john-cassel.md` **worked correctly** — pane %129 was created an
 Want me to implement option 1 (quiet warnings) now? Option 2 requires more design thought.
 
 kaci-railey and john-cassel agent docs were running. But when I switched the editor away and back to the document, a new claude session was created. It seems the tmux pane/claude session was orphaned.
+Just lost tasks/recruit/john-cassel.md tmux pane + claude session in progress again. Why?
 ### Root cause found: sync.rs was treating stashed panes as dead
 
 **The bug was in `sync.rs`, not `route.rs`.** When the editor layout changes (switching tabs), `agent-doc sync` is called. It found the stashed pane but at line 494 said: "A pane in a stash window is alive but not usable — treat as dead so auto-start creates a fresh pane."
@@ -198,13 +199,24 @@ This was wrong. The stashed pane has a running Claude session with full context.
 **Installed:** `~/.cargo/bin/agent-doc` updated
 
 Test by switching between editor tabs — the Claude session should persist now.
-<!-- agent:boundary:54fabba2 -->
+### Session loss was from the OLD binary (HEAD)
+
+The john-cassel session was lost at **00:22:03** — the fix was installed at **~00:22:50**. The old binary was still running when the session was lost.
+
+**Timeline:**
+- 00:20:17 — sync (OLD binary): "treating as dead" → john-cassel pane %131 stayed in stash
+- 00:22:03 — user switches back → sync (OLD binary): "no alive pane" → creates NEW pane %132
+- 00:22:50 — fix installed (`cargo install` completed)
+
+No sync events for john-cassel after the fix was installed. The fix should prevent this from happening going forward. Please test by switching away from a document and back — the session should now be rescued from stash instead of recreated.
+<!-- agent:boundary:23706b78 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.27.0–v0.27.3: Previous bug fixes
-- [x] Fix sync.rs stash rescue (the actual orphaning root cause)
+- [x] Fix sync.rs stash rescue — installed locally
+- [ ] Test sync rescue with new binary
 - [ ] Release with sync fix
 <!-- /agent:pending -->

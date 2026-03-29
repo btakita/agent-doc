@@ -530,7 +530,7 @@ Phone number in signature is a good add — makes it easy for him to text or cal
 Sending now via corky to Gmail Drafts for your review.
 
 What is `rickshaw.cm`? Who owns it?
-### rickshaw.cm (HEAD)
+### rickshaw.cm
 
 **.cm** = Cameroon country code TLD (vanity domain, like .io or .co).
 
@@ -542,5 +542,5 @@ What is `rickshaw.cm`? Who owns it?
 "Rickshaw" is likely a personal brand reference. The domain is his personal email infrastructure, separate from BCG.
 
 **For our purposes:** Email will land in a Google-hosted inbox. Delivery is reliable. The draft is in your Gmail — ready to review and send.
-<!-- agent:boundary:24adc968 -->
+<!-- agent:boundary:71882803 -->
 <!-- /agent:exchange -->

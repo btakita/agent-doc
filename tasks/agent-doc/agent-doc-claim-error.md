@@ -154,7 +154,7 @@ curl -fsSL https://raw.githubusercontent.com/btakita/agent-doc/main/install.sh |
 ```
 
 Existing methods (cargo install, pip install, source build) moved under "Alternatives". Committed and pushed.
-### Docs audit (HEAD)
+### Docs audit
 
 The `agent-doc audit-docs` CLI command is CPU-intensive (parses all source files). The subagent ran it earlier and found:
 
@@ -165,7 +165,7 @@ The `agent-doc audit-docs` CLI command is CPU-intensive (parses all source files
 - **git.rs module comments** — updated after boundary fix ✓
 
 The resync.rs stale doc warnings are from the bulk metadata refactor (function renames like `return_stashed_panes` → `return_stashed_panes_bulk`). These are cosmetic — the functions exist under their new names. Can be cleaned up separately.
-<!-- agent:boundary:2a51bd94 -->
+<!-- agent:boundary:16d315b3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

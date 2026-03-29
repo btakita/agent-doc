@@ -1,6 +1,5 @@
 ---
 agent_doc_session: 584ef929-37ee-47f6-b3d8-d4266ad31ee9
-tmux_session: '0'
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
@@ -347,7 +346,27 @@ Re-pushed to Google Contacts — now includes name, org/title, and LinkedIn URL.
 **LinkedIn scraping:** Browser automation couldn't connect (CDP timeout). The Research section already has good data from a prior session (location, education, specialization).
 
 **Note:** A duplicate contact may exist from the first push (`people/c2459970024107071866`). The new one (`people/c8069343841925028707`) has the enriched data. You may want to merge/delete the old one in Google Contacts.
-<!-- agent:boundary:9b6076cb -->
+
+Is `corky contact push google` implemented? Can it update the phone number on a contact?
+### Re: `corky contact push google` — Phone Number Support (HEAD)
+
+Yes, `corky contact push google` is fully implemented and **supports phone numbers**. Here's the flow:
+
+1. **Add phone to AGENTS.md** — add `**Phone:** +1-425-591-7794` to Anil's contact file
+2. **Re-push** — `cd ~/work/btakita/agent-loop/mail && corky contact push google --name anil-podduturi`
+3. **Update (not duplicate)** — `.sync-state.json` tracks `people/c8069343841925028707`, so it PATCHes the existing contact
+
+**Field mapping from AGENTS.md:**
+| AGENTS.md Field | Google Contacts Field |
+|---|---|
+| `**Phone:**` | phoneNumbers (mobile) |
+| `**Role:** Title at Org` | organizations (name + title) |
+| `**LinkedIn:**` | urls (profile) |
+| `**Email:**` | emailAddresses |
+| `# Contact: Name` | names (given + family) |
+
+The update logic uses etag-based concurrency control — fetches the current contact, gets the etag, then PATCHes with the updated fields.
+<!-- agent:boundary:328295f3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

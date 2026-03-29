@@ -829,7 +829,7 @@ This keeps the conversation continuous across documents while letting each docum
 Yes — this is exactly how Pattern works in the ontology. An analogy is a Pattern recognized across Domains: the structural relationship between abstractions in one domain maps to the same structural relationship in another. NULL:database :: noumena:ontology because the *relationship* (content-free pointer to unknown) is the pattern, and it transfers across the database and philosophy domains.
 
 This is also why the ontology is useful for AI: patterns expressed at the right level of abstraction (vague enough to transfer, precise enough to be meaningful) become reusable across any domain. The ontology provides the vocabulary for expressing those transferable patterns.
-<!-- agent:boundary:30eb4a11 -->
+<!-- agent:boundary:83738982 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.27.3 released. Auto-kill reverted, stash rescue stable.
+v0.27.4 released. Sync stash rescue shipped.
 <!-- /agent:status -->
 
 ## Exchange
@@ -222,14 +222,25 @@ update README, SPEC, module-harness, ontology
 - Section 8.4 (Stash Window Routing): Added RESCUE row to stash lifecycle table
 
 Committed `ef6f728` and pushed. Ready to release.
-<!-- agent:boundary:82e2473c -->
+release
+### v0.27.4 released (HEAD)
+
+**Published everywhere:**
+- **crates.io:** v0.27.4 ✓
+- **PyPI:** v0.27.4 ✓
+- **GitHub Release:** [v0.27.4](https://github.com/btakita/agent-doc/releases/tag/v0.27.4) ✓
+- **cargo install:** updated ✓
+
+**Changelog:** Rescue stashed panes in sync — preserves Claude session context across tab switches.
+<!-- agent:boundary:48c71875 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.27.0–v0.27.3: Previous bug fixes
-- [x] Fix sync.rs stash rescue
-- [x] Docs updated (sync.rs, SPEC.md)
-- [ ] Release v0.27.4 with sync rescue fix
+- [x] v0.27.0: Fix stash rescue deregistration
+- [x] v0.27.1: Fix "externally modified" popup
+- [x] v0.27.3: Revert auto-kill
+- [x] v0.27.4: Sync stash rescue
+- All shipped.
 <!-- /agent:pending -->

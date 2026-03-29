@@ -813,6 +813,8 @@ Confirmed — will add git root detection to agent-kit so all consumers benefit.
 
 **Recommendation:** Option 1 + 3. Add `agent-doc rename <old> <new>` to migrate snapshots and claims, and add a session lock check before writes.
 
+Implement.
+
 ### Re: Document transfer and linking
 
 Understood — when you transfer topics from this document to `tasks/software/existence.md` or other docs, we can link them via `related_docs` frontmatter. The transfer workflow would be:
@@ -824,21 +826,46 @@ Understood — when you transfer topics from this document to `tasks/software/ex
 
 This keeps the conversation continuous across documents while letting each document focus on its domain.
 
+Implement
+
 ### Re: Analogy as cross-domain pattern application
 
 Yes — this is exactly how Pattern works in the ontology. An analogy is a Pattern recognized across Domains: the structural relationship between abstractions in one domain maps to the same structural relationship in another. NULL:database :: noumena:ontology because the *relationship* (content-free pointer to unknown) is the pattern, and it transfers across the database and philosophy domains.
 
 This is also why the ontology is useful for AI: patterns expressed at the right level of abstraction (vague enough to transfer, precise enough to be meaningful) become reusable across any domain. The ontology provides the vocabulary for expressing those transferable patterns.
-<!-- agent:boundary:83738982 -->
+
+And Systems Theory is a large field of study that encompasses the analogy pattern. Perhaps we should consider investigating the available corpus of Systems Theory. Transfer this task to `tasks/research/systems-theory.md`.
+
+### Re: Implementation directives (HEAD)
+
+Three directives received:
+
+**1. `agent-doc rename` + session lock** — Rust implementation in `src/agent-doc/`. Requires:
+- New `rename` subcommand (snapshot migration + claims registry update)
+- Session lock check in the write path
+- Entering plan mode to design the approach.
+
+**2. Document transfer and linking** — Requires:
+- `related_docs` frontmatter parsing in preflight
+- Change detection for linked documents
+- Transfer summary writing via `agent-doc post`
+- Entering plan mode alongside #1.
+
+**3. Systems Theory research** — Transferred to `tasks/research/systems-theory.md` with context summary, research questions, and `related_docs` linking back to this document and `tasks/software/existence.md`.
+
+Entering plan mode for #1 and #2.
+<!-- agent:boundary:bc024d85 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **BUG**: File rename causes orphaned snapshots + unexpected session triggers — add `agent-doc rename` command
-- [ ] **BUG**: Add session lock check before writes (prevent modifications when user is editing without `/agent-doc`)
-- [ ] Spec cross-document sync: document links (related_docs frontmatter) + change detection + link/unlink proposals
-- [ ] Transfer existence topics to tasks/software/existence.md (with document linking)
+- [ ] **IMPLEMENTING**: `agent-doc rename` command (snapshot migration + claims update)
+- [ ] **IMPLEMENTING**: Session lock check before writes
+- [ ] **IMPLEMENTING**: Document linking (related_docs frontmatter + change detection in preflight)
+- [ ] **IMPLEMENTING**: Document transfer (`agent-doc post` for cross-document summaries)
+- [x] Transfer Systems Theory research to tasks/research/systems-theory.md
+- [ ] Transfer existence topics to tasks/software/existence.md
 - [ ] Add `existence fetch --check` and `existence diff` commands
 - [ ] Refactor chromium-bridge to use agent-kit SkillConfig
 - [ ] Migrate tagpath to bundle SKILL.md and use agent-kit
@@ -848,7 +875,7 @@ This is also why the ontology is useful for AI: patterns expressed at the right 
 - [ ] Move interface.md to existence-lang/ontology/src/
 - [ ] Add prebuilt binary release workflow to existence-lang/existence
 - [ ] Make btakita/philosophy depend on existence-lang/ontology (via existence fetch)
-- [ ] Author pneuma.md, noumena.md (NULL analogy + cross-domain pattern), phenomena.md
+- [ ] Author pneuma.md, noumena.md (NULL analogy), phenomena.md in existence-lang/ontology
 - [ ] Create/update precision.md + scope.md in existence-lang/ontology
 - [ ] Update chromium-bridge SKILL.md with CSS :hover limitation
 <!-- /agent:pending -->

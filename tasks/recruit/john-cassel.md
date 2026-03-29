@@ -459,7 +459,7 @@ This is a better framing than the microscope analogy: a microscope constrains wh
 **Updated understanding for the LinkedIn message:**
 The message should not imply that applying the ontology involves trade-offs or backgrounding. It should convey that the ontology expresses the pneuma of Existence -- the full structure of any system -- and that precision communicates the possibility space at any level without inherently constraining what's expressible.
 
-### Re: Noumena, pneuma, and phenomena (HEAD)
+### Re: Noumena, pneuma, and phenomena
 
 **Noumena:** Yes, largely correct. In Kant's framework, the noumenon is "the thing in itself" -- what exists independent of our perception. It's not strictly "unknown" but *unknowable through perception alone*. We can reason about it (Kant calls this the "negative" sense of noumenon) but we can never directly experience it as phenomena.
 
@@ -476,7 +476,7 @@ The message should not imply that applying the ontology involves trade-offs or b
 So the ontology is unique in that it doesn't choose between pneuma, noumena, and phenomena -- it provides the framework to express any of them. At vague precision, you express the pneuma (the full possibility space). At precise precision, you express phenomena (specific abstractions). The noumena are what remains unexpressed at any given precision -- but they're always expressible, because the ontology's scope is Existence.
 
 This is a much richer framing than anything in the current LinkedIn draft. The question is whether to bring this depth into a first message to John, or keep it for a follow-up conversation.
-<!-- agent:boundary:5ce3a121 -->
+<!-- agent:boundary:0b06ec64 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

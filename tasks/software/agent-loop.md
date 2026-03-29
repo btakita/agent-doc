@@ -108,7 +108,49 @@ What is `src/git.rs`?
 `src/git.rs` is an orphaned test file — it contains 3 tests for `strip_head_markers` and `add_head_marker` functions (from agent-doc's git module), but it's sitting in the agent-loop root `src/` directory where it doesn't belong. It references `super::*` which won't resolve since there's no parent module in this context.
 
 Likely a stray file from a development session. It's untracked (`??` in git status). Safe to delete — the real tests live in `src/agent-doc/src/git.rs`.
-<!-- agent:boundary:53e36b94 -->
+
+Please look at evals/
+Explain these files.
+Are they used with eval-runner?
+Do they relate with module-harness?
+### Re: evals/ directory, eval-runner, module-harness (HEAD)
+
+**`evals/` directory** — a YAML-based test case repository for benchmarking agent behavior:
+
+```
+evals/
+├── agent-doc/
+│   ├── diff-interpretation/cases.yaml   ← 30 test cases (only populated file)
+│   ├── patch-correctness/               ← empty placeholder
+│   └── pending-sync/                    ← empty placeholder
+├── corky/
+│   ├── threading/                       ← empty placeholder
+│   └── voice-consistency/               ← empty placeholder
+├── skills/
+│   ├── instruction-adherence/           ← empty placeholder
+│   └── tool-selection/                  ← empty placeholder
+└── results/                             ← empty (for storing eval results)
+```
+
+The `cases.yaml` has 30 test cases for diff interpretation — each with a diff, document context, expected behaviors, and `llm-rubric` grading (LLM-as-judge).
+
+**`src/eval-runner/`** — Rust CLI that executes evals:
+- Reads YAML cases, calls Claude API to generate responses, uses a second call to grade
+- Computes stats: pass rate, mean score, token usage, latency percentiles
+- Supports baseline comparison for regression detection
+- General-purpose — doesn't hardcode the `evals/` path, takes any YAML file
+
+**`src/module-harness/`** — complementary but separate system:
+- Embeds Spec/Contracts/Evals *inside source code* as doc comments
+- Language-agnostic (Rust, Python, TypeScript, Go, Kotlin/Java)
+- Has its own eval type system (boolean, ordinal, continuous, range)
+- Includes an existence-lang ontology layer
+
+**Relationship:**
+- `evals/` feeds into `eval-runner` (YAML → Claude API → scored results)
+- `module-harness` embeds evals in source for agents to read during development
+- They're independent systems — module-harness could theoretically share scoring logic with eval-runner but doesn't currently
+<!-- agent:boundary:c1ef1668 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

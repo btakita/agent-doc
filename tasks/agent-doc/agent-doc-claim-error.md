@@ -209,7 +209,7 @@ The john-cassel session was lost at **00:22:03** — the fix was installed at **
 - 00:22:50 — fix installed (`cargo install` completed)
 
 No sync events for john-cassel after the fix was installed. The fix should prevent this from happening going forward. Please test by switching away from a document and back — the session should now be rescued from stash instead of recreated.
-<!-- agent:boundary:d0297561 -->
+<!-- agent:boundary:6dafd3cf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

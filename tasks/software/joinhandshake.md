@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Interview video transcribed to tmp/handshake-interview-video-1.txt. joinhandshake topic created.
+Both videos transcribed. Spectra welcome + interview recording saved to tmp/.
 <!-- /agent:status -->
 
 ## Exchange
@@ -113,6 +113,7 @@ So now we have two videos:
 2. `tmp/handshake-interview-video.mp4` — Interview recording from Typeform (2:01, 720p)
 
 Which one(s) do you want transcribed?
+Both
 
 ### Re: Transcribe interview video
 
@@ -126,7 +127,28 @@ Done.
 - Diarization detected 4 speakers but it's a single-speaker recording (you) — the speaker splits are just diarization artifacts
 
 **Content summary:** You discuss your resume — Presence AI (real-time lip avatars, multimodal systems, image generation), open source work (AgentDoc, Corky), and prior work at Martin Investment/Sensible (ESG data, investment tools, consulting).
-<!-- agent:boundary:6cc3c530 -->
+
+### Re: Transcribe both videos (HEAD)
+
+Spectra video transcribed.
+
+**Transcription:** `tmp/handshake-spectra-video-1.txt`
+- GPU: RTX 5090 (148x realtime, 2.8s for 7min audio)
+- Single speaker (Ben, Handshake co-founder) — diarization found 0 segments (likely mono track)
+
+**Content summary:** Ben introduces Project Spectra:
+- Handshake started 12 years ago to democratize job access
+- Handshake AI pays competitive rates for AI data work
+- Project Spectra: analyzing AI edits to images across 4 criteria
+- Two stages: paid screening (~10hrs, 15hr cap) then ongoing production (through end of year+)
+- Tools: Hubstaff (time tracking), Feather (task work), Canvas (learning materials)
+- Key success factors: attention to detail, quality over speed, consistency, learning mindset
+- Team: Ben (co-founder), Christopher, Joshua, Reem, Shreya, Hayden, James
+
+**Both transcriptions complete:**
+1. `tmp/handshake-spectra-video-1.txt` — Project Spectra welcome (6:59)
+2. `tmp/handshake-interview-video-1.txt` — Your interview recording (2:01)
+<!-- agent:boundary:7e95f091 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -136,4 +158,5 @@ Done.
 - [x] Download videos
 - [x] Add joinhandshake topic
 - [x] Transcribe interview video (tmp/handshake-interview-video-1.txt)
+- [x] Transcribe spectra video (tmp/handshake-spectra-video-1.txt)
 <!-- /agent:pending -->

@@ -270,7 +270,7 @@ We have a permaculture entry in btakita/philosophy: See /home/brian/work/btakita
 
 Are you proposing that we have a permaculture entry in src/existence-lang/existence?
 
-### Re: Where the overlay lives (HEAD)
+### Re: Where the overlay lives
 
 No -- I wasn't proposing a new entry in `src/existence-lang/existence/` (that's the Rust CLI tool). I see now that the permaculture entry already exists in `philosophy/src/permaculture.md` with the ethics, principles, and epistemological references.
 
@@ -299,7 +299,7 @@ Given this is a first reply to someone Brian doesn't know well yet, option 2 is 
 > -- Brian
 
 This version demonstrates the ontological thinking without requiring a repo link, and correctly applies the universal applicability principle rather than the exclusive label error.
-<!-- agent:boundary:ad09f7fb -->
+<!-- agent:boundary:cb767378 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

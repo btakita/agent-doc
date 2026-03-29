@@ -89,7 +89,7 @@ All submodules now clean and pushed, including nested ones. Will commit recursiv
 
 Create a github project btakita/eval-runner for src/eval-runner
 src/eval-runner will be a submodule in agent-loop
-### Re: create btakita/eval-runner GitHub project + submodule (HEAD)
+### Re: create btakita/eval-runner GitHub project + submodule
 
 **GitHub repo created:** https://github.com/btakita/eval-runner (public)
 
@@ -102,7 +102,7 @@ src/eval-runner will be a submodule in agent-loop
 **Submodule registered** in agent-loop:
 - `git submodule add` recognized existing repo
 - Parent commit `940119d`: added eval-runner as submodule, pushed
-<!-- agent:boundary:83d9b94c -->
+<!-- agent:boundary:57ffefbb -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

@@ -348,7 +348,7 @@ Re-pushed to Google Contacts — now includes name, org/title, and LinkedIn URL.
 **Note:** A duplicate contact may exist from the first push (`people/c2459970024107071866`). The new one (`people/c8069343841925028707`) has the enriched data. You may want to merge/delete the old one in Google Contacts.
 
 Is `corky contact push google` implemented? Can it update the phone number on a contact?
-### Re: `corky contact push google` — Phone Number Support (HEAD)
+### Re: `corky contact push google` — Phone Number Support
 
 Yes, `corky contact push google` is fully implemented and **supports phone numbers**. Here's the flow:
 
@@ -366,7 +366,7 @@ Yes, `corky contact push google` is fully implemented and **supports phone numbe
 | `# Contact: Name` | names (given + family) |
 
 The update logic uses etag-based concurrency control — fetches the current contact, gets the etag, then PATCHes with the updated fields.
-<!-- agent:boundary:328295f3 -->
+<!-- agent:boundary:926af428 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -761,7 +761,7 @@ This is a known limitation of browser automation -- CSS `:hover` requires real O
 3. Then trigger the next cycle and I'll resend with proper paragraph formatting
 
 Alternatively, you can click `...` → Edit, manually add line breaks, and Save.
-<!-- agent:boundary:b2964025 -->
+<!-- agent:boundary:90d8e7d7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

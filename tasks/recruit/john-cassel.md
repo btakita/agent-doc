@@ -574,7 +574,7 @@ Your call.
 
 Should we directly mention agent-doc?
 
-### Re: Mentioning agent-doc (HEAD)
+### Re: Mentioning agent-doc
 
 The current draft already references it implicitly: "document sessions" in "correspondence automation, document sessions, and browser orchestration." But it doesn't name agent-doc directly or explain what it does.
 
@@ -589,7 +589,7 @@ The current draft already references it implicitly: "document sessions" in "corr
 > I've been applying this practically to human-agent alignment in AI tooling -- building correspondence automation, agent-doc (a document-session tool for iterative alignment), and browser orchestration in Rust. The ontology drives convergence between human intent and agent behavior through iteration.
 
 Want me to update the full draft with this change?
-<!-- agent:boundary:5d7d9b47 -->
+<!-- agent:boundary:b7fa0970 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

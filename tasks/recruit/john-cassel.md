@@ -476,7 +476,7 @@ The message should not imply that applying the ontology involves trade-offs or b
 So the ontology is unique in that it doesn't choose between pneuma, noumena, and phenomena -- it provides the framework to express any of them. At vague precision, you express the pneuma (the full possibility space). At precise precision, you express phenomena (specific abstractions). The noumena are what remains unexpressed at any given precision -- but they're always expressible, because the ontology's scope is Existence.
 
 This is a much richer framing than anything in the current LinkedIn draft. The question is whether to bring this depth into a first message to John, or keep it for a follow-up conversation.
-<!-- agent:boundary:0b06ec64 -->
+<!-- agent:boundary:3a82231f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

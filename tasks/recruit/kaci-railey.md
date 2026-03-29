@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Message loaded in LinkedIn reply box. Awaiting approval to send.
+Reply sent. Contact updated. Chatbox formatting docs added to chromium-bridge skill.
 <!-- /agent:status -->
 
 ## Exchange
@@ -179,12 +179,26 @@ Message is loaded in the LinkedIn InMail reply box (tab 38) with bold section he
 Regarding the SKILL.md question: I'd add the chatbox formatting guidance to the **chromium-bridge** skill since it's the tool that interfaces with browser chat UIs. The browser skill is more general-purpose. I can add a "Chatbox Formatting" section to `.claude/skills/chromium-bridge/SKILL.md` documenting:
 - LinkedIn messaging: supports `<strong>` for bold, `<p>` for paragraphs, no markdown
 - General pattern: use `innerHTML` with `<p>` tags per line, `<br>` for blank lines, dispatch `input` event
-<!-- agent:boundary:3732af6c -->
+
+I manually sent it. continue
+- [ ] Add chatbox formatting docs to chromium-bridge SKILL.md
+
+### Re: Post-send cleanup (HEAD)
+
+Done:
+1. **Saved sent reply** to `mail/contacts/kaci-railey/20260329-linkedin-brian-takita.txt`
+2. **Updated AGENTS.md** communication timeline with the reply (2026-03-29)
+3. **Added chatbox formatting docs** to `.claude/skills/chromium-bridge/SKILL.md` — new "Chatbox Formatting" section documenting:
+   - `innerHTML` + `<p>` + `<strong>` pattern for rich text in contenteditable fields
+   - Platform-specific selectors (LinkedIn, Gmail, Messenger)
+   - `input` event dispatch requirement
+   - How to click conversation items by heading text
+<!-- agent:boundary:3bdd0a3b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Review message in browser and approve send
-- [ ] Add chatbox formatting docs to chromium-bridge SKILL.md
+- [x] Review message in browser and approve send ([done])
+- [x] Add chatbox formatting docs to chromium-bridge SKILL.md ([done])
 <!-- /agent:pending -->

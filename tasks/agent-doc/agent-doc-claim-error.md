@@ -54,7 +54,7 @@ Previously these panes accumulated forever because tmux reported them as running
 
 Ready to release when you want, or test first.
 release
-### v0.27.2 released (HEAD)
+### v0.27.2 released
 
 **Published everywhere:**
 - **crates.io:** agent-doc v0.27.2 ✓
@@ -65,7 +65,7 @@ release
 **Changelog:**
 - Auto-kill idle stashed Claude sessions with no return target
 - Remove stale boundary disk write (from v0.27.1)
-<!-- agent:boundary:52208247 -->
+<!-- agent:boundary:31db6d5c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

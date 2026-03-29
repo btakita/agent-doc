@@ -190,7 +190,27 @@ grading = "llm-rubric"
 **My recommendation:** switch to TOML. The Rust ecosystem alignment matters, the file is machine-consumed not hand-edited frequently, and the YAML gotchas are real risks with diff content that might contain bare `yes`/`no`. The code change is small — swap `serde_yaml` for `toml` crate and update the deserializer call.
 
 Want me to make the switch?
-<!-- agent:boundary:5974e488 -->
+Is yaml used for other eval frameworks?
+Does any eval framework use the toml format?
+### Re: YAML in eval frameworks / TOML in eval frameworks? (HEAD)
+
+**YAML is the dominant format** across eval frameworks:
+- **OpenAI Evals** — YAML/JSONL for test cases
+- **Braintrust** — YAML configs + JSON data
+- **promptfoo** — YAML for test suites (`promptfooconfig.yaml`)
+- **Inspect AI** (UK AISI) — Python but YAML for dataset configs
+- **HELM** (Stanford) — YAML run configs
+- **LangSmith/LangChain** — YAML + JSON datasets
+
+**No major eval framework uses TOML.** TOML is primarily a Rust/config ecosystem format. The eval world standardized on YAML/JSON/JSONL because:
+1. Python-centric tooling (YAML is native to Python ecosystem)
+2. Multi-line string handling for prompts/expected outputs
+3. Existing dataset standards (HuggingFace datasets, etc.)
+
+**Revised recommendation:** Keep YAML. Since eval-runner may eventually interoperate with other eval tools, datasets, or CI pipelines that expect YAML/JSONL, switching to TOML would create friction. The ecosystem alignment argument I made earlier cuts the other way here — Rust ecosystem prefers TOML for *config*, but eval cases are *data*, and the data ecosystem is YAML/JSON.
+
+If the YAML gotchas concern you, the mitigation is quoting strings that could be misinterpreted (which serde_yaml handles correctly when deserializing to `String` fields anyway).
+<!-- agent:boundary:03e25134 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

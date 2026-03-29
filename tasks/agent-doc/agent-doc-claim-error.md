@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.27.1 released. Fix for "externally modified" popup shipped.
+v0.27.2 released. Idle stash cleanup + boundary fix shipped.
 <!-- /agent:status -->
 
 ## Exchange
@@ -53,15 +53,26 @@ Previously these panes accumulated forever because tmux reported them as running
 **Installed:** `~/.cargo/bin/agent-doc` updated
 
 Ready to release when you want, or test first.
-<!-- agent:boundary:53093452 -->
+release
+### v0.27.2 released (HEAD)
+
+**Published everywhere:**
+- **crates.io:** agent-doc v0.27.2 ✓
+- **PyPI:** agent_doc v0.27.2 ✓
+- **GitHub Release:** [v0.27.2](https://github.com/btakita/agent-doc/releases/tag/v0.27.2) with binary ✓
+- **cargo install:** updated ✓
+
+**Changelog:**
+- Auto-kill idle stashed Claude sessions with no return target
+- Remove stale boundary disk write (from v0.27.1)
+<!-- agent:boundary:52208247 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.27.0: Fix stash rescue deregistration
-- [x] v0.27.1: Fix "externally modified" popup (boundary disk write)
-- [x] Kill 7 orphaned stashed panes
-- [x] Implement auto-cleanup for idle stashed Claude sessions
-- [ ] Bump version, release
+- [x] v0.27.1: Fix "externally modified" popup
+- [x] v0.27.2: Auto-kill idle stashed Claude sessions
+- All tasks complete.
 <!-- /agent:pending -->

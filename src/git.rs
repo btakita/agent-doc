@@ -8,8 +8,9 @@
 //!   via `git hash-object + update-index` so the working tree is never touched; user keystrokes
 //!   typed after the snapshot was taken remain uncommitted (green gutter).  Falls back to
 //!   `git add -f` when hash-object fails.  After a successful commit, strips `(HEAD)` from the
-//!   snapshot, repositions the boundary marker in the snapshot, cleans stale boundaries from the
-//!   working tree if >1 are found, and fires an IPC signal to the IDE plugin.
+//!   snapshot, repositions the boundary marker in the snapshot, and fires an IPC reposition signal
+//!   (`try_ipc_reposition_boundary`) to the IDE plugin so the working tree boundary is updated
+//!   via the plugin's Document API.
 //! - `show_head(file)`: returns the file content from `HEAD` as `Some(String)`, or `None` if not
 //!   tracked.
 //! - `last_commit_mtime(file)`: returns the author timestamp of the most recent commit touching the
@@ -24,7 +25,7 @@
 //!
 //! ## Agentic Contracts
 //! - `commit` never modifies the working tree file directly; all staging is done through the git
-//!   index.  The only disk writes are to the snapshot file and (safety-net) stale boundary cleanup.
+//!   index.  The only disk write is to the snapshot file.
 //! - `commit` captures all git stdout to stderr so callers that reserve stdout for JSON (e.g.,
 //!   `preflight`) are not polluted.
 //! - All public functions resolve paths relative to the superproject root when running inside a

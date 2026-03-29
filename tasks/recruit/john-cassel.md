@@ -309,7 +309,7 @@ Have you read this paper or is it only behind a paywall?
 existence-lang is designed to model Existence...and any scoped system within Existence.
 It can naturally be coherent with Permaculture...or with any other system...via context, scope, and ontology.
 
-### Re: Paper access & framing correction (HEAD)
+### Re: Paper access & framing correction
 
 **Paper access:** I did not read the full "Permaculture as a Systemic Design Practice" -- Springer returned a 303 (paywall). I only got the abstract via web search (ResearchGate listing + RSD4 symposium page). The FormAkademisk piece I read in summary (the journal redirected but the abstract page loaded). The Mathematica Journal article I read in full (open access). The OCAD thesis I read 10 pages of the PDF (title, abstract, TOC, introduction). So the draft's claim "I came across your paper" is honest only at the abstract level for the Springer chapter.
 
@@ -335,7 +335,7 @@ It can naturally be coherent with Permaculture...or with any other system...via 
 > Your work on incentive programs at Regrow sounds fascinating -- shaping demand for new practices is such a leverage point. If you're moving toward design & planning, I'd love to hear more about what that looks like. Happy to jump on a call sometime.
 >
 > -- Brian
-<!-- agent:boundary:94f9d97f -->
+<!-- agent:boundary:1f886780 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

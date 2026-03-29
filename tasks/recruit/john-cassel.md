@@ -670,7 +670,7 @@ Updated final draft:
 
 Should we compare our pneuma, noumena, phenomena insight to "the way you frame multi-criteria design and reasoning about infinite unknown factors"?
 
-### Re: Connecting pneuma/noumena/phenomena to John's work (HEAD)
+### Re: Connecting pneuma/noumena/phenomena to John's work
 
 The mapping is direct:
 
@@ -708,7 +708,7 @@ Updated final draft:
 > Your work on incentive programs at Regrow sounds fascinating -- shaping demand for new practices is such a leverage point. If you're moving toward design & planning, I'd love to hear more about what that looks like. Happy to jump on a call sometime.
 >
 > -- Brian
-<!-- agent:boundary:c40736ed -->
+<!-- agent:boundary:f0457e01 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

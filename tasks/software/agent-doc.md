@@ -513,7 +513,7 @@ This is an interesting design question. Options:
 
 Which approach fits your vision? The existence CLI itself is a standalone tool -- tying it to CLAUDE.md file management feels like it should be a skill concern (option C), unless you want the CLI to be the canonical deployer (option A).
 
-### Re: Protocol involves Interfaces (HEAD)
+### Re: Protocol involves Interfaces
 
 Good distinction. Authored `protocol.md`:
 
@@ -523,7 +523,7 @@ Good distinction. Authored `protocol.md`:
 Example: The NDJSON-over-Unix-socket **Protocol** defines how the `agent-doc` CLI and the editor plugin communicate through their socket **Interfaces**. The C ABI is the FFI library's Interface. The JNA declarations are the JetBrains plugin's Interface. The NDJSON message format is the Protocol spanning both.
 
 Cross-linked `interface.md` -> `protocol.md` and vice versa.
-<!-- agent:boundary:cd80580a -->
+<!-- agent:boundary:be9abb45 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -534,7 +534,7 @@ So there are (at least) two kinds of noumena:
 
 - **Vague precision** encompasses the raw pneuma -- the full possibility space *including* structurally unabstractable noumena. The abstraction is honest about what it contains: both the expressible and the inexpressible. It doesn't claim to have captured the noumena; it acknowledges they're within its scope.
 
-- **Precise precision** narrows the possibility space but may still contain noumena (both kinds). It contains *less* noumena than vague precision because narrowing the possibility space excludes more of the unknown -- but some structurally unabstractable aspects may persist at any level of precision.
+- **Precise precision** narrows the possibility space but may still contain noumena (both kinds). It contains *less* noumena than vague precision because narrowing the possibility space excludes more of the known and unknown -- but some structurally unabstractable aspects may persist at any level of precision.
 
 - **The ontology** doesn't claim to abstract the unabstractable. It acknowledges that the pneuma contains aspects that no abstraction can fully capture -- and that's part of the accurate description. An accurate abstraction includes the acknowledgment of its own limits.
 
@@ -747,7 +747,7 @@ This needs manual intervention. To delete and resend:
 The message text is ready -- I just need you to delete the wall-of-text version first.
 
 Try clicking the `...` menu
-![img.png](img.png)
+![img.png](../recruit/img.png)
 
 ### Re: Menu click attempt with CSS override
 
@@ -767,7 +767,7 @@ Perform an analysis over how we were unaligned and iterated toward alignment.
 What needs changes?
 Should we add AGENT_LEARNINGS.md. Or are there any change to existence's SKILL.md?
 
-### Re: Alignment analysis and learnings (HEAD)
+### Re: Alignment analysis and learnings
 
 **Alignment journey -- 11 correction cycles to convergence:**
 
@@ -816,7 +816,7 @@ The learnings fall into two categories:
 - **chromium-bridge/LinkedIn automation** (CSS :hover limitation, paragraph formatting) → These belong in the chromium-bridge SKILL.md as known limitations.
 
 I'd recommend updating `philosophy/CLAUDE.md` with the precision and bounded/unbounded guidance rather than creating a separate AGENT_LEARNINGS.md. The learnings are about the ontology itself, so they should live with the ontology.
-<!-- agent:boundary:13c3e86d -->
+<!-- agent:boundary:b5066742 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Chromium has no debug port — can't access video. Need user to provide URL or restart Chromium with debugging.
+Connected to Chromium (port 9223). Typeform is a video recording form — no downloadable video found.
 <!-- /agent:status -->
 
 ## Exchange
@@ -56,13 +56,33 @@ chromium-bridge is connected to **Brave** (port 9222), not Chromium. Chromium is
 3. **Open the same Handshake URL in Brave** — then I can access it via chromium-bridge
 
 Which approach do you prefer?
-<!-- agent:boundary:26be2d2e -->
+
+Copy Video Address is disabled.
+Can we restart Chromium?
+
+### Re: Restart Chromium & find video (HEAD)
+
+Done — restarted Chromium with `--remote-debugging-port=9223` and connected via `CHROMIUM_BRIDGE_PORT=9223`.
+
+I accessed the Typeform iframe directly via CDP. Here's the full content of the form:
+
+**Step 1:** Name & email (already filled: Brian Takita, brian.takita@gmail.com)
+
+**Step 2:** "Walk us through your resume and highlight your key experiences"
+- "Your answer should be between 30 and 60 seconds. Please record a live answer instead of uploading a video."
+- Button: "Add video answer"
+
+This is a video **recording** form — it's asking you to record a new video, not showing an existing video to download. There are no `<video>` elements or video URLs on the page.
+
+Were you perhaps looking at a different page or tab in Chromium that had a video? The other Chromium tab is "Project Spectra" on `handshakeai.instructure.com/courses/314`. Want me to check that one?
+<!-- agent:boundary:8185aa36 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Connect to Chromium browser (needs debug port or alternative approach)
+- [x] Connect to Chromium browser
+- [ ] Locate the actual video (user may mean a different tab/page)
 - [ ] Download video to local filesystem
 - [ ] Transcribe video
 <!-- /agent:pending -->

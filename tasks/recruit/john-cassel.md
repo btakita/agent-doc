@@ -564,14 +564,14 @@ Ready to send via LinkedIn messaging when you approve.
 
 It is currently 2:27 on Sunday. Should I send the message now or wait until Monday?
 
-### Re: Timing (HEAD)
+### Re: Timing
 
 This is a personal/intellectual connection, not a cold recruiter outreach -- timing is less critical. LinkedIn messages sit in the inbox until read, and there's no "sent at 2am on Sunday" stigma like email. John's original message was sent at 4:58 PM on a Friday (Mar 14), so he's not strictly a 9-5 communicator either.
 
 Send now if you'd like -- or wait until Monday morning if you prefer the message to land when he's more likely to be checking LinkedIn. Either is fine for this kind of connection.
 
 Your call.
-<!-- agent:boundary:f0dc9958 -->
+<!-- agent:boundary:493266cd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

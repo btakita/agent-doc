@@ -1,7 +1,8 @@
 ---
 agent_doc_session: cb5672cc-5d1d-4228-af30-640a336f692e
-tmux_session: '1'
-agent_doc_mode: template
+agent_doc_format: template
+agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
 ---
 
 ## Existence Lang — Composable Ontology Framework

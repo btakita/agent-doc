@@ -512,7 +512,7 @@ This draft reflects all corrections: no paper claims beyond what was read, Exist
 
 Ready to send when you approve.
 
-### Re: Noumena — unknowable vs not-yet-known (HEAD)
+### Re: Noumena — unknowable vs not-yet-known
 
 **Yes, there's a genuine tension.** Two distinct claims:
 
@@ -539,7 +539,7 @@ So there are (at least) two kinds of noumena:
 - **The ontology** doesn't claim to abstract the unabstractable. It acknowledges that the pneuma contains aspects that no abstraction can fully capture -- and that's part of the accurate description. An accurate abstraction includes the acknowledgment of its own limits.
 
 This last point is important: accuracy in Existence Lang includes knowing what you *can't* express. A vague definition that honestly encompasses the unabstractable is more accurate than a precise definition that pretends it has captured everything.
-<!-- agent:boundary:9394fbe2 -->
+<!-- agent:boundary:ee390c86 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

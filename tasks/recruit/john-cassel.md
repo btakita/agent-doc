@@ -230,7 +230,7 @@ Updated draft reply incorporating the ontology:
 
 Want me to create the overlay file in the existence-lang repo so we have a shareable link?
 
-### Re: Exclusivity error in ontology mapping (HEAD)
+### Re: Exclusivity error in ontology mapping
 
 You're right -- I fell into the same trap. The table assigns Existence Lang terms as **exclusive labels** for permaculture concepts ("Zones = Scope + Resolution", "Elements = Entity", "Ethics = Domain"). But the Universal Applicability Principle says every term applies to every entity at every scope.
 
@@ -265,7 +265,7 @@ A Zone is not just Scope + Resolution -- a Zone is also a System (with its own i
 **The overlay should present it this way** -- not a mapping table, but a rich description of how every term illuminates every concept. This is what makes Existence Lang valuable: it reveals dimensions of understanding that a simple label assignment misses.
 
 Want me to rewrite the overlay in this corrected format for the existence-lang repo?
-<!-- agent:boundary:e7970a01 -->
+<!-- agent:boundary:0341f7a8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

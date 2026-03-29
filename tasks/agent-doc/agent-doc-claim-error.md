@@ -19,7 +19,7 @@ v0.27.1 released. Fix for "externally modified" popup shipped.
 I got another agent-doc claim error.
 When calling `Claim for Tmux Pane` on tasks/software/joinhandshake.md
 ![img.png](img.png)
-### Claim error analysis (HEAD)
+### Claim error analysis
 
 The claim itself **succeeded** — pane %110 was created for `joinhandshake.md`. The errors you see are resync warnings about 7 orphaned stashed panes that can't be returned to a visible window.
 
@@ -33,7 +33,7 @@ All 7 stashed panes (%104, %109, %106, %108, %102, %107, %111) are idle Claude s
 2. **Permanent:** Add auto-cleanup to resync — when a stashed pane has an idle Claude session and no document claim, kill it instead of keeping it registered
 
 Want me to kill the orphaned panes and implement the auto-cleanup in resync?
-<!-- agent:boundary:8e05b979 -->
+<!-- agent:boundary:0293ac81 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

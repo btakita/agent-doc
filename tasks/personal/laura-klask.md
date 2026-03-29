@@ -417,6 +417,8 @@ Want me to help with any of these:
 - Surface contract opportunities from your existing network/tasks?
 - Update tasks/judith-krug.md with the current status?
 I'm also running low on funds. Need to get something going soon. So I have a client but have not closed on a deal yet. And have not begun work to be paid. And I need to find more work immediately after that.
+
+Read laura-klask-sms.txt. Propose a draft response.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

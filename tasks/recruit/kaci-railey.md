@@ -18,7 +18,7 @@ Please create a contact for kaci-railey: https://www.linkedin.com/in/kacirailey/
 Copy the current correspondence over LinkedIn messenger in mail/contacts/kaci-railey/
 . Use chromium-bridge via brave.
 
-### Re: Create contact for kaci-railey (HEAD)
+### Re: Create contact for kaci-railey
 
 Contact created at `mail/contacts/kaci-railey/`:
 - `AGENTS.md` — profile info from LinkedIn (role, education, experience, awards)
@@ -31,7 +31,7 @@ Contact created at `mail/contacts/kaci-railey/`:
 - 21K LinkedIn followers, multiple President's Club awards
 
 **LinkedIn messages:** The Chrome DevTools connection is timing out — unable to access LinkedIn Messenger right now. Please restart the browser bridge or manually copy the conversation. I can retry once the browser is available.
-<!-- agent:boundary:f45b2495 -->
+<!-- agent:boundary:79357c7b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

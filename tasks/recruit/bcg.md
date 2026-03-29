@@ -557,7 +557,7 @@ Added **+1-425-591-7794** to Anil Podduturi's Google Contact (via browser automa
 - **Google Contact:** https://contacts.google.com/person/c1640905550654697548
 
 Contact saved successfully.
-### Re: Browser & corky for contacts (HEAD)
+### Re: Browser & corky for contacts
 
 **Browser:** Used Brave via direct CDP (Chrome DevTools Protocol on port 9222). The MCP chromium-bridge had connection timeout issues, so fell back to direct websocket CDP commands — same result, different plumbing.
 
@@ -567,5 +567,5 @@ Contact saved successfully.
 1. Browser automation (as used for Anil's phone)
 2. Manual via Google Contacts web UI
 3. *(Future)* `corky contact push google` once implemented
-<!-- agent:boundary:877174ca -->
+<!-- agent:boundary:776b3f59 -->
 <!-- /agent:exchange -->

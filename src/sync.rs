@@ -31,8 +31,11 @@
 //! - The `resolve_file` closure reads each file's frontmatter session UUID and
 //!   produces a `FileResolution::Registered` (or `Unmanaged` when no UUID is present).
 //!   It never propagates `tmux_session` from frontmatter — that field is deprecated.
-//! - Auto-start treats a pane in a stash window as dead; a fresh pane is started in
-//!   the correct window.
+//! - When a registered pane is found in a stash window, sync attempts to **rescue** it
+//!   back to the agent-doc window (via `swap-pane`, falling back to `join-pane`)
+//!   instead of treating it as dead. This preserves the existing Claude session context
+//!   when switching between editor tabs. Only if rescue fails is the pane treated as
+//!   dead and a fresh session started.
 //! - Auto-start detects duplicate panes via `find_alive_pane_for_file`, which scans
 //!   process command lines (`ps -p <pid> -o command=`) before spawning.
 //! - `register_synced_files` updates or creates registry entries for every file

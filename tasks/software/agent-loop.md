@@ -1,8 +1,8 @@
 ---
 agent_doc_session: be20dd6e-31ce-4f16-93ed-42c9c2a21b98
-tmux_session: '0'
 agent_doc_format: template
 agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
 ---
 
 # agent-loop operations
@@ -86,7 +86,23 @@ Committed inside-out:
 3. **Parent `agent-loop`** (`0ad8bf4`): Updated briantakita.me-dev pointer, pushed
 
 All submodules now clean and pushed, including nested ones. Will commit recursively in future.
-<!-- agent:boundary:e5a12068 -->
+
+Create a github project btakita/eval-runner for src/eval-runner
+src/eval-runner will be a submodule in agent-loop
+### Re: create btakita/eval-runner GitHub project + submodule (HEAD)
+
+**GitHub repo created:** https://github.com/btakita/eval-runner (public)
+
+**Initial setup:**
+- Initialized git in existing `src/eval-runner/` directory
+- Added `.gitignore` (target/, *.iml, .agent-doc/)
+- Cleaned up accidentally committed `target/` directory
+- Pushed to origin
+
+**Submodule registered** in agent-loop:
+- `git submodule add` recognized existing repo
+- Parent commit `940119d`: added eval-runner as submodule, pushed
+<!-- agent:boundary:83d9b94c -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

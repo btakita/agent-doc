@@ -638,7 +638,7 @@ Here's the complete final draft:
 
 The existence crate also includes SKILL.md and a cli.
 
-### Re: Existence Lang is more than an ontology (HEAD)
+### Re: Existence Lang is more than an ontology
 
 Good point -- calling it just "an ontology" understates it. Existence Lang includes:
 - The ontology itself (philosophy/src/ terms)
@@ -667,7 +667,7 @@ Updated final draft:
 > Your work on incentive programs at Regrow sounds fascinating -- shaping demand for new practices is such a leverage point. If you're moving toward design & planning, I'd love to hear more about what that looks like. Happy to jump on a call sometime.
 >
 > -- Brian
-<!-- agent:boundary:b0df5e26 -->
+<!-- agent:boundary:91ccca28 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

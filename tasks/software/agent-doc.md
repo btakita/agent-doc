@@ -795,7 +795,7 @@ Noted:
 
 Confirmed — will add git root detection to agent-kit so all consumers benefit.
 
-### Re: File rename and unexpected modifications (HEAD)
+### Re: File rename and unexpected modifications
 
 **Yes, the rename likely caused this.** Here's the chain:
 
@@ -813,7 +813,7 @@ Confirmed — will add git root detection to agent-kit so all consumers benefit.
 
 **Recommendation:** Option 1 + 3. Add `agent-doc rename <old> <new>` to migrate snapshots and claims, and add a session lock check before writes.
 
-### Re: Document transfer and linking (HEAD)
+### Re: Document transfer and linking
 
 Understood — when you transfer topics from this document to `tasks/software/existence.md` or other docs, we can link them via `related_docs` frontmatter. The transfer workflow would be:
 
@@ -824,12 +824,12 @@ Understood — when you transfer topics from this document to `tasks/software/ex
 
 This keeps the conversation continuous across documents while letting each document focus on its domain.
 
-### Re: Analogy as cross-domain pattern application (HEAD)
+### Re: Analogy as cross-domain pattern application
 
 Yes — this is exactly how Pattern works in the ontology. An analogy is a Pattern recognized across Domains: the structural relationship between abstractions in one domain maps to the same structural relationship in another. NULL:database :: noumena:ontology because the *relationship* (content-free pointer to unknown) is the pattern, and it transfers across the database and philosophy domains.
 
 This is also why the ontology is useful for AI: patterns expressed at the right level of abstraction (vague enough to transfer, precise enough to be meaningful) become reusable across any domain. The ontology provides the vocabulary for expressing those transferable patterns.
-<!-- agent:boundary:7dc5f9af -->
+<!-- agent:boundary:30eb4a11 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Needs manual delete of wall-of-text message. Then resend with formatting.
+Needs manual delete/edit in Brave. Automation can't trigger LinkedIn's hover menus.
 <!-- /agent:status -->
 
 ## Exchange
@@ -731,7 +731,6 @@ I wasn't able to edit the sent message -- LinkedIn's dropdown menu items aren't 
 The issue is that LinkedIn's contenteditable doesn't preserve `<br>` tags when editing, and the `chromium-bridge type` paragraph handling (Shift+Enter) didn't create visible breaks in the edit save. For future LinkedIn messages, I should type each paragraph separately with Enter key presses between them rather than using the `type` command's paragraph handling.
 
 Which approach do you prefer?
-
 Try **Delete and resend**. If that doesn't work, I'll manually edit.
 
 ### Re: Delete attempt
@@ -746,12 +745,28 @@ This needs manual intervention. To delete and resend:
 4. Then I can resend with proper formatting using Enter key presses between paragraphs
 
 The message text is ready -- I just need you to delete the wall-of-text version first.
-<!-- agent:boundary:2b8d58b0 -->
+
+Try clicking the `...` menu
+![img.png](img.png)
+
+### Re: Menu click attempt with CSS override (HEAD)
+
+I forced the `...` button visible via CSS override and CDP-clicked it at the correct coordinates (1132, 604). The button registers the click but LinkedIn's dropdown content never renders in the DOM. The root cause is that CDP mouse events don't trigger the CSS `:hover` pseudo-class that LinkedIn's React framework requires to activate the dropdown menu.
+
+This is a known limitation of browser automation -- CSS `:hover` requires real OS-level mouse movement, not just DOM/CDP events.
+
+**The manual approach is the only reliable option here.** Please:
+1. Hover over the message in Brave
+2. Click the `...` → Delete
+3. Then trigger the next cycle and I'll resend with proper paragraph formatting
+
+Alternatively, you can click `...` → Edit, manually add line breaks, and Save.
+<!-- agent:boundary:346f0b0c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Manually delete wall-of-text LinkedIn message
-- [ ] Resend with proper paragraph breaks
+- [ ] Manually delete or edit LinkedIn message formatting
+- [ ] Resend with paragraph breaks (if deleted)
 <!-- /agent:pending -->

@@ -197,7 +197,7 @@ Done:
 audit docs
 update README, SPEC, ontology, module-harness
 
-### Re: Audit docs (HEAD)
+### Re: Audit docs
 
 Done. Updated chromium-bridge docs:
 
@@ -212,7 +212,7 @@ Done. Updated chromium-bridge docs:
 **Module-harness** — Not set up yet. The project has no tests beyond `cargo test` (which currently has no test files). Setting up module-harness would require creating eval scenarios. Skipping for now since this is a simple CLI.
 
 **Edition 2024** — Builds fine on current Rust toolchain. Not an issue.
-<!-- agent:boundary:23cfeb90 -->
+<!-- agent:boundary:ab1580c0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

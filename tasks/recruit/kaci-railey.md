@@ -34,7 +34,7 @@ Contact created at `mail/contacts/kaci-railey/`:
 
 I'm using brave.
 
-### Re: Copy LinkedIn correspondence (HEAD)
+### Re: Copy LinkedIn correspondence
 
 Copied Kaci's LinkedIn InMail (Mar 26, 6:17 PM) to `mail/contacts/kaci-railey/20260326-linkedin-kaci-railey.txt`.
 
@@ -48,7 +48,7 @@ Copied Kaci's LinkedIn InMail (Mar 26, 6:17 PM) to `mail/contacts/kaci-railey/20
 **Status:** No reply sent yet. The InMail has quick-reply buttons: "Yes, interested..." / "No thanks..."
 
 Updated `AGENTS.md` with accurate title (Lead, Technical Recruiting), email (kaci.railey@cdw.com), and communication timeline.
-<!-- agent:boundary:c8b9c45b -->
+<!-- agent:boundary:15ad6fb0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

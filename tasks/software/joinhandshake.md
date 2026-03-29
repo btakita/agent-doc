@@ -96,7 +96,7 @@ Ready to transcribe with `corky transcribe`.
 
 transcribe
 
-### Re: Interview video from forms tab (HEAD)
+### Re: Interview video from forms tab
 
 Found the video in the Typeform! It was embedded via Mux streaming (`stream.mux.com`), rendered as a `<figure>` with "Preview of embedded video" caption — no standard `<video>` element, which is why I missed it initially.
 
@@ -111,7 +111,7 @@ So now we have two videos:
 2. `tmp/handshake-interview-video.mp4` — Interview recording from Typeform (2:01, 720p)
 
 Which one(s) do you want transcribed?
-<!-- agent:boundary:3c79259b -->
+<!-- agent:boundary:7d26fb7f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

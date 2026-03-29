@@ -402,7 +402,7 @@ Note that resolution can be high even for larger scopes. We often have scope and
 But when the information is unbounded, scope can increase or decrease without affecting the resolution.
 So scope and resolution are mutually exclusive in many but not all systems.
 
-### Re: Elaboration & precision corrections (HEAD)
+### Re: Elaboration & precision corrections
 
 **"Attention is a result, not the utility" -- elaboration:**
 
@@ -437,7 +437,7 @@ This is important for the LinkedIn message -- I shouldn't imply scope/resolution
 > I've been building an ontology framework called Existence Lang. Existence is the Universal Set -- it includes itself and every entity. So the ontology is naturally coherent with any system. The utility is expressing accurate abstractions of entities within the bounding scope of a system, at any level of precision -- where precision communicates the possibility space. Pattern relationships between entities emerge across scopes and contexts.
 
 Want me to revise the full draft with these corrections, or are there more refinements first?
-<!-- agent:boundary:ce8388fa -->
+<!-- agent:boundary:47b0c67f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

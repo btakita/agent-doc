@@ -168,7 +168,7 @@ The resync.rs stale doc warnings are from the bulk metadata refactor (function r
 
 Got an error pane with `Claim for Tmux Pane`. I thought it was fixed. Why did it happen?
 ![img_1.png](img_1.png)
-### Claim succeeded — warnings are noise (HEAD)
+### Claim succeeded — warnings are noise
 
 The claim for `john-cassel.md` **worked correctly** — pane %129 was created and claimed. The "errors" you see are resync warnings about stashed panes that can't find a return target. They're harmless but noisy.
 
@@ -179,7 +179,7 @@ The claim for `john-cassel.md` **worked correctly** — pane %129 was created an
 2. **Better auto-cleanup:** The v0.27.2 approach (kill panes at `❯` prompt) was wrong because stashed sessions normally show `❯`. A safer heuristic: kill stashed panes that have been registered for >10 minutes AND have no alive tmux window with the same session name. This targets truly orphaned sessions without killing recently-stashed ones.
 
 Want me to implement option 1 (quiet warnings) now? Option 2 requires more design thought.
-<!-- agent:boundary:520cc3ab -->
+<!-- agent:boundary:2e6f99cd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

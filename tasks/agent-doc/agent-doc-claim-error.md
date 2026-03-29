@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.27.2 auto-kill reverted. Active session killing bug fixed.
+v0.27.3 released. Auto-kill reverted, stash rescue stable.
 <!-- /agent:status -->
 
 ## Exchange
@@ -88,7 +88,18 @@ The v0.27.2 auto-cleanup (`is_idle_claude_pane()`) was **too aggressive**. It ki
 The orphaned pane accumulation problem remains unsolved but is less harmful than killing active sessions. A better approach would be a separate `agent-doc gc` command that cleans up panes with no registered file, rather than inline cleanup during resync.
 
 Ready to release v0.27.3 with the revert.
-<!-- agent:boundary:bec2eda5 -->
+
+release
+### v0.27.3 released (HEAD)
+
+**Published everywhere:**
+- **crates.io:** v0.27.3 ✓
+- **PyPI:** v0.27.3 ✓
+- **GitHub Release:** [v0.27.3](https://github.com/btakita/agent-doc/releases/tag/v0.27.3) ✓
+- **cargo install:** updated ✓
+
+Reverts the v0.27.2 auto-kill. Back to stable stash rescue behavior.
+<!-- agent:boundary:78345398 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -96,8 +107,6 @@ Ready to release v0.27.3 with the revert.
 <!-- agent:pending patch=replace -->
 - [x] v0.27.0: Fix stash rescue deregistration
 - [x] v0.27.1: Fix "externally modified" popup
-- [x] v0.27.2: Auto-kill idle stashed sessions (REVERTED — killed active sessions)
-- [x] Revert auto-kill, installed locally
-- [ ] Release v0.27.3 with revert
-- [ ] Future: `agent-doc gc` command for orphan cleanup
+- [x] v0.27.3: Revert auto-kill (was killing active sessions)
+- All shipped. Future: `agent-doc gc` for safe orphan cleanup.
 <!-- /agent:pending -->

@@ -68,7 +68,25 @@ Release any unreleased software.
 **Parent commit** `7312fce`: Updated 6 submodule pointers (mail, philosophy, agent-doc, corky, drmanny-dev, tmux-router). Pushed to origin.
 
 **Not committed:** `src/briantakita.me-dev` has submodule mismatch but no new changes inside.
-<!-- agent:boundary:edc0d8eb -->
+
+When I ask you to commit all submodules...do it recursively
+
+Commit src/briantakita.me-dev/app/briantakita.me
+### Re: recursive submodule commit — briantakita.me-dev (HEAD)
+
+Committed inside-out:
+
+1. **`src/briantakita.me-dev/app/briantakita.me`** (`2e08656`):
+   - Pinned rappstack deps to 0.1.4 (removed `^` range)
+   - Fixed GitHub URLs in blog post (nicholasgasior → btakita)
+   - Pushed to origin
+
+2. **`src/briantakita.me-dev`** (`dc43971`): Updated briantakita.me submodule pointer, pushed
+
+3. **Parent `agent-loop`** (`0ad8bf4`): Updated briantakita.me-dev pointer, pushed
+
+All submodules now clean and pushed, including nested ones. Will commit recursively in future.
+<!-- agent:boundary:2a9495d9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

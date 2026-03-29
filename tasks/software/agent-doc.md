@@ -554,11 +554,11 @@ Read through tasks/professional/john-cassel.md. Note the insights gain on:
 Cross reference and update existence-lang/ontology with these insights
 Also make btakita/philosophy dependent on existence-lang/ontology
 
-### Re: Interface node location (HEAD)
+### Re: Interface node location
 
 Agreed — `interface.md` belongs in `existence-lang/ontology/src/`, not `btakita/philosophy/src/`. The ontology repo is the canonical source for fundamental terms. I'll move it there.
 
-### Re: Existence CLI installability (HEAD)
+### Re: Existence CLI installability
 
 Good news — `cargo install existence` already works (it's published). For the other items:
 
@@ -566,11 +566,11 @@ Good news — `cargo install existence` already works (it's published). For the 
 
 **SKILL.md in the existence crate**: Currently the skill lives at `.claude/skills/existence/SKILL.md` in agent-loop. To make it self-contained, we'd bundle it in the existence crate and add `xist skill install` — same pattern as `agent-doc skill install`. The `agent-kit` crate already provides `SkillConfig` for this exact use case.
 
-### Re: `xist` naming (HEAD)
+### Re: `xist` naming
 
 Acknowledged — will refer to the existence crate as `xist` going forward, matching the CLI alias.
 
-### Re: Agent harness autodetection (HEAD)
+### Re: Agent harness autodetection
 
 Great question — and **you already have this**. The **`agent-kit`** crate (`src/agent-kit/`) already implements multi-harness detection:
 
@@ -581,7 +581,7 @@ Great question — and **you already have this**. The **`agent-kit`** crate (`sr
 
 So `xist skill install` would use `agent-kit` to detect the harness and install to the right location. No new crate needed — `agent-kit` is exactly this. For future harnesses (pi, etc.), you'd add detection logic to `agent-kit/src/detect.rs`.
 
-### Re: btakita/philosophy vs existence-lang/ontology (HEAD)
+### Re: btakita/philosophy vs existence-lang/ontology
 
 **Meta answer**: I wrote into `btakita/philosophy` because earlier in this session I treated it as the active ontology workspace. That was wrong — `existence-lang/ontology` is the canonical source for fundamental terms, and `btakita/philosophy` should be a consumer/overlay, not the authoring location.
 
@@ -592,7 +592,7 @@ So `xist skill install` would use `agent-kit` to detect the harness and install 
 
 To make `btakita/philosophy` dependent on `existence-lang/ontology`: add `existence-lang/ontology` as a git submodule within `btakita/philosophy`, then have philosophy's terms reference ontology terms via relative paths.
 
-### Re: John Cassel insights → existence-lang/ontology (HEAD)
+### Re: John Cassel insights → existence-lang/ontology
 
 The john-cassel session produced rich refinements that should be canonized in `existence-lang/ontology/src/`:
 
@@ -608,7 +608,7 @@ The john-cassel session produced rich refinements that should be canonized in `e
 **Key insight to encode**: "An accurate abstraction includes the acknowledgment of its own limits. A vague definition that honestly encompasses the unabstractable is more accurate than a precise definition that pretends completeness."
 
 These are substantial authoring tasks. Want me to start with the new terms (pneuma, noumena, phenomena) in `existence-lang/ontology/src/`, or tackle the dependency restructuring (making btakita/philosophy depend on existence-lang/ontology) first?
-<!-- agent:boundary:4a7ccd5a -->
+<!-- agent:boundary:75f01df2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

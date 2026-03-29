@@ -114,7 +114,7 @@ So now we have two videos:
 
 Which one(s) do you want transcribed?
 
-### Re: Transcribe interview video (HEAD)
+### Re: Transcribe interview video
 
 Done.
 
@@ -126,7 +126,7 @@ Done.
 - Diarization detected 4 speakers but it's a single-speaker recording (you) — the speaker splits are just diarization artifacts
 
 **Content summary:** You discuss your resume — Presence AI (real-time lip avatars, multimodal systems, image generation), open source work (AgentDoc, Corky), and prior work at Martin Investment/Sensible (ESG data, investment tools, consulting).
-<!-- agent:boundary:f2af3c1e -->
+<!-- agent:boundary:6cc3c530 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -477,7 +477,7 @@ So the ontology is unique in that it doesn't choose between pneuma, noumena, and
 
 This is a much richer framing than anything in the current LinkedIn draft. The question is whether to bring this depth into a first message to John, or keep it for a follow-up conversation.
 
-### Re: Precision as abstraction at all levels (HEAD)
+### Re: Precision as abstraction at all levels
 
 Correction accepted. Both vague and precise are *abstractions* -- the ontology always operates through abstraction, never raw pneuma. The distinction:
 
@@ -505,7 +505,7 @@ Now let me do the final draft revision incorporating everything we've refined:
 This draft reflects all corrections: no paper claims beyond what was read, Existence as Universal Set (self-including), precision as relative (communicating possibility space), no backgrounding implication, coherent-with-any-system framing, and the human-agent alignment application.
 
 Ready to send when you approve.
-<!-- agent:boundary:c72bf913 -->
+<!-- agent:boundary:e2cc7acb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

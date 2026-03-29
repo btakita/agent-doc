@@ -199,7 +199,7 @@ This was wrong. The stashed pane has a running Claude session with full context.
 **Installed:** `~/.cargo/bin/agent-doc` updated
 
 Test by switching between editor tabs — the Claude session should persist now.
-### Session loss was from the OLD binary (HEAD)
+### Session loss was from the OLD binary
 
 The john-cassel session was lost at **00:22:03** — the fix was installed at **~00:22:50**. The old binary was still running when the session was lost.
 
@@ -209,7 +209,7 @@ The john-cassel session was lost at **00:22:03** — the fix was installed at **
 - 00:22:50 — fix installed (`cargo install` completed)
 
 No sync events for john-cassel after the fix was installed. The fix should prevent this from happening going forward. Please test by switching away from a document and back — the session should now be rescued from stash instead of recreated.
-<!-- agent:boundary:23706b78 -->
+<!-- agent:boundary:d0297561 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

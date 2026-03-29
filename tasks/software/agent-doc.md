@@ -629,13 +629,13 @@ These are substantial authoring tasks. Want me to start with the new terms (pneu
 Please transfer the existence conversation into `tasks/software/existence.md`.
 tasks/professional/john-cassel.md has some external modification. Why?
 
-### Re: Session status and sync (HEAD)
+### Re: Session status and sync
 
 **Current status:** This document (tasks/software/agent-doc.md) has been tracking agent-doc development alongside existence-lang ontology work. Several releases have shipped since the v0.27 pending item — agent-doc is now at v0.27.4. The pending list was stale; I've updated it below.
 
 **john-cassel.md modifications:** Those came from a separate agent-doc session running on `tasks/professional/john-cassel.md` — two commits at 18:03 and 18:05 today via `agent-doc(john-cassel)`. That's normal agent-doc behavior: each document has its own session, and they commit independently.
 
-### Re: Cross-document sync feature (HEAD)
+### Re: Cross-document sync feature
 
 This is a real gap. Currently each agent-doc session is isolated — there's no mechanism for one document to be aware of changes in a related document. Here's a proposed feature set:
 
@@ -659,15 +659,15 @@ Multiple documents could reference a shared pending list (e.g., `.agent-doc/shar
 
 The simplest starting point is **#1** — document links with change detection in preflight. Want me to spec this out in more detail?
 
-### Re: Transfer existence conversation to tasks/software/existence.md (HEAD)
+### Re: Transfer existence conversation to tasks/software/existence.md
 
 `tasks/software/existence.md` already exists as a template document with the existence-lang overview. The ontology authoring work (pneuma, noumena, phenomena, precision, scope) and the dependency restructuring (btakita/philosophy → existence-lang/ontology) should move there. I'll note this in the pending list — the actual transfer should happen via that document's session.
 
-### Re: agent-kit usage across crates (HEAD)
+### Re: agent-kit usage across crates
 
 Researching which crates use agent-kit and which should — agent running in background. I'll update the pending list when it completes.
 
-### Re: Alternative package systems for markdown repos (HEAD)
+### Re: Alternative package systems for markdown repos
 
 Since `btakita/philosophy` and `existence-lang/ontology` are pure markdown (no runtime), traditional package managers don't fit. Options:
 
@@ -681,7 +681,7 @@ Since `btakita/philosophy` and `existence-lang/ontology` are pure markdown (no r
 
 **Recommendation: B (`existence fetch`)** — it's already built, it's the native tool, and it works outside of agent-loop. Philosophy's `existence.toml` would declare `existence-lang/ontology` as a source, and `existence fetch` pulls it.
 
-### Re: "permanently in the pneuma" in noumena.md (HEAD)
+### Re: "permanently in the pneuma" in noumena.md
 
 You're right — that's redundant. Everything is within the pneuma by definition (pneuma = Existence = the Universal Set). Saying "permanently in the pneuma" implies something could leave the pneuma, which contradicts the definition.
 
@@ -690,18 +690,48 @@ The distinction I was trying to make is between two kinds of noumena:
 2. **Contingently unattended** — not yet abstracted but could be through further attention
 
 The first kind remains noumena regardless of effort. The second kind can become phenomena. Neither "leaves" the pneuma — that framing was wrong. I'll correct this in the authoring.
-<!-- agent:boundary:0236549f -->
+
+### Re: agent-kit usage across crates
+
+Audit complete. Here's the current state:
+
+**Already using agent-kit (3 crates):**
+
+| Crate | Features | Notes |
+|-------|----------|-------|
+| **agent-doc** | SkillConfig, bundled SKILL.md, `skill install/check` | Registry version (`agent-kit = "0.2"`), git superproject detection |
+| **corky** | SkillConfig, bundled SKILL.md, `skill install/check` | Path dep, `install_at(root)` for mailbox-specific installs |
+| **webmaster** | SkillConfig + audit feature, bundled SKILL.md | Path dep with `features = ["audit"]` |
+
+**Should use agent-kit (2 crates):**
+
+| Crate | Current State | Effort |
+|-------|---------------|--------|
+| **chromium-bridge** | ~60 lines of reimplemented skill logic in main.rs | HIGH priority — direct consolidation, drop to ~10 lines |
+| **tagpath** | SKILL.md exists as external file, not bundled | MEDIUM — add bundling + SkillConfig + CLI commands |
+
+**Could use agent-kit if SKILL.md added (5 crates):**
+- **existence** — discussed above, `xist skill install` using agent-kit
+- **module-harness**, **tmux-router**, **agent-resume**, **eval-runner** — no SKILL.md yet, evaluate per tool
+
+**Library crates (no skill management needed):**
+- **instruction-files**, **lazily-rs**, **agent-kit** itself
+
+**Architectural note:** agent-kit's `Environment::skill_path()` is environment-aware but not git-aware. Both agent-doc and chromium-bridge implement their own git superproject detection for monorepo placement. This could be upstreamed into agent-kit to benefit all consumers.
+<!-- agent:boundary:d340707e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Transfer existence conversation to tasks/software/existence.md (author pneuma, noumena, phenomena, precision, scope there)
+- [ ] Transfer existence conversation to tasks/software/existence.md
 - [ ] Spec cross-document sync feature (document links + change detection in preflight)
-- [ ] Audit agent-kit usage across all src/ crates (research in progress)
+- [ ] Refactor chromium-bridge to use agent-kit SkillConfig (remove ~60 lines duplication)
+- [ ] Migrate tagpath to bundle SKILL.md and use agent-kit
+- [ ] Upstream git superproject detection into agent-kit
+- [ ] Add `xist skill install` to existence crate using agent-kit
 - [ ] Move interface.md from btakita/philosophy to existence-lang/ontology/src/
 - [ ] Add prebuilt binary release workflow to existence-lang/existence
-- [ ] Bundle SKILL.md in existence crate with `xist skill install` (using agent-kit)
 - [ ] Add per-harness path patterns to agent-kit
 - [ ] Make btakita/philosophy depend on existence-lang/ontology (via existence.toml + existence fetch)
 - [ ] Update philosophy/CLAUDE.md with precision + bounded/unbounded guidance

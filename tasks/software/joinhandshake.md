@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Video downloaded: tmp/handshake-spectra-video.mp4 (1080p, 6:59, 17.5MB). Ready to transcribe.
+Both videos downloaded. Spectra welcome (6:59) + interview recording (2:01). Ready to transcribe.
 <!-- /agent:status -->
 
 ## Exchange
@@ -77,6 +77,9 @@ This is a video **recording** form — it's asking you to record a new video, no
 
 Were you perhaps looking at a different page or tab in Chromium that had a video? The other Chromium tab is "Project Spectra" on `handshakeai.instructure.com/courses/314`. Want me to check that one?
 
+I'm in the next page.
+Now the video appears in the https://ai.joinhandshake.com/fellow/forms/d6a5a8ad-257c-4b89-8c24-513653204040 tab
+
 ### Re: Found and downloaded the video
 
 The video was on the **Project Spectra** tab (`handshakeai.instructure.com/courses/314`), not the forms page. It was embedded in a Canvas media attachment iframe.
@@ -90,14 +93,32 @@ The video was on the **Project Spectra** tab (`handshakeai.instructure.com/cours
 The page says "This is only the first video! Watch the rest under Modules!" — there may be more videos to download if needed.
 
 Ready to transcribe with `corky transcribe`.
-<!-- agent:boundary:963995dd -->
+
+transcribe
+
+### Re: Interview video from forms tab (HEAD)
+
+Found the video in the Typeform! It was embedded via Mux streaming (`stream.mux.com`), rendered as a `<figure>` with "Preview of embedded video" caption — no standard `<video>` element, which is why I missed it initially.
+
+**Downloaded:** `tmp/handshake-interview-video.mp4`
+- Resolution: 1280x720
+- Duration: 2:01 (121 seconds)
+- Codec: h264 + AAC
+- Size: 33.3 MB
+
+So now we have two videos:
+1. `tmp/handshake-spectra-video.mp4` — Project Spectra welcome video (6:59, 1080p)
+2. `tmp/handshake-interview-video.mp4` — Interview recording from Typeform (2:01, 720p)
+
+Which one(s) do you want transcribed?
+<!-- agent:boundary:3c79259b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] Connect to Chromium browser
-- [x] Locate the video (Project Spectra Canvas page, media attachment 9354)
-- [x] Download video to local filesystem (tmp/handshake-spectra-video.mp4)
-- [ ] Transcribe video with corky
+- [x] Download Project Spectra video (tmp/handshake-spectra-video.mp4, 6:59)
+- [x] Download interview video from Typeform (tmp/handshake-interview-video.mp4, 2:01)
+- [ ] Transcribe video(s) with corky
 <!-- /agent:pending -->

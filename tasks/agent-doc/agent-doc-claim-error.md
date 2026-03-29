@@ -99,14 +99,25 @@ release
 - **cargo install:** updated ✓
 
 Reverts the v0.27.2 auto-kill. Back to stable stash rescue behavior.
-<!-- agent:boundary:7442f0ed -->
+
+Does agent-doc have a curl ... | sh install?
+### No `curl | sh` installer (HEAD)
+
+agent-doc doesn't have a `curl ... | sh` install script. Current install methods:
+
+1. **cargo install:** `cargo install agent-doc` (requires Rust toolchain)
+2. **pip install:** `pip install agent-doc` (PyPI, prebuilt wheel)
+3. **GitHub Release:** Download binary from [releases](https://github.com/btakita/agent-doc/releases)
+4. **Self-update:** `agent-doc upgrade` (checks crates.io, downloads from GitHub Releases)
+
+A `curl | sh` installer could be added — it would download the prebuilt binary from GitHub Releases and install to `~/.local/bin/` or `~/.cargo/bin/`. Want me to create one?
+<!-- agent:boundary:2dadd56b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.27.0: Fix stash rescue deregistration
-- [x] v0.27.1: Fix "externally modified" popup
-- [x] v0.27.3: Revert auto-kill (was killing active sessions)
-- All shipped. Future: `agent-doc gc` for safe orphan cleanup.
+- [x] v0.27.0–v0.27.3: Stash rescue, boundary fix, auto-kill revert
+- All shipped.
+- [ ] (optional) Create `curl | sh` installer script
 <!-- /agent:pending -->

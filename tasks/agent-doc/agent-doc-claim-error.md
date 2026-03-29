@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.27.2 released. Idle stash cleanup + boundary fix shipped.
+v0.27.2 auto-kill reverted. Active session killing bug fixed.
 <!-- /agent:status -->
 
 ## Exchange
@@ -54,6 +54,9 @@ Previously these panes accumulated forever because tmux reported them as running
 
 Ready to release when you want, or test first.
 release
+There was an active claude run in tasks/software/joinhandshake.md
+When I moved to another file in the right editor and back to joinhandshake, a new claude session was created.
+What happened to the active session?
 ### v0.27.2 released
 
 **Published everywhere:**
@@ -65,7 +68,27 @@ release
 **Changelog:**
 - Auto-kill idle stashed Claude sessions with no return target
 - Remove stale boundary disk write (from v0.27.1)
-<!-- agent:boundary:31db6d5c -->
+### Root cause: auto-cleanup killed active sessions (HEAD)
+
+The v0.27.2 auto-cleanup (`is_idle_claude_pane()`) was **too aggressive**. It killed your active joinhandshake session because:
+
+1. User switches away → joinhandshake pane stashed → Claude sitting at `❯` prompt
+2. Resync runs → sees `❯` in last 3 lines → classifies as "idle orphan" → **kills it**
+3. User switches back → pane gone → creates new session (context lost)
+
+**The `❯` prompt is the normal state of a stashed session waiting to be rescued.** It's NOT an orphan.
+
+**Fix:** Reverted the auto-kill logic from `return_stashed_panes_bulk()`. Back to v0.27.0 behavior:
+- Idle shells (zsh/bash) → deregister
+- Active processes (agent-doc/claude) → keep registered, let `rescue_from_stash()` handle them
+
+**Committed:** `4fa3377` — revert: remove auto-kill of idle stashed Claude sessions
+**Installed:** `~/.cargo/bin/agent-doc` updated
+
+The orphaned pane accumulation problem remains unsolved but is less harmful than killing active sessions. A better approach would be a separate `agent-doc gc` command that cleans up panes with no registered file, rather than inline cleanup during resync.
+
+Ready to release v0.27.3 with the revert.
+<!-- agent:boundary:53b72684 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -73,6 +96,8 @@ release
 <!-- agent:pending patch=replace -->
 - [x] v0.27.0: Fix stash rescue deregistration
 - [x] v0.27.1: Fix "externally modified" popup
-- [x] v0.27.2: Auto-kill idle stashed Claude sessions
-- All tasks complete.
+- [x] v0.27.2: Auto-kill idle stashed sessions (REVERTED — killed active sessions)
+- [x] Revert auto-kill, installed locally
+- [ ] Release v0.27.3 with revert
+- [ ] Future: `agent-doc gc` command for orphan cleanup
 <!-- /agent:pending -->

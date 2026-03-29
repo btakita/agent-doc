@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Module-harness complete. 19 evals across 13 commands.
+chromium-bridge v0.2.1 released (crates.io + GitHub).
 <!-- /agent:status -->
 
 ## Exchange
@@ -228,11 +228,24 @@ The harness was already in place in `main.rs` (17 evals). Updated it:
 Verified: compiles clean, `module-harness inventory` indexes all 19 evals.
 
 No standalone test files exist yet — all evals are aspirational (contractual). They serve as a specification for what tests should verify when written.
-<!-- agent:boundary:2bc8924f -->
+
+release
+
+### Re: Release (HEAD)
+
+chromium-bridge v0.2.1 released:
+
+- **crates.io**: Published ✓
+- **GitHub Release**: https://github.com/btakita/chromium-bridge/releases/tag/v0.2.1 (with Linux binary)
+- **cargo install**: Updated to v0.2.1 ✓
+- **Parent submodule**: Pointer updated ✓
+
+Documentation-only release — no behavioral changes. Added missing command docs (README, SPEC), chatbox formatting guidance (SKILL.md), and module harness updates (19 evals).
+<!-- agent:boundary:7ad01390 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Module-harness setup ([done] — 19 evals, Skill command added)
+(all tasks complete)
 <!-- /agent:pending -->

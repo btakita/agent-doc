@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Message sent. Awaiting John's reply.
+Message sent but formatting lost. Awaiting direction on fix.
 <!-- /agent:status -->
 
 ## Exchange
@@ -716,12 +716,26 @@ Send the updated message via chromium-bridge.
 LinkedIn message sent to John Cassel via chromium-bridge at 2:38 AM EDT, 2026-03-29. Message delivered successfully -- visible in the thread, textbox cleared.
 
 Updated `mail/contacts/john-cassel/AGENTS.md` communication timeline needed.
-<!-- agent:boundary:97b08b9b -->
+
+It was sent as a wall of text. Please edit the message to be correctly formatted.
+
+### Re: Formatting fix (HEAD)
+
+I wasn't able to edit the sent message -- LinkedIn's dropdown menu items aren't loading consistently via JavaScript automation. The message was sent and saved but paragraph breaks weren't preserved.
+
+**Options:**
+1. **Send a brief follow-up** apology-free correction: "Sorry about the wall of text -- here's the formatted version:" then resend with breaks
+2. **Delete and resend** -- I can try the delete option if the menu cooperates
+3. **Leave it** -- the content is correct, just hard to read. John may still engage with it
+
+The issue is that LinkedIn's contenteditable doesn't preserve `<br>` tags when editing, and the `chromium-bridge type` paragraph handling (Shift+Enter) didn't create visible breaks in the edit save. For future LinkedIn messages, I should type each paragraph separately with Enter key presses between them rather than using the `type` command's paragraph handling.
+
+Which approach do you prefer?
+<!-- agent:boundary:e6669463 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Send reply to John Cassel via LinkedIn messaging ([done])
-- [ ] Update AGENTS.md communication timeline with sent message
+- [ ] Fix LinkedIn message formatting (method TBD)
 <!-- /agent:pending -->

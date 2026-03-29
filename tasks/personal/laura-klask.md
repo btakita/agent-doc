@@ -447,7 +447,7 @@ Read laura-klask-sms.txt. Propose a draft response.
 - Keep Ken/Amulet outreach completely separate
 
 Should we offer help with the roof? Or no need? Not sure if there's anything that we can do other than research.
-### Re: offer help with the roof? (HEAD)
+### Re: offer help with the roof?
 
 **Yes — one line, keep it light.** You don't need to fly to Maui. Research is something you can actually do well and remotely. Updated draft:
 
@@ -458,7 +458,7 @@ Should we offer help with the roof? Or no need? Not sure if there's anything tha
 > When you have a free moment after things settle down, would love to catch up on a call. No rush.
 
 **Why it works:** It signals you're paying attention to her life and willing to help — without overcommitting. If she needs anything, she'll ask. If not, it reads as thoughtful and moves on.
-<!-- agent:boundary:f9db3021 -->
+<!-- agent:boundary:ca5acd7e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

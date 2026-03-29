@@ -566,10 +566,10 @@ Both messages delivered via chromium-bridge:
 2. **Lisa DM** — sent the condensed AI tools recommendations (CapCut, Pika, Kling AI, ElevenLabs, Canva Video) with proper paragraph formatting
 
 Both confirmed sent with screenshots. The Suno link generated a nice preview card in the OHANA chat which should get clicks from the family.
-### Re: Send Lisa DM (HEAD)
+### Re: Send Lisa DM
 
 Already done — Lisa's DM was sent in the previous cycle along with the OHANA teaser. Both confirmed delivered with screenshots. The DM went to Lisa Kondrat-Dauphin's personal Messenger chat with all 7 paragraphs (CapCut, Pika, Kling AI, ElevenLabs, Canva Video, formula, and intro) properly formatted.
-<!-- agent:boundary:126e9e58 -->
+<!-- agent:boundary:8fab35c5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Final draft approved. Awaiting timing decision (send now or Monday).
+agent-doc mention option presented. Awaiting decision.
 <!-- /agent:status -->
 
 ## Exchange
@@ -571,11 +571,30 @@ This is a personal/intellectual connection, not a cold recruiter outreach -- tim
 Send now if you'd like -- or wait until Monday morning if you prefer the message to land when he's more likely to be checking LinkedIn. Either is fine for this kind of connection.
 
 Your call.
-<!-- agent:boundary:9024bfd2 -->
+
+Should we directly mention agent-doc?
+
+### Re: Mentioning agent-doc (HEAD)
+
+The current draft already references it implicitly: "document sessions" in "correspondence automation, document sessions, and browser orchestration." But it doesn't name agent-doc directly or explain what it does.
+
+**Case for mentioning it:** agent-doc is the concrete embodiment of the human-agent alignment claim. It's where the ontology meets practice -- the iteration mechanism (human prompt → response patch → convergence). For John, who thinks in terms of discovery processes and design methodology, seeing a *tool* that operationalizes the ontology would be more compelling than abstract description. It also connects to his interest in interview-based elicitation (from his thesis) -- agent-doc is a kind of structured elicitation tool.
+
+**Case against:** The message is already dense with concepts. Adding another named tool could overwhelm a first message. "Document sessions" is enough to signal the concept without requiring explanation.
+
+**My recommendation:** Mention it by name, briefly, without detailed explanation. Replace "document sessions" with "agent-doc (a document-session tool for human-agent alignment)". This names the tool, connects it to the alignment concept, and invites curiosity without requiring a paragraph of explanation.
+
+**Revised paragraph:**
+
+> I've been applying this practically to human-agent alignment in AI tooling -- building correspondence automation, agent-doc (a document-session tool for iterative alignment), and browser orchestration in Rust. The ontology drives convergence between human intent and agent behavior through iteration.
+
+Want me to update the full draft with this change?
+<!-- agent:boundary:5d7d9b47 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Send reply to John Cassel via LinkedIn messaging (timing TBD)
+- [ ] Finalize agent-doc mention in draft
+- [ ] Send reply to John Cassel via LinkedIn messaging
 <!-- /agent:pending -->

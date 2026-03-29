@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Ontology exclusivity error corrected. Awaiting direction on rewritten overlay.
+Draft reply revised (no link dependency, correct ontology). Ready to send.
 <!-- /agent:status -->
 
 ## Exchange
@@ -265,14 +265,46 @@ A Zone is not just Scope + Resolution -- a Zone is also a System (with its own i
 **The overlay should present it this way** -- not a mapping table, but a rich description of how every term illuminates every concept. This is what makes Existence Lang valuable: it reveals dimensions of understanding that a simple label assignment misses.
 
 Want me to rewrite the overlay in this corrected format for the existence-lang repo?
-<!-- agent:boundary:0341f7a8 -->
+
+We have a permaculture entry in btakita/philosophy: See /home/brian/work/btakita/agent-loop/philosophy/src/permaculture.md
+
+Are you proposing that we have a permaculture entry in src/existence-lang/existence?
+
+### Re: Where the overlay lives (HEAD)
+
+No -- I wasn't proposing a new entry in `src/existence-lang/existence/` (that's the Rust CLI tool). I see now that the permaculture entry already exists in `philosophy/src/permaculture.md` with the ethics, principles, and epistemological references.
+
+The right approach is to **enrich the existing `philosophy/src/permaculture.md`** with the universal applicability analysis -- adding how each ontology term applies to key permaculture concepts (zones, guilds, elements, etc.). This keeps the content in the canonical location rather than creating a duplicate.
+
+For sharing with John, we could either:
+1. **Link to the philosophy repo's permaculture.md** on GitHub (if public)
+2. **Include the key insights inline in the LinkedIn message** (simpler, no link dependency)
+
+Given this is a first reply to someone Brian doesn't know well yet, option 2 is probably better -- a concise message that demonstrates the thinking without requiring him to visit a repo. We can share the full overlay later if the conversation develops.
+
+**Revised draft reply (no link dependency, lighter touch):**
+
+> Hi John,
+>
+> Thanks for the thoughtful reply -- I'm glad you accepted the connection. Permaculture is definitely common ground for us.
+>
+> I came across your "Permaculture as a Systemic Design Practice" paper & your FormAkademisk piece on unbounded discovery -- they've stuck with me. The way you frame multi-criteria design and reasoning about infinite unknown factors resonates deeply.
+>
+> I've been building an ontology framework called Existence Lang that captures how entities, systems, and domains relate across different scopes & contexts. Permaculture maps beautifully onto it -- not as a simple label assignment (zones "are" scope, guilds "are" context) but in the richer sense: a zone is simultaneously a system of relationships, an entity within the site, a scope of attention, a pattern transferable to other domains. Your unbounded reasoning principle captures something the ontology tries to make explicit: good design is choosing the right resolution for each context when you can't model everything.
+>
+> Right now I'm working on AI agent tooling in Rust -- correspondence automation, document sessions, browser orchestration. The permaculture lens still shapes how I approach architecture: stacking functions, designing for emergent behavior, whole systems over isolated components.
+>
+> Your work on incentive programs at Regrow sounds fascinating -- shaping demand for new practices is such a leverage point. If you're moving toward design & planning, I'd love to hear more about what that looks like. Happy to jump on a call sometime.
+>
+> -- Brian
+
+This version demonstrates the ontological thinking without requiring a repo link, and correctly applies the universal applicability principle rather than the exclusive label error.
+<!-- agent:boundary:ad09f7fb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Rewrite permaculture overlay using universal applicability (if approved)
-- [ ] Create overlay file in existence-lang repo
-- [ ] Update LinkedIn reply with corrected framing
+- [ ] Enrich philosophy/src/permaculture.md with universal applicability analysis (optional, for later)
 - [ ] Send approved reply to John Cassel via LinkedIn messaging
 <!-- /agent:pending -->

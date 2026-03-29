@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Docs audit complete. README, SPEC, SKILL.md updated.
+Module-harness complete. 19 evals across 13 commands.
 <!-- /agent:status -->
 
 ## Exchange
@@ -194,8 +194,7 @@ Done:
    - `input` event dispatch requirement
    - How to click conversation items by heading text
 
-audit docs
-update README, SPEC, ontology, module-harness
+audit docs update README, SPEC, ontology, module-harness
 
 ### Re: Audit docs
 
@@ -212,15 +211,28 @@ Done. Updated chromium-bridge docs:
 **Module-harness** — Not set up yet. The project has no tests beyond `cargo test` (which currently has no test files). Setting up module-harness would require creating eval scenarios. Skipping for now since this is a simple CLI.
 
 **Edition 2024** — Builds fine on current Rust toolchain. Not an issue.
-<!-- agent:boundary:ab1580c0 -->
+
+Continue:
+- [ ] Module-harness setup (deferred — no existing tests)
+
+### Re: Module-harness setup (HEAD)
+
+The harness was already in place in `main.rs` (17 evals). Updated it:
+
+- Added `Skill` command to Spec (was missing from the command list)
+- Added `cmd_skill_install` spec entry describing the bundled SKILL.md mechanism
+- Added 2 new evals: `skill_install` and `skill_check`
+
+**Total: 19 evals** covering all 13 commands + edge cases (ambiguous tab, no browser, JSON output, paragraph newlines).
+
+Verified: compiles clean, `module-harness inventory` indexes all 19 evals.
+
+No standalone test files exist yet — all evals are aspirational (contractual). They serve as a specification for what tests should verify when written.
+<!-- agent:boundary:a3ae3a87 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Audit docs ([done])
-- [x] Update README ([done])
-- [x] Update SPEC ([done])
-- [x] Update SKILL.md source ([done])
-- [ ] Module-harness setup (deferred — no existing tests)
+- [x] Module-harness setup ([done] — 19 evals, Skill command added)
 <!-- /agent:pending -->

@@ -46,7 +46,7 @@ Could you clarify:
 Yes.
 The video is in chromium, not brave.
 
-### Re: Video in Chromium (HEAD)
+### Re: Video in Chromium
 
 chromium-bridge is connected to **Brave** (port 9222), not Chromium. Chromium is running (`/usr/lib/chromium/chromium`, PID 3014781) but was launched **without `--remote-debugging-port`**, so I can't connect to it.
 
@@ -56,7 +56,7 @@ chromium-bridge is connected to **Brave** (port 9222), not Chromium. Chromium is
 3. **Open the same Handshake URL in Brave** — then I can access it via chromium-bridge
 
 Which approach do you prefer?
-<!-- agent:boundary:10d71cc7 -->
+<!-- agent:boundary:26be2d2e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

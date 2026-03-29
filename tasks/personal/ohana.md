@@ -506,7 +506,7 @@ Great question — Lisa said she wants AI cat videos and believes Scooter should
 Want me to draft a reply to Lisa in the OHANA chat suggesting some of these? Or dig deeper into any specific platform?
 
 Yes. This is a a lot of content. Should we send it to ohana or be a personal message?
-### Re: Group vs personal message (HEAD)
+### Re: Group vs personal message
 
 **Recommendation: personal DM to Lisa, with a short teaser in OHANA.**
 
@@ -535,7 +535,7 @@ Yes. This is a a lot of content. Should we send it to ohana or be a personal mes
 > The formula: film on phone → edit in CapCut → add AI effects in Pika → post as Reels (Instagram favors video over photos). Consistency beats quality!
 
 Want me to send both via chromium-bridge?
-<!-- agent:boundary:5caaa26e -->
+<!-- agent:boundary:4db57224 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

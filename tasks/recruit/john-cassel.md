@@ -356,7 +356,7 @@ This is remarkably effective at creating human-agent alignment...and at exposing
 agent-doc facilitates this iteration through an inquiry of human prompt and response patch in a markdown document.
 Where the system's ontology can be expressed with full accuracy at the appropriate precision and resolution.
 
-### Re: Total utility of Existence Lang (HEAD)
+### Re: Total utility of Existence Lang
 
 You're right -- I narrowed the utility to attention/visibility, which is only one dimension. Let me restate the full picture:
 
@@ -384,7 +384,7 @@ The attention framing ("what becomes visible") is a consequence of #2 and #4 -- 
 > Your work on incentive programs at Regrow sounds fascinating -- shaping demand for new practices is such a leverage point. If you're moving toward design & planning, I'd love to hear more about what that looks like. Happy to jump on a call sometime.
 >
 > -- Brian
-<!-- agent:boundary:d6134173 -->
+<!-- agent:boundary:d0c2d697 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

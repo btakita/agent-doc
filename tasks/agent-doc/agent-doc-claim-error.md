@@ -209,14 +209,27 @@ The john-cassel session was lost at **00:22:03** — the fix was installed at **
 - 00:22:50 — fix installed (`cargo install` completed)
 
 No sync events for john-cassel after the fix was installed. The fix should prevent this from happening going forward. Please test by switching away from a document and back — the session should now be rescued from stash instead of recreated.
-<!-- agent:boundary:6dafd3cf -->
+Seems to be working.
+audit docs
+add docs
+update README, SPEC, module-harness, ontology
+### Docs updated for sync rescue (HEAD)
+
+**sync.rs module docs** — Updated to describe rescue behavior: stashed panes are rescued via swap-pane/join-pane before falling back to auto-start.
+
+**SPEC.md** — Two updates:
+- Section 7.20 (sync): Pre-resolution rescue path documented
+- Section 8.4 (Stash Window Routing): Added RESCUE row to stash lifecycle table
+
+Committed `ef6f728` and pushed. Ready to release.
+<!-- agent:boundary:9ca20245 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.27.0–v0.27.3: Previous bug fixes
-- [x] Fix sync.rs stash rescue — installed locally
-- [ ] Test sync rescue with new binary
-- [ ] Release with sync fix
+- [x] Fix sync.rs stash rescue
+- [x] Docs updated (sync.rs, SPEC.md)
+- [ ] Release v0.27.4 with sync rescue fix
 <!-- /agent:pending -->

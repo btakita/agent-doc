@@ -538,7 +538,7 @@ Include in message?
 > The formula: film on phone → edit in CapCut → add AI effects in Pika → post as Reels (Instagram favors video over photos). Consistency beats quality!
 
 Want me to send both via chromium-bridge?
-### Re: Include Leilani's Suno song (HEAD)
+### Re: Include Leilani's Suno song
 
 Yes, absolutely include it! Leilani's song is a perfect hook:
 - It's **AI-generated music** — directly relevant to Lisa's AI interest
@@ -555,7 +555,7 @@ Yes, absolutely include it! Leilani's song is a perfect hook:
 This turns the OHANA message from just a teaser into a conversation piece. Everyone will want to click the Suno link and hear what Leilani made.
 
 Ready to send both (OHANA teaser + Lisa DM) via chromium-bridge?
-<!-- agent:boundary:386e8616 -->
+<!-- agent:boundary:e21ef2ef -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

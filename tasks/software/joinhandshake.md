@@ -168,13 +168,13 @@ Downloaded and transcribed the second interview video (question: "Tell us about 
 2. `tmp/handshake-interview-video-1.txt` — Resume walkthrough (2:01)
 3. `tmp/handshake-interview-video-2.txt` — Favorite career experience (2:01)
 
-### Re: Move transcripts (HEAD)
+### Re: Move transcripts
 
 Copied all 3 transcripts to `mail/topics/joinhandshake/`:
 - `handshake-spectra-video-1.txt` (8.4 KB)
 - `handshake-interview-video-1.txt` (1.7 KB)
 - `handshake-interview-video-2.txt` (2.4 KB)
-<!-- agent:boundary:f6b95d22 -->
+<!-- agent:boundary:d8588a37 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

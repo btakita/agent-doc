@@ -60,7 +60,7 @@ Which approach do you prefer?
 Copy Video Address is disabled.
 Can we restart Chromium?
 
-### Re: Restart Chromium & find video (HEAD)
+### Re: Restart Chromium & find video
 
 Done — restarted Chromium with `--remote-debugging-port=9223` and connected via `CHROMIUM_BRIDGE_PORT=9223`.
 
@@ -75,7 +75,7 @@ I accessed the Typeform iframe directly via CDP. Here's the full content of the 
 This is a video **recording** form — it's asking you to record a new video, not showing an existing video to download. There are no `<video>` elements or video URLs on the page.
 
 Were you perhaps looking at a different page or tab in Chromium that had a video? The other Chromium tab is "Project Spectra" on `handshakeai.instructure.com/courses/314`. Want me to check that one?
-<!-- agent:boundary:8185aa36 -->
+<!-- agent:boundary:f7ea3a69 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

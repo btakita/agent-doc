@@ -51,9 +51,25 @@ All submodules clean, all releases published.
 
 Commit and push all submodules.
 Release any unreleased software.
-<!-- agent:boundary:7a0a0be9 -->
+### Re: commit all submodules + release unreleased software (HEAD)
+
+**Submodules committed & pushed:**
+- `mail` — sync contacts, conversations, drafts, social (132 files)
+- `philosophy` — add interface/protocol terms, update abstraction
+- `src/corky` — contact push google + diarize as default feature
+- `src/drmanny-dev` — update .iml
+
+**tmux-router v0.3.2** released:
+- Fixed 4 clippy errors (collapsible if, doc continuation, unused var)
+- Includes `alive_pane_ids()` bulk method from previous commit
+- Published: crates.io, GitHub Release
+- Note: v0.3.1 was already taken on crates.io, bumped to v0.3.2
+
+**Parent commit** `7312fce`: Updated 6 submodule pointers (mail, philosophy, agent-doc, corky, drmanny-dev, tmux-router). Pushed to origin.
+
+**Not committed:** `src/briantakita.me-dev` has submodule mismatch but no new changes inside.
+<!-- agent:boundary:4f874a81 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-
 <!-- /agent:pending -->

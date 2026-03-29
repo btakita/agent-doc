@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-agent-doc mention option presented. Awaiting decision.
+Final draft with tool mentions. Ready to send.
 <!-- /agent:status -->
 
 ## Exchange
@@ -589,12 +589,55 @@ The current draft already references it implicitly: "document sessions" in "corr
 > I've been applying this practically to human-agent alignment in AI tooling -- building correspondence automation, agent-doc (a document-session tool for iterative alignment), and browser orchestration in Rust. The ontology drives convergence between human intent and agent behavior through iteration.
 
 Want me to update the full draft with this change?
-<!-- agent:boundary:b7fa0970 -->
+Yes. Any other tools that I have been developing should be mentioned? Such as:
+- module-harness
+- corky
+- tagpath
+- tmux-router
+- instruction-files
+
+### Re: Which tools to mention (HEAD)
+
+For a first LinkedIn message, I'd keep it focused on what resonates with John's interests. Here's my assessment:
+
+**Include (directly relevant to the ontology/alignment story):**
+- **agent-doc** -- the human-agent iteration tool. Central to the alignment narrative. John will connect it to his elicitation process research.
+- **corky** -- correspondence toolkit. Demonstrates practical application of the ontology to communication (a system John cares about as a design researcher).
+
+**Mention briefly (supports the "whole systems" claim):**
+- **module-harness** -- spec/contract/eval generation for any module. Shows the ontology applied to software system boundaries.
+- **instruction-files** -- shared audit crate across tools. Shows coherent system design across projects.
+
+**Skip for now (too technical/niche for first message):**
+- **tagpath** -- tag-based identifier parsing. Interesting but requires context to appreciate.
+- **tmux-router** -- session management infrastructure. Operational plumbing, not conceptually interesting for this audience.
+
+**My recommendation:** Mention agent-doc and corky by name. Reference the broader toolkit without listing every tool:
+
+> I've been applying this practically to human-agent alignment in AI tooling in Rust -- agent-doc for iterative document sessions, corky for correspondence automation, along with module-level harness generation, browser orchestration, and shared audit infrastructure. The ontology drives convergence between human intent and agent behavior through iteration across all of these.
+
+This gives the sense of a coherent ecosystem without becoming a feature list. The tools that matter conceptually (agent-doc, corky) are named; the rest are described by function.
+
+Here's the complete final draft:
+
+> Hi John,
+>
+> Thanks for the thoughtful reply -- I'm glad you accepted the connection. Permaculture is definitely common ground for us.
+>
+> I've been reading about your work on permaculture as systemic design & unbounded discovery processes -- the way you frame multi-criteria design and reasoning about infinite unknown factors resonates with how I think about systems.
+>
+> I've been building an ontology called Existence Lang. Existence is the Universal Set -- it includes itself and every entity -- so the ontology is coherent with any system. The utility is expressing accurate abstractions of entities within the bounding scope of a system, at any level of precision. Precision communicates the possibility space -- vague abstractions encompass wide possibilities, precise ones narrow them, and both are accurate at their level. An honest abstraction also acknowledges what it can't capture -- accuracy includes knowing your limits.
+>
+> I've been applying this practically to human-agent alignment in AI tooling in Rust -- agent-doc for iterative document sessions, corky for correspondence automation, along with module-level harness generation, browser orchestration, and shared audit infrastructure. The ontology drives convergence between human intent and agent behavior through iteration across all of these. The permaculture lens still shapes how I approach this architecture: stacking functions, designing for emergent behavior, whole systems over isolated components.
+>
+> Your work on incentive programs at Regrow sounds fascinating -- shaping demand for new practices is such a leverage point. If you're moving toward design & planning, I'd love to hear more about what that looks like. Happy to jump on a call sometime.
+>
+> -- Brian
+<!-- agent:boundary:5f8ffbf5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Finalize agent-doc mention in draft
 - [ ] Send reply to John Cassel via LinkedIn messaging
 <!-- /agent:pending -->

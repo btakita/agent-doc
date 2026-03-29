@@ -125,7 +125,7 @@ Brian Takita
 
 **Note:** This version is much more honest. The tradeoff is that the payments-specific experience (POS, PCI, tokenization) is thin. The strongest fits are API integrations and cloud — both genuinely deep. If you feel the payments gap is too large for this particular role, it might not be worth pursuing. Up to you.
 
-### Re: menu.com correction (HEAD)
+### Re: menu.com correction
 
 Good call — I found menu.com in your portfolio. From your briantakita.me site:
 
@@ -136,7 +136,7 @@ menu.com is a restaurant ordering platform, so this gives you direct experience 
 **Payments ecosystems (POS and Gateways):** I have direct experience building restaurant ordering and payment systems — I developed the front end for menu.com's multi-tenant platform, which included consumer web ordering, restaurant back-office management, and a Cordova mobile app. I've also integrated Stripe for membership billing on other projects and built API layers connecting to payment processors.
 
 Want me to rewrite the full draft with this correction incorporated?
-<!-- agent:boundary:dd15b4bb -->
+<!-- agent:boundary:8accf9ee -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

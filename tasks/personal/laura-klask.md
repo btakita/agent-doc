@@ -15,7 +15,7 @@ agent_doc_write: crdt
 - [x] Ken email history reviewed (7 threads, 2006–2014)
 - [x] Ken email pushed to Gmail drafts — review and send
 - [x] SMS history reviewed — draft response prepared
-- [ ] Send SMS response to Laura (awaiting approval)
+- [x] SMS typed into PulseSMS — awaiting send approval
 - [ ] Awaiting Ken's response
 <!-- /agent:status -->
 
@@ -498,7 +498,21 @@ We are also going to Florida for a month or so.
 > When you have a free moment after things settle down, would love to catch up on a call. No rush.
 
 **Changes:** "4 now" → "almost 5"; added Florida plans (natural meetup opportunity if timing overlaps with Laura's end-of-April trip); "would be great to get together" now covers both Florida and west coast.
-<!-- agent:boundary:f5b98c67 -->
+
+Send via chromium-bridge -> https://pulsesms.app/thread/101342305403002 on Brave
+### SMS typed — ready to send (HEAD)
+
+Message typed into PulseSMS (`#message-entry`) via chromium-bridge. **Not sent yet** — waiting for your approval.
+
+**Message in the input field:**
+> That sounds like a lot! I hope the roof goes smoothly in Maui — let me know if you need help researching anything for it. Give Mom & Dad a big hug from us when you see them in Florida.
+>
+> I'd love for Leilani to meet you too — she's almost 5 and full of energy. We're actually heading to Florida soon too, and also looking at the west coast after that. Would be great to get together.
+>
+> When you have a free moment after things settle down, would love to catch up on a call. No rush.
+
+Review in browser and approve to send, or edit in the text field first.
+<!-- agent:boundary:e636e1bc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

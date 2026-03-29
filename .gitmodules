@@ -97,3 +97,6 @@
 [submodule "src/chromium-bridge"]
 	path = src/chromium-bridge
 	url = git@github.com:btakita/chromium-bridge.git
+[submodule "src/eval-runner"]
+	path = src/eval-runner
+	url = git@github.com:btakita/eval-runner.git

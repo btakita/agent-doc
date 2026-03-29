@@ -12,6 +12,7 @@ agent_doc_write: crdt
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+Use chromium-bridge to download the video on the https://ai.joinhandshake.com/fellow/forms/d6a5a8ad-257c-4b89-8c24-513653204040 Brave tab
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

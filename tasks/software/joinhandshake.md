@@ -77,7 +77,7 @@ This is a video **recording** form — it's asking you to record a new video, no
 
 Were you perhaps looking at a different page or tab in Chromium that had a video? The other Chromium tab is "Project Spectra" on `handshakeai.instructure.com/courses/314`. Want me to check that one?
 
-### Re: Found and downloaded the video (HEAD)
+### Re: Found and downloaded the video
 
 The video was on the **Project Spectra** tab (`handshakeai.instructure.com/courses/314`), not the forms page. It was embedded in a Canvas media attachment iframe.
 
@@ -90,7 +90,7 @@ The video was on the **Project Spectra** tab (`handshakeai.instructure.com/cours
 The page says "This is only the first video! Watch the rest under Modules!" — there may be more videos to download if needed.
 
 Ready to transcribe with `corky transcribe`.
-<!-- agent:boundary:a682197d -->
+<!-- agent:boundary:963995dd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

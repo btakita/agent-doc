@@ -14,8 +14,9 @@ agent_doc_write: crdt
 - [x] Follow-up nudge sent to Laura
 - [x] Ken email history reviewed (7 threads, 2006–2014)
 - [x] Ken email pushed to Gmail drafts — review and send
+- [x] SMS history reviewed — draft response prepared
+- [ ] Send SMS response to Laura (awaiting approval)
 - [ ] Awaiting Ken's response
-- [ ] Awaiting Laura's response to follow-up
 <!-- /agent:status -->
 
 ## Exchange
@@ -419,6 +420,32 @@ Want me to help with any of these:
 I'm also running low on funds. Need to get something going soon. So I have a client but have not closed on a deal yet. And have not begun work to be paid. And I need to find more work immediately after that.
 
 Read laura-klask-sms.txt. Propose a draft response.
+### Re: SMS conversation — draft response (HEAD)
+
+**SMS history reviewed** (`mail/contacts/laura-klask/laura-klask-sms.txt`) — 72 messages spanning 2022–2026.
+
+**Key context:** Your most recent text (Thu Mar 27) was a breakthrough. You apologized for the Katarina wedding social media post, shared your situation, and asked how she is. **Laura responded warmly** — appreciated the apology, wants to meet Leilani, shared her life (going to Maui for MIL roof, then Florida with Mom & Dad, cruise with sisters). She's engaged.
+
+**Draft response:**
+
+> That sounds like a lot! I hope the roof goes smoothly in Maui. Give Mom & Dad a big hug from us when you see them in Florida.
+>
+> I'd love for Leilani to meet you too — she's 4 now and full of energy. Once we're settled on the west coast, you and Ken should come visit.
+>
+> When you have a free moment after things settle down, would love to catch up on a call. No rush.
+
+**Why this approach:**
+- She just re-engaged after the apology — build the relationship before going deeper
+- Match her energy: warm, light, future-oriented
+- "Give Mom & Dad a hug from us" — emotional connection without weight
+- "Catch up on a call" — plants the seed for the real conversation later
+- Don't mention work, finances, or Ken/Amulet yet — separate tracks
+
+**What to avoid:**
+- Don't reference the unanswered LinkedIn message
+- Don't bring up financial struggles — she's in "reconnecting" mode, not "help" mode
+- Keep Ken/Amulet outreach completely separate
+<!-- agent:boundary:52e59466 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -596,7 +596,7 @@ Yes. Any other tools that I have been developing should be mentioned? Such as:
 - tmux-router
 - instruction-files
 
-### Re: Which tools to mention (HEAD)
+### Re: Which tools to mention
 
 For a first LinkedIn message, I'd keep it focused on what resonates with John's interests. Here's my assessment:
 
@@ -633,7 +633,7 @@ Here's the complete final draft:
 > Your work on incentive programs at Regrow sounds fascinating -- shaping demand for new practices is such a leverage point. If you're moving toward design & planning, I'd love to hear more about what that looks like. Happy to jump on a call sometime.
 >
 > -- Brian
-<!-- agent:boundary:5f8ffbf5 -->
+<!-- agent:boundary:e99e9f1f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

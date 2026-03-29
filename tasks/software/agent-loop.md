@@ -72,7 +72,7 @@ Release any unreleased software.
 When I ask you to commit all submodules...do it recursively
 
 Commit src/briantakita.me-dev/app/briantakita.me
-### Re: recursive submodule commit — briantakita.me-dev (HEAD)
+### Re: recursive submodule commit — briantakita.me-dev
 
 Committed inside-out:
 
@@ -86,7 +86,7 @@ Committed inside-out:
 3. **Parent `agent-loop`** (`0ad8bf4`): Updated briantakita.me-dev pointer, pushed
 
 All submodules now clean and pushed, including nested ones. Will commit recursively in future.
-<!-- agent:boundary:2a9495d9 -->
+<!-- agent:boundary:e5a12068 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

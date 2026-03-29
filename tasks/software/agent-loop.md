@@ -150,7 +150,7 @@ The `cases.yaml` has 30 test cases for diff interpretation — each with a diff,
 - `evals/` feeds into `eval-runner` (YAML → Claude API → scored results)
 - `module-harness` embeds evals in source for agents to read during development
 - They're independent systems — module-harness could theoretically share scoring logic with eval-runner but doesn't currently
-### Re: TOML instead of YAML for eval cases? (HEAD)
+### Re: TOML instead of YAML for eval cases?
 
 Yes, but with tradeoffs. The cases have multi-line diffs and document context that benefit from YAML's `|` block scalar syntax. In TOML, the equivalent would be:
 
@@ -190,7 +190,7 @@ grading = "llm-rubric"
 **My recommendation:** switch to TOML. The Rust ecosystem alignment matters, the file is machine-consumed not hand-edited frequently, and the YAML gotchas are real risks with diff content that might contain bare `yes`/`no`. The code change is small — swap `serde_yaml` for `toml` crate and update the deserializer call.
 
 Want me to make the switch?
-<!-- agent:boundary:f9d845e2 -->
+<!-- agent:boundary:5974e488 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

@@ -526,7 +526,7 @@ Added `reposition_boundary_cleans_multiple_stale` test in `git.rs`:
 
 All tests pass. Ready to release.
 release
-### v0.27.1 released (HEAD)
+### v0.27.1 released
 
 **Published everywhere:**
 - **crates.io:** agent-doc v0.27.1 ✓
@@ -536,7 +536,7 @@ release
 
 **Changelog:**
 - Fix: remove `clean_stale_boundaries_in_working_tree()` disk write — prevents "file externally modified" popup and lost keystrokes in JetBrains
-<!-- agent:boundary:267a87e7 -->
+<!-- agent:boundary:3ce9da03 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

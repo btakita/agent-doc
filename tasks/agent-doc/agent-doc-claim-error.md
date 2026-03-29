@@ -510,7 +510,7 @@ update docs, ontology, module-harness
 - **make check** — 38 tests pass, clippy clean
 
 Ready to bump version and release.
-<!-- agent:boundary:6ef5aa75 -->
+<!-- agent:boundary:912f8006 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

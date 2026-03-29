@@ -420,7 +420,7 @@ Want me to help with any of these:
 I'm also running low on funds. Need to get something going soon. So I have a client but have not closed on a deal yet. And have not begun work to be paid. And I need to find more work immediately after that.
 
 Read laura-klask-sms.txt. Propose a draft response.
-### Re: SMS conversation — draft response (HEAD)
+### Re: SMS conversation — draft response
 
 **SMS history reviewed** (`mail/contacts/laura-klask/laura-klask-sms.txt`) — 72 messages spanning 2022–2026.
 
@@ -445,7 +445,7 @@ Read laura-klask-sms.txt. Propose a draft response.
 - Don't reference the unanswered LinkedIn message
 - Don't bring up financial struggles — she's in "reconnecting" mode, not "help" mode
 - Keep Ken/Amulet outreach completely separate
-<!-- agent:boundary:52e59466 -->
+<!-- agent:boundary:84bc538f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

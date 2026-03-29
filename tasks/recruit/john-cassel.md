@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Permaculture ontology overlay drafted. Updated reply ready. Awaiting direction on repo file creation.
+Ontology exclusivity error corrected. Awaiting direction on rewritten overlay.
 <!-- /agent:status -->
 
 ## Exchange
@@ -200,6 +200,8 @@ Here's a draft overlay:
 | Edge effects | **Scope (boundary)** | Where two systems overlap, diversity and productivity increase. The boundary between scopes is where the most interesting patterns emerge. |
 | The problem is the solution | **Perspective** | Reframing changes what an entity means. A "problem" entity becomes a "resource" entity when perspective shifts. |
 
+You are making the same exclusivity error that we came across in tasks/software/agent-doc.md
+
 **Key insight:** Permaculture's design methodology is already ontological -- it categorizes entities, maps relationships, defines scopes, and manages resolution. Existence Lang makes this explicit and transferable to other domains (software, organizations, knowledge systems).
 
 **John's "Unbounded Reasoning Principle" in Existence Lang terms:** You can't model every Entity at full Resolution across the entire Scope. Good design is choosing the right Resolution for each Context -- acknowledging that the System contains more than your Focus can hold, while still enabling coherent action through Pattern recognition.
@@ -227,12 +229,50 @@ Updated draft reply incorporating the ontology:
 > -- Brian
 
 Want me to create the overlay file in the existence-lang repo so we have a shareable link?
-<!-- agent:boundary:02914f13 -->
+
+### Re: Exclusivity error in ontology mapping (HEAD)
+
+You're right -- I fell into the same trap. The table assigns Existence Lang terms as **exclusive labels** for permaculture concepts ("Zones = Scope + Resolution", "Elements = Entity", "Ethics = Domain"). But the Universal Applicability Principle says every term applies to every entity at every scope.
+
+A Zone is not just Scope + Resolution -- a Zone is also a System (with its own internal relationships), has a Perspective (Zone 1 "sees" the landscape differently than Zone 5), contains Entities, exhibits Patterns, and undergoes Evolution. Similarly, an Element (plant, structure) is not just an Entity -- it's a System with its own Perspective, operating at its own Scope and Resolution.
+
+**Corrected approach:** Instead of "Concept X = Term Y", describe how *each* Existence Lang term applies to *each* permaculture concept:
+
+**Example: Zones**
+- **System:** Each zone is a system of relationships (plants, animals, structures, water flows)
+- **Entity:** Each zone is an entity within the larger site system
+- **Scope:** Zones define concentric scopes of attention and management intensity
+- **Resolution:** Zone 0 operates at high resolution (daily observation); Zone 5 at low resolution (seasonal)
+- **Perspective:** Each zone has a perspective -- what matters in Zone 1 (daily harvest) differs from Zone 4 (timber, forage)
+- **Context:** Zone boundaries create contexts that limit what's relevant for design decisions
+- **Pattern:** Concentric zone placement is itself a pattern transferable to other domains
+- **Evolution:** Zones evolve as succession progresses and management practices change
+- **Focus:** Zone design directs finite attention where it has highest impact
+- **Abstraction:** Zone numbering (0-5) is an abstraction -- a symbol simplifying the continuous gradient of management intensity
+
+**Example: Guilds**
+- **System:** A guild is a system of mutualistic relationships between organisms
+- **Entity:** Each guild is an entity within the zone/site system
+- **Perspective:** A guild has a collective perspective -- the "view" of resource availability from within the group
+- **Context:** A guild creates a context that makes specific plant combinations coherent
+- **Evolution:** Guilds evolve as plants mature and relationships strengthen or break down
+- **Pattern:** Guild composition patterns transfer across climates and sites
+- **Scope:** A guild's scope is tight (square meters), nested within zone and site scope
+- **Resolution:** Understanding a guild requires high resolution -- individual plant interactions
+- **Abstraction:** Named guilds ("three sisters", "apple guild") are abstractions of specific polyculture configurations
+- **Focus:** Designing a guild requires focused attention on micro-interactions
+
+**The overlay should present it this way** -- not a mapping table, but a rich description of how every term illuminates every concept. This is what makes Existence Lang valuable: it reveals dimensions of understanding that a simple label assignment misses.
+
+Want me to rewrite the overlay in this corrected format for the existence-lang repo?
+<!-- agent:boundary:e7970a01 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Create permaculture overlay file in existence-lang repo (if approved)
+- [ ] Rewrite permaculture overlay using universal applicability (if approved)
+- [ ] Create overlay file in existence-lang repo
+- [ ] Update LinkedIn reply with corrected framing
 - [ ] Send approved reply to John Cassel via LinkedIn messaging
 <!-- /agent:pending -->

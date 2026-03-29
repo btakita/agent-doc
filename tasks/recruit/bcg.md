@@ -542,5 +542,16 @@ What is `rickshaw.cm`? Who owns it?
 "Rickshaw" is likely a personal brand reference. The domain is his personal email infrastructure, separate from BCG.
 
 **For our purposes:** Email will land in a Google-hosted inbox. Delivery is reliable. The draft is in your Gmail — ready to review and send.
-<!-- agent:boundary:71882803 -->
+
+Please add the phone number from anil's website to the contact for anil https://contacts.google.com/person/c1640905550654697548
+### Phone number added to Google Contact (HEAD)
+
+Added **+1-425-591-7794** to Anil Podduturi's Google Contact (via browser automation). The contact now shows:
+
+- **Email:** anil@neo.com (Other), anil@rickshaw.cm
+- **Phone:** +1-425-591-7794
+- **Google Contact:** https://contacts.google.com/person/c1640905550654697548
+
+Contact saved successfully.
+<!-- agent:boundary:eae39263 -->
 <!-- /agent:exchange -->

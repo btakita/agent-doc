@@ -33,7 +33,27 @@ All 7 stashed panes (%104, %109, %106, %108, %102, %107, %111) are idle Claude s
 2. **Permanent:** Add auto-cleanup to resync — when a stashed pane has an idle Claude session and no document claim, kill it instead of keeping it registered
 
 Want me to kill the orphaned panes and implement the auto-cleanup in resync?
-<!-- agent:boundary:0293ac81 -->
+yes.
+### Done (HEAD)
+
+**Killed 7 orphaned panes:** %104, %109, %106, %108, %102, %107, %111 — all idle Claude sessions.
+
+**Implemented auto-cleanup** in `return_stashed_panes_bulk()` (resync.rs):
+
+When a stashed pane meets ALL of these conditions:
+1. Running `agent-doc` or `claude` (not an idle shell like zsh/bash)
+2. Shows `❯` in the last 3 non-empty lines (idle Claude prompt)
+3. `find_return_target_bulk()` returns `None` (no window to return to)
+
+→ Kill the pane via `tmux.kill_pane()` and deregister it.
+
+Previously these panes accumulated forever because tmux reported them as running `agent-doc` (not an idle shell), so the existing idle-shell deregistration didn't apply.
+
+**Committed:** `634985c` — fix: auto-kill idle stashed Claude sessions with no return target
+**Installed:** `~/.cargo/bin/agent-doc` updated
+
+Ready to release when you want, or test first.
+<!-- agent:boundary:23863f6d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -41,6 +61,7 @@ Want me to kill the orphaned panes and implement the auto-cleanup in resync?
 <!-- agent:pending patch=replace -->
 - [x] v0.27.0: Fix stash rescue deregistration
 - [x] v0.27.1: Fix "externally modified" popup (boundary disk write)
-- [ ] Kill 7 orphaned stashed panes (%104, %109, %106, %108, %102, %107, %111)
-- [ ] Implement auto-cleanup in resync for idle stashed Claude sessions
+- [x] Kill 7 orphaned stashed panes
+- [x] Implement auto-cleanup for idle stashed Claude sessions
+- [ ] Bump version, release
 <!-- /agent:pending -->

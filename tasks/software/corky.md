@@ -64,7 +64,9 @@ claude_args: --dangerously-skip-permissions
 - [x] YouTube playlist management — v0.21.0
 - [x] Diarize default feature — v0.22.1
 - [x] `corky contact push google` — v0.22.1
+- [x] CLAUDE.md fallback in contact push — v0.22.1
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
+- [ ] crates.io publish for v0.22.1 — blocked on token refresh
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
@@ -381,12 +383,27 @@ continue
 4. Install locally with GPU
 
 Ready to release when you approve.
-<!-- agent:boundary:655fd695 -->
+I don't see the LinkedIn url.
+release
+### Re: LinkedIn URL Fix + Released v0.22.1 (HEAD)
+
+**Bug fixed:** `contact push` was only looking for `AGENTS.md` — contacts with only `CLAUDE.md` (like Anil) had their LinkedIn URL (and other fields) silently ignored. Added fallback: `AGENTS.md` → `CLAUDE.md` in both `extract_contact_payload()` and `discover_contacts()`.
+
+**Verified:** Re-pushed Anil Podduturi — now includes LinkedIn URL (`https://www.linkedin.com/in/anilpod/`), role/org, and name.
+
+**Released v0.22.1:**
+- [GitHub Release](https://github.com/btakita/corky/releases/tag/v0.22.1) (with CUDA binary)
+- [PyPI](https://pypi.org/project/corky/0.22.1/)
+- crates.io — **auth failed** (token in `~/.cargo/credentials.toml` appears invalid/expired). You may need to regenerate at https://crates.io/settings/tokens
+- Installed locally: corky 0.22.1 with GPU (transcribe-cuda)
+
+**Note:** Anil may have a duplicate contact again (new `people/c8464968541752362288` created alongside previous entries). May want to merge in Google Contacts.
+<!-- agent:boundary:f9b49042 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Release v0.22.1 — contact push google + diarize default
+- [ ] crates.io publish for v0.22.1 — needs token refresh
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:pending -->

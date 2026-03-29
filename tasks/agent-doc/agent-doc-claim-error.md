@@ -101,7 +101,7 @@ release
 Reverts the v0.27.2 auto-kill. Back to stable stash rescue behavior.
 
 Does agent-doc have a curl ... | sh install?
-### No `curl | sh` installer (HEAD)
+### No `curl | sh` installer
 
 agent-doc doesn't have a `curl ... | sh` install script. Current install methods:
 
@@ -111,7 +111,7 @@ agent-doc doesn't have a `curl ... | sh` install script. Current install methods
 4. **Self-update:** `agent-doc upgrade` (checks crates.io, downloads from GitHub Releases)
 
 A `curl | sh` installer could be added — it would download the prebuilt binary from GitHub Releases and install to `~/.local/bin/` or `~/.cargo/bin/`. Want me to create one?
-<!-- agent:boundary:2dadd56b -->
+<!-- agent:boundary:a80654c4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

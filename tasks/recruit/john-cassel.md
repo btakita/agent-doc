@@ -17,7 +17,7 @@ Create a contact for john-cassel: https://www.linkedin.com/in/john-cassel-648050
 
 Read LinkedIn message from john-cassel. Save message in mail/contacts/john-cassel. Use chromium-bridge via brave.
 
-### Re: Contact setup & LinkedIn message (HEAD)
+### Re: Contact setup & LinkedIn message
 
 **Contact created:** `mail/contacts/john-cassel/`
 - `AGENTS.md` — full profile with research, publications, communication timeline
@@ -42,7 +42,7 @@ John responded to Brian's connection request. Key points:
 - **Status:** No reply sent yet
 
 **Strong alignment with Brian's interests:** systems design, ontology/knowledge representation, permaculture. His academic work on discovery processes and domain design resonates with Existence Lang concepts.
-<!-- agent:boundary:137d0875 -->
+<!-- agent:boundary:38ee36c3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

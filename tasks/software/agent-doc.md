@@ -718,7 +718,7 @@ Audit complete. Here's the current state:
 - **instruction-files**, **lazily-rs**, **agent-kit** itself
 
 **Architectural note:** agent-kit's `Environment::skill_path()` is environment-aware but not git-aware. Both agent-doc and chromium-bridge implement their own git superproject detection for monorepo placement. This could be upstreamed into agent-kit to benefit all consumers.
-<!-- agent:boundary:d340707e -->
+<!-- agent:boundary:db8876e4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

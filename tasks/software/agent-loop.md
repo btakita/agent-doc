@@ -48,6 +48,9 @@ commit all submodules
 **Parent commit** `50bec72`: Updated agent-doc + corky submodule pointers.
 
 All submodules clean, all releases published.
+
+Commit and push all submodules.
+Release any unreleased software.
 <!-- agent:boundary:7a0a0be9 -->
 <!-- /agent:exchange -->
 

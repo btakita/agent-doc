@@ -366,11 +366,27 @@ Yes, `corky contact push google` is fully implemented and **supports phone numbe
 | `# Contact: Name` | names (given + family) |
 
 The update logic uses etag-based concurrency control — fetches the current contact, gets the etag, then PATCHes with the updated fields.
-<!-- agent:boundary:926af428 -->
+
+continue
+### Re: Continue — Release v0.22.1 (HEAD)
+
+**Unreleased since v0.22.0:**
+- `corky contact push google` — People API integration, field mapping, sync state tracking
+- Diarize as default feature — no longer behind feature flag
+
+**Next steps:**
+1. Bump version to `0.22.1` in `Cargo.toml` + `pyproject.toml`
+2. `make check` to verify
+3. Publish to crates.io, PyPI, GitHub Release
+4. Install locally with GPU
+
+Ready to release when you approve.
+<!-- agent:boundary:ef101bc1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] Release v0.22.1 — contact push google + diarize default
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:pending -->

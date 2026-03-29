@@ -749,7 +749,7 @@ The message text is ready -- I just need you to delete the wall-of-text version 
 Try clicking the `...` menu
 ![img.png](img.png)
 
-### Re: Menu click attempt with CSS override (HEAD)
+### Re: Menu click attempt with CSS override
 
 I forced the `...` button visible via CSS override and CDP-clicked it at the correct coordinates (1132, 604). The button registers the click but LinkedIn's dropdown content never renders in the DOM. The root cause is that CDP mouse events don't trigger the CSS `:hover` pseudo-class that LinkedIn's React framework requires to activate the dropdown menu.
 
@@ -761,7 +761,7 @@ This is a known limitation of browser automation -- CSS `:hover` requires real O
 3. Then trigger the next cycle and I'll resend with proper paragraph formatting
 
 Alternatively, you can click `...` → Edit, manually add line breaks, and Save.
-<!-- agent:boundary:346f0b0c -->
+<!-- agent:boundary:b2964025 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

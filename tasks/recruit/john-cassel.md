@@ -711,12 +711,12 @@ Updated final draft:
 
 Send the updated message via chromium-bridge.
 
-### Re: Message sent (HEAD)
+### Re: Message sent
 
 LinkedIn message sent to John Cassel via chromium-bridge at 2:38 AM EDT, 2026-03-29. Message delivered successfully -- visible in the thread, textbox cleared.
 
 Updated `mail/contacts/john-cassel/AGENTS.md` communication timeline needed.
-<!-- agent:boundary:25f85054 -->
+<!-- agent:boundary:97b08b9b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

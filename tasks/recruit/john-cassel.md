@@ -571,7 +571,7 @@ This is a personal/intellectual connection, not a cold recruiter outreach -- tim
 Send now if you'd like -- or wait until Monday morning if you prefer the message to land when he's more likely to be checking LinkedIn. Either is fine for this kind of connection.
 
 Your call.
-<!-- agent:boundary:493266cd -->
+<!-- agent:boundary:9024bfd2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

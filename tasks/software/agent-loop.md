@@ -103,12 +103,12 @@ src/eval-runner will be a submodule in agent-loop
 - `git submodule add` recognized existing repo
 - Parent commit `940119d`: added eval-runner as submodule, pushed
 What is `src/git.rs`?
-### Re: what is src/git.rs? (HEAD)
+### Re: what is src/git.rs?
 
 `src/git.rs` is an orphaned test file — it contains 3 tests for `strip_head_markers` and `add_head_marker` functions (from agent-doc's git module), but it's sitting in the agent-loop root `src/` directory where it doesn't belong. It references `super::*` which won't resolve since there's no parent module in this context.
 
 Likely a stray file from a development session. It's untracked (`??` in git status). Safe to delete — the real tests live in `src/agent-doc/src/git.rs`.
-<!-- agent:boundary:5d18a7cf -->
+<!-- agent:boundary:53e36b94 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

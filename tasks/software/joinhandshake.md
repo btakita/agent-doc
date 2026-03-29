@@ -32,7 +32,7 @@ The "Start" button likely opens a Typeform where you record a video. Want me to 
 No...there is a video on the https://ai.joinhandshake.com/fellow/forms/d6a5a8ad-257c-4b89-8c24-513653204040 tab.
 I just want you to download the video onto my local fs so I can transcribe it.
 
-### Re: Video location (HEAD)
+### Re: Video location
 
 I clicked "Start" — it opened a Typeform modal overlay. The Typeform is on step 1 asking for name/email/last name. The video prompt likely appears on a later step after identity verification.
 
@@ -42,7 +42,7 @@ Could you clarify:
 - Are you seeing a video playing right now on this tab that I'm not detecting?
 - Or should I close this modal and look elsewhere on the page?
 - Or do you want me to fill in the form to advance to the video step?
-<!-- agent:boundary:7d826f07 -->
+<!-- agent:boundary:62a1db67 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

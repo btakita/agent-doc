@@ -734,7 +734,7 @@ Which approach do you prefer?
 
 Try **Delete and resend**. If that doesn't work, I'll manually edit.
 
-### Re: Delete attempt (HEAD)
+### Re: Delete attempt
 
 The delete option isn't accessible via automation -- LinkedIn's dropdown menu items aren't rendering in the DOM when triggered by CDP mouse events. The menu button clicks but the content (Forward/Share/Delete/Edit) doesn't load.
 
@@ -746,7 +746,7 @@ This needs manual intervention. To delete and resend:
 4. Then I can resend with proper formatting using Enter key presses between paragraphs
 
 The message text is ready -- I just need you to delete the wall-of-text version first.
-<!-- agent:boundary:6d058310 -->
+<!-- agent:boundary:2b8d58b0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

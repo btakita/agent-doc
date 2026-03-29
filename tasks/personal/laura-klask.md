@@ -483,7 +483,7 @@ Leilani will be 5 on 4/14...about 2 1/2 weeks from now. Should we mention that o
 We are also going to Florida for a month or so.
 
 **What changed:** "You and Ken should come visit" → "would be great to get together when we're closer." No hosting promise, keeps it open, and mentioning Southern Oregon / LA signals proximity to both San Jose and Mar Vista.
-### Re: Leilani's age + Florida plans (HEAD)
+### Re: Leilani's age + Florida plans
 
 **Leilani:** "She's 4" → "she's almost 5." Accurate, natural, no birthday fishing. Mentioning the actual date (4/14) would feel like hinting for a gift — you're right to avoid that.
 
@@ -498,7 +498,7 @@ We are also going to Florida for a month or so.
 > When you have a free moment after things settle down, would love to catch up on a call. No rush.
 
 **Changes:** "4 now" → "almost 5"; added Florida plans (natural meetup opportunity if timing overlaps with Laura's end-of-April trip); "would be great to get together" now covers both Florida and west coast.
-<!-- agent:boundary:54fc74ac -->
+<!-- agent:boundary:f5b98c67 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -474,8 +474,31 @@ Good call — don't promise hosting if you're not there yet. Since Laura & Ken a
 >
 > When you have a free moment after things settle down, would love to catch up on a call. No rush.
 
+> she's 4 now and full of energy.
+
+Leilani will be 5 on 4/14...about 2 1/2 weeks from now. Should we mention that or would that be fishing for a present? I don't want to do that.
+
+> We're looking at the west coast — maybe Southern Oregon or the LA area. Would be great to get together when we're closer.
+
+We are also going to Florida for a month or so.
+
 **What changed:** "You and Ken should come visit" → "would be great to get together when we're closer." No hosting promise, keeps it open, and mentioning Southern Oregon / LA signals proximity to both San Jose and Mar Vista.
-<!-- agent:boundary:399aa8cd -->
+### Re: Leilani's age + Florida plans (HEAD)
+
+**Leilani:** "She's 4" → "she's almost 5." Accurate, natural, no birthday fishing. Mentioning the actual date (4/14) would feel like hinting for a gift — you're right to avoid that.
+
+**Florida:** This is important context. Laura said she's going to Florida end of April with Mom & Dad before the cruise. If your timing overlaps, that's a real opportunity to see family in person.
+
+**Updated draft:**
+
+> That sounds like a lot! I hope the roof goes smoothly in Maui — let me know if you need help researching anything for it. Give Mom & Dad a big hug from us when you see them in Florida.
+>
+> I'd love for Leilani to meet you too — she's almost 5 and full of energy. We're actually heading to Florida soon too, and also looking at the west coast after that. Would be great to get together.
+>
+> When you have a free moment after things settle down, would love to catch up on a call. No rush.
+
+**Changes:** "4 now" → "almost 5"; added Florida plans (natural meetup opportunity if timing overlaps with Laura's end-of-April trip); "would be great to get together" now covers both Florida and west coast.
+<!-- agent:boundary:54fc74ac -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -90,7 +90,7 @@ The orphaned pane accumulation problem remains unsolved but is less harmful than
 Ready to release v0.27.3 with the revert.
 
 release
-### v0.27.3 released (HEAD)
+### v0.27.3 released
 
 **Published everywhere:**
 - **crates.io:** v0.27.3 ✓
@@ -99,7 +99,7 @@ release
 - **cargo install:** updated ✓
 
 Reverts the v0.27.2 auto-kill. Back to stable stash rescue behavior.
-<!-- agent:boundary:78345398 -->
+<!-- agent:boundary:7442f0ed -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -128,7 +128,7 @@ Done.
 
 **Content summary:** You discuss your resume — Presence AI (real-time lip avatars, multimodal systems, image generation), open source work (AgentDoc, Corky), and prior work at Martin Investment/Sensible (ESG data, investment tools, consulting).
 
-### Re: Transcribe both videos (HEAD)
+### Re: Transcribe both videos
 
 Spectra video transcribed.
 
@@ -148,7 +148,7 @@ Spectra video transcribed.
 **Both transcriptions complete:**
 1. `tmp/handshake-spectra-video-1.txt` — Project Spectra welcome (6:59)
 2. `tmp/handshake-interview-video-1.txt` — Your interview recording (2:01)
-<!-- agent:boundary:7e95f091 -->
+<!-- agent:boundary:d8b21686 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

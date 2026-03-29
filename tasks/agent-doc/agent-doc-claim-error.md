@@ -68,7 +68,7 @@ What happened to the active session?
 **Changelog:**
 - Auto-kill idle stashed Claude sessions with no return target
 - Remove stale boundary disk write (from v0.27.1)
-### Root cause: auto-cleanup killed active sessions (HEAD)
+### Root cause: auto-cleanup killed active sessions
 
 The v0.27.2 auto-cleanup (`is_idle_claude_pane()`) was **too aggressive**. It killed your active joinhandshake session because:
 
@@ -88,7 +88,7 @@ The v0.27.2 auto-cleanup (`is_idle_claude_pane()`) was **too aggressive**. It ki
 The orphaned pane accumulation problem remains unsolved but is less harmful than killing active sessions. A better approach would be a separate `agent-doc gc` command that cleans up panes with no registered file, rather than inline cleanup during resync.
 
 Ready to release v0.27.3 with the revert.
-<!-- agent:boundary:53b72684 -->
+<!-- agent:boundary:4070ec72 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

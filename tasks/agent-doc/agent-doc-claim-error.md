@@ -15,6 +15,7 @@ v0.27.1 released. Fix for "externally modified" popup shipped.
 
 <!-- agent:exchange patch=append -->
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/4674cbdd322fce519fe66718682225f86b088adb9a6e63aa6f5df754c59a4ef1-20260329-003821.md`*
+<!-- agent:boundary:e236905c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

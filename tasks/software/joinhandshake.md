@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-3 videos downloaded & transcribed. Resume + favorite experience interviews + Spectra welcome.
+Transcripts moved to mail/topics/joinhandshake/. All tasks complete.
 <!-- /agent:status -->
 
 ## Exchange
@@ -150,6 +150,9 @@ Spectra video transcribed.
 2. `tmp/handshake-interview-video-1.txt` — Your interview recording (2:01)
 
 Get and transcribe the next video at https://ai.joinhandshake.com/fellow/forms/d6a5a8ad-257c-4b89-8c24-513653204040
+This video is about my favorite career experience.
+
+Move transcripts into mail/topics/joinhandshake
 
 ### Re: Next video downloaded & transcribed
 
@@ -164,14 +167,19 @@ Downloaded and transcribed the second interview video (question: "Tell us about 
 1. `tmp/handshake-spectra-video-1.txt` — Spectra welcome (6:59)
 2. `tmp/handshake-interview-video-1.txt` — Resume walkthrough (2:01)
 3. `tmp/handshake-interview-video-2.txt` — Favorite career experience (2:01)
-<!-- agent:boundary:42795c4e -->
+
+### Re: Move transcripts (HEAD)
+
+Copied all 3 transcripts to `mail/topics/joinhandshake/`:
+- `handshake-spectra-video-1.txt` (8.4 KB)
+- `handshake-interview-video-1.txt` (1.7 KB)
+- `handshake-interview-video-2.txt` (2.4 KB)
+<!-- agent:boundary:f6b95d22 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] Download & transcribe all videos
-- [x] Spectra welcome video
-- [x] Interview video 1 (resume walkthrough)
-- [x] Interview video 2 (favorite career experience)
+- [x] Move transcripts to mail/topics/joinhandshake
 <!-- /agent:pending -->

@@ -516,7 +516,10 @@ Yes. This is a a lot of content. Should we send it to ohana or be a personal mes
 
 **OHANA teaser (replying to Lisa's message):**
 
-> Totally! I'll look up some AI video tools for making cat content — there are some really fun ones where you can upload a photo of Scooter and it'll animate him or add wild effects. I'll DM you some links!
+> Totally! I researched some AI video tools for making cat content — there are some really fun ones where you can upload a photo of Scooter and it'll animate him or add wild effects. I'll DM you some links!
+
+Leilani made this song https://suno.com/song/1bbc55e5-841e-48a7-842b-871d23b5d86f?sh=GgTiWDscYssNN7xb
+Include in message?
 
 **Lisa DM (condensed recommendations):**
 
@@ -535,14 +538,31 @@ Yes. This is a a lot of content. Should we send it to ohana or be a personal mes
 > The formula: film on phone → edit in CapCut → add AI effects in Pika → post as Reels (Instagram favors video over photos). Consistency beats quality!
 
 Want me to send both via chromium-bridge?
-<!-- agent:boundary:4db57224 -->
+### Re: Include Leilani's Suno song (HEAD)
+
+Yes, absolutely include it! Leilani's song is a perfect hook:
+- It's **AI-generated music** — directly relevant to Lisa's AI interest
+- It's **family content** — Leilani made it, so it's personal and endearing
+- It shows AI creativity is accessible enough for a kid to use
+- Suno was already on the recommended list for Lisa
+
+**Updated OHANA teaser:**
+
+> Totally! I researched some AI video tools for making cat content — there are some really fun ones where you can upload a photo of Scooter and it'll animate him or add wild effects. I'll DM you some links!
+>
+> Speaking of AI creativity — Leilani made this song on Suno (an AI music app): https://suno.com/song/1bbc55e5-841e-48a7-842b-871d23b5d86f?sh=GgTiWDscYssNN7xb
+
+This turns the OHANA message from just a teaser into a conversation piece. Everyone will want to click the Suno link and hear what Leilani made.
+
+Ready to send both (OHANA teaser + Lisa DM) via chromium-bridge?
+<!-- agent:boundary:386e8616 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [active] Send OHANA teaser (with Leilani's Suno song) + Lisa DM
 - [active] Creating 7 family contacts in mail/contacts/
-- [active] Send OHANA teaser + Lisa DM re: AI video platforms
 - Laura using ChatGPT/Grammarly — potential Claude Code intro
 - Start posting family photos/updates consistently via Claude Code
 - Laura's LA photos — Hayley social media restriction noted

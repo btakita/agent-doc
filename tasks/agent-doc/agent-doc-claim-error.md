@@ -111,13 +111,44 @@ agent-doc doesn't have a `curl ... | sh` install script. Current install methods
 4. **Self-update:** `agent-doc upgrade` (checks crates.io, downloads from GitHub Releases)
 
 A `curl | sh` installer could be added — it would download the prebuilt binary from GitHub Releases and install to `~/.local/bin/` or `~/.cargo/bin/`. Want me to create one?
-<!-- agent:boundary:a80654c4 -->
+
+Yes
+Make sure that Linux, OSX, and Windows are supported.
+### Install script updated (HEAD)
+
+`install.sh` already existed but only supported Linux/macOS with the old asset naming convention. Updated to:
+
+**Platforms:** Linux (x86_64, aarch64), macOS (x86_64, aarch64), Windows (x86_64 via MSYS/Cygwin)
+
+**Usage:**
+```sh
+curl -fsSL https://raw.githubusercontent.com/btakita/agent-doc/main/install.sh | sh
+```
+
+**Features:**
+- Auto-detects OS and architecture → maps to CI release target names
+- Downloads correct archive format (`.tar.gz` for Unix, `.zip` for Windows)
+- Installs to `~/.cargo/bin` (if exists) or `~/.local/bin`
+- Env overrides: `AGENT_DOC_INSTALL_DIR`, `AGENT_DOC_VERSION`
+- PATH guidance if install dir not in PATH
+
+**CI already builds all 5 targets** via `.github/workflows/release.yml`:
+- `x86_64-unknown-linux-gnu`
+- `aarch64-unknown-linux-gnu` (via cross)
+- `x86_64-apple-darwin`
+- `aarch64-apple-darwin`
+- `x86_64-pc-windows-msvc`
+
+Pushed to main. The install URL will work for any tagged release that completes CI.
+
+**Note:** The v0.27.3 release was created manually (Linux binary only). Future tag pushes will trigger CI and produce all 5 platform binaries automatically.
+<!-- agent:boundary:3669b8ba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.27.0–v0.27.3: Stash rescue, boundary fix, auto-kill revert
+- [x] Multi-platform install.sh (Linux, macOS, Windows)
 - All shipped.
-- [ ] (optional) Create `curl | sh` installer script
 <!-- /agent:pending -->

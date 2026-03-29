@@ -445,7 +445,20 @@ Read laura-klask-sms.txt. Propose a draft response.
 - Don't reference the unanswered LinkedIn message
 - Don't bring up financial struggles — she's in "reconnecting" mode, not "help" mode
 - Keep Ken/Amulet outreach completely separate
-<!-- agent:boundary:84bc538f -->
+
+Should we offer help with the roof? Or no need? Not sure if there's anything that we can do other than research.
+### Re: offer help with the roof? (HEAD)
+
+**Yes — one line, keep it light.** You don't need to fly to Maui. Research is something you can actually do well and remotely. Updated draft:
+
+> That sounds like a lot! I hope the roof goes smoothly in Maui — let me know if you need help researching anything for it. Give Mom & Dad a big hug from us when you see them in Florida.
+>
+> I'd love for Leilani to meet you too — she's 4 now and full of energy. Once we're settled on the west coast, you and Ken should come visit.
+>
+> When you have a free moment after things settle down, would love to catch up on a call. No rush.
+
+**Why it works:** It signals you're paying attention to her life and willing to help — without overcommitting. If she needs anything, she'll ask. If not, it reads as thoughtful and moves on.
+<!-- agent:boundary:f9db3021 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

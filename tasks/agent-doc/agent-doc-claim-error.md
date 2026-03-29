@@ -494,7 +494,23 @@ The fix is live now. The "externally modified" popup while typing should not hap
 
 release
 Typo fix noted.
-<!-- agent:boundary:f382d354 -->
+
+audit docs
+update docs, ontology, module-harness
+### Committed and docs audited (HEAD)
+
+**Commits in agent-doc submodule:**
+1. `594cdbb` — fix: remove `clean_stale_boundaries_in_working_tree()` disk write
+2. `85ddb7f` — docs: update git.rs module comments
+
+**Doc audit results:**
+- **git.rs module comments** — updated commit spec and agentic contracts to reflect no working-tree writes
+- **SPEC.md** — already accurate (line 661: "The working tree file is NEVER written by `commit()`")
+- **CLAUDE.md, README.md** — no stale references found
+- **make check** — 38 tests pass, clippy clean
+
+Ready to bump version and release.
+<!-- agent:boundary:f8b54035 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -505,7 +521,6 @@ Typo fix noted.
 - [x] Bump to v0.27.0, publish (crates.io, PyPI, GitHub Release)
 - [x] cargo install
 - [x] Plugin: "Run Agent Doc" — already calls `agent-doc route <path>` (verified in source)
-- [x] Fix: removed `clean_stale_boundaries_in_working_tree()` — no more disk write during commit
-- [ ] Clean up orphaned stashed panes
-- [ ] Commit fix in submodule, bump version, release
+- [x] Fix: removed `clean_stale_boundaries_in_working_tree()` — committed + docs audited
+- [ ] Bump version, release (crates.io, PyPI, GitHub Release)
 <!-- /agent:pending -->

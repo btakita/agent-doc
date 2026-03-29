@@ -179,14 +179,32 @@ The claim for `john-cassel.md` **worked correctly** — pane %129 was created an
 2. **Better auto-cleanup:** The v0.27.2 approach (kill panes at `❯` prompt) was wrong because stashed sessions normally show `❯`. A safer heuristic: kill stashed panes that have been registered for >10 minutes AND have no alive tmux window with the same session name. This targets truly orphaned sessions without killing recently-stashed ones.
 
 Want me to implement option 1 (quiet warnings) now? Option 2 requires more design thought.
-<!-- agent:boundary:2e6f99cd -->
+
+kaci-railey and john-cassel agent docs were running. But when I switched the editor away and back to the document, a new claude session was created. It seems the tmux pane/claude session was orphaned.
+### Root cause found: sync.rs was treating stashed panes as dead (HEAD)
+
+**The bug was in `sync.rs`, not `route.rs`.** When the editor layout changes (switching tabs), `agent-doc sync` is called. It found the stashed pane but at line 494 said: "A pane in a stash window is alive but not usable — treat as dead so auto-start creates a fresh pane."
+
+This was wrong. The stashed pane has a running Claude session with full context. Creating a "fresh pane" throws away all that context.
+
+**Fix:** Changed sync.rs to rescue stashed panes back to the agent-doc window (same swap-pane technique as route.rs `rescue_from_stash()`). Now when you switch editor tabs:
+
+1. Sync runs → finds stashed pane for the document
+2. Instead of "treating as dead" → rescues it via swap-pane
+3. Original Claude session with full context is restored
+4. No new session created
+
+**Committed:** `33d6228` — fix: rescue stashed panes in sync instead of treating as dead
+**Installed:** `~/.cargo/bin/agent-doc` updated
+
+Test by switching between editor tabs — the Claude session should persist now.
+<!-- agent:boundary:267b64c2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.27.0–v0.27.3: Bug fixes shipped
-- [x] Multi-platform install.sh + README
-- [ ] Reduce resync warning noise (stderr → debug level)
-- [ ] Better orphan cleanup heuristic (time-based, not prompt-based)
+- [x] v0.27.0–v0.27.3: Previous bug fixes
+- [x] Fix sync.rs stash rescue (the actual orphaning root cause)
+- [ ] Release with sync fix
 <!-- /agent:pending -->

@@ -46,7 +46,7 @@ John responded to Brian's connection request. Key points:
 
 Draft a response
 
-### Re: Draft a response (HEAD)
+### Re: Draft a response
 
 **Draft LinkedIn reply to John Cassel:**
 
@@ -63,7 +63,7 @@ Draft a response
 > -- Brian
 
 Ready to send via LinkedIn messaging when you approve. Let me know if you'd like any edits.
-<!-- agent:boundary:a9f33f0b -->
+<!-- agent:boundary:c98a98f3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

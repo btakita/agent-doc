@@ -635,6 +635,8 @@ tasks/professional/john-cassel.md has some external modification. Why?
 
 **john-cassel.md modifications:** Those came from a separate agent-doc session running on `tasks/professional/john-cassel.md` — two commits at 18:03 and 18:05 today via `agent-doc(john-cassel)`. That's normal agent-doc behavior: each document has its own session, and they commit independently.
 
+These external modifications happened as I was typing inside of `tasks/professional/john-cassel.md`. The claude session was idle and no agent-doc command was running. The external modifications should not have happened.
+
 ### Re: Cross-document sync feature
 
 This is a real gap. Currently each agent-doc session is isolated — there's no mechanism for one document to be aware of changes in a related document. Here's a proposed feature set:
@@ -659,6 +661,10 @@ Multiple documents could reference a shared pending list (e.g., `.agent-doc/shar
 
 The simplest starting point is **#1** — document links with change detection in preflight. Want me to spec this out in more detail?
 
+Yes. I also want to make sure that we readily unlink documents once they are no longer connected.
+Can we make our agent-doc SKILL.md both link and unlink documents?
+Or should we make the human entirely responsible?
+
 ### Re: Transfer existence conversation to tasks/software/existence.md
 
 `tasks/software/existence.md` already exists as a template document with the existence-lang overview. The ontology authoring work (pneuma, noumena, phenomena, precision, scope) and the dependency restructuring (btakita/philosophy → existence-lang/ontology) should move there. I'll note this in the pending list — the actual transfer should happen via that document's session.
@@ -681,12 +687,14 @@ Since `btakita/philosophy` and `existence-lang/ontology` are pure markdown (no r
 
 **Recommendation: B (`existence fetch`)** — it's already built, it's the native tool, and it works outside of agent-loop. Philosophy's `existence.toml` would declare `existence-lang/ontology` as a source, and `existence fetch` pulls it.
 
+Do B. How do we check for and apply updates? If we update, how do we know what definition changes have occurred?
+
 ### Re: "permanently in the pneuma" in noumena.md
 
 You're right — that's redundant. Everything is within the pneuma by definition (pneuma = Existence = the Universal Set). Saying "permanently in the pneuma" implies something could leave the pneuma, which contradicts the definition.
 
 The distinction I was trying to make is between two kinds of noumena:
-1. **Structurally unabstractable** — no abstraction at any precision can fully capture them (the map can never be the territory)
+1. **Structurally unabstractable** — no abstraction at any precision can fully capture them (the map can never be the territory): We can always abstract the unknowable as the "noumena" of the entity. But it's not descriptive. This is a trancenental contradiction. We need to correctly define or scope what noumena means. It is abstractable. But the abstraction has no description other than "unknown". Is this analogous to the semantics of a NULL value?
 2. **Contingently unattended** — not yet abstracted but could be through further attention
 
 The first kind remains noumena regardless of effort. The second kind can become phenomena. Neither "leaves" the pneuma — that framing was wrong. I'll correct this in the authoring.
@@ -714,28 +722,90 @@ Audit complete. Here's the current state:
 - **existence** — discussed above, `xist skill install` using agent-kit
 - **module-harness**, **tmux-router**, **agent-resume**, **eval-runner** — no SKILL.md yet, evaluate per tool
 
+- **module-harness**: yes
+- **tmux-router**: no: used as a library by agent-doc
+- **agent-resume**: yes
+- **eval-runner**: yes
+
 **Library crates (no skill management needed):**
 - **instruction-files**, **lazily-rs**, **agent-kit** itself
 
 **Architectural note:** agent-kit's `Environment::skill_path()` is environment-aware but not git-aware. Both agent-doc and chromium-bridge implement their own git superproject detection for monorepo placement. This could be upstreamed into agent-kit to benefit all consumers.
-<!-- agent:boundary:db8876e4 -->
+
+Yes
+
+### Re: External modifications to john-cassel.md (HEAD)
+
+That's a real bug. If no `/agent-doc` command was running and the Claude session was idle, john-cassel.md should not have been modified. The commits at 18:03 and 18:05 came from `agent-doc(john-cassel)` — which means either a stashed tmux pane was still active (the v0.27.4 rescue fix may have revived it unexpectedly), or a watch daemon triggered. I'll add this to the bug investigation list.
+
+### Re: Document linking/unlinking (HEAD)
+
+**Recommendation: Hybrid** — the agent proposes links/unlinks, the human approves.
+
+**Linking:** During a session, when the agent detects topic overlap with another document, it proposes adding to frontmatter `related_docs`. The user approves. The SKILL.md preflight would then check linked docs for changes and include summaries.
+
+**Unlinking:** Each preflight cycle, if a linked document hasn't had relevant changes in N cycles (configurable), the agent proposes removing the link. Or the user can manually remove from frontmatter.
+
+This keeps the human in control while leveraging the agent's ability to detect connections. The SKILL.md handles both — link proposals are part of the response, and the `related_docs` frontmatter is the source of truth.
+
+### Re: `existence fetch` update checking (HEAD)
+
+For change detection after fetch:
+
+1. **`existence fetch --check`** (new) — fetches and reports what changed: new terms, modified terms, removed terms. Uses `git diff` between old and new HEAD.
+2. **`existence diff`** (new) — shows definition changes between local and remote. Summary output: "3 terms modified: scope.md, precision.md (new), pneuma.md (new)".
+3. **`existence lint`** after fetch — validates the updated ontology passes all checks.
+
+Workflow: `existence fetch --check` → review changes → `existence fetch` → `existence lint`.
+
+### Re: Noumena and the NULL analogy (HEAD)
+
+Insightful correction. You're right — we *can* abstract the unknowable; the abstraction is just "noumena" itself. The word is the abstraction. But it carries no descriptive content beyond "unknown aspects exist."
+
+The NULL analogy is apt:
+- **NULL in databases** = "value exists but is not known" — a placeholder acknowledging presence without description
+- **Noumena** = "aspects exist but are not abstractable into descriptive phenomena" — a semantic placeholder
+- Both are valid abstractions (in the type system / ontology) but carry no content
+- Both distinguish "unknown" from "doesn't exist" (NULL ≠ empty, noumena ≠ nonexistence)
+
+**The transcendental contradiction resolved:** Noumena IS abstractable — as the concept "noumena." What's unabstractable is the *content* of the noumena. The abstraction "noumena" is a content-free pointer to the unknowable, just as NULL is a content-free pointer to an unknown value. Both are maximally vague — they encompass the full possibility space of what they point to without narrowing it.
+
+So the two kinds aren't "abstractable vs unabstractable" — they're:
+1. **Content-free noumena** — abstractable only as "unknown" (NULL-like). The content is structurally inaccessible to phenomena.
+2. **Contingently unattended** — abstractable with content once attention is applied. Currently NULL but resolvable.
+
+### Re: agent-kit crate assessments (HEAD)
+
+Noted:
+- **module-harness**: yes → add agent-kit + SKILL.md
+- **tmux-router**: no → library used by agent-doc, not standalone
+- **agent-resume**: yes → add agent-kit + SKILL.md
+- **eval-runner**: yes → add agent-kit + SKILL.md
+
+### Re: Upstream git superproject detection (HEAD)
+
+Confirmed — will add git root detection to agent-kit so all consumers benefit.
+<!-- agent:boundary:e1c75a09 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] **BUG**: Investigate unexpected john-cassel.md modifications when session was idle (stashed pane revival?)
+- [ ] Spec cross-document sync: document links (related_docs frontmatter) + change detection in preflight + agent-proposed link/unlink
 - [ ] Transfer existence conversation to tasks/software/existence.md
-- [ ] Spec cross-document sync feature (document links + change detection in preflight)
-- [ ] Refactor chromium-bridge to use agent-kit SkillConfig (remove ~60 lines duplication)
+- [ ] Add `existence fetch --check` and `existence diff` commands for update detection
+- [ ] Refactor chromium-bridge to use agent-kit SkillConfig
 - [ ] Migrate tagpath to bundle SKILL.md and use agent-kit
 - [ ] Upstream git superproject detection into agent-kit
-- [ ] Add `xist skill install` to existence crate using agent-kit
+- [ ] Add agent-kit + SKILL.md to: existence, module-harness, agent-resume, eval-runner
+- [ ] Add per-harness path patterns to agent-kit
 - [ ] Move interface.md from btakita/philosophy to existence-lang/ontology/src/
 - [ ] Add prebuilt binary release workflow to existence-lang/existence
-- [ ] Add per-harness path patterns to agent-kit
 - [ ] Make btakita/philosophy depend on existence-lang/ontology (via existence.toml + existence fetch)
-- [ ] Update philosophy/CLAUDE.md with precision + bounded/unbounded guidance
-- [ ] Enrich permaculture.md with universal applicability analysis
+- [ ] Author pneuma.md, noumena.md (with NULL analogy), phenomena.md in existence-lang/ontology
+- [ ] Create/update precision.md with vague/precise possibility-space framing
+- [ ] Update scope.md with bounded/unbounded information system distinction
 - [ ] Update chromium-bridge SKILL.md with CSS :hover limitation
 <!-- /agent:pending -->
 

@@ -40,6 +40,7 @@
 //! - reposition_boundary_to_end_basic: stale boundary before user prompt → boundary repositioned after prompt
 //! - reposition_boundary_no_exchange: doc with no exchange component → content returned unchanged
 //! - reposition_boundary_preserves_user_edits: user text between response and boundary → all user text preserved, boundary after it
+//! - reposition_boundary_cleans_multiple_stale: document with 2 stale boundaries → all removed, exactly 1 fresh boundary at end after user text
 
 use anyhow::Result;
 use std::path::Path;
@@ -615,6 +616,29 @@ mod tests {
         assert!(result.contains("More user text."), "user edit must be preserved");
         let boundary_pos = result.find("<!-- agent:boundary:").unwrap();
         let user_pos = result.find("User's new prompt here.").unwrap();
+        assert!(boundary_pos > user_pos, "boundary must be after user text");
+    }
+
+    #[test]
+    fn reposition_boundary_cleans_multiple_stale() {
+        // Simulate a document with multiple stale boundary markers
+        let content = "<!-- agent:exchange patch=append -->\n\
+            First response.\n\
+            <!-- agent:boundary:aaa111 -->\n\
+            Second response.\n\
+            <!-- agent:boundary:bbb222 -->\n\
+            User prompt.\n\
+            <!-- /agent:exchange -->\n";
+        let result = agent_doc::template::reposition_boundary_to_end(content);
+        // All old boundaries should be removed
+        assert!(!result.contains("aaa111"), "first stale boundary must be removed");
+        assert!(!result.contains("bbb222"), "second stale boundary must be removed");
+        // Exactly one fresh boundary should exist
+        let boundary_count = result.matches("<!-- agent:boundary:").count();
+        assert_eq!(boundary_count, 1, "exactly one boundary marker should remain");
+        // The single boundary should be after user prompt
+        let boundary_pos = result.find("<!-- agent:boundary:").unwrap();
+        let user_pos = result.find("User prompt.").unwrap();
         assert!(boundary_pos > user_pos, "boundary must be after user text");
     }
 }

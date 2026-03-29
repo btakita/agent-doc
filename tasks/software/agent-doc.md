@@ -738,6 +738,9 @@ Yes
 
 That's a real bug. If no `/agent-doc` command was running and the Claude session was idle, john-cassel.md should not have been modified. The commits at 18:03 and 18:05 came from `agent-doc(john-cassel)` — which means either a stashed tmux pane was still active (the v0.27.4 rescue fix may have revived it unexpectedly), or a watch daemon triggered. I'll add this to the bug investigation list.
 
+I moved `tasks/recruit/john-cass el.md` to `tasks/professional/john-cassel.md`. Could this have affected the behavior?
+How do we mitigate these issues?
+
 ### Re: Document linking/unlinking
 
 **Recommendation: Hybrid** — the agent proposes links/unlinks, the human approves.
@@ -748,6 +751,8 @@ That's a real bug. If no `/agent-doc` command was running and the Claude session
 
 This keeps the human in control while leveraging the agent's ability to detect connections. The SKILL.md handles both — link proposals are part of the response, and the `related_docs` frontmatter is the source of truth.
 
+In this document, I want to transfer work to other documents. When I transfer the work, we may want to link the documents together.
+
 ### Re: `existence fetch` update checking
 
 For change detection after fetch:
@@ -757,6 +762,8 @@ For change detection after fetch:
 3. **`existence lint`** after fetch — validates the updated ontology passes all checks.
 
 Workflow: `existence fetch --check` → review changes → `existence fetch` → `existence lint`.
+
+Yes to all.
 
 ### Re: Noumena and the NULL analogy
 
@@ -769,6 +776,8 @@ The NULL analogy is apt:
 - Both distinguish "unknown" from "doesn't exist" (NULL ≠ empty, noumena ≠ nonexistence)
 
 **The transcendental contradiction resolved:** Noumena IS abstractable — as the concept "noumena." What's unabstractable is the *content* of the noumena. The abstraction "noumena" is a content-free pointer to the unknowable, just as NULL is a content-free pointer to an unknown value. Both are maximally vague — they encompass the full possibility space of what they point to without narrowing it.
+
+Note that analogy applies the pattern of how a word (abstraction) in relation to other words (abstractions) in one domain also apply to other domains.
 
 So the two kinds aren't "abstractable vs unabstractable" — they're:
 1. **Content-free noumena** — abstractable only as "unknown" (NULL-like). The content is structurally inaccessible to phenomena.
@@ -785,27 +794,62 @@ Noted:
 ### Re: Upstream git superproject detection
 
 Confirmed — will add git root detection to agent-kit so all consumers benefit.
-<!-- agent:boundary:bb98a259 -->
+
+### Re: File rename and unexpected modifications (HEAD)
+
+**Yes, the rename likely caused this.** Here's the chain:
+
+1. You moved `tasks/recruit/john-cassel.md` → `tasks/professional/john-cassel.md`
+2. The agent-doc sync system (`sync.rs:547-557`) detects when a registered file no longer exists but a pane is showing a different path. It kills the stale pane and registers the new path.
+3. However, the rescue logic from v0.27.4 may have revived a stashed pane that was still pointing to the old path, causing it to trigger a session on the new path.
+
+**Mitigation options:**
+
+1. **Snapshot path tracking** — When a file is renamed, the snapshot (keyed by `sha256(canonical_path)`) becomes orphaned. The new path generates a new snapshot key, so the next cycle sees the entire file as "new" and responds to everything. Fix: add a `rename` command that migrates the snapshot.
+
+2. **Rename detection in preflight** — If preflight detects that the snapshot is missing but a snapshot for a similar filename exists (fuzzy match), warn instead of treating the whole file as new content.
+
+3. **Session lock** — Before writing to a document, check if any Claude Code session currently has it open. If the file is being edited by the user and no `/agent-doc` was invoked, don't write.
+
+**Recommendation:** Option 1 + 3. Add `agent-doc rename <old> <new>` to migrate snapshots and claims, and add a session lock check before writes.
+
+### Re: Document transfer and linking (HEAD)
+
+Understood — when you transfer topics from this document to `tasks/software/existence.md` or other docs, we can link them via `related_docs` frontmatter. The transfer workflow would be:
+
+1. You indicate which topics to transfer (or I propose based on topic analysis)
+2. I write a summary to the target document's exchange
+3. Both documents get linked in `related_docs`
+4. Future cycles on either doc show changes from the linked doc
+
+This keeps the conversation continuous across documents while letting each document focus on its domain.
+
+### Re: Analogy as cross-domain pattern application (HEAD)
+
+Yes — this is exactly how Pattern works in the ontology. An analogy is a Pattern recognized across Domains: the structural relationship between abstractions in one domain maps to the same structural relationship in another. NULL:database :: noumena:ontology because the *relationship* (content-free pointer to unknown) is the pattern, and it transfers across the database and philosophy domains.
+
+This is also why the ontology is useful for AI: patterns expressed at the right level of abstraction (vague enough to transfer, precise enough to be meaningful) become reusable across any domain. The ontology provides the vocabulary for expressing those transferable patterns.
+<!-- agent:boundary:7dc5f9af -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **BUG**: Investigate unexpected john-cassel.md modifications when session was idle (stashed pane revival?)
-- [ ] Spec cross-document sync: document links (related_docs frontmatter) + change detection in preflight + agent-proposed link/unlink
-- [ ] Transfer existence conversation to tasks/software/existence.md
-- [ ] Add `existence fetch --check` and `existence diff` commands for update detection
+- [ ] **BUG**: File rename causes orphaned snapshots + unexpected session triggers — add `agent-doc rename` command
+- [ ] **BUG**: Add session lock check before writes (prevent modifications when user is editing without `/agent-doc`)
+- [ ] Spec cross-document sync: document links (related_docs frontmatter) + change detection + link/unlink proposals
+- [ ] Transfer existence topics to tasks/software/existence.md (with document linking)
+- [ ] Add `existence fetch --check` and `existence diff` commands
 - [ ] Refactor chromium-bridge to use agent-kit SkillConfig
 - [ ] Migrate tagpath to bundle SKILL.md and use agent-kit
 - [ ] Upstream git superproject detection into agent-kit
 - [ ] Add agent-kit + SKILL.md to: existence, module-harness, agent-resume, eval-runner
 - [ ] Add per-harness path patterns to agent-kit
-- [ ] Move interface.md from btakita/philosophy to existence-lang/ontology/src/
+- [ ] Move interface.md to existence-lang/ontology/src/
 - [ ] Add prebuilt binary release workflow to existence-lang/existence
-- [ ] Make btakita/philosophy depend on existence-lang/ontology (via existence.toml + existence fetch)
-- [ ] Author pneuma.md, noumena.md (with NULL analogy), phenomena.md in existence-lang/ontology
-- [ ] Create/update precision.md with vague/precise possibility-space framing
-- [ ] Update scope.md with bounded/unbounded information system distinction
+- [ ] Make btakita/philosophy depend on existence-lang/ontology (via existence fetch)
+- [ ] Author pneuma.md, noumena.md (NULL analogy + cross-domain pattern), phenomena.md
+- [ ] Create/update precision.md + scope.md in existence-lang/ontology
 - [ ] Update chromium-bridge SKILL.md with CSS :hover limitation
 <!-- /agent:pending -->
 

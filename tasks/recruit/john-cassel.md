@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Message sent but formatting lost. Awaiting direction on fix.
+Needs manual delete of wall-of-text message. Then resend with formatting.
 <!-- /agent:status -->
 
 ## Exchange
@@ -731,11 +731,27 @@ I wasn't able to edit the sent message -- LinkedIn's dropdown menu items aren't 
 The issue is that LinkedIn's contenteditable doesn't preserve `<br>` tags when editing, and the `chromium-bridge type` paragraph handling (Shift+Enter) didn't create visible breaks in the edit save. For future LinkedIn messages, I should type each paragraph separately with Enter key presses between them rather than using the `type` command's paragraph handling.
 
 Which approach do you prefer?
-<!-- agent:boundary:915b7eb0 -->
+
+Try **Delete and resend**. If that doesn't work, I'll manually edit.
+
+### Re: Delete attempt (HEAD)
+
+The delete option isn't accessible via automation -- LinkedIn's dropdown menu items aren't rendering in the DOM when triggered by CDP mouse events. The menu button clicks but the content (Forward/Share/Delete/Edit) doesn't load.
+
+This needs manual intervention. To delete and resend:
+
+1. **In Brave**, hover over your sent message in the John Cassel thread
+2. Click the **three dots** (options) that appear on hover
+3. Click **Delete**
+4. Then I can resend with proper formatting using Enter key presses between paragraphs
+
+The message text is ready -- I just need you to delete the wall-of-text version first.
+<!-- agent:boundary:6d058310 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Fix LinkedIn message formatting (method TBD)
+- [ ] Manually delete wall-of-text LinkedIn message
+- [ ] Resend with proper paragraph breaks
 <!-- /agent:pending -->

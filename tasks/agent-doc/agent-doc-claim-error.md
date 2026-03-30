@@ -981,6 +981,7 @@ release
 
 Release tmux-router v0.3.6 + agent-doc v0.28.0?
 release
+Update README.md, SPEC.md, module-harness, and ontology.
 ### Re: v0.28.0 + tmux-router v0.3.6 released
 
 **tmux-router v0.3.6:** crates.io ✓ — No early exits, reconciler always runs
@@ -993,13 +994,22 @@ release
 - Reconcile detail file logging
 - SPEC.md phase order corrected
 - 569 tests passing
-<!-- agent:boundary:3f3936d8 -->
+### Re: Docs updated for v0.28.0 (HEAD)
+
+- **README.md** — Reconciler description: "always runs, no early exits, handles 0/1/2+ panes uniformly"
+- **CLAUDE.md** — sync.rs module note updated
+- **SKILL.md** — Version bumped from 0.25.1 to 0.28.0
+- **SPEC.md** — Already accurate, no changes needed
+- **audit-docs** — All staleness warnings resolved
+
+Committed and pushed.
+<!-- agent:boundary:fe5ff1bc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.27.5-v0.27.9: Incremental layout fixes
-- [x] v0.28.0: Structural fix — no early exits + empty col_args filter + plugin v0.2.36
+- [x] v0.28.0: Structural layout fix shipped
+- [x] Docs updated (README, CLAUDE.md, SKILL.md)
 - All shipped.
 <!-- /agent:pending -->

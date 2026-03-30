@@ -443,12 +443,21 @@ The pragmatic path is **Shopify Storefront API** — Ron already built the Shopi
 No shopping cart needed initially — it's content + referral links. If we add our own products later, Stripe Checkout is the lightest option.
 
 I'll update the draft to say "whether we keep it on WordPress, move to Shopify, or build a custom frontend" instead of assuming Shopify.
-<!-- agent:boundary:f323c5b0 -->
+continue
+
+Send from brian.takita@gmail.com
+### Re: Continue & send email (HEAD)
+
+Updated the email draft account from `btak.dev` to `brian.takita@gmail.com` and pushed to **Gmail Drafts**. The draft already had the platform-agnostic language ("Whether we go with Shopify, Astro, or a custom Cloudflare-hosted frontend") so no content changes were needed.
+
+Open your Gmail drafts to review and send: [Gmail Drafts](https://mail.google.com/mail/u/0/#drafts)
+<!-- agent:boundary:55d2383a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Update email draft to not assume Shopify
-- [ ] Review & send call summary email to Ron
+- [x] Update email draft to not assume Shopify (already done in previous cycle)
+- [x] Push call summary email to Gmail Drafts (brian.takita@gmail.com)
+- [ ] Review & send email from Gmail Drafts
 - [ ] Wait for Ron to confirm client introductions
 - [ ] Research MonsterRodHolders.com site structure for optimization plan
 <!-- /agent:pending -->

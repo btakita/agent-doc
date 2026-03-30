@@ -388,6 +388,7 @@ Let's draft an email with the long SMS that I attempted to send to her.
 Also include my recent conversation with ron-berkes.
 
 Her email is melissa.lewis2019@gmail.com
+Please update the melissa-lewis contact and use corky to update her contact. She may be under Melissa Brodack, her maiden name, as well.
 ### Re: Email draft to Melissa with Ron Berkes context
 
 Got the email: **melissa.lewis2019@gmail.com**. SMS wasn't received, so pivoting to email.
@@ -408,13 +409,24 @@ Got the email: **melissa.lewis2019@gmail.com**. SMS wasn't received, so pivoting
 Review the draft and let me know if you want changes before pushing to Gmail Drafts. Say "send" to push via corky.
 
 **Contact file update:** Adding melissa.lewis2019@gmail.com to Melissa's contact file.
-<!-- agent:boundary:030dc241 -->
+### Re: Contact update for Melissa Lewis (HEAD)
+
+Updated Melissa's contact across all systems:
+
+1. **`mail/contacts/melissa-lewis/AGENTS.md`** — email already added last cycle: `melissa.lewis2019@gmail.com`
+2. **`mail/.corky.toml`** — added `[contacts.melissa-lewis]` with email, and added to the `correspondence` gmail filter
+3. **No "Melissa Brodack" duplicate found** — she only exists as `melissa-lewis` in the contacts directory
+
+Corky will now track email correspondence with Melissa automatically. The gmail filter will label messages to/from her as "correspondence."
+
+The email draft at `mail/drafts/2026-03-30-melissa-lewis-update.md` is ready to send. Say "send" to push to Gmail Drafts via corky.
+<!-- agent:boundary:6da13c20 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Draft email to Melissa reviewed and ready to send via corky
+- Email draft to Melissa ready to send via corky → Gmail Drafts
 - Fix chromium-bridge `type` command exclamation mark escaping bug
 - Release corky with diarize as default feature (Cargo.toml updated, needs commit + publish)
 <!-- /agent:pending -->

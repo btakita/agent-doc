@@ -83,16 +83,43 @@ No Walmart, Bass Pro, or other big-box retailer listings found. No wholesale/dis
 - **FishingStatus:** Ranked #1005, 7,482 views
 
 **To get a definitive distributor list, contacting the shop directly at (314) 653-1377 would be needed** — the website and public sources don't list wholesale partners or retail distributors beyond Amazon.
-<!-- agent:boundary:9bdd4827 -->
+
+Send from brian.takita@gmail.com
+
+### Re: Email to 367 Bait & Tackle (HEAD)
+
+Found their email: **etcpremier@yahoo.com** (from Facebook/business directories).
+
+Drafting an inquiry email:
+
+**To:** etcpremier@yahoo.com
+**From:** brian.takita@gmail.com
+**Subject:** Distributor/Wholesale Inquiry — Krazy Kat Products
+
+> Hi there,
+>
+> I came across 367 Bait & Tackle and your Krazy Kat product line — the punch bait and circle hooks look great. I'm researching catfish bait brands and distributors in the region.
+>
+> Could you share information about your current distribution network? Specifically:
+> - Do you wholesale Krazy Kat products to other bait shops or retailers?
+> - Are there any distributors or dealers that carry your products?
+> - Are you open to new wholesale/distribution partnerships?
+>
+> Thanks for your time — appreciate any info you can share.
+>
+> Best,
+> Brian Takita
+
+**Awaiting approval** to push to Gmail Drafts.
+<!-- agent:boundary:1829f525 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Contact shop for distributor list (phone: 314-653-1377)
+- [ ] **Send distributor inquiry email** to etcpremier@yahoo.com (draft ready, awaiting approval)
 - [ ] Deep-dive into Krazy Kat product line and pricing
 - [ ] YouTube/TikTok channel analysis (@baitshop367, @club3672)
 - [ ] Customer review aggregation (Yelp, Google, Facebook)
 - [ ] Investigate "for sale" forum thread
-- Awaiting user direction
 <!-- /agent:pending -->

@@ -1256,7 +1256,7 @@ Let's figure out what is know and unknown for the call with Bob.
 **Recommendation:** Decide what you're asking for before booking. A "show what I'm building + explore how Ragie fits" framing is low-pressure and authentic. You don't need a polished integration — showing the architecture and where Ragie slots in is enough for a 30-min call with an old colleague.
 
 I have not yet built anything specific to Ragie. I'm currently using corky for my personal correspondence and to find work. Do you have any recommendations for demo-worthy work that supports my current correspondence flow?
-### Re: Use case specifics & demo recommendations (HEAD)
+### Re: Use case specifics & demo recommendations
 
 **Ron/Judith context noted.** The patent mining proposal is solid — that's your best concrete Ragie use case. Judith's secure document storage for commercial real estate loan apps is a textbook RAG application (ingest loan docs, query across them for underwriting context).
 
@@ -1273,7 +1273,7 @@ I have not yet built anything specific to Ragie. I'm currently using corky for m
 **On contract work:** Bring it up. Frame as: "I'm building tools that integrate Ragie deeply. If you need someone who understands the developer experience from the builder side, I'm available." Low-pressure, concrete, and true.
 
 **On Ragie pricing:** Check their free tier before the call so you can speak to it concretely. If you're on free, that's fine — "I'm prototyping on free, ready to scale when the client pipeline justifies it."
-<!-- agent:boundary:2159f587 -->
+<!-- agent:boundary:d7d54656 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

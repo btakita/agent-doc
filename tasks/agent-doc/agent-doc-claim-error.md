@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.27.5 released. 3-pane layout fix shipped.
+v0.27.6 released. Bold-text header fallback shipped.
 <!-- /agent:status -->
 
 ## Exchange
@@ -440,16 +440,26 @@ audit docs
 - **SKILL.md** — Updated to note bold text is now supported as fallback (no longer "breaks" boundary), while still recommending real headings
 
 All 566 tests pass. Ready to release.
-<!-- agent:boundary:85282738 -->
+release
+### v0.27.6 released (HEAD)
+
+**Published everywhere:**
+- **crates.io:** v0.27.6 ✓
+- **PyPI:** v0.27.6 ✓
+- **GitHub Release:** [v0.27.6](https://github.com/btakita/agent-doc/releases/tag/v0.27.6) ✓
+- **cargo install:** updated ✓ (confirmed v0.27.6)
+
+**Changelog:**
+- Bold-text pseudo-header fallback for `(HEAD)` boundary marker
+- SKILL.md: `### Re:` header format guidance (bold-text supported as fallback)
+- 3 new tests, docs updated
+<!-- agent:boundary:052c11ea -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.27.5: 3-pane layout fix shipped
-- [x] Skill: enforce `### Re:` header format (with bold-text fallback noted)
-- [x] Binary: bold-text fallback for `(HEAD)` marker
-- [x] Tests: 3 new tests for bold-text fallback
-- [x] Docs: SPEC.md, git.rs, SKILL.md updated
-- [ ] Release v0.27.6
+- [x] v0.27.5: 3-pane layout fix
+- [x] v0.27.6: Bold-text header fallback + SKILL.md header format
+- All shipped.
 <!-- /agent:pending -->

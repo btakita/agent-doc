@@ -1003,13 +1003,29 @@ Update README.md, SPEC.md, module-harness, and ontology.
 - **audit-docs** — All staleness warnings resolved
 
 Committed and pushed.
-<!-- agent:boundary:81221626 -->
+
+When the left editor had a non agent doc selected in a 2 editor layout...only 1 tmux pane was in the tmux window.
+We should keep the 2 tmux pane layout...showing the last selected agent doc in the left side. If no agent-doc was previously selected in the left side, then a shell is ok.
+![2026-03-30_15-10.png](../../../../../Pictures/agent-loop/2026-03-30_15-10.png)
+### Re: 2-pane preservation when non-agent doc selected (HEAD)
+
+This is the inverse of the 3-pane bug — now the reconciler is correctly stashing excess panes, but you want to **keep** the previous agent doc pane for a column that currently shows a non-agent file.
+
+The reconciler only knows about files in `col_args`. When the left editor has a non-agent file, it resolves as `Unmanaged` — so only the right-side agent doc resolves, giving 1 wanted pane. The reconciler stashes everything else.
+
+**The fix needs column-position memory:** "What agent doc was last in column 0?" This isn't available in the current col_args.
+
+**Approach:** In the JetBrains plugin, when a column has a non-.md file, send the **last known .md file** for that column instead of omitting it. The plugin already tracks `editorLayout` — it just needs to remember the previous .md file per column position.
+
+This is a plugin-side fix. The binary already does the right thing: if 2 files are in col_args and both resolve, 2 panes are kept. The problem is the plugin sending only 1 file when it should send 2 (with the "last known" for the non-.md column).
+
+Want me to implement this in the JetBrains plugin?
+<!-- agent:boundary:1d34d124 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.28.0: Structural layout fix shipped
-- [x] Docs updated (README, CLAUDE.md, SKILL.md)
-- All shipped.
+- [ ] **JetBrains plugin: column-position memory for non-.md files**
 <!-- /agent:pending -->

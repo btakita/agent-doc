@@ -740,10 +740,10 @@ Backfill tmux-router VERSIONS.md
 **agent-doc v0.27.9:** crates.io ✓, PyPI ✓, GitHub Release ✓, cargo install ✓ (confirmed v0.27.9)
 - Updated tmux-router dep to 0.3.5
 - VERSIONS.md updated for both
-### Re: tmux-router VERSIONS.md backfilled (HEAD)
+### Re: tmux-router VERSIONS.md backfilled
 
 Added 7 missing entries (v0.2.6 through v0.3.3). Full history now covers v0.1.0 through v0.3.5. Committed and pushed.
-<!-- agent:boundary:2cc13d55 -->
+<!-- agent:boundary:392d7778 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

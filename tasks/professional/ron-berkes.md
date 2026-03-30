@@ -96,7 +96,7 @@ Running now — will update when complete.
 - **Processing time:** ~62 min on CPU (no GPU detected — large-v3 model)
 
 Note: Some confidence scores are low (0.29–0.48 range), indicating potential speaker label swaps — common with mono phone recordings. Review the transcript for accuracy, especially in sections with low confidence.
-<!-- agent:boundary:9a392f8f -->
+<!-- agent:boundary:4503f4f0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

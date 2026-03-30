@@ -267,8 +267,29 @@ The split target selection in `route.rs:511-520` (`auto_start_in_session`) grabs
 
 **Fix:** Before the early return, stash any panes in the agent-doc window that aren't in the wanted set. Even with 1 resolved pane, unwanted panes should be stashed.
 
+I want the previously selected document for the left pane and the right pane to have a new tmux pane for the document.
+The left pane should have been left alone and the right pane should have had the new tmux window. 
+
 Want me to implement the fix?
-<!-- agent:boundary:f1a63fd2 -->
+### Revised understanding (HEAD)
+
+Got it — you want **2 panes**, not 1:
+- **Left:** keep the previous agent doc session (the one that was there before you switched to CSV)
+- **Right:** new Claude session for the newly selected agent doc
+
+The bug has two parts:
+
+1. **`auto_start` split the wrong pane.** It grabbed the first pane in the window (left) and split it horizontally, creating 2 left panes + 1 right = 3. It should have split alongside the right pane (pane B) or swapped B out.
+
+2. **The reconciler didn't clean up.** With only 1 resolved pane (`resolved.len() < 2`), the reconciler exited early without stashing the excess.
+
+**Proposed fix:**
+- In `auto_start_in_session`: when `col_args` place the new file in the right column, pick the rightmost pane in the window to split alongside (not the first). This creates the new pane in the correct position.
+- In `tmux-router::sync`: before the `resolved < 2` early exit, stash unwanted panes that exceed the column count. This is a safety net.
+- The previous left-side agent doc pane stays untouched because it's not in the stash set.
+
+Ready to implement?
+<!-- agent:boundary:da062f5c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -278,5 +299,6 @@ Want me to implement the fix?
 - [x] v0.27.1: Fix "externally modified" popup
 - [x] v0.27.3: Revert auto-kill
 - [x] v0.27.4: Sync stash rescue
-- [ ] **v0.27.5: Stash excess panes on early-exit from sync** (resolved < 2 skips DETACH)
+- [ ] **v0.27.5: Fix auto_start split target selection** (split rightmost pane for right-column files)
+- [ ] **v0.27.5: Stash excess panes on early-exit from sync** (resolved < 2 safety net)
 <!-- /agent:pending -->

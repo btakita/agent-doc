@@ -372,7 +372,7 @@ The top-level "headers" is bold text in the patch responses...it should be a hea
 agent-doc should also consider this bold text pattern as a candidate to be a top-level header. So if headers are not in the response, but bold text "headers" are...consider those bold text "headers" to be the top-level headers.
 - Commit with ` (HEAD)` suffix
 - Uncommitted change removing ` (HEAD)` suffix
-### Two separate issues (HEAD)
+### Two separate issues
 
 **1. Bold text instead of headers (`**Re: ...**` vs `### Re: ...`)**
 
@@ -393,7 +393,7 @@ This creates the blue gutter visual boundary in the editor. The committed conten
 - Add bold-text-as-header detection in `git.rs:add_head_marker()` as a fallback for when the agent uses bold instead of headers
 
 Want me to implement both?
-<!-- agent:boundary:68e9e360 -->
+<!-- agent:boundary:de5f86c2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

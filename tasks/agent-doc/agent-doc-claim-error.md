@@ -478,7 +478,7 @@ The old idle panes (%162, %164) will be killed/replaced by the new sessions.
 
 I was running a task in monsterrodholders.md to crawl monsterrodholders.com.
 What happen to that claude session?
-### Re: Monsterrodholders crawl session (HEAD)
+### Re: Monsterrodholders crawl session
 
 The session **completed its work and exited normally**. It wasn't killed by a bug.
 
@@ -493,7 +493,7 @@ Looking at the git history: 10 commits from 20:02 to 08:43, last commit added 13
 The only remaining items are "Update email draft with complete research findings" and "Send email (awaiting user approval)". The Claude session finished its active work and returned to the `❯` prompt. The pane then got stashed during a subsequent sync operation.
 
 To continue where it left off, re-claim `monsterrodholders.md` — the new session will see all the completed work in the document and can pick up the remaining email tasks.
-<!-- agent:boundary:83fc4342 -->
+<!-- agent:boundary:3549852f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

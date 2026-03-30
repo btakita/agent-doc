@@ -393,7 +393,24 @@ This creates the blue gutter visual boundary in the editor. The committed conten
 - Add bold-text-as-header detection in `git.rs:add_head_marker()` as a fallback for when the agent uses bold instead of headers
 
 Want me to implement both?
-<!-- agent:boundary:de5f86c2 -->
+Yes...This should go into the installable agent-doc skil
+
+> - Fix the skill prompt to explicitly instruct `### Re:` headers (not bold) — this is a SKILL.md update
+
+HTML headers only go 6 levels...`h6`...so this is a limitation. Do we need to note that?
+### h6 limit — not a practical concern (HEAD)
+
+Good question. In agent-doc template mode, the exchange component typically lives under `## Exchange` (h2). Agent responses at `### Re:` (h3) leave h4-h6 for sub-sections. Documents rarely go deeper than h4.
+
+The bold-text pattern happened because the agent "felt" like h3 was too prominent inside a component — but that's wrong. The `(HEAD)` marker needs actual headings to work, and the gutter boundary depends on it.
+
+**Approach:**
+1. **SKILL.md** — Add explicit instruction: "Use `### Re:` headers for response sections in template mode. Do NOT use bold text (`**...**`) as pseudo-headers — the `(HEAD)` boundary marker requires actual markdown headings."
+2. **Binary fallback** — In `git.rs:add_head_marker()`, if no new headings are found, detect lines matching `^**...**$` as bold-text pseudo-headers and treat them as h-level for `(HEAD)` tagging.
+3. **h6 note** — Add to SKILL.md: "Markdown supports h1-h6. In template mode exchange components (under h2), use h3 for response headers. This leaves h4-h6 for sub-sections."
+
+Implementing now.
+<!-- agent:boundary:ee82b454 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -540,5 +540,20 @@ Does https://www.linkedin.com/in/eric-irwin-78b7b53bb/ seem like a real profile?
 He commented on one of my posts at https://www.linkedin.com/feed/update/urn:li:activity:7444389222624448512?commentUrn=urn%3Ali%3Acomment%3A%28activity%3A7444389222624448512%2C7444389275695099904%29&replyUrn=urn%3Ali%3Acomment%3A%28activity%3A7444389222624448512%2C7444431288767258624%29&dashCommentUrn=urn%3Ali%3Afsd_comment%3A%287444389275695099904%2Curn%3Ali%3Aactivity%3A7444389222624448512%29&dashReplyUrn=urn%3Ali%3Afsd_comment%3A%287444431288767258624%2Curn%3Ali%3Aactivity%3A7444389222624448512%29
 
 Please evaluate.
-<!-- agent:boundary:11cae35d -->
+### Re: Eric Irwin profile evaluation (HEAD)
+
+**Red flags — likely fake or very new/low-quality profile:**
+
+1. **Not indexed by search engines** — Searching `site:linkedin.com "eric-irwin-78b7b53bb"` returns zero results. Legitimate, established profiles are indexed by Google.
+
+2. **Unusual URL slug** — The suffix `78b7b53bb` looks like a truncated hash. Real LinkedIn profiles have either clean custom URLs (e.g., `/in/eric-irwin/`) or shorter numeric suffixes. Hash-like slugs are typical of auto-generated profiles that never customized their URL.
+
+3. **No match among 60+ real Eric Irwins** — Web search found Eric Irwins at Datadog, Quantum Metric, Electric Boat, etc. — none with this URL. A real professional with enough context to comment meaningfully on your post would likely have an established, indexed profile.
+
+4. **Comment context matters** — What did the comment say? If it's generic engagement bait ("Great post!", "Interesting!", or a vague question), that's another signal of a bot or engagement-farming account.
+
+**Recommendation:** Don't engage. If the comment is substantive and adds value to the thread, leave it visible (it helps your algorithm). If it's spam or low-effort, hide it from the post.
+
+Browser connection timed out so I couldn't visually verify the profile — but the search evidence alone is concerning.
+<!-- agent:boundary:02fa2350 -->
 <!-- /agent:exchange -->

@@ -904,7 +904,7 @@ I think the following are important:
 - creative system lifecycle: unbounded creative system to bounded steady state system
 - begin/end eschatology (propose a better name) + cyclical eschatology
 
-### Re: Updated LinkedIn draft with deeper themes (HEAD)
+### Re: Updated LinkedIn draft with deeper themes
 
 Updated the draft to include all the themes you flagged. Here's the revised ontology section:
 
@@ -920,7 +920,7 @@ For the eschatology naming — I used "genesis and completion cycles" instead. "
 - "Genesis and completion cycles" (current — captures begin/end + cyclical)
 
 Draft updated in `mail/social/20260330-ffi-ontology-linkedin.md`. Review and approve to publish.
-<!-- agent:boundary:a4f31f4e -->
+<!-- agent:boundary:b596313b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

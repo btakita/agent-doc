@@ -735,7 +735,7 @@ Say "send patent" to push to Gmail Drafts.
 
 Note that Julian provides the Manufacturer database.
 We can offer Julian research and search capabilities. Which can also work with his risk management operations.
-### Re: Julian as manufacturer data provider + research services (HEAD)
+### Re: Julian as manufacturer data provider + research services
 
 Updated the patent mining proposal:
 
@@ -747,7 +747,7 @@ Updated the patent mining proposal:
 3. **"What I'd Need"** — asks Ron for an intro to Julian for database access
 
 Say "send patent" to push to Gmail Drafts.
-<!-- agent:boundary:f7e65b62 -->
+<!-- agent:boundary:cea7057a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

@@ -30,7 +30,7 @@ https://whiskerseeker.com
 Crawl all of the dealers in https://whiskerseeker.com/dealers
 Put into a csv file.
 
-### Re: Site crawl & dealers (HEAD)
+### Re: Site crawl & dealers
 
 Crawled whiskerseeker.com and searched extensively. The dealers page uses a **Storemapper** widget that loads dynamically via JavaScript — can't be scraped via static fetch, and Chrome DevTools timed out. I extracted all publicly discoverable dealers/retailers from web search instead.
 
@@ -94,7 +94,7 @@ Crawled whiskerseeker.com and searched extensively. The dealers page uses a **St
 - [Catfish Angler Forum (USCA)](https://www.catfish1.com/threads/whisker-seeker-tackle.215036/) — community discussion
 - [Manta.com listing](https://www.manta.com/c/mkbxhnp/whisker-seeker-tackle-llc) — Grimes, IA business record
 - PRADCO Outdoor Brands parent: [pradcooutdoorbrands.com](https://www.pradcooutdoorbrands.com/)
-<!-- agent:boundary:e4fc956b -->
+<!-- agent:boundary:dec33625 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

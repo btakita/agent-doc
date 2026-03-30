@@ -664,13 +664,33 @@ The v0.27.8 stash correctly derived the session, but stashed ALL non-resolved pa
 **Fixed:** Removed the early-exit stash entirely. When `resolved < 2`, just focus the resolved pane. Other panes belong to previous-column agent docs and stay visible. Excess cleanup only happens in the full reconcile path (`resolved >= 2`) which has column layout context.
 
 Test updated: `test_sync_early_exit_preserves_other_panes` — verifies all panes remain. Installed — please test.
-<!-- agent:boundary:0b41a717 -->
+
+Got into a 1 pane layout when switching the left editor to a non agent document.
+![2026-03-30_11-23.png](../../../../../Pictures/agent-loop/2026-03-30_11-23.png)
+### Re: 1-pane layout investigation (HEAD)
+
+Current tmux state shows 2 panes in the agent-doc window (%153 + %171), so the layout may have self-corrected by the time I'm checking. The screenshot was at 11:23.
+
+This 1-pane issue is **different** from the early-exit stash — that code is now removed. Something else is causing a pane to disappear when the left editor switches to a non-agent file.
+
+**Possible causes:**
+1. The full reconcile path (`resolved >= 2`) has a DETACH phase that stashes unwanted panes — but this only runs when `resolved >= 2`, so it shouldn't apply here
+2. `resync::run(false)` runs post-sync and might be killing/deregistering a pane
+3. The left-side agent doc pane might have been stashed during the editor layout change (before sync ran)
+
+**Questions:**
+- Did you see the 1-pane state briefly, or did it persist?
+- Was the left-side document an active Claude session (running) or idle (at `❯` prompt)?
+- Did you select a new file on the right after switching the left? Or was the 1-pane state triggered just by switching the left editor?
+
+If this is reproducible, I'll add stderr logging to the sync path to capture exactly what happens during the layout transition.
+<!-- agent:boundary:2042dc28 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.27.5-v0.27.8: Layout fix iterations
-- [ ] **v0.27.9: Remove early-exit stash (preserves previous-column panes)**
-- [ ] Test + release
+- [ ] **Investigate: 1-pane state when left editor switches to non-agent file**
+- [ ] Release v0.27.9
 <!-- /agent:pending -->

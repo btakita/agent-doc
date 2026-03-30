@@ -497,7 +497,7 @@ To continue where it left off, re-claim `monsterrodholders.md` — the new sessi
 We went into a 3 pane layout when I moved /home/brian/work/btakita/agent-loop/mail/drafts/2026-03-30-call-summary-next-steps.md from the right editor to the left editor, kept 2026-03-30-call-summary-next-steps.md selected...then on the right editor, selected another agent document.
 
 What happened? Please review logs.
-### Re: 3-pane layout still happening after v0.27.5 (HEAD)
+### Re: 3-pane layout still happening after v0.27.5
 
 This is a **different scenario** from the one v0.27.5 fixed.
 
@@ -522,13 +522,33 @@ Actually, looking at the reconcile function — the DETACH phase (Phase 4) itera
 **Most likely cause:** The column-aware split target fix (v0.27.5) should have picked the last pane for a right-column file. But if the draft is in the left column and the draft has no agent session, auto_start doesn't have col_args context — it may not know which column the new file is in.
 
 I need to check: does `auto_start_in_session` receive `split_before` correctly in the sync path? Let me review.
-<!-- agent:boundary:26375dd1 -->
+### Re: Root cause of the recurrence (HEAD)
+
+Found it. **`auto_start_no_wait` hardcodes `split_before = false`** — the v0.27.5 column-aware fix only applied to the `route` path, not the `sync` path.
+
+`route.rs:457`:
+```rust
+auto_start_ext(tmux, file, session_id, file_path, context_session, true, false)
+//                                                                       ^^^^^ hardcoded
+```
+
+The sync path calls `auto_start_no_wait` (line 595) but doesn't pass col_args, so the positional split target selection never runs. The sync path always picks the last pane regardless of column position.
+
+**But the bigger issue:** Even with the correct split target, auto_start creates a 3rd pane that the reconciler should then stash. The reconciler DOES have the DETACH phase — but the question is whether the old pane from the left-side agent doc (that was displaced by the draft) is being correctly identified as "not wanted."
+
+**Two fixes needed:**
+1. Pass `col_args` through `auto_start_no_wait` → `auto_start_ext` so the sync path gets positional split
+2. Verify the reconciler's DETACH phase handles this case — if a previously-resolved pane is no longer in the current column layout, it should be stashed
+
+Want me to implement?
+<!-- agent:boundary:c8000b7d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.27.5: 3-pane layout fix (partial — only covered resolved < 2 case)
+- [x] v0.27.5: 3-pane fix (route path only)
 - [x] v0.27.6: Bold-text header fallback
-- [ ] **Investigate: 3-pane recurrence in resolved >= 2 scenario**
+- [ ] **v0.27.7: Pass col_args to auto_start_no_wait (sync path fix)**
+- [ ] **v0.27.7: Verify reconciler DETACH handles displaced panes**
 <!-- /agent:pending -->

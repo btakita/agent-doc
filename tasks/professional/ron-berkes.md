@@ -658,6 +658,7 @@ Updated the draft at `mail/drafts/2026-03-30-call-summary-next-steps.md`. Key ch
 Review the draft and let me know if you want changes before pushing to Gmail Drafts.
 Note that tasks/research/manufacturingchina.md is currently working on a draft for the patent intelligence.
 Please add the income proposal in there.
+Bi-directional link with tasks/research/manufacturingchina.md
 ### Re: Income proposal added to patent mining draft
 
 Added an **Income Structure** section to `mail/drafts/2026-03-30-patent-mining-proposal.md`. It covers:
@@ -672,7 +673,15 @@ Both email drafts are now updated and ready:
 2. `mail/drafts/2026-03-30-patent-mining-proposal.md` — patent automation + income structure
 
 Say "send" to push either or both to Gmail Drafts.
-<!-- agent:boundary:dd24e60d -->
+### Re: Bi-directional links (HEAD)
+
+Added cross-references:
+
+- **manufacturingchina.md** → Status section now links to `tasks/professional/ron-berkes.md` ("compensation discussion, call transcripts, email drafts")
+- **ron-berkes.md** → already references `tasks/research/manufacturingchina.md` in the exchange
+
+The link in manufacturingchina.md is in the `&lt;!-- agent:status --&gt;` component so it persists across status updates.
+<!-- agent:boundary:d000d24e -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -682,6 +691,7 @@ Say "send" to push either or both to Gmail Drafts.
 - [x] Run ManufacturingChina.com site analysis (Ron requested)
 - [x] Update email proposal with analyst + compensation + Julian angle
 - [x] Add income proposal to patent mining draft
+- [x] Bi-directional links between ron-berkes.md and manufacturingchina.md
 - [ ] Push updated emails to Gmail Drafts (awaiting approval)
 - [ ] Wait for Ron to confirm Steve intro / Steve responds
 - [ ] Review transcript speaker labels for accuracy corrections

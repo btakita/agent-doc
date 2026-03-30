@@ -388,7 +388,7 @@ Let's draft an email with the long SMS that I attempted to send to her.
 Also include my recent conversation with ron-berkes.
 
 Her email is melissa.lewis2019@gmail.com
-### Re: Email draft to Melissa with Ron Berkes context (HEAD)
+### Re: Email draft to Melissa with Ron Berkes context
 
 Got the email: **melissa.lewis2019@gmail.com**. SMS wasn't received, so pivoting to email.
 
@@ -408,7 +408,7 @@ Got the email: **melissa.lewis2019@gmail.com**. SMS wasn't received, so pivoting
 Review the draft and let me know if you want changes before pushing to Gmail Drafts. Say "send" to push via corky.
 
 **Contact file update:** Adding melissa.lewis2019@gmail.com to Melissa's contact file.
-<!-- agent:boundary:7229a371 -->
+<!-- agent:boundary:030dc241 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

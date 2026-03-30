@@ -618,7 +618,7 @@ The original source files are already separate, so splitting is trivial (no re-e
 
 Yes.
 
-### Re: Split into 2 videos (HEAD)
+### Re: Split into 2 videos
 
 Done. SRT captions split at the 58:13 boundary — timestamps reset for Video 2.
 
@@ -641,7 +641,7 @@ Done. SRT captions split at the 58:13 boundary — timestamps reset for Video 2.
   > Tools: Claude Code, agent-doc, existence-lang, Rust
 
 Ready to upload both. Approve the titles/descriptions or edit them, then I'll upload with CC.
-<!-- agent:boundary:ecd4a69a -->
+<!-- agent:boundary:50241431 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

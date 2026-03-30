@@ -231,7 +231,7 @@ WebFetch can't extract data from YouTube's JS-rendered pages, so I used web sear
 
 Please create a monsterrodholders.com site structure report to send as an email to ron-berkes.
 
-### Re: Site structure report for Ron Berkes (HEAD)
+### Re: Site structure report for Ron Berkes
 
 Drafted and pushed to Gmail Drafts:
 
@@ -249,7 +249,7 @@ The email covers:
 Draft saved at: `mail/drafts/2026-03-30-monsterrodholders-com-site-structure-report.md`
 
 Say "send" to deliver, or edit the draft first.
-<!-- agent:boundary:0bc6e100 -->
+<!-- agent:boundary:d62fde18 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

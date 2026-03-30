@@ -427,7 +427,7 @@ All 38 tests pass. Ready to release or add tests first.
 
 Add tests
 audit docs
-### Tests and docs done (HEAD)
+### Tests and docs done
 
 **3 new tests** in `git.rs`:
 - `test_add_head_marker_bold_text_fallback` — bold `**Re:...**` with no headings → gets `(HEAD)`
@@ -440,7 +440,7 @@ audit docs
 - **SKILL.md** — Updated to note bold text is now supported as fallback (no longer "breaks" boundary), while still recommending real headings
 
 All 566 tests pass. Ready to release.
-<!-- agent:boundary:744a9ceb -->
+<!-- agent:boundary:85282738 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

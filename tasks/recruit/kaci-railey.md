@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Resume rebuilt with Menu.com first. Message in LinkedIn compose box. Attach PDF and send.
+Reply sent to Kaci with updated resume. Menu.com includes Stripe tokenization. Awaiting response.
 <!-- /agent:status -->
 
 ## Exchange
@@ -346,6 +346,8 @@ Message is loaded in Kaci's LinkedIn compose box (tab 1, iframe 1). Verified the
 4. Click **Send**
 
 **Re: MCP timeout issue** — The `Network.enable timed out` error happens because LinkedIn pages are very heavy (large iframes, complex DOM). The MCP `chrome-devtools` server's CDP protocol timeout is shorter than what LinkedIn needs. The chromium-bridge CLI works because it uses a direct WebSocket connection with a configurable timeout. To fix this permanently, the MCP server would need a higher `protocolTimeout` setting in its connection config.
+
+Menu.com should include Stripe tokenization.
 ### Re: Highlight Menu.com in resume
 
 Done. Two changes to make it stand out:
@@ -358,19 +360,20 @@ The `agent-resume` CLI doesn't apply phrase bolding to experience bullets (only 
 **PDF rebuilt** — `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-cdw-payments.pdf`
 
 The message is still loaded in the LinkedIn compose box from earlier. Ready for you to attach the new PDF and send.
-<!-- agent:boundary:5b12efe0 -->
+### Re: Add Stripe tokenization to Menu.com (HEAD)
+
+Done. Updated both `data.toml` and `BrianTakita.md` — Menu.com entry now reads:
+
+> Menu.com: Multi-tenant restaurant ordering and payment platform — consumer web ordering, restaurant back-office, and Cordova mobile app. **Stripe tokenization for payment processing.** Developed AWS CDK + Lambda serverless functions integrated with AWS Fargate Windows .NET API on ECS
+
+**PDF rebuilt** at `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-cdw-payments.pdf`
+
+Also saved the sent reply to `mail/contacts/kaci-railey/20260330-linkedin-brian-takita.txt` and updated the communication timeline in AGENTS.md.
+<!-- agent:boundary:2d0fe310 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Add menu.com to BrianTakita.md with payment/POS description
-- [x] Update data.toml menu.com entry with payment tags
-- [x] Create CDW profile (payments emphasis)
-- [x] Build CDW-tailored PDF (rebuilt with menu.com first)
-- [x] Save Kaci's new message
-- [x] Revised draft with experience database mention
-- [x] Message loaded in LinkedIn compose box
-- [x] Menu.com moved to first position in freelance section
-- [ ] Attach PDF and send (manual — user action needed)
+(all tasks complete)
 <!-- /agent:pending -->

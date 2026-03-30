@@ -729,7 +729,7 @@ Now installed with local tmux-router trace logs. Reproduce the 1-pane bug and ch
 Note: the path dep is temporary for debugging. Will revert to crates.io version before release.
 
 Working. Release tmux-router and agent-doc
-### Re: v0.27.9 + tmux-router v0.3.5 released (HEAD)
+### Re: v0.27.9 + tmux-router v0.3.5 released
 
 **tmux-router v0.3.5:** crates.io ✓
 - Sync trace logging at key decision points
@@ -738,7 +738,7 @@ Working. Release tmux-router and agent-doc
 **agent-doc v0.27.9:** crates.io ✓, PyPI ✓, GitHub Release ✓, cargo install ✓ (confirmed v0.27.9)
 - Updated tmux-router dep to 0.3.5
 - VERSIONS.md updated for both
-<!-- agent:boundary:c16a5dbc -->
+<!-- agent:boundary:3568430f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

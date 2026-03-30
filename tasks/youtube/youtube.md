@@ -731,7 +731,21 @@ Already deployed. The git push triggered Cloudflare Pages CI, which completed su
 Blog posts are live:
 - https://briantakita.me/posts/agent-doc-ffi-plugin-socket-ipc
 - https://briantakita.me/posts/existence-lang-pneuma-noumena-phenomena
-<!-- agent:boundary:4dc0d4ec -->
+
+We lost the shrinking sticky breadcrumb + header behavior. The breadcrumb and header should shrink when it's stick. To make the post easier to read by adding space.
+
+![img_1.png](img_1.png)
+
+### Re: Sticky header shrinking fix (HEAD)
+
+Found and fixed the regression. The CSS `.scrolled` selectors were defined but the `scrolled` class was never being applied to the document root.
+
+**Root cause:** `layout__hyop.ts` only toggled `scroll-down` on the header element. The `.scrolled` CSS selectors need it on `document.documentElement`.
+
+**Fix:** Added `document.documentElement.classList.toggle('scrolled', scrolled)` to the scroll handler in `lib/snippet--rappstack/cruip-simple/browser/layout__hyop.ts`.
+
+Committed, pushed, and CI will deploy. The sticky header/breadcrumb/title will now shrink when scrolling — font sizes reduce, nav padding shrinks, and breadcrumb top adjusts.
+<!-- agent:boundary:0d2052de -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -750,4 +764,5 @@ Blog posts are live:
 - [x] Blog post 1: https://briantakita.me/posts/agent-doc-ffi-plugin-socket-ipc
 - [x] Blog post 2: https://briantakita.me/posts/existence-lang-pneuma-noumena-phenomena
 - [x] Blog deployed to Cloudflare Pages
+- [x] Fixed sticky header shrinking regression
 <!-- /agent:pending -->

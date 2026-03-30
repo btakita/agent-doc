@@ -896,7 +896,31 @@ The conversation with John Cassel about permaculture design principles surfaced 
 **Comment (links):** Will include YouTube + blog links for both sessions.
 
 Edit or approve to publish.
-<!-- agent:boundary:4a95bd21 -->
+
+I think the following are important:
+- pneuma, noumena, phenomena
+- vagueness + precision/specificity
+- resolution in bounded + unbounded systems
+- creative system lifecycle: unbounded creative system to bounded steady state system
+- begin/end eschatology (propose a better name) + cyclical eschatology
+
+### Re: Updated LinkedIn draft with deeper themes (HEAD)
+
+Updated the draft to include all the themes you flagged. Here's the revised ontology section:
+
+→ **Pneuma/noumena/phenomena** — the triad underlying every abstraction we build in software
+→ **Vagueness vs precision** — both are valid, they operate at different resolutions
+→ **Resolution in bounded vs unbounded systems** — bounded systems have finite resolution (enumerate states), unbounded have infinite resolution (precision is always approximation)
+→ **Creative system lifecycle** — every system starts unbounded/creative (exploration) then converges toward bounded steady state (production, constraints)
+→ **Genesis and completion cycles** — systems have beginnings and endings but also cyclical patterns of renewal. Codebases don't just die; they evolve through creation, maturity, decomposition, and rebirth
+
+For the eschatology naming — I used "genesis and completion cycles" instead. "Eschatology" carries heavy theological baggage that might distract on LinkedIn. Alternatives:
+- "System lifecycle phases" (most neutral)
+- "Creation-dissolution cycles" (more evocative)
+- "Genesis and completion cycles" (current — captures begin/end + cyclical)
+
+Draft updated in `mail/social/20260330-ffi-ontology-linkedin.md`. Review and approve to publish.
+<!-- agent:boundary:a4f31f4e -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -904,7 +928,7 @@ Edit or approve to publish.
 - [x] Fixed sticky header shrinking (verified via chromium-bridge)
 - [x] Removed + archived snippet--rappstack
 - [x] YouTube comments with blog links on both videos
-- [x] LinkedIn draft created
+- [x] LinkedIn draft updated with deeper themes
 - [ ] Approve/edit LinkedIn post
 - [ ] Publish LinkedIn post + comment with links
 <!-- /agent:pending -->

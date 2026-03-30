@@ -381,12 +381,40 @@ The message Melissa received would show as: "Would love to connect there too\!" 
 Added the chromium-bridge `type` escaping bug to `tasks/software/chromium-bridge.md` with repro steps and root cause analysis.
 
 Also noted: the user made `diarize` a default feature in corky's `Cargo.toml` (`default = ["transcribe", "diarize"]`). This fulfills the earlier request to make diarize core, not optional.
-<!-- agent:boundary:098e6365 -->
+
+The SMS was not received by Melissa. She sent her email over SMS. Please read the thread to get her email address.
+
+Let's draft an email with the long SMS that I attempted to send to her.
+Also include my recent conversation with ron-berkes.
+
+Her email is melissa.lewis2019@gmail.com
+### Re: Email draft to Melissa with Ron Berkes context (HEAD)
+
+Got the email: **melissa.lewis2019@gmail.com**. SMS wasn't received, so pivoting to email.
+
+**Email draft created** at `mail/drafts/2026-03-30-melissa-lewis-update.md`
+
+- **To:** melissa.lewis2019@gmail.com
+- **From:** brian.takita@gmail.com
+- **Subject:** "Work update — things are moving"
+
+**Content includes:**
+1. **Judith Krug / Equity Funding Source** — full context on MA vs TMO, custom loan management system ($8K flat), document upload portal, AI-powered OCR, automated reminders
+2. **Ron Berkes / Outdoor Industry** (new) — Monster Rod Holders (Steve Douglas, 119K YT subs, $18K/mo), Fast Fire Starters, YouTube→blog content pipeline, patent research automation, outdoor industry directory vision
+3. **Agent harness capabilities** — CRM, transcription, content generation
+4. **Other conversations** — Bob Remeika/Ragie, LinkedIn traction, recruiter pipeline ($150K–$300K)
+5. **Wedding Insider Network** — cost equation has changed, agent harness for photography business and vendor network
+
+Review the draft and let me know if you want changes before pushing to Gmail Drafts. Say "send" to push via corky.
+
+**Contact file update:** Adding melissa.lewis2019@gmail.com to Melissa's contact file.
+<!-- agent:boundary:7229a371 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- Draft email to Melissa reviewed and ready to send via corky
 - Fix chromium-bridge `type` command exclamation mark escaping bug
 - Release corky with diarize as default feature (Cargo.toml updated, needs commit + publish)
 <!-- /agent:pending -->

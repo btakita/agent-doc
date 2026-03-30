@@ -836,7 +836,7 @@ This is also why the ontology is useful for AI: patterns expressed at the right 
 
 And Systems Theory is a large field of study that encompasses the analogy pattern. Perhaps we should consider investigating the available corpus of Systems Theory. Transfer this task to `tasks/research/systems-theory.md`.
 
-### Re: Implementation directives (HEAD)
+### Re: Implementation directives
 
 Three directives received:
 
@@ -854,17 +854,47 @@ Three directives received:
 **3. Systems Theory research** — Transferred to `tasks/research/systems-theory.md` with context summary, research questions, and `related_docs` linking back to this document and `tasks/software/existence.md`.
 
 Entering plan mode for #1 and #2.
-<!-- agent:boundary:bc024d85 -->
+
+### Re: Implementation complete (HEAD)
+
+All three features implemented, compiled, tested (38/38 pass), and release binary built.
+
+**Phase 1: Session lock guard** (`write.rs`)
+- Added `verify_pane_ownership(file)` — checks current tmux pane against registered session owner
+- Inserted at top of `run()`, `run_template()`, `run_stream()` (after file existence check)
+- Permissive: returns Ok on any ambiguity (no tmux, no session, can't determine pane)
+- Recovery functions (`apply_*_from_string`) intentionally excluded
+
+**Phase 2: `agent-doc rename` command** (new `rename.rs` + `snapshot.rs` + `main.rs`)
+- `agent-doc rename <old-path> <new-path>` migrates all hash-keyed state files
+- Added `snapshot::doc_hash_from_str()` for hashing paths that no longer exist
+- Migrates: snapshots, locks, pending, crdt, pre-response + associated lock files
+- Updates sessions.json file field under RegistryLock
+- Works whether old path still exists or not
+
+**Phase 3: Document linking** (`frontmatter.rs` + `preflight.rs`)
+- Added `related_docs: Vec<String>` to Frontmatter struct (serde default = empty, skip if empty)
+- Preflight step 3c: `check_related_docs()` — for each related doc, compares git commit time vs snapshot mtime
+- If related doc changed since last cycle, includes commit summaries in `related_doc_changes` JSON field
+- Made `git::resolve_to_git_root()` pub(crate) for use by preflight
+
+**Files changed:**
+- `src/write.rs` — pane ownership guard (3 call sites)
+- `src/snapshot.rs` — `doc_hash_from_str()` + `hash_path_str()` helper
+- `src/rename.rs` — NEW: rename command module
+- `src/main.rs` — Rename command variant + dispatch + mod declaration
+- `src/frontmatter.rs` — `related_docs` field + test fix
+- `src/preflight.rs` — `RelatedDocChange` struct, `check_related_docs()`, `recent_commit_summary()`, output field + test fixes
+- `src/git.rs` — `resolve_to_git_root` visibility: fn → pub(crate) fn
+<!-- agent:boundary:95237f73 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] **IMPLEMENTING**: `agent-doc rename` command (snapshot migration + claims update)
-- [ ] **IMPLEMENTING**: Session lock check before writes
-- [ ] **IMPLEMENTING**: Document linking (related_docs frontmatter + change detection in preflight)
-- [ ] **IMPLEMENTING**: Document transfer (`agent-doc post` for cross-document summaries)
-- [x] Transfer Systems Theory research to tasks/research/systems-theory.md
+- [x] **DONE**: Session lock guard (pane ownership check before writes)
+- [x] **DONE**: `agent-doc rename` command (snapshot migration + registry update)
+- [x] **DONE**: Document linking (related_docs frontmatter + preflight change detection)
 - [ ] Transfer existence topics to tasks/software/existence.md
 - [ ] Add `existence fetch --check` and `existence diff` commands
 - [ ] Refactor chromium-bridge to use agent-kit SkillConfig

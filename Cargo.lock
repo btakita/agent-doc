@@ -1775,9 +1775,9 @@ dependencies = [
 
 [[package]]
 name = "tmux-router"
-version = "0.3.4"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f05d5718c0426cf69bda815e0572fba9cafdcea6ffe1ddbd9dcaf150b9a5b18"
+checksum = "85953ffaded8618d258289f2cf39c685a0023b1697edffa9017812ef85c1b079"
 dependencies = [
  "anyhow",
  "clap",

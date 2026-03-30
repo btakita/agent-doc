@@ -746,7 +746,7 @@ Added 7 missing entries (v0.2.6 through v0.3.3). Full history now covers v0.1.0 
 
 We got into some invalid pane states. Especially when reopening sessions. Here is 1 case. Another case of >4 tmux panes occurred after this screenhot. Check the logs.
 /home/brian/work/btakita/agent-loop/screenshot.png
-### Re: Invalid pane states — stash accumulation (HEAD)
+### Re: Invalid pane states — stash accumulation
 
 Current state: **2 panes in agent-doc window, 6 in stash**. The stash is accumulating:
 
@@ -768,7 +768,7 @@ The >4 pane issue is from sessions accumulating without cleanup. When you switch
 **Immediate cleanup:** Want me to kill the 6 idle stash panes now?
 
 **Longer term:** Implement `agent-doc gc` as a separate command for manual and automated cleanup.
-<!-- agent:boundary:800caa4b -->
+<!-- agent:boundary:58e9ad9e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -207,7 +207,7 @@ This frames it as "let's check what GSC is telling you" rather than "you need to
 Draft updated. Say "send" to push to Gmail Drafts.
 
 Send email to Ron. No need to check draft.
-### Re: Send email (HEAD)
+### Re: Send email
 
 Pushed to **Gmail Drafts** via `corky draft push`:
 
@@ -216,7 +216,7 @@ Pushed to **Gmail Drafts** via `corky draft push`:
 - **Subject:** ManufacturingChina.com - Site Structure Report
 
 Open your Gmail drafts to review and send: [Gmail Drafts](https://mail.google.com/mail/u/0/#drafts)
-<!-- agent:boundary:3014684d -->
+<!-- agent:boundary:7ab81d56 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

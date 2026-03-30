@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc"
-version = "0.27.6"
+version = "0.27.8"
 dependencies = [
  "agent-kit",
  "anyhow",
@@ -1775,9 +1775,9 @@ dependencies = [
 
 [[package]]
 name = "tmux-router"
-version = "0.3.1"
+version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "669f133d65c0f8dfde4613a6bad7c7c2a7b4805472d35d1ce490ccc1511a317a"
+checksum = "2f05d5718c0426cf69bda815e0572fba9cafdcea6ffe1ddbd9dcaf150b9a5b18"
 dependencies = [
  "anyhow",
  "clap",

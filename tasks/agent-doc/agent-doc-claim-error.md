@@ -1003,7 +1003,7 @@ Update README.md, SPEC.md, module-harness, and ontology.
 - **audit-docs** — All staleness warnings resolved
 
 Committed and pushed.
-<!-- agent:boundary:19af4377 -->
+<!-- agent:boundary:81221626 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

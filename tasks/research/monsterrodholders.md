@@ -228,7 +228,28 @@ WebFetch can't extract data from YouTube's JS-rendered pages, so I used web sear
 - [Catfish Conference](https://catfishconference.com) — event sponsor/vendor
 - [Catfish Angler Forum (USCA)](https://www.catfish1.com) — community presence
 - [Kayak Catfish](http://www.kayakcatfish.com) — product reviews/features
-<!-- agent:boundary:c4628f2c -->
+
+Please create a monsterrodholders.com site structure report to send as an email to ron-berkes.
+
+### Re: Site structure report for Ron Berkes (HEAD)
+
+Drafted and pushed to Gmail Drafts:
+
+**To:** rberkes@gmail.com
+**Subject:** MonsterRodHolders.com - Site Structure Report
+
+The email covers:
+- Platform overview (WordPress/WooCommerce + Zoho integration)
+- Full product line breakdown (57 products, 17 categories)
+- Key pages (reseller directory, sponsorship program, affiliate area, dealer qualification)
+- **Security alert:** SEO spam compromise — 11 German/Russian gambling posts injected March 2026, with recommended remediation steps
+- Cleanup opportunities (duplicate pages, blog content gaps)
+- Summary assessment: good bones, spam is the urgent priority
+
+Draft saved at: `mail/drafts/2026-03-30-monsterrodholders-com-site-structure-report.md`
+
+Say "send" to deliver, or edit the draft first.
+<!-- agent:boundary:0bc6e100 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -239,5 +260,6 @@ WebFetch can't extract data from YouTube's JS-rendered pages, so I used web sear
 - [ ] Customer review aggregation
 - [ ] Security assessment of WordPress spam compromise
 - [ ] Certified resellers directory analysis
+- [x] Site structure report email to Ron Berkes — drafted
 - Awaiting user direction
 <!-- /agent:pending -->

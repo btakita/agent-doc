@@ -645,7 +645,7 @@ In Video 2, include pneuma, noumena, phenomena in the description. Also include 
 - tasks/software/agent-doc.md
 Ready to upload both. Approve the titles/descriptions or edit them, then I'll upload with CC.
 
-### Re: Expanded Video 2 description (HEAD)
+### Re: Expanded Video 2 description
 
 Updated with pneuma/noumena/phenomena and thematic topics from the source documents:
 
@@ -673,7 +673,7 @@ Updated with pneuma/noumena/phenomena and thematic topics from the source docume
 - **Title:** "Agent-Doc: Building a Cross-Platform FFI Plugin with Socket IPC | Live Coding"
 
 Approve and I'll upload both.
-<!-- agent:boundary:f9d2138e -->
+<!-- agent:boundary:cdb74162 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

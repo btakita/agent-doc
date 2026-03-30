@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.27.4 released. Sync stash rescue shipped.
+v0.27.5 released. 3-pane layout fix shipped.
 <!-- /agent:status -->
 
 ## Exchange
@@ -348,7 +348,22 @@ All pass: 78 tmux-router tests, 38 agent-doc tests.
 - **tmux-router README.md** — Stash window section expanded
 
 Ready to release when you want to test.
-<!-- agent:boundary:ec2fcf8e -->
+release
+### v0.27.5 released (HEAD)
+
+**Published everywhere:**
+- **tmux-router:** v0.3.3 on crates.io ✓
+- **agent-doc crates.io:** v0.27.5 ✓
+- **PyPI:** v0.27.5 ✓
+- **GitHub Release:** [v0.27.5](https://github.com/btakita/agent-doc/releases/tag/v0.27.5) ✓
+- **cargo install:** updated ✓ (confirmed v0.27.5)
+
+**Changelog:**
+- Column-aware split target: auto_start picks positionally correct pane (first for left-column, last for right-column)
+- Early-exit stash: excess panes stashed before `resolved < 2` early return
+- 3 new integration tests
+- Docs updated (SPEC.md, module docs, tmux-router README)
+<!-- agent:boundary:c5511dab -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -358,9 +373,6 @@ Ready to release when you want to test.
 - [x] v0.27.1: Fix "externally modified" popup
 - [x] v0.27.3: Revert auto-kill
 - [x] v0.27.4: Sync stash rescue
-- [x] v0.27.5: Fix auto_start split target selection (column-aware)
-- [x] v0.27.5: Stash excess panes on early-exit from sync
-- [x] v0.27.5: Tests added
-- [x] v0.27.5: Docs updated
-- [ ] Release v0.27.5
+- [x] v0.27.5: 3-pane layout fix (column-aware split + early-exit stash)
+- All shipped.
 <!-- /agent:pending -->

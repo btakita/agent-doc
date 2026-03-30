@@ -493,13 +493,42 @@ Looking at the git history: 10 commits from 20:02 to 08:43, last commit added 13
 The only remaining items are "Update email draft with complete research findings" and "Send email (awaiting user approval)". The Claude session finished its active work and returned to the `❯` prompt. The pane then got stashed during a subsequent sync operation.
 
 To continue where it left off, re-claim `monsterrodholders.md` — the new session will see all the completed work in the document and can pick up the remaining email tasks.
-<!-- agent:boundary:3549852f -->
+
+We went into a 3 pane layout when I moved /home/brian/work/btakita/agent-loop/mail/drafts/2026-03-30-call-summary-next-steps.md from the right editor to the left editor, kept 2026-03-30-call-summary-next-steps.md selected...then on the right editor, selected another agent document.
+
+What happened? Please review logs.
+### Re: 3-pane layout still happening after v0.27.5 (HEAD)
+
+This is a **different scenario** from the one v0.27.5 fixed.
+
+**Your scenario:**
+1. Right editor had an agent doc (let's call it doc-A, with pane A)
+2. Left editor had an agent doc (doc-B, with pane B)
+3. You moved the draft file `2026-03-30-call-summary-next-steps.md` to the left editor (not an agent doc — no session ID)
+4. You selected a new agent doc on the right editor (doc-C)
+
+**What happened:**
+- Sync sees: left = draft (unmanaged), right = doc-C (needs new pane)
+- Pane A (doc-A, now stashed or in window) is still registered
+- Pane B (doc-B, now stashed or in window) is still registered
+- auto_start creates pane C for doc-C → 3 panes
+
+**Why v0.27.5 didn't help:** The early-exit stash only fires when `resolved < 2`. But in this case, the old panes A and B are still registered for their respective documents. If doc-B's session ID resolves to pane B, that's 2 resolved panes (B + C), so the reconciler runs the full path — but pane A is also in the window and not in the wanted set.
+
+The real issue is that **the full reconciler path (resolved >= 2) should ALSO stash panes not in the wanted set**. Let me check if the DETACH phase is actually running...
+
+Actually, looking at the reconcile function — the DETACH phase (Phase 4) iterates `refreshed` panes in the target window and stashes any not in `wanted`. This SHOULD work. Let me check if the problem is that auto_start created pane C via split BEFORE the reconciler ran, and the split target was wrong.
+
+**Most likely cause:** The column-aware split target fix (v0.27.5) should have picked the last pane for a right-column file. But if the draft is in the left column and the draft has no agent session, auto_start doesn't have col_args context — it may not know which column the new file is in.
+
+I need to check: does `auto_start_in_session` receive `split_before` correctly in the sync path? Let me review.
+<!-- agent:boundary:26375dd1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.27.5: 3-pane layout fix
-- [x] v0.27.6: Bold-text header fallback + SKILL.md header format
-- All shipped.
+- [x] v0.27.5: 3-pane layout fix (partial — only covered resolved < 2 case)
+- [x] v0.27.6: Bold-text header fallback
+- [ ] **Investigate: 3-pane recurrence in resolved >= 2 scenario**
 <!-- /agent:pending -->

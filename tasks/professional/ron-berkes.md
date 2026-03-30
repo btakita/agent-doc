@@ -718,7 +718,21 @@ Committed 3 sent email drafts in the `mail/` submodule:
 3. `2026-03-30-monsterrodholders-com-site-structure-report.md` — sent earlier
 
 **Not committed:** `2026-03-30-patent-mining-proposal.md` — hasn't been sent yet, stays as untracked draft.
-<!-- agent:boundary:b4aa0e0f -->
+
+Ok...update the patent-mining-proposal with any income propositions that were reset in call-summary-next-steps.
+### Re: Patent proposal updated with full scope (HEAD)
+
+Added a **"Full Scope — Beyond Patents"** section to the patent mining proposal covering items from the call summary:
+
+- **Monster Rod Holders** — CDN, spam cleanup, speed, Shop Manager, keep WordPress
+- **Fast Fire Starters** — ranking #3, push higher
+- **ManufacturingChina.com** — site analysis sent separately, WordPress comeback
+- **Content & Directory** — YouTube → blog automation, WhiskerSeeker dealer data
+
+The Income Structure now covers **all** work streams. This makes the patent proposal a comprehensive engagement email — no need to re-send the call summary.
+
+Say "send patent" to push to Gmail Drafts.
+<!-- agent:boundary:233e15bf -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -731,7 +745,8 @@ Committed 3 sent email drafts in the `mail/` submodule:
 - [x] Bi-directional links between ron-berkes.md and manufacturingchina.md
 - [x] Add Julian patent intelligence service to patent mining proposal
 - [x] Commit sent email drafts to mail submodule
-- [ ] Push patent mining proposal to Gmail Drafts (not yet sent)
+- [x] Merge call summary income items into patent proposal
+- [ ] Push patent mining proposal to Gmail Drafts
 - [ ] Wait for Ron to confirm Steve intro / Steve responds
 - [ ] Review transcript speaker labels for accuracy corrections
 - [ ] Patent mining automation — review Ron's spreadsheet when shared

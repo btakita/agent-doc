@@ -328,7 +328,7 @@ Test by: open 2 agent docs side-by-side → switch one side to a CSV → select 
 
 Add tests
 audit docs
-### Tests added (HEAD)
+### Tests added
 
 **tmux-router** (`sync.rs`):
 - `test_sync_early_exit_stashes_excess_panes` — 3 panes in window, 1 managed + 1 unmanaged column → verifies 2 excess panes are stashed, only 1 resolved pane remains. Stashed panes confirmed alive.
@@ -348,7 +348,7 @@ All pass: 78 tmux-router tests, 38 agent-doc tests.
 - **tmux-router README.md** — Stash window section expanded
 
 Ready to release when you want to test.
-<!-- agent:boundary:64ea8119 -->
+<!-- agent:boundary:ec2fcf8e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -247,11 +247,34 @@ fi
 ```
 
 **Recommendation:** Start with the Makefile approach (option 1) — it's simple, deterministic, and covers `cargo install` from source. The prebuilt binary approach (option 2) requires CI changes to build two variants. Want me to implement the Makefile detection?
-<!-- agent:boundary:cefde1ad -->
+
+Transfer these tasks to `tasks/software/corky.md`
+
+**Re: Transfer tasks to corky.md**
+
+Good news — both are **already implemented**. Looking at `tasks/software/corky.md` line 86-88:
+
+> `make install` and `install.sh` auto-detect GPU via `nvidia-smi`. GPU found → tries CUDA build/binary → falls back to CPU on failure. SPEC.md §5.30 updated.
+
+The Makefile `install` target already does exactly what we discussed:
+```makefile
+# Auto-detects GPU for transcribe-cuda (HEAD)
+install:
+    if nvidia-smi >/dev/null 2>&1; then
+        cargo install --path . --features transcribe-cuda  # falls back to CPU on failure
+    else
+        cargo install --path .
+    fi
+```
+
+And `install.sh` tries the CUDA binary first, falls back to CPU.
+
+**Root cause of the CPU build this session:** I ran `cargo run --release --features diarize` directly instead of using `make install` or `make release-gpu`. The deterministic GPU detection was already built — I just bypassed it by invoking cargo directly.
+
+No tasks to transfer — the work is done. The lesson is: **always use `make` targets instead of raw `cargo` commands** when building corky.
+<!-- agent:boundary:a6d6a67b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Add CUDA auto-detect to corky Makefile install target
-- [ ] Update install.sh to detect CUDA and select GPU binary (later — needs CI)
 <!-- /agent:pending -->
  

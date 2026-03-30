@@ -714,7 +714,20 @@ Added sync trace logging at key decision points:
 - Which exit path: single-file, early exit (resolved < 2), single-pane-column, full reconcile
 
 Installed. Next time you trigger the 1-pane bug, the tmux pane running `agent-doc sync` will show the trace. Check stderr of the sync pane for `[sync]` lines.
-<!-- agent:boundary:ea555f5f -->
+
+Single pane bug is still happening.
+![2026-03-30_11-40.png](../../../../../Pictures/agent-loop/2026-03-30_11-40.png)
+### Re: Fixed — trace logs now active (HEAD)
+
+The previous build was pulling tmux-router from **crates.io** (published v0.3.4), not the local source with trace logs. Switched to `path = "../tmux-router"` dependency and rebuilt.
+
+Now installed with local tmux-router trace logs. Reproduce the 1-pane bug and check the stderr output. The `[sync]` lines will show:
+- `[sync] resolution: resolved=X unresolved=X non_managed=X all_files=X`
+- `[sync]   resolved: pane=%XX file=...`
+- `[sync] early exit: resolved < 2, preserving other panes` (or whichever path)
+
+Note: the path dep is temporary for debugging. Will revert to crates.io version before release.
+<!-- agent:boundary:dd75ca46 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

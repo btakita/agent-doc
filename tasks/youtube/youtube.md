@@ -904,6 +904,8 @@ I think the following are important:
 - creative system lifecycle: unbounded creative system to bounded steady state system
 - begin/end eschatology (propose a better name) + cyclical eschatology
 
+I'm only responding to John Cassel reaching out to me. No full conversation yet. But the response inspired exploration into existence-lang.
+
 ### Re: Updated LinkedIn draft with deeper themes
 
 Updated the draft to include all the themes you flagged. Here's the revised ontology section:
@@ -920,7 +922,13 @@ For the eschatology naming — I used "genesis and completion cycles" instead. "
 - "Genesis and completion cycles" (current — captures begin/end + cyclical)
 
 Draft updated in `mail/social/20260330-ffi-ontology-linkedin.md`. Review and approve to publish.
-<!-- agent:boundary:b596313b -->
+
+### Re: John Cassel correction (HEAD)
+
+Updated the draft — changed "The conversation with John Cassel" to "A response to John Cassel's outreach about permaculture design principles inspired an exploration of parallels." This accurately reflects that it was a response to his outreach, not a full back-and-forth conversation.
+
+Draft updated in `mail/social/20260330-ffi-ontology-linkedin.md`. Ready for final review.
+<!-- agent:boundary:d488a899 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -928,7 +936,6 @@ Draft updated in `mail/social/20260330-ffi-ontology-linkedin.md`. Review and app
 - [x] Fixed sticky header shrinking (verified via chromium-bridge)
 - [x] Removed + archived snippet--rappstack
 - [x] YouTube comments with blog links on both videos
-- [x] LinkedIn draft updated with deeper themes
-- [ ] Approve/edit LinkedIn post
-- [ ] Publish LinkedIn post + comment with links
+- [x] LinkedIn draft updated with deeper themes + John Cassel correction
+- [ ] Final review + publish LinkedIn post
 <!-- /agent:pending -->

@@ -849,7 +849,23 @@ Do it here. Go
 - 2+ resolved panes → arrange in columns, stash extras (existing behavior)
 
 78 tmux-router tests + 38 agent-doc tests pass. Installed. Please test.
-<!-- agent:boundary:0b3be5c4 -->
+
+Found bad pane layout state:
+![2026-03-30_13-15.png](../../../../../Pictures/agent-loop/2026-03-30_13-15.png)
+### Re: Current state analysis (HEAD)
+
+Current tmux: 2 panes in agent-doc window (%153 this doc + %241 youtube.md). %241 is running `zsh` (Claude exited). 5 panes in stash.
+
+What specifically was bad about the layout when you took the screenshot? Was it:
+1. **3+ panes visible** (back to the old bug)?
+2. **1 pane visible** (over-stashing)?
+3. **Wrong pane visible** (wrong doc's pane showing)?
+4. **Dead pane visible** (%241 is idle zsh, should have been replaced)?
+
+From the screenshot it looks like 2 panes — which is correct for 2 editor columns. But if one of them is a dead session (zsh instead of active Claude), that's a different issue: the sync doesn't detect dead Claude sessions and replace them.
+
+Please describe what you expected vs. what you saw.
+<!-- agent:boundary:3e7f3a02 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

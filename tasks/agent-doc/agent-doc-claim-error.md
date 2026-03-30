@@ -232,7 +232,28 @@ release
 - **cargo install:** updated ✓
 
 **Changelog:** Rescue stashed panes in sync — preserves Claude session context across tab switches.
-<!-- agent:boundary:1915e5f3 -->
+I had whiskerseeker-dealers.csv on the left editor side...I selected an agent document on the right editor side.
+The tmux window had 3 panes.
+The left pane split into 2 panes.
+Why?
+It should have been 2 panes.
+### 3-pane layout analysis (HEAD)
+
+**Root cause:** When you selected the agent document on the right, `agent-doc sync` auto-started a Claude pane by splitting an **existing pane** already in the agent-doc window. If there were 2 panes already present (from other active agent doc sessions), the split created pane #3.
+
+The split target selection in `route.rs:511-520` (`auto_start_in_session`) grabs the **first available pane** in the agent-doc window — it doesn't consider whether that pane belongs to the current editor layout.
+
+**Expected behavior:** Sync should arrange exactly the panes needed for the current editor columns. Panes not in the current layout should be stashed.
+
+**Questions to narrow down the fix:**
+- How many panes were in the agent-doc tmux window **before** you selected the agent doc on the right?
+- Were other agent doc sessions running at the time?
+- Was the left side (CSV) ever an agent document, or always just the CSV?
+
+**Two fix directions:**
+1. **Post-split cleanup:** tmux-router sync stashes excess panes that don't belong to the current column layout (the overflow stashing may not be triggering for this case)
+2. **Pre-split awareness:** auto_start checks the desired layout before choosing a split target — avoid splitting panes that sync will immediately stash
+<!-- agent:boundary:8bd0c6a3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

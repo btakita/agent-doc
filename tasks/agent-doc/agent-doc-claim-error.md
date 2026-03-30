@@ -307,7 +307,7 @@ So reversed scenario (CSV right, new agent doc left):
 
 Both directions work. Ready to implement.
 Implement
-### Implemented (HEAD)
+### Implemented
 
 **Fix 1: Column-aware split target** (`route.rs:516`)
 - `split_before = true` (left-column) → picks **first** pane (leftmost)
@@ -325,7 +325,7 @@ Implement
 - Release binary built and installed to `~/.cargo/bin/agent-doc`
 
 Test by: open 2 agent docs side-by-side → switch one side to a CSV → select a new agent doc on the other side. Should get 2 panes, not 3.
-<!-- agent:boundary:a0c7b3e3 -->
+<!-- agent:boundary:05c580bd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

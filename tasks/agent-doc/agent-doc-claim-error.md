@@ -424,7 +424,7 @@ Implementing now.
 - `strip_head_markers()` also handles stripping `(HEAD)` from bold-text lines
 
 All 38 tests pass. Ready to release or add tests first.
-<!-- agent:boundary:60ea09ef -->
+<!-- agent:boundary:8d313d24 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

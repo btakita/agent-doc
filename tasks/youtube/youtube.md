@@ -747,10 +747,10 @@ Found and fixed the regression. The CSS `.scrolled` selectors were defined but t
 
 Committed, pushed, and CI will deploy. The sticky header/breadcrumb/title will now shrink when scrolling — font sizes reduce, nav padding shrinks, and breadcrumb top adjusts.
 
-### Re: Regression confirmed (HEAD)
+### Re: Regression confirmed
 
 Yes — the `.scrolled` class toggle was likely lost during a refactor. The fix is deployed now (CI in progress, ~1 min remaining). The scroll handler in `snippet--rappstack` now correctly applies `.scrolled` to `document.documentElement` when `scrollY > 10`, which activates all the shrinking CSS rules for header, breadcrumbs, and sticky headings.
-<!-- agent:boundary:706896d7 -->
+<!-- agent:boundary:57b20212 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

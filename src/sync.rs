@@ -11,9 +11,10 @@
 //! post-sync registry updates, and layout repair.
 //!
 //! ## Spec
-//! - `run(col_args, window, focus)` is the primary entry point. Repairs layout,
-//!   prunes stale sessions, auto-starts missing panes, delegates to `tmux_router::sync`,
-//!   then registers synced file→pane assignments.
+//! - `run(col_args, window, focus)` is the primary entry point. Filters empty
+//!   col_args (phantom columns from the JetBrains plugin), repairs layout,
+//!   prunes stale sessions, auto-starts missing panes, delegates to
+//!   `tmux_router::sync`, then registers synced file→pane assignments.
 //! - `run_layout_only(col_args, window, focus)` skips auto-start; used when called
 //!   from `route` which has already handled the target file.
 //! - `run_with_tmux(col_args, window, focus, tmux)` injects a custom `Tmux` instance
@@ -55,6 +56,9 @@
 //! - `register_synced_files` holds `RegistryLock` for the duration of its write and
 //!   saves only when at least one entry changed.
 //! - Auto-start errors are non-fatal: a warning is logged to stderr and sync continues.
+//! - Post-auto_start stash is no longer needed: `tmux_router::sync` always runs the
+//!   full reconcile path (no early exits), so excess panes are stashed during the
+//!   DETACH phase.
 //!
 //! ## Evals
 //! - repair_layout_skips_correct_state: session with agent-doc at index 0 and one
@@ -73,6 +77,8 @@
 //!   has `tmux_session: None` regardless of what the frontmatter contains.
 //! - find_alive_pane_for_file: pane whose child process cmdline contains `agent-doc`
 //!   and the file path is returned; panes without a matching cmdline are skipped.
+//! - empty_col_args_filtered: col_args `["file1.md", "", "file2.md", ""]` → after
+//!   filtering, only `["file1.md", "file2.md"]` are processed.
 
 use anyhow::Result;
 use std::cell::RefCell;
@@ -326,6 +332,20 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
     Ok(())
 }
 
+fn sync_log(msg: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true).append(true)
+        .open("/tmp/agent-doc-sync.log")
+    {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let _ = writeln!(f, "[{}] {}", ts, msg);
+    }
+}
+
 fn run_with_options(
     col_args: &[String],
     window: Option<&str>,
@@ -333,6 +353,13 @@ fn run_with_options(
     auto_start: bool,
     tmux: &Tmux,
 ) -> Result<()> {
+    // Filter empty col_args — the JetBrains plugin sometimes sends phantom empty columns.
+    let col_args: Vec<String> = col_args.iter()
+        .filter(|s| !s.trim().is_empty())
+        .cloned()
+        .collect();
+    let col_args = col_args.as_slice();
+    sync_log(&format!("=== sync start: col_args={:?} window={:?} focus={:?} auto_start={}", col_args, window, focus, auto_start));
     // Repair layout before anything else: consolidate stash windows and ensure
     // the agent-doc window exists.
     // Resolve session name from --window arg, or fall back to current session.
@@ -357,6 +384,7 @@ fn run_with_options(
             .unwrap_or_default();
         if !session_name.is_empty() {
             let _ = repair_layout(tmux, &session_name, "agent-doc");
+            sync_log("repair_layout completed");
             // After repair, the window ID may have changed. Re-resolve by name.
             let resolved = tmux.raw_cmd(&[
                 "list-windows", "-t", &format!("{}:", session_name),
@@ -590,6 +618,7 @@ fn run_with_options(
                 continue;
             }
 
+            sync_log(&format!("auto-starting session for {} (no alive pane)", file_path.display()));
             eprintln!(
                 "[sync] auto-starting session for {} (no alive pane)",
                 file_path.display()
@@ -602,10 +631,25 @@ fn run_with_options(
                 );
             }
         }
+
+        // Post-auto_start stash removed: the tmux_router reconciler now always runs
+        // the full reconcile path (no early exits), so it handles stashing excess panes.
+    }
+
+    // Log pane count before tmux_router::sync
+    if let Some(w) = window {
+        let pane_count = tmux.list_window_panes(w).map(|p| p.len()).unwrap_or(0);
+        sync_log(&format!("pre-tmux_router::sync: window={} panes={}", w, pane_count));
     }
 
     let result =
         tmux_router::sync(col_args, window, focus, tmux, &registry_path, &resolve_file)?;
+
+    // Log pane count after tmux_router::sync
+    if let Some(w) = window {
+        let pane_count = tmux.list_window_panes(w).map(|p| p.len()).unwrap_or(0);
+        sync_log(&format!("post-tmux_router::sync: window={} panes={} file_panes={}", w, pane_count, result.file_panes.len()));
+    }
 
     // tmux_session frontmatter write-back removed (deprecated).
     // Session targeting now uses --window arg or pane introspection.
@@ -1063,5 +1107,23 @@ mod tests {
             }
             _ => panic!("expected Registered"),
         }
+    }
+
+    /// Empty col_args are filtered out before processing (JetBrains plugin sends phantom columns).
+    #[test]
+    fn empty_col_args_filtered() {
+        let col_args: Vec<String> = vec![
+            "file1.md".into(),
+            "".into(),
+            "file2.md".into(),
+            "".into(),
+            "  ".into(),
+        ];
+        let filtered: Vec<String> = col_args
+            .iter()
+            .filter(|s| !s.trim().is_empty())
+            .cloned()
+            .collect();
+        assert_eq!(filtered, vec!["file1.md", "file2.md"]);
     }
 }

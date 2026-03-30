@@ -56,10 +56,12 @@ class SyncLayoutAction : AnAction() {
                     val editorLayout = if (visibleMdFiles.size > 1)
                         LayoutDetector.detectEditorLayout(project) else null
                     val cmd = if (editorLayout != null && editorLayout.columns.size > 1) {
-                        // 2D layout: use sync --col format
-                        val colArgs = editorLayout.columns.flatMap { col ->
-                            listOf("--col", col.files.joinToString(","))
-                        }
+                        // 2D layout: use sync --col format (filter empty columns)
+                        val colArgs = editorLayout.columns
+                            .filter { it.files.isNotEmpty() }
+                            .flatMap { col ->
+                                listOf("--col", col.files.joinToString(","))
+                            }
                         listOf(agentDoc, "sync") + colArgs + focusArgs + windowArgs
                     } else {
                         // Single file or flat layout: sync with single column

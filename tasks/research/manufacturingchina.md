@@ -144,7 +144,7 @@ Research complete. I crawled the site, analyzed SEO, and mapped the competitive 
 #### Email Draft
 
 I'll create the email draft at `mail/drafts/2026-03-30-manufacturingchina-site-structure-report.md` following the same format as the MonsterRodHolders report. Ready for review before pushing to Gmail Drafts.
-### Re: Email draft (HEAD)
+### Re: Email draft
 
 Email draft created at `mail/drafts/2026-03-30-manufacturingchina-site-structure-report.md`
 
@@ -162,7 +162,7 @@ Covers:
 - Priority action list (6 items, SEO fix is #1)
 
 Review the draft and say "send" to push to Gmail Drafts, or edit first.
-<!-- agent:boundary:dfed141b -->
+<!-- agent:boundary:cc3f1f5c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -810,7 +810,7 @@ Starting migration. Plan:
 
 Working on it now...
 
-### Re: snippet--rappstack removed (HEAD)
+### Re: snippet--rappstack removed
 
 **Audit result:** The package was completely orphaned — zero imports anywhere in the codebase. All active functionality already lived in `ui--browser--briantakita` and `ui--server--briantakita`.
 
@@ -821,7 +821,7 @@ Working on it now...
 4. Committed and pushed — CI deploying
 
 The snippet--rappstack GitHub repo still exists but is no longer referenced. You can archive it at your convenience.
-<!-- agent:boundary:28a7ea1d -->
+<!-- agent:boundary:10a3773a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

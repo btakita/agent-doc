@@ -3,6 +3,7 @@ agent_doc_session: 76ecc7d3-a8f8-4db5-abfd-be1e69dcb082
 tmux_session: '0'
 agent_doc_format: template
 agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
 ---
 
 Please make a transcript of /home/brian/Videos/2026-03-12 00-43-08.mp4
@@ -534,12 +535,36 @@ Publish comment on the post with links to:
 - btakita/module-harness github and crate
 - existence-lang/existence github and existence crate
 
+Edit the linkedin post to include conceiving, implementing, and releasing module-harness cli tool and library
+
+
+### Re: Publish LinkedIn + comment (HEAD)
+
+**LinkedIn published:**
+
+**Comment posted** with links to:
+- YouTube full session
+- Blog post
+- module-harness GitHub + crates.io
+- existence-lang GitHub + crates.io
+Restart claude with --dangerously-skip-permissions
+
 ### Re: Edit LinkedIn post
 
 Updated the LinkedIn post to emphasize conceiving, implementing, and releasing module-harness as a CLI tool and library — from concept to crates.io in a single session.
 
 Post updated: https://www.linkedin.com/feed/update/urn:li:share:7442567333950345217
-<!-- agent:boundary:59a993f0 -->
+
+In [2026-03-29 16-19-07.mp4](../../../../../Videos/2026-03-29%2016-19-07.mp4), please cut out 35:46.1 - 35:47.5
+
+### Re: Video cut (HEAD)
+
+Cut out 35:46.1 - 35:47.5 from `2026-03-29 16-19-07.mp4` using stream copy (no re-encoding, no quality loss).
+
+Output: `~/Videos/2026-03-29 16-19-07-cut.mp4` (6.4G)
+
+Original file is unchanged. Verify the cut looks clean, then rename if you want to replace the original.
+<!-- agent:boundary:d05bdc21 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -549,5 +574,6 @@ Post updated: https://www.linkedin.com/feed/update/urn:li:share:7442567333950345
 - [x] YouTube comment with blog link
 - [x] corky v0.21.2 released
 - [x] rappstack packages at 0.1.4
-- [ ] Verify CI build passes and blog deploys
+- [x] Verify CI build passes and blog deploys
+- [x] Cut 35:46.1-35:47.5 from 2026-03-29 16-19-07.mp4
 <!-- /agent:pending -->

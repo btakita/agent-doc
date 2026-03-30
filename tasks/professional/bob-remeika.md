@@ -1230,15 +1230,40 @@ Good thinking on Wednesday or even Thursday. Here's a structured call plan:
 - **Wed Apr 2** if you feel ready with a basic demo flow
 - **Thu Apr 3** if you want an extra day to prepare polished examples
 - Either way, book by tomorrow (Mon Mar 31) so Bob has it on his calendar
-<!-- agent:boundary:8d77ee5b -->
+Today is Monday.
+
+Let's figure out what is know and unknown for the call with Bob.
+### Re: Known vs Unknown for the Bob call (HEAD)
+
+**Known / Ready:**
+- Bob is CEO & Co-Founder at Ragie (RAG-as-a-Service, agentic OCR)
+- Shared history from Grockit — strong personal rapport
+- Bob already expressed genuine interest in what you're building
+- You signed up for Ragie and told him you're integrating it
+- Calendly has availability all weekdays in April (confirmed — Wed Apr 1 through Fri Apr 3+ all open)
+- Corky exists and works: email drafting, transcription with diarization, contact management
+- agent-doc exists and works: template mode, live editing, git integration, streaming writes
+- Two active client projects (Ron Berkes — manufacturing, Judith Krug — mortgage brokerage) with doc-heavy workflows
+
+**Unknown / Need to figure out:**
+1. **Ragie integration specifics** — Have you actually written any Ragie API code yet? Or is it still conceptual? What would the integration point be — ingesting project context into Ragie for retrieval during agent-doc sessions?
+2. **Demo readiness** — Can you run a live agent-doc session as a demo? What would break or look rough?
+3. **What you're asking Bob for** — Is this a "show and tell" catch-up, a partnership pitch, a customer conversation, or exploring the contract work angle?
+4. **Ragie pricing/tier** — Are you on a free tier? Does the plan support the features you'd demo?
+5. **Ron & Judith integration specifics** — What exactly would Ragie do for them? Extract data from PDFs (Ragie Parse)? Power search over their documents? The pitch needs concrete use cases, not just "they have documents."
+6. **Contract gig status** — Bob said he'd keep you on deck. Is that something to bring up on the call or leave alone?
+
+**Recommendation:** Decide what you're asking for before booking. A "show what I'm building + explore how Ragie fits" framing is low-pressure and authentic. You don't need a polished integration — showing the architecture and where Ragie slots in is enough for a 30-min call with an old colleague.
+<!-- agent:boundary:cca84953 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Book Calendly slot with Bob for Wed Apr 2 or Thu Apr 3 (https://calendly.com/bobremeika/30-minute-call) — book by Mon Mar 31
-- Prepare agent-doc demo (template mode walkthrough)
-- Prepare Corky demo (email drafting + transcription pipeline)
-- Outline Ragie integration pitch using Ron's and Judith's projects as use cases
+- Decide call framing (catch-up vs partnership vs customer)
+- Answer the 6 unknowns above to prep for the call
+- Book Calendly slot (Wed Apr 1 or later) — https://calendly.com/bobremeika/30-minute-call
+- Prepare agent-doc live demo
+- Outline Ragie integration architecture (even if conceptual)
 - Follow up on contract gig if Bob reports the intros fell through
 <!-- /agent:pending -->

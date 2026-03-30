@@ -446,12 +446,12 @@ I'll update the draft to say "whether we keep it on WordPress, move to Shopify, 
 continue
 
 Send from brian.takita@gmail.com
-### Re: Continue & send email (HEAD)
+### Re: Continue & send email
 
 Updated the email draft account from `btak.dev` to `brian.takita@gmail.com` and pushed to **Gmail Drafts**. The draft already had the platform-agnostic language ("Whether we go with Shopify, Astro, or a custom Cloudflare-hosted frontend") so no content changes were needed.
 
 Open your Gmail drafts to review and send: [Gmail Drafts](https://mail.google.com/mail/u/0/#drafts)
-<!-- agent:boundary:55d2383a -->
+<!-- agent:boundary:1971525f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

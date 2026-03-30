@@ -116,7 +116,7 @@ cargo run --release --features "diarize,transcribe-cuda" -- transcribe --diarize
 ```
 
 Requires CUDA toolkit on the system. With GPU, the 62-min transcription would likely drop to ~5-10 min.
-<!-- agent:boundary:e3882740 -->
+<!-- agent:boundary:e2d4c5a1 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

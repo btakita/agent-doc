@@ -303,7 +303,7 @@ Brian Takita
 ---
 
 The PDF is at `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-cdw-payments.pdf` — please review it before sending. LinkedIn messaging supports file attachments, so we can send the reply + PDF via chromium-bridge when you approve.
-<!-- agent:boundary:8668c5b4 -->
+<!-- agent:boundary:4de4cfaf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

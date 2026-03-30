@@ -409,7 +409,7 @@ Got the email: **melissa.lewis2019@gmail.com**. SMS wasn't received, so pivoting
 Review the draft and let me know if you want changes before pushing to Gmail Drafts. Say "send" to push via corky.
 
 **Contact file update:** Adding melissa.lewis2019@gmail.com to Melissa's contact file.
-### Re: Contact update for Melissa Lewis (HEAD)
+### Re: Contact update for Melissa Lewis
 
 Updated Melissa's contact across all systems:
 
@@ -420,7 +420,7 @@ Updated Melissa's contact across all systems:
 Corky will now track email correspondence with Melissa automatically. The gmail filter will label messages to/from her as "correspondence."
 
 The email draft at `mail/drafts/2026-03-30-melissa-lewis-update.md` is ready to send. Say "send" to push to Gmail Drafts via corky.
-<!-- agent:boundary:6da13c20 -->
+<!-- agent:boundary:d448855b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -731,7 +731,7 @@ Already deployed. The git push triggered Cloudflare Pages CI, which completed su
 Blog posts are live:
 - https://briantakita.me/posts/agent-doc-ffi-plugin-socket-ipc
 - https://briantakita.me/posts/existence-lang-pneuma-noumena-phenomena
-<!-- agent:boundary:72c1ef98 -->
+<!-- agent:boundary:4dc0d4ec -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

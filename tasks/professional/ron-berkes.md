@@ -83,7 +83,14 @@ Converted to template mode. The Summary section is static content; the `agent:ex
 
 Transcribe and diarize using corky --gpu
 /home/brian/work/btakita/agent-loop/mail/contacts/ron-berkes/recordings/phone_20260329-193132_6504368181.amr
+
+Transcribing `phone_20260329-193132_6504368181.amr` (~11MB) with diarization and speaker labels (Ron Berkes, Brian Takita). Output will be saved to `mail/contacts/ron-berkes/recordings/phone_20260329-193132_6504368181.md`.
+
+Running now — will update when complete.
+<!-- agent:boundary:0e5cb9ad -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
+- [ ] Transcription of phone_20260329-193132_6504368181.amr (in progress)
+- [ ] Commit transcription output
 <!-- /agent:pending -->

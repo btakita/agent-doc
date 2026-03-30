@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Site crawled. 57 products, 79 pages, 20 blog posts (11 are spam). WordPress/WooCommerce platform with possible SEO compromise.
+Site crawled + YouTube channels researched. 57 products, company founded 2007 by Steve Douglas ("The Catfish Dude", 100k+ YouTube subs). WordPress site has SEO spam compromise.
 <!-- /agent:status -->
 
 ## Exchange
@@ -28,6 +28,9 @@ Please crawl:
 https://monsterrodholders.com/
 Look at the site directory structure.
 https://monsterrodholders.com/wp-sitemap.xml
+Youtube channels:
+https://www.youtube.com/@SteveDouglastheCatfishDude
+https://www.youtube.com/@monsterrodholders
 
 ### Re: Site crawl
 
@@ -169,11 +172,72 @@ rod-holders | rod-holder-bases | racks-and-t-bars | rod-transport-solutions | mo
 3. **WooCommerce + Zoho integration** — `/woocommerce-to-zoho-inventory-plugin/` page exists
 4. **GeoDirectory pages** — gd-archive, gd-details suggest a directory plugin is installed
 5. **Niche but complete product line** — 57 products covering rod holders, bases, nets, anchors, tackle, transport, and accessories
-<!-- agent:boundary:ff2546d6 -->
+
+### Re: YouTube channels (HEAD)
+
+WebFetch can't extract data from YouTube's JS-rendered pages, so I used web search + the company site to gather what's available.
+
+---
+
+#### @SteveDouglastheCatfishDude
+
+**Channel:** Steve Douglas the Catfish Dude
+**Subscribers:** 100k+
+**Views:** Millions (exact count unavailable)
+**Content:** Catfishing instruction, equipment reviews, tournament fishing, technique demos
+
+**About Steve Douglas:**
+- **Title:** President & Founder of Monster Rod Holders
+- **Nickname:** "The Catfish Dude"
+- **Recognition:** Called "one of the founding fathers of the great American sport of catfishing" and "one of the most recognizable figures in the industry"
+- **American Catfishing Association Hall of Fame Member** (has a Spotify podcast episode about this)
+- **Origin story (2007):** Lost a 100+ lb catfish during an Ohio River tournament when his rod holder snapped. Designed and built 8 rod holders for personal use. Other anglers on the 2008 national trail saw them and wanted their own — Monster Rod Holders was born.
+- **Partnerships:** Long-standing sponsorship with Tangling with Catfish (~15 years). Collaborated on the Monster Rod Series (red E-glass blank, black cross-cut EVA foam grip, neon green double-epoxy wraps).
+- **Techniques:** Known for "bumping" — presenting baits near underwater structures in current-driven rivers (Mississippi River specialty)
+- **Philosophy:** Avid catch-and-release fisherman
+
+---
+
+#### @monsterrodholders
+
+**Channel:** Monster Rod Holders (official brand channel)
+**Details:** Limited data available via search — appears to be the company's official YouTube presence for product demos and brand content, complementing Steve's personal channel.
+
+---
+
+#### Company Details (from About Us page)
+
+| Field | Detail |
+|-------|--------|
+| **Address** | 777 Highway 434, Lebanon Junction, KY 40150 |
+| **Phone** | (270) 215-2070 |
+| **Email** | support@monsterrodholders.com |
+| **Hours** | Mon–Fri 8 AM – 4 PM (closed weekends) |
+| **Materials** | 1/2-inch solid steel, bent & welded, baked-on UV-resistant rubber coating |
+| **Manufacturing** | All products made in Kentucky, USA |
+
+#### Social Media Presence
+- **YouTube:** @SteveDouglastheCatfishDude (100k+ subs, primary content channel)
+- **YouTube:** @monsterrodholders (brand channel)
+- **Instagram:** @officialmonsterrodholders
+- **Instagram:** @monsterrodholderbrands
+- **Facebook:** Steve Douglas personal page
+
+#### Industry Connections
+- [Tangling with Catfish](https://tanglingwithcatfish.com) — rod partnership, Monster Rod Series
+- [Catfish Conference](https://catfishconference.com) — event sponsor/vendor
+- [Catfish Angler Forum (USCA)](https://www.catfish1.com) — community presence
+- [Kayak Catfish](http://www.kayakcatfish.com) — product reviews/features
+<!-- agent:boundary:0313ce02 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Awaiting user direction on what to research deeper (pricing, competitors, specific products, security assessment, etc.)
+- [ ] Deep-dive into specific product pricing (requires crawling individual product pages)
+- [ ] Competitor analysis (Fish Bite Rod Holders, others)
+- [ ] Customer review aggregation
+- [ ] Security assessment of WordPress spam compromise
+- [ ] Certified resellers directory analysis
+- Awaiting user direction
 <!-- /agent:pending -->

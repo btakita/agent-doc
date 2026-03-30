@@ -732,7 +732,22 @@ Added a **"Full Scope — Beyond Patents"** section to the patent mining proposa
 The Income Structure now covers **all** work streams. This makes the patent proposal a comprehensive engagement email — no need to re-send the call summary.
 
 Say "send patent" to push to Gmail Drafts.
-<!-- agent:boundary:e5489aea -->
+
+Note that Julian provides the Manufacturer database.
+We can offer Julian research and search capabilities. Which can also work with his risk management operations.
+### Re: Julian as manufacturer data provider + research services (HEAD)
+
+Updated the patent mining proposal:
+
+1. **Step 3** — manufacturer matching now sources from "Julian's 3A Credit data + ManufacturingChina.com listings"
+2. **Julian section reframed as mutual value exchange:**
+   - Julian **provides**: manufacturer database
+   - We **offer**: patent intelligence + AI-powered research/search for his risk management operations
+   - "One system, three beneficiaries" (Julian: research tools, Ron: qualified leads, us: income)
+3. **"What I'd Need"** — asks Ron for an intro to Julian for database access
+
+Say "send patent" to push to Gmail Drafts.
+<!-- agent:boundary:f7e65b62 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -746,6 +761,7 @@ Say "send patent" to push to Gmail Drafts.
 - [x] Add Julian patent intelligence service to patent mining proposal
 - [x] Commit sent email drafts to mail submodule
 - [x] Merge call summary income items into patent proposal
+- [x] Reframe Julian as data provider + research services consumer
 - [ ] Push patent mining proposal to Gmail Drafts
 - [ ] Wait for Ron to confirm Steve intro / Steve responds
 - [ ] Review transcript speaker labels for accuracy corrections

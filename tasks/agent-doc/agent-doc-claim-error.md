@@ -994,7 +994,7 @@ Update README.md, SPEC.md, module-harness, and ontology.
 - Reconcile detail file logging
 - SPEC.md phase order corrected
 - 569 tests passing
-### Re: Docs updated for v0.28.0 (HEAD)
+### Re: Docs updated for v0.28.0
 
 - **README.md** — Reconciler description: "always runs, no early exits, handles 0/1/2+ panes uniformly"
 - **CLAUDE.md** — sync.rs module note updated
@@ -1003,7 +1003,7 @@ Update README.md, SPEC.md, module-harness, and ontology.
 - **audit-docs** — All staleness warnings resolved
 
 Committed and pushed.
-<!-- agent:boundary:fe5ff1bc -->
+<!-- agent:boundary:19af4377 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

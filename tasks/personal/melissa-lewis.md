@@ -438,7 +438,21 @@ Good call. Updated the email draft:
 The draft now focuses on concrete, verifiable work (live client sites, YouTube→blog pipeline, patent automation) without pointing Melissa to anything unfinished.
 
 Draft ready at `mail/drafts/2026-03-30-melissa-lewis-update.md`. Say "send" to push to Gmail Drafts.
-<!-- agent:boundary:679556e7 -->
+
+Mention more about what Ragie does. Melissa maybe interested in it or may know someone who would be interested in it.
+All business documents are open for ai search & reasoning.
+### Re: Expand Ragie description for Melissa (HEAD)
+
+Updated the Bob Remeika/Ragie bullet in the email draft. Now explains what Ragie actually does in accessible terms:
+
+> Ragie makes it possible for businesses to upload all their documents (contracts, emails, PDFs, spreadsheets — anything) and have AI search through and reason about them instantly. Think of it like having an AI analyst that's read every document your company has ever produced.
+
+Also added: "If you or anyone in your network deals with large volumes of business documents, Ragie is worth knowing about." — a soft referral prompt without being pushy.
+
+This is relevant for Melissa because wedding professionals deal with vendor contracts, client agreements, timelines, and budgets. And her loan officer contacts definitely deal with document-heavy workflows.
+
+Draft updated at `mail/drafts/2026-03-30-melissa-lewis-update.md`. Say "send" to push to Gmail Drafts.
+<!-- agent:boundary:61927e15 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

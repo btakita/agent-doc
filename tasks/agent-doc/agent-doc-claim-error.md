@@ -905,7 +905,7 @@ The empty strings shouldn't be there — the plugin is sending phantom columns. 
 Want me to add the filter? This is a 1-line fix.
 Yes. Let's also fix the plugin
 Is this an ffi or JB plug
-### Re: Both fixes applied (HEAD)
+### Re: Both fixes applied
 
 **1. sync.rs** — Filters empty col_args at entry (defensive).
 
@@ -914,7 +914,7 @@ Is this an ffi or JB plug
 **Plugin needs reinstall:** `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-*.zip` → IDEA → Settings → Plugins → gear → Install from Disk → restart.
 
 Both binary and plugin are ready to test.
-<!-- agent:boundary:7f22dc68 -->
+<!-- agent:boundary:10984a3c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

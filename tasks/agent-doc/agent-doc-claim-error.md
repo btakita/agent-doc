@@ -598,6 +598,7 @@ Release
 - Docs updated (route.rs, sync.rs, SPEC.md)
 
 Please update VERSIONS.md. Make sure VERSIONS.md is **always** updated before each release.
+Make sure the relevant SKILL.md files hold this rule.
 ### Re: VERSIONS.md updated
 
 Added entries for v0.27.0 through v0.27.7 to `src/agent-doc/VERSIONS.md`. Committed and pushed.
@@ -605,7 +606,17 @@ Added entries for v0.27.0 through v0.27.7 to `src/agent-doc/VERSIONS.md`. Commit
 Also saved a memory: **always update VERSIONS.md before each release** — this is now a mandatory pre-release step.
 
 Note: v0.24.0 through v0.26.x entries are still missing (from previous sessions). I only added the versions released in this session. If you want the full history backfilled, let me know.
-<!-- agent:boundary:346d07f3 -->
+full history backfill
+### Re: VERSIONS.md backfill and SKILL rule (HEAD)
+
+**Full backfill done:** 30 missing version entries added (v0.23.2 through v0.26.6), derived from git commit messages between tags. VERSIONS.md now has complete history from v0.17.24 through v0.27.7.
+
+**SKILL rule added:**
+- **CLAUDE.md** — Release Process step 2: "Update `VERSIONS.md` with a new version entry summarizing the changes"
+- **dev SKILL.md** — Already had the rule in pre-release verification checklist
+
+Committed and pushed.
+<!-- agent:boundary:1c623b98 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -614,6 +625,6 @@ Note: v0.24.0 through v0.26.x entries are still missing (from previous sessions)
 - [x] v0.27.5: 3-pane fix (route path)
 - [x] v0.27.6: Bold-text header fallback
 - [x] v0.27.7: Sync path column-aware split
-- [x] VERSIONS.md updated for v0.27.0-v0.27.7
+- [x] VERSIONS.md: full history backfill + release process rule
 - All shipped.
 <!-- /agent:pending -->

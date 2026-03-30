@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Resume updated with menu.com. CDW PDF built. Draft reply ready — awaiting approval to send.
+Reply loaded in LinkedIn compose box. Attach PDF manually and send.
 <!-- /agent:status -->
 
 ## Exchange
@@ -330,7 +330,22 @@ Brian Takita
 ---
 
 PDF ready at `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-cdw-payments.pdf`. Review the PDF, then approve to send via chromium-bridge with the resume attached.
-<!-- agent:boundary:e649dd96 -->
+
+send via chromium-bridge. Make sure the reply is well formatted and the resume is attached before sending.
+### Re: Send via chromium-bridge
+
+Message is loaded in Kaci's LinkedIn compose box (tab 1, iframe 1). Verified the text is correct.
+
+**Cannot auto-attach PDF** — LinkedIn's file input requires CDP `DOM.setFileInputFiles` but the MCP DevTools connection times out on LinkedIn pages (the `Network.enable timed out` issue you asked about). The chromium-bridge CLI can evaluate JS in the iframe but can't programmatically set file inputs due to browser security restrictions.
+
+**Manual steps needed:**
+1. The reply text is already in the compose box — review it in browser
+2. Click the **paperclip icon** (attachment) next to the compose box
+3. Select: `/home/brian/work/btakita/agent-loop/resume/BrianTakita-cdw-payments.pdf`
+4. Click **Send**
+
+**Re: MCP timeout issue** — The `Network.enable timed out` error happens because LinkedIn pages are very heavy (large iframes, complex DOM). The MCP `chrome-devtools` server's CDP protocol timeout is shorter than what LinkedIn needs. The chromium-bridge CLI works because it uses a direct WebSocket connection with a configurable timeout. To fix this permanently, the MCP server would need a higher `protocolTimeout` setting in its connection config.
+<!-- agent:boundary:6e7dd23d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -342,5 +357,6 @@ PDF ready at `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-cdw-
 - [x] Build CDW-tailored PDF
 - [x] Save Kaci's new message
 - [x] Revised draft with experience database mention
-- [ ] Send reply + updated resume to Kaci (awaiting approval)
+- [x] Message loaded in LinkedIn compose box
+- [ ] Attach PDF and send (manual — user action needed)
 <!-- /agent:pending -->

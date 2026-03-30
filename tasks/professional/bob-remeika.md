@@ -1174,7 +1174,7 @@ That's natural, non-pushy, and lets Bob connect the dots. The contract gig and d
 - Prepare demo before then
 
 Use chromium-bridge to get bob-remeika's latest message(s) to me on LinkedIn.
-### Re: LinkedIn messages (HEAD)
+### Re: LinkedIn messages
 
 Fetched the latest LinkedIn thread with Bob Remeika. Here's the full recent exchange:
 
@@ -1198,7 +1198,7 @@ Fetched the latest LinkedIn thread with Bob Remeika. Here's the full recent exch
 - Calendly link: https://calendly.com/bobremeika/30-minute-call
 - Contract gig: Already sent 2 intros, but keeping Brian on deck if those fall through
 - **Action needed:** Book the Calendly slot for Tue Apr 1 or Wed Apr 2
-<!-- agent:boundary:8f24441f -->
+<!-- agent:boundary:222b9723 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

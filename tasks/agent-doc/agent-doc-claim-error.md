@@ -1020,12 +1020,30 @@ The reconciler only knows about files in `col_args`. When the left editor has a 
 This is a plugin-side fix. The binary already does the right thing: if 2 files are in col_args and both resolve, 2 panes are kept. The problem is the plugin sending only 1 file when it should send 2 (with the "last known" for the non-.md column).
 
 Want me to implement this in the JetBrains plugin?
-<!-- agent:boundary:317a4487 -->
+I would rather have the FFI plugin send the files that are currently selected.
+The agent-doc binary could then "remember" what the last active agent doc in the layout pane is.
+### Re: Binary-side column memory (HEAD)
+
+Good call — keeps the plugin thin. The binary should:
+
+1. **On each sync:** Record the resolved agent doc per column position to a state file (e.g., `.agent-doc/last_layout.json`)
+2. **When a column has no agent doc:** Look up the last known agent doc for that column position from the state file
+3. **Include the remembered doc** in the wanted set so the reconciler preserves its pane
+
+**Implementation:**
+- New file: `.agent-doc/last_layout.json` — maps column index → last known agent doc path
+- In `sync.rs:run_with_options`, after resolving files: save column→file mapping for resolved agent docs
+- For unmanaged columns: look up the saved mapping and add to the resolved set
+
+This way the plugin just sends `--col non-agent.txt --col agent-doc.md` and the binary fills in the gap from memory.
+
+This is a medium-sized change. Should I implement now or move to a separate task?
+<!-- agent:boundary:241cb793 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.28.0: Structural layout fix shipped
-- [ ] **JetBrains plugin: column-position memory for non-.md files**
+- [ ] **Binary-side column-position memory for non-.md columns**
 <!-- /agent:pending -->

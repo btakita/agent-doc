@@ -87,10 +87,17 @@ Transcribe and diarize using corky --gpu
 Transcribing `phone_20260329-193132_6504368181.amr` (~11MB) with diarization and speaker labels (Ron Berkes, Brian Takita). Output will be saved to `mail/contacts/ron-berkes/recordings/phone_20260329-193132_6504368181.md`.
 
 Running now — will update when complete.
-<!-- agent:boundary:0e5cb9ad -->
+
+**Transcription complete.** `phone_20260329-193132_6504368181.amr` → `phone_20260329-193132_6504368181.md`
+
+- **Duration:** 123:43 (2h 4min)
+- **Segments:** 2980, 2 speakers detected (Ron Berkes, Brian Takita)
+- **Output:** 1548 lines at `mail/contacts/ron-berkes/recordings/phone_20260329-193132_6504368181.md`
+- **Processing time:** ~62 min on CPU (no GPU detected — large-v3 model)
+
+Note: Some confidence scores are low (0.29–0.48 range), indicating potential speaker label swaps — common with mono phone recordings. Review the transcript for accuracy, especially in sections with low confidence.
+<!-- agent:boundary:9a392f8f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Transcription of phone_20260329-193132_6504368181.amr (in progress)
-- [ ] Commit transcription output
 <!-- /agent:pending -->

@@ -204,9 +204,54 @@ So there were **three** layers that should have prevented the CPU-only build, an
 3. The generated skill (though it doesn't currently mention transcription features)
 
 The transcription GPU preference lives in `CLAUDE.local.md` already. The generated `SKILL.md` doesn't cover transcription build features — that could be added to corky's skill generator if you want it embedded in the skill itself. But since `CLAUDE.local.md` already handles it, the real failure was me not reading the submodule's instruction files before building.
-<!-- agent:boundary:0547450a -->
+
+We should have the GPU preference be deterministic in the cargo install and in the `curl | sh` script.
+
+**Re: Deterministic GPU in install paths**
+
+Current state:
+- `Cargo.toml` defaults: `["transcribe", "diarize"]` — no CUDA (can't add it to defaults without breaking non-GPU machines)
+- `install.sh` — downloads prebuilt binary from GitHub Releases
+- `cargo install --path .` — builds from source with default features only
+
+Two changes would make GPU deterministic:
+
+**1. `cargo install` path — auto-detect CUDA:**
+Add a `build.rs` that checks for CUDA toolkit at compile time and enables the feature automatically:
+```rust
+// build.rs
+fn main() {
+    if std::process::Command::new("nvcc").arg("--version").output().is_ok() {
+        println!("cargo:rustc-cfg=has_cuda");
+        // Can't enable features from build.rs, but can set cfg
+    }
+}
+```
+Problem: `build.rs` can't enable Cargo features. The standard approach is a **Makefile target** or wrapper script:
+```bash
+# In Makefile (HEAD)
+install:
+    @if command -v nvcc >/dev/null 2>&1; then \
+        cargo install --path . --features "diarize,transcribe-cuda"; \
+    else \
+        cargo install --path . --features diarize; \
+    fi
+```
+
+**2. `curl | sh` path — ship GPU and CPU binaries:**
+Build two release binaries: `corky-linux-x86_64` (CPU) and `corky-linux-x86_64-cuda` (GPU). The install script detects CUDA and picks the right one:
+```bash
+if command -v nvcc >/dev/null 2>&1 || [ -d /usr/local/cuda ]; then
+    BINARY="${BINARY}-cuda"
+fi
+```
+
+**Recommendation:** Start with the Makefile approach (option 1) — it's simple, deterministic, and covers `cargo install` from source. The prebuilt binary approach (option 2) requires CI changes to build two variants. Want me to implement the Makefile detection?
+<!-- agent:boundary:50c9bae7 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
+- [ ] Add CUDA auto-detect to corky Makefile install target
+- [ ] Update install.sh to detect CUDA and select GPU binary (later — needs CI)
 <!-- /agent:pending -->
  

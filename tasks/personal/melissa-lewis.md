@@ -381,7 +381,7 @@ The message Melissa received would show as: "Would love to connect there too\!" 
 Added the chromium-bridge `type` escaping bug to `tasks/software/chromium-bridge.md` with repro steps and root cause analysis.
 
 Also noted: the user made `diarize` a default feature in corky's `Cargo.toml` (`default = ["transcribe", "diarize"]`). This fulfills the earlier request to make diarize core, not optional.
-<!-- agent:boundary:81d8c59c -->
+<!-- agent:boundary:c770e546 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

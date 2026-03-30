@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-chromium-bridge v0.2.1 released (crates.io + GitHub).
+Resume updated with menu.com. CDW PDF built. Draft reply ready — awaiting approval to send.
 <!-- /agent:status -->
 
 ## Exchange
@@ -241,11 +241,78 @@ chromium-bridge v0.2.1 released:
 - **Parent submodule**: Pointer updated ✓
 
 Documentation-only release — no behavioral changes. Added missing command docs (README, SPEC), chatbox formatting guidance (SKILL.md), and module harness updates (19 evals).
-<!-- agent:boundary:aabe57ef -->
+
+USE chromium-bridge
+Please use chromium-bridge to read the message thread with Kaci.
+She mentioned that some items were not in my resume.
+Since I use a resume database, I can make a custom resume based on a role.
+If I have the missing gaps, I can fill them in with my previous experience that I have not logged before in the description message that I provided.
+Please assist with a draft and updating my resume.
+```
+● chrome-devtools - select_page (MCP)(pageId: 1)
+  ⎿  Error: Network.enable timed out. Increase the 'protocolTimeout' setting in launch/connect calls for a higher
+     timeout if needed.
+```
+I get this error everytime I run chromium-bridge with Claude. Why?
+### Re: Read Kaci's thread and update resume (HEAD)
+
+**Kaci's new message (today, 1:36 PM):**
+> "Thanks Brian. I don't see this experience mentioned on the resume submitted."
+
+She's right — **menu.com is missing from the master resume template** (`BrianTakita.md`). It exists in `data.toml` but only describing AWS infrastructure work, not the payment/POS aspects. The portfolio on briantakita.me mentions "Front end development of the menu.com multi-tenant app" with Svelte/Sapper/Cordova, but neither version made it into the resume PDF.
+
+**Fixing now:**
+1. Adding menu.com to `BrianTakita.md` freelance section with payment/POS emphasis
+2. Updating `data.toml` entry to include payment processing tags
+3. Creating a CDW-specific profile highlighting payments, API, and cloud experience
+4. Building the tailored PDF
+5. Drafting a reply to Kaci with the updated resume
+### Re: Read Kaci's thread and update resume (HEAD)
+
+**Kaci's new message (today, 1:36 PM):**
+> "Thanks Brian. I don't see this experience mentioned on the resume submitted."
+
+She's right — **menu.com was missing from the master resume** (`BrianTakita.md`). It existed in `data.toml` (AWS infra focus only) and the briantakita.me portfolio, but never made it into the PDF.
+
+**Resume updates completed:**
+
+1. **Added menu.com to `BrianTakita.md`** under freelance section:
+   > menu.com — Multi-tenant restaurant ordering and payment platform. Built the consumer web ordering app, restaurant back-office, and Cordova mobile app. Developed AWS CDK + Lambda serverless functions integrated with AWS Fargate Windows .NET API on ECS. Svelte, Sapper, ctx-core, Cordova, AWS CDK, Lambda, ECS, Docker.
+
+2. **Updated `data.toml`** — expanded menu.com entry with payment/POS/restaurant tags
+
+3. **Created CDW profile** (`profiles/cdw-payments.toml`) — highlights payments, API integrations, cloud, and security experience
+
+4. **Built PDF** — `BrianTakita-cdw-payments.pdf` ready at `resume/BrianTakita-cdw-payments.pdf`
+
+5. **Saved Kaci's new message** to `mail/contacts/kaci-railey/20260330-linkedin-kaci-railey.txt`
+
+**Draft reply to Kaci:**
+
+---
+
+Hi Kaci,
+
+You're absolutely right — I apologize for that. The experience I described wasn't reflected in the version of my resume I submitted. I've updated it to include the relevant details, particularly my work on menu.com's restaurant ordering and payment platform.
+
+I've attached the updated resume for your review. Please let me know if you need any additional information.
+
+Best regards,
+Brian Takita
+
+---
+
+The PDF is at `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-cdw-payments.pdf` — please review it before sending. LinkedIn messaging supports file attachments, so we can send the reply + PDF via chromium-bridge when you approve.
+<!-- agent:boundary:e84efd75 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-(all tasks complete)
+- [x] Add menu.com to BrianTakita.md with payment/POS description
+- [x] Update data.toml menu.com entry with payment tags
+- [x] Create CDW profile (payments emphasis)
+- [x] Build CDW-tailored PDF
+- [x] Save Kaci's new message
+- [ ] Send reply + updated resume to Kaci (awaiting approval)
 <!-- /agent:pending -->

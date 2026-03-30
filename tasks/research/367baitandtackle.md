@@ -29,7 +29,7 @@ https://www.367baitandtackle.com/
 
 Please get a list of his distributors.
 
-### Re: Site crawl & distributors (HEAD)
+### Re: Site crawl & distributors
 
 Crawled the site and searched extensively. Here's what I found:
 
@@ -83,7 +83,7 @@ No Walmart, Bass Pro, or other big-box retailer listings found. No wholesale/dis
 - **FishingStatus:** Ranked #1005, 7,482 views
 
 **To get a definitive distributor list, contacting the shop directly at (314) 653-1377 would be needed** — the website and public sources don't list wholesale partners or retail distributors beyond Amazon.
-<!-- agent:boundary:5f753805 -->
+<!-- agent:boundary:9bdd4827 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

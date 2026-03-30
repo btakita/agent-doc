@@ -998,7 +998,7 @@ The LinkedIn post's phrasing ("Creativity dies when the system becomes bounded")
 
 Please update the LinkedIn post.
 
-### Re: LinkedIn post updated (HEAD)
+### Re: LinkedIn post updated
 
 Updated the live post. Changed:
 
@@ -1007,7 +1007,7 @@ Updated the live post. Changed:
 **After:** "Creativity is constrained but not necessarily extinguished — it depends on whether the boundary is permeable and whether the system has mechanisms for renewal"
 
 Post updated: https://www.linkedin.com/feed/update/urn:li:share:7444389220590305280
-<!-- agent:boundary:28ad6316 -->
+<!-- agent:boundary:953fc045 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

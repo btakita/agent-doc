@@ -695,6 +695,8 @@ Added a new section **"Julian / 3A Credit — Patent Intelligence Service"** to 
 
 Both emails ready to push. Say "send" for Gmail Drafts.
 I already sent Ron 2026-03-30-call-summary-next-steps.md...Use corky to inspect which emails were sent. It should be synced in the correspondence label.
+
+Please commit all sent email drafts as thery were sent.
 ### Re: Email status check
 
 Checked the correspondence. Here's what's already been sent to Ron:
@@ -707,7 +709,16 @@ The updated call summary draft (with flexible compensation, analyst, Julian) has
 **Recommendation:** Send the **patent mining proposal** as a new email. It contains the income structure, Julian angle, and analyst positioning. The old call summary already established the basics — the patent proposal builds on it naturally.
 
 Say "send patent" to push `2026-03-30-patent-mining-proposal.md` to Gmail Drafts.
-<!-- agent:boundary:9972c5f6 -->
+### Re: Sent email drafts committed (HEAD)
+
+Committed 3 sent email drafts in the `mail/` submodule:
+
+1. `2026-03-30-call-summary-next-steps.md` — sent 9:21 AM
+2. `2026-03-30-manufacturingchina-site-structure-report.md` — sent 11:33 AM
+3. `2026-03-30-monsterrodholders-com-site-structure-report.md` — sent earlier
+
+**Not committed:** `2026-03-30-patent-mining-proposal.md` — hasn't been sent yet, stays as untracked draft.
+<!-- agent:boundary:3f5d4f98 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -719,7 +730,8 @@ Say "send patent" to push `2026-03-30-patent-mining-proposal.md` to Gmail Drafts
 - [x] Add income proposal to patent mining draft
 - [x] Bi-directional links between ron-berkes.md and manufacturingchina.md
 - [x] Add Julian patent intelligence service to patent mining proposal
-- [ ] Push patent mining proposal to Gmail Drafts
+- [x] Commit sent email drafts to mail submodule
+- [ ] Push patent mining proposal to Gmail Drafts (not yet sent)
 - [ ] Wait for Ron to confirm Steve intro / Steve responds
 - [ ] Review transcript speaker labels for accuracy corrections
 - [ ] Patent mining automation — review Ron's spreadsheet when shared

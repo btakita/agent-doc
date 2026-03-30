@@ -695,7 +695,7 @@ Added a new section **"Julian / 3A Credit — Patent Intelligence Service"** to 
 
 Both emails ready to push. Say "send" for Gmail Drafts.
 I already sent Ron 2026-03-30-call-summary-next-steps.md...Use corky to inspect which emails were sent. It should be synced in the correspondence label.
-### Re: Email status check (HEAD)
+### Re: Email status check
 
 Checked the correspondence. Here's what's already been sent to Ron:
 
@@ -707,7 +707,7 @@ The updated call summary draft (with flexible compensation, analyst, Julian) has
 **Recommendation:** Send the **patent mining proposal** as a new email. It contains the income structure, Julian angle, and analyst positioning. The old call summary already established the basics — the patent proposal builds on it naturally.
 
 Say "send patent" to push `2026-03-30-patent-mining-proposal.md` to Gmail Drafts.
-<!-- agent:boundary:152f3c33 -->
+<!-- agent:boundary:9972c5f6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

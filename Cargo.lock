@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc"
-version = "0.27.4"
+version = "0.27.6"
 dependencies = [
  "agent-kit",
  "anyhow",

@@ -26,9 +26,11 @@
 //! - **`auto_start(tmux, file, session_id, file_path, context_session)`**: Public; spawns a
 //!   new Claude pane and sends `/agent-doc start`. Waits for Claude's idle prompt before
 //!   sending the initial command. Called by `sync.rs` for unresolved files.
-//! - **`auto_start_no_wait(tmux, file, session_id, file_path, context_session)`**: Like
+//! - **`auto_start_no_wait(tmux, file, session_id, file_path, context_session, col_args)`**: Like
 //!   `auto_start` but skips waiting for Claude to be ready. Used by sync when only pane
-//!   existence is needed (Claude will start asynchronously).
+//!   existence is needed (Claude will start asynchronously). Computes `split_before` via
+//!   `is_first_column(file, col_args)` so new panes split in the correct direction for
+//!   their column position.
 //! - **`is_first_column(file, col_args)`**: Returns true when `file` appears in the first
 //!   `--col` argument. Drives the `-dbh` (split before) vs `-dh` (split after) split direction
 //!   when creating a new pane. Returns false when `col_args` has fewer than 2 entries.
@@ -453,8 +455,10 @@ pub fn auto_start_no_wait(
     session_id: &str,
     file_path: &str,
     context_session: Option<&str>,
+    col_args: &[String],
 ) -> Result<()> {
-    auto_start_ext(tmux, file, session_id, file_path, context_session, true, false)
+    let split_before = is_first_column(file, col_args);
+    auto_start_ext(tmux, file, session_id, file_path, context_session, true, split_before)
 }
 
 fn auto_start_ext(
@@ -1630,6 +1634,102 @@ mod tests {
         assert_eq!(
             final_order[2], new_pane,
             "new pane should be rightmost (split after)"
+        );
+    }
+
+    #[test]
+    fn auto_start_no_wait_first_col_splits_left() {
+        // Verify that auto_start_no_wait with a file in the first column
+        // computes split_before=true via is_first_column and places the new
+        // pane at the leftmost position in the agent-doc window.
+        let iso = IsolatedTmux::new("route-test-auto-start-col-left");
+        let session = "test";
+        let cwd = std::env::current_dir().unwrap();
+
+        // Create a window with 2 panes to simulate existing agent-doc layout
+        let pane_left = iso.auto_start(session, &cwd).unwrap();
+        let window = iso.pane_window(&pane_left).unwrap();
+        let _ = iso.raw_cmd(&["resize-window", "-t", &window, "-x", "300", "-y", "60"]);
+        let pane_right = iso.split_window(&pane_left, &cwd, "-dh").unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", &window, "agent-doc"]);
+
+        // Verify 2-pane setup
+        let ordered = iso.list_window_panes(&format!("{}:agent-doc", session)).unwrap();
+        assert_eq!(ordered.len(), 2, "should start with 2 panes");
+
+        // col_args: file_a is in first column, file_b in second
+        let col_args = vec![
+            "tasks/file_a.md".to_string(),
+            "tasks/file_b.md".to_string(),
+        ];
+
+        // Call auto_start_no_wait with file in the FIRST column
+        let file_a = Path::new("tasks/file_a.md");
+        let result = auto_start_no_wait(
+            &iso, file_a, "session-a", "tasks/file_a.md",
+            Some(session), &col_args,
+        );
+        assert!(result.is_ok(), "auto_start_no_wait should succeed: {:?}", result.err());
+
+        // The new pane should be leftmost (split_before=true picks first pane, splits -dbh)
+        let after = iso.list_window_panes(&format!("{}:agent-doc", session)).unwrap();
+        assert_eq!(after.len(), 3, "should have 3 panes after auto_start");
+        // The new pane is NOT one of the original two — find it
+        let new_pane: Vec<_> = after.iter()
+            .filter(|p| *p != &pane_left && *p != &pane_right)
+            .collect();
+        assert_eq!(new_pane.len(), 1, "should have exactly 1 new pane");
+        assert_eq!(
+            &after[0], new_pane[0],
+            "first-column file should produce leftmost pane (split_before=true)"
+        );
+    }
+
+    #[test]
+    fn auto_start_no_wait_second_col_splits_right() {
+        // Verify that auto_start_no_wait with a file in the second column
+        // computes split_before=false via is_first_column and places the new
+        // pane at the rightmost position in the agent-doc window.
+        let iso = IsolatedTmux::new("route-test-auto-start-col-right");
+        let session = "test";
+        let cwd = std::env::current_dir().unwrap();
+
+        // Create a window with 2 panes to simulate existing agent-doc layout
+        let pane_left = iso.auto_start(session, &cwd).unwrap();
+        let window = iso.pane_window(&pane_left).unwrap();
+        let _ = iso.raw_cmd(&["resize-window", "-t", &window, "-x", "300", "-y", "60"]);
+        let pane_right = iso.split_window(&pane_left, &cwd, "-dh").unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", &window, "agent-doc"]);
+
+        // Verify 2-pane setup
+        let ordered = iso.list_window_panes(&format!("{}:agent-doc", session)).unwrap();
+        assert_eq!(ordered.len(), 2, "should start with 2 panes");
+
+        // col_args: file_a is in first column, file_b in second
+        let col_args = vec![
+            "tasks/file_a.md".to_string(),
+            "tasks/file_b.md".to_string(),
+        ];
+
+        // Call auto_start_no_wait with file in the SECOND column
+        let file_b = Path::new("tasks/file_b.md");
+        let result = auto_start_no_wait(
+            &iso, file_b, "session-b", "tasks/file_b.md",
+            Some(session), &col_args,
+        );
+        assert!(result.is_ok(), "auto_start_no_wait should succeed: {:?}", result.err());
+
+        // The new pane should be rightmost (split_before=false picks last pane, splits -dh)
+        let after = iso.list_window_panes(&format!("{}:agent-doc", session)).unwrap();
+        assert_eq!(after.len(), 3, "should have 3 panes after auto_start");
+        // Find the new pane (not one of the original two)
+        let new_pane: Vec<_> = after.iter()
+            .filter(|p| *p != &pane_left && *p != &pane_right)
+            .collect();
+        assert_eq!(new_pane.len(), 1, "should have exactly 1 new pane");
+        assert_eq!(
+            after.last().unwrap(), new_pane[0],
+            "second-column file should produce rightmost pane (split_before=false)"
         );
     }
 }

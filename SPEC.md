@@ -562,7 +562,7 @@ Diff output now uses a 5-line context radius (unified diff with 5 lines of surro
 
 ## 7.31 Sync auto_start_no_wait
 
-The sync path uses `auto_start_no_wait` instead of the standard auto-start. This variant spawns the Claude session but does not block waiting for the `❯` prompt to appear (unlike `route` which waits up to 30s). This avoids sync blocking on slow Claude startup when arranging multiple panes.
+The sync path uses `auto_start_no_wait` instead of the standard auto-start. This variant accepts `col_args: &[String]` and computes `split_before` via `is_first_column(file, col_args)`, so new panes split in the correct direction for their column position (left-column files split before, right-column files split after). It does not block waiting for the `❯` prompt to appear (unlike `route` which waits up to 30s), avoiding sync blocking on slow Claude startup when arranging multiple panes. The call site in `sync.rs` passes the `col_args` slice through from the CLI arguments.
 
 ## 7.32 Sync Swap-Pane Atomic Reconcile
 

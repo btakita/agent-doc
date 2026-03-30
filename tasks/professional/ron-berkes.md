@@ -494,7 +494,50 @@ Follow-up call about patent mining automation and ManufacturingChina market oppo
 **Note:** Low confidence scores throughout (0.23-0.66). Speaker labels likely have some drift — similar pattern to other mono phone recordings.
 
 Output: `mail/contacts/ron-berkes/recordings/phone_20260330-114040_6504368181.md`
-<!-- agent:boundary:a8352f5a -->
+
+What do you recommend for compensation?
+I would like some cash flow right now. But residuals can work later.
+### Re: Compensation recommendations (HEAD)
+
+Given the multiple revenue streams discussed with Ron, here's a structured approach prioritizing immediate cash flow:
+
+**Tier 1 — Immediate Cash Flow (start this week)**
+
+| Work | Rate | Est. Monthly |
+|------|------|-------------|
+| Monster Rod Holders web cleanup | $100/hr ($25/hr × 4x billing) | $2,000 → tapering to $1,500 |
+| Fast Fire Starters site work | $100/hr (50/50 split with MRH) | $1,000–$1,500 |
+| ManufacturingChina.com site analysis & fixes | $100/hr | $1,000–$2,000 |
+
+**Combined estimate: $4,000–$6,000/mo** in hourly billing from day one.
+
+**Tier 2 — Project-Based (next 30 days)**
+
+| Project | Structure | Potential |
+|---------|-----------|-----------|
+| Patent scraper/automation | Fixed bid $5K–$10K or $100/hr | One-time + maintenance |
+| Ragie/document embedding integration | $100/hr | $2K–$5K project |
+| YouTube → blog post pipeline | $100/hr or fixed $3K | Reusable across all clients |
+
+**Tier 3 — Residuals (build after cash flow stabilizes)**
+
+| Stream | Structure | Upside |
+|--------|-----------|--------|
+| Patent lead revenue share | 10–20% of Ron's $2,500 PM fee per closed lead | $250–$500/lead, recurring |
+| Directory site equity | Sweat equity stake (15–25%) | Long-term — $2-5M+ vision |
+| Outdoor brand consolidation | Equity partner | Largest upside, longest horizon |
+
+**Recommended ask to Ron:**
+
+> "I need $100/hr for the web work — that's the cash flow piece. For the patent automation and the bigger directory/consolidation vision, I'm open to a hybrid: hourly for the build, then a revenue share or equity stake once it's generating. Let's nail the immediate client work first so we both see income, then structure the long-term plays."
+
+**Key negotiation points:**
+- Don't discount the hourly rate — Ron already expects $100/hr and proposed the 4x billing structure himself
+- The $25/hr optics is Ron's problem to manage with Steve, not yours
+- Weekly invoicing in 4-hour increments (Ron's suggestion) — take it, it's favorable
+- For patent automation: hourly during build + per-lead residual once automated (you built the machine, you get a cut of what it produces)
+- Keep equity conversations separate from hourly — don't trade current hours for future equity
+<!-- agent:boundary:ada4b503 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -505,5 +548,6 @@ Output: `mail/contacts/ron-berkes/recordings/phone_20260330-114040_6504368181.md
 - [ ] Wait for Ron to confirm Steve intro / Steve responds
 - [ ] Review transcript speaker labels for accuracy corrections
 - [ ] Patent mining automation — review Ron's spreadsheet when shared
+- [ ] Draft compensation proposal for Ron
 <!-- /agent:pending -->
  

@@ -851,7 +851,7 @@ Reasons:
 
 Want me to draft both LinkedIn posts now?
 
-### Re: Single vs separate LinkedIn posts (HEAD)
+### Re: Single vs separate LinkedIn posts
 
 **Recommendation: One combined post.** Here's why:
 
@@ -866,7 +866,7 @@ Want me to draft both LinkedIn posts now?
 - Links in first comment (better for engagement)
 
 Want me to draft it?
-<!-- agent:boundary:85c753e8 -->
+<!-- agent:boundary:1ef6c745 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

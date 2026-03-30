@@ -785,7 +785,14 @@ Created `mail/topics/3a-credit/README.md`:
 - Cross-linked with manufacturing-china topic
 
 Committed to mail submodule. "Publicly traded" in the email is now verified.
-<!-- agent:boundary:592c21a7 -->
+Send the email. We can bypass the draft.
+### Re: Patent mining proposal sent (HEAD)
+
+**Sent** to `rberkes@gmail.com`:
+- **From:** brian.takita@gmail.com
+- **Subject:** Patent Mining Automation — Proposal
+- **Status:** sent and committed to mail submodule
+<!-- agent:boundary:16379805 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -802,7 +809,7 @@ Committed to mail submodule. "Publicly traded" in the email is now verified.
 - [x] Reframe Julian as data provider + research services consumer
 - [x] Remove Julian intro ask — data already available as CSVs
 - [x] Verify 3A Credit publicly listed (China) + create mail topic
-- [ ] Push patent mining proposal to Gmail Drafts
+- [x] Send patent mining proposal to Ron
 - [ ] Wait for Ron to confirm Steve intro / Steve responds
 - [ ] Review transcript speaker labels for accuracy corrections
 - [ ] Patent mining automation — review Ron's spreadsheet when shared

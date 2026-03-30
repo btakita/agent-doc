@@ -786,7 +786,7 @@ This is a structural change to the sync flow — auto_start should feed back int
 Implement now.
 Add tests
 audit docs
-### Re: Implemented — post-auto_start layout fix (HEAD)
+### Re: Implemented — post-auto_start layout fix
 
 Added a layout fix step in `agent-doc/sync.rs` that runs **after auto_start creates panes** but **before tmux_router::sync**:
 
@@ -801,7 +801,7 @@ This ensures the agent-doc window has only the correct panes by the time the rec
 All 38 tests pass, clippy clean. Installed. Please test:
 1. 2 agent docs side-by-side → switch one to non-agent → select new agent doc → should get 2 panes
 2. Switch to non-agent on one side → should preserve 2 panes (not drop to 1)
-<!-- agent:boundary:74a56959 -->
+<!-- agent:boundary:121525fa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

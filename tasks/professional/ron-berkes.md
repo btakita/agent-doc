@@ -164,7 +164,19 @@ Since `transcribe-cuda` is a compile-time feature (whisper.cpp links against CUD
 That said — this is a build-time concern, not a per-invocation concern. Once corky is installed with CUDA, it always uses GPU. The fallback only matters during initial `cargo install`. For your machine with the 5090, `transcribe-cuda` will always succeed.
 
 Want me to implement this in the corky skill now, or is this a "later" item?
-<!-- agent:boundary:79a61021 -->
+
+**Re: corky skill install**
+
+No — different things. What I updated was my **auto-memory** (a persistence file at `~/.claude/projects/.../memory/`), not a skill.
+
+There is no corky skill yet — no `.claude/skills/corky/SKILL.md` exists. The skills that exist are: agent-doc, browser, chromium-bridge, dev, email, existence, livestream, module-harness, rust-package, tagpath, testing.
+
+The `skill install` command belongs to **agent-doc**, not corky. Corky doesn't have a skill installer.
+
+If we wanted a corky skill, we'd create `.claude/skills/corky/SKILL.md` with instructions like "always build with `--features diarize,transcribe-cuda`" and the GPU fallback logic. This would be a new file, not updating an existing one.
+
+Also — the recovered response duplicated the "Non-GPU fallback" section. I'll clean that up on the next compact.
+<!-- agent:boundary:27968d14 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

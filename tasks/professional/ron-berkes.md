@@ -568,7 +568,7 @@ That makes sense — if Ron is cash-strapped and managing childcare, a fixed mon
 For the Steve/MRH engagement specifically, Ron could still bill Steve hourly ($25/hr × 4x) while paying you the flat rate — Ron keeps the margin as his project management cut.
 
 I'm fine with whatever Ron can afford.
-### Re: Flexible compensation approach (HEAD)
+### Re: Flexible compensation approach
 
 Got it — you're prioritizing the relationship over maximizing rate. That's smart given the pipeline Ron is building. Here's how to frame it:
 
@@ -588,7 +588,7 @@ Got it — you're prioritizing the relationship over maximizing rate. That's sma
 - Keep it simple — no contracts, no scope documents, just start delivering
 
 The real value here isn't the monthly rate — it's positioning yourself as Ron's tech partner across all his ventures (ManufacturingChina, patent mining, MRH, Fast Fire, outdoor consolidation). That's a $100K+/yr relationship once it's all flowing.
-<!-- agent:boundary:b3ffd97a -->
+<!-- agent:boundary:b6b4d1d7 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

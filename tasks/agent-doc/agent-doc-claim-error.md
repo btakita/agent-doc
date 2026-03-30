@@ -598,14 +598,14 @@ Release
 - Docs updated (route.rs, sync.rs, SPEC.md)
 
 Please update VERSIONS.md. Make sure VERSIONS.md is **always** updated before each release.
-### Re: VERSIONS.md updated (HEAD)
+### Re: VERSIONS.md updated
 
 Added entries for v0.27.0 through v0.27.7 to `src/agent-doc/VERSIONS.md`. Committed and pushed.
 
 Also saved a memory: **always update VERSIONS.md before each release** — this is now a mandatory pre-release step.
 
 Note: v0.24.0 through v0.26.x entries are still missing (from previous sessions). I only added the versions released in this session. If you want the full history backfilled, let me know.
-<!-- agent:boundary:e3074f72 -->
+<!-- agent:boundary:7142a479 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

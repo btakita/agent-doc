@@ -476,7 +476,7 @@ Quick follow-up call about the Monster Rod Holders engagement:
 
 Output: `mail/contacts/ron-berkes/recordings/phone_20260330-104440_6504368181.md`
 Transcribe + diarize /home/brian/work/btakita/agent-loop/mail/contacts/ron-berkes/recordings/phone_20260330-114040_6504368181.amr
-### Re: Transcription of phone_20260330-114040_6504368181.amr (HEAD)
+### Re: Transcription of phone_20260330-114040_6504368181.amr
 
 **Transcribed** `phone_20260330-114040_6504368181.amr` — 13:04 call, GPU processed in 5.1s (153.1x realtime on RTX 5090).
 
@@ -494,7 +494,7 @@ Follow-up call about patent mining automation and ManufacturingChina market oppo
 **Note:** Low confidence scores throughout (0.23-0.66). Speaker labels likely have some drift — similar pattern to other mono phone recordings.
 
 Output: `mail/contacts/ron-berkes/recordings/phone_20260330-114040_6504368181.md`
-<!-- agent:boundary:3e1e5f1a -->
+<!-- agent:boundary:a8352f5a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

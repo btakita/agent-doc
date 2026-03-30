@@ -564,7 +564,36 @@ Cut out 35:46.1 - 35:47.5 from `2026-03-29 16-19-07.mp4` using stream copy (no r
 Output: `~/Videos/2026-03-29 16-19-07-cut.mp4` (6.4G)
 
 Original file is unchanged. Verify the cut looks clean, then rename if you want to replace the original.
-<!-- agent:boundary:b566b21a -->
+
+Combine
+- [2026-03-27 16-00-27.mp4](../../../../../Videos/2026-03-27%2016-00-27.mp4)
+- [2026-03-29 16-19-07-cut.mp4](../../../../../Videos/2026-03-29%2016-19-07-cut.mp4)
+
+Transcribe with CC the result and prepare for YouTube.
+Note the source agent documents are:
+- tasks/software/agent-doc.md
+- tasks/professional/john-cassel.md
+
+### Re: Combine videos and transcribe (HEAD)
+
+**Combined video:** `~/Videos/2026-03-27+29-combined.mp4` (9.0G, 3h26m34s)
+- Part 1: `2026-03-27 16-00-27.mp4` (58min) — agent-doc FFI plugin & socket IPC
+- Part 2: `2026-03-29 16-19-07-cut.mp4` (2h28min) — continued session
+
+**Transcription:** GPU-accelerated (157x realtime, 79s for 3.4h)
+- SRT caption file: `~/Videos/2026-03-27+29-combined-cc.srt` (13,719 segments, proper YouTube SRT format)
+
+**Source documents:**
+- `tasks/software/agent-doc.md`
+- `tasks/professional/john-cassel.md`
+
+**Ready for YouTube.** Need your input on:
+1. **Title** — something like "Building Agent-Doc: FFI Plugin Architecture & Socket IPC | Live Coding Session"?
+2. **Description** — I can draft based on the transcript topics (FFI plugins, cross-platform IPC, existence-lang ontology)
+3. **Thumbnail** — any preference?
+
+Let me know the title direction and I'll prepare the upload.
+<!-- agent:boundary:228d2703 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -576,4 +605,8 @@ Original file is unchanged. Verify the cut looks clean, then rename if you want 
 - [x] rappstack packages at 0.1.4
 - [x] Verify CI build passes and blog deploys
 - [x] Cut 35:46.1-35:47.5 from 2026-03-29 16-19-07.mp4
+- [x] Combined 2026-03-27 + 2026-03-29 videos (3h26m)
+- [x] Transcribed with CC (13,719 segments SRT)
+- [ ] YouTube title + description
+- [ ] Upload to YouTube
 <!-- /agent:pending -->

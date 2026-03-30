@@ -1172,7 +1172,7 @@ That's natural, non-pushy, and lets Bob connect the dots. The contract gig and d
 - Message sent (done)
 - Book Calendly slot for Tue or Wed (Apr 1-2)
 - Prepare demo before then
-<!-- agent:boundary:9d33f231 -->
+<!-- agent:boundary:8c9321fa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

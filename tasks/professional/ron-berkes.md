@@ -775,7 +775,7 @@ https://3acredit.com/about/
 See also https://3acredit.com/
 
 Add mail/topic/3a-credit
-### Re: 3A Credit topic created (HEAD)
+### Re: 3A Credit topic created
 
 Created `mail/topics/3a-credit/README.md`:
 - Confirmed publicly listed in China (verified via https://3acredit.com/about/)
@@ -785,7 +785,7 @@ Created `mail/topics/3a-credit/README.md`:
 - Cross-linked with manufacturing-china topic
 
 Committed to mail submodule. "Publicly traded" in the email is now verified.
-<!-- agent:boundary:d8d0c673 -->
+<!-- agent:boundary:592c21a7 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

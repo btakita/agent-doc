@@ -765,16 +765,29 @@ The >4 pane issue is from sessions accumulating without cleanup. When you switch
 
 **Root problem:** There's no garbage collection for stashed panes. The v0.27.2 auto-kill was reverted because it was too aggressive (killed active sessions). The correct approach is an `agent-doc gc` command that kills stashed panes whose Claude sessions have exited (idle shells at `❯` prompt with no active agent-doc process).
 
-**Immediate cleanup:** Want me to kill the 6 idle stash panes now?
+**Immediate cleanup:** Want me to kill the 6 idle stash panes now?: No...we can keep them since they are in 1:stash
 
 **Longer term:** Implement `agent-doc gc` as a separate command for manual and automated cleanup.
-<!-- agent:boundary:58e9ad9e -->
+Changing to an active agent doc fixed the layout.
+When opening a new tmux pane, the same layout fix operation that fixes the layout when selecting an active agent doc should run.
+### Re: Layout fix should run after auto_start (HEAD)
+
+Got it — the layout self-corrects when you select an active agent doc because sync runs the full reconcile path (resolved >= 2). But when auto_start creates a NEW pane, the reconcile doesn't clean up the previous layout.
+
+**The fix:** After `auto_start_no_wait` creates a new pane in the sync path, the reconcile should still run. Currently:
+1. Sync resolves files → only 1 resolves (new doc) → early exit (resolved < 2)
+2. But the auto_start just created a new pane, so now the window has the new pane + whatever was there before
+3. The reconcile never runs to fix the layout
+
+**What should happen:** After auto_start creates a new pane, re-resolve to include the new pane, then let the full reconcile path run to arrange/stash as needed.
+
+This is a structural change to the sync flow — auto_start should feed back into resolution so the reconciler can do its job. Want me to implement this, or should we move this to `tasks/software/agent-doc.md` as a separate workstream?
+<!-- agent:boundary:4e1fbb5c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.27.5-v0.27.9: Layout fixes shipped
-- [ ] **Kill 6 idle stash panes (immediate cleanup)**
-- [ ] **Implement `agent-doc gc` for stash garbage collection**
+- [ ] **Fix: run reconcile after auto_start creates new pane**
 <!-- /agent:pending -->

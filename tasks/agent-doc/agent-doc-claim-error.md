@@ -457,7 +457,7 @@ release
 What happened to the active sessions for:
 - tasks/research/monsterrodholders.md
 - tasks/professional/ron-berkes.md
-### Re: Active sessions for monsterrodholders and ron-berkes (HEAD)
+### Re: Active sessions for monsterrodholders and ron-berkes
 
 Both are registered in sessions.json but their panes are **idle shells** (zsh), not active Claude sessions:
 
@@ -475,7 +475,7 @@ The Claude sessions that were running in these panes have exited — the panes a
 2. Select `ron-berkes.md` in the editor → `Claim for Tmux Pane`
 
 The old idle panes (%162, %164) will be killed/replaced by the new sessions.
-<!-- agent:boundary:2a5f35a3 -->
+<!-- agent:boundary:5cf7506d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

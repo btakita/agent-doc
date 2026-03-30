@@ -867,6 +867,15 @@ From the screenshot it looks like 2 panes — which is correct for 2 editor colu
 It was 3 panes. Look in the logs.
 
 Please describe what you expected vs. what you saw.
+### Re: Apologies — you're right about the 3 panes (HEAD)
+
+I couldn't find the logs because `agent-doc sync` is invoked by the JetBrains plugin as a short-lived process — its stderr goes nowhere persistent. The trace logs I added are lost.
+
+**Immediate fix needed:** File-based sync logging so we can capture what happens during the layout transition.
+
+I'll add logging to `/tmp/agent-doc-sync.log` so we can inspect it after reproduction. Then we can see exactly which code path creates the 3rd pane and why the reconciler isn't cleaning it up.
+
+Adding now.
 ### Re: File-based sync logging installed
 
 Logs now go to `/tmp/agent-doc-sync.log`. Cleared the file. Reproduce the 3-pane bug, then I'll read the log.
@@ -874,7 +883,27 @@ Logs now go to `/tmp/agent-doc-sync.log`. Cleared the file. Reproduce the 3-pane
 The log captures: sync start (col_args, window, focus), repair_layout, each auto_start, pane count before/after tmux_router::sync, and tmux_router trace (resolution, reconcile).
 
 Reproduce and let me know.
-<!-- agent:boundary:436a54a2 -->
+
+Another pane issue
+![2026-03-30_13-35.png](../../../../../Pictures/agent-loop/2026-03-30_13-35.png)
+### Re: Log analysis — found two issues (HEAD)
+
+The logs reveal:
+
+**1. Empty col_args from JetBrains plugin.** Many calls have extra empty strings:
+```
+col_args=["mail/drafts/...", "tasks/professional/...", "", "", ""]
+```
+The empty strings shouldn't be there — the plugin is sending phantom columns. These could cause the Layout parser to create phantom pane columns, leading to incorrect reconciliation.
+
+**2. Some sync calls never complete** (no `post-tmux_router::sync` line) — they either error out or hang. This happens specifically on the calls with 4+ empty col_args.
+
+**3. Pane counts are consistently 2 in the log** — the sync itself is maintaining 2 panes. The 3-pane issue might be from the incomplete sync calls (crashing mid-reconcile, leaving the window in an intermediate state).
+
+**Root cause:** The JetBrains plugin is sending extra empty `--col` args. The fix is to **filter empty col_args** at the start of sync before processing.
+
+Want me to add the filter? This is a 1-line fix.
+<!-- agent:boundary:bf8a90e7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -882,7 +911,8 @@ Reproduce and let me know.
 <!-- agent:pending patch=replace -->
 - [x] Structural fix: removed early exits
 - [x] File-based sync logging
-- [ ] **Reproduce 3-pane and capture logs**
-- [ ] Diagnose and fix
+- [x] Log captured — found empty col_args from plugin
+- [ ] **Filter empty col_args at sync entry**
+- [ ] Fix JetBrains plugin to not send empty cols
 - [ ] Release
 <!-- /agent:pending -->

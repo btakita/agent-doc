@@ -393,12 +393,12 @@ This creates the blue gutter visual boundary in the editor. The committed conten
 - Add bold-text-as-header detection in `git.rs:add_head_marker()` as a fallback for when the agent uses bold instead of headers
 
 Want me to implement both?
-Yes...This should go into the installable agent-doc skil
+Yes...This should go into the installable agent-doc skill
 
 > - Fix the skill prompt to explicitly instruct `### Re:` headers (not bold) — this is a SKILL.md update
 
 HTML headers only go 6 levels...`h6`...so this is a limitation. Do we need to note that?
-### h6 limit — not a practical concern (HEAD)
+### h6 limit — not a practical concern
 
 Good question. In agent-doc template mode, the exchange component typically lives under `## Exchange` (h2). Agent responses at `### Re:` (h3) leave h4-h6 for sub-sections. Documents rarely go deeper than h4.
 
@@ -410,13 +410,28 @@ The bold-text pattern happened because the agent "felt" like h3 was too prominen
 3. **h6 note** — Add to SKILL.md: "Markdown supports h1-h6. In template mode exchange components (under h2), use h3 for response headers. This leaves h4-h6 for sub-sections."
 
 Implementing now.
-<!-- agent:boundary:ee82b454 -->
+### Done
+
+**SKILL.md updated** — Added "Response header format (template mode)" section before streaming checkpoints:
+- Use `### Re:` headers, NOT bold text `**Re: ...**`
+- Explains why: `(HEAD)` boundary marker requires actual headings
+- Notes h3 for response headers leaves h4-h6 for sub-sections
+
+**git.rs updated** — `add_head_marker()` bold-text fallback:
+- First pass: looks for actual `#` headings (existing behavior)
+- If none found: second pass scans for `**...**` on own line (bold-text pseudo-headers)
+- Picks first bold-text line and tags with ` (HEAD)`
+- `strip_head_markers()` also handles stripping `(HEAD)` from bold-text lines
+
+All 38 tests pass. Ready to release or add tests first.
+<!-- agent:boundary:60ea09ef -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.27.5: 3-pane layout fix shipped
-- [ ] Skill: enforce `### Re:` header format in template mode responses
-- [ ] Binary: bold-text fallback for `(HEAD)` marker in `add_head_marker()`
+- [x] Skill: enforce `### Re:` header format in template mode responses
+- [x] Binary: bold-text fallback for `(HEAD)` marker in `add_head_marker()`
+- [ ] Release v0.27.6
 <!-- /agent:pending -->

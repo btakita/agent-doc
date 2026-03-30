@@ -443,7 +443,7 @@ The pragmatic path is **Shopify Storefront API** — Ron already built the Shopi
 No shopping cart needed initially — it's content + referral links. If we add our own products later, Stripe Checkout is the lightest option.
 
 I'll update the draft to say "whether we keep it on WordPress, move to Shopify, or build a custom frontend" instead of assuming Shopify.
-<!-- agent:boundary:31a9b4d8 -->
+<!-- agent:boundary:f323c5b0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

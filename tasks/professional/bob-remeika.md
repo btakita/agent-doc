@@ -1273,16 +1273,38 @@ I have not yet built anything specific to Ragie. I'm currently using corky for m
 **On contract work:** Bring it up. Frame as: "I'm building tools that integrate Ragie deeply. If you need someone who understands the developer experience from the builder side, I'm available." Low-pressure, concrete, and true.
 
 **On Ragie pricing:** Check their free tier before the call so you can speak to it concretely. If you're on free, that's fine — "I'm prototyping on free, ready to scale when the client pipeline justifies it."
-<!-- agent:boundary:d7d54656 -->
+
+I also want to propose to build interactive office, pdf, markdown, mdx documents using Ragie as a backend.
+Via a web interface and via editor plugins.
+### Re: Interactive document editing with Ragie backend (HEAD)
+
+That's a strong product pitch — it directly connects your agent-doc architecture to Ragie's core offering.
+
+**The pitch for Bob:** "I've built a system for interactive AI-assisted document editing (agent-doc). Right now it works with local files. I want to build a version where Ragie is the backend — documents indexed in Ragie become live, editable surfaces where an AI agent can pull context from the entire document corpus while you work."
+
+**Concrete product angles:**
+
+1. **Web interface** — Browser-based document editor where Ragie retrieval feeds context into AI responses. User edits a contract, the agent pulls relevant clauses from other indexed documents. Google Docs meets RAG.
+2. **Editor plugins** (VS Code, JetBrains) — You already have JetBrains plugin architecture from agent-doc. Extend it so the agent queries Ragie for context while editing markdown, MDX, or structured documents locally.
+3. **Office/PDF support** — Ragie already handles PDF ingestion (Ragie Parse). The loop: ingest PDFs → index in Ragie → query during editing → produce new documents that reference the ingested corpus.
+
+**Why Bob should care:** This turns Ragie from a "search your documents" API into an **interactive document platform** — much bigger TAM. You're offering to build the integration layer, essentially a reference implementation of "Ragie-powered document editing."
+
+**For Ron/Judith concretely:**
+- Judith: ingest all loan documents → edit new applications with AI pulling relevant precedents, terms, comparable deals from the corpus
+- Ron: ingest patent filings → produce analysis documents that cross-reference the entire patent + manufacturer database
+
+This could become a product feature Ragie ships or a partner integration they showcase. Either way, it's the kind of proposal that turns a 30-min catch-up into a working relationship.
+<!-- agent:boundary:4b472508 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- ~~Answer the 6 unknowns above to prep for the call~~ ([done] — answered in exchange)
 - Book Calendly slot (Wed Apr 1 or later) — https://calendly.com/bobremeika/30-minute-call
-- Decide call framing: "show what I'm building + where Ragie fits + explore contract work"
+- Decide call framing: "agent-doc + Ragie interactive docs platform + contract work"
 - Check Ragie free tier / sign up if not already
+- Draft 1-page pitch: interactive document editing with Ragie backend (web + editor plugins + Office/PDF)
 - Optional: build quick Ragie POC (index mail/contacts, retrieval demo)
 - Prepare agent-doc live demo (just run a session — no special prep needed)
 <!-- /agent:pending -->

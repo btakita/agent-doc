@@ -229,7 +229,7 @@ fn main() {
 ```
 Problem: `build.rs` can't enable Cargo features. The standard approach is a **Makefile target** or wrapper script:
 ```bash
-# In Makefile (HEAD)
+# In Makefile
 install:
     @if command -v nvcc >/dev/null 2>&1; then \
         cargo install --path . --features "diarize,transcribe-cuda"; \
@@ -247,7 +247,7 @@ fi
 ```
 
 **Recommendation:** Start with the Makefile approach (option 1) — it's simple, deterministic, and covers `cargo install` from source. The prebuilt binary approach (option 2) requires CI changes to build two variants. Want me to implement the Makefile detection?
-<!-- agent:boundary:50c9bae7 -->
+<!-- agent:boundary:78441d26 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

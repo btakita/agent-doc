@@ -673,7 +673,7 @@ Both email drafts are now updated and ready:
 2. `mail/drafts/2026-03-30-patent-mining-proposal.md` — patent automation + income structure
 
 Say "send" to push either or both to Gmail Drafts.
-### Re: Bi-directional links (HEAD)
+### Re: Bi-directional links
 
 Added cross-references:
 
@@ -681,7 +681,7 @@ Added cross-references:
 - **ron-berkes.md** → already references `tasks/research/manufacturingchina.md` in the exchange
 
 The link in manufacturingchina.md is in the `&lt;!-- agent:status --&gt;` component so it persists across status updates.
-<!-- agent:boundary:d000d24e -->
+<!-- agent:boundary:bf5dd81e -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.27.7 released. Sync path column-aware split shipped.
+v0.27.8 released. Early-exit stash fix shipped (was dead code since v0.27.5).
 <!-- /agent:status -->
 
 ## Exchange
@@ -640,14 +640,27 @@ audit docs
 **Docs:** No updates needed — existing docs describe behavior at the right abstraction level. The inline code comment at sync.rs:624-625 documents the fix rationale.
 
 79 tmux-router tests pass. Ready to release v0.27.8.
-<!-- agent:boundary:1d3397bd -->
+
+release tmux-router and agent-doc
+### Re: v0.27.8 + tmux-router v0.3.4 released (HEAD)
+
+**tmux-router v0.3.4:**
+- crates.io ✓
+- Fix: early-exit stash derives session from pane (was dead code with always-None doc_tmux_session)
+
+**agent-doc v0.27.8:**
+- crates.io ✓, PyPI ✓, GitHub Release ✓, cargo install ✓ (confirmed v0.27.8)
+- Updated tmux-router dep to 0.3.4
+- VERSIONS.md entries for both
+
+The early-exit stash should now actually work. Test by switching between agent docs with a non-agent file on one side.
+<!-- agent:boundary:244ce98a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.27.5-v0.27.7: Shipped (stash was dead code)
+- [x] v0.27.5-v0.27.7: Layout fixes (stash was dead code)
 - [x] v0.27.8: Fix dead-code stash — derive session from pane
-- [x] v0.27.8: Test added
-- [ ] Release v0.27.8
+- All shipped.
 <!-- /agent:pending -->

@@ -642,7 +642,21 @@ Good thinking on both fronts. Here's the refined approach:
 | Patent lead commissions | Per-lead fee when leads close | After automation built |
 
 This gives you 3-4 potential income streams instead of depending on Ron alone. Julian is especially attractive because he runs a funded company — $2-3K/mo for patent intelligence is a rounding error for a publicly traded firm.
-<!-- agent:boundary:516f69a9 -->
+
+Update the email proposal. Include the woman that Ron has in Brazil as an analyst.
+### Re: Updated email proposal (HEAD)
+
+Updated the draft at `mail/drafts/2026-03-30-call-summary-next-steps.md`. Key changes:
+
+- **Added the Brazilian analyst** — positioned the patent automation as enhancing her work (she focuses on evaluation, the scraper handles discovery)
+- **Added ManufacturingChina section** — references the site analysis already sent
+- **Revised compensation section** — $1K/mo base if he can, flexible if he can't, transparent about family obligations
+- **Added Julian angle** — patent data as credit risk intelligence, pitched as a future subscription
+- **Added patent mining details** — full report generation per patent
+- **Removed the old $100/hr language** — replaced with the flexible approach
+
+Review the draft and let me know if you want changes before pushing to Gmail Drafts.
+<!-- agent:boundary:301d30ab -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -650,7 +664,8 @@ This gives you 3-4 potential income streams instead of depending on Ron alone. J
 - [x] Transcribe phone_20260330-114040_6504368181.amr with GPU diarization
 - [x] Research MonsterRodHolders.com site structure for optimization plan
 - [x] Run ManufacturingChina.com site analysis (Ron requested)
-- [ ] Draft message to Ron with $1K/mo ask + Julian patent data pitch
+- [x] Update email proposal with analyst + compensation + Julian angle
+- [ ] Push updated email to Gmail Drafts (awaiting review)
 - [ ] Wait for Ron to confirm Steve intro / Steve responds
 - [ ] Review transcript speaker labels for accuracy corrections
 - [ ] Patent mining automation — review Ron's spreadsheet when shared

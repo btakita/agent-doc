@@ -928,7 +928,39 @@ Draft updated in `mail/social/20260330-ffi-ontology-linkedin.md`. Review and app
 Updated the draft — changed "The conversation with John Cassel" to "A response to John Cassel's outreach about permaculture design principles inspired an exploration of parallels." This accurately reflects that it was a response to his outreach, not a full back-and-forth conversation.
 
 Draft updated in `mail/social/20260330-ffi-ontology-linkedin.md`. Ready for final review.
-<!-- agent:boundary:4f6a149a -->
+
+> → Resolution in bounded vs unbounded systems: bounded systems (databases, APIs) have finite resolution — you can enumerate states. Unbounded systems (markets, ecosystems, consciousness) have infinite resolution — precision is always an approximation
+
+This misses the framing of a bounded vs unbounded system. See the source documents:
+- tasks/professional/john-cassel.md
+- tasks/software/agent-doc.md
+
+> → The creative system lifecycle: every system starts unbounded and creative (exploration, possibility space), then converges toward bounded steady state (production, constraints). Understanding where you are in this lifecycle changes how you design
+
+"every system" is incorrect. Some systems.
+
+> → Genesis and completion cycles: systems have beginnings and endings — but also cyclical patterns of renewal. A codebase doesn't just die; it evolves through cycles of creation, maturity, decomposition, and rebirth. The same pattern appears in ecosystems, organizations, and ideas
+
+> systems have beginnings and endings — but also cyclical patterns of renewal
+
+We may just want to leave this out. Unless you can be more aligned with the source documents + transcript.
+
+See source documents:
+- tasks/professional/john-cassel.md
+- tasks/software/agent-doc.md
+
+### Re: Corrected framing from source documents (HEAD)
+
+Updated the LinkedIn draft based on the source documents. Key corrections:
+
+**Resolution/bounded:** Now frames it as scope-resolution trade-off in bounded-information systems vs no trade-off in unbounded systems. Removed the incorrect "databases, APIs" / "infinite resolution" framing. Now uses the accurate framing: "The bounded case is a simplification, not the default."
+
+**Creative lifecycle:** Changed from "every system starts unbounded" to "some systems start unbounded and creative." Uses the source's examples: permaculture sites, software projects, markets. Captures the key insight: transition to bounded steady state happens when incumbents/monopolists gatekeep channels, and creativity dies.
+
+**Genesis/completion cycles:** Removed this bullet entirely. The source material discusses begin/end vs cyclical eschatology but the framing in the draft was too loose and didn't align with the actual discussion.
+
+Updated draft in `mail/social/20260330-ffi-ontology-linkedin.md`.
+<!-- agent:boundary:cd1b03e1 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -936,6 +968,6 @@ Draft updated in `mail/social/20260330-ffi-ontology-linkedin.md`. Ready for fina
 - [x] Fixed sticky header shrinking (verified via chromium-bridge)
 - [x] Removed + archived snippet--rappstack
 - [x] YouTube comments with blog links on both videos
-- [x] LinkedIn draft updated with deeper themes + John Cassel correction
+- [x] LinkedIn draft corrected with source-aligned framing
 - [ ] Final review + publish LinkedIn post
 <!-- /agent:pending -->

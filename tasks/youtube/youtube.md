@@ -866,7 +866,37 @@ Want me to draft both LinkedIn posts now?
 - Links in first comment (better for engagement)
 
 Want me to draft it?
-<!-- agent:boundary:1ef6c745 -->
+Yes...let's see how it reads.
+
+### Re: LinkedIn draft (HEAD)
+
+Draft saved to `mail/social/20260330-ffi-ontology-linkedin.md`:
+
+---
+
+Two live sessions, one thread: from building cross-platform FFI plugins to modeling reality in software.
+
+Session 1: I hit a classic AI agent behavior — Claude chose to implement a pure Kotlin socket listener inside the JetBrains plugin instead of using the shared Rust FFI backend. Technically correct, architecturally wrong. It optimized for immediate effort reduction over the documented FFI-first convention.
+
+This sparked a deeper question: how do you make architectural conventions stick when your coding partner has an instinct to minimize effort? CLAUDE.md wasn't strong enough. Memory feedback helped but wasn't sufficient. The answer: encode conventions into skills and reinforce them with domain ontology — a shared vocabulary that persists across sessions.
+
+Session 2 went full ontology. I've been building existence-lang — a formal language for modeling reality that applies equally to software systems and philosophical inquiry. This session explored:
+
+- Pneuma (totality), noumena (the unseen), phenomena (the observed) — and how they map to software abstractions
+- The NULL analogy: noumena relates to phenomena the way NULL relates to known database values
+- Universal applicability: every ontology term applies to every entity at every scope — no exclusive labels
+- Precision as possibility space: a vague definition that honestly encompasses the unknown is more accurate than a precise one that pretends completeness
+
+The conversation with John Cassel about permaculture design principles surfaced surprising parallels — both permaculture and existence-lang provide vocabulary for reasoning about complex systems where you can't know everything, but you can design with honest acknowledgment of what you don't know.
+
+3.5 hours of vibe coding across two sessions. Not tutorials — real architecture decisions, philosophical tangents, and the occasional bug fix.
+
+---
+
+**Comment (links):** Will include YouTube + blog links for both sessions.
+
+Edit or approve to publish.
+<!-- agent:boundary:53df837d -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -874,6 +904,7 @@ Want me to draft it?
 - [x] Fixed sticky header shrinking (verified via chromium-bridge)
 - [x] Removed + archived snippet--rappstack
 - [x] YouTube comments with blog links on both videos
-- [ ] Draft combined LinkedIn post
-- [ ] Publish LinkedIn post
+- [x] LinkedIn draft created
+- [ ] Approve/edit LinkedIn post
+- [ ] Publish LinkedIn post + comment with links
 <!-- /agent:pending -->

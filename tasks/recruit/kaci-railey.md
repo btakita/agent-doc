@@ -231,7 +231,7 @@ No standalone test files exist yet — all evals are aspirational (contractual).
 
 release
 
-### Re: Release (HEAD)
+### Re: Release
 
 chromium-bridge v0.2.1 released:
 
@@ -241,7 +241,7 @@ chromium-bridge v0.2.1 released:
 - **Parent submodule**: Pointer updated ✓
 
 Documentation-only release — no behavioral changes. Added missing command docs (README, SPEC), chatbox formatting guidance (SKILL.md), and module harness updates (19 evals).
-<!-- agent:boundary:7ad01390 -->
+<!-- agent:boundary:d5733fc8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

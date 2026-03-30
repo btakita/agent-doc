@@ -441,7 +441,7 @@ audit docs
 
 All 566 tests pass. Ready to release.
 release
-### v0.27.6 released (HEAD)
+### v0.27.6 released
 
 **Published everywhere:**
 - **crates.io:** v0.27.6 ✓
@@ -453,7 +453,7 @@ release
 - Bold-text pseudo-header fallback for `(HEAD)` boundary marker
 - SKILL.md: `### Re:` header format guidance (bold-text supported as fallback)
 - 3 new tests, docs updated
-<!-- agent:boundary:052c11ea -->
+<!-- agent:boundary:83a5711a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

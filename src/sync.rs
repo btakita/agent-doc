@@ -37,7 +37,9 @@
 //!   when switching between editor tabs. Only if rescue fails is the pane treated as
 //!   dead and a fresh session started.
 //! - Auto-start detects duplicate panes via `find_alive_pane_for_file`, which scans
-//!   process command lines (`ps -p <pid> -o command=`) before spawning.
+//!   process command lines (`ps -p <pid> -o command=`) before spawning. The `col_args`
+//!   slice is passed through to `route::auto_start_no_wait` so new panes split in the
+//!   correct direction based on column position (`is_first_column`).
 //! - `register_synced_files` updates or creates registry entries for every file
 //!   assigned a pane by `tmux_router::sync`, covering files never individually claimed.
 //!
@@ -592,7 +594,7 @@ fn run_with_options(
                 "[sync] auto-starting session for {} (no alive pane)",
                 file_path.display()
             );
-            if let Err(e) = route::auto_start_no_wait(tmux, file_path, &session_id, &file_str, context_session.as_deref()) {
+            if let Err(e) = route::auto_start_no_wait(tmux, file_path, &session_id, &file_str, context_session.as_deref(), col_args) {
                 eprintln!(
                     "[sync] warning: auto-start failed for {}: {}",
                     file_path.display(),

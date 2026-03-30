@@ -967,12 +967,12 @@ I removed due to not relevant to the post:
 
 Publish to LinkedIn
 
-### Re: LinkedIn published (HEAD)
+### Re: LinkedIn published
 
 **Post:** https://www.linkedin.com/feed/update/urn:li:share:7444389220590305280
 
 **Comment with links posted** — YouTube + blog for both sessions, plus GitHub and crates.io links.
-<!-- agent:boundary:2463af73 -->
+<!-- agent:boundary:b5dfb42e -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

@@ -833,12 +833,30 @@ This is essentially what `reconcile()` already does — but it only runs when `r
 - Reconcile handles all cases: 0 panes (stash everything), 1 pane (focus + stash extras), 2+ panes (current behavior)
 
 This is a bigger change. I recommend transferring to `tasks/software/agent-doc.md` as a proper design task with a plan, tests, and verification before release. Want me to do that?
-<!-- agent:boundary:62474f5a -->
+Do it here. Go
+### Re: Structural fix implemented — no early exits (HEAD)
+
+**Removed all early exits from tmux_router::sync.** The reconciler now always runs regardless of how many panes resolve.
+
+**Changes:**
+1. **tmux-router/sync.rs:** Removed `single-file` early exit (line 618), `resolved < 2` early exit (line 627), and `single-pane-column` early exit (line 674). The reconciler's DETACH phase now handles all stashing uniformly.
+2. **agent-doc/sync.rs:** Removed post-auto_start stash (was a workaround for the early exits).
+3. **Test:** Updated `test_sync_single_resolved_stashes_excess` — verifies the reconciler stashes excess panes even with only 1 resolved pane.
+
+**The reconciler now handles all cases:**
+- 0 resolved panes → stash everything in the window
+- 1 resolved pane → focus it, stash all others
+- 2+ resolved panes → arrange in columns, stash extras (existing behavior)
+
+78 tmux-router tests + 38 agent-doc tests pass. Installed. Please test.
+<!-- agent:boundary:29d51029 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.27.5-v0.27.9: Incremental layout fixes (partial)
-- [ ] **Structural fix: declarative layout model — always reconcile, no early exits**
+- [x] Structural fix: removed all early exits from tmux_router::sync
+- [x] Reconciler handles 0/1/2+ panes uniformly
+- [ ] Test manually
+- [ ] Release v0.28.0
 <!-- /agent:pending -->

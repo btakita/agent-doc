@@ -1038,12 +1038,19 @@ Good call — keeps the plugin thin. The binary should:
 This way the plugin just sends `--col non-agent.txt --col agent-doc.md` and the binary fills in the gap from memory.
 
 This is a medium-sized change. Should I implement now or move to a separate task?
-<!-- agent:boundary:02ba7bdb -->
+Implement now
+### Re: Column memory implemented (HEAD)
+
+Saves column→agent-doc mapping to `.agent-doc/last_layout.json`. When a column has no agent doc, substitutes the remembered one. Reconciler sees 2 docs → 2 panes preserved.
+
+Installed. Test: open 2 agent docs → switch one side to non-agent → should keep 2 tmux panes.
+<!-- agent:boundary:bd7eaf41 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.28.0: Structural layout fix shipped
-- [ ] **Binary-side column-position memory for non-.md columns**
+- [x] v0.28.0: Structural layout fix
+- [x] Column memory implemented
+- [ ] Test + release
 <!-- /agent:pending -->

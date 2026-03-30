@@ -1007,7 +1007,22 @@ Updated the live post. Changed:
 **After:** "Creativity is constrained but not necessarily extinguished — it depends on whether the boundary is permeable and whether the system has mechanisms for renewal"
 
 Post updated: https://www.linkedin.com/feed/update/urn:li:share:7444389220590305280
-<!-- agent:boundary:953fc045 -->
+
+Please update the briantakita.me blog posts with the insights from the LinkedIn post conversation.
+
+### Re: Blog posts updated (HEAD)
+
+Updated both blog posts with insights from the LinkedIn conversation:
+
+**Existence-Lang post** — Added two new sections:
+- **Scope and Resolution in Bounded vs Unbounded Systems** — In bounded-information systems, scope and resolution trade off. In unbounded/creative systems, they don't. The bounded case is a simplification, not the default.
+- **Creative Systems and Steady State** — Some systems start unbounded and creative, can transition to bounded steady state. Creativity is constrained but not necessarily extinguished — depends on boundary permeability and renewal mechanisms.
+- **Permaculture section** — Corrected to "response to John Cassel's outreach" (not a full conversation)
+
+**FFI Plugin post** — Refined the "making conventions stick" section with the fuller framing about agent behavior and domain ontology as persistent vocabulary.
+
+Built, committed, pushed. CI deploying.
+<!-- agent:boundary:0edd8eb9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -1016,4 +1031,5 @@ Post updated: https://www.linkedin.com/feed/update/urn:li:share:7444389220590305
 - [x] Removed + archived snippet--rappstack
 - [x] YouTube comments with blog links on both videos
 - [x] LinkedIn published + updated + comment with links
+- [x] Blog posts updated with bounded/unbounded and creative lifecycle insights
 <!-- /agent:pending -->

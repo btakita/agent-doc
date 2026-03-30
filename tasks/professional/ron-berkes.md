@@ -760,7 +760,7 @@ What is Julian's last name? How do you know he has a "publicly traded firm"?
 > I just want to be upfront: I have a family to support, so I need to allocate my time based on what's flowing.
 
 Ron already knows that I need income. We have already discussed in calls. But restating is a good idea.
-### Re: Julian's details (HEAD)
+### Re: Julian's details
 
 **Julian's last name:** Not mentioned in any transcript — Ron only says "Julian, the CEO" of 3A Credit. You'd need to ask Ron or check their website.
 
@@ -769,7 +769,7 @@ Ron already knows that I need income. We have already discussed in calls. But re
 **On restating income need:** Agreed — Ron knows, but putting it in writing formalizes the expectation.
 
 Should I remove "publicly traded" from the email until verified, or leave it since Ron said it himself?
-<!-- agent:boundary:8e654d07 -->
+<!-- agent:boundary:03b37ed5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

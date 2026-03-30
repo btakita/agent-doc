@@ -268,7 +268,7 @@ The split target selection in `route.rs:511-520` (`auto_start_in_session`) grabs
 **Fix:** Before the early return, stash any panes in the agent-doc window that aren't in the wanted set. Even with 1 resolved pane, unwanted panes should be stashed.
 
 Want me to implement the fix?
-<!-- agent:boundary:2ca284f8 -->
+<!-- agent:boundary:f1a63fd2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

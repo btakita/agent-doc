@@ -409,6 +409,11 @@ Got the email: **melissa.lewis2019@gmail.com**. SMS wasn't received, so pivoting
 Review the draft and let me know if you want changes before pushing to Gmail Drafts. Say "send" to push via corky.
 
 **Contact file update:** Adding melissa.lewis2019@gmail.com to Melissa's contact file.
+
+> **Ron Berkes / Outdoor Industry**
+
+Contract Manufacturing / Outdoor Industry
+Should we include manufacturingchina.com? It's not developed at this point...so it does not reflect Ron's actual client + manufacturer network.
 ### Re: Contact update for Melissa Lewis
 
 Updated Melissa's contact across all systems:
@@ -420,7 +425,20 @@ Updated Melissa's contact across all systems:
 Corky will now track email correspondence with Melissa automatically. The gmail filter will label messages to/from her as "correspondence."
 
 The email draft at `mail/drafts/2026-03-30-melissa-lewis-update.md` is ready to send. Say "send" to push to Gmail Drafts via corky.
-<!-- agent:boundary:d448855b -->
+### Re: Ron Berkes section — drop ManufacturingChina (HEAD)
+
+Good call. Updated the email draft:
+
+- **Section renamed:** "Ron Berkes / Outdoor Industry" → "Ron Berkes / Contract Manufacturing & Outdoor Industry"
+- **Removed** ManufacturingChina.com reference entirely — the site isn't ready and wouldn't reflect Ron's actual network
+- **Removed** "directory site for the outdoor industry" (tied to the platform)
+- **Kept** the core value: MRH and Fast Fire client introductions, content pipeline, patent research automation
+- **Reframed** patent work as "for his manufacturing clients" rather than tied to a specific platform
+
+The draft now focuses on concrete, verifiable work (live client sites, YouTube→blog pipeline, patent automation) without pointing Melissa to anything unfinished.
+
+Draft ready at `mail/drafts/2026-03-30-melissa-lewis-update.md`. Say "send" to push to Gmail Drafts.
+<!-- agent:boundary:3d3e0894 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

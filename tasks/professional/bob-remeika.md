@@ -1276,7 +1276,7 @@ I have not yet built anything specific to Ragie. I'm currently using corky for m
 
 I also want to propose to build interactive office, pdf, markdown, mdx documents using Ragie as a backend.
 Via a web interface and via editor plugins.
-### Re: Interactive document editing with Ragie backend (HEAD)
+### Re: Interactive document editing with Ragie backend
 
 That's a strong product pitch — it directly connects your agent-doc architecture to Ragie's core offering.
 
@@ -1295,7 +1295,7 @@ That's a strong product pitch — it directly connects your agent-doc architectu
 - Ron: ingest patent filings → produce analysis documents that cross-reference the entire patent + manufacturer database
 
 This could become a product feature Ragie ships or a partner integration they showcase. Either way, it's the kind of proposal that turns a 30-min catch-up into a working relationship.
-<!-- agent:boundary:4b472508 -->
+<!-- agent:boundary:096bbf31 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

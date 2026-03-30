@@ -914,12 +914,12 @@ Is this an ffi or JB plugin issue?
 **Plugin needs reinstall:** `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-*.zip` → IDEA → Settings → Plugins → gear → Install from Disk → restart.
 
 Both binary and plugin are ready to test.
-### Re: JB plugin issue (HEAD)
+### Re: JB plugin issue
 
 It's a **JetBrains plugin issue** in `SyncLayoutAction.kt`. The `LayoutDetector.detectEditorLayout()` returns columns with empty file lists (for editor splits showing non-.md files). `SyncLayoutAction` was using all columns including empty ones, producing `--col ""` args. The `EditorTabSyncListener` had the filter already but `SyncLayoutAction` (called by `LayoutChangeDetector`) didn't.
 
 Both are now fixed — plugin source and binary-side defensive filter. Plugin rebuild is at `editors/jetbrains/build/distributions/`. Needs reinstall + IDEA restart to take effect.
-<!-- agent:boundary:5f441f66 -->
+<!-- agent:boundary:dc8554ff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

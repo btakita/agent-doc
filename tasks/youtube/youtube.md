@@ -796,9 +796,9 @@ Agreed — a misc package is an anti-pattern. Options:
 
 Option 1 seems cleanest since most of the functionality already has a natural home. Want me to proceed with migrating and deprecating snippet--rappstack?
 yes.
-If everything is moved out of snippet--rappstack, we can deprecate the repo.
+If everything is moved out of snippet--rappstack, we can deprecate the repo. 
 
-### Re: Migrate snippet--rappstack (HEAD)
+### Re: Migrate snippet--rappstack
 
 Starting migration. Plan:
 1. Move `cruip-simple/server/*` → `ui--server--briantakita/`
@@ -809,13 +809,24 @@ Starting migration. Plan:
 6. Build, test with chromium-bridge, commit
 
 Working on it now...
-<!-- agent:boundary:09b85a0b -->
+
+### Re: snippet--rappstack removed (HEAD)
+
+**Audit result:** The package was completely orphaned — zero imports anywhere in the codebase. All active functionality already lived in `ui--browser--briantakita` and `ui--server--briantakita`.
+
+**Actions taken:**
+1. Removed `snippet--rappstack` submodule from briantakita.me-dev
+2. Build passes cleanly
+3. Verified via chromium-bridge: page loads, `.scrolled` class works, sticky header shrinks
+4. Committed and pushed — CI deploying
+
+The snippet--rappstack GitHub repo still exists but is no longer referenced. You can archive it at your convenience.
+<!-- agent:boundary:28a7ea1d -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
 - [x] Videos uploaded + blog posts published
 - [x] Fixed sticky header shrinking (verified via chromium-bridge)
-- [ ] Migrate snippet--rappstack into existing packages
-- [ ] Remove snippet--rappstack submodule
-- [ ] Build + verify
+- [x] Removed snippet--rappstack submodule (unused, orphaned)
+- [x] CI deploying with all changes
 <!-- /agent:pending -->

@@ -537,7 +537,36 @@ Given the multiple revenue streams discussed with Ron, here's a structured appro
 - Weekly invoicing in 4-hour increments (Ron's suggestion) — take it, it's favorable
 - For patent automation: hourly during build + per-lead residual once automated (you built the machine, you get a cut of what it produces)
 - Keep equity conversations separate from hourly — don't trade current hours for future equity
-<!-- agent:boundary:31c135f8 -->
+Ron seems reluctant to pay an hourly rate due to him having to take care of his child. I was thinking a fix rate could be good in the short term.
+### Re: Fixed rate structure for Ron (HEAD)
+
+That makes sense — if Ron is cash-strapped and managing childcare, a fixed monthly retainer removes the "meter running" anxiety. Here's how to structure it:
+
+**Fixed Rate Option — Monthly Retainer**
+
+| Tier | Scope | Monthly Rate |
+|------|-------|-------------|
+| **Starter** | MRH cleanup + Fast Fire maintenance (10-15 hrs worth) | $1,500/mo |
+| **Standard** | Above + ManufacturingChina fixes + patent scraper build | $3,000/mo |
+| **Full** | All sites + patent automation + directory foundation | $5,000/mo |
+
+**Why this works for both sides:**
+- **Ron:** Predictable cost, no hourly surprises, can budget around childcare expenses
+- **You:** Guaranteed monthly income, flexibility to batch work around your schedule
+- **Built-in upside:** If you're efficient (AI tooling makes you 3-5x faster), you earn more per hour effective
+
+**Suggested pitch:**
+
+> "I get it — let's do a flat monthly rate so you know exactly what you're paying. $3,000/mo covers all three sites plus the patent automation build. That's predictable for you, and I'll prioritize based on what's moving fastest. Once the patent pipeline is generating leads, we switch that piece to a per-lead fee."
+
+**Key adjustments from hourly model:**
+- Define deliverables per month, not hours — "site cleanup + 2 optimization reports + patent scraper MVP"
+- 30-day commitment minimum, month-to-month after that
+- Scope creep protection: anything outside agreed deliverables is a separate quote
+- The per-lead residual on patent automation still kicks in later — that's the "residuals can work later" piece
+
+For the Steve/MRH engagement specifically, Ron could still bill Steve hourly ($25/hr × 4x) while paying you the flat rate — Ron keeps the margin as his project management cut.
+<!-- agent:boundary:c4651c49 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -545,9 +574,9 @@ Given the multiple revenue streams discussed with Ron, here's a structured appro
 - [x] Transcribe phone_20260330-114040_6504368181.amr with GPU diarization
 - [x] Research MonsterRodHolders.com site structure for optimization plan
 - [ ] Run ManufacturingChina.com site analysis (Ron requested)
+- [ ] Draft compensation proposal for Ron (fixed retainer model)
 - [ ] Wait for Ron to confirm Steve intro / Steve responds
 - [ ] Review transcript speaker labels for accuracy corrections
 - [ ] Patent mining automation — review Ron's spreadsheet when shared
-- [ ] Draft compensation proposal for Ron
 <!-- /agent:pending -->
  

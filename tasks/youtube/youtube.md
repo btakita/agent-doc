@@ -640,8 +640,40 @@ Done. SRT captions split at the 58:13 boundary — timestamps reset for Video 2.
   > Source: tasks/software/agent-doc.md, tasks/professional/john-cassel.md
   > Tools: Claude Code, agent-doc, existence-lang, Rust
 
+In Video 2, include pneuma, noumena, phenomena in the description. Also include other thematic topics. See:
+- tasks/professional/john-cassel.md
+- tasks/software/agent-doc.md
 Ready to upload both. Approve the titles/descriptions or edit them, then I'll upload with CC.
-<!-- agent:boundary:50241431 -->
+
+### Re: Expanded Video 2 description (HEAD)
+
+Updated with pneuma/noumena/phenomena and thematic topics from the source documents:
+
+**Video 2:** `~/Videos/2026-03-29 16-19-07-cut.mp4` (2h28min, 6.4G)
+- CC: `~/Videos/2026-03-29-cc.srt` (11,372 segments)
+- **Title:** "Existence-Lang: Pneuma, Noumena & Phenomena in Software Ontology | Live Coding"
+- **Description:**
+  > Deep dive into existence-lang ontology development — building a formal language for modeling reality in software systems.
+  >
+  > Key themes:
+  > - Pneuma (totality), Noumena (the unseen), Phenomena (the observed) — and how they map to software abstractions
+  > - Universal Applicability Principle: every ontology term applies to every entity at every scope
+  > - Precision as possibility space: vague definitions that honestly encompass the unknown vs. precise definitions that pretend completeness
+  > - The NULL analogy: noumena relates to phenomena the way NULL relates to known database values
+  > - Permaculture as systemic design practice — guiding ethics, vocabulary of interactions, whole-system planning
+  > - Applying ontology to FFI architecture: shared foundation pattern, domain overlays, scope-aware abstractions
+  > - Existence-lang CLI, dependency management, and the 114-node canonical ontology
+  >
+  > Includes conversation with John Cassel exploring permaculture design principles and their parallels to ontology-driven software development.
+  >
+  > Source: tasks/software/agent-doc.md, tasks/professional/john-cassel.md
+  > Tools: Claude Code, agent-doc, existence-lang, Rust
+
+**Video 1 unchanged:**
+- **Title:** "Agent-Doc: Building a Cross-Platform FFI Plugin with Socket IPC | Live Coding"
+
+Approve and I'll upload both.
+<!-- agent:boundary:f9d2138e -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -656,6 +688,7 @@ Ready to upload both. Approve the titles/descriptions or edit them, then I'll up
 - [x] Combined 2026-03-27 + 2026-03-29 videos (3h26m)
 - [x] Transcribed with CC (13,719 segments SRT)
 - [x] Split SRT into 2 files (2,347 + 11,372 segments)
+- [x] Expanded Video 2 description with pneuma/noumena/phenomena themes
 - [ ] Approve titles/descriptions
 - [ ] Upload Video 1 to YouTube with CC
 - [ ] Upload Video 2 to YouTube with CC

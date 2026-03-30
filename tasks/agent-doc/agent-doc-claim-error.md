@@ -271,7 +271,7 @@ I want the previously selected document for the left pane and the right pane to 
 The left pane should have been left alone and the right pane should have had the new tmux window. 
 
 Want me to implement the fix?
-### Revised understanding (HEAD)
+### Revised understanding
 
 Got it — you want **2 panes**, not 1:
 - **Left:** keep the previous agent doc session (the one that was there before you switched to CSV)
@@ -289,7 +289,7 @@ The bug has two parts:
 - The previous left-side agent doc pane stays untouched because it's not in the stash set.
 
 Ready to implement?
-<!-- agent:boundary:da062f5c -->
+<!-- agent:boundary:5838fbaf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

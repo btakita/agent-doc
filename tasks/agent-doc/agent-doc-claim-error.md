@@ -938,16 +938,24 @@ audit docs
 Fixed tmux-router clippy issue (collapsible_if). All clean.
 
 Ready to release when plugin is installed and tested.
-<!-- agent:boundary:bdbad09d -->
+
+I installed the latest JB Plugin.
+There is a single editor pane. But 3 tmux panes. 2 of the panes were left-over from the previous Idea session.
+There should be 1 tmux pane.
+Please look at logs.
+![2026-03-30_13-58.png](../../../../../Pictures/agent-loop/2026-03-30_13-58.png)
+### Re: Deeper reconcile logging added (HEAD)
+
+Reconcile detail logging now goes to `/tmp/agent-doc-sync.log` — each phase (SNAPSHOT, ATTACH, SELECT, DETACH) with pane IDs. Reproduce the 3-pane issue again and I'll read the detailed log.
+<!-- agent:boundary:e6e3218c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Structural fix: no early exits in reconciler
-- [x] Empty col_args filter (sync.rs + SyncLayoutAction.kt)
-- [x] Plugin v0.2.36 built
-- [x] Docs + VERSIONS.md updated
-- [ ] **Install plugin + test**
-- [ ] **Release tmux-router + agent-doc + plugin**
+- [x] Structural fix + empty col_args filter + plugin fix
+- [x] Reconcile detail logging
+- [ ] **Reproduce and capture detailed DETACH log**
+- [ ] Fix
+- [ ] Release
 <!-- /agent:pending -->

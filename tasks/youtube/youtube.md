@@ -795,25 +795,27 @@ Agreed — a misc package is an anti-pattern. Options:
 2. **Rename to something domain-specific** — e.g., `template--briantakita` or `theme--briantakita` if it stays as a separate package.
 
 Option 1 seems cleanest since most of the functionality already has a natural home. Want me to proceed with migrating and deprecating snippet--rappstack?
-<!-- agent:boundary:13a1d6e5 -->
+yes.
+If everything is moved out of snippet--rappstack, we can deprecate the repo.
+
+### Re: Migrate snippet--rappstack (HEAD)
+
+Starting migration. Plan:
+1. Move `cruip-simple/server/*` → `ui--server--briantakita/`
+2. Move `cruip-simple/browser/*` → `ui--browser--briantakita/`
+3. Move `cruip-simple/any/*` → appropriate existing package
+4. Update all imports in briantakita.me-dev
+5. Remove snippet--rappstack submodule
+6. Build, test with chromium-bridge, commit
+
+Working on it now...
+<!-- agent:boundary:09b85a0b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Full video: https://www.youtube.com/watch?v=ixDbYPO43Cw
-- [x] Blog post: https://briantakita.me/posts/agent-doc-module-harness-ontology
-- [x] LinkedIn published + edited + comment with links
-- [x] YouTube comment with blog link
-- [x] corky v0.21.2 released
-- [x] rappstack packages at 0.1.4
-- [x] Verify CI build passes and blog deploys
-- [x] Cut 35:46.1-35:47.5 from 2026-03-29 16-19-07.mp4
-- [x] Combined + split videos
-- [x] Transcribed with CC
-- [x] Video 1 uploaded: https://www.youtube.com/watch?v=u8qnbhsGAGo
-- [x] Video 2 uploaded: https://www.youtube.com/watch?v=IWNj9GPb2OI
-- [x] Blog post 1: https://briantakita.me/posts/agent-doc-ffi-plugin-socket-ipc
-- [x] Blog post 2: https://briantakita.me/posts/existence-lang-pneuma-noumena-phenomena
-- [x] Blog deployed to Cloudflare Pages
+- [x] Videos uploaded + blog posts published
 - [x] Fixed sticky header shrinking (verified via chromium-bridge)
-- [ ] Decide: migrate snippet--rappstack into existing packages or rename
+- [ ] Migrate snippet--rappstack into existing packages
+- [ ] Remove snippet--rappstack submodule
+- [ ] Build + verify
 <!-- /agent:pending -->

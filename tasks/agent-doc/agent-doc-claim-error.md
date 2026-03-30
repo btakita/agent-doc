@@ -1039,12 +1039,12 @@ This way the plugin just sends `--col non-agent.txt --col agent-doc.md` and the 
 
 This is a medium-sized change. Should I implement now or move to a separate task?
 Implement now
-### Re: Column memory implemented (HEAD)
+### Re: Column memory implemented
 
 Saves column→agent-doc mapping to `.agent-doc/last_layout.json`. When a column has no agent doc, substitutes the remembered one. Reconciler sees 2 docs → 2 panes preserved.
 
 Installed. Test: open 2 agent docs → switch one side to non-agent → should keep 2 tmux panes.
-<!-- agent:boundary:bd7eaf41 -->
+<!-- agent:boundary:cdf4afe7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -241,7 +241,7 @@ chromium-bridge v0.2.1 released:
 - **Parent submodule**: Pointer updated ✓
 
 Documentation-only release — no behavioral changes. Added missing command docs (README, SPEC), chatbox formatting guidance (SKILL.md), and module harness updates (19 evals).
-<!-- agent:boundary:d5733fc8 -->
+<!-- agent:boundary:1d9769e5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

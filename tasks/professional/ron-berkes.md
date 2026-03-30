@@ -656,7 +656,23 @@ Updated the draft at `mail/drafts/2026-03-30-call-summary-next-steps.md`. Key ch
 - **Removed the old $100/hr language** — replaced with the flexible approach
 
 Review the draft and let me know if you want changes before pushing to Gmail Drafts.
-<!-- agent:boundary:8cbf2979 -->
+Note that tasks/research/manufacturingchina.md is currently working on a draft for the patent intelligence.
+Please add the income proposal in there.
+### Re: Income proposal added to patent mining draft (HEAD)
+
+Added an **Income Structure** section to `mail/drafts/2026-03-30-patent-mining-proposal.md`. It covers:
+
+- **Patent pipeline** — you build the automation, per-lead fee or revenue share once generating. Analyst moves to higher-level evaluation.
+- **Client work** — billed directly through Ron's billing structure, separate cash flow.
+- **Base ask** — $1K/mo if he can swing it, flexible if not. Honest about family obligations and time allocation tied to revenue flow.
+- **Framing** — long-term partnership across all ventures, "let's get the wheels turning."
+
+Both email drafts are now updated and ready:
+1. `mail/drafts/2026-03-30-call-summary-next-steps.md` — general recap + compensation
+2. `mail/drafts/2026-03-30-patent-mining-proposal.md` — patent automation + income structure
+
+Say "send" to push either or both to Gmail Drafts.
+<!-- agent:boundary:d64f64ac -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -665,7 +681,8 @@ Review the draft and let me know if you want changes before pushing to Gmail Dra
 - [x] Research MonsterRodHolders.com site structure for optimization plan
 - [x] Run ManufacturingChina.com site analysis (Ron requested)
 - [x] Update email proposal with analyst + compensation + Julian angle
-- [ ] Push updated email to Gmail Drafts (awaiting review)
+- [x] Add income proposal to patent mining draft
+- [ ] Push updated emails to Gmail Drafts (awaiting approval)
 - [ ] Wait for Ron to confirm Steve intro / Steve responds
 - [ ] Review transcript speaker labels for accuracy corrections
 - [ ] Patent mining automation — review Ron's spreadsheet when shared

@@ -223,7 +223,7 @@ update README, SPEC, module-harness, ontology
 
 Committed `ef6f728` and pushed. Ready to release.
 release
-### v0.27.4 released (HEAD)
+### v0.27.4 released
 
 **Published everywhere:**
 - **crates.io:** v0.27.4 ✓
@@ -232,7 +232,7 @@ release
 - **cargo install:** updated ✓
 
 **Changelog:** Rescue stashed panes in sync — preserves Claude session context across tab switches.
-<!-- agent:boundary:48c71875 -->
+<!-- agent:boundary:1915e5f3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

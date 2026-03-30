@@ -107,13 +107,14 @@ editors/
 ## Release Process
 
 1. Bump version in `Cargo.toml` + `pyproject.toml` (keep in sync)
-2. `make check` (clippy + test)
-3. Branch → PR → squash merge to main
-4. Tag: `git tag v<version> && git push origin v<version>`
-5. `cargo publish` (crates.io)
-6. `maturin publish` (PyPI)
-7. `gh release create v<version> --generate-notes` with prebuilt binary (GitHub Release)
-8. Install binary: `cargo install --path .`
+2. Update `VERSIONS.md` with a new version entry summarizing the changes
+3. `make check` (clippy + test)
+4. Branch → PR → squash merge to main
+5. Tag: `git tag v<version> && git push origin v<version>`
+6. `cargo publish` (crates.io)
+7. `maturin publish` (PyPI)
+8. `gh release create v<version> --generate-notes` with prebuilt binary (GitHub Release)
+9. Install binary: `cargo install --path .`
 
 ## Agent Backend Contract
 

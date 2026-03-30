@@ -38,6 +38,190 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 ## 0.27.0
 
 - **Fix stash rescue deregistration**: Fixed pane deregistration during stash rescue operations.
+- **Socket IPC**: Added `ipc_socket` module using Unix domain sockets via the `interprocess` crate for direct binary-to-plugin communication.
+- **Bulk resync**: `return_stashed_panes_bulk()` for batch stash rescue operations.
+
+## 0.26.6
+
+- **FFI sync lock/debounce**: Added `agent_doc_sync_try_lock`/`unlock` FFI exports for cross-editor concurrency control. Added `agent_doc_sync_bump`/`check_generation` for cross-editor event coalescing.
+- **Layout debounce fix**: `LayoutChangeDetector` uses generation counter instead of spawning concurrent threads per event.
+- **JetBrains plugin v0.2.35**: Uses FFI sync primitives with local fallback.
+
+## 0.26.5
+
+- **Skip no-op IPC reposition**: IPC reposition signal skipped when boundary position is unchanged, eliminating ~64% of no-op PatchWatcher operations.
+- **Handle inotify overflow**: PatchWatcher scans for missed files on inotify OVERFLOW events.
+- **CI: crates.io-only dependencies**: All path dependencies (instruction-files, tmux-router, agent-kit, module-harness, existence) replaced with crates.io versions in CI workflows.
+
+## 0.26.4
+
+- **Prompt detection for Claude Code v2.1+**: Support numbered list format (`N. label`) in prompt option parsing alongside bracket format (`[N] label`).
+- **Auto-start PromptPoller**: Plugin auto-starts PromptPoller on project open.
+- **JetBrains plugin v0.2.32**: PromptPoller auto-start, `.bin/` path resolution, diagnostic logging.
+
+## 0.26.3
+
+- **Sync no longer auto-inits frontmatter**: Sync returns `Unmanaged` for files without session UUIDs; only `claim` adds frontmatter now.
+- **Plugin mixed-layout sync**: Uses focus-only when non-`.md` files are in editor splits, preventing stashing.
+- **JetBrains plugin v0.2.25**: Alt+Space popup, removed ActionPromoter (frees Alt+Enter for native JetBrains intentions).
+
+## 0.26.2
+
+- **Route single exit point**: Refactored route to `resolve_or_create_pane()` eliminating propagation bugs. `sync_after_claim` now runs on ALL route paths.
+- **Response status signals**: File-based status signals (`.agent-doc/status/<hash>`) for cross-process visibility. FFI: `set_status`/`get_status`/`is_busy` for in-process plugin checks.
+- **Auto-init unclaimed files in sync**: Sync writes session UUID for unclaimed files.
+- **`agent_doc_version()` FFI export**: Runtime version tracking for plugins.
+- **JetBrains plugin v0.2.24**: `is_busy()` guard in `EditorTabSyncListener` + `TerminalUtil`.
+
+## 0.26.1
+
+- **Sync layout authority**: `sync_after_claim` uses editor-provided `col_args`, preventing 3-pane layout regression on file switch.
+- **Clippy fixes**: `doc_lazy_continuation` fixes in sync.rs, upgrade.rs. Unused variable fix in tmux-router `break_pane_to_stash`.
+- **SPEC.md updates**: Added sections on project config, IPC write verification, and sync layout authority.
+
+## 0.26.0
+
+- **Kill pane safety**: `kill_pane` refuses to destroy a session's last window (tmux-router v0.3.0).
+- **IPC verification**: Content verification catches partial plugin application failures. `--force-disk` cleans stale patches to prevent double-writes.
+- **Module harness context**: All 53+ modules annotated with Spec/Contracts/Evals doc comments (468 named evals, 68% coverage).
+- **Existence-lang ontology**: 9 domain terms defined (Document, Session, Component, Boundary, Snapshot, Patch, Exchange, Route, Claim). Dev dependencies: existence v0.4.0, module-harness v0.2.0.
+- **README rewrite**: Concise GitHub-facing guide.
+
+## 0.25.15
+
+- **Sync layout repair**: Added `repair_layout()` to fix window index mismatches (agent-doc window not at index 0). Sync tests added for repair skip and move scenarios.
+- **Blank line collapse on tmux_session strip**: Collapsing 3+ consecutive newlines to 2 when stripping deprecated `tmux_session` frontmatter field.
+
+## 0.25.14
+
+- **Sync pane repair**: Window index repair, pane state reconciliation, effective window tracking.
+- **Resync enhancements**: Enhanced dead pane detection and session validation.
+- **Route improvements**: Improved command routing logic.
+
+## 0.25.13
+
+- **Install script**: Rewritten `install.sh` with platform detection and improved install paths.
+- **Homebrew formula**: Added `Formula/agent-doc.rb` for macOS/Linux Homebrew installation.
+- **Deprecate `tmux_session` frontmatter**: Sync strips the field on encounter instead of repairing it. Route `auto_start` no longer attempts repair.
+
+## 0.25.12
+
+- **Sync swap-pane atomic reconcile**: `context_session` overrides frontmatter `tmux_session`, auto-repairs on mismatch.
+- **Visible-window split**: New panes split in the visible agent-doc window instead of stash.
+- **Resync report-only in sync**: `resync --fix` disabled in sync path to preserve cross-session panes.
+- **tmux-router v0.2.9**: Swap-pane atomic transitions.
+
+## 0.25.11
+
+- **Tmux-router swap-pane atomic transitions**: Pane moves use `swap-pane` for flicker-free layout changes. CI fix for path dependencies (agent-kit, tmux-router).
+
+## 0.25.10
+
+- **Preflight mtime debounce**: 500ms idle gate before computing diff.
+- **Unified diff context**: Diff output uses unified format with 5-line context radius.
+- **Route `--debounce` flag**: Opt-in mtime polling for coalescing rapid editor triggers.
+- **`is_tracked` FFI export**: For editor plugins to check file tracking status.
+- **Sync no-wait auto-start**: `auto_start_no_wait` for non-blocking session creation during sync.
+- **JetBrains plugin v0.2.21**: Sync logging improvements.
+
+## 0.25.9
+
+- **`is_tracked()` FFI export**: Conservative debounce on untracked files (fallback to local tracking).
+- **Untracked file debounce fix**: Untracked files no longer bypass debounce.
+- **JetBrains plugin v0.2.20**: `is_tracked` binding + FFI logging tags.
+
+## 0.25.8
+
+- **Preflight debounce**: Mtime-based 500ms idle gate before computing diff.
+- **Unified diff context**: Switch diff output to unified format with 5-line context radius.
+- **Route `--debounce`**: New flag for opt-in mtime polling to coalesce rapid editor triggers.
+- **Truncation detection fix**: Smarter dot handling for domain fragments in `looks_truncated`.
+
+## 0.25.7
+
+- **Rename `submit` to `run`**: `submit.rs` renamed to `run.rs`; all internal "submit" terminology updated to "run".
+- **FFI debounce module**: `document_changed()` + `await_idle()` FFI exports for editor-side debounce.
+- **Route sync fix**: Route calls `sync::run_layout_only()` to prevent auto-start race conditions.
+- **JetBrains plugin v0.2.19**: FFI debounce, conditional typing wait, layout-only sync.
+
+## 0.25.6
+
+- **Route `--col`/`--focus` args**: Declarative layout sync from the route command. Plugin `sendToTerminal` passes editor layout in a single CLI call.
+- **Layout change detection**: `LayoutChangeDetector` using `ContainerListener` with 5s fallback poll in the JetBrains plugin.
+- **EDT-safe threading**: Plugin uses `invokeLater` for Swing reads, background thread for CLI calls.
+- **JetBrains plugin v0.2.17**.
+
+## 0.25.5
+
+- **FFI boundary reposition**: Export `agent_doc_reposition_boundary_to_end()` for plugin use.
+- **Boundary ID summaries**: 8-char hex IDs with optional `:summary` suffix (filename stem). `new_boundary_id_with_summary()` wired into all write paths.
+- **Snapshot boundary cleanup**: Commit path uses `remove_all_boundaries()`. Working tree cleaned via `clean_stale_boundaries_in_working_tree()` on commit.
+- **JetBrains plugin v0.2.14**: FFI-first reposition with Kotlin fallback.
+
+## 0.25.4
+
+- **Boundary accumulation fix**: Plugin `repositionBoundaryToEnd` removes ALL boundaries, not just the last one.
+- **Short boundary IDs**: 8 hex chars instead of full UUID (centralized in `lib.rs`).
+- **Autoclaim pruning**: Validate file existence, prune stale entries on rename/delete.
+- **Sync stale pane detection**: Detect alive panes with non-existent registered files (rename), kill stale pane and auto-start new session.
+
+## 0.25.3
+
+- **Fix IPC boundary reposition for prompt ordering**: All IPC write paths call `reposition_boundary_to_end()` before extracting boundary IDs. Previously the stale boundary position caused responses to appear before the prompt.
+
+## 0.25.2
+
+- **Fix skill install superproject root resolution**: Added `resolve_root()` to detect git superproject when CWD is in a submodule. `skill install`/`check` now writes to the project root, not the submodule's `.claude/skills/`.
+
+## 0.25.1
+
+- **IPC boundary reposition from commit**: After committing, send an IPC reposition signal to the plugin so it moves the boundary marker to end-of-exchange in its Document buffer. Avoids writing to the working tree (which would lose user keystrokes).
+
+## 0.25.0
+
+- **`agent-doc preflight` command**: Consolidated pre-agent command (recover + commit + claims + diff + document read) returning JSON for skill consumption.
+- **Boundary reposition fix**: Snapshot-only reposition prevents losing user input; no working tree writes during reposition.
+- **CRDT merge simplification**: Removed `reorder_agent_before_human()`, deterministic client IDs.
+- **Pulldown-cmark outline**: CommonMark-compliant heading parser for outline.
+- **Plugin boundary reposition via IPC**: `reposition_boundary: true` flag in IPC payloads.
+- **Stash window routing**: Target largest pane, overflow to stash windows.
+- **JetBrains plugin v0.2.12**: Plugin-side boundary reposition.
+
+## 0.24.4
+
+- **Deterministic boundary re-insertion in `apply_patches`**: Binary handles boundary re-insertion after checkpoint writes, removing the need for SKILL.md to manually re-insert boundaries.
+
+## 0.24.3
+
+- **Context session for auto_start**: Pass context session to `auto_start` to prevent routing to the wrong tmux session. Post-sync resync for consistency.
+
+## 0.24.2
+
+- **SKILL.md step 3b**: Added mandatory pending updates check each cycle.
+- **`plugin install --local`**: Install JetBrains/VS Code plugins from local build directory.
+- **JetBrains plugin v0.2.10**: `resync --fix` on startup.
+- **JetBrains plugin v0.2.9**: VCS refresh signal fix (ENTRY_MODIFY event).
+
+## 0.24.1
+
+- **SKILL.md heredoc examples**: Updated bundled SKILL.md with heredoc examples for the write command.
+
+## 0.24.0
+
+- **`agent-doc install` command**: System-level setup that checks prerequisites (tmux, claude) and detects/installs editor plugins.
+- **`agent-doc init` project mode**: No-arg `init` now initializes a project (creates `.agent-doc/` directory structure, installs SKILL.md) instead of requiring a file argument.
+- **SKILL.md content tests**: CLI integration tests for skill install/check content verification.
+- **Sync pane guard**: Pre-sync alive pane check prevents duplicate session creation.
+
+## 0.23.3
+
+- **Cross-platform sync pane guard**: `find_alive_pane_for_file()` uses `ps(1)` instead of `/proc` for Linux+macOS compatibility. Pre-sync auto-start checks alive panes before creating duplicates.
+- **Clippy fixes**: Fix `collapsible_if` warnings in template.rs, git.rs, terminal.rs. Suppress `dead_code` warnings for library-only boundary functions.
+
+## 0.23.2
+
+- **Explicit patch boundary-aware insertion**: `apply_patches_with_overrides()` checks for boundary markers when applying explicit patch blocks in append mode, not just unmatched content. Prevents boundary markers from accumulating as orphans.
+- **Version bump**: Includes all v0.23.1 fixes (IPC snapshot, HEAD marker cleanup, boundary insertion).
 
 ## 0.23.1
 

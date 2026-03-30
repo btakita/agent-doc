@@ -673,7 +673,7 @@ Updated with pneuma/noumena/phenomena and thematic topics from the source docume
 - **Title:** "Agent-Doc: Building a Cross-Platform FFI Plugin with Socket IPC | Live Coding"
 
 Approve and I'll upload both.
-<!-- agent:boundary:cdb74162 -->
+<!-- agent:boundary:aa5aeb0d -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

@@ -584,7 +584,7 @@ audit docs
 
 All 568 tests pass. Ready to release v0.27.7.
 Release
-### Re: v0.27.7 released (HEAD)
+### Re: v0.27.7 released
 
 **Published everywhere:**
 - **crates.io:** v0.27.7 ✓
@@ -596,7 +596,7 @@ Release
 - Sync path now column-aware: `auto_start_no_wait` receives `col_args` and picks positionally correct split target
 - 2 new integration tests
 - Docs updated (route.rs, sync.rs, SPEC.md)
-<!-- agent:boundary:e71d774a -->
+<!-- agent:boundary:d216cfaf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

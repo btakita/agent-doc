@@ -419,10 +419,35 @@ Covers:
 - Asks for intros to both clients
 
 Review the draft and let me know if you want changes before pushing to Gmail Drafts.
-<!-- agent:boundary:27bbf947 -->
+
+> - The Shopify mockup you showed me looked great. If we go that route, we'd just need to mirror the URL structure to preserve SEO.
+
+Ron also mentioned using Astro and I mentioned using Hono with Cloudflare. What shopping cart would be used in these cases?
+
+**Re: Shopping cart for Astro / Hono + Cloudflare**
+
+Good catch on the draft — I'll update it to not assume Shopify. Here are the options:
+
+| Approach | Cart/Checkout | Hosting | Best For |
+|----------|--------------|---------|----------|
+| **Shopify Storefront API** | Shopify handles cart, checkout, payments | Astro/Hono is just the frontend | Easiest migration — Ron already has a Shopify mockup |
+| **Stripe Checkout** | Stripe Sessions API | Cloudflare Workers/Pages | Simpler catalogs, lower monthly cost ($0 vs Shopify $39+/mo) |
+| **Snipcart** | Drop-in JS widget | Any static host | Quick add-on, no backend needed, $0–$20/mo |
+| **Medusa.js** | Open-source headless commerce | Self-hosted or Railway | Full control, no vendor lock-in |
+| **Custom (D1 + Stripe)** | Build it with Hono + D1 + Stripe | Cloudflare Workers | Maximum performance, total control |
+
+**For Monster Rod Holders (~200 products, $18K/mo):**
+The pragmatic path is **Shopify Storefront API** — Ron already built the Shopify catalog/mockup, so the products are already in Shopify. We'd just replace the Shopify theme with an Astro or Hono frontend served from Cloudflare. Cart, checkout, and payments stay on Shopify. Best of both worlds: Cloudflare CDN speed + Shopify's proven commerce backend.
+
+**For the directory site (long-term):**
+No shopping cart needed initially — it's content + referral links. If we add our own products later, Stripe Checkout is the lightest option.
+
+I'll update the draft to say "whether we keep it on WordPress, move to Shopify, or build a custom frontend" instead of assuming Shopify.
+<!-- agent:boundary:31a9b4d8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
+- [ ] Update email draft to not assume Shopify
 - [ ] Review & send call summary email to Ron
 - [ ] Wait for Ron to confirm client introductions
 - [ ] Research MonsterRodHolders.com site structure for optimization plan

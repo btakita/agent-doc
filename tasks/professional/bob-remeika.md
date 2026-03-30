@@ -1296,7 +1296,7 @@ That's a strong product pitch — it directly connects your agent-doc architectu
 - Ron: ingest patent filings → produce analysis documents that cross-reference the entire patent + manufacturer database
 
 This could become a product feature Ragie ships or a partner integration they showcase. Either way, it's the kind of proposal that turns a 30-min catch-up into a working relationship.
-### Re: Interactive web document prototype as demo (HEAD)
+### Re: Interactive web document prototype as demo
 
 Yes — that's the move. A working prototype is far more compelling than talking about the concept.
 
@@ -1325,7 +1325,7 @@ Yes — that's the move. A working prototype is far more compelling than talking
 5. Bob sees: "This is Ragie-powered document editing, live"
 
 This turns the call from "let me tell you about an idea" into "let me show you a working product that uses your API." Completely different conversation.
-<!-- agent:boundary:7325e983 -->
+<!-- agent:boundary:1b7f5995 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

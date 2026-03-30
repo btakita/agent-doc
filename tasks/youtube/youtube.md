@@ -736,7 +736,7 @@ We lost the shrinking sticky breadcrumb + header behavior. The breadcrumb and he
 
 ![img_1.png](img_1.png)
 
-### Re: Sticky header shrinking fix (HEAD)
+### Re: Sticky header shrinking fix
 
 Found and fixed the regression. The CSS `.scrolled` selectors were defined but the `scrolled` class was never being applied to the document root.
 
@@ -745,7 +745,7 @@ Found and fixed the regression. The CSS `.scrolled` selectors were defined but t
 **Fix:** Added `document.documentElement.classList.toggle('scrolled', scrolled)` to the scroll handler in `lib/snippet--rappstack/cruip-simple/browser/layout__hyop.ts`.
 
 Committed, pushed, and CI will deploy. The sticky header/breadcrumb/title will now shrink when scrolling — font sizes reduce, nav padding shrinks, and breadcrumb top adjusts.
-<!-- agent:boundary:0d2052de -->
+<!-- agent:boundary:ecfb3417 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

@@ -743,16 +743,38 @@ Backfill tmux-router VERSIONS.md
 ### Re: tmux-router VERSIONS.md backfilled
 
 Added 7 missing entries (v0.2.6 through v0.3.3). Full history now covers v0.1.0 through v0.3.5. Committed and pushed.
-<!-- agent:boundary:394c8e29 -->
+
+We got into some invalid pane states. Especially when reopening sessions. Here is 1 case. Another case of >4 tmux panes occurred after this screenhot. Check the logs.
+/home/brian/work/btakita/agent-loop/screenshot.png
+### Re: Invalid pane states — stash accumulation (HEAD)
+
+Current state: **2 panes in agent-doc window, 6 in stash**. The stash is accumulating:
+
+| Pane | File | Location |
+|------|------|----------|
+| %153 | agent-doc-claim-error.md | agent-doc window |
+| %191 | youtube.md | agent-doc window |
+| %183 | monsterrodholders.md | stash |
+| %184 | ron-berkes.md | stash |
+| %187 | manufacturingchina.md | stash |
+| %188 | corky.md | stash |
+| %189 | existence.md | stash |
+| %190 | whiskerseeker.md | stash |
+
+The >4 pane issue is from sessions accumulating without cleanup. When you switch between documents rapidly, each new doc gets a new pane via auto_start, previous panes get stashed, but stashed panes never get cleaned up.
+
+**Root problem:** There's no garbage collection for stashed panes. The v0.27.2 auto-kill was reverted because it was too aggressive (killed active sessions). The correct approach is an `agent-doc gc` command that kills stashed panes whose Claude sessions have exited (idle shells at `❯` prompt with no active agent-doc process).
+
+**Immediate cleanup:** Want me to kill the 6 idle stash panes now?
+
+**Longer term:** Implement `agent-doc gc` as a separate command for manual and automated cleanup.
+<!-- agent:boundary:800caa4b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.27.5: Column-aware split target (route path)
-- [x] v0.27.6: Bold-text header fallback
-- [x] v0.27.7: Sync path column-aware split (col_args pass-through)
-- [x] v0.27.8: Fix dead-code stash (derive session from pane)
-- [x] v0.27.9: Remove early-exit stash + trace logging
-- All shipped. Layout working correctly.
+- [x] v0.27.5-v0.27.9: Layout fixes shipped
+- [ ] **Kill 6 idle stash panes (immediate cleanup)**
+- [ ] **Implement `agent-doc gc` for stash garbage collection**
 <!-- /agent:pending -->

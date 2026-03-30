@@ -289,7 +289,7 @@ The bug has two parts:
 - The previous left-side agent doc pane stays untouched because it's not in the stash set.
 
 Ready to implement?
-### Yes — the fix is column-position-aware, not hardcoded (HEAD)
+### Yes — the fix is column-position-aware, not hardcoded
 
 The existing code already knows which column the file is in via `is_first_column()` + `split_before`:
 - **Right column** → `split_before = false` → `-dh` (split right of target)
@@ -306,7 +306,7 @@ So reversed scenario (CSV right, new agent doc left):
 4. Right pane (previous agent doc) untouched
 
 Both directions work. Ready to implement.
-<!-- agent:boundary:dd8a5d8e -->
+<!-- agent:boundary:5f278598 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

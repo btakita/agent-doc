@@ -607,7 +607,7 @@ Also saved a memory: **always update VERSIONS.md before each release** — this 
 
 Note: v0.24.0 through v0.26.x entries are still missing (from previous sessions). I only added the versions released in this session. If you want the full history backfilled, let me know.
 full history backfill
-### Re: VERSIONS.md backfill and SKILL rule (HEAD)
+### Re: VERSIONS.md backfill and SKILL rule
 
 **Full backfill done:** 30 missing version entries added (v0.23.2 through v0.26.6), derived from git commit messages between tags. VERSIONS.md now has complete history from v0.17.24 through v0.27.7.
 
@@ -616,7 +616,7 @@ full history backfill
 - **dev SKILL.md** — Already had the rule in pre-release verification checklist
 
 Committed and pushed.
-<!-- agent:boundary:1c623b98 -->
+<!-- agent:boundary:1428c541 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

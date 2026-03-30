@@ -80,4 +80,10 @@ All 4 old transcript artifacts were deleted earlier. Current recordings director
 ---
 
 Converted to template mode. The Summary section is static content; the `agent:exchange` component below holds the conversation. Edit inline here and I'll respond with patch blocks.
+
+Transcribe and diarize using corky --gpu
+/home/brian/work/btakita/agent-loop/mail/contacts/ron-berkes/recordings/phone_20260329-193132_6504368181.amr
 <!-- /agent:exchange -->
+
+<!-- agent:pending patch=replace -->
+<!-- /agent:pending -->

@@ -868,7 +868,7 @@ Want me to draft both LinkedIn posts now?
 Want me to draft it?
 Yes...let's see how it reads.
 
-### Re: LinkedIn draft (HEAD)
+### Re: LinkedIn draft
 
 Draft saved to `mail/social/20260330-ffi-ontology-linkedin.md`:
 
@@ -896,7 +896,7 @@ The conversation with John Cassel about permaculture design principles surfaced 
 **Comment (links):** Will include YouTube + blog links for both sessions.
 
 Edit or approve to publish.
-<!-- agent:boundary:53df837d -->
+<!-- agent:boundary:4a95bd21 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

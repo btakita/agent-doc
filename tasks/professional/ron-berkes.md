@@ -658,7 +658,7 @@ Updated the draft at `mail/drafts/2026-03-30-call-summary-next-steps.md`. Key ch
 Review the draft and let me know if you want changes before pushing to Gmail Drafts.
 Note that tasks/research/manufacturingchina.md is currently working on a draft for the patent intelligence.
 Please add the income proposal in there.
-### Re: Income proposal added to patent mining draft (HEAD)
+### Re: Income proposal added to patent mining draft
 
 Added an **Income Structure** section to `mail/drafts/2026-03-30-patent-mining-proposal.md`. It covers:
 
@@ -672,7 +672,7 @@ Both email drafts are now updated and ready:
 2. `mail/drafts/2026-03-30-patent-mining-proposal.md` — patent automation + income structure
 
 Say "send" to push either or both to Gmail Drafts.
-<!-- agent:boundary:d64f64ac -->
+<!-- agent:boundary:dd24e60d -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

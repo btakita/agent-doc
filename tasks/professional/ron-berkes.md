@@ -786,13 +786,13 @@ Created `mail/topics/3a-credit/README.md`:
 
 Committed to mail submodule. "Publicly traded" in the email is now verified.
 Send the email. We can bypass the draft.
-### Re: Patent mining proposal sent (HEAD)
+### Re: Patent mining proposal sent
 
 **Sent** to `rberkes@gmail.com`:
 - **From:** brian.takita@gmail.com
 - **Subject:** Patent Mining Automation — Proposal
 - **Status:** sent and committed to mail submodule
-<!-- agent:boundary:16379805 -->
+<!-- agent:boundary:2b43a871 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

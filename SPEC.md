@@ -222,10 +222,12 @@ Two modes:
 
 **Auto-start algorithm (`auto_start_in_session`):**
 1. Read `tmux_session` from the document's frontmatter (fall back to default `claude` session name)
-2. Search `sessions.json` for a registered pane that is alive and in the target tmux session
-3. If found → `tmux split-window -dh` alongside that pane (creates the new pane in the same window, avoiding throwaway windows and join failures from minimum pane size)
+2. Find a split target pane:
+   - **Sync path** (`skip_wait=true`): pick the split target by column position — first pane in the agent-doc window for left-column files, last pane for right-column files. This places the new pane adjacent to its column neighbors.
+   - **Route path** (`skip_wait=false`): search `sessions.json` for any registered pane alive in the target session.
+3. If found → `tmux split-window` alongside that pane (`-dbh` for left-column, `-dh` for right-column)
 4. If split-window fails → fall back to creating a new window
-5. If no registered pane found → create a new window via `tmux new-window` (the session may not exist yet, in which case a new session is created)
+5. If no split target found → create a new window via `tmux new-window` (the session may not exist yet, in which case a new session is created)
 
 ### 7.10 claim
 
@@ -376,6 +378,8 @@ Supported editors: `jetbrains`, `vscode`. Downloads plugin assets from GitHub Re
 Mirrors a columnar editor layout in tmux. Each `--col` is a comma-separated list of files. Columns arrange left-to-right; files stack top-to-bottom within each column.
 
 **Pre-sync file resolution:** Before the layout algorithm runs, sync parses file paths from `--col` args and resolves each file. Files without a session UUID in frontmatter are treated as **unmanaged** and skipped (no auto-initialization of frontmatter). Only `agent-doc claim` adds session UUIDs. For managed files (those with session UUIDs) whose registered pane is in a stash window, sync **rescues** the pane back to the agent-doc window (via `swap-pane`, falling back to `join-pane`) — preserving the existing Claude session context. Only if rescue fails, or if no alive pane exists at all, does sync auto-start a fresh Claude session (via `route::auto_start()`).
+
+**Early-exit stash:** When fewer than 2 panes are resolved (not enough for a 2D layout), sync stashes any excess panes in the agent-doc window that aren't in the wanted set before returning. This prevents leftover panes from previous layouts from staying visible when switching from a multi-pane layout to a single-pane layout.
 
 **Reconciliation algorithm** (simple 2-step detach/attach):
 1. **SNAPSHOT** — query current pane order in target window

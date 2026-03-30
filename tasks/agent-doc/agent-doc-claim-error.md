@@ -867,14 +867,14 @@ From the screenshot it looks like 2 panes — which is correct for 2 editor colu
 It was 3 panes. Look in the logs.
 
 Please describe what you expected vs. what you saw.
-### Re: File-based sync logging installed (HEAD)
+### Re: File-based sync logging installed
 
 Logs now go to `/tmp/agent-doc-sync.log`. Cleared the file. Reproduce the 3-pane bug, then I'll read the log.
 
 The log captures: sync start (col_args, window, focus), repair_layout, each auto_start, pane count before/after tmux_router::sync, and tmux_router trace (resolution, reconcile).
 
 Reproduce and let me know.
-<!-- agent:boundary:72043eff -->
+<!-- agent:boundary:436a54a2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

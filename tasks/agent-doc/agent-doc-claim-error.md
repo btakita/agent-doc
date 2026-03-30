@@ -867,23 +867,22 @@ From the screenshot it looks like 2 panes — which is correct for 2 editor colu
 It was 3 panes. Look in the logs.
 
 Please describe what you expected vs. what you saw.
-### Re: Apologies — you're right about the 3 panes (HEAD)
+### Re: File-based sync logging installed (HEAD)
 
-I couldn't find the logs because `agent-doc sync` is invoked by the JetBrains plugin as a short-lived process — its stderr goes nowhere persistent. The trace logs I added are lost.
+Logs now go to `/tmp/agent-doc-sync.log`. Cleared the file. Reproduce the 3-pane bug, then I'll read the log.
 
-**Immediate fix needed:** File-based sync logging so we can capture what happens during the layout transition.
+The log captures: sync start (col_args, window, focus), repair_layout, each auto_start, pane count before/after tmux_router::sync, and tmux_router trace (resolution, reconcile).
 
-I'll add logging to `/tmp/agent-doc-sync.log` so we can inspect it after reproduction. Then we can see exactly which code path creates the 3rd pane and why the reconciler isn't cleaning it up.
-
-Adding now.
-<!-- agent:boundary:121c3ea3 -->
+Reproduce and let me know.
+<!-- agent:boundary:72043eff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] Structural fix: removed early exits
-- [ ] **Add persistent file logging for sync**
-- [ ] **Diagnose 3-pane from logs**
+- [x] File-based sync logging
+- [ ] **Reproduce 3-pane and capture logs**
+- [ ] Diagnose and fix
 - [ ] Release
 <!-- /agent:pending -->

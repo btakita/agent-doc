@@ -588,7 +588,29 @@ Got it — you're prioritizing the relationship over maximizing rate. That's sma
 - Keep it simple — no contracts, no scope documents, just start delivering
 
 The real value here isn't the monthly rate — it's positioning yourself as Ron's tech partner across all his ventures (ManufacturingChina, patent mining, MRH, Fast Fire, outdoor consolidation). That's a $100K+/yr relationship once it's all flowing.
-<!-- agent:boundary:b6b4d1d7 -->
+
+Ron may not be able to afford even $1000. We should allow for that. Just let him know that I need to support my family so I need to allocate time accordingly.
+### Re: Zero-upfront with time allocation honesty (HEAD)
+
+Understood. Here's the framing that respects both realities — Ron may have zero budget right now, and you need to feed your family:
+
+**Suggested message to Ron:**
+
+> "Ron, I'm all in on what we're building. I don't need you to pay me upfront if the cash isn't there right now — I know you're juggling a lot. What I do need is to be honest with you: I have a family to support, so I have to allocate my time where income is coming in. If you can get me in front of Steve and the Fast Fire guy, that's where the hourly billing starts. For everything else — ManufacturingChina, the patent scraper, the directory vision — I'm happy to build alongside you and we figure out compensation as revenue comes in. Just keep me in the loop so I can plan my time."
+
+**What this actually means in practice:**
+
+| Work | Payment | Your time allocation |
+|------|---------|---------------------|
+| MRH / Fast Fire (client work) | Hourly via Ron's billing to clients | Priority — this is cash flow |
+| ManufacturingChina fixes | Deferred / revenue share | Lower priority until clients pay |
+| Patent scraper | Deferred / per-lead share | Build in gaps, high future value |
+| Directory / consolidation | Equity / future revenue | Nights & weekends / when inspired |
+
+**The key ask isn't money — it's introductions.** Ron's value right now is connecting you to paying clients (Steve, Fast Fire owner). Once those engagements start, you have cash flow independent of Ron's personal budget. Ron gets his cut as the middleman, you get steady work, everyone wins.
+
+This way you're not asking Ron for money he doesn't have, and you're not over-committing time you can't afford to give away.
+<!-- agent:boundary:c2bb2d23 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -596,7 +618,6 @@ The real value here isn't the monthly rate — it's positioning yourself as Ron'
 - [x] Transcribe phone_20260330-114040_6504368181.amr with GPU diarization
 - [x] Research MonsterRodHolders.com site structure for optimization plan
 - [x] Run ManufacturingChina.com site analysis (Ron requested)
-- [ ] Draft compensation proposal for Ron (flexible/relationship-first approach)
 - [ ] Wait for Ron to confirm Steve intro / Steve responds
 - [ ] Review transcript speaker labels for accuracy corrections
 - [ ] Patent mining automation — review Ron's spreadsheet when shared

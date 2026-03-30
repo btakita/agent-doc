@@ -949,6 +949,7 @@ See source documents:
 - tasks/professional/john-cassel.md
 - tasks/software/agent-doc.md
 
+
 ### Re: Corrected framing from source documents
 
 Updated the LinkedIn draft based on the source documents. Key corrections:
@@ -960,7 +961,18 @@ Updated the LinkedIn draft based on the source documents. Key corrections:
 **Genesis/completion cycles:** Removed this bullet entirely. The source material discusses begin/end vs cyclical eschatology but the framing in the draft was too loose and didn't align with the actual discussion.
 
 Updated draft in `mail/social/20260330-ffi-ontology-linkedin.md`.
-<!-- agent:boundary:ded6bcec -->
+
+I removed due to not relevant to the post:
+> . The bounded case is a simplification, not the default
+
+Publish to LinkedIn
+
+### Re: LinkedIn published (HEAD)
+
+**Post:** https://www.linkedin.com/feed/update/urn:li:share:7444389220590305280
+
+**Comment with links posted** — YouTube + blog for both sessions, plus GitHub and crates.io links.
+<!-- agent:boundary:2463af73 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -968,6 +980,6 @@ Updated draft in `mail/social/20260330-ffi-ontology-linkedin.md`.
 - [x] Fixed sticky header shrinking (verified via chromium-bridge)
 - [x] Removed + archived snippet--rappstack
 - [x] YouTube comments with blog links on both videos
-- [x] LinkedIn draft corrected with source-aligned framing
-- [ ] Final review + publish LinkedIn post
+- [x] LinkedIn published: https://www.linkedin.com/feed/update/urn:li:share:7444389220590305280
+- [x] LinkedIn comment with all links posted
 <!-- /agent:pending -->

@@ -857,22 +857,33 @@ Found bad pane layout state:
 Current tmux: 2 panes in agent-doc window (%153 this doc + %241 youtube.md). %241 is running `zsh` (Claude exited). 5 panes in stash.
 
 What specifically was bad about the layout when you took the screenshot? Was it:
-1. **3+ panes visible** (back to the old bug)?
+1. **3+ panes visible** (back to the old bug)?: Yes. Why can't you tell? It's in the screenshot.
 2. **1 pane visible** (over-stashing)?
 3. **Wrong pane visible** (wrong doc's pane showing)?
 4. **Dead pane visible** (%241 is idle zsh, should have been replaced)?
 
 From the screenshot it looks like 2 panes — which is correct for 2 editor columns. But if one of them is a dead session (zsh instead of active Claude), that's a different issue: the sync doesn't detect dead Claude sessions and replace them.
 
+It was 3 panes. Look in the logs.
+
 Please describe what you expected vs. what you saw.
-<!-- agent:boundary:9ba7b15a -->
+### Re: Apologies — you're right about the 3 panes (HEAD)
+
+I couldn't find the logs because `agent-doc sync` is invoked by the JetBrains plugin as a short-lived process — its stderr goes nowhere persistent. The trace logs I added are lost.
+
+**Immediate fix needed:** File-based sync logging so we can capture what happens during the layout transition.
+
+I'll add logging to `/tmp/agent-doc-sync.log` so we can inspect it after reproduction. Then we can see exactly which code path creates the 3rd pane and why the reconciler isn't cleaning it up.
+
+Adding now.
+<!-- agent:boundary:121c3ea3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Structural fix: removed all early exits from tmux_router::sync
-- [x] Reconciler handles 0/1/2+ panes uniformly
-- [ ] Test manually
-- [ ] Release v0.28.0
+- [x] Structural fix: removed early exits
+- [ ] **Add persistent file logging for sync**
+- [ ] **Diagnose 3-pane from logs**
+- [ ] Release
 <!-- /agent:pending -->

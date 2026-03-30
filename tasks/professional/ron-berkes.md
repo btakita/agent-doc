@@ -312,7 +312,7 @@ Summarize the phone call with ron-berkes. Update the contact context files.
 **Action items:**
 1. Ron to pitch Brian to both clients this week
 2. Brian available immediately at $100/hr part-time
-3. Research MonsterRodHolders.com site structure and WhiskerSeeker dealer network
+3. Research MonsterRodHolders.com site structure ~~and WhiskerSeeker dealer network~~
 4. Brian to be introduced as "someone I know who does these kinds of things"
 
 **Contact file updated** — `mail/contacts/ron-berkes/AGENTS.md` now has full relationship context, topics, research notes on Steve Douglas, Fast Fire Starters, and the consolidation strategy.
@@ -403,12 +403,28 @@ Please repost the transcript of the conversation.
 > And hopefully we can get something moving so I can get you some money coming through...
 
 The transcript file at `mail/contacts/ron-berkes/recordings/phone_20260329-193132_6504368181.md` has been updated with these corrections.
-<!-- agent:boundary:6d7e94f1 -->
+
+Please draft a summary email to ron-berkes
+
+**Email draft created** at `mail/drafts/2026-03-30-call-summary-next-steps.md`
+
+Subject: "Call Summary & Next Steps"
+To: rberkes@gmail.com
+
+Covers:
+- Monster Rod Holders — ready to jump in, CDN/cleanup/SEO priorities, control setup
+- Fast Fire Starters — $50/50 split works
+- Directory vision — mentions the WhiskerSeeker dealer data already scraped
+- YouTube → blog post automation capability
+- Asks for intros to both clients
+
+Review the draft and let me know if you want changes before pushing to Gmail Drafts.
+<!-- agent:boundary:e8f96bc4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
+- [ ] Review & send call summary email to Ron
 - [ ] Wait for Ron to confirm client introductions
 - [ ] Research MonsterRodHolders.com site structure for optimization plan
-- [ ] Prepare WhiskerSeeker dealer data for Ron
 <!-- /agent:pending -->
  

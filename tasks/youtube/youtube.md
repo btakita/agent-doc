@@ -827,13 +827,38 @@ Please archive it using chromium-bridge
 ### Re: Archive snippet--rappstack
 
 Archived via `gh repo archive btakita/snippet--rappstack --yes`. Verified: `isArchived: true`.
-<!-- agent:boundary:336c448a -->
+
+Please add a link to the respective blog post as a YouTube comment for both videos.
+I want to make linkedin posts for both videos + blog posts. Should I schedule both to be posted at the same time. Or stagger the scheduling?
+Or should I incl
+
+### Re: YouTube comments + LinkedIn scheduling (HEAD)
+
+**YouTube comments posted:**
+- Video 1: https://www.youtube.com/watch?v=u8qnbhsGAGo&lc=UgyIODIGibgS8SFzhkB4AaABAg
+- Video 2: https://www.youtube.com/watch?v=IWNj9GPb2OI&lc=UgwUv1r16lX1Yf9wds14AaABAg
+
+**LinkedIn scheduling recommendation: Stagger them.**
+
+Reasons:
+1. **Algorithm visibility** — LinkedIn throttles multiple posts in rapid succession. Staggering gives each post its own engagement window.
+2. **Audience fatigue** — Two posts at once splits attention. Staggering lets each one breathe.
+3. **Content differentiation** — The topics are distinct (FFI architecture vs. philosophy/ontology). Different audiences will engage with each.
+
+**Suggested schedule:**
+- **Post 1 (FFI Plugin):** Today or tomorrow morning — more technical, appeals to the dev/AI coding audience
+- **Post 2 (Existence-Lang):** 2-3 days later — more philosophical, appeals to the systems thinking/ontology audience
+
+Want me to draft both LinkedIn posts now?
+<!-- agent:boundary:acdebe17 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
 - [x] Videos uploaded + blog posts published
 - [x] Fixed sticky header shrinking (verified via chromium-bridge)
-- [x] Removed snippet--rappstack submodule (unused, orphaned)
-- [x] Archived btakita/snippet--rappstack on GitHub
-- [x] CI deploying with all changes
+- [x] Removed + archived snippet--rappstack
+- [x] YouTube comments with blog links on both videos
+- [ ] Draft LinkedIn post 1 (FFI Plugin)
+- [ ] Draft LinkedIn post 2 (Existence-Lang)
+- [ ] Schedule LinkedIn posts
 <!-- /agent:pending -->

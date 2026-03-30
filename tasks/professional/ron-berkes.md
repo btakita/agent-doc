@@ -176,8 +176,37 @@ The `skill install` command belongs to **agent-doc**, not corky. Corky doesn't h
 If we wanted a corky skill, we'd create `.claude/skills/corky/SKILL.md` with instructions like "always build with `--features diarize,transcribe-cuda`" and the GPU fallback logic. This would be a new file, not updating an existing one.
 
 Also — the recovered response duplicated the "Non-GPU fallback" section. I'll clean that up on the next compact.
-<!-- agent:boundary:b89f36f0 -->
+
+What is this?
+```
+❯ corky skill install --help
+~/work/btakita/agent-loop main ⇡206 !60 ?18                                                                                                                                                                                     ✘ INT 08:07:42
+❯ corky skill install --help
+Install the skill definition to .claude/skills/corky/SKILL.md
+
+Usage: corky skill install [OPTIONS]
+
+Options:
+      --mailbox <MAILBOX>  Use a named mailbox from app config
+  -h, --help               Print help
+```
+
+**Re: corky skill install**
+
+I was wrong — corky *does* have `corky skill install`! I just ran it and it installed to `src/corky/.claude/skills/corky/SKILL.md`. It generates a comprehensive skill definition covering email, calendar, contacts, documents, filters, social, and scheduling.
+
+Even more — corky's `CLAUDE.local.md` already says:
+> "This machine has an NVIDIA GPU (CUDA 13.2). Always build corky with GPU-accelerated transcription."
+
+So there were **three** layers that should have prevented the CPU-only build, and I missed all of them:
+1. `src/corky/CLAUDE.local.md` — explicit GPU instruction
+2. My own auto-memory — mentioned `transcribe-cuda`
+3. The generated skill (though it doesn't currently mention transcription features)
+
+The transcription GPU preference lives in `CLAUDE.local.md` already. The generated `SKILL.md` doesn't cover transcription build features — that could be added to corky's skill generator if you want it embedded in the skill itself. But since `CLAUDE.local.md` already handles it, the real failure was me not reading the submodule's instruction files before building.
+<!-- agent:boundary:913e2376 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 <!-- /agent:pending -->
+ 

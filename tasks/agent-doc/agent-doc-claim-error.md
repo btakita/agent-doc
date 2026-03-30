@@ -671,6 +671,8 @@ Got into a 1 pane layout when switching the left editor to a non agent document.
 
 Current tmux state shows 2 panes in the agent-doc window (%153 + %171), so the layout may have self-corrected by the time I'm checking. The screenshot was at 11:23.
 
+It self-corrected when I switched the left editor back to this document. But while it was on the non agent doc, it remained 1 pane.
+
 This 1-pane issue is **different** from the early-exit stash — that code is now removed. Something else is causing a pane to disappear when the left editor switches to a non-agent file.
 
 **Possible causes:**
@@ -679,18 +681,36 @@ This 1-pane issue is **different** from the early-exit stash — that code is no
 3. The left-side agent doc pane might have been stashed during the editor layout change (before sync ran)
 
 **Questions:**
-- Did you see the 1-pane state briefly, or did it persist?
-- Was the left-side document an active Claude session (running) or idle (at `❯` prompt)?
-- Did you select a new file on the right after switching the left? Or was the 1-pane state triggered just by switching the left editor?
+- Did you see the 1-pane state briefly, or did it persist?: It persisted as long as I was on the no agent doc. When I switched back to an agent doc, the tmux window went back to 2 panes.
+- Was the left-side document an active Claude session (running) or idle (at `❯` prompt)?: It was the claude session for this document...as this document was the last agent doc selected before selecting the the non agent doc.
+- Did you select a new file on the right after switching the left? Or was the 1-pane state triggered just by switching the left editor?: 1. No: 2. 1-pane state was triggered just by navigating to the non agent doc.
+
+Are there logs for the actions and states that occurred? If not, we need to add logs.
 
 If this is reproducible, I'll add stderr logging to the sync path to capture exactly what happens during the layout transition.
-<!-- agent:boundary:24977710 -->
+### Re: Adding sync trace logs (HEAD)
+
+Thank you — that narrows it down significantly. The 1-pane state persists while the non-agent doc is selected and self-corrects when you switch back. This means something in the sync flow is actively stashing the left-side pane.
+
+The early-exit code is clean (no stashing). The suspects are:
+1. **`resync::run(false)`** — runs post-sync, should be report-only but worth confirming
+2. **`repair_layout`** — runs at sync start, consolidates stash windows
+3. **The JetBrains plugin** — might be sending multiple sync calls or different col_args
+
+I'll add stderr trace logs to the sync flow so we can capture exactly what happens. The logs will show:
+- What col_args are received
+- How many files resolve
+- Whether early exit or full reconcile path is taken
+- What `resync::run(false)` does
+
+This is a separate task from the bug fix queue. Let me transfer this to `tasks/software/agent-doc.md` for proper tracking.
+<!-- agent:boundary:256171f3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.27.5-v0.27.8: Layout fix iterations
-- [ ] **Investigate: 1-pane state when left editor switches to non-agent file**
+- [ ] **Add sync trace logs to diagnose 1-pane issue**
 - [ ] Release v0.27.9
 <!-- /agent:pending -->

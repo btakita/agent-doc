@@ -753,7 +753,7 @@ Yes — the `.scrolled` class toggle was likely lost during a refactor. The fix 
 
 What is snippet--rappstack? What is cruip-simple?
 
-### Re: snippet--rappstack and cruip-simple (HEAD)
+### Re: snippet--rappstack and cruip-simple
 
 **`snippet--rappstack`** (`@btakita/snippet--rappstack`) is a reusable snippets/templates library for the rappstack full-stack framework. It's a git submodule in briantakita.me-dev containing isomorphic code organized in the rappstack `any`/`browser`/`server` layer pattern. Exports layout components, browser interactivity handlers (hyops), and server-side HTML generators.
 
@@ -763,7 +763,7 @@ What is snippet--rappstack? What is cruip-simple?
 - `server/` — server-side HTML generators (header, footer, home page layout)
 
 The scroll handler that was missing the `.scrolled` class lives in `cruip-simple/browser/layout__hyop.ts` — the browser-side interactivity layer for the layout.
-<!-- agent:boundary:8a7d500d -->
+<!-- agent:boundary:2f9e5a51 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

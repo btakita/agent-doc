@@ -694,7 +694,20 @@ Added a new section **"Julian / 3A Credit — Patent Intelligence Service"** to 
 - **Key sell** — Julian funds the infrastructure, we use the same pipeline for Ron's lead gen. Two revenue streams from one system.
 
 Both emails ready to push. Say "send" for Gmail Drafts.
-<!-- agent:boundary:f811b638 -->
+I already sent Ron 2026-03-30-call-summary-next-steps.md...Use corky to inspect which emails were sent. It should be synced in the correspondence label.
+### Re: Email status check (HEAD)
+
+Checked the correspondence. Here's what's already been sent to Ron:
+
+1. **"Call Summary & Next Steps"** — sent Mon 9:21 AM (the **old** version with $100/hr language)
+2. **"ManufacturingChina.com - Site Structure Report"** — sent Mon 11:33 AM
+
+The updated call summary draft (with flexible compensation, analyst, Julian) has **not** been sent — it's in `mail/drafts/`.
+
+**Recommendation:** Send the **patent mining proposal** as a new email. It contains the income structure, Julian angle, and analyst positioning. The old call summary already established the basics — the patent proposal builds on it naturally.
+
+Say "send patent" to push `2026-03-30-patent-mining-proposal.md` to Gmail Drafts.
+<!-- agent:boundary:152f3c33 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -706,7 +719,7 @@ Both emails ready to push. Say "send" for Gmail Drafts.
 - [x] Add income proposal to patent mining draft
 - [x] Bi-directional links between ron-berkes.md and manufacturingchina.md
 - [x] Add Julian patent intelligence service to patent mining proposal
-- [ ] Push updated emails to Gmail Drafts (awaiting approval)
+- [ ] Push patent mining proposal to Gmail Drafts
 - [ ] Wait for Ron to confirm Steve intro / Steve responds
 - [ ] Review transcript speaker labels for accuracy corrections
 - [ ] Patent mining automation — review Ron's spreadsheet when shared

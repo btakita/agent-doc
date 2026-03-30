@@ -21,7 +21,8 @@
 //!   and recommits as a single squashed commit.
 //! - `add_head_marker` (private): compares the snapshot against `HEAD` to identify newly added
 //!   headings; marks only the shallowest (root-level) new headings with ` (HEAD)` so the IDE shows
-//!   a single modified line per response section as a visual boundary.
+//!   a single modified line per response section as a visual boundary.  Falls back to bold-text
+//!   pseudo-headers (`**...**` on its own line) when no markdown headings are found.
 //!
 //! ## Agentic Contracts
 //! - `commit` never modifies the working tree file directly; all staging is done through the git
@@ -36,7 +37,9 @@
 //! ## Evals
 //! - strip_head_markers_from_headings: heading lines with ` (HEAD)` suffix → suffix removed; non-heading lines unchanged
 //! - strip_head_markers_preserves_non_heading_lines: body text containing "(HEAD)" → preserved verbatim
+//! - strip_head_markers_bold_text: bold-text pseudo-header `**Re: Something** (HEAD)` → suffix removed
 //! - add_head_marker_strips_old_markers: old `(HEAD)` heading stripped; new heading acquires `(HEAD)`
+//! - add_head_marker_bold_text_fallback: no markdown headings → bold-text pseudo-header gets `(HEAD)`; real heading present → bold text skipped
 //! - reposition_boundary_to_end_basic: stale boundary before user prompt → boundary repositioned after prompt
 //! - reposition_boundary_no_exchange: doc with no exchange component → content returned unchanged
 //! - reposition_boundary_preserves_user_edits: user text between response and boundary → all user text preserved, boundary after it
@@ -48,7 +51,7 @@ use std::process::Command;
 
 /// Resolve a relative path against the git root (superproject root if in a submodule).
 /// Returns (git_root, resolved_file_path) so callers can run git commands in the correct repo.
-fn resolve_to_git_root(file: &Path) -> Result<(std::path::PathBuf, std::path::PathBuf)> {
+pub(crate) fn resolve_to_git_root(file: &Path) -> Result<(std::path::PathBuf, std::path::PathBuf)> {
     if file.is_absolute() {
         // Find git root from the file's directory
         let parent = file.parent().unwrap_or(Path::new("/"));
@@ -263,7 +266,7 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
     false
 }
 
-/// Strip ` (HEAD)` suffix from markdown heading lines only.
+/// Strip ` (HEAD)` suffix from markdown heading lines and bold-text pseudo-headers.
 fn strip_head_markers(content: &str) -> String {
     let mut lines: Vec<&str> = Vec::new();
     for line in content.lines() {
@@ -271,11 +274,18 @@ fn strip_head_markers(content: &str) -> String {
     }
     let result: String = lines.iter().map(|line| {
         let trimmed = line.trim_start();
-        if trimmed.starts_with('#') && line.ends_with(" (HEAD)") {
-            &line[..line.len() - 7]
-        } else {
-            line
+        if let Some(stripped) = line.strip_suffix(" (HEAD)") {
+            // Strip from markdown headings
+            if trimmed.starts_with('#') {
+                return stripped;
+            }
+            // Strip from bold-text pseudo-headers (e.g., "**Re: Foo** (HEAD)")
+            let without_suffix = stripped.trim_end();
+            if trimmed.starts_with("**") && without_suffix.trim_start().ends_with("**") {
+                return stripped;
+            }
         }
+        line
     }).collect::<Vec<&str>>().join("\n");
     if content.ends_with('\n') { format!("{}\n", result) } else { result }
 }
@@ -292,16 +302,24 @@ fn strip_head_markers(content: &str) -> String {
 fn add_head_marker(content: &str, file: &Path) -> String {
     let head_content = show_head(file).ok().flatten();
 
-    // Step 1: Strip ALL existing (HEAD) markers from heading lines only.
+    // Step 1: Strip ALL existing (HEAD) markers from heading lines and bold-text pseudo-headers.
     // This prevents accumulation across commit cycles.
     let mut cleaned_lines: Vec<String> = Vec::new();
     for line in content.lines() {
         let trimmed = line.trim_start();
-        if trimmed.starts_with('#') && trimmed.ends_with(" (HEAD)") {
-            cleaned_lines.push(line[..line.len() - 7].to_string()); // strip " (HEAD)"
-        } else {
-            cleaned_lines.push(line.to_string());
+        if trimmed.ends_with(" (HEAD)") {
+            if trimmed.starts_with('#') {
+                cleaned_lines.push(line[..line.len() - 7].to_string());
+                continue;
+            }
+            // Bold-text pseudo-header: "**...** (HEAD)"
+            let without_suffix = line[..line.len() - 7].trim_end();
+            if trimmed.starts_with("**") && without_suffix.trim_start().ends_with("**") {
+                cleaned_lines.push(line[..line.len() - 7].to_string());
+                continue;
+            }
         }
+        cleaned_lines.push(line.to_string());
     }
     let cleaned = cleaned_lines.join("\n");
     // Preserve trailing newline
@@ -316,11 +334,16 @@ fn add_head_marker(content: &str, file: &Path) -> String {
         h.lines()
             .map(|line| {
                 let trimmed = line.trim_start();
-                if trimmed.starts_with('#') && trimmed.ends_with(" (HEAD)") {
-                    &line[..line.len() - 7]
-                } else {
-                    line
+                if trimmed.ends_with(" (HEAD)") {
+                    if trimmed.starts_with('#') {
+                        return &line[..line.len() - 7];
+                    }
+                    let without_suffix = line[..line.len() - 7].trim_end();
+                    if trimmed.starts_with("**") && without_suffix.trim_start().ends_with("**") {
+                        return &line[..line.len() - 7];
+                    }
                 }
+                line
             })
             .collect::<Vec<&str>>()
             .join("\n")
@@ -339,6 +362,24 @@ fn add_head_marker(content: &str, file: &Path) -> String {
             }
         }
         offset = line_end + 1;
+    }
+
+    // Fallback: if no markdown headings found, scan for bold-text pseudo-headers
+    // (lines matching `**...**` at start of line). Treat the first one found as a
+    // pseudo-heading so it can receive the (HEAD) marker.
+    if heading_positions.is_empty() {
+        let mut offset = 0usize;
+        for line in cleaned.lines() {
+            let trimmed = line.trim_start();
+            let line_end = offset + line.len();
+            let trimmed_end = trimmed.trim_end();
+            if trimmed_end.starts_with("**") && trimmed_end.ends_with("**") && trimmed_end.len() > 4 {
+                // Use level 99 as a sentinel — bold pseudo-headers are always "shallowest"
+                // since there are no real headings to compete with.
+                heading_positions.push((offset, line_end, 99));
+            }
+            offset = line_end + 1;
+        }
     }
 
     if heading_positions.is_empty() {
@@ -587,6 +628,39 @@ mod tests {
         let result = add_head_marker(content, Path::new("/nonexistent/file.md"));
         assert!(!result.contains("### Re: Old (HEAD)"), "old heading should not have (HEAD)");
         assert!(result.contains("### Re: New (HEAD)") || result.contains("### Re: Old\n"), "old (HEAD) should be stripped");
+    }
+
+    #[test]
+    fn add_head_marker_bold_text_fallback() {
+        // No markdown headings — bold-text pseudo-header should get (HEAD)
+        let content = "Some intro text.\n**Re: Something**\nBody paragraph.\n";
+        let result = add_head_marker(content, Path::new("/nonexistent/file.md"));
+        assert!(
+            result.contains("**Re: Something** (HEAD)"),
+            "bold-text pseudo-header should get (HEAD) marker, got: {result}"
+        );
+    }
+
+    #[test]
+    fn add_head_marker_prefers_real_headings() {
+        // Both a real heading and bold text — only the heading should get (HEAD)
+        let content = "### Re: Something\n**Bold text**\nBody.\n";
+        let result = add_head_marker(content, Path::new("/nonexistent/file.md"));
+        assert!(
+            result.contains("### Re: Something (HEAD)"),
+            "real heading should get (HEAD), got: {result}"
+        );
+        assert!(
+            !result.contains("**Bold text** (HEAD)"),
+            "bold text should NOT get (HEAD) when real headings exist, got: {result}"
+        );
+    }
+
+    #[test]
+    fn strip_head_markers_bold_text() {
+        let input = "**Re: Something** (HEAD)\nSome text.\n";
+        let result = strip_head_markers(input);
+        assert_eq!(result, "**Re: Something**\nSome text.\n");
     }
 
     #[test]

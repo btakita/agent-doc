@@ -70,6 +70,11 @@ The command outputs JSON to stdout:
   - Structural changes (deletions, reorganization)
 - Your console response IS the document response — they should be the same content
 
+**Response header format (template mode):**
+Use `### Re:` markdown headers for response sections — NOT bold text (`**Re: ...**`). The `(HEAD)` boundary marker requires actual markdown headings to function. Bold text pseudo-headers break the gutter boundary.
+
+Markdown supports h1-h6. In template mode exchange components (typically under `## Exchange`), use `### Re:` (h3) for response headers. This leaves h4-h6 for sub-sections within each response.
+
 **Streaming checkpoints (template/stream mode):**
 When responding to a document with multiple user questions/topics, flush partial responses at natural breakpoints so the user sees progress in their editor:
 

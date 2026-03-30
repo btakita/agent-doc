@@ -852,7 +852,7 @@ Do it here. Go
 
 Found bad pane layout state:
 ![2026-03-30_13-15.png](../../../../../Pictures/agent-loop/2026-03-30_13-15.png)
-### Re: Current state analysis (HEAD)
+### Re: Current state analysis
 
 Current tmux: 2 panes in agent-doc window (%153 this doc + %241 youtube.md). %241 is running `zsh` (Claude exited). 5 panes in stash.
 
@@ -865,7 +865,7 @@ What specifically was bad about the layout when you took the screenshot? Was it:
 From the screenshot it looks like 2 panes — which is correct for 2 editor columns. But if one of them is a dead session (zsh instead of active Claude), that's a different issue: the sync doesn't detect dead Claude sessions and replace them.
 
 Please describe what you expected vs. what you saw.
-<!-- agent:boundary:3e7f3a02 -->
+<!-- agent:boundary:9ba7b15a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

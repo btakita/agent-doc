@@ -782,7 +782,7 @@ Another session had started a similar fix (applying to `el` body instead of `doc
 
 Built, verified `scrolled` is in production JS output, committed, and pushed. CI deploying now.
 
-### Re: Test with chromium-bridge + snippet--rappstack rename (HEAD)
+### Re: Test with chromium-bridge + snippet--rappstack rename
 
 **Sticky header verified via chromium-bridge:**
 - Scrolled state: `.scrolled` class applied to `<html>`, header/breadcrumbs/title all shrink correctly
@@ -795,7 +795,7 @@ Agreed — a misc package is an anti-pattern. Options:
 2. **Rename to something domain-specific** — e.g., `template--briantakita` or `theme--briantakita` if it stays as a separate package.
 
 Option 1 seems cleanest since most of the functionality already has a natural home. Want me to proceed with migrating and deprecating snippet--rappstack?
-<!-- agent:boundary:32a88960 -->
+<!-- agent:boundary:ee449245 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

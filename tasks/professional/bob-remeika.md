@@ -1233,7 +1233,7 @@ Good thinking on Wednesday or even Thursday. Here's a structured call plan:
 Today is Monday.
 
 Let's figure out what is know and unknown for the call with Bob.
-### Re: Known vs Unknown for the Bob call (HEAD)
+### Re: Known vs Unknown for the Bob call
 
 **Known / Ready:**
 - Bob is CEO & Co-Founder at Ragie (RAG-as-a-Service, agentic OCR)
@@ -1254,7 +1254,7 @@ Let's figure out what is know and unknown for the call with Bob.
 6. **Contract gig status** — Bob said he'd keep you on deck. Is that something to bring up on the call or leave alone?
 
 **Recommendation:** Decide what you're asking for before booking. A "show what I'm building + explore how Ragie fits" framing is low-pressure and authentic. You don't need a polished integration — showing the architecture and where Ragie slots in is enough for a 30-min call with an old colleague.
-<!-- agent:boundary:cca84953 -->
+<!-- agent:boundary:f43ff09c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

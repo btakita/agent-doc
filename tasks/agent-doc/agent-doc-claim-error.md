@@ -616,7 +616,7 @@ full history backfill
 - **dev SKILL.md** — Already had the rule in pre-release verification checklist
 
 Committed and pushed.
-<!-- agent:boundary:e944cc53 -->
+<!-- agent:boundary:e54ee83c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

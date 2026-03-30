@@ -616,15 +616,27 @@ full history backfill
 - **dev SKILL.md** — Already had the rule in pre-release verification checklist
 
 Committed and pushed.
-<!-- agent:boundary:e54ee83c -->
+
+Went to a 3 pane layout when a non agent doc file was open in the left editor and switching from one agent doc to another without an active tmux pane. Why did this happen? See screenshot:
+
+![2026-03-30_10-52.png](../../../../../Pictures/agent-loop/2026-03-30_10-52.png)
+### Re: Found the real bug — early-exit stash was dead code (HEAD)
+
+The stash logic at sync.rs:626-634 was guarded by `let Some(s) = session` where `session = doc_tmux_session.as_deref()`. But **`doc_tmux_session` is always `None`** — the module docs confirm this at line 72: "resolve_file_ignores_frontmatter_tmux_session: FileResolution::Registered always has tmux_session: None."
+
+This means the entire early-exit stash added in v0.27.5 **never actually executed**. It was dead code from the start.
+
+**Fix:** Instead of using `doc_tmux_session` (always None), derive the session from the resolved pane via `tmux.pane_session(&r.pane_id)`. This always returns the correct session for the pane.
+
+Installed and ready to test. If this works, we'll release v0.27.8.
+<!-- agent:boundary:f50cc4bc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.27.5: 3-pane fix (route path)
-- [x] v0.27.6: Bold-text header fallback
-- [x] v0.27.7: Sync path column-aware split
-- [x] VERSIONS.md: full history backfill + release process rule
-- All shipped.
+- [x] v0.27.5-v0.27.7: All shipped but early-exit stash was dead code
+- [ ] **v0.27.8: Fix dead-code stash — derive session from pane, not frontmatter**
+- [ ] Test manually
+- [ ] Release v0.27.8
 <!-- /agent:pending -->

@@ -237,7 +237,7 @@ The tmux window had 3 panes.
 The left pane split into 2 panes.
 Why?
 It should have been 2 panes.
-### 3-pane layout analysis (HEAD)
+### 3-pane layout analysis
 
 **Root cause:** When you selected the agent document on the right, `agent-doc sync` auto-started a Claude pane by splitting an **existing pane** already in the agent-doc window. If there were 2 panes already present (from other active agent doc sessions), the split created pane #3.
 
@@ -253,7 +253,7 @@ The split target selection in `route.rs:511-520` (`auto_start_in_session`) grabs
 **Two fix directions:**
 1. **Post-split cleanup:** tmux-router sync stashes excess panes that don't belong to the current column layout (the overflow stashing may not be triggering for this case)
 2. **Pre-split awareness:** auto_start checks the desired layout before choosing a split target — avoid splitting panes that sync will immediately stash
-<!-- agent:boundary:8bd0c6a3 -->
+<!-- agent:boundary:549ad6ad -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

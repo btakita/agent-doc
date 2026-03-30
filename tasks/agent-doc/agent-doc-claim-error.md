@@ -949,20 +949,31 @@ Please look at logs.
 Reconcile detail logging now goes to `/tmp/agent-doc-sync.log` — each phase (SNAPSHOT, ATTACH, SELECT, DETACH) with pane IDs. Reproduce the 3-pane issue again and I'll read the detailed log.
 
 When I change agent docs with 1 editor window, the 3 pane layout remains.
-### Re: Reconcile detail logging now active (HEAD)
+### Re: Fix confirmed working — reconcile stashes excess panes (HEAD)
 
-Previous build was using crates.io tmux-router (not local). Switched to path dep and rebuilt. Reconcile detail logs now go to `/tmp/agent-doc-sync.log`. 
+Manually triggered sync — the reconcile detail log shows it working correctly:
 
-Switch between agent docs with 1 editor window — the log will now show the reconcile's SNAPSHOT, ATTACH, SELECT, DETACH phases with exact pane IDs and decisions.
-<!-- agent:boundary:ceb321fe -->
+```
+pre-reconcile panes: ["%153", "%242", "%244"]   (3 panes)
+DETACH: stashed %242 from @2
+DETACH: stashed %244 from @2
+post-reconcile panes: ["%153"]                   (1 pane — correct)
+```
+
+The previous binary from crates.io (v0.3.5) still had the old early-exit code. The local path dep build includes the no-early-exits fix. When we release the new tmux-router + agent-doc, this will work from the published version too.
+
+Current state: 1 pane in agent-doc window (this doc), 3 in stash. Fix verified.
+
+Ready to release? This will be tmux-router v0.3.6 + agent-doc v0.28.0 (major change: no early exits + empty col_args filter + plugin v0.2.36).
+<!-- agent:boundary:e5cbe17c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Structural fix + empty col_args filter + plugin fix
-- [x] Reconcile detail logging
-- [ ] **Reproduce and capture detailed DETACH log**
-- [ ] Fix
-- [ ] Release
+- [x] Structural fix: no early exits — reconciler always runs
+- [x] Empty col_args filter (sync.rs + plugin)
+- [x] Plugin v0.2.36 built
+- [x] Fix verified via reconcile logs
+- [ ] **Release tmux-router v0.3.6 + agent-doc v0.28.0 + plugin v0.2.36**
 <!-- /agent:pending -->

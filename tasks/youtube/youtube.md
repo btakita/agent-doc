@@ -824,10 +824,10 @@ The snippet--rappstack GitHub repo still exists but is no longer referenced. You
 
 Please archive it using chromium-bridge
 
-### Re: Archive snippet--rappstack (HEAD)
+### Re: Archive snippet--rappstack
 
 Archived via `gh repo archive btakita/snippet--rappstack --yes`. Verified: `isArchived: true`.
-<!-- agent:boundary:ce381edd -->
+<!-- agent:boundary:336c448a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

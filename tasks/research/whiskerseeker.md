@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Site crawled. WST founded 2015 (Grimes, IA), acquired by PRADCO Oct 2022. 8 known dealers/retailers exported to CSV. Full dealer list requires JS-rendered Storemapper page.
+Full dealer list extracted via chromium-bridge. 1,458 locations (1,205 Walmart + 50 Fleet Farm + 20 Scheels + 19 Academy Sports + 164 independents). CSV saved.
 <!-- /agent:status -->
 
 ## Exchange
@@ -29,6 +29,7 @@ https://whiskerseeker.com
 
 Crawl all of the dealers in https://whiskerseeker.com/dealers
 Put into a csv file.
+Use chromium-bridge if that helps.
 
 ### Re: Site crawl & dealers
 
@@ -94,13 +95,61 @@ Crawled whiskerseeker.com and searched extensively. The dealers page uses a **St
 - [Catfish Angler Forum (USCA)](https://www.catfish1.com/threads/whisker-seeker-tackle.215036/) — community discussion
 - [Manta.com listing](https://www.manta.com/c/mkbxhnp/whisker-seeker-tackle-llc) — Grimes, IA business record
 - PRADCO Outdoor Brands parent: [pradcooutdoorbrands.com](https://www.pradcooutdoorbrands.com/)
-<!-- agent:boundary:dec33625 -->
+
+Use chromium-bridge with brave to scrape the the Storemapper JS widget.
+
+### Re: Storemapper scrape via chromium-bridge (HEAD)
+
+Used chromium-bridge to navigate to the dealers page, found the Storemapper widget's API endpoint (account ID 5207), and extracted the full store database directly.
+
+**CSV updated:** `tasks/research/whiskerseeker-dealers.csv` — **1,458 dealer locations**
+
+---
+
+#### Dealer Network Summary
+
+| Chain / Type | Locations | Notes |
+|-------------|-----------|-------|
+| **Walmart** | 1,205 | Massive national distribution |
+| **Fleet Farm** | 50 | Midwest regional chain |
+| **Scheels** | 20 | Sporting goods chain (Midwest/West) |
+| **Academy Sports** | 19 | Southern US chain |
+| **Independent shops** | 164 | Local bait shops, tackle stores, outdoors retailers |
+| **Total** | **1,458** | |
+
+#### Top Independent Dealers (sampling)
+- 2nd Amendment Outdoors — Corinth, MS
+- 367 Bait & Tackle — St. Louis, MO
+- 64 Bait Shop & Tackle — Muldrow, OK
+- AI Outdoors
+- AJ's Mercantile
+- Back-N-Sticks Outdoors
+- Badwoods Outdoors
+- Bait Bucket
+- Base Camp Outfitters
+- Beginner's Luck Tackle and Supply
+- (and 154 more in the CSV)
+
+#### Geographic Distribution (top states)
+TX (26), WI (24), MN (18), IA (10), KY (7), NE (5), MO (5), TN (5), OH (5)
+Plus 17 more states. Heavy Midwest/Southern concentration matching catfish fishing geography.
+
+#### CSV Fields
+`name, address, phone, email, url, latitude, longitude, city_custom, state_custom, categories`
+
+#### Method
+1. `chromium-bridge navigate` → whiskerseeker.com/dealers
+2. `chromium-bridge evaluate` → found Storemapper widget loaded from `storemapper.co/js/widget.js`
+3. Extracted API endpoint from performance entries: `storemapper-herokuapp-com.global.ssl.fastly.net/api/users/5207/stores.json`
+4. `curl` direct API call → full JSON with all 1,458 stores
+5. Parsed to CSV with all fields including lat/lng coordinates
+<!-- agent:boundary:72c1bd4c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Full Storemapper dealer list (requires browser JS execution — retry when Chrome DevTools available)
+- [x] Full Storemapper dealer list — DONE (1,458 dealers)
 - [ ] Product pricing deep-dive
 - [ ] Competitor comparison (Monster Rod Holders, Team Catfish, etc.)
 - [ ] Customer review aggregation

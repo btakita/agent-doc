@@ -346,7 +346,7 @@ Message is loaded in Kaci's LinkedIn compose box (tab 1, iframe 1). Verified the
 4. Click **Send**
 
 **Re: MCP timeout issue** — The `Network.enable timed out` error happens because LinkedIn pages are very heavy (large iframes, complex DOM). The MCP `chrome-devtools` server's CDP protocol timeout is shorter than what LinkedIn needs. The chromium-bridge CLI works because it uses a direct WebSocket connection with a configurable timeout. To fix this permanently, the MCP server would need a higher `protocolTimeout` setting in its connection config.
-### Re: Highlight Menu.com in resume (HEAD)
+### Re: Highlight Menu.com in resume
 
 Done. Two changes to make it stand out:
 
@@ -358,7 +358,7 @@ The `agent-resume` CLI doesn't apply phrase bolding to experience bullets (only 
 **PDF rebuilt** — `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-cdw-payments.pdf`
 
 The message is still loaded in the LinkedIn compose box from earlier. Ready for you to attach the new PDF and send.
-<!-- agent:boundary:01b8d0e9 -->
+<!-- agent:boundary:5b12efe0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

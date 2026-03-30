@@ -795,7 +795,7 @@ Agreed — a misc package is an anti-pattern. Options:
 2. **Rename to something domain-specific** — e.g., `template--briantakita` or `theme--briantakita` if it stays as a separate package.
 
 Option 1 seems cleanest since most of the functionality already has a natural home. Want me to proceed with migrating and deprecating snippet--rappstack?
-<!-- agent:boundary:ee449245 -->
+<!-- agent:boundary:13a1d6e5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

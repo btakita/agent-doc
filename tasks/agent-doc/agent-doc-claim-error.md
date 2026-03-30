@@ -834,7 +834,7 @@ This is essentially what `reconcile()` already does — but it only runs when `r
 
 This is a bigger change. I recommend transferring to `tasks/software/agent-doc.md` as a proper design task with a plan, tests, and verification before release. Want me to do that?
 Do it here. Go
-### Re: Structural fix implemented — no early exits (HEAD)
+### Re: Structural fix implemented — no early exits
 
 **Removed all early exits from tmux_router::sync.** The reconciler now always runs regardless of how many panes resolve.
 
@@ -849,7 +849,7 @@ Do it here. Go
 - 2+ resolved panes → arrange in columns, stash extras (existing behavior)
 
 78 tmux-router tests + 38 agent-doc tests pass. Installed. Please test.
-<!-- agent:boundary:29d51029 -->
+<!-- agent:boundary:0b3be5c4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

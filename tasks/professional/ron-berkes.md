@@ -247,7 +247,7 @@ fi
 ```
 
 **Recommendation:** Start with the Makefile approach (option 1) — it's simple, deterministic, and covers `cargo install` from source. The prebuilt binary approach (option 2) requires CI changes to build two variants. Want me to implement the Makefile detection?
-<!-- agent:boundary:78441d26 -->
+<!-- agent:boundary:cefde1ad -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

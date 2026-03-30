@@ -349,7 +349,7 @@ All pass: 78 tmux-router tests, 38 agent-doc tests.
 
 Ready to release when you want to test.
 release
-### v0.27.5 released (HEAD)
+### v0.27.5 released
 
 **Published everywhere:**
 - **tmux-router:** v0.3.3 on crates.io ✓
@@ -363,7 +363,7 @@ release
 - Early-exit stash: excess panes stashed before `resolved < 2` early return
 - 3 new integration tests
 - Docs updated (SPEC.md, module docs, tmux-router README)
-<!-- agent:boundary:c5511dab -->
+<!-- agent:boundary:1f9f3f80 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -596,7 +596,7 @@ Let me know the title direction and I'll prepare the upload.
 
 Should we create a separate video for the existence-lang ontology part?
 
-### Re: Separate existence-lang ontology video? (HEAD)
+### Re: Separate existence-lang ontology video?
 
 Yes, the content splits naturally. Analyzed the transcript:
 
@@ -615,7 +615,7 @@ Yes, the content splits naturally. Analyzed the transcript:
 3. **Keep combined** but also upload the 58min as a standalone short-form
 
 The original source files are already separate, so splitting is trivial (no re-encoding needed). Want me to split and prepare both for upload?
-<!-- agent:boundary:2759b841 -->
+<!-- agent:boundary:a47745eb -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

@@ -475,14 +475,35 @@ Quick follow-up call about the Monster Rod Holders engagement:
 **Note:** Speaker labels have significant drift (many low confidence scores 0.20-0.50). The speakers swap frequently — Ron is giving most of the advice about how to handle Steve, while Brian agrees. Some segments need manual review.
 
 Output: `mail/contacts/ron-berkes/recordings/phone_20260330-104440_6504368181.md`
-<!-- agent:boundary:e441e204 -->
+Transcribe + diarize /home/brian/work/btakita/agent-loop/mail/contacts/ron-berkes/recordings/phone_20260330-114040_6504368181.amr
+### Re: Transcription of phone_20260330-114040_6504368181.amr (HEAD)
+
+**Transcribed** `phone_20260330-114040_6504368181.amr` — 13:04 call, GPU processed in 5.1s (153.1x realtime on RTX 5090).
+
+**Call Summary — Mar 30, 2026 (13:04)**
+
+Follow-up call about patent mining automation and ManufacturingChina market opportunity:
+
+- **Patent mining pipeline details:** Ron has a woman ($1K/mo) manually searching USPTO for **design patents only** (no utility) — focused on soft goods, bags, textiles, tents, blankets, anything sewable. Last 30 days only. Ron will share the spreadsheet of current patent data.
+- **Revenue model:** $2,500 project management fee per patent lead → sample order → tooling order ($100K+) → production (hundreds of thousands). The scraper automates the discovery; she oversees and fine-tunes.
+- **Bob Remeika / Ragie connection:** Ron mentions Bob Remeika (ex-Pivotal Labs) runs Ragie — document embedding for AI, funded by David Sacks. Could use Ragie to embed all manufacturer + patent data into a searchable data lake. Also working on a local version of the same concept.
+- **Market size:** China B2B manufacturing is ~$3 trillion/yr. 1% = $30 billion. ManufacturingChina.com recognized by AI as a top competitor alongside Alibaba, Made-in-China, DHgate.
+- **WordPress comeback:** Ron considering putting ManufacturingChina back on WordPress since they were ranking before. Showed Brian screenshots of past Google rankings.
+- **Call ended early** — Brian needed to attend to his daughter. Ron will follow up soon.
+
+**Note:** Low confidence scores throughout (0.23-0.66). Speaker labels likely have some drift — similar pattern to other mono phone recordings.
+
+Output: `mail/contacts/ron-berkes/recordings/phone_20260330-114040_6504368181.md`
+<!-- agent:boundary:3e1e5f1a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [x] Transcribe phone_20260330-104440_6504368181.amr with GPU diarization
+- [x] Transcribe phone_20260330-114040_6504368181.amr with GPU diarization
 - [x] Research MonsterRodHolders.com site structure for optimization plan
 - [ ] Run ManufacturingChina.com site analysis (Ron requested)
 - [ ] Wait for Ron to confirm Steve intro / Steve responds
 - [ ] Review transcript speaker labels for accuracy corrections
+- [ ] Patent mining automation — review Ron's spreadsheet when shared
 <!-- /agent:pending -->
  

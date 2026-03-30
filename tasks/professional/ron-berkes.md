@@ -272,9 +272,56 @@ And `install.sh` tries the CUDA binary first, falls back to CPU.
 **Root cause of the CPU build this session:** I ran `cargo run --release --features diarize` directly instead of using `make install` or `make release-gpu`. The deterministic GPU detection was already built — I just bypassed it by invoking cargo directly.
 
 No tasks to transfer — the work is done. The lesson is: **always use `make` targets instead of raw `cargo` commands** when building corky.
-<!-- agent:boundary:40cee57c -->
+
+Summarize the phone call with ron-berkes. Update the contact context files.
+
+### Call Summary — Mar 29, 2026 (2h 4min) (HEAD)
+
+**Two potential web clients via Ron:**
+
+**1. Monster Rod Holders (Steve Douglas)**
+- Steve "Catfish Dude" Douglas, Lebanon KY — 119K YouTube subscribers, ~$18K/mo WooCommerce sales
+- Stage 4 pancreatic cancer, owes Ron ~$65K for manufacturing
+- Bloated WordPress site, slow loading, no CDN, ~200 products, 10-20 spam signups/day
+- Ron wants Brian to take over web management at $100/hr (part-time)
+- Strategy: clean up or rebuild site, maintain SEO structure (301 redirects if platform changes), add Cloudflare CDN
+- Ron wants domain/hosting control as creditor protection — if Steve passes, Ron needs to be able to operate the business
+- Monster Energy trademark dispute ongoing — "CatfishDude.com" purchased as brand backup
+- Ron showed a Shopify mockup with AI-generated catfish graphics (looked good)
+
+**2. Fast Fire Starters (Missouri client)**
+- BBQ/outdoor fire starter products, GetFastFire.com / FastFireStarters.com (Shopify)
+- Owner healthy, 60s, wants to retire, told Ron "this is like your company"
+- Already ranks #3 on Google for "fast fire starters" with a basic site
+- Ron proposes both clients split $50/50 for Brian's web work
+
+**Long-term vision — Outdoor industry consolidation:**
+- Build a directory site (like Clutch.co but for catfishing/outdoors) — become the authority
+- Scrape competitor dealer lists (WhiskerSeeker has hundreds of dealers including Walmart)
+- Acquire struggling catfishing brands one at a time (Driftmaster already talking about selling)
+- Ron = supply chain, Brian = tech, Steve = content creation
+- Potential $2-5M+ business combining rod holders, tackle, apparel, fire starters under one outdoor brand
+- Transcribe YouTube videos → blog posts → SEO content pipeline
+
+**Other topics:**
+- Ron has a patent database mining operation (manual, wants automation/crawler)
+- Personal: Ron in RV, considering Oregon or Kentucky. Daughter turning 5. Son's mom recently passed.
+- Brian discussed agent-doc markdown workflow and AI tooling
+- Water filtration discussion (PFAS, reverse osmosis)
+
+**Action items:**
+1. Ron to pitch Brian to both clients this week
+2. Brian available immediately at $100/hr part-time
+3. Research MonsterRodHolders.com site structure and WhiskerSeeker dealer network
+4. Brian to be introduced as "someone I know who does these kinds of things"
+
+**Contact file updated** — `mail/contacts/ron-berkes/AGENTS.md` now has full relationship context, topics, research notes on Steve Douglas, Fast Fire Starters, and the consolidation strategy.
+<!-- agent:boundary:1c7ef0c3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
+- [ ] Wait for Ron to confirm client introductions
+- [ ] Research MonsterRodHolders.com site structure for optimization plan
+- [ ] Prepare WhiskerSeeker dealer data for Ron
 <!-- /agent:pending -->
  

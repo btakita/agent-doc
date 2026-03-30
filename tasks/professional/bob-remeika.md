@@ -1207,7 +1207,7 @@ I'm onboarding Ron and Judith as clients. Both of their projects could use Ragie
 Please help me plan a call with Bob.
 If we have to push it to Thursday to get more time that's ok too. If it would clarify what I would do.
 Given I don't fully know yet what the integration situation looks like, I'll need to think about it.
-### Re: Planning the Bob call (HEAD)
+### Re: Planning the Bob call
 
 Good thinking on Wednesday or even Thursday. Here's a structured call plan:
 
@@ -1230,7 +1230,7 @@ Good thinking on Wednesday or even Thursday. Here's a structured call plan:
 - **Wed Apr 2** if you feel ready with a basic demo flow
 - **Thu Apr 3** if you want an extra day to prepare polished examples
 - Either way, book by tomorrow (Mon Mar 31) so Bob has it on his calendar
-<!-- agent:boundary:44527895 -->
+<!-- agent:boundary:499bee1b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

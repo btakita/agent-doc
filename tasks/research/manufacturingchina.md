@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Patent mining proposal drafted. Email at mail/drafts/2026-03-30-patent-mining-proposal.md. Ready for review.
+Patent mining proposal updated: added manufacturer matching (Step 3), Ragie + Sift search layer section, Bob Remeika meeting mention. Ready for review.
 <!-- /agent:status -->
 
 ## Exchange
@@ -249,7 +249,29 @@ The pitch connects it to ManufacturingChina.com: patent holders are top-of-funne
 Email draft at `mail/drafts/2026-03-30-patent-mining-proposal.md`
 
 Say "send" to push to Gmail Drafts, or edit first.
-<!-- agent:boundary:7fb6f1b3 -->
+
+Using Ron's internal database of manufacturers, we can also match the patents with manufacturers.
+
+Warm Ron up to Ragie. I'm going to meet with the CEO/Founder Bob Remeika this week to discuss. Also mention that I'm integrating Sift for local document search.
+### Re: Manufacturer matching + Ragie/Sift (HEAD)
+
+Updated the patent mining proposal with both additions:
+
+#### Manufacturer matching (new Step 3)
+Added a dedicated step that cross-references each patent's manufacturing requirements against Ron's internal factory database. The agent identifies which factories can fulfill the patent's needs — CNC capability, material specs, production volume, certifications. This means when Ron reaches out to a patent holder, he's not just offering help — he's presenting specific verified factory matches. Also added "factory match quality" to the lead scoring criteria.
+
+#### Ragie + Sift search layer (new section)
+Added a section explaining the search infrastructure that powers the matching:
+
+- **Ragie** — cloud-hosted document search. Factory database, patent filings, market reports get indexed and queryable by AI agents. Mentioned you're meeting with Bob Remeika (CEO/founder) this week to discuss integration.
+- **Sift** — local document search for private/sensitive data. Factory contracts, pricing sheets, supplier agreements stay local but are still searchable by the agents. Currently being integrated.
+
+Framed it as: "together they give the agents access to everything — public patent data, private factory database, market intelligence, and web research — through a unified search interface." This is natural and doesn't oversell — just explains the tooling that makes the matching work.
+
+Also updated the "What I'd Need" section to explicitly ask for Ron's factory database/manufacturer list as a required input for the matching engine.
+
+Draft at `mail/drafts/2026-03-30-patent-mining-proposal.md`. Say "send" to push to Gmail Drafts.
+<!-- agent:boundary:a4649a1a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -257,6 +279,8 @@ Say "send" to push to Gmail Drafts, or edit first.
 <!-- agent:pending patch=replace -->
 - [x] ManufacturingChina.com site structure report — sent to Gmail Drafts
 - [x] Patent mining proposal drafted
+- [x] Added manufacturer matching to proposal
+- [x] Added Ragie/Sift search layer + Bob Remeika meeting
 - [ ] Push patent mining email to Gmail Drafts (awaiting approval)
 - [ ] Send ManufacturingChina report from Gmail (user action)
 <!-- /agent:pending -->

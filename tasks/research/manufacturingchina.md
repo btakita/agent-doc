@@ -2,7 +2,7 @@
 agent_doc_session: d911f843-f5f3-455a-be97-af9224eade35
 agent_doc_format: template
 agent_doc_write: crdt
-
+claude_args: --dangerously-skip-permissions
 ---
 
 ## Status
@@ -17,7 +17,7 @@ Complete: Site crawl (118 URLs), SEO analysis (2/110 indexed — critical), comp
 Please draft a manufacturingchina.com site structure report email for ron-berkes.
 Include SEO, market analysis, competitive analysis, notable findings.
 See tasks/research/monsterrodholders.md and the corresponding emails that were sent to ron-berkes.
-### Re: ManufacturingChina.com site structure report (HEAD)
+### Re: ManufacturingChina.com site structure report
 
 Research complete. I crawled the site, analyzed SEO, and mapped the competitive landscape. Here's the full picture, followed by the email draft.
 
@@ -144,7 +144,25 @@ Research complete. I crawled the site, analyzed SEO, and mapped the competitive 
 #### Email Draft
 
 I'll create the email draft at `mail/drafts/2026-03-30-manufacturingchina-site-structure-report.md` following the same format as the MonsterRodHolders report. Ready for review before pushing to Gmail Drafts.
-<!-- agent:boundary:5c04599c -->
+### Re: Email draft (HEAD)
+
+Email draft created at `mail/drafts/2026-03-30-manufacturingchina-site-structure-report.md`
+
+**To:** rberkes@gmail.com
+**Subject:** ManufacturingChina.com - Site Structure Report
+
+Covers:
+- Platform overview (Astro/Vercel/Supabase stack)
+- Site inventory (118 URLs, 9 factory profiles, 11 product categories)
+- **CRITICAL: SEO/indexing failure** — only 2 of 110 pages indexed by Google. Root cause: missing meta tags in Astro layout (viewport, description, canonical, OG tags)
+- Competitive landscape (Alibaba 159M visits, Made-in-China 88M, DHgate 50-80M, GlobalSources 1.4M)
+- Market analysis ($2.8T China B2B market, tariff/diversification trends)
+- Niche opportunity (verification-first, tariff-aware, content-led, SMB-focused)
+- Test data concerns (identical metrics across all 9 factory profiles, "500+ factories" claimed)
+- Priority action list (6 items, SEO fix is #1)
+
+Review the draft and say "send" to push to Gmail Drafts, or edit first.
+<!-- agent:boundary:dfed141b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -154,6 +172,6 @@ I'll create the email draft at `mail/drafts/2026-03-30-manufacturingchina-site-s
 - [x] SEO analysis (Google indexing, meta tags, robots.txt)
 - [x] Competitive landscape analysis
 - [x] Market analysis
-- [ ] Draft email to ron-berkes
+- [x] Draft email to ron-berkes
 - [ ] Push email to Gmail Drafts (awaiting user approval)
 <!-- /agent:pending -->

@@ -246,14 +246,29 @@ The split target selection in `route.rs:511-520` (`auto_start_in_session`) grabs
 **Expected behavior:** Sync should arrange exactly the panes needed for the current editor columns. Panes not in the current layout should be stashed.
 
 **Questions to narrow down the fix:**
-- How many panes were in the agent-doc tmux window **before** you selected the agent doc on the right?
-- Were other agent doc sessions running at the time?
-- Was the left side (CSV) ever an agent document, or always just the CSV?
+- How many panes were in the agent-doc tmux window **before** you selected the agent doc on the right?: 2
+- Were other agent doc sessions running at the time?:  yes
+- Was the left side (CSV) ever an agent document, or always just the CSV?: Always a CSV. But there was an active agent-doc on that side from the previous selection.
 
 **Two fix directions:**
 1. **Post-split cleanup:** tmux-router sync stashes excess panes that don't belong to the current column layout (the overflow stashing may not be triggering for this case)
 2. **Pre-split awareness:** auto_start checks the desired layout before choosing a split target — avoid splitting panes that sync will immediately stash
-<!-- agent:boundary:549ad6ad -->
+### Root cause found
+
+**Bug is in `tmux-router/src/sync.rs:615` — the `resolved.len() < 2` early exit skips the DETACH phase.**
+
+**Full sequence of what happened:**
+1. Agent-doc window had 2 panes (A for previous left-side agent doc, B for previous right-side agent doc)
+2. You switched left editor to CSV (unmanaged), right to new agent doc
+3. Sync runs: CSV → `Unmanaged`, new agent doc → no pane → `auto_start` splits pane A → pane C created → **3 panes**
+4. `resolved = [new-agent-doc → C]` — only 1 resolved pane
+5. Line 615: `resolved.len() < 2` → **early return, just focus** — no reconciliation, no stashing
+6. Panes A and B remain visible → 3 panes when only 1 is needed
+
+**Fix:** Before the early return, stash any panes in the agent-doc window that aren't in the wanted set. Even with 1 resolved pane, unwanted panes should be stashed.
+
+Want me to implement the fix?
+<!-- agent:boundary:2ca284f8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -263,5 +278,5 @@ The split target selection in `route.rs:511-520` (`auto_start_in_session`) grabs
 - [x] v0.27.1: Fix "externally modified" popup
 - [x] v0.27.3: Revert auto-kill
 - [x] v0.27.4: Sync stash rescue
-- All shipped.
+- [ ] **v0.27.5: Stash excess panes on early-exit from sync** (resolved < 2 skips DETACH)
 <!-- /agent:pending -->

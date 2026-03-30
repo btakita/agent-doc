@@ -903,16 +903,26 @@ The empty strings shouldn't be there — the plugin is sending phantom columns. 
 **Root cause:** The JetBrains plugin is sending extra empty `--col` args. The fix is to **filter empty col_args** at the start of sync before processing.
 
 Want me to add the filter? This is a 1-line fix.
-<!-- agent:boundary:edd1484d -->
+Yes. Let's also fix the plugin
+Is this an ffi or JB plug
+### Re: Both fixes applied (HEAD)
+
+**1. sync.rs** — Filters empty col_args at entry (defensive).
+
+**2. JetBrains plugin SyncLayoutAction.kt** — Added `.filter { it.files.isNotEmpty() }` before building `--col` args. The `EditorTabSyncListener` already had this filter but `SyncLayoutAction` (used by `LayoutChangeDetector`) was missing it — this was the source of phantom `""` columns.
+
+**Plugin needs reinstall:** `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-*.zip` → IDEA → Settings → Plugins → gear → Install from Disk → restart.
+
+Both binary and plugin are ready to test.
+<!-- agent:boundary:7f22dc68 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Structural fix: removed early exits
-- [x] File-based sync logging
-- [x] Log captured — found empty col_args from plugin
-- [ ] **Filter empty col_args at sync entry**
-- [ ] Fix JetBrains plugin to not send empty cols
+- [x] Structural fix + sync logging
+- [x] Found root cause: empty col_args from SyncLayoutAction.kt
+- [x] Fixed both sync.rs (defensive) and plugin (source fix)
+- [ ] **Reinstall plugin + test**
 - [ ] Release
 <!-- /agent:pending -->

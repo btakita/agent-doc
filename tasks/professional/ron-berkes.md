@@ -454,7 +454,7 @@ Updated the email draft account from `btak.dev` to `brian.takita@gmail.com` and 
 Open your Gmail drafts to review and send: [Gmail Drafts](https://mail.google.com/mail/u/0/#drafts)
 
 Please transcribe + diarize using gpu /home/brian/work/btakita/agent-loop/mail/contacts/ron-berkes/recordings/phone_20260330-104440_6504368181.amr
-### Re: Transcription complete (HEAD)
+### Re: Transcription complete
 
 **Transcribed** `phone_20260330-104440_6504368181.amr` — 7:19 call, GPU processed in 3.0s (148.6x realtime on RTX 5090).
 
@@ -475,7 +475,7 @@ Quick follow-up call about the Monster Rod Holders engagement:
 **Note:** Speaker labels have significant drift (many low confidence scores 0.20-0.50). The speakers swap frequently — Ron is giving most of the advice about how to handle Steve, while Brian agrees. Some segments need manual review.
 
 Output: `mail/contacts/ron-berkes/recordings/phone_20260330-104440_6504368181.md`
-<!-- agent:boundary:05b2bcbe -->
+<!-- agent:boundary:e441e204 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

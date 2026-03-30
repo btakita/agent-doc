@@ -419,7 +419,7 @@ Covers:
 - Asks for intros to both clients
 
 Review the draft and let me know if you want changes before pushing to Gmail Drafts.
-<!-- agent:boundary:e8f96bc4 -->
+<!-- agent:boundary:27bbf947 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

@@ -446,19 +446,43 @@ I'll update the draft to say "whether we keep it on WordPress, move to Shopify, 
 continue
 
 Send from brian.takita@gmail.com
+
 ### Re: Continue & send email
 
 Updated the email draft account from `btak.dev` to `brian.takita@gmail.com` and pushed to **Gmail Drafts**. The draft already had the platform-agnostic language ("Whether we go with Shopify, Astro, or a custom Cloudflare-hosted frontend") so no content changes were needed.
 
 Open your Gmail drafts to review and send: [Gmail Drafts](https://mail.google.com/mail/u/0/#drafts)
-<!-- agent:boundary:1971525f -->
+
+Please transcribe + diarize using gpu /home/brian/work/btakita/agent-loop/mail/contacts/ron-berkes/recordings/phone_20260330-104440_6504368181.amr
+### Re: Transcription complete (HEAD)
+
+**Transcribed** `phone_20260330-104440_6504368181.amr` — 7:19 call, GPU processed in 3.0s (148.6x realtime on RTX 5090).
+
+**Call Summary — Mar 30, 2026 (7:19)**
+
+Quick follow-up call about the Monster Rod Holders engagement:
+
+- **Site report impressed Ron** — he wants a similar analysis run on ManufacturingChina.com
+- **Pricing strategy for Steve:** Ron suggests quoting $25/hr and billing 4x hours (effectively $100/hr) because Steve in Kentucky would balk at $100/hr rate directly. Invoice in 4-hour increments, weekly.
+- **Monthly estimates:** ~$2K first month, tapering to $1,500 then less — give Steve "light at the end of the tunnel"
+- **Keep WordPress for now** — don't migrate, just fix and optimize what's there. Game plan for migration later.
+- **Shop Manager access** for Steve so he can add products himself without full admin
+- **Domain control concern:** Ron wants to ask Steve to assign the domain to Ron (purchase 10 years) as creditor protection. Steve controls DNS and could bypass them.
+- **Steve unreachable** — went to voicemail, last read Ron's message Saturday. Ron concerned about health (stage 4 pancreatic cancer).
+- **ManufacturingChina report:** Ron wants Brian to run the same site analysis on his Astro site
+- Ron will call back once Steve responds
+
+**Note:** Speaker labels have significant drift (many low confidence scores 0.20-0.50). The speakers swap frequently — Ron is giving most of the advice about how to handle Steve, while Brian agrees. Some segments need manual review.
+
+Output: `mail/contacts/ron-berkes/recordings/phone_20260330-104440_6504368181.md`
+<!-- agent:boundary:05b2bcbe -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Update email draft to not assume Shopify (already done in previous cycle)
-- [x] Push call summary email to Gmail Drafts (brian.takita@gmail.com)
-- [ ] Review & send email from Gmail Drafts
-- [ ] Wait for Ron to confirm client introductions
-- [ ] Research MonsterRodHolders.com site structure for optimization plan
+- [x] Transcribe phone_20260330-104440_6504368181.amr with GPU diarization
+- [x] Research MonsterRodHolders.com site structure for optimization plan
+- [ ] Run ManufacturingChina.com site analysis (Ron requested)
+- [ ] Wait for Ron to confirm Steve intro / Steve responds
+- [ ] Review transcript speaker labels for accuracy corrections
 <!-- /agent:pending -->
  

@@ -590,7 +590,7 @@ Got it — you're prioritizing the relationship over maximizing rate. That's sma
 The real value here isn't the monthly rate — it's positioning yourself as Ron's tech partner across all his ventures (ManufacturingChina, patent mining, MRH, Fast Fire, outdoor consolidation). That's a $100K+/yr relationship once it's all flowing.
 
 Ron may not be able to afford even $1000. We should allow for that. Just let him know that I need to support my family so I need to allocate time accordingly.
-### Re: Zero-upfront with time allocation honesty (HEAD)
+### Re: Zero-upfront with time allocation honesty
 
 Understood. Here's the framing that respects both realities — Ron may have zero budget right now, and you need to feed your family:
 
@@ -610,7 +610,7 @@ Understood. Here's the framing that respects both realities — Ron may have zer
 **The key ask isn't money — it's introductions.** Ron's value right now is connecting you to paying clients (Steve, Fast Fire owner). Once those engagements start, you have cash flow independent of Ron's personal budget. Ron gets his cut as the middleman, you get steady work, everyone wins.
 
 This way you're not asking Ron for money he doesn't have, and you're not over-committing time you can't afford to give away.
-<!-- agent:boundary:c2bb2d23 -->
+<!-- agent:boundary:a2c2ef07 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

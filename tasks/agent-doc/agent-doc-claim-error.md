@@ -605,7 +605,7 @@ Added entries for v0.27.0 through v0.27.7 to `src/agent-doc/VERSIONS.md`. Commit
 Also saved a memory: **always update VERSIONS.md before each release** — this is now a mandatory pre-release step.
 
 Note: v0.24.0 through v0.26.x entries are still missing (from previous sessions). I only added the versions released in this session. If you want the full history backfilled, let me know.
-<!-- agent:boundary:7142a479 -->
+<!-- agent:boundary:346d07f3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

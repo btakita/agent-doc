@@ -302,8 +302,35 @@ Brian Takita
 
 ---
 
+Should I mention that I have an experience database that I use to generate custom resumes for each role.
+Since she responded with additional details in her previous message, I added experience that I did not include in my initial resume build.
+
 The PDF is at `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-cdw-payments.pdf` — please review it before sending. LinkedIn messaging supports file attachments, so we can send the reply + PDF via chromium-bridge when you approve.
-<!-- agent:boundary:4de4cfaf -->
+### Re: Mention experience database? (HEAD)
+
+Yes — mentioning it works in your favor:
+
+1. **Explains the gap** without sounding like you exaggerated experience
+2. **Shows technical sophistication** — you built a system to generate tailored resumes
+3. **Frames it positively** — "large experience database, role-specific generation" vs "I forgot to include it"
+
+**Revised draft:**
+
+---
+
+Hi Kaci,
+
+You're right — I apologize for that oversight. I maintain an experience database that I use to generate tailored resumes for each role. The version I submitted didn't include all the relevant experience I described. After your detailed questions highlighted the specific areas you're looking for, I've updated my resume to include the relevant details — particularly my work on menu.com's restaurant ordering and payment platform.
+
+I've attached the updated resume for your review. Please let me know if you need any additional information.
+
+Best regards,
+Brian Takita
+
+---
+
+PDF ready at `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-cdw-payments.pdf`. Review the PDF, then approve to send via chromium-bridge with the resume attached.
+<!-- agent:boundary:93dac03c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -314,5 +341,6 @@ The PDF is at `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-cdw
 - [x] Create CDW profile (payments emphasis)
 - [x] Build CDW-tailored PDF
 - [x] Save Kaci's new message
+- [x] Revised draft with experience database mention
 - [ ] Send reply + updated resume to Kaci (awaiting approval)
 <!-- /agent:pending -->

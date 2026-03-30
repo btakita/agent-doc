@@ -770,7 +770,7 @@ The >4 pane issue is from sessions accumulating without cleanup. When you switch
 **Longer term:** Implement `agent-doc gc` as a separate command for manual and automated cleanup.
 Changing to an active agent doc fixed the layout.
 When opening a new tmux pane, the same layout fix operation that fixes the layout when selecting an active agent doc should run.
-### Re: Layout fix should run after auto_start (HEAD)
+### Re: Layout fix should run after auto_start
 
 Got it — the layout self-corrects when you select an active agent doc because sync runs the full reconcile path (resolved >= 2). But when auto_start creates a NEW pane, the reconcile doesn't clean up the previous layout.
 
@@ -782,7 +782,7 @@ Got it — the layout self-corrects when you select an active agent doc because 
 **What should happen:** After auto_start creates a new pane, re-resolve to include the new pane, then let the full reconcile path run to arrange/stash as needed.
 
 This is a structural change to the sync flow — auto_start should feed back into resolution so the reconciler can do its job. Want me to implement this, or should we move this to `tasks/software/agent-doc.md` as a separate workstream?
-<!-- agent:boundary:4e1fbb5c -->
+<!-- agent:boundary:a36e6325 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

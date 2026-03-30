@@ -615,7 +615,33 @@ Yes, the content splits naturally. Analyzed the transcript:
 3. **Keep combined** but also upload the 58min as a standalone short-form
 
 The original source files are already separate, so splitting is trivial (no re-encoding needed). Want me to split and prepare both for upload?
-<!-- agent:boundary:a47745eb -->
+
+Yes.
+
+### Re: Split into 2 videos (HEAD)
+
+Done. SRT captions split at the 58:13 boundary — timestamps reset for Video 2.
+
+**Video 1:** `~/Videos/2026-03-27 16-00-27.mp4` (58min, 2.6G)
+- CC: `~/Videos/2026-03-27-cc.srt` (2,347 segments)
+- **Title:** "Agent-Doc: Building a Cross-Platform FFI Plugin with Socket IPC | Live Coding"
+- **Description:**
+  > Building a generalizable FFI plugin backend for agent-doc — replacing file-based IPC with cross-platform socket communication. Covers the architecture decision to centralize logic in Rust FFI rather than duplicating across editor plugins (JetBrains, VS Code, Vim, Zed). Includes applying existence-lang ontology concepts to software architecture patterns.
+  >
+  > Source: tasks/software/agent-doc.md
+  > Tools: Claude Code, agent-doc, Rust, JetBrains
+
+**Video 2:** `~/Videos/2026-03-29 16-19-07-cut.mp4` (2h28min, 6.4G)
+- CC: `~/Videos/2026-03-29-cc.srt` (11,372 segments)
+- **Title:** "Existence-Lang: Ontology-Driven Software Development | Live Coding Session"
+- **Description:**
+  > Continuing the existence-lang ontology development — applying domain language to codify software patterns. Working bottom-up through existence-lang CLI installability, ontology term definitions, and how universal concepts (System, Perspective, Abstraction) apply across any scope. Includes conversation with John Cassel about the approach.
+  >
+  > Source: tasks/software/agent-doc.md, tasks/professional/john-cassel.md
+  > Tools: Claude Code, agent-doc, existence-lang, Rust
+
+Ready to upload both. Approve the titles/descriptions or edit them, then I'll upload with CC.
+<!-- agent:boundary:ecd4a69a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -629,7 +655,8 @@ The original source files are already separate, so splitting is trivial (no re-e
 - [x] Cut 35:46.1-35:47.5 from 2026-03-29 16-19-07.mp4
 - [x] Combined 2026-03-27 + 2026-03-29 videos (3h26m)
 - [x] Transcribed with CC (13,719 segments SRT)
-- [ ] Decide: split vs combined upload
-- [ ] YouTube title + description
-- [ ] Upload to YouTube
+- [x] Split SRT into 2 files (2,347 + 11,372 segments)
+- [ ] Approve titles/descriptions
+- [ ] Upload Video 1 to YouTube with CC
+- [ ] Upload Video 2 to YouTube with CC
 <!-- /agent:pending -->

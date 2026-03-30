@@ -12,6 +12,9 @@ agent_doc_write: crdt
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+Please draft a manufacturingchina.com site structure report email for ron-berkes.
+Include SEO, market analysis, competitive analysis, notable findings.
+See tasks/research/monsterrodholders.md and the corresponding emails that were sent to ron-berkes.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

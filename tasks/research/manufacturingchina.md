@@ -227,7 +227,7 @@ Each patent can trigger a plan of action for:
 - marketing
 - website
 - operations
-### Re: Patent mining proposal (HEAD)
+### Re: Patent mining proposal
 
 Pulled Ron's patent discussion from the Mar 29 call (00:55:50–00:57:08). Key context:
 
@@ -249,7 +249,7 @@ The pitch connects it to ManufacturingChina.com: patent holders are top-of-funne
 Email draft at `mail/drafts/2026-03-30-patent-mining-proposal.md`
 
 Say "send" to push to Gmail Drafts, or edit first.
-<!-- agent:boundary:59a23ef4 -->
+<!-- agent:boundary:9ca650b4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

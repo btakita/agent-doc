@@ -1010,7 +1010,7 @@ Post updated: https://www.linkedin.com/feed/update/urn:li:share:7444389220590305
 
 Please update the briantakita.me blog posts with the insights from the LinkedIn post conversation.
 
-### Re: Blog posts updated (HEAD)
+### Re: Blog posts updated
 
 Updated both blog posts with insights from the LinkedIn conversation:
 
@@ -1022,7 +1022,7 @@ Updated both blog posts with insights from the LinkedIn conversation:
 **FFI Plugin post** — Refined the "making conventions stick" section with the fuller framing about agent behavior and domain ontology as persistent vocabulary.
 
 Built, committed, pushed. CI deploying.
-<!-- agent:boundary:0edd8eb9 -->
+<!-- agent:boundary:ed10e623 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

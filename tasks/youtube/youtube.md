@@ -692,6 +692,17 @@ Both videos uploaded in temporal order:
 Write a separate blog post for each video on briantakita.me
 
 Both should be featured
+We should be using bun...not pnpm
+```
+● Now build and verify.
+
+● Bash(cd /home/brian/work/btakita/agent-loop/src/briantakita.me-dev && pnpm build 2>&1 | tail -20)
+  ⎿   WARN  The "workspaces" field in package.json is not supported by pnpm. Create a "pnpm-workspace.yaml" file i
+     nstead.
+     … +6 lines (ctrl+o to expand)
+
+● Build passed. Now commit from within the submodule.
+```
 
 ### Re: Blog posts created
 
@@ -706,7 +717,11 @@ Both posts written, built, committed, and pushed:
    - Featured, linked to Video 2
 
 Build passed, deployed via CI.
-<!-- agent:boundary:20aaf29b -->
+
+### Re: bun not pnpm (HEAD)
+
+Noted — saved feedback memory. Will use `bun run build` for briantakita.me-dev going forward. The build did succeed (pnpm delegated to bun internally), but I'll invoke bun directly next time.
+<!-- agent:boundary:a68ff3a7 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

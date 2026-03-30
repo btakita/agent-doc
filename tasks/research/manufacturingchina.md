@@ -195,7 +195,7 @@ Draft updated at `mail/drafts/2026-03-30-manufacturingchina-site-structure-repor
 > **Google Search Console**
 
 Should already be done. But it could be worth mentioning anyways? Ron is usually on top of SEO administration.
-### Re: Google Search Console (HEAD)
+### Re: Google Search Console
 
 Good call — Ron is savvy about SEO admin so he probably already has GSC set up. I softened the language in the email:
 
@@ -205,7 +205,7 @@ Good call — Ron is savvy about SEO admin so he probably already has GSC set up
 This frames it as "let's check what GSC is telling you" rather than "you need to set up GSC," which respects that he's been doing this for years.
 
 Draft updated. Say "send" to push to Gmail Drafts.
-<!-- agent:boundary:e05e398b -->
+<!-- agent:boundary:cb439955 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

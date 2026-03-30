@@ -332,13 +332,26 @@ I've updated the summary line to remove the ambiguity:
 - **After:** "Ron's son's biological mother recently passed away."
 
 Want me to go through the transcript and fix the swapped speaker labels in that section?
-<!-- agent:boundary:69634723 -->
+Yes
+
+**Speaker labels fixed** in the transcript around 00:57:10–00:59:09.
+
+The diarizer lumped a ~1 minute interleaved conversation into a single "Ron Berkes" block. I split it into proper speaker turns based on conversational context:
+
+- Ron asks about Brian's daughter → Brian says she's turning 5
+- Ron shares that his son's mom passed away → Brian says he heard
+- Ron and Brian discuss where she lived (L.A., ~5 miles away)
+- Ron mentions Sarah has been like a mom to his son since age 4
+
+Also swapped the labels on the subsequent segments (00:58:04–00:59:09) where Ron/Brian were reversed — "I'll let you know what they say" and "get you some money" are clearly Ron speaking.
+
+The timestamps on the split segments are approximate (the original was one continuous block). Content is preserved exactly.
+<!-- agent:boundary:6f952d2e -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [ ] Wait for Ron to confirm client introductions
 - [ ] Research MonsterRodHolders.com site structure for optimization plan
 - [ ] Prepare WhiskerSeeker dealer data for Ron
-- [ ] Fix speaker label swaps in transcript (~00:57:10 section)
 <!-- /agent:pending -->
  

@@ -706,7 +706,7 @@ I'll add stderr trace logs to the sync flow so we can capture exactly what happe
 This is a separate task from the bug fix queue. Let me transfer this to `tasks/software/agent-doc.md` for proper tracking.
 
 Do all of this here. tasks/software/agent-doc.md already has a large work queue.
-### Re: Trace logs added (HEAD)
+### Re: Trace logs added
 
 Added sync trace logging at key decision points:
 - Resolution summary: resolved/unresolved/non_managed/total counts
@@ -714,7 +714,7 @@ Added sync trace logging at key decision points:
 - Which exit path: single-file, early exit (resolved < 2), single-pane-column, full reconcile
 
 Installed. Next time you trigger the 1-pane bug, the tmux pane running `agent-doc sync` will show the trace. Check stderr of the sync pane for `[sync]` lines.
-<!-- agent:boundary:10906643 -->
+<!-- agent:boundary:ea555f5f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

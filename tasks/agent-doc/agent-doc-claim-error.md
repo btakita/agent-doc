@@ -657,14 +657,14 @@ The early-exit stash should now actually work. Test by switching between agent d
 
 Now I got a 1 tmux pane layout when a non agent document was selected on the left editor and switching to an inactive agent document on the right editor.
 ![2026-03-30_11-17.png](../../../../../Pictures/agent-loop/2026-03-30_11-17.png)
-### Re: Reverted early-exit stash — too aggressive (HEAD)
+### Re: Reverted early-exit stash — too aggressive
 
 The v0.27.8 stash correctly derived the session, but stashed ALL non-resolved panes — including the left-side agent doc that should stay.
 
 **Fixed:** Removed the early-exit stash entirely. When `resolved < 2`, just focus the resolved pane. Other panes belong to previous-column agent docs and stay visible. Excess cleanup only happens in the full reconcile path (`resolved >= 2`) which has column layout context.
 
 Test updated: `test_sync_early_exit_preserves_other_panes` — verifies all panes remain. Installed — please test.
-<!-- agent:boundary:0f5ebc2b -->
+<!-- agent:boundary:0b41a717 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

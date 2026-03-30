@@ -754,7 +754,22 @@ We have gotten our data as CSV files. I don't need to meet Julian for the data.
 Updated the proposal — removed the Julian intro ask. Changed "What I'd Need" to: "Latest manufacturer CSV data (I already have earlier exports — just need the most current version)." No introduction needed since you already have the data and have met Julian.
 
 Say "send patent" to push to Gmail Drafts.
-<!-- agent:boundary:b418fb20 -->
+
+What is Julian's last name? How do you know he has a "publicly traded firm"?
+
+> I just want to be upfront: I have a family to support, so I need to allocate my time based on what's flowing.
+
+Ron already knows that I need income. We have already discussed in calls. But restating is a good idea.
+### Re: Julian's details (HEAD)
+
+**Julian's last name:** Not mentioned in any transcript — Ron only says "Julian, the CEO" of 3A Credit. You'd need to ask Ron or check their website.
+
+**"Publicly traded" source:** Ron said it himself on the Feb 26 long call: *"...they're a publicly traded company."* I haven't independently verified it.
+
+**On restating income need:** Agreed — Ron knows, but putting it in writing formalizes the expectation.
+
+Should I remove "publicly traded" from the email until verified, or leave it since Ron said it himself?
+<!-- agent:boundary:8e654d07 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -770,6 +785,7 @@ Say "send patent" to push to Gmail Drafts.
 - [x] Merge call summary income items into patent proposal
 - [x] Reframe Julian as data provider + research services consumer
 - [x] Remove Julian intro ask — data already available as CSVs
+- [ ] Verify Julian's last name and 3A Credit publicly traded status
 - [ ] Push patent mining proposal to Gmail Drafts
 - [ ] Wait for Ron to confirm Steve intro / Steve responds
 - [ ] Review transcript speaker labels for accuracy corrections

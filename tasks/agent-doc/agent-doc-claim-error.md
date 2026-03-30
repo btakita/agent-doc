@@ -542,7 +542,7 @@ The sync path calls `auto_start_no_wait` (line 595) but doesn't pass col_args, s
 
 Want me to implement?
 Yes
-### Re: Implemented — sync path now column-aware (HEAD)
+### Re: Implemented — sync path now column-aware
 
 **Fix:** `auto_start_no_wait` now accepts `col_args` and computes `split_before` via `is_first_column()` — same logic as the route path.
 
@@ -555,7 +555,7 @@ Yes
 Test by reproducing: agent doc on both sides → move non-agent file to one side → select new agent doc on other side. Should be 2 panes, not 3.
 
 Note: this is installed as v0.27.6 (same version, not yet bumped). When you're ready to release, we'll bump to v0.27.7.
-<!-- agent:boundary:676ec221 -->
+<!-- agent:boundary:bfe9d51d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

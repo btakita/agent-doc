@@ -522,7 +522,7 @@ Actually, looking at the reconcile function — the DETACH phase (Phase 4) itera
 **Most likely cause:** The column-aware split target fix (v0.27.5) should have picked the last pane for a right-column file. But if the draft is in the left column and the draft has no agent session, auto_start doesn't have col_args context — it may not know which column the new file is in.
 
 I need to check: does `auto_start_in_session` receive `split_before` correctly in the sync path? Let me review.
-### Re: Root cause of the recurrence (HEAD)
+### Re: Root cause of the recurrence
 
 Found it. **`auto_start_no_wait` hardcodes `split_before = false`** — the v0.27.5 column-aware fix only applied to the `route` path, not the `sync` path.
 
@@ -541,7 +541,7 @@ The sync path calls `auto_start_no_wait` (line 595) but doesn't pass col_args, s
 2. Verify the reconciler's DETACH phase handles this case — if a previously-resolved pane is no longer in the current column layout, it should be stashed
 
 Want me to implement?
-<!-- agent:boundary:c8000b7d -->
+<!-- agent:boundary:eb8cd6a1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

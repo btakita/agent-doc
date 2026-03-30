@@ -440,7 +440,7 @@ The draft now focuses on concrete, verifiable work (live client sites, YouTube�
 Draft ready at `mail/drafts/2026-03-30-melissa-lewis-update.md`. Say "send" to push to Gmail Drafts.
 
 Mention more about what Ragie does. Melissa maybe interested in it or may know someone who would be interested in it.
-All business documents are open for ai search & reasoning.
+All business documents are open for ai search & reasoning. 
 ### Re: Expand Ragie description for Melissa
 
 Updated the Bob Remeika/Ragie bullet in the email draft. Now explains what Ragie actually does in accessible terms:
@@ -452,13 +452,24 @@ Also added: "If you or anyone in your network deals with large volumes of busine
 This is relevant for Melissa because wedding professionals deal with vendor contracts, client agreements, timelines, and budgets. And her loan officer contacts definitely deal with document-heavy workflows.
 
 Draft updated at `mail/drafts/2026-03-30-melissa-lewis-update.md`. Say "send" to push to Gmail Drafts.
-<!-- agent:boundary:02d3e5bf -->
+direct send...bypass gmail draft
+### Re: Email sent directly (HEAD)
+
+**Email sent** to melissa.lewis2019@gmail.com via corky `--send` (bypassed Gmail Drafts).
+
+- **From:** brian.takita@gmail.com
+- **To:** melissa.lewis2019@gmail.com
+- **Subject:** Work update — things are moving
+- **Status:** sent
+
+Draft file updated to `status: sent` at `mail/drafts/2026-03-30-melissa-lewis-update.md`.
+<!-- agent:boundary:dfd82ace -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Email draft to Melissa ready to send via corky → Gmail Drafts
+- ([done]) Email sent to Melissa
 - Fix chromium-bridge `type` command exclamation mark escaping bug
 - Release corky with diarize as default feature (Cargo.toml updated, needs commit + publish)
 <!-- /agent:pending -->

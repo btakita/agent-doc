@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.27.8 released. Early-exit stash fix shipped (was dead code since v0.27.5).
+v0.27.9 released. Layout fixes complete — trace logging + early-exit pane preservation.
 <!-- /agent:status -->
 
 ## Exchange
@@ -715,7 +715,7 @@ Added sync trace logging at key decision points:
 
 Installed. Next time you trigger the 1-pane bug, the tmux pane running `agent-doc sync` will show the trace. Check stderr of the sync pane for `[sync]` lines.
 
-Single pane bug is still happening.
+[Single pane bug is still happening.
 ![2026-03-30_11-40.png](../../../../../Pictures/agent-loop/2026-03-30_11-40.png)
 ### Re: Fixed — trace logs now active
 
@@ -727,14 +727,27 @@ Now installed with local tmux-router trace logs. Reproduce the 1-pane bug and ch
 - `[sync] early exit: resolved < 2, preserving other panes` (or whichever path)
 
 Note: the path dep is temporary for debugging. Will revert to crates.io version before release.
-<!-- agent:boundary:dbfb32ed -->
+
+Working. Release tmux-router and agent-doc
+### Re: v0.27.9 + tmux-router v0.3.5 released (HEAD)
+
+**tmux-router v0.3.5:** crates.io ✓
+- Sync trace logging at key decision points
+- Early-exit stash removed (preserves previous-column panes)
+
+**agent-doc v0.27.9:** crates.io ✓, PyPI ✓, GitHub Release ✓, cargo install ✓ (confirmed v0.27.9)
+- Updated tmux-router dep to 0.3.5
+- VERSIONS.md updated for both
+<!-- agent:boundary:c16a5dbc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.27.5-v0.27.8: Layout fix iterations
-- [x] Sync trace logs added
-- [ ] **Reproduce 1-pane issue and capture logs**
-- [ ] Release v0.27.9
+- [x] v0.27.5: Column-aware split target (route path)
+- [x] v0.27.6: Bold-text header fallback
+- [x] v0.27.7: Sync path column-aware split (col_args pass-through)
+- [x] v0.27.8: Fix dead-code stash (derive session from pane)
+- [x] v0.27.9: Remove early-exit stash + trace logging
+- All shipped. Layout working correctly.
 <!-- /agent:pending -->

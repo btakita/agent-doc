@@ -949,7 +949,7 @@ Please look at logs.
 Reconcile detail logging now goes to `/tmp/agent-doc-sync.log` — each phase (SNAPSHOT, ATTACH, SELECT, DETACH) with pane IDs. Reproduce the 3-pane issue again and I'll read the detailed log.
 
 When I change agent docs with 1 editor window, the 3 pane layout remains.
-### Re: Fix confirmed working — reconcile stashes excess panes (HEAD)
+### Re: Fix confirmed working — reconcile stashes excess panes
 
 Manually triggered sync — the reconcile detail log shows it working correctly:
 
@@ -965,7 +965,7 @@ The previous binary from crates.io (v0.3.5) still had the old early-exit code. T
 Current state: 1 pane in agent-doc window (this doc), 3 in stash. Fix verified.
 
 Ready to release? This will be tmux-router v0.3.6 + agent-doc v0.28.0 (major change: no early exits + empty col_args filter + plugin v0.2.36).
-<!-- agent:boundary:e5cbe17c -->
+<!-- agent:boundary:de41111f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

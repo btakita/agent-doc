@@ -254,7 +254,7 @@ Please assist with a draft and updating my resume.
      timeout if needed.
 ```
 I get this error everytime I run chromium-bridge with Claude. Why?
-### Re: Read Kaci's thread and update resume (HEAD)
+### Re: Read Kaci's thread and update resume
 
 **Kaci's new message (today, 1:36 PM):**
 > "Thanks Brian. I don't see this experience mentioned on the resume submitted."
@@ -267,7 +267,7 @@ She's right — **menu.com is missing from the master resume template** (`BrianT
 3. Creating a CDW-specific profile highlighting payments, API, and cloud experience
 4. Building the tailored PDF
 5. Drafting a reply to Kaci with the updated resume
-### Re: Read Kaci's thread and update resume (HEAD)
+### Re: Read Kaci's thread and update resume
 
 **Kaci's new message (today, 1:36 PM):**
 > "Thanks Brian. I don't see this experience mentioned on the resume submitted."
@@ -303,7 +303,7 @@ Brian Takita
 ---
 
 The PDF is at `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-cdw-payments.pdf` — please review it before sending. LinkedIn messaging supports file attachments, so we can send the reply + PDF via chromium-bridge when you approve.
-<!-- agent:boundary:e84efd75 -->
+<!-- agent:boundary:8668c5b4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

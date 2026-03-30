@@ -1230,7 +1230,7 @@ Good thinking on Wednesday or even Thursday. Here's a structured call plan:
 - **Wed Apr 2** if you feel ready with a basic demo flow
 - **Thu Apr 3** if you want an extra day to prepare polished examples
 - Either way, book by tomorrow (Mon Mar 31) so Bob has it on his calendar
-<!-- agent:boundary:0fbe4313 -->
+<!-- agent:boundary:8d77ee5b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

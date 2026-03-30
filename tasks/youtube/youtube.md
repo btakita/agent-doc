@@ -949,7 +949,7 @@ See source documents:
 - tasks/professional/john-cassel.md
 - tasks/software/agent-doc.md
 
-### Re: Corrected framing from source documents (HEAD)
+### Re: Corrected framing from source documents
 
 Updated the LinkedIn draft based on the source documents. Key corrections:
 
@@ -960,7 +960,7 @@ Updated the LinkedIn draft based on the source documents. Key corrections:
 **Genesis/completion cycles:** Removed this bullet entirely. The source material discusses begin/end vs cyclical eschatology but the framing in the draft was too loose and didn't align with the actual discussion.
 
 Updated draft in `mail/social/20260330-ffi-ontology-linkedin.md`.
-<!-- agent:boundary:cd1b03e1 -->
+<!-- agent:boundary:ded6bcec -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

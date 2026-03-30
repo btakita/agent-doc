@@ -720,7 +720,7 @@ Committed 3 sent email drafts in the `mail/` submodule:
 **Not committed:** `2026-03-30-patent-mining-proposal.md` — hasn't been sent yet, stays as untracked draft.
 
 Ok...update the patent-mining-proposal with any income propositions that were reset in call-summary-next-steps.
-### Re: Patent proposal updated with full scope (HEAD)
+### Re: Patent proposal updated with full scope
 
 Added a **"Full Scope — Beyond Patents"** section to the patent mining proposal covering items from the call summary:
 
@@ -732,7 +732,7 @@ Added a **"Full Scope — Beyond Patents"** section to the patent mining proposa
 The Income Structure now covers **all** work streams. This makes the patent proposal a comprehensive engagement email — no need to re-send the call summary.
 
 Say "send patent" to push to Gmail Drafts.
-<!-- agent:boundary:233e15bf -->
+<!-- agent:boundary:e5489aea -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

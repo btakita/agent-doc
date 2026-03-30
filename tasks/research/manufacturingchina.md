@@ -165,7 +165,7 @@ Review the draft and say "send" to push to Gmail Drafts, or edit first.
 
 Read through contacts/ron-berkes context + transcriptions, tasks/professional/ron-berkes.md.
 Analyze what Ron finds important about manufacturingchina.com. Make the report reflect what Ron finds important.
-### Re: Revise report for Ron's priorities (HEAD)
+### Re: Revise report for Ron's priorities
 
 Read through the contact file, both call transcripts (Feb 26 and Mar 29), and the task document. Here's what Ron cares about most, and how I restructured the email:
 
@@ -191,7 +191,7 @@ Read through the contact file, both call transcripts (Feb 26 and Mar 29), and th
 - **Removed generic filler** (design quality assessment, niche opportunity theory) — Ron doesn't need persuading about the concept, he needs the technical blocker fixed
 
 Draft updated at `mail/drafts/2026-03-30-manufacturingchina-site-structure-report.md`. Review and say "send" to push to Gmail Drafts.
-<!-- agent:boundary:c5427507 -->
+<!-- agent:boundary:68f6aa18 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

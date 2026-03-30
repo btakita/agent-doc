@@ -677,7 +677,7 @@ Approve and I'll upload both.
 Don't include `Source: ...` in both video descriptions.
 Approved...Upload both in temporal order.
 
-### Re: Upload complete (HEAD)
+### Re: Upload complete
 
 Both videos uploaded in temporal order:
 
@@ -688,7 +688,7 @@ Both videos uploaded in temporal order:
 2. **Video 2 (Mar 29):** https://www.youtube.com/watch?v=IWNj9GPb2OI
    - "Existence-Lang: Pneuma, Noumena & Phenomena in Software Ontology | Live Coding"
    - 2h28min, with CC
-<!-- agent:boundary:1484574a -->
+<!-- agent:boundary:968601b1 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

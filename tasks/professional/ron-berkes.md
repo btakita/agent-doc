@@ -673,6 +673,7 @@ Both email drafts are now updated and ready:
 2. `mail/drafts/2026-03-30-patent-mining-proposal.md` — patent automation + income structure
 
 Say "send" to push either or both to Gmail Drafts.
+
 ### Re: Bi-directional links
 
 Added cross-references:
@@ -681,7 +682,19 @@ Added cross-references:
 - **ron-berkes.md** → already references `tasks/research/manufacturingchina.md` in the exchange
 
 The link in manufacturingchina.md is in the `&lt;!-- agent:status --&gt;` component so it persists across status updates.
-<!-- agent:boundary:bf5dd81e -->
+Add the patent research service for Julian into the patent-mining-proposal
+### Re: Julian patent intelligence service added (HEAD)
+
+Added a new section **"Julian / 3A Credit — Patent Intelligence Service"** to `mail/drafts/2026-03-30-patent-mining-proposal.md`. It covers:
+
+- **Curated patent intelligence** — monthly reports on new design patents with manufacturer matching
+- **Innovation tracking** — filing patterns, category trends, capital flow signals
+- **Risk signals** — patent activity as a leading indicator of company health for credit assessment
+- **Pricing** — $2-3K/mo data subscription
+- **Key sell** — Julian funds the infrastructure, we use the same pipeline for Ron's lead gen. Two revenue streams from one system.
+
+Both emails ready to push. Say "send" for Gmail Drafts.
+<!-- agent:boundary:f09cae3b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -692,6 +705,7 @@ The link in manufacturingchina.md is in the `&lt;!-- agent:status --&gt;` compon
 - [x] Update email proposal with analyst + compensation + Julian angle
 - [x] Add income proposal to patent mining draft
 - [x] Bi-directional links between ron-berkes.md and manufacturingchina.md
+- [x] Add Julian patent intelligence service to patent mining proposal
 - [ ] Push updated emails to Gmail Drafts (awaiting approval)
 - [ ] Wait for Ron to confirm Steve intro / Steve responds
 - [ ] Review transcript speaker labels for accuracy corrections

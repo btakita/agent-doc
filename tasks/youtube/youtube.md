@@ -830,7 +830,7 @@ Archived via `gh repo archive btakita/snippet--rappstack --yes`. Verified: `isAr
 
 Please add a link to the respective blog post as a YouTube comment for both videos.
 I want to make linkedin posts for both videos + blog posts. Should I schedule both to be posted at the same time. Or stagger the scheduling?
-Or should I incl
+Or should I include both videos in the same LinkedIn post?
 
 ### Re: YouTube comments + LinkedIn scheduling
 
@@ -850,7 +850,23 @@ Reasons:
 - **Post 2 (Existence-Lang):** 2-3 days later — more philosophical, appeals to the systems thinking/ontology audience
 
 Want me to draft both LinkedIn posts now?
-<!-- agent:boundary:b77dee6a -->
+
+### Re: Single vs separate LinkedIn posts (HEAD)
+
+**Recommendation: One combined post.** Here's why:
+
+1. **LinkedIn favors longer, substantive posts** — a post covering both sessions has more depth and tells a better story arc (from technical implementation to philosophical foundations)
+2. **Link density** — LinkedIn's algorithm doesn't penalize multiple links in comments, and one post with a comment thread linking to both videos + blog posts performs better than two separate thin posts
+3. **Narrative cohesion** — The two sessions are connected: Video 1 builds FFI architecture, Video 2 applies ontology to that architecture. One post can frame the through-line
+
+**Draft structure:**
+- Hook: "Two live coding sessions, one thread — from building cross-platform FFI plugins to modeling reality in software"
+- Video 1 summary (FFI + socket IPC)
+- Video 2 summary (pneuma/noumena/phenomena)
+- Links in first comment (better for engagement)
+
+Want me to draft it?
+<!-- agent:boundary:85c753e8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -858,7 +874,6 @@ Want me to draft both LinkedIn posts now?
 - [x] Fixed sticky header shrinking (verified via chromium-bridge)
 - [x] Removed + archived snippet--rappstack
 - [x] YouTube comments with blog links on both videos
-- [ ] Draft LinkedIn post 1 (FFI Plugin)
-- [ ] Draft LinkedIn post 2 (Existence-Lang)
-- [ ] Schedule LinkedIn posts
+- [ ] Draft combined LinkedIn post
+- [ ] Publish LinkedIn post
 <!-- /agent:pending -->

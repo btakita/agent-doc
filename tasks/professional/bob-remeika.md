@@ -1250,20 +1250,39 @@ Let's figure out what is know and unknown for the call with Bob.
 2. **Demo readiness** — Can you run a live agent-doc session as a demo? What would break or look rough?
 3. **What you're asking Bob for** — Is this a "show and tell" catch-up, a partnership pitch, a customer conversation, or exploring the contract work angle?
 4. **Ragie pricing/tier** — Are you on a free tier? Does the plan support the features you'd demo?
-5. **Ron & Judith integration specifics** — What exactly would Ragie do for them? Extract data from PDFs (Ragie Parse)? Power search over their documents? The pitch needs concrete use cases, not just "they have documents."
-6. **Contract gig status** — Bob said he'd keep you on deck. Is that something to bring up on the call or leave alone?
+5. **Ron & Judith integration specifics** — What exactly would Ragie do for them? Extract data from PDFs (Ragie Parse)? Power search over their documents? The pitch needs concrete use cases, not just "they have documents.": For Ron, the manufacturer database & patent database. See /home/brian/work/btakita/agent-loop/mail/drafts/2026-03-30-patent-mining-proposal.md. For Judith, secure storage for the commercial real estate loan applications and finance documents. General business automation.
+6. **Contract gig status** — Bob said he'd keep you on deck. Is that something to bring up on the call or leave alone?: Yes, I'm interested in paying work.
 
 **Recommendation:** Decide what you're asking for before booking. A "show what I'm building + explore how Ragie fits" framing is low-pressure and authentic. You don't need a polished integration — showing the architecture and where Ragie slots in is enough for a 30-min call with an old colleague.
-<!-- agent:boundary:f3932e8c -->
+
+I have not yet built anything specific to Ragie. I'm currently using corky for my personal correspondence and to find work. Do you have any recommendations for demo-worthy work that supports my current correspondence flow?
+### Re: Use case specifics & demo recommendations (HEAD)
+
+**Ron/Judith context noted.** The patent mining proposal is solid — that's your best concrete Ragie use case. Judith's secure document storage for commercial real estate loan apps is a textbook RAG application (ingest loan docs, query across them for underwriting context).
+
+**Demo strategy — three tiers:**
+
+1. **Free (what you have now):** Live agent-doc session on the call. Bob sees real-time document collaboration, tmux multi-pane, git-integrated snapshots, corky correspondence drafting. Zero prep, genuinely impressive to a technical founder.
+
+2. **The Ragie pitch (conceptual, no code needed):** Walk Bob through the patent mining proposal. Show where Ragie slots in: patent corpus indexing, manufacturer database search, and the killer angle — your `mail/` directory as a searchable knowledge base feeding into corky drafts. When you write to Ron, the agent pulls past conversations, project status, deal context via Ragie retrieval.
+
+3. **Quick POC (1-2 hours if you have time):** Sign up for Ragie, index a subset of mail/contacts, write a retrieval script that queries "what do I know about Ron Berkes?" and feeds that into a corky draft. Small, tangible, demonstrates the integration point.
+
+**Framing that works:** "I'm building agent tooling for correspondence and document management. I have real clients (Ron/Judith) who need search over their documents. Ragie is the missing layer." This positions you as a **distribution channel** for Ragie, not just a user — that's what gets a CEO's attention.
+
+**On contract work:** Bring it up. Frame as: "I'm building tools that integrate Ragie deeply. If you need someone who understands the developer experience from the builder side, I'm available." Low-pressure, concrete, and true.
+
+**On Ragie pricing:** Check their free tier before the call so you can speak to it concretely. If you're on free, that's fine — "I'm prototyping on free, ready to scale when the client pipeline justifies it."
+<!-- agent:boundary:2159f587 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Decide call framing (catch-up vs partnership vs customer)
-- Answer the 6 unknowns above to prep for the call
+- ~~Answer the 6 unknowns above to prep for the call~~ ([done] — answered in exchange)
 - Book Calendly slot (Wed Apr 1 or later) — https://calendly.com/bobremeika/30-minute-call
-- Prepare agent-doc live demo
-- Outline Ragie integration architecture (even if conceptual)
-- Follow up on contract gig if Bob reports the intros fell through
+- Decide call framing: "show what I'm building + where Ragie fits + explore contract work"
+- Check Ragie free tier / sign up if not already
+- Optional: build quick Ragie POC (index mail/contacts, retrieval demo)
+- Prepare agent-doc live demo (just run a session — no special prep needed)
 <!-- /agent:pending -->

@@ -555,5 +555,26 @@ Please evaluate.
 **Recommendation:** Don't engage. If the comment is substantive and adds value to the thread, leave it visible (it helps your algorithm). If it's spam or low-effort, hide it from the post.
 
 Browser connection timed out so I couldn't visually verify the profile — but the search evidence alone is concerning.
-<!-- agent:boundary:e482def3 -->
+
+Use chromium-bridge to visit the comment with the url above
+### Re: Eric Irwin profile evaluation (visual verification) (HEAD)
+
+**Confirmed: This is a recruitment scam account.** Full comment and profile now visually verified via chromium-bridge.
+
+**Eric Irwin's full comment:**
+> "There's an exciting Full Stack Engineer Roles position that has recently opened at Bunge, offering a remarkable opportunity for professionals with strong qualifications and experience like yours."
+> Directs you to email **bunge.screeningdesk@outlook.com** — an Outlook.com address, not a corporate Bunge domain.
+> "Wishing you the best of luck in your application and future endeavors."
+
+**Profile red flags (confirmed visually):**
+1. **0 followers** — a legitimate admin professional with "15+ years" would have connections
+2. **No Experience section** — profile only has About and Activity, no actual work history
+3. **No Education, Skills, or Endorsements** — completely empty profile
+4. **Location: Đà Nẵng, Vietnam** — claims to work at Bunge but located in Vietnam
+5. **Activity is entirely Bunge corporate reposts** — no original content, just sharing Bunge's official posts to appear legitimate
+6. **Outlook.com email for "screening"** — real Bunge recruitment uses @bunge.com corporate email
+7. **Hash-style URL** (`eric-irwin-78b7b53bb`) — never customized, auto-generated
+
+**Recommendation: Hide/delete the comment and report the profile.** This is a job scam designed to harvest resumes and personal information via a non-corporate email address. Do not engage or reply.
+<!-- agent:boundary:c25c937d -->
 <!-- /agent:exchange -->

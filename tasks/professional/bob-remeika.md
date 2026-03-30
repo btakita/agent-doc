@@ -1254,7 +1254,7 @@ Let's figure out what is know and unknown for the call with Bob.
 6. **Contract gig status** — Bob said he'd keep you on deck. Is that something to bring up on the call or leave alone?
 
 **Recommendation:** Decide what you're asking for before booking. A "show what I'm building + explore how Ragie fits" framing is low-pressure and authentic. You don't need a polished integration — showing the architecture and where Ragie slots in is enough for a 30-min call with an old colleague.
-<!-- agent:boundary:5e8e4c41 -->
+<!-- agent:boundary:f3932e8c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

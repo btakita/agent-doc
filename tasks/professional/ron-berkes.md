@@ -644,7 +644,7 @@ Good thinking on both fronts. Here's the refined approach:
 This gives you 3-4 potential income streams instead of depending on Ron alone. Julian is especially attractive because he runs a funded company — $2-3K/mo for patent intelligence is a rounding error for a publicly traded firm.
 
 Update the email proposal. Include the woman that Ron has in Brazil as an analyst.
-### Re: Updated email proposal (HEAD)
+### Re: Updated email proposal
 
 Updated the draft at `mail/drafts/2026-03-30-call-summary-next-steps.md`. Key changes:
 
@@ -656,7 +656,7 @@ Updated the draft at `mail/drafts/2026-03-30-call-summary-next-steps.md`. Key ch
 - **Removed the old $100/hr language** — replaced with the flexible approach
 
 Review the draft and let me know if you want changes before pushing to Gmail Drafts.
-<!-- agent:boundary:301d30ab -->
+<!-- agent:boundary:8cbf2979 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

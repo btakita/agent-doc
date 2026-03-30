@@ -855,7 +855,7 @@ Three directives received:
 
 Entering plan mode for #1 and #2.
 
-### Re: Implementation complete (HEAD)
+### Re: Implementation complete
 
 All three features implemented, compiled, tested (38/38 pass), and release binary built.
 
@@ -886,7 +886,7 @@ All three features implemented, compiled, tested (38/38 pass), and release binar
 - `src/frontmatter.rs` — `related_docs` field + test fix
 - `src/preflight.rs` — `RelatedDocChange` struct, `check_related_docs()`, `recent_commit_summary()`, output field + test fixes
 - `src/git.rs` — `resolve_to_git_root` visibility: fn → pub(crate) fn
-<!-- agent:boundary:95237f73 -->
+<!-- agent:boundary:f70688c3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

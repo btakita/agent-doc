@@ -345,7 +345,7 @@ Message is loaded in Kaci's LinkedIn compose box (tab 1, iframe 1). Verified the
 4. Click **Send**
 
 **Re: MCP timeout issue** — The `Network.enable timed out` error happens because LinkedIn pages are very heavy (large iframes, complex DOM). The MCP `chrome-devtools` server's CDP protocol timeout is shorter than what LinkedIn needs. The chromium-bridge CLI works because it uses a direct WebSocket connection with a configurable timeout. To fix this permanently, the MCP server would need a higher `protocolTimeout` setting in its connection config.
-<!-- agent:boundary:6e7dd23d -->
+<!-- agent:boundary:025bb109 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

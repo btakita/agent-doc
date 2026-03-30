@@ -752,6 +752,7 @@ Committed, pushed, and CI will deploy. The sticky header/breadcrumb/title will n
 Yes — the `.scrolled` class toggle was likely lost during a refactor. The fix is deployed now (CI in progress, ~1 min remaining). The scroll handler in `snippet--rappstack` now correctly applies `.scrolled` to `document.documentElement` when `scrollY > 10`, which activates all the shrinking CSS rules for header, breadcrumbs, and sticky headings.
 
 What is snippet--rappstack? What is cruip-simple?
+The "fix" did not apply. Same non-shrinking sticky behavior.
 
 ### Re: snippet--rappstack and cruip-simple
 
@@ -763,7 +764,19 @@ What is snippet--rappstack? What is cruip-simple?
 - `server/` — server-side HTML generators (header, footer, home page layout)
 
 The scroll handler that was missing the `.scrolled` class lives in `cruip-simple/browser/layout__hyop.ts` — the browser-side interactivity layer for the layout.
-<!-- agent:boundary:2f9e5a51 -->
+
+### Re: Actual fix for sticky header (HEAD)
+
+The previous fix was in the wrong place — `snippet--rappstack` isn't wired as a dependency. The scroll handler needed to go into `ui--browser--briantakita/layout/hyop/index.ts`, which IS registered in the browser entry point.
+
+**Root cause:** The `nofouc__hyop` function runs on page load but had no scroll listener. The CSS `.scrolled` selectors existed but nothing toggled the class.
+
+**Fix:** Added scroll listener to `nofouc__hyop` in `lib/ui--browser--briantakita/layout/hyop/index.ts` — toggles `.scrolled` on `document.documentElement` when scrollY > 0. Uses optimized implementation with cached state and passive listener.
+
+Another session had started a similar fix (applying to `el` body instead of `document.documentElement`). Merged both — resolved the conflict to use `document.documentElement` so the CSS ancestor selectors `.scrolled .blog__header` match correctly.
+
+Built, verified `scrolled` is in production JS output, committed, and pushed. CI deploying now.
+<!-- agent:boundary:c6f732bd -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -782,5 +795,6 @@ The scroll handler that was missing the `.scrolled` class lives in `cruip-simple
 - [x] Blog post 1: https://briantakita.me/posts/agent-doc-ffi-plugin-socket-ipc
 - [x] Blog post 2: https://briantakita.me/posts/existence-lang-pneuma-noumena-phenomena
 - [x] Blog deployed to Cloudflare Pages
-- [x] Fixed sticky header shrinking regression
+- [x] Fixed sticky header shrinking (ui--browser--briantakita hyop)
+- [ ] Verify sticky header works on live site after deploy
 <!-- /agent:pending -->

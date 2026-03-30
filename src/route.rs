@@ -32,6 +32,11 @@
 //! - **`is_first_column(file, col_args)`**: Returns true when `file` appears in the first
 //!   `--col` argument. Drives the `-dbh` (split before) vs `-dh` (split after) split direction
 //!   when creating a new pane. Returns false when `col_args` has fewer than 2 entries.
+//! - **Positional split target (sync path)**: When `skip_wait` is true (called from sync),
+//!   `auto_start_in_session` picks the split target based on column position — first pane in
+//!   the agent-doc window for left-column files (`split_before`), last pane for right-column
+//!   files. This places the new pane adjacent to its column neighbors instead of always splitting
+//!   beside an arbitrary registered pane.
 //! - **`send_command(tmux, pane, file_path)`**: Flashes a tmux display-message on the target
 //!   pane, sends `/agent-doc <file_path>` via send-keys, focuses the pane, then polls up to
 //!   5 seconds verifying the command was accepted (retrying Enter if still visible in input).
@@ -513,8 +518,12 @@ fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: 
         let window_panes = tmux.list_window_panes(
             &format!("{}:agent-doc", session_name)
         ).unwrap_or_default();
-        window_panes.into_iter().next()
-            .or_else(|| find_registered_pane_in_session(tmux, session_name, ""))
+        let positional = if split_before {
+            window_panes.into_iter().next()       // leftmost for left-column file
+        } else {
+            window_panes.into_iter().last()       // rightmost for right-column file
+        };
+        positional.or_else(|| find_registered_pane_in_session(tmux, session_name, ""))
     } else {
         find_registered_pane_in_session(tmux, session_name, "")
     };
@@ -1532,5 +1541,95 @@ mod tests {
 
         // Pane should still be alive
         assert!(iso.pane_alive(&pane_a), "pane should survive sync with unresolved files");
+    }
+
+    // --- split_before positional target tests ---
+
+    #[test]
+    fn split_before_true_picks_leftmost_pane() {
+        // Regression test for 3-pane layout bug (Fix 1):
+        // When split_before=true (left-column file), the split target should be
+        // the first (leftmost) pane in the agent-doc window — not the last.
+        // Before the fix, the code always used find_registered_pane_in_session
+        // which could pick any registered pane regardless of position.
+        let iso = IsolatedTmux::new("route-test-split-before-left");
+        let session = "test";
+        let cwd = std::env::current_dir().unwrap();
+
+        // Create a window with 2 panes side by side (simulating agent-doc window)
+        let pane_left = iso.auto_start(session, &cwd).unwrap();
+        let window = iso.pane_window(&pane_left).unwrap();
+        let _ = iso.raw_cmd(&["resize-window", "-t", &window, "-x", "300", "-y", "60"]);
+        let pane_right = iso.split_window(&pane_left, &cwd, "-dh").unwrap();
+
+        // Rename to "agent-doc" so list_window_panes("test:agent-doc") works
+        let _ = iso.raw_cmd(&["rename-window", "-t", &window, "agent-doc"]);
+
+        // Verify setup: 2 panes, left then right
+        let ordered = iso.list_window_panes(&format!("{}:agent-doc", session)).unwrap();
+        assert_eq!(ordered.len(), 2, "should have 2 panes");
+        assert_eq!(ordered[0], pane_left, "first pane should be leftmost");
+        assert_eq!(ordered[1], pane_right, "second pane should be rightmost");
+
+        // split_before=true: should pick the first pane (leftmost)
+        // We split alongside pane_left with -dbh (before, horizontal)
+        let new_pane = iso.split_window(&ordered[0], &cwd, "-dbh").unwrap();
+        let new_window = iso.pane_window(&new_pane).unwrap();
+        assert_eq!(
+            iso.pane_window(&pane_left).unwrap(),
+            new_window,
+            "new pane should be in the same window as the leftmost pane"
+        );
+
+        // Verify the new pane is to the LEFT of the original leftmost pane
+        let final_order = iso.list_window_panes(&format!("{}:agent-doc", session)).unwrap();
+        assert_eq!(final_order.len(), 3, "should have 3 panes now");
+        assert_eq!(
+            final_order[0], new_pane,
+            "new pane should be leftmost (split before)"
+        );
+    }
+
+    #[test]
+    fn split_before_false_picks_rightmost_pane() {
+        // Regression test for 3-pane layout bug (Fix 1):
+        // When split_before=false (right-column file), the split target should be
+        // the last (rightmost) pane in the agent-doc window.
+        let iso = IsolatedTmux::new("route-test-split-before-right");
+        let session = "test";
+        let cwd = std::env::current_dir().unwrap();
+
+        // Create a window with 2 panes side by side
+        let pane_left = iso.auto_start(session, &cwd).unwrap();
+        let window = iso.pane_window(&pane_left).unwrap();
+        let _ = iso.raw_cmd(&["resize-window", "-t", &window, "-x", "300", "-y", "60"]);
+        let pane_right = iso.split_window(&pane_left, &cwd, "-dh").unwrap();
+
+        // Rename to "agent-doc"
+        let _ = iso.raw_cmd(&["rename-window", "-t", &window, "agent-doc"]);
+
+        // Verify setup
+        let ordered = iso.list_window_panes(&format!("{}:agent-doc", session)).unwrap();
+        assert_eq!(ordered.len(), 2);
+        assert_eq!(ordered[0], pane_left);
+        assert_eq!(ordered[1], pane_right);
+
+        // split_before=false: should pick the last pane (rightmost)
+        // We split alongside pane_right with -dh (after, horizontal)
+        let new_pane = iso.split_window(&ordered[1], &cwd, "-dh").unwrap();
+        let new_window = iso.pane_window(&new_pane).unwrap();
+        assert_eq!(
+            iso.pane_window(&pane_right).unwrap(),
+            new_window,
+            "new pane should be in the same window as the rightmost pane"
+        );
+
+        // Verify the new pane is to the RIGHT of the original rightmost pane
+        let final_order = iso.list_window_panes(&format!("{}:agent-doc", session)).unwrap();
+        assert_eq!(final_order.len(), 3, "should have 3 panes now");
+        assert_eq!(
+            final_order[2], new_pane,
+            "new pane should be rightmost (split after)"
+        );
     }
 }

@@ -15,7 +15,7 @@ Session started. Awaiting research direction.
 <!-- agent:exchange patch=append -->
 
 
-### Assistant (HEAD)
+### Assistant
 Whisker Seeker research session initialized. What would you like to research? For example:
 
 - Website and online presence
@@ -27,7 +27,7 @@ Whisker Seeker research session initialized. What would you like to research? Fo
 - Competitor comparison
 
 Provide URLs or direction and I'll start crawling.
-<!-- agent:boundary:73e6d3d5 -->
+<!-- agent:boundary:ffe95f8b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

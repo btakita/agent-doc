@@ -379,15 +379,18 @@ Mirrors a columnar editor layout in tmux. Each `--col` is a comma-separated list
 
 **Pre-sync file resolution:** Before the layout algorithm runs, sync parses file paths from `--col` args and resolves each file. Files without a session UUID in frontmatter are treated as **unmanaged** and skipped (no auto-initialization of frontmatter). Only `agent-doc claim` adds session UUIDs. For managed files (those with session UUIDs) whose registered pane is in a stash window, sync **rescues** the pane back to the agent-doc window (via `swap-pane`, falling back to `join-pane`) — preserving the existing Claude session context. Only if rescue fails, or if no alive pane exists at all, does sync auto-start a fresh Claude session (via `route::auto_start()`).
 
-**Early-exit stash:** When fewer than 2 panes are resolved (not enough for a 2D layout), sync stashes any excess panes in the agent-doc window that aren't in the wanted set before returning. This prevents leftover panes from previous layouts from staying visible when switching from a multi-pane layout to a single-pane layout.
+**Empty col_args filtering:** Before processing, empty strings in `col_args` are filtered out. The JetBrains plugin sometimes sends phantom empty columns when editor splits change rapidly.
 
-**Reconciliation algorithm** (simple 2-step detach/attach):
+**No early exits:** The full reconcile path always runs regardless of how many panes resolve (0, 1, or 2+). The DETACH phase stashes excess panes from previous layouts. Previous versions had early exits for `resolved < 2` that bypassed stashing, leaving orphaned panes visible.
+
+**Reconciliation algorithm** (attach-first order):
 1. **SNAPSHOT** — query current pane order in target window
 2. **FAST PATH** — if current order matches desired, done
-3. **DETACH** — `break-pane` unwanted panes out of target window (panes stay alive in solo windows)
-4. **ATTACH** — `join-pane` missing desired panes into target window (isolate from shared windows first, then join with correct split direction: `-h` for columns, `-v` for stacking)
-5. **REORDER** — if all panes present but wrong order, break non-first panes out and rejoin in order
-6. **VERIFY** — confirm final layout matches desired order
+3. **ATTACH** — `join-pane` missing desired panes into target window (isolate from shared windows first, then join with correct split direction: `-h` for columns, `-v` for stacking)
+4. **SELECT** — select focus pane before stashing (prevents tmux auto-selecting an unintended pane)
+5. **DETACH** — stash unwanted panes out of target window (panes stay alive in stash)
+6. **REORDER** — if all panes present but wrong order, break non-first panes out and rejoin in order
+7. **VERIFY** — confirm final layout matches desired order
 
 ### 7.21 patch
 

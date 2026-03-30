@@ -923,7 +923,7 @@ Both are now fixed — plugin source and binary-side defensive filter. Plugin re
 Did you bump the JB plugin version?
 add tests
 audit docs
-### Re: Plugin version bumped, tests + docs done (HEAD)
+### Re: Plugin version bumped, tests + docs done
 
 **Plugin:** Bumped to v0.2.36, rebuilt. Install from `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.36.zip`.
 
@@ -938,7 +938,7 @@ audit docs
 Fixed tmux-router clippy issue (collapsible_if). All clean.
 
 Ready to release when plugin is installed and tested.
-<!-- agent:boundary:e473886f -->
+<!-- agent:boundary:d436d1e9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1276,6 +1276,7 @@ I have not yet built anything specific to Ragie. I'm currently using corky for m
 
 I also want to propose to build interactive office, pdf, markdown, mdx documents using Ragie as a backend.
 Via a web interface and via editor plugins.
+A prototype of this interactive web document could be my demo.
 ### Re: Interactive document editing with Ragie backend
 
 That's a strong product pitch — it directly connects your agent-doc architecture to Ragie's core offering.
@@ -1295,16 +1296,45 @@ That's a strong product pitch — it directly connects your agent-doc architectu
 - Ron: ingest patent filings → produce analysis documents that cross-reference the entire patent + manufacturer database
 
 This could become a product feature Ragie ships or a partner integration they showcase. Either way, it's the kind of proposal that turns a 30-min catch-up into a working relationship.
-<!-- agent:boundary:096bbf31 -->
+### Re: Interactive web document prototype as demo (HEAD)
+
+Yes — that's the move. A working prototype is far more compelling than talking about the concept.
+
+**MVP scope (buildable in a day):**
+- Simple web page: markdown editor pane + AI response pane
+- On submit, agent queries Ragie for relevant context from indexed documents
+- Agent responds inline (like agent-doc but in the browser)
+- Side panel shows Ragie retrieval results so Bob sees what's being pulled
+
+**Tech stack:**
+- Frontend: basic HTML + markdown renderer (no framework needed for a demo)
+- Backend: small server proxying to Claude API + Ragie API
+- Ragie: index a few real documents (patent proposal, contact profiles, resume)
+- The "magic moment": Bob sees the agent pulling context from indexed docs while editing
+
+**What to index for the demo:**
+- Patent mining proposal (business document retrieval)
+- A few contact profiles from mail/contacts (correspondence context)
+- A resume profile or two (structured data retrieval)
+
+**Demo script for the call:**
+1. Open the web prototype
+2. Start editing a draft email to Ron about manufacturing
+3. Agent pulls Ron's context + patent proposal + manufacturer data from Ragie
+4. Agent drafts contextual response referencing all of it
+5. Bob sees: "This is Ragie-powered document editing, live"
+
+This turns the call from "let me tell you about an idea" into "let me show you a working product that uses your API." Completely different conversation.
+<!-- agent:boundary:7325e983 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - Book Calendly slot (Wed Apr 1 or later) — https://calendly.com/bobremeika/30-minute-call
-- Decide call framing: "agent-doc + Ragie interactive docs platform + contract work"
-- Check Ragie free tier / sign up if not already
-- Draft 1-page pitch: interactive document editing with Ragie backend (web + editor plugins + Office/PDF)
-- Optional: build quick Ragie POC (index mail/contacts, retrieval demo)
-- Prepare agent-doc live demo (just run a session — no special prep needed)
+- **Build interactive web document prototype** (MVP: markdown editor + Ragie retrieval + Claude responses)
+- Sign up for Ragie / check free tier
+- Index demo documents in Ragie (patent proposal, contacts, resume)
+- Prepare demo script: draft email to Ron with live Ragie context retrieval
+- Prepare agent-doc live demo as backup (just run a session)
 <!-- /agent:pending -->

@@ -14,7 +14,7 @@ Session started. Awaiting research direction.
 
 <!-- agent:exchange patch=append -->
 
-### Assistant (HEAD)
+### Assistant
 
 MonsterRodHolders research session initialized. What would you like to research? For example:
 
@@ -23,7 +23,7 @@ MonsterRodHolders research session initialized. What would you like to research?
 - Competitor comparison
 - Customer reviews and reputation
 - Where to buy / availability
-<!-- agent:boundary:037a957a -->
+<!-- agent:boundary:782a2928 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

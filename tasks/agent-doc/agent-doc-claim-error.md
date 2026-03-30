@@ -536,6 +536,8 @@ The sync path calls `auto_start_no_wait` (line 595) but doesn't pass col_args, s
 
 **But the bigger issue:** Even with the correct split target, auto_start creates a 3rd pane that the reconciler should then stash. The reconciler DOES have the DETACH phase — but the question is whether the old pane from the left-side agent doc (that was displaced by the draft) is being correctly identified as "not wanted."
 
+The left pane in this case should remain...since a non-agent document was currently selected...the most recent left editor agent document should still remain on the left tmux pane.
+
 **Two fixes needed:**
 1. Pass `col_args` through `auto_start_no_wait` → `auto_start_ext` so the sync path gets positional split
 2. Verify the reconciler's DETACH phase handles this case — if a previously-resolved pane is no longer in the current column layout, it should be stashed
@@ -555,7 +557,18 @@ Yes
 Test by reproducing: agent doc on both sides → move non-agent file to one side → select new agent doc on other side. Should be 2 panes, not 3.
 
 Note: this is installed as v0.27.6 (same version, not yet bumped). When you're ready to release, we'll bump to v0.27.7.
-<!-- agent:boundary:bfe9d51d -->
+### Re: Left pane should remain (HEAD)
+
+Yes — that's exactly the intended behavior. When the left editor shows a non-agent file, the left tmux pane keeps the most recent agent doc session for that column position.
+
+The fix already handles this:
+1. **Early-exit stash (v0.27.5):** Only stashes panes NOT in the `wanted` (resolved) set. The left pane's agent doc is still registered and resolves → stays in the window.
+2. **Sync path col_args (just implemented):** When the new right-side agent doc needs a pane, `auto_start_no_wait` now picks the correct split target (rightmost pane for right-column file). The left pane is untouched.
+
+Result: 2 panes — left (previous agent doc, preserved) + right (new agent doc).
+
+The fix is installed. Please test and let me know if the 3-pane issue is resolved.
+<!-- agent:boundary:30aae9ff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

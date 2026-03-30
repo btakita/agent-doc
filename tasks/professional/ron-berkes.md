@@ -709,7 +709,7 @@ The updated call summary draft (with flexible compensation, analyst, Julian) has
 **Recommendation:** Send the **patent mining proposal** as a new email. It contains the income structure, Julian angle, and analyst positioning. The old call summary already established the basics — the patent proposal builds on it naturally.
 
 Say "send patent" to push `2026-03-30-patent-mining-proposal.md` to Gmail Drafts.
-### Re: Sent email drafts committed (HEAD)
+### Re: Sent email drafts committed
 
 Committed 3 sent email drafts in the `mail/` submodule:
 
@@ -718,7 +718,7 @@ Committed 3 sent email drafts in the `mail/` submodule:
 3. `2026-03-30-monsterrodholders-com-site-structure-report.md` — sent earlier
 
 **Not committed:** `2026-03-30-patent-mining-proposal.md` — hasn't been sent yet, stays as untracked draft.
-<!-- agent:boundary:3f5d4f98 -->
+<!-- agent:boundary:b4aa0e0f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

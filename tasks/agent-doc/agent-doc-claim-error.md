@@ -557,7 +557,7 @@ Yes
 Test by reproducing: agent doc on both sides → move non-agent file to one side → select new agent doc on other side. Should be 2 panes, not 3.
 
 Note: this is installed as v0.27.6 (same version, not yet bumped). When you're ready to release, we'll bump to v0.27.7.
-### Re: Left pane should remain (HEAD)
+### Re: Left pane should remain
 
 Yes — that's exactly the intended behavior. When the left editor shows a non-agent file, the left tmux pane keeps the most recent agent doc session for that column position.
 
@@ -568,7 +568,7 @@ The fix already handles this:
 Result: 2 panes — left (previous agent doc, preserved) + right (new agent doc).
 
 The fix is installed. Please test and let me know if the 3-pane issue is resolved.
-<!-- agent:boundary:30aae9ff -->
+<!-- agent:boundary:7ddf78d7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

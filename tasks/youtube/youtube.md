@@ -721,7 +721,17 @@ Build passed, deployed via CI.
 ### Re: bun not pnpm
 
 Noted — saved feedback memory. Will use `bun run build` for briantakita.me-dev going forward. The build did succeed (pnpm delegated to bun internally), but I'll invoke bun directly next time.
-<!-- agent:boundary:12667076 -->
+
+publish
+
+### Re: Publish
+
+Already deployed. The git push triggered Cloudflare Pages CI, which completed successfully (1m0s).
+
+Blog posts are live:
+- https://briantakita.me/posts/agent-doc-ffi-plugin-socket-ipc
+- https://briantakita.me/posts/existence-lang-pneuma-noumena-phenomena
+<!-- agent:boundary:72c1ef98 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -739,4 +749,5 @@ Noted — saved feedback memory. Will use `bun run build` for briantakita.me-dev
 - [x] Video 2 uploaded: https://www.youtube.com/watch?v=IWNj9GPb2OI
 - [x] Blog post 1: https://briantakita.me/posts/agent-doc-ffi-plugin-socket-ipc
 - [x] Blog post 2: https://briantakita.me/posts/existence-lang-pneuma-noumena-phenomena
+- [x] Blog deployed to Cloudflare Pages
 <!-- /agent:pending -->

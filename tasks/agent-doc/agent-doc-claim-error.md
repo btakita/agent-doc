@@ -949,6 +949,11 @@ Please look at logs.
 Reconcile detail logging now goes to `/tmp/agent-doc-sync.log` — each phase (SNAPSHOT, ATTACH, SELECT, DETACH) with pane IDs. Reproduce the 3-pane issue again and I'll read the detailed log.
 
 When I change agent docs with 1 editor window, the 3 pane layout remains.
+### Re: Reconcile detail logging now active (HEAD)
+
+Previous build was using crates.io tmux-router (not local). Switched to path dep and rebuilt. Reconcile detail logs now go to `/tmp/agent-doc-sync.log`. 
+
+Switch between agent docs with 1 editor window — the log will now show the reconcile's SNAPSHOT, ATTACH, SELECT, DETACH phases with exact pane IDs and decisions.
 ### Re: Fix confirmed working — reconcile stashes excess panes
 
 Manually triggered sync — the reconcile detail log shows it working correctly:
@@ -965,15 +970,23 @@ The previous binary from crates.io (v0.3.5) still had the old early-exit code. T
 Current state: 1 pane in agent-doc window (this doc), 3 in stash. Fix verified.
 
 Ready to release? This will be tmux-router v0.3.6 + agent-doc v0.28.0 (major change: no early exits + empty col_args filter + plugin v0.2.36).
-<!-- agent:boundary:de41111f -->
+
+add tests
+audit docs
+### Re: Tests + docs done, ready to release (HEAD)
+
+**Tests:** 569 pass (78 tmux-router + 491 agent-doc). New test: `empty_col_args_filtered` in sync.rs.
+
+**Docs:** SPEC.md reconciliation phase order fixed (was DETACH→ATTACH, now ATTACH→SELECT→DETACH). VERSIONS.md entries accurate. Path dep reverted to `tmux-router = "0.3"`.
+
+Release tmux-router v0.3.6 + agent-doc v0.28.0?
+<!-- agent:boundary:f2bade25 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Structural fix: no early exits — reconciler always runs
-- [x] Empty col_args filter (sync.rs + plugin)
-- [x] Plugin v0.2.36 built
-- [x] Fix verified via reconcile logs
+- [x] Structural fix verified
+- [x] Tests + docs
 - [ ] **Release tmux-router v0.3.6 + agent-doc v0.28.0 + plugin v0.2.36**
 <!-- /agent:pending -->

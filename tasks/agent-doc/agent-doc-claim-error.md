@@ -688,7 +688,7 @@ This 1-pane issue is **different** from the early-exit stash — that code is no
 Are there logs for the actions and states that occurred? If not, we need to add logs.
 
 If this is reproducible, I'll add stderr logging to the sync path to capture exactly what happens during the layout transition.
-### Re: Adding sync trace logs (HEAD)
+### Re: Adding sync trace logs
 
 Thank you — that narrows it down significantly. The 1-pane state persists while the non-agent doc is selected and self-corrects when you switch back. This means something in the sync flow is actively stashing the left-side pane.
 
@@ -704,7 +704,7 @@ I'll add stderr trace logs to the sync flow so we can capture exactly what happe
 - What `resync::run(false)` does
 
 This is a separate task from the bug fix queue. Let me transfer this to `tasks/software/agent-doc.md` for proper tracking.
-<!-- agent:boundary:256171f3 -->
+<!-- agent:boundary:f9b03036 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

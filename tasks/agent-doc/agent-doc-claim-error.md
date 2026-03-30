@@ -801,15 +801,44 @@ This ensures the agent-doc window has only the correct panes by the time the rec
 All 38 tests pass, clippy clean. Installed. Please test:
 1. 2 agent docs side-by-side → switch one to non-agent → select new agent doc → should get 2 panes
 2. Switch to non-agent on one side → should preserve 2 panes (not drop to 1)
-<!-- agent:boundary:121525fa -->
+
+Single pane state. Also, there were >2 pane states. Please look at logs. I'm not sure why this issue keeps on occurring. Please find a way to fix on a structural level. Propose common abstractions to fix these pane issue.
+![2026-03-30_12-54.png](../../../../../Pictures/agent-loop/2026-03-30_12-54.png)
+### Re: Structural fix needed (HEAD)
+
+You're right — the incremental patches (v0.27.5-v0.27.9 + this session's fixes) have been chasing symptoms. Each fix solves one scenario but reveals another. The root cause is architectural:
+
+**The problem:** The sync flow has 4 independent steps that don't share a unified layout model:
+1. **auto_start** (agent-doc/sync.rs) — creates panes for unregistered files
+2. **resolve** (tmux-router/sync.rs) — maps files to panes via registry lookup
+3. **reconcile** (tmux-router/sync.rs) — arranges panes in the window
+4. **stash** (various places) — removes unwanted panes
+
+Each step makes decisions independently. auto_start doesn't know what reconcile will do. The early exits bypass reconcile entirely. The stash logic runs in different places with different "wanted" sets.
+
+**The structural fix: Declarative Layout Model**
+
+Instead of imperative steps that each modify tmux state independently, the sync should:
+
+1. **Declare the desired layout:** "Left column: pane for file A. Right column: pane for file B. Everything else: stash."
+2. **Compute the diff:** Compare desired layout vs. current tmux state
+3. **Apply the diff:** Create missing panes, stash excess panes, arrange wanted panes
+
+This is essentially what `reconcile()` already does — but it only runs when `resolved >= 2`. The fix is to make reconcile the **only** code path that touches the tmux window layout. No early exits, no pre-reconcile stashing, no post-auto_start cleanup.
+
+**Proposed design:**
+- Remove all early exits from tmux_router::sync (lines 610-677)
+- Remove the post-auto_start stash from agent-doc/sync.rs
+- Always run the full reconcile path, even with 0 or 1 resolved panes
+- Reconcile handles all cases: 0 panes (stash everything), 1 pane (focus + stash extras), 2+ panes (current behavior)
+
+This is a bigger change. I recommend transferring to `tasks/software/agent-doc.md` as a proper design task with a plan, tests, and verification before release. Want me to do that?
+<!-- agent:boundary:e3d4f3b2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.27.5-v0.27.9: Layout fix iterations
-- [x] Post-auto_start layout fix implemented
-- [ ] Test manually
-- [ ] Add tests + audit docs
-- [ ] Release v0.28.0
+- [x] v0.27.5-v0.27.9: Incremental layout fixes (partial)
+- [ ] **Structural fix: declarative layout model — always reconcile, no early exits**
 <!-- /agent:pending -->

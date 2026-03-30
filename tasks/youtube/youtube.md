@@ -693,7 +693,7 @@ Write a separate blog post for each video on briantakita.me
 
 Both should be featured
 
-### Re: Blog posts created (HEAD)
+### Re: Blog posts created
 
 Both posts written, built, committed, and pushed:
 
@@ -706,7 +706,7 @@ Both posts written, built, committed, and pushed:
    - Featured, linked to Video 2
 
 Build passed, deployed via CI.
-<!-- agent:boundary:0413787f -->
+<!-- agent:boundary:20aaf29b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

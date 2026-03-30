@@ -132,7 +132,7 @@ Two options to prevent this from recurring:
 2. **Corky SKILL update** — Yes, adding a build preference to the corky skill would add a second layer of defense. The skill could specify `required_features: ["diarize", "transcribe-cuda"]` so any skill-invoked build includes GPU support automatically.
 
 Option 1 is sufficient for me — I won't forget again. Option 2 would help if other agents or fresh sessions invoke the corky skill without my memory loaded. Want me to update the corky skill as well?
-<!-- agent:boundary:65c6b666 -->
+<!-- agent:boundary:5ddd855e -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

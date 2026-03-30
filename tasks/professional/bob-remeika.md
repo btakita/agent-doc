@@ -1276,7 +1276,6 @@ I have not yet built anything specific to Ragie. I'm currently using corky for m
 
 I also want to propose to build interactive office, pdf, markdown, mdx documents using Ragie as a backend.
 Via a web interface and via editor plugins.
-A prototype of this interactive web document could be my demo.
 ### Re: Interactive document editing with Ragie backend
 
 That's a strong product pitch — it directly connects your agent-doc architecture to Ragie's core offering.
@@ -1288,6 +1287,10 @@ That's a strong product pitch — it directly connects your agent-doc architectu
 1. **Web interface** — Browser-based document editor where Ragie retrieval feeds context into AI responses. User edits a contract, the agent pulls relevant clauses from other indexed documents. Google Docs meets RAG.
 2. **Editor plugins** (VS Code, JetBrains) — You already have JetBrains plugin architecture from agent-doc. Extend it so the agent queries Ragie for context while editing markdown, MDX, or structured documents locally.
 3. **Office/PDF support** — Ragie already handles PDF ingestion (Ragie Parse). The loop: ingest PDFs → index in Ragie → query during editing → produce new documents that reference the ingested corpus.
+
+I already have JB Editor plugin that I can demo.
+Maybe VSCode is working. I could test it.
+A prototype of this interactive web document could in my demo as well.
 
 **Why Bob should care:** This turns Ragie from a "search your documents" API into an **interactive document platform** — much bigger TAM. You're offering to build the integration layer, essentially a reference implementation of "Ragie-powered document editing."
 
@@ -1325,16 +1328,36 @@ Yes — that's the move. A working prototype is far more compelling than talking
 5. Bob sees: "This is Ragie-powered document editing, live"
 
 This turns the call from "let me tell you about an idea" into "let me show you a working product that uses your API." Completely different conversation.
-<!-- agent:boundary:1b7f5995 -->
+### Re: Demo assets — JB plugin + VS Code + web prototype (HEAD)
+
+You have more demo assets than you think:
+
+**Ready now:**
+- **JetBrains plugin** — agent-doc IntelliJ plugin with IPC, gutter boundaries, live document sync. Most polished demo asset. Show a live agent-doc session editing markdown.
+
+**Quick check needed:**
+- **VS Code** — test it. If it works, demo on whichever editor Bob's more familiar with. Most devs default to VS Code.
+
+**Build for demo:**
+- **Web prototype** — the new piece. Markdown editor + Ragie retrieval panel + Claude responses. Shows "Ragie-powered document editing as a web product."
+
+**Demo flow for the call (7 min total):**
+1. **JB plugin** (2 min) — "Here's what I have today. Live document editing with AI, git-integrated, tmux orchestration." Shows technical depth.
+2. **Web prototype** (3 min) — "Here's where Ragie comes in. Same concept, browser-based, pulling context from indexed documents via your API." Shows the product vision.
+3. **Ragie retrieval panel** (2 min) — Show Ragie search results feeding into the document. Makes Ragie's value visible and concrete.
+
+Goes from "working product" → "your API powers the next version" → "here's what your customers see." Strong progression.
+<!-- agent:boundary:63dcb898 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - Book Calendly slot (Wed Apr 1 or later) — https://calendly.com/bobremeika/30-minute-call
-- **Build interactive web document prototype** (MVP: markdown editor + Ragie retrieval + Claude responses)
+- Test VS Code agent-doc extension — does it work?
+- **Build interactive web document prototype** (markdown editor + Ragie retrieval + Claude responses)
 - Sign up for Ragie / check free tier
 - Index demo documents in Ragie (patent proposal, contacts, resume)
-- Prepare demo script: draft email to Ron with live Ragie context retrieval
-- Prepare agent-doc live demo as backup (just run a session)
+- Prep JB plugin demo (clean session, good example doc)
+- Prepare demo script: 3-part progression (JB → web → Ragie panel)
 <!-- /agent:pending -->

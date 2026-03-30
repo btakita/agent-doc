@@ -204,7 +204,7 @@ So there were **three** layers that should have prevented the CPU-only build, an
 3. The generated skill (though it doesn't currently mention transcription features)
 
 The transcription GPU preference lives in `CLAUDE.local.md` already. The generated `SKILL.md` doesn't cover transcription build features — that could be added to corky's skill generator if you want it embedded in the skill itself. But since `CLAUDE.local.md` already handles it, the real failure was me not reading the submodule's instruction files before building.
-<!-- agent:boundary:913e2376 -->
+<!-- agent:boundary:0547450a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

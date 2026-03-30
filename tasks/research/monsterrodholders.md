@@ -173,7 +173,7 @@ rod-holders | rod-holder-bases | racks-and-t-bars | rod-transport-solutions | mo
 4. **GeoDirectory pages** — gd-archive, gd-details suggest a directory plugin is installed
 5. **Niche but complete product line** — 57 products covering rod holders, bases, nets, anchors, tackle, transport, and accessories
 
-### Re: YouTube channels (HEAD)
+### Re: YouTube channels
 
 WebFetch can't extract data from YouTube's JS-rendered pages, so I used web search + the company site to gather what's available.
 
@@ -228,7 +228,7 @@ WebFetch can't extract data from YouTube's JS-rendered pages, so I used web sear
 - [Catfish Conference](https://catfishconference.com) — event sponsor/vendor
 - [Catfish Angler Forum (USCA)](https://www.catfish1.com) — community presence
 - [Kayak Catfish](http://www.kayakcatfish.com) — product reviews/features
-<!-- agent:boundary:0313ce02 -->
+<!-- agent:boundary:c4628f2c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

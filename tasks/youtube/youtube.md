@@ -574,7 +574,7 @@ Note the source agent documents are:
 - tasks/software/agent-doc.md
 - tasks/professional/john-cassel.md
 
-### Re: Combine videos and transcribe (HEAD)
+### Re: Combine videos and transcribe
 
 **Combined video:** `~/Videos/2026-03-27+29-combined.mp4` (9.0G, 3h26m34s)
 - Part 1: `2026-03-27 16-00-27.mp4` (58min) — agent-doc FFI plugin & socket IPC
@@ -593,7 +593,7 @@ Note the source agent documents are:
 3. **Thumbnail** — any preference?
 
 Let me know the title direction and I'll prepare the upload.
-<!-- agent:boundary:228d2703 -->
+<!-- agent:boundary:f7e73a22 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

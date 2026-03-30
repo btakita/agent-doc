@@ -249,7 +249,7 @@ The pitch connects it to ManufacturingChina.com: patent holders are top-of-funne
 Email draft at `mail/drafts/2026-03-30-patent-mining-proposal.md`
 
 Say "send" to push to Gmail Drafts, or edit first.
-<!-- agent:boundary:9ca650b4 -->
+<!-- agent:boundary:7fb6f1b3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

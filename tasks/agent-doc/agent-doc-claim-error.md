@@ -804,7 +804,7 @@ All 38 tests pass, clippy clean. Installed. Please test:
 
 Single pane state. Also, there were >2 pane states. Please look at logs. I'm not sure why this issue keeps on occurring. Please find a way to fix on a structural level. Propose common abstractions to fix these pane issue.
 ![2026-03-30_12-54.png](../../../../../Pictures/agent-loop/2026-03-30_12-54.png)
-### Re: Structural fix needed (HEAD)
+### Re: Structural fix needed
 
 You're right — the incremental patches (v0.27.5-v0.27.9 + this session's fixes) have been chasing symptoms. Each fix solves one scenario but reveals another. The root cause is architectural:
 
@@ -833,7 +833,7 @@ This is essentially what `reconcile()` already does — but it only runs when `r
 - Reconcile handles all cases: 0 panes (stash everything), 1 pane (focus + stash extras), 2+ panes (current behavior)
 
 This is a bigger change. I recommend transferring to `tasks/software/agent-doc.md` as a proper design task with a plan, tests, and verification before release. Want me to do that?
-<!-- agent:boundary:e3d4f3b2 -->
+<!-- agent:boundary:62474f5a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

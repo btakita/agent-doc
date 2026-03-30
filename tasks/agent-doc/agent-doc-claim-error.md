@@ -596,7 +596,16 @@ Release
 - Sync path now column-aware: `auto_start_no_wait` receives `col_args` and picks positionally correct split target
 - 2 new integration tests
 - Docs updated (route.rs, sync.rs, SPEC.md)
-<!-- agent:boundary:d216cfaf -->
+
+Please update VERSIONS.md. Make sure VERSIONS.md is **always** updated before each release.
+### Re: VERSIONS.md updated (HEAD)
+
+Added entries for v0.27.0 through v0.27.7 to `src/agent-doc/VERSIONS.md`. Committed and pushed.
+
+Also saved a memory: **always update VERSIONS.md before each release** — this is now a mandatory pre-release step.
+
+Note: v0.24.0 through v0.26.x entries are still missing (from previous sessions). I only added the versions released in this session. If you want the full history backfilled, let me know.
+<!-- agent:boundary:e3074f72 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -605,5 +614,6 @@ Release
 - [x] v0.27.5: 3-pane fix (route path)
 - [x] v0.27.6: Bold-text header fallback
 - [x] v0.27.7: Sync path column-aware split
+- [x] VERSIONS.md updated for v0.27.0-v0.27.7
 - All shipped.
 <!-- /agent:pending -->

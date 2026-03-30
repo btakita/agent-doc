@@ -132,7 +132,39 @@ Two options to prevent this from recurring:
 2. **Corky SKILL update** — Yes, adding a build preference to the corky skill would add a second layer of defense. The skill could specify `required_features: ["diarize", "transcribe-cuda"]` so any skill-invoked build includes GPU support automatically.
 
 Option 1 is sufficient for me — I won't forget again. Option 2 would help if other agents or fresh sessions invoke the corky skill without my memory loaded. Want me to update the corky skill as well?
-<!-- agent:boundary:5ddd855e -->
+
+Only if this would also support a non-GPU fallback.
+
+**Re: Non-GPU fallback**
+
+Yes, the skill could handle this. The approach:
+
+1. **Try `transcribe-cuda` first** — attempt build with CUDA features
+2. **Fall back to `transcribe`** — if CUDA build fails (no toolkit), retry CPU-only
+3. **Warn on fallback** — print "CUDA not available, falling back to CPU (this will be slow)"
+
+Since `transcribe-cuda` is a compile-time feature (whisper.cpp links against CUDA libs), the fallback detection happens at build time, not runtime. The skill would run `cargo build` with CUDA first, check the exit code, and retry without it.
+
+That said — this is a build-time concern, not a per-invocation concern. Once corky is installed with CUDA, it always uses GPU. The fallback only matters during initial `cargo install`. For your machine with the 5090, `transcribe-cuda` will always succeed.
+
+Want me to implement this in the corky skill now, or is this a "later" item?
+
+Is the SKILL.md you were updating the same skill installed using `corky skill install`?
+
+**Re: Non-GPU fallback**
+
+Yes, the skill could handle this. The approach:
+
+1. **Try `transcribe-cuda` first** — attempt build with CUDA features
+2. **Fall back to `transcribe`** — if CUDA build fails (no toolkit), retry CPU-only
+3. **Warn on fallback** — print "CUDA not available, falling back to CPU (this will be slow)"
+
+Since `transcribe-cuda` is a compile-time feature (whisper.cpp links against CUDA libs), the fallback detection happens at build time, not runtime. The skill would run `cargo build` with CUDA first, check the exit code, and retry without it.
+
+That said — this is a build-time concern, not a per-invocation concern. Once corky is installed with CUDA, it always uses GPU. The fallback only matters during initial `cargo install`. For your machine with the 5090, `transcribe-cuda` will always succeed.
+
+Want me to implement this in the corky skill now, or is this a "later" item?
+<!-- agent:boundary:79a61021 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

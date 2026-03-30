@@ -749,12 +749,12 @@ Updated the patent mining proposal:
 Say "send patent" to push to Gmail Drafts.
 I met Julian for a brunch one time in LA. About 6 years ago.
 We have gotten our data as CSV files. I don't need to meet Julian for the data.
-### Re: Data already available (HEAD)
+### Re: Data already available
 
 Updated the proposal — removed the Julian intro ask. Changed "What I'd Need" to: "Latest manufacturer CSV data (I already have earlier exports — just need the most current version)." No introduction needed since you already have the data and have met Julian.
 
 Say "send patent" to push to Gmail Drafts.
-<!-- agent:boundary:3def068b -->
+<!-- agent:boundary:b418fb20 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

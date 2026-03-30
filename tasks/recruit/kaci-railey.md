@@ -306,7 +306,7 @@ Should I mention that I have an experience database that I use to generate custo
 Since she responded with additional details in her previous message, I added experience that I did not include in my initial resume build.
 
 The PDF is at `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-cdw-payments.pdf` — please review it before sending. LinkedIn messaging supports file attachments, so we can send the reply + PDF via chromium-bridge when you approve.
-### Re: Mention experience database? (HEAD)
+### Re: Mention experience database?
 
 Yes — mentioning it works in your favor:
 
@@ -330,7 +330,7 @@ Brian Takita
 ---
 
 PDF ready at `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-cdw-payments.pdf`. Review the PDF, then approve to send via chromium-bridge with the resume attached.
-<!-- agent:boundary:93dac03c -->
+<!-- agent:boundary:e649dd96 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

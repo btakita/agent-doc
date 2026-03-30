@@ -176,7 +176,7 @@ The `skill install` command belongs to **agent-doc**, not corky. Corky doesn't h
 If we wanted a corky skill, we'd create `.claude/skills/corky/SKILL.md` with instructions like "always build with `--features diarize,transcribe-cuda`" and the GPU fallback logic. This would be a new file, not updating an existing one.
 
 Also — the recovered response duplicated the "Non-GPU fallback" section. I'll clean that up on the next compact.
-<!-- agent:boundary:27968d14 -->
+<!-- agent:boundary:b89f36f0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

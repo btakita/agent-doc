@@ -867,7 +867,7 @@ From the screenshot it looks like 2 panes — which is correct for 2 editor colu
 It was 3 panes. Look in the logs.
 
 Please describe what you expected vs. what you saw.
-### Re: Apologies — you're right about the 3 panes (HEAD)
+### Re: Apologies — you're right about the 3 panes
 
 I couldn't find the logs because `agent-doc sync` is invoked by the JetBrains plugin as a short-lived process — its stderr goes nowhere persistent. The trace logs I added are lost.
 
@@ -886,7 +886,7 @@ Reproduce and let me know.
 
 Another pane issue
 ![2026-03-30_13-35.png](../../../../../Pictures/agent-loop/2026-03-30_13-35.png)
-### Re: Log analysis — found two issues (HEAD)
+### Re: Log analysis — found two issues
 
 The logs reveal:
 
@@ -903,7 +903,7 @@ The empty strings shouldn't be there — the plugin is sending phantom columns. 
 **Root cause:** The JetBrains plugin is sending extra empty `--col` args. The fix is to **filter empty col_args** at the start of sync before processing.
 
 Want me to add the filter? This is a 1-line fix.
-<!-- agent:boundary:bf8a90e7 -->
+<!-- agent:boundary:edd1484d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -453,7 +453,29 @@ release
 - Bold-text pseudo-header fallback for `(HEAD)` boundary marker
 - SKILL.md: `### Re:` header format guidance (bold-text supported as fallback)
 - 3 new tests, docs updated
-<!-- agent:boundary:83a5711a -->
+
+What happened to the active sessions for:
+- tasks/research/monsterrodholders.md
+- tasks/professional/ron-berkes.md
+### Re: Active sessions for monsterrodholders and ron-berkes (HEAD)
+
+Both are registered in sessions.json but their panes are **idle shells** (zsh), not active Claude sessions:
+
+| Document | Pane | Window | Status |
+|----------|------|--------|--------|
+| `monsterrodholders.md` | %162 | stash | Idle zsh (PID 785161) |
+| `ron-berkes.md` | %164 | agent-doc | Idle zsh (PID 789176) |
+
+The Claude sessions that were running in these panes have exited — the panes are now sitting at a shell prompt. The monsterrodholders pane was stashed at some point and never rescued. The ron-berkes pane is in the agent-doc window but its Claude process has ended.
+
+**What likely happened:** When the 3-pane layout bug hit earlier (before the v0.27.5 fix), the excess pane stashing or session switching may have disrupted these sessions. Or they simply completed their work and exited naturally.
+
+**To recover:** Re-claim both documents — this will create fresh Claude sessions:
+1. Select `monsterrodholders.md` in the editor → `Claim for Tmux Pane`
+2. Select `ron-berkes.md` in the editor → `Claim for Tmux Pane`
+
+The old idle panes (%162, %164) will be killed/replaced by the new sessions.
+<!-- agent:boundary:2a5f35a3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

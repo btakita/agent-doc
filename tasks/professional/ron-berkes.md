@@ -258,7 +258,7 @@ Good news — both are **already implemented**. Looking at `tasks/software/corky
 
 The Makefile `install` target already does exactly what we discussed:
 ```makefile
-# Auto-detects GPU for transcribe-cuda (HEAD)
+# Auto-detects GPU for transcribe-cuda
 install:
     if nvidia-smi >/dev/null 2>&1; then
         cargo install --path . --features transcribe-cuda  # falls back to CPU on failure
@@ -272,7 +272,7 @@ And `install.sh` tries the CUDA binary first, falls back to CPU.
 **Root cause of the CPU build this session:** I ran `cargo run --release --features diarize` directly instead of using `make install` or `make release-gpu`. The deterministic GPU detection was already built — I just bypassed it by invoking cargo directly.
 
 No tasks to transfer — the work is done. The lesson is: **always use `make` targets instead of raw `cargo` commands** when building corky.
-<!-- agent:boundary:a6d6a67b -->
+<!-- agent:boundary:40cee57c -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

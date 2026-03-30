@@ -306,7 +306,26 @@ So reversed scenario (CSV right, new agent doc left):
 4. Right pane (previous agent doc) untouched
 
 Both directions work. Ready to implement.
-<!-- agent:boundary:5f278598 -->
+Implement
+### Implemented (HEAD)
+
+**Fix 1: Column-aware split target** (`route.rs:516`)
+- `split_before = true` (left-column) → picks **first** pane (leftmost)
+- `split_before = false` (right-column) → picks **last** pane (rightmost)
+
+**Fix 2: Stash excess panes on early exit** (`tmux-router/sync.rs:615-635`)
+- Before the `resolved < 2` early return, lists all panes in the agent-doc window
+- Stashes any pane NOT in the wanted set (resolved panes)
+- Stashes from back (rightmost) first to preserve focus pane position
+- Skips if resolved is empty (no window to clean up)
+
+**Verification:**
+- tmux-router: 77 tests pass, no new clippy warnings
+- agent-doc: 38 tests pass
+- Release binary built and installed to `~/.cargo/bin/agent-doc`
+
+Test by: open 2 agent docs side-by-side → switch one side to a CSV → select a new agent doc on the other side. Should get 2 panes, not 3.
+<!-- agent:boundary:a0c7b3e3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -316,6 +335,7 @@ Both directions work. Ready to implement.
 - [x] v0.27.1: Fix "externally modified" popup
 - [x] v0.27.3: Revert auto-kill
 - [x] v0.27.4: Sync stash rescue
-- [ ] **v0.27.5: Fix auto_start split target selection** (split rightmost pane for right-column files)
-- [ ] **v0.27.5: Stash excess panes on early-exit from sync** (resolved < 2 safety net)
+- [x] v0.27.5: Fix auto_start split target selection (column-aware)
+- [x] v0.27.5: Stash excess panes on early-exit from sync
+- [ ] Release v0.27.5
 <!-- /agent:pending -->

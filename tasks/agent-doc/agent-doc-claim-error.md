@@ -363,16 +363,43 @@ release
 - Early-exit stash: excess panes stashed before `resolved < 2` early return
 - 3 new integration tests
 - Docs updated (SPEC.md, module docs, tmux-router README)
-<!-- agent:boundary:1f9f3f80 -->
+
+There is an issue with the patch response in tasks/professional/ron-berkes.md
+
+> **Re: Shopping cart for Astro / Hono + Cloudflare**
+
+The top-level "headers" is bold text in the patch responses...it should be a header. Why was the bold text used?
+agent-doc should also consider this bold text pattern as a candidate to be a top-level header. So if headers are not in the response, but bold text "headers" are...consider those bold text "headers" to be the top-level headers.
+- Commit with ` (HEAD)` suffix
+- Uncommitted change removing ` (HEAD)` suffix
+### Two separate issues (HEAD)
+
+**1. Bold text instead of headers (`**Re: ...**` vs `### Re: ...`)**
+
+This is a **skill/prompt issue**, not a binary issue. When the Claude agent responds in template mode, it should format section headers as `### Re: ...` (markdown headers) but instead used `**Re: ...**` (bold text). The SKILL.md already mentions `### Re:` as the expected pattern (line 96: "After each `### Re:` section").
+
+The agent formatting the response is responsible for using proper headers. However, your suggestion to have agent-doc **detect bold text as fallback headers** is a good defensive measure for the binary — if the response has no markdown headers but has bold text at the start of lines, treat them as headers for boundary marker placement and `(HEAD)` tagging.
+
+**2. `(HEAD)` suffix behavior — this is working as designed**
+
+The commit flow intentionally:
+1. **On commit:** Adds ` (HEAD)` suffix to the shallowest new heading in the snapshot → committed
+2. **Post-commit:** Strips ` (HEAD)` from the snapshot and fires IPC to reposition the boundary in the working tree → uncommitted change
+
+This creates the blue gutter visual boundary in the editor. The committed content has `(HEAD)`, the working tree doesn't — so the editor shows a blue "modified" gutter on that line, marking where the agent response ends. This is the intended boundary marker behavior from `git.rs`.
+
+**Action items:**
+- Fix the skill prompt to explicitly instruct `### Re:` headers (not bold) — this is a SKILL.md update
+- Add bold-text-as-header detection in `git.rs:add_head_marker()` as a fallback for when the agent uses bold instead of headers
+
+Want me to implement both?
+<!-- agent:boundary:68e9e360 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.27.0: Fix stash rescue deregistration
-- [x] v0.27.1: Fix "externally modified" popup
-- [x] v0.27.3: Revert auto-kill
-- [x] v0.27.4: Sync stash rescue
-- [x] v0.27.5: 3-pane layout fix (column-aware split + early-exit stash)
-- All shipped.
+- [x] v0.27.5: 3-pane layout fix shipped
+- [ ] Skill: enforce `### Re:` header format in template mode responses
+- [ ] Binary: bold-text fallback for `(HEAD)` marker in `add_head_marker()`
 <!-- /agent:pending -->

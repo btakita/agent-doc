@@ -613,7 +613,7 @@ This way you're not asking Ron for money he doesn't have, and you're not over-co
 
 I think Ron can afford ideas that bring in money to him. I need cashflow right now. Ron wants sales. We can work out the differences as sales come in.
 I like the idea of throwing out $1000/month to start. But I also understand if Ron does not have the budget. So keep the door open either way. Hopefully he does have a budget. Another option is Julian may need some help. Perhaps we could share the patent research with Julian and he can pay us monthly.
-### Re: Sales-driven compensation + Julian angle (HEAD)
+### Re: Sales-driven compensation + Julian angle
 
 Good thinking on both fronts. Here's the refined approach:
 
@@ -642,7 +642,7 @@ Good thinking on both fronts. Here's the refined approach:
 | Patent lead commissions | Per-lead fee when leads close | After automation built |
 
 This gives you 3-4 potential income streams instead of depending on Ron alone. Julian is especially attractive because he runs a funded company — $2-3K/mo for patent intelligence is a rounding error for a publicly traded firm.
-<!-- agent:boundary:58cb4e58 -->
+<!-- agent:boundary:516f69a9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

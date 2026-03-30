@@ -593,7 +593,29 @@ Note the source agent documents are:
 3. **Thumbnail** — any preference?
 
 Let me know the title direction and I'll prepare the upload.
-<!-- agent:boundary:f7e73a22 -->
+
+Should we create a separate video for the existence-lang ontology part?
+
+### Re: Separate existence-lang ontology video? (HEAD)
+
+Yes, the content splits naturally. Analyzed the transcript:
+
+| Segment | Duration | Primary Topic | Ontology mentions |
+|---------|----------|--------------|-------------------|
+| Video 1 (0:00–58:13) | 58min | FFI plugin architecture, socket IPC | 91 |
+| Video 2 (58:13–3:26:34) | 2h28min | Existence-lang ontology work | 181 |
+
+**Video 1** opens with FFI plugin motivation, builds socket IPC, then applies ontology concepts to the architecture. Stands alone well.
+
+**Video 2** is almost entirely ontology/existence-lang development with some John Cassel conversation context (7 mentions).
+
+**Options:**
+1. **Split into 2 videos** — separate uploads, each with focused title/description/CC
+2. **Keep combined** with chapter markers at the split point
+3. **Keep combined** but also upload the 58min as a standalone short-form
+
+The original source files are already separate, so splitting is trivial (no re-encoding needed). Want me to split and prepare both for upload?
+<!-- agent:boundary:2759b841 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -607,6 +629,7 @@ Let me know the title direction and I'll prepare the upload.
 - [x] Cut 35:46.1-35:47.5 from 2026-03-29 16-19-07.mp4
 - [x] Combined 2026-03-27 + 2026-03-29 videos (3h26m)
 - [x] Transcribed with CC (13,719 segments SRT)
+- [ ] Decide: split vs combined upload
 - [ ] YouTube title + description
 - [ ] Upload to YouTube
 <!-- /agent:pending -->

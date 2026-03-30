@@ -324,7 +324,7 @@ Exits with error if the pane is dead or no session is registered.
 
 1. Load the snapshot for the file (the document state after the last `agent-doc write`)
 2. If snapshot exists:
-   a. Add `(HEAD)` suffix to all new markdown headings (any level `#`–`######`) not present in git HEAD
+   a. Add `(HEAD)` suffix to all new markdown headings (any level `#`–`######`) not present in git HEAD. Falls back to bold-text pseudo-headers (`**...**` on its own line) when no markdown headings are found.
    b. Write the modified snapshot to git's object database via `git hash-object -w --stdin`
    c. Stage via `git update-index --add --cacheinfo 100644,<hash>,<file>` — working tree is NOT modified
    d. Result: snapshot content (agent response) is committed; user edits in the working tree stay uncommitted
@@ -332,9 +332,9 @@ Exits with error if the pane is dead or no session is registered.
 4. `git commit -m "agent-doc(<stem>): <timestamp>" --no-verify`
 5. On successful commit: write `vcs-refresh.signal` to `.agent-doc/patches/` — the IDE plugin watches this and triggers `VcsDirtyScopeManager.markEverythingDirty()` + VFS refresh so git gutter updates immediately
 
-**HEAD marker:** The committed version has ` (HEAD)` appended to new root-level headings. The working tree does not. This creates a single modified-line gutter (blue) at each heading — a visual boundary between committed agent response and uncommitted user input.
+**HEAD marker:** The committed version has ` (HEAD)` appended to new root-level headings. When no markdown headings exist, bold-text pseudo-headers (`**...**` on its own line) receive the marker instead. The working tree does not have these markers. This creates a single modified-line gutter (blue) at each heading — a visual boundary between committed agent response and uncommitted user input.
 
-**Post-commit cleanup:** After a successful commit, `(HEAD)` markers are stripped from both the snapshot and the working tree file. This prevents stale markers from accumulating across commits.
+**Post-commit cleanup:** After a successful commit, `(HEAD)` markers are stripped from headings and bold-text pseudo-headers in both the snapshot and the working tree file. This prevents stale markers from accumulating across commits.
 
 ### 7.16 skill
 

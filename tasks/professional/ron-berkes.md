@@ -116,7 +116,23 @@ cargo run --release --features "diarize,transcribe-cuda" -- transcribe --diarize
 ```
 
 Requires CUDA toolkit on the system. With GPU, the 62-min transcription would likely drop to ~5-10 min.
-<!-- agent:boundary:e2d4c5a1 -->
+
+I **always** want `corky transcribe` to run using the GPU...as my machine has a 5090.
+Yet you seem to nudge `corky transcribe` to use the CPU.
+Would adding a preference to use the GPU to the corky installable SKILL help?
+
+**Re: Always use GPU**
+
+You're right — my mistake. I've updated my memory to **always** use `--features "diarize,transcribe-cuda"` when building corky. The existing memory already mentioned it but I didn't follow it. Now it's explicit and prominent.
+
+Two options to prevent this from recurring:
+
+1. **Memory update (done)** — I've already updated the feedback memory. Any future `corky transcribe` will use CUDA.
+
+2. **Corky SKILL update** — Yes, adding a build preference to the corky skill would add a second layer of defense. The skill could specify `required_features: ["diarize", "transcribe-cuda"]` so any skill-invoked build includes GPU support automatically.
+
+Option 1 is sufficient for me — I won't forget again. Option 2 would help if other agents or fresh sessions invoke the corky skill without my memory loaded. Want me to update the corky skill as well?
+<!-- agent:boundary:d1d934e4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

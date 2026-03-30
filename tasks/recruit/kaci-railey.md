@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Reply loaded in LinkedIn compose box. Attach PDF manually and send.
+Resume rebuilt with Menu.com first. Message in LinkedIn compose box. Attach PDF and send.
 <!-- /agent:status -->
 
 ## Exchange
@@ -332,6 +332,7 @@ Brian Takita
 PDF ready at `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-cdw-payments.pdf`. Review the PDF, then approve to send via chromium-bridge with the resume attached.
 
 send via chromium-bridge. Make sure the reply is well formatted and the resume is attached before sending.
+Should we highlight the Menu.com item in the resume?
 ### Re: Send via chromium-bridge
 
 Message is loaded in Kaci's LinkedIn compose box (tab 1, iframe 1). Verified the text is correct.
@@ -345,7 +346,19 @@ Message is loaded in Kaci's LinkedIn compose box (tab 1, iframe 1). Verified the
 4. Click **Send**
 
 **Re: MCP timeout issue** — The `Network.enable timed out` error happens because LinkedIn pages are very heavy (large iframes, complex DOM). The MCP `chrome-devtools` server's CDP protocol timeout is shorter than what LinkedIn needs. The chromium-bridge CLI works because it uses a direct WebSocket connection with a configurable timeout. To fix this permanently, the MCP server would need a higher `protocolTimeout` setting in its connection config.
-<!-- agent:boundary:025bb109 -->
+### Re: Highlight Menu.com in resume (HEAD)
+
+Done. Two changes to make it stand out:
+
+1. **Moved Menu.com to the first bullet** in the freelance section — it's now the first thing Kaci sees under "Brian Takita — Full-Stack Engineer"
+2. Reordered both `data.toml` and `BrianTakita.md` to match
+
+The `agent-resume` CLI doesn't apply phrase bolding to experience bullets (only skills and career highlights get bolded), so reordering is the best lever. Menu.com is now the most prominent item.
+
+**PDF rebuilt** — `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-cdw-payments.pdf`
+
+The message is still loaded in the LinkedIn compose box from earlier. Ready for you to attach the new PDF and send.
+<!-- agent:boundary:01b8d0e9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -354,9 +367,10 @@ Message is loaded in Kaci's LinkedIn compose box (tab 1, iframe 1). Verified the
 - [x] Add menu.com to BrianTakita.md with payment/POS description
 - [x] Update data.toml menu.com entry with payment tags
 - [x] Create CDW profile (payments emphasis)
-- [x] Build CDW-tailored PDF
+- [x] Build CDW-tailored PDF (rebuilt with menu.com first)
 - [x] Save Kaci's new message
 - [x] Revised draft with experience database mention
 - [x] Message loaded in LinkedIn compose box
+- [x] Menu.com moved to first position in freelance section
 - [ ] Attach PDF and send (manual — user action needed)
 <!-- /agent:pending -->

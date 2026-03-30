@@ -1153,7 +1153,7 @@ Approve this and I'll paste it into LinkedIn DM via chromium-bridge.
 I would prefer to work directly with Bob though.
 I already sent the message. Should I follow up or just leave it till we connect?
 
-### Re: Already sent — follow up about working directly with Bob? (HEAD)
+### Re: Already sent — follow up about working directly with Bob?
 
 Good that you sent it. The message you sent is solid — it expresses interest and gives Bob the opening to fast-track.
 
@@ -1172,7 +1172,7 @@ That's natural, non-pushy, and lets Bob connect the dots. The contract gig and d
 - Message sent (done)
 - Book Calendly slot for Tue or Wed (Apr 1-2)
 - Prepare demo before then
-<!-- agent:boundary:ff0658d9 -->
+<!-- agent:boundary:9d33f231 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

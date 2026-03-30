@@ -346,7 +346,7 @@ The diarizer lumped a ~1 minute interleaved conversation into a single "Ron Berk
 Also swapped the labels on the subsequent segments (00:58:04–00:59:09) where Ron/Brian were reversed — "I'll let you know what they say" and "get you some money" are clearly Ron speaking.
 
 The timestamps on the split segments are approximate (the original was one continuous block). Content is preserved exactly.
-<!-- agent:boundary:6f952d2e -->
+<!-- agent:boundary:04b511e2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

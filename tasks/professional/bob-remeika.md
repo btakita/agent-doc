@@ -1172,15 +1172,39 @@ That's natural, non-pushy, and lets Bob connect the dots. The contract gig and d
 - Message sent (done)
 - Book Calendly slot for Tue or Wed (Apr 1-2)
 - Prepare demo before then
-<!-- agent:boundary:8c9321fa -->
+
+Use chromium-bridge to get bob-remeika's latest message(s) to me on LinkedIn.
+### Re: LinkedIn messages (HEAD)
+
+Fetched the latest LinkedIn thread with Bob Remeika. Here's the full recent exchange:
+
+**Thu Mar 27 — Bob (6:33 PM):**
+> is this a good email address to talk to you through? im also on gmail at bob.remeika@gmail.com
+
+**Thu Mar 27 — Brian (8:11 PM):**
+> Hey Bob — your repost really made my day. Knowing you've been following along means a lot. I signed up for Ragie and I'm integrating it into Corky, my correspondence toolkit in Rust. I'm using local hybrid search for my personal workflow, but Ragie is the collaborative layer — building it so teams and non-technical users can query shared document context without a developer setup. I have a couple of client integrations where this is exactly the need. Document retrieval has been the bottleneck, and Ragie looks like the right fit for the shared side. I'd love to show you how I'm using Ragie — I think you'd find the integration interesting. Great to reconnect.
+
+**Thu Mar 27 — Bob (9:04 PM):**
+> hey brian! im glad my post meant something :) i think what you have been working on is really interesting. lets catch up and i'd love to see what you are building. throw something on my calendar for next week: https://calendly.com/bobremeika/30-minute-call
+
+**Fri Mar 28 — Brian (2:42 PM):**
+> Sounds great! Will plan it out & sign up in a bit. Probably next Tuesday or Wednesday. Also saw your post about the contract gig — I'm interested! Happy to chat about it sooner if timing matters, or we can cover it when we connect.
+
+**Fri Mar 28 — Bob (5:18 PM):**
+> oh man... i actually got way more responses than i thought i would on this. i already sent over 2 intros. ill let you know if they fall through for whatever reason. ill also keep you on deck now that i know you would be open to contract work.
+
+**Key takeaways:**
+- Bob's email: `bob.remeika@gmail.com`
+- Calendly link: https://calendly.com/bobremeika/30-minute-call
+- Contract gig: Already sent 2 intros, but keeping Brian on deck if those fall through
+- **Action needed:** Book the Calendly slot for Tue Apr 1 or Wed Apr 2
+<!-- agent:boundary:8f24441f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Book Calendly slot with Bob (target Tue-Wed, Apr 1-2)
-- Prepare presentation demo scripts for Bob session
-- During call: mention openness to direct Ragie work after demo
-- YouTube: Ragie integration session with Judith's project — planned follow-up
-- Retest bookmarklet — awaiting test
+- Book Calendly slot with Bob for Tue Apr 1 or Wed Apr 2 (https://calendly.com/bobremeika/30-minute-call)
+- Prepare demo of Corky + Ragie integration before the call
+- Follow up on contract gig if Bob reports the intros fell through
 <!-- /agent:pending -->

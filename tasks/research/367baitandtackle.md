@@ -15,7 +15,7 @@ Session started. Awaiting research direction.
 <!-- agent:exchange patch=append -->
 
 
-### Assistant (HEAD)
+### Assistant
 367 Bait and Tackle research session initialized. What would you like to research? For example:
 
 - Website and online presence
@@ -26,7 +26,7 @@ Session started. Awaiting research direction.
 - Competitor comparison
 
 Provide URLs or direction and I'll start crawling.
-<!-- agent:boundary:0a374c7b -->
+<!-- agent:boundary:633e0e9e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

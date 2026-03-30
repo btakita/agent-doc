@@ -424,14 +424,32 @@ Implementing now.
 - `strip_head_markers()` also handles stripping `(HEAD)` from bold-text lines
 
 All 38 tests pass. Ready to release or add tests first.
-<!-- agent:boundary:8d313d24 -->
+
+Add tests
+audit docs
+### Tests and docs done (HEAD)
+
+**3 new tests** in `git.rs`:
+- `test_add_head_marker_bold_text_fallback` — bold `**Re:...**` with no headings → gets `(HEAD)`
+- `test_add_head_marker_prefers_real_headings` — both `###` and `**bold**` → real heading wins
+- `test_strip_head_markers_bold_text` — strips `(HEAD)` from bold-text lines
+
+**Docs updated:**
+- **git.rs module doc** — Added eval entries for bold-text fallback
+- **SPEC.md §7.15** — commit section updated: bold-text fallback in HEAD marker, strip step
+- **SKILL.md** — Updated to note bold text is now supported as fallback (no longer "breaks" boundary), while still recommending real headings
+
+All 566 tests pass. Ready to release.
+<!-- agent:boundary:744a9ceb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.27.5: 3-pane layout fix shipped
-- [x] Skill: enforce `### Re:` header format in template mode responses
-- [x] Binary: bold-text fallback for `(HEAD)` marker in `add_head_marker()`
+- [x] Skill: enforce `### Re:` header format (with bold-text fallback noted)
+- [x] Binary: bold-text fallback for `(HEAD)` marker
+- [x] Tests: 3 new tests for bold-text fallback
+- [x] Docs: SPEC.md, git.rs, SKILL.md updated
 - [ ] Release v0.27.6
 <!-- /agent:pending -->

@@ -904,7 +904,7 @@ The empty strings shouldn't be there — the plugin is sending phantom columns. 
 
 Want me to add the filter? This is a 1-line fix.
 Yes. Let's also fix the plugin
-Is this an ffi or JB plug
+Is this an ffi or JB plugin issue?
 ### Re: Both fixes applied
 
 **1. sync.rs** — Filters empty col_args at entry (defensive).
@@ -914,7 +914,12 @@ Is this an ffi or JB plug
 **Plugin needs reinstall:** `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-*.zip` → IDEA → Settings → Plugins → gear → Install from Disk → restart.
 
 Both binary and plugin are ready to test.
-<!-- agent:boundary:10984a3c -->
+### Re: JB plugin issue (HEAD)
+
+It's a **JetBrains plugin issue** in `SyncLayoutAction.kt`. The `LayoutDetector.detectEditorLayout()` returns columns with empty file lists (for editor splits showing non-.md files). `SyncLayoutAction` was using all columns including empty ones, producing `--col ""` args. The `EditorTabSyncListener` had the filter already but `SyncLayoutAction` (called by `LayoutChangeDetector`) didn't.
+
+Both are now fixed — plugin source and binary-side defensive filter. Plugin rebuild is at `editors/jetbrains/build/distributions/`. Needs reinstall + IDEA restart to take effect.
+<!-- agent:boundary:5f441f66 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

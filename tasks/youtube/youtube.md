@@ -718,10 +718,10 @@ Both posts written, built, committed, and pushed:
 
 Build passed, deployed via CI.
 
-### Re: bun not pnpm (HEAD)
+### Re: bun not pnpm
 
 Noted — saved feedback memory. Will use `bun run build` for briantakita.me-dev going forward. The build did succeed (pnpm delegated to bun internally), but I'll invoke bun directly next time.
-<!-- agent:boundary:a68ff3a7 -->
+<!-- agent:boundary:12667076 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

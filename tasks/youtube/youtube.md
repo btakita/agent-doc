@@ -750,7 +750,20 @@ Committed, pushed, and CI will deploy. The sticky header/breadcrumb/title will n
 ### Re: Regression confirmed
 
 Yes — the `.scrolled` class toggle was likely lost during a refactor. The fix is deployed now (CI in progress, ~1 min remaining). The scroll handler in `snippet--rappstack` now correctly applies `.scrolled` to `document.documentElement` when `scrollY > 10`, which activates all the shrinking CSS rules for header, breadcrumbs, and sticky headings.
-<!-- agent:boundary:57b20212 -->
+
+What is snippet--rappstack? What is cruip-simple?
+
+### Re: snippet--rappstack and cruip-simple (HEAD)
+
+**`snippet--rappstack`** (`@btakita/snippet--rappstack`) is a reusable snippets/templates library for the rappstack full-stack framework. It's a git submodule in briantakita.me-dev containing isomorphic code organized in the rappstack `any`/`browser`/`server` layer pattern. Exports layout components, browser interactivity handlers (hyops), and server-side HTML generators.
+
+**`cruip-simple`** is a specific theme/template implementation inside snippet--rappstack. "Cruip" is a Tailwind CSS template collection — this is a customized variant. It contains:
+- `any/` — isomorphic code (tab state management)
+- `browser/` — hyperop (hyop) handlers for interactivity (scroll behavior, hero modal, tabs)
+- `server/` — server-side HTML generators (header, footer, home page layout)
+
+The scroll handler that was missing the `.scrolled` class lives in `cruip-simple/browser/layout__hyop.ts` — the browser-side interactivity layer for the layout.
+<!-- agent:boundary:8a7d500d -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

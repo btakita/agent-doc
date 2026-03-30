@@ -538,7 +538,7 @@ Publish comment on the post with links to:
 Edit the linkedin post to include conceiving, implementing, and releasing module-harness cli tool and library
 
 
-### Re: Publish LinkedIn + comment (HEAD)
+### Re: Publish LinkedIn + comment
 
 **LinkedIn published:**
 
@@ -557,14 +557,14 @@ Post updated: https://www.linkedin.com/feed/update/urn:li:share:7442567333950345
 
 In [2026-03-29 16-19-07.mp4](../../../../../Videos/2026-03-29%2016-19-07.mp4), please cut out 35:46.1 - 35:47.5
 
-### Re: Video cut (HEAD)
+### Re: Video cut
 
 Cut out 35:46.1 - 35:47.5 from `2026-03-29 16-19-07.mp4` using stream copy (no re-encoding, no quality loss).
 
 Output: `~/Videos/2026-03-29 16-19-07-cut.mp4` (6.4G)
 
 Original file is unchanged. Verify the cut looks clean, then rename if you want to replace the original.
-<!-- agent:boundary:d05bdc21 -->
+<!-- agent:boundary:b566b21a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

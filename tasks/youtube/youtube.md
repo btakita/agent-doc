@@ -832,7 +832,7 @@ Please add a link to the respective blog post as a YouTube comment for both vide
 I want to make linkedin posts for both videos + blog posts. Should I schedule both to be posted at the same time. Or stagger the scheduling?
 Or should I incl
 
-### Re: YouTube comments + LinkedIn scheduling (HEAD)
+### Re: YouTube comments + LinkedIn scheduling
 
 **YouTube comments posted:**
 - Video 1: https://www.youtube.com/watch?v=u8qnbhsGAGo&lc=UgyIODIGibgS8SFzhkB4AaABAg
@@ -850,7 +850,7 @@ Reasons:
 - **Post 2 (Existence-Lang):** 2-3 days later — more philosophical, appeals to the systems thinking/ontology audience
 
 Want me to draft both LinkedIn posts now?
-<!-- agent:boundary:acdebe17 -->
+<!-- agent:boundary:b77dee6a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

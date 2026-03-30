@@ -297,7 +297,7 @@ The existing code already knows which column the file is in via `is_first_column
 
 The fix selects the split target based on column position:
 - **Right-column file** → pick the **last** pane in the window (rightmost) to split alongside
-- **Left-column file** → pick the **first** pane in the window (leftmost) to split alongside
+- **Left-column file** → pick the **first** pane in the window (le tmost) to split alongside
 
 So reversed scenario (CSV right, new agent doc left):
 1. `is_first_column()` → `true` → `split_before = true`
@@ -325,7 +325,30 @@ Implement
 - Release binary built and installed to `~/.cargo/bin/agent-doc`
 
 Test by: open 2 agent docs side-by-side → switch one side to a CSV → select a new agent doc on the other side. Should get 2 panes, not 3.
-<!-- agent:boundary:05c580bd -->
+
+Add tests
+audit docs
+### Tests added (HEAD)
+
+**tmux-router** (`sync.rs`):
+- `test_sync_early_exit_stashes_excess_panes` — 3 panes in window, 1 managed + 1 unmanaged column → verifies 2 excess panes are stashed, only 1 resolved pane remains. Stashed panes confirmed alive.
+
+**agent-doc** (`route.rs`):
+- `split_before_true_picks_leftmost_pane` — 2-pane window, `-dbh` split alongside first pane → new pane at position 0
+- `split_before_false_picks_rightmost_pane` — 2-pane window, `-dh` split alongside last pane → new pane at end
+
+All pass: 78 tmux-router tests, 38 agent-doc tests.
+
+### Docs updated
+
+- **sync.rs module doc** — Added early-exit stash behavior bullet
+- **route.rs module doc** — Added positional split target documentation
+- **SPEC.md §7.9** — Auto-start algorithm updated for positional split target
+- **SPEC.md §7.20** — Early-exit stash paragraph added
+- **tmux-router README.md** — Stash window section expanded
+
+Ready to release when you want to test.
+<!-- agent:boundary:64ea8119 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -337,5 +360,7 @@ Test by: open 2 agent docs side-by-side → switch one side to a CSV → select 
 - [x] v0.27.4: Sync stash rescue
 - [x] v0.27.5: Fix auto_start split target selection (column-aware)
 - [x] v0.27.5: Stash excess panes on early-exit from sync
+- [x] v0.27.5: Tests added
+- [x] v0.27.5: Docs updated
 - [ ] Release v0.27.5
 <!-- /agent:pending -->

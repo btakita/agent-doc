@@ -688,7 +688,25 @@ Both videos uploaded in temporal order:
 2. **Video 2 (Mar 29):** https://www.youtube.com/watch?v=IWNj9GPb2OI
    - "Existence-Lang: Pneuma, Noumena & Phenomena in Software Ontology | Live Coding"
    - 2h28min, with CC
-<!-- agent:boundary:968601b1 -->
+
+Write a separate blog post for each video on briantakita.me
+
+Both should be featured
+
+### Re: Blog posts created (HEAD)
+
+Both posts written, built, committed, and pushed:
+
+1. **FFI Plugin post:** [agent-doc-ffi-plugin-socket-ipc](https://briantakita.me/posts/agent-doc-ffi-plugin-socket-ipc)
+   - Covers FFI-first architecture, Claude's minimize-effort pattern, ontology applied to plugin architecture
+   - Featured, linked to Video 1
+
+2. **Existence-Lang post:** [existence-lang-pneuma-noumena-phenomena](https://briantakita.me/posts/existence-lang-pneuma-noumena-phenomena)
+   - Covers pneuma/noumena/phenomena triad, universal applicability, precision as possibility space, permaculture parallels, CLI development
+   - Featured, linked to Video 2
+
+Build passed, deployed via CI.
+<!-- agent:boundary:0413787f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -704,4 +722,6 @@ Both videos uploaded in temporal order:
 - [x] Transcribed with CC
 - [x] Video 1 uploaded: https://www.youtube.com/watch?v=u8qnbhsGAGo
 - [x] Video 2 uploaded: https://www.youtube.com/watch?v=IWNj9GPb2OI
+- [x] Blog post 1: https://briantakita.me/posts/agent-doc-ffi-plugin-socket-ipc
+- [x] Blog post 2: https://briantakita.me/posts/existence-lang-pneuma-noumena-phenomena
 <!-- /agent:pending -->

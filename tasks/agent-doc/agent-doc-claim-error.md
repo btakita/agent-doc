@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.27.9 released. Layout fixes complete — trace logging + early-exit pane preservation.
+v0.28.0 released. Structural layout fix shipped — reconciler always runs, no early exits.
 <!-- /agent:status -->
 
 ## Exchange
@@ -970,9 +970,9 @@ The previous binary from crates.io (v0.3.5) still had the old early-exit code. T
 Current state: 1 pane in agent-doc window (this doc), 3 in stash. Fix verified.
 
 Ready to release? This will be tmux-router v0.3.6 + agent-doc v0.28.0 (major change: no early exits + empty col_args filter + plugin v0.2.36).
-
 add tests
 audit docs
+release
 ### Re: Tests + docs done, ready to release
 
 **Tests:** 569 pass (78 tmux-router + 491 agent-doc). New test: `empty_col_args_filtered` in sync.rs.
@@ -980,13 +980,26 @@ audit docs
 **Docs:** SPEC.md reconciliation phase order fixed (was DETACH→ATTACH, now ATTACH→SELECT→DETACH). VERSIONS.md entries accurate. Path dep reverted to `tmux-router = "0.3"`.
 
 Release tmux-router v0.3.6 + agent-doc v0.28.0?
-<!-- agent:boundary:78b2df05 -->
+release
+### Re: v0.28.0 + tmux-router v0.3.6 released (HEAD)
+
+**tmux-router v0.3.6:** crates.io ✓ — No early exits, reconciler always runs
+**agent-doc v0.28.0:** crates.io ✓, PyPI ✓, GitHub Release ✓, cargo install ✓ (confirmed v0.28.0)
+**Plugin v0.2.36:** Built, needs manual install in IDEA
+
+**Changelog:**
+- Structural fix: removed all early exits from sync reconciler
+- Empty col_args filter (sync.rs + JetBrains plugin SyncLayoutAction.kt)
+- Reconcile detail file logging
+- SPEC.md phase order corrected
+- 569 tests passing
+<!-- agent:boundary:9ab62f27 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Structural fix verified
-- [x] Tests + docs
-- [ ] **Release tmux-router v0.3.6 + agent-doc v0.28.0 + plugin v0.2.36**
+- [x] v0.27.5-v0.27.9: Incremental layout fixes
+- [x] v0.28.0: Structural fix — no early exits + empty col_args filter + plugin v0.2.36
+- All shipped.
 <!-- /agent:pending -->

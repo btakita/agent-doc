@@ -949,7 +949,7 @@ Please look at logs.
 Reconcile detail logging now goes to `/tmp/agent-doc-sync.log` — each phase (SNAPSHOT, ATTACH, SELECT, DETACH) with pane IDs. Reproduce the 3-pane issue again and I'll read the detailed log.
 
 When I change agent docs with 1 editor window, the 3 pane layout remains.
-### Re: Reconcile detail logging now active (HEAD)
+### Re: Reconcile detail logging now active
 
 Previous build was using crates.io tmux-router (not local). Switched to path dep and rebuilt. Reconcile detail logs now go to `/tmp/agent-doc-sync.log`. 
 
@@ -973,14 +973,14 @@ Ready to release? This will be tmux-router v0.3.6 + agent-doc v0.28.0 (major cha
 
 add tests
 audit docs
-### Re: Tests + docs done, ready to release (HEAD)
+### Re: Tests + docs done, ready to release
 
 **Tests:** 569 pass (78 tmux-router + 491 agent-doc). New test: `empty_col_args_filtered` in sync.rs.
 
 **Docs:** SPEC.md reconciliation phase order fixed (was DETACH→ATTACH, now ATTACH→SELECT→DETACH). VERSIONS.md entries accurate. Path dep reverted to `tmux-router = "0.3"`.
 
 Release tmux-router v0.3.6 + agent-doc v0.28.0?
-<!-- agent:boundary:f2bade25 -->
+<!-- agent:boundary:78b2df05 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

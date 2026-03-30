@@ -497,7 +497,7 @@ Output: `mail/contacts/ron-berkes/recordings/phone_20260330-114040_6504368181.md
 
 What do you recommend for compensation?
 I would like some cash flow right now. But residuals can work later.
-### Re: Compensation recommendations (HEAD)
+### Re: Compensation recommendations
 
 Given the multiple revenue streams discussed with Ron, here's a structured approach prioritizing immediate cash flow:
 
@@ -537,7 +537,7 @@ Given the multiple revenue streams discussed with Ron, here's a structured appro
 - Weekly invoicing in 4-hour increments (Ron's suggestion) — take it, it's favorable
 - For patent automation: hourly during build + per-lead residual once automated (you built the machine, you get a cut of what it produces)
 - Keep equity conversations separate from hourly — don't trade current hours for future equity
-<!-- agent:boundary:ada4b503 -->
+<!-- agent:boundary:31c135f8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

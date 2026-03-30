@@ -765,7 +765,7 @@ The "fix" did not apply. Same non-shrinking sticky behavior.
 
 The scroll handler that was missing the `.scrolled` class lives in `cruip-simple/browser/layout__hyop.ts` — the browser-side interactivity layer for the layout.
 
-### Re: Actual fix for sticky header (HEAD)
+### Re: Actual fix for sticky header
 
 The previous fix was in the wrong place — `snippet--rappstack` isn't wired as a dependency. The scroll handler needed to go into `ui--browser--briantakita/layout/hyop/index.ts`, which IS registered in the browser entry point.
 
@@ -776,7 +776,7 @@ The previous fix was in the wrong place — `snippet--rappstack` isn't wired as 
 Another session had started a similar fix (applying to `el` body instead of `document.documentElement`). Merged both — resolved the conflict to use `document.documentElement` so the CSS ancestor selectors `.scrolled .blog__header` match correctly.
 
 Built, verified `scrolled` is in production JS output, committed, and pushed. CI deploying now.
-<!-- agent:boundary:c6f732bd -->
+<!-- agent:boundary:e7af3c44 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

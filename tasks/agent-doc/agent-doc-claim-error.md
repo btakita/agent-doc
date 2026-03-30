@@ -1022,7 +1022,7 @@ This is a plugin-side fix. The binary already does the right thing: if 2 files a
 Want me to implement this in the JetBrains plugin?
 I would rather have the FFI plugin send the files that are currently selected.
 The agent-doc binary could then "remember" what the last active agent doc in the layout pane is.
-### Re: Binary-side column memory (HEAD)
+### Re: Binary-side column memory
 
 Good call — keeps the plugin thin. The binary should:
 
@@ -1038,7 +1038,7 @@ Good call — keeps the plugin thin. The binary should:
 This way the plugin just sends `--col non-agent.txt --col agent-doc.md` and the binary fills in the gap from memory.
 
 This is a medium-sized change. Should I implement now or move to a separate task?
-<!-- agent:boundary:241cb793 -->
+<!-- agent:boundary:02ba7bdb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

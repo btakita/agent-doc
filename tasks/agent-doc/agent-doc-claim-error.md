@@ -735,10 +735,15 @@ Working. Release tmux-router and agent-doc
 - Sync trace logging at key decision points
 - Early-exit stash removed (preserves previous-column panes)
 
+Backfill tmux-router VERSIONS.md
+
 **agent-doc v0.27.9:** crates.io ✓, PyPI ✓, GitHub Release ✓, cargo install ✓ (confirmed v0.27.9)
 - Updated tmux-router dep to 0.3.5
 - VERSIONS.md updated for both
-<!-- agent:boundary:3568430f -->
+### Re: tmux-router VERSIONS.md backfilled (HEAD)
+
+Added 7 missing entries (v0.2.6 through v0.3.3). Full history now covers v0.1.0 through v0.3.5. Committed and pushed.
+<!-- agent:boundary:2cc13d55 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

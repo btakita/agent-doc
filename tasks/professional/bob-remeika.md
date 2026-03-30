@@ -1198,13 +1198,47 @@ Fetched the latest LinkedIn thread with Bob Remeika. Here's the full recent exch
 - Calendly link: https://calendly.com/bobremeika/30-minute-call
 - Contract gig: Already sent 2 intros, but keeping Brian on deck if those fall through
 - **Action needed:** Book the Calendly slot for Tue Apr 1 or Wed Apr 2
-<!-- agent:boundary:222b9723 -->
+
+I'm thinking Wednesday. Just want to make sure that I have a good set of demo for him.
+- Bidirectional Link: tasks/professional/ron-berkes.md
+- Bidirectional Link: tasks/professional/judith-krug.md
+
+I'm onboarding Ron and Judith as clients. Both of their projects could use Ragie.
+Please help me plan a call with Bob.
+If we have to push it to Thursday to get more time that's ok too. If it would clarify what I would do.
+Given I don't fully know yet what the integration situation looks like, I'll need to think about it.
+### Re: Planning the Bob call (HEAD)
+
+Good thinking on Wednesday or even Thursday. Here's a structured call plan:
+
+**What you're showing Bob:**
+1. **Corky** — correspondence toolkit (email drafting, transcription with diarization, contact management)
+2. **agent-doc** — interactive document sessions where AI agents collaborate through markdown
+3. **The Ragie integration angle** — where Ragie fits as the collaborative document retrieval layer
+
+**Client projects that could use Ragie:**
+- **Ron Berkes (manufacturingchina.com)** — Manufacturing sourcing platform. Ragie could power document understanding for supplier evaluations, factory compliance docs, and trade documents. The 69-min call transcript + project specs are exactly the kind of context Ragie excels at ingesting.
+- **Judith Krug (Equity Funding Source)** — Private mortgage brokerage. Ragie could extract structured data from loan applications, investor pitch decks, property appraisals, and compliance disclosures. Her current workflow is manual entry — Ragie Parse's agentic OCR on PDFs/scanned docs is directly relevant.
+
+**Demo flow suggestion:**
+1. Quick agent-doc walkthrough (template mode, live editing, git integration)
+2. Show Corky's correspondence pipeline (email + transcription)
+3. Pitch the Ragie integration: "Here's where I need scalable document retrieval" → show Ron's and Judith's doc-heavy workflows as use cases
+4. Ask Bob about Ragie Parse capabilities for mortgage/manufacturing docs
+
+**Timeline recommendation:**
+- **Wed Apr 2** if you feel ready with a basic demo flow
+- **Thu Apr 3** if you want an extra day to prepare polished examples
+- Either way, book by tomorrow (Mon Mar 31) so Bob has it on his calendar
+<!-- agent:boundary:44527895 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Book Calendly slot with Bob for Tue Apr 1 or Wed Apr 2 (https://calendly.com/bobremeika/30-minute-call)
-- Prepare demo of Corky + Ragie integration before the call
+- Book Calendly slot with Bob for Wed Apr 2 or Thu Apr 3 (https://calendly.com/bobremeika/30-minute-call) — book by Mon Mar 31
+- Prepare agent-doc demo (template mode walkthrough)
+- Prepare Corky demo (email drafting + transcription pipeline)
+- Outline Ragie integration pitch using Ron's and Judith's projects as use cases
 - Follow up on contract gig if Bob reports the intros fell through
 <!-- /agent:pending -->

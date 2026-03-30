@@ -923,12 +923,12 @@ For the eschatology naming — I used "genesis and completion cycles" instead. "
 
 Draft updated in `mail/social/20260330-ffi-ontology-linkedin.md`. Review and approve to publish.
 
-### Re: John Cassel correction (HEAD)
+### Re: John Cassel correction
 
 Updated the draft — changed "The conversation with John Cassel" to "A response to John Cassel's outreach about permaculture design principles inspired an exploration of parallels." This accurately reflects that it was a response to his outreach, not a full back-and-forth conversation.
 
 Draft updated in `mail/social/20260330-ffi-ontology-linkedin.md`. Ready for final review.
-<!-- agent:boundary:d488a899 -->
+<!-- agent:boundary:4f6a149a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Email sent to Gmail Drafts (brian.takita@gmail.com → rberkes@gmail.com). Subject: ManufacturingChina.com - Site Structure Report. Open Gmail to review and send.
+Patent mining proposal drafted. Email at mail/drafts/2026-03-30-patent-mining-proposal.md. Ready for review.
 <!-- /agent:status -->
 
 ## Exchange
@@ -216,19 +216,47 @@ Pushed to **Gmail Drafts** via `corky draft push`:
 - **Subject:** ManufacturingChina.com - Site Structure Report
 
 Open your Gmail drafts to review and send: [Gmail Drafts](https://mail.google.com/mail/u/0/#drafts)
-<!-- agent:boundary:7ab81d56 -->
+
+Let's draft a quick proposal to ron-berkes for scraping the patents website(s).
+Using agents to analyze the patent + authors.
+Each patent can trigger a plan of action for:
+- market analysis
+- competitive analysis
+- manufacturing
+- distribution
+- marketing
+- website
+- operations
+### Re: Patent mining proposal (HEAD)
+
+Pulled Ron's patent discussion from the Mar 29 call (00:55:50–00:57:08). Key context:
+
+- Ron has someone **manually mining the patent database** for new clients
+- Logic: "When somebody gets a patent, they instantly — most of them need to get a manufacturer lined up"
+- He wants automation — offered to pay for a crawler
+- He mentioned "Claw" (likely OpenCrawl/browser automation tools)
+- Already producing leads — "I have a meeting next week for a new client"
+
+The proposal goes beyond a simple crawler. Instead of just scraping patent data, each patent triggers an AI agent pipeline that generates a full business intelligence package:
+
+1. **Patent discovery** — automated USPTO monitoring, filtered by manufacturing-relevant categories
+2. **AI analysis per patent** — market, competitive, manufacturing, distribution, marketing, website, operations
+3. **Lead scoring** — manufacturing complexity, inventor profile, category match, timing
+4. **Delivery** — structured reports with inventor contact, patent summary, manufacturing requirements, full analysis
+
+The pitch connects it to ManufacturingChina.com: patent holders are top-of-funnel leads for his factory directory. Agent finds patent → Ron reaches out with qualified analysis → patent holder signs up on ManufacturingChina.com → browses verified factories → Julian's audits build trust → smart contract handles transaction.
+
+Email draft at `mail/drafts/2026-03-30-patent-mining-proposal.md`
+
+Say "send" to push to Gmail Drafts, or edit first.
+<!-- agent:boundary:59a23ef4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Crawl manufacturingchina.com site structure
-- [x] SEO analysis (Google indexing, meta tags, robots.txt)
-- [x] Competitive landscape analysis
-- [x] Market analysis
-- [x] Analyze Ron's priorities from transcripts and contact context
-- [x] Revise email draft to reflect Ron's priorities
-- [x] Soften GSC language (Ron likely already has it set up)
-- [x] Push email to Gmail Drafts
-- [ ] Send from Gmail (user action)
+- [x] ManufacturingChina.com site structure report — sent to Gmail Drafts
+- [x] Patent mining proposal drafted
+- [ ] Push patent mining email to Gmail Drafts (awaiting approval)
+- [ ] Send ManufacturingChina report from Gmail (user action)
 <!-- /agent:pending -->

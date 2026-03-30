@@ -540,7 +540,7 @@ Does https://www.linkedin.com/in/eric-irwin-78b7b53bb/ seem like a real profile?
 He commented on one of my posts at https://www.linkedin.com/feed/update/urn:li:activity:7444389222624448512?commentUrn=urn%3Ali%3Acomment%3A%28activity%3A7444389222624448512%2C7444389275695099904%29&replyUrn=urn%3Ali%3Acomment%3A%28activity%3A7444389222624448512%2C7444431288767258624%29&dashCommentUrn=urn%3Ali%3Afsd_comment%3A%287444389275695099904%2Curn%3Ali%3Aactivity%3A7444389222624448512%29&dashReplyUrn=urn%3Ali%3Afsd_comment%3A%287444431288767258624%2Curn%3Ali%3Aactivity%3A7444389222624448512%29
 
 Please evaluate.
-### Re: Eric Irwin profile evaluation (HEAD)
+### Re: Eric Irwin profile evaluation
 
 **Red flags — likely fake or very new/low-quality profile:**
 
@@ -555,5 +555,5 @@ Please evaluate.
 **Recommendation:** Don't engage. If the comment is substantive and adds value to the thread, leave it visible (it helps your algorithm). If it's spam or low-effort, hide it from the post.
 
 Browser connection timed out so I couldn't visually verify the profile — but the search evidence alone is concerning.
-<!-- agent:boundary:02fa2350 -->
+<!-- agent:boundary:e482def3 -->
 <!-- /agent:exchange -->

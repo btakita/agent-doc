@@ -947,7 +947,14 @@ Please look at logs.
 ### Re: Deeper reconcile logging added
 
 Reconcile detail logging now goes to `/tmp/agent-doc-sync.log` — each phase (SNAPSHOT, ATTACH, SELECT, DETACH) with pane IDs. Reproduce the 3-pane issue again and I'll read the detailed log.
-<!-- agent:boundary:3ca5b2f9 -->
+
+When I change agent docs with 1 editor window, the 3 pane layout remains.
+### Re: Reconcile detail logging now active (HEAD)
+
+Previous build was using crates.io tmux-router (not local). Switched to path dep and rebuilt. Reconcile detail logs now go to `/tmp/agent-doc-sync.log`. 
+
+Switch between agent docs with 1 editor window — the log will now show the reconcile's SNAPSHOT, ATTACH, SELECT, DETACH phases with exact pane IDs and decisions.
+<!-- agent:boundary:ceb321fe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

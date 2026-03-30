@@ -944,10 +944,10 @@ There is a single editor pane. But 3 tmux panes. 2 of the panes were left-over f
 There should be 1 tmux pane.
 Please look at logs.
 ![2026-03-30_13-58.png](../../../../../Pictures/agent-loop/2026-03-30_13-58.png)
-### Re: Deeper reconcile logging added (HEAD)
+### Re: Deeper reconcile logging added
 
 Reconcile detail logging now goes to `/tmp/agent-doc-sync.log` — each phase (SNAPSHOT, ATTACH, SELECT, DETACH) with pane IDs. Reproduce the 3-pane issue again and I'll read the detailed log.
-<!-- agent:boundary:e6e3218c -->
+<!-- agent:boundary:3ca5b2f9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

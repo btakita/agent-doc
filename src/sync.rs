@@ -8,7 +8,7 @@
 //! left-to-right; files within a column stack top-to-bottom. Layout arithmetic is
 //! delegated to `tmux-router::sync`. This module provides the agent-doc-specific
 //! layers: frontmatter-based session resolution, auto-start for missing panes,
-//! post-sync registry updates, and layout repair.
+//! post-sync registry updates, layout repair, and column memory.
 //!
 //! ## Spec
 //! - `run(col_args, window, focus)` is the primary entry point. Filters empty
@@ -55,6 +55,11 @@
 //!   from within an active route cycle).
 //! - `register_synced_files` holds `RegistryLock` for the duration of its write and
 //!   saves only when at least one entry changed.
+//! - **Column memory:** `.agent-doc/last_layout.json` persists a column→agent-doc mapping.
+//!   When a column has no agent doc (user switches to a non-session file), sync substitutes
+//!   the last known agent doc for that column index. This preserves the 2-pane tmux layout
+//!   when one editor column temporarily shows a non-agent file. The state file is updated
+//!   after each successful sync with any columns that contain an agent doc.
 //! - Auto-start errors are non-fatal: a warning is logged to stderr and sync continues.
 //! - Post-auto_start stash is no longer needed: `tmux_router::sync` always runs the
 //!   full reconcile path (no early exits), so excess panes are stashed during the
@@ -358,6 +363,39 @@ fn run_with_options(
         .filter(|s| !s.trim().is_empty())
         .cloned()
         .collect();
+
+    // Column memory: for columns with non-agent files, substitute the last known
+    // agent doc so the reconciler preserves the pane from the previous layout.
+    let layout_state_path = std::path::Path::new(".agent-doc/last_layout.json");
+    let saved_layout: Vec<String> = std::fs::read_to_string(layout_state_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+
+    let col_args: Vec<String> = col_args.iter().enumerate().map(|(i, col)| {
+        // Check if this column has an agent doc (any file with session UUID)
+        let has_agent_doc = col.split(',').any(|f| {
+            let f = f.trim();
+            if f.is_empty() { return false; }
+            if let Ok(content) = std::fs::read_to_string(f)
+                && let Ok((fm, _)) = frontmatter::parse(&content) {
+                    return fm.session.is_some();
+                }
+            false
+        });
+        if has_agent_doc {
+            col.clone()
+        } else if let Some(remembered) = saved_layout.get(i) {
+            if !remembered.is_empty() {
+                sync_log(&format!("column {} has no agent doc, substituting remembered: {}", i, remembered));
+                remembered.clone()
+            } else {
+                col.clone()
+            }
+        } else {
+            col.clone()
+        }
+    }).collect();
     let col_args = col_args.as_slice();
     sync_log(&format!("=== sync start: col_args={:?} window={:?} focus={:?} auto_start={}", col_args, window, focus, auto_start));
     // Repair layout before anything else: consolidate stash windows and ensure
@@ -649,6 +687,28 @@ fn run_with_options(
     if let Some(w) = window {
         let pane_count = tmux.list_window_panes(w).map(|p| p.len()).unwrap_or(0);
         sync_log(&format!("post-tmux_router::sync: window={} panes={} file_panes={}", w, pane_count, result.file_panes.len()));
+    }
+
+    // Save column layout state: for each column that has an agent doc,
+    // record it so future syncs can substitute it when the column has a non-agent file.
+    {
+        let layout_state: Vec<String> = col_args.iter().map(|col| {
+            // Find the first agent doc file in this column
+            for f in col.split(',').map(|f| f.trim()) {
+                if f.is_empty() { continue; }
+                if let Ok(content) = std::fs::read_to_string(f)
+                    && let Ok((fm, _)) = frontmatter::parse(&content)
+                    && fm.session.is_some() {
+                        return f.to_string();
+                    }
+            }
+            String::new()
+        }).collect();
+        // Only save if at least one column has an agent doc
+        if layout_state.iter().any(|s| !s.is_empty())
+            && let Ok(json) = serde_json::to_string(&layout_state) {
+                let _ = std::fs::write(layout_state_path, json);
+            }
     }
 
     // tmux_session frontmatter write-back removed (deprecated).

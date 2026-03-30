@@ -59,6 +59,7 @@ The typical edit cycle: write in your editor, trigger `agent-doc route <file>` v
 - **Watch daemon** — auto-submit on file change with debounce and reactive mode for stream documents
 - **Git integration** — auto-commit each run; squash history with `agent-doc clean`
 - **Bulk resync** — validates session state and fixes stale/orphaned panes in 3 subprocess calls instead of ~20-40
+- **Column memory** — `.agent-doc/last_layout.json` remembers column→agent-doc mapping; preserves 2-pane tmux layout when one editor column switches to a non-agent file
 
 ## Architecture
 

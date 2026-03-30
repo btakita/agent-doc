@@ -284,12 +284,29 @@ The bug has two parts:
 2. **The reconciler didn't clean up.** With only 1 resolved pane (`resolved.len() < 2`), the reconciler exited early without stashing the excess.
 
 **Proposed fix:**
-- In `auto_start_in_session`: when `col_args` place the new file in the right column, pick the rightmost pane in the window to split alongside (not the first). This creates the new pane in the correct position.
+- In `auto_start_in_session`: when `col_args` place the new file in the right column, pick the rightmost pane in the window to split alongside (not the first). This creates the new pane in the correct position.: Will this work if the editor windows were reversed? So if the csv file were in the right side editor window and the left editor selected the new file.
 - In `tmux-router::sync`: before the `resolved < 2` early exit, stash unwanted panes that exceed the column count. This is a safety net.
 - The previous left-side agent doc pane stays untouched because it's not in the stash set.
 
 Ready to implement?
-<!-- agent:boundary:5838fbaf -->
+### Yes — the fix is column-position-aware, not hardcoded (HEAD)
+
+The existing code already knows which column the file is in via `is_first_column()` + `split_before`:
+- **Right column** → `split_before = false` → `-dh` (split right of target)
+- **Left column** → `split_before = true` → `-dbh` (split left of target)
+
+The fix selects the split target based on column position:
+- **Right-column file** → pick the **last** pane in the window (rightmost) to split alongside
+- **Left-column file** → pick the **first** pane in the window (leftmost) to split alongside
+
+So reversed scenario (CSV right, new agent doc left):
+1. `is_first_column()` → `true` → `split_before = true`
+2. Fix picks the **first/leftmost** existing pane to split alongside
+3. New pane created to the **left** of it (via `-dbh`)
+4. Right pane (previous agent doc) untouched
+
+Both directions work. Ready to implement.
+<!-- agent:boundary:dd8a5d8e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -673,7 +673,22 @@ Updated with pneuma/noumena/phenomena and thematic topics from the source docume
 - **Title:** "Agent-Doc: Building a Cross-Platform FFI Plugin with Socket IPC | Live Coding"
 
 Approve and I'll upload both.
-<!-- agent:boundary:aa5aeb0d -->
+
+Don't include `Source: ...` in both video descriptions.
+Approved...Upload both in temporal order.
+
+### Re: Upload complete (HEAD)
+
+Both videos uploaded in temporal order:
+
+1. **Video 1 (Mar 27):** https://www.youtube.com/watch?v=u8qnbhsGAGo
+   - "Agent-Doc: Building a Cross-Platform FFI Plugin with Socket IPC | Live Coding"
+   - 58min, with CC
+
+2. **Video 2 (Mar 29):** https://www.youtube.com/watch?v=IWNj9GPb2OI
+   - "Existence-Lang: Pneuma, Noumena & Phenomena in Software Ontology | Live Coding"
+   - 2h28min, with CC
+<!-- agent:boundary:1484574a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
@@ -685,11 +700,8 @@ Approve and I'll upload both.
 - [x] rappstack packages at 0.1.4
 - [x] Verify CI build passes and blog deploys
 - [x] Cut 35:46.1-35:47.5 from 2026-03-29 16-19-07.mp4
-- [x] Combined 2026-03-27 + 2026-03-29 videos (3h26m)
-- [x] Transcribed with CC (13,719 segments SRT)
-- [x] Split SRT into 2 files (2,347 + 11,372 segments)
-- [x] Expanded Video 2 description with pneuma/noumena/phenomena themes
-- [ ] Approve titles/descriptions
-- [ ] Upload Video 1 to YouTube with CC
-- [ ] Upload Video 2 to YouTube with CC
+- [x] Combined + split videos
+- [x] Transcribed with CC
+- [x] Video 1 uploaded: https://www.youtube.com/watch?v=u8qnbhsGAGo
+- [x] Video 2 uploaded: https://www.youtube.com/watch?v=IWNj9GPb2OI
 <!-- /agent:pending -->

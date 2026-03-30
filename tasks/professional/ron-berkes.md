@@ -95,8 +95,28 @@ Running now — will update when complete.
 - **Output:** 1548 lines at `mail/contacts/ron-berkes/recordings/phone_20260329-193132_6504368181.md`
 - **Processing time:** ~62 min on CPU (no GPU detected — large-v3 model)
 
+Why was no GPU detected? What program was unable to detect a GPU?
+
 Note: Some confidence scores are low (0.29–0.48 range), indicating potential speaker label swaps — common with mono phone recordings. Review the transcript for accuracy, especially in sections with low confidence.
-<!-- agent:boundary:4503f4f0 -->
+
+**Re: GPU detection**
+
+The "no GPU detected" came from **whisper-rs** (Rust bindings for whisper.cpp). GPU support is a compile-time feature in corky, not runtime detection:
+
+| Feature | Backend |
+|---------|---------|
+| `transcribe` | CPU only (what was used) |
+| `transcribe-cuda` | CUDA GPU via `whisper-rs/cuda` |
+| `transcribe-metal` | Metal GPU (macOS) |
+
+The build used `--features diarize` which implies `transcribe` (CPU). To get GPU:
+
+```bash
+cargo run --release --features "diarize,transcribe-cuda" -- transcribe --diarize ...
+```
+
+Requires CUDA toolkit on the system. With GPU, the 62-min transcription would likely drop to ~5-10 min.
+<!-- agent:boundary:e3882740 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

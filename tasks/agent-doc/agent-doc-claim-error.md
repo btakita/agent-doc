@@ -981,7 +981,7 @@ release
 
 Release tmux-router v0.3.6 + agent-doc v0.28.0?
 release
-### Re: v0.28.0 + tmux-router v0.3.6 released (HEAD)
+### Re: v0.28.0 + tmux-router v0.3.6 released
 
 **tmux-router v0.3.6:** crates.io ✓ — No early exits, reconciler always runs
 **agent-doc v0.28.0:** crates.io ✓, PyPI ✓, GitHub Release ✓, cargo install ✓ (confirmed v0.28.0)
@@ -993,7 +993,7 @@ release
 - Reconcile detail file logging
 - SPEC.md phase order corrected
 - 569 tests passing
-<!-- agent:boundary:9ab62f27 -->
+<!-- agent:boundary:3f3936d8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

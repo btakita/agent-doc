@@ -571,7 +571,7 @@ The fix is installed. Please test and let me know if the 3-pane issue is resolve
 
 add tests
 audit docs
-### Re: Tests and docs done (HEAD)
+### Re: Tests and docs done
 
 **2 new tests** in `route.rs`:
 - `auto_start_no_wait_first_col_splits_left` — file in col_args[0] → split_before=true → new pane at leftmost position
@@ -583,7 +583,7 @@ audit docs
 - **SPEC.md §7.31** — `col_args` parameter documented
 
 All 568 tests pass. Ready to release v0.27.7.
-<!-- agent:boundary:b92c4102 -->
+<!-- agent:boundary:10224beb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

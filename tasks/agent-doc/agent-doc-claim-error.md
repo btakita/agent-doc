@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.27.6 released. Bold-text header fallback shipped.
+v0.27.7 released. Sync path column-aware split shipped.
 <!-- /agent:status -->
 
 ## Exchange
@@ -583,7 +583,20 @@ audit docs
 - **SPEC.md §7.31** — `col_args` parameter documented
 
 All 568 tests pass. Ready to release v0.27.7.
-<!-- agent:boundary:10224beb -->
+Release
+### Re: v0.27.7 released (HEAD)
+
+**Published everywhere:**
+- **crates.io:** v0.27.7 ✓
+- **PyPI:** v0.27.7 ✓
+- **GitHub Release:** [v0.27.7](https://github.com/btakita/agent-doc/releases/tag/v0.27.7) ✓
+- **cargo install:** updated ✓ (confirmed v0.27.7)
+
+**Changelog:**
+- Sync path now column-aware: `auto_start_no_wait` receives `col_args` and picks positionally correct split target
+- 2 new integration tests
+- Docs updated (route.rs, sync.rs, SPEC.md)
+<!-- agent:boundary:e71d774a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -591,6 +604,6 @@ All 568 tests pass. Ready to release v0.27.7.
 <!-- agent:pending patch=replace -->
 - [x] v0.27.5: 3-pane fix (route path)
 - [x] v0.27.6: Bold-text header fallback
-- [x] v0.27.7: Sync path column-aware split + tests + docs
-- [ ] Release v0.27.7
+- [x] v0.27.7: Sync path column-aware split
+- All shipped.
 <!-- /agent:pending -->

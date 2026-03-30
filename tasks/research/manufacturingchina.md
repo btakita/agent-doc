@@ -191,7 +191,21 @@ Read through the contact file, both call transcripts (Feb 26 and Mar 29), and th
 - **Removed generic filler** (design quality assessment, niche opportunity theory) — Ron doesn't need persuading about the concept, he needs the technical blocker fixed
 
 Draft updated at `mail/drafts/2026-03-30-manufacturingchina-site-structure-report.md`. Review and say "send" to push to Gmail Drafts.
-<!-- agent:boundary:68f6aa18 -->
+
+> **Google Search Console**
+
+Should already be done. But it could be worth mentioning anyways? Ron is usually on top of SEO administration.
+### Re: Google Search Console (HEAD)
+
+Good call — Ron is savvy about SEO admin so he probably already has GSC set up. I softened the language in the email:
+
+- Changed "Submit sitemap in Google Search Console" → "Verify in Google Search Console that the sitemap is submitted and factory pages are being crawled — if they show 'Discovered - currently not indexed' or 'Crawled - currently not indexed,' the meta tag fix should resolve it"
+- Changed the action items section similarly
+
+This frames it as "let's check what GSC is telling you" rather than "you need to set up GSC," which respects that he's been doing this for years.
+
+Draft updated. Say "send" to push to Gmail Drafts.
+<!-- agent:boundary:e05e398b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -203,5 +217,6 @@ Draft updated at `mail/drafts/2026-03-30-manufacturingchina-site-structure-repor
 - [x] Market analysis
 - [x] Analyze Ron's priorities from transcripts and contact context
 - [x] Revise email draft to reflect Ron's priorities
+- [x] Soften GSC language (Ron likely already has it set up)
 - [ ] Push email to Gmail Drafts (awaiting user approval)
 <!-- /agent:pending -->

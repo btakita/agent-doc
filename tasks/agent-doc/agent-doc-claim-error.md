@@ -640,7 +640,7 @@ audit docs
 **Docs:** No updates needed — existing docs describe behavior at the right abstraction level. The inline code comment at sync.rs:624-625 documents the fix rationale.
 
 79 tmux-router tests pass. Ready to release v0.27.8.
-<!-- agent:boundary:cc98aba8 -->
+<!-- agent:boundary:1d3397bd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -275,7 +275,7 @@ No tasks to transfer — the work is done. The lesson is: **always use `make` ta
 
 Summarize the phone call with ron-berkes. Update the contact context files.
 
-### Call Summary — Mar 29, 2026 (2h 4min) (HEAD)
+### Call Summary — Mar 29, 2026 (2h 4min)
 
 **Two potential web clients via Ron:**
 
@@ -316,7 +316,7 @@ Summarize the phone call with ron-berkes. Update the contact context files.
 4. Brian to be introduced as "someone I know who does these kinds of things"
 
 **Contact file updated** — `mail/contacts/ron-berkes/AGENTS.md` now has full relationship context, topics, research notes on Steve Douglas, Fast Fire Starters, and the consolidation strategy.
-<!-- agent:boundary:1c7ef0c3 -->
+<!-- agent:boundary:266c3021 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

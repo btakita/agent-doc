@@ -642,7 +642,7 @@ audit docs
 79 tmux-router tests pass. Ready to release v0.27.8.
 
 release tmux-router and agent-doc
-### Re: v0.27.8 + tmux-router v0.3.4 released (HEAD)
+### Re: v0.27.8 + tmux-router v0.3.4 released
 
 **tmux-router v0.3.4:**
 - crates.io ✓
@@ -654,7 +654,7 @@ release tmux-router and agent-doc
 - VERSIONS.md entries for both
 
 The early-exit stash should now actually work. Test by switching between agent docs with a non-agent file on one side.
-<!-- agent:boundary:244ce98a -->
+<!-- agent:boundary:4730f03a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

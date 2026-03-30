@@ -683,7 +683,7 @@ Added cross-references:
 
 The link in manufacturingchina.md is in the `&lt;!-- agent:status --&gt;` component so it persists across status updates.
 Add the patent research service for Julian into the patent-mining-proposal
-### Re: Julian patent intelligence service added (HEAD)
+### Re: Julian patent intelligence service added
 
 Added a new section **"Julian / 3A Credit — Patent Intelligence Service"** to `mail/drafts/2026-03-30-patent-mining-proposal.md`. It covers:
 
@@ -694,7 +694,7 @@ Added a new section **"Julian / 3A Credit — Patent Intelligence Service"** to 
 - **Key sell** — Julian funds the infrastructure, we use the same pipeline for Ron's lead gen. Two revenue streams from one system.
 
 Both emails ready to push. Say "send" for Gmail Drafts.
-<!-- agent:boundary:f09cae3b -->
+<!-- agent:boundary:f811b638 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

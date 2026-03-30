@@ -667,7 +667,7 @@ Test updated: `test_sync_early_exit_preserves_other_panes` — verifies all pane
 
 Got into a 1 pane layout when switching the left editor to a non agent document.
 ![2026-03-30_11-23.png](../../../../../Pictures/agent-loop/2026-03-30_11-23.png)
-### Re: 1-pane layout investigation (HEAD)
+### Re: 1-pane layout investigation
 
 Current tmux state shows 2 panes in the agent-doc window (%153 + %171), so the layout may have self-corrected by the time I'm checking. The screenshot was at 11:23.
 
@@ -684,7 +684,7 @@ This 1-pane issue is **different** from the early-exit stash — that code is no
 - Did you select a new file on the right after switching the left? Or was the 1-pane state triggered just by switching the left editor?
 
 If this is reproducible, I'll add stderr logging to the sync path to capture exactly what happens during the layout transition.
-<!-- agent:boundary:2042dc28 -->
+<!-- agent:boundary:24977710 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

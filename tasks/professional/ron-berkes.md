@@ -538,7 +538,7 @@ Given the multiple revenue streams discussed with Ron, here's a structured appro
 - For patent automation: hourly during build + per-lead residual once automated (you built the machine, you get a cut of what it produces)
 - Keep equity conversations separate from hourly — don't trade current hours for future equity
 Ron seems reluctant to pay an hourly rate due to him having to take care of his child. I was thinking a fix rate could be good in the short term.
-### Re: Fixed rate structure for Ron (HEAD)
+### Re: Fixed rate structure for Ron
 
 That makes sense — if Ron is cash-strapped and managing childcare, a fixed monthly retainer removes the "meter running" anxiety. Here's how to structure it:
 
@@ -566,7 +566,7 @@ That makes sense — if Ron is cash-strapped and managing childcare, a fixed mon
 - The per-lead residual on patent automation still kicks in later — that's the "residuals can work later" piece
 
 For the Steve/MRH engagement specifically, Ron could still bill Steve hourly ($25/hr × 4x) while paying you the flat rate — Ron keeps the margin as his project management cut.
-<!-- agent:boundary:c4651c49 -->
+<!-- agent:boundary:3be63b1b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

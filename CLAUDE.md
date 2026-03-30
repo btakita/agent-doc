@@ -88,7 +88,7 @@ src/
   mode.rs           # Document mode resolution (format + write strategy)
   autoclaim.rs      # SessionStart hook: auto-claim documents
   commands.rs       # List available commands for plugin autocomplete
-  sync.rs           # Sync pane state between editor and tmux
+  sync.rs           # Sync pane state between editor and tmux (reconciler always runs, no early exits)
   preflight.rs      # Pre-agent checks: recover, commit, claims, diff, document read → JSON
   agent/
     mod.rs          # Agent trait

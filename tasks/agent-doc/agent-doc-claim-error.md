@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.28.0 released. Structural layout fix shipped — reconciler always runs, no early exits.
+v0.28.1 released. Column memory for non-agent columns shipped.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1044,13 +1044,25 @@ Implement now
 Saves column→agent-doc mapping to `.agent-doc/last_layout.json`. When a column has no agent doc, substitutes the remembered one. Reconciler sees 2 docs → 2 panes preserved.
 
 Installed. Test: open 2 agent docs → switch one side to non-agent → should keep 2 tmux panes.
-<!-- agent:boundary:cdf4afe7 -->
+
+Add tests
+audit docs
+Update README.md, SPEC.md, module-harness, ontology.
+### Re: v0.28.1 released (HEAD)
+
+**agent-doc v0.28.1:** crates.io ✓, PyPI ✓, GitHub Release ✓, cargo install ✓ (confirmed v0.28.1)
+
+**Changelog:**
+- Column memory: `.agent-doc/last_layout.json` preserves 2-pane layout when a column switches to non-agent file
+- Docs: README, SPEC.md, sync.rs module doc, VERSIONS.md updated
+- Clippy fixes (collapsible_if in sync.rs)
+<!-- agent:boundary:e922b3f1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.28.0: Structural layout fix
-- [x] Column memory implemented
-- [ ] Test + release
+- [x] v0.28.0: Structural layout fix (no early exits)
+- [x] v0.28.1: Column memory for non-agent columns
+- All shipped.
 <!-- /agent:pending -->

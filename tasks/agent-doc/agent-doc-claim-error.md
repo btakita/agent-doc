@@ -1070,7 +1070,7 @@ Updated the guard from length-based to baseline-vs-snapshot comparison:
 Catches ALL stale baselines regardless of content length. Committed `d9a113a`, pushed, installed.
 
 Ready for Bug 2?
-<!-- agent:boundary:c3a038e8 -->
+<!-- agent:boundary:e236bc7c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

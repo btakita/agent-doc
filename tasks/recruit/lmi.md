@@ -577,7 +577,7 @@ Please fetch the data again.
 The email already touches auditability and traceability (git-backed revision history, selective staging), which are security-adjacent without being explicit about it.
 
 Want to send as-is, or add a security angle?
-### Re: Email Updated + Sync Attempt (HEAD)
+### Re: Email Updated + Sync Attempt
 
 **Sync:** Re-synced btak.dev account but "0 messages to process." The scheduling email body is likely HTML-only without a text/plain part, which corky's parser doesn't extract. This is a corky feature gap (HTML body extraction), not a data issue.
 
@@ -586,7 +586,7 @@ Want to send as-is, or add a security angle?
 > "One thing worth noting: agent-doc currently operates in a single-user security model (local file system, git-backed). I'm actively working on collaborative security for the web/networked version...multi-user access control, session isolation, and the kind of compartmented access patterns that would be relevant for federal deployments."
 
 Draft updated. Ready to send?
-<!-- agent:boundary:ca064526 -->
+<!-- agent:boundary:f2d494a5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

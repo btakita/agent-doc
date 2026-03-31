@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Thank-you email sent to Kate Revels
+LMI topic document created
 <!-- /agent:status -->
 
 ## Exchange
@@ -478,16 +478,30 @@ Draft file: `mail/drafts/2026-03-31-re-lmi-video-conference-interview-confirmati
 The draft was empty because I got interrupted before writing the body (the `corky draft new` command only scaffolds the frontmatter/header). I filled in the body content and sent it directly.
 
 **Email sent** to kathryn.revels@lmisolutions.com as a threaded reply to the original confirmation email. Status updated to `sent`.
-<!-- agent:boundary:31ca6266 -->
+
+Do:
+- [ ] Create LMI topic document in mail/topics/lmi
+### Re: LMI Topic Document Created (HEAD)
+
+Created `mail/topics/lmi/AGENTS.md` (with `CLAUDE.md` symlink) containing:
+
+- Company info and platform page
+- Role details (Full Stack Developer, stack, focus areas)
+- Interview team with roles and LinkedIn
+- Leadership contacts
+- LIGER platform summary
+- Timeline of interactions
+- Asset index (cheat sheet, transcript, video, emails)
+- Kate Revels contact info
+<!-- agent:boundary:238f88ab -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] LinkedIn message to Josh Malloy re: agent-doc
-- [ ] Create LMI topic document in mail/topics/lmi
-- [x] Thank-you email sent to Kate Revels
-- [x] Detailed conversation analysis
-- [x] Transcription completed
-- [x] Interview completed
+- [x] LMI topic document created
+- [x] Thank-you email sent
+- [x] Interview analysis complete
+- [x] Transcription complete
 <!-- /agent:pending -->

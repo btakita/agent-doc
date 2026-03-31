@@ -517,7 +517,7 @@ Done. Added a blockquote right under the "Alpha Software" note:
 The full Security section remains at the bottom with the detailed breakdown. The top-level note gives immediate visibility.
 
 Add security to SPEC.md. We will address security
-### Re: Security added to SPEC.md (HEAD)
+### Re: Security added to SPEC.md
 
 Done. Added **Section 10: Security** to SPEC.md with three subsections:
 
@@ -526,7 +526,7 @@ Done. Added **Section 10: Security** to SPEC.md with three subsections:
 - **10.3 Recommendations** ... private repo, no secrets in context, wait for multi-user security, review before sharing
 
 The security content draws from the ragie-web-doc analysis (data divulgence is the fundamental unsolved problem) and aligns with the README security section. The SPEC is more detailed since it's the functional specification for implementors.
-<!-- agent:boundary:432c20f6 -->
+<!-- agent:boundary:8efb7f7a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

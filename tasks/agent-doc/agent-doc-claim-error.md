@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.28.2 released. Write dedup + pane ownership shipped.
+v0.28.3 released. Dedup strips boundary markers before comparison.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1179,14 +1179,26 @@ The simplest fix: in the dedup check, strip all `<!-- agent:boundary:* -->` line
 
 Also: the "external write while typing" confirms the second write was from a **different Claude session** (the tmux pane running the linkedin.md agent-doc), not this session.
 
+Why would the different claude session write the same response? Does this have to do with the harness being duplicated, listening to the same request/response going to the upstream service?
+
 Want me to fix the dedup to strip boundary markers?
-<!-- agent:boundary:e70f0e78 -->
+Yes
+### Re: Why same response from different session + dedup fix (HEAD)
+
+**Why the same response:** The linkedin.md Claude session likely re-processed the same user prompt. When the user edits near a response or saves, the `agent-doc preflight` computes a diff. If the diff shows the same user prompt (because the previous response wasn't yet committed to the snapshot), the Claude session generates the same response. The preflight's commit step should prevent this, but if the timing is tight (user edits while commit is in progress), the second cycle can see the same diff.
+
+This is NOT about two sessions sharing a harness — each tmux pane has its own Claude process. It's about the **same session** processing the **same diff twice** due to a timing gap between write and commit.
+
+**v0.28.3 released** — dedup now strips boundary markers before comparison:
+- `strip_boundary_for_dedup()` filters `<!-- agent:boundary:* -->` lines
+- All 4 dedup paths updated
+- crates.io ✓, PyPI ✓, GitHub Release ✓, cargo install ✓ (v0.28.3)
+<!-- agent:boundary:19eb5d4d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.28.2: Write dedup shipped (but bypassed by boundary marker changes)
-- [ ] **Fix dedup: strip boundary markers before comparison**
-- [ ] Remove duplicate from linkedin.md
+- [x] v0.28.0-v0.28.3: Layout fixes + dedup + pane ownership
+- All shipped.
 <!-- /agent:pending -->

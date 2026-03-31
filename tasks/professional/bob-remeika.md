@@ -1381,7 +1381,7 @@ Good additions to the meeting agenda. Ragie Parse is a strong fit for both:
 **Meeting framing:** Lead with "I have a client project where Ragie Parse solves a real problem" rather than a generic integration pitch. Showing Bob you're bringing **distribution** (real clients with real document workflows) is what gets a CEO's attention. Between Judith's loan docs and Ron's patent corpus, you have two compelling vertical use cases to walk through.
 
 Note the identified security issues. My demo will be changed. Should we schedule a call for Thursday? Today is Tuesday 17:25 Eastern.
-### Re: Security-Aware Demo & Thursday Call (HEAD)
+### Re: Security-Aware Demo & Thursday Call
 
 Good call acknowledging the security findings. The response channel exfiltration risk and prompt injection concerns from the web architecture analysis are real... adjusting the demo to account for those is the right move. When you meet with Bob, being upfront about "here's our security model and what we're doing about the hard parts" actually builds credibility rather than undermining the pitch. CEOs respect engineers who know where the edges are.
 
@@ -1395,7 +1395,7 @@ Good call acknowledging the security findings. The response channel exfiltration
 - Ragie Parse discussion doesn't have the same attack surface concerns since it's structured data extraction, not LLM-mediated document editing
 
 Want me to draft a message to Bob proposing Thursday?
-<!-- agent:boundary:580d6278 -->
+<!-- agent:boundary:da37567f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

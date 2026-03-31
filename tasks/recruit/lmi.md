@@ -601,7 +601,7 @@ Note my updates. We should also add a note in the agent-doc README.md about sing
 I'll add this to the agent-doc task queue. For now, the Josh email draft is ready with the corrected security note.
 
 Send it?
-<!-- agent:boundary:86591026 -->
+<!-- agent:boundary:2a3e7acc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -246,6 +246,10 @@ pub struct Frontmatter {
     /// Space-separated string (e.g., "--dangerously-skip-permissions").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_args: Option<String>,
+    /// Linked resources: local file paths or URLs (relative to this document's directory).
+    /// Changes in linked docs are surfaced during preflight.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", alias = "related_docs")]
+    pub links: Vec<String>,
 }
 
 impl Frontmatter {
@@ -501,6 +505,7 @@ mod tests {
             write_mode: None,
             stream_config: None,
             claude_args: None,
+            links: vec![],
         };
         let body = "# Hello\n\nBody text.\n";
         let written = write(&fm, body).unwrap();

@@ -16,6 +16,13 @@
 //! - Step 3b — debounce: waits up to 3 seconds (polling every 100 ms) for
 //!   both the file mtime to be at least 500 ms old and the cross-process
 //!   typing indicator to be inactive before proceeding to the diff step.
+//! - Step 3c — linked docs: calls `check_linked_docs(file)` to inspect
+//!   `links` from frontmatter. For local file links, compares git commit
+//!   times against the snapshot mtime. For URL links (`http://`/`https://`),
+//!   fetches content via `ureq`, converts HTML to markdown via `htmd`
+//!   (stripping script/style/nav/footer/noscript/svg), caches in
+//!   `.agent-doc/links_cache/<sha256(url)>.txt`, and reports changes by
+//!   comparing against the cached content.
 //! - Step 4 — diff: calls `diff::compute(file)` to compare the current
 //!   document against the last snapshot; `no_changes=true` when they match.
 //! - Step 5 — read document: reads the current file from disk into `document`.
@@ -63,13 +70,38 @@
 //!   `check_layout()` returns empty vec without invoking tmux.
 //! - `preflight_output_includes_layout_issues`: `PreflightOutput` with one
 //!   layout issue → JSON `layout_issues` array has length 1 with correct text.
+//! - `is_url_detects_http`: `http://` and `https://` prefixes → true;
+//!   relative paths and empty strings → false.
+//! - `is_html_content_detects_html`: `text/html` and `application/xhtml` → true;
+//!   `application/json` and `text/plain` → false.
+//! - `html_to_markdown_converts_basic_html`: `<h1>` and `<strong>` → markdown
+//!   heading and bold syntax.
+//! - `html_to_markdown_strips_script_and_style`: script/style content removed
+//!   from output, visible content preserved.
+//! - `html_to_markdown_strips_nav_and_footer`: nav/footer content removed,
+//!   main content preserved.
+//! - `url_cache_path_is_deterministic`: same URL → same path; different URL →
+//!   different path; extension is `.txt`.
+//! - `links_cache_dir_creates_directory`: creates `.agent-doc/links_cache/` and
+//!   returns `Some(path)` when `.agent-doc/` exists.
 
 use anyhow::{Context, Result};
 use serde::Serialize;
 use std::path::Path;
 use std::process::Command;
 
-use crate::{diff, git, recover, sessions, snapshot};
+use crate::{diff, frontmatter, git, recover, sessions, snapshot};
+
+/// A change detected in a related document since the last cycle.
+#[derive(Serialize)]
+pub struct RelatedDocChange {
+    /// Path to the related document (as declared in frontmatter).
+    pub path: String,
+    /// Human-readable summary of what changed.
+    pub summary: String,
+    /// Whether the related document exists on disk.
+    pub exists: bool,
+}
 
 #[derive(Serialize)]
 pub struct PreflightOutput {
@@ -87,6 +119,9 @@ pub struct PreflightOutput {
     pub no_changes: bool,
     /// Full document content at HEAD (current file on disk).
     pub document: String,
+    /// Changes detected in linked documents since last cycle.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub linked_changes: Vec<RelatedDocChange>,
 }
 
 /// Shells considered idle (not actively running a meaningful process).
@@ -284,6 +319,13 @@ pub fn run(file: &Path) -> Result<()> {
         }
     }
 
+    // Step 3c: Check related documents for changes.
+    eprintln!("[preflight] step 3c: related docs");
+    let linked_changes = check_linked_docs(file);
+    for change in &linked_changes {
+        eprintln!("[preflight] related doc change: {} — {}", change.path, change.summary);
+    }
+
     // Step 4: Compute diff between snapshot and current document.
     eprintln!("[preflight] step 4: diff");
     let diff_result = diff::compute(file)?;
@@ -302,6 +344,7 @@ pub fn run(file: &Path) -> Result<()> {
         diff: diff_result,
         no_changes,
         document,
+        linked_changes,
     };
 
     let json = serde_json::to_string_pretty(&output)
@@ -349,6 +392,250 @@ fn read_and_truncate_claims(file: &Path) -> Vec<String> {
     }
 
     claims
+}
+
+/// Check related documents for changes since our last snapshot.
+///
+/// Parses `links` from the document's frontmatter, then for each path:
+/// - Resolves relative to the document's parent directory
+/// - Checks if the file exists
+/// - Compares the related doc's last git commit time against our snapshot mtime
+/// - If newer, summarizes the recent commits
+fn is_url(link: &str) -> bool {
+    link.starts_with("http://") || link.starts_with("https://")
+}
+
+/// Resolve the links cache directory, creating it if needed.
+fn links_cache_dir(file: &Path) -> Option<std::path::PathBuf> {
+    let mut search = file.parent();
+    while let Some(d) = search {
+        let candidate = d.join(".agent-doc");
+        if candidate.is_dir() {
+            let cache = candidate.join("links_cache");
+            std::fs::create_dir_all(&cache).ok()?;
+            return Some(cache);
+        }
+        search = d.parent();
+    }
+    None
+}
+
+/// Compute a cache filename for a URL.
+fn url_cache_path(cache_dir: &Path, url: &str) -> std::path::PathBuf {
+    use sha2::{Digest, Sha256};
+    let hash = format!("{:x}", Sha256::digest(url.as_bytes()));
+    cache_dir.join(format!("{}.txt", hash))
+}
+
+/// Fetch a URL and compare against cached content. Returns a change entry if content differs.
+/// Convert HTML content to markdown, stripping boilerplate elements.
+fn html_to_markdown(html: &str) -> String {
+    use htmd::HtmlToMarkdown;
+    let converter = HtmlToMarkdown::builder()
+        .skip_tags(vec!["script", "style", "nav", "footer", "noscript", "svg"])
+        .build();
+    converter.convert(html).unwrap_or_else(|_| html.to_string())
+}
+
+/// Returns true if the response content-type indicates HTML.
+fn is_html_content(content_type: &str) -> bool {
+    content_type.contains("text/html") || content_type.contains("application/xhtml")
+}
+
+fn check_url_link(url: &str, cache_dir: &Path) -> RelatedDocChange {
+    let cache_path = url_cache_path(cache_dir, url);
+    let cached = std::fs::read_to_string(&cache_path).ok();
+
+    // Fetch with a reasonable timeout
+    let agent = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(10))
+        .build();
+    let response = agent.get(url).call();
+
+    match response {
+        Ok(resp) => {
+            let content_type = resp
+                .header("content-type")
+                .unwrap_or("")
+                .to_string();
+            let body = match resp.into_string() {
+                Ok(b) => b,
+                Err(e) => {
+                    return RelatedDocChange {
+                        path: url.to_string(),
+                        summary: format!("fetch error: {}", e),
+                        exists: false,
+                    };
+                }
+            };
+
+            // Convert HTML to markdown for cleaner agent context
+            let content = if is_html_content(&content_type) {
+                html_to_markdown(&body)
+            } else {
+                body
+            };
+
+            match cached {
+                Some(ref old) if old == &content => {
+                    // No change — don't include in output
+                    RelatedDocChange {
+                        path: url.to_string(),
+                        summary: String::new(), // empty = no change
+                        exists: true,
+                    }
+                }
+                Some(_) => {
+                    // Content changed — update cache and report
+                    let _ = std::fs::write(&cache_path, &content);
+                    RelatedDocChange {
+                        path: url.to_string(),
+                        summary: format!("content changed ({} bytes)", content.len()),
+                        exists: true,
+                    }
+                }
+                None => {
+                    // First fetch — cache it and report as new
+                    let _ = std::fs::write(&cache_path, &content);
+                    RelatedDocChange {
+                        path: url.to_string(),
+                        summary: format!("initial fetch ({} bytes)", content.len()),
+                        exists: true,
+                    }
+                }
+            }
+        }
+        Err(e) => RelatedDocChange {
+            path: url.to_string(),
+            summary: format!("fetch failed: {}", e),
+            exists: false,
+        },
+    }
+}
+
+fn check_linked_docs(file: &Path) -> Vec<RelatedDocChange> {
+    let content = match std::fs::read_to_string(file) {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+    let fm = match frontmatter::parse(&content) {
+        Ok((fm, _)) => fm,
+        Err(_) => return vec![],
+    };
+    if fm.links.is_empty() {
+        return vec![];
+    }
+
+    // Get our snapshot mtime as the baseline for comparison.
+    let our_snapshot_mtime = snapshot::path_for(file)
+        .ok()
+        .and_then(|p| std::fs::metadata(&p).ok())
+        .and_then(|m| m.modified().ok());
+
+    let doc_dir = match file.parent() {
+        Some(d) => d,
+        None => return vec![],
+    };
+
+    let cache_dir = links_cache_dir(file);
+
+    let mut changes = Vec::new();
+    for link in &fm.links {
+        if is_url(link) {
+            // URL link — fetch and compare against cache
+            if let Some(ref cache) = cache_dir {
+                let change = check_url_link(link, cache);
+                // Only include if there's an actual change or error
+                if !change.summary.is_empty() {
+                    changes.push(change);
+                }
+            } else {
+                eprintln!("[preflight] warning: cannot resolve links cache for URL: {}", link);
+            }
+            continue;
+        }
+
+        // File link — existing behavior
+        let resolved = doc_dir.join(link);
+        if !resolved.exists() {
+            changes.push(RelatedDocChange {
+                path: link.clone(),
+                summary: "file not found".to_string(),
+                exists: false,
+            });
+            continue;
+        }
+
+        // Compare last commit time of related doc against our snapshot mtime.
+        let related_mtime = match git::last_commit_mtime(&resolved) {
+            Ok(Some(t)) => t,
+            _ => continue, // Not tracked or no commits — skip silently.
+        };
+
+        let is_newer = match our_snapshot_mtime {
+            Some(snap_time) => related_mtime > snap_time,
+            None => true, // No snapshot yet — treat everything as new.
+        };
+
+        if !is_newer {
+            continue;
+        }
+
+        // Get recent commit summaries.
+        let summary = recent_commit_summary(&resolved, our_snapshot_mtime);
+        changes.push(RelatedDocChange {
+            path: link.clone(),
+            summary,
+            exists: true,
+        });
+    }
+
+    changes
+}
+
+/// Get a human-readable summary of recent commits for a file.
+fn recent_commit_summary(file: &Path, since: Option<std::time::SystemTime>) -> String {
+    let since_arg = since.and_then(|t| {
+        t.duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .map(|d| format!("--since={}", d.as_secs()))
+    });
+
+    let (git_root, resolved) = match git::resolve_to_git_root(file) {
+        Ok(pair) => pair,
+        Err(_) => return "changed (git unavailable)".to_string(),
+    };
+    let rel_path = resolved
+        .strip_prefix(&git_root)
+        .unwrap_or(&resolved);
+
+    let mut args = vec!["log", "--oneline", "-5"];
+    let since_str;
+    if let Some(ref s) = since_arg {
+        since_str = s.clone();
+        args.push(&since_str);
+    }
+    args.push("--");
+    let rel_str = rel_path.to_string_lossy().to_string();
+    args.push(&rel_str);
+
+    let output = std::process::Command::new("git")
+        .current_dir(&git_root)
+        .args(&args)
+        .output();
+
+    match output {
+        Ok(out) if out.status.success() => {
+            let text = String::from_utf8_lossy(&out.stdout).to_string();
+            let lines: Vec<&str> = text.lines().take(5).collect();
+            if lines.is_empty() {
+                "changed".to_string()
+            } else {
+                lines.join("; ")
+            }
+        }
+        _ => "changed (git log failed)".to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -468,6 +755,7 @@ mod tests {
             diff: Some("+new line\n".to_string()),
             no_changes: false,
             document: "# Doc\n".to_string(),
+            linked_changes: vec![],
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -490,6 +778,7 @@ mod tests {
             diff: None,
             no_changes: true,
             document: "content".to_string(),
+            linked_changes: vec![],
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -522,10 +811,81 @@ mod tests {
             diff: None,
             no_changes: true,
             document: "content".to_string(),
+            linked_changes: vec![],
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["layout_issues"].as_array().unwrap().len(), 1);
         assert_eq!(parsed["layout_issues"][0], "window index 0 missing");
+    }
+
+    #[test]
+    fn is_url_detects_http() {
+        assert!(is_url("http://example.com"));
+        assert!(is_url("https://example.com/path"));
+        assert!(!is_url("../relative/path.md"));
+        assert!(!is_url("tasks/software/agent-doc.md"));
+        assert!(!is_url(""));
+    }
+
+    #[test]
+    fn is_html_content_detects_html() {
+        assert!(is_html_content("text/html; charset=utf-8"));
+        assert!(is_html_content("text/html"));
+        assert!(is_html_content("application/xhtml+xml"));
+        assert!(!is_html_content("application/json"));
+        assert!(!is_html_content("text/plain"));
+    }
+
+    #[test]
+    fn html_to_markdown_converts_basic_html() {
+        let html = "<h1>Title</h1><p>Hello <strong>world</strong>.</p>";
+        let md = html_to_markdown(html);
+        assert!(md.contains("Title"), "should contain heading text");
+        assert!(md.contains("**world**"), "should convert bold");
+    }
+
+    #[test]
+    fn html_to_markdown_strips_script_and_style() {
+        let html = "<p>Visible</p><script>alert('xss')</script><style>.foo{}</style><p>Also visible</p>";
+        let md = html_to_markdown(html);
+        assert!(md.contains("Visible"));
+        assert!(md.contains("Also visible"));
+        assert!(!md.contains("alert"), "script content should be stripped");
+        assert!(!md.contains(".foo"), "style content should be stripped");
+    }
+
+    #[test]
+    fn html_to_markdown_strips_nav_and_footer() {
+        let html = "<nav><a href='/'>Home</a></nav><main><p>Content</p></main><footer>Copyright</footer>";
+        let md = html_to_markdown(html);
+        assert!(md.contains("Content"));
+        assert!(!md.contains("Home"), "nav content should be stripped");
+        assert!(!md.contains("Copyright"), "footer content should be stripped");
+    }
+
+    #[test]
+    fn url_cache_path_is_deterministic() {
+        let dir = TempDir::new().unwrap();
+        let p1 = url_cache_path(dir.path(), "https://example.com");
+        let p2 = url_cache_path(dir.path(), "https://example.com");
+        assert_eq!(p1, p2, "same URL should produce same cache path");
+
+        let p3 = url_cache_path(dir.path(), "https://other.com");
+        assert_ne!(p1, p3, "different URLs should produce different cache paths");
+        assert!(p1.extension().unwrap() == "txt");
+    }
+
+    #[test]
+    fn links_cache_dir_creates_directory() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Doc\n").unwrap();
+
+        let cache = links_cache_dir(&doc);
+        assert!(cache.is_some());
+        let cache_path = cache.unwrap();
+        assert!(cache_path.exists());
+        assert!(cache_path.ends_with("links_cache"));
     }
 }

@@ -424,7 +424,7 @@ The email **does have content** — it's a `multipart/related` message with both
 **Why Gmail shows no content:** `multipart/related` email with embedded signature images — Gmail's renderer sometimes fails on these boundaries.
 
 Why did corky not parse this message correctly? Why is the body in /home/brian/work/btakita/agent-loop/mail/conversations/lmi-video-conference-interview-confirmation.md blank?
-### Re: Why Corky Produced a Blank Body (HEAD)
+### Re: Why Corky Produced a Blank Body
 
 **Root cause:** Gmail API returns `body.attachmentId` (instead of inline `body.data`) for message parts that exceed its inline size threshold. This happens with:
 - `multipart/related` messages (like this one — embedded images inflate the structure)
@@ -435,7 +435,7 @@ Corky's `Body` struct (`gmail_api_sync.rs:82-86`) only has `data: Option<String>
 **Fix needed:** Add `attachment_id: Option<String>` to `Body`, then when `data` is `None` but `attachment_id` is `Some`, call `GET /gmail/v1/users/me/messages/{messageId}/attachments/{attachmentId}` to fetch the actual content.
 
 Ready to implement when you approve.
-<!-- agent:boundary:23fb39de -->
+<!-- agent:boundary:81375b24 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -275,12 +275,12 @@ Rebuilt the cheat sheet with tighter fonts (7.5pt) and margins. Confirmed 1 page
 
 Fits on 1 page with room to space. Make the font larger.
 ![img_3.png](img_3.png)
-### Re: Committed and Pushed (HEAD)
+### Re: Committed and Pushed
 
 - Ontology files committed and pushed to `existence-lang/ontology` (3 new files: phenomena, noumena, pneuma)
 - existence-lang submodule pointer updated and pushed
 - agent-loop local commits (agent-doc session) are up to date
-<!-- agent:boundary:9584d07a -->
+<!-- agent:boundary:fb204a2d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

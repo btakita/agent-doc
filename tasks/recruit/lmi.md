@@ -701,7 +701,7 @@ Reviewed the Josh Malloy follow-up email for consistency.
 Well you missed something. https://github.com/btakita/agent-loop is the private repo that is mentioned in:
 
 > backed by a private git repo
-### Re: Email Link Fix (HEAD)
+### Re: Email Link Fix
 
 Understood — no granting access to the private repo. You'd create a sample repo if requested.
 
@@ -716,7 +716,7 @@ With:
 This keeps the signal that real code exists without a dead link, and sets the expectation of a curated sample rather than full repo access.
 
 Want me to apply this edit to the draft now?
-<!-- agent:boundary:6220fc5a -->
+<!-- agent:boundary:7f6cf980 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

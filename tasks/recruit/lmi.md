@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-LIGER deep dive complete — call at 1:30 PM ET today
+Interview talking points ready — agent-doc + existence-lang alignment focus
 <!-- /agent:status -->
 
 ## Exchange
@@ -106,13 +106,60 @@ Give more info on LIGER.
 - Your MCP daily usage maps to their tool-calling infrastructure
 - RAG experience with Ragie maps to LIGER's citation-backed RAG
 - You understand that federal security (IL5/IL6, air-gapped, zero-trust) shapes architecture from day one, not bolted on
-<!-- agent:boundary:5dbb6d94 -->
+
+I want to focus on the agent-doc workflow and the existence-lang ontology workflow.
+To achieve human-agent and human-human alignment.
+### Re: agent-doc & existence-lang as Interview Focus (HEAD)
+
+#### agent-doc — Human-Agent Alignment Through Shared State
+
+**The pitch:** agent-doc keeps humans and AI agents aligned on evolving tasks. The document is the shared state — both parties read and write to it, with CRDT merge ensuring neither loses work.
+
+**How it maps to LIGER:**
+- **Human-in-the-loop gates** — your approach: the agent doesn't just execute and report. It maintains a living conversation surface where the human can redirect, annotate, or override at any point. This is exactly what LIGER needs for federal trust.
+- **Template mode with named components** (status, exchange, pending) gives structure to agent outputs — parallels LIGER's need for structured, auditable agent workflows.
+- **Agentic workflow orchestration** — agent-doc manages tool-calling, multi-step reasoning, state management, and streaming checkpoints. The binary handles deterministic operations (CRDT merge, snapshot, git); the skill handles non-deterministic reasoning. Clean separation of concerns.
+- **Built in Rust with Python bindings** (PyO3/maturin) — demonstrates the exact stack they use (systems language + Python ML layer).
+
+**Key technical details to mention:**
+- CRDT-based conflict-free merge (yrs library) — user edits during agent response are never lost
+- Atomic file writes (flock + tempfile + rename) — reliability under concurrency
+- FFI layer for editor plugins (JetBrains, VS Code) via JNA — shared foundation pattern
+- MCP integration for tool orchestration (chrome-devtools, Gmail, calendar, memory)
+
+#### existence-lang — Shared Ontology for Human-Agent & Human-Human Alignment
+
+**The pitch:** A formal ontology (114 terms, 3 rings) giving humans and agents a shared vocabulary. When both parties use the same definitions for "system," "context," "scope," "domain" — ambiguity drops dramatically.
+
+**How it maps to LIGER:**
+- **Ring 0 (14 kernel terms)** always loaded into agent context — your version of DDD's "ubiquitous language" applied to human-agent collaboration
+- **DDD mapping is directly relevant** — LIGER is domain-heavy (federal acquisition, logistics, intelligence). Bounded contexts, ubiquitous language, domain events = architectural maturity signals
+- **Sociotechnical alignment** — connects to Malloy's "Beyond the Vending Machine" insight that agentic AI is a sociotechnical change. You've built the vocabulary layer that makes that change tractable.
+
+**The alignment thesis to articulate:**
+
+> Misalignment between humans and agents (or humans and humans) comes from scope/context divergence — people using the same words with different meanings. agent-doc attacks this with shared document state. existence-lang attacks it with shared vocabulary. Together they form a complete alignment stack: shared terms + shared workspace.
+
+**DDD terms they'll recognize:**
+| DDD Concept | Your Ontology Term | Connection |
+|-------------|-------------------|------------|
+| Ubiquitous Language | language + domain | Scoped vocabulary grounded in the domain model |
+| Bounded Context | scope + context | Limits information for coherent systems |
+| Aggregate | system | A whole of relationships, internally consistent |
+| Domain Event | evolution + signal | State change that triggers responses |
+
+#### Interview Flow Suggestion
+
+1. **Open with agent-doc** — concrete, demonstrable, maps to their daily work
+2. **Bridge to existence-lang** — "the vocabulary layer that makes agent alignment tractable"
+3. **Connect to LIGER** — "you're solving this at enterprise scale for federal missions; I'm solving it at the developer workflow level. Same pattern, different scope."
+<!-- agent:boundary:2ae098ce -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Join Teams call at 1:30 PM ET
-- [ ] Review Malloy's "Beyond the Vending Machine" framing for conversation hooks
-- [ ] Prepare agent-doc demo talking points
+- [ ] Practice the alignment thesis pitch (30 seconds)
+- [ ] Have agent-doc repo open for screen-share if they ask
 <!-- /agent:pending -->

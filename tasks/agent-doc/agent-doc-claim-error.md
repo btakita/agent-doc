@@ -1074,7 +1074,7 @@ This is a **write-back race condition** — two consecutive writes with overlapp
 Want me to remove the duplicate from linkedin.md?
 
 How do we fix the **write-back race condition**?
-### Re: Fix for the write-back race condition (HEAD)
+### Re: Fix for the write-back race condition
 
 The race happens when two writes overlap: Write B starts before Write A's commit updates the snapshot, so B's baseline is stale and the CRDT merge treats A's response as user content → duplication.
 
@@ -1089,7 +1089,7 @@ The race happens when two writes overlap: Write B starts before Write A's commit
 **Recommendation:** Option 3 is the most correct — it eliminates the race entirely by re-reading the snapshot inside the critical section. Options 1-2 are cheaper dedup checks that catch the symptom.
 
 This should be tracked as a separate bug — it's not specific to the layout fix. Want me to add it to `tasks/software/agent-doc.md`?
-<!-- agent:boundary:2c0edc69 -->
+<!-- agent:boundary:93f5b664 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

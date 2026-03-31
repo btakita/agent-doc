@@ -1058,7 +1058,7 @@ Update README.md, SPEC.md, module-harness, ontology.
 - Clippy fixes (collapsible_if in sync.rs)
 
 In tasks/recruit/linkedin.md, the response patch was duplicated. Why?
-### Re: Duplicated response patch in linkedin.md (HEAD)
+### Re: Duplicated response patch in linkedin.md
 
 **What happened:** The "visual verification" response was appended twice. The git history shows commit `c12b51de` added it once correctly. But the working tree has a second copy.
 
@@ -1072,7 +1072,7 @@ This is a **write-back race condition** — two consecutive writes with overlapp
 **Fix the document:** I can remove the duplicate section now. The fix for the underlying race is to ensure the baseline is always fresh — this is already handled by the `--baseline-file` flag, but the Claude session that wrote to linkedin.md may have used a stale baseline.
 
 Want me to remove the duplicate from linkedin.md?
-<!-- agent:boundary:89d96d7b -->
+<!-- agent:boundary:25dccf83 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

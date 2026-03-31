@@ -489,7 +489,24 @@ That waited ~6 rechecks (~1.5s) for the typing to settle.
 3. The typing indicator (`is_typing_via_file`) wasn't active for this document
 
 To diagnose: can you describe what you saw? Did the agent respond to a partial/truncated prompt? Or did it respond before you finished editing?
-<!-- agent:boundary:cf168888 -->
+
+Please add to README.md, if not already done, a note about security. agent-doc is only secure with a single user. Changes are written to a git repo, so any unintended divulgence of data is at the user's risk. A private monorepo base is recommended.
+Please verify security message.
+See tasks/software/ragie-web-doc.md and tasks/recruit/lmi.md for more context.
+### Re: Security section added to README.md (HEAD)
+
+Done. Added a **Security** section to README.md covering:
+
+- **Single user only** ... no multi-user access control, authentication, or session isolation
+- **Private repo recommended** ... session documents may contain sensitive content
+- **Prompt injection risk** ... content pasted from external sources could contain injection attempts, no scanning in place
+- **`--dangerously-skip-permissions` exposure** ... full filesystem access when using this flag
+- **Planned** ... collaborative security for web/networked deployments
+
+The language draws from the ragie-web-doc security analysis (data divulgence through the response channel) and the lmi.md email discussion (single-user model, private git backing, roadmap for collaborative security).
+
+Please review the README.md directly to verify the wording.
+<!-- agent:boundary:92135442 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -504,6 +521,7 @@ To diagnose: can you describe what you saw? Did the agent respond to a partial/t
 - [x] **Tests** — 7 new tests for URL/HTML features
 - [x] **Audit docs** — module specs + evals updated
 - [x] **SPEC.md, README.md** — updated with new features
+- [x] **Security section in README.md** — single-user model, prompt injection, private repo
 - [ ] **Investigate lmi.md debounce failure** — need user description of symptoms
 - [ ] **Optional markitdown/Ragie Parse integration** (PDF, DOCX, OCR)
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)

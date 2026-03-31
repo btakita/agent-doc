@@ -1120,13 +1120,28 @@ The real fix is **pane ownership**: only the Claude session that owns a document
 **Prevention:** The preflight's `agent-doc commit` step should detect that the snapshot already contains the response content. If the snapshot matches the current document (no diff), preflight returns `no_changes: true` and the skill stops.
 
 This is already the designed behavior. The bug is that the second session somehow bypassed this check. Without the linkedin session's logs, I can't determine exactly how. If it happens again, we'll capture the preflight output to diagnose.
-<!-- agent:boundary:c73190c0 -->
+
+How can 2 separate claude sessions generate the exact same response? I suppose it's possible but it seems extremely unlikely.
+### Re: Same session, not two sessions (HEAD)
+
+You're right — two Claude sessions generating identical responses is nearly impossible. It was a **single session that called `agent-doc write` twice with the same content**.
+
+How this happens: the skill piped the response through `agent-doc write --stream`, it succeeded (file updated + snapshot saved). Then something caused the skill to call `agent-doc write` again with the same response — possibly a retry after a perceived failure, or the streaming checkpoint logic flushing the full response after it was already written by the final write.
+
+The snapshot has 1 copy (correct). The working tree has 2 (the second write appended again). The commit only staged from the snapshot, so the git history is clean.
+
+**Root cause is likely in the skill workflow**, not the binary. The skill should never call `agent-doc write` twice for the same response. The `agent-doc commit` between cycles should catch stale state, but if write is called twice within the same cycle (no commit in between), the second write duplicates.
+
+**Fix:** `agent-doc write` should detect if the response content is already present at the boundary marker position and skip the append. This is a binary-side dedup check — cheap and eliminates the symptom regardless of how many times write is called.
+
+Want me to implement this dedup check?
+<!-- agent:boundary:568e4566 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.28.1: Column memory shipped
+- [ ] **Implement write dedup check (skip if response already present at boundary)**
 - [ ] Remove duplicate from linkedin.md
-- [ ] Monitor for recurrence of double-write
 <!-- /agent:pending -->

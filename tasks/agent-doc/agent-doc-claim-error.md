@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-All features implemented, tested, and documented. Ready for release.
+All changes committed and pushed. Ready for v0.29.0 release.
 <!-- /agent:status -->
 
 ## Exchange
@@ -526,29 +526,49 @@ Done. Added **Section 10: Security** to SPEC.md with three subsections:
 - **10.3 Recommendations** ... private repo, no secrets in context, wait for multi-user security, review before sharing
 
 The security content draws from the ragie-web-doc analysis (data divulgence is the fundamental unsolved problem) and aligns with the README security section. The SPEC is more detailed since it's the functional specification for implementors.
+
 ### Re: Security model status
 
 Acknowledged. SPEC.md Section 10 covers the current security model. The "More work TBD" items from the ragie-web-doc analysis (content scanning, session isolation, multi-user access control) are tracked in pending.
 
 All documentation work for this session is complete. Ready for the next priority when you are.
-<!-- agent:boundary:92eb7154 -->
+
+audit docs
+commit and push
+should we release this change?
+### Re: Audit, commit, push, release? (HEAD)
+
+**Audit docs:** 1 issue (pre-existing large table warning in CLAUDE.md). No new issues.
+
+**Committed and pushed:**
+- Submodule: `9f8ddc4` feat: links with URL fetch, HTML-to-markdown, session logging, auto-trigger (778 insertions, 9 files)
+- Parent: `b44d5c34` update agent-doc submodule pointer
+
+**Should we release?** This is a significant feature set:
+- `links` frontmatter with URL fetch + HTML-to-markdown
+- Session logging
+- Auto-trigger on restart
+- Security documentation
+- 7 new tests
+
+I'd recommend **yes, release as v0.29.0** (minor bump for new features). The checklist:
+1. Bump version in Cargo.toml + pyproject.toml
+2. Update VERSIONS.md
+3. `make check` (already passing)
+4. Tag + push tag
+5. `cargo publish` + `maturin publish` + `gh release create`
+6. `cargo install --path .`
+
+Want me to proceed with the release?
+<!-- agent:boundary:62215806 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.28.0-v0.28.3: All shipped
-- [x] **Rename `related_docs` → `links` (with backward-compat alias)**
-- [x] **Session death logging** (`.agent-doc/logs/`)
-- [x] **Auto-trigger on restart** — tmux send-keys after `--continue`
-- [x] **URL link support (fetch + cache + context)**
-- [x] **HTML-to-markdown via htmd** — integrated, deps audited
-- [x] **Tests** — 7 new tests for URL/HTML features
-- [x] **Audit docs** — module specs + evals updated
-- [x] **SPEC.md** — updated with features + security (Section 10)
-- [x] **README.md** — updated with features + security top-note + section
+- [x] All features implemented, tested, documented, committed, pushed
+- [ ] **Release v0.29.0** — version bump, tag, publish (crates.io, PyPI, GitHub Release)
 - [ ] **Collaborative security model** — content scanning, session isolation, multi-user ACL (TBD)
-- [ ] **Investigate lmi.md debounce failure**
 - [ ] **Optional markitdown/Ragie Parse integration** (PDF, DOCX, OCR)
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)
 - [ ] **Editable repo links (git push back)**

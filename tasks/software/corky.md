@@ -398,7 +398,31 @@ release
 - Installed locally: corky 0.22.1 with GPU (transcribe-cuda)
 
 **Note:** Anil may have a duplicate contact again (new `people/c8464968541752362288` created alongside previous entries). May want to merge in Google Contacts.
-<!-- agent:boundary:6a1385fe -->
+
+Look at the email with subject "LMI - Video Conference Interview Confirmation"
+
+There is no content.
+I dowloaded the source to /home/brian/work/btakita/agent-loop/tasks/software/corky/lmi-email-source.txt
+### Re: LMI Interview Confirmation Email (HEAD)
+
+The email **does have content** — it's a `multipart/related` message with both `text/plain` and `text/html` parts. Gmail's web UI isn't rendering it (likely the multipart/related boundary or embedded images confusing the renderer).
+
+**Email summary from source:**
+
+**From:** Kathryn Revels <kathryn.revels@lmisolutions.com>
+**Date:** Mon, Mar 30, 2026, 7:48 PM UTC
+
+- **Interview:** Tuesday, March 31 at 1:30pm EST (today!) — up to 30 minutes
+- **Format:** Video conference on Microsoft Teams (webcam required)
+- **Interview Team:** Luke Stets, Josh Malloy, Andrew Dirks, Adam Hughes
+- **Teams Meeting ID:** 992 946 948 306 / Passcode: qQ2Ph6Fj
+- **LIGER platform:** https://www.lmisolutions.com/platforms/liger
+- **Role:** Full stack dev for LIGER (enterprise AI platform) — Angular/TypeScript, Node/Python, agentic workflows. 100% remote.
+- **Action requested:** Confirm receipt of the email
+- **Note:** Stay on camera, no AI tools during interview (but can share AI workflow examples)
+
+**Why Gmail shows no content:** `multipart/related` email with embedded signature images — Gmail's renderer sometimes fails on these boundaries.
+<!-- agent:boundary:c224ed22 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

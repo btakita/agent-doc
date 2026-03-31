@@ -454,13 +454,47 @@ The agent can converse, answer questions, and write to the document. It can't ex
 **Elevation path:** Sandboxed agent asks user explicitly: "This action requires elevated permissions. Approve?" — same UX as Claude Code's existing tool approval prompts.
 
 **For Bob:** When he processes a shared document via MCP, his Claude Code runs sandboxed by default. He can elevate for his own local docs, but MCP-sourced content is always sandboxed. Same for you processing his content.
-<!-- agent:boundary:21d913f4 -->
+
+Is this true for **all** claude code usage? Is there any way to bypass the sandbox without permission? Via prompt injection?
+### Re: Can prompt injection bypass Claude Code's sandbox? (HEAD)
+
+**Honest answer: `--allowedTools` is enforced at the harness level, not the model level.** This is the key distinction.
+
+**How it works:** Claude Code's harness (the CLI process) filters tool calls before execution. The model may *request* a disallowed tool, but the harness refuses to execute it. The model's output is just text/JSON — actual execution happens in the harness process which the model cannot modify.
+
+```
+Claude model ──"call Bash"──> Claude Code harness
+                                ├── Is Bash in allowedTools? NO
+                                └── Tool call rejected (never executes)
+```
+
+**`--allowedTools` cannot be bypassed via prompt injection alone.** The model can be *tricked into wanting* to run bash, but the harness won't let it.
+
+**Real attack surfaces within an allowed toolset:**
+
+1. **Allowed tool abuse** — If `Read` is allowed without path scoping, injection could convince the model to read `.env`, SSH keys, etc. and include contents in the document response. Mitigation: scope `Read` to only the document file.
+
+2. **Data exfiltration via response** — Even in a pure sandbox, the model could copy sensitive content *already in context* (system prompt, previous conversation) into the document response. Mitigation: don't put secrets in the agent-doc system prompt.
+
+3. **Social engineering** — Injection produces convincing "please run this command" text, tricking the *human* into elevating. Mitigation: user awareness, clear sandbox indicators in the UI.
+
+4. **Tool parameter manipulation** — If `agent-doc write` is allowed, injection could try a different file path. Mitigation: `agent-doc write` validates target against session document path.
+
+**For agent-doc sandbox, the secure tool set:**
+- `agent-doc write <FILE>` (hardcoded path, not model-controlled)
+- `agent-doc commit <FILE>` (same)
+- `Read <FILE>` (same)
+- No other tools
+
+This makes the sandbox genuinely secure against prompt injection. The model can be confused about *what to write*, but it cannot escape the document boundary. The harness enforcement is a hard wall, not a suggestion.
+<!-- agent:boundary:7678a09b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Design sandbox permission model (`--sandbox` flag, `--allowedTools` scoping)
+- [ ] Design sandbox permission model (`--sandbox` flag, `--allowedTools` with path scoping)
+- [ ] Hardcode file paths in sandboxed tool calls (not model-controlled)
 - [ ] Implement auto-detection of shared documents (git history, frontmatter, MCP origin)
 - [ ] Add `trust` frontmatter field for explicit sandbox control
 - [ ] Implement trust tiers for multi-author agent-doc (owner/collaborator/PR/external)

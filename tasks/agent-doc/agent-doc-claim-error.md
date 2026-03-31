@@ -1080,6 +1080,8 @@ Why not **always** re-read the file? Where is this code? in the ffi plugin or in
 
 2. **Baseline** = the document state when the SKILL started generating its response (saved by the SKILL via `cp <FILE> /tmp/baseline.md`). Passed to `agent-doc write --baseline-file`. Used for 3-way merge: if the user edits during response generation, the CRDT merge uses baseline as the common ancestor.
 
+Why not always use CRDT? Is the 3-way merge leftover from the original implementation?
+
 3. **File on disk** = the current document, which may include user edits typed AFTER the agent started generating.
 
 **Why we need the baseline (not just re-read the file):**
@@ -1087,7 +1089,7 @@ Why not **always** re-read the file? Where is this code? in the ffi plugin or in
 The baseline captures the document state BEFORE the agent's response. The file on disk has the user's concurrent edits. The 3-way merge needs both:
 - `baseline` (common ancestor)
 - `content_ours` (baseline + agent response)
-- `file on disk` (baseline + user edits)
+- `file on disk` (baseline + user edits): Actually, it's even more complex. Since the editor has a buffer and may have user edits **not** on disk. Please account for that.
 
 If we always used the current file as baseline, we'd lose the ability to detect and preserve concurrent user edits.
 
@@ -1097,15 +1099,38 @@ The SKILL saves the baseline at the start of step 1 (before generating). Between
 
 **The real fix:** The baseline should be saved AFTER preflight completes (after commit repositions the boundary), not before. That's a SKILL-level fix. The binary guard we added is a safety net for when the SKILL gets this wrong.
 
+If this is deterministic, why not implement as part of the agent-doc binary or as a agent harness hook?
+
 **Could we eliminate baselines entirely?** Yes, if we always re-read the file as the merge ancestor. But then we lose concurrent-edit detection. The tradeoff: baselines enable CRDT merge; the cost is staleness risk.
-<!-- agent:boundary:ae1ce7ba -->
+
+Ok...leave the baseline-vs-snapshot then.
+### Re: CRDT vs 3-way merge, editor buffer, baseline save timing (HEAD)
+
+**Why not always use CRDT?** The 3-way merge IS the CRDT path. `--stream` mode uses `yrs` (Yjs CRDT) for the merge. The "baseline" is the shared origin document that both branches (agent response + user edits) diverged from. Even CRDT needs a common ancestor to merge correctly. Without it, the CRDT would treat the entire file as a conflict on every write.
+
+The 3-way merge predates CRDT (it was the original `similar`-based diff merge). CRDT replaced it for `--stream` mode but still needs the baseline concept.
+
+**Editor buffer vs file on disk:** Correct, there are actually four states:
+1. **Snapshot** (last committed agent state)
+2. **Baseline** (file at response-generation start)
+3. **File on disk** (last save from editor)
+4. **Editor buffer** (unsaved edits in memory)
+
+The IPC write path handles this: the plugin applies patches via the Document API (which operates on the editor buffer, not the disk file). So user's unsaved edits in the buffer are preserved. The disk file is a lagging representation. This is why IPC is preferred over disk writes.
+
+**Why not save baseline in the binary?** Good point. The baseline save IS deterministic. It should happen in `preflight` after the commit step, not in the SKILL. This would eliminate the staleness window entirely.
+
+Implementation: add `--save-baseline <path>` to `agent-doc preflight`. After step 2 (commit + boundary reposition), save the current file as the baseline. The SKILL then passes this path to `agent-doc write --baseline-file`.
+
+This is a one-line addition to preflight. Want me to implement it?
+<!-- agent:boundary:86da6be7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **v0.29.0 released** + ops logging + Bug 1 v2 fix
-- [ ] **SKILL fix: save baseline after preflight** (prevents staleness at source)
+- [ ] **Move baseline save into preflight** (eliminates staleness at source) ← proposed
 - [ ] **Bug 2A: Divergence check before auto-start**
 - [ ] **Bug 2B: Rollback guard in commit()**
 - [ ] **Preflight ops.log anomaly scan**

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Bug 1 v2 (baseline-vs-snapshot guard) deployed. Bug 2 next.
+Preflight baseline save deployed. SKILL.md update pending.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1118,22 +1118,41 @@ The 3-way merge predates CRDT (it was the original `similar`-based diff merge). 
 
 The IPC write path handles this: the plugin applies patches via the Document API (which operates on the editor buffer, not the disk file). So user's unsaved edits in the buffer are preserved. The disk file is a lagging representation. This is why IPC is preferred over disk writes.
 
+Save **Editor buffer vs file on disk:** to our documentation (README.md?). Should it also be in SPEC.md?
+
 **Why not save baseline in the binary?** Good point. The baseline save IS deterministic. It should happen in `preflight` after the commit step, not in the SKILL. This would eliminate the staleness window entirely.
 
 Implementation: add `--save-baseline <path>` to `agent-doc preflight`. After step 2 (commit + boundary reposition), save the current file as the baseline. The SKILL then passes this path to `agent-doc write --baseline-file`.
 
+Meta: We need to save this interaction somewhere. I want to make a blog post about this session. Also, we may want to note this in the email draft to Josh Malloy. See tasks/recruit/lmi.md
+
 This is a one-line addition to preflight. Want me to implement it?
-<!-- agent:boundary:7a7ece51 -->
+Yes. Should this behavior be removed from SKILL.md as well?
+> Meta: We need to save this interaction somewhere. I want to make a blog post about this session. Also, we may want to note this in the email draft to Josh Malloy. See tasks/recruit/lmi.md
+
+I want to have a way to unroll the full context history that led to a certain iteration point either in instruction-files or agent-kit.
+Ideally, we can track an iteration as a narrative story into markdown for evaluation and publication.
+### Re: Preflight baseline deployed + next steps (HEAD)
+
+**Deployed.** Preflight now saves baseline after commit and includes `baseline_file` in JSON output.
+
+**SKILL.md update:** Yes, the SKILL should use `baseline_file` from preflight instead of manual `cp`. Will update next cycle. Old behavior stays as fallback for older binaries.
+
+**Editor buffer docs:** Will add 4-state model (snapshot, baseline, file, buffer) to SPEC.md Section 8.
+
+**Blog post / Josh email:** Noted. This debugging session (CRDT concurrency bug + ops logging + stale baseline) is relevant content for both.
+<!-- agent:boundary:a55df6e0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **v0.29.0 released** + ops logging + Bug 1 v2 fix
-- [ ] **Move baseline save into preflight** (eliminates staleness at source) ← proposed
+- [x] **v0.29.0 released** + ops logging + Bug 1 v2 + preflight baseline
+- [ ] **Update SKILL.md** to use preflight baseline_file
+- [ ] **SPEC.md: 4-state model** (snapshot, baseline, file, buffer)
+- [ ] **Blog post** about this debugging session
 - [ ] **Bug 2A: Divergence check before auto-start**
 - [ ] **Bug 2B: Rollback guard in commit()**
-- [ ] **Preflight ops.log anomaly scan**
 - [ ] **Multi-harness hooks** (agent-kit)
 - [ ] **Collaborative security model** (TBD)
 <!-- /agent:pending -->

@@ -624,7 +624,7 @@ if let Some(ref snap) = snapshot_content {
 Could also add this check to `preflight.rs` step 2 (before commit), where it would detect the divergence and either auto-fix or surface it in the JSON output. This gives the skill a chance to handle it.
 
 Want me to implement this fix?
-### Re: (HEAD) marker false positive risk (HEAD)
+### Re: (HEAD) marker false positive risk
 
 No false positive risk. The `(HEAD)` marker is only added during `commit()` staging — it's injected into the staged content via `add_head_marker()`, never saved to the snapshot itself.
 
@@ -639,7 +639,7 @@ I confirmed: the snapshots that grep-matched `(HEAD)` have it as literal text in
 The 50-byte threshold is safe. The only content difference between snapshot and file in the failure case is the missing agent response (typically hundreds to thousands of bytes).
 
 Want me to implement the fix now?
-<!-- agent:boundary:fef91ca1 -->
+<!-- agent:boundary:f4d348a0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

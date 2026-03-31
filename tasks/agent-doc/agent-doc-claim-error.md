@@ -1180,7 +1180,7 @@ The simplest fix: in the dedup check, strip all `<!-- agent:boundary:* -->` line
 Also: the "external write while typing" confirms the second write was from a **different Claude session** (the tmux pane running the linkedin.md agent-doc), not this session.
 
 Want me to fix the dedup to strip boundary markers?
-<!-- agent:boundary:239bb764 -->
+<!-- agent:boundary:e70f0e78 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

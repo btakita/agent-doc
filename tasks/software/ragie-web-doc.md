@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-Hub-and-spoke architecture chosen | Git-backed server + Ragie sidecar | WebSocket protocol design next
+"Always local, optionally web" architecture | `agent-doc serve` subcommand designed | Implementation planning next
 <!-- /agent:status -->
 
 ## Exchange
@@ -164,15 +164,72 @@ Client C ──ws──┘
 Each client gets a WebSocket connection. Edits from any client are applied server-side and broadcast to all others. The agent-doc CRDT merge handles conflicts if two clients edit simultaneously.
 
 **P2P only makes sense if** you need to work without a server (offline-first, mesh networking). That's not this use case.
-<!-- agent:boundary:de0da3c1 -->
+
+I would like agent-doc local and agent-doc web to seamlessly integrate.
+Would it be fair to make agent-doc web enabled in addition to local fs support (current status)?
+### Re: Seamless local + web integration (HEAD)
+
+Yes — and this is the elegant design. agent-doc shouldn't be "local mode OR web mode." It should be **always local, optionally web-accessible.**
+
+**The key insight: the web server is a thin layer on top of the existing local architecture.** Nothing changes about how agent-doc works — the filesystem, git, snapshots, CRDT merge, preflight/write/commit all stay exactly as they are. The web server just exposes the same operations over HTTP/WebSocket.
+
+#### How it works concretely
+
+```
+                    ┌─── JetBrains plugin (inotify + IPC)
+                    ├─── VS Code extension (inotify + IPC)
+ agent-doc CLI ─────├─── tmux/terminal (direct CLI)
+ (filesystem + git) ├─── agent-doc-web (axum, inotify + WebSocket)
+                    │      └─── Browser A, Browser B, ...
+                    └─── Claude Code skill (/agent-doc)
+```
+
+All clients — IDE plugins, terminal, browser — are peers. They all read/write the same files on disk. The web server is just another client that proxies filesystem operations to/from browsers.
+
+#### Implementation: `agent-doc serve`
+
+A new subcommand that starts the web server:
+
+```bash
+agent-doc serve [--port 8080] [--host 0.0.0.0] [path/to/document.md]
+```
+
+What it does:
+1. **Serves the document** as a web page (CodeMirror editor + rendered preview)
+2. **Watches the file** via inotify — when any local client edits (IDE, CLI), pushes the change to all connected browsers
+3. **Accepts browser edits** via WebSocket — writes them to disk via `agent-doc write --stream`, which triggers inotify for IDE plugins
+4. **Proxies agent-doc operations** — preflight, write, commit are all local CLI calls under the hood
+
+The beauty: **you can edit in JetBrains while Bob watches in the browser.** Both see the same live document. Agent responses appear in both simultaneously because they're all watching the same file.
+
+#### What stays the same
+
+- `agent-doc preflight` — unchanged, reads filesystem
+- `agent-doc write --stream` — unchanged, CRDT merge to filesystem
+- `agent-doc commit` — unchanged, git operations
+- Snapshot storage — unchanged, `.agent-doc/snapshots/`
+- IPC with IDE plugins — unchanged, same mechanism
+
+#### What's new
+
+- `agent-doc serve` — axum HTTP server + WebSocket endpoint
+- Static frontend assets — CodeMirror 6 editor, bundled into the binary
+- WebSocket protocol — edit operations, document sync, cursor positions
+- Optional: auth (API key or session token for remote access)
+
+**So yes — "web-enabled" is the right framing.** Local is the foundation. Web is an optional access layer. No mode switching, no configuration changes. Just `agent-doc serve` and share the URL.
+<!-- agent:boundary:af8949e2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Design web prototype architecture (axum + CodeMirror + WebSocket + hub-and-spoke)
-- [ ] Build web prototype MVP (markdown editor + Ragie retrieval + Claude responses)
-- [ ] Define WebSocket message protocol (edit ops, document sync, agent responses)
+- [ ] Implement `agent-doc serve` subcommand (axum + inotify + WebSocket)
+- [ ] Build CodeMirror 6 frontend (editor + markdown preview + WebSocket client)
+- [ ] Define WebSocket message protocol (edit ops, document sync, cursor positions)
+- [ ] Bundle frontend assets into agent-doc binary (rust-embed or include_bytes)
+- [ ] Add Ragie retrieval panel to web frontend
+- [ ] Add auth layer for remote access (API key or session token)
 - [ ] Test VS Code agent-doc extension
 - [ ] Index demo documents in Ragie (patent proposal, contacts, resume)
 - [ ] Prepare demo script for Bob call

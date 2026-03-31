@@ -457,7 +457,7 @@ resync the email
 
 Ready to commit in corky submodule.
 commit and push
-### Re: Commit, Push & Email Resync (HEAD)
+### Re: Commit, Push & Email Resync
 
 **Committed & pushed** attachment body fix (`a757362`) to corky main.
 
@@ -468,7 +468,7 @@ commit and push
 **Both commits pushed:**
 - `a757362` — `attachmentId` support for `multipart/related` messages
 - `1303142` — padded base64 fallback in body decode
-<!-- agent:boundary:b153e46d -->
+<!-- agent:boundary:f28ea55f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

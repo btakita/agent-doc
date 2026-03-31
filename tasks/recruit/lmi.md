@@ -511,7 +511,7 @@ Want me to draft a LinkedIn connection request / message to Josh about agent-doc
 
 Please add contacts for each of the participants in the interview.
 Please draft an email to Josh Malloy with a thank you and a follow up re: agent-doc
-### Re: Contacts Created + Josh Email Drafted (HEAD)
+### Re: Contacts Created + Josh Email Drafted
 
 #### Contacts Created
 
@@ -534,7 +534,7 @@ Subject: Re: Interview Follow-up — agent-doc & Interactive Document Generation
 Content references his specific interest in interactive document generation with source citation/fact-checking, links to YouTube demos, crates.io, and GitHub. Uses `...` not em dashes.
 
 Review and approve? I'll send with `corky draft push --send` when ready.
-<!-- agent:boundary:d0420b5c -->
+<!-- agent:boundary:18cbf192 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -640,7 +640,7 @@ The 50-byte threshold is safe. The only content difference between snapshot and 
 
 Want me to implement the fix now?
 Note that tasks/recruit/lmi.md had the issue occur again. Why is this happening on lmi.md? Is there something about the file or session that is causing the issue?
-### Re: Recurring lmi.md snapshot divergence (HEAD)
+### Re: Recurring lmi.md snapshot divergence
 
 Investigated the code paths. The IPC write + snapshot save logic looks correct in all paths — `content_ours` is saved as the snapshot when provided. But lmi.md keeps having uncommitted responses.
 
@@ -651,7 +651,7 @@ In other words: the **write** succeeds (snapshot saved), but then the **next pre
 **The fix is still the proposed divergence detection in `commit()`:** When preflight calls `commit()` for any file, it should check if the file has content beyond the snapshot and auto-fix. The preflight commit step already runs for every document cycle — we just need to make it smarter.
 
 **Quick mitigation now:** Let me sync the lmi.md snapshot.
-<!-- agent:boundary:69d2dc76 -->
+<!-- agent:boundary:e1bb1e97 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

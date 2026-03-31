@@ -576,5 +576,29 @@ Use chromium-bridge to visit the comment with the url above
 7. **Hash-style URL** (`eric-irwin-78b7b53bb`) — never customized, auto-generated
 
 **Recommendation: Hide/delete the comment and report the profile.** This is a job scam designed to harvest resumes and personal information via a non-corporate email address. Do not engage or reply.
-<!-- agent:boundary:852c92f7 -->
+
+> Hide/delete the comment and report the profile.
+
+Why do you recommend hiding or deleting the comment? Would I lose the engagement?
+### Re: Why hide/delete — engagement tradeoff (HEAD)
+
+Good question. Here's the tradeoff:
+
+**Hiding the comment** (recommended):
+- Only you and the commenter can see it — everyone else sees it removed
+- Your post's engagement metrics (likes, comment count) are **not affected** — LinkedIn still counts hidden comments in the total
+- The scam email (`bunge.screeningdesk@outlook.com`) is no longer visible to your audience
+- You don't lose any algorithmic benefit
+
+**Deleting the comment:**
+- Permanently removes it — your comment count drops by 1 (2 → 1)
+- Marginal engagement loss, but a scam comment isn't real engagement anyway
+
+**Leaving it visible:**
+- Risk: someone in your network clicks through and gets scammed
+- The comment adds zero value to the conversation
+- It makes your post look like a spam magnet
+
+**Best move: Hide it** (not delete). You keep the engagement number, remove the scam from view, and can report the profile separately. LinkedIn's "Hide comment" is under the three-dot menu on the comment itself.
+<!-- agent:boundary:a567c85a -->
 <!-- /agent:exchange -->

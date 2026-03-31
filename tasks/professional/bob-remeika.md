@@ -1328,7 +1328,7 @@ Yes — that's the move. A working prototype is far more compelling than talking
 5. Bob sees: "This is Ragie-powered document editing, live"
 
 This turns the call from "let me tell you about an idea" into "let me show you a working product that uses your API." Completely different conversation.
-### Re: Demo assets — JB plugin + VS Code + web prototype (HEAD)
+### Re: Demo assets — JB plugin + VS Code + web prototype
 
 You have more demo assets than you think:
 
@@ -1347,7 +1347,7 @@ You have more demo assets than you think:
 3. **Ragie retrieval panel** (2 min) — Show Ragie search results feeding into the document. Makes Ragie's value visible and concrete.
 
 Goes from "working product" → "your API powers the next version" → "here's what your customers see." Strong progression.
-<!-- agent:boundary:63dcb898 -->
+<!-- agent:boundary:8d56acc4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

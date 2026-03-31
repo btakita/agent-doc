@@ -1011,7 +1011,7 @@ Or better: always re-read the file as the baseline if the `--baseline-file` cont
 Want me to implement Bug 1 fix now? It's a quick, targeted change.
 Yes.
 Let's get the Bug 2 fix started after Bug 1 is fixed.
-### Re: Bug 1 fix implemented + Bug 2 next (HEAD)
+### Re: Bug 1 fix implemented + Bug 2 next
 
 **Bug 1 fix deployed.** Stale baseline guard in `write.rs`:
 - Compares `content_ours` against current snapshot
@@ -1028,7 +1028,7 @@ Before starting a new session, check if file has uncommitted content beyond snap
 Compare `### Re:` headings between git HEAD and snapshot. Block staging if headings are missing (unless compaction marker present).
 
 Want me to implement Part A first?
-<!-- agent:boundary:a75188d3 -->
+<!-- agent:boundary:32911f4d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

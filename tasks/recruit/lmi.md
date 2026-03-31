@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Cheat sheet 1-page confirmed — ready for call
+All committed and pushed — call time
 <!-- /agent:status -->
 
 ## Exchange
@@ -272,13 +272,20 @@ commit and push
 Rebuilt the cheat sheet with tighter fonts (7.5pt) and margins. Confirmed 1 page with room to spare. Reload:
 
 `file:///home/brian/work/btakita/agent-loop/tmp/lmi-cheatsheet.pdf`
-<!-- agent:boundary:5c9d89b7 -->
+
+Fits on 1 page with room to space. Make the font larger.
+![img_3.png](img_3.png)
+### Re: Committed and Pushed (HEAD)
+
+- Ontology files committed and pushed to `existence-lang/ontology` (3 new files: phenomena, noumena, pneuma)
+- existence-lang submodule pointer updated and pushed
+- agent-loop local commits (agent-doc session) are up to date
+<!-- agent:boundary:9584d07a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Join Teams call at 1:30 PM ET
-- [x] Fix PDF to 1 page
-- [x] Add pneuma/noumena/phenomena to existence-lang ontology
+- [x] Commit and push ontology + session
 <!-- /agent:pending -->

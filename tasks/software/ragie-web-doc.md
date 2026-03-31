@@ -413,7 +413,7 @@ PR opened ──> CI: agent-doc preflight (sandboxed, no bash)
 This would also include Bob executing my shared document, correct?
 I could also be an attack vector on his machine.
 I wonder if it makes sense to only execute shared documents on a sandbox.
-### Re: Bidirectional trust and sandbox-by-default for shared documents (HEAD)
+### Re: Bidirectional trust and sandbox-by-default for shared documents
 
 **Yes — the trust problem is symmetric.** Your content runs in Bob's agent context too. Neither party should blindly trust the other's document content.
 
@@ -454,7 +454,7 @@ The agent can converse, answer questions, and write to the document. It can't ex
 **Elevation path:** Sandboxed agent asks user explicitly: "This action requires elevated permissions. Approve?" — same UX as Claude Code's existing tool approval prompts.
 
 **For Bob:** When he processes a shared document via MCP, his Claude Code runs sandboxed by default. He can elevate for his own local docs, but MCP-sourced content is always sandboxed. Same for you processing his content.
-<!-- agent:boundary:e873aa8a -->
+<!-- agent:boundary:21d913f4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

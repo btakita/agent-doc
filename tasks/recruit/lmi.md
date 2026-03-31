@@ -109,7 +109,7 @@ Give more info on LIGER.
 
 I want to focus on the agent-doc workflow and the existence-lang ontology workflow.
 To achieve human-agent and human-human alignment.
-### Re: agent-doc & existence-lang as Interview Focus (HEAD)
+### Re: agent-doc & existence-lang as Interview Focus
 
 #### agent-doc — Human-Agent Alignment Through Shared State
 
@@ -153,7 +153,7 @@ To achieve human-agent and human-human alignment.
 1. **Open with agent-doc** — concrete, demonstrable, maps to their daily work
 2. **Bridge to existence-lang** — "the vocabulary layer that makes agent alignment tractable"
 3. **Connect to LIGER** — "you're solving this at enterprise scale for federal missions; I'm solving it at the developer workflow level. Same pattern, different scope."
-<!-- agent:boundary:2ae098ce -->
+<!-- agent:boundary:c27ad060 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

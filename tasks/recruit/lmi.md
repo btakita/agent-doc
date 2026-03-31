@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Josh Malloy email confirmed: jmalloy@lmi.org
+Contacts created, Josh email drafted — awaiting approval
 <!-- /agent:status -->
 
 ## Exchange
@@ -508,15 +508,42 @@ The full team emails from that thread:
 - Adam Hughes: adam.hughes@lmi.org
 
 Want me to draft a LinkedIn connection request / message to Josh about agent-doc?
-<!-- agent:boundary:d60159ce -->
+
+Please add contacts for each of the participants in the interview.
+Please draft an email to Josh Malloy with a thank you and a follow up re: agent-doc
+### Re: Contacts Created + Josh Email Drafted (HEAD)
+
+#### Contacts Created
+
+All 5 interview participants now have contact files in `mail/contacts/`:
+
+- `mail/contacts/kate-revels/AGENTS.md`
+- `mail/contacts/luke-stets/AGENTS.md`
+- `mail/contacts/josh-malloy/AGENTS.md`
+- `mail/contacts/andrew-dirks/AGENTS.md`
+- `mail/contacts/adam-hughes/AGENTS.md`
+
+Each includes role details, email, LinkedIn, tone notes, and interview observations. CLAUDE.md symlinks created.
+
+#### Josh Malloy Email Draft
+
+Draft at: `mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-interactive-document-genera.md`
+
+Subject: Re: Interview Follow-up — agent-doc & Interactive Document Generation
+
+Content references his specific interest in interactive document generation with source citation/fact-checking, links to YouTube demos, crates.io, and GitHub. Uses `...` not em dashes.
+
+Review and approve? I'll send with `corky draft push --send` when ready.
+<!-- agent:boundary:d0420b5c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] LinkedIn message to Josh Malloy re: agent-doc
+- [ ] Send Josh Malloy follow-up email (draft ready, awaiting approval)
+- [x] Created contacts for all 5 interview participants
 - [x] LMI topic document created
-- [x] Thank-you email sent
+- [x] Thank-you email sent to Kate
 - [x] Interview analysis complete
 - [x] Transcription complete
 <!-- /agent:pending -->

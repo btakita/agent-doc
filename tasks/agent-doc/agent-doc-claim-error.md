@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.28.3 released. Dedup strips boundary markers before comparison.
+`related_docs` → `links` rename complete (v0.28.3). URL link support not yet implemented.
 <!-- /agent:status -->
 
 ## Exchange
@@ -134,14 +134,41 @@ links:
 Simple entries (strings) are auto-detected: paths → local file, URLs → fetch+cache. Object entries allow metadata (editable flag, repo URL, refresh interval).
 
 Want me to implement the rename (`related_docs` → `links` with alias) first as a foundation, then build out the URL support?
-<!-- agent:boundary:ee477c08 -->
+Yes
+
+We lost the active claude session running the task `Yes` on the document.
+Why?
+Is it currently running in the background?
+I did notice that the visible tmux window a Claude did
+### Re: Lost session + rename status (HEAD)
+
+**The lost session:** The previous Claude session that received your "Yes" was running in a tmux pane managed by `agent-doc start`. When a session dies (timeout, crash, network issue), the pane goes idle and `agent-doc` doesn't auto-restart — you have to re-invoke `/agent-doc` to pick up where it left off. That's what just happened.
+
+**Is it running in the background?** No. The stash pane %275 is running `tasks/software/corky.md`, not this document. The previous session for this document is gone.
+
+**Rename status:** The `related_docs` → `links` rename is **already done** (committed as `9b87df1` in agent-doc). The `Frontmatter` struct now has:
+```rust
+#[serde(default, skip_serializing_if = "Vec::is_empty", alias = "related_docs")]
+pub links: Vec<String>,
+```
+
+Existing documents using `related_docs:` in frontmatter will continue to work via the alias. New documents should use `links:`.
+
+**Remaining items:**
+- URL link support (fetch + cache + include as context in preflight)
+- Editable repo links (git push back to source)
+- Object entry syntax (metadata like `editable`, `repo`, `refresh`)
+
+Want me to start on URL link support next?
+<!-- agent:boundary:c3a29f7c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.28.0-v0.28.3: All shipped
-- [ ] **Rename `related_docs` → `links` (with backward-compat alias)**
+- [x] **Rename `related_docs` → `links` (with backward-compat alias)** — done in v0.28.3
 - [ ] **URL link support (fetch + cache + context)**
+- [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)
 - [ ] **Editable repo links (git push back)**
 <!-- /agent:pending -->

@@ -1169,7 +1169,7 @@ tasks/recruit/linkedin.md also had an external write as I was typing.
 - Dedup file logging with backtrace to `/tmp/agent-doc-write-dedup.log`
 - Pane ownership verification on write
 - Docs: write.rs module doc, SPEC.md, VERSIONS.md updated
-### Re: Dedup bypassed — boundary marker changes (HEAD)
+### Re: Dedup bypassed — boundary marker changes
 
 Found the issue. The duplicate in linkedin.md has a **different boundary marker ID** (`7a18f6c0` vs `2c9accdb`). The dedup check compares entire merged content, but the boundary marker is regenerated on each write. So `merged_content != current_file_content` because the boundary differs.
 
@@ -1180,7 +1180,7 @@ The simplest fix: in the dedup check, strip all `<!-- agent:boundary:* -->` line
 Also: the "external write while typing" confirms the second write was from a **different Claude session** (the tmux pane running the linkedin.md agent-doc), not this session.
 
 Want me to fix the dedup to strip boundary markers?
-<!-- agent:boundary:82e8e13f -->
+<!-- agent:boundary:239bb764 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

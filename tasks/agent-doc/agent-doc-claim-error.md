@@ -16,7 +16,7 @@ v0.28.3 released. Dedup strips boundary markers before comparison.
 <!-- agent:exchange patch=append -->
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/4674cbdd322fce519fe66718682225f86b088adb9a6e63aa6f5df754c59a4ef1-20260331-140801.md`*
 Does agent-doc support linked documents in the frontmatter?
-### Re: Linked documents in frontmatter (HEAD)
+### Re: Linked documents in frontmatter
 
 No — agent-doc doesn't currently support linked documents in frontmatter. The `Frontmatter` struct has: `session`, `agent`, `model`, `branch`, `format`, `write_mode` — but no field for linked/related documents.
 
@@ -36,7 +36,7 @@ linked:
 - Task dependency tracking
 
 Is this what you're thinking? Or a different use case? This would be a new feature — happy to design it.
-<!-- agent:boundary:e4b15872 -->
+<!-- agent:boundary:dfd5c0a4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

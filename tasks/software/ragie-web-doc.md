@@ -167,7 +167,7 @@ Each client gets a WebSocket connection. Edits from any client are applied serve
 
 I would like agent-doc local and agent-doc web to seamlessly integrate.
 Would it be fair to make agent-doc web enabled in addition to local fs support (current status)?
-### Re: Seamless local + web integration (HEAD)
+### Re: Seamless local + web integration
 
 Yes — and this is the elegant design. agent-doc shouldn't be "local mode OR web mode." It should be **always local, optionally web-accessible.**
 
@@ -218,7 +218,7 @@ The beauty: **you can edit in JetBrains while Bob watches in the browser.** Both
 - Optional: auth (API key or session token for remote access)
 
 **So yes — "web-enabled" is the right framing.** Local is the foundation. Web is an optional access layer. No mode switching, no configuration changes. Just `agent-doc serve` and share the URL.
-<!-- agent:boundary:af8949e2 -->
+<!-- agent:boundary:91df01a9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -821,7 +821,7 @@ if !missing.is_empty() && !snapshot.contains("*Compacted") {
 This is precise: it detects rollback (missing responses) while allowing all legitimate shrinkage (deletions, undo, replace-mode patches, extractions). The only false positive would be if a user manually deleted a `### Re:` heading AND the content below it, which is an intentional edit that should be respected.
 
 We need detailed specs for all of this. Is a single SPEC.md sufficient?
-### Re: Log analysis + ops logging + SPEC structure (HEAD)
+### Re: Log analysis + ops logging + SPEC structure
 
 **Current logs for lmi.md session:**
 ```
@@ -843,7 +843,7 @@ Without these, we're guessing. I've launched a background agent to implement ope
 - `SPEC-security.md` — security model, threat model, recommendations
 
 But splitting prematurely adds navigation overhead. For now, add new sections to the existing SPEC.md. The audit-docs budget allows up to 1000 lines per instruction file, and SPEC.md at 722 has room.
-<!-- agent:boundary:84b6ca11 -->
+<!-- agent:boundary:5bb9f285 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

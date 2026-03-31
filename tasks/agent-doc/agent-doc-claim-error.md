@@ -776,8 +776,8 @@ Can the document shrink without the word "Compacted"?
 
 **Revised theory:** The issue isn't session death. It's the **Claude conversation** inside the session losing its thread. The `start.rs` loop is running fine, but the Claude agent inside:
 1. Ran `agent-doc write --stream` successfully (file updated, snapshot saved)
-2. Then either hit a tool error, lost context, or was interrupted before running `agent-doc commit`
-3. On the next `/agent-doc` cycle, preflight's `commit()` ran with the snapshot but something went wrong with the snapshot state
+2. Then either hit a tool error, lost context, or was interrupted before running `agent-doc commit`: What do the logs say? Anything that should be logged to validate or invalidate this theory that is missing from the logs?
+3. On the next `/agent-doc` cycle, preflight's `commit()` ran with the snapshot but something went wrong with the snapshot state: Do the logs provide any clues? Anything that should be logged that is not logged to provide evidence of what happened?
 
 **What logs are missing:**
 - **Write-level logging**: `agent-doc write` should log every successful write + snapshot save to `.agent-doc/logs/ops.log`
@@ -787,6 +787,7 @@ Can the document shrink without the word "Compacted"?
 **Immediate action:** Add write/commit/snapshot logging so we can trace the exact failure next time it occurs. The session-level logging confirmed the session is stable. Now we need operation-level logging.
 
 Want me to add this logging now?
+Yes
 ### Re: Can the document shrink without "Compacted"?
 
 Yes. Several scenarios:
@@ -818,15 +819,39 @@ if !missing.is_empty() && !snapshot.contains("*Compacted") {
 ```
 
 This is precise: it detects rollback (missing responses) while allowing all legitimate shrinkage (deletions, undo, replace-mode patches, extractions). The only false positive would be if a user manually deleted a `### Re:` heading AND the content below it, which is an intentional edit that should be respected.
-<!-- agent:boundary:15944b56 -->
+
+We need detailed specs for all of this. Is a single SPEC.md sufficient?
+### Re: Log analysis + ops logging + SPEC structure (HEAD)
+
+**Current logs for lmi.md session:**
+```
+[1774992690] session_start file=tasks/recruit/lmi.md pane=%298 session=69cd8603
+[1774992690] claude_start mode=fresh restart_count=0
+```
+That's it. Two lines. No exits, no restarts, no errors. The session has been running continuously for hours. This confirms the `start.rs` loop is stable. What's missing: any record of what the Claude conversation DID during those hours (writes, commits, snapshot saves).
+
+**What needs logging to validate/invalidate the theory:**
+- Did `agent-doc write --stream` succeed? (snapshot save event)
+- Did `agent-doc commit` run after the write? (commit staging event)
+- Was the snapshot length consistent with the file? (comparison at commit time)
+
+Without these, we're guessing. I've launched a background agent to implement operation-level logging now.
+
+**SPEC.md structure:** A single SPEC.md is fine for now. It's at 722 lines. If it grows past ~1000 lines, consider splitting into:
+- `SPEC.md` — core behavior (document format, snapshot, diff, write, git)
+- `SPEC-session.md` — session lifecycle (start, route, sync, claim, focus)
+- `SPEC-security.md` — security model, threat model, recommendations
+
+But splitting prematurely adds navigation overhead. For now, add new sections to the existing SPEC.md. The audit-docs budget allows up to 1000 lines per instruction file, and SPEC.md at 722 has room.
+<!-- agent:boundary:84b6ca11 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **v0.29.0 released**
-- [ ] **Add operation-level logging** (write, commit, snapshot events)
-- [ ] **Re: heading rollback guard in commit()** (precise detection, compaction-safe)
+- [ ] **Operation-level logging** — write, commit, snapshot events to ops.log ← implementing now
+- [ ] **Re: heading rollback guard in commit()** — precise detection, compaction-safe
 - [ ] **Session dedup** (prevent duplicate sessions for same file)
 - [ ] **Collaborative security model** (TBD)
 - [ ] **Optional markitdown/Ragie Parse integration** (PDF, DOCX, OCR)

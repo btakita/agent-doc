@@ -285,7 +285,7 @@ Fits on 1 page with room to space. Make the font larger.
 Bumped fonts from 7.5pt → 8.5pt body, headers proportionally larger. Still fits on 1 page with good readability. Reload:
 
 `file:///home/brian/work/btakita/agent-loop/tmp/lmi-cheatsheet.pdf`
-<!-- agent:boundary:29272499 -->
+<!-- agent:boundary:1f3b3fe7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

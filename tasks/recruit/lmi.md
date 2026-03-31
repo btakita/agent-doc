@@ -623,8 +623,8 @@ Failing to disclose is far worse than disclosing. The clearance process rewards 
 
 **Is this job worth pursuing?**
 LMI works at IL5/IL6 (DoD). If the role requires TS/SCI, the clearance timeline alone is 12-18 months. Consider:
-- If the collaboration with Lucas is purely professional/open-source, it's easier to frame
-- If it involves shared proprietary work or he has access to your systems, that's more complex
+- If the collaboration with Lucas is purely professional/open-source, it's easier to frame: purely professional/open-source
+- If it involves shared proprietary work or he has access to your systems, that's more complex: He does not have access to proprietary work. He has access to a sandboxed Mac Mini with limited account access.
 - The interview seemed focused on your technical skills (agent-doc, full-stack)...the clearance question comes later in the pipeline
 
 **Can I still help without being an applicant?**
@@ -636,7 +636,32 @@ Potentially yes. LMI also does:
 You could frame it as: interested in the technical mission, open to roles that match your clearance eligibility. Many defense contractors have both cleared and uncleared positions.
 
 **My recommendation:** Don't self-select out yet. If you're interested in the work, continue the process. The clearance investigation is where these questions get formally evaluated...you don't need to solve them upfront. Be prepared to be fully transparent about the Lucas collaboration if/when you reach the SF-86 stage.
-<!-- agent:boundary:9d475fcd -->
+
+If that were the case, can I still use him as a subcontract?
+### Re: Subcontracting a Foreign National on Cleared Work (HEAD)
+
+**Short answer:** It depends entirely on the classification level of the work.
+
+**Unclassified work:** Yes, you can subcontract Lucas on unclassified projects with no clearance issues. Many defense contractors use foreign national subcontractors for unclassified/commercial work. No SF-86 implications.
+
+**CUI (Controlled Unclassified Information):** Possible but restricted. CUI requires NIST 800-171 compliance and often US-person restrictions in contract clauses. You'd need to check the specific contract's DFARS clauses.
+
+**Classified work (Secret/TS):** No. Foreign nationals cannot access classified information, period. Even as a subcontractor, Lucas could not touch classified deliverables, systems, or data. This is a hard legal boundary under ITAR/EAR and the NISPOM.
+
+**The practical play for LMI work:**
+- You take the cleared role and handle classified deliverables
+- Lucas works on open-source/unclassified components (like agent-doc's public codebase)
+- Clean separation between classified and unclassified work streams
+- This is actually a common pattern in defense contracting...companies routinely have mixed teams where cleared staff handle sensitive work and uncleared/foreign contractors handle the open components
+
+**Your situation is actually favorable:**
+- The collaboration is open-source (publicly visible, no secrets)
+- He has sandboxed, limited access (not full system access)
+- The work product (agent-doc) is a public tool, not classified IP
+- You can clearly demonstrate compartmentalization
+
+This is the kind of arrangement that clearance adjudicators see regularly. The key is: can you demonstrate that classified and unclassified work are cleanly separated? Your setup suggests yes.
+<!-- agent:boundary:2ae2e72a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -646,7 +671,9 @@ You could frame it as: interested in the technical mission, open to roles that m
 - [ ] agent-doc README: security section (single-user, prompt injection)
 - [ ] Corky: HTML body extraction for emails
 - [ ] Research LMI uncleared role options
+- [ ] Explore LMI subcontracting structure for mixed cleared/uncleared teams
 - [x] All contacts created
 - [x] All post-interview tasks complete
 - [x] Security clearance foreign collaboration guidance provided
+- [x] Subcontracting foreign national guidance provided
 <!-- /agent:pending -->

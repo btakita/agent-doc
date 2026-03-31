@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-Josh email revised with interest alignment — awaiting approval
+Josh email ready (has content) — awaiting send approval
 <!-- /agent:status -->
 
 ## Exchange
@@ -501,6 +501,8 @@ Do we have confirmation for Josh Malloy's email address anywhere?
 
 Yes. From `mail/conversations/interview-with-brian-takita-2026-13755-full-stack-developer.md`:
 
+This draft is empty...no body.
+
 **jmalloy@lmi.org**
 
 The full team emails from that thread:
@@ -549,15 +551,22 @@ Updated the draft to directly map his stated interests to agent-doc capabilities
 Draft at: `mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-interactive-document-genera.md`
 
 Review and approve to send.
-<!-- agent:boundary:1cc6b275 -->
+
+Note that I'm exploring security concerns in tasks/software/ragie-web-doc.md
+### Re: Draft Status + Security Note (HEAD)
+
+The Josh Malloy draft **does have content** (31 lines). The "empty draft" issue was the Kate Revels draft from earlier (which I filled and sent). The Josh draft at `mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-interactive-document-genera.md` has the full aligned email with claim identification, CRDT merge, auditable state, and "Beyond the Vending Machine" connection.
+
+Noted re: security concerns in `tasks/software/ragie-web-doc.md`. That's relevant context for the LIGER conversation since they deploy at IL5/IL6.
+
+Ready to send the Josh email? Set status to `approved` and push?
+<!-- agent:boundary:ca97eb01 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Send Josh Malloy follow-up email (revised draft ready)
-- [x] Created contacts for all 5 participants
-- [x] LMI topic document
-- [x] Thank-you email to Kate
-- [x] Interview analysis + transcription
+- [ ] Send Josh Malloy follow-up email
+- [x] All contacts created
+- [x] All post-interview tasks complete
 <!-- /agent:pending -->

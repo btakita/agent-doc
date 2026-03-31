@@ -1091,7 +1091,7 @@ The race happens when two writes overlap: Write B starts before Write A's commit
 This should be tracked as a separate bug — it's not specific to the layout fix. Want me to add it to `tasks/software/agent-doc.md`?
 Keep it here.
 Write A should occur before Write B. There should not be a race.
-### Re: Write serialization (HEAD)
+### Re: Write serialization
 
 You're right — writes should be serialized, not raced. The skill workflow is sequential: preflight → respond → write → commit → next cycle.
 
@@ -1105,7 +1105,7 @@ You're right — writes should be serialized, not raced. The skill workflow is s
 **Prevention:** The `agent-doc preflight` already commits previous cycle changes, which should prevent double-writes. But if two Claude sessions are running for the same document (e.g., this session + a tmux session), both could write independently.
 
 **Fix for linkedin.md:** I'll remove the duplicate from the working tree now.
-<!-- agent:boundary:ca9883b1 -->
+<!-- agent:boundary:7248fc9a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

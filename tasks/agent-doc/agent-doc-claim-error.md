@@ -927,6 +927,7 @@ If another full scan needs to occur, add an endpoint and an agent harness hook f
 This may involve a claude code hook. We would need a codex compatible hook. opencode and pi hooks are also needed. Implement these hooks in agent-kit.
 
 tasks/software/corky.md just restarted when I navigated to the file in the editor. Why?
+tasks/recruit/lmi.md has uncommitted response patch for the 3rd time in a row. What is the pattern?
 ### Re: Performance, log rotation, hooks, and corky.md restart
 
 **Corky.md restart confirmed by session logs:**
@@ -953,19 +954,48 @@ This belongs in `tasks/software/agent-doc.md` as a feature track, not in this bu
 - Orphaned writes (write without subsequent commit)
 - Snapshot rollbacks (snap_len decreased without compaction)
 - Session restarts (multiple session_start for same file)
-<!-- agent:boundary:6defd996 -->
+### Re: Third occurrence — ops.log reveals the pattern (HEAD)
+
+The ops.log captured the exact failure:
+
+```
+[1774997542] commit_staging snap_len=48172 file_len=48529   ← preflight commit (ok)
+[1774997542] snapshot_save len=48172                         ← snapshot after commit
+[1774997567] snapshot_save len=47461                         ← snapshot SHRUNK by 711 bytes!
+[1774997567] ipc_write_consumed patches=2                    ← write happened
+[1774997570] commit_staging snap_len=47461 file_len=49424    ← snapshot 1963B short of file!
+[1774997570] commit_success                                  ← committed with stale snapshot
+```
+
+**Root cause identified:** The snapshot shrunk from 48172 to 47461 at the same timestamp as `ipc_write_consumed`. This means `content_ours` (baseline + patches applied) was **smaller** than the previous snapshot. The baseline file passed to `agent-doc write --stream --baseline-file` was stale.
+
+**Why the baseline is stale:** The SKILL saves the baseline at the start of step 1 (`cp <FILE> /tmp/agent-doc-baseline-$$.md`). Between that save and the `agent-doc write` call, the file may have been modified by another session writing to it, or by the commit step repositioning the boundary. The baseline no longer matches the current file.
+
+**The fix:** `content_ours` should never be smaller than the previous snapshot. In `write.rs`, after computing `content_ours`, compare against the current snapshot:
+
+```rust
+let current_snap = snapshot::load(file)?.unwrap_or_default();
+if content_ours.len() < current_snap.len() - 100 {
+    // content_ours is suspiciously smaller — use file content instead
+    eprintln!("[write] WARNING: content_ours ({}) smaller than snapshot ({}) — using file content",
+        content_ours.len(), current_snap.len());
+    content_ours = std::fs::read_to_string(file)?;
+}
+```
+
+Or better: always re-read the file as the baseline if the `--baseline-file` content doesn't match the current snapshot.
+<!-- agent:boundary:3b72881b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **v0.29.0 released**
-- [x] **Operation-level logging** — deployed, capturing corky.md restart evidence
-- [ ] **Fix duplicate session starts** — route/sync creating new panes when old ones die ← root cause confirmed
-- [ ] **SPEC.md split threshold** — add 1000-line rule
-- [ ] **Preflight ops.log anomaly scan** — lightweight, last-50-lines check
-- [ ] **`agent-doc audit-ops`** — full ops.log audit command
-- [ ] **Rollback guard in commit()** — Re: heading comparison
-- [ ] **Multi-harness hooks** (agent-kit: Codex, opencode, pi) — move to agent-doc.md task
+- [x] **Operation-level logging** — deployed, revealed the pattern
+- [ ] **Fix: stale baseline causing snapshot shrinkage** — content_ours guard in write.rs ← root cause found
+- [ ] **Preflight ops.log anomaly scan**
+- [ ] **Rollback guard in commit()**
+- [ ] **Session dedup** (prevent duplicate sessions for same file)
+- [ ] **Multi-harness hooks** (agent-kit) — move to agent-doc.md
 - [ ] **Collaborative security model** (TBD)
 <!-- /agent:pending -->

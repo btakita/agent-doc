@@ -701,7 +701,7 @@ Reviewed the Josh Malloy follow-up email for consistency.
 Well you missed something. https://github.com/btakita/agent-loop is the private repo that is mentioned in:
 
 > backed by a private git repo
-### Re: Private Repo Correction (HEAD)
+### Re: Private Repo Correction
 
 You're right — I missed that. `btakita/agent-loop` is confirmed private on GitHub. "Backed by a private git repo" is literally accurate.
 
@@ -712,7 +712,7 @@ You're right — I missed that. `btakita/agent-loop` is confirmed private on Git
 2. Replace with "Source available on request" to signal real code without a dead link
 3. Replace with the public agent-doc GitHub repo if one exists separately
 4. Keep it and mention "private repo, happy to grant access if you'd like to review the code": I don't want to grant access. I can create a sample repo if requested.
-### Re: Email Link Fix (HEAD)
+### Re: Email Link Fix
 
 Understood — no granting access to the private repo. You'd create a sample repo if requested.
 
@@ -738,7 +738,7 @@ Applied the edit to the email draft. Line 26 now reads:
 > - Source: private repo; happy to prepare a sample repo for review
 
 Draft is ready to send. Want to approve it?
-<!-- agent:boundary:c0b927b1 -->
+<!-- agent:boundary:c6e556d1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

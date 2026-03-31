@@ -163,7 +163,7 @@ Existing documents using `related_docs:` in frontmatter will continue to work vi
 Want me to start on URL link support next?
 Yes
 I did notice that the visible tmux window had a single tmux pane with a new Claude session.
-### Re: Why did the session die + logging (HEAD)
+### Re: Why did the session die + logging
 
 **What happened:** Looking at `start.rs`, the restart loop (line 96-137) shows the behavior:
 - Non-zero exit → auto-restart with `--continue` after 2s
@@ -179,7 +179,7 @@ The "single tmux pane with a new Claude session" you saw was likely Claude resta
 
 This would let you debug "what happened to my session?" after the fact.
 
-### Re: URL link support — approved (HEAD)
+### Re: URL link support — approved
 
 Adding to pending. This is a meaningful feature — I'll design the implementation before coding.
 
@@ -190,7 +190,7 @@ Adding to pending. This is a meaningful feature — I'll design the implementati
 4. **Cache invalidation:** Re-fetch on each preflight (URLs are cheap to fetch, and staleness is worse than latency)
 
 Want me to implement this now, or should we address the session logging first?
-<!-- agent:boundary:b9467c7d -->
+<!-- agent:boundary:2bfbbcd9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

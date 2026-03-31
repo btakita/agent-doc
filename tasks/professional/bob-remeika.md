@@ -1349,7 +1349,7 @@ You have more demo assets than you think:
 Goes from "working product" → "your API powers the next version" → "here's what your customers see." Strong progression.
 
 The call is scheduled for 30 minutes.
-### Re: 30-minute call time budget (HEAD)
+### Re: 30-minute call time budget
 
 30 minutes goes fast. Here's a realistic allocation:
 
@@ -1363,7 +1363,7 @@ The call is scheduled for 30 minutes.
 **Key:** Don't force all three demos. Pick one or two based on Bob's reactions. If JB plugin excites him, go deep there. If he's more into the web vision, pivot. Read the room.
 
 **If web prototype isn't ready:** Fine. JB plugin is a real product. Walk through web architecture on a document. "Here's what I'm building next with your API" still lands without a live demo.
-<!-- agent:boundary:571aa393 -->
+<!-- agent:boundary:bc672d54 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

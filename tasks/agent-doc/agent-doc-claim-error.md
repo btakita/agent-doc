@@ -583,15 +583,56 @@ This is the exact scenario the `recover` step in preflight is designed to catch 
 **Fix applied:** Updated the snapshot to match the current file content, then ran `agent-doc commit`. The response is now committed and the gutter is clean.
 
 **Bug to track:** `agent-doc commit` should detect when the file has content not in the snapshot and handle it (either by updating the snapshot or warning). Currently it silently ignores this divergence.
-<!-- agent:boundary:869a10ad -->
+
+Propose bug fix
+### Re: Bug fix proposal — snapshot/file divergence detection (HEAD)
+
+**The bug:** When `agent-doc write` succeeds (file updated via IPC) but the snapshot isn't saved (crash, IPC timeout, plugin error), subsequent `agent-doc commit` stages the stale snapshot content, leaving the actual response uncommitted.
+
+**Where the fix goes:** `git.rs:commit()`, line 132-134.
+
+**Proposed fix — divergence detection in commit:**
+
+```rust
+// After loading snapshot, compare against file content
+let snapshot_content = crate::snapshot::load(file)?;
+if let Some(ref snap) = snapshot_content {
+    let file_content = std::fs::read_to_string(file)?;
+    // Strip boundary markers for comparison
+    let snap_clean = crate::boundary::remove_all_boundaries(snap);
+    let file_clean = crate::boundary::remove_all_boundaries(&file_content);
+    
+    if file_clean.len() > snap_clean.len() + 50 {
+        // File has significant content beyond snapshot — likely an unsynced write
+        eprintln!("[commit] WARNING: file has {} bytes beyond snapshot — updating snapshot",
+            file_clean.len() - snap_clean.len());
+        // Update snapshot to match file before staging
+        crate::snapshot::save(file, &file_content)?;
+        // Re-load updated snapshot for staging
+        let updated_snap = file_content;
+        // ... use updated_snap for staging instead of snap
+    }
+}
+```
+
+**Key design decisions:**
+1. **50-byte threshold** — avoids false positives from minor whitespace/boundary differences
+2. **Auto-fix, not just warn** — updates the snapshot so the commit includes the response
+3. **Length comparison, not content diff** — fast, and the failure mode is always "file has more content than snapshot" (a response was written but snapshot wasn't saved)
+
+**Alternative: preflight-level detection**
+Could also add this check to `preflight.rs` step 2 (before commit), where it would detect the divergence and either auto-fix or surface it in the JSON output. This gives the skill a chance to handle it.
+
+Want me to implement this fix?
+<!-- agent:boundary:fd37e194 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **v0.29.0 released** — links, htmd, session logging, auto-trigger, security docs
-- [ ] **Bug: snapshot/file divergence detection** — commit should warn/fix when file has content not in snapshot
-- [ ] **Collaborative security model** — content scanning, session isolation, multi-user ACL (TBD)
+- [x] **v0.29.0 released**
+- [ ] **Bug fix: snapshot/file divergence** — auto-detect and fix in commit() ← proposed
+- [ ] **Collaborative security model** (TBD)
 - [ ] **Optional markitdown/Ragie Parse integration** (PDF, DOCX, OCR)
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)
 - [ ] **Editable repo links (git push back)**

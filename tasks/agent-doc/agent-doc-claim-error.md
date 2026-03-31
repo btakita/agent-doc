@@ -657,7 +657,7 @@ We need to have an accurate check of all running claude sessions + tmux panes.
 The requisite logging should also occur.
 The running session validation check needs to be accurate and comprehensive and happen when running any agent-doc command that could start a new tmux pane + claude session.
 How can we do this?
-### Re: Session validation and duplicate prevention (HEAD)
+### Re: Session validation and duplicate prevention
 
 You're describing a critical issue: the editor sync triggered a **new session** for lmi.md even though one was already running. This means the existing session's pane was either dead or not properly detected.
 
@@ -693,7 +693,7 @@ Before starting a new Claude process for a document, check if any `claude` proce
 4. Log all session lifecycle events to `.agent-doc/logs/sessions.log`
 
 Want me to implement this? It's a v0.29.1 fix.
-<!-- agent:boundary:0957ead7 -->
+<!-- agent:boundary:e2c3421e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

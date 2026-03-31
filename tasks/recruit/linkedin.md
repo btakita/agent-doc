@@ -580,7 +580,7 @@ Use chromium-bridge to visit the comment with the url above
 > Hide/delete the comment and report the profile.
 
 Why do you recommend hiding or deleting the comment? Would I lose the engagement?
-### Re: Why hide/delete — engagement tradeoff (HEAD)
+### Re: Why hide/delete — engagement tradeoff
 
 Good question. Here's the tradeoff:
 
@@ -600,5 +600,5 @@ Good question. Here's the tradeoff:
 - It makes your post look like a spam magnet
 
 **Best move: Hide it** (not delete). You keep the engagement number, remove the scam from view, and can report the profile separately. LinkedIn's "Hide comment" is under the three-dot menu on the comment itself.
-<!-- agent:boundary:a567c85a -->
+<!-- agent:boundary:4fd5e666 -->
 <!-- /agent:exchange -->

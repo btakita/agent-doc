@@ -464,7 +464,32 @@ All 361 tests pass, 0 failures.
 **README.md updated:** Added "Linked resources" and "Session logging" to Key Features.
 
 **Audit result:** 1 remaining issue — pre-existing large table warning in CLAUDE.md (not related to our changes).
-<!-- agent:boundary:b28fd4d2 -->
+
+The debouncing in tasks/recruit/lmi.md did not work. Why not?
+### Re: LMI debounce not working (HEAD)
+
+The debounce in preflight has two layers:
+
+1. **Step 3b — mtime debounce** (500ms): Waits until the file's mtime is at least 500ms old before computing the diff. This prevents picking up mid-save edits.
+
+2. **Diff truncation detection** (step 4): After computing the diff, checks if the last line looks like it's actively being typed (short, growing). Rechecks up to 12 times with delays.
+
+**What likely happened with lmi.md:** The debounce works based on **file mtime** — it waits for the file to stop being modified. But if the user saves the file and then immediately runs `/agent-doc` (or agent-doc is auto-triggered), the 500ms mtime debounce may have already passed by the time preflight reaches step 3b.
+
+**The truncation detection in the diff step** is what caught the partial typing in this document's earlier preflight:
+```
+[diff] Last line may be truncated (recheck 1/12): "Are there"
+[diff] Last line may be truncated (recheck 6/12): "Are there any solutions for this type of issue"
+```
+That waited ~6 rechecks (~1.5s) for the typing to settle.
+
+**Possible failure modes:**
+1. The editor auto-saves, but the user is still typing — the mtime debounce sees a settled file even though the buffer has unsaved changes
+2. The debounce timeout (3s) expired before typing finished
+3. The typing indicator (`is_typing_via_file`) wasn't active for this document
+
+To diagnose: can you describe what you saw? Did the agent respond to a partial/truncated prompt? Or did it respond before you finished editing?
+<!-- agent:boundary:d9c74ef1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -479,6 +504,7 @@ All 361 tests pass, 0 failures.
 - [x] **Tests** — 7 new tests for URL/HTML features
 - [x] **Audit docs** — module specs + evals updated
 - [x] **SPEC.md, README.md** — updated with new features
+- [ ] **Investigate lmi.md debounce failure** — need user description of symptoms
 - [ ] **Optional markitdown/Ragie Parse integration** (PDF, DOCX, OCR)
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)
 - [ ] **Editable repo links (git push back)**

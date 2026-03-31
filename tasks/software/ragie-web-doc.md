@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-"Always local, optionally web" architecture | `agent-doc serve` subcommand designed | Implementation planning next
+"Always local, optionally web" architecture | Sandbox security model designed | Trust tiers: owner/collaborator/PR/external
 <!-- /agent:status -->
 
 ## Exchange
@@ -339,18 +339,85 @@ Uses a relay (cloudflared tunnel or self-hosted) to expose the local MCP server 
 
 **Prompt injection — your instinct is correct.** Bob's Claude Code sending tool calls to your MCP server is a surface. The safe architecture:
 
-- Bob gets **scoped MCP access** (read + write to specific documents only)
+- Bob gets **scoped MCP access** (read + write to specific documents only): This still requires a high level of trust as in if the agent doc is run with prompt injection on my system due to an edit...my system can be compromised. Should we have a git based model instead? Where prompt injections can be sandboxed? How would that even be possible with multiple authors on an agent doc?
 - Bob uses his **own Claude Code session** (his model, his API key, his context)
 - Your agent-doc remains local — Bob's edits come through `write_document` but are applied via CRDT merge (text only, no code execution)
 - Future sandbox: per-tool permissions, audit logging, rate limiting, content filtering
 
-**For MVP:** Bob connects via MCP, gets `read_document` + `write_document` scoped to specific files, uses his own Claude Code. No shared model context. The only prompt injection vector is document content itself, which is mitigated by document-level scoping.
-<!-- agent:boundary:c43e32af -->
+**For MVP:** Bob connects via MCP, gets `read_document` + `write_document` scoped to specific files, uses his own Claude Code. No shared model context. The only prompt injection vector is document content itself, which is mitigated by document-level scoping.: While sharing is great idea, I want to project against prompt injection. Even if we don't share, but if there's a repo with pull requests...someone can make a PR with prompt injection. agent-doc may need to be sandboxed by default for true security.
+### Re: Prompt injection sandboxing — the real threat model (HEAD)
+
+You're identifying the fundamental tension: **agent-doc documents are processed by an LLM with tool access.** Any content in the document is potential prompt injection, regardless of source — collaborator, PR, or Ragie retrieval.
+
+**The threat isn't the MCP transport — it's the agent loop itself.**
+
+Even without sharing:
+- A PR modifies a `.md` file → your agent-doc session processes it → injected instructions execute via Claude Code's tools
+- Ragie retrieval returns poisoned content → lands in agent context → same problem
+- Bob pastes content from a compromised source into the shared doc
+
+**Git-based model — necessary but not sufficient.** Git gives authorship tracking, review gates, and branch isolation. But once content is in the document and the agent processes it, the injection has already landed.
+
+#### Layer 1: Execution sandbox (strongest defense)
+
+The agent-doc session runs in a restricted environment:
+
+```
+agent-doc process ──> Claude Code (sandboxed)
+                        ├── NO bash (or restricted allowlist)
+                        ├── File writes scoped to document + snapshots only
+                        ├── No network access (or allowlisted endpoints)
+                        └── No git push, no secret access
+```
+
+Implementation: `agent-doc` launches Claude Code with `--allowedTools` restricting to `Read`, `Edit` on the document file, and `agent-doc write/commit`. No `Bash`, no `WebFetch`, no arbitrary file access. Principle of least privilege.
+
+Today's `--dangerously-skip-permissions` is the opposite of this. A sandboxed mode:
+```bash
+agent-doc serve --sandbox  # restricted tool access by default
+```
+
+#### Layer 2: Content boundaries (defense in depth)
+
+- **Structured extraction** — diff wrapped in `<user-edit>...</user-edit>`, system prompt treats it as untrusted data
+- **No raw document in system prompt** — content goes in user message (lower injection leverage)
+- **Comment stripping** — already exists, removes one injection vector
+
+#### Layer 3: Trust tiers for multi-author
+
+```
+Tier 0: Owner (you)         — full tool access, unrestricted
+Tier 1: Trusted collaborator — scoped tools, document-only writes
+Tier 2: PR contributor       — read-only processing, no tool execution
+Tier 3: External content     — Ragie, web fetches — untrusted data only
+```
+
+**Each author's edits processed by their own Claude Code session.** Execution is never shared. If Bob's edit contains injection, it runs in Bob's sandbox, not yours. When you process it, his content is framed as "collaborator edit" not instructions.
+
+#### PR workflow with sandboxing
+
+```
+PR opened ──> CI: agent-doc preflight (sandboxed, no bash)
+           ──> Reports diff summary
+           ──> Human reviews content
+           ──> Merge to main
+           ──> Your session processes merged content
+```
+
+**For MVP:**
+1. Default to sandboxed execution — restricted Claude Code permissions unless explicitly elevated
+2. Each author runs their own agent — no shared Claude context
+3. Git review gates for PRs — content reviewed before entering main
+4. Treat all document content as untrusted — system prompt explicitly frames it as user data, not instructions
+<!-- agent:boundary:a33af68d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Design sandbox permission model (`--sandbox` flag, `--allowedTools` scoping)
+- [ ] Implement trust tiers for multi-author agent-doc (owner/collaborator/PR/external)
+- [ ] Add `<user-edit>` content boundaries to agent-doc preflight output
 - [ ] Design MCP server tool schema (`read_document`, `write_document`, `preflight`, `list_documents`)
 - [ ] Implement `agent-doc mcp-server` subcommand (stdio transport)
 - [ ] Add `--share` flag with cloudflared tunnel integration for instant HTTPS sharing

@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-WebSocket chosen over WebRTC | links field updated | Web prototype architecture design next
+Hub-and-spoke architecture chosen | Git-backed server + Ragie sidecar | WebSocket protocol design next
 <!-- /agent:status -->
 
 ## Exchange
@@ -107,14 +107,72 @@ Browser <──ws── Server (push updated document)
 The server watches the file (inotify on Linux) and pushes changes. The browser sends edit operations as WebSocket messages. The server applies them via `agent-doc write --stream` (CRDT merge handles conflicts).
 
 **Good call on the `links` rename** — that matches agent-doc v0.28.3's field rename from `related_docs` to `links`.
-<!-- agent:boundary:480be12f -->
+
+How would this look for web collaboration? Could Ragie, or a file server, host the source document?
+How would websockets come into play? Should we consider P2P or have a service broker all communication?
+### Re: Web collaboration architecture — document hosting and communication topology (HEAD)
+
+**Could Ragie or a file server host the source document?**
+
+Two viable architectures, depending on what you want:
+
+#### Option A: Git-backed server (recommended for MVP)
+
+The server owns the git repo and the markdown files. Ragie is a **retrieval sidecar**, not the document store.
+
+```
+Browser ──ws──> agent-doc-web (axum)
+                  ├── filesystem: markdown files + git
+                  ├── agent-doc CLI: preflight/write/commit
+                  ├── Claude API: agent responses
+                  └── Ragie API: context retrieval (read-only)
+```
+
+- Documents live on the server's filesystem, versioned by git
+- Ragie indexes documents for retrieval but doesn't own them
+- This is the simplest path — reuses everything agent-doc already does
+- Server can be a VPS, a Cloudflare Worker + Durable Object, or even localhost with a tunnel (cloudflared/ngrok)
+
+#### Option B: Ragie as document store (future)
+
+Ragie becomes the source of truth. Documents are stored in Ragie, fetched/pushed via their API. Git becomes optional (or a sync target).
+
+- Pros: no server filesystem to manage, Ragie handles indexing automatically
+- Cons: Ragie's API isn't designed for real-time collaborative editing, no CRDT/OT support, adds latency
+- Makes sense later if Ragie adds a document editing API, but not for MVP
+
+**Recommendation:** Option A for MVP. Git + filesystem is the proven foundation. Ragie augments with retrieval, not storage.
+
+**P2P vs service broker?**
+
+**Service broker (centralized server), definitely.** Reasons:
+
+1. **Git requires a single writer** — concurrent git operations from P2P clients would corrupt the repo. A central server serializes writes.
+2. **Claude API calls need a server** — API keys shouldn't live in the browser. The server proxies Claude requests.
+3. **Ragie API is server-side** — same reason. No API keys in the browser.
+4. **Simpler auth** — server controls who can read/write. P2P needs distributed auth (hard problem).
+5. **WebSocket fan-out is trivial** — server receives an edit, applies it, broadcasts to all connected clients. This is ~50 lines of axum code.
+
+The architecture is a **hub-and-spoke** model:
+
+```
+Client A ──ws──┐
+Client B ──ws──├──> agent-doc-web server ──> git + Claude + Ragie
+Client C ──ws──┘
+```
+
+Each client gets a WebSocket connection. Edits from any client are applied server-side and broadcast to all others. The agent-doc CRDT merge handles conflicts if two clients edit simultaneously.
+
+**P2P only makes sense if** you need to work without a server (offline-first, mesh networking). That's not this use case.
+<!-- agent:boundary:491a68c6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Design web prototype architecture (axum server + CodeMirror frontend + WebSocket sync)
+- [ ] Design web prototype architecture (axum + CodeMirror + WebSocket + hub-and-spoke)
 - [ ] Build web prototype MVP (markdown editor + Ragie retrieval + Claude responses)
+- [ ] Define WebSocket message protocol (edit ops, document sync, agent responses)
 - [ ] Test VS Code agent-doc extension
 - [ ] Index demo documents in Ragie (patent proposal, contacts, resume)
 - [ ] Prepare demo script for Bob call

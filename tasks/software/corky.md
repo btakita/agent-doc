@@ -514,7 +514,7 @@ corky sync refetch <THREAD_ID>
 
 Ready to implement when you approve.
 implement
-### Re: Implemented `corky sync refetch` (HEAD)
+### Re: Implemented `corky sync refetch`
 
 Implemented the single-thread refetch command:
 
@@ -541,7 +541,7 @@ corky sync refetch <THREAD_ID>
 **Build:** `make check` passes — clippy clean, 232 tests pass.
 
 Ready to add tests, update SPEC.md, and run audit-docs.
-<!-- agent:boundary:e9448ed0 -->
+<!-- agent:boundary:1912b93e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

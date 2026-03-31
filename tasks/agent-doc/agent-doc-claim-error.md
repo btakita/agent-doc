@@ -1158,6 +1158,8 @@ Dedup events now log to `/tmp/agent-doc-write-dedup.log` with timestamp, file pa
 
 Installed. Both dedup check and pane ownership verification are active.
 add tests
+tasks/recruit/linkedin.md just had a duplicate response patch.
+tasks/recruit/linkedin.md also had an external write as I was typing.
 ### Re: v0.28.2 released
 
 **agent-doc v0.28.2:** crates.io ✓, PyPI ✓, GitHub Release ✓, cargo install ✓ (confirmed v0.28.2)
@@ -1167,14 +1169,24 @@ add tests
 - Dedup file logging with backtrace to `/tmp/agent-doc-write-dedup.log`
 - Pane ownership verification on write
 - Docs: write.rs module doc, SPEC.md, VERSIONS.md updated
-<!-- agent:boundary:143da619 -->
+### Re: Dedup bypassed — boundary marker changes (HEAD)
+
+Found the issue. The duplicate in linkedin.md has a **different boundary marker ID** (`7a18f6c0` vs `2c9accdb`). The dedup check compares entire merged content, but the boundary marker is regenerated on each write. So `merged_content != current_file_content` because the boundary differs.
+
+**Fix:** The dedup comparison should strip boundary markers before comparing. Or better: compare the response content (patches) against what's already in the document, ignoring boundary markers.
+
+The simplest fix: in the dedup check, strip all `<!-- agent:boundary:* -->` lines from both sides before comparing.
+
+Also: the "external write while typing" confirms the second write was from a **different Claude session** (the tmux pane running the linkedin.md agent-doc), not this session.
+
+Want me to fix the dedup to strip boundary markers?
+<!-- agent:boundary:82e8e13f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.28.0: Structural layout fix (no early exits)
-- [x] v0.28.1: Column memory for non-agent columns
-- [x] v0.28.2: Write dedup + pane ownership + dedup logging
-- All shipped.
+- [x] v0.28.2: Write dedup shipped (but bypassed by boundary marker changes)
+- [ ] **Fix dedup: strip boundary markers before comparison**
+- [ ] Remove duplicate from linkedin.md
 <!-- /agent:pending -->

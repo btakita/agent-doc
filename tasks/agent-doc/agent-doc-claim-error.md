@@ -1028,7 +1028,7 @@ Before starting a new session, check if file has uncommitted content beyond snap
 Compare `### Re:` headings between git HEAD and snapshot. Block staging if headings are missing (unless compaction marker present).
 
 Want me to implement Part A first?
-### Re: Why 100 bytes? Can a net-positive diff have a stale baseline? (HEAD)
+### Re: Why 100 bytes? Can a net-positive diff have a stale baseline?
 
 **Why 100 bytes:** The threshold was meant to avoid false positives from minor differences (boundary markers are ~40 bytes, whitespace normalization). But you're right to question it.
 
@@ -1058,7 +1058,7 @@ if base_clean != snap_clean {
 ```
 
 This catches ALL stale baselines, not just ones that produce shorter content. Want me to update the guard to this approach?
-<!-- agent:boundary:49b0df23 -->
+<!-- agent:boundary:4631a57f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

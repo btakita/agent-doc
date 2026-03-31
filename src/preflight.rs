@@ -122,6 +122,10 @@ pub struct PreflightOutput {
     /// Changes detected in linked documents since last cycle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub linked_changes: Vec<RelatedDocChange>,
+    /// Path to the baseline file saved after commit (for `--baseline-file` in write).
+    /// Saved after step 2 (commit + boundary reposition) so it matches the snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline_file: Option<String>,
 }
 
 /// Shells considered idle (not actively running a meaningful process).
@@ -281,6 +285,29 @@ pub fn run(file: &Path) -> Result<()> {
         }
     };
 
+    // Step 2b: Save baseline after commit (post-boundary-reposition).
+    // This baseline matches the snapshot exactly, eliminating staleness.
+    let baseline_file = {
+        let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+        let hash = snapshot::doc_hash(&canonical).unwrap_or_else(|_| "unknown".to_string());
+        let baseline_dir = snapshot::find_project_root(&canonical)
+            .unwrap_or_else(|| file.parent().unwrap_or(Path::new(".")).to_path_buf())
+            .join(".agent-doc/baselines");
+        let _ = std::fs::create_dir_all(&baseline_dir);
+        let baseline_path = baseline_dir.join(format!("{}.md", hash));
+        match std::fs::read_to_string(file) {
+            Ok(content) => {
+                let _ = std::fs::write(&baseline_path, &content);
+                eprintln!("[preflight] baseline saved: {}", baseline_path.display());
+                Some(baseline_path.to_string_lossy().to_string())
+            }
+            Err(e) => {
+                eprintln!("[preflight] failed to save baseline: {}", e);
+                None
+            }
+        }
+    };
+
     // Step 3: Read and truncate the claims log.
     eprintln!("[preflight] step 3: claims");
     let claims = read_and_truncate_claims(file);
@@ -345,6 +372,7 @@ pub fn run(file: &Path) -> Result<()> {
         no_changes,
         document,
         linked_changes,
+        baseline_file,
     };
 
     let json = serde_json::to_string_pretty(&output)
@@ -756,6 +784,7 @@ mod tests {
             no_changes: false,
             document: "# Doc\n".to_string(),
             linked_changes: vec![],
+            baseline_file: None,
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -779,6 +808,7 @@ mod tests {
             no_changes: true,
             document: "content".to_string(),
             linked_changes: vec![],
+            baseline_file: None,
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -812,6 +842,7 @@ mod tests {
             no_changes: true,
             document: "content".to_string(),
             linked_changes: vec![],
+            baseline_file: None,
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();

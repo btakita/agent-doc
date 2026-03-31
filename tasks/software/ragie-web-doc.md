@@ -110,7 +110,7 @@ The server watches the file (inotify on Linux) and pushes changes. The browser s
 
 How would this look for web collaboration? Could Ragie, or a file server, host the source document?
 How would websockets come into play? Should we consider P2P or have a service broker all communication?
-### Re: Web collaboration architecture — document hosting and communication topology (HEAD)
+### Re: Web collaboration architecture — document hosting and communication topology
 
 **Could Ragie or a file server host the source document?**
 
@@ -164,7 +164,7 @@ Client C ──ws──┘
 Each client gets a WebSocket connection. Edits from any client are applied server-side and broadcast to all others. The agent-doc CRDT merge handles conflicts if two clients edit simultaneously.
 
 **P2P only makes sense if** you need to work without a server (offline-first, mesh networking). That's not this use case.
-<!-- agent:boundary:491a68c6 -->
+<!-- agent:boundary:de0da3c1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

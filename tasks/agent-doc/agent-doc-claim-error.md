@@ -36,12 +36,34 @@ linked:
 - Task dependency tracking
 
 Is this what you're thinking? Or a different use case? This would be a new feature — happy to design it.
-<!-- agent:boundary:dfd5c0a4 -->
+It looks like there is related_docs. tasks/software/ragie-web-doc.md set related_docs in the frontmatter when I prompted it to.
+Either way, when I request to link documents, nothing is added to the frontmatter.
+Should we use linked instead of related_docs?
+### Re: related_docs already exists (HEAD)
+
+`related_docs` is already implemented in agent-doc. It's in the `Frontmatter` struct (line 252 of frontmatter.rs) and actively used by preflight (preflight.rs:378-408).
+
+**How it works:**
+```yaml
+---
+related_docs:
+  - ../professional/bob-remeika.md
+---
+```
+
+During `agent-doc preflight`, `check_related_docs()` reads the related docs, computes their diffs against their snapshots, and includes any changes in the preflight JSON output. The agent then sees changes from linked documents alongside the main document's diff.
+
+**Naming:** `related_docs` is the canonical field name — it's already in the codebase and used by ragie-web-doc.md. I'd recommend keeping `related_docs` over `linked` since it's already deployed.
+
+**The issue:** When you "requested to link documents" and nothing was added to frontmatter — that was a skill/agent issue (the Claude session didn't know to add the `related_docs` field). The binary supports it; the skill just needs to know the field name.
+
+Want me to add `related_docs` guidance to the SKILL.md so future sessions know to use it?
+<!-- agent:boundary:28e4d3ee -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.28.0-v0.28.3: Layout fixes + dedup shipped
-- [ ] Linked documents feature (if desired)
+- [x] v0.28.0-v0.28.3: All shipped
+- [ ] Add `related_docs` guidance to SKILL.md
 <!-- /agent:pending -->

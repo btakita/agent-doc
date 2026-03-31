@@ -337,7 +337,7 @@ Is markitdown the canonical tool to use?
 https://github.com/microsoft/markitdown
 
 Is there a Rust equivalent to remove the python dependency?
-### Re: HTML-to-markdown — markitdown vs Rust alternatives (HEAD)
+### Re: HTML-to-markdown — markitdown vs Rust alternatives
 
 **markitdown** (Microsoft) is a Python tool that converts many formats (HTML, PDF, DOCX, etc.) to markdown. It's comprehensive but adds a Python dependency.
 
@@ -355,7 +355,7 @@ Is there a Rust equivalent to remove the python dependency?
 The conversion would slot into `check_url_link()` — after fetching, convert HTML to markdown before caching and diffing. This gives the agent clean, readable content instead of raw HTML.
 
 Want me to add one of these crates and wire it into the URL link fetch pipeline?
-<!-- agent:boundary:e3a5bc5c -->
+<!-- agent:boundary:3279f142 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

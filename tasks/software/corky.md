@@ -513,12 +513,40 @@ corky sync refetch <THREAD_ID>
 - `SPEC.md` — document the command
 
 Ready to implement when you approve.
-<!-- agent:boundary:3ccab9aa -->
+implement
+### Re: Implemented `corky sync refetch` (HEAD)
+
+Implemented the single-thread refetch command:
+
+**New CLI command:**
+```bash
+corky sync refetch <THREAD_ID>
+```
+
+**How it works:**
+1. Scans `conversations/` for a file matching the Thread ID
+2. Extracts account name and labels from the existing file metadata
+3. Deletes the old file (so merge builds fresh content)
+4. Calls Gmail Threads API (`GET /threads/{threadId}?format=full`) — bypasses historyId entirely
+5. Re-merges all messages via `merge_message_to_file()` (creates fresh file with correct bodies)
+6. Also refreshes routed copies (mailboxes)
+7. If no existing file found, tries all gmail-api accounts
+
+**Files changed (4):**
+- `src/cli.rs` — added `Refetch { thread_id }` to `SyncCommands`
+- `src/main.rs` — dispatch to `sync::refetch()`
+- `src/sync/mod.rs` — `refetch()`, `try_refetch_from_account()`, `refetch_merge_to_dir()`, `find_thread_file_by_id()`
+- `src/sync/gmail_api_sync.rs` — `ThreadResponse` struct + `fetch_thread_messages()` (public)
+
+**Build:** `make check` passes — clippy clean, 232 tests pass.
+
+Ready to add tests, update SPEC.md, and run audit-docs.
+<!-- agent:boundary:e9448ed0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] `corky sync refetch <THREAD_ID>` — force re-fetch a single thread (proposed, awaiting approval)
+- [ ] `corky sync refetch` — tests, SPEC.md, audit-docs (implemented, needs docs)
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:pending -->

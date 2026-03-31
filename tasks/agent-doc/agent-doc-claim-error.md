@@ -356,7 +356,7 @@ The conversion would slot into `check_url_link()` — after fetching, convert HT
 
 Want me to add one of these crates and wire it into the URL link fetch pipeline?
 Are there rust equivalalnts for PDF and DOCX?
-### Re: Rust equivalents for PDF and DOCX (HEAD)
+### Re: Rust equivalents for PDF and DOCX
 
 **PDF — yes, but with caveats:**
 
@@ -386,7 +386,7 @@ Are there rust equivalalnts for PDF and DOCX?
 - No need to maintain custom PDF/DOCX→markdown logic
 
 This is a pragmatic hybrid — Rust for the hot path, Python for the long tail.
-<!-- agent:boundary:fc6f0094 -->
+<!-- agent:boundary:8c258ddd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

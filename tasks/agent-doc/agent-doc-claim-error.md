@@ -493,7 +493,7 @@ To diagnose: can you describe what you saw? Did the agent respond to a partial/t
 Please add to README.md, if not already done, a note about security. agent-doc is only secure with a single user. Changes are written to a git repo, so any unintended divulgence of data is at the user's risk. A private monorepo base is recommended.
 Please verify security message.
 See tasks/software/ragie-web-doc.md and tasks/recruit/lmi.md for more context.
-### Re: Security section added to README.md (HEAD)
+### Re: Security section added to README.md
 
 Done. Added a **Security** section to README.md covering:
 
@@ -506,7 +506,7 @@ Done. Added a **Security** section to README.md covering:
 The language draws from the ragie-web-doc security analysis (data divulgence through the response channel) and the lmi.md email discussion (single-user model, private git backing, roadmap for collaborative security).
 
 Please review the README.md directly to verify the wording.
-<!-- agent:boundary:92135442 -->
+<!-- agent:boundary:9b543c38 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

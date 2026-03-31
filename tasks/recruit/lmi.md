@@ -663,7 +663,7 @@ If that were the case, can I still use him as a subcontract?
 This is the kind of arrangement that clearance adjudicators see regularly. The key is: can you demonstrate that classified and unclassified work are cleanly separated? Your setup suggests yes.
 
 My Mac Mini is part of my home network. I did not separate the networks due to a lack of a capable router. Is that a problem for a potential audit?
-### Re: Home Network Separation & Audit Risk (HEAD)
+### Re: Home Network Separation & Audit Risk
 
 **For a security clearance investigation:** The network setup at home is generally not audited for personal clearance adjudication. The SF-86 asks about foreign contacts, financial issues, criminal history, substance use, etc. It does not audit your home network topology. Your home lab setup is your business.
 
@@ -678,7 +678,7 @@ My Mac Mini is part of my home network. I did not separate the networks due to a
 - For NIST 800-171 compliance (if required), you'd need network segmentation...but that's a technical fix, not a disqualifier
 
 **Bottom line:** Not a problem for the clearance process. If you eventually need to handle sensitive work from home, network segmentation is a solvable technical problem (VLAN, separate router, or dedicated work network). Cross that bridge when LMI tells you the specific requirements for the role.
-<!-- agent:boundary:6a4bb65f -->
+<!-- agent:boundary:bb3f6788 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

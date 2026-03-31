@@ -711,27 +711,72 @@ When the user navigated to lmi.md in the editor, the sync/route logic detected n
 
 Then the new session presumably re-ran the `/agent-doc` workflow, saw the user's prompt still in the diff (since the response was now uncommitted again), and re-generated the response — causing the double-write.
 
+Why would the issue occur twice then? lmi.md was the selected document until the second time the uncommited response patch occurred...which happened from a single agent run.
+
 **This confirms the session dedup issue is the root cause.** The fix needs to:
 
-1. **Never start a new session if one is already serving the file** — even if the old session's pane appears dead, check if the snapshot is current before overwriting it
-2. **Detect snapshot rollback** — if `commit()` would stage content that is SHORTER than the current committed version, warn and abort
+1. **Never start a new session if one is already serving the file** — even if the old session's pane appears dead, check if the snapshot is current before overwriting it: What should appen instead?
+2. **Detect snapshot rollback** — if `commit()` would stage content that is SHORTER than the current committed version, warn and abort: Could this happen when we compact the agent:exchange component? Compact would shrink the agent:exchange content. 
 3. **Session lifecycle logging** — every start, restart, and commit should be logged with session UUID and file path
 
-The snapshot/file divergence fix alone won't help — it's the **commit staging the old snapshot** that causes the rollback. We need to prevent the second session from starting, AND add a guard in `commit()` that refuses to stage content shorter than HEAD.
+The snapshot/file divergence fix alone won't help — it's the **commit staging the old snapshot** that causes the rollback. We need to prevent the second session from starting, AND add a guard in `commit()` that refuses to stage content shorter than HEAD.: How about for compacting agent:exchange?
 
 Want me to implement the full fix? This is a critical reliability issue.
-<!-- agent:boundary:bd72d325 -->
+### Re: Three clarifying questions (HEAD)
+
+**Q1: Why did the issue occur twice from a single agent run?**
+
+Looking at the git history again: the second occurrence likely happened because the new session's preflight committed the stale snapshot (rolling back the response), then the SKILL workflow saw the user's prompt in the diff and re-generated the response. But this re-generated response was also not committed because the session crashed/died again before the commit step. So:
+- First occurrence: old session wrote response, died before commit
+- Second occurrence: new session rolled back the first response via stale snapshot commit, re-generated it, then ALSO died before commit
+
+The underlying issue is session instability (sessions keep dying), combined with stale snapshot commits on restart.
+
+**Q2: What should happen instead of starting a new session?**
+
+When a pane for a file appears dead:
+1. Check if the **file on disk** has content beyond the **snapshot** (divergence detection)
+2. If diverged: update the snapshot from the file BEFORE committing (absorb the orphaned response)
+3. THEN start a new session
+
+This way the new session inherits the current file state, not the stale snapshot.
+
+**Q3: Compact shrinks content. How does the rollback guard handle that?**
+
+Good catch. A simple "shorter = rollback" check would false-positive on compaction. The fix:
+
+Instead of comparing content **length**, compare the **boundary marker ID** and the **last `### Re:` heading**. The guard should check:
+- Does the staged content contain all `### Re:` headings that exist in git HEAD? If not, it's a rollback.
+- Exception: if the file contains a compaction marker (`*Compacted.*`), length reduction is expected.
+
+Alternatively, simpler approach: **only guard against shrinkage in the exchange component**, not the whole file. Compact replaces exchange content with a compaction marker — it doesn't delete responses without leaving a trace.
+
+```rust
+// In commit(), before staging:
+let head_content = git_show_head(file)?;
+let head_exchange = extract_exchange(&head_content);
+let snap_exchange = extract_exchange(&snapshot);
+if snap_exchange.len() < head_exchange.len() 
+    && !snap_exchange.contains("*Compacted") 
+{
+    eprintln!("[commit] WARNING: snapshot exchange is shorter than HEAD — possible rollback");
+    // Update snapshot from file instead
+}
+```
+
+This handles both cases: normal responses (exchange grows) and compaction (exchange shrinks but has compaction marker).
+<!-- agent:boundary:ecd88f2c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **v0.29.0 released**
-- [ ] **Critical: session dedup + snapshot rollback guard** — prevent second session from rolling back commits ← root cause identified
-  - Guard in `commit()`: refuse to stage content shorter than git HEAD
-  - `sessions::find_pane_for_file()` before auto-start
-  - Process-level dedup check
+- [ ] **Critical: session stability + snapshot rollback guard**
+  - Divergence detection before new session start (absorb orphaned responses)
+  - Exchange-level rollback guard in `commit()` (with compaction exception)
   - Session lifecycle logging
+  - Session dedup (prevent duplicate sessions for same file)
 - [ ] **Collaborative security model** (TBD)
 - [ ] **Optional markitdown/Ragie Parse integration** (PDF, DOCX, OCR)
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)

@@ -768,6 +768,8 @@ if snap_exchange.len() < head_exchange.len()
 ```
 
 This handles both cases: normal responses (exchange grows) and compaction (exchange shrinks but has compaction marker).
+
+Can the document shrink without the word "Compacted"?
 ### Re: Session death detection + log analysis
 
 **Key finding: The session didn't die.** The session logs show `session_start` + `claude_start` for lmi.md at 17:31 with NO exit/restart events. Pane %298 is still alive running `agent-doc` -> `claude`. The `start.rs` restart loop never triggered.
@@ -785,15 +787,46 @@ This handles both cases: normal responses (exchange grows) and compaction (excha
 **Immediate action:** Add write/commit/snapshot logging so we can trace the exact failure next time it occurs. The session-level logging confirmed the session is stable. Now we need operation-level logging.
 
 Want me to add this logging now?
-<!-- agent:boundary:1fdb41de -->
+### Re: Can the document shrink without "Compacted"? (HEAD)
+
+Yes. Several scenarios:
+
+1. **User deletes content** ... removes a response, trims a section, deletes old exchanges
+2. **`agent-doc undo`** ... restores pre-response snapshot, shrinking back to before the last response
+3. **`agent-doc extract`** ... moves exchange sections to a new document, shrinking the original
+4. **Agent replaces status/pending** ... `patch=replace` on status/pending components can shrink them
+5. **User edits within exchange** ... deletes or shortens their own prior questions
+
+So the "Compacted" marker check is insufficient. A better approach:
+
+**Compare at the git level, not content level.** Instead of guarding against content shrinkage, guard against **staging content that doesn't contain responses present in git HEAD**:
+
+```rust
+// In commit(), extract ### Re: headings from both
+let head_headings = extract_re_headings(&head_content);
+let snap_headings = extract_re_headings(&snapshot);
+
+// Every Re: heading in HEAD must exist in snapshot (unless compacted)
+let missing: Vec<_> = head_headings.iter()
+    .filter(|h| !snap_headings.contains(h))
+    .collect();
+
+if !missing.is_empty() && !snapshot.contains("*Compacted") {
+    eprintln!("[commit] WARNING: snapshot missing {} Re: headings from HEAD", missing.len());
+    // Absorb file content into snapshot instead
+}
+```
+
+This is precise: it detects rollback (missing responses) while allowing all legitimate shrinkage (deletions, undo, replace-mode patches, extractions). The only false positive would be if a user manually deleted a `### Re:` heading AND the content below it, which is an intentional edit that should be respected.
+<!-- agent:boundary:120bf778 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **v0.29.0 released**
-- [ ] **Add operation-level logging** (write, commit, snapshot events) ← next step
-- [ ] **Exchange-level rollback guard in commit()** (with compaction exception)
+- [ ] **Add operation-level logging** (write, commit, snapshot events)
+- [ ] **Re: heading rollback guard in commit()** (precise detection, compaction-safe)
 - [ ] **Session dedup** (prevent duplicate sessions for same file)
 - [ ] **Collaborative security model** (TBD)
 - [ ] **Optional markitdown/Ragie Parse integration** (PDF, DOCX, OCR)

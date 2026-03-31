@@ -240,14 +240,14 @@ From your existing work:
 
 Please ensure the entire document is a 1 page pdf.
 We should add Pneuma, Noumena,
-### Re: PDF Confirmation (HEAD)
+### Re: PDF Confirmation
 
 The cheat sheet PDF already has all content on 1 page — including the pneuma/noumena/phenomena and Ragie/Sift sections added in the last update. It's ready at:
 
 `file:///home/brian/work/btakita/agent-loop/tmp/lmi-cheatsheet.pdf`
 
 (It looks like your message was cut off after "We should add P" — if you need something else added, let me know.)
-<!-- agent:boundary:1bf564d0 -->
+<!-- agent:boundary:b6fcdf98 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

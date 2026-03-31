@@ -15,7 +15,7 @@ v0.28.3 released. Dedup strips boundary markers before comparison.
 
 <!-- agent:exchange patch=append -->
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/4674cbdd322fce519fe66718682225f86b088adb9a6e63aa6f5df754c59a4ef1-20260331-140801.md`*
-<!-- agent:boundary:b55a79da -->
+<!-- agent:boundary:78287483 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -680,7 +680,7 @@ My Mac Mini is part of my home network. I did not separate the networks due to a
 **Bottom line:** Not a problem for the clearance process. If you eventually need to handle sensitive work from home, network segmentation is a solvable technical problem (VLAN, separate router, or dedicated work network). Cross that bridge when LMI tells you the specific requirements for the role.
 
 Please review /home/brian/work/btakita/agent-loop/mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-interactive-document-genera.md for consistency. A couple of iterations were made on it. Especially re: security.
-### Re: Email Draft Review (HEAD)
+### Re: Email Draft Review
 
 Reviewed the Josh Malloy follow-up email for consistency.
 
@@ -697,7 +697,7 @@ Reviewed the Josh Malloy follow-up email for consistency.
 3. Status is still `draft` — hasn't been sent yet.
 
 **Verdict:** Email is consistent and ready to send. Want to approve it?
-<!-- agent:boundary:5b402cb8 -->
+<!-- agent:boundary:e1e29492 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

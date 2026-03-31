@@ -61,7 +61,7 @@ Want me to add `related_docs` guidance to the SKILL.md so future sessions know t
 Before we do that, would it be better to rename `related_docs` to `linked`?
 `linked` would also imply other sources such as urls, documents with other types of formats, etc.
 I think it's actually a good idea to link these other types of sources.
-### Re: Rename to `linked` + expand scope (HEAD)
+### Re: Rename to `linked` + expand scope
 
 Good thinking. `linked` is more general and future-proof:
 
@@ -89,7 +89,7 @@ linked:
 3. Non-.md file support — read content, include in preflight context
 
 This is a feature design that should go into `tasks/software/agent-doc.md` for proper planning. Want me to add it there, or implement the rename here first?
-<!-- agent:boundary:86f057a6 -->
+<!-- agent:boundary:5c80f827 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

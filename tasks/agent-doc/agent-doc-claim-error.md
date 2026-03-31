@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-`related_docs` → `links` rename complete. Session logging gap identified. URL link support designed, not yet implemented.
+Session logging implemented in start.rs. `related_docs` → `links` rename complete.
 <!-- /agent:status -->
 
 ## Exchange
@@ -192,6 +192,8 @@ Adding to pending. This is a meaningful feature — I'll design the implementati
 4. **Cache invalidation:** Re-fetch on each preflight (URLs are cheap to fetch, and staleness is worse than latency)
 
 Want me to implement this now, or should we address the session logging first?
+Session logging first
+Make sure this is in our agent:pending
 ### Re: Solutions for --continue skill loss
 
 Yes, there are several approaches:
@@ -220,7 +222,35 @@ Claude Code doesn't have a `--initial-prompt` flag that works with `--continue`.
 **Recommendation:** Option 1 is the most practical. The stdin pipe approach works today without any upstream changes. The key insight is: `--continue` preserves conversation context, but the agent needs a _trigger_ to re-enter the agent-doc workflow loop. Piping `/agent-doc <file>` provides that trigger.
 
 Want me to implement this in `start.rs`?
-<!-- agent:boundary:250e729f -->
+### Re: Session logging — implemented (HEAD)
+
+Done. Added persistent session logging to `start.rs`. Logs are written to `.agent-doc/logs/<session-uuid>.log` in append mode.
+
+**What's logged:**
+- `session_start` — file, pane ID, session UUID
+- `claude_start` — mode (fresh/fresh_restart), restart count
+- `claude_restart` — mode=continue, restart count
+- `claude_exit` — exit code, restart count
+- `stdin_read_failed` / `user_quit` — why the loop ended
+- `session_end` — clean shutdown
+
+**Example log output:**
+```
+[1743436383] session_start file=tasks/foo.md pane=%42 session=bef800bc
+[1743436383] claude_start mode=fresh restart_count=0
+[1743436512] claude_exit code=1 restart_count=0
+[1743436514] claude_restart mode=continue restart_count=1
+[1743436600] claude_exit code=0 restart_count=1
+[1743436601] user_quit
+[1743436601] session_end
+```
+
+**Build status:** Clippy clean, 38 tests pass, release build complete.
+
+The timestamps are Unix epoch seconds (no chrono dependency needed). The log directory is auto-created at `.agent-doc/logs/` next to the existing `.agent-doc/` structure.
+
+Next up: session logging is done. Ready to work on **auto-trigger on restart** (pipe `/agent-doc <file>` to stdin) or **URL link support**. Which first?
+<!-- agent:boundary:f42f8a21 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -228,8 +258,8 @@ Want me to implement this in `start.rs`?
 <!-- agent:pending patch=replace -->
 - [x] v0.28.0-v0.28.3: All shipped
 - [x] **Rename `related_docs` → `links` (with backward-compat alias)** — done in v0.28.3
+- [x] **Session death logging** (`.agent-doc/logs/`) — implemented in start.rs
 - [ ] **Auto-trigger on restart** — pipe `/agent-doc <file>` to stdin after `--continue`
-- [ ] **Session death logging** (`.agent-doc/logs/`) — no persistent logs exist today
 - [ ] **URL link support (fetch + cache + context)**
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)
 - [ ] **Editable repo links (git push back)**

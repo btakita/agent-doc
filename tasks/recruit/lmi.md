@@ -288,10 +288,10 @@ Bumped fonts from 7.5pt → 8.5pt body, headers proportionally larger. Still fit
 
 Bigger font:
 ![img_4.png](img_4.png)
-### Re: Confirmed (HEAD)
+### Re: Confirmed
 
 Looks good — readable and all on 1 page. You're set. Break a leg!
-<!-- agent:boundary:912f3e9d -->
+<!-- agent:boundary:e4107016 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -927,7 +927,7 @@ If another full scan needs to occur, add an endpoint and an agent harness hook f
 This may involve a claude code hook. We would need a codex compatible hook. opencode and pi hooks are also needed. Implement these hooks in agent-kit.
 
 tasks/software/corky.md just restarted when I navigated to the file in the editor. Why?
-### Re: Performance, log rotation, hooks, and corky.md restart (HEAD)
+### Re: Performance, log rotation, hooks, and corky.md restart
 
 **Corky.md restart confirmed by session logs:**
 ```
@@ -953,7 +953,7 @@ This belongs in `tasks/software/agent-doc.md` as a feature track, not in this bu
 - Orphaned writes (write without subsequent commit)
 - Snapshot rollbacks (snap_len decreased without compaction)
 - Session restarts (multiple session_start for same file)
-<!-- agent:boundary:16ab3e19 -->
+<!-- agent:boundary:6defd996 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

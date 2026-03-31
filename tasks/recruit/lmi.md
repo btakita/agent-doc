@@ -701,58 +701,35 @@ Reviewed the Josh Malloy follow-up email for consistency.
 Well you missed something. https://github.com/btakita/agent-loop is the private repo that is mentioned in:
 
 > backed by a private git repo
-### Re: Private Repo Correction
+### Re: Framing agent-doc as a Prototype Spike (HEAD)
 
-You're right — I missed that. `btakita/agent-loop` is confirmed private on GitHub. "Backed by a private git repo" is literally accurate.
+Strong framing. For a federal audience, this is actually more credible than presenting it as production-ready. They understand the prototype → spec → production pipeline.
 
-**But there's a real inconsistency I should have caught:** The email links to `https://github.com/btakita/agent-loop` as the "Source" link (line 26). Since the repo is private, Josh can't access it. That's a dead link for him.
+**What this signals to LIGER:**
+- You know the difference between a spike and production software
+- You're spec-driven (SPEC.md exists and is being iterated)
+- Security is a known constraint being designed for, not an afterthought
+- The prototype validates the interaction model before committing to production architecture
 
-**Suggested fix options:**
-1. Remove the source link entirely (crates.io link already listed)
-2. Replace with "Source available on request" to signal real code without a dead link
-3. Replace with the public agent-doc GitHub repo if one exists separately
-4. Keep it and mention "private repo, happy to grant access if you'd like to review the code": I don't want to grant access. I can create a sample repo if requested.
-### Re: Email Link Fix
+**Email draft implications:** The current email presents agent-doc's features as-is without qualifying them as prototype. I'd suggest revising:
+1. Capabilities section (lines 14-18): qualify as "working prototype that demonstrates..."
+2. Security paragraph (line 28): already covers this well, minimal change needed
+3. Closing (line 30): reframe as "walkthrough of the prototype and the production spec we're developing from it"
 
-Understood — no granting access to the private repo. You'd create a sample repo if requested.
-
-**Recommended change for the email draft (line 26):**
-
-Replace:
-> - Source: https://github.com/btakita/agent-loop
-
-With:
-> - Source: private repo; happy to prepare a sample repo for review
-
-Note my edit above
-
-> - Source: private repo; happy to prepare a sample repo for review
-
-This keeps the signal that real code exists without a dead link, and sets the expectation of a curated sample rather than full repo access.
-
-Want me to apply this edit to the draft now?
-### Re: Source Link Updated
-
-Applied the edit to the email draft. Line 26 now reads:
-
-> - Source: private repo; happy to prepare a sample repo for review
-
-Draft is ready to send. Want to approve it?
-<!-- agent:boundary:c6e556d1 -->
+Should I apply the prototype framing revisions to the email draft?
+<!-- agent:boundary:b14944ee -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Send Josh Malloy follow-up email (draft finalized, ready to send)
+- [ ] Revise Josh email with prototype spike framing (pending approval)
+- [ ] Send Josh Malloy follow-up email (after revision)
 - [ ] agent-doc README: security section (single-user, prompt injection)
 - [ ] Corky: HTML body extraction for emails
 - [ ] Research LMI uncleared role options
-- [ ] Explore LMI subcontracting structure for mixed cleared/uncleared teams
 - [x] All contacts created
 - [x] All post-interview tasks complete
-- [x] Security clearance foreign collaboration guidance provided
-- [x] Subcontracting foreign national guidance provided
-- [x] Home network audit risk assessment provided
-- [x] Josh email draft reviewed and source link fixed
+- [x] Security clearance + subcontracting guidance provided
+- [x] Josh email source link fixed
 <!-- /agent:pending -->

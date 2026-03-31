@@ -526,12 +526,12 @@ Done. Added **Section 10: Security** to SPEC.md with three subsections:
 - **10.3 Recommendations** ... private repo, no secrets in context, wait for multi-user security, review before sharing
 
 The security content draws from the ragie-web-doc analysis (data divulgence is the fundamental unsolved problem) and aligns with the README security section. The SPEC is more detailed since it's the functional specification for implementors.
-### Re: Security model status (HEAD)
+### Re: Security model status
 
 Acknowledged. SPEC.md Section 10 covers the current security model. The "More work TBD" items from the ragie-web-doc analysis (content scanning, session isolation, multi-user access control) are tracked in pending.
 
 All documentation work for this session is complete. Ready for the next priority when you are.
-<!-- agent:boundary:9be7a9c7 -->
+<!-- agent:boundary:92eb7154 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

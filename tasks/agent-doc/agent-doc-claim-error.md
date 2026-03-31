@@ -171,6 +171,8 @@ I did notice that the visible tmux window had a single tmux pane with a new Clau
 
 The "single tmux pane with a new Claude session" you saw was likely Claude restarting via `--continue` after a crash. The problem: `--continue` resumes the Claude conversation, but the `/agent-doc` skill context isn't re-injected — so it becomes a bare Claude session that doesn't know about the document workflow. That's why the session was "lost" even though the pane was still alive.
 
+Are there any agent-doc solutions for this type of issue?
+
 **Logging:** Currently there's NO persistent logging — only stderr to the tmux pane (ephemeral, scrolls away). We should add:
 
 1. **Session log file:** `.agent-doc/logs/<session-uuid>.log` — append exit codes, timestamps, restart events
@@ -190,7 +192,35 @@ Adding to pending. This is a meaningful feature — I'll design the implementati
 4. **Cache invalidation:** Re-fetch on each preflight (URLs are cheap to fetch, and staleness is worse than latency)
 
 Want me to implement this now, or should we address the session logging first?
-<!-- agent:boundary:2bfbbcd9 -->
+### Re: Solutions for --continue skill loss (HEAD)
+
+Yes, there are several approaches:
+
+**1. Pipe initial prompt on restart (best option)**
+After `--continue`, `start.rs` could write `/agent-doc <file>` to Claude's stdin as the first message. This would re-trigger the skill workflow in the resumed conversation. The conversation history is preserved (so Claude has context), and the skill re-executes the preflight cycle.
+
+Implementation in `start.rs`:
+```rust
+// Instead of just cmd.status(), use stdin pipe
+let mut child = cmd.stdin(Stdio::piped()).spawn()?;
+if !first_run {
+    if let Some(mut stdin) = child.stdin.take() {
+        writeln!(stdin, "/agent-doc {}", file.display())?;
+    }
+}
+child.wait()?
+```
+
+**2. SessionStart hook auto-trigger**
+Claude Code supports hooks that fire on session start. A `SessionStart` hook could detect that this is a `--continue` restart and auto-inject the `/agent-doc` command. However, hooks can't inject user messages — they run shell commands.
+
+**3. `--initial-prompt` flag (doesn't exist yet)**
+Claude Code doesn't have a `--initial-prompt` flag that works with `--continue`. This would be the cleanest solution but requires upstream support.
+
+**Recommendation:** Option 1 is the most practical. The stdin pipe approach works today without any upstream changes. The key insight is: `--continue` preserves conversation context, but the agent needs a _trigger_ to re-enter the agent-doc workflow loop. Piping `/agent-doc <file>` provides that trigger.
+
+Want me to implement this in `start.rs`?
+<!-- agent:boundary:2628c8f4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -198,6 +228,7 @@ Want me to implement this now, or should we address the session logging first?
 <!-- agent:pending patch=replace -->
 - [x] v0.28.0-v0.28.3: All shipped
 - [x] **Rename `related_docs` → `links` (with backward-compat alias)** — done in v0.28.3
+- [ ] **Auto-trigger on restart** — pipe `/agent-doc <file>` to stdin after `--continue`
 - [ ] **Session death logging** (`.agent-doc/logs/`) — no persistent logs exist today
 - [ ] **URL link support (fetch + cache + context)**
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)

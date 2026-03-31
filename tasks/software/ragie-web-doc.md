@@ -241,10 +241,10 @@ Bob's Claude Code ──MCP (stdio over SSH or HTTP)──> your machine
 - Bob adds your MCP server to his Claude Code config
 - Bob's Claude Code can now call these tools natively... no agent-doc binary needed on his end
 - Transport options:
-  - **SSH stdio** — Bob's Claude Code spawns `ssh brian@host agent-doc mcp-server` (zero infra, works today with any SSH access)
-  - **HTTP/SSE** — `agent-doc serve --mcp` exposes an HTTP-based MCP endpoint (needs the web server)
-
-**Pros:** Native Claude Code integration, Bob gets tool use with his own model/context, no new binary to install, MCP is the standard protocol.
+  - **SSH stdio** — Bob's Claude Code spawns `ssh brian@host agent-doc mcp-server` (zero infra, works today with any SSH access): Do I need a ssh tunnel with authorized users? Is it possible to make this network seamless + secure? Perhaps by using a password auth instead. Ideally a cli command to run the server and generate a link.
+  - **HTTP/SSE** — `agent-doc serve --mcp` exposes an HTTP-based MCP endpoint (needs the web server): This could also be a https endpoint when hosted on a server.: Does this use a websocket?
+  
+**Pros:** Native Claude Code integration, Bob gets tool use with his own model/context, no new binary to install, MCP is the standard protocol.: We could optionally provide access...but I'm concerned about prompt injection. It would be better to just have Bob use his own Claude code session for now. A more recure sandbox can be provided later.
 **Cons:** Needs SSH access or an HTTP endpoint.
 
 Bob's setup would be one config entry:
@@ -303,7 +303,49 @@ MCP is purpose-built for this. Bob adds one line to his config and gets native t
 1. `agent-doc mcp-server` — stdio-based MCP server (works over SSH today)
 2. `agent-doc serve --mcp` — HTTP-based MCP endpoint (when the web server lands)
 3. WebSocket document sync (for real-time browser editing)
-<!-- agent:boundary:f58a4f87 -->
+### Re: MCP transport security, HTTPS, and prompt injection concerns (HEAD)
+
+**SSH — no tunnel needed, but the UX is clunky.** Better approach:
+
+**The ideal UX: `agent-doc serve --share`**
+
+```bash
+$ agent-doc serve --share tasks/software/ragie-web-doc.md
+🔗 Share this MCP endpoint:
+   https://ad-7f3k2x.agent-doc.dev
+
+   Token: ad_live_7f3k2xQ9m...
+   Expires: 24h
+
+   Bob's config:
+   {
+     "mcpServers": {
+       "brian-agent-doc": {
+         "url": "https://ad-7f3k2x.agent-doc.dev/mcp",
+         "headers": { "Authorization": "Bearer ad_live_7f3k2xQ9m..." }
+       }
+     }
+   }
+```
+
+Uses a relay (cloudflared tunnel or self-hosted) to expose the local MCP server over HTTPS with a generated token. No SSH keys, no port forwarding. Bob pastes one config block.
+
+**Practical options for MVP (in order of simplicity):**
+1. **cloudflared tunnel** — `agent-doc serve --tunnel` wraps `cloudflared tunnel` for instant HTTPS URL. Free, no account needed.
+2. **Token auth** — `agent-doc serve --token <secret>` on a VPS with TLS. Bob connects with the token.
+3. **SSH** — fallback for same-network or existing SSH access.
+
+**HTTP/SSE — yes HTTPS, no WebSocket for MCP.** The MCP "Streamable HTTP" transport uses HTTP + Server-Sent Events (SSE) for server→client streaming, regular HTTP POST for client→server. WebSocket is reserved for the browser collaboration layer (real-time document editing), which is a separate concern from the MCP tool protocol.
+
+**Prompt injection — your instinct is correct.** Bob's Claude Code sending tool calls to your MCP server is a surface. The safe architecture:
+
+- Bob gets **scoped MCP access** (read + write to specific documents only)
+- Bob uses his **own Claude Code session** (his model, his API key, his context)
+- Your agent-doc remains local — Bob's edits come through `write_document` but are applied via CRDT merge (text only, no code execution)
+- Future sandbox: per-tool permissions, audit logging, rate limiting, content filtering
+
+**For MVP:** Bob connects via MCP, gets `read_document` + `write_document` scoped to specific files, uses his own Claude Code. No shared model context. The only prompt injection vector is document content itself, which is mitigated by document-level scoping.
+<!-- agent:boundary:219a7bd0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -311,14 +353,16 @@ MCP is purpose-built for this. Bob adds one line to his config and gets native t
 <!-- agent:pending patch=replace -->
 - [ ] Design MCP server tool schema (`read_document`, `write_document`, `preflight`, `list_documents`)
 - [ ] Implement `agent-doc mcp-server` subcommand (stdio transport)
+- [ ] Add `--share` flag with cloudflared tunnel integration for instant HTTPS sharing
+- [ ] Add token-based auth for MCP endpoints
+- [ ] Add document-level scoping for MCP access control
 - [ ] Test MCP over SSH with a second Claude Code instance
 - [ ] Implement `agent-doc serve` subcommand (axum + inotify + WebSocket)
-- [ ] Add `--mcp` flag to `agent-doc serve` for HTTP-based MCP transport
+- [ ] Add `--mcp` flag to `agent-doc serve` for HTTP/SSE-based MCP transport
 - [ ] Build CodeMirror 6 frontend (editor + markdown preview + WebSocket client)
 - [ ] Define WebSocket message protocol (edit ops, document sync, cursor positions)
 - [ ] Bundle frontend assets into agent-doc binary (rust-embed or include_bytes)
 - [ ] Add Ragie retrieval panel to web frontend
-- [ ] Add auth layer for remote access (API key or session token)
 - [ ] Test VS Code agent-doc extension
 - [ ] Index demo documents in Ragie (patent proposal, contacts, resume)
 - [ ] Prepare demo script for Bob call

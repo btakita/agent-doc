@@ -205,7 +205,7 @@ All talking points visible in a single page — tile it next to the Teams call i
 Include pneuma, noumena, phenomena.
 The agent-doc atom write was updated to use sockets. Please verify we are talking about the same thing.
 Ragi + Sift integration
-### Re: Pneuma/Noumena/Phenomena + Socket Writes + Ragie/Sift (HEAD)
+### Re: Pneuma/Noumena/Phenomena + Socket Writes + Ragie/Sift
 
 #### Pneuma / Noumena / Phenomena
 
@@ -237,7 +237,7 @@ From your existing work:
 - **Sift** — local hybrid search (Alex Kwiatkowski). Exploring for semantic search across agent-doc, corky, existence-lang, tagpath.
 
 **Interview angle for LIGER:** "I'm building document processing pipelines that combine cloud RAG (Ragie for indexing/retrieval) with local hybrid search (Sift for offline/air-gapped). This maps to LIGER's dual deployment model — cloud for unclassified, local for air-gapped IL5/IL6 environments."
-<!-- agent:boundary:f0843545 -->
+<!-- agent:boundary:717629b9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

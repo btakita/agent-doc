@@ -695,7 +695,7 @@ Before starting a new Claude process for a document, check if any `claude` proce
 Want me to implement this? It's a v0.29.1 fix.
 I do. But we also need to discover and address why uncommited response patches were written to tasks/recruit/lmi.md
 And we need to fix the issue(s).
-### Re: Root cause of lmi.md uncommitted responses (HEAD)
+### Re: Root cause of lmi.md uncommitted responses
 
 Found it. Here's the exact sequence from git history:
 
@@ -720,7 +720,7 @@ Then the new session presumably re-ran the `/agent-doc` workflow, saw the user's
 The snapshot/file divergence fix alone won't help — it's the **commit staging the old snapshot** that causes the rollback. We need to prevent the second session from starting, AND add a guard in `commit()` that refuses to stage content shorter than HEAD.
 
 Want me to implement the full fix? This is a critical reliability issue.
-<!-- agent:boundary:dc8535d2 -->
+<!-- agent:boundary:1ec4a1d1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

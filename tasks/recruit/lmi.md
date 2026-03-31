@@ -587,7 +587,7 @@ Want to send as-is, or add a security angle?
 
 Draft updated. Ready to send?
 Note my updates. We should also add a note in the agent-doc README.md about single user security and the current vulnerability to prompt injection for copy/pasted prompts.
-### Re: Updates Applied (HEAD)
+### Re: Updates Applied
 
 **Draft corrected:** Changed "git-backed" → "backed by a private git repo" in the Josh email.
 
@@ -601,7 +601,7 @@ Note my updates. We should also add a note in the agent-doc README.md about sing
 I'll add this to the agent-doc task queue. For now, the Josh email draft is ready with the corrected security note.
 
 Send it?
-<!-- agent:boundary:efbc0093 -->
+<!-- agent:boundary:86591026 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

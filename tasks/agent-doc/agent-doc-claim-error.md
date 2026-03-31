@@ -222,7 +222,7 @@ Claude Code doesn't have a `--initial-prompt` flag that works with `--continue`.
 **Recommendation:** Option 1 is the most practical. The stdin pipe approach works today without any upstream changes. The key insight is: `--continue` preserves conversation context, but the agent needs a _trigger_ to re-enter the agent-doc workflow loop. Piping `/agent-doc <file>` provides that trigger.
 
 Want me to implement this in `start.rs`?
-### Re: Session logging — implemented (HEAD)
+### Re: Session logging — implemented
 
 Done. Added persistent session logging to `start.rs`. Logs are written to `.agent-doc/logs/<session-uuid>.log` in append mode.
 
@@ -250,7 +250,7 @@ Done. Added persistent session logging to `start.rs`. Logs are written to `.agen
 The timestamps are Unix epoch seconds (no chrono dependency needed). The log directory is auto-created at `.agent-doc/logs/` next to the existing `.agent-doc/` structure.
 
 Next up: session logging is done. Ready to work on **auto-trigger on restart** (pipe `/agent-doc <file>` to stdin) or **URL link support**. Which first?
-<!-- agent:boundary:f42f8a21 -->
+<!-- agent:boundary:968c1ea0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

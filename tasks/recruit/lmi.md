@@ -280,12 +280,12 @@ Fits on 1 page with room to space. Make the font larger.
 - Ontology files committed and pushed to `existence-lang/ontology` (3 new files: phenomena, noumena, pneuma)
 - existence-lang submodule pointer updated and pushed
 - agent-loop local commits (agent-doc session) are up to date
-### Re: Font Size Increased (HEAD)
+### Re: Font Size Increased
 
 Bumped fonts from 7.5pt → 8.5pt body, headers proportionally larger. Still fits on 1 page with good readability. Reload:
 
 `file:///home/brian/work/btakita/agent-loop/tmp/lmi-cheatsheet.pdf`
-<!-- agent:boundary:f8505903 -->
+<!-- agent:boundary:29272499 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1396,6 +1396,7 @@ Good call acknowledging the security findings. The response channel exfiltration
 
 Want me to draft a message to Bob proposing Thursday?
 Security would be a great topic with Bob.
+I'll go ahead and schedule on Calendy. What time would be good for Bob? Morning Pacific?
 ### Re: Security as a Meeting Topic
 
 Absolutely. Bob would be well-positioned to discuss the security challenges since Ragie deals with enterprise document retrieval where prompt injection and data leakage are first-order concerns. Specific angles to explore with him:
@@ -1405,15 +1406,24 @@ Absolutely. Bob would be well-positioned to discuss the security challenges sinc
 - **Content signing / provenance**... your 5-layer security architecture (instruction/data separation, deterministic processing, response-only mode, content signing, injection scanning) would be a substantive technical conversation, not just a sales pitch
 
 This actually strengthens the meeting framing: instead of just pitching use cases, you're having a peer-level technical discussion about shared security challenges in LLM-mediated document systems. That's the kind of conversation that turns a sales call into a partnership conversation.
-<!-- agent:boundary:68c71513 -->
+### Re: Scheduling with Bob (HEAD)
+
+Morning Pacific makes sense for Bob since he's Bay Area based (Ragie is SF). I'd suggest **10:00 AM PT / 1:00 PM ET** as a sweet spot... late enough that he's settled in, early enough that you're not competing with afternoon meetings. If that slot's taken, **11:00 AM PT / 2:00 PM ET** works too.
+
+For Calendly, set the meeting for 30 minutes. In the invite description, something brief:
+
+> "Catching up on agent-doc + Ragie integration. Have a couple client use cases to discuss plus some security architecture questions."
+
+That gives him enough context to be interested without overloading the invite.
+<!-- agent:boundary:d64cfa96 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- Schedule Thursday call with Bob via Calendly (~10 AM PT / 1 PM ET)
 - Security discussion topics for Bob meeting (prompt injection, data isolation, content signing)
 - Demo prep: security-aware framing (JB plugin first, web arch + threat model second)
-- Draft outreach message to Bob for Thursday call
 - Ragie Parse discussion points for Judith + patents
 - Patent mining proposal as Ragie pitch material
 <!-- /agent:pending -->

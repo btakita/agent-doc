@@ -4,6 +4,15 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.29.0
+
+- **Links frontmatter**: Renamed `related_docs` → `links` (backward-compat alias). URL links (`http://`/`https://`) are fetched via `ureq`, converted HTML→markdown via `htmd` (stripping script/style/nav/footer), cached in `.agent-doc/links_cache/`, and diffed on each preflight. Non-HTML content passes through unchanged.
+- **Session logging**: Persistent logs at `.agent-doc/logs/<session-uuid>.log` with timestamped events for session start, claude start/restart/exit, user quit, and session end.
+- **Auto-trigger on restart**: After `--continue` restart, background thread sends `/agent-doc <file>` via `tmux send-keys` after 5s delay to re-trigger the skill workflow.
+- **Security documentation**: README.md top-level security notice + detailed Security section. SPEC.md Section 10 with threat model, known risks, and recommendations.
+- **New dependency**: `htmd` v0.5.3 (HTML-to-markdown, ~13 new crates from html5ever ecosystem, no HTTP server).
+- **Tests**: 7 new tests for URL detection, HTML conversion, boilerplate stripping, cache paths. 361 total, 0 failures.
+
 ## 0.28.3
 
 - **Write dedup boundary fix**: Strip `<!-- agent:boundary:XXXXXXXX -->` markers before dedup comparison. Boundary marker IDs change on each write, causing false negatives in the dedup check (content appeared different when only the boundary ID changed).

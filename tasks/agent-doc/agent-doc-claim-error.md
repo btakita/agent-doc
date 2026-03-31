@@ -1141,7 +1141,7 @@ Ideally, we can track an iteration as a narrative story into markdown for evalua
 **Editor buffer docs:** Will add 4-state model (snapshot, baseline, file, buffer) to SPEC.md Section 8.
 
 **Blog post / Josh email:** Noted. This debugging session (CRDT concurrency bug + ops logging + stale baseline) is relevant content for both.
-<!-- agent:boundary:586c7f13 -->
+<!-- agent:boundary:600bbea0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

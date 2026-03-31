@@ -444,7 +444,7 @@ htmd v0.5.3
 **Truly new crates:** htmd, html5ever, markup5ever, markup5ever_rcdom, xml5ever, tendril, futf, mac, web_atoms, string_cache, precomputed-hash, new_debug_unreachable, utf-8 — ~13 new crates, all from the html5ever ecosystem (Mozilla-maintained).
 
 Working on tests, audit docs, and SPEC/README updates now.
-### Re: Tests, audit docs, SPEC/README updates — done (HEAD)
+### Re: Tests, audit docs, SPEC/README updates — done
 
 **Tests added** (7 new tests in `preflight.rs`):
 - `is_url_detects_http` — URL detection for http/https prefixes
@@ -464,7 +464,7 @@ All 361 tests pass, 0 failures.
 **README.md updated:** Added "Linked resources" and "Session logging" to Key Features.
 
 **Audit result:** 1 remaining issue — pre-existing large table warning in CLAUDE.md (not related to our changes).
-<!-- agent:boundary:870434f3 -->
+<!-- agent:boundary:b28fd4d2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

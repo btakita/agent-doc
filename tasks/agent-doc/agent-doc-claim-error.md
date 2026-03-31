@@ -572,7 +572,7 @@ All publish targets complete:
 - **Parent submodule:** pointer updated to v0.29.0
 
 In tasks/recruit/lmi.md, there is a full uncommitted response patch. Why?
-### Re: Uncommitted response patch in lmi.md (HEAD)
+### Re: Uncommitted response patch in lmi.md
 
 **Root cause:** The response was written to the file (via IPC to the editor plugin) but the **snapshot was never updated** with the response content. The `agent-doc commit` command commits based on the snapshot — so it committed the boundary marker changes but not the response body, because the snapshot didn't contain it.
 
@@ -583,7 +583,7 @@ This is the exact scenario the `recover` step in preflight is designed to catch 
 **Fix applied:** Updated the snapshot to match the current file content, then ran `agent-doc commit`. The response is now committed and the gutter is clean.
 
 **Bug to track:** `agent-doc commit` should detect when the file has content not in the snapshot and handle it (either by updating the snapshot or warning). Currently it silently ignores this divergence.
-<!-- agent:boundary:0302930d -->
+<!-- agent:boundary:869a10ad -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

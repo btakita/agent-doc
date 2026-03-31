@@ -439,7 +439,7 @@ Implement
 Add tests
 audit docs
 resync the
-### Re: Implemented Gmail API Attachment Body Fix (HEAD)
+### Re: Implemented Gmail API Attachment Body Fix
 
 **Bug fix:** Added `attachmentId` support to Gmail API body extraction. When Gmail returns a reference instead of inline data (common for `multipart/related` messages), corky now fetches the body via the attachments API.
 
@@ -456,7 +456,7 @@ resync the
 **Tests:** 232 total (7 new), all passing. Clippy clean. Audit clean.
 
 Ready to commit in corky submodule.
-<!-- agent:boundary:2630bde1 -->
+<!-- agent:boundary:d056670c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

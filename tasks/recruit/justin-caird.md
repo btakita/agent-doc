@@ -861,7 +861,7 @@ This is already captured in the document (around line 805). Justin responded on 
 > "Thanks for sharing Brian. This is great. The CTO is coming back from travel next week. We should have times to interview soon. Stay tuned!"
 
 **Status:** Positive signal. CTO Jack Wood is returning from travel the week of March 30. Interview scheduling expected soon. No follow-up action needed right now — wait for Justin to share interview times.
-<!-- agent:boundary:1a21cb4e -->
+<!-- agent:boundary:4e782600 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

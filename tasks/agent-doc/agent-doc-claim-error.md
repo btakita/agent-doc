@@ -508,14 +508,14 @@ Done. Added a **Security** section to README.md covering:
 The language draws from the ragie-web-doc security analysis (data divulgence through the response channel) and the lmi.md email discussion (single-user model, private git backing, roadmap for collaborative security).
 
 Please review the README.md directly to verify the wording.
-### Re: Security note at top of README (HEAD)
+### Re: Security note at top of README
 
 Done. Added a blockquote right under the "Alpha Software" note:
 
 > **Single-user only.** agent-doc operates on the local filesystem with no access control. Use a private git repository. See the [Security](#security) section for details.
 
 The full Security section remains at the bottom with the detailed breakdown. The top-level note gives immediate visibility.
-<!-- agent:boundary:2e5d2f6a -->
+<!-- agent:boundary:c80127a7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

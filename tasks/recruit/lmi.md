@@ -495,7 +495,7 @@ Created `mail/topics/lmi/AGENTS.md` (with `CLAUDE.md` symlink) containing:
 - Kate Revels contact info
 
 Do we have confirmation for Josh Malloy's email address anywhere?
-### Re: Josh Malloy's Email (HEAD)
+### Re: Josh Malloy's Email
 
 Yes. From `mail/conversations/interview-with-brian-takita-2026-13755-full-stack-developer.md`:
 
@@ -508,7 +508,7 @@ The full team emails from that thread:
 - Adam Hughes: adam.hughes@lmi.org
 
 Want me to draft a LinkedIn connection request / message to Josh about agent-doc?
-<!-- agent:boundary:2ad6b2b3 -->
+<!-- agent:boundary:d60159ce -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

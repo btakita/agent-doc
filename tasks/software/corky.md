@@ -471,7 +471,7 @@ commit and push
 - `1303142` — padded base64 fallback in body decode
 
 release
-### Re: Released v0.22.2 — Gmail API Body Decode Fixes (HEAD)
+### Re: Released v0.22.2 — Gmail API Body Decode Fixes
 
 **Version bump:** 0.22.1 → 0.22.2. VERSIONS.md backfilled for 0.22.0, 0.22.1, 0.22.2.
 
@@ -485,7 +485,7 @@ release
 - `a757362` — `attachmentId` support for `multipart/related` messages
 - `1303142` — padded base64 fallback in body decode
 - `79d7be0` — version bump + VERSIONS.md
-<!-- agent:boundary:7937ffbc -->
+<!-- agent:boundary:aff231cf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

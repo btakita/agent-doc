@@ -622,7 +622,7 @@ Good question. Here's the tradeoff:
 **Best move: Hide it** (not delete). You keep the engagement number, remove the scam from view, and can report the profile separately. LinkedIn's "Hide comment" is under the three-dot menu on the comment itself.
 
 Can corky support hiding these spam comments?
-### Re: Corky LinkedIn comment moderation (HEAD)
+### Re: Corky LinkedIn comment moderation
 
 Not currently — and it would be difficult to add.
 
@@ -632,5 +632,5 @@ Not currently — and it would be difficult to add.
 A `corky linkedin moderate` command could navigate to the post, find the comment, and click Hide via browser automation. But this is fragile DOM automation that breaks when LinkedIn updates their UI — probably not worth the investment for occasional spam.
 
 **Practical recommendation:** Just hide it manually — three-dot menu → Hide comment. It's 3 clicks.
-<!-- agent:boundary:2c9accdb -->
+<!-- agent:boundary:cecd1d9c -->
 <!-- /agent:exchange -->

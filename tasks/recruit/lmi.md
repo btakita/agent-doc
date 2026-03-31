@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Transcript complete — diarization failed (Teams audio format), manual attribution possible
+Interview analysis complete — follow-up actions identified
 <!-- /agent:status -->
 
 ## Exchange
@@ -344,14 +344,85 @@ From the transcript content, I can identify speakers by context:
 To get proper speaker diarization, we could try extracting audio to WAV first and running pyannote directly, but the Teams compressed audio may not have enough channel separation for voiceprint matching.
 
 Want me to manually attribute speakers through the full transcript based on conversational context?
-<!-- agent:boundary:aab38c3b -->
+### Re: Detailed Interview Analysis (HEAD)
+
+#### Speaker Attribution & Flow
+
+| Time | Speaker | Topic |
+|------|---------|-------|
+| 00:00–01:30 | **Luke** (intro) | Greetings, introduces team: Josh=tech lead, Andrew=full stack/frontend, Adam=security/gateway/API |
+| 01:30–07:17 | **Brian** | Self-intro: Presence AI, Corky (Rust correspondence tool), agent-doc (CRDT markdown sessions), existence-lang (ontology/philosophy of language), alignment/evals |
+| 07:18–07:42 | **Josh** | "When you say alignment — goal-oriented or normative/values-oriented?" |
+| 07:42–09:32 | **Brian** | Alignment as communication alignment, noumena/phenomena distinction, measurements as proxies |
+| 09:32–10:08 | **Josh** | "In a production setting, how does this apply?" |
+| 10:08–12:02 | **Brian** | Organizational ontologies, detecting drift between implementation and specs, back-testing concept |
+| 12:03–12:29 | **Josh** | "What was the agentic development methodology at Presence?" |
+| 12:29–14:14 | **Brian** | Lip-sync pipeline: open-source model, jitter problem, facial landmarks (128-point grid), one-Euro filter solution |
+| 14:14–17:22 | **Josh** → **Brian** | Stack at Presence: Python, Ray, LiveKit/WebRTC, GPU pipelines, transition to multiprocessing with shared GPU memory, LatentSync |
+| 17:24–18:03 | **Adam** | "Do you prefer broad full-stack work or deep diving into hard problems?" |
+| 18:03–19:55 | **Brian** | Gap-filling on teams, building composable "primitives" (irreducible, well-tested building blocks) |
+| 20:00–21:19 | **Adam** → **Brian** | "What is context engineering in 2026?" → Creating/specifying systems so people and tools can produce correct software |
+| 21:19–23:50 | **Adam** → **Brian** | Sensible/Martin Investment: ESG startup, data pipelines, stock screener, portfolio rebalancer |
+| 23:50–24:03 | **Luke** | Time check — ~5 min remaining |
+| 24:03–26:22 | **Brian** → **Luke/team** | Security clearance Q: No clearance needed to start, secret clearance process 3-9 months, CUI not classified |
+| 26:22–27:37 | **Brian** → **Josh** | RAG/air-gap Q: Standard RAG (extract/chunk/vectorize/store/retrieve), one air-gapped deployment |
+| 27:38–29:51 | **Brian** ↔ **Josh** | Agent-doc discussion — Josh expresses genuine interest in interactive document generation, source citation, fact-checking |
+| 29:51–30:26 | **Luke** | Wrap-up, recruiter will follow up |
+
+**Notable:** Andrew Dirks (frontend lead) did not ask any questions during the entire interview.
+
+#### Key Questions & What They Probed
+
+1. **Josh — Alignment specificity** (07:18): Goal vs values? → *Precision of thinking, practical vs theoretical*
+2. **Josh — Production application** (09:32): How do ontology concepts apply in real systems? → *Can Brian translate abstract ideas into engineering?*
+3. **Josh — Presence agentic work** (12:03): What prompted it, what did you learn? → *Hands-on experience*
+4. **Josh — Stack** (14:14): What technologies? → *Technical breadth*
+5. **Adam — Breadth vs depth** (17:24): Preference? → *Role fit, self-awareness*
+6. **Adam — "For the layman"** (19:06, 20:00): What's a primitive? What's context engineering? → *Communication skills, substance behind concepts*
+7. **Adam — Sensible details** (21:19): Team makeup, focus? → *Concrete full-stack experience*
+
+#### What Went Well
+
+- **Presence AI technical depth** — jitter root cause analysis (landmark grid), specific solution (one-Euro filter), architectural decisions (Ray vs multiprocessing, shared GPU memory). Demonstrated real problem-solving.
+- **Good questions asked** — clearance process and RAG architecture showed genuine research and interest.
+- **Agent-doc discussion at the end** — Josh expressed genuine interest: "I would have dove deeper... we're open to ideas." Strong positive signal.
+- **Sensible/Martin Investment** was concrete and relevant (data pipelines, stock screener).
+
+#### Areas for Improvement
+
+1. **Opening monologue too long (~6 min)** — Philosophy/ontology consumed time that could have showcased enterprise experience. For a 30-min screen, need a tighter 2-min intro.
+2. **Abstract answers when concrete was needed** — Josh had to redirect twice from philosophy to practical application. Adam asked "for the layman" twice.
+3. **No frontend discussion** — For a full-stack role where Andrew leads frontend, zero frontend mention. Andrew's silence may reflect this gap.
+4. **TrueCar, Pivotal, team leadership unexplored** — Adam noticed these on the resume but Brian didn't expand. Enterprise-scale experience is highly relevant for federal platform work.
+5. **"Context engineering" definition was circular** — A concrete example (e.g., "I write CLAUDE.md files that give AI agents the right context") would have landed better.
+
+#### Interviewer Signals
+
+- **Josh** — Strongest positive signal. Genuinely interested in agent-doc for LIGER's document generation and fact-checking needs. "Half an hour always flies by."
+- **Luke** — Standard-positive PM facilitation. Transparent about clearance process.
+- **Adam** — Probing for communication clarity and concrete experience. The "for the layman" requests suggest he wanted more accessible explanations.
+- **Andrew** — Silent the entire interview. Could mean: (a) didn't see enough frontend relevance to engage, (b) defers in initial screens, or (c) passive concern.
+
+#### Overall Assessment
+
+The interview went **reasonably well as an initial screen**, but left value on the table. Brian demonstrated deep technical capability (Presence AI work) and innovative thinking (agent-doc, existence-lang), but communication calibration was off — too much abstract philosophy, not enough concrete enterprise engineering. The bright spot was Josh's genuine interest in agent-doc at the end.
+
+#### Recommended Follow-ups
+
+1. **LinkedIn message to Josh** about agent-doc — he explicitly said he wanted to dive deeper
+2. **Prepare for round 2** with: tight 2-min intro, concrete frontend examples, RAG implementation details grounded in specific decisions
+3. **Send thank-you email** to Kate Revels
+<!-- agent:boundary:8e188ad5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Manual speaker attribution through transcript
-- [ ] Create LMI topic document
-- [x] Transcription completed (272 segments)
+- [ ] Send thank-you email to Kate Revels
+- [ ] LinkedIn message to Josh Malloy re: agent-doc interest
+- [ ] Prepare tight 2-min intro for potential round 2
+- [ ] Create LMI topic document in mail/topics/lmi
+- [x] Detailed conversation analysis
+- [x] Transcription completed
 - [x] Interview completed
 <!-- /agent:pending -->

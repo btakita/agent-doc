@@ -1106,7 +1106,7 @@ You're right — writes should be serialized, not raced. The skill workflow is s
 
 **Fix for linkedin.md:** I'll remove the duplicate from the working tree now.
 Would the fix be a debouncing solution? Is **Lock-based serialization:** your recommendation for the debouncing solution?
-### Re: Debouncing vs lock-based serialization (HEAD)
+### Re: Debouncing vs lock-based serialization
 
 No — lock-based serialization (option 3) is for concurrent writes to the same file. The linkedin.md issue is different: **two separate Claude sessions both generated the same response for the same document**.
 
@@ -1120,7 +1120,7 @@ The real fix is **pane ownership**: only the Claude session that owns a document
 **Prevention:** The preflight's `agent-doc commit` step should detect that the snapshot already contains the response content. If the snapshot matches the current document (no diff), preflight returns `no_changes: true` and the skill stops.
 
 This is already the designed behavior. The bug is that the second session somehow bypassed this check. Without the linkedin session's logs, I can't determine exactly how. If it happens again, we'll capture the preflight output to diagnose.
-<!-- agent:boundary:6ade1c55 -->
+<!-- agent:boundary:d196057f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

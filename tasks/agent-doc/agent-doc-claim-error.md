@@ -1070,7 +1070,7 @@ Catches ALL stale baselines regardless of content length. Committed `d9a113a`, p
 Ready for Bug 2?
 Please explain why we have baseline-vs-snapshot. I'm not 100% following why we have these 2 components.
 Why not **always** re-read the file? Where is this code? in the ffi plugin or in agent-doc binary?
-### Re: Why baseline AND snapshot? Why not always re-read? (HEAD)
+### Re: Why baseline AND snapshot? Why not always re-read?
 
 **Where this code lives:** All in the `agent-doc` binary (`write.rs`), not the FFI plugin.
 
@@ -1098,7 +1098,7 @@ The SKILL saves the baseline at the start of step 1 (before generating). Between
 **The real fix:** The baseline should be saved AFTER preflight completes (after commit repositions the boundary), not before. That's a SKILL-level fix. The binary guard we added is a safety net for when the SKILL gets this wrong.
 
 **Could we eliminate baselines entirely?** Yes, if we always re-read the file as the merge ancestor. But then we lose concurrent-edit detection. The tradeoff: baselines enable CRDT merge; the cost is staleness risk.
-<!-- agent:boundary:78c3ca1e -->
+<!-- agent:boundary:ae1ce7ba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

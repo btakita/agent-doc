@@ -926,7 +926,7 @@ Justin confirmed he's sending it tomorrow morning. Given the call context, his s
 1. Reply to Justin on LinkedIn with your preferred time slot
 2. Watch for the markdown exercise email tomorrow morning
 3. When it arrives, plan a recorded session completing it with agent-doc
-### Re: Call timing clarification (Mar 31) (HEAD)
+### Re: Call timing clarification (Mar 31)
 
 Correct — the phone call happened before Justin's 5:14 PM LinkedIn message. Timeline:
 
@@ -941,7 +941,7 @@ So the 1pm Tuesday from the call is invalidated. Your LinkedIn reply should refe
 > Hi Justin, thanks for the update. Monday April 6th at 1pm ET works for me. Looking forward to it!
 
 Also note from the call: "Hawk" is likely the interviewer name (VP of Engineering or CTO alias). Justin mentioned the CTO may have the first round be discussion-only with the VP, saving vibe coding for a later round. Either way, he's sending the markdown exercise tomorrow so you can be proactive.
-<!-- agent:boundary:f7708477 -->
+<!-- agent:boundary:229be005 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

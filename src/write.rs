@@ -515,25 +515,27 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                 eprintln!("[perf] apply_patches_with_overrides: {}ms", elapsed_apply);
             }
 
-            // Guard: if content_ours is shorter than the current snapshot, the baseline
-            // was stale. Use the current file content as the snapshot instead to prevent
-            // rolling back committed responses.
-            if let Ok(Some(current_snap)) = snapshot::load(file)
-                && content_ours.len() + 100 < current_snap.len()
-            {
+            // Guard: detect stale baseline by comparing it against the current snapshot.
+            // If the baseline doesn't match the snapshot (after stripping boundary markers),
+            // the baseline is stale — re-apply patches to the current file content instead.
+            // This prevents snapshot rollback regardless of whether content_ours is longer
+            // or shorter than the snapshot.
+            if let Ok(Some(current_snap)) = snapshot::load(file) {
+                let snap_clean = strip_boundary_for_dedup(&current_snap);
+                let base_clean = strip_boundary_for_dedup(base);
+                if snap_clean != base_clean {
                     eprintln!(
-                        "[write] WARNING: content_ours ({} bytes) shorter than snapshot ({} bytes) — stale baseline detected, using file content",
-                        content_ours.len(),
-                        current_snap.len()
+                        "[write] WARNING: baseline doesn't match snapshot — stale baseline detected, using current file as baseline"
                     );
                     crate::ops_log::log_op(file, &format!(
-                        "stale_baseline_detected file={} content_ours_len={} snap_len={}",
-                        file.display(), content_ours.len(), current_snap.len()
+                        "stale_baseline_detected file={} base_len={} snap_len={} file_len={}",
+                        file.display(), base.len(), current_snap.len(), content_at_start.len()
                     ));
                     // Re-apply patches to the current file content instead of the stale baseline
                     content_ours = template::apply_patches_with_overrides(
                         &content_at_start, &patches, &unmatched, file, &mode_overrides,
                     ).context("failed to apply patches with fresh baseline")?;
+                }
             }
 
             // Dedup: skip IPC if patches produce no changes (strip boundary markers)

@@ -456,7 +456,7 @@ resync the
 **Tests:** 232 total (7 new), all passing. Clippy clean. Audit clean.
 
 Ready to commit in corky submodule.
-<!-- agent:boundary:d056670c -->
+<!-- agent:boundary:d5f0a15a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

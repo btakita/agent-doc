@@ -15,10 +15,10 @@ New session — awaiting user input.
 
 <!-- agent:exchange patch=append -->
 
-### Re: New session — ragie-web-doc (HEAD)
+### Re: New session — ragie-web-doc
 
 Fresh document with empty components. What's the goal here? Add your prompt to the exchange component and I'll pick it up on the next cycle.
-<!-- agent:boundary:3ecd66b8 -->
+<!-- agent:boundary:775df786 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

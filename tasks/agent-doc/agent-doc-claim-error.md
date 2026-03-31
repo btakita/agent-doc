@@ -954,7 +954,7 @@ This belongs in `tasks/software/agent-doc.md` as a feature track, not in this bu
 - Orphaned writes (write without subsequent commit)
 - Snapshot rollbacks (snap_len decreased without compaction)
 - Session restarts (multiple session_start for same file)
-### Re: Third occurrence — ops.log reveals the pattern (HEAD)
+### Re: Third occurrence — ops.log reveals the pattern
 
 The ops.log captured the exact failure:
 
@@ -984,7 +984,7 @@ if content_ours.len() < current_snap.len() - 100 {
 ```
 
 Or better: always re-read the file as the baseline if the `--baseline-file` content doesn't match the current snapshot.
-<!-- agent:boundary:3b72881b -->
+<!-- agent:boundary:4f03e2eb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

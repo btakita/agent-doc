@@ -3,12 +3,14 @@ agent_doc_session: 69cd8603-762b-4a92-adc6-a44c3ed88380
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
+links:
+  - ./kate-revels.md
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-Contacts created, Josh email drafted — awaiting approval
+Josh email revised with interest alignment — awaiting approval
 <!-- /agent:status -->
 
 ## Exchange
@@ -511,6 +513,7 @@ Want me to draft a LinkedIn connection request / message to Josh about agent-doc
 
 Please add contacts for each of the participants in the interview.
 Please draft an email to Josh Malloy with a thank you and a follow up re: agent-doc
+In the draft, align his interests with agent-doc.
 ### Re: Contacts Created + Josh Email Drafted
 
 #### Contacts Created
@@ -534,16 +537,27 @@ Subject: Re: Interview Follow-up — agent-doc & Interactive Document Generation
 Content references his specific interest in interactive document generation with source citation/fact-checking, links to YouTube demos, crates.io, and GitHub. Uses `...` not em dashes.
 
 Review and approve? I'll send with `corky draft push --send` when ready.
-<!-- agent:boundary:18cbf192 -->
+### Re: Josh Email Revised — Aligned to His Interests (HEAD)
+
+Updated the draft to directly map his stated interests to agent-doc capabilities:
+
+1. **Claim identification + evidence matching** → template mode with named components, source traceability
+2. **Interactive long-form generation** → CRDT merge for concurrent editing, human-in-the-loop control
+3. **Auditable workflow state** → git-backed revision history with selective staging
+4. **"Beyond the Vending Machine" connection** → deterministic binary vs non-deterministic skill = managing capability/transparency tradeoff
+
+Draft at: `mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-interactive-document-genera.md`
+
+Review and approve to send.
+<!-- agent:boundary:8e45d506 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Send Josh Malloy follow-up email (draft ready, awaiting approval)
-- [x] Created contacts for all 5 interview participants
-- [x] LMI topic document created
-- [x] Thank-you email sent to Kate
-- [x] Interview analysis complete
-- [x] Transcription complete
+- [ ] Send Josh Malloy follow-up email (revised draft ready)
+- [x] Created contacts for all 5 participants
+- [x] LMI topic document
+- [x] Thank-you email to Kate
+- [x] Interview analysis + transcription
 <!-- /agent:pending -->

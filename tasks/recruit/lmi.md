@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-All talking points ready — 16 min to call
+Cheat sheet complete — call in ~10 min
 <!-- /agent:status -->
 
 ## Exchange
@@ -237,12 +237,22 @@ From your existing work:
 - **Sift** — local hybrid search (Alex Kwiatkowski). Exploring for semantic search across agent-doc, corky, existence-lang, tagpath.
 
 **Interview angle for LIGER:** "I'm building document processing pipelines that combine cloud RAG (Ragie for indexing/retrieval) with local hybrid search (Sift for offline/air-gapped). This maps to LIGER's dual deployment model — cloud for unclassified, local for air-gapped IL5/IL6 environments."
-<!-- agent:boundary:717629b9 -->
+
+Please ensure the entire document is a 1 page pdf.
+We should add Pneuma, Noumena,
+### Re: PDF Confirmation (HEAD)
+
+The cheat sheet PDF already has all content on 1 page — including the pneuma/noumena/phenomena and Ragie/Sift sections added in the last update. It's ready at:
+
+`file:///home/brian/work/btakita/agent-loop/tmp/lmi-cheatsheet.pdf`
+
+(It looks like your message was cut off after "We should add P" — if you need something else added, let me know.)
+<!-- agent:boundary:1bf564d0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Join Teams call at 1:30 PM ET
-- [ ] Update cheat sheet PDF with pneuma/noumena/phenomena + Ragie/Sift
+- [x] Update cheat sheet PDF with pneuma/noumena/phenomena + Ragie/Sift
 <!-- /agent:pending -->

@@ -6,6 +6,8 @@ Edit a markdown file, press a hotkey, and the tool diffs your changes, sends the
 
 > **Alpha Software** — actively developed; APIs and frontmatter format may change between versions.
 
+> **Single-user only.** agent-doc operates on the local filesystem with no access control. Use a private git repository. See the [Security](#security) section for details.
+
 ## Install
 
 ```sh
@@ -57,6 +59,8 @@ The typical edit cycle: write in your editor, trigger `agent-doc route <file>` v
 - **Parallel fan-out** — independent git worktrees per subtask, each with its own Claude session (`agent-doc parallel`)
 - **Editor plugins** — JetBrains and VS Code plugins for hotkey integration and IPC writes
 - **Watch daemon** — auto-submit on file change with debounce and reactive mode for stream documents
+- **Linked resources** — `links` frontmatter field for local files and URLs; URL content fetched, converted HTML→markdown via `htmd`, cached, and diffed on each preflight
+- **Session logging** — persistent logs at `.agent-doc/logs/<session-uuid>.log` for debugging session crashes and restarts
 - **Git integration** — auto-commit each run; squash history with `agent-doc clean`
 - **Bulk resync** — validates session state and fixes stale/orphaned panes in 3 subprocess calls instead of ~20-40
 - **Column memory** — `.agent-doc/last_layout.json` remembers column→agent-doc mapping; preserves 2-pane tmux layout when one editor column switches to a non-agent file
@@ -90,6 +94,18 @@ Or install from the VS Code Marketplace. Add a task with `"command": "agent-doc 
 ```vim
 nnoremap <leader>as :!agent-doc run %<CR>:e<CR>
 ```
+
+## Security
+
+agent-doc is designed for **single-user, local operation**. All session data (documents, snapshots, exchange history) is stored on the local filesystem and committed to a git repository.
+
+**Current security model:**
+- **Single user only.** There is no multi-user access control, authentication, or session isolation.
+- **Private repo recommended.** Session documents may contain sensitive content (correspondence, research, credentials in context). Use a private git repository.
+- **Prompt injection risk.** Content pasted into documents from external sources (emails, web pages, chat logs) could contain prompt injection attempts. The agent processes all document content as user input with no injection scanning.
+- **`--dangerously-skip-permissions` exposure.** When running with this flag (common in agent-doc sessions), the agent has full filesystem access. Injected prompts could read files or execute commands if not sandboxed.
+
+**Planned:** Collaborative security for web/networked deployments (multi-user access control, session isolation, content scanning, compartmented access patterns).
 
 ## License
 

@@ -83,9 +83,21 @@ const CRDT_DIR: &str = ".agent-doc/crdt";
 /// Used for both snapshot filenames and lock filenames.
 pub fn doc_hash(doc: &Path) -> Result<String> {
     let canonical = doc.canonicalize()?;
+    Ok(hash_path_str(&canonical.to_string_lossy()))
+}
+
+/// Compute the SHA256 hex hash from an absolute path string.
+///
+/// Unlike [`doc_hash`], this does not call `canonicalize()` and therefore works
+/// for paths that no longer exist on disk (e.g., the old path after a rename).
+pub fn doc_hash_from_str(absolute_path: &str) -> String {
+    hash_path_str(absolute_path)
+}
+
+fn hash_path_str(path: &str) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(canonical.to_string_lossy().as_bytes());
-    Ok(hex::encode(hasher.finalize()))
+    hasher.update(path.as_bytes());
+    hex::encode(hasher.finalize())
 }
 
 /// Compute the advisory lock file path for a given document.

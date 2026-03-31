@@ -16,6 +16,12 @@
 //! - On clean exit (code 0): prints a prompt to stderr and reads stdin; pressing
 //!   Enter restarts fresh (no `--continue`), typing `q` + Enter exits.
 //! - Prints the truncated session UUID and pane ID to stderr on registration.
+//! - Opens a persistent session log at `.agent-doc/logs/<session-uuid>.log`,
+//!   appending timestamped events for session start, claude start/restart/exit,
+//!   user quit, and session end.
+//! - On `--continue` restarts, spawns a background thread that waits 5 seconds
+//!   then sends `/agent-doc <file>` via `tmux send-keys` to auto-trigger
+//!   the skill workflow in the resumed conversation.
 //!
 //! ## Agentic Contracts
 //! - The file path must exist before `run` is called; callers must not rely on
@@ -27,8 +33,9 @@
 //! - `claude_args` are prepended to every `claude` invocation inside the loop,
 //!   including restarts; they are resolved once at startup and held for the
 //!   lifetime of the loop.
-//! - The module only writes to the document file (UUID injection) and to
-//!   `sessions.json`; it does not touch snapshots, git, or claims.
+//! - The module writes to the document file (UUID injection), `sessions.json`,
+//!   and `.agent-doc/logs/<session-uuid>.log`; it does not touch snapshots,
+//!   git, or claims.
 //! - Must be called from within an active tmux session; violating this contract
 //!   returns an immediate `Err`.
 //!
@@ -49,9 +56,50 @@
 //!   which overrides `AGENT_DOC_CLAUDE_ARGS`; each layer verified independently.
 
 use anyhow::{Context, Result};
+use std::io::Write;
 use std::path::Path;
 
 use crate::{config, frontmatter, sessions};
+
+/// Open (or create) the session log file at `.agent-doc/logs/<session-uuid>.log`.
+/// Returns a writable file handle in append mode, or None if the directory can't be created.
+fn open_session_log(file: &Path, session_id: &str) -> Option<std::fs::File> {
+    // Walk up from the document to find the project root containing .agent-doc/
+    let dir = file.parent()?;
+    let mut search = Some(dir);
+    let mut agent_doc_dir = None;
+    while let Some(d) = search {
+        let candidate = d.join(".agent-doc");
+        if candidate.is_dir() {
+            agent_doc_dir = Some(candidate);
+            break;
+        }
+        search = d.parent();
+    }
+    let logs_dir = agent_doc_dir?.join("logs");
+    std::fs::create_dir_all(&logs_dir).ok()?;
+    let log_path = logs_dir.join(format!("{}.log", session_id));
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .ok()
+}
+
+fn timestamp() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // Format as ISO-ish: just use epoch seconds for simplicity in logs
+    format!("{}", now)
+}
+
+fn log_event(log: &mut Option<std::fs::File>, msg: &str) {
+    if let Some(f) = log {
+        let _ = writeln!(f, "[{}] {}", timestamp(), msg);
+    }
+}
 
 pub fn run(file: &Path) -> Result<()> {
     if !file.exists() {
@@ -91,8 +139,22 @@ pub fn run(file: &Path) -> Result<()> {
         pane_id
     );
 
+    // Open session log
+    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let mut session_log = open_session_log(&canonical, &session_id);
+    log_event(
+        &mut session_log,
+        &format!(
+            "session_start file={} pane={} session={}",
+            file.display(),
+            pane_id,
+            &session_id[..8]
+        ),
+    );
+
     // Run claude in a restart loop — pane never dies
     let mut first_run = true;
+    let mut restart_count: u32 = 0;
     loop {
         let mut cmd = std::process::Command::new("claude");
         // Add resolved claude_args before other flags
@@ -101,41 +163,103 @@ pub fn run(file: &Path) -> Result<()> {
                 cmd.arg(arg);
             }
         }
-        if !first_run {
+        let auto_trigger = if !first_run {
             // After first run, continue the previous session
             cmd.arg("--continue");
             eprintln!("Restarting claude (--continue)...");
+            log_event(
+                &mut session_log,
+                &format!("claude_restart mode=continue restart_count={}", restart_count),
+            );
+            true
         } else {
             eprintln!("Starting claude...");
+            log_event(
+                &mut session_log,
+                &format!(
+                    "claude_start mode={} restart_count={}",
+                    if restart_count == 0 { "fresh" } else { "fresh_restart" },
+                    restart_count
+                ),
+            );
+            false
+        };
+
+        // For --continue restarts, schedule auto-trigger of /agent-doc via tmux send-keys
+        // after a short delay to let Claude initialize
+        if auto_trigger {
+            let trigger_pane = pane_id.clone();
+            let trigger_file = file.to_string_lossy().to_string();
+            let mut trigger_log = session_log.as_ref().and_then(|f| f.try_clone().ok());
+            std::thread::spawn(move || {
+                // Wait for Claude to initialize and be ready for input
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                let trigger_cmd = format!("/agent-doc {}", trigger_file);
+                let status = std::process::Command::new("tmux")
+                    .args(["send-keys", "-t", &trigger_pane, &trigger_cmd, "Enter"])
+                    .output();
+                match status {
+                    Ok(output) if output.status.success() => {
+                        if let Some(ref mut f) = trigger_log {
+                            let ts = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs();
+                            let _ = writeln!(f, "[{}] auto_trigger sent=\"{}\"", ts, trigger_cmd);
+                        }
+                        eprintln!("[agent-doc] auto-triggered: {}", trigger_cmd);
+                    }
+                    _ => {
+                        if let Some(ref mut f) = trigger_log {
+                            let ts = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs();
+                            let _ = writeln!(f, "[{}] auto_trigger_failed", ts);
+                        }
+                        eprintln!("[agent-doc] auto-trigger failed");
+                    }
+                }
+            });
         }
 
         let status = cmd.status().context("failed to run claude")?;
         first_run = false;
 
         let code = status.code().unwrap_or(1);
+        log_event(
+            &mut session_log,
+            &format!("claude_exit code={} restart_count={}", code, restart_count),
+        );
+
         if code == 0 {
             // Clean exit — prompt user
             eprintln!("\nClaude exited cleanly.");
             eprintln!("Press Enter to restart, or 'q' to exit.");
             let mut input = String::new();
             if std::io::stdin().read_line(&mut input).is_err() {
+                log_event(&mut session_log, "stdin_read_failed — exiting loop");
                 break;
             }
             if input.trim().eq_ignore_ascii_case("q") {
+                log_event(&mut session_log, "user_quit");
                 break;
             }
             // User pressed Enter — restart fresh
             first_run = true;
+            restart_count += 1;
         } else {
             // Non-zero exit (context exhaustion, crash, etc.) — auto-restart
             eprintln!(
                 "\nClaude exited with code {}. Auto-restarting in 2s...",
                 code
             );
+            restart_count += 1;
             std::thread::sleep(std::time::Duration::from_secs(2));
         }
     }
 
+    log_event(&mut session_log, "session_end");
     eprintln!("Session ended for {}", file.display());
     Ok(())
 }

@@ -66,6 +66,7 @@ mod patch;
 mod plugin;
 mod prompt;
 mod recover;
+mod rename;
 mod reset;
 mod resync;
 mod route;
@@ -470,6 +471,13 @@ enum Commands {
         /// Component name to transfer
         component: String,
     },
+    /// Migrate session state after a document file rename/move
+    Rename {
+        /// Original document path (may no longer exist on disk)
+        old_path: PathBuf,
+        /// New document path (must exist)
+        new_path: PathBuf,
+    },
     /// Open an external terminal with tmux attached to the session
     Terminal {
         /// Path to the session document
@@ -708,6 +716,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Undo { file } => undo::run(&file),
         Commands::Extract { source, target, component } => extract::run(&source, &target, component.as_deref()),
         Commands::Transfer { source, target, component } => extract::transfer(&source, &target, &component),
+        Commands::Rename { old_path, new_path } => rename::run(&old_path, &new_path),
         Commands::Claims => {
             let cwd = std::env::current_dir()?;
             if let Some(root) = snapshot::find_project_root(&cwd) {

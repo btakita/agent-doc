@@ -533,6 +533,7 @@ Combines recover, commit, claims-log check, diff, and document HEAD read into a 
 1. Recover orphaned pending responses (`agent-doc recover`)
 2. Commit previous cycle (`agent-doc commit`)
 3. Read and truncate `.agent-doc/claims.log`
+3c. Check linked docs: inspect `links` from frontmatter — local files compared by git commit time, URLs fetched via `ureq` with HTML-to-markdown conversion (htmd), cached in `.agent-doc/links_cache/`
 4. Compute diff between snapshot and current document
 5. Read document HEAD from disk
 
@@ -544,14 +545,22 @@ Combines recover, commit, claims-log check, diff, and document HEAD read into a 
   "claims": [],
   "diff": "unified diff text or null",
   "no_changes": false,
-  "document": "full document content"
+  "document": "full document content",
+  "linked_changes": [{"path": "https://example.com", "summary": "content changed (1234 bytes)", "exists": true}]
 }
 ```
 
 - `no_changes` is `true` when the diff is `None` (snapshot == document)
 - `diff` is `null` when `no_changes` is `true`
 - `document` always contains the current HEAD content
+- `linked_changes` lists changes in linked docs/URLs since last cycle (omitted when empty)
 - Progress/diagnostic messages go to stderr
+
+**URL link processing:**
+- URLs (`http://`/`https://`) in `links` frontmatter are fetched with a 10s timeout
+- HTML responses are converted to markdown via `htmd` (stripping script, style, nav, footer, noscript, svg)
+- Content is cached at `.agent-doc/links_cache/<sha256(url)>.txt`
+- Changes detected by comparing fresh fetch against cached content
 
 ## 7.27 Preflight Mtime Debounce
 
@@ -687,3 +696,27 @@ The stash system preserves running Claude sessions when the user switches editor
 - Commit: `git add -f {file}` (bypasses .gitignore) + `git commit -m "agent-doc: {timestamp}" --no-verify`
 - Branch: `git checkout -b agent-doc/{filestem}`
 - Squash: soft-reset to before first `agent-doc:` commit, recommit as one
+
+## 10. Security
+
+agent-doc is designed for single-user, local operation. There is no authentication, authorization, or multi-user access control.
+
+### 10.1 Threat Model
+
+- **Trusted user, untrusted content.** The user is trusted; document content may contain prompt injection from external sources (pasted emails, web pages, chat logs).
+- **Local filesystem scope.** All data (documents, snapshots, exchange history, links cache) resides on the local filesystem. No network services are exposed.
+- **Git as audit trail.** All agent responses are committed to git, providing a complete audit trail. However, git history may contain sensitive content if documents reference private data.
+
+### 10.2 Known Risks
+
+- **Prompt injection via document content.** Content pasted from external sources could contain injection attempts. The agent processes all document content as user input with no injection scanning. Mitigation: user awareness; planned content scanning in `agent-doc write`.
+- **`--dangerously-skip-permissions` exposure.** When running with this flag (common in agent-doc sessions via `claude_args` frontmatter), the agent has full filesystem access. Injected prompts could read files or execute commands.
+- **Data divulgence through the response channel.** Even with sandboxing, the agent's response IS the output channel. If the model has sensitive data in context, injection can convince it to include that data in the document response. The only real defense is context isolation (see ragie-web-doc security analysis).
+- **Links cache may contain sensitive fetched content.** URL content fetched via `links` frontmatter is cached at `.agent-doc/links_cache/`. This cache is not encrypted and persists until manually cleared.
+
+### 10.3 Recommendations
+
+- Use a **private git repository** for the project containing session documents.
+- Avoid putting secrets (API keys, credentials) in documents or agent context.
+- For shared/collaborative use cases, wait for the planned multi-user security model (access control, session isolation, content scanning).
+- Review agent responses before sharing or publishing document content.

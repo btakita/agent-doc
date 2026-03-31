@@ -466,7 +466,7 @@ All 361 tests pass, 0 failures.
 **Audit result:** 1 remaining issue — pre-existing large table warning in CLAUDE.md (not related to our changes).
 
 The debouncing in tasks/recruit/lmi.md did not work. Why not?
-### Re: LMI debounce not working (HEAD)
+### Re: LMI debounce not working
 
 The debounce in preflight has two layers:
 
@@ -489,7 +489,7 @@ That waited ~6 rechecks (~1.5s) for the typing to settle.
 3. The typing indicator (`is_typing_via_file`) wasn't active for this document
 
 To diagnose: can you describe what you saw? Did the agent respond to a partial/truncated prompt? Or did it respond before you finished editing?
-<!-- agent:boundary:d9c74ef1 -->
+<!-- agent:boundary:cf168888 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

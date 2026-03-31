@@ -516,7 +516,7 @@ Done. Added a blockquote right under the "Alpha Software" note:
 
 The full Security section remains at the bottom with the detailed breakdown. The top-level note gives immediate visibility.
 
-Add security to SPEC.md. We will address security
+Add security to SPEC.md. Add current security model. More work TBD. 
 ### Re: Security added to SPEC.md
 
 Done. Added **Section 10: Security** to SPEC.md with three subsections:
@@ -526,7 +526,12 @@ Done. Added **Section 10: Security** to SPEC.md with three subsections:
 - **10.3 Recommendations** ... private repo, no secrets in context, wait for multi-user security, review before sharing
 
 The security content draws from the ragie-web-doc analysis (data divulgence is the fundamental unsolved problem) and aligns with the README security section. The SPEC is more detailed since it's the functional specification for implementors.
-<!-- agent:boundary:8efb7f7a -->
+### Re: Security model status (HEAD)
+
+Acknowledged. SPEC.md Section 10 covers the current security model. The "More work TBD" items from the ragie-web-doc analysis (content scanning, session isolation, multi-user access control) are tracked in pending.
+
+All documentation work for this session is complete. Ready for the next priority when you are.
+<!-- agent:boundary:9be7a9c7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -540,9 +545,10 @@ The security content draws from the ragie-web-doc analysis (data divulgence is t
 - [x] **HTML-to-markdown via htmd** — integrated, deps audited
 - [x] **Tests** — 7 new tests for URL/HTML features
 - [x] **Audit docs** — module specs + evals updated
-- [x] **SPEC.md** — updated with features + security section
+- [x] **SPEC.md** — updated with features + security (Section 10)
 - [x] **README.md** — updated with features + security top-note + section
-- [ ] **Investigate lmi.md debounce failure** — need user description of symptoms
+- [ ] **Collaborative security model** — content scanning, session isolation, multi-user ACL (TBD)
+- [ ] **Investigate lmi.md debounce failure**
 - [ ] **Optional markitdown/Ragie Parse integration** (PDF, DOCX, OCR)
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)
 - [ ] **Editable repo links (git push back)**

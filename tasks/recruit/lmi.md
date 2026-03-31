@@ -196,12 +196,12 @@ This is richer than DDD's ubiquitous language. A DDD glossary says "Context mean
 
 Please prepare a 1 page pdf cheat sheet for talking points.
 I want all talking points to be visible when tiled with the call using i3.
-### Re: Cheat Sheet PDF (HEAD)
+### Re: Cheat Sheet PDF
 
 Created a 1-page PDF cheat sheet at `file:///home/brian/work/btakita/agent-loop/tmp/lmi-cheatsheet.pdf`
 
 All talking points visible in a single page — tile it next to the Teams call in i3. Covers: interviewers, LIGER facts, your angles, alignment thesis, agent-doc pitch, existence-lang pitch, agent-kit distribution, Malloy hook, and rules.
-<!-- agent:boundary:cb290e25 -->
+<!-- agent:boundary:ce535364 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

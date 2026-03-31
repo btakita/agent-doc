@@ -491,7 +491,7 @@ This makes the sandbox genuinely secure against prompt injection. The model can 
 How can I be certain that you are correct about this statement?
 
 If Bob were to execute a document sent my me and he already bypasses certain permissions, how can he be certain that there won't be an unintentional divulgence of data?
-### Re: Verifiability and the data divulgence problem (HEAD)
+### Re: Verifiability and the data divulgence problem
 
 **How to verify the `--allowedTools` claim — don't take my word for it:**
 
@@ -530,7 +530,7 @@ Even with a perfect sandbox, there's a fundamental leak: **the model's response 
 **The honest answer:** If Bob runs `--dangerously-skip-permissions` and processes untrusted docs in a session that has his secrets in context, no sandboxing prevents leakage through the response channel. The only real defense is **context isolation** — shared documents in a clean, separate session with no sensitive data loaded.
 
 This is an unsolved problem in the broader LLM agent space. The best we can do: make the safe path (isolated sessions) the default, and make the unsafe path (shared context with untrusted content) require explicit opt-in.
-<!-- agent:boundary:472b893f -->
+<!-- agent:boundary:753e2b51 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

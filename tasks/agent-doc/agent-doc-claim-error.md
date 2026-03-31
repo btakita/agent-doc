@@ -425,18 +425,40 @@ Done. `htmd` v0.5.3 is now wired into `check_url_link()` in `preflight.rs`.
 **Boilerplate stripping:** The converter skips `<script>`, `<style>`, `<nav>`, `<footer>`, `<noscript>`, and `<svg>` tags, removing common web page boilerplate.
 
 **Build status:** Clippy clean, all tests pass, release build complete. Added 21 transitive deps (html5ever + related parsing crates).
-<!-- agent:boundary:8df1f5ba -->
+21 transitive deps is a lot of dependencies. Please show me. Did we include any http server implementation? I would want that decoupled.
+Add tests
+audit docs
+Update SPEC.md, README.md
+### Re: Dependency audit + action items (HEAD)
+
+**htmd dependency tree** — 3 direct deps, all HTML parsing:
+```
+htmd v0.5.3
+├── html5ever v0.36.1        # Mozilla's HTML parser
+├── markup5ever_rcdom v0.36.0 # DOM tree for html5ever
+└── phf v0.13.1               # Perfect hash function (tag lookup)
+```
+
+**No HTTP server.** The transitive deps are all parsing-related: `tendril` (string buffers), `string_cache` (atom interning), `web_atoms` (HTML/SVG atom definitions), `phf_*` (compile-time hash tables). Many overlap with existing deps (proc-macro2, quote, syn, cfg-if, libc, log, smallvec are already pulled by other crates).
+
+**Truly new crates:** htmd, html5ever, markup5ever, markup5ever_rcdom, xml5ever, tendril, futf, mac, web_atoms, string_cache, precomputed-hash, new_debug_unreachable, utf-8 — ~13 new crates, all from the html5ever ecosystem (Mozilla-maintained).
+
+Working on tests, audit docs, and SPEC/README updates now.
+<!-- agent:boundary:51d4837a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.28.0-v0.28.3: All shipped
-- [x] **Rename `related_docs` → `links` (with backward-compat alias)** — done in v0.28.3
-- [x] **Session death logging** (`.agent-doc/logs/`) — implemented
+- [x] **Rename `related_docs` → `links` (with backward-compat alias)**
+- [x] **Session death logging** (`.agent-doc/logs/`)
 - [x] **Auto-trigger on restart** — tmux send-keys after `--continue`
-- [x] **URL link support (fetch + cache + context)** — implemented
-- [x] **HTML-to-markdown via htmd** — integrated into URL fetch pipeline
+- [x] **URL link support (fetch + cache + context)**
+- [x] **HTML-to-markdown via htmd** — integrated, deps audited (no HTTP server)
+- [ ] **Add tests** for URL link + HTML conversion ← active
+- [ ] **Audit docs** (module spec comments)
+- [ ] **Update SPEC.md, README.md**
 - [ ] **Optional markitdown/Ragie Parse integration** (PDF, DOCX, OCR)
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)
 - [ ] **Editable repo links (git push back)**

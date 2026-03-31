@@ -543,7 +543,7 @@ corky sync refetch <THREAD_ID>
 
 Ready to add tests, update SPEC.md, and run audit-docs.
 Go
-### Re: Tests, SPEC.md, Audit — Complete (HEAD)
+### Re: Tests, SPEC.md, Audit — Complete
 
 **Tests** (3 new, 235 total passing):
 - `test_thread_response_deserialize` — deserializes multi-message thread JSON, verifies IDs
@@ -559,7 +559,7 @@ Go
 **Audit:** `corky audit-docs` — clean (1 pre-existing SKILL.md warning only).
 
 `make check` passes — clippy clean, 235 tests pass. Ready to commit and release.
-<!-- agent:boundary:a7115001 -->
+<!-- agent:boundary:6c3f5d8e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

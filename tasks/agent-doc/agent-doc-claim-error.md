@@ -294,7 +294,7 @@ This is a larger feature — let me scope the initial implementation:
 - HTML-to-markdown conversion (raw HTML for now)
 
 Starting implementation now.
-### Re: URL link support — implemented (HEAD)
+### Re: URL link support — implemented
 
 Done. URL links now work in the `links` frontmatter field. Implementation in `preflight.rs`.
 
@@ -332,7 +332,7 @@ links:
 - HTML-to-markdown conversion (agent gets raw HTML)
 - Object entry syntax for metadata
 - Editable repo links
-<!-- agent:boundary:631c9927 -->
+<!-- agent:boundary:73bd1e77 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

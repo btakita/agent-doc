@@ -294,12 +294,12 @@ Looks good — readable and all on 1 page. You're set. Break a leg!
 
 I'm also working on a web/networked enabled agent-doc as well. Please add to cheat sheet.
 Make the font bigger on the cheat sheet.
-### Re: Updated Cheat Sheet (HEAD)
+### Re: Updated Cheat Sheet
 
 Added **Web/networked agent-doc** to the agent-doc pitch section. Bumped font to 9pt. Still 1 page. Reload:
 
 `file:///home/brian/work/btakita/agent-loop/tmp/lmi-cheatsheet.pdf`
-<!-- agent:boundary:a57a0a2f -->
+<!-- agent:boundary:8eafc890 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

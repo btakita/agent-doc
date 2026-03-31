@@ -1193,7 +1193,7 @@ This is NOT about two sessions sharing a harness — each tmux pane has its own 
 - `strip_boundary_for_dedup()` filters `<!-- agent:boundary:* -->` lines
 - All 4 dedup paths updated
 - crates.io ✓, PyPI ✓, GitHub Release ✓, cargo install ✓ (v0.28.3)
-<!-- agent:boundary:035baf82 -->
+<!-- agent:boundary:e71d99d1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

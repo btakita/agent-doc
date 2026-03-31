@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-Josh email ready — security discussion deferred to follow-up
+Josh email updated with security note — ready to send
 <!-- /agent:status -->
 
 ## Exchange
@@ -568,20 +568,32 @@ Should we address security concerns in the email draft?
 
 **Empty conversation file:** `mail/conversations/interview-with-brian-takita-2026-13755-full-stack-developer.md` has the header (To: all team members) but no body. This is the internal scheduling email Kate sent to the team with you CC'd. The body was likely HTML-only and corky's sync didn't extract text content from it. That's a corky sync issue...not something to fix in this session.
 
+Please fetch the data again.
+
 **Security in the Josh email:** I'd recommend keeping this first follow-up focused on agent-doc alignment. Bringing up security concerns in a cold follow-up could feel premature. Better to:
 1. Send the agent-doc-focused email now (establish the connection)
-2. If Josh responds or there's a second interview, bring up security architecture then...it'll land better with context
+2. If Josh responds or there's a second interview, bring up security architecture then...it'll land better with context: At least mention that this is only secure for a single user atm...but I'm working on collaborative security.
 
 The email already touches auditability and traceability (git-backed revision history, selective staging), which are security-adjacent without being explicit about it.
 
 Want to send as-is, or add a security angle?
-<!-- agent:boundary:36a1ce60 -->
+### Re: Email Updated + Sync Attempt (HEAD)
+
+**Sync:** Re-synced btak.dev account but "0 messages to process." The scheduling email body is likely HTML-only without a text/plain part, which corky's parser doesn't extract. This is a corky feature gap (HTML body extraction), not a data issue.
+
+**Security note added to Josh email:** Added a paragraph before the closing:
+
+> "One thing worth noting: agent-doc currently operates in a single-user security model (local file system, git-backed). I'm actively working on collaborative security for the web/networked version...multi-user access control, session isolation, and the kind of compartmented access patterns that would be relevant for federal deployments."
+
+Draft updated. Ready to send?
+<!-- agent:boundary:ca064526 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Send Josh Malloy follow-up email (awaiting approval)
+- [ ] Send Josh Malloy follow-up email (security note added)
+- [ ] Fix corky HTML body extraction (separate task)
 - [x] All contacts created
 - [x] All post-interview tasks complete
 <!-- /agent:pending -->

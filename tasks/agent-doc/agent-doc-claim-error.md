@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-All changes committed and pushed. Ready for v0.29.0 release.
+v0.29.0 released (crates.io, PyPI, GitHub Release).
 <!-- /agent:status -->
 
 ## Exchange
@@ -560,14 +560,23 @@ I'd recommend **yes, release as v0.29.0** (minor bump for new features). The che
 6. `cargo install --path .`
 
 Want me to proceed with the release?
-<!-- agent:boundary:c8adc480 -->
+release
+### Re: v0.29.0 released (HEAD)
+
+All publish targets complete:
+
+- **crates.io:** `agent-doc v0.29.0` published
+- **PyPI:** `agent_doc-0.29.0` published (manylinux_2_39_x86_64)
+- **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.29.0 (with binary + wheel)
+- **Local install:** `~/.cargo/bin/agent-doc` updated to v0.29.0
+- **Parent submodule:** pointer updated to v0.29.0
+<!-- agent:boundary:2eadcf17 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] All features implemented, tested, documented, committed, pushed
-- [ ] **Release v0.29.0** — version bump, tag, publish (crates.io, PyPI, GitHub Release)
+- [x] **v0.29.0 released** — links, htmd, session logging, auto-trigger, security docs
 - [ ] **Collaborative security model** — content scanning, session isolation, multi-user ACL (TBD)
 - [ ] **Optional markitdown/Ragie Parse integration** (PDF, DOCX, OCR)
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)

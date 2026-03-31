@@ -1183,7 +1183,7 @@ Why would the different claude session write the same response? Does this have t
 
 Want me to fix the dedup to strip boundary markers?
 Yes
-### Re: Why same response from different session + dedup fix (HEAD)
+### Re: Why same response from different session + dedup fix
 
 **Why the same response:** The linkedin.md Claude session likely re-processed the same user prompt. When the user edits near a response or saves, the `agent-doc preflight` computes a diff. If the diff shows the same user prompt (because the previous response wasn't yet committed to the snapshot), the Claude session generates the same response. The preflight's commit step should prevent this, but if the timing is tight (user edits while commit is in progress), the second cycle can see the same diff.
 
@@ -1193,7 +1193,7 @@ This is NOT about two sessions sharing a harness — each tmux pane has its own 
 - `strip_boundary_for_dedup()` filters `<!-- agent:boundary:* -->` lines
 - All 4 dedup paths updated
 - crates.io ✓, PyPI ✓, GitHub Release ✓, cargo install ✓ (v0.28.3)
-<!-- agent:boundary:19eb5d4d -->
+<!-- agent:boundary:035baf82 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

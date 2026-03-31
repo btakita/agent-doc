@@ -59,7 +59,7 @@ Enterprise AI orchestration platform for federal government:
 - Do NOT use AI tools or interview guides during the call
 - You CAN share examples of how you use AI to make your work more effective
 Give more info on LIGER.
-### Re: LIGER Deep Dive (HEAD)
+### Re: LIGER Deep Dive
 
 **LIGER = LMI Instruction-tuned GEnerative Resource**
 
@@ -106,7 +106,7 @@ Give more info on LIGER.
 - Your MCP daily usage maps to their tool-calling infrastructure
 - RAG experience with Ragie maps to LIGER's citation-backed RAG
 - You understand that federal security (IL5/IL6, air-gapped, zero-trust) shapes architecture from day one, not bolted on
-<!-- agent:boundary:99132ae2 -->
+<!-- agent:boundary:5dbb6d94 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

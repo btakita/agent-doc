@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Thank-you email drafted — awaiting approval to send
+Revised thank-you email (no AI tells) — awaiting send approval
 <!-- /agent:status -->
 
 ## Exchange
@@ -437,8 +437,37 @@ Brian Takita
 
 ---
 
+Rather than ` — `, use `...`. ` — ` is a common generic "tell" that AI was used to draft the content. Add this to my voice. Does corky support the author's voice?
+
 Want me to send this via corky as a reply to the original confirmation email? I'll thread it properly using the Message-ID from the source email.
-<!-- agent:boundary:459a5f04 -->
+### Re: Revised Email + Voice Notes (HEAD)
+
+Good catch on the em dash tell. Saved to memory so I'll avoid it going forward.
+
+**Corky voice support:** Not yet. Corky currently handles email composition (HTML formatting, threading, Gmail API) but doesn't have author voice/style profiles. That would be a good feature... a `voice.toml` or similar that captures writing patterns to apply during drafting.
+
+Here's the revised email:
+
+---
+
+**To:** kathryn.revels@lmisolutions.com
+**Subject:** Re: LMI - Video Conference Interview Confirmation
+
+Hi Kate,
+
+Thank you for coordinating today's interview with the LIGER team. I enjoyed meeting Luke, Josh, Andrew, and Adam...it was great to hear about the platform and the work the team is doing.
+
+The conversation about LIGER's agentic workflows and document processing capabilities was particularly exciting. Josh and I touched on some overlap between my agent-doc project and LIGER's interactive document generation needs, and I'd like to explore that further.
+
+Looking forward to hearing about next steps. Please let me know if there's anything else you need from me.
+
+Best,
+Brian Takita
+
+---
+
+Ready to send via corky? I'll thread it as a reply to the original confirmation email.
+<!-- agent:boundary:0e5d779d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

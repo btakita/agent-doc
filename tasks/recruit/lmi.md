@@ -537,7 +537,7 @@ Subject: Re: Interview Follow-up — agent-doc & Interactive Document Generation
 Content references his specific interest in interactive document generation with source citation/fact-checking, links to YouTube demos, crates.io, and GitHub. Uses `...` not em dashes.
 
 Review and approve? I'll send with `corky draft push --send` when ready.
-### Re: Josh Email Revised — Aligned to His Interests (HEAD)
+### Re: Josh Email Revised — Aligned to His Interests
 
 Updated the draft to directly map his stated interests to agent-doc capabilities:
 
@@ -549,7 +549,7 @@ Updated the draft to directly map his stated interests to agent-doc capabilities
 Draft at: `mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-interactive-document-genera.md`
 
 Review and approve to send.
-<!-- agent:boundary:8e45d506 -->
+<!-- agent:boundary:1cc6b275 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

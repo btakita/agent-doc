@@ -585,7 +585,7 @@ This is the exact scenario the `recover` step in preflight is designed to catch 
 **Bug to track:** `agent-doc commit` should detect when the file has content not in the snapshot and handle it (either by updating the snapshot or warning). Currently it silently ignores this divergence.
 
 Propose bug fix
-### Re: Bug fix proposal — snapshot/file divergence detection (HEAD)
+### Re: Bug fix proposal — snapshot/file divergence detection
 
 **The bug:** When `agent-doc write` succeeds (file updated via IPC) but the snapshot isn't saved (crash, IPC timeout, plugin error), subsequent `agent-doc commit` stages the stale snapshot content, leaving the actual response uncommitted.
 
@@ -624,7 +624,7 @@ if let Some(ref snap) = snapshot_content {
 Could also add this check to `preflight.rs` step 2 (before commit), where it would detect the divergence and either auto-fix or surface it in the JSON output. This gives the skill a chance to handle it.
 
 Want me to implement this fix?
-<!-- agent:boundary:fd37e194 -->
+<!-- agent:boundary:2b6d65b0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -638,7 +638,7 @@ You could frame it as: interested in the technical mission, open to roles that m
 **My recommendation:** Don't self-select out yet. If you're interested in the work, continue the process. The clearance investigation is where these questions get formally evaluated...you don't need to solve them upfront. Be prepared to be fully transparent about the Lucas collaboration if/when you reach the SF-86 stage.
 
 If that were the case, can I still use him as a subcontract?
-### Re: Subcontracting a Foreign National on Cleared Work (HEAD)
+### Re: Subcontracting a Foreign National on Cleared Work
 
 **Short answer:** It depends entirely on the classification level of the work.
 
@@ -661,7 +661,7 @@ If that were the case, can I still use him as a subcontract?
 - You can clearly demonstrate compartmentalization
 
 This is the kind of arrangement that clearance adjudicators see regularly. The key is: can you demonstrate that classified and unclassified work are cleanly separated? Your setup suggests yes.
-<!-- agent:boundary:2ae2e72a -->
+<!-- agent:boundary:f6a51e71 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

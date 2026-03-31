@@ -65,8 +65,9 @@ claude_args: --dangerously-skip-permissions
 - [x] Diarize default feature — v0.22.1
 - [x] `corky contact push google` — v0.22.1
 - [x] CLAUDE.md fallback in contact push — v0.22.1
+- [x] Gmail API body decode (attachment + base64 padding) — v0.22.2
+- [ ] crates.io publish — needs token refresh
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
-- [ ] crates.io publish for v0.22.1 — blocked on token refresh
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
@@ -468,12 +469,28 @@ commit and push
 **Both commits pushed:**
 - `a757362` — `attachmentId` support for `multipart/related` messages
 - `1303142` — padded base64 fallback in body decode
-<!-- agent:boundary:f28ea55f -->
+
+release
+### Re: Released v0.22.2 — Gmail API Body Decode Fixes (HEAD)
+
+**Version bump:** 0.22.1 → 0.22.2. VERSIONS.md backfilled for 0.22.0, 0.22.1, 0.22.2.
+
+**Published:**
+- [GitHub Release](https://github.com/btakita/corky/releases/tag/v0.22.2) (with CUDA binary)
+- [PyPI](https://pypi.org/project/corky/0.22.2/)
+- crates.io — token still invalid (same issue as v0.22.1)
+- Installed locally: corky 0.22.2 with GPU (transcribe-cuda)
+
+**Commits in this release:**
+- `a757362` — `attachmentId` support for `multipart/related` messages
+- `1303142` — padded base64 fallback in body decode
+- `79d7be0` — version bump + VERSIONS.md
+<!-- agent:boundary:7937ffbc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] crates.io publish for v0.22.1 — needs token refresh
+- [ ] crates.io publish — needs token refresh (blocked since v0.22.1)
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:pending -->

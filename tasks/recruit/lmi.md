@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Cheat sheet updated — join the call!
+Post-interview — transcription in progress
 <!-- /agent:status -->
 
 ## Exchange
@@ -299,11 +299,35 @@ Make the font bigger on the cheat sheet.
 Added **Web/networked agent-doc** to the agent-doc pitch section. Bumped font to 9pt. Still 1 page. Reload:
 
 `file:///home/brian/work/btakita/agent-loop/tmp/lmi-cheatsheet.pdf`
-<!-- agent:boundary:8eafc890 -->
+
+Please add contact for each of the participants in the interview. Include their LinkedIn profile.
+Please add a lmi topic. Please transcribe + diarize the conversation. Try to match who is speaking from the video with the diariazed output...matching the voice print of each speaker. Use the video as evidence of who is speaking.
+[2026-03-31 13-30-14.mp4](../../../../../Videos/2026-03-31%2013-30-14.mp4)
+### Re: Post-Interview — Contact Info & Transcription (HEAD)
+
+#### Interview Participants — Contact & LinkedIn
+
+| Name | Role | LinkedIn |
+|------|------|---------|
+| **Kate Revels** | Talent Acquisition | [linkedin.com/in/kate-revels](https://www.linkedin.com/in/kate-revels/) — kathryn.revels@lmisolutions.com, (703) 917-7594 |
+| **Luke Stets** | Engineering | [linkedin.com/in/lukestets](https://www.linkedin.com/in/lukestets/) |
+| **Josh Malloy** | Data Science Principal | [linkedin.com/in/josh-malloy](https://www.linkedin.com/in/josh-malloy/) |
+| **Andrew Dirks** | Full Stack Engineer | [linkedin.com/in/andrew-dirks-3789a5a9](https://www.linkedin.com/in/andrew-dirks-3789a5a9/) |
+| **Adam Hughes** | Software Developer, PhD | [linkedin.com/in/hughesadam87](https://www.linkedin.com/in/hughesadam87/) |
+
+#### Transcription
+
+Running `corky transcribe` with `--diarize` and 6 speakers on the recorded video (1.4GB, ~30 min). This will take several minutes. Output will be at:
+
+`/home/brian/work/btakita/agent-loop/tmp/lmi-interview-2026-03-31.txt`
+<!-- agent:boundary:4cf72032 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Join Teams call NOW
+- [ ] Transcription completing (corky transcribe running)
+- [ ] Match speaker voiceprints to diarized segments
+- [ ] Create LMI topic document
+- [x] Interview completed
 <!-- /agent:pending -->

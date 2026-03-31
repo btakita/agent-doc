@@ -247,7 +247,7 @@ The cheat sheet PDF already has all content on 1 page — including the pneuma/n
 `file:///home/brian/work/btakita/agent-loop/tmp/lmi-cheatsheet.pdf`
 
 (It looks like your message was cut off after "We should add P" — if you need something else added, let me know.)
-### Re: Ontology Files Created (HEAD)
+### Re: Ontology Files Created
 
 Added three new existence-lang ontology nodes:
 
@@ -264,7 +264,7 @@ Each follows the SPEC.md format: Ontology, Axiology, Epistemology (Cultural + Pa
 | Pneuma | Why does it matter? | Alignment intent, shared direction |
 
 Cheat sheet already has these — both the PDF and the ontology are now in sync.
-<!-- agent:boundary:29b8d300 -->
+<!-- agent:boundary:3d269348 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

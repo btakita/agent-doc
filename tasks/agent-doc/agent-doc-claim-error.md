@@ -768,7 +768,7 @@ if snap_exchange.len() < head_exchange.len()
 ```
 
 This handles both cases: normal responses (exchange grows) and compaction (exchange shrinks but has compaction marker).
-### Re: Session death detection + log analysis (HEAD)
+### Re: Session death detection + log analysis
 
 **Key finding: The session didn't die.** The session logs show `session_start` + `claude_start` for lmi.md at 17:31 with NO exit/restart events. Pane %298 is still alive running `agent-doc` -> `claude`. The `start.rs` restart loop never triggered.
 
@@ -785,7 +785,7 @@ This handles both cases: normal responses (exchange grows) and compaction (excha
 **Immediate action:** Add write/commit/snapshot logging so we can trace the exact failure next time it occurs. The session-level logging confirmed the session is stable. Now we need operation-level logging.
 
 Want me to add this logging now?
-<!-- agent:boundary:03b91ae4 -->
+<!-- agent:boundary:1fdb41de -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

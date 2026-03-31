@@ -412,7 +412,7 @@ Focus on html. Which html to md is the best library to use in our case?
 
 Want me to add `htmd` and wire it into `check_url_link()` now?
 Yes
-### Re: htmd integrated — HTML-to-markdown in URL fetch pipeline (HEAD)
+### Re: htmd integrated — HTML-to-markdown in URL fetch pipeline
 
 Done. `htmd` v0.5.3 is now wired into `check_url_link()` in `preflight.rs`.
 
@@ -425,7 +425,7 @@ Done. `htmd` v0.5.3 is now wired into `check_url_link()` in `preflight.rs`.
 **Boilerplate stripping:** The converter skips `<script>`, `<style>`, `<nav>`, `<footer>`, `<noscript>`, and `<svg>` tags, removing common web page boilerplate.
 
 **Build status:** Clippy clean, all tests pass, release build complete. Added 21 transitive deps (html5ever + related parsing crates).
-<!-- agent:boundary:263a763b -->
+<!-- agent:boundary:8df1f5ba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

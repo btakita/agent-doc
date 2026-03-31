@@ -678,13 +678,32 @@ My Mac Mini is part of my home network. I did not separate the networks due to a
 - For NIST 800-171 compliance (if required), you'd need network segmentation...but that's a technical fix, not a disqualifier
 
 **Bottom line:** Not a problem for the clearance process. If you eventually need to handle sensitive work from home, network segmentation is a solvable technical problem (VLAN, separate router, or dedicated work network). Cross that bridge when LMI tells you the specific requirements for the role.
-<!-- agent:boundary:bb3f6788 -->
+
+Please review /home/brian/work/btakita/agent-loop/mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-interactive-document-genera.md for consistency. A couple of iterations were made on it. Especially re: security.
+### Re: Email Draft Review (HEAD)
+
+Reviewed the Josh Malloy follow-up email for consistency.
+
+**Security section (line 28) — accurate:**
+- "single-user security model (local file system, backed by a private git repo)" — correctly describes the deployment model
+- "actively working on collaborative security" — honest forward-looking statement
+- No overclaiming of current capabilities
+
+**No inconsistencies found.** The email is internally consistent and matches the current state of agent-doc.
+
+**Minor observations (not blockers):**
+1. "backed by a private git repo" — describes the user's deployment model (their docs in their private repo), not agent-doc's source. Phrasing is fine.
+2. The "Beyond the Vending Machine" reference — verify this is a real Josh Malloy piece (if it came from the interview, it's fine; if inferred, double-check).
+3. Status is still `draft` — hasn't been sent yet.
+
+**Verdict:** Email is consistent and ready to send. Want to approve it?
+<!-- agent:boundary:5b402cb8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Send Josh Malloy follow-up email
+- [ ] Send Josh Malloy follow-up email (draft reviewed, ready to send)
 - [ ] agent-doc README: security section (single-user, prompt injection)
 - [ ] Corky: HTML body extraction for emails
 - [ ] Research LMI uncleared role options
@@ -694,4 +713,5 @@ My Mac Mini is part of my home network. I did not separate the networks due to a
 - [x] Security clearance foreign collaboration guidance provided
 - [x] Subcontracting foreign national guidance provided
 - [x] Home network audit risk assessment provided
+- [x] Josh email draft reviewed for consistency
 <!-- /agent:pending -->

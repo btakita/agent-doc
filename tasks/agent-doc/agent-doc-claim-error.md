@@ -65,6 +65,8 @@ I think it's actually a good idea to link these other types of sources.
 
 Good thinking. `linked` is more general and future-proof:
 
+We should rename `linked` to `links`.
+
 ```yaml
 ---
 linked:
@@ -89,13 +91,57 @@ linked:
 3. Non-.md file support — read content, include in preflight context
 
 This is a feature design that should go into `tasks/software/agent-doc.md` for proper planning. Want me to add it there, or implement the rename here first?
-<!-- agent:boundary:5c80f827 -->
+This document will handle the feature.
+One of the features of `related_docs` is changes to context would ripple across the related_docs.
+How would `links` handle these updates? Would editable files be edited? How would the info in uneditable files, such as urls, be handled?
+I suppose that we can see if the agent-doc repo can edit the source of the url...such as briantakita.me. But some of the urls would be uneditable.
+### Re: `links` design — editable vs read-only sources (HEAD)
+
+Good name — `links` is cleaner. Here's the design for how different source types are handled:
+
+**Link types by editability:**
+
+| Source | Read | Write | Change detection |
+|--------|------|-------|-----------------|
+| Local .md (agent-doc) | Preflight diff | `agent-doc write` via patch | Snapshot-based diff |
+| Local file (non-.md) | Read content | Direct file edit | mtime + hash |
+| URL (editable repo) | Fetch + cache | Git push to source repo | Cache diff vs fresh fetch |
+| URL (read-only) | Fetch + cache | Cannot edit — context only | Cache diff vs fresh fetch |
+
+**How changes ripple:**
+
+1. **Local .md links:** Already implemented via `check_related_docs()`. Changes in linked docs appear in the preflight diff. The agent can respond to those changes and update the current doc OR write back to the linked doc.
+
+2. **Local non-.md files:** Read the content during preflight, include as context. If the agent wants to update the linked file, it can use the Edit tool directly (not via agent-doc write).
+
+3. **Editable URLs (e.g., briantakita.me):** If the URL maps to a known git repo (configured in the link metadata), the agent can clone/pull, edit, and push. This is a heavier operation — probably triggered explicitly, not on every preflight.
+
+4. **Read-only URLs:** Fetch content, cache in `.agent-doc/links_cache/`, include as context. The agent can reference this content but can't edit the source. Changes detected by comparing cached vs fresh fetch.
+
+**Frontmatter syntax:**
+```yaml
+---
+links:
+  - ../professional/bob-remeika.md           # local file (auto-detected)
+  - https://briantakita.me/about             # URL (auto-detected)
+  - url: https://example.com/api
+    editable: false                           # explicit read-only
+  - path: ../some-repo/README.md
+    repo: git@github.com:user/repo.git       # editable via git
+---
+```
+
+Simple entries (strings) are auto-detected: paths → local file, URLs → fetch+cache. Object entries allow metadata (editable flag, repo URL, refresh interval).
+
+Want me to implement the rename (`related_docs` → `links` with alias) first as a foundation, then build out the URL support?
+<!-- agent:boundary:ec1c8ce4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.28.0-v0.28.3: All shipped
-- [ ] **Rename `related_docs` → `linked` (with alias for backward compat)**
-- [ ] **Expand `linked` to support URLs + non-.md files**
+- [ ] **Rename `related_docs` → `links` (with backward-compat alias)**
+- [ ] **URL link support (fetch + cache + context)**
+- [ ] **Editable repo links (git push back)**
 <!-- /agent:pending -->

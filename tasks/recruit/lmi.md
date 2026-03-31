@@ -12,6 +12,9 @@ agent_doc_write: crdt
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+Read /home/brian/work/btakita/agent-loop/tasks/software/corky/lmi-email-source.txt
+
+Help me prepare for the call today at 13:30 Eastern
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

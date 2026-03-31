@@ -787,7 +787,7 @@ Can the document shrink without the word "Compacted"?
 **Immediate action:** Add write/commit/snapshot logging so we can trace the exact failure next time it occurs. The session-level logging confirmed the session is stable. Now we need operation-level logging.
 
 Want me to add this logging now?
-### Re: Can the document shrink without "Compacted"? (HEAD)
+### Re: Can the document shrink without "Compacted"?
 
 Yes. Several scenarios:
 
@@ -818,7 +818,7 @@ if !missing.is_empty() && !snapshot.contains("*Compacted") {
 ```
 
 This is precise: it detects rollback (missing responses) while allowing all legitimate shrinkage (deletions, undo, replace-mode patches, extractions). The only false positive would be if a user manually deleted a `### Re:` heading AND the content below it, which is an intentional edit that should be respected.
-<!-- agent:boundary:120bf778 -->
+<!-- agent:boundary:15944b56 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

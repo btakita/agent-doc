@@ -821,6 +821,7 @@ if !missing.is_empty() && !snapshot.contains("*Compacted") {
 This is precise: it detects rollback (missing responses) while allowing all legitimate shrinkage (deletions, undo, replace-mode patches, extractions). The only false positive would be if a user manually deleted a `### Re:` heading AND the content below it, which is an intentional edit that should be respected.
 
 We need detailed specs for all of this. Is a single SPEC.md sufficient?
+The SPEC(s) need to be validatable as well.
 ### Re: Log analysis + ops logging + SPEC structure
 
 **Current logs for lmi.md session:**
@@ -843,15 +844,53 @@ Without these, we're guessing. I've launched a background agent to implement ope
 - `SPEC-security.md` — security model, threat model, recommendations
 
 But splitting prematurely adds navigation overhead. For now, add new sections to the existing SPEC.md. The audit-docs budget allows up to 1000 lines per instruction file, and SPEC.md at 722 has room.
-<!-- agent:boundary:5bb9f285 -->
+### Re: Validatable specs (HEAD)
+
+Agreed. agent-doc already has a pattern for this: every module has `## Spec`, `## Agentic Contracts`, and `## Evals` sections in its doc comments. The evals are validatable assertions that map 1:1 to tests.
+
+**For the new features, the spec structure should be:**
+
+1. **Module spec comment** (in the `.rs` file) ... describes behavior, contracts, and evals
+2. **SPEC.md section** ... captures cross-module behavior for porters/reimplementors
+3. **Tests** ... implement each eval from the module spec
+
+**For the rollback guard and ops logging, the evals would be:**
+
+```
+// git.rs evals:
+- commit_detects_snapshot_rollback: snapshot missing a `### Re:` heading present in HEAD
+  → warning logged, snapshot updated from file before staging
+- commit_allows_compacted_shrinkage: snapshot has `*Compacted` marker and fewer headings
+  → commit proceeds normally (no rollback warning)
+- commit_logs_staging_details: every commit writes snap_len + file_len to ops.log
+
+// write.rs evals:
+- write_logs_snapshot_save: successful write → ops.log entry with file + len
+- write_logs_ipc_consumed: IPC success → ops.log entry with file + patches count
+
+// snapshot.rs evals:
+- snapshot_save_logs_operation: save() → ops.log entry with file + content length
+```
+
+These become both the spec documentation and the test definitions. The ops logging agent is implementing the logging now. Once it's done, I'll add the tests and spec comments.
+
+**SPEC.md addition for ops logging:**
+
+Will add a new section `10.4 Operations Logging` (under Security, since logging is audit-adjacent) or a new `## 11. Observability` section. The spec will define:
+- Log file location (`.agent-doc/logs/ops.log`)
+- Log format (`[timestamp] operation key=value ...`)
+- Required events (snapshot_save, ipc_write, commit_staging, commit_success)
+- Best-effort semantics (logging failure never blocks operations)
+<!-- agent:boundary:932636a3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **v0.29.0 released**
-- [ ] **Operation-level logging** — write, commit, snapshot events to ops.log ← implementing now
-- [ ] **Re: heading rollback guard in commit()** — precise detection, compaction-safe
+- [ ] **Operation-level logging** — implementing in background ← in progress
+- [ ] **Rollback guard spec + tests** — evals defined, implementation after logging
+- [ ] **SPEC.md Section 11: Observability** — ops logging format + required events
 - [ ] **Session dedup** (prevent duplicate sessions for same file)
 - [ ] **Collaborative security model** (TBD)
 - [ ] **Optional markitdown/Ragie Parse integration** (PDF, DOCX, OCR)

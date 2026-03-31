@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Linked with bob-remeika.md | Web prototype MVP scoped | Ragie Parse use cases: Judith (loans), Ron (patents)
+Linked with bob-remeika.md via related_docs | Web prototype MVP scoped | Ragie Parse: Judith (loans), Ron (patents)
 <!-- /agent:status -->
 
 ## Exchange
@@ -41,12 +41,24 @@ Cross-reference established. Here's the relevant context from `tasks/professiona
 **Meeting plan:** 30-min call with Bob. JB plugin demo → Ragie pitch/web prototype → discussion → contract work → next steps.
 
 Add your requirements or next steps to the exchange and I'll pick them up.
-<!-- agent:boundary:51259526 -->
+I thought agent-doc supports linked documents in the frontmatter.
+### Re: Linked documents via related_docs frontmatter (HEAD)
+
+You're right — agent-doc has a `related_docs` frontmatter field. Adding it to the frontmatter will cause preflight to surface changes in `bob-remeika.md` each cycle:
+
+```yaml
+related_docs:
+  - ../professional/bob-remeika.md
+```
+
+This is better than a manual cross-reference — preflight will automatically detect when bob-remeika.md changes and include a summary in the preflight output. I'll add it to the frontmatter now.
+<!-- agent:boundary:d7e3058d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Add related_docs to frontmatter linking bob-remeika.md
 - [ ] Build web prototype MVP (markdown editor + Ragie retrieval + Claude responses)
 - [ ] Test VS Code agent-doc extension
 - [ ] Index demo documents in Ragie (patent proposal, contacts, resume)

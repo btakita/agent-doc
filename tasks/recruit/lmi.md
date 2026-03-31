@@ -701,7 +701,7 @@ Reviewed the Josh Malloy follow-up email for consistency.
 Well you missed something. https://github.com/btakita/agent-loop is the private repo that is mentioned in:
 
 > backed by a private git repo
-### Re: Private Repo Correction (HEAD)
+### Re: Private Repo Correction
 
 You're right — I missed that. `btakita/agent-loop` is confirmed private on GitHub. "Backed by a private git repo" is literally accurate.
 
@@ -727,7 +727,7 @@ With:
 This keeps the signal that real code exists without a dead link, and sets the expectation of a curated sample rather than full repo access.
 
 Want me to apply this edit to the draft now?
-<!-- agent:boundary:91f0b7e6 -->
+<!-- agent:boundary:11aff759 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

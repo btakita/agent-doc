@@ -639,14 +639,26 @@ I confirmed: the snapshots that grep-matched `(HEAD)` have it as literal text in
 The 50-byte threshold is safe. The only content difference between snapshot and file in the failure case is the missing agent response (typically hundreds to thousands of bytes).
 
 Want me to implement the fix now?
-<!-- agent:boundary:f4d348a0 -->
+Note that tasks/recruit/lmi.md had the issue occur again. Why is this happening on lmi.md? Is there something about the file or session that is causing the issue?
+### Re: Recurring lmi.md snapshot divergence (HEAD)
+
+Investigated the code paths. The IPC write + snapshot save logic looks correct in all paths — `content_ours` is saved as the snapshot when provided. But lmi.md keeps having uncommitted responses.
+
+**Most likely cause:** The lmi.md session's Claude instance is using `agent-doc write --stream` (SKILL-driven), and the snapshot save at the end of `write_ipc_and_poll()` is succeeding — but then **a subsequent preflight commit from another document's session** is running `agent-doc commit` on its own file, and the lmi.md session's `agent-doc commit` step is being skipped because the Claude session crashed or lost context before reaching the commit step.
+
+In other words: the **write** succeeds (snapshot saved), but then the **next preflight cycle** for lmi.md doesn't happen because the session died. Meanwhile, the next `/agent-doc` invocation on this document (agent-doc-claim-error.md) runs preflight which calls `agent-doc commit` — but only for this file, not lmi.md.
+
+**The fix is still the proposed divergence detection in `commit()`:** When preflight calls `commit()` for any file, it should check if the file has content beyond the snapshot and auto-fix. The preflight commit step already runs for every document cycle — we just need to make it smarter.
+
+**Quick mitigation now:** Let me sync the lmi.md snapshot.
+<!-- agent:boundary:69d2dc76 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **v0.29.0 released**
-- [ ] **Bug fix: snapshot/file divergence** — implement in commit(), 50-byte threshold safe ← ready to implement
+- [ ] **Bug fix: snapshot/file divergence in commit()** — implement auto-detection and fix
 - [ ] **Collaborative security model** (TBD)
 - [ ] **Optional markitdown/Ragie Parse integration** (PDF, DOCX, OCR)
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)

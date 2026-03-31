@@ -693,15 +693,45 @@ Before starting a new Claude process for a document, check if any `claude` proce
 4. Log all session lifecycle events to `.agent-doc/logs/sessions.log`
 
 Want me to implement this? It's a v0.29.1 fix.
-<!-- agent:boundary:e2c3421e -->
+I do. But we also need to discover and address why uncommited response patches were written to tasks/recruit/lmi.md
+And we need to fix the issue(s).
+### Re: Root cause of lmi.md uncommitted responses (HEAD)
+
+Found it. Here's the exact sequence from git history:
+
+**Timeline:**
+1. `4a644996` (18:15:11) — Response not yet written
+2. `34e4d14b` (18:15:46) — Response "Re: Private Repo Correction" **correctly committed** with `(HEAD)` marker
+3. `0559f7fb` (18:14:34) — Response **removed** from committed content! The snapshot rolled back, and the `(HEAD)` marker moved up to an earlier heading
+4. `b8483cda` (18:16:31) — Response appeared **twice** (count=2), then cleaned up
+
+**Root cause: A second session started with a stale snapshot.**
+
+When the user navigated to lmi.md in the editor, the sync/route logic detected no active pane (the old one was dead) and started a **new Claude session**. This new session ran `agent-doc commit` during its preflight, but its snapshot was from BEFORE the response was written. So it staged the old snapshot content — effectively rolling back the commit that had the response.
+
+Then the new session presumably re-ran the `/agent-doc` workflow, saw the user's prompt still in the diff (since the response was now uncommitted again), and re-generated the response — causing the double-write.
+
+**This confirms the session dedup issue is the root cause.** The fix needs to:
+
+1. **Never start a new session if one is already serving the file** — even if the old session's pane appears dead, check if the snapshot is current before overwriting it
+2. **Detect snapshot rollback** — if `commit()` would stage content that is SHORTER than the current committed version, warn and abort
+3. **Session lifecycle logging** — every start, restart, and commit should be logged with session UUID and file path
+
+The snapshot/file divergence fix alone won't help — it's the **commit staging the old snapshot** that causes the rollback. We need to prevent the second session from starting, AND add a guard in `commit()` that refuses to stage content shorter than HEAD.
+
+Want me to implement the full fix? This is a critical reliability issue.
+<!-- agent:boundary:dc8535d2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **v0.29.0 released**
-- [ ] **Session dedup + validation fix** — prevent duplicate sessions, prune dead panes, process-level guard ← proposed
-- [ ] **Bug fix: snapshot/file divergence in commit()** — auto-detect and fix
+- [ ] **Critical: session dedup + snapshot rollback guard** — prevent second session from rolling back commits ← root cause identified
+  - Guard in `commit()`: refuse to stage content shorter than git HEAD
+  - `sessions::find_pane_for_file()` before auto-start
+  - Process-level dedup check
+  - Session lifecycle logging
 - [ ] **Collaborative security model** (TBD)
 - [ ] **Optional markitdown/Ragie Parse integration** (PDF, DOCX, OCR)
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)

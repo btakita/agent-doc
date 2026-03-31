@@ -1089,13 +1089,29 @@ The race happens when two writes overlap: Write B starts before Write A's commit
 **Recommendation:** Option 3 is the most correct — it eliminates the race entirely by re-reading the snapshot inside the critical section. Options 1-2 are cheaper dedup checks that catch the symptom.
 
 This should be tracked as a separate bug — it's not specific to the layout fix. Want me to add it to `tasks/software/agent-doc.md`?
-<!-- agent:boundary:93f5b664 -->
+Keep it here.
+Write A should occur before Write B. There should not be a race.
+### Re: Write serialization (HEAD)
+
+You're right — writes should be serialized, not raced. The skill workflow is sequential: preflight → respond → write → commit → next cycle.
+
+**What actually happened in linkedin.md:**
+- The committed version (git HEAD) has 1 copy of the response — correct
+- The working tree has 2 copies — the duplicate is uncommitted
+- This means `agent-doc write` ran twice for the same response: once correctly (committed), then again (appended to working tree but not committed)
+
+**Most likely cause:** The same `/agent-doc` skill was invoked twice for the same document — either by the user running it manually while an auto-claim session was also processing, or by the Claude session retrying after a perceived failure.
+
+**Prevention:** The `agent-doc preflight` already commits previous cycle changes, which should prevent double-writes. But if two Claude sessions are running for the same document (e.g., this session + a tmux session), both could write independently.
+
+**Fix for linkedin.md:** I'll remove the duplicate from the working tree now.
+<!-- agent:boundary:ca9883b1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.28.1: Column memory shipped
-- [ ] **Write-back race condition dedup** (separate bug)
-- [ ] Remove duplicate from linkedin.md
+- [ ] **Remove duplicate from linkedin.md working tree**
+- [ ] Investigate double-write prevention
 <!-- /agent:pending -->

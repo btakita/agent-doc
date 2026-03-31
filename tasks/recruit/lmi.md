@@ -267,12 +267,12 @@ Each follows the SPEC.md format: Ontology, Axiology, Epistemology (Cultural + Pa
 
 Cheat sheet already has these — both the PDF and the ontology are now in sync.
 commit and push
-### Re: PDF Fixed — Now 1 Page (HEAD)
+### Re: PDF Fixed — Now 1 Page
 
 Rebuilt the cheat sheet with tighter fonts (7.5pt) and margins. Confirmed 1 page with room to spare. Reload:
 
 `file:///home/brian/work/btakita/agent-loop/tmp/lmi-cheatsheet.pdf`
-<!-- agent:boundary:c09351bf -->
+<!-- agent:boundary:5c9d89b7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

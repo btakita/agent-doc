@@ -390,7 +390,7 @@ This is a pragmatic hybrid — Rust for the hot path, Python for the long tail.
 Ragie parse also handles OCR and presumably md. https://www.ragie.ai/parse
 Let's use the Rust binaries for now. We can have optional markdownit and ragie parse integration.
 Focus on html. Which html to md is the best library to use in our case?
-### Re: Best HTML-to-markdown library for agent-doc (HEAD)
+### Re: Best HTML-to-markdown library for agent-doc
 
 **`htmd`** is the best fit for our case. Here's why:
 
@@ -411,7 +411,7 @@ Focus on html. Which html to md is the best library to use in our case?
 4. **Good enough speed** — 16ms for a Wikipedia page is fine for preflight
 
 Want me to add `htmd` and wire it into `check_url_link()` now?
-<!-- agent:boundary:0d3e1bd4 -->
+<!-- agent:boundary:ee6ce576 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -701,40 +701,20 @@ Reviewed the Josh Malloy follow-up email for consistency.
 Well you missed something. https://github.com/btakita/agent-loop is the private repo that is mentioned in:
 
 > backed by a private git repo
-### Re: Private Repo Correction
+### Re: Source Link Updated (HEAD)
 
-You're right — I missed that. `btakita/agent-loop` is confirmed private on GitHub. "Backed by a private git repo" is literally accurate.
+Applied the edit to the email draft. Line 26 now reads:
 
-**But there's a real inconsistency I should have caught:** The email links to `https://github.com/btakita/agent-loop` as the "Source" link (line 26). Since the repo is private, Josh can't access it. That's a dead link for him.
-
-**Suggested fix options:**
-1. Remove the source link entirely (crates.io link already listed)
-2. Replace with "Source available on request" to signal real code without a dead link
-3. Replace with the public agent-doc GitHub repo if one exists separately
-4. Keep it and mention "private repo, happy to grant access if you'd like to review the code": I don't want to grant access. I can create a sample repo if requested.
-### Re: Email Link Fix
-
-Understood — no granting access to the private repo. You'd create a sample repo if requested.
-
-**Recommended change for the email draft (line 26):**
-
-Replace:
-> - Source: https://github.com/btakita/agent-loop
-
-With:
 > - Source: private repo; happy to prepare a sample repo for review
 
-This keeps the signal that real code exists without a dead link, and sets the expectation of a curated sample rather than full repo access.
-
-Want me to apply this edit to the draft now?
-<!-- agent:boundary:11aff759 -->
+Draft is ready to send. Want to approve it?
+<!-- agent:boundary:8b29327d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Apply source link fix to Josh email draft
-- [ ] Send Josh Malloy follow-up email (after link fix)
+- [ ] Send Josh Malloy follow-up email (draft finalized, ready to send)
 - [ ] agent-doc README: security section (single-user, prompt injection)
 - [ ] Corky: HTML body extraction for emails
 - [ ] Research LMI uncleared role options
@@ -744,5 +724,5 @@ Want me to apply this edit to the draft now?
 - [x] Security clearance foreign collaboration guidance provided
 - [x] Subcontracting foreign national guidance provided
 - [x] Home network audit risk assessment provided
-- [x] Josh email draft reviewed for consistency
+- [x] Josh email draft reviewed and source link fixed
 <!-- /agent:pending -->

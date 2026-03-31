@@ -332,7 +332,30 @@ links:
 - HTML-to-markdown conversion (agent gets raw HTML)
 - Object entry syntax for metadata
 - Editable repo links
-<!-- agent:boundary:73bd1e77 -->
+
+Is markitdown the canonical tool to use?
+https://github.com/microsoft/markitdown
+
+Is there a Rust equivalent to remove the python dependency?
+### Re: HTML-to-markdown — markitdown vs Rust alternatives (HEAD)
+
+**markitdown** (Microsoft) is a Python tool that converts many formats (HTML, PDF, DOCX, etc.) to markdown. It's comprehensive but adds a Python dependency.
+
+**Rust alternatives exist** — no Python needed:
+
+| Crate | Downloads/mo | Quality | Notes |
+|-------|-------------|---------|-------|
+| **html2md** | ~30k | Most mature, production-ready | DOM-based, GFM tables |
+| **htmd** | Growing | Well-maintained, customizable | Turndown.js-inspired |
+| **html-to-markdown-rs** | Newer | Modern, multi-runtime | Uses lol-html parser |
+| **quick_html2md** | Small | Active | Speed-focused, GFM |
+
+**Recommendation:** Use **`htmd`** or **`html2md`** — both are pure Rust, DOM-based (not regex), and handle the common HTML structures we'd encounter from URL fetches. This keeps agent-doc dependency-free of Python.
+
+The conversion would slot into `check_url_link()` — after fetching, convert HTML to markdown before caching and diffing. This gives the agent clean, readable content instead of raw HTML.
+
+Want me to add one of these crates and wire it into the URL link fetch pipeline?
+<!-- agent:boundary:e3a5bc5c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -343,7 +366,7 @@ links:
 - [x] **Session death logging** (`.agent-doc/logs/`) — implemented
 - [x] **Auto-trigger on restart** — tmux send-keys after `--continue`
 - [x] **URL link support (fetch + cache + context)** — implemented
+- [ ] **HTML-to-markdown conversion** — htmd or html2md (pure Rust, no Python)
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)
 - [ ] **Editable repo links (git push back)**
-- [ ] **HTML-to-markdown conversion** for URL content
 <!-- /agent:pending -->

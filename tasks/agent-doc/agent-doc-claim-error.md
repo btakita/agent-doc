@@ -1189,11 +1189,26 @@ Yes
 
 This is NOT about two sessions sharing a harness — each tmux pane has its own Claude process. It's about the **same session** processing the **same diff twice** due to a timing gap between write and commit.
 
+So two tmux panes each claim the same document? 
+
 **v0.28.3 released** — dedup now strips boundary markers before comparison:
 - `strip_boundary_for_dedup()` filters `<!-- agent:boundary:* -->` lines
 - All 4 dedup paths updated
 - crates.io ✓, PyPI ✓, GitHub Release ✓, cargo install ✓ (v0.28.3)
-<!-- agent:boundary:e71d99d1 -->
+### Re: Not two panes — single pane, same diff twice (HEAD)
+
+No, two panes don't claim the same document. The registry shows only 1 pane (%260) owns linkedin.md.
+
+The duplicate came from a **single Claude session** running `/agent-doc` twice for the same diff within one conversation. This happens when:
+1. The user triggers `/agent-doc tasks/recruit/linkedin.md`
+2. Claude generates a response and calls `agent-doc write`
+3. Before `agent-doc commit` runs, something triggers the skill again (e.g., user saves, or the streaming checkpoint logic)
+4. The second invocation sees the same diff (snapshot not yet updated) and generates the same response
+
+The v0.28.3 dedup (stripping boundary markers) should now catch this case. The pane ownership check prevents cross-pane writes but can't prevent same-pane double-writes — that's what the dedup is for.
+
+If you see it happen again after v0.28.3, the `/tmp/agent-doc-write-dedup.log` will capture the backtrace showing exactly which code path triggered the duplicate.
+<!-- agent:boundary:0b1eee70 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

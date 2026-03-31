@@ -1,8 +1,8 @@
 ---
 agent_doc_session: fb7495d9-25a5-4962-9cd9-c2726a37aa21
-tmux_session: '0'
 agent_doc_format: template
 agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
 ---
 <!-- agent:status mode=replace -->
 - [x] Research ECI Solutions & Justin Caird
@@ -861,11 +861,38 @@ This is already captured in the document (around line 805). Justin responded on 
 > "Thanks for sharing Brian. This is great. The CTO is coming back from travel next week. We should have times to interview soon. Stay tuned!"
 
 **Status:** Positive signal. CTO Jack Wood is returning from travel the week of March 30. Interview scheduling expected soon. No follow-up action needed right now — wait for Justin to share interview times.
-<!-- agent:boundary:4e782600 -->
+
+Please look at the current linkedin messages from Justin. Given the context, what would be the best time to schedule a call?
+I have yet to see the *.md file exercise, so I won't know how much effort it would take. Note that I have a few items on my plate, but I may be able to address the *.md exercise over the weekend.
+### Re: LinkedIn messages & scheduling (Mar 31) (HEAD)
+
+**Browser status:** Chrome DevTools connection timed out — couldn't pull fresh LinkedIn messages. The last exported conversation is from March 22, and the most recent message from Justin (captured March 28 via browser) was:
+
+> "Thanks for sharing Brian. This is great. The CTO is coming back from travel next week. We should have times to interview soon. Stay tuned!"
+
+Today is Monday, March 31 — the start of the week Jack Wood was expected back from travel.
+
+**Scheduling recommendation:**
+- **Don't reach out proactively yet** — Justin said "stay tuned," so let him drive it
+- **If no word by Wednesday April 2**, a brief nudge is appropriate: "Hey Justin, hope the week's going well. I'm flexible this week and next — happy to work around Jack's schedule."
+- **Keep Thu/Fri open** if you can — CTO calendars tend to clear later in the week after travel catch-up
+
+**Re: The .md exercise**
+
+Your framing is good — acknowledging you have items on your plate but can likely address it over the weekend sets reasonable expectations without overcounting.
+
+A few considerations:
+- The "vibe coding from markdown" pre-work is essentially what you do with agent-doc daily — this is your strongest differentiator
+- Weekend turnaround is fine once you receive it. Justin hasn't sent it yet, and a few days is reasonable
+- **Consider recording yourself completing the exercise with agent-doc as a YouTube session** — that directly demonstrates the "agents that write and maintain code" thesis Jack Wood is hiring for. Meta-demonstration of your workflow is more compelling than just a deliverable.
+
+When we can get the browser working, I'll pull the latest LinkedIn thread to check for any new messages since March 28.
+<!-- agent:boundary:df55dbfc -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Review Justin's LinkedIn message response about the eval tooling video → positive, CTO interview pending next week
-- [x] Confirm CTO Jack Wood LinkedIn profile URL → https://www.linkedin.com/in/jack-wood-0339361/
+- [ ] Check LinkedIn for new messages from Justin (browser was down — retry next session)
 - [ ] Prepare for CTO interview (Jack Wood returning from travel week of March 30)
+- [ ] If no word by April 2: draft brief LinkedIn nudge to Justin
+- [ ] When .md exercise arrives: plan YouTube recording session
 <!-- /agent:pending -->

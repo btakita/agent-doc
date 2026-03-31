@@ -58,7 +58,7 @@ This is better than a manual cross-reference — preflight will automatically de
 Can we make agent-doc work in a browser view?
 Can the editing work across the network?
 Should we use WebRTC or pla
-### Re: Browser view and network editing (HEAD)
+### Re: Browser view and network editing
 
 Great questions — these connect directly to the web prototype MVP from the Bob conversation.
 
@@ -85,7 +85,7 @@ The minimal stack: a Rust HTTP server (axum/actix) wrapping the existing `agent-
 **"Should w"** — looks like your thought got cut off. What were you going to ask?
 
 **Related docs link** — the `related_docs` frontmatter is now active. Preflight will surface bob-remeika.md changes automatically.
-<!-- agent:boundary:d1e6a506 -->
+<!-- agent:boundary:5a054dc6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -892,7 +892,7 @@ See changes in /home/brian/work/btakita/agent-loop/mail/contacts/justin-caird/20
 Please transcribe + diarize /home/brian/work/btakita/agent-loop/mail/contacts/justin-caird/recordings/20260331-justin-caird.amr
 Use transcript to help with draft response on LinkedIn
 Note that the phone cal
-### Re: LinkedIn messages & call transcript (Mar 31) (HEAD)
+### Re: LinkedIn messages & call transcript (Mar 31)
 
 **New LinkedIn messages found** (exported 2026-03-31T21:49):
 
@@ -926,7 +926,7 @@ Justin confirmed he's sending it tomorrow morning. Given the call context, his s
 1. Reply to Justin on LinkedIn with your preferred time slot
 2. Watch for the markdown exercise email tomorrow morning
 3. When it arrives, plan a recorded session completing it with agent-doc
-<!-- agent:boundary:233e0145 -->
+<!-- agent:boundary:9a0dacca -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

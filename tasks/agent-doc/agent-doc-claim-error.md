@@ -720,7 +720,7 @@ Then the new session presumably re-ran the `/agent-doc` workflow, saw the user's
 The snapshot/file divergence fix alone won't help — it's the **commit staging the old snapshot** that causes the rollback. We need to prevent the second session from starting, AND add a guard in `commit()` that refuses to stage content shorter than HEAD.
 
 Want me to implement the full fix? This is a critical reliability issue.
-<!-- agent:boundary:1ec4a1d1 -->
+<!-- agent:boundary:bd72d325 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

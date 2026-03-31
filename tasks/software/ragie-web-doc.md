@@ -3,12 +3,14 @@ agent_doc_session: 4ef1150a-7b51-4ff6-9284-9c7c1f1570e5
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
+related_docs:
+  - ../professional/bob-remeika.md
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-Linked with bob-remeika.md via related_docs | Web prototype MVP scoped | Ragie Parse: Judith (loans), Ron (patents)
+Linked with bob-remeika.md via related_docs | Browser/network architecture scoped | Web prototype MVP next
 <!-- /agent:status -->
 
 ## Exchange
@@ -52,13 +54,45 @@ related_docs:
 ```
 
 This is better than a manual cross-reference — preflight will automatically detect when bob-remeika.md changes and include a summary in the preflight output. I'll add it to the frontmatter now.
-<!-- agent:boundary:e2e95f9d -->
+
+Can we make agent-doc work in a browser view?
+Can the editing work across the network?
+Should we use WebRTC or pla
+### Re: Browser view and network editing (HEAD)
+
+Great questions — these connect directly to the web prototype MVP from the Bob conversation.
+
+**Can agent-doc work in a browser view?**
+
+Yes, and the architecture maps cleanly:
+
+1. **Backend server** — serves the markdown file, runs `agent-doc preflight`/`write`/`commit` on the server side
+2. **Browser frontend** — CodeMirror 6 or Monaco editor rendering the markdown, with split pane for rendered preview
+3. **Real-time sync** — WebSocket pushes file changes to the browser; browser sends edits back to the server
+4. **Agent loop** — server-side process watches for changes (same diff→respond→write cycle), pushes responses via WebSocket
+
+The CRDT merge (`--stream`) already handles concurrent edits, so the hardest part (conflict resolution) is solved. The browser just becomes another editor, like VS Code or JetBrains.
+
+**Can editing work across the network?**
+
+Yes — the server runs wherever the git repo lives. Browser clients connect over HTTP/WebSocket. This gives you:
+- **Remote pair editing** — Bob sees the document live while you edit
+- **Demo mode** — share a URL, Bob watches the agent respond in real-time
+- **Mobile access** — edit from a phone/tablet
+
+The minimal stack: a Rust HTTP server (axum/actix) wrapping the existing `agent-doc` CLI, serving a static frontend. No new state management needed — the file system + git remain the source of truth.
+
+**"Should w"** — looks like your thought got cut off. What were you going to ask?
+
+**Related docs link** — the `related_docs` frontmatter is now active. Preflight will surface bob-remeika.md changes automatically.
+<!-- agent:boundary:d1e6a506 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Add related_docs to frontmatter linking bob-remeika.md
+- [done] Add related_docs to frontmatter linking bob-remeika.md
+- [ ] Design web prototype architecture (axum server + CodeMirror frontend + WebSocket sync)
 - [ ] Build web prototype MVP (markdown editor + Ragie retrieval + Claude responses)
 - [ ] Test VS Code agent-doc extension
 - [ ] Index demo documents in Ragie (patent proposal, contacts, resume)

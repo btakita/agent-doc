@@ -66,6 +66,7 @@ claude_args: --dangerously-skip-permissions
 - [x] `corky contact push google` — v0.22.1
 - [x] CLAUDE.md fallback in contact push — v0.22.1
 - [x] Gmail API body decode (attachment + base64 padding) — v0.22.2
+- [x] `corky sync refetch` — implemented, tested, documented
 - [ ] crates.io publish — needs token refresh
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:status -->
@@ -541,12 +542,29 @@ corky sync refetch <THREAD_ID>
 **Build:** `make check` passes — clippy clean, 232 tests pass.
 
 Ready to add tests, update SPEC.md, and run audit-docs.
-<!-- agent:boundary:1912b93e -->
+Go
+### Re: Tests, SPEC.md, Audit — Complete (HEAD)
+
+**Tests** (3 new, 235 total passing):
+- `test_thread_response_deserialize` — deserializes multi-message thread JSON, verifies IDs
+- `test_thread_response_to_messages` — converts thread messages via `gmail_to_message()`, verifies all fields (from, to, subject, body, thread_id)
+- `test_thread_response_empty_messages` — handles empty thread gracefully
+
+**SPEC.md:**
+- §5.2 — added `sync refetch THREAD_ID` to CLI commands table
+- §6.8 — new "Single-thread refetch" section documenting the full flow (7 steps), noting no sync state modification
+
+**README.md:** Added `sync refetch THREAD_ID` to usage quick reference.
+
+**Audit:** `corky audit-docs` — clean (1 pre-existing SKILL.md warning only).
+
+`make check` passes — clippy clean, 235 tests pass. Ready to commit and release.
+<!-- agent:boundary:a7115001 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] `corky sync refetch` — tests, SPEC.md, audit-docs (implemented, needs docs)
+- [ ] `corky sync refetch` — commit, release
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:pending -->

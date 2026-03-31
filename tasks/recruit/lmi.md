@@ -344,7 +344,7 @@ From the transcript content, I can identify speakers by context:
 To get proper speaker diarization, we could try extracting audio to WAV first and running pyannote directly, but the Teams compressed audio may not have enough channel separation for voiceprint matching.
 
 Want me to manually attribute speakers through the full transcript based on conversational context?
-### Re: Detailed Interview Analysis (HEAD)
+### Re: Detailed Interview Analysis
 
 #### Speaker Attribution & Flow
 
@@ -412,7 +412,7 @@ The interview went **reasonably well as an initial screen**, but left value on t
 1. **LinkedIn message to Josh** about agent-doc — he explicitly said he wanted to dive deeper
 2. **Prepare for round 2** with: tight 2-min intro, concrete frontend examples, RAG implementation details grounded in specific decisions
 3. **Send thank-you email** to Kate Revels
-<!-- agent:boundary:8e188ad5 -->
+<!-- agent:boundary:def37678 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

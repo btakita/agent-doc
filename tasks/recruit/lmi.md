@@ -697,13 +697,29 @@ Reviewed the Josh Malloy follow-up email for consistency.
 3. Status is still `draft` — hasn't been sent yet.
 
 **Verdict:** Email is consistent and ready to send. Want to approve it?
-<!-- agent:boundary:e1e29492 -->
+
+Well you missed something. https://github.com/btakita/agent-loop is the private repo that is mentioned in:
+
+> backed by a private git repo
+### Re: Private Repo Correction (HEAD)
+
+You're right — I missed that. `btakita/agent-loop` is confirmed private on GitHub. "Backed by a private git repo" is literally accurate.
+
+**But there's a real inconsistency I should have caught:** The email links to `https://github.com/btakita/agent-loop` as the "Source" link (line 26). Since the repo is private, Josh can't access it. That's a dead link for him.
+
+**Suggested fix options:**
+1. Remove the source link entirely (crates.io link already listed)
+2. Replace with "Source available on request" to signal real code without a dead link
+3. Replace with the public agent-doc GitHub repo if one exists separately
+4. Keep it and mention "private repo, happy to grant access if you'd like to review the code"
+<!-- agent:boundary:aec7c373 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Send Josh Malloy follow-up email (draft reviewed, ready to send)
+- [ ] Fix Josh email: private repo link issue (line 26)
+- [ ] Send Josh Malloy follow-up email (after link fix)
 - [ ] agent-doc README: security section (single-user, prompt injection)
 - [ ] Corky: HTML body extraction for emails
 - [ ] Research LMI uncleared role options

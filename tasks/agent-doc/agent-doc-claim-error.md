@@ -140,7 +140,7 @@ We lost the active claude session running the task `Yes` on the document.
 Why?
 Is it currently running in the background?
 I did notice that the visible tmux window a Claude did
-### Re: Lost session + rename status (HEAD)
+### Re: Lost session + rename status
 
 **The lost session:** The previous Claude session that received your "Yes" was running in a tmux pane managed by `agent-doc start`. When a session dies (timeout, crash, network issue), the pane goes idle and `agent-doc` doesn't auto-restart — you have to re-invoke `/agent-doc` to pick up where it left off. That's what just happened.
 
@@ -160,7 +160,7 @@ Existing documents using `related_docs:` in frontmatter will continue to work vi
 - Object entry syntax (metadata like `editable`, `repo`, `refresh`)
 
 Want me to start on URL link support next?
-<!-- agent:boundary:c3a29f7c -->
+<!-- agent:boundary:54fced25 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

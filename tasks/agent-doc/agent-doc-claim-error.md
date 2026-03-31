@@ -1048,7 +1048,7 @@ Installed. Test: open 2 agent docs → switch one side to non-agent → should k
 Add tests
 audit docs
 Update README.md, SPEC.md, module-harness, ontology.
-### Re: v0.28.1 released (HEAD)
+### Re: v0.28.1 released
 
 **agent-doc v0.28.1:** crates.io ✓, PyPI ✓, GitHub Release ✓, cargo install ✓ (confirmed v0.28.1)
 
@@ -1056,7 +1056,7 @@ Update README.md, SPEC.md, module-harness, ontology.
 - Column memory: `.agent-doc/last_layout.json` preserves 2-pane layout when a column switches to non-agent file
 - Docs: README, SPEC.md, sync.rs module doc, VERSIONS.md updated
 - Clippy fixes (collapsible_if in sync.rs)
-<!-- agent:boundary:e922b3f1 -->
+<!-- agent:boundary:fa620b0c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

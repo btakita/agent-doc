@@ -251,6 +251,9 @@ Done. Added persistent session logging to `start.rs`. Logs are written to `.agen
 The timestamps are Unix epoch seconds (no chrono dependency needed). The log directory is auto-created at `.agent-doc/logs/` next to the existing `.agent-doc/` structure.
 
 Next up: session logging is done. Ready to work on **auto-trigger on restart** (pipe `/agent-doc <file>` to stdin) or **URL link support**. Which first?
+
+Continue:
+- [ ] **Auto-trigger on restart** — pipe `/agent-doc <file>` to stdin after `--continue`
 ### Re: Auto-trigger on restart — implemented
 
 Done. After a `--continue` restart, `start.rs` now spawns a background thread that:
@@ -272,7 +275,26 @@ Claude exits (code 1) → 2s delay → restart with --continue
 **Build status:** Clippy clean, all tests pass, release build complete.
 
 Both session logging and auto-trigger are now implemented. Ready for URL link support next?
-<!-- agent:boundary:37dcb0d4 -->
+### Re: Continue — URL link support (HEAD)
+
+Acknowledged. Auto-trigger is done. Moving to **URL link support**.
+
+This is a larger feature — let me scope the initial implementation:
+
+**MVP (this session):**
+1. Detect URL entries in `links` frontmatter field (starts with `http://` or `https://`)
+2. Fetch URL content via `ureq` (already a dependency for `upgrade.rs`)
+3. Cache fetched content in `.agent-doc/links_cache/<sha256(url)>.txt`
+4. On preflight: fetch fresh, diff against cache, include in preflight JSON output
+5. Update cache after successful diff
+
+**Not in MVP:**
+- Object entry syntax (`url:`, `editable:`, `repo:`)
+- Editable repo links
+- HTML-to-markdown conversion (raw HTML for now)
+
+Starting implementation now.
+<!-- agent:boundary:78a52990 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -282,7 +304,7 @@ Both session logging and auto-trigger are now implemented. Ready for URL link su
 - [x] **Rename `related_docs` → `links` (with backward-compat alias)** — done in v0.28.3
 - [x] **Session death logging** (`.agent-doc/logs/`) — implemented
 - [x] **Auto-trigger on restart** — tmux send-keys after `--continue`
-- [ ] **URL link support (fetch + cache + context)**
+- [ ] **URL link support (fetch + cache + context)** ← active
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)
 - [ ] **Editable repo links (git push back)**
 <!-- /agent:pending -->

@@ -864,7 +864,7 @@ This is already captured in the document (around line 805). Justin responded on 
 
 Please look at the current linkedin messages from Justin. Given the context, what would be the best time to schedule a call?
 I have yet to see the *.md file exercise, so I won't know how much effort it would take. Note that I have a few items on my plate, but I may be able to address the *.md exercise over the weekend.
-### Re: LinkedIn messages & scheduling (Mar 31) (HEAD)
+### Re: LinkedIn messages & scheduling (Mar 31)
 
 **Browser status:** Chrome DevTools connection timed out — couldn't pull fresh LinkedIn messages. The last exported conversation is from March 22, and the most recent message from Justin (captured March 28 via browser) was:
 
@@ -887,7 +887,7 @@ A few considerations:
 - **Consider recording yourself completing the exercise with agent-doc as a YouTube session** — that directly demonstrates the "agents that write and maintain code" thesis Jack Wood is hiring for. Meta-demonstration of your workflow is more compelling than just a deliverable.
 
 When we can get the browser working, I'll pull the latest LinkedIn thread to check for any new messages since March 28.
-<!-- agent:boundary:df55dbfc -->
+<!-- agent:boundary:c1b94af0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

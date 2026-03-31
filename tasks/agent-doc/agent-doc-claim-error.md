@@ -493,6 +493,8 @@ To diagnose: can you describe what you saw? Did the agent respond to a partial/t
 Please add to README.md, if not already done, a note about security. agent-doc is only secure with a single user. Changes are written to a git repo, so any unintended divulgence of data is at the user's risk. A private monorepo base is recommended.
 Please verify security message.
 See tasks/software/ragie-web-doc.md and tasks/recruit/lmi.md for more context.
+This security concern should be at the top of the document. Under Alpha Software.
+See the Security section for more details.
 ### Re: Security section added to README.md
 
 Done. Added a **Security** section to README.md covering:
@@ -506,7 +508,14 @@ Done. Added a **Security** section to README.md covering:
 The language draws from the ragie-web-doc security analysis (data divulgence through the response channel) and the lmi.md email discussion (single-user model, private git backing, roadmap for collaborative security).
 
 Please review the README.md directly to verify the wording.
-<!-- agent:boundary:9b543c38 -->
+### Re: Security note at top of README (HEAD)
+
+Done. Added a blockquote right under the "Alpha Software" note:
+
+> **Single-user only.** agent-doc operates on the local filesystem with no access control. Use a private git repository. See the [Security](#security) section for details.
+
+The full Security section remains at the bottom with the detailed breakdown. The top-level note gives immediate visibility.
+<!-- agent:boundary:2e5d2f6a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -520,8 +529,8 @@ Please review the README.md directly to verify the wording.
 - [x] **HTML-to-markdown via htmd** — integrated, deps audited
 - [x] **Tests** — 7 new tests for URL/HTML features
 - [x] **Audit docs** — module specs + evals updated
-- [x] **SPEC.md, README.md** — updated with new features
-- [x] **Security section in README.md** — single-user model, prompt injection, private repo
+- [x] **SPEC.md, README.md** — updated with new features + security
+- [x] **Security section in README.md** — top-level note + detailed section
 - [ ] **Investigate lmi.md debounce failure** — need user description of symptoms
 - [ ] **Optional markitdown/Ragie Parse integration** (PDF, DOCX, OCR)
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)

@@ -303,7 +303,7 @@ MCP is purpose-built for this. Bob adds one line to his config and gets native t
 1. `agent-doc mcp-server` — stdio-based MCP server (works over SSH today)
 2. `agent-doc serve --mcp` — HTTP-based MCP endpoint (when the web server lands)
 3. WebSocket document sync (for real-time browser editing)
-### Re: MCP transport security, HTTPS, and prompt injection concerns (HEAD)
+### Re: MCP transport security, HTTPS, and prompt injection concerns
 
 **SSH — no tunnel needed, but the UX is clunky.** Better approach:
 
@@ -345,7 +345,7 @@ Uses a relay (cloudflared tunnel or self-hosted) to expose the local MCP server 
 - Future sandbox: per-tool permissions, audit logging, rate limiting, content filtering
 
 **For MVP:** Bob connects via MCP, gets `read_document` + `write_document` scoped to specific files, uses his own Claude Code. No shared model context. The only prompt injection vector is document content itself, which is mitigated by document-level scoping.
-<!-- agent:boundary:219a7bd0 -->
+<!-- agent:boundary:c43e32af -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

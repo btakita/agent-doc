@@ -206,7 +206,13 @@ pub fn load(doc: &Path) -> Result<Option<String>> {
 /// Save the current document content as the snapshot under an exclusive lock.
 pub fn save(doc: &Path, content: &str) -> Result<()> {
     let _lock = SnapshotLock::acquire(doc)?;
-    save_unlocked(doc, content)
+    save_unlocked(doc, content)?;
+    crate::ops_log::log_op(doc, &format!(
+        "snapshot_save file={} len={}",
+        doc.display(),
+        content.len()
+    ));
+    Ok(())
 }
 
 /// Delete the snapshot for a document.

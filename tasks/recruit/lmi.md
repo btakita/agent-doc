@@ -701,14 +701,44 @@ Reviewed the Josh Malloy follow-up email for consistency.
 Well you missed something. https://github.com/btakita/agent-loop is the private repo that is mentioned in:
 
 > backed by a private git repo
-### Re: Source Link Updated (HEAD)
+### Re: Private Repo Correction (HEAD)
+
+You're right — I missed that. `btakita/agent-loop` is confirmed private on GitHub. "Backed by a private git repo" is literally accurate.
+
+**But there's a real inconsistency I should have caught:** The email links to `https://github.com/btakita/agent-loop` as the "Source" link (line 26). Since the repo is private, Josh can't access it. That's a dead link for him.
+
+**Suggested fix options:**
+1. Remove the source link entirely (crates.io link already listed)
+2. Replace with "Source available on request" to signal real code without a dead link
+3. Replace with the public agent-doc GitHub repo if one exists separately
+4. Keep it and mention "private repo, happy to grant access if you'd like to review the code": I don't want to grant access. I can create a sample repo if requested.
+### Re: Email Link Fix (HEAD)
+
+Understood — no granting access to the private repo. You'd create a sample repo if requested.
+
+**Recommended change for the email draft (line 26):**
+
+Replace:
+> - Source: https://github.com/btakita/agent-loop
+
+With:
+> - Source: private repo; happy to prepare a sample repo for review
+
+Note my edit above
+
+> - Source: private repo; happy to prepare a sample repo for review
+
+This keeps the signal that real code exists without a dead link, and sets the expectation of a curated sample rather than full repo access.
+
+Want me to apply this edit to the draft now?
+### Re: Source Link Updated
 
 Applied the edit to the email draft. Line 26 now reads:
 
 > - Source: private repo; happy to prepare a sample repo for review
 
 Draft is ready to send. Want to approve it?
-<!-- agent:boundary:8b29327d -->
+<!-- agent:boundary:c0b927b1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

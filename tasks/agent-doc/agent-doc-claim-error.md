@@ -39,7 +39,7 @@ Is this what you're thinking? Or a different use case? This would be a new featu
 It looks like there is related_docs. tasks/software/ragie-web-doc.md set related_docs in the frontmatter when I prompted it to.
 Either way, when I request to link documents, nothing is added to the frontmatter.
 Should we use linked instead of related_docs?
-### Re: related_docs already exists (HEAD)
+### Re: related_docs already exists
 
 `related_docs` is already implemented in agent-doc. It's in the `Frontmatter` struct (line 252 of frontmatter.rs) and actively used by preflight (preflight.rs:378-408).
 
@@ -58,7 +58,7 @@ During `agent-doc preflight`, `check_related_docs()` reads the related docs, com
 **The issue:** When you "requested to link documents" and nothing was added to frontmatter — that was a skill/agent issue (the Claude session didn't know to add the `related_docs` field). The binary supports it; the skill just needs to know the field name.
 
 Want me to add `related_docs` guidance to the SKILL.md so future sessions know to use it?
-<!-- agent:boundary:28e4d3ee -->
+<!-- agent:boundary:ff59f0db -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

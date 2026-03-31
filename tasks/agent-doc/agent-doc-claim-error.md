@@ -515,7 +515,7 @@ Done. Added a blockquote right under the "Alpha Software" note:
 > **Single-user only.** agent-doc operates on the local filesystem with no access control. Use a private git repository. See the [Security](#security) section for details.
 
 The full Security section remains at the bottom with the detailed breakdown. The top-level note gives immediate visibility.
-<!-- agent:boundary:c80127a7 -->
+<!-- agent:boundary:3a5c8519 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

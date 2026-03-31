@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.28.2
+
+- **Write dedup**: All 4 write paths (`run`, `run_template`, `run_stream` disk, `run_stream` IPC) skip the write when merged content is identical to the current file. Dedup events logged to `/tmp/agent-doc-write-dedup.log` with backtrace.
+- **Pane ownership verification**: `verify_pane_ownership()` called at entry of `run`, `run_template`, `run_stream`. Rejects writes when a different tmux pane owns the session (lenient — passes silently when not in tmux or pane is indeterminate).
+- **Column memory**: `.agent-doc/last_layout.json` saves column→agent-doc mapping (carried from v0.28.1, now documented).
+
 ## 0.28.1
 
 - **Column memory**: `.agent-doc/last_layout.json` saves column→agent-doc mapping. When a column has no agent doc, sync substitutes the last known agent doc from the state file. Preserves 2 tmux panes when one column switches to a non-agent file.

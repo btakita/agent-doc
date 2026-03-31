@@ -6,6 +6,23 @@
 //! response) → merge with any concurrent user edits → atomic write → save
 //! snapshot as `content_ours` (not the merged result) → clear pending.
 //!
+//! ## Write dedup (v0.28.2)
+//!
+//! All four write paths (`run`, `run_template`, `run_stream` disk, `run_stream`
+//! IPC) skip the actual write when the merged/patched content is identical to
+//! the current file on disk. Dedup events are logged to stderr and appended
+//! (with backtrace) to `/tmp/agent-doc-write-dedup.log` for diagnosis.
+//!
+//! ## Pane ownership verification (v0.28.2)
+//!
+//! `verify_pane_ownership()` is called at the top of `run`, `run_template`, and
+//! `run_stream`. It checks that the current tmux pane matches the session
+//! registry entry for the document's `session` frontmatter field. If a
+//! *different* pane definitively owns the session, the write is rejected with an
+//! error suggesting `agent-doc claim`. The check is lenient: it passes silently
+//! when not in tmux, when there is no session ID, or when the pane is
+//! indeterminate.
+//!
 //! ## Spec
 //!
 //! - `run`: inline (User/Assistant) mode. Reads response from stdin, strips any
@@ -137,7 +154,7 @@ use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::Path;
 
-use crate::{component, merge, recover, snapshot, template};
+use crate::{component, frontmatter, merge, recover, sessions, snapshot, template};
 use crate::snapshot::find_project_root;
 
 /// Helper: extract boundary_id for a named component from the document.
@@ -179,6 +196,62 @@ fn is_append_mode_component(name: &str) -> bool {
 }
 
 
+/// Log a write dedup event to both stderr and a persistent file for diagnosis.
+fn log_dedup(file: &Path, context: &str) {
+    let msg = format!("[write] dedup: {} — {}", file.display(), context);
+    eprintln!("{}", msg);
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true).append(true)
+        .open("/tmp/agent-doc-write-dedup.log")
+    {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let bt = std::backtrace::Backtrace::force_capture();
+        let _ = writeln!(f, "[{}] {} backtrace:\n{}", ts, msg, bt);
+    }
+}
+
+/// Verify the current tmux pane owns the session for this document.
+///
+/// Returns `Ok(())` when the check passes or cannot be performed (not in tmux,
+/// no session ID, session not registered, pane indeterminate). Returns `Err`
+/// only when a *different* pane definitively owns the session.
+fn verify_pane_ownership(file: &Path) -> Result<()> {
+    if !sessions::in_tmux() {
+        return Ok(());
+    }
+    let content = match std::fs::read_to_string(file) {
+        Ok(c) => c,
+        Err(_) => return Ok(()),
+    };
+    let session_id = match frontmatter::parse(&content) {
+        Ok((fm, _)) => match fm.session {
+            Some(s) => s,
+            None => return Ok(()),
+        },
+        Err(_) => return Ok(()),
+    };
+    let entry = match sessions::lookup_entry(&session_id) {
+        Ok(Some(e)) => e,
+        _ => return Ok(()),
+    };
+    let current = match sessions::current_pane() {
+        Ok(p) => p,
+        Err(_) => return Ok(()),
+    };
+    if entry.pane != current {
+        anyhow::bail!(
+            "pane ownership mismatch: session {} owned by pane {}, current pane is {}. \
+             Use `agent-doc claim` to reclaim.",
+            session_id, entry.pane, current
+        );
+    }
+    Ok(())
+}
+
 /// Run the write command: append assistant response to document.
 ///
 /// `baseline` is the document content at the time the response was generated.
@@ -187,6 +260,7 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
+    verify_pane_ownership(file)?;
 
     // Read response from stdin
     let mut response = String::new();
@@ -241,6 +315,14 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
         merge::merge_contents(base, &content_ours, &content_current)?
     };
 
+    // Dedup: skip write if merged content is identical to current file
+    if final_content == content_current {
+        log_dedup(file, "no changes after merge, skipping write");
+        drop(doc_lock);
+        recover::clear_pending(file)?;
+        return Ok(());
+    }
+
     atomic_write(file, &final_content)?;
 
     // Save snapshot as content_ours (baseline + response), NOT final_content.
@@ -264,6 +346,7 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
+    verify_pane_ownership(file)?;
 
     // Read response from stdin
     let mut response = String::new();
@@ -316,6 +399,14 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
         merge::merge_contents(base, &content_ours, &content_current)?
     };
 
+    // Dedup: skip write if merged content is identical to current file
+    if final_content == content_current {
+        log_dedup(file, "no changes after merge, skipping write");
+        drop(doc_lock);
+        recover::clear_pending(file)?;
+        return Ok(());
+    }
+
     atomic_write(file, &final_content)?;
 
     // Save snapshot as content_ours (baseline + response), not final_content
@@ -349,6 +440,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
+    verify_pane_ownership(file)?;
 
     // Read response from stdin
     let mut response = String::new();
@@ -403,6 +495,13 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             let elapsed_apply = t_apply.elapsed().as_millis();
             if elapsed_apply > 0 {
                 eprintln!("[perf] apply_patches_with_overrides: {}ms", elapsed_apply);
+            }
+
+            // Dedup: skip IPC if patches produce no changes
+            if content_ours == content_at_start {
+                log_dedup(file, "no changes after merge, skipping write");
+                recover::clear_pending(file)?;
+                return Ok(());
             }
 
             // Plugin is installed — try IPC
@@ -538,6 +637,18 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
         // Agent=client_id(2) gives native correct ordering — no skip_reorder needed.
         merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current)?
     };
+
+    // Dedup: skip write if merged content is identical to current file
+    if final_content == content_current {
+        log_dedup(file, "no changes after merge, skipping write");
+        drop(doc_lock);
+        recover::clear_pending(file)?;
+        let elapsed_total = t_total.elapsed().as_millis();
+        if elapsed_total > 0 {
+            eprintln!("[perf] run_stream total: {}ms", elapsed_total);
+        }
+        return Ok(());
+    }
 
     atomic_write(file, &final_content)?;
 

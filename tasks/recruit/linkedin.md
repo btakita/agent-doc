@@ -632,5 +632,25 @@ Not currently — and it would be difficult to add.
 A `corky linkedin moderate` command could navigate to the post, find the comment, and click Hide via browser automation. But this is fragile DOM automation that breaks when LinkedIn updates their UI — probably not worth the investment for occasional spam.
 
 **Practical recommendation:** Just hide it manually — three-dot menu → Hide comment. It's 3 clicks.
-<!-- agent:boundary:cecd1d9c -->
+
+I don't see Hide Comment in the dropdown menu.
+![img_1.png](img_1.png)
+### Re: No "Hide Comment" option (HEAD)
+
+The screenshot shows **Elvio Sacchi's** comment, not Eric Irwin's — but the menu is the same for all comments on your own posts.
+
+You're right — LinkedIn's menu for post authors shows **Delete**, not **Hide**. "Hide comment" is only available to page admins on Company Page posts. For personal posts, the options are:
+- **Delete** — removes the comment entirely (comment count drops)
+- **Block** — blocks the user from seeing/commenting on your content
+- **Report** — flags the profile/comment to LinkedIn
+
+**For the Eric Irwin scam comment, do all three:**
+1. **Report** first (so LinkedIn has the record)
+2. **Delete** the comment (removes the scam email from your post)
+3. **Block** Eric Irwin's profile (prevents future spam)
+
+The engagement count loss is negligible — better than leaving a scam email visible on your post.
+
+**For Elvio Sacchi** (shown in screenshot) — that looks like a legitimate recruiter comment ("We're currently hiring for several industries..."). Worth keeping or replying to.
+<!-- agent:boundary:c3feaf9e -->
 <!-- /agent:exchange -->

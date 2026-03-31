@@ -988,7 +988,7 @@ if content_ours.len() < current_snap.len() - 100 {
 ```
 
 Or better: always re-read the file as the baseline if the `--baseline-file` content doesn't match the current snapshot.
-### Re: Fix status + multi-harness task (HEAD)
+### Re: Fix status + multi-harness task
 
 **Do we have a fix?** Not yet implemented, but the root cause and fix are clear:
 
@@ -1009,7 +1009,7 @@ Or better: always re-read the file as the baseline if the `--baseline-file` cont
 **Multi-harness hooks:** Added to `tasks/software/agent-doc.md` pending list.
 
 Want me to implement Bug 1 fix now? It's a quick, targeted change.
-<!-- agent:boundary:0a8ca00a -->
+<!-- agent:boundary:c83c4206 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

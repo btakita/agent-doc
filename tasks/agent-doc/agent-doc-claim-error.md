@@ -927,7 +927,6 @@ If another full scan needs to occur, add an endpoint and an agent harness hook f
 This may involve a claude code hook. We would need a codex compatible hook. opencode and pi hooks are also needed. Implement these hooks in agent-kit.
 
 tasks/software/corky.md just restarted when I navigated to the file in the editor. Why?
-tasks/recruit/lmi.md has uncommitted response patch for the 3rd time in a row. What is the pattern?
 ### Re: Performance, log rotation, hooks, and corky.md restart
 
 **Corky.md restart confirmed by session logs:**
@@ -936,6 +935,8 @@ tasks/recruit/lmi.md has uncommitted response patch for the 3rd time in a row. W
 [1774997708] session_start file=tasks/software/corky.md pane=%300
 ```
 Pane %299 died, pane %300 was auto-started when you navigated to the file. Same session UUID, different panes. The session log captured the restart — this is the same duplicate-session issue we identified with lmi.md.
+
+Do we have a fix for this issue?
 
 **Performance + log rotation:**
 - **ops.log is tiny:** 22 lines, 4KB after a full session. Even 1000 write cycles would produce ~5000 lines (~200KB). No rotation needed for months of normal use.
@@ -949,11 +950,14 @@ This is a larger scope item. The current implementation is Claude Code-specific 
 3. **SKILL.md equivalent for each harness** — the skill file is Claude Code-specific
 
 This belongs in `tasks/software/agent-doc.md` as a feature track, not in this bug investigation document. Want me to add it there?
+Yes
 
 **Full scan endpoint:** For a comprehensive audit (not just last-N-lines), add `agent-doc audit-ops` command that scans the full ops.log for:
 - Orphaned writes (write without subsequent commit)
 - Snapshot rollbacks (snap_len decreased without compaction)
 - Session restarts (multiple session_start for same file)
+
+tasks/recruit/lmi.md has uncommitted response patch for the 3rd time in a row. What is the pattern?
 ### Re: Third occurrence — ops.log reveals the pattern
 
 The ops.log captured the exact failure:
@@ -984,18 +988,39 @@ if content_ours.len() < current_snap.len() - 100 {
 ```
 
 Or better: always re-read the file as the baseline if the `--baseline-file` content doesn't match the current snapshot.
-<!-- agent:boundary:4f03e2eb -->
+### Re: Fix status + multi-harness task (HEAD)
+
+**Do we have a fix?** Not yet implemented, but the root cause and fix are clear:
+
+**Two bugs, two fixes:**
+
+**Bug 1: Stale baseline causes snapshot shrinkage** (the ops.log pattern)
+- **Root cause:** SKILL saves baseline before generating response. By the time `agent-doc write` runs, the file has changed (boundary repositioned by commit). `content_ours` is computed from stale baseline, producing a smaller snapshot.
+- **Fix (in write.rs):** After computing `content_ours`, compare against current snapshot. If `content_ours` is shorter, use current file content as snapshot instead. ~10 lines of code.
+- **Status:** Ready to implement.
+
+**Bug 2: Session restart on file navigation** (corky.md + lmi.md)
+- **Root cause:** When user navigates to a file in the editor, sync/route detects the old pane as dead and starts a new one. The new session's first preflight commit uses the (now-stale) snapshot, rolling back committed responses.
+- **Fix (in route.rs/sync.rs):** Before auto-starting a new session, check file/snapshot divergence and absorb orphaned content. Also: in `commit()`, never stage content with fewer `### Re:` headings than git HEAD (rollback guard).
+- **Status:** Design complete, needs implementation.
+
+**Priority:** Bug 1 is the simpler fix and prevents the symptom (snapshot shrinkage). Bug 2 is deeper but less urgent if Bug 1 is fixed (the snapshot won't shrink, so even a restart won't lose content).
+
+**Multi-harness hooks:** Added to `tasks/software/agent-doc.md` pending list.
+
+Want me to implement Bug 1 fix now? It's a quick, targeted change.
+<!-- agent:boundary:0a8ca00a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **v0.29.0 released**
-- [x] **Operation-level logging** — deployed, revealed the pattern
-- [ ] **Fix: stale baseline causing snapshot shrinkage** — content_ours guard in write.rs ← root cause found
+- [x] **Operation-level logging** — deployed, confirmed root cause
+- [ ] **Bug 1 fix: snapshot shrinkage guard** — compare content_ours vs current snapshot in write.rs ← ready
+- [ ] **Bug 2 fix: session restart rollback guard** — divergence check before auto-start + commit guard
+- [ ] **Multi-harness hooks** — added to agent-doc.md task
 - [ ] **Preflight ops.log anomaly scan**
-- [ ] **Rollback guard in commit()**
-- [ ] **Session dedup** (prevent duplicate sessions for same file)
-- [ ] **Multi-harness hooks** (agent-kit) — move to agent-doc.md
+- [ ] **`agent-doc audit-ops`** command
 - [ ] **Collaborative security model** (TBD)
 <!-- /agent:pending -->

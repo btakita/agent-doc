@@ -887,12 +887,51 @@ A few considerations:
 - **Consider recording yourself completing the exercise with agent-doc as a YouTube session** — that directly demonstrates the "agents that write and maintain code" thesis Jack Wood is hiring for. Meta-demonstration of your workflow is more compelling than just a deliverable.
 
 When we can get the browser working, I'll pull the latest LinkedIn thread to check for any new messages since March 28.
-<!-- agent:boundary:c1b94af0 -->
+
+See changes in /home/brian/work/btakita/agent-loop/mail/contacts/justin-caird/20260322-linkedin-justin-caird.txt
+Please transcribe + diarize /home/brian/work/btakita/agent-loop/mail/contacts/justin-caird/recordings/20260331-justin-caird.amr
+Use transcript to help with draft response on LinkedIn
+Note that the phone cal
+### Re: LinkedIn messages & call transcript (Mar 31) (HEAD)
+
+**New LinkedIn messages found** (exported 2026-03-31T21:49):
+
+1. **Justin (1:15 PM):** Positive feedback from ECI — first round interview! Initial times offered: Tue 4/7 or Thu 4/9
+2. **Justin (5:14 PM):** Calendar change — "Hawk" (likely the VP of Engineering or the CTO's alias) has a conflict. Updated times:
+   - **Monday, April 6th** at 1pm, 2pm, 4pm, or 6pm ET
+   - **Thursday, April 9th** at 4pm, 5pm, or 6pm ET
+
+**Call transcript summary (3 min, Mar 31):**
+- You confirmed 1pm Tuesday initially, but that was invalidated by the follow-up message
+- **First round may be with VP of Engineering** — CTO Jack Wood is traveling, so he may defer round 1
+- **Format may be discussion-only** (not vibe coding) for round 1
+- Justin is sending the **markdown vibe coding exercise via email tomorrow morning** (April 1) with full breakdown
+- Justin's strategy: do the exercise proactively, then reference it or share screen during the discussion interview — "I don't think it'll hurt"
+- Interview duration: **60-90 minutes**
+- They're scheduling multiple candidates, so they wanted to lock in a time today
+
+**You need to respond on LinkedIn** to pick a new time from the updated slots. Since you said 1pm Tuesday worked on the call, **Monday April 6th at 1pm ET** is the natural equivalent.
+
+**Draft LinkedIn response:**
+
+> Hi Justin, thanks for the update. Monday April 6th at 1pm ET works for me. Looking forward to it!
+
+Adjust if 1pm Monday doesn't work for your schedule. Let me know which time to go with and I can help you send it.
+
+**Re: The .md exercise**
+
+Justin confirmed he's sending it tomorrow morning. Given the call context, his strong recommendation is to complete it before the interview even if round 1 is discussion-only. This aligns with the YouTube recording idea — completing the exercise on camera with agent-doc would be a powerful demonstration.
+
+**Action items:**
+1. Reply to Justin on LinkedIn with your preferred time slot
+2. Watch for the markdown exercise email tomorrow morning
+3. When it arrives, plan a recorded session completing it with agent-doc
+<!-- agent:boundary:233e0145 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [ ] Check LinkedIn for new messages from Justin (browser was down — retry next session)
-- [ ] Prepare for CTO interview (Jack Wood returning from travel week of March 30)
-- [ ] If no word by April 2: draft brief LinkedIn nudge to Justin
-- [ ] When .md exercise arrives: plan YouTube recording session
+- [ ] **Reply to Justin on LinkedIn** with preferred interview time (Mon 4/6 or Thu 4/9)
+- [ ] Watch for markdown exercise email from Justin (expected April 1 morning)
+- [ ] When exercise arrives: complete it with agent-doc, consider YouTube recording
+- [ ] Prepare for first-round interview (possibly VP of Engineering, discussion format, 60-90 min)
 <!-- /agent:pending -->

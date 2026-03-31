@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-LMI topic document created
+Josh Malloy email confirmed: jmalloy@lmi.org
 <!-- /agent:status -->
 
 ## Exchange
@@ -493,7 +493,22 @@ Created `mail/topics/lmi/AGENTS.md` (with `CLAUDE.md` symlink) containing:
 - Timeline of interactions
 - Asset index (cheat sheet, transcript, video, emails)
 - Kate Revels contact info
-<!-- agent:boundary:bbfd2a98 -->
+
+Do we have confirmation for Josh Malloy's email address anywhere?
+### Re: Josh Malloy's Email (HEAD)
+
+Yes. From `mail/conversations/interview-with-brian-takita-2026-13755-full-stack-developer.md`:
+
+**jmalloy@lmi.org**
+
+The full team emails from that thread:
+- Luke Stets: luke.stets@lmi.org
+- Josh Malloy: jmalloy@lmi.org
+- Andrew Dirks: andrew.dirks@lmi.org
+- Adam Hughes: adam.hughes@lmi.org
+
+Want me to draft a LinkedIn connection request / message to Josh about agent-doc?
+<!-- agent:boundary:2ad6b2b3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

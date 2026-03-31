@@ -1120,7 +1120,7 @@ The real fix is **pane ownership**: only the Claude session that owns a document
 **Prevention:** The preflight's `agent-doc commit` step should detect that the snapshot already contains the response content. If the snapshot matches the current document (no diff), preflight returns `no_changes: true` and the skill stops.
 
 This is already the designed behavior. The bug is that the second session somehow bypassed this check. Without the linkedin session's logs, I can't determine exactly how. If it happens again, we'll capture the preflight output to diagnose.
-<!-- agent:boundary:f6c02af8 -->
+<!-- agent:boundary:c73190c0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

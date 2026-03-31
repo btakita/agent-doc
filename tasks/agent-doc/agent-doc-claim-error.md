@@ -616,7 +616,7 @@ if let Some(ref snap) = snapshot_content {
 ```
 
 **Key design decisions:**
-1. **50-byte threshold** — avoids false positives from minor whitespace/boundary differences
+1. **50-byte threshold** — avoids false positives from minor whitespace/boundary differences: Would removing ` (HEAD)` prefix cause a false positive for long titles?
 2. **Auto-fix, not just warn** — updates the snapshot so the commit includes the response
 3. **Length comparison, not content diff** — fast, and the failure mode is always "file has more content than snapshot" (a response was written but snapshot wasn't saved)
 
@@ -624,14 +624,29 @@ if let Some(ref snap) = snapshot_content {
 Could also add this check to `preflight.rs` step 2 (before commit), where it would detect the divergence and either auto-fix or surface it in the JSON output. This gives the skill a chance to handle it.
 
 Want me to implement this fix?
-<!-- agent:boundary:2b6d65b0 -->
+### Re: (HEAD) marker false positive risk (HEAD)
+
+No false positive risk. The `(HEAD)` marker is only added during `commit()` staging — it's injected into the staged content via `add_head_marker()`, never saved to the snapshot itself.
+
+The comparison in the proposed fix compares **snapshot vs file** — neither contains `(HEAD)`:
+- **Snapshot:** Raw content saved by `agent-doc write`
+- **File on disk:** Raw content written by IPC/disk write
+
+The `(HEAD)` only exists in the **git index** (staged content) — it's a commit-time decoration, not persisted to either the snapshot or the working tree.
+
+I confirmed: the snapshots that grep-matched `(HEAD)` have it as literal text in the content (discussing the HEAD marker feature), not as a marker suffix on headings.
+
+The 50-byte threshold is safe. The only content difference between snapshot and file in the failure case is the missing agent response (typically hundreds to thousands of bytes).
+
+Want me to implement the fix now?
+<!-- agent:boundary:fef91ca1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **v0.29.0 released**
-- [ ] **Bug fix: snapshot/file divergence** — auto-detect and fix in commit() ← proposed
+- [ ] **Bug fix: snapshot/file divergence** — implement in commit(), 50-byte threshold safe ← ready to implement
 - [ ] **Collaborative security model** (TBD)
 - [ ] **Optional markitdown/Ragie Parse integration** (PDF, DOCX, OCR)
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)

@@ -1417,10 +1417,10 @@ For Calendly, set the meeting for 30 minutes. In the invite description, somethi
 That gives him enough context to be interested without overloading the invite.
 
 This is too early. I want 1PM Eastern but it scheduled me for 10AM Eastern.
-### Re: Calendly Time Fix (HEAD)
+### Re: Calendly Time Fix
 
 My bad on the confusion. I suggested 10 AM PT which equals 1 PM ET... but if Calendly scheduled you for 10 AM ET, that's 7 AM PT, way too early for Bob. You'll want to reschedule the Calendly link to **1:00 PM ET / 10:00 AM PT** explicitly. Double-check the timezone setting in your Calendly event... it may be defaulting to Eastern when you need to set the target time in Eastern directly.
-<!-- agent:boundary:1c6932f1 -->
+<!-- agent:boundary:0859e142 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

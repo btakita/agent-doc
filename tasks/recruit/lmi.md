@@ -661,7 +661,24 @@ If that were the case, can I still use him as a subcontract?
 - You can clearly demonstrate compartmentalization
 
 This is the kind of arrangement that clearance adjudicators see regularly. The key is: can you demonstrate that classified and unclassified work are cleanly separated? Your setup suggests yes.
-<!-- agent:boundary:f6a51e71 -->
+
+My Mac Mini is part of my home network. I did not separate the networks due to a lack of a capable router. Is that a problem for a potential audit?
+### Re: Home Network Separation & Audit Risk (HEAD)
+
+**For a security clearance investigation:** The network setup at home is generally not audited for personal clearance adjudication. The SF-86 asks about foreign contacts, financial issues, criminal history, substance use, etc. It does not audit your home network topology. Your home lab setup is your business.
+
+**However, if you're handling CUI/classified work from home:** That's a different story. If LMI requires you to process CUI or access classified systems remotely, you'd need to comply with NIST 800-171 (for CUI) or use a government-furnished equipment (GFE) setup. In that case:
+
+- Classified work: Done on GFE on a separate, air-gapped or VPN-tunneled network. The government provides the equipment and network requirements. Your personal network doesn't matter because you'd never process classified data on it.
+- CUI work: Requires an "adequately secured" environment. Some contracts require a dedicated VLAN or physical separation, but this is contract-specific, not a clearance requirement.
+
+**The Mac Mini with Lucas's access:**
+- If it's on the same network as a future GFE machine, that's a concern...but one you'd solve when/if you get the cleared role (buy a $50 VLAN-capable router, or physically separate)
+- For the clearance investigation itself, this is not a question they ask
+- For NIST 800-171 compliance (if required), you'd need network segmentation...but that's a technical fix, not a disqualifier
+
+**Bottom line:** Not a problem for the clearance process. If you eventually need to handle sensitive work from home, network segmentation is a solvable technical problem (VLAN, separate router, or dedicated work network). Cross that bridge when LMI tells you the specific requirements for the role.
+<!-- agent:boundary:6a4bb65f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -676,4 +693,5 @@ This is the kind of arrangement that clearance adjudicators see regularly. The k
 - [x] All post-interview tasks complete
 - [x] Security clearance foreign collaboration guidance provided
 - [x] Subcontracting foreign national guidance provided
+- [x] Home network audit risk assessment provided
 <!-- /agent:pending -->

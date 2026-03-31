@@ -440,7 +440,7 @@ Brian Takita
 Rather than ` — `, use `...`. ` — ` is a common generic "tell" that AI was used to draft the content. Add this to my voice. Does corky support the author's voice?
 
 Want me to send this via corky as a reply to the original confirmation email? I'll thread it properly using the Message-ID from the source email.
-### Re: Revised Email + Voice Notes (HEAD)
+### Re: Revised Email + Voice Notes
 
 Good catch on the em dash tell. Saved to memory so I'll avoid it going forward.
 
@@ -467,7 +467,7 @@ Brian Takita
 ---
 
 Ready to send via corky? I'll thread it as a reply to the original confirmation email.
-<!-- agent:boundary:0e5d779d -->
+<!-- agent:boundary:c37de6bb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

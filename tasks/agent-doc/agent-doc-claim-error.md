@@ -887,7 +887,7 @@ Will add a new section `10.4 Operations Logging` (under Security, since logging 
 - Best-effort semantics (logging failure never blocks operations)
 
 Should we be continously reading the logs to ensure no anomalies occur in realtime?
-### Re: SPEC split threshold, evals definition, real-time log monitoring (HEAD)
+### Re: SPEC split threshold, evals definition, real-time log monitoring
 
 **SPEC split at 1000 lines:** Noted. I'll add a self-documenting rule to SPEC.md itself:
 
@@ -917,7 +917,7 @@ For agent harness validation, you'd need integration tests or observability (whi
 Option 1 is simpler and addresses the immediate need. The preflight already runs before every agent cycle, so adding an ops.log scan there catches issues before they propagate.
 
 Want me to implement the preflight ops.log anomaly scan?
-<!-- agent:boundary:852a3e35 -->
+<!-- agent:boundary:59a7081c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

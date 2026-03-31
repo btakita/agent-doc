@@ -19,7 +19,7 @@ Linked with bob-remeika.md | Web prototype MVP scoped | Ragie Parse use cases: J
 Fresh document with empty components. What's the goal here? Add your prompt to the exchange component and I'll pick it up on the next cycle.
 
 Link this document with tasks/professional/bob-remeika.md
-### Re: Linking with bob-remeika.md (HEAD)
+### Re: Linking with bob-remeika.md
 
 Cross-reference established. Here's the relevant context from `tasks/professional/bob-remeika.md`:
 
@@ -41,7 +41,7 @@ Cross-reference established. Here's the relevant context from `tasks/professiona
 **Meeting plan:** 30-min call with Bob. JB plugin demo → Ragie pitch/web prototype → discussion → contract work → next steps.
 
 Add your requirements or next steps to the exchange and I'll pick them up.
-<!-- agent:boundary:f5bb5f13 -->
+<!-- agent:boundary:51259526 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

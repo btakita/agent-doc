@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Session logging, auto-trigger, and URL link support implemented.
+HTML-to-markdown (htmd) integrated into URL link pipeline. All prior features shipped.
 <!-- /agent:status -->
 
 ## Exchange
@@ -411,7 +411,21 @@ Focus on html. Which html to md is the best library to use in our case?
 4. **Good enough speed** — 16ms for a Wikipedia page is fine for preflight
 
 Want me to add `htmd` and wire it into `check_url_link()` now?
-<!-- agent:boundary:ee6ce576 -->
+Yes
+### Re: htmd integrated — HTML-to-markdown in URL fetch pipeline (HEAD)
+
+Done. `htmd` v0.5.3 is now wired into `check_url_link()` in `preflight.rs`.
+
+**How it works:**
+1. URL is fetched via `ureq`
+2. If `content-type` header contains `text/html` or `application/xhtml`, the response is converted to markdown via `htmd`
+3. Non-HTML responses (JSON, plain text, etc.) pass through unchanged
+4. The **markdown** output is what gets cached and diffed — agents see clean, readable content
+
+**Boilerplate stripping:** The converter skips `<script>`, `<style>`, `<nav>`, `<footer>`, `<noscript>`, and `<svg>` tags, removing common web page boilerplate.
+
+**Build status:** Clippy clean, all tests pass, release build complete. Added 21 transitive deps (html5ever + related parsing crates).
+<!-- agent:boundary:263a763b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -422,7 +436,7 @@ Want me to add `htmd` and wire it into `check_url_link()` now?
 - [x] **Session death logging** (`.agent-doc/logs/`) — implemented
 - [x] **Auto-trigger on restart** — tmux send-keys after `--continue`
 - [x] **URL link support (fetch + cache + context)** — implemented
-- [ ] **HTML-to-markdown via htmd** — add crate, wire into URL fetch pipeline
+- [x] **HTML-to-markdown via htmd** — integrated into URL fetch pipeline
 - [ ] **Optional markitdown/Ragie Parse integration** (PDF, DOCX, OCR)
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)
 - [ ] **Editable repo links (git push back)**

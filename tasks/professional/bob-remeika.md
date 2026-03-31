@@ -1406,7 +1406,7 @@ Absolutely. Bob would be well-positioned to discuss the security challenges sinc
 - **Content signing / provenance**... your 5-layer security architecture (instruction/data separation, deterministic processing, response-only mode, content signing, injection scanning) would be a substantive technical conversation, not just a sales pitch
 
 This actually strengthens the meeting framing: instead of just pitching use cases, you're having a peer-level technical discussion about shared security challenges in LLM-mediated document systems. That's the kind of conversation that turns a sales call into a partnership conversation.
-### Re: Scheduling with Bob (HEAD)
+### Re: Scheduling with Bob
 
 Morning Pacific makes sense for Bob since he's Bay Area based (Ragie is SF). I'd suggest **10:00 AM PT / 1:00 PM ET** as a sweet spot... late enough that he's settled in, early enough that you're not competing with afternoon meetings. If that slot's taken, **11:00 AM PT / 2:00 PM ET** works too.
 
@@ -1415,7 +1415,7 @@ For Calendly, set the meeting for 30 minutes. In the invite description, somethi
 > "Catching up on agent-doc + Ragie integration. Have a couple client use cases to discuss plus some security architecture questions."
 
 That gives him enough context to be interested without overloading the invite.
-<!-- agent:boundary:d64cfa96 -->
+<!-- agent:boundary:4476b85e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Session logging implemented in start.rs. `related_docs` → `links` rename complete.
+Session logging + auto-trigger on restart implemented in start.rs.
 <!-- /agent:status -->
 
 ## Exchange
@@ -222,6 +222,7 @@ Claude Code doesn't have a `--initial-prompt` flag that works with `--continue`.
 **Recommendation:** Option 1 is the most practical. The stdin pipe approach works today without any upstream changes. The key insight is: `--continue` preserves conversation context, but the agent needs a _trigger_ to re-enter the agent-doc workflow loop. Piping `/agent-doc <file>` provides that trigger.
 
 Want me to implement this in `start.rs`?
+Yes
 ### Re: Session logging — implemented
 
 Done. Added persistent session logging to `start.rs`. Logs are written to `.agent-doc/logs/<session-uuid>.log` in append mode.
@@ -250,7 +251,28 @@ Done. Added persistent session logging to `start.rs`. Logs are written to `.agen
 The timestamps are Unix epoch seconds (no chrono dependency needed). The log directory is auto-created at `.agent-doc/logs/` next to the existing `.agent-doc/` structure.
 
 Next up: session logging is done. Ready to work on **auto-trigger on restart** (pipe `/agent-doc <file>` to stdin) or **URL link support**. Which first?
-<!-- agent:boundary:968c1ea0 -->
+### Re: Auto-trigger on restart — implemented (HEAD)
+
+Done. After a `--continue` restart, `start.rs` now spawns a background thread that:
+
+1. Waits 5 seconds for Claude to initialize
+2. Sends `/agent-doc <file>` via `tmux send-keys` to the current pane
+3. Logs the trigger event to the session log
+
+**Why tmux send-keys instead of stdin pipe?**
+Claude needs interactive stdin for the rest of the session. Piping to stdin and dropping it would break interactivity. `tmux send-keys` injects the command as if the user typed it, preserving full terminal interactivity.
+
+**What happens on restart now:**
+```
+Claude exits (code 1) → 2s delay → restart with --continue
+→ 5s delay → tmux send-keys "/agent-doc tasks/foo.md" Enter
+→ Claude receives /agent-doc, skill re-triggers, preflight runs
+```
+
+**Build status:** Clippy clean, all tests pass, release build complete.
+
+Both session logging and auto-trigger are now implemented. Ready for URL link support next?
+<!-- agent:boundary:3710a2a6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -258,8 +280,8 @@ Next up: session logging is done. Ready to work on **auto-trigger on restart** (
 <!-- agent:pending patch=replace -->
 - [x] v0.28.0-v0.28.3: All shipped
 - [x] **Rename `related_docs` → `links` (with backward-compat alias)** — done in v0.28.3
-- [x] **Session death logging** (`.agent-doc/logs/`) — implemented in start.rs
-- [ ] **Auto-trigger on restart** — pipe `/agent-doc <file>` to stdin after `--continue`
+- [x] **Session death logging** (`.agent-doc/logs/`) — implemented
+- [x] **Auto-trigger on restart** — tmux send-keys after `--continue`
 - [ ] **URL link support (fetch + cache + context)**
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)
 - [ ] **Editable repo links (git push back)**

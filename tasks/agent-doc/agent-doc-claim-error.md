@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Session logging + auto-trigger on restart implemented in start.rs.
+Session logging, auto-trigger, and URL link support implemented.
 <!-- /agent:status -->
 
 ## Exchange
@@ -275,7 +275,7 @@ Claude exits (code 1) → 2s delay → restart with --continue
 **Build status:** Clippy clean, all tests pass, release build complete.
 
 Both session logging and auto-trigger are now implemented. Ready for URL link support next?
-### Re: Continue — URL link support (HEAD)
+### Re: Continue — URL link support
 
 Acknowledged. Auto-trigger is done. Moving to **URL link support**.
 
@@ -294,7 +294,45 @@ This is a larger feature — let me scope the initial implementation:
 - HTML-to-markdown conversion (raw HTML for now)
 
 Starting implementation now.
-<!-- agent:boundary:78a52990 -->
+### Re: URL link support — implemented (HEAD)
+
+Done. URL links now work in the `links` frontmatter field. Implementation in `preflight.rs`.
+
+**How it works:**
+1. During preflight, each link is checked: `is_url()` detects `http://` or `https://` prefixes
+2. URLs are fetched via `ureq` with a 10-second timeout
+3. Content is cached at `.agent-doc/links_cache/<sha256(url)>.txt`
+4. On subsequent preflights, fetched content is diffed against the cache:
+   - **First fetch:** Reports "initial fetch (N bytes)" and caches
+   - **Content changed:** Reports "content changed (N bytes)" and updates cache
+   - **No change:** Silently skipped (not included in preflight output)
+   - **Fetch error:** Reports the error with `exists: false`
+
+**Example frontmatter:**
+```yaml
+---
+links:
+  - ../professional/bob-remeika.md
+  - https://briantakita.me/about
+---
+```
+
+**Preflight output** (when URL content changes):
+```json
+{
+  "linked_changes": [
+    { "path": "https://briantakita.me/about", "summary": "content changed (4521 bytes)", "exists": true }
+  ]
+}
+```
+
+**Build status:** Clippy clean, all tests pass, release build complete.
+
+**What's NOT included yet:**
+- HTML-to-markdown conversion (agent gets raw HTML)
+- Object entry syntax for metadata
+- Editable repo links
+<!-- agent:boundary:631c9927 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -304,7 +342,8 @@ Starting implementation now.
 - [x] **Rename `related_docs` → `links` (with backward-compat alias)** — done in v0.28.3
 - [x] **Session death logging** (`.agent-doc/logs/`) — implemented
 - [x] **Auto-trigger on restart** — tmux send-keys after `--continue`
-- [ ] **URL link support (fetch + cache + context)** ← active
+- [x] **URL link support (fetch + cache + context)** — implemented
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)
 - [ ] **Editable repo links (git push back)**
+- [ ] **HTML-to-markdown conversion** for URL content
 <!-- /agent:pending -->

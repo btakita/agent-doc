@@ -722,7 +722,7 @@ Why would the issue occur twice then? lmi.md was the selected document until the
 The snapshot/file divergence fix alone won't help — it's the **commit staging the old snapshot** that causes the rollback. We need to prevent the second session from starting, AND add a guard in `commit()` that refuses to stage content shorter than HEAD.: How about for compacting agent:exchange?
 
 Want me to implement the full fix? This is a critical reliability issue.
-### Re: Three clarifying questions (HEAD)
+### Re: Three clarifying questions
 
 **Q1: Why did the issue occur twice from a single agent run?**
 
@@ -765,7 +765,7 @@ if snap_exchange.len() < head_exchange.len()
 ```
 
 This handles both cases: normal responses (exchange grows) and compaction (exchange shrinks but has compaction marker).
-<!-- agent:boundary:ecd88f2c -->
+<!-- agent:boundary:3acbfd07 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

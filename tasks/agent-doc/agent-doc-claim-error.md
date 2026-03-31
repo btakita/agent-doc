@@ -1059,8 +1059,6 @@ if base_clean != snap_clean {
 
 This catches ALL stale baselines, not just ones that produce shorter content. Want me to update the guard to this approach?
 Yes
-Please explain why we have multiple baselines.
-Why not **always** re-read the file? Where is this code? in the ffi plugin or in agent-doc binary?
 ### Re: Bug 1 v2 fix deployed
 
 Updated the guard from length-based to baseline-vs-snapshot comparison:
@@ -1070,14 +1068,45 @@ Updated the guard from length-based to baseline-vs-snapshot comparison:
 Catches ALL stale baselines regardless of content length. Committed `d9a113a`, pushed, installed.
 
 Ready for Bug 2?
-<!-- agent:boundary:e236bc7c -->
+Please explain why we have baseline-vs-snapshot. I'm not 100% following why we have these 2 components.
+Why not **always** re-read the file? Where is this code? in the ffi plugin or in agent-doc binary?
+### Re: Why baseline AND snapshot? Why not always re-read? (HEAD)
+
+**Where this code lives:** All in the `agent-doc` binary (`write.rs`), not the FFI plugin.
+
+**The three things:**
+
+1. **Snapshot** = the document state after the last completed write cycle. Stored at `.agent-doc/snapshots/<hash>.md`. Used by `diff::compute()` to detect what the user changed since the last agent response. This is the "last known good state."
+
+2. **Baseline** = the document state when the SKILL started generating its response (saved by the SKILL via `cp <FILE> /tmp/baseline.md`). Passed to `agent-doc write --baseline-file`. Used for 3-way merge: if the user edits during response generation, the CRDT merge uses baseline as the common ancestor.
+
+3. **File on disk** = the current document, which may include user edits typed AFTER the agent started generating.
+
+**Why we need the baseline (not just re-read the file):**
+
+The baseline captures the document state BEFORE the agent's response. The file on disk has the user's concurrent edits. The 3-way merge needs both:
+- `baseline` (common ancestor)
+- `content_ours` (baseline + agent response)
+- `file on disk` (baseline + user edits)
+
+If we always used the current file as baseline, we'd lose the ability to detect and preserve concurrent user edits.
+
+**Why the baseline goes stale:**
+
+The SKILL saves the baseline at the start of step 1 (before generating). Between that save and calling `agent-doc write`, the file changes because `agent-doc commit` (from preflight step 2) repositions the boundary marker. So the baseline doesn't match the snapshot anymore.
+
+**The real fix:** The baseline should be saved AFTER preflight completes (after commit repositions the boundary), not before. That's a SKILL-level fix. The binary guard we added is a safety net for when the SKILL gets this wrong.
+
+**Could we eliminate baselines entirely?** Yes, if we always re-read the file as the merge ancestor. But then we lose concurrent-edit detection. The tradeoff: baselines enable CRDT merge; the cost is staleness risk.
+<!-- agent:boundary:78c3ca1e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **v0.29.0 released** + ops logging + Bug 1 v2 fix
-- [ ] **Bug 2A: Divergence check before auto-start** ← next
+- [ ] **SKILL fix: save baseline after preflight** (prevents staleness at source)
+- [ ] **Bug 2A: Divergence check before auto-start**
 - [ ] **Bug 2B: Rollback guard in commit()**
 - [ ] **Preflight ops.log anomaly scan**
 - [ ] **Multi-harness hooks** (agent-kit)

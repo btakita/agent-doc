@@ -570,13 +570,27 @@ All publish targets complete:
 - **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.29.0 (with binary + wheel)
 - **Local install:** `~/.cargo/bin/agent-doc` updated to v0.29.0
 - **Parent submodule:** pointer updated to v0.29.0
-<!-- agent:boundary:5b822dd1 -->
+
+In tasks/recruit/lmi.md, there is a full uncommitted response patch. Why?
+### Re: Uncommitted response patch in lmi.md (HEAD)
+
+**Root cause:** The response was written to the file (via IPC to the editor plugin) but the **snapshot was never updated** with the response content. The `agent-doc commit` command commits based on the snapshot — so it committed the boundary marker changes but not the response body, because the snapshot didn't contain it.
+
+**How this happened:** The session that wrote the response likely crashed or lost context after `agent-doc write` succeeded but before `agent-doc commit` could properly stage the changes. The IPC write updated the file on disk, but the snapshot save either failed or was skipped.
+
+This is the exact scenario the `recover` step in preflight is designed to catch — but it only detects orphaned responses in `.agent-doc/pending/`, not snapshot/file divergence.
+
+**Fix applied:** Updated the snapshot to match the current file content, then ran `agent-doc commit`. The response is now committed and the gutter is clean.
+
+**Bug to track:** `agent-doc commit` should detect when the file has content not in the snapshot and handle it (either by updating the snapshot or warning). Currently it silently ignores this divergence.
+<!-- agent:boundary:0302930d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **v0.29.0 released** — links, htmd, session logging, auto-trigger, security docs
+- [ ] **Bug: snapshot/file divergence detection** — commit should warn/fix when file has content not in snapshot
 - [ ] **Collaborative security model** — content scanning, session isolation, multi-user ACL (TBD)
 - [ ] **Optional markitdown/Ragie Parse integration** (PDF, DOCX, OCR)
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)

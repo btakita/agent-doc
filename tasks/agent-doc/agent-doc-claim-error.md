@@ -134,7 +134,7 @@ links:
 Simple entries (strings) are auto-detected: paths → local file, URLs → fetch+cache. Object entries allow metadata (editable flag, repo URL, refresh interval).
 
 Want me to implement the rename (`related_docs` → `links` with alias) first as a foundation, then build out the URL support?
-<!-- agent:boundary:4171cf1b -->
+<!-- agent:boundary:ee477c08 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

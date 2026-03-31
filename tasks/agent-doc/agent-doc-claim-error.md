@@ -1158,7 +1158,7 @@ Dedup events now log to `/tmp/agent-doc-write-dedup.log` with timestamp, file pa
 
 Installed. Both dedup check and pane ownership verification are active.
 add tests
-### Re: v0.28.2 released (HEAD)
+### Re: v0.28.2 released
 
 **agent-doc v0.28.2:** crates.io ✓, PyPI ✓, GitHub Release ✓, cargo install ✓ (confirmed v0.28.2)
 
@@ -1167,7 +1167,7 @@ add tests
 - Dedup file logging with backtrace to `/tmp/agent-doc-write-dedup.log`
 - Pane ownership verification on write
 - Docs: write.rs module doc, SPEC.md, VERSIONS.md updated
-<!-- agent:boundary:5924c457 -->
+<!-- agent:boundary:1aa35250 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

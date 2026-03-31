@@ -2,6 +2,10 @@
 agent_doc_session: 71f8d769-d777-4386-9464-8c2ed618e619
 agent_doc_format: template
 agent_doc_write: crdt
+links:
+  - ../software/ragie-web-doc.md
+  - ../agent-doc/agent-doc-claim-error.md
+  - ../recruit/lmi.md
 ---
 
 ## Status
@@ -1375,14 +1379,30 @@ Good additions to the meeting agenda. Ragie Parse is a strong fit for both:
 **For patent files:** The patent mining proposal already identified Ragie as the retrieval layer for Ron's patent corpus. Ragie Parse specifically handles complex PDF layouts (tables, headers, multi-column) which patents are full of — two distinct document-heavy use cases strengthen the pitch.
 
 **Meeting framing:** Lead with "I have a client project where Ragie Parse solves a real problem" rather than a generic integration pitch. Showing Bob you're bringing **distribution** (real clients with real document workflows) is what gets a CEO's attention. Between Judith's loan docs and Ron's patent corpus, you have two compelling vertical use cases to walk through.
-<!-- agent:boundary:393ad36a -->
+
+Note the identified security issues. My demo will be changed. Should we schedule a call for Thursday? Today is Tuesday 17:25 Eastern.
+### Re: Security-Aware Demo & Thursday Call (HEAD)
+
+Good call acknowledging the security findings. The response channel exfiltration risk and prompt injection concerns from the web architecture analysis are real... adjusting the demo to account for those is the right move. When you meet with Bob, being upfront about "here's our security model and what we're doing about the hard parts" actually builds credibility rather than undermining the pitch. CEOs respect engineers who know where the edges are.
+
+**For Thursday scheduling:** That gives you two days of prep time. I'd suggest reaching out to Bob today to propose a time. A simple message like:
+
+> "Hey Bob, would you have 30 minutes Thursday afternoon for a call? I've been building some interesting things with the Ragie API and have a couple client use cases I'd like to walk through with you."
+
+**Demo pivot given security work:**
+- Lead with the JetBrains plugin (local-only, no security concerns)
+- Frame the web architecture as "here's the design, here's the threat model, here's the mitigation strategy"... shows maturity
+- Ragie Parse discussion doesn't have the same attack surface concerns since it's structured data extraction, not LLM-mediated document editing
+
+Want me to draft a message to Bob proposing Thursday?
+<!-- agent:boundary:580d6278 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Ragie Parse discussion points for Judith + patents added to meeting prep
-- Demo prep: JB plugin demo, web prototype architecture walkthrough
+- Demo prep: pivot to security-aware framing (JB plugin first, web arch + threat model second)
+- Draft outreach message to Bob for Thursday call
+- Ragie Parse discussion points for Judith + patents
 - Patent mining proposal as Ragie pitch material
-- Meeting with Bob (schedule TBD)
 <!-- /agent:pending -->

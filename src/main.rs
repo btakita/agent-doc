@@ -83,6 +83,7 @@ mod undo;
 mod upgrade;
 mod watch;
 mod worktree;
+mod ops_log;
 mod write;
 
 // Re-export library modules so binary-internal modules can use `crate::` paths

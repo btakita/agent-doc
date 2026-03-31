@@ -339,6 +339,10 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
     // If the user edited during response generation, final_content includes their
     // edits via merge. Saving content_ours ensures the next diff detects those edits.
     snapshot::save(file, &content_ours)?;
+    crate::ops_log::log_op(file, &format!(
+        "write_inline_done file={} snap_len={}",
+        file.display(), content_ours.len()
+    ));
 
     drop(doc_lock);
 
@@ -421,6 +425,10 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
 
     // Save snapshot as content_ours (baseline + response), not final_content
     snapshot::save(file, &content_ours)?;
+    crate::ops_log::log_op(file, &format!(
+        "write_template_done file={} snap_len={} patches={}",
+        file.display(), content_ours.len(), patches.len()
+    ));
 
     drop(doc_lock);
 
@@ -526,6 +534,10 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                     eprintln!("[perf] run_stream total: {}ms", elapsed_total);
                 }
                 // IPC succeeded — plugin applied patches
+                crate::ops_log::log_op(file, &format!(
+                    "ipc_write_consumed file={} patches={}",
+                    file.display(), patches.len()
+                ));
                 recover::clear_pending(file)?;
                 return Ok(());
             }
@@ -670,6 +682,10 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     // Using content_ours would lose user edits from the merge, causing
     // the next merge cycle to re-insert them as duplicates.
     snapshot::save_crdt(file, &crdt_state)?;
+    crate::ops_log::log_op(file, &format!(
+        "write_stream_done file={} snap_len={}",
+        file.display(), content_ours.len()
+    ));
 
     drop(doc_lock);
 

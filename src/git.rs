@@ -130,6 +130,12 @@ pub fn commit(file: &Path) -> Result<()> {
     // - Agent response → committed (no git gutter)
     // - User's subsequent edits → uncommitted (green git gutter)
     let snapshot_content = crate::snapshot::load(file)?;
+    let file_len = std::fs::metadata(file).map(|m| m.len()).unwrap_or(0);
+    let snap_len = snapshot_content.as_ref().map(|s| s.len()).unwrap_or(0);
+    crate::ops_log::log_op(file, &format!(
+        "commit_staging file={} snap_len={} file_len={}",
+        file.display(), snap_len, file_len
+    ));
     let t_staging = std::time::Instant::now();
     if let Some(ref snap) = snapshot_content {
         // Add (HEAD) marker to the last ### Re: heading in the snapshot.
@@ -183,6 +189,26 @@ pub fn commit(file: &Path) -> Result<()> {
             if !line.trim().is_empty() {
                 eprintln!("{}", line);
             }
+        }
+    }
+
+    // Log commit result
+    match &commit_status {
+        Ok(s) if s.success() => {
+            crate::ops_log::log_op(file, &format!("commit_success file={}", file.display()));
+        }
+        Ok(s) => {
+            crate::ops_log::log_op(file, &format!(
+                "commit_failed file={} exit_code={}",
+                file.display(),
+                s.code().unwrap_or(-1)
+            ));
+        }
+        Err(e) => {
+            crate::ops_log::log_op(file, &format!(
+                "commit_error file={} err={}",
+                file.display(), e
+            ));
         }
     }
 

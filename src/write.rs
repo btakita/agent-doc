@@ -507,12 +507,33 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             let base = baseline.unwrap_or(&content_at_start);
             let mode_overrides = std::collections::HashMap::new();
             let t_apply = std::time::Instant::now();
-            let content_ours = template::apply_patches_with_overrides(
+            let mut content_ours = template::apply_patches_with_overrides(
                 base, &patches, &unmatched, file, &mode_overrides,
             ).context("failed to apply patches for snapshot")?;
             let elapsed_apply = t_apply.elapsed().as_millis();
             if elapsed_apply > 0 {
                 eprintln!("[perf] apply_patches_with_overrides: {}ms", elapsed_apply);
+            }
+
+            // Guard: if content_ours is shorter than the current snapshot, the baseline
+            // was stale. Use the current file content as the snapshot instead to prevent
+            // rolling back committed responses.
+            if let Ok(Some(current_snap)) = snapshot::load(file)
+                && content_ours.len() + 100 < current_snap.len()
+            {
+                    eprintln!(
+                        "[write] WARNING: content_ours ({} bytes) shorter than snapshot ({} bytes) — stale baseline detected, using file content",
+                        content_ours.len(),
+                        current_snap.len()
+                    );
+                    crate::ops_log::log_op(file, &format!(
+                        "stale_baseline_detected file={} content_ours_len={} snap_len={}",
+                        file.display(), content_ours.len(), current_snap.len()
+                    ));
+                    // Re-apply patches to the current file content instead of the stale baseline
+                    content_ours = template::apply_patches_with_overrides(
+                        &content_at_start, &patches, &unmatched, file, &mode_overrides,
+                    ).context("failed to apply patches with fresh baseline")?;
             }
 
             // Dedup: skip IPC if patches produce no changes (strip boundary markers)

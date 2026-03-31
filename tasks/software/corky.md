@@ -385,7 +385,7 @@ continue
 Ready to release when you approve.
 I don't see the LinkedIn url.
 release
-### Re: LinkedIn URL Fix + Released v0.22.1 (HEAD)
+### Re: LinkedIn URL Fix + Released v0.22.1
 
 **Bug fixed:** `contact push` was only looking for `AGENTS.md` — contacts with only `CLAUDE.md` (like Anil) had their LinkedIn URL (and other fields) silently ignored. Added fallback: `AGENTS.md` → `CLAUDE.md` in both `extract_contact_payload()` and `discover_contacts()`.
 
@@ -398,7 +398,7 @@ release
 - Installed locally: corky 0.22.1 with GPU (transcribe-cuda)
 
 **Note:** Anil may have a duplicate contact again (new `people/c8464968541752362288` created alongside previous entries). May want to merge in Google Contacts.
-<!-- agent:boundary:f9b49042 -->
+<!-- agent:boundary:9ac5b19f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

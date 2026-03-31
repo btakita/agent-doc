@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.28.1 released. Column memory for non-agent columns shipped.
+v0.28.2 released. Write dedup + pane ownership shipped.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1157,12 +1157,24 @@ Binary installed. Ready to release when tested.
 Dedup events now log to `/tmp/agent-doc-write-dedup.log` with timestamp, file path, context, and **full stack backtrace** — so we can trace exactly which call path triggered the duplicate. If it recurs, the backtrace will identify the root cause.
 
 Installed. Both dedup check and pane ownership verification are active.
-<!-- agent:boundary:cd28ac54 -->
+add tests
+### Re: v0.28.2 released (HEAD)
+
+**agent-doc v0.28.2:** crates.io ✓, PyPI ✓, GitHub Release ✓, cargo install ✓ (confirmed v0.28.2)
+
+**Changelog:**
+- Write dedup: skip write if merged content == current file (4 paths)
+- Dedup file logging with backtrace to `/tmp/agent-doc-write-dedup.log`
+- Pane ownership verification on write
+- Docs: write.rs module doc, SPEC.md, VERSIONS.md updated
+<!-- agent:boundary:5924c457 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.28.1: Column memory + write dedup + pane ownership
-- [ ] Tests + audit docs + release v0.28.2
+- [x] v0.28.0: Structural layout fix (no early exits)
+- [x] v0.28.1: Column memory for non-agent columns
+- [x] v0.28.2: Write dedup + pane ownership + dedup logging
+- All shipped.
 <!-- /agent:pending -->

@@ -881,7 +881,7 @@ Will add a new section `10.4 Operations Logging` (under Security, since logging 
 - Log format (`[timestamp] operation key=value ...`)
 - Required events (snapshot_save, ipc_write, commit_staging, commit_success)
 - Best-effort semantics (logging failure never blocks operations)
-<!-- agent:boundary:b4467ed8 -->
+<!-- agent:boundary:ad92d720 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

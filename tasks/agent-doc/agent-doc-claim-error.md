@@ -561,7 +561,7 @@ I'd recommend **yes, release as v0.29.0** (minor bump for new features). The che
 
 Want me to proceed with the release?
 release
-### Re: v0.29.0 released (HEAD)
+### Re: v0.29.0 released
 
 All publish targets complete:
 
@@ -570,7 +570,7 @@ All publish targets complete:
 - **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.29.0 (with binary + wheel)
 - **Local install:** `~/.cargo/bin/agent-doc` updated to v0.29.0
 - **Parent submodule:** pointer updated to v0.29.0
-<!-- agent:boundary:2eadcf17 -->
+<!-- agent:boundary:5b822dd1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1072,13 +1072,30 @@ This is a **write-back race condition** — two consecutive writes with overlapp
 **Fix the document:** I can remove the duplicate section now. The fix for the underlying race is to ensure the baseline is always fresh — this is already handled by the `--baseline-file` flag, but the Claude session that wrote to linkedin.md may have used a stale baseline.
 
 Want me to remove the duplicate from linkedin.md?
-<!-- agent:boundary:25dccf83 -->
+
+How do we fix the **write-back race condition**?
+### Re: Fix for the write-back race condition (HEAD)
+
+The race happens when two writes overlap: Write B starts before Write A's commit updates the snapshot, so B's baseline is stale and the CRDT merge treats A's response as user content → duplication.
+
+**Three approaches:**
+
+1. **Boundary marker dedup (simplest):** Before writing, check if the boundary marker ID from the current response already exists in the document. If it does, the response was already written — skip the write. This is a 1-line check in `agent-doc write`.
+
+2. **Content hash dedup:** Hash the response content and check if it matches the last N lines before the boundary marker. If it matches, skip. More robust but more complex.
+
+3. **Lock-based serialization:** The `agent-doc write --stream` already uses `flock` for atomic file writes. But the race is between the *baseline snapshot* and the *write*, not between two concurrent writes. The fix is to **re-read the snapshot after acquiring the flock** and check if it changed since the baseline was saved. If it did, recompute the CRDT merge with the fresh snapshot.
+
+**Recommendation:** Option 3 is the most correct — it eliminates the race entirely by re-reading the snapshot inside the critical section. Options 1-2 are cheaper dedup checks that catch the symptom.
+
+This should be tracked as a separate bug — it's not specific to the layout fix. Want me to add it to `tasks/software/agent-doc.md`?
+<!-- agent:boundary:2c0edc69 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.28.1: Column memory shipped
-- [ ] **Remove duplicate from tasks/recruit/linkedin.md**
-- [ ] Investigate write-back race condition
+- [ ] **Write-back race condition dedup** (separate bug)
+- [ ] Remove duplicate from linkedin.md
 <!-- /agent:pending -->

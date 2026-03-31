@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-All committed and pushed — call time
+Cheat sheet ready at readable size — call in minutes
 <!-- /agent:status -->
 
 ## Exchange
@@ -280,12 +280,17 @@ Fits on 1 page with room to space. Make the font larger.
 - Ontology files committed and pushed to `existence-lang/ontology` (3 new files: phenomena, noumena, pneuma)
 - existence-lang submodule pointer updated and pushed
 - agent-loop local commits (agent-doc session) are up to date
-<!-- agent:boundary:fb204a2d -->
+### Re: Font Size Increased (HEAD)
+
+Bumped fonts from 7.5pt → 8.5pt body, headers proportionally larger. Still fits on 1 page with good readability. Reload:
+
+`file:///home/brian/work/btakita/agent-loop/tmp/lmi-cheatsheet.pdf`
+<!-- agent:boundary:f8505903 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Join Teams call at 1:30 PM ET
-- [x] Commit and push ontology + session
+- [x] Increase PDF font size
 <!-- /agent:pending -->

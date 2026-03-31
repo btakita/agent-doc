@@ -196,6 +196,16 @@ fn is_append_mode_component(name: &str) -> bool {
 }
 
 
+/// Strip boundary markers for dedup comparison.
+/// Boundary markers (`<!-- agent:boundary:XXXXXXXX -->`) get a fresh ID on each write,
+/// so they must be excluded from content equality checks.
+fn strip_boundary_for_dedup(content: &str) -> String {
+    content.lines()
+        .filter(|line| !line.trim().starts_with("<!-- agent:boundary:"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Log a write dedup event to both stderr and a persistent file for diagnosis.
 fn log_dedup(file: &Path, context: &str) {
     let msg = format!("[write] dedup: {} — {}", file.display(), context);
@@ -315,8 +325,8 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
         merge::merge_contents(base, &content_ours, &content_current)?
     };
 
-    // Dedup: skip write if merged content is identical to current file
-    if final_content == content_current {
+    // Dedup: skip write if merged content is identical to current file (strip boundary markers)
+    if strip_boundary_for_dedup(&final_content) == strip_boundary_for_dedup(&content_current) {
         log_dedup(file, "no changes after merge, skipping write");
         drop(doc_lock);
         recover::clear_pending(file)?;
@@ -399,8 +409,8 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
         merge::merge_contents(base, &content_ours, &content_current)?
     };
 
-    // Dedup: skip write if merged content is identical to current file
-    if final_content == content_current {
+    // Dedup: skip write if merged content is identical to current file (strip boundary markers)
+    if strip_boundary_for_dedup(&final_content) == strip_boundary_for_dedup(&content_current) {
         log_dedup(file, "no changes after merge, skipping write");
         drop(doc_lock);
         recover::clear_pending(file)?;
@@ -497,8 +507,8 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                 eprintln!("[perf] apply_patches_with_overrides: {}ms", elapsed_apply);
             }
 
-            // Dedup: skip IPC if patches produce no changes
-            if content_ours == content_at_start {
+            // Dedup: skip IPC if patches produce no changes (strip boundary markers)
+            if strip_boundary_for_dedup(&content_ours) == strip_boundary_for_dedup(&content_at_start) {
                 log_dedup(file, "no changes after merge, skipping write");
                 recover::clear_pending(file)?;
                 return Ok(());
@@ -638,8 +648,8 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
         merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current)?
     };
 
-    // Dedup: skip write if merged content is identical to current file
-    if final_content == content_current {
+    // Dedup: skip write if merged content is identical to current file (strip boundary markers)
+    if strip_boundary_for_dedup(&final_content) == strip_boundary_for_dedup(&content_current) {
         log_dedup(file, "no changes after merge, skipping write");
         drop(doc_lock);
         recover::clear_pending(file)?;

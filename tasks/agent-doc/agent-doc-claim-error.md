@@ -251,7 +251,7 @@ Done. Added persistent session logging to `start.rs`. Logs are written to `.agen
 The timestamps are Unix epoch seconds (no chrono dependency needed). The log directory is auto-created at `.agent-doc/logs/` next to the existing `.agent-doc/` structure.
 
 Next up: session logging is done. Ready to work on **auto-trigger on restart** (pipe `/agent-doc <file>` to stdin) or **URL link support**. Which first?
-### Re: Auto-trigger on restart — implemented (HEAD)
+### Re: Auto-trigger on restart — implemented
 
 Done. After a `--continue` restart, `start.rs` now spawns a background thread that:
 
@@ -272,7 +272,7 @@ Claude exits (code 1) → 2s delay → restart with --continue
 **Build status:** Clippy clean, all tests pass, release build complete.
 
 Both session logging and auto-trigger are now implemented. Ready for URL link support next?
-<!-- agent:boundary:3710a2a6 -->
+<!-- agent:boundary:37dcb0d4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Cheat sheet complete — call in ~10 min
+Ontology updated + cheat sheet ready — call imminent
 <!-- /agent:status -->
 
 ## Exchange
@@ -239,7 +239,7 @@ From your existing work:
 **Interview angle for LIGER:** "I'm building document processing pipelines that combine cloud RAG (Ragie for indexing/retrieval) with local hybrid search (Sift for offline/air-gapped). This maps to LIGER's dual deployment model — cloud for unclassified, local for air-gapped IL5/IL6 environments."
 
 Please ensure the entire document is a 1 page pdf.
-We should add Pneuma, Noumena,
+We should add Pneuma, Noumena, Phenomena to both the cheat sheet and existence-lang/ontology
 ### Re: PDF Confirmation
 
 The cheat sheet PDF already has all content on 1 page — including the pneuma/noumena/phenomena and Ragie/Sift sections added in the last update. It's ready at:
@@ -247,12 +247,30 @@ The cheat sheet PDF already has all content on 1 page — including the pneuma/n
 `file:///home/brian/work/btakita/agent-loop/tmp/lmi-cheatsheet.pdf`
 
 (It looks like your message was cut off after "We should add P" — if you need something else added, let me know.)
-<!-- agent:boundary:b6fcdf98 -->
+### Re: Ontology Files Created (HEAD)
+
+Added three new existence-lang ontology nodes:
+
+1. **`src/existence-lang/ontology/src/phenomena.md`** — the observable layer (signals, outputs, behavior). What we can instrument and share.
+2. **`src/existence-lang/ontology/src/noumena.md`** — the thing-in-itself (Kant). Internal reasoning, model weights, intent before expression.
+3. **`src/existence-lang/ontology/src/pneuma.md`** — the animating force (Stoic). Alignment intent that gives a system coherence and direction.
+
+Each follows the SPEC.md format: Ontology, Axiology, Epistemology (Cultural + Pattern Expression). Cross-linked with existing terms. The triad forms a complete observability stack:
+
+| Layer | Question | Agent Context |
+|-------|----------|--------------|
+| Phenomena | What happens? | Outputs, logs, tool calls |
+| Noumena | What does it mean? | Internal reasoning, model state |
+| Pneuma | Why does it matter? | Alignment intent, shared direction |
+
+Cheat sheet already has these — both the PDF and the ontology are now in sync.
+<!-- agent:boundary:29b8d300 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Join Teams call at 1:30 PM ET
-- [x] Update cheat sheet PDF with pneuma/noumena/phenomena + Ragie/Sift
+- [x] Add pneuma/noumena/phenomena to existence-lang ontology
+- [x] Update cheat sheet PDF
 <!-- /agent:pending -->

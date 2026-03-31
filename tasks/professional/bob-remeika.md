@@ -1366,7 +1366,7 @@ The call is scheduled for 30 minutes.
 
 I also want to discuss Ragie parse https://www.ragie.ai/parse for Judith's project.
 Ragie parse may also be useful for reading the patent files as well.
-### Re: Ragie Parse for Judith & Patents (HEAD)
+### Re: Ragie Parse for Judith & Patents
 
 Good additions to the meeting agenda. Ragie Parse is a strong fit for both:
 
@@ -1375,7 +1375,7 @@ Good additions to the meeting agenda. Ragie Parse is a strong fit for both:
 **For patent files:** The patent mining proposal already identified Ragie as the retrieval layer for Ron's patent corpus. Ragie Parse specifically handles complex PDF layouts (tables, headers, multi-column) which patents are full of — two distinct document-heavy use cases strengthen the pitch.
 
 **Meeting framing:** Lead with "I have a client project where Ragie Parse solves a real problem" rather than a generic integration pitch. Showing Bob you're bringing **distribution** (real clients with real document workflows) is what gets a CEO's attention. Between Judith's loan docs and Ron's patent corpus, you have two compelling vertical use cases to walk through.
-<!-- agent:boundary:7224c78b -->
+<!-- agent:boundary:393ad36a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

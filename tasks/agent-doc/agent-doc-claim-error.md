@@ -1167,7 +1167,7 @@ add tests
 - Dedup file logging with backtrace to `/tmp/agent-doc-write-dedup.log`
 - Pane ownership verification on write
 - Docs: write.rs module doc, SPEC.md, VERSIONS.md updated
-<!-- agent:boundary:1aa35250 -->
+<!-- agent:boundary:6cd10a0a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

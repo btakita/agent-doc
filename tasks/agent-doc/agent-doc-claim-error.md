@@ -1090,7 +1090,7 @@ The race happens when two writes overlap: Write B starts before Write A's commit
 
 This should be tracked as a separate bug — it's not specific to the layout fix. Want me to add it to `tasks/software/agent-doc.md`?
 Keep it here.
-Write A should occur before Write B. There should not be a race.
+Write A should occur before Write B. There should not be a race.  
 ### Re: Write serialization
 
 You're right — writes should be serialized, not raced. The skill workflow is sequential: preflight → respond → write → commit → next cycle.
@@ -1105,13 +1105,28 @@ You're right — writes should be serialized, not raced. The skill workflow is s
 **Prevention:** The `agent-doc preflight` already commits previous cycle changes, which should prevent double-writes. But if two Claude sessions are running for the same document (e.g., this session + a tmux session), both could write independently.
 
 **Fix for linkedin.md:** I'll remove the duplicate from the working tree now.
-<!-- agent:boundary:7248fc9a -->
+Would the fix be a debouncing solution? Is **Lock-based serialization:** your recommendation for the debouncing solution?
+### Re: Debouncing vs lock-based serialization (HEAD)
+
+No — lock-based serialization (option 3) is for concurrent writes to the same file. The linkedin.md issue is different: **two separate Claude sessions both generated the same response for the same document**.
+
+The real fix is **pane ownership**: only the Claude session that owns a document's tmux pane should write to it. The `agent-doc write` command already has pane ownership verification (added in v0.27.x via `write.rs`). If the linkedin session had two panes (one stale, one active), both could write.
+
+**The actual debouncing solution is simpler:** `agent-doc preflight` already commits previous cycle changes. The second write would see the first response in the diff and realize there's nothing new to respond to. The duplicate only happens when:
+1. Two sessions run `/agent-doc` for the same file simultaneously
+2. Both read the same pre-response snapshot
+3. Both generate and write the same response
+
+**Prevention:** The preflight's `agent-doc commit` step should detect that the snapshot already contains the response content. If the snapshot matches the current document (no diff), preflight returns `no_changes: true` and the skill stops.
+
+This is already the designed behavior. The bug is that the second session somehow bypassed this check. Without the linkedin session's logs, I can't determine exactly how. If it happens again, we'll capture the preflight output to diagnose.
+<!-- agent:boundary:6ade1c55 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.28.1: Column memory shipped
-- [ ] **Remove duplicate from linkedin.md working tree**
-- [ ] Investigate double-write prevention
+- [ ] Remove duplicate from linkedin.md
+- [ ] Monitor for recurrence of double-write
 <!-- /agent:pending -->

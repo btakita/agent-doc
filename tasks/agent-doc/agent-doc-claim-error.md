@@ -515,7 +515,18 @@ Done. Added a blockquote right under the "Alpha Software" note:
 > **Single-user only.** agent-doc operates on the local filesystem with no access control. Use a private git repository. See the [Security](#security) section for details.
 
 The full Security section remains at the bottom with the detailed breakdown. The top-level note gives immediate visibility.
-<!-- agent:boundary:3a5c8519 -->
+
+Add security to SPEC.md. We will address security
+### Re: Security added to SPEC.md (HEAD)
+
+Done. Added **Section 10: Security** to SPEC.md with three subsections:
+
+- **10.1 Threat Model** ... trusted user/untrusted content, local filesystem scope, git as audit trail
+- **10.2 Known Risks** ... prompt injection via document content, `--dangerously-skip-permissions` exposure, data divulgence through the response channel, links cache sensitivity
+- **10.3 Recommendations** ... private repo, no secrets in context, wait for multi-user security, review before sharing
+
+The security content draws from the ragie-web-doc analysis (data divulgence is the fundamental unsolved problem) and aligns with the README security section. The SPEC is more detailed since it's the functional specification for implementors.
+<!-- agent:boundary:432c20f6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -529,8 +540,8 @@ The full Security section remains at the bottom with the detailed breakdown. The
 - [x] **HTML-to-markdown via htmd** — integrated, deps audited
 - [x] **Tests** — 7 new tests for URL/HTML features
 - [x] **Audit docs** — module specs + evals updated
-- [x] **SPEC.md, README.md** — updated with new features + security
-- [x] **Security section in README.md** — top-level note + detailed section
+- [x] **SPEC.md** — updated with features + security section
+- [x] **README.md** — updated with features + security top-note + section
 - [ ] **Investigate lmi.md debounce failure** — need user description of symptoms
 - [ ] **Optional markitdown/Ragie Parse integration** (PDF, DOCX, OCR)
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)

@@ -844,7 +844,7 @@ Without these, we're guessing. I've launched a background agent to implement ope
 - `SPEC-security.md` — security model, threat model, recommendations
 
 But splitting prematurely adds navigation overhead. For now, add new sections to the existing SPEC.md. The audit-docs budget allows up to 1000 lines per instruction file, and SPEC.md at 722 has room.
-### Re: Validatable specs (HEAD)
+### Re: Validatable specs
 
 Agreed. agent-doc already has a pattern for this: every module has `## Spec`, `## Agentic Contracts`, and `## Evals` sections in its doc comments. The evals are validatable assertions that map 1:1 to tests.
 
@@ -881,7 +881,7 @@ Will add a new section `10.4 Operations Logging` (under Security, since logging 
 - Log format (`[timestamp] operation key=value ...`)
 - Required events (snapshot_save, ipc_write, commit_staging, commit_success)
 - Best-effort semantics (logging failure never blocks operations)
-<!-- agent:boundary:932636a3 -->
+<!-- agent:boundary:b4467ed8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

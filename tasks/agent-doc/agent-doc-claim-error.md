@@ -1152,12 +1152,12 @@ We should log any duplicates that are skipped. Ideally we can isolate why the du
 **linkedin.md fixed** — restored from git HEAD (1 copy of the response). Duplicate removed.
 
 Binary installed. Ready to release when tested.
-### Re: Dedup logging added (HEAD)
+### Re: Dedup logging added
 
 Dedup events now log to `/tmp/agent-doc-write-dedup.log` with timestamp, file path, context, and **full stack backtrace** — so we can trace exactly which call path triggered the duplicate. If it recurs, the backtrace will identify the root cause.
 
 Installed. Both dedup check and pane ownership verification are active.
-<!-- agent:boundary:03283701 -->
+<!-- agent:boundary:cd28ac54 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

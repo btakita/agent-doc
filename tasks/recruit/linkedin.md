@@ -557,7 +557,7 @@ Please evaluate.
 Browser connection timed out so I couldn't visually verify the profile — but the search evidence alone is concerning.
 
 Use chromium-bridge to visit the comment with the url above
-### Re: Eric Irwin profile evaluation (visual verification) (HEAD)
+### Re: Eric Irwin profile evaluation (visual verification)
 
 **Confirmed: This is a recruitment scam account.** Full comment and profile now visually verified via chromium-bridge.
 
@@ -576,5 +576,5 @@ Use chromium-bridge to visit the comment with the url above
 7. **Hash-style URL** (`eric-irwin-78b7b53bb`) — never customized, auto-generated
 
 **Recommendation: Hide/delete the comment and report the profile.** This is a job scam designed to harvest resumes and personal information via a non-corporate email address. Do not engage or reply.
-<!-- agent:boundary:c25c937d -->
+<!-- agent:boundary:852c92f7 -->
 <!-- /agent:exchange -->

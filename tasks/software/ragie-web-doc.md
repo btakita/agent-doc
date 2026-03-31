@@ -345,7 +345,7 @@ Uses a relay (cloudflared tunnel or self-hosted) to expose the local MCP server 
 - Future sandbox: per-tool permissions, audit logging, rate limiting, content filtering
 
 **For MVP:** Bob connects via MCP, gets `read_document` + `write_document` scoped to specific files, uses his own Claude Code. No shared model context. The only prompt injection vector is document content itself, which is mitigated by document-level scoping.: While sharing is great idea, I want to project against prompt injection. Even if we don't share, but if there's a repo with pull requests...someone can make a PR with prompt injection. agent-doc may need to be sandboxed by default for true security.
-### Re: Prompt injection sandboxing — the real threat model (HEAD)
+### Re: Prompt injection sandboxing — the real threat model
 
 You're identifying the fundamental tension: **agent-doc documents are processed by an LLM with tool access.** Any content in the document is potential prompt injection, regardless of source — collaborator, PR, or Ragie retrieval.
 
@@ -409,7 +409,7 @@ PR opened ──> CI: agent-doc preflight (sandboxed, no bash)
 2. Each author runs their own agent — no shared Claude context
 3. Git review gates for PRs — content reviewed before entering main
 4. Treat all document content as untrusted — system prompt explicitly frames it as user data, not instructions
-<!-- agent:boundary:a33af68d -->
+<!-- agent:boundary:dfd7f581 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

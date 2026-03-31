@@ -16,7 +16,7 @@ Interview prep ready — call at 1:30 PM ET today via Microsoft Teams
 Read /home/brian/work/btakita/agent-loop/tasks/software/corky/lmi-email-source.txt
 
 Help me prepare for the call today at 13:30 Eastern
-### Re: LMI Interview Prep — Today 1:30 PM ET (HEAD)
+### Re: LMI Interview Prep — Today 1:30 PM ET
 
 **Meeting:** Microsoft Teams video conference, 30 min
 **Team:** Luke Stets, Josh Malloy, Andrew Dirks, Adam Hughes
@@ -57,7 +57,7 @@ Enterprise AI orchestration platform for federal government:
 - Stay on camera for the full duration
 - Do NOT use AI tools or interview guides during the call
 - You CAN share examples of how you use AI to make your work more effective
-<!-- agent:boundary:001349f1 -->
+<!-- agent:boundary:8b677803 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

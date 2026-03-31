@@ -1347,17 +1347,33 @@ You have more demo assets than you think:
 3. **Ragie retrieval panel** (2 min) — Show Ragie search results feeding into the document. Makes Ragie's value visible and concrete.
 
 Goes from "working product" → "your API powers the next version" → "here's what your customers see." Strong progression.
-<!-- agent:boundary:8d56acc4 -->
+
+The call is scheduled for 30 minutes.
+### Re: 30-minute call time budget (HEAD)
+
+30 minutes goes fast. Here's a realistic allocation:
+
+- **0-3 min** — Catch up. "What are you working on at Ragie right now?"
+- **3-10 min** — JB plugin demo. Live agent-doc session, gutter system, tmux orchestration. Let Bob react.
+- **10-18 min** — Ragie pitch. Where your API fits. Web prototype if ready, otherwise walk through architecture. Patent pipeline + Judith's loan docs as use cases.
+- **18-25 min** — Discussion. Does this align with Ragie's roadmap? Integration support? Partner/developer program?
+- **25-28 min** — Contract work. "If you need someone building Ragie integrations from the developer side, I'm available."
+- **28-30 min** — Next steps.
+
+**Key:** Don't force all three demos. Pick one or two based on Bob's reactions. If JB plugin excites him, go deep there. If he's more into the web vision, pivot. Read the room.
+
+**If web prototype isn't ready:** Fine. JB plugin is a real product. Walk through web architecture on a document. "Here's what I'm building next with your API" still lands without a live demo.
+<!-- agent:boundary:571aa393 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Book Calendly slot (Wed Apr 1 or later) — https://calendly.com/bobremeika/30-minute-call
+- Book Calendly slot (Wed Apr 2 or later) — https://calendly.com/bobremeika/30-minute-call
 - Test VS Code agent-doc extension — does it work?
 - **Build interactive web document prototype** (markdown editor + Ragie retrieval + Claude responses)
 - Sign up for Ragie / check free tier
 - Index demo documents in Ragie (patent proposal, contacts, resume)
 - Prep JB plugin demo (clean session, good example doc)
-- Prepare demo script: 3-part progression (JB → web → Ragie panel)
+- Prepare call time budget (7-min demo within 30-min call)
 <!-- /agent:pending -->

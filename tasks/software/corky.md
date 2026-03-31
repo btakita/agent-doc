@@ -403,7 +403,7 @@ Look at the email with subject "LMI - Video Conference Interview Confirmation"
 
 There is no content.
 I dowloaded the source to /home/brian/work/btakita/agent-loop/tasks/software/corky/lmi-email-source.txt
-### Re: LMI Interview Confirmation Email (HEAD)
+### Re: LMI Interview Confirmation Email
 
 The email **does have content** — it's a `multipart/related` message with both `text/plain` and `text/html` parts. Gmail's web UI isn't rendering it (likely the multipart/related boundary or embedded images confusing the renderer).
 
@@ -422,7 +422,7 @@ The email **does have content** — it's a `multipart/related` message with both
 - **Note:** Stay on camera, no AI tools during interview (but can share AI workflow examples)
 
 **Why Gmail shows no content:** `multipart/related` email with embedded signature images — Gmail's renderer sometimes fails on these boundaries.
-<!-- agent:boundary:c224ed22 -->
+<!-- agent:boundary:752de2be -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

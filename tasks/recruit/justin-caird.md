@@ -926,6 +926,7 @@ Justin confirmed he's sending it tomorrow morning. Given the call context, his s
 1. Reply to Justin on LinkedIn with your preferred time slot
 2. Watch for the markdown exercise email tomorrow morning
 3. When it arrives, plan a recorded session completing it with agent-doc
+
 ### Re: Call timing clarification (Mar 31)
 
 Correct — the phone call happened before Justin's 5:14 PM LinkedIn message. Timeline:
@@ -941,12 +942,31 @@ So the 1pm Tuesday from the call is invalidated. Your LinkedIn reply should refe
 > Hi Justin, thanks for the update. Monday April 6th at 1pm ET works for me. Looking forward to it!
 
 Also note from the call: "Hawk" is likely the interviewer name (VP of Engineering or CTO alias). Justin mentioned the CTO may have the first round be discussion-only with the VP, saving vibe coding for a later round. Either way, he's sending the markdown exercise tomorrow so you can be proactive.
-<!-- agent:boundary:229be005 -->
+
+Yes. I'm concerned about the complexity of the markdown exercise. But I have the Wed-Monday to work through it. Seems like I can fit it in.
+### Re: Markdown exercise timeline (Mar 31) (HEAD)
+
+You have a solid window. Justin said the exercise email arrives tomorrow morning (April 1). If you pick Monday April 6 at 1pm for the interview, that's **5 full days** (Tue-Sat) plus Sunday as buffer.
+
+Context that should ease the concern:
+- Other candidates did this exercise **live during the interview** as vibe coding. You're getting it in advance — that's an advantage
+- The exercise is a markdown file. This is literally your domain — agent-doc is purpose-built for this kind of work
+- Justin specifically said "no pressure" but that being proactive and having it ready to share screen would "go off really well"
+- Even if round 1 ends up being discussion-only, having completed it gives you concrete material to reference
+
+**Suggested approach when it arrives:**
+1. Read through the markdown exercise, assess scope (likely 1-2 focused sessions)
+2. Complete it using agent-doc — the meta-demonstration is the differentiator
+3. Optionally record a YouTube session of the process
+4. Have it ready to share screen during the Monday interview
+
+The complexity concern is valid but manageable. You won't know until you see it, and 5 days is generous for what's designed as a live interview exercise.
+<!-- agent:boundary:1044dc92 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
 - [ ] **Reply to Justin on LinkedIn** with preferred time from updated slots (Mon 4/6 or Thu 4/9)
 - [ ] Watch for markdown exercise email from Justin (expected April 1 morning)
-- [ ] When exercise arrives: complete it with agent-doc, consider YouTube recording
+- [ ] When exercise arrives: assess scope, complete with agent-doc, consider YouTube recording
 - [ ] Prepare for first-round interview (possibly VP of Engineering, discussion format, 60-90 min)
 <!-- /agent:pending -->

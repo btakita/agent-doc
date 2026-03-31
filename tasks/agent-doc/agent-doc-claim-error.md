@@ -1015,7 +1015,7 @@ Let's get the Bug 2 fix started after Bug 1 is fixed.
 
 **Bug 1 fix deployed.** Stale baseline guard in `write.rs`:
 - Compares `content_ours` against current snapshot
-- If 100+ bytes shorter: detects stale baseline, re-applies patches to current file content
+- If 100+ bytes shorter: detects stale baseline, re-applies patches to current file content: Why 100+ bytes? Why would 1 byte shorter be acceptable in this case? Can we even guarantee that a net-neutral or net-positive diff does not have a stale basline?
 - Logs `stale_baseline_detected` to ops.log
 - Committed `129885a`, pushed, installed
 
@@ -1028,14 +1028,46 @@ Before starting a new session, check if file has uncommitted content beyond snap
 Compare `### Re:` headings between git HEAD and snapshot. Block staging if headings are missing (unless compaction marker present).
 
 Want me to implement Part A first?
-<!-- agent:boundary:32911f4d -->
+### Re: Why 100 bytes? Can a net-positive diff have a stale baseline? (HEAD)
+
+**Why 100 bytes:** The threshold was meant to avoid false positives from minor differences (boundary markers are ~40 bytes, whitespace normalization). But you're right to question it.
+
+**Can a stale baseline produce net-positive content_ours?** Yes. If the response being appended is longer than the content that was lost from the stale baseline, `content_ours` would be larger than the snapshot despite being wrong. Example:
+
+- Snapshot: 10000 bytes (contains response A)
+- Stale baseline: 9500 bytes (missing response A, 500 bytes lost)
+- New response B: 800 bytes
+- `content_ours` = 9500 + 800 = 10300 bytes (> snapshot)
+- But it's WRONG: it has response B but lost response A
+
+So the length comparison is fundamentally flawed. A stale baseline can produce content_ours that's longer, shorter, or the same length as the snapshot.
+
+**Better approach:** Instead of comparing lengths, compare the **baseline** against the **snapshot** directly. If the baseline doesn't match the snapshot (after stripping boundary markers), the baseline is stale:
+
+```rust
+let snap_clean = strip_boundary_for_dedup(&current_snap);
+let base_clean = strip_boundary_for_dedup(base);
+if base_clean != snap_clean {
+    eprintln!("[write] WARNING: baseline doesn't match snapshot — using current file as baseline");
+    // Re-read file and use as baseline
+    let fresh_base = std::fs::read_to_string(file)?;
+    content_ours = template::apply_patches_with_overrides(
+        &fresh_base, &patches, &unmatched, file, &mode_overrides,
+    )?;
+}
+```
+
+This catches ALL stale baselines, not just ones that produce shorter content. Want me to update the guard to this approach?
+<!-- agent:boundary:49b0df23 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **v0.29.0 released** + ops logging + Bug 1 fix
-- [ ] **Bug 2A: Divergence check before auto-start** ← next
+- [x] **v0.29.0 released** + ops logging
+- [x] **Bug 1 fix (v1)** — length-based guard (deployed but insufficient)
+- [ ] **Bug 1 fix (v2)** — baseline vs snapshot comparison (correct approach) ← proposed
+- [ ] **Bug 2A: Divergence check before auto-start**
 - [ ] **Bug 2B: Rollback guard in commit()**
 - [ ] **Preflight ops.log anomaly scan**
 - [ ] **Multi-harness hooks** (agent-kit)

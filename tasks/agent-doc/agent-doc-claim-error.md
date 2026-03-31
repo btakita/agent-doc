@@ -844,6 +844,9 @@ Without these, we're guessing. I've launched a background agent to implement ope
 - `SPEC-security.md` — security model, threat model, recommendations
 
 But splitting prematurely adds navigation overhead. For now, add new sections to the existing SPEC.md. The audit-docs budget allows up to 1000 lines per instruction file, and SPEC.md at 722 has room.
+
+Add a SPEC to split the file if it grows past 1000 lines.
+
 ### Re: Validatable specs
 
 Agreed. agent-doc already has a pattern for this: every module has `## Spec`, `## Agentic Contracts`, and `## Evals` sections in its doc comments. The evals are validatable assertions that map 1:1 to tests.
@@ -871,6 +874,7 @@ Agreed. agent-doc already has a pattern for this: every module has `## Spec`, `#
 // snapshot.rs evals:
 - snapshot_save_logs_operation: save() → ops.log entry with file + content length
 ```
+When you say evals, is this a sort of runtime eval that occurs to validate SKILL.md and the agent harness is operating correctly?
 
 These become both the spec documentation and the test definitions. The ops logging agent is implementing the logging now. Once it's done, I'll add the tests and spec comments.
 
@@ -881,16 +885,49 @@ Will add a new section `10.4 Operations Logging` (under Security, since logging 
 - Log format (`[timestamp] operation key=value ...`)
 - Required events (snapshot_save, ipc_write, commit_staging, commit_success)
 - Best-effort semantics (logging failure never blocks operations)
-<!-- agent:boundary:ad92d720 -->
+
+Should we be continously reading the logs to ensure no anomalies occur in realtime?
+### Re: SPEC split threshold, evals definition, real-time log monitoring (HEAD)
+
+**SPEC split at 1000 lines:** Noted. I'll add a self-documenting rule to SPEC.md itself:
+
+> When SPEC.md exceeds 1000 lines, split into domain-specific spec files (SPEC-session.md, SPEC-security.md, etc.) and update audit-docs to validate each.
+
+**Evals clarification:** No, these are NOT runtime evals. They're **unit test definitions** in the module's doc comments. The naming convention comes from the existing codebase pattern:
+
+```rust
+//! ## Evals
+//! - `commit_detects_snapshot_rollback`: ...
+//! - `commit_allows_compacted_shrinkage`: ...
+```
+
+Each eval becomes a `#[test]` function with the same name. They validate the **binary's** behavior, not the SKILL.md or agent harness. The agent harness (SKILL.md + Claude) is non-deterministic and can't be unit-tested this way.
+
+For agent harness validation, you'd need integration tests or observability (which is what the ops logging gives you). The ops.log is the "runtime eval" equivalent for the agent harness.
+
+**Real-time log monitoring:** Yes, this is a good idea. Two approaches:
+
+1. **Preflight-level check:** During `preflight` step 2 (before commit), scan ops.log for recent anomalies:
+   - `commit_staging` where `snap_len` is significantly less than `file_len` (potential rollback)
+   - `commit_failed` entries
+   - Missing `commit_success` after `ipc_write_consumed` (write succeeded but commit never ran)
+
+2. **Watch daemon check:** The `agent-doc watch` daemon could tail ops.log and alert on anomalies via the claims log (which surfaces in preflight output).
+
+Option 1 is simpler and addresses the immediate need. The preflight already runs before every agent cycle, so adding an ops.log scan there catches issues before they propagate.
+
+Want me to implement the preflight ops.log anomaly scan?
+<!-- agent:boundary:852a3e35 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **v0.29.0 released**
-- [ ] **Operation-level logging** — implementing in background ← in progress
-- [ ] **Rollback guard spec + tests** — evals defined, implementation after logging
-- [ ] **SPEC.md Section 11: Observability** — ops logging format + required events
+- [x] **Operation-level logging** — implemented, deployed, verified working
+- [ ] **SPEC.md split threshold** — add self-documenting 1000-line rule
+- [ ] **Preflight ops.log anomaly scan** — detect rollbacks + missing commits ← proposed
+- [ ] **Rollback guard in commit()** — Re: heading comparison
 - [ ] **Session dedup** (prevent duplicate sessions for same file)
 - [ ] **Collaborative security model** (TBD)
 - [ ] **Optional markitdown/Ragie Parse integration** (PDF, DOCX, OCR)

@@ -1208,7 +1208,7 @@ The duplicate came from a **single Claude session** running `/agent-doc` twice f
 The v0.28.3 dedup (stripping boundary markers) should now catch this case. The pane ownership check prevents cross-pane writes but can't prevent same-pane double-writes — that's what the dedup is for.
 
 If you see it happen again after v0.28.3, the `/tmp/agent-doc-write-dedup.log` will capture the backtrace showing exactly which code path triggered the duplicate.
-<!-- agent:boundary:9dad92b4 -->
+<!-- agent:boundary:a2c72393 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

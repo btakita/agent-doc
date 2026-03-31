@@ -553,14 +553,14 @@ Draft at: `mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-interactive-d
 Review and approve to send.
 
 Note that I'm exploring security concerns in tasks/software/ragie-web-doc.md
-### Re: Draft Status + Security Note (HEAD)
+### Re: Draft Status + Security Note
 
 The Josh Malloy draft **does have content** (31 lines). The "empty draft" issue was the Kate Revels draft from earlier (which I filled and sent). The Josh draft at `mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-interactive-document-genera.md` has the full aligned email with claim identification, CRDT merge, auditable state, and "Beyond the Vending Machine" connection.
 
 Noted re: security concerns in `tasks/software/ragie-web-doc.md`. That's relevant context for the LIGER conversation since they deploy at IL5/IL6.
 
 Ready to send the Josh email? Set status to `approved` and push?
-<!-- agent:boundary:ca97eb01 -->
+<!-- agent:boundary:7329e018 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

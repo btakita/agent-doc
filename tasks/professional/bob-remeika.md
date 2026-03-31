@@ -1415,13 +1415,18 @@ For Calendly, set the meeting for 30 minutes. In the invite description, somethi
 > "Catching up on agent-doc + Ragie integration. Have a couple client use cases to discuss plus some security architecture questions."
 
 That gives him enough context to be interested without overloading the invite.
-<!-- agent:boundary:4476b85e -->
+
+This is too early. I want 1PM Eastern but it scheduled me for 10AM Eastern.
+### Re: Calendly Time Fix (HEAD)
+
+My bad on the confusion. I suggested 10 AM PT which equals 1 PM ET... but if Calendly scheduled you for 10 AM ET, that's 7 AM PT, way too early for Bob. You'll want to reschedule the Calendly link to **1:00 PM ET / 10:00 AM PT** explicitly. Double-check the timezone setting in your Calendly event... it may be defaulting to Eastern when you need to set the target time in Eastern directly.
+<!-- agent:boundary:1c6932f1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Schedule Thursday call with Bob via Calendly (~10 AM PT / 1 PM ET)
+- Reschedule Thursday call to 1:00 PM ET / 10:00 AM PT (fix Calendly timezone)
 - Security discussion topics for Bob meeting (prompt injection, data isolation, content signing)
 - Demo prep: security-aware framing (JB plugin first, web arch + threat model second)
 - Ragie Parse discussion points for Judith + patents

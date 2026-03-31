@@ -1061,7 +1061,7 @@ This catches ALL stale baselines, not just ones that produce shorter content. Wa
 Yes
 Please explain why we have multiple baselines.
 Why not **always** re-read the file? Where is this code? in the ffi plugin or in agent-doc binary?
-### Re: Bug 1 v2 fix deployed (HEAD)
+### Re: Bug 1 v2 fix deployed
 
 Updated the guard from length-based to baseline-vs-snapshot comparison:
 1. Strip boundary markers from both baseline and snapshot
@@ -1070,7 +1070,7 @@ Updated the guard from length-based to baseline-vs-snapshot comparison:
 Catches ALL stale baselines regardless of content length. Committed `d9a113a`, pushed, installed.
 
 Ready for Bug 2?
-<!-- agent:boundary:9660e68b -->
+<!-- agent:boundary:ba2af7ff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

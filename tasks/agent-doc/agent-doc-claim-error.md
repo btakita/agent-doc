@@ -355,7 +355,7 @@ Is there a Rust equivalent to remove the python dependency?
 The conversion would slot into `check_url_link()` — after fetching, convert HTML to markdown before caching and diffing. This gives the agent clean, readable content instead of raw HTML.
 
 Want me to add one of these crates and wire it into the URL link fetch pipeline?
-Are there rust equivalalnts for PDF and DOCX?
+Are there rust equivalents for PDF and DOCX?
 ### Re: Rust equivalents for PDF and DOCX
 
 **PDF — yes, but with caveats:**
@@ -386,7 +386,32 @@ Are there rust equivalalnts for PDF and DOCX?
 - No need to maintain custom PDF/DOCX→markdown logic
 
 This is a pragmatic hybrid — Rust for the hot path, Python for the long tail.
-<!-- agent:boundary:8c258ddd -->
+
+Ragie parse also handles OCR and presumably md. https://www.ragie.ai/parse
+Let's use the Rust binaries for now. We can have optional markdownit and ragie parse integration.
+Focus on html. Which html to md is the best library to use in our case?
+### Re: Best HTML-to-markdown library for agent-doc (HEAD)
+
+**`htmd`** is the best fit for our case. Here's why:
+
+| Criterion | htmd | html2md |
+|-----------|------|---------|
+| **Boilerplate stripping** | Explicit skip-tags config (script, style, nav, header, footer) | Implicit |
+| **GFM tables** | Yes | Yes |
+| **Code blocks** | Yes | Yes |
+| **API** | `htmd::convert("<h1>Hi</h1>")` | `html2md::rewrite_html("<p>text</p>", false)` |
+| **Dependencies** | 1 (html5ever) | 2 (lol_html, scraper) |
+| **Maintenance** | Active, 17 releases, Apache 2.0 | Active, MIT |
+| **Performance** | ~16ms for 1.37MB Wikipedia page | Fastest (streaming parser) |
+
+**Why htmd wins for us:**
+1. **Boilerplate control** — we can skip `<script>`, `<style>`, `<nav>`, `<header>`, `<footer>` upfront via `HtmlToMarkdownBuilder`, giving the agent clean content
+2. **Lighter deps** — single dependency (html5ever), smaller compile impact
+3. **Turndown.js test suite** — proven conversion quality
+4. **Good enough speed** — 16ms for a Wikipedia page is fine for preflight
+
+Want me to add `htmd` and wire it into `check_url_link()` now?
+<!-- agent:boundary:0d3e1bd4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -397,8 +422,8 @@ This is a pragmatic hybrid — Rust for the hot path, Python for the long tail.
 - [x] **Session death logging** (`.agent-doc/logs/`) — implemented
 - [x] **Auto-trigger on restart** — tmux send-keys after `--continue`
 - [x] **URL link support (fetch + cache + context)** — implemented
-- [ ] **HTML-to-markdown conversion** — htmd or html2md (pure Rust)
-- [ ] **PDF/DOCX support** — shell out to markitdown if available
+- [ ] **HTML-to-markdown via htmd** — add crate, wire into URL fetch pipeline
+- [ ] **Optional markitdown/Ragie Parse integration** (PDF, DOCX, OCR)
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)
 - [ ] **Editable repo links (git push back)**
 <!-- /agent:pending -->

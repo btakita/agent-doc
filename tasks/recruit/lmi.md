@@ -324,7 +324,7 @@ Running `corky transcribe` with `--diarize` and 6 speakers on the recorded video
 Note that I created mail/topics/lmi & some assets were moved from tmp into mail/topics/lmi.
 
 Please provide a detailed analysis of the conversation.
-### Re: Transcription Complete (HEAD)
+### Re: Transcription Complete
 
 Transcript saved to `tmp/lmi-interview-2026-03-31.txt` — 272 segments, ~30 min.
 
@@ -344,7 +344,7 @@ From the transcript content, I can identify speakers by context:
 To get proper speaker diarization, we could try extracting audio to WAV first and running pyannote directly, but the Teams compressed audio may not have enough channel separation for voiceprint matching.
 
 Want me to manually attribute speakers through the full transcript based on conversational context?
-<!-- agent:boundary:b13a40cf -->
+<!-- agent:boundary:aab38c3b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

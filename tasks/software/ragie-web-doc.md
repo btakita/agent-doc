@@ -409,13 +409,60 @@ PR opened ──> CI: agent-doc preflight (sandboxed, no bash)
 2. Each author runs their own agent — no shared Claude context
 3. Git review gates for PRs — content reviewed before entering main
 4. Treat all document content as untrusted — system prompt explicitly frames it as user data, not instructions
-<!-- agent:boundary:dfd7f581 -->
+
+This would also include Bob executing my shared document, correct?
+I could also be an attack vector on his machine.
+I wonder if it makes sense to only execute shared documents on a sandbox.
+### Re: Bidirectional trust and sandbox-by-default for shared documents (HEAD)
+
+**Yes — the trust problem is symmetric.** Your content runs in Bob's agent context too. Neither party should blindly trust the other's document content.
+
+**Sandbox-by-default for shared documents — correct approach:**
+
+**Local-only documents** (sole author, no external content):
+- Full tool access is reasonable — you trust yourself
+- Still risky with Ragie results or external data, but acceptable for personal workflows
+
+**Shared documents** (multiple authors or external sources):
+- Sandbox by default — no bash, no arbitrary file access, no network
+- Agent can only read the document and write responses back
+- Any tool use beyond that requires explicit elevation
+
+**Detection — agent-doc can infer "shared" from:**
+- Git history: multiple authors in `git log`
+- Frontmatter: explicit `trust: sandbox` or `collaborators: [bob]`
+- MCP origin: document fetched via MCP (always sandbox)
+- PR context: branch that isn't main (always sandbox)
+
+**Sandboxed execution concretely:**
+
+```
+agent-doc session (sandboxed)
+  Claude Code --allowedTools:
+    ✅ Read (document file only)
+    ✅ agent-doc write (document file only)
+    ✅ agent-doc commit (document file only)
+    ❌ Bash
+    ❌ Edit (arbitrary files)
+    ❌ Write (arbitrary files)
+    ❌ WebFetch
+    ❌ Agent (spawning subagents)
+```
+
+The agent can converse, answer questions, and write to the document. It can't execute code, access other files, or make network requests. Sufficient for collaborative editing, dramatically reduces prompt injection surface.
+
+**Elevation path:** Sandboxed agent asks user explicitly: "This action requires elevated permissions. Approve?" — same UX as Claude Code's existing tool approval prompts.
+
+**For Bob:** When he processes a shared document via MCP, his Claude Code runs sandboxed by default. He can elevate for his own local docs, but MCP-sourced content is always sandboxed. Same for you processing his content.
+<!-- agent:boundary:e873aa8a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Design sandbox permission model (`--sandbox` flag, `--allowedTools` scoping)
+- [ ] Implement auto-detection of shared documents (git history, frontmatter, MCP origin)
+- [ ] Add `trust` frontmatter field for explicit sandbox control
 - [ ] Implement trust tiers for multi-author agent-doc (owner/collaborator/PR/external)
 - [ ] Add `<user-edit>` content boundaries to agent-doc preflight output
 - [ ] Design MCP server tool schema (`read_document`, `write_document`, `preflight`, `list_documents`)

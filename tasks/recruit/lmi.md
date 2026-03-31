@@ -159,7 +159,7 @@ And explicit definition of patterns of meaning for each abstraction across diffe
 1. **Open with agent-doc** — concrete, demonstrable, maps to their daily work
 2. **Bridge to existence-lang** — "the vocabulary layer that makes agent alignment tractable"
 3. **Connect to LIGER** — "you're solving this at enterprise scale for federal missions; I'm solving it at the developer workflow level. Same pattern, different scope."
-### Re: Enriched Talking Points (HEAD)
+### Re: Enriched Talking Points
 
 #### Video Demos & Content Creation Process
 
@@ -193,7 +193,7 @@ Not just "shared vocabulary" — each term defines **patterns of meaning across 
 This is richer than DDD's ubiquitous language. A DDD glossary says "Context means X." Existence-lang says "Context means X, it matters because Y, and here's how it manifests as a pattern at every scale from individual cognition to organizational systems." When an agent loads these definitions, it doesn't just use the right word — it understands the *pattern* behind the word and can apply it at the appropriate scope.
 
 **30-second pitch version:** "existence-lang gives agents the same conceptual framework humans use — not just definitions, but the patterns of meaning behind them. When both parties share not just vocabulary but the *structure of understanding*, alignment becomes tractable across scope boundaries."
-<!-- agent:boundary:0bdd1f37 -->
+<!-- agent:boundary:dda80405 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

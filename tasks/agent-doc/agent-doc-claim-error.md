@@ -95,7 +95,7 @@ This document will handle the feature.
 One of the features of `related_docs` is changes to context would ripple across the related_docs.
 How would `links` handle these updates? Would editable files be edited? How would the info in uneditable files, such as urls, be handled?
 I suppose that we can see if the agent-doc repo can edit the source of the url...such as briantakita.me. But some of the urls would be uneditable.
-### Re: `links` design — editable vs read-only sources (HEAD)
+### Re: `links` design — editable vs read-only sources
 
 Good name — `links` is cleaner. Here's the design for how different source types are handled:
 
@@ -134,7 +134,7 @@ links:
 Simple entries (strings) are auto-detected: paths → local file, URLs → fetch+cache. Object entries allow metadata (editable flag, repo URL, refresh interval).
 
 Want me to implement the rename (`related_docs` → `links` with alias) first as a foundation, then build out the URL support?
-<!-- agent:boundary:ec1c8ce4 -->
+<!-- agent:boundary:4171cf1b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

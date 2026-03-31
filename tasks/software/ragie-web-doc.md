@@ -221,7 +221,7 @@ Please present some options.
 - Optional: auth (API key or session token for remote access)
 
 **So yes — "web-enabled" is the right framing.** Local is the foundation. Web is an optional access layer. No mode switching, no configuration changes. Just `agent-doc serve` and share the URL.
-### Re: Remote access for Bob via CLI or MCP — without installing agent-doc (HEAD)
+### Re: Remote access for Bob via CLI or MCP — without installing agent-doc
 
 Three options, from simplest to most capable:
 
@@ -303,7 +303,7 @@ MCP is purpose-built for this. Bob adds one line to his config and gets native t
 1. `agent-doc mcp-server` — stdio-based MCP server (works over SSH today)
 2. `agent-doc serve --mcp` — HTTP-based MCP endpoint (when the web server lands)
 3. WebSocket document sync (for real-time browser editing)
-<!-- agent:boundary:bf00e6b7 -->
+<!-- agent:boundary:f58a4f87 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Cheat sheet PDF ready — tile with Teams call in i3
+All talking points ready — 16 min to call
 <!-- /agent:status -->
 
 ## Exchange
@@ -201,13 +201,48 @@ I want all talking points to be visible when tiled with the call using i3.
 Created a 1-page PDF cheat sheet at `file:///home/brian/work/btakita/agent-loop/tmp/lmi-cheatsheet.pdf`
 
 All talking points visible in a single page — tile it next to the Teams call in i3. Covers: interviewers, LIGER facts, your angles, alignment thesis, agent-doc pitch, existence-lang pitch, agent-kit distribution, Malloy hook, and rules.
-<!-- agent:boundary:ce535364 -->
+
+Include pneuma, noumena, phenomena.
+The agent-doc atom write was updated to use sockets. Please verify we are talking about the same thing.
+Ragi + Sift integration
+### Re: Pneuma/Noumena/Phenomena + Socket Writes + Ragie/Sift (HEAD)
+
+#### Pneuma / Noumena / Phenomena
+
+Not yet in existence-lang's ontology files, but powerful for the interview:
+
+- **Phenomena** — what we observe. Agent context: outputs, logs, observable behavior.
+- **Noumena** — the thing-in-itself, beyond observation (Kant). Agent context: the model's internal reasoning we can't directly inspect.
+- **Pneuma** — breath/spirit/animating force (Stoic). Agent context: the alignment intent that makes an agent coherent, not just reactive.
+
+**Interview framing:** "Most platforms only instrument the phenomenal layer — what the agent does. Existence-lang helps bridge to the noumenal by making meaning explicit. The pneuma is the alignment intent that guides the whole system."
+
+#### agent-doc IPC Socket Writes — Confirmed
+
+Yes, we're talking about the same thing. `write.rs` uses **IPC-first writes**:
+
+1. `run_stream` → `try_ipc` → serializes patches as JSON
+2. Sends to editor plugin via IPC socket
+3. Plugin applies patches directly in the editor buffer (real-time)
+4. If IPC times out → falls back to disk write
+5. Dedup check: skips IPC if patches produce no changes
+
+The primary write path is now IPC to the editor plugin, with disk as fallback. This is the socket-based atomic write — agent writes patches, plugin applies them live in the editor.
+
+#### Ragie + Sift Integration
+
+From your existing work:
+
+- **Ragie** — cloud RAG service (parse, chunk, index, retrieve). Your ragie-web-doc project: markdown editor + AI response + Ragie retrieval panel.
+- **Sift** — local hybrid search (Alex Kwiatkowski). Exploring for semantic search across agent-doc, corky, existence-lang, tagpath.
+
+**Interview angle for LIGER:** "I'm building document processing pipelines that combine cloud RAG (Ragie for indexing/retrieval) with local hybrid search (Sift for offline/air-gapped). This maps to LIGER's dual deployment model — cloud for unclassified, local for air-gapped IL5/IL6 environments."
+<!-- agent:boundary:f0843545 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Open cheat sheet PDF: file:///home/brian/work/btakita/agent-loop/tmp/lmi-cheatsheet.pdf
-- [ ] Tile PDF viewer + Teams call in i3
 - [ ] Join Teams call at 1:30 PM ET
+- [ ] Update cheat sheet PDF with pneuma/noumena/phenomena + Ragie/Sift
 <!-- /agent:pending -->

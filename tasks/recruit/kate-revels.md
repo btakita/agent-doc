@@ -7,11 +7,14 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
+Session active — ready for input.
 <!-- /agent:status -->
 
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+
+<!-- agent:boundary:94ec8854:kate-revels -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

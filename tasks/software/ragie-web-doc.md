@@ -42,7 +42,7 @@ Cross-reference established. Here's the relevant context from `tasks/professiona
 
 Add your requirements or next steps to the exchange and I'll pick them up.
 I thought agent-doc supports linked documents in the frontmatter.
-### Re: Linked documents via related_docs frontmatter (HEAD)
+### Re: Linked documents via related_docs frontmatter
 
 You're right — agent-doc has a `related_docs` frontmatter field. Adding it to the frontmatter will cause preflight to surface changes in `bob-remeika.md` each cycle:
 
@@ -52,7 +52,7 @@ related_docs:
 ```
 
 This is better than a manual cross-reference — preflight will automatically detect when bob-remeika.md changes and include a summary in the preflight output. I'll add it to the frontmatter now.
-<!-- agent:boundary:d7e3058d -->
+<!-- agent:boundary:e2e95f9d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

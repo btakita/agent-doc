@@ -202,6 +202,9 @@ What it does:
 
 The beauty: **you can edit in JetBrains while Bob watches in the browser.** Both see the same live document. Agent responses appear in both simultaneously because they're all watching the same file.
 
+Can we make this accessible via cli or mpc for Bob to also interact with using his own Claude code environment. Without having to install agent-doc?
+Please present some options.
+
 #### What stays the same
 
 - `agent-doc preflight` — unchanged, reads filesystem
@@ -218,13 +221,99 @@ The beauty: **you can edit in JetBrains while Bob watches in the browser.** Both
 - Optional: auth (API key or session token for remote access)
 
 **So yes — "web-enabled" is the right framing.** Local is the foundation. Web is an optional access layer. No mode switching, no configuration changes. Just `agent-doc serve` and share the URL.
-<!-- agent:boundary:91df01a9 -->
+### Re: Remote access for Bob via CLI or MCP — without installing agent-doc (HEAD)
+
+Three options, from simplest to most capable:
+
+---
+
+#### Option 1: MCP Server (recommended)
+
+Expose agent-doc operations as an MCP server that Bob's Claude Code connects to remotely.
+
+```
+Bob's Claude Code ──MCP (stdio over SSH or HTTP)──> your machine
+                                                      └── agent-doc CLI
+```
+
+**How it works:**
+- You run `agent-doc mcp-server` (new subcommand) which exposes tools: `read_document`, `write_document`, `preflight`, `list_documents`
+- Bob adds your MCP server to his Claude Code config
+- Bob's Claude Code can now call these tools natively... no agent-doc binary needed on his end
+- Transport options:
+  - **SSH stdio** — Bob's Claude Code spawns `ssh brian@host agent-doc mcp-server` (zero infra, works today with any SSH access)
+  - **HTTP/SSE** — `agent-doc serve --mcp` exposes an HTTP-based MCP endpoint (needs the web server)
+
+**Pros:** Native Claude Code integration, Bob gets tool use with his own model/context, no new binary to install, MCP is the standard protocol.
+**Cons:** Needs SSH access or an HTTP endpoint.
+
+Bob's setup would be one config entry:
+```json
+{
+  "mcpServers": {
+    "agent-doc-brian": {
+      "command": "ssh",
+      "args": ["brian@host", "agent-doc", "mcp-server", "--project", "/path/to/agent-loop"]
+    }
+  }
+}
+```
+
+---
+
+#### Option 2: WebSocket CLI bridge (lightweight)
+
+A thin CLI wrapper connects to `agent-doc serve` via WebSocket... no agent-doc install needed.
+
+```
+Bob's machine:  npx agent-doc-client ws://brian:8080/doc
+Bob's Claude Code ──/agent-doc──> local wrapper ──ws──> your server
+```
+
+- Bob runs a tiny client (npm package, single Python script, or `websocat`) that mirrors the document to a local temp file
+- Bob's Claude Code uses the standard `/agent-doc` skill on the local temp file
+- Edits sync bidirectionally via WebSocket
+
+**Pros:** Works with existing `/agent-doc` skill. Minimal client.
+**Cons:** Two-hop latency. Needs the web server built first.
+
+---
+
+#### Option 3: Pure HTTP API (no client needed)
+
+Bob interacts entirely through Claude Code's `WebFetch` or a custom MCP wrapper.
+
+```
+Bob's Claude Code ──WebFetch──> https://brian.example.com/api/doc/ragie-web-doc
+```
+
+- `agent-doc serve` exposes REST: `GET /api/doc/:name`, `POST /api/doc/:name`, `POST /api/doc/:name/preflight`
+- Zero setup on Bob's end
+
+**Pros:** Zero installation. Works from any environment.
+**Cons:** No real-time push. Clunky UX compared to MCP.
+
+---
+
+#### Recommendation: Option 1 (MCP Server)
+
+MCP is purpose-built for this. Bob adds one line to his config and gets native tool access. The SSH transport works immediately with zero infrastructure. Later, `agent-doc serve` adds HTTP transport for the same MCP server.
+
+**Implementation order:**
+1. `agent-doc mcp-server` — stdio-based MCP server (works over SSH today)
+2. `agent-doc serve --mcp` — HTTP-based MCP endpoint (when the web server lands)
+3. WebSocket document sync (for real-time browser editing)
+<!-- agent:boundary:bf00e6b7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Design MCP server tool schema (`read_document`, `write_document`, `preflight`, `list_documents`)
+- [ ] Implement `agent-doc mcp-server` subcommand (stdio transport)
+- [ ] Test MCP over SSH with a second Claude Code instance
 - [ ] Implement `agent-doc serve` subcommand (axum + inotify + WebSocket)
+- [ ] Add `--mcp` flag to `agent-doc serve` for HTTP-based MCP transport
 - [ ] Build CodeMirror 6 frontend (editor + markdown preview + WebSocket client)
 - [ ] Define WebSocket message protocol (edit ops, document sync, cursor positions)
 - [ ] Bundle frontend assets into agent-doc binary (rust-embed or include_bytes)

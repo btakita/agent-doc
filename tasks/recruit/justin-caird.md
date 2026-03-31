@@ -891,7 +891,7 @@ When we can get the browser working, I'll pull the latest LinkedIn thread to che
 See changes in /home/brian/work/btakita/agent-loop/mail/contacts/justin-caird/20260322-linkedin-justin-caird.txt
 Please transcribe + diarize /home/brian/work/btakita/agent-loop/mail/contacts/justin-caird/recordings/20260331-justin-caird.amr
 Use transcript to help with draft response on LinkedIn
-Note that the phone cal
+Note that the phone call occurred before the last linkedin message.
 ### Re: LinkedIn messages & call transcript (Mar 31)
 
 **New LinkedIn messages found** (exported 2026-03-31T21:49):
@@ -926,11 +926,26 @@ Justin confirmed he's sending it tomorrow morning. Given the call context, his s
 1. Reply to Justin on LinkedIn with your preferred time slot
 2. Watch for the markdown exercise email tomorrow morning
 3. When it arrives, plan a recorded session completing it with agent-doc
-<!-- agent:boundary:9a0dacca -->
+### Re: Call timing clarification (Mar 31) (HEAD)
+
+Correct — the phone call happened before Justin's 5:14 PM LinkedIn message. Timeline:
+
+1. **Justin LinkedIn (1:15 PM):** First round interview confirmed, Tue 4/7 or Thu 4/9 offered
+2. **Phone call (afternoon):** You tentatively confirmed 1pm Tuesday
+3. **Justin LinkedIn (5:14 PM):** "Hawk" calendar change — Tuesday removed. Updated slots:
+   - **Monday, April 6th** at 1pm, 2pm, 4pm, or 6pm ET
+   - **Thursday, April 9th** at 4pm, 5pm, or 6pm ET
+
+So the 1pm Tuesday from the call is invalidated. Your LinkedIn reply should reference the updated Monday/Thursday options. If 1pm Monday works (closest equivalent), the draft reply is:
+
+> Hi Justin, thanks for the update. Monday April 6th at 1pm ET works for me. Looking forward to it!
+
+Also note from the call: "Hawk" is likely the interviewer name (VP of Engineering or CTO alias). Justin mentioned the CTO may have the first round be discussion-only with the VP, saving vibe coding for a later round. Either way, he's sending the markdown exercise tomorrow so you can be proactive.
+<!-- agent:boundary:f7708477 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [ ] **Reply to Justin on LinkedIn** with preferred interview time (Mon 4/6 or Thu 4/9)
+- [ ] **Reply to Justin on LinkedIn** with preferred time from updated slots (Mon 4/6 or Thu 4/9)
 - [ ] Watch for markdown exercise email from Justin (expected April 1 morning)
 - [ ] When exercise arrives: complete it with agent-doc, consider YouTube recording
 - [ ] Prepare for first-round interview (possibly VP of Engineering, discussion format, 60-90 min)

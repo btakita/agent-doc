@@ -536,7 +536,7 @@ All documentation work for this session is complete. Ready for the next priority
 audit docs
 commit and push
 should we release this change?
-### Re: Audit, commit, push, release? (HEAD)
+### Re: Audit, commit, push, release?
 
 **Audit docs:** 1 issue (pre-existing large table warning in CLAUDE.md). No new issues.
 
@@ -560,7 +560,7 @@ I'd recommend **yes, release as v0.29.0** (minor bump for new features). The che
 6. `cargo install --path .`
 
 Want me to proceed with the release?
-<!-- agent:boundary:62215806 -->
+<!-- agent:boundary:a24e1424 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

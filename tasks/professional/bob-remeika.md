@@ -1395,13 +1395,24 @@ Good call acknowledging the security findings. The response channel exfiltration
 - Ragie Parse discussion doesn't have the same attack surface concerns since it's structured data extraction, not LLM-mediated document editing
 
 Want me to draft a message to Bob proposing Thursday?
-<!-- agent:boundary:da37567f -->
+Security would be a great topic with Bob.
+### Re: Security as a Meeting Topic (HEAD)
+
+Absolutely. Bob would be well-positioned to discuss the security challenges since Ragie deals with enterprise document retrieval where prompt injection and data leakage are first-order concerns. Specific angles to explore with him:
+
+- **How Ragie handles prompt injection** in their retrieval pipeline... they've likely built defenses you could learn from or integrate
+- **Data isolation in multi-tenant RAG**... relevant to agent-doc's web collaboration model where multiple users share documents
+- **Content signing / provenance**... your 5-layer security architecture (instruction/data separation, deterministic processing, response-only mode, content signing, injection scanning) would be a substantive technical conversation, not just a sales pitch
+
+This actually strengthens the meeting framing: instead of just pitching use cases, you're having a peer-level technical discussion about shared security challenges in LLM-mediated document systems. That's the kind of conversation that turns a sales call into a partnership conversation.
+<!-- agent:boundary:9d4c7838 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Demo prep: pivot to security-aware framing (JB plugin first, web arch + threat model second)
+- Security discussion topics for Bob meeting (prompt injection, data isolation, content signing)
+- Demo prep: security-aware framing (JB plugin first, web arch + threat model second)
 - Draft outreach message to Bob for Thursday call
 - Ragie Parse discussion points for Judith + patents
 - Patent mining proposal as Ragie pitch material

@@ -564,7 +564,7 @@ Noted re: security concerns in `tasks/software/ragie-web-doc.md`. That's relevan
 Ready to send the Josh email? Set status to `approved` and push?
 
 Should we address security concerns in the email draft?
-### Re: Empty Conversation + Security in Email (HEAD)
+### Re: Empty Conversation + Security in Email
 
 **Empty conversation file:** `mail/conversations/interview-with-brian-takita-2026-13755-full-stack-developer.md` has the header (To: all team members) but no body. This is the internal scheduling email Kate sent to the team with you CC'd. The body was likely HTML-only and corky's sync didn't extract text content from it. That's a corky sync issue...not something to fix in this session.
 
@@ -575,7 +575,7 @@ Should we address security concerns in the email draft?
 The email already touches auditability and traceability (git-backed revision history, selective staging), which are security-adjacent without being explicit about it.
 
 Want to send as-is, or add a security angle?
-<!-- agent:boundary:50dd9887 -->
+<!-- agent:boundary:36a1ce60 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

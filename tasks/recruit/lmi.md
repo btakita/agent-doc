@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Interview talking points ready — agent-doc + existence-lang alignment focus
+Final talking points integrated — ready for 1:30 PM call
 <!-- /agent:status -->
 
 ## Exchange
@@ -116,7 +116,7 @@ To achieve human-agent and human-human alignment.
 **The pitch:** agent-doc keeps humans and AI agents aligned on evolving tasks. The document is the shared state — both parties read and write to it, with CRDT merge ensuring neither loses work.
 
 **How it maps to LIGER:**
-- **Human-in-the-loop gates** — your approach: the agent doesn't just execute and report. It maintains a living conversation surface where the human can redirect, annotate, or override at any point. This is exactly what LIGER needs for federal trust.
+- **Human-in-the-loop gates** — your approach: the agent doesn't just execute and report. It maintains a living conversation surface where the human can redirect, annotate, or override at any point. This is exactly what LIGER needs for federal trust.: I have videos demonstrating deep alignment work on the ontological level. Also, my process includes screen shared work sessions with human narration to create transcripts and blog posts of interesting topics.
 - **Template mode with named components** (status, exchange, pending) gives structure to agent outputs — parallels LIGER's need for structured, auditable agent workflows.
 - **Agentic workflow orchestration** — agent-doc manages tool-calling, multi-step reasoning, state management, and streaming checkpoints. The binary handles deterministic operations (CRDT merge, snapshot, git); the skill handles non-deterministic reasoning. Clean separation of concerns.
 - **Built in Rust with Python bindings** (PyO3/maturin) — demonstrates the exact stack they use (systems language + Python ML layer).
@@ -136,9 +136,15 @@ To achieve human-agent and human-human alignment.
 - **DDD mapping is directly relevant** — LIGER is domain-heavy (federal acquisition, logistics, intelligence). Bounded contexts, ubiquitous language, domain events = architectural maturity signals
 - **Sociotechnical alignment** — connects to Malloy's "Beyond the Vending Machine" insight that agentic AI is a sociotechnical change. You've built the vocabulary layer that makes that change tractable.
 
+Aside from the **Sociotechnical alignment**, agent-kit allows for Rust crates to distribute binary for deterministic software along with agent harness installs for SKILL.md, hooks, and other agent harness integration.
+
 **The alignment thesis to articulate:**
 
 > Misalignment between humans and agents (or humans and humans) comes from scope/context divergence — people using the same words with different meanings. agent-doc attacks this with shared document state. existence-lang attacks it with shared vocabulary. Together they form a complete alignment stack: shared terms + shared workspace.
+
+> existence-lang attacks it with shared vocabulary.
+
+And explicit definition of patterns of meaning for each abstraction across different scope/context.
 
 **DDD terms they'll recognize:**
 | DDD Concept | Your Ontology Term | Connection |
@@ -153,13 +159,47 @@ To achieve human-agent and human-human alignment.
 1. **Open with agent-doc** — concrete, demonstrable, maps to their daily work
 2. **Bridge to existence-lang** — "the vocabulary layer that makes agent alignment tractable"
 3. **Connect to LIGER** — "you're solving this at enterprise scale for federal missions; I'm solving it at the developer workflow level. Same pattern, different scope."
-<!-- agent:boundary:c27ad060 -->
+### Re: Enriched Talking Points (HEAD)
+
+#### Video Demos & Content Creation Process
+
+This is a strong differentiator. The job listing says "we care more about what you've built than where you've worked." You have:
+
+- **Recorded screen-shared work sessions** showing deep human-agent alignment in real-time
+- **Human narration over live coding** — demonstrates thought process, not just output
+- **Transcripts → blog posts** pipeline — shows you think about knowledge transfer and documentation
+- **Ontological-level alignment work on video** — proof you're not theorizing about human-agent collaboration, you're demonstrating it
+
+**Interview angle:** "I can show you recordings of agent-doc sessions where the human and agent iterate on complex tasks through a shared document. You can see the alignment happening in real-time — redirections, annotations, the agent adapting. This is the same pattern LIGER needs for federal users who need to trust and steer AI workflows."
+
+#### agent-kit Distribution Model
+
+This maps directly to LIGER's **MOSA (Modular Open Systems Approach)** architecture:
+
+- **Rust crate → compiled binary** for all deterministic operations (parsing, merging, snapshot, git)
+- **SKILL.md + hooks** for non-deterministic agent behavior (configurable per deployment)
+- **Agent harness integration** — the harness (Claude Code, or any compatible agent) loads the skill and hooks at runtime
+
+**Why this matters for LIGER:** Federal deployments need reproducible, auditable deterministic behavior (the binary) combined with adaptable agent intelligence (the skill). Your agent-kit pattern separates these cleanly — the binary can be certified/scanned, the skill can be updated independently. This is how you'd distribute agentic capabilities across an enterprise platform without coupling them.
+
+#### Sharpened existence-lang Pitch
+
+Not just "shared vocabulary" — each term defines **patterns of meaning across scope/context**:
+
+- **Ontology** — what the term IS (definition, identity)
+- **Axiology** — why it MATTERS (value, purpose)
+- **Epistemology** — how we KNOW it (evidence, patterns, cultural references)
+
+This is richer than DDD's ubiquitous language. A DDD glossary says "Context means X." Existence-lang says "Context means X, it matters because Y, and here's how it manifests as a pattern at every scale from individual cognition to organizational systems." When an agent loads these definitions, it doesn't just use the right word — it understands the *pattern* behind the word and can apply it at the appropriate scope.
+
+**30-second pitch version:** "existence-lang gives agents the same conceptual framework humans use — not just definitions, but the patterns of meaning behind them. When both parties share not just vocabulary but the *structure of understanding*, alignment becomes tractable across scope boundaries."
+<!-- agent:boundary:0bdd1f37 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Join Teams call at 1:30 PM ET
-- [ ] Practice the alignment thesis pitch (30 seconds)
-- [ ] Have agent-doc repo open for screen-share if they ask
+- [ ] Practice 30-second pitches: alignment thesis, agent-kit distribution, existence-lang patterns
+- [ ] Have video demos queued if they ask to see work
 <!-- /agent:pending -->

@@ -85,7 +85,7 @@ The minimal stack: a Rust HTTP server (axum/actix) wrapping the existing `agent-
 **"Should w"** — looks like your thought got cut off. What were you going to ask?
 
 **Related docs link** — the `related_docs` frontmatter is now active. Preflight will surface bob-remeika.md changes automatically.
-### Re: WebRTC vs plain WebSockets (HEAD)
+### Re: WebRTC vs plain WebSockets
 
 **Plain WebSockets — use those.** Here's why:
 
@@ -107,7 +107,7 @@ Browser <──ws── Server (push updated document)
 The server watches the file (inotify on Linux) and pushes changes. The browser sends edit operations as WebSocket messages. The server applies them via `agent-doc write --stream` (CRDT merge handles conflicts).
 
 **Good call on the `links` rename** — that matches agent-doc v0.28.3's field rename from `related_docs` to `links`.
-<!-- agent:boundary:d801934f -->
+<!-- agent:boundary:480be12f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

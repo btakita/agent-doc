@@ -560,7 +560,7 @@ I'd recommend **yes, release as v0.29.0** (minor bump for new features). The che
 6. `cargo install --path .`
 
 Want me to proceed with the release?
-<!-- agent:boundary:a24e1424 -->
+<!-- agent:boundary:c8adc480 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

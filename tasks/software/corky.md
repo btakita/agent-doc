@@ -435,13 +435,34 @@ Corky's `Body` struct (`gmail_api_sync.rs:82-86`) only has `data: Option<String>
 **Fix needed:** Add `attachment_id: Option<String>` to `Body`, then when `data` is `None` but `attachment_id` is `Some`, call `GET /gmail/v1/users/me/messages/{messageId}/attachments/{attachmentId}` to fetch the actual content.
 
 Ready to implement when you approve.
-<!-- agent:boundary:81375b24 -->
+Implement
+Add tests
+audit docs
+resync the
+### Re: Implemented Gmail API Attachment Body Fix (HEAD)
+
+**Bug fix:** Added `attachmentId` support to Gmail API body extraction. When Gmail returns a reference instead of inline data (common for `multipart/related` messages), corky now fetches the body via the attachments API.
+
+**Changes (2 files):**
+- `src/sync/gmail_api_sync.rs`:
+  - `Body` struct: added `attachment_id` + `#[serde(rename_all = "camelCase")]`
+  - New `fetch_attachment()` — calls `GET /messages/{id}/attachments/{attachmentId}`
+  - New `resolve_body_data()` — tries inline `data` first, falls back to attachment fetch
+  - `extract_body_from_payload()` / `extract_body_from_parts()` now accept `token` and `message_id`
+  - `gmail_to_message()` now accepts `token` parameter
+  - 7 new unit tests
+- `SPEC.md` §6.8 — documented attachment fetch behavior
+
+**Tests:** 232 total (7 new), all passing. Clippy clean. Audit clean.
+
+Ready to commit in corky submodule.
+<!-- agent:boundary:2630bde1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Fix Gmail API body extraction for `multipart/related` messages with `attachmentId` — blank body bug
+- [ ] Commit and verify LMI email re-sync — attachment body fix
 - [ ] crates.io publish for v0.22.1 — needs token refresh
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:pending -->

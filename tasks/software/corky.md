@@ -402,7 +402,7 @@ release
 Look at the email with subject "LMI - Video Conference Interview Confirmation"
 
 There is no content.
-I dowloaded the source to /home/brian/work/btakita/agent-loop/tasks/software/corky/lmi-email-source.txt
+I downloaded the source to /home/brian/work/btakita/agent-loop/tasks/software/corky/lmi-email-source.txt
 ### Re: LMI Interview Confirmation Email
 
 The email **does have content** — it's a `multipart/related` message with both `text/plain` and `text/html` parts. Gmail's web UI isn't rendering it (likely the multipart/related boundary or embedded images confusing the renderer).
@@ -422,12 +422,26 @@ The email **does have content** — it's a `multipart/related` message with both
 - **Note:** Stay on camera, no AI tools during interview (but can share AI workflow examples)
 
 **Why Gmail shows no content:** `multipart/related` email with embedded signature images — Gmail's renderer sometimes fails on these boundaries.
-<!-- agent:boundary:752de2be -->
+
+Why did corky not parse this message correctly? Why is the body in /home/brian/work/btakita/agent-loop/mail/conversations/lmi-video-conference-interview-confirmation.md blank?
+### Re: Why Corky Produced a Blank Body (HEAD)
+
+**Root cause:** Gmail API returns `body.attachmentId` (instead of inline `body.data`) for message parts that exceed its inline size threshold. This happens with:
+- `multipart/related` messages (like this one — embedded images inflate the structure)
+- Messages with large text bodies
+
+Corky's `Body` struct (`gmail_api_sync.rs:82-86`) only has `data: Option<String>` — no `attachmentId` field. When Gmail returns an attachment reference instead of inline data, corky sees `data: None` and produces an empty body.
+
+**Fix needed:** Add `attachment_id: Option<String>` to `Body`, then when `data` is `None` but `attachment_id` is `Some`, call `GET /gmail/v1/users/me/messages/{messageId}/attachments/{attachmentId}` to fetch the actual content.
+
+Ready to implement when you approve.
+<!-- agent:boundary:23fb39de -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] Fix Gmail API body extraction for `multipart/related` messages with `attachmentId` — blank body bug
 - [ ] crates.io publish for v0.22.1 — needs token refresh
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:pending -->

@@ -1056,13 +1056,29 @@ Update README.md, SPEC.md, module-harness, ontology.
 - Column memory: `.agent-doc/last_layout.json` preserves 2-pane layout when a column switches to non-agent file
 - Docs: README, SPEC.md, sync.rs module doc, VERSIONS.md updated
 - Clippy fixes (collapsible_if in sync.rs)
-<!-- agent:boundary:fa620b0c -->
+
+In tasks/recruit/linkedin.md, the response patch was duplicated. Why?
+### Re: Duplicated response patch in linkedin.md (HEAD)
+
+**What happened:** The "visual verification" response was appended twice. The git history shows commit `c12b51de` added it once correctly. But the working tree has a second copy.
+
+**Root cause:** The second `agent-doc write` didn't see the first response in its snapshot/baseline. This happens when:
+1. First write succeeds and updates the snapshot
+2. But the second write uses a stale baseline (from before the first write)
+3. The CRDT merge treats the first response as "user content" and appends the second copy alongside it
+
+This is a **write-back race condition** — two consecutive writes with overlapping content. The CRDT merge correctly preserves both (it can't know they're duplicates), but the result is duplication.
+
+**Fix the document:** I can remove the duplicate section now. The fix for the underlying race is to ensure the baseline is always fresh — this is already handled by the `--baseline-file` flag, but the Claude session that wrote to linkedin.md may have used a stale baseline.
+
+Want me to remove the duplicate from linkedin.md?
+<!-- agent:boundary:89d96d7b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.28.0: Structural layout fix (no early exits)
-- [x] v0.28.1: Column memory for non-agent columns
-- All shipped.
+- [x] v0.28.1: Column memory shipped
+- [ ] **Remove duplicate from tasks/recruit/linkedin.md**
+- [ ] Investigate write-back race condition
 <!-- /agent:pending -->

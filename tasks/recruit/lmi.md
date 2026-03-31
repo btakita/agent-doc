@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-Josh email updated with security note — ready to send
+Josh email corrected — ready to send
 <!-- /agent:status -->
 
 ## Exchange
@@ -568,7 +568,7 @@ Should we address security concerns in the email draft?
 
 **Empty conversation file:** `mail/conversations/interview-with-brian-takita-2026-13755-full-stack-developer.md` has the header (To: all team members) but no body. This is the internal scheduling email Kate sent to the team with you CC'd. The body was likely HTML-only and corky's sync didn't extract text content from it. That's a corky sync issue...not something to fix in this session.
 
-Please fetch the data again.
+Please fetch the the single email again.
 
 **Security in the Josh email:** I'd recommend keeping this first follow-up focused on agent-doc alignment. Bringing up security concerns in a cold follow-up could feel premature. Better to:
 1. Send the agent-doc-focused email now (establish the connection)
@@ -583,17 +583,33 @@ Want to send as-is, or add a security angle?
 
 **Security note added to Josh email:** Added a paragraph before the closing:
 
-> "One thing worth noting: agent-doc currently operates in a single-user security model (local file system, git-backed). I'm actively working on collaborative security for the web/networked version...multi-user access control, session isolation, and the kind of compartmented access patterns that would be relevant for federal deployments."
+> "One thing worth noting: agent-doc currently operates in a single-user security model (local file system, backed by a private git repo). I'm actively working on collaborative security for the web/networked version...multi-user access control, session isolation, and the kind of compartmented access patterns that would be relevant for federal deployments."
 
 Draft updated. Ready to send?
-<!-- agent:boundary:f2d494a5 -->
+Note my updates. We should also add a note in the agent-doc README.md about single user security and the current vulnerability to prompt injection for copy/pasted prompts.
+### Re: Updates Applied (HEAD)
+
+**Draft corrected:** Changed "git-backed" → "backed by a private git repo" in the Josh email.
+
+**Email re-fetch:** Corky doesn't have a single-thread re-fetch command. The sync sees "0 messages to process" because the email was already synced...the issue is the HTML body wasn't extracted on the initial pull. This needs a corky code change (HTML body extraction) to fix. Filed mentally as a corky feature gap.
+
+**README security note:** Good call. That's a separate task for the agent-doc submodule. Should cover:
+- Single-user security model (local filesystem + private git)
+- Prompt injection vulnerability for copy/pasted content (user-supplied text in documents could contain injection attempts)
+- Roadmap: collaborative security for web/networked version
+
+I'll add this to the agent-doc task queue. For now, the Josh email draft is ready with the corrected security note.
+
+Send it?
+<!-- agent:boundary:efbc0093 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Send Josh Malloy follow-up email (security note added)
-- [ ] Fix corky HTML body extraction (separate task)
+- [ ] Send Josh Malloy follow-up email
+- [ ] agent-doc README: security section (single-user, prompt injection)
+- [ ] Corky: HTML body extraction for emails
 - [x] All contacts created
 - [x] All post-interview tasks complete
 <!-- /agent:pending -->

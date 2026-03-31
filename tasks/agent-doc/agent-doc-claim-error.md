@@ -1132,7 +1132,7 @@ Yes. Should this behavior be removed from SKILL.md as well?
 
 I want to have a way to unroll the full context history that led to a certain iteration point either in instruction-files or agent-kit.
 Ideally, we can track an iteration as a narrative story into markdown for evaluation and publication.
-### Re: Preflight baseline deployed + next steps (HEAD)
+### Re: Preflight baseline deployed + next steps
 
 **Deployed.** Preflight now saves baseline after commit and includes `baseline_file` in JSON output.
 
@@ -1141,7 +1141,7 @@ Ideally, we can track an iteration as a narrative story into markdown for evalua
 **Editor buffer docs:** Will add 4-state model (snapshot, baseline, file, buffer) to SPEC.md Section 8.
 
 **Blog post / Josh email:** Noted. This debugging session (CRDT concurrency bug + ops logging + stale baseline) is relevant content for both.
-<!-- agent:boundary:a55df6e0 -->
+<!-- agent:boundary:586c7f13 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

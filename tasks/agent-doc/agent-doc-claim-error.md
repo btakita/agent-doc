@@ -1104,7 +1104,7 @@ If this is deterministic, why not implement as part of the agent-doc binary or a
 **Could we eliminate baselines entirely?** Yes, if we always re-read the file as the merge ancestor. But then we lose concurrent-edit detection. The tradeoff: baselines enable CRDT merge; the cost is staleness risk.
 
 Ok...leave the baseline-vs-snapshot then.
-### Re: CRDT vs 3-way merge, editor buffer, baseline save timing (HEAD)
+### Re: CRDT vs 3-way merge, editor buffer, baseline save timing
 
 **Why not always use CRDT?** The 3-way merge IS the CRDT path. `--stream` mode uses `yrs` (Yjs CRDT) for the merge. The "baseline" is the shared origin document that both branches (agent response + user edits) diverged from. Even CRDT needs a common ancestor to merge correctly. Without it, the CRDT would treat the entire file as a conflict on every write.
 
@@ -1123,7 +1123,7 @@ The IPC write path handles this: the plugin applies patches via the Document API
 Implementation: add `--save-baseline <path>` to `agent-doc preflight`. After step 2 (commit + boundary reposition), save the current file as the baseline. The SKILL then passes this path to `agent-doc write --baseline-file`.
 
 This is a one-line addition to preflight. Want me to implement it?
-<!-- agent:boundary:86da6be7 -->
+<!-- agent:boundary:7a7ece51 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

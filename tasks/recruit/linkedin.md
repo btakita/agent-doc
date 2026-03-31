@@ -600,5 +600,37 @@ Good question. Here's the tradeoff:
 - It makes your post look like a spam magnet
 
 **Best move: Hide it** (not delete). You keep the engagement number, remove the scam from view, and can report the profile separately. LinkedIn's "Hide comment" is under the three-dot menu on the comment itself.
-<!-- agent:boundary:4fd5e666 -->
+### Re: Why hide/delete — engagement tradeoff
+
+Good question. Here's the tradeoff:
+
+**Hiding the comment** (recommended):
+- Only you and the commenter can see it — everyone else sees it removed
+- Your post's engagement metrics (likes, comment count) are **not affected** — LinkedIn still counts hidden comments in the total
+- The scam email (`bunge.screeningdesk@outlook.com`) is no longer visible to your audience
+- You don't lose any algorithmic benefit
+
+**Deleting the comment:**
+- Permanently removes it — your comment count drops by 1 (2 → 1)
+- Marginal engagement loss, but a scam comment isn't real engagement anyway
+
+**Leaving it visible:**
+- Risk: someone in your network clicks through and gets scammed
+- The comment adds zero value to the conversation
+- It makes your post look like a spam magnet
+
+**Best move: Hide it** (not delete). You keep the engagement number, remove the scam from view, and can report the profile separately. LinkedIn's "Hide comment" is under the three-dot menu on the comment itself.
+
+Can corky support hiding these spam comments?
+### Re: Corky LinkedIn comment moderation (HEAD)
+
+Not currently — and it would be difficult to add.
+
+**LinkedIn's API doesn't support comment moderation.** The Marketing API (which corky uses for publishing) has no endpoints for hiding, deleting, or reporting comments. These actions are only available through the LinkedIn web UI. Even official partner integrations (Hootsuite, Sprout Social) can't moderate comments via API.
+
+**What corky *could* do (via chromium-bridge):**
+A `corky linkedin moderate` command could navigate to the post, find the comment, and click Hide via browser automation. But this is fragile DOM automation that breaks when LinkedIn updates their UI — probably not worth the investment for occasional spam.
+
+**Practical recommendation:** Just hide it manually — three-dot menu → Hide comment. It's 3 clicks.
+<!-- agent:boundary:2c9accdb -->
 <!-- /agent:exchange -->

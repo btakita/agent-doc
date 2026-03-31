@@ -1363,17 +1363,26 @@ The call is scheduled for 30 minutes.
 **Key:** Don't force all three demos. Pick one or two based on Bob's reactions. If JB plugin excites him, go deep there. If he's more into the web vision, pivot. Read the room.
 
 **If web prototype isn't ready:** Fine. JB plugin is a real product. Walk through web architecture on a document. "Here's what I'm building next with your API" still lands without a live demo.
-<!-- agent:boundary:dea1b9f0 -->
+
+I also want to discuss Ragie parse https://www.ragie.ai/parse for Judith's project.
+Ragie parse may also be useful for reading the patent files as well.
+### Re: Ragie Parse for Judith & Patents (HEAD)
+
+Good additions to the meeting agenda. Ragie Parse is a strong fit for both:
+
+**For Judith's project:** Ragie Parse's agentic OCR can extract structured data from commercial real estate loan applications, appraisals, and compliance docs — exactly the document types she deals with. This is a concrete "here's a client who needs your product" pitch point with Bob.
+
+**For patent files:** The patent mining proposal already identified Ragie as the retrieval layer for Ron's patent corpus. Ragie Parse specifically handles complex PDF layouts (tables, headers, multi-column) which patents are full of — two distinct document-heavy use cases strengthen the pitch.
+
+**Meeting framing:** Lead with "I have a client project where Ragie Parse solves a real problem" rather than a generic integration pitch. Showing Bob you're bringing **distribution** (real clients with real document workflows) is what gets a CEO's attention. Between Judith's loan docs and Ron's patent corpus, you have two compelling vertical use cases to walk through.
+<!-- agent:boundary:7224c78b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Book Calendly slot (Wed Apr 2 or later) — https://calendly.com/bobremeika/30-minute-call
-- Test VS Code agent-doc extension — does it work?
-- **Build interactive web document prototype** (markdown editor + Ragie retrieval + Claude responses)
-- Sign up for Ragie / check free tier
-- Index demo documents in Ragie (patent proposal, contacts, resume)
-- Prep JB plugin demo (clean session, good example doc)
-- Prepare call time budget (7-min demo within 30-min call)
+- Ragie Parse discussion points for Judith + patents added to meeting prep
+- Demo prep: JB plugin demo, web prototype architecture walkthrough
+- Patent mining proposal as Ragie pitch material
+- Meeting with Bob (schedule TBD)
 <!-- /agent:pending -->

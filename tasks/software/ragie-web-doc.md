@@ -456,7 +456,7 @@ The agent can converse, answer questions, and write to the document. It can't ex
 **For Bob:** When he processes a shared document via MCP, his Claude Code runs sandboxed by default. He can elevate for his own local docs, but MCP-sourced content is always sandboxed. Same for you processing his content.
 
 Is this true for **all** claude code usage? Is there any way to bypass the sandbox without permission? Via prompt injection?
-### Re: Can prompt injection bypass Claude Code's sandbox? (HEAD)
+### Re: Can prompt injection bypass Claude Code's sandbox?
 
 **Honest answer: `--allowedTools` is enforced at the harness level, not the model level.** This is the key distinction.
 
@@ -487,7 +487,7 @@ Claude model ──"call Bash"──> Claude Code harness
 - No other tools
 
 This makes the sandbox genuinely secure against prompt injection. The model can be confused about *what to write*, but it cannot escape the document boundary. The harness enforcement is a hard wall, not a suggestion.
-<!-- agent:boundary:7678a09b -->
+<!-- agent:boundary:5b232f7a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

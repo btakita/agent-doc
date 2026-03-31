@@ -398,7 +398,7 @@ release
 - Installed locally: corky 0.22.1 with GPU (transcribe-cuda)
 
 **Note:** Anil may have a duplicate contact again (new `people/c8464968541752362288` created alongside previous entries). May want to merge in Google Contacts.
-<!-- agent:boundary:9ac5b19f -->
+<!-- agent:boundary:6a1385fe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

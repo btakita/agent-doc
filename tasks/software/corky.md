@@ -487,7 +487,7 @@ release
 - `79d7be0` — version bump + VERSIONS.md
 
 Implement a single thread refetch command. See tasks/recruit/lmi.md
-### Re: Single Thread Refetch Command (HEAD)
+### Re: Single Thread Refetch Command
 
 Good call — this was identified as a gap during the LMI email debugging. The use case: a message was already synced but body extraction failed (base64 padding, attachmentId, etc.). `corky sync` skips it ("0 messages to process") because historyId says it's already seen.
 
@@ -513,7 +513,7 @@ corky sync refetch <THREAD_ID>
 - `SPEC.md` — document the command
 
 Ready to implement when you approve.
-<!-- agent:boundary:870cc0a0 -->
+<!-- agent:boundary:3ccab9aa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

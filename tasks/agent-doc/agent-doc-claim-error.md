@@ -1139,7 +1139,7 @@ This seems like this should be a deteministic fix.
 
 Want me to implement this dedup check?
 Yes. Do we have any logs indicating why the duplication occurred?
-### Re: Write dedup implemented + linkedin.md fixed (HEAD)
+### Re: Write dedup implemented + linkedin.md fixed
 
 **Dedup check added** to `write.rs` in 4 locations (inline, template, stream/IPC, stream/disk). After computing the merged content, if it's identical to the current file, the write is skipped with a log message: `[write] dedup: no changes after merge, skipping write`. Returns Ok so the skill continues normally.
 
@@ -1150,7 +1150,7 @@ This is deterministic — if the same response is piped twice, the second write 
 **linkedin.md fixed** — restored from git HEAD (1 copy of the response). Duplicate removed.
 
 Binary installed. Ready to release when tested.
-<!-- agent:boundary:b67e0430 -->
+<!-- agent:boundary:85d65ee5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

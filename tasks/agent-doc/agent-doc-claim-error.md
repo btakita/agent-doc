@@ -1147,18 +1147,22 @@ This is deterministic — if the same response is piped twice, the second write 
 
 **No logs exist** for the original duplication — `agent-doc write` didn't have file logging at the time. The sync log only tracks layout sync calls, not write operations. With the dedup check, it won't matter — duplicates are silently skipped.
 
+We should log any duplicates that are skipped. Ideally we can isolate why the duplicates happen in the first place.
+
 **linkedin.md fixed** — restored from git HEAD (1 copy of the response). Duplicate removed.
 
 Binary installed. Ready to release when tested.
-<!-- agent:boundary:85d65ee5 -->
+### Re: Dedup logging added (HEAD)
+
+Dedup events now log to `/tmp/agent-doc-write-dedup.log` with timestamp, file path, context, and **full stack backtrace** — so we can trace exactly which call path triggered the duplicate. If it recurs, the backtrace will identify the root cause.
+
+Installed. Both dedup check and pane ownership verification are active.
+<!-- agent:boundary:03283701 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.28.1: Column memory shipped
-- [x] Write dedup check (4 paths in write.rs)
-- [x] linkedin.md duplicate removed
-- [ ] Add tests + audit docs
-- [ ] Release v0.28.2
+- [x] v0.28.1: Column memory + write dedup + pane ownership
+- [ ] Tests + audit docs + release v0.28.2
 <!-- /agent:pending -->

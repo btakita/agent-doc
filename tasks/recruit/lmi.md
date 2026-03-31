@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Final talking points integrated — ready for 1:30 PM call
+Cheat sheet PDF ready — tile with Teams call in i3
 <!-- /agent:status -->
 
 ## Exchange
@@ -193,13 +193,21 @@ Not just "shared vocabulary" — each term defines **patterns of meaning across 
 This is richer than DDD's ubiquitous language. A DDD glossary says "Context means X." Existence-lang says "Context means X, it matters because Y, and here's how it manifests as a pattern at every scale from individual cognition to organizational systems." When an agent loads these definitions, it doesn't just use the right word — it understands the *pattern* behind the word and can apply it at the appropriate scope.
 
 **30-second pitch version:** "existence-lang gives agents the same conceptual framework humans use — not just definitions, but the patterns of meaning behind them. When both parties share not just vocabulary but the *structure of understanding*, alignment becomes tractable across scope boundaries."
-<!-- agent:boundary:dda80405 -->
+
+Please prepare a 1 page pdf cheat sheet for talking points.
+I want all talking points to be visible when tiled with the call using i3.
+### Re: Cheat Sheet PDF (HEAD)
+
+Created a 1-page PDF cheat sheet at `file:///home/brian/work/btakita/agent-loop/tmp/lmi-cheatsheet.pdf`
+
+All talking points visible in a single page — tile it next to the Teams call in i3. Covers: interviewers, LIGER facts, your angles, alignment thesis, agent-doc pitch, existence-lang pitch, agent-kit distribution, Malloy hook, and rules.
+<!-- agent:boundary:cb290e25 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Open cheat sheet PDF: file:///home/brian/work/btakita/agent-loop/tmp/lmi-cheatsheet.pdf
+- [ ] Tile PDF viewer + Teams call in i3
 - [ ] Join Teams call at 1:30 PM ET
-- [ ] Practice 30-second pitches: alignment thesis, agent-kit distribution, existence-lang patterns
-- [ ] Have video demos queued if they ask to see work
 <!-- /agent:pending -->

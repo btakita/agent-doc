@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.29.0 released (crates.io, PyPI, GitHub Release).
+Bug 1 (stale baseline) fixed and deployed. Bug 2 (session restart rollback) in progress.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1009,18 +1009,35 @@ Or better: always re-read the file as the baseline if the `--baseline-file` cont
 **Multi-harness hooks:** Added to `tasks/software/agent-doc.md` pending list.
 
 Want me to implement Bug 1 fix now? It's a quick, targeted change.
-<!-- agent:boundary:c83c4206 -->
+Yes.
+Let's get the Bug 2 fix started after Bug 1 is fixed.
+### Re: Bug 1 fix implemented + Bug 2 next (HEAD)
+
+**Bug 1 fix deployed.** Stale baseline guard in `write.rs`:
+- Compares `content_ours` against current snapshot
+- If 100+ bytes shorter: detects stale baseline, re-applies patches to current file content
+- Logs `stale_baseline_detected` to ops.log
+- Committed `129885a`, pushed, installed
+
+**Bug 2 — two parts:**
+
+**Part A: Divergence check before auto-start** (route.rs/sync.rs)
+Before starting a new session, check if file has uncommitted content beyond snapshot. If yes: update snapshot from file first.
+
+**Part B: Rollback guard in commit()** (git.rs)
+Compare `### Re:` headings between git HEAD and snapshot. Block staging if headings are missing (unless compaction marker present).
+
+Want me to implement Part A first?
+<!-- agent:boundary:a75188d3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **v0.29.0 released**
-- [x] **Operation-level logging** — deployed, confirmed root cause
-- [ ] **Bug 1 fix: snapshot shrinkage guard** — compare content_ours vs current snapshot in write.rs ← ready
-- [ ] **Bug 2 fix: session restart rollback guard** — divergence check before auto-start + commit guard
-- [ ] **Multi-harness hooks** — added to agent-doc.md task
+- [x] **v0.29.0 released** + ops logging + Bug 1 fix
+- [ ] **Bug 2A: Divergence check before auto-start** ← next
+- [ ] **Bug 2B: Rollback guard in commit()**
 - [ ] **Preflight ops.log anomaly scan**
-- [ ] **`agent-doc audit-ops`** command
+- [ ] **Multi-harness hooks** (agent-kit)
 - [ ] **Collaborative security model** (TBD)
 <!-- /agent:pending -->

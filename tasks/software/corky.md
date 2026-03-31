@@ -485,12 +485,40 @@ release
 - `a757362` — `attachmentId` support for `multipart/related` messages
 - `1303142` — padded base64 fallback in body decode
 - `79d7be0` — version bump + VERSIONS.md
-<!-- agent:boundary:aff231cf -->
+
+Implement a single thread refetch command. See tasks/recruit/lmi.md
+### Re: Single Thread Refetch Command (HEAD)
+
+Good call — this was identified as a gap during the LMI email debugging. The use case: a message was already synced but body extraction failed (base64 padding, attachmentId, etc.). `corky sync` skips it ("0 messages to process") because historyId says it's already seen.
+
+**Proposed command:**
+```bash
+corky sync refetch <THREAD_ID>
+```
+
+**Design:**
+1. Look up the conversation file by Thread ID (reuse `find_thread_file()`)
+2. Extract account name and labels from the file metadata
+3. Use Gmail Threads API (`GET /threads/{threadId}?format=full`) to fetch all messages in the thread — bypasses historyId entirely
+4. Re-run `gmail_to_message()` + `merge_message_to_file()` on each message
+5. Dedup by `(from, date)` prevents duplicates — only body content gets refreshed
+
+**Why Threads API:** Simpler than hacking around historyId. One API call gets all messages in the thread with full bodies. No state mutation needed.
+
+**Files to change (5):**
+- `src/cli.rs` — add `Refetch { thread_id: String }` to `SyncCommands`
+- `src/main.rs` — dispatch to `sync::refetch()`
+- `src/sync/mod.rs` — public `refetch()` entry point
+- `src/sync/gmail_api_sync.rs` — `fetch_thread()` function + refetch logic
+- `SPEC.md` — document the command
+
+Ready to implement when you approve.
+<!-- agent:boundary:870cc0a0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] crates.io publish — needs token refresh (blocked since v0.22.1)
+- [ ] `corky sync refetch <THREAD_ID>` — force re-fetch a single thread (proposed, awaiting approval)
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:pending -->

@@ -481,7 +481,7 @@ The draft was empty because I got interrupted before writing the body (the `cork
 
 Do:
 - [ ] Create LMI topic document in mail/topics/lmi
-### Re: LMI Topic Document Created (HEAD)
+### Re: LMI Topic Document Created
 
 Created `mail/topics/lmi/AGENTS.md` (with `CLAUDE.md` symlink) containing:
 
@@ -493,7 +493,7 @@ Created `mail/topics/lmi/AGENTS.md` (with `CLAUDE.md` symlink) containing:
 - Timeline of interactions
 - Asset index (cheat sheet, transcript, video, emails)
 - Kate Revels contact info
-<!-- agent:boundary:238f88ab -->
+<!-- agent:boundary:bbfd2a98 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

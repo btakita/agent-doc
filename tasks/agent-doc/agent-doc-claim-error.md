@@ -355,7 +355,38 @@ Is there a Rust equivalent to remove the python dependency?
 The conversion would slot into `check_url_link()` — after fetching, convert HTML to markdown before caching and diffing. This gives the agent clean, readable content instead of raw HTML.
 
 Want me to add one of these crates and wire it into the URL link fetch pipeline?
-<!-- agent:boundary:3279f142 -->
+Are there rust equivalalnts for PDF and DOCX?
+### Re: Rust equivalents for PDF and DOCX (HEAD)
+
+**PDF — yes, but with caveats:**
+
+| Crate | Type | Quality | Notes |
+|-------|------|---------|-------|
+| **pdfium-render** | FFI (PDFium) | Production-ready | Best text extraction, requires PDFium binary |
+| **pdf-extract** | Pure Rust | Moderate | Text-only, no layout/formatting |
+| **pdf** | Pure Rust | Basic | Low-level, minimal extraction |
+
+**DOCX — yes:**
+
+| Crate | Type | Quality | Notes |
+|-------|------|---------|-------|
+| **docx-rs** | Pure Rust | Production-ready | Handles formatting, text extraction |
+| **docx** | Pure Rust | Basic | Lightweight, simple API |
+
+**Key limitation:** None of these crates natively convert to **markdown**. They extract raw text or structured elements. You'd need a post-processing step to generate markdown from the extracted content.
+
+**Comparison with markitdown:**
+- markitdown handles HTML, PDF, DOCX, PPTX, XLSX, images (OCR), and audio — all in one tool
+- Rust equivalents require assembling 3-4 separate crates + custom markdown generation
+- markitdown is a single `pip install` and a single API
+
+**My recommendation for agent-doc:** Start with **HTML-to-markdown only** (pure Rust via `htmd`/`html2md`). For PDF/DOCX, shell out to `markitdown` if it's installed, with graceful fallback. This gives us:
+- Zero Python dependency for the common case (HTML URLs)
+- Full format support when markitdown is available
+- No need to maintain custom PDF/DOCX→markdown logic
+
+This is a pragmatic hybrid — Rust for the hot path, Python for the long tail.
+<!-- agent:boundary:fc6f0094 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -366,7 +397,8 @@ Want me to add one of these crates and wire it into the URL link fetch pipeline?
 - [x] **Session death logging** (`.agent-doc/logs/`) — implemented
 - [x] **Auto-trigger on restart** — tmux send-keys after `--continue`
 - [x] **URL link support (fetch + cache + context)** — implemented
-- [ ] **HTML-to-markdown conversion** — htmd or html2md (pure Rust, no Python)
+- [ ] **HTML-to-markdown conversion** — htmd or html2md (pure Rust)
+- [ ] **PDF/DOCX support** — shell out to markitdown if available
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)
 - [ ] **Editable repo links (git push back)**
 <!-- /agent:pending -->

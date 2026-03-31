@@ -601,7 +601,42 @@ Note my updates. We should also add a note in the agent-doc README.md about sing
 I'll add this to the agent-doc task queue. For now, the Josh email draft is ready with the corrected security note.
 
 Send it?
-<!-- agent:boundary:834e9a6f -->
+
+I'm concerned about my collaboration with Lucas Huang...who is a Chinese national.
+If I have extra scrutiny for top secret clearance, am I in danger of any issues?
+If I declare his collaboration, would I be discounted from this job?
+Is this job even worth pursuing as a job applicant?
+Can I still help even if I am not a job applicant?
+### Re: Security Clearance & Foreign National Collaboration (HEAD)
+
+**Disclaimer:** I'm not a security clearance attorney. For definitive guidance, consult a cleared facility security officer (FSO) or a lawyer specializing in security clearances. That said, here's the general landscape:
+
+**Am I in danger of issues?**
+Foreign contacts/associations are a standard area of inquiry in the SF-86 (the form for Top Secret clearance). Having a professional collaboration with a Chinese national is not automatically disqualifying, but China is specifically flagged as a country of concern by ODNI. The key factors adjudicators evaluate:
+- Nature and frequency of contact (professional vs. personal)
+- Whether the foreign national has ties to a foreign government/military/intelligence
+- Whether you've been transparent about the relationship
+- Whether there's any potential for foreign influence or coercion
+
+**Would declaring it discount me?**
+Failing to disclose is far worse than disclosing. The clearance process rewards honesty. Many cleared individuals have foreign contacts...the issue is concealment, not the contact itself. That said, an ongoing close collaboration (especially involving shared IP/software) with a Chinese national will receive extra scrutiny and could slow the adjudication process.
+
+**Is this job worth pursuing?**
+LMI works at IL5/IL6 (DoD). If the role requires TS/SCI, the clearance timeline alone is 12-18 months. Consider:
+- If the collaboration with Lucas is purely professional/open-source, it's easier to frame
+- If it involves shared proprietary work or he has access to your systems, that's more complex
+- The interview seemed focused on your technical skills (agent-doc, full-stack)...the clearance question comes later in the pipeline
+
+**Can I still help without being an applicant?**
+Potentially yes. LMI also does:
+- Unclassified consulting work
+- Commercial/civilian contracts
+- Subcontracting arrangements where clearance isn't required
+
+You could frame it as: interested in the technical mission, open to roles that match your clearance eligibility. Many defense contractors have both cleared and uncleared positions.
+
+**My recommendation:** Don't self-select out yet. If you're interested in the work, continue the process. The clearance investigation is where these questions get formally evaluated...you don't need to solve them upfront. Be prepared to be fully transparent about the Lucas collaboration if/when you reach the SF-86 stage.
+<!-- agent:boundary:c810dd5a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -610,6 +645,8 @@ Send it?
 - [ ] Send Josh Malloy follow-up email
 - [ ] agent-doc README: security section (single-user, prompt injection)
 - [ ] Corky: HTML body extraction for emails
+- [ ] Research LMI uncleared role options
 - [x] All contacts created
 - [x] All post-interview tasks complete
+- [x] Security clearance foreign collaboration guidance provided
 <!-- /agent:pending -->

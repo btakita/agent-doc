@@ -607,7 +607,7 @@ If I have extra scrutiny for top secret clearance, am I in danger of any issues?
 If I declare his collaboration, would I be discounted from this job?
 Is this job even worth pursuing as a job applicant?
 Can I still help even if I am not a job applicant?
-### Re: Security Clearance & Foreign National Collaboration (HEAD)
+### Re: Security Clearance & Foreign National Collaboration
 
 **Disclaimer:** I'm not a security clearance attorney. For definitive guidance, consult a cleared facility security officer (FSO) or a lawyer specializing in security clearances. That said, here's the general landscape:
 
@@ -636,7 +636,7 @@ Potentially yes. LMI also does:
 You could frame it as: interested in the technical mission, open to roles that match your clearance eligibility. Many defense contractors have both cleared and uncleared positions.
 
 **My recommendation:** Don't self-select out yet. If you're interested in the work, continue the process. The clearance investigation is where these questions get formally evaluated...you don't need to solve them upfront. Be prepared to be fully transparent about the Lucas collaboration if/when you reach the SF-86 stage.
-<!-- agent:boundary:c810dd5a -->
+<!-- agent:boundary:9d475fcd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

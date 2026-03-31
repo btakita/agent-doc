@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Cheat sheet ready at readable size — call in minutes
+Ready — call at 1:30 PM ET
 <!-- /agent:status -->
 
 ## Exchange
@@ -285,12 +285,17 @@ Fits on 1 page with room to space. Make the font larger.
 Bumped fonts from 7.5pt → 8.5pt body, headers proportionally larger. Still fits on 1 page with good readability. Reload:
 
 `file:///home/brian/work/btakita/agent-loop/tmp/lmi-cheatsheet.pdf`
-<!-- agent:boundary:1f3b3fe7 -->
+
+Bigger font:
+![img_4.png](img_4.png)
+### Re: Confirmed (HEAD)
+
+Looks good — readable and all on 1 page. You're set. Break a leg!
+<!-- agent:boundary:912f3e9d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Join Teams call at 1:30 PM ET
-- [x] Increase PDF font size
+- [ ] Join Teams call NOW (1:30 PM ET)
 <!-- /agent:pending -->

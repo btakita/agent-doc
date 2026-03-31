@@ -3,14 +3,14 @@ agent_doc_session: 4ef1150a-7b51-4ff6-9284-9c7c1f1570e5
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
-related_docs:
+links:
   - ../professional/bob-remeika.md
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-Linked with bob-remeika.md via related_docs | Browser/network architecture scoped | Web prototype MVP next
+WebSocket chosen over WebRTC | links field updated | Web prototype architecture design next
 <!-- /agent:status -->
 
 ## Exchange
@@ -57,7 +57,7 @@ This is better than a manual cross-reference — preflight will automatically de
 
 Can we make agent-doc work in a browser view?
 Can the editing work across the network?
-Should we use WebRTC or pla
+Should we use WebRTC or plain web sockets?
 ### Re: Browser view and network editing
 
 Great questions — these connect directly to the web prototype MVP from the Bob conversation.
@@ -85,13 +85,34 @@ The minimal stack: a Rust HTTP server (axum/actix) wrapping the existing `agent-
 **"Should w"** — looks like your thought got cut off. What were you going to ask?
 
 **Related docs link** — the `related_docs` frontmatter is now active. Preflight will surface bob-remeika.md changes automatically.
-<!-- agent:boundary:5a054dc6 -->
+### Re: WebRTC vs plain WebSockets (HEAD)
+
+**Plain WebSockets — use those.** Here's why:
+
+**WebRTC is overkill for this use case.** WebRTC solves peer-to-peer media streaming with NAT traversal, STUN/TURN servers, and codec negotiation. Agent-doc is text-only, server-mediated, and doesn't need P2P. WebRTC adds complexity (signaling server, ICE candidates, DTLS) with zero benefit.
+
+**WebSockets are the right fit because:**
+- **Server-mediated architecture** — all edits flow through the server (where git, agent-doc CLI, and Claude API live). No peer-to-peer needed.
+- **Simple protocol** — bidirectional text frames over a single TCP connection. Native browser API, trivial Rust support (tokio-tungstenite or axum's built-in WS).
+- **Low latency** — persistent connection, no polling. Sub-50ms round trip for edit operations.
+- **Battle-tested for collaborative editing** — CodeMirror's collab extension, Yjs, and Automerge all use WebSockets as the default transport.
+
+**Proposed message flow:**
+```
+Browser ──ws──> Server ──file write──> agent-doc write --stream
+                Server <──inotify/poll── file change detected
+Browser <──ws── Server (push updated document)
+```
+
+The server watches the file (inotify on Linux) and pushes changes. The browser sends edit operations as WebSocket messages. The server applies them via `agent-doc write --stream` (CRDT merge handles conflicts).
+
+**Good call on the `links` rename** — that matches agent-doc v0.28.3's field rename from `related_docs` to `links`.
+<!-- agent:boundary:d801934f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [done] Add related_docs to frontmatter linking bob-remeika.md
 - [ ] Design web prototype architecture (axum server + CodeMirror frontend + WebSocket sync)
 - [ ] Build web prototype MVP (markdown editor + Ragie retrieval + Claude responses)
 - [ ] Test VS Code agent-doc extension

@@ -1122,7 +1122,7 @@ The real fix is **pane ownership**: only the Claude session that owns a document
 This is already the designed behavior. The bug is that the second session somehow bypassed this check. Without the linkedin session's logs, I can't determine exactly how. If it happens again, we'll capture the preflight output to diagnose.
 
 How can 2 separate claude sessions generate the exact same response? I suppose it's possible but it seems extremely unlikely.
-### Re: Same session, not two sessions (HEAD)
+### Re: Same session, not two sessions
 
 You're right — two Claude sessions generating identical responses is nearly impossible. It was a **single session that called `agent-doc write` twice with the same content**.
 
@@ -1135,7 +1135,7 @@ The snapshot has 1 copy (correct). The working tree has 2 (the second write appe
 **Fix:** `agent-doc write` should detect if the response content is already present at the boundary marker position and skip the append. This is a binary-side dedup check — cheap and eliminates the symptom regardless of how many times write is called.
 
 Want me to implement this dedup check?
-<!-- agent:boundary:568e4566 -->
+<!-- agent:boundary:cd52b807 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

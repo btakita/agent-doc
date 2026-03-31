@@ -192,7 +192,7 @@ Adding to pending. This is a meaningful feature — I'll design the implementati
 4. **Cache invalidation:** Re-fetch on each preflight (URLs are cheap to fetch, and staleness is worse than latency)
 
 Want me to implement this now, or should we address the session logging first?
-### Re: Solutions for --continue skill loss (HEAD)
+### Re: Solutions for --continue skill loss
 
 Yes, there are several approaches:
 
@@ -220,7 +220,7 @@ Claude Code doesn't have a `--initial-prompt` flag that works with `--continue`.
 **Recommendation:** Option 1 is the most practical. The stdin pipe approach works today without any upstream changes. The key insight is: `--continue` preserves conversation context, but the agent needs a _trigger_ to re-enter the agent-doc workflow loop. Piping `/agent-doc <file>` provides that trigger.
 
 Want me to implement this in `start.rs`?
-<!-- agent:boundary:2628c8f4 -->
+<!-- agent:boundary:250e729f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

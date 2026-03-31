@@ -58,12 +58,44 @@ During `agent-doc preflight`, `check_related_docs()` reads the related docs, com
 **The issue:** When you "requested to link documents" and nothing was added to frontmatter — that was a skill/agent issue (the Claude session didn't know to add the `related_docs` field). The binary supports it; the skill just needs to know the field name.
 
 Want me to add `related_docs` guidance to the SKILL.md so future sessions know to use it?
-<!-- agent:boundary:ff59f0db -->
+Before we do that, would it be better to rename `related_docs` to `linked`?
+`linked` would also imply other sources such as urls, documents with other types of formats, etc.
+I think it's actually a good idea to link these other types of sources.
+### Re: Rename to `linked` + expand scope (HEAD)
+
+Good thinking. `linked` is more general and future-proof:
+
+```yaml
+---
+linked:
+  - ../professional/bob-remeika.md          # relative path
+  - tasks/software/agent-doc.md             # project-relative
+  - https://docs.example.com/api            # URL
+  - mail/contacts/ron-berkes/AGENTS.md      # non-agent-doc file
+---
+```
+
+**Benefits of `linked` over `related_docs`:**
+- Shorter, cleaner
+- Implies active linking (not just "related")
+- Natural extension to URLs, non-.md files, external resources
+- The preflight can handle each type differently: local files → diff, URLs → fetch + cache
+
+**Migration:** Keep `related_docs` as a backward-compatible alias via `#[serde(alias = "related_docs")]`. New docs use `linked`.
+
+**Implementation scope:**
+1. Rename field + alias (small change)
+2. URL support in preflight — `WebFetch` or `curl` for URLs, cache in `.agent-doc/linked_cache/`
+3. Non-.md file support — read content, include in preflight context
+
+This is a feature design that should go into `tasks/software/agent-doc.md` for proper planning. Want me to add it there, or implement the rename here first?
+<!-- agent:boundary:86f057a6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.28.0-v0.28.3: All shipped
-- [ ] Add `related_docs` guidance to SKILL.md
+- [ ] **Rename `related_docs` → `linked` (with alias for backward compat)**
+- [ ] **Expand `linked` to support URLs + non-.md files**
 <!-- /agent:pending -->

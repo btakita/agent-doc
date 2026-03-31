@@ -438,7 +438,7 @@ Ready to implement when you approve.
 Implement
 Add tests
 audit docs
-resync the
+resync the email
 ### Re: Implemented Gmail API Attachment Body Fix
 
 **Bug fix:** Added `attachmentId` support to Gmail API body extraction. When Gmail returns a reference instead of inline data (common for `multipart/related` messages), corky now fetches the body via the attachments API.
@@ -456,13 +456,24 @@ resync the
 **Tests:** 232 total (7 new), all passing. Clippy clean. Audit clean.
 
 Ready to commit in corky submodule.
-<!-- agent:boundary:d5f0a15a -->
+commit and push
+### Re: Commit, Push & Email Resync (HEAD)
+
+**Committed & pushed** attachment body fix (`a757362`) to corky main.
+
+**Second bug found & fixed** (`1303142`): The LMI email was STILL blank after the attachment fix because Gmail sends **padded** URL-safe base64 for some message bodies. `URL_SAFE_NO_PAD.decode()` silently rejects padded input → empty body. Fixed `base64url_decode()` to fall back to `URL_SAFE` decoder when `NO_PAD` fails. This was a systematic issue affecting many emails (debug showed ~20 empty bodies during full resync).
+
+**Verified:** Re-synced btak.dev account — LMI interview confirmation now has full body content (interview details, Teams meeting link, interviewer LinkedIn profiles, dial-in info).
+
+**Both commits pushed:**
+- `a757362` — `attachmentId` support for `multipart/related` messages
+- `1303142` — padded base64 fallback in body decode
+<!-- agent:boundary:b153e46d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Commit and verify LMI email re-sync — attachment body fix
 - [ ] crates.io publish for v0.22.1 — needs token refresh
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:pending -->

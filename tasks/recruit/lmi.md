@@ -414,7 +414,7 @@ The interview went **reasonably well as an initial screen**, but left value on t
 3. **Send thank-you email** to Kate Revels
 
 Please draft a thank you email to Kate Revels.
-### Re: Thank You Email Draft (HEAD)
+### Re: Thank You Email Draft
 
 Here's the draft for Kate Revels:
 
@@ -438,7 +438,7 @@ Brian Takita
 ---
 
 Want me to send this via corky as a reply to the original confirmation email? I'll thread it properly using the Message-ID from the source email.
-<!-- agent:boundary:988baebc -->
+<!-- agent:boundary:459a5f04 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

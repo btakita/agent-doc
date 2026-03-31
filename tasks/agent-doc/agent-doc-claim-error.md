@@ -1128,20 +1128,37 @@ You're right — two Claude sessions generating identical responses is nearly im
 
 How this happens: the skill piped the response through `agent-doc write --stream`, it succeeded (file updated + snapshot saved). Then something caused the skill to call `agent-doc write` again with the same response — possibly a retry after a perceived failure, or the streaming checkpoint logic flushing the full response after it was already written by the final write.
 
+What caused the skill to call `agent-doc write`?
+
 The snapshot has 1 copy (correct). The working tree has 2 (the second write appended again). The commit only staged from the snapshot, so the git history is clean.
 
 **Root cause is likely in the skill workflow**, not the binary. The skill should never call `agent-doc write` twice for the same response. The `agent-doc commit` between cycles should catch stale state, but if write is called twice within the same cycle (no commit in between), the second write duplicates.
+This seems like this should be a deteministic fix.
 
 **Fix:** `agent-doc write` should detect if the response content is already present at the boundary marker position and skip the append. This is a binary-side dedup check — cheap and eliminates the symptom regardless of how many times write is called.
 
 Want me to implement this dedup check?
-<!-- agent:boundary:cd52b807 -->
+Yes. Do we have any logs indicating why the duplication occurred?
+### Re: Write dedup implemented + linkedin.md fixed (HEAD)
+
+**Dedup check added** to `write.rs` in 4 locations (inline, template, stream/IPC, stream/disk). After computing the merged content, if it's identical to the current file, the write is skipped with a log message: `[write] dedup: no changes after merge, skipping write`. Returns Ok so the skill continues normally.
+
+This is deterministic — if the same response is piped twice, the second write is a no-op.
+
+**No logs exist** for the original duplication — `agent-doc write` didn't have file logging at the time. The sync log only tracks layout sync calls, not write operations. With the dedup check, it won't matter — duplicates are silently skipped.
+
+**linkedin.md fixed** — restored from git HEAD (1 copy of the response). Duplicate removed.
+
+Binary installed. Ready to release when tested.
+<!-- agent:boundary:b67e0430 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.28.1: Column memory shipped
-- [ ] **Implement write dedup check (skip if response already present at boundary)**
-- [ ] Remove duplicate from linkedin.md
+- [x] Write dedup check (4 paths in write.rs)
+- [x] linkedin.md duplicate removed
+- [ ] Add tests + audit docs
+- [ ] Release v0.28.2
 <!-- /agent:pending -->

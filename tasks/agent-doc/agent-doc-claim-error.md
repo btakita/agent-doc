@@ -651,14 +651,57 @@ In other words: the **write** succeeds (snapshot saved), but then the **next pre
 **The fix is still the proposed divergence detection in `commit()`:** When preflight calls `commit()` for any file, it should check if the file has content beyond the snapshot and auto-fix. The preflight commit step already runs for every document cycle — we just need to make it smarter.
 
 **Quick mitigation now:** Let me sync the lmi.md snapshot.
-<!-- agent:boundary:e1bb1e97 -->
+
+I did see a new session start when I navigated back to the document in the editor.
+We need to have an accurate check of all running claude sessions + tmux panes.
+The requisite logging should also occur.
+The running session validation check needs to be accurate and comprehensive and happen when running any agent-doc command that could start a new tmux pane + claude session.
+How can we do this?
+### Re: Session validation and duplicate prevention (HEAD)
+
+You're describing a critical issue: the editor sync triggered a **new session** for lmi.md even though one was already running. This means the existing session's pane was either dead or not properly detected.
+
+**Current validation chain:**
+1. `route.rs` checks `sessions.json` for the document's session UUID → pane ID mapping
+2. `tmux.pane_alive(pane)` checks if the pane still exists
+3. If alive, `send_command` sends `/agent-doc <file>` to the existing pane
+4. If dead/missing, `auto_start` creates a new pane + Claude session
+
+**Where this breaks:**
+- The old pane may have been killed (context exhaustion, manual close) but `sessions.json` wasn't updated
+- The new `auto_start` registers a new session UUID, but the old UUID is still in the document's frontmatter
+- Now there are two session entries — one dead, one alive — and the document's frontmatter points to the old dead one
+
+**Comprehensive fix — three layers:**
+
+**Layer 1: Validate before auto-start**
+Before creating a new pane, check ALL panes running `agent-doc` or `claude` and cross-reference with `sessions.json`. If any pane is already serving this document, route to it instead of starting a new one.
+
+**Layer 2: Session registry cleanup on every command**
+Every `agent-doc` command that touches `sessions.json` should:
+- Prune dead panes (pane_alive check)
+- Detect duplicate panes for the same file
+- Log pruning events to `.agent-doc/logs/`
+
+**Layer 3: Process-level dedup guard**
+Before starting a new Claude process for a document, check if any `claude` process tree already has this file path as an argument. Use `pstree` or `/proc` inspection.
+
+**Implementation plan:**
+1. Add `sessions::prune_dead()` — called at start of `route`, `sync`, and `preflight`
+2. Add `sessions::find_pane_for_file(file)` — checks all entries, not just the session UUID in frontmatter
+3. Add process check in `auto_start` — scan tmux panes for active claude processes serving this file
+4. Log all session lifecycle events to `.agent-doc/logs/sessions.log`
+
+Want me to implement this? It's a v0.29.1 fix.
+<!-- agent:boundary:0957ead7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **v0.29.0 released**
-- [ ] **Bug fix: snapshot/file divergence in commit()** — implement auto-detection and fix
+- [ ] **Session dedup + validation fix** — prevent duplicate sessions, prune dead panes, process-level guard ← proposed
+- [ ] **Bug fix: snapshot/file divergence in commit()** — auto-detect and fix
 - [ ] **Collaborative security model** (TBD)
 - [ ] **Optional markitdown/Ragie Parse integration** (PDF, DOCX, OCR)
 - [ ] **Object entry syntax** (editable flag, repo URL, refresh interval)

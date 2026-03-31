@@ -66,7 +66,7 @@ claude_args: --dangerously-skip-permissions
 - [x] `corky contact push google` — v0.22.1
 - [x] CLAUDE.md fallback in contact push — v0.22.1
 - [x] Gmail API body decode (attachment + base64 padding) — v0.22.2
-- [x] `corky sync refetch` — implemented, tested, documented
+- [x] `corky sync refetch` — v0.23.0
 - [ ] crates.io publish — needs token refresh
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:status -->
@@ -559,12 +559,27 @@ Go
 **Audit:** `corky audit-docs` — clean (1 pre-existing SKILL.md warning only).
 
 `make check` passes — clippy clean, 235 tests pass. Ready to commit and release.
-<!-- agent:boundary:6c3f5d8e -->
+
+release
+### Re: Released v0.23.0 — Sync Refetch (HEAD)
+
+**Committed** (`76b7836`):
+- `sync refetch` command (4 files), 3 new tests (235 total)
+- SPEC.md §5.2, §6.8 updated
+- README.md, VERSIONS.md updated
+- Version bump 0.22.2 → 0.23.0
+
+**Published:**
+- [PyPI](https://pypi.org/project/corky/0.23.0/)
+- [GitHub Release](https://github.com/btakita/corky/releases/tag/v0.23.0) (with CUDA binary)
+- crates.io — skipped (token still expired)
+
+**Installed:** corky 0.23.0 locally with GPU (transcribe-cuda)
+<!-- agent:boundary:c144f68d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] `corky sync refetch` — commit, release
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:pending -->

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Audit 5→2. Docs updated for guard removal. 595 tests pass.
+3-pane bug fixed: cargo install updated. JB plugin now uses fixed binary.
 <!-- /agent:status -->
 
 ## Exchange
@@ -2104,6 +2104,7 @@ The busy session in %323 is alive in the stash. If you switch back to `robert-wa
 Add tests
 audit docs
 Update SPEC.md, README.md, ontology, module-harness
+I opened tasks/personal/melissa-lewis.md...stuck in a 3 pane layout. Why?
 ### Re: Tests, audit, docs
 
 **All 595 tests pass.** No new tests needed for the guard removal — the existing sync tests cover the DETACH behavior, and the `is_stale_baseline` tests in git.rs + write.rs validate the component-aware logic.
@@ -2116,13 +2117,24 @@ Update SPEC.md, README.md, ontology, module-harness
 Remaining 2 issues are informational (large table, SKILL.md managed by binary).
 
 **Line budget:** 431/1000 (57% headroom). Release binary deployed.
-<!-- agent:boundary:b8bdf2ac -->
+
+You are processing melissa-lewis.md. But the prompt is uncommitted. Why?
+![img_2.png](img_2.png)
+Idea is not responding. Jump threads. Why?
+### Re: 3-pane layout with melissa-lewis.md (HEAD)
+
+**Root cause:** The JB plugin calls `/home/brian/.cargo/bin/agent-doc` (installed via `cargo install`). That binary was still v0.30.0 with the busy pane guard. The release build at `.bin/agent-doc` had the fix, but the plugin doesn't use that path.
+
+**Fixed:** Re-ran `cargo install --path .` to update `~/.cargo/bin/agent-doc`. Verified: sync now produces 2 panes, no "protected (busy pane)" messages.
+
+**Lesson:** After code changes, always run `cargo install --path .` — the JB plugin uses the cargo-installed binary, not the release build symlink.
+<!-- agent:boundary:bbfb23e3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **Fix 3-pane layout bug + docs** — guard removed, docs updated, audit clean
+- [x] **Fix 3-pane layout bug** — guard removed + cargo install updated
 - [ ] **Release agent-doc v0.30.1** (guard fix + multi-harness + agent-kit 0.3.1)
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)

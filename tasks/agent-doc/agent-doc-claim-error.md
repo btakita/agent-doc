@@ -1586,7 +1586,10 @@ Multi-harness hooks (agent-kit) would let multiple agent-doc sessions coordinate
 - **Claim hook**: When a file is claimed, notify any session that was working on it
 
 Current state: agent-kit 0.2 exists but doesn't have the hook registry yet. This would be a v0.3 feature. The value is highest when running 3+ concurrent sessions on related documents.
-<!-- agent:boundary:514bb822 -->
+
+Implement agent-kit changes.
+Implement updates to agent-doc.
+<!-- agent:boundary:420f58fb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

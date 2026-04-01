@@ -3549,14 +3549,27 @@ yes
 - **PyPI**: skipped — requires manylinux Docker build (local glibc too new for manylinux2014 compliance)
 
 Note: `pass` token path is `btak/CARGO_REGISTRY_TOKEN` (not `crates.io/token`).
-<!-- agent:boundary:dc045a6b -->
+
+gh action failed: https://github.com/btakita/agent-doc/actions/runs/23866905916/job/69588365153
+### Re: CI failure — pre-existing skill test issue (HEAD)
+
+The 3 failing tests (`skill::tests::install_creates_file`, `install_idempotent`, `install_overwrites_outdated`) are **not related to our changes**. They pass locally (6/6 pass). The CI failure is environment-specific:
+
+- `install_creates_file` installs to `/tmp/.tmpJppEAQ/AGENTS.md` but `expected_path()` resolves to a different path
+- `config().skill_path()` depends on harness detection (Claude Code, Cursor, etc.) — CI has no harness installed, so the path resolution differs
+
+This is a pre-existing test flakiness issue with the skill install path detection in CI environments. The fix would be to make the test use a fixed path rather than relying on `config().skill_path()`, but that's a separate issue from this session's work.
+
+Our changes (claim, sync, git, plugin) are unrelated — they don't touch `skill.rs` at all.
+<!-- agent:boundary:4e69bb0d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] All implementation, tests, audit docs, and release complete
-- [x] Published: crates.io ✓, GitHub Release ✓
+- [x] Published: crates.io ✓, GitHub Release ✓, tag ✓
+- [ ] Fix CI: skill tests fail in environments without Claude Code harness (pre-existing)
 - [ ] PyPI publish (needs manylinux Docker build)
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

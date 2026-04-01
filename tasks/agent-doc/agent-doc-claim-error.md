@@ -2908,7 +2908,7 @@ Failed tests on gh actions https://github.com/btakita/agent-doc/actions/runs/238
 **The Windows build failure** (agent-kit SocketTransport) was already fixed in the previous cycle via `agent-kit` v0.3.2.
 
 Both fixes are pushed. The next CI run should be green.
-<!-- agent:boundary:89b40cd8 -->
+<!-- agent:boundary:cab7d6ec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -673,5 +673,17 @@ Split the failed 10-min chunks into 2-min segments and re-diarized. Results:
 **Mar 30 morning (37min):** Now 94 Brian + 90 Robert + 1 Unknown segment. Only 1 "Unknown" segment remains (first 2 min). Coverage went from ~75% to ~99%.
 
 Both transcript files updated in place. The diarization failure pattern is consistent: the very first ~2 minutes of each call fails (likely too little audio for speaker embedding extraction). Everything after that is properly attributed.
-<!-- agent:boundary:3375044f -->
+
+Split the Unknown segments and try again.
+### Re: Further splitting (HEAD)
+
+Split the remaining Unknown 2-min segments into 30-second micro-chunks. Results:
+
+**Apr 1:** 161 Brian + 152 Robert + 3 Unknown (was 150+142+3)
+**Mar 30 AM:** 101 Brian + 96 Robert + 1 Unknown (was 94+90+1)
+
+More diarized speaker turns recovered from the 30s-90s range. The remaining 3+1 Unknown segments are all exactly `[00:00:00 -> 00:00:30]` -- the first 30 seconds of each boundary where pyannote simply can't build speaker embeddings. This is the hard floor for this diarization approach.
+
+The transcripts are updated in place. Those first-30s Unknown blocks are just a few sentences of audio each.
+<!-- agent:boundary:48ab334d -->
 <!-- /agent:exchange -->

@@ -381,13 +381,32 @@ The OAuth and Cargo token incidents came from the **Security Notes** section of 
 > - Google OAuth refresh tokens were exposed in March 13 session transcript
 > - CARGO_REGISTRY_TOKEN was exposed in cleartext in March 14 session
 
+I'm only talking about the last day. From 3/31 - 4/1. Let's not include the OAUTH token issue from 3/13. It is out of scope. Just mention that as a hypothetical, where exposures can be tracked using regular audits of the private git commits. Please emphasize that agent-doc documents are meant to be run in a private repo.
+
 I treated those as factual and built the blog post around them. If they didn't happen as described — or you're questioning the "reviewed the session documents afterward" framing specifically — the blog post needs correction.
 
 What actually happened? I should write about real events, not what a previous session's notes claim.
-<!-- agent:boundary:23f9f1f8 -->
+Also mention that a shared security model is under development.
+### Re: Rewritten — 3/31-4/1 scope, actual data (HEAD)
+
+Complete rewrite based on what actually happened 3/31-4/1:
+
+**Title:** "532 Commits in One Day: What Multi-Agent Sessions Reveal About Security and Debugging"
+
+**Key changes:**
+- **Real data**: 532 commits, 11 documents, table of actual session breakdown (292 claim-error, 60 corky, etc.)
+- **No false incidents**: Removed OAuth/Cargo token as things that happened this day. Prior credential exposure mentioned as a hypothetical example found through audit
+- **Private repo emphasis**: Explicit section stating agent-doc documents are meant to run in private repos, with explanation of why
+- **Prompt injection**: Reframed as forward-looking risk in multi-user setups, not something that happened
+- **Security as hypothetical**: "Nothing went wrong that day" — the security section explores what *would* happen at scale
+- **IPC section retained**: Three-way sync debugging across editor/agent-doc/tmux
+- **Self-referential**: "I pointed Claude at the git logs and it counted 532 commits across 11 documents"
+
+File updated at `src/briantakita.me-dev/app/briantakita.me/post/content/2026-04-01-agent-security-multiuser-lessons.md`.
+<!-- agent:boundary:b949b67e -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Blog post premise under review — awaiting clarification on security incidents
+- Blog post v4 (corrected scope, real data) — ready to review
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

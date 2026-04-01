@@ -3466,7 +3466,7 @@ Same when switching the right pane to tasks/professional/judith-krug.md
 - `cargo build --release`: done
 
 The `.agent-doc/build.stamp` file should be gitignored — it's machine-local.
-### Re: Plugin was calling old binary — fixed (HEAD)
+### Re: Plugin was calling old binary — fixed
 
 **Root cause found:** The IDEA log shows `exec: /home/brian/.cargo/bin/agent-doc sync` — the **old binary** from 15:19. Both `EditorTabSyncListener.kt` and `SyncLayoutAction.kt` called `TerminalUtil.resolveAgentDoc()` **without `basePath`**, skipping the `.bin/agent-doc` symlink (first candidate) and falling through to `~/.cargo/bin/agent-doc`.
 
@@ -3480,7 +3480,7 @@ Both binary paths now point to the same fixed code. Plugin rebuilt.
 This explains why navigating to files didn't create panes — the old binary at `~/.cargo/bin/` still had both registry guards that blocked auto-start for unregistered files.
 
 **Plugin zip:** `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.38.zip`
-<!-- agent:boundary:aeb35fbc -->
+<!-- agent:boundary:da545b74 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

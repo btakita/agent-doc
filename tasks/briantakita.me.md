@@ -484,7 +484,7 @@ Major rewrite addressing all your feedback:
 Low risk. The post describes architecture of an open-source tool, standard agentic security considerations, bug-fixing competence, and forward-looking concerns. No credentials, no client details, no real names. The dog-fooding angle shows builder credibility. The security discussion shows you're thinking about this before shipping multi-user.
 
 File updated at `src/briantakita.me-dev/app/briantakita.me/post/content/2026-04-01-agent-security-multiuser-lessons.md`.
-### Re: April 1st — April Fools Day (HEAD)
+### Re: April 1st — April Fools Day
 
 Publishing a technical security post on April 1st creates irony:
 
@@ -493,7 +493,7 @@ Publishing a technical security post on April 1st creates irony:
 - **Options:** (1) Change to April 2nd, (2) Lean in with "No, the 532 commits are not a joke," (3) Ignore it.
 
 Recommendation: change to April 2nd unless you want the irony as a hook.
-<!-- agent:boundary:8023ea03 -->
+<!-- agent:boundary:71cb9479 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

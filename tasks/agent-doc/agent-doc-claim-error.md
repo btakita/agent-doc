@@ -1587,8 +1587,6 @@ Multi-harness hooks (agent-kit) would let multiple agent-doc sessions coordinate
 
 Current state: agent-kit 0.2 exists but doesn't have the hook registry yet. This would be a v0.3 feature. The value is highest when running 3+ concurrent sessions on related documents.
 
-Implement agent-kit changes.
-Implement updates to agent-doc.
 ### Re: Diff regression status
 
 The Bug 2B regression is **fixed**. The new release binary uses `is_stale_baseline()` (component-aware) instead of `starts_with` for divergence detection. Normal user edits inside components no longer trigger false divergence.
@@ -1612,9 +1610,7 @@ The Bug 2B regression is **fixed**. The new release binary uses `is_stale_baseli
 
 To continue: edit the document in your editor and trigger `/agent-doc` — the diff will be detected.
 
-Implement agent-kit changes.
-Implement updates to agent-doc.
-### Re: "No changes" — not a regression (HEAD)
+### Re: "No changes" — not a regression
 
 **The diff detection is working correctly.** The file and snapshot are identical (95,098 bytes each, only boundary marker ID differs). Your edits were typed in the Claude Code prompt, not the document — so there's nothing for the diff to detect.
 
@@ -1631,7 +1627,7 @@ Implement updates to agent-doc.
 - No user edits present in the file
 
 The Bug 2B regression from earlier IS fixed — the component-aware divergence check is deployed. This `no_changes` is correct behavior, not a regression.
-<!-- agent:boundary:9c0355b6 -->
+<!-- agent:boundary:f9382aab -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

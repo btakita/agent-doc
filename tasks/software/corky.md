@@ -575,11 +575,21 @@ release
 - crates.io — skipped (token still expired)
 
 **Installed:** corky 0.23.0 locally with GPU (transcribe-cuda)
-<!-- agent:boundary:62a1b491 -->
+
+The email sync /home/brian/work/btakita/agent-loop/mail/conversations/brian-rob-zoom.md resulted with no body.
+Please resync this email.
+### Re: Email resync brian-rob-zoom.md (HEAD)
+
+Refetched thread `19d479af292d8d99` via `corky sync refetch`. The email body was missing due to a sync issue — now populated.
+
+**From:** Robert Ross <rob@dreamable.com> — Tue, 31 Mar 2026 22:53:38 -0700
+**Content:** Rob reviewed your application and videos, wants to schedule a chat about the role at Dreamable. Requests Wed (Apr 2) or Thu (Apr 3) 12-4pm PT.
+<!-- agent:boundary:28815ad2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] `corky doc upload` — deferred (Google Drive OAuth design)
+- Respond to Rob Ross (Dreamable) — schedule meeting Wed/Thu 12-4pm PT
+- crates.io token — renew and publish corky 0.23.0
 <!-- /agent:pending -->

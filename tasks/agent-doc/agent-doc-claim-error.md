@@ -2821,12 +2821,24 @@ continue
 - `SPEC.md` — stash pane safety guarantee
 - `README.md` — fix subprocess count
 - Test: `purge_preserves_unregistered_agent_process_in_stash`
-<!-- agent:boundary:cf12c516 -->
+
+Switching the editor to corky.md did not create a tmux pane. The old behavior was to eagerly create a claude session. But it may be ok not to be eager...since rapidly navigating through several inactive agent docs used to rapidly run `agent-doc start` commands. Which likely caused race conditions.
+`Run Agent Doc` on corky.md created the tmux page...good
+### Re: Lazy pane creation is the right call (HEAD)
+
+Good observation. The old eager behavior (auto-starting Claude sessions on every editor tab switch) caused race conditions when rapidly navigating files. The new behavior is better:
+
+- **Switching to a file** — stashes the old pane, does NOT auto-start a new one
+- **`Run Agent Doc` (explicit action)** — creates the tmux pane and Claude session
+
+This is intentional lazy initialization. The user explicitly triggers `Run Agent Doc` when they want to interact with a document, rather than having sessions spawn just because a file was opened in the editor. Prevents wasted Claude sessions and race conditions from rapid navigation.
+
+The sync.rs change (stale UUID → Unmanaged) reinforces this — files that were never properly claimed don't get auto-started during sync.
+<!-- agent:boundary:6f188f02 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Pane creation for unmanaged files** — sync should auto-start for files without agent-doc sessions
 - **SPEC.md/README.md** — document `agent-doc session` command
 <!-- /agent:pending -->

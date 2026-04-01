@@ -1153,7 +1153,7 @@ continue:
 
 Both committed and pushed.
 Add tests.
-### Re: Add tests (HEAD)
+### Re: Add tests
 
 Using the preflight-provided baseline for this write (first time!). Let me verify it eliminates the stale baseline warning.
 
@@ -1163,7 +1163,7 @@ Adding tests for the new features. I'll cover:
 3. Ops logging events
 
 Implementing now.
-<!-- agent:boundary:f11f038e -->
+<!-- agent:boundary:cf1956a2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

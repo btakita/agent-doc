@@ -455,6 +455,7 @@ This is an old bug. You are looking too far back into the git history. Please li
 We should note that the complexity of this issue is agent-doc being a complex challenge in itself. But we are able to address due to dog-fooding the process. The SPEC is being iterated upon...as this interaction is novel. But the complexity is worth it...because other complex problems are tractable with agent-doc.
 
 META: Am I divulging too much? Can I expose myself to risk by publishing this?
+Is it ironic if this post is on April 1...April Fools Day? How would it be received?
 ### Re: v5 — anonymized, real bugs, dog-fooding theme, risk assessment
 
 Major rewrite addressing all your feedback:
@@ -483,10 +484,19 @@ Major rewrite addressing all your feedback:
 Low risk. The post describes architecture of an open-source tool, standard agentic security considerations, bug-fixing competence, and forward-looking concerns. No credentials, no client details, no real names. The dog-fooding angle shows builder credibility. The security discussion shows you're thinking about this before shipping multi-user.
 
 File updated at `src/briantakita.me-dev/app/briantakita.me/post/content/2026-04-01-agent-security-multiuser-lessons.md`.
-<!-- agent:boundary:a8fd91aa -->
+### Re: April 1st — April Fools Day (HEAD)
+
+Publishing a technical security post on April 1st creates irony:
+
+- **Positive:** "532 commits sounds absurd enough to be a joke, but it's verifiable." Self-aware humor.
+- **Risk:** Skimmers see the date and dismiss it as an April Fools post.
+- **Options:** (1) Change to April 2nd, (2) Lean in with "No, the 532 commits are not a joke," (3) Ignore it.
+
+Recommendation: change to April 2nd unless you want the irony as a hook.
+<!-- agent:boundary:8023ea03 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Blog post v5 (anonymized, real bugs, dog-fooding) — ready to review
+- Blog post v5 — date decision (April 1 vs 2)
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

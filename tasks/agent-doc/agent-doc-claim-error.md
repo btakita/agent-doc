@@ -2632,7 +2632,7 @@ Now tmux session 5 is gone. Why?
 All 389 tests pass. Binary reinstalled.
 
 We probably should have a way in the
-### Re: Config keeps resetting to "1" (HEAD)
+### Re: Config keeps resetting to "1"
 
 Config got overwritten to `tmux_session = "1"` again after I fixed it. This is likely from the **old binary** still running in stashed panes %353 and %352 — they have the pre-fix code that auto-updates config in claim.rs. The new binary (with the fix) is installed but those stashed sessions are still running the old binary from memory.
 
@@ -2645,7 +2645,7 @@ The fix code I applied prevents new claim/route operations from overwriting conf
 - The old stashed sessions (%353, %352) may continue overwriting until killed
 
 There are also two legitimate fallback paths in route.rs (lines 144-155 and 488-499) that update config when the configured session is dead. These are safe — they only fire when session 5 doesn't exist. Not a concern right now since session 5 is alive.
-<!-- agent:boundary:cdd531c5 -->
+<!-- agent:boundary:1bf31994 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -882,7 +882,21 @@ With agent authored reports?
 ### Re: Agent-Authored Reports
 
 Updated to "agent-authored reports." More precise — these aren't cron-job automated reports, they're authored by the agent within the document workflow.
-<!-- agent:boundary:9bd6b10b -->
+
+> especially the distinction between goal-oriented and normative alignment
+
+Should we expand on this or leave it as is with "That's the kind of rigor that makes me excited about this role."?
+### Re: Alignment Mention — Leave As Is (HEAD)
+
+Leave it. The one-liner works better here:
+
+1. Shows you were listening to Josh's specific question
+2. Avoids the interview pitfall of going too deep into philosophy
+3. The email's strength is the concrete prototype work
+4. If Josh wants to explore alignment theory further, the hook is set — he'll bring it up
+
+Expanding risks diluting the email's focus. The compliment-as-acknowledgment is the right weight.
+<!-- agent:boundary:3555e64e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

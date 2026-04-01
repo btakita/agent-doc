@@ -830,7 +830,7 @@ Want me to draft the email via corky?
 
 Yes. There is already a draft email for Josh. Review that.
 Consider whether we should replace the existing draft entirely or amend it with our addional content wrt the blog post + LIGER framing.
-### Re: Existing Josh draft — amend, not replace (HEAD)
+### Re: Existing Josh draft — amend, not replace
 
 Found the draft at `mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-interactive-document-genera.md`. It's strong — maps agent-doc to LIGER's needs (claim identification, CRDT merge, audit trail), references "Beyond the Vending Machine," includes links.
 
@@ -843,7 +843,7 @@ Found the draft at `mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-inte
 > https://briantakita.me/posts/agent-security-multiuser-lessons/
 
 This ties the blog post to the LIGER conversation naturally. Want me to apply this edit to the draft?
-<!-- agent:boundary:3bd05d1f -->
+<!-- agent:boundary:f2d9e45c -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

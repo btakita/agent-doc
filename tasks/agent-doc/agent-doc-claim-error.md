@@ -2412,7 +2412,7 @@ Both editors now share the same FFI debounce tracker and reposition logic when k
 > Graceful fallback when koffi or library unavailable
 
 Why would koffi or the library be unavailable?
-### Re: Why koffi or library might be unavailable (HEAD)
+### Re: Why koffi or library might be unavailable
 
 Two scenarios:
 
@@ -2423,7 +2423,7 @@ Two scenarios:
 **In practice for you:** Both are always available since you build from source. The fallback exists for distribution to other users.
 
 **To make FFI "just work":** We could add `agent-doc plugin install --lib` to copy the `.so` to `~/.local/lib/` or `.agent-doc/lib/`, and bundle platform-specific koffi binaries in the `.vsix` build. That's a release concern, not a blocker for the current fix.
-<!-- agent:boundary:eea657f7 -->
+<!-- agent:boundary:31c3d20d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

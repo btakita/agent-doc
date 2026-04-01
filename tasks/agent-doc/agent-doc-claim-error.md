@@ -2775,7 +2775,7 @@ Also do:
 - **Pane creation for new files** — sync should auto-start panes for unmanaged files in editor layout
 
 Note that tasks/software/corky.md has the entire response patch in an uncommitted state. Why? Please fix.
-### Re: Consolidation complete (HEAD)
+### Re: Consolidation complete
 
 **`resolve_target_session()` extracted** — single function in route.rs that handles all session resolution:
 
@@ -2796,7 +2796,7 @@ fn resolve_target_session(
 **`--dry-run` for resync:** Already exists — running `agent-doc resync` without `--fix` shows all issues without applying them. No code change needed.
 
 **Remaining:** The "pane creation for new files" gap — when you switch to a file without an agent-doc session (like corky.md), the sync should auto-start a pane. That's a separate feature, not part of this consolidation.
-<!-- agent:boundary:4a0e0640 -->
+<!-- agent:boundary:6f2ea10b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

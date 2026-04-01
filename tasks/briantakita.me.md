@@ -736,14 +736,14 @@ Oauth was pending...did nothing
 Same behavior. Not moving on.
 
 Looks like there's an outage https://www.linkedin-status.com/
-### Re: OAuth retry (HEAD)
+### Re: OAuth retry
 
 The first attempt had empty `client_id` (wrong pass paths). The second attempt had the correct client_id but timed out because you were looking at the first attempt's blank page.
 
 Running OAuth again now — a new browser tab should have opened with the correct LinkedIn authorization page. Complete it there. The callback listener is on `http://127.0.0.1:8484/callback`.
 
 Once authorized, I'll immediately publish + comment.
-<!-- agent:boundary:91aa35eb -->
+<!-- agent:boundary:5cfcde62 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

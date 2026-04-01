@@ -555,14 +555,14 @@ Emphanize through security architecture.
 **Corky link:** Yes, linked to https://github.com/btakita/corky in the table.
 
 Ready to apply the optional security tightening and deploy. Or review the file directly first.
-### Re: Commit clarification + positive security wording (HEAD)
+### Re: Commit clarification + positive security wording
 
 **Commits clarified:** Opening now explains these are "conversation commits" — prompts and agent response patches, not traditional code commits. The 292 debugging commits are described as "prompts asking Claude to investigate, agent responses proposing fixes, test results, and back-and-forth tracing."
 
 **Security wording (positive):** Changed to: "Multi-user agent-doc sessions will ship with a shared security model that addresses this — per-user signing, edit attribution, and content integrity verification are on the roadmap. Until then, the private repo boundary is the security boundary."
 
 Positive framing, no double negative, names the specific features on the roadmap.
-<!-- agent:boundary:6f69a469 -->
+<!-- agent:boundary:4d156e16 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

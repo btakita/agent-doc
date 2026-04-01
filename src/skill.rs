@@ -146,14 +146,19 @@ mod tests {
         assert!(BUNDLED_SKILL.contains("agent-doc"));
     }
 
+    /// Resolve expected skill path for the detected environment.
+    fn expected_path(dir: &std::path::Path) -> std::path::PathBuf {
+        config().skill_path(Some(dir))
+    }
+
     #[test]
     fn install_creates_file() {
         let dir = tempfile::tempdir().unwrap();
 
         install_at(Some(dir.path())).unwrap();
 
-        let path = dir.path().join(".claude/skills/agent-doc/SKILL.md");
-        assert!(path.exists());
+        let path = expected_path(dir.path());
+        assert!(path.exists(), "skill not found at {}", path.display());
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content, BUNDLED_SKILL);
     }
@@ -165,7 +170,7 @@ mod tests {
         install_at(Some(dir.path())).unwrap();
         install_at(Some(dir.path())).unwrap();
 
-        let path = dir.path().join(".claude/skills/agent-doc/SKILL.md");
+        let path = expected_path(dir.path());
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content, BUNDLED_SKILL);
     }
@@ -174,7 +179,7 @@ mod tests {
     fn check_not_installed() {
         let dir = tempfile::tempdir().unwrap();
 
-        let path = dir.path().join(".claude/skills/agent-doc/SKILL.md");
+        let path = expected_path(dir.path());
         assert!(!path.exists());
     }
 
@@ -182,7 +187,7 @@ mod tests {
     fn install_overwrites_outdated() {
         let dir = tempfile::tempdir().unwrap();
 
-        let path = dir.path().join(".claude/skills/agent-doc/SKILL.md");
+        let path = expected_path(dir.path());
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "old content").unwrap();
 

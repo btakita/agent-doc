@@ -3307,7 +3307,7 @@ This is overly conservative. The user's intent when navigating to a file in a sp
 Should I implement this? The change is in `sync.rs` line 467-468: remove the `Unmanaged` return and always treat UUID-bearing files as `Registered`.
 Yes...as we discussed earlier, autostarting new tmux + agent harness sessions should be guaranteed to not race.
 Should the agent-doc binary itself (not the editor plugin nor the ffi plugin) handle the locks and guards?
-### Re: Sync now auto-starts files with stale UUIDs (HEAD)
+### Re: Sync now auto-starts files with stale UUIDs
 
 Done. Removed the registry-entry guard from `sync.rs` `resolve_file`. Files with session UUIDs are now always treated as `Registered` — sync will auto-start new sessions for them even if the registry entry was pruned.
 
@@ -3318,7 +3318,7 @@ Done. Removed the registry-entry guard from `sync.rs` `resolve_file`. Files with
 The release binary is live. Try switching to corky.md in the right split — sync should now create a second tmux pane and auto-start a Claude session.
 
 You're right that I should have traced the `non_managed=1` signal from the sync output immediately rather than chasing plugin state. The log data was there.
-<!-- agent:boundary:a52894ed -->
+<!-- agent:boundary:5f685301 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

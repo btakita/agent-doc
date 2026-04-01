@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Stale baseline guard refined (component-aware, append-only). 13 new tests added. Release binary built.
+Busy pane guard implemented. Active Claude sessions protected from DETACH stashing. Release binary built.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1207,6 +1207,14 @@ Implement:
 
 The gap: `claim.rs` has `find_alive_project_window` that could locate alternate live panes, but `route.rs` doesn't use it in the routing path. This is a known architectural limitation.
 
+No...I meant this document...tasks/agent-doc/agent-doc-claim-error.md
+There was an active run. I switched the left editor to a non agent-doc file. I create robert-ross.md and moved corky.md from the left editor to the right editor side.
+The tmux window became a 1 pane layout...it should have remained 2 panes with the running agent-doc-claim-error.md session
+When I navigated the left pane back to agent-doc-claim-error.md, a new tmux pane + claude session was started.
+
+Implement:
+- [ ] **Session resume on document switch** — route.rs needs to reuse alive panes
+
 **Stale baseline guard — refined and tested.** The old guard used a prefix check (`starts_with`) that fired false positives when users edited content anywhere other than the end of the document.
 
 New approach:
@@ -1226,18 +1234,61 @@ New approach:
 - `log_op_no_panic_on_missing_project_root`: verifies graceful degradation
 
 All 382 tests pass. Release binary built.
-<!-- agent:boundary:d7a7ed5b -->
+Claude code has hooks. Not sure about other agent harnesses.
+This behavior may belong in agent-kit.
+### Re: Session collapse on document switch — busy pane guard (HEAD)
+
+Got it — the issue is clearer now. Here's the bug trace:
+
+1. You had a 2-pane layout: `agent-doc-claim-error.md` (left) + `corky.md` (right)
+2. You switched the left editor to a non-agent-doc file
+3. You created `robert-ross.md` and moved `corky.md` from left to right
+4. `sync.rs` received the new column layout → the old pane for `agent-doc-claim-error.md` wasn't in the `wanted` set
+5. tmux-router's DETACH phase stashed the pane (moved to stash window)
+6. When you navigated back, `route.rs` found the stashed pane was dead/stale → started a new session
+
+**Root cause:** tmux-router's `reconcile()` DETACH phase stashes any pane not in the `wanted` set — no matter what it's doing. A pane running an active Claude session gets stashed just like an idle one.
+
+**Column memory** (`.agent-doc/last_layout.json`) partially addresses this by substituting remembered agent docs for non-agent columns, but it breaks when:
+- The column structure changes fundamentally (you rearranged columns)
+- The remembered file no longer matches the column index
+- Multiple layout changes happen in quick succession
+
+**Fix implemented: busy pane guard**
+
+Added `SyncOptions.protect_pane` callback to tmux-router's sync API:
+- `tmux-router::sync_with_options()` — new variant accepting `SyncOptions`
+- `SyncOptions { protect_pane: Option<&dyn Fn(&str) -> bool> }` — callback checked during DETACH
+- When `protect_pane` returns `true`, the pane is skipped: `"skipped %123 — protected (busy pane)"`
+
+In agent-doc's `sync.rs`:
+- `is_pane_busy()` checks if a pane is running `agent-doc` or `claude` by inspecting the process tree (pane PID + child processes via `pgrep`/`ps`)
+- Passed as `protect_pane` callback to `sync_with_options`
+
+This protects active sessions at the DETACH level — even when column memory fails, busy panes stay in the agent-doc window.
+
+**Files changed:**
+- `src/tmux-router/src/sync.rs` — `SyncOptions`, `sync_with_options()`, protect_pane check in DETACH + empty-panes stash
+- `src/tmux-router/src/lib.rs` — re-export new types
+- `src/agent-doc/src/sync.rs` — `is_pane_busy()`, `pid_is_agent_session()`, wired into sync call
+- `src/agent-doc/Cargo.toml` — switched to path dependency for tmux-router (dev)
+
+All tests pass. Release binary built.
+
+**Note:** `Cargo.toml` uses `path = "../tmux-router"` for now. Before publishing, we'll need to publish tmux-router 0.3.7 first, then switch back to the registry version.
+<!-- agent:boundary:fc192eb4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **v0.29.0 shipped** + ops logging + Bug 1 v2 + preflight baseline + docs
-- [x] **Refine stale baseline guard** — now component-aware, only checks append-mode
-- [x] **Tests** for stale baseline guard (11) + ops logging (2) = 13 new tests
+- [x] **Refine stale baseline guard** — component-aware, append-only
+- [x] **Tests** for stale baseline guard (11) + ops logging (2)
+- [x] **Session resume on document switch** — busy pane guard in DETACH phase
+- [ ] **Publish tmux-router 0.3.7** (SyncOptions API) + switch agent-doc back to registry dep
 - [ ] **Bug 2A: Divergence check before auto-start**
 - [ ] **Bug 2B: Rollback guard in commit()**
-- [ ] **Session resume on document switch** — route.rs needs to reuse alive panes
 - [ ] **Multi-harness hooks** (agent-kit)
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)

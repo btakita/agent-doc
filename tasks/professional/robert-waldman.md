@@ -90,7 +90,7 @@ Ask Robert if he has any of the missing assets for the website.
 Implementing `corky contact delete` now.
 
 Robert Waldman contacts are merged.
-### Re: Email Draft & corky contact delete (HEAD)
+### Re: Email Draft & corky contact delete
 
 #### Email Draft Created
 
@@ -114,7 +114,7 @@ Tried deleting the duplicate (`c5045079896432711148`) — got 404, meaning it wa
 #### Google People API — No Native Merge
 
 The API has no merge endpoint. To merge: copy data from one contact to the other (`updateContact`), then delete the source (`deleteContact`). The Google Contacts web UI "Merge & fix" is still the easiest path for one-off merges.
-<!-- agent:boundary:32164ae4 -->
+<!-- agent:boundary:f7352aab -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

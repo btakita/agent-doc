@@ -3,6 +3,8 @@ agent_doc_session: aaca1487-6409-4c94-88d6-97b579485190
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
+links:
+  - ../professional/judith-krug.md
 ---
 
 Robert Ward is a long time friend who lives in LA.
@@ -609,5 +611,31 @@ Please transcribe + diarize:
 ### Re: Correction
 
 Corrected. You spent $400 on groceries at Whole Foods yourself.
-<!-- agent:boundary:10b4e719 -->
+
+Where are the 3 most recent transcript files?
+Please print the paths.
+### Re: Transcript file paths (HEAD)
+
+The 3 most recent **transcribed** recordings (.txt files):
+
+1. `mail/contacts/robert-ward/recordings/phone_20260328-001315_3109684542.txt`
+2. `mail/contacts/robert-ward/recordings/phone_20260328-000319_3109684542.txt`
+3. `mail/contacts/robert-ward/recordings/phone_20260327-212919_3109684542.txt`
+
+Note: The 3 most recent recordings (Apr 1, Mar 30 x2) don't have transcripts yet. You can generate them with `corky transcribe --diarize --speakers "Brian,Robert"`.
+
+What about the transcripts for?
+/home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260330-040607_3109684542.amr
+/home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260330-212922_3109684542.amr
+/home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260401-042624_3109684542.amr
+### Re: Transcript file paths (HEAD)
+
+The 3 most recent **transcribed** recordings (.txt files):
+
+1. `mail/contacts/robert-ward/recordings/phone_20260328-001315_3109684542.txt`
+2. `mail/contacts/robert-ward/recordings/phone_20260328-000319_3109684542.txt`
+3. `mail/contacts/robert-ward/recordings/phone_20260327-212919_3109684542.txt`
+
+Note: The 3 most recent recordings (Apr 1, Mar 30 x2) don't have transcripts yet. You can generate them with `corky transcribe --diarize --speakers "Brian,Robert"`.
+<!-- agent:boundary:9e8d402d -->
 <!-- /agent:exchange -->

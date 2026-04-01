@@ -477,6 +477,7 @@ Applying Robert's coaching (short, not alarming, just checking in):
 > Hi Judith, it's Brian. I noticed equityfundingsource.com appears to be down — were you aware? Just wanted to check before I start working on things. Hope you're doing well!
 
 Short, casual, non-alarming. Doesn't imply blame or urgency. Just a heads-up question.
+
 ### Re: Text Sent (2026-04-01)
 
 Noted — text to Judith about the website being down has been sent. Checked off from pending.
@@ -487,11 +488,30 @@ Noted — text to Judith about the website being down has been sent. Checked off
 3. Check in with Robert this afternoon
 
 Let me know when you want me to create the email draft file or if you're jumping to the website work first.
-<!-- agent:boundary:78cd2b22 -->
+
+Please draft a good response to Judith's last message
+/home/brian/work/btakita/agent-loop/mail/contacts/judith-krug/judith-krug-sms.txt
+Is "Ok" good or too short?
+### Re: SMS Response to Judith (2026-04-01) (HEAD)
+
+Judith's last text: "Hold on I'll find out At doctors appt now"
+
+"Ok" is too short — she just told you she's at a doctor's appointment. A brief acknowledgment that shows you heard her (not just the website part) is better:
+
+**Recommended:**
+> No rush at all, take your time! Hope the appointment goes well.
+
+**Alternatives:**
+- "No worries, take your time!" (shorter but still warm)
+- "Sounds good, no rush!" (minimal)
+
+All three are under Robert's 1-2 sentence guideline. The first option is best because it acknowledges the doctor visit, which shows attentiveness without being intrusive.
+<!-- agent:boundary:c4a99d6b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [x] Send text to Judith about website being down
+- [ ] Reply to Judith's "at doctors appt" text — draft ready, awaiting approval
 - [ ] Prepare email draft file (`mail/drafts/20260401-judith-call-followup.md`)
 - [ ] Website migration to Cloudflare ... website is DOWN, urgent deliverable for tonight
 - [ ] Check in with Robert this afternoon before the Judith call

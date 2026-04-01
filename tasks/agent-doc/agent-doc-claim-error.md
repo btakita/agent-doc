@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Transport abstraction designed. HookTransport trait + socket/tmux/MCP transports proposed.
+HookTransport trait + FileTransport + SocketTransport + ChainTransport implemented. 10 hooks tests total.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1789,16 +1789,49 @@ For the Claude Code side, we add a `settings.json` hook that fires on relevant e
 This bridges Claude Code's event model → agent-doc's hook bus → other sessions via transport.
 
 This is the right direction but it's a significant architectural piece. Recommend: ship the `HookTransport` trait + socket transport in agent-kit v0.3, then wire the Claude Code bridge as a follow-up.
-<!-- agent:boundary:8de44a1b -->
+Go
+### Re: HookTransport trait + implementations (HEAD)
+
+**Implemented.** `HookTransport` trait + 3 implementations + `fire_and_deliver` method.
+
+#### `HookTransport` trait (agent-kit)
+
+```rust
+pub trait HookTransport: Send + Sync {
+    fn deliver(&self, target_session: &str, event: &ReceivedEvent) -> Result<bool>;
+    fn is_available(&self, target_session: &str) -> bool;
+    fn name(&self) -> &str;
+}
+```
+
+#### Implementations
+
+1. **`FileTransport`** — writes event JSON to target's hook directory. Always available. Default fallback.
+2. **`SocketTransport`** — delivers via Unix domain socket (`<root>/.agent-doc/hooks.sock`). Sends JSON + newline, expects "ok"/"ack" response within 2s.
+3. **`ChainTransport`** — tries transports in order until one succeeds. Composes socket → file for graceful degradation.
+
+#### `HookRegistry` extensions
+
+- `deliver(transport, target_session, event)` — deliver a single event via transport
+- `fire_and_deliver(name, event, transport, target_sessions)` — fire locally AND deliver to listed sessions
+
+#### Tests (4 new, 10 total for hooks)
+
+- `file_transport_delivers_event` — round-trip fire+poll via FileTransport
+- `socket_transport_unavailable_when_no_socket` — graceful when socket missing
+- `chain_transport_falls_through` — socket (unavailable) → file (available) → success
+- `fire_and_deliver_fires_locally_and_delivers` — local fire + delivery to target
+
+All 31 agent-kit tests + 595 agent-doc tests pass. Release binary built.
+<!-- agent:boundary:241707df -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **agent-kit hooks** — file-based fire/poll, 6 tests
-- [x] **agent-doc hook integration** — post_write, post_commit wired in
-- [ ] **HookTransport trait** — abstract delivery mechanism (socket, tmux, MCP)
-- [ ] **SocketTransport** — extend existing IPC for hook delivery
+- [x] **HookTransport trait** — abstract delivery (file, socket, chain)
+- [x] **SocketTransport** — Unix domain socket delivery with ack
+- [ ] **Hook socket listener in agent-doc** — accept events on `.agent-doc/hooks.sock`
 - [ ] **Claude Code hook bridge** — PostToolUse settings.json → agent-doc hook fire
 - [ ] **Publish agent-kit v0.3** + switch agent-doc back to registry dep
 - [ ] **Blog post** about this debugging session

@@ -1217,7 +1217,7 @@ continue:
 - Implement speaker count constraint from `--speakers` length (one-line fix)
 - Add whisper repetition detection/suppression (post-processing)
 - Tune whisper no_speech_threshold for AMR audio
-### Re: Implementing fixes (HEAD)
+### Re: Implementing fixes
 
 All three fixes implemented and building now. Testing on the same 79-min call.
 
@@ -1236,14 +1236,26 @@ Added `collapse_repeated_phrases()` post-processing after `collect_whisper_segme
 Set `params.set_no_speech_thold(0.8)` (default was 0.6). More aggressive about marking silence as non-speech, which reduces hallucination on low-quality audio. Note: whisper-rs comment says "not implemented as of v1.3.0" but the field is set on the C struct -- likely works in newer whisper.cpp versions.
 
 Re-running transcription now to verify all three fixes.
-<!-- agent:boundary:5f234a8f -->
+### Re: Test results (HEAD)
+
+**Speaker count fix: working.** 2 speakers detected (Brian, Robert) vs 4 before. 495 lines vs 575 (-14%).
+
+**Repetition filter: needs improvement.** The "I'm going to call her tomorrow" hallucination persists because whisper generates *escalating* variants ("tomorrow tomorrow tomorrow..."), not exact n-gram repeats. The current filter catches exact repeated phrases but this is a different pattern -- each repetition adds more "tomorrow"s.
+
+Need a different approach for escalating repetitions:
+- Detect segments where a short phrase (e.g., "I'm going to call her tomorrow") appears with increasing word count appended
+- Or: detect abnormally high word frequency in a window (e.g., "tomorrow" appearing 30+ times in 200 words)
+
+**no_speech_thold: inconclusive.** Same transcript output -- the param may not be effective in whisper-rs 0.16 (comment says "not implemented as of v1.3.0"). Would need to compare word counts to confirm any effect.
+
+The speaker count fix is the clear win here. Want me to also improve the repetition detection for escalating patterns, or save that for later?
+<!-- agent:boundary:cd6a7384 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Verify speaker count fix (expect 2 speakers, not 4)
-- Verify repetition collapse works on the call
-- Verify no_speech_thold reduces hallucination
-- User switching Cube ACR from AMR to WAV/M4A format
+- Improve repetition detection for escalating whisper hallucinations
+- User switching Cube ACR from AMR to WAV/M4A format (biggest quality win)
+- Commit speaker count fix to corky repo
 <!-- /agent:pending -->

@@ -1278,7 +1278,7 @@ All tests pass. Release binary built.
 **Note:** `Cargo.toml` uses `path = "../tmux-router"` for now. Before publishing, we'll need to publish tmux-router 0.3.7 first, then switch back to the registry version.
 
 I notice that we no longer have the tmux window 1:stash. Where are the tmux panes currently stashed? How do we guarantee a tmux pane is not prematurely closed?
-### Re: Stash window and pane lifecycle (HEAD)
+### Re: Stash window and pane lifecycle
 
 **Current state:** No stash window exists. The `claude` session has only `agent-doc` window with 2 panes (%312, %308). Pane %306 (the one that was in stash running `robert-ross.md`) is **dead**.
 
@@ -1313,7 +1313,7 @@ The stash mechanism has three layers:
 - **Death:** Process exits (Claude session ends) → pane auto-closes → registry pruned by `resync`
 
 The busy pane guard prevents step "Stashed" from happening to panes with active sessions, which was the root cause of your document switch issue.
-<!-- agent:boundary:5a1839ed -->
+<!-- agent:boundary:3a5b50d6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

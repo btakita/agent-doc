@@ -3088,7 +3088,7 @@ This is an edge case in the exchange append flow — the user's approval text be
 
 The plugin zip is ready at `src/agent-doc/editors/jetbrains/build/distributions/`. Do you want to install it now, or is there anything else to address first?
 Is the JB plugin version incremented?
-### Re: Boundary/HEAD and plugin version (HEAD)
+### Re: Boundary/HEAD and plugin version
 
 **On the `(HEAD)` marker question:**
 
@@ -3110,7 +3110,7 @@ Can you clarify what you observed? Did the heading show no blue gutter (both com
 **On the JB plugin version:**
 
 No, I didn't increment it. Currently `0.2.36`. Should I bump to `0.2.37`?
-<!-- agent:boundary:f1ff7792 -->
+<!-- agent:boundary:e55498f6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -721,14 +721,14 @@ Read the full blog post. The security story is about **multiuser prompt injectio
 Ready to publish via corky. Say the word.
 
 publish
-### Re: Publishing (HEAD)
+### Re: Publishing
 
 Created draft at `/home/brian/Documents/mail/social/20260401-181027-linkedin.md`.
 
 LinkedIn OAuth needed first ... corky is running the auth flow now. A browser window should have opened for you to authorize. Once you complete the OAuth, I'll publish the post and add the first comment with the link.
 
 **Draft file:** `/home/brian/Documents/mail/social/20260401-181027-linkedin.md`
-<!-- agent:boundary:8c5f63fb -->
+<!-- agent:boundary:10793376 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

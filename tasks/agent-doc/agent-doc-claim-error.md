@@ -2389,7 +2389,7 @@ Updated the VS Code extension with matching reposition handling:
 - Long term: add Node FFI bindings (`koffi`) to VS Code extension, eliminating TS duplication and achieving true FFI-first parity.
 
 Let's add the koffi support.
-### Re: koffi FFI support added to VS Code extension (HEAD)
+### Re: koffi FFI support added to VS Code extension
 
 **New file: `editors/vscode/src/native.ts`**
 - `repositionBoundaryToEnd(doc)` — calls `agent_doc_reposition_boundary_to_end` via FFI
@@ -2408,7 +2408,7 @@ Let's add the koffi support.
 **`package.json`:** Added `koffi: ^2.9.0` dependency.
 
 Both editors now share the same FFI debounce tracker and reposition logic when koffi is available. The TS fallback ensures the extension works without native deps.
-<!-- agent:boundary:23c5a3f7 -->
+<!-- agent:boundary:42aed6a6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

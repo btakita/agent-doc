@@ -2821,7 +2821,7 @@ continue
 - `SPEC.md` — stash pane safety guarantee
 - `README.md` — fix subprocess count
 - Test: `purge_preserves_unregistered_agent_process_in_stash`
-<!-- agent:boundary:eba300ac -->
+<!-- agent:boundary:cf12c516 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

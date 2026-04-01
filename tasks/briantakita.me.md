@@ -744,7 +744,7 @@ Running OAuth again now — a new browser tab should have opened with the correc
 
 Once authorized, I'll immediately publish + comment.
 Looks like there's a LinkedIn outage. See https://www.linkedin-status.com/
-### Re: LinkedIn outage (HEAD)
+### Re: LinkedIn outage
 
 Got it. LinkedIn is having an outage per their status page. The OAuth callback won't complete until they're back up.
 
@@ -759,7 +759,7 @@ Got it. LinkedIn is having an outage per their status page. The OAuth callback w
 3. `! CORKY_LINKEDIN_CLIENT_ID="$(pass corky/linkedin/client_id)" CORKY_LINKEDIN_CLIENT_SECRET="$(pass corky/linkedin/client_secret)" corky linkedin comment /home/brian/Documents/mail/social/20260401-181027-linkedin.md "https://briantakita.me/posts/agent-security-multiuser-lessons/"`
 
 Or just trigger `/agent-doc tasks/briantakita.me.md` and tell me LinkedIn is back.
-<!-- agent:boundary:8c666e78 -->
+<!-- agent:boundary:5ccaf316 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

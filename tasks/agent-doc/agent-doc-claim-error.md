@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Bug 2A + 2B implemented. IPC snapshot failures non-fatal; commit auto-recovers divergence.
+Bug 2B regression fixed (component-aware divergence check). Multi-harness hooks assessed.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1553,26 +1553,52 @@ All 592 tests pass. Release binary built.
 Just saw...why?
 > ● No changes detected in the document. Nothing to respond to.
 
-<!-- agent:boundary:d004adad -->
 Reasking...this was lost in the previous "No changes detected" bug:
 How would Multi-harness hooks be implemented?
 Can agent-doc take advantage of these hooks to better deterministic event handling?
+### Re: Bug 2B regression fix + multi-harness hooks (HEAD)
+
+**Bug 2B regression found and fixed.** The divergence detection in `commit()` was using a `starts_with` check that fails for template documents — user edits inside components push closing tags to different positions, making the check always trigger. This caused the snapshot to be overwritten with file content (including user edits) on every commit, making the next preflight see no diff.
+
+**Fix:** Replaced the `starts_with` check with `is_stale_baseline()` (component-aware). This correctly distinguishes:
+- User added text inside exchange component → NOT diverged (additive edit, append-mode content still present)
+- Missing agent response in snapshot → DIVERGED (append-mode component missing committed content)
+
+Also cleaned up: made `is_stale_baseline` directly `pub` instead of adding a wrapper function.
+
+**Your questions were committed by the bug** — the divergence detection baked them into the snapshot during the previous two commit cycles. They're now part of the committed state.
+
+---
+
+#### Multi-harness hooks
+
+Multi-harness hooks (agent-kit) would let multiple agent-doc sessions coordinate. The concept:
+
+1. **Shared event bus**: agent-kit provides a hook registry where sessions register interest in events (file changes, component updates, git commits)
+2. **Cross-session triggers**: When session A writes to a shared component, sessions B and C get notified
+3. **Deterministic ordering**: Hooks fire in a defined order (priority + registration time), preventing race conditions between sessions
+
+**How agent-doc would use them:**
+
+- **Pre-write hook**: Before writing, check if another session is mid-write to the same file → queue instead of conflict
+- **Post-commit hook**: After committing, notify linked documents that their upstream changed
+- **Layout hook**: When sync moves panes, notify affected sessions to refresh their state
+- **Claim hook**: When a file is claimed, notify any session that was working on it
+
+Current state: agent-kit 0.2 exists but doesn't have the hook registry yet. This would be a v0.3 feature. The value is highest when running 3+ concurrent sessions on related documents.
+<!-- agent:boundary:af54472d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **v0.29.0 shipped** + ops logging + Bug 1 v2 + preflight baseline + docs
+- [x] **v0.29.0 shipped** + all bug fixes + docs + tmux-router 0.3.7
 - [x] **Refine stale baseline guard** — component-aware, append-only (11 tests)
-- [x] **Ops logging tests** (2 tests)
-- [x] **Session resume on document switch** — busy pane guard in DETACH + layout.rs
+- [x] **Session resume on document switch** — busy pane guard
 - [x] **Fix auto-start race** — startup lock with 5s TTL
-- [x] **Docs updated** — SPEC.md, README.md
-- [x] **Audit docs** — 5 → 3 issues
-- [x] **Publish tmux-router 0.3.7** + registry dep restored
-- [x] **Bug 2A** — IPC snapshot save failure now non-fatal with warning
-- [x] **Bug 2B** — commit auto-recovers snapshot/file divergence
-- [ ] **Multi-harness hooks** (agent-kit)
+- [x] **Bug 2A** — IPC snapshot save failure now non-fatal
+- [x] **Bug 2B** — commit divergence detection (fixed regression: now component-aware)
+- [ ] **Multi-harness hooks** (agent-kit v0.3 — hook registry + cross-session coordination)
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)
 <!-- /agent:pending -->

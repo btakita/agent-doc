@@ -3,6 +3,9 @@ agent_doc_session: 9f4d7cf6-4c6c-4c61-b52f-12e9c5908e20
 tmux_session: '0'
 agent_doc_format: template
 agent_doc_write: crdt
+links:
+  - ../personal/robert-ward.md
+  
 ---
 
 # Judith Krug — Equity Funding Source
@@ -326,4 +329,10 @@ Please have corky transcribe use --gpu on this machine by default. Set CLAUDE.lo
 - Created `src/corky/CLAUDE.local.md` with build instructions and transcription defaults
 - No skill needed — it's a build-time setting, not a runtime flag
 The reply looks good. Full send.
+
+Please read the transcript for the last phone call with robert-ward. Come up with a plan for today.
+I will start with Judith's website. Also need to plan Ragie integration with Judith's at equity-fundng-source.
 <!-- /agent:exchange -->
+
+<!-- agent:pending patch=replace -->
+<!-- /agent:pending -->

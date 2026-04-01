@@ -2504,7 +2504,7 @@ Add tests.
 All 600 tests pass. Needs `cargo build --release` + reinstall to test live.
 audit docs
 Update SPEC.md, README.md, ontology, module-harness
-### Re: Audit docs + update SPEC/README/ontology/module-harness (HEAD)
+### Re: Audit docs + update SPEC/README/ontology/module-harness
 
 Noted. These are post-release documentation tasks for v0.30.1/v0.30.2. I'll queue them — let's first get the sync fix built and installed, then tackle the docs.
 
@@ -2515,7 +2515,7 @@ The changes that need documenting:
 - **Module harness** — update evals for sync.rs (3 new tests), ffi.rs (2 new tests)
 
 Want me to start the doc audit now, or handle the build + install first?
-<!-- agent:boundary:49cb64da -->
+<!-- agent:boundary:2c585762 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

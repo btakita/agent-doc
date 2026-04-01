@@ -2613,7 +2613,7 @@ Note .agent-doc/config.toml has `tmux_session = "5"`
 
 Now tmux session 5 is gone. Why?
 We need a way to recover the agent-doc tmux pane. Can we have a way to move the
-### Re: 1-pane layout stuck + session migration (HEAD)
+### Re: 1-pane layout stuck + session migration
 
 **Root cause:** Two bugs in route.rs and claim.rs caused a cascading session migration.
 
@@ -2631,7 +2631,7 @@ We need a way to recover the agent-doc tmux pane. Can we have a way to move the
 - Both panes (%348 and %343) are back in `5:agent-doc`
 
 All 389 tests pass. Binary reinstalled.
-<!-- agent:boundary:825540f7 -->
+<!-- agent:boundary:b75427c5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

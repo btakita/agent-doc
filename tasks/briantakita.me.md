@@ -188,7 +188,7 @@ tags:
   - agentic-programming
 ---
 
-# When AI Agents Leak Your Secrets: Security Lessons from a Livestreamed Coding Session (HEAD)
+# When AI Agents Leak Your Secrets: Security Lessons from a Livestreamed Coding Session
 
 I spent a day building with AI agents while livestreaming. By the end of it, I'd leaked a Google OAuth refresh token and a crate registry credential — both on camera. I also uncovered a cascade of tmux session management bugs that turned a clean workspace into a pane proliferation nightmare. The debugging session that followed taught me more about multi-user agent security than any threat model ever could.
 
@@ -307,7 +307,7 @@ The tools are better for it. The security posture is better for it. And I have a
 ```
 
 Let me know what you'd like to adjust — tone, length, emphasis, additional details, or anything to cut.
-<!-- agent:boundary:de3853ef -->
+<!-- agent:boundary:a85187c9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

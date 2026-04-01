@@ -344,7 +344,7 @@ Completely reworked the framing. The incidents happened in **private sessions** 
 - **Closing**: Tension between traceability-as-feature and traceability-as-risk — "Build the audit trail first. Then make sure you control who can read it."
 
 Full revised draft (v3) is in the console output above.
-<!-- agent:boundary:2b801f39 -->
+<!-- agent:boundary:8f0b64fb -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

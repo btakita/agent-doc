@@ -1486,7 +1486,7 @@ Please help me strategically schedule a good time.
 Clean separation, no conflicts, respectful times for both Bay Area contacts. Want me to draft a reschedule message to Bob?
 
 Would 11:30 Eastern be better? I believe Bob has an appointments between 12:30 and 13:30.
-### Re: 11:30 ET is better (HEAD)
+### Re: 11:30 ET is better
 
 Yes, **11:30 AM ET / 8:30 AM PT** is the better call. If Bob has 12:30-1:30 PM ET blocked, a noon start would butt right up against it with no buffer. 11:30 gives:
 
@@ -1503,7 +1503,7 @@ Yes, **11:30 AM ET / 8:30 AM PT** is the better call. If Bob has 12:30-1:30 PM E
 | 4:00 PM | 1:00 PM | Robert Ross call |
 
 Want me to draft the reschedule message to Bob for the 11:30 AM ET slot?
-<!-- agent:boundary:79d25436 -->
+<!-- agent:boundary:e2cb5cf5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

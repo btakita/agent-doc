@@ -695,7 +695,7 @@ Next step: build release binary and resync to populate the 297 empty emails. Wan
 audit docs
 add tests
 update SPEC.md, README.md, ontology, module-harness
-### Re: Audit docs, add tests, update SPEC/README (HEAD)
+### Re: Audit docs, add tests, update SPEC/README
 
 Working through the checklist:
 
@@ -715,7 +715,7 @@ No changes needed — sync behavior details live in AGENTS.md/SPEC.md, not READM
 Adding note about HTML→markdown body extraction.
 
 Working...
-### Re: Audit docs, add tests, update SPEC/README (done) (HEAD)
+### Re: Audit docs, add tests, update SPEC/README (done)
 
 All complete. `make check` passes (239 tests), `corky audit-docs` clean.
 
@@ -739,7 +739,7 @@ All complete. `make check` passes (239 tests), `corky audit-docs` clean.
 **README.md**: No changes needed — sync details live in SPEC.md/AGENTS.md.
 
 **Module harness / ontology**: Not applicable — no new modules or ontology terms introduced. This is a behavior change within existing sync modules.
-<!-- agent:boundary:4cd64d4a -->
+<!-- agent:boundary:1b1d76b8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

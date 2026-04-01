@@ -592,12 +592,12 @@ The blog post file existed but wasn't registered. `post/index.ts` is a generated
 
 For localhost: restart `bun run dev` to pick up the change. CI should now deploy with the post included.
 This should either be a precommit hook or part of the build. or
-### Re: Reindex as part of release (HEAD)
+### Re: Reindex as part of release
 
 Added `bun post/index.generate.ts` as a CI step in `deploy.yml`, right before the build. Now new blog posts will always be included in the build even if the local `index.ts` wasn't regenerated before pushing.
 
 Committed and pushed to briantakita.me-dev. The CI push will also trigger a fresh deploy with the regenerated index — so this should also fix the current deploy.
-<!-- agent:boundary:ff7f0b59 -->
+<!-- agent:boundary:2c1435c6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

@@ -2590,7 +2590,7 @@ The binary is already rebuilt and installed with this fix.
 Add tests
 audit docs
 Update SPEC.md, README.md, ontology, module-harness
-### Re: Tests, audit docs, doc updates (HEAD)
+### Re: Tests, audit docs, doc updates
 
 **Tests added:**
 - `purge_preserves_unregistered_agent_process_in_stash` — verifies idle shells in stash are still killed (regression check) while agent processes would be skipped
@@ -2604,7 +2604,7 @@ Update SPEC.md, README.md, ontology, module-harness
 **Audit docs:** All clean (1 pre-existing warning about large table in CLAUDE.md).
 
 **All 389 tests pass.** Binary reinstalled.
-<!-- agent:boundary:351a0072 -->
+<!-- agent:boundary:b8f52d11 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

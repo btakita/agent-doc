@@ -606,7 +606,7 @@ Should this behavior be extracted to a common dependency such as either:
 - agent-kit?
 - instruction-files?
 - a new common dependency?
-### Re: html2text shared dependency (HEAD)
+### Re: html2text shared dependency
 
 Checked the code:
 
@@ -647,7 +647,7 @@ fn extract_body_from_parts(parts: &[Part], token: &str, message_id: &str) -> Str
 ```
 
 Same pattern for `imap_sync.rs`. Want me to implement it?
-<!-- agent:boundary:5ef6b82f -->
+<!-- agent:boundary:749b6817 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

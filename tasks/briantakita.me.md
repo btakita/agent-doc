@@ -346,14 +346,14 @@ Completely reworked the framing. The incidents happened in **private sessions** 
 Full revised draft (v3) is in the console output above.
 
 Please draft to a file.
-### Re: "Did I not already address this?" (HEAD)
+### Re: "Did I not already address this?"
 
 You're right — you told me this earlier and I should have gotten it right the first time. Apologies for the extra round-trip.
 
 The v3 draft (from two cycles ago) already has the correct framing: no livestream, no screencast, incidents discovered through commit history review, private repo. That summary bullet was describing changes already applied, not proposing new ones.
 
 v3 is the current draft. Ready to create the `.md` file, or let me know what else to adjust.
-<!-- agent:boundary:aec55a19 -->
+<!-- agent:boundary:355fac42 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

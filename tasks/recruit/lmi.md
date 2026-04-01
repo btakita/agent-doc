@@ -924,14 +924,28 @@ Yes...apply.
 Updated line 21 in the draft. Now reads:
 
 > "The deterministic binary (Rust) handles reliable operations (merging, snapshots, git) while the skill layer handles reasoning. Both produce auditable output."
-<!-- agent:boundary:9698061d -->
+
+Cancel send.
+Should we include others in this email? Or just Josh?
+### Re: Email Recipients (HEAD)
+
+Send still cancelled.
+
+**Just Josh.** The email is a direct follow-up on his specific interest in agent-doc's document generation. Including others would dilute the personal connection — everything in the email references things Josh said or wrote.
+
+If you want to reach others later, separate emails with tailored angles:
+- **Adam**: context engineering, composable primitives, security
+- **Luke**: product-level roadmap alignment
+- **Andrew**: frontend/full-stack (would need frontend content)
+
+But the Josh email is the highest-value follow-up based on interview signals.
+<!-- agent:boundary:1669d7c0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Send Josh Malloy follow-up email (on hold)
+- [ ] Send Josh Malloy follow-up email (on hold — reviewing)
 - [ ] agent-doc README: security section (single-user, prompt injection)
 - [ ] Corky: HTML body extraction for emails
-- [x] Binary/audit framing corrected
 <!-- /agent:pending -->

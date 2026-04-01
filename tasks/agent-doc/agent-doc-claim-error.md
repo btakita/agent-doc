@@ -3129,7 +3129,8 @@ Yes
 All tests pass (`make check` clean).
 
 Add tests.
-aud
+audit docs
+Update SPEC.md, README.md, ontology, module-harness
 
 **On the startup lock question:**
 
@@ -3151,7 +3152,32 @@ The old step 1 was harmless when it succeeded (sync would fix the layout anyway)
 So the plugin update isn't fixing sync (which works), it's removing the claim call that was causing the problem you reported. Without the update, Ctrl+Shift+Alt+C still runs the broken claim flow first.
 
 The `(HEAD)` marker fix is in the Rust binary, not the plugin — that takes effect with `cargo build --release`.
-<!-- agent:boundary:d920d837 -->
+
+Selected the right editor (corky.md)...should declaratively cause the tmux pane layout to align. But it does not. Why?
+### Re: Why selecting corky.md doesn't trigger sync (HEAD)
+
+**Root cause:** The **busy guard** in `EditorTabSyncListener.kt` (lines 81-93) blocks sync for ALL files if ANY visible file is busy:
+
+```kotlin
+val anyBusy = visibleMdFiles.any { lib.agent_doc_is_busy(absPath) }
+if (anyBusy) { return@Thread } // skips entire sync
+```
+
+Since this agent-doc session is running on `agent-doc-claim-error.md`, `is_busy()` returns `true`, and the entire layout sync is skipped — even though the layout change was about corky.md in the other split.
+
+**Fix options:**
+
+A. **Remove the busy guard entirely** — sync is safe to run during agent-doc sessions. The `agent-doc sync` command itself handles concurrent operations (startup locks, registry locks). The busy guard was added to prevent layout cascade during writes, but writes use IPC (no disk writes that would trigger file watchers).
+
+B. **Make the busy guard file-specific** — only skip sync if the *focused* file is busy, not if any visible file is busy. This preserves the cascade protection while allowing layout changes for other files.
+
+C. **Narrow to write-busy only** — add a separate `is_write_busy()` FFI function that only returns true during active writes (not during the entire session). Sync during idle session time is safe.
+
+I'd recommend **A** (remove entirely) since `agent-doc sync` already has its own concurrency guards. The plugin-side busy guard is redundant and causes this exact failure mode. Want me to implement that?
+
+On the other items:
+- Tests, audit docs, SPEC.md, module-harness updates — I'll queue those after the sync fix.
+<!-- agent:boundary:52ddb7f1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -3161,6 +3187,9 @@ The `(HEAD)` marker fix is in the Rust binary, not the plugin — that takes eff
 - [x] claim.rs: add registry protection against overwriting existing sessions
 - [x] git.rs: fix (HEAD) marker not added for duplicate heading text
 - [x] Bump JB plugin version to 0.2.37
-- [ ] `cargo build --release` in agent-doc submodule (for HEAD marker fix)
-- [ ] Install updated JetBrains plugin (for ClaimAction fix)
+- [ ] Fix busy guard blocking sync for non-busy files
+- [ ] `cargo build --release` in agent-doc submodule
+- [ ] Install updated JetBrains plugin
+- [ ] Add tests for occurrence-counting HEAD marker logic
+- [ ] Audit docs (SPEC.md, README.md, ontology, module-harness)
 <!-- /agent:pending -->

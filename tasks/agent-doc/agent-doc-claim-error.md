@@ -1152,7 +1152,7 @@ continue:
 **SPEC.md Section 6.6 added:** "Document State Model (4 States)" with table showing snapshot, baseline, file on disk, and editor buffer. Includes consistency invariants and staleness risk documentation.
 
 Both committed and pushed.
-<!-- agent:boundary:4c9d325d -->
+<!-- agent:boundary:cd6d4498 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

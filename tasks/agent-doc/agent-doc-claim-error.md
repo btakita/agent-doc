@@ -1881,7 +1881,7 @@ All 595 tests pass. Release binary built and verified.
 agent-kit:
 audit docs
 Update SPEC.md, README.md, ontology, module-harness
-### Re: agent-kit v0.3.0 published + docs updated (HEAD)
+### Re: agent-kit v0.3.0 published + docs updated
 
 **agent-kit v0.3.0 published to crates.io** with hooks module.
 
@@ -1898,7 +1898,7 @@ Update SPEC.md, README.md, ontology, module-harness
 **Audit docs:** 5 → 2 issues. Remaining: large table warning (informational), SKILL.md staleness (managed by binary).
 
 All tests pass. Release binary deployed.
-<!-- agent:boundary:1bfc8790 -->
+<!-- agent:boundary:3de9b080 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -904,7 +904,7 @@ All 252 tests pass.
 do:
 - crates.io token — renew and publish corky
 - VERSIONS.md — add entry before next release
-### Re: VERSIONS.md + crates.io publish (HEAD)
+### Re: VERSIONS.md + crates.io publish
 
 **VERSIONS.md updated** — added 4 entries under 0.23.0:
 - HTML-first email body extraction
@@ -930,7 +930,7 @@ do:
 - `tests/test_sync.rs` (tracking field in test structs)
 
 Ready to commit inside `src/corky/`, then publish. Want me to proceed with the commit?
-<!-- agent:boundary:7e8742fb -->
+<!-- agent:boundary:6c97cab7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

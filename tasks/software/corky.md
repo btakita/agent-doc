@@ -587,7 +587,7 @@ Refetched thread `19d479af292d8d99` via `corky sync refetch`. The email body was
 
 Please go through synchronized emails in /home/brian/work/btakita/agent-loop/mail/conversations
 Note which ones have an empty body. Please resync those email threads.
-### Re: Email body resync (HEAD)
+### Re: Email body resync
 
 Scanned all conversation files in `mail/conversations/` — found **555 emails with empty bodies**.
 
@@ -598,7 +598,7 @@ Ran `corky sync refetch` on all 555 threads (0 errors).
 - **297** remain empty — these are HTML-only emails (newsletters, marketing, tracking pixels) where the original message had no plain-text part. Corky stored the raw HTML but the body detection script considers them empty since they're just markup, not readable text.
 
 The 297 remaining empty ones are a potential corky improvement — an html2text fallback for emails that only have `text/html` MIME parts. This would extract readable content from HTML-only emails during sync.
-<!-- agent:boundary:a465bb72 -->
+<!-- agent:boundary:b53cfb93 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -942,7 +942,7 @@ All done:
 5. **Installed** `~/.cargo/bin/corky` with CUDA support
 6. **Updated** [GitHub Release](https://github.com/btakita/corky/releases/tag/v0.23.0) with new notes + CUDA binary
 7. **Updated** parent agent-loop submodule pointer
-### Feature: `corky transcribe` — Adaptive Chunked Diarization with Unknown Attribution (HEAD)
+### Feature: `corky transcribe` — Adaptive Chunked Diarization with Unknown Attribution
 
 **Problem:** pyannote-rs diarization fails (0 segments detected) on long audio files and on very short segments (<30s). This leaves speaker turns attributed to "Unknown".
 
@@ -967,7 +967,7 @@ All done:
 - Automatic chunking cascade: full -> 10min -> 2min -> 30s
 - Reassembly with frontmatter stripping
 - LLM inference step could be a separate `corky transcribe --resolve-unknown` post-processing pass
-<!-- agent:boundary:8cffacc0 -->
+<!-- agent:boundary:645e745a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

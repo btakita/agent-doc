@@ -930,12 +930,23 @@ do:
 - `tests/test_sync.rs` (tracking field in test structs)
 
 Ready to commit inside `src/corky/`, then publish. Want me to proceed with the commit?
-<!-- agent:boundary:6c97cab7 -->
+go
+### Re: Published corky v0.23.0 (HEAD)
+
+All done:
+
+1. **Committed** 12 files to corky submodule (576 insertions, 27 deletions)
+2. **Pushed** to `btakita/corky` main
+3. **Moved tag** v0.23.0 forward to HEAD
+4. **Published** to [crates.io](https://crates.io/crates/corky/0.23.0)
+5. **Installed** `~/.cargo/bin/corky` with CUDA support
+6. **Updated** [GitHub Release](https://github.com/btakita/corky/releases/tag/v0.23.0) with new notes + CUDA binary
+7. **Updated** parent agent-loop submodule pointer
+<!-- agent:boundary:a3bb7f01 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - Respond to Rob Ross (Dreamable) — schedule meeting Wed/Thu 12-4pm PT
-- **corky: commit + publish 0.23.0** — commit submodule changes, cargo publish, update GitHub release
 <!-- /agent:pending -->

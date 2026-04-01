@@ -2704,7 +2704,7 @@ agent-doc session set <N>  # Update config + move agent-doc & stash windows
 - Both bulk and non-bulk purge variants fixed
 
 All 601 tests pass. Binary installed.
-<!-- agent:boundary:d6e55812 -->
+<!-- agent:boundary:877699d6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

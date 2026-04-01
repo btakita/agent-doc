@@ -519,12 +519,12 @@ The git log is in a private repo...so nobody can check other than me...I hope :-
 > Full post: [link]
 
 Ready to build and deploy when you are. Want me to build briantakita.me locally to preview?
-### Re: Private git log (HEAD)
+### Re: Private git log
 
 Removed the "check the git log" link — can't verify a private repo. Now just: *"Yes, this is dated April 1st. The 532 commits are real."*
 
 Simple, confident, no empty promises. :-)
-<!-- agent:boundary:c443cc1e -->
+<!-- agent:boundary:86a3939e -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

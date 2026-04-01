@@ -2365,7 +2365,7 @@ All 597 tests pass.
 You missed my prompt:
 Please update the VSCode plugin as well to match the logic.
 We need a way to always ensure that the editor plugins are edited in lock-step. Prefer FFI plugin logic.
-### Re: VS Code plugin updated + lock-step strategy (HEAD)
+### Re: VS Code plugin updated + lock-step strategy
 
 Updated the VS Code extension with matching reposition handling:
 
@@ -2387,7 +2387,7 @@ Updated the VS Code extension with matching reposition handling:
 **On FFI-first lock-step:**
 - Short term: both plugins handle the same IPC protocol. Reposition logic is simple enough that TS duplication is low-risk.
 - Long term: add Node FFI bindings (`koffi`) to VS Code extension, eliminating TS duplication and achieving true FFI-first parity.
-<!-- agent:boundary:de7d49bf -->
+<!-- agent:boundary:777d06c5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -613,10 +613,10 @@ With your understand of Judith's business...please come up with a list of prompt
 - "What's my investor utilization rate ... how many investors have funded a deal in the last year?"
 
 **The pitch angle:** These queries currently require Judith or her staff to manually dig through files, emails, and Dropbox. With Ragie, it's a 10-second phone query. For a one-person brokerage handling millions in deals, that's transformative.
-### Re: Prompts vs Queries (HEAD)
+### Re: Prompts vs Queries
 
 Good call on "prompts" over "queries" — it frames the Ragie interaction as talking to an AI assistant rather than running database queries, which is more intuitive for Judith. The examples above all work as natural-language prompts. When presenting to Judith, use language like "you just ask it" or "you tell it what you need" rather than "query" or "search."
-<!-- agent:boundary:0e2f5a83 -->
+<!-- agent:boundary:d3c6f34c -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

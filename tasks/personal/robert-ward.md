@@ -524,7 +524,7 @@ Please transcribe + diarize:
 /home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260330-040607_3109684542.amr
 /home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260330-212922_3109684542.amr
 /home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260401-042624_3109684542.amr
-### Re: Transcriptions (Mar 30 - Apr 1, 2026) (HEAD)
+### Re: Transcriptions (Mar 30 - Apr 1, 2026)
 
 **Call 1: Mar 30, 4:06am ET (37:38)** — Diarization failed (single-channel AMR)
 - Robert spent 2+ hours with Judith at biohacking expo, introduced her to his network. They bonded.
@@ -565,5 +565,5 @@ Please transcribe + diarize:
 - Retainer strategy: $4K ideal (40 hrs), $2K fallback
 - Ragie integration is the immediate deliverable (document OCR + AI search for all Judith's business docs)
 - Next step: Robert calling Judith Thu/Fri, getting Brian on the call
-<!-- agent:boundary:6ad78e7f -->
+<!-- agent:boundary:ff6f43de -->
 <!-- /agent:exchange -->

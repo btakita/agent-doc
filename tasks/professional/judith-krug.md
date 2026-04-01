@@ -335,7 +335,7 @@ I will start with Judith's website. Also need to plan Ragie integration with Jud
 ### Re: Bob Remeika Link Added
 
 Linked `./bob-remeika.md` — Bob Remeika (CEO, Ragie) is now a related contact for this document. This ties into the Ragie RAG integration planned for equityfundingsource.com. When ready to scope that work, the bob-remeika doc and `tasks/software/ragie-web-doc.md` have the Ragie context.
-<!-- agent:boundary:a33437b2 -->
+<!-- agent:boundary:fbfe893b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

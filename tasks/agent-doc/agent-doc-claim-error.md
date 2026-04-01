@@ -1477,7 +1477,7 @@ Steps completed:
 Reassess...should we implement?:
 - [ ] **Bug 2A: Divergence check before auto-start**
 - [ ] **Bug 2B: Rollback guard in commit()**
-### Re: Reassessment of Bug 2A and Bug 2B (HEAD)
+### Re: Reassessment of Bug 2A and Bug 2B
 
 **Bug 2A: Divergence check before auto-start**
 
@@ -1511,7 +1511,7 @@ The remaining scenario: IPC write succeeds (plugin applies patch) but the Rust p
 ---
 
 **Summary:** Both bugs are edge cases narrowed by this session's work. Neither is actively causing issues. Recommend moving to the queue for the next session.
-<!-- agent:boundary:ba82425f -->
+<!-- agent:boundary:f09f8374 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

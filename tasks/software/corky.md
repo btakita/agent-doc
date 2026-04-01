@@ -678,7 +678,7 @@ Ready to implement. The change touches:
 
 Want me to go ahead?
 Implement
-### Re: Implementation complete (HEAD)
+### Re: Implementation complete
 
 Done. All tests pass (235+).
 
@@ -692,7 +692,7 @@ Done. All tests pass (235+).
 **Behavior change:** Emails with both `text/html` and `text/plain` parts now get the HTML version converted to markdown (preserving links, formatting). Emails with only `text/plain` still work as before. The 297 previously empty HTML-only emails will now have readable content on next sync.
 
 Next step: build release binary and resync to populate the 297 empty emails. Want me to proceed?
-<!-- agent:boundary:32663720 -->
+<!-- agent:boundary:d19571e9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

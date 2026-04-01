@@ -617,7 +617,7 @@ Now both layers are in place:
 ### Re: Index in the commit?
 
 Yes. The hook runs `git add post/index.ts` after regeneration, so the updated index is staged and lands in the same commit as the blog post file.
-<!-- agent:boundary:1b5feb94 -->
+<!-- agent:boundary:58b942db -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

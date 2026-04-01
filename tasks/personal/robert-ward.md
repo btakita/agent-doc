@@ -685,5 +685,21 @@ Split the remaining Unknown 2-min segments into 30-second micro-chunks. Results:
 More diarized speaker turns recovered from the 30s-90s range. The remaining 3+1 Unknown segments are all exactly `[00:00:00 -> 00:00:30]` -- the first 30 seconds of each boundary where pyannote simply can't build speaker embeddings. This is the hard floor for this diarization approach.
 
 The transcripts are updated in place. Those first-30s Unknown blocks are just a few sentences of audio each.
-<!-- agent:boundary:462d3b1e -->
+
+Can we use the transcribed content to infer who said what?
+### Re: Inferring Unknown speakers (HEAD)
+
+Read the content of each Unknown segment and used context clues to attribute them:
+
+1. **Apr 1 #1** (call opening): "hello hey Robert good morning" -- Brian initiating the call → **Brian**
+2. **Apr 1 #2** (10min): "paid because I got a lot of people starting to help me... including Brooke's sister" -- references Brooke (Brian's partner) → **Brian**
+3. **Apr 1 #3** (18min): "yeah I need the money... I don't mean to be like desperate" -- continuation of Brian's financial discussion → **Brian**
+4. **Mar 30 AM #1** (call opening): "Hey. Hey. It seems that I have two numbers for you" -- Brian talking to Robert about saved contacts → **Brian**
+
+All 4 Unknown segments replaced with **Brian**. Final counts:
+- **Apr 1:** 164 Brian + 152 Robert + 0 Unknown
+- **Mar 30 AM:** 102 Brian + 96 Robert + 0 Unknown
+
+100% speaker attribution across all 3 transcripts.
+<!-- agent:boundary:3648d7ae -->
 <!-- /agent:exchange -->

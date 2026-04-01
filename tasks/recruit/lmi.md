@@ -927,7 +927,7 @@ Updated line 21 in the draft. Now reads:
 
 Cancel send.
 Should we include others in this email? Or just Josh?
-### Re: Email Recipients (HEAD)
+### Re: Email Recipients
 
 Send still cancelled.
 
@@ -939,7 +939,7 @@ If you want to reach others later, separate emails with tailored angles:
 - **Andrew**: frontend/full-stack (would need frontend content)
 
 But the Josh email is the highest-value follow-up based on interview signals.
-<!-- agent:boundary:1669d7c0 -->
+<!-- agent:boundary:3e47a5a8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

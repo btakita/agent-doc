@@ -2612,7 +2612,6 @@ It should have stayed in tmux session 5.
 Note .agent-doc/config.toml has `tmux_session = "5"`
 
 Now tmux session 5 is gone. Why?
-We need a way to recover the agent-doc tmux pane. Can we have a way to move the
 ### Re: 1-pane layout stuck + session migration
 
 **Root cause:** Two bugs in route.rs and claim.rs caused a cascading session migration.
@@ -2631,14 +2630,30 @@ We need a way to recover the agent-doc tmux pane. Can we have a way to move the
 - Both panes (%348 and %343) are back in `5:agent-doc`
 
 All 389 tests pass. Binary reinstalled.
-<!-- agent:boundary:b75427c5 -->
+
+We probably should have a way in the
+### Re: Config keeps resetting to "1" (HEAD)
+
+Config got overwritten to `tmux_session = "1"` again after I fixed it. This is likely from the **old binary** still running in stashed panes %353 and %352 — they have the pre-fix code that auto-updates config in claim.rs. The new binary (with the fix) is installed but those stashed sessions are still running the old binary from memory.
+
+The fix code I applied prevents new claim/route operations from overwriting config. But the stashed sessions are old processes that still have the bug. Once those stashed sessions are killed or replaced, the config will stay stable.
+
+**Current state:**
+- Session 5 is alive and attached (2 windows: agent-doc + stash)
+- Both panes %348 and %343 are in `5:agent-doc`
+- Config reset to `tmux_session = "5"` (again)
+- The old stashed sessions (%353, %352) may continue overwriting until killed
+
+There are also two legitimate fallback paths in route.rs (lines 144-155 and 488-499) that update config when the configured session is dead. These are safe — they only fire when session 5 doesn't exist. Not a concern right now since session 5 is alive.
+<!-- agent:boundary:cdd531c5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- **Kill stashed old-binary sessions** — %353 and %352 running old agent-doc binary that overwrites config
 - **Commit all changes** — resync fix + route fix + claim fix + test in agent-doc submodule
-- **Unused variable warnings** — 7 in route.rs + 1 in template.rs (prefix with `_`)
-- **Module harness** — update evals for sync.rs (3 new tests), ffi.rs (2 new tests)
-- **Ontology** — review for any new domain terms from session scope work
+- **Unused variable warnings** — 7 in route.rs + 1 in template.rs
+- **Module harness** — update evals for sync.rs, ffi.rs
+- **Ontology** — review for new domain terms
 <!-- /agent:pending -->

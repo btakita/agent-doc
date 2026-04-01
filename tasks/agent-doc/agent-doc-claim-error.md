@@ -2908,7 +2908,120 @@ Failed tests on gh actions https://github.com/btakita/agent-doc/actions/runs/238
 **The Windows build failure** (agent-kit SocketTransport) was already fixed in the previous cycle via `agent-kit` v0.3.2.
 
 Both fixes are pushed. The next CI run should be green.
-<!-- agent:boundary:cab7d6ec -->
+
+`Claim for Tmux Pane` should have opened a second pane on tasks/briantakita.me.md. It did not. Why?
+We are in a bad tmux window state
+![2026-04-01_15-40.png](../../../../../Pictures/agent-loop/2026-04-01_15-40.png)
+
+```
+ ▐▛███▜▌   Claude Code v2.1.89
+▝▜█████▛▘  Opus 4.6 (1M context) · Claude Max
+  ▘▘ ▝▝    ~/work/btakita/agent-loop
+  ⎿  Interrupted · What should Claude do instead?
+
+❯ /agent-doc tasks/briantakita.me.md
+
+  Bash(agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/briantakita.me.md 2>&1 | python3 -c "
+      import json, sys…)
+  ⎿  Running…
+  ⎿  === DIFF ===
+     --- snapshot
+     +++ document
+     … +15 lines (ctrl+o to expand)
+
+❯ gent-doc tasks/briantakita.me.md
+
+● Same frontmatter-only diff. No exchange changes. The diff keeps appearing because the snapshot has the old frontmatter (tmux_session: '0') but the working file has the new frontmatter (claude_args: --dangerously-skip-permissions). The
+  selective commit only stages snapshot content, so frontmatter edits outside components remain uncommitted.
+
+  To clear this persistent diff, I need to write a no-op response which will update the snapshot to include the current frontmatter.
+
+  Reading 1 file… (ctrl+o to expand)
+  ⎿  $ cat <<'RESPONSE' | agent-doc write /home/brian/work/btakita/agent-loop/tasks/briantakita.me.md --baseline-file
+     /home/brian/work/btakita/agent-loop/.agent-doc/baselines/fcbeac6845e4489b13706dd01be9c0f9132816a800493c7409b7ba77450ce236.md --stream
+     <!-- patch:exchange -->
+     ### Re: Frontmatter updated (HEAD)
+     …
+
+  Bash(agent-doc commit /home/brian/work/btakita/agent-loop/tasks/briantakita.me.md)
+  ⎿  Running…
+  ⎿  [perf] commit.staging (hash_object+update-index): 2ms
+     [perf] commit.git_commit: 11ms
+     [main 972756f8] agent-doc(briantakita.me): 2026-04-01 15:41:22
+     … +6 lines (ctrl+o to expand)
+
+● Frontmatter diff should now be cleared. The document is waiting for your approach decision on the @source fix (A/B/C/D) — write it in the exchange section of tasks/briantakita.me.md.
+
+✻ Churned for 30s · 2 shells still running
+
+❯ /agent-doc tasks/briantakita.me.md
+
+✶ Improvising…
+
+
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/agent-doc/agent-doc-claim-error.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+  ❯ /agent-doc tasks/briantakita.me.md
+```
+### Re: Claim for Tmux Pane failed to open second pane (HEAD)
+
+**Root cause analysis:**
+
+`briantakita.me.md` is **not in the sessions registry** (`sessions.json`). Only two sessions are registered:
+- `agent-doc-claim-error.md` → `%348` (active, window @163)
+- `judith-krug.md` → `%343` (stashed)
+
+The stashed panes (%357, %343, %356) are: "Claude Code", "Review Robert Waldman professional tasks", and "adaptive-chunk-resolve-unknown" — none is `briantakita.me.md`.
+
+**What likely happened:**
+
+The JetBrains "Claim for Tmux Pane" action (`ClaimAction.kt`) has two silent failure points:
+
+1. **Position detection returned `null`** — both Strategy 1 (Splitter tree traversal) and Strategy 2 (window list query) can fail silently. If position is `null`, the claim runs without `--position`, falling back to `TMUX_PANE` env var or current pane. This would claim `briantakita.me.md` to `%348` — **the same pane already running this document** — effectively overwriting the existing claim.
+
+2. **Pane ID regex extraction failed** — after claim, the plugin extracts `%\d+` from stdout to auto-start Claude. If extraction fails, `agent-doc start` is never sent. The plugin still shows a "Claimed" hint — **false positive feedback**.
+
+The repeated `/agent-doc tasks/briantakita.me.md` commands in the terminal (25+ times) suggest the user was retrying in the existing pane, which was already bound to `agent-doc-claim-error.md`.
+
+**Current tmux state:**
+- Session 5, window `agent-doc`: 1 pane (%348) — this session
+- Session 5, window `stash`: 3 non-idle panes (%357, %343, %356) — orphaned Claude sessions
+
+**Recommended fixes:**
+
+1. **`ClaimAction.kt`**: When position detection returns `null`, show an error notification instead of proceeding with a blind fallback. The user needs to know the claim targeted the wrong pane.
+
+2. **`ClaimAction.kt`**: When pane ID regex extraction fails, show a warning "Claimed but auto-start skipped — pane ID not found in output".
+
+3. **`agent-doc claim`**: Add `--split` flag that forces creating a new pane via `tmux split-window` rather than claiming an existing one. This would guarantee a second pane.
+
+4. **Registry protection**: `agent-doc claim` should refuse to overwrite an existing session's pane unless `--force` is used. Currently, claiming to an already-registered pane silently replaces the entry.
+
+Want me to implement any of these fixes?
+<!-- agent:boundary:b1ec40b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

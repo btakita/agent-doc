@@ -857,14 +857,14 @@ The boundaries are just markdown and can be overwritten by the user or other pro
 > - **Backtesting against specs**: With a well-defined spec and full revision history, you can backtest the codebase against its own specification...detecting drift between what was intended and what was implemented. This applies to codebases, datasets, agent harness configurations, and prompts. A general pipeline verification approach that catches drift early.
 
 I'm not doing this yet. Just mentioned it as an idea during the interview.
-### Re: Overclaiming Fixes (HEAD)
+### Re: Overclaiming Fixes
 
 **Template boundaries:** You're right — markdown components are conventions, not enforced boundaries. Anyone can overwrite them. Rewrote the bullet to describe what's actually there: named components for organizing output, with git tracking who changed what. Dropped the "explicit boundaries" and "traced to source" claims.
 
 **Backtesting:** Reframed as "one idea I mentioned during our conversation...not implemented yet, but the audit trail makes it feasible." Honest about where it stands.
 
 Updated draft. These corrections make the email stronger — presenting what you actually have rather than extrapolating.
-<!-- agent:boundary:1d743207 -->
+<!-- agent:boundary:76ccc4e6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

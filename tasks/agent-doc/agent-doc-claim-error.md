@@ -3521,7 +3521,7 @@ Note: claim registry protection and sync auto-start are integration tests requir
 
 `make check`: all 602 tests pass.
 release
-### Re: Release v0.31.1 prepared (HEAD)
+### Re: Release v0.31.1 prepared
 
 **Version bumped to 0.31.1:**
 - `Cargo.toml` → 0.31.1
@@ -3540,7 +3540,7 @@ release
 4. Tag: `git tag v0.31.1 && git push origin v0.31.1`
 
 Want me to proceed with publishing?
-<!-- agent:boundary:09ddaaa5 -->
+<!-- agent:boundary:9628aaa9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

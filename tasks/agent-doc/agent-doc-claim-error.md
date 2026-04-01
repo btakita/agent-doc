@@ -2253,7 +2253,7 @@ Noted — sentence completed. Ready when you want to proceed with the implementa
 
 File being changed externally with tasks/professional/judith-krug.md
 While I was typing, I would lose the last character due to the file being externally modified. Why?
-### Re: External file modification causing lost keystrokes (HEAD)
+### Re: External file modification causing lost keystrokes
 
 This is likely caused by the **boundary marker repositioning** after `agent-doc commit`. The sequence:
 
@@ -2277,7 +2277,7 @@ The boundary reposition modifies the file through the IDE's Document API. Even t
 3. **Use IDE `DocumentListener`** — check if user modified the document recently before applying IPC patches
 
 Want me to dig into the boundary reposition code to find the exact trigger?
-<!-- agent:boundary:5be5a04c -->
+<!-- agent:boundary:694db19e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

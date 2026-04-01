@@ -2130,7 +2130,7 @@ Idea is not responding. Jump threads. Why?
 **Lesson:** After code changes, always run `cargo install --path .` — the JB plugin uses the cargo-installed binary, not the release build symlink.
 
 Whe agent-
-### Re: Agent-doc tmux pane closed (HEAD)
+### Re: Agent-doc tmux pane closed
 
 **What happened:** The last sync (timestamp 1775061987) went from 2 panes to 0 — the reconciler stashed BOTH panes, destroying the agent-doc window. The `claude` tmux session was then destroyed (no windows left).
 
@@ -2141,7 +2141,7 @@ Whe agent-
 **This is a critical bug:** The reconciler should NEVER stash all panes when it has resolved files with known session UUIDs. The "stash everything" path should only trigger when `col_args` is truly empty or all files are unmanaged. A guard is needed: if `pane_columns` is empty but `col_args` had managed files, log an error and skip stashing.
 
 This needs to be fixed before v0.30.1 release.
-<!-- agent:boundary:a8b8e9c1 -->
+<!-- agent:boundary:450e7952 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

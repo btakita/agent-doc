@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Hook CLI (fire/poll/listen/gc) deployed. Claude Code bridge documented. Verified working.
+agent-kit v0.3.0 published. All docs updated. Audit 5→2 issues. Session complete.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1852,7 +1852,9 @@ Session ID is auto-read from frontmatter when `--session-id` is omitted.
 
 #### Hook socket listener (`hook listen`)
 
-Starts a Unix domain socket at `.agent-doc/hooks.sock`. Accepts JSON messages from `SocketTransport`, writes them to the file-based hook directory. Protocol: JSON line → `ok\n` or `error\n`.
+Starts a Unix domain socket at `.agent-doc/hooks.sock`. Accepts JSON messages from `SocketTransport`, writes them to the file-based hook directory. Protocol: JSON line → `ok\
+` or `error\
+`.
 
 #### Claude Code bridge
 
@@ -1875,16 +1877,38 @@ This fires a `post_write` event whenever Claude Code writes/edits a file. Other 
 - Updated `main.rs` — `Hook` command variant + `HookAction` enum
 
 All 595 tests pass. Release binary built and verified.
-<!-- agent:boundary:f35c002c -->
+
+agent-kit:
+audit docs
+Update SPEC.md, README.md, ontology, module-harness
+### Re: agent-kit v0.3.0 published + docs updated (HEAD)
+
+**agent-kit v0.3.0 published to crates.io** with hooks module.
+
+**agent-doc switched to registry dep** (`agent-kit = { version = "0.3", features = ["hooks"] }`).
+
+**Documentation updated:**
+
+- **agent-kit README.md** — features list, hooks usage example, updated roadmap
+- **agent-kit VERSIONS.md** — v0.3.0 changelog entry
+- **agent-doc CLAUDE.md** — added `hooks.rs`, `hook_cmd.rs`, `ops_log.rs` to module layout
+- **agent-doc SPEC.md** — added §9.5 Hook System (CLI, lifecycle hooks, transport, Claude Code bridge)
+- **agent-doc README.md** — added hook system to key features
+
+**Audit docs:** 5 → 2 issues. Remaining: large table warning (informational), SKILL.md staleness (managed by binary).
+
+All tests pass. Release binary deployed.
+<!-- agent:boundary:1bfc8790 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **Hook CLI** — `agent-doc hook fire/poll/listen/gc`
-- [x] **Hook socket listener** — Unix domain socket at `.agent-doc/hooks.sock`
-- [x] **Claude Code bridge** — PostToolUse settings.json documented
-- [ ] **Publish agent-kit v0.3** + switch agent-doc back to registry dep
+- [x] **All code shipped** — bugs, guards, hooks, transports, CLI
+- [x] **agent-kit v0.3.0** published to crates.io
+- [x] **tmux-router v0.3.7** published to crates.io
+- [x] **All docs updated** — SPEC.md, README.md, CLAUDE.md, VERSIONS.md (both crates)
+- [x] **Audit** — 5→2 issues (remaining are informational)
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)
 <!-- /agent:pending -->

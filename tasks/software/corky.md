@@ -598,7 +598,56 @@ Ran `corky sync refetch` on all 555 threads (0 errors).
 - **297** remain empty — these are HTML-only emails (newsletters, marketing, tracking pixels) where the original message had no plain-text part. Corky stored the raw HTML but the body detection script considers them empty since they're just markup, not readable text.
 
 The 297 remaining empty ones are a potential corky improvement — an html2text fallback for emails that only have `text/html` MIME parts. This would extract readable content from HTML-only emails during sync.
-<!-- agent:boundary:b53cfb93 -->
+
+> - corky improvement: html2text fallback for HTML-only emails (297 emails affected)
+
+I believe agent-doc has a dependency on htmd. Perhaps corky can also use the same htmd parsing capability?
+Should this behavior be extracted to a common dependency such as either:
+- agent-kit?
+- instruction-files?
+- a new common dependency?
+### Re: html2text shared dependency (HEAD)
+
+Checked the code:
+
+**agent-doc** uses `htmd` (HTML→Markdown) in `preflight.rs` for converting fetched web pages to markdown during document preflight.
+
+**corky** has the opposite problem — both `extract_body` functions (`imap_sync.rs:25` and `gmail_api_sync.rs:215`) only look for `text/plain` MIME parts. When an email is HTML-only (no `text/plain` alternative), they return an empty string. This is the root cause of the 297 empty bodies.
+
+**Recommendation: Add `htmd` directly to corky** — no shared crate needed. Here's why:
+
+1. **Different use cases** — agent-doc converts web pages to markdown for document context; corky would convert email HTML to readable markdown for conversation files. The conversion is a single function call (`HtmlToMarkdown::new().convert(html)`), not a shared abstraction.
+
+2. **`htmd` is already battle-tested** — it's a thin crate (HTML→Markdown via DOM walk). Adding it to corky's `Cargo.toml` is ~1 line. No wrapper needed.
+
+3. **The fix is local to corky's `extract_body` functions** — fallback to `text/html` when `text/plain` is missing, pipe through `htmd::HtmlToMarkdown::new().convert()`. ~10 lines of code in each sync module.
+
+4. **Extracting to agent-kit/instruction-files would over-engineer this** — both crates already depend on `htmd` independently (or would). A shared crate adds a build dependency and version coupling for a one-liner.
+
+#### Implementation sketch (gmail_api_sync.rs)
+
+```rust
+fn extract_body_from_parts(parts: &[Part], token: &str, message_id: &str) -> String {
+    let mut html_fallback = None;
+    for part in parts {
+        if let Some(mime) = &part.mime_type {
+            if mime == "text/plain" { /* existing logic — return immediately */ }
+            if mime == "text/html" && html_fallback.is_none() {
+                html_fallback = Some(resolve_body_data(body, token, message_id));
+            }
+        }
+        // recurse into nested parts...
+    }
+    // Fallback: convert HTML to markdown
+    if let Some(html) = html_fallback {
+        return htmd::HtmlToMarkdown::new().convert(&html).unwrap_or_default();
+    }
+    String::new()
+}
+```
+
+Same pattern for `imap_sync.rs`. Want me to implement it?
+<!-- agent:boundary:5ef6b82f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -606,5 +655,5 @@ The 297 remaining empty ones are a potential corky improvement — an html2text 
 <!-- agent:pending -->
 - Respond to Rob Ross (Dreamable) — schedule meeting Wed/Thu 12-4pm PT
 - crates.io token — renew and publish corky 0.23.0
-- corky improvement: html2text fallback for HTML-only emails (297 emails affected)
+- **corky: html2text fallback** — add `htmd` dep, update `extract_body` in both sync modules (297 emails affected)
 <!-- /agent:pending -->

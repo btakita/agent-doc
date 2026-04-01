@@ -1723,7 +1723,7 @@ Should I implement the Claude Code hook bridge?
 Yes.
 We should also consider making tmux one of many ways of integrating with the agent harness.
 For example, we may want to use MCP or a service approach. There should be an appropriate abstraction that can be used to interporate other mechanisms.
-### Re: Hook transport abstraction + Claude Code bridge (HEAD)
+### Re: Hook transport abstraction + Claude Code bridge
 
 #### Shell commands, not Rust-only
 
@@ -1789,7 +1789,7 @@ For the Claude Code side, we add a `settings.json` hook that fires on relevant e
 This bridges Claude Code's event model → agent-doc's hook bus → other sessions via transport.
 
 This is the right direction but it's a significant architectural piece. Recommend: ship the `HookTransport` trait + socket transport in agent-kit v0.3, then wire the Claude Code bridge as a follow-up.
-<!-- agent:boundary:e96c8ad0 -->
+<!-- agent:boundary:8de44a1b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

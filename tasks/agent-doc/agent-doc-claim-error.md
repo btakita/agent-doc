@@ -3231,10 +3231,12 @@ Add evaluate utility of `/btw` wrt agent-doc into agent:pending
 **Ready for plugin install.** The JB plugin zip is at:
 `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.37.zip`
 
-Switching to the right editor `corky.md` still **does not** update th tmux layout. Why?
+Switching to the right editor `corky.md` still **does not** update the tmux layout. Why?
 ### Re: Plugin not yet installed
 
 The updated plugin (0.2.37) has been built but **not installed in your IDE**. The currently loaded plugin is still 0.2.36, which has the busy guard that blocks sync during active sessions.
+
+I am running 0.2.37. Why did you detect the wrong version?
 
 To install:
 1. IDEA → Settings → Plugins → gear icon → "Install Plugin from Disk..."
@@ -3242,7 +3244,23 @@ To install:
 3. Since classes changed structurally (ClaimAction lost methods, EditorTabSyncListener removed code): **uninstall first → restart → install → restart**
 
 After the restart, switching to corky.md should trigger sync because the busy guard is gone.
-<!-- agent:boundary:82056ded -->
+### Re: Plugin disabled by Settings Sync (HEAD)
+
+The IDEA log (`IntelliJIdea2026.1/log/idea.log`) shows:
+
+```
+16:13:47 — Uninstalled plugin com.github.btakita.agent-doc
+16:14:08 — Will mark plugin com.github.btakita.agent-doc as disabled in setting sync
+```
+
+Settings Sync marked the plugin as `enabled=false` during the uninstall. After reinstalling, Settings Sync may have kept it disabled. The log shows **zero** `[layout-sync]` or `[layout]` entries after the 16:14 restart — the listener isn't running.
+
+**Fix:** Settings → Plugins → search for "agent-doc" → ensure it's enabled (checkbox checked). If Settings Sync is re-disabling it, temporarily disable Settings Sync, enable the plugin, restart, then re-enable Settings Sync.
+
+Alternatively, check Settings → Settings Sync → make sure the plugin isn't in the disabled list.
+
+Note: the sync DID work correctly once at 16:13:22 (before uninstall) — it detected both files in the correct columns and ran `agent-doc sync --col agent-doc-claim-error.md --col corky.md`. So the sync logic itself is working; it's just that the plugin isn't loaded in the current session.
+<!-- agent:boundary:1d92decf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -3256,7 +3274,7 @@ After the restart, switching to corky.md should trigger sync because the busy gu
 - [x] `cargo build --release` in agent-doc submodule
 - [x] Add tests for occurrence-counting HEAD marker logic
 - [x] Audit docs (SPEC.md, claim.rs, git.rs module docs)
-- [ ] Install updated JetBrains plugin (uninstall → restart → install → restart)
-- [ ] Verify sync triggers on editor tab switch
+- [ ] Re-enable agent-doc plugin in IDEA (disabled by Settings Sync)
+- [ ] Verify sync triggers on editor tab switch after re-enabling
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

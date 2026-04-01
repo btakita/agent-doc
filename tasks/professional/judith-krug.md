@@ -578,13 +578,48 @@ judith-krug will likely ask robert-waldman to help her understand the proposal.
 "Imagine every document your company has ever handled ... loan applications, bank statements, investor agreements, emails ... all searchable instantly from your phone. You could ask 'show me all loans over $500K in the last year' or 'which investors haven't been contacted in 6 months' and get answers in seconds. That's what Ragie does. It reads your documents (even scanned paper), understands them, and lets you search across everything with AI. It's like having a brilliant assistant who's read every file in your office."
 
 **For Robert Waldman:** He'll understand RAG (Retrieval Augmented Generation). Ragie is a managed RAG service backed by Craft Ventures (David Sacks). Handles document ingestion, OCR, chunking, embeddings, vector search. Brian integrates via API. Bob Remeika (CEO) is a personal contact ... early access conversation tomorrow.
-<!-- agent:boundary:a6cc20a7 -->
+
+With your understand of Judith's business...please come up with a list of queries that will be beneficial for Judith and her team.
+### Re: Ragie Query Examples for Judith's Business (HEAD)
+
+**Loan Pipeline & Deal Management:**
+- "Show me all active loan applications over $500K"
+- "Which loans are pending investor commitment?"
+- "List all commercial loans funded in the last 6 months"
+- "Find all bridge loans with LTV above 60%"
+
+**Investor Relations:**
+- "Which investors haven't been contacted in 90 days?"
+- "Show me investors who typically fund $200K+ deals"
+- "Find all investors with IRA or trust accounts"
+- "Which investors participated in fractionalized notes this year?"
+- "List retirees in my investor pool who prefer low-risk 1st position loans"
+
+**Borrower Intelligence:**
+- "Show me repeat borrowers from the last 2 years"
+- "Find all borrowers with properties in Northern California"
+- "Which borrowers have outstanding loan balances?"
+
+**Document & Compliance:**
+- "Find the RE 885 disclosure for loan #[X]"
+- "Show me all bank statements submitted by [borrower name]"
+- "Which loans are missing construction budgets?"
+- "Pull up the trust deed for [property address]"
+
+**Business Intelligence:**
+- "What's my average loan size this year vs last year?"
+- "Which referring brokers have sent the most deals?"
+- "Show me all loans in Malibu or Pacific Palisades"
+- "What's my investor utilization rate ... how many investors have funded a deal in the last year?"
+
+**The pitch angle:** These queries currently require Judith or her staff to manually dig through files, emails, and Dropbox. With Ragie, it's a 10-second phone query. For a one-person brokerage handling millions in deals, that's transformative.
+<!-- agent:boundary:e39113b7 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [x] Send text to Judith about website being down
 - [x] Reply to Judith's text
-- [ ] Prepare email draft file with 3 options (`mail/drafts/20260401-judith-call-followup.md`)
+- [ ] Prepare email draft file with 3 options + query examples (`mail/drafts/20260401-judith-call-followup.md`)
 - [ ] Website migration to Cloudflare ... website is DOWN
 - [ ] Check in with Robert Ward this afternoon
 - [ ] Tonight's call with Judith ... present 3 options, ask for retainer

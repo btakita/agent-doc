@@ -3262,7 +3262,7 @@ Alternatively, check Settings → Settings Sync → make sure the plugin isn't i
 Note: the sync DID work correctly once at 16:13:22 (before uninstall) — it detected both files in the correct columns and ran `agent-doc sync --col agent-doc-claim-error.md --col corky.md`. So the sync logic itself is working; it's just that the plugin isn't loaded in the current session.
 
 Still not working. Why is the busy guard logic in the plugin? It should be in agent-doc binary..no?
-### Re: Busy guard belongs in the binary, not the plugin (HEAD)
+### Re: Busy guard belongs in the binary, not the plugin
 
 You're absolutely right. This violates the **FFI-first / Shared Foundation pattern** from CLAUDE.md:
 
@@ -3280,7 +3280,7 @@ Since we already removed the busy guard from the plugin and the binary's existin
 **On "still not working":** The IDEA log confirmed the plugin was disabled by Settings Sync after the uninstall/reinstall cycle. Can you verify in Settings → Plugins that `agent-doc` shows as enabled? The IPC (PatchWatcher) works independently of the listener registration — patches arriving doesn't mean the sync listener is active.
 
 If the plugin IS enabled and sync still doesn't fire, the LayoutChangeDetector might not have initialized (it waits 2s after startup). Try pressing `Ctrl+Shift+Alt+L` (manual sync trigger) to test if the SyncLayoutAction works directly.
-<!-- agent:boundary:08d06b53 -->
+<!-- agent:boundary:0321bb85 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -867,7 +867,7 @@ Updated draft. These corrections make the email stronger — presenting what you
 
 > built-in traceability.
 
-With automated cadence of reports.
+With agentic authored automated reports.
 ### Re: Automated Reports Added
 
 Updated the auditable workflow bullet to include "with automated cadence of reports." Now reads:
@@ -875,7 +875,10 @@ Updated the auditable workflow bullet to include "with automated cadence of repo
 > "...built-in traceability with automated cadence of reports."
 
 This adds a concrete operational detail — the audit trail isn't just passive history, it feeds into regular reporting.
-<!-- agent:boundary:b6384c55 -->
+### Re: Simplified (HEAD)
+
+Updated draft: "built-in traceability with automated reports." Cleaner.
+<!-- agent:boundary:315e28c6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -884,5 +887,4 @@ This adds a concrete operational detail — the audit trail isn't just passive h
 - [ ] Send Josh Malloy follow-up email (pending final approval)
 - [ ] agent-doc README: security section (single-user, prompt injection)
 - [ ] Corky: HTML body extraction for emails
-- [x] Automated reports added to auditable workflow bullet
 <!-- /agent:pending -->

@@ -3154,7 +3154,7 @@ So the plugin update isn't fixing sync (which works), it's removing the claim ca
 The `(HEAD)` marker fix is in the Rust binary, not the plugin — that takes effect with `cargo build --release`.
 
 Selected the right editor (corky.md)...should declaratively cause the tmux pane layout to align. But it does not. Why?
-### Re: Why selecting corky.md doesn't trigger sync (HEAD)
+### Re: Why selecting corky.md doesn't trigger sync
 
 **Root cause:** The **busy guard** in `EditorTabSyncListener.kt` (lines 81-93) blocks sync for ALL files if ANY visible file is busy:
 
@@ -3177,7 +3177,7 @@ I'd recommend **A** (remove entirely) since `agent-doc sync` already has its own
 
 On the other items:
 - Tests, audit docs, SPEC.md, module-harness updates — I'll queue those after the sync fix.
-<!-- agent:boundary:52ddb7f1 -->
+<!-- agent:boundary:58489106 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

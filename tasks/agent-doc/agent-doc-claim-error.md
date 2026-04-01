@@ -2018,7 +2018,7 @@ release
 
 Implement:
 - [ ] **Multi-harness skill install** (v0.31.0)
-### Re: Multi-harness skill install (HEAD)
+### Re: Multi-harness skill install
 
 **Implemented and published.**
 
@@ -2045,7 +2045,7 @@ agent-doc skill install --all              # all harnesses
 ```
 
 Published: agent-kit v0.3.1 on crates.io. agent-doc uses registry dep. Release binary built.
-<!-- agent:boundary:5d272e79 -->
+<!-- agent:boundary:c66f9368 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

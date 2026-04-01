@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-tmux-router 0.3.7 published. agent-doc back on registry dep. All 592 tests pass.
+Bug 2A/2B reassessed: both deferred (low-risk edge cases, partially addressed by session work).
 <!-- /agent:status -->
 
 ## Exchange
@@ -1473,7 +1473,45 @@ Steps completed:
 3. Published to crates.io
 4. Updated agent-doc Cargo.toml from path dep to `"0.3.7"`
 5. Verified build + tests
-<!-- agent:boundary:e90e794e -->
+
+Reassess...should we implement?:
+- [ ] **Bug 2A: Divergence check before auto-start**
+- [ ] **Bug 2B: Rollback guard in commit()**
+### Re: Reassessment of Bug 2A and Bug 2B (HEAD)
+
+**Bug 2A: Divergence check before auto-start**
+
+Original problem: When a session crashes after `agent-doc write` but before `agent-doc commit`, the file has new content that the snapshot doesn't know about. Next auto-start creates a new session that doesn't know about the uncommitted response.
+
+**Assessment: Partially addressed, remainder is low-risk.**
+
+What we built this session that covers this:
+- **Preflight recover step** already detects `.agent-doc/pending/` orphaned responses
+- **Startup lock** prevents double-spawn race conditions
+- **Busy pane guard** prevents pane stashing during active sessions
+
+What's NOT addressed: The specific scenario where IPC write succeeds but snapshot save fails. This is a narrow edge case — IPC write and snapshot save happen in the same code path (`run_stream`), and both are synchronous. The only way snapshot fails is a disk I/O error, which would likely affect the IPC write too.
+
+**Recommendation: Defer.** The risk is low and the existing guards cover the common failure modes. If it recurs, the ops log now captures enough data to diagnose.
+
+---
+
+**Bug 2B: Rollback guard in commit()**
+
+Original problem: `agent-doc commit` silently stages stale snapshot content when the file has diverged (response written but snapshot not updated). The user sees "committed" but the response isn't actually in git.
+
+**Assessment: Still valid but low priority.**
+
+The stale baseline guard (component-aware) and preflight baseline save reduce the window where this can happen. The commit now uses the snapshot directly, and the snapshot is saved immediately after write in the same function call.
+
+The remaining scenario: IPC write succeeds (plugin applies patch) but the Rust process dies before `snapshot::save`. The plugin has the correct content, the file is correct, but the snapshot is stale. On next commit, stale snapshot is staged.
+
+**Recommendation: Defer to next session.** This is a robustness improvement, not a regression. The fix is straightforward (compare file content vs snapshot in `git.rs:commit()`, warn or auto-update snapshot), but it's not blocking anything right now.
+
+---
+
+**Summary:** Both bugs are edge cases narrowed by this session's work. Neither is actively causing issues. Recommend moving to the queue for the next session.
+<!-- agent:boundary:ba82425f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1484,11 +1522,10 @@ Steps completed:
 - [x] **Ops logging tests** (2 tests)
 - [x] **Session resume on document switch** — busy pane guard in DETACH + layout.rs
 - [x] **Fix auto-start race** — startup lock with 5s TTL
-- [x] **Docs updated** — SPEC.md §6.6/§7.9/§7.20, README.md key features
+- [x] **Docs updated** — SPEC.md, README.md
 - [x] **Audit docs** — 5 → 3 issues
-- [x] **Publish tmux-router 0.3.7** + switch agent-doc back to registry dep
-- [ ] **Bug 2A: Divergence check before auto-start**
-- [ ] **Bug 2B: Rollback guard in commit()**
+- [x] **Publish tmux-router 0.3.7** + registry dep restored
+- [ ] **Bug 2A/2B** — deferred (low-risk, partially addressed)
 - [ ] **Multi-harness hooks** (agent-kit)
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)

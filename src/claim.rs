@@ -195,7 +195,9 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
     let pane_pid = sessions::pane_pid(&pane_id).unwrap_or(std::process::id());
     sessions::register_with_pid(&session_id, &pane_id, &file_str, pane_pid)?;
 
-    // Sync config.toml tmux_session to match the pane's actual session
+    // Log if pane is in a different session than configured — but do NOT
+    // auto-update config.toml. The configured session is the source of truth;
+    // overwriting it causes cascading session migration bugs.
     if tmux.pane_alive(&pane_id) {
         let pane_session = tmux
             .cmd()
@@ -206,10 +208,11 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
             .unwrap_or_default();
         if !pane_session.is_empty() {
             let configured = crate::config::project_tmux_session();
-            if configured.as_deref() != Some(&pane_session)
-                && let Err(e) = crate::config::update_project_tmux_session(&pane_session)
-            {
-                eprintln!("warning: failed to update project tmux_session config: {}", e);
+            if configured.as_deref() != Some(&pane_session) {
+                eprintln!(
+                    "note: pane {} is in session '{}' but config says '{}' — config unchanged",
+                    pane_id, pane_session, configured.as_deref().unwrap_or("(none)")
+                );
             }
         }
     }

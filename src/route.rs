@@ -138,21 +138,7 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
         eprintln!("[route] Generated session UUID: {}", session_id);
     }
 
-    // Read target session from project config (.agent-doc/config.toml), fall back to current session
-    let configured_session = crate::config::project_tmux_session();
-    let configured_alive = configured_session.as_ref().is_some_and(|s| tmux.session_alive(s));
-    let target_session = if configured_alive {
-        configured_session.unwrap()
-    } else {
-        let fallback = current_tmux_session(tmux)
-            .unwrap_or_else(|| TMUX_SESSION_NAME.to_string());
-        // Auto-sync config when configured session is dead or missing
-        if configured_session.as_deref() != Some(&fallback)
-            && let Err(e) = crate::config::update_project_tmux_session(&fallback) {
-                eprintln!("warning: failed to update project tmux_session config: {}", e);
-            }
-        fallback
-    };
+    let target_session = resolve_target_session(tmux, None, true);
     eprintln!("[route] target tmux session: {}", target_session);
 
     let file_path = file.to_string_lossy();
@@ -209,15 +195,15 @@ fn resolve_or_create_pane(
                 send_command(tmux, registered_pane, file_path)?;
                 return Ok(registered_pane.clone());
             }
-            // Pane moved to a different live session — follow it by updating config
+            // Pane is alive but in a different session — rescue it back to the
+            // configured session rather than following it. Following the pane
+            // would cascade config updates and move all subsequent panes to the
+            // wrong session.
             eprintln!(
-                "[route] Pane {} is alive but in session '{}' (config says '{}'). Updating config to follow pane.",
+                "[route] Pane {} is alive but in session '{}' (config says '{}'). Rescuing to configured session.",
                 registered_pane, pane_session, target_session
             );
-            if let Err(e) = crate::config::update_project_tmux_session(&pane_session) {
-                eprintln!("warning: failed to update project tmux_session config: {}", e);
-            }
-            rescue_from_stash(tmux, registered_pane, session_id, file_path, &pane_session);
+            rescue_from_stash(tmux, registered_pane, session_id, file_path, target_session);
             send_command(tmux, registered_pane, file_path)?;
             return Ok(registered_pane.clone());
         } else {
@@ -381,6 +367,41 @@ fn current_tmux_session(tmux: &Tmux) -> Option<String> {
     None
 }
 
+/// Single source of truth for target session resolution.
+///
+/// Priority:
+/// 1. `context_session` if provided (from sync --window)
+/// 2. config.toml `tmux_session` if the session is alive
+/// 3. Fallback to current tmux session or "claude" constant
+///
+/// When the configured session is dead and `auto_update_config` is true,
+/// updates config.toml with the fallback session.
+fn resolve_target_session(
+    tmux: &Tmux,
+    context_session: Option<&str>,
+    auto_update_config: bool,
+) -> String {
+    if let Some(ctx) = context_session {
+        return ctx.to_string();
+    }
+
+    let configured = crate::config::project_tmux_session();
+    if configured.as_ref().is_some_and(|s| tmux.session_alive(s)) {
+        return configured.unwrap();
+    }
+
+    let fallback = current_tmux_session(tmux)
+        .unwrap_or_else(|| TMUX_SESSION_NAME.to_string());
+
+    if auto_update_config && configured.as_deref() != Some(&fallback)
+        && let Err(e) = crate::config::update_project_tmux_session(&fallback)
+    {
+        eprintln!("warning: failed to update project tmux_session config: {}", e);
+    }
+
+    fallback
+}
+
 /// Find an active target pane for lazy claiming.
 fn find_target_pane(tmux: &Tmux, explicit_pane: Option<&str>, session_name: &str) -> Option<String> {
     let target = explicit_pane
@@ -477,28 +498,7 @@ fn auto_start_ext(
     skip_wait: bool,
     split_before: bool,
 ) -> Result<()> {
-    // Determine target session. Priority:
-    // 1. context_session (from sync --window) — sync knows which session it's managing
-    // 2. current_tmux_session() — fallback
-    // (tmux_session frontmatter field is deprecated — no longer read)
-    let session_name = if let Some(ctx) = context_session {
-        ctx.to_string()
-    } else {
-        // Check project config first, fall back to current session
-        let configured = crate::config::project_tmux_session();
-        let configured_alive = configured.as_ref().is_some_and(|s| tmux.session_alive(s));
-        if configured_alive {
-            configured.unwrap()
-        } else {
-            let fallback = current_tmux_session(tmux)
-                .unwrap_or_else(|| TMUX_SESSION_NAME.to_string());
-            if configured.as_deref() != Some(&fallback)
-                && let Err(e) = crate::config::update_project_tmux_session(&fallback) {
-                    eprintln!("warning: failed to update project tmux_session config: {}", e);
-                }
-            fallback
-        }
-    };
+    let session_name = resolve_target_session(tmux, context_session, true);
     auto_start_in_session(tmux, file, session_id, file_path, &session_name, skip_wait, split_before)
 }
 
@@ -1090,7 +1090,7 @@ mod tests {
         // The command "echo DONE" should NOT be in the prompt anymore
         // (it was accepted and executed)
         let content = sessions::capture_pane(&iso, &pane).unwrap();
-        let cmd_in_last_lines = content
+        let _cmd_in_last_lines = content
             .lines()
             .rev()
             .take(5)
@@ -1492,13 +1492,13 @@ mod tests {
             match iso.swap_pane(&stashed_pane, target) {
                 Ok(()) => {
                     // Verify the stashed pane is now in the agent-doc window
-                    let rescued_win = iso.pane_window(&stashed_pane).unwrap();
-                    let agent_doc_win_id = iso.pane_window(&pane1).unwrap_or_default();
+                    let _rescued_win = iso.pane_window(&stashed_pane).unwrap();
+                    let _agent_doc_win_id = iso.pane_window(&pane1).unwrap_or_default();
                     // After swap, the stashed pane should be in agent-doc window
                     // and pane1 should be in stash
                     assert!(iso.pane_alive(&stashed_pane), "rescued pane should be alive");
                 }
-                Err(e) => {
+                Err(_e) => {
                     // Fallback to join-pane (same as route.rs:94)
                     iso.join_pane(&stashed_pane, target, "-dh").unwrap();
                     assert!(iso.pane_alive(&stashed_pane), "pane should survive join rescue");
@@ -1515,7 +1515,7 @@ mod tests {
         let cwd = std::env::current_dir().unwrap();
 
         // Create session with agent-doc window
-        let pane1 = iso.auto_start(session, &cwd).unwrap();
+        let _pane1 = iso.auto_start(session, &cwd).unwrap();
         let _ = iso
             .cmd()
             .args(["rename-window", "-t", &format!("{}:", session), "agent-doc"])
@@ -1523,7 +1523,7 @@ mod tests {
 
         // Create a second pane in its own window
         let pane2 = iso.auto_start(session, &cwd).unwrap();
-        let win_before = iso.pane_window(&pane2).unwrap();
+        let _win_before = iso.pane_window(&pane2).unwrap();
 
         // Use join_pane to move pane2 into agent-doc window (the fallback path)
         let agent_doc_window = format!("{}:agent-doc", session);
@@ -1533,7 +1533,7 @@ mod tests {
         iso.join_pane(&pane2, target, "-dh").unwrap();
 
         // Verify pane2 is now in the agent-doc window
-        let win_after = iso.pane_window(&pane2).unwrap();
+        let _win_after = iso.pane_window(&pane2).unwrap();
         let agent_doc_panes = iso.list_window_panes(&agent_doc_window).unwrap();
         assert!(
             agent_doc_panes.contains(&pane2),

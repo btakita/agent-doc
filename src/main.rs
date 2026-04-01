@@ -72,6 +72,7 @@ mod rename;
 mod reset;
 mod resync;
 mod route;
+mod session_cmd;
 mod sessions;
 mod skill;
 mod snapshot;
@@ -508,6 +509,11 @@ enum Commands {
         #[command(subcommand)]
         action: HookAction,
     },
+    /// Show or change the configured tmux session
+    Session {
+        #[command(subcommand)]
+        action: Option<SessionAction>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -547,6 +553,15 @@ enum HookAction {
         /// Project root directory
         #[arg(long)]
         root: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SessionAction {
+    /// Set the configured tmux session and migrate panes
+    Set {
+        /// Target tmux session name (e.g., "5")
+        name: String,
     },
 }
 
@@ -830,6 +845,10 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Commands::ListCommands => commands::run(),
+        Commands::Session { action } => match action {
+            Some(SessionAction::Set { name }) => session_cmd::set(&name),
+            None => session_cmd::show(),
+        },
         Commands::Hook { action } => match action {
             HookAction::Fire { event, file, session_id, data } => {
                 hook_cmd::fire(&event, &file, session_id.as_deref(), data.as_deref())

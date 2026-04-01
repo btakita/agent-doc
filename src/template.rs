@@ -822,7 +822,7 @@ Example:
 Real content continues.
 <!-- /patch:exchange -->
 ";
-        let (patches, unmatched) = parse_patches(response).unwrap();
+        let (patches, _unmatched) = parse_patches(response).unwrap();
         assert_eq!(patches.len(), 1);
         assert_eq!(patches[0].name, "exchange");
         assert!(patches[0].content.contains("Real content continues."));

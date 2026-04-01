@@ -3480,7 +3480,7 @@ Both binary paths now point to the same fixed code. Plugin rebuilt.
 This explains why navigating to files didn't create panes — the old binary at `~/.cargo/bin/` still had both registry guards that blocked auto-start for unregistered files.
 
 **Plugin zip:** `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.38.zip`
-<!-- agent:boundary:da545b74 -->
+<!-- agent:boundary:581d412e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

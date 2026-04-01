@@ -4,18 +4,19 @@ agent_doc_format: template
 agent_doc_write: crdt
 ---
 
-## Status (HEAD)
+## Status
 
 <!-- agent:status patch=replace -->
 <!-- /agent:status -->
 
-## Exchange (HEAD)
+## Exchange
 
 <!-- agent:exchange patch=append -->
 
+<!-- agent:boundary:8b8f49ce -->
 <!-- /agent:exchange -->
 
-## Pending / Not Built (HEAD)
+## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 <!-- /agent:pending -->

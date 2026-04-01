@@ -1122,7 +1122,7 @@ For a 79-minute call, CPU-only diarization could take 15-20+ minutes. The proces
 Want me to check the corky diarization code to confirm whether pyannote-rs supports GPU acceleration?
 
 Why was the gpu not used with corky transcribe?
-### Re: Transcription results (HEAD)
+### Re: Transcription results
 
 Transcription completed but `head -50` truncated the output to just initialization logs. Re-running with `-o /tmp/robert-ward-20260401.txt`.
 
@@ -1137,8 +1137,26 @@ The 32GB GPU is available (`nvidia-smi` shows it) but whisper-rs compiled withou
 
 **To fix:** whisper-rs needs to be built with CUDA/cuBLAS. Check if the `whisper-rs` dependency has a `cuda` feature flag, or if `WHISPER_CUBLAS=1` needs to be set at build time.
 
-Re-running transcription now (will take another ~10 min on CPU). Will update with results and investigate the GPU build issue.
-<!-- agent:boundary:6d06161f -->
+It should **always** be built with gpu support if the environment has the correct libraries.
+### Re: CUDA build fix (HEAD)
+
+Rebuilt with `--features "diarize,transcribe-cuda"` and GPU is now active:
+
+```
+ggml_cuda_init: found 1 CUDA devices:
+  Device 0: NVIDIA GeForce RTX 5090, compute capability 12.0
+whisper_backend_init_gpu: using CUDA0 backend
+whisper_model_load: CUDA0 total size = 1623.92 MB
+```
+
+- **GPU:** 62% utilization, 2.8 GB VRAM
+- **Previous build:** `--features diarize` (CPU-only, `use gpu = 0`)
+- **Fixed build:** `--features "diarize,transcribe-cuda"` (`use gpu = 1`)
+
+Transcription re-running on the 79-min call. Should complete much faster with GPU acceleration.
+
+**Build note:** The `diarize` feature implies `transcribe` but not `transcribe-cuda`. Need to always include `transcribe-cuda` explicitly on this machine.
+<!-- agent:boundary:68200f42 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

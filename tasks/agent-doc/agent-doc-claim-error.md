@@ -3065,7 +3065,7 @@ We should refactor the agent-doc code so all of the declarative layout logic fun
 Go
 ### Re: Implementation complete
 
-The above `###` should have had removing the ` (HEAD)` suffix as uncommited to .
+The above `###` should have had removing the ` (HEAD)` suffix as uncommited to git. Why was it commited? Was it because this happened as the first response patch in a sequence? 
 
 All three changes are done:
 
@@ -3087,7 +3087,30 @@ You're right — the "Go" text was your approval signal and should have been con
 This is an edge case in the exchange append flow — the user's approval text becomes part of the permanent exchange history rather than being consumed. Worth noting but not blocking. I'll clean it up now by including it in context.
 
 The plugin zip is ready at `src/agent-doc/editors/jetbrains/build/distributions/`. Do you want to install it now, or is there anything else to address first?
-<!-- agent:boundary:16ed33a9 -->
+Is the JB plugin version incremented?
+### Re: Boundary/HEAD and plugin version (HEAD)
+
+**On the `(HEAD)` marker question:**
+
+The commit flow works like this:
+1. `agent-doc commit` stages snapshot content with `(HEAD)` added to the shallowest new headings
+2. After commit succeeds, it strips `(HEAD)` from the snapshot and repositions the boundary
+3. IPC tells the plugin to reposition the boundary in the working tree
+
+The result: committed content has `### Re: Implementation complete (HEAD)`, working tree has `### Re: Implementation complete` — the diff creates a blue gutter line as the visual boundary.
+
+If the heading appeared committed **without** the blue gutter, it could be because:
+- The IPC reposition signal arrived before the IDE refreshed git status, so the working tree matched the committed content momentarily
+- Or the `(HEAD)` marker was stripped from the snapshot before staging (timing bug in the sequence)
+
+To answer your specific question: no, this shouldn't be related to being the first response patch in a sequence. The boundary is inserted pre-patch by `apply_patches_with_overrides()`, then the response is appended after it. The commit happens once after the final write.
+
+Can you clarify what you observed? Did the heading show no blue gutter (both committed and working tree matched)?
+
+**On the JB plugin version:**
+
+No, I didn't increment it. Currently `0.2.36`. Should I bump to `0.2.37`?
+<!-- agent:boundary:f1ff7792 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -3096,5 +3119,6 @@ The plugin zip is ready at `src/agent-doc/editors/jetbrains/build/distributions/
 - [x] ClaimAction.kt: replace claim+auto-start with SyncLayoutAction.syncLayout()
 - [x] claim.rs: add registry protection against overwriting existing sessions
 - [x] route.rs: startup lock feedback (already existed)
+- [ ] Bump JB plugin version to 0.2.37
 - [ ] Install updated JetBrains plugin and verify Ctrl+Shift+Alt+C triggers sync
 <!-- /agent:pending -->

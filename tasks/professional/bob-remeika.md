@@ -1456,7 +1456,7 @@ Former Time
 Note that I also want to schedule a call with robert-ross (tasks/recruit/robert-ross.md) between 12:00-16:00 Pacific (15:00-19:00 Eastern).
 
 Please help me strategically schedule a good time.
-### Re: Rescheduling Bob & Coordinating with Robert Ross (HEAD)
+### Re: Rescheduling Bob & Coordinating with Robert Ross
 
 **Constraints:**
 - You're unavailable 1:00-3:00 PM ET (watching daughter during dentist)
@@ -1484,7 +1484,7 @@ Please help me strategically schedule a good time.
 | 4:00 PM | 1:00 PM | Robert Ross call |
 
 Clean separation, no conflicts, respectful times for both Bay Area contacts. Want me to draft a reschedule message to Bob?
-<!-- agent:boundary:8dec93cb -->
+<!-- agent:boundary:21ebc949 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

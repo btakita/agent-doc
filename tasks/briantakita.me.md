@@ -617,11 +617,33 @@ Now both layers are in place:
 ### Re: Index in the commit?
 
 Yes. The hook runs `git add post/index.ts` after regeneration, so the updated index is staged and lands in the same commit as the blog post file.
-<!-- agent:boundary:58b942db -->
+
+I see it at https://briantakita.me/posts/agent-security-multiuser-lessons/
+
+Please draft the LinkedIn teaser post.
+### Re: Live + LinkedIn teaser (HEAD)
+
+Post confirmed live at `https://briantakita.me/posts/agent-security-multiuser-lessons/`.
+
+**LinkedIn teaser draft:**
+
+> 532 git commits in one day. 11 parallel AI agent sessions. 292 commits debugging one cascade of bugs.
+>
+> Yes, this is dated April 1st. No, it's not a joke.
+>
+> I spent a day running agent-doc — my Rust CLI for interactive AI document sessions — at scale. Each document gets its own Claude Code instance in a tmux pane, orchestrated by editor focus. Every prompt and response is committed to git.
+>
+> What I found: snapshot rollbacks when sessions restart with stale state. Duplicate response writes from the rollback/regeneration cycle. Ghost sessions in the registry. And a three-way IPC synchronization layer where bugs in one system present as failures in another.
+>
+> The meta-lesson: the only way to debug a tool this complex is to dog-food it on itself.
+>
+> Full post: https://briantakita.me/posts/agent-security-multiuser-lessons/
+
+Ready to post when you are.
+<!-- agent:boundary:30cda428 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Verify deploy to briantakita.me
-- LinkedIn teaser post
+- LinkedIn teaser — draft ready, awaiting approval to post
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

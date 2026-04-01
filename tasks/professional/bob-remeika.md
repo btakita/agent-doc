@@ -1507,7 +1507,7 @@ Want me to draft the reschedule message to Bob for the 11:30 AM ET slot?
 What should I put as my reason for change?
 Should I mention that my wife has a dentist appointment & I have to watch my daughter?
 Look at our history. Bob probably does not know I have a daughter...so this may be a low key way to introduce that info.
-### Re: Reschedule reason & the daughter reveal (HEAD)
+### Re: Reschedule reason & the daughter reveal
 
 Good instinct. The dentist/daughter mention is the right call for a few reasons:
 
@@ -1526,7 +1526,7 @@ Good instinct. The dentist/daughter mention is the right call for a few reasons:
 - Bob likely responds with something like "no worries, I have kids too" or "didn't know you had a daughter!" -- either way, it opens a personal connection before a business call
 
 Want me to adjust the tone or wording?
-<!-- agent:boundary:dfaec1c6 -->
+<!-- agent:boundary:efd24129 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

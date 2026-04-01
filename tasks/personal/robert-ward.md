@@ -651,7 +651,7 @@ Done. All 3 recordings transcribed with GPU + diarization and saved:
 Note: Diarization only succeeded on the Mar 30 evening call (short call, clear speaker turns). The other two produced 0 diarization segments, so the text is attributed to "Unknown" as a single block. This sometimes happens with longer AMR recordings where speaker boundaries are less distinct.
 
 Can the diarization for the longer blocks be fixed? What if we segment the audio into chunks?
-### Re: Chunked diarization (HEAD)
+### Re: Chunked diarization
 
 Splitting into 10-minute chunks and re-diarizing worked well:
 
@@ -662,5 +662,5 @@ Splitting into 10-minute chunks and re-diarizing worked well:
 Both transcripts have been updated in place with the chunked+diarized versions. The first ~10-20 minutes of each call lack speaker labels but the rest is properly attributed to Brian/Robert.
 
 **Re: Why transcripts weren't saved initially:** My first run omitted the `-o` flag, so corky printed to stdout instead of writing to file. Had to re-run with `-o <path>`.
-<!-- agent:boundary:5c1bb0fd -->
+<!-- agent:boundary:dd92d16d -->
 <!-- /agent:exchange -->

@@ -2515,22 +2515,42 @@ The changes that need documenting:
 - **Module harness** — update evals for sync.rs (3 new tests), ffi.rs (2 new tests)
 
 Want me to start the doc audit now, or handle the build + install first?
-<!-- agent:boundary:0f14486d -->
+build + install...without release.
+The audit docs + Update SPEC.md, README.md, ontology, module-harness
+
+We lost the tmux pane + session when I swithed to this document in the left editor. Why?
+![2026-04-01_14-18.png](../../../../../Pictures/agent-loop/2026-04-01_14-18.png)
+### Re: Build + install + doc audit (HEAD)
+
+**Build + install:** Done. `cargo build` (debug) + `cargo install --path .` (release) completed.
+
+**Test fix:** `resync::tests::healthy_pane_has_no_issues` was failing because `.zshrc` profile takes >500ms to start (shell was running `mv` during init). Increased sleep from 500ms to 2000ms. All 383 + 38 CLI tests pass.
+
+**Doc audit results:**
+- README.md: Fixed "3 subprocess calls" → "2 subprocess calls" for bulk resync
+- SPEC.md: Already correct, just touched timestamp
+- CLAUDE.md, SKILL.md: Touched timestamps (content was current)
+- Remaining warning: large table in CLAUDE.md (module layout, intentional)
+
+### Re: Tmux pane/session loss (HEAD)
+
+**The pane wasn't lost...it was stashed.** When you switched to `agent-doc-claim-error.md` in the left editor, `tmux-router sync` reconciled the layout and moved the `equityfundingsource.md` pane to the `stash` window (pane %344). The full Claude session is still alive:
+
+```
+stash.0 %344 → agent-doc start tasks/professional/equityfundingsource.md
+  └─ claude (PID 727785) + chrome-devtools MCP
+```
+
+**Why it happened:** tmux-router only shows panes for files currently open in the editor. When you opened this document, it replaced equityfundingsource in the layout. The stash-and-rescue mechanism keeps the pane alive so when you switch back to that file, `route`'s `rescue_from_stash()` brings it back.
+
+**To recover:** Open `tasks/professional/equityfundingsource.md` in the editor and the pane will be rescued from stash automatically.
+<!-- agent:boundary:5b65ca8f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **Fix stash-everything guard** — skip stash when managed files have unresolved panes
-- [x] **Fix boundary reposition keystroke loss** — FFI `await_idle` (JB) + FFI/TS debounce (VS Code)
-- [x] **VS Code koffi FFI bindings** — native.ts with graceful fallback
-- [x] **Fix tmux_session config drift** — route.rs follows pane; claim.rs updates config.toml
-- [x] **Rebuild JB plugin + VS Code extension** — JB 0.2.36, VS Code 0.2.3, binary v0.30.0
-- [x] **Install JB plugin** — uninstall old > restart > install 0.2.36 > restart
-- [x] **Finalize tmux-router v0.3.8** — committed, tagged, published to crates.io
-- [x] **Release agent-doc v0.30.1** — published to crates.io, binary installed
-- [x] **Fix sync auto-start for unclaimed files** — sync skips files without registry entries + 3 tests
-- [ ] **Build + install v0.30.2** — release build + cargo install for sync fix
-- [ ] **Audit docs** — update SPEC.md, README.md, ontology, module-harness
-- [ ] **Blog post** about this debugging session
+- **Unused variable warnings** — 7 warnings in route.rs (rescued_win, agent_doc_win_id, etc.) and 1 in template.rs. Should prefix with `_` or remove.
+- **Module harness** — update evals for sync.rs (3 new tests), ffi.rs (2 new tests)
+- **Ontology** — review for any new domain terms from FFI/IPC work
 <!-- /agent:pending -->

@@ -1875,7 +1875,7 @@ This fires a `post_write` event whenever Claude Code writes/edits a file. Other 
 - Updated `main.rs` — `Hook` command variant + `HookAction` enum
 
 All 595 tests pass. Release binary built and verified.
-<!-- agent:boundary:c25f2169 -->
+<!-- agent:boundary:f35c002c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

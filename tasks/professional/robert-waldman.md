@@ -41,13 +41,13 @@ Added `robert-waldman` to `mail/.corky.toml` and pushed to Google Contacts via `
 Yes
 
 Please create a bi-directional link between this document + judith-krug.md
-### Re: Bi-directional Links Created (HEAD)
+### Re: Bi-directional Links Created
 
 - `tasks/professional/robert-waldman.md` → links to `./judith-krug.md`
 - `tasks/professional/judith-krug.md` → links to `./robert-waldman.md`
 
 Both frontmatter `links` arrays updated.
-<!-- agent:boundary:aa9e531f -->
+<!-- agent:boundary:06b1f972 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

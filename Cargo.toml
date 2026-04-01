@@ -31,7 +31,7 @@ tempfile = "3"
 zip = "2"
 uuid = { version = "1", features = ["v4"] }
 notify = "7"
-agent-kit = { version = "0.3.1", features = ["hooks"] }
+agent-kit = { version = "0.3.2", features = ["hooks"] }
 instruction-files = "0.1"
 tmux-router = "0.3.8"
 pulldown-cmark = "0.12"

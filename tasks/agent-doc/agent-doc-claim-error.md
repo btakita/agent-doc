@@ -1550,9 +1550,13 @@ Both bugs fixed. Here's what was done:
 
 All 592 tests pass. Release binary built.
 
+Just saw...why?
+> ● No changes detected in the document. Nothing to respond to.
+
+<!-- agent:boundary:d004adad -->
+Reasking...this was lost in the previous "No changes detected" bug:
 How would Multi-harness hooks be implemented?
 Can agent-doc take advantage of these hooks to better deterministic event handling?
-<!-- agent:boundary:d004adad -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -849,7 +849,22 @@ Good instincts on all three points.
 The email doesn't need to mention any of this. Let Josh's response tell you which door to walk through.
 
 Updated draft ready for review.
-<!-- agent:boundary:05c66132 -->
+
+> agent-doc's template mode uses named components where each section can be traced to its source. The agent generates structured output with explicit boundaries between user input, agent response, and referenced material.
+
+The boundaries are just markdown and can be overwritten by the user or other processes. Perhaps this is an oversell or irrelevant. Thoughts?
+
+> - **Backtesting against specs**: With a well-defined spec and full revision history, you can backtest the codebase against its own specification...detecting drift between what was intended and what was implemented. This applies to codebases, datasets, agent harness configurations, and prompts. A general pipeline verification approach that catches drift early.
+
+I'm not doing this yet. Just mentioned it as an idea during the interview.
+### Re: Overclaiming Fixes (HEAD)
+
+**Template boundaries:** You're right — markdown components are conventions, not enforced boundaries. Anyone can overwrite them. Rewrote the bullet to describe what's actually there: named components for organizing output, with git tracking who changed what. Dropped the "explicit boundaries" and "traced to source" claims.
+
+**Backtesting:** Reframed as "one idea I mentioned during our conversation...not implemented yet, but the audit trail makes it feasible." Honest about where it stands.
+
+Updated draft. These corrections make the email stronger — presenting what you actually have rather than extrapolating.
+<!-- agent:boundary:1d743207 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -858,6 +873,6 @@ Updated draft ready for review.
 - [ ] Send Josh Malloy follow-up email (pending final approval)
 - [ ] agent-doc README: security section (single-user, prompt injection)
 - [ ] Corky: HTML body extraction for emails
-- [x] Backtesting language corrected (removed false LIGER equivalence)
-- [x] Closing reframed as curiosity, not assertion
+- [x] Template boundaries overclaim fixed
+- [x] Backtesting reframed as idea, not feature
 <!-- /agent:pending -->

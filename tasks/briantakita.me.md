@@ -151,7 +151,7 @@ Which approach do you prefer?
 ### Re: Frontmatter updated
 
 Noted the frontmatter changes: removed `tmux_session: '0'`, added `claude_args: --dangerously-skip-permissions`. The `@source` absolute path fix is still pending your approach decision (A/B/C/D).
-<!-- agent:boundary:b54487e7 -->
+<!-- agent:boundary:71e19bcf -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

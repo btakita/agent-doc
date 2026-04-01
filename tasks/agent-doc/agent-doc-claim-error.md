@@ -3444,6 +3444,9 @@ These are good items for a future session — not blocking the current work. I'l
 Implement:
 - [ ] Add logging to sync auto-start path (attempt/success/skip)
 - [ ] Old-instance protection: version check (A), binary hash cache clear (B), graceful restart (C)
+
+Switching the left pane to tasks/briantakita.me.md caused a single tmux pane layout in the tmux window. Why?
+Same when switching the right pane to tasks/professional/judith-krug.md
 ### Re: Logging and build stamp implemented
 
 **1. Sync auto-start logging added:**
@@ -3463,7 +3466,21 @@ Implement:
 - `cargo build --release`: done
 
 The `.agent-doc/build.stamp` file should be gitignored — it's machine-local.
-<!-- agent:boundary:6d79f356 -->
+### Re: Plugin was calling old binary — fixed (HEAD)
+
+**Root cause found:** The IDEA log shows `exec: /home/brian/.cargo/bin/agent-doc sync` — the **old binary** from 15:19. Both `EditorTabSyncListener.kt` and `SyncLayoutAction.kt` called `TerminalUtil.resolveAgentDoc()` **without `basePath`**, skipping the `.bin/agent-doc` symlink (first candidate) and falling through to `~/.cargo/bin/agent-doc`.
+
+**Fixes:**
+1. Both callers now pass `basePath` to `resolveAgentDoc(basePath)`
+2. Plugin bumped to 0.2.38
+3. `cargo install --path .` — `~/.cargo/bin/agent-doc` is now the current build too
+
+Both binary paths now point to the same fixed code. Plugin rebuilt.
+
+This explains why navigating to files didn't create panes — the old binary at `~/.cargo/bin/` still had both registry guards that blocked auto-start for unregistered files.
+
+**Plugin zip:** `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.38.zip`
+<!-- agent:boundary:aeb35fbc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -3472,17 +3489,14 @@ The `.agent-doc/build.stamp` file should be gitignored — it's machine-local.
 - [x] ClaimAction.kt: replace claim+auto-start with SyncLayoutAction.syncLayout()
 - [x] claim.rs: add registry protection against overwriting existing sessions
 - [x] git.rs: fix (HEAD) marker not added for duplicate heading text
-- [x] Bump JB plugin version to 0.2.37
 - [x] Remove busy guard from EditorTabSyncListener.kt
-- [x] `cargo build --release` in agent-doc submodule
-- [x] Add tests for occurrence-counting HEAD marker logic
-- [x] Audit docs (SPEC.md, claim.rs, git.rs, sync.rs module docs)
 - [x] Fix: sync auto-starts files with session UUIDs (both guards removed)
-- [x] Verify end-to-end: 2 panes confirmed in agent-doc window
-- [x] Add logging to sync auto-start path (resolve_file + auto-start check)
-- [x] Old-instance protection: build stamp (A+B) — clear stale locks on new build
+- [x] Add logging to sync auto-start path
+- [x] Old-instance protection: build stamp (A+B)
+- [x] Fix: plugin resolveAgentDoc now passes basePath (was using old ~/.cargo/bin binary)
+- [x] Bump JB plugin version to 0.2.38
+- [x] `cargo install --path .` — both binary paths are now current
+- [ ] Install plugin 0.2.38 and verify end-to-end
 - [ ] Add `build.stamp` to .gitignore
-- [ ] Old-instance protection: graceful restart (C) — deferred, needs design
-- [ ] `cargo install --path .` to update ~/.cargo/bin/agent-doc
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

@@ -711,5 +711,18 @@ Please include confidence % for the inference.
 3. **Apr 1 #3** "yeah I need the money... I don't mean to be like desperate" → Brian — **90%** confidence. Continues Brian's financial discussion from surrounding diarized segments. The "I need the money" context matches Brian's situation (freelancer awaiting Judith payment). Could be Robert but surrounding context strongly suggests Brian.
 
 4. **Mar 30 AM #1** "Hey. Hey. It seems that I have two numbers for you" → Brian — **85%** confidence. "I have two numbers for you" implies the speaker saved two contacts for the listener. Robert has one phone + one Google Voice number. Brian is the one who would have saved both, noticing the duplicate. Slightly less certain because Robert could be saying "you have two numbers for me" in a colloquial way.
-<!-- agent:boundary:6b06ae35 -->
+
+Please update tasks/software/corky.md to add to `corky transcribe` the algorithm that we just used to attribute unknown speakers in diarized transcriptions.
+Make sure this algorithm is deterministic and in the binary.
+### Re: corky.md updated (HEAD)
+
+Added the adaptive chunked diarization algorithm to `tasks/software/corky.md`:
+
+- **Exchange section:** Full algorithm spec with the 5-step cascade (full -> 10min -> 2min -> 30s -> LLM inference)
+- **Pending section:** Two new items:
+  - `corky transcribe --adaptive-chunk` — cascading chunk diarization
+  - `corky transcribe --resolve-unknown` — LLM-based speaker attribution
+
+The algorithm documents exactly what we did here: progressive splitting + contextual inference for the remaining Unknown segments.
+<!-- agent:boundary:a88ff8b9 -->
 <!-- /agent:exchange -->

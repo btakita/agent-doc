@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Busy pane guard implemented. Active Claude sessions protected from DETACH stashing. Release binary built.
+Stash lifecycle documented. Busy pane guard covers reconciler DETACH. layout.rs gap identified.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1276,7 +1276,44 @@ This protects active sessions at the DETACH level — even when column memory fa
 All tests pass. Release binary built.
 
 **Note:** `Cargo.toml` uses `path = "../tmux-router"` for now. Before publishing, we'll need to publish tmux-router 0.3.7 first, then switch back to the registry version.
-<!-- agent:boundary:d4514882 -->
+
+I notice that we no longer have the tmux window 1:stash. Where are the tmux panes currently stashed? How do we guarantee a tmux pane is not prematurely closed?
+### Re: Stash window and pane lifecycle (HEAD)
+
+**Current state:** No stash window exists. The `claude` session has only `agent-doc` window with 2 panes (%312, %308). Pane %306 (the one that was in stash running `robert-ross.md`) is **dead**.
+
+**Where stashed panes go:**
+
+The stash mechanism has three layers:
+
+1. **`stash_pane(pane_id, session)`** — primary path: joins pane into a "stash" window via `join-pane -dv`. Stash window created on demand by `ensure_stash_window()`.
+2. **`break_pane_to_stash(pane_id, session)`** — fallback when join fails: `break-pane -d` + rename to "stash".
+3. **`break_pane(pane_id)`** — raw detach (used by `layout.rs`): creates unnamed window, no stash naming.
+
+**Why no stash window now:** The stash window is session-scoped and ephemeral. It's created when panes are stashed and cleaned up by `repair_layout`'s consolidation. Since all stashed panes have since died (no active sessions in stash), the stash window was removed or never created.
+
+**Guarantees against premature closure:**
+
+| Guard | Where | What it prevents |
+|-------|-------|-----------------|
+| **Busy pane guard** (new) | `reconcile()` DETACH | Panes running agent-doc/claude skipped during stash |
+| **Last-pane check** | `reconcile()` DETACH | Never stash the last pane in a window |
+| **Cross-session check** | `reconcile()` DETACH | Skip panes registered to another tmux session |
+| **kill_pane safety** | `tmux.rs:375` | Refuses to kill if it would destroy the session |
+| **Column memory** | `sync.rs:367` | Substitutes remembered agent doc for non-agent columns |
+| **Stash rescue** | `sync.rs:566` | Rescues panes from stash back to agent-doc window |
+
+**Known gap:** `layout.rs:213` uses raw `break_pane` without the busy guard. This is a secondary code path (old `layout` command, not the sync reconciler), but it's a hole worth closing.
+
+**Pane lifecycle summary:**
+- **Birth:** `agent-doc start` → `route.rs` creates pane + starts Claude session
+- **Active:** Pane runs in agent-doc window, claimed in sessions.json
+- **Stashed:** DETACH moves to stash window (pane alive, session continues)
+- **Rescued:** Sync detects stashed pane for active file → `swap-pane`/`join-pane` back
+- **Death:** Process exits (Claude session ends) → pane auto-closes → registry pruned by `resync`
+
+The busy pane guard prevents step "Stashed" from happening to panes with active sessions, which was the root cause of your document switch issue.
+<!-- agent:boundary:5a1839ed -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1286,6 +1323,7 @@ All tests pass. Release binary built.
 - [x] **Refine stale baseline guard** — component-aware, append-only
 - [x] **Tests** for stale baseline guard (11) + ops logging (2)
 - [x] **Session resume on document switch** — busy pane guard in DETACH phase
+- [ ] **Close layout.rs gap** — add busy pane check to `run_with_tmux` break_pane path
 - [ ] **Publish tmux-router 0.3.7** (SyncOptions API) + switch agent-doc back to registry dep
 - [ ] **Bug 2A: Divergence check before auto-start**
 - [ ] **Bug 2B: Rollback guard in commit()**

@@ -684,7 +684,7 @@ Updated `mail/drafts/20260401-judith-proposal-options.md` — the "What's includ
 > "AI-powered document intelligence through Ragie ... I'm talking with the CEO tomorrow about integration and early access for your account."
 
 This signals two things: a real company (credibility) and a personal relationship with the CEO (trust + exclusivity). Robert Waldman will recognize this as a serious play.
-<!-- agent:boundary:a1320260 -->
+<!-- agent:boundary:198b534b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

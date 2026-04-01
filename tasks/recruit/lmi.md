@@ -919,12 +919,12 @@ Proposed:
 
 Want me to apply this, or do you have different wording in mind?
 Yes...apply.
-### Re: Applied (HEAD)
+### Re: Applied
 
 Updated line 21 in the draft. Now reads:
 
 > "The deterministic binary (Rust) handles reliable operations (merging, snapshots, git) while the skill layer handles reasoning. Both produce auditable output."
-<!-- agent:boundary:a80899cf -->
+<!-- agent:boundary:9698061d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

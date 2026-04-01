@@ -637,5 +637,16 @@ The 3 most recent **transcribed** recordings (.txt files):
 3. `mail/contacts/robert-ward/recordings/phone_20260327-212919_3109684542.txt`
 
 Note: The 3 most recent recordings (Apr 1, Mar 30 x2) don't have transcripts yet. You can generate them with `corky transcribe --diarize --speakers "Brian,Robert"`.
-<!-- agent:boundary:b3f6571c -->
+
+transcribe + diarize using the gpu
+### Re: Transcription
+
+Done. All 3 recordings transcribed with GPU + diarization and saved:
+
+1. `mail/contacts/robert-ward/recordings/phone_20260401-042624_3109684542.txt` (76min, Apr 1 -- diarization failed, single speaker block)
+2. `mail/contacts/robert-ward/recordings/phone_20260330-212922_3109684542.txt` (7:49, Mar 30 evening -- 2 speakers detected, good diarization)
+3. `mail/contacts/robert-ward/recordings/phone_20260330-040607_3109684542.txt` (37:38, Mar 30 morning -- diarization failed, single speaker block)
+
+Note: Diarization only succeeded on the Mar 30 evening call (short call, clear speaker turns). The other two produced 0 diarization segments, so the text is attributed to "Unknown" as a single block. This sometimes happens with longer AMR recordings where speaker boundaries are less distinct.
+<!-- agent:boundary:aaa0886a -->
 <!-- /agent:exchange -->

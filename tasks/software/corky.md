@@ -1041,14 +1041,62 @@ Good, both decisions simplify the implementation:
 3. Both default-on in `.corky.toml`, opt-out via `--no-adaptive-chunk` / `--no-resolve-unknown`
 
 ## User
-<!-- agent:boundary:518e387d -->
+continue
+### Re: implementation complete
+
+Both features are implemented and `make check` passes (clippy + tests).
+
+**Files changed:**
+- `src/config/corky_config.rs` — added `adaptive_chunk` and `resolve_unknown` fields (default: true)
+- `src/cli.rs` — added `--no-adaptive-chunk` and `--no-resolve-unknown` opt-out flags
+- `src/main.rs` — passes new flags through to `transcribe::run()`
+- `src/transcribe/engine.rs` — refactored diarization flow:
+  - `run_adaptive_diarization()` — tries full audio, cascades through 10min/2min/30s chunks
+  - `format_merged_output()` — extracted output formatting
+  - `resolve_unknown` implies `diarize`
+- `src/transcribe/audio.rs` — added `chunk_audio()` for splitting samples by duration
+- `src/transcribe/diarize.rs` — added:
+  - `diarize_chunked()` — per-chunk diarization with cross-chunk speaker merging
+  - `merge_cross_chunk_speakers()` — cosine similarity matching of speaker embeddings across chunks
+  - `quality_ok()` — checks for >30% unknowns or single-speaker collapse
+- `src/transcribe/resolve.rs` — **new** — Claude API batch resolve for Unknown segments
+
+**Adaptive chunking cascade:**
+1. Try full audio diarization
+2. If quality poor (>30% unknown or too few speakers), try 10min chunks
+3. If still poor, try 2min chunks
+4. If still poor, try 30s chunks
+5. Cross-chunk speaker merging via embedding cosine similarity
+
+**Resolve unknown:**
+- Batches all Unknown segments into one Claude API call with context
+- Uses `claude-sonnet-4-20250514` via existing `ANTHROPIC_API_KEY`
+- Gracefully warns on failure (doesn't block transcription)
+
+**Usage:**
+```bash
+# Default (both features on): (HEAD)
+corky transcribe call.wav --diarize --speakers "Brian,Robert"
+
+# Opt out: (HEAD)
+corky transcribe call.wav --diarize --no-adaptive-chunk --no-resolve-unknown
+
+# Config (.corky.toml): (HEAD)
+[transcription]
+adaptive_chunk = false
+resolve_unknown = false
+```
+
+Ready for a real-world test with a long audio file. Want to try it?
+
+## User
+<!-- agent:boundary:363a4c63 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] `corky transcribe --adaptive-chunk` — cascading chunk diarization for long audio (default-on, opt-out via `--no-adaptive-chunk`)
-- [ ] `corky transcribe --resolve-unknown` — Claude API speaker attribution for Unknown segments (default-on, implies `--diarize`, opt-out via `--no-resolve-unknown`)
+- [ ] Real-world test with long audio file (adaptive-chunk + resolve-unknown)
 - [ ] crates.io publish — needs token refresh
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:pending -->

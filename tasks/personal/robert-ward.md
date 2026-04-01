@@ -565,5 +565,49 @@ Please transcribe + diarize:
 - Retainer strategy: $4K ideal (40 hrs), $2K fallback
 - Ragie integration is the immediate deliverable (document OCR + AI search for all Judith's business docs)
 - Next step: Robert calling Judith Thu/Fri, getting Brian on the call
-<!-- agent:boundary:bff2d3be -->
+### Re: Transcriptions (Mar 30 - Apr 1, 2026)
+
+**Call 1: Mar 30, 4:06am ET (37:38)** — Diarization failed (single-channel AMR)
+- Robert spent 2+ hours with Judith at biohacking expo, introduced her to his network. They bonded.
+- Judith has emotional/health issues (black mold poisoning in Malibu condo)
+- Robert committed to calling Judith Mon/Tue to push the project forward
+- Brian stressed urgency: over a month since first proposal
+- Ron (Manufacturing China) has a client with pancreatic cancer in Kentucky who runs a large catfish supply website/YouTube channel. Owes Ron $65K in inventory. Potential side gig for Brian to help with the website.
+- The catfish guy catches from Ohio River (toxic industrial runoff, DuPont). Likely got sick from consuming contaminated fish. On peptides.
+- Ian texted Robert about a dating website idea
+- Brian mentioned Ragie for Judith's document retrieval needs
+- Brooke is on board with moving out of current location
+- Robert met new women at biohacking event; saw his ex
+
+**Call 2: Mar 30, 9:29pm ET (7:49)** — Diarization succeeded (Brian + Robert)
+- Robert told Judith that Brian has already started work; Judith said "I'll pay him"
+- Judith still wants Brian to build the website + mortgage optimizer replacement
+- Previous web developers still haven't fully refunded Judith (lawyer still involved)
+- Robert invited Brian to LA: Beverly Hills party Monday night, networking events every night
+- Robert asked Brian to do another apartment search (LA listings)
+- Brooke's sister helping pay for groceries at Whole Foods ($400): Not true. I spent $400 on groceries.
+
+**Call 3: Apr 1, 4:26am ET (76:48)** — Diarization failed (single-channel AMR)
+- Brian's finances critical: approaching zero, skipping car payment, rent, electricity
+- Strategy for Judith call: present technical options first (blow her mind), then discuss money at the end
+- Brian wants a 40-hour retainer ($4,000) as ideal ask, $2,000 as fallback
+- Plan: copy Judith's website to new system, start document upload/OCR system using Ragie
+- Ragie backed by Craft Ventures (David Sacks, US AI czar). ~$100/mo for document storage + AI search
+- Three scenarios: (1) keep mortgage optimizer, (2) use mortgage office, (3) build everything custom with Ragie
+- Robert to call Judith Thu/Fri, try to get Brian on the call
+- Brian offering to waive research hours if Judith does the retainer
+- Robert's advice: present value/options first, keep it simple, don't lead with money talk
+- Brian planning email + proposal ready as backup if call is overwhelming
+- Robert mentioned "Primal Moves" fitness space (Venice/Marina Del Rey border), biohacking event Apr 11
+
+**Key Updates:**
+- Judith verbally committed to paying Brian for work done
+- Brian's finances more critical than previously noted: approaching zero
+- Retainer strategy: $4K ideal (40 hrs), $2K fallback
+- Ragie integration is the immediate deliverable (document OCR + AI search for all Judith's business docs)
+- Next step: Robert calling Judith Thu/Fri, getting Brian on the call
+### Re: Correction (HEAD)
+
+Corrected. You spent $400 on groceries at Whole Foods yourself.
+<!-- agent:boundary:15ad96a4 -->
 <!-- /agent:exchange -->

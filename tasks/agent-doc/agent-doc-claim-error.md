@@ -3212,7 +3212,7 @@ This is a good design direction for later — sync becomes an agent-level concer
 Shall I proceed with the remaining items? Next up: `cargo build --release`, then tests and audit docs.
 proceed.
 Add evaluate utility of `/btw` wrt agent-doc into agent:pending
-### Re: Build, tests, and audit docs complete (HEAD)
+### Re: Build, tests, and audit docs complete
 
 **Done:**
 
@@ -3230,7 +3230,7 @@ Add evaluate utility of `/btw` wrt agent-doc into agent:pending
 
 **Ready for plugin install.** The JB plugin zip is at:
 `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.37.zip`
-<!-- agent:boundary:73635e54 -->
+<!-- agent:boundary:10833cd8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

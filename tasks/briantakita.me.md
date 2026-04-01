@@ -696,7 +696,7 @@ Please read /home/brian/work/btakita/agent-loop/src/briantakita.me-dev/app/brian
 The security story is the audit trail...and the multiuser prompt injection. 
 
 Include the agent-doc bugs as well. But let's get the teaser correct.
-### Re: Revised teaser — security + audit trail (HEAD)
+### Re: Revised teaser — security + audit trail
 
 Read the full blog post. The security story is about **multiuser prompt injection** (the document IS the prompt, so anyone with repo access can inject instructions) and the **audit trail** (every exchange committed to git, blog post generated from that history).
 
@@ -719,7 +719,7 @@ Read the full blog post. The security story is about **multiuser prompt injectio
 **First comment:** `https://briantakita.me/posts/agent-security-multiuser-lessons/`
 
 Ready to publish via corky. Say the word.
-<!-- agent:boundary:5cc3cc90 -->
+<!-- agent:boundary:17a51547 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

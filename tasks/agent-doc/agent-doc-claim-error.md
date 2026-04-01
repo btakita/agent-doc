@@ -1556,7 +1556,7 @@ Just saw...why?
 Reasking...this was lost in the previous "No changes detected" bug:
 How would Multi-harness hooks be implemented?
 Can agent-doc take advantage of these hooks to better deterministic event handling?
-### Re: Bug 2B regression fix + multi-harness hooks (HEAD)
+### Re: Bug 2B regression fix + multi-harness hooks
 
 **Bug 2B regression found and fixed.** The divergence detection in `commit()` was using a `starts_with` check that fails for template documents — user edits inside components push closing tags to different positions, making the check always trigger. This caused the snapshot to be overwritten with file content (including user edits) on every commit, making the next preflight see no diff.
 
@@ -1586,7 +1586,7 @@ Multi-harness hooks (agent-kit) would let multiple agent-doc sessions coordinate
 - **Claim hook**: When a file is claimed, notify any session that was working on it
 
 Current state: agent-kit 0.2 exists but doesn't have the hook registry yet. This would be a v0.3 feature. The value is highest when running 3+ concurrent sessions on related documents.
-<!-- agent:boundary:af54472d -->
+<!-- agent:boundary:514bb822 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

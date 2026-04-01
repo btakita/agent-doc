@@ -502,6 +502,8 @@ Should I also release the entire blog post on LinkedIn along with briantakita.me
 
 **April 1st:** Keeping it. Added *"Yes, this is dated April 1st. The 532 commits are real — check the git log."* to the blog post intro.
 
+The git log is in a private repo...so nobody can check other than me...I hope :-p
+
 **LinkedIn:** Recommend teaser post linking to full article on briantakita.me. Draft teaser:
 
 > 532 git commits in one day. 11 parallel AI agent sessions. 292 commits debugging one cascade of bugs.
@@ -517,11 +519,16 @@ Should I also release the entire blog post on LinkedIn along with briantakita.me
 > Full post: [link]
 
 Ready to build and deploy when you are. Want me to build briantakita.me locally to preview?
-<!-- agent:boundary:ba569521 -->
+### Re: Private git log (HEAD)
+
+Removed the "check the git log" link — can't verify a private repo. Now just: *"Yes, this is dated April 1st. The 532 commits are real."*
+
+Simple, confident, no empty promises. :-)
+<!-- agent:boundary:c443cc1e -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Blog post v5 with April 1st line — build, preview, deploy
+- Blog post v5 final — build, preview, deploy
 - LinkedIn teaser draft ready
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

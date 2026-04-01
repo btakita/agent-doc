@@ -761,7 +761,7 @@ Got it. LinkedIn is having an outage per their status page. The OAuth callback w
 Or just trigger `/agent-doc tasks/briantakita.me.md` and tell me LinkedIn is back.
 
 Should we delay teaser post until tomorrow morning or post when LinkedIn comes back. Will reduced activity + posts be an advantage or disadvantage?
-### Re: Timing — post now vs. tomorrow morning (HEAD)
+### Re: Timing — post now vs. tomorrow morning
 
 **Post tomorrow morning (8-10 AM ET).** Here's why:
 
@@ -776,7 +776,7 @@ Should we delay teaser post until tomorrow morning or post when LinkedIn comes b
 **Recommendation:** Schedule for Wednesday April 2nd, ~9 AM ET. Fresh eyes, peak engagement window, no outage noise, no April Fools associations.
 
 Want me to set up a corky scheduled publish for tomorrow morning?
-<!-- agent:boundary:125aa7f0 -->
+<!-- agent:boundary:1dc82e85 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

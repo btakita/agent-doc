@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-HookTransport trait + FileTransport + SocketTransport + ChainTransport implemented. 10 hooks tests total.
+Hook CLI (fire/poll/listen/gc) deployed. Claude Code bridge documented. Verified working.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1823,16 +1823,67 @@ pub trait HookTransport: Send + Sync {
 - `fire_and_deliver_fires_locally_and_delivers` — local fire + delivery to target
 
 All 31 agent-kit tests + 595 agent-doc tests pass. Release binary built.
-<!-- agent:boundary:9bb89b77 -->
+
+Implement:
+- [ ] **Hook socket listener in agent-doc** — accept events on `.agent-doc/hooks.sock`
+- [ ] **Claude Code hook bridge** — PostToolUse settings.json → agent-doc hook fire
+### Re: Hook CLI + socket listener + Claude Code bridge (HEAD)
+
+**Implemented.** New `agent-doc hook` subcommand with 4 actions:
+
+```
+agent-doc hook fire <EVENT> <FILE> [--session-id ID] [--data JSON]
+agent-doc hook poll <EVENT> [--since SECS] [--root PATH]
+agent-doc hook listen [--root PATH]
+agent-doc hook gc [--root PATH]
+```
+
+#### Verified working
+
+```
+$ agent-doc hook fire post_write tasks/agent-doc/agent-doc-claim-error.md --data '{"test": true}'
+69cd3e1301b9d6d0
+
+$ agent-doc hook poll post_write --since 0
+[{"data":{"test":true},"event_id":"69cd3e1301b9d6d0","file":"tasks/agent-doc/agent-doc-claim-error.md","session_id":"bef800bc-950e-4f9e-b861-92c249853397","timestamp":1775058451}]
+```
+
+Session ID is auto-read from frontmatter when `--session-id` is omitted.
+
+#### Hook socket listener (`hook listen`)
+
+Starts a Unix domain socket at `.agent-doc/hooks.sock`. Accepts JSON messages from `SocketTransport`, writes them to the file-based hook directory. Protocol: JSON line → `ok\n` or `error\n`.
+
+#### Claude Code bridge
+
+Add to `.claude/settings.json` (or project-level):
+```json
+{
+  "hooks": {
+    "PostToolUse": [{
+      "matcher": "Write|Edit",
+      "command": "agent-doc hook fire post_write \"$TOOL_INPUT_FILE\""
+    }]
+  }
+}
+```
+
+This fires a `post_write` event whenever Claude Code writes/edits a file. Other agent-doc sessions can poll for these events to know when linked documents change.
+
+**Files added:**
+- `src/agent-doc/src/hook_cmd.rs` — CLI subcommands (fire, poll, listen, gc)
+- Updated `main.rs` — `Hook` command variant + `HookAction` enum
+
+All 595 tests pass. Release binary built and verified.
+<!-- agent:boundary:1e27ec1b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **HookTransport trait** — abstract delivery (file, socket, chain)
-- [x] **SocketTransport** — Unix domain socket delivery with ack
-- [ ] **Hook socket listener in agent-doc** — accept events on `.agent-doc/hooks.sock`
-- [ ] **Claude Code hook bridge** — PostToolUse settings.json → agent-doc hook fire
+- [x] **Hook CLI** — `agent-doc hook fire/poll/listen/gc`
+- [x] **Hook socket listener** — Unix domain socket at `.agent-doc/hooks.sock`
+- [x] **Claude Code bridge** — PostToolUse settings.json documented
 - [ ] **Publish agent-kit v0.3** + switch agent-doc back to registry dep
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)

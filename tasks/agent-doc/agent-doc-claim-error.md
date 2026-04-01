@@ -2674,12 +2674,12 @@ agent-doc session migrate <from> <to> # Move panes between sessions explicitly
 This is a good feature to add in the next release. Want me to implement it now, or track it in pending?
 
 Implement now for the upcoming release.
-### Re: Implementing `agent-doc session` CLI (HEAD)
+### Re: Implementing `agent-doc session` CLI
 
 Building it now. Starting implementation.
 The entire response patch is uncommitted. Why? It should be committed.
 ![img_4.png](img_4.png)
-### Re: `agent-doc session` CLI — Implemented (HEAD)
+### Re: `agent-doc session` CLI — Implemented
 
 **New command:**
 
@@ -2704,7 +2704,7 @@ agent-doc session set <N>  # Update config + move agent-doc & stash windows
 - Both bulk and non-bulk purge variants fixed
 
 All 601 tests pass. Binary installed.
-<!-- agent:boundary:18e165dc -->
+<!-- agent:boundary:d6e55812 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

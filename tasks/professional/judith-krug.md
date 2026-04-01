@@ -662,7 +662,7 @@ Include website + document uploads in the proposal as well.
 Want me to create the draft file?
 Let's include the example prompts as a p.s. to the email. I want Judith to visualize the power of what she will be getting.
 She will be able to run prompts from her phone.
-### Re: Draft Created with P.S. Prompts (HEAD)
+### Re: Draft Created with P.S. Prompts
 
 Created `mail/drafts/20260401-judith-proposal-options.md` — full proposal with P.S. section showcasing 8 example prompts:
 
@@ -675,7 +675,7 @@ Created `mail/drafts/20260401-judith-proposal-options.md` — full proposal with
 The P.S. lets Judith visualize the power without cluttering the main email. Closes with "Like having a brilliant assistant who's read every file in your office."
 
 Ready to send via `corky draft push` when you approve.
-<!-- agent:boundary:88c653b8 -->
+<!-- agent:boundary:37a9cd29 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

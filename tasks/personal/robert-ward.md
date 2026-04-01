@@ -714,7 +714,7 @@ Please include confidence % for the inference.
 
 Please update tasks/software/corky.md to add to `corky transcribe` the algorithm that we just used to attribute unknown speakers in diarized transcriptions.
 Make sure this algorithm is deterministic and in the binary.
-### Re: corky.md updated (HEAD)
+### Re: corky.md updated
 
 Added the adaptive chunked diarization algorithm to `tasks/software/corky.md`:
 
@@ -724,5 +724,5 @@ Added the adaptive chunked diarization algorithm to `tasks/software/corky.md`:
   - `corky transcribe --resolve-unknown` — LLM-based speaker attribution
 
 The algorithm documents exactly what we did here: progressive splitting + contextual inference for the remaining Unknown segments.
-<!-- agent:boundary:a88ff8b9 -->
+<!-- agent:boundary:8e96f45d -->
 <!-- /agent:exchange -->

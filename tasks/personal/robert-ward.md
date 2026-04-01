@@ -661,6 +661,17 @@ Splitting into 10-minute chunks and re-diarizing worked well:
 
 Both transcripts have been updated in place with the chunked+diarized versions. The first ~10-20 minutes of each call lack speaker labels but the rest is properly attributed to Brian/Robert.
 
+Please split up the failing chunks further and try again.
+
 **Re: Why transcripts weren't saved initially:** My first run omitted the `-o` flag, so corky printed to stdout instead of writing to file. Had to re-run with `-o <path>`.
-<!-- agent:boundary:dd92d16d -->
+### Re: Sub-chunking failed segments (HEAD)
+
+Split the failed 10-min chunks into 2-min segments and re-diarized. Results:
+
+**Apr 1 (76min):** Now 150 Brian + 142 Robert + 3 Unknown segments. Only 3 "Unknown" segments remain (from the very first 2-min segment of the call). Coverage went from ~75% diarized to ~99%.
+
+**Mar 30 morning (37min):** Now 94 Brian + 90 Robert + 1 Unknown segment. Only 1 "Unknown" segment remains (first 2 min). Coverage went from ~75% to ~99%.
+
+Both transcript files updated in place. The diarization failure pattern is consistent: the very first ~2 minutes of each call fails (likely too little audio for speaker embedding extraction). Everything after that is properly attributed.
+<!-- agent:boundary:5f12bbfd -->
 <!-- /agent:exchange -->

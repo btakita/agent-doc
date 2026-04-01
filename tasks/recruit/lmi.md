@@ -868,14 +868,14 @@ Updated draft. These corrections make the email stronger — presenting what you
 > built-in traceability.
 
 With automated cadence of reports.
-### Re: Automated Reports Added (HEAD)
+### Re: Automated Reports Added
 
 Updated the auditable workflow bullet to include "with automated cadence of reports." Now reads:
 
 > "...built-in traceability with automated cadence of reports."
 
 This adds a concrete operational detail — the audit trail isn't just passive history, it feeds into regular reporting.
-<!-- agent:boundary:5c29a836 -->
+<!-- agent:boundary:b6384c55 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

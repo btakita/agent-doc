@@ -1092,7 +1092,6 @@ Ready for a real-world test with a long audio file. Want to try it?
 ## User
 Try it on the April call with robert-ward.
 
-Run nvi
 ### Re: Try it on the April call with robert-ward
 
 Running `corky transcribe` on the April 1 call:
@@ -1103,7 +1102,25 @@ corky transcribe --diarize --speakers "Brian,Robert" \
 ```
 
 Transcription in progress... will update with results.
-<!-- agent:boundary:82fc2a4a -->
+
+Run nvidia-smi to detect if we are using the gpu.
+### Re: Run nvi (HEAD)
+
+Transcription still running (10+ min elapsed on a 79-min call). Status:
+
+- **CPU:** 395% (4 cores saturated) - pyannote diarization phase
+- **GPU:** 0% utilization, 221 MiB / 32,607 MiB used
+- **RSS:** 2.5 GB
+
+The GPU isn't being used right now. This suggests pyannote-rs diarization is running on CPU only. Two possibilities:
+
+1. **Pyannote always runs on CPU** in the current build - the ONNX runtime for pyannote may not have CUDA enabled
+2. **Whisper already finished** its GPU pass, and we're in the diarization-only phase
+
+For a 79-minute call, CPU-only diarization could take 15-20+ minutes. The process is still actively computing (not stuck).
+
+Want me to check the corky diarization code to confirm whether pyannote-rs supports GPU acceleration?
+<!-- agent:boundary:9cc48405 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

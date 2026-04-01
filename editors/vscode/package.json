@@ -68,6 +68,9 @@
     "package": "vsce package",
     "publish": "vsce publish"
   },
+  "dependencies": {
+    "koffi": "^2.9.0"
+  },
   "devDependencies": {
     "@types/vscode": "^1.85.0",
     "@types/node": "^20.0.0",

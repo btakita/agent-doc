@@ -209,10 +209,17 @@ fn resolve_or_create_pane(
                 send_command(tmux, registered_pane, file_path)?;
                 return Ok(registered_pane.clone());
             }
+            // Pane moved to a different live session — follow it by updating config
             eprintln!(
-                "[route] Pane {} is alive but in wrong session ('{}', expected '{}'). Will re-create.",
+                "[route] Pane {} is alive but in session '{}' (config says '{}'). Updating config to follow pane.",
                 registered_pane, pane_session, target_session
             );
+            if let Err(e) = crate::config::update_project_tmux_session(&pane_session) {
+                eprintln!("warning: failed to update project tmux_session config: {}", e);
+            }
+            rescue_from_stash(tmux, registered_pane, session_id, file_path, &pane_session);
+            send_command(tmux, registered_pane, file_path)?;
+            return Ok(registered_pane.clone());
         } else {
             eprintln!("[route] Pane {} is dead", registered_pane);
         }
@@ -515,18 +522,17 @@ fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: 
     {
         let starting_dir = project_root.join(".agent-doc/starting");
         let lock_path = starting_dir.join(format!("{}.lock", hash));
-        if lock_path.exists() {
-            if let Ok(meta) = lock_path.metadata()
-                && let Ok(modified) = meta.modified()
-                && let Ok(age) = modified.elapsed()
-                && age.as_secs() < 5
-            {
-                eprintln!(
-                    "[route] startup lock exists for {} (age {:.1}s), skipping auto-start",
-                    file_path, age.as_secs_f64()
-                );
-                return Ok(());
-            }
+        if lock_path.exists()
+            && let Ok(meta) = lock_path.metadata()
+            && let Ok(modified) = meta.modified()
+            && let Ok(age) = modified.elapsed()
+            && age.as_secs() < 5
+        {
+            eprintln!(
+                "[route] startup lock exists for {} (age {:.1}s), skipping auto-start",
+                file_path, age.as_secs_f64()
+            );
+            return Ok(());
         }
         // Create the lock
         let _ = std::fs::create_dir_all(&starting_dir);

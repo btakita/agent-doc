@@ -24,6 +24,9 @@
 //! - `agent_doc_document_changed(file_path)`: records a change event for debounce tracking.
 //! - `agent_doc_is_tracked(file_path)`: returns whether at least one change event has been recorded
 //!   for the file.
+//! - `agent_doc_is_idle(file_path, debounce_ms)`: non-blocking check — returns `true` if no
+//!   `document_changed` event within `debounce_ms`.  Used by the IDE plugin to defer IPC writes
+//!   (e.g. boundary repositioning) while the user is actively typing.
 //! - `agent_doc_await_idle(file_path, debounce_ms, timeout_ms)`: blocks until the document has been
 //!   idle for `debounce_ms`, or `timeout_ms` expires.  Returns `true` on idle, `false` on timeout.
 //! - `agent_doc_free_string(ptr)` / `agent_doc_free_state(ptr, len)`: free memory returned by any
@@ -531,6 +534,30 @@ pub unsafe extern "C" fn agent_doc_is_tracked(file_path: *const c_char) -> bool 
     crate::debounce::is_tracked(path)
 }
 
+/// Non-blocking idle check — returns `true` if no `document_changed` event
+/// within `debounce_ms`.
+///
+/// Used by IDE plugins to defer IPC operations (boundary repositioning, patch
+/// application) while the user is actively typing.  Unlike `await_idle`, this
+/// returns immediately.
+///
+/// For untracked files (no `document_changed` ever called), returns `true`.
+///
+/// # Safety
+///
+/// `file_path` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_is_idle(
+    file_path: *const c_char,
+    debounce_ms: i64,
+) -> bool {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return true, // Invalid path — don't block callers
+    };
+    crate::debounce::is_idle(path, debounce_ms as u64)
+}
+
 /// Block until the document has been idle for `debounce_ms`, or `timeout_ms` expires.
 ///
 /// Returns `true` if idle was reached (safe to run), `false` if timed out.
@@ -819,6 +846,21 @@ mod tests {
         assert!(text.contains("more\n<!-- agent:boundary:"));
         assert!(text.contains(" -->\n<!-- /agent:exchange -->"));
         unsafe { agent_doc_free_string(result.text) };
+    }
+
+    #[test]
+    fn is_idle_untracked_returns_true() {
+        let path = CString::new("/tmp/ffi-test-untracked-file.md").unwrap();
+        let result = unsafe { agent_doc_is_idle(path.as_ptr(), 500) };
+        assert!(result, "untracked file should report idle");
+    }
+
+    #[test]
+    fn is_idle_after_change_returns_false() {
+        let path = CString::new("/tmp/ffi-test-just-changed.md").unwrap();
+        unsafe { agent_doc_document_changed(path.as_ptr()) };
+        let result = unsafe { agent_doc_is_idle(path.as_ptr(), 2000) };
+        assert!(!result, "file changed <2s ago should not be idle with 2000ms window");
     }
 
     #[test]

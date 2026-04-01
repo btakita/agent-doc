@@ -571,11 +571,17 @@ enum PluginAction {
 
 #[derive(Subcommand)]
 enum SkillCommands {
-    /// Install the skill definition to .claude/skills/agent-doc/SKILL.md
+    /// Install the skill definition for the detected (or specified) agent harness
     Install {
         /// After install, output reload instructions: compact (default) or restart
         #[arg(long)]
         reload: Option<String>,
+        /// Target harness: claude, opencode, codex, cursor, generic (auto-detected if omitted)
+        #[arg(long)]
+        harness: Option<String>,
+        /// Install for all supported harnesses
+        #[arg(long)]
+        all: bool,
     },
     /// Check if the installed skill matches the binary version
     Check,
@@ -680,19 +686,29 @@ fn main() -> anyhow::Result<()> {
         Commands::Outline { file, json } => outline::run(&file, json),
         Commands::Resync { fix } => resync::run(fix),
         Commands::Skill { command } => match command {
-            SkillCommands::Install { reload } => {
-                let updated = skill::install_and_check_updated()?;
-                if updated
-                    && let Some(ref mode) = reload
-                {
-                    match mode.as_str() {
-                        "restart" => {
-                            println!("SKILL_RELOAD=restart");
-                            println!("Skill updated. Please restart this session with --resume to reload the skill.");
-                        }
-                        _ => {
-                            println!("SKILL_RELOAD=compact");
-                            println!("Skill updated. Please run /compact to reload the updated skill instructions.");
+            SkillCommands::Install { reload, harness, all } => {
+                if all {
+                    skill::install_all()?;
+                } else if let Some(ref h) = harness {
+                    let env = agent_kit::detect::Environment::from_name(h)
+                        .ok_or_else(|| anyhow::anyhow!(
+                            "unknown harness '{}'. Valid: claude, opencode, codex, cursor, generic", h
+                        ))?;
+                    skill::install_for(env)?;
+                } else {
+                    let updated = skill::install_and_check_updated()?;
+                    if updated
+                        && let Some(ref mode) = reload
+                    {
+                        match mode.as_str() {
+                            "restart" => {
+                                println!("SKILL_RELOAD=restart");
+                                println!("Skill updated. Please restart this session with --resume to reload the skill.");
+                            }
+                            _ => {
+                                println!("SKILL_RELOAD=compact");
+                                println!("Skill updated. Please run /compact to reload the updated skill instructions.");
+                            }
                         }
                     }
                 }

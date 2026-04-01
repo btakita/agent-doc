@@ -4,6 +4,16 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.30.1
+
+- **FFI `agent_doc_is_idle`**: Non-blocking typing check for editor plugins to query idle state before boundary reposition.
+- **JetBrains plugin typing debounce**: Boundary reposition deferred until typing stops, using FFI idle check.
+- **VS Code koffi FFI bindings**: `native.ts` with koffi-based native bindings for the shared FFI library.
+- **VS Code reposition boundary handling**: Boundary reposition with typing debounce via FFI idle check.
+- **tmux_session config drift fix**: `route.rs` follows pane session, `claim.rs` updates config to match.
+- **2 new FFI tests**: Coverage for `agent_doc_is_idle` and related FFI surface.
+- **Dependencies**: `tmux-router` v0.3.8.
+
 ## 0.30.0
 
 - **Stale baseline guard (component-aware)**: `is_stale_baseline()` now parses components and only checks append-mode (exchange, findings). Replace-mode components (status, pending) are skipped. Falls back to prefix check for inline docs. 11 new tests.

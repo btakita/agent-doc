@@ -216,40 +216,40 @@ pub fn is_stale_baseline(baseline: &str, snapshot: &str) -> bool {
     if let (Ok(snap_components), Ok(base_components)) = (
         component::parse(snapshot),
         component::parse(baseline),
-    ) {
-        if !snap_components.is_empty() {
-            // Only check append-mode components — these grow monotonically and must
-            // contain the snapshot's committed content. Replace-mode components
-            // (status, pending) are user-editable and should be skipped.
-            for snap_comp in &snap_components {
-                let is_append = snap_comp.patch_mode()
-                    .map(|m| m == "append")
-                    .unwrap_or(is_append_mode_component(&snap_comp.name));
-                if !is_append {
-                    continue;
-                }
-                let snap_content = strip_boundary_for_dedup(
-                    snap_comp.content(snapshot).trim(),
+    )
+        && !snap_components.is_empty()
+    {
+        // Only check append-mode components — these grow monotonically and must
+        // contain the snapshot's committed content. Replace-mode components
+        // (status, pending) are user-editable and should be skipped.
+        for snap_comp in &snap_components {
+            let is_append = snap_comp.patch_mode()
+                .map(|m| m == "append")
+                .unwrap_or(is_append_mode_component(&snap_comp.name));
+            if !is_append {
+                continue;
+            }
+            let snap_content = strip_boundary_for_dedup(
+                snap_comp.content(snapshot).trim(),
+            );
+            if snap_content.is_empty() {
+                continue;
+            }
+            // Find matching component in baseline by name
+            if let Some(base_comp) = base_components.iter().find(|c| c.name == snap_comp.name) {
+                let base_content = strip_boundary_for_dedup(
+                    base_comp.content(baseline).trim(),
                 );
-                if snap_content.is_empty() {
-                    continue;
-                }
-                // Find matching component in baseline by name
-                if let Some(base_comp) = base_components.iter().find(|c| c.name == snap_comp.name) {
-                    let base_content = strip_boundary_for_dedup(
-                        base_comp.content(baseline).trim(),
-                    );
-                    // Baseline's append component must contain the snapshot's content
-                    if !base_content.contains(&snap_content) {
-                        return true;
-                    }
-                } else {
-                    // Snapshot has an append component that baseline lacks entirely
+                // Baseline's append component must contain the snapshot's content
+                if !base_content.contains(&snap_content) {
                     return true;
                 }
+            } else {
+                // Snapshot has an append component that baseline lacks entirely
+                return true;
             }
-            return false;
         }
+        return false;
     }
 
     // Fallback for non-template docs: prefix check (original behavior)
@@ -583,20 +583,20 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             // Compare component-by-component: for each component in the snapshot, check
             // that the baseline's corresponding component contains the snapshot content.
             // This handles user edits anywhere in the document (not just appended at end).
-            if let Ok(Some(current_snap)) = snapshot::load(file) {
-                if is_stale_baseline(base, &current_snap) {
-                    eprintln!(
-                        "[write] WARNING: baseline missing snapshot content — stale baseline detected, using current file as baseline"
-                    );
-                    crate::ops_log::log_op(file, &format!(
-                        "stale_baseline_detected file={} base_len={} snap_len={} file_len={}",
-                        file.display(), base.len(), current_snap.len(), content_at_start.len()
-                    ));
-                    // Re-apply patches to the current file content instead of the stale baseline
-                    content_ours = template::apply_patches_with_overrides(
-                        &content_at_start, &patches, &unmatched, file, &mode_overrides,
-                    ).context("failed to apply patches with fresh baseline")?;
-                }
+            if let Ok(Some(current_snap)) = snapshot::load(file)
+                && is_stale_baseline(base, &current_snap)
+            {
+                eprintln!(
+                    "[write] WARNING: baseline missing snapshot content — stale baseline detected, using current file as baseline"
+                );
+                crate::ops_log::log_op(file, &format!(
+                    "stale_baseline_detected file={} base_len={} snap_len={} file_len={}",
+                    file.display(), base.len(), current_snap.len(), content_at_start.len()
+                ));
+                // Re-apply patches to the current file content instead of the stale baseline
+                content_ours = template::apply_patches_with_overrides(
+                    &content_at_start, &patches, &unmatched, file, &mode_overrides,
+                ).context("failed to apply patches with fresh baseline")?;
             }
 
             // Dedup: skip IPC if patches produce no changes (strip boundary markers)

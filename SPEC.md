@@ -410,14 +410,14 @@ Mirrors a columnar editor layout in tmux. Each `--col` is a comma-separated list
 
 **No early exits:** The full reconcile path always runs regardless of how many panes resolve (0, 1, or 2+). The DETACH phase stashes excess panes from previous layouts. Previous versions had early exits for `resolved < 2` that bypassed stashing, leaving orphaned panes visible.
 
-**Busy pane guard:** The DETACH phase checks each unwanted pane via `SyncOptions.protect_pane` callback before stashing. agent-doc's sync passes `is_pane_busy()` which inspects the pane's process tree (`ps -p <pid> -o command=` + child processes via `pgrep -P`) for running `agent-doc` or `claude` processes. Protected panes are skipped with `"skipped — protected (busy pane)"` log. The same guard is applied in `layout.rs` for the `break_pane` path.
+**Busy pane guard (`layout.rs` only):** The `layout.rs` break_pane path checks `is_pane_busy()` before breaking panes. The sync reconciler's DETACH phase does NOT use a busy pane guard — the `SyncOptions.protect_pane` callback exists in tmux-router but agent-doc passes default options (no guard). This was changed because the guard caused 3-pane accumulation when users switched documents in the same column. Column memory + stash rescue handle session preservation without the guard.
 
 **Reconciliation algorithm** (attach-first order):
 1. **SNAPSHOT** — query current pane order in target window
 2. **FAST PATH** — if current order matches desired, done
 3. **ATTACH** — `join-pane` missing desired panes into target window (isolate from shared windows first, then join with correct split direction: `-h` for columns, `-v` for stacking)
 4. **SELECT** — select focus pane before stashing (prevents tmux auto-selecting an unintended pane)
-5. **DETACH** — stash unwanted panes out of target window (panes stay alive in stash; busy panes skipped)
+5. **DETACH** — stash unwanted panes out of target window (panes stay alive in stash)
 6. **REORDER** — if all panes present but wrong order, break non-first panes out and rejoin in order
 7. **VERIFY** — confirm final layout matches desired order
 

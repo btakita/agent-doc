@@ -353,10 +353,15 @@ You're right — you told me this earlier and I should have gotten it right the 
 The v3 draft (from two cycles ago) already has the correct framing: no livestream, no screencast, incidents discovered through commit history review, private repo. That summary bullet was describing changes already applied, not proposing new ones.
 
 v3 is the current draft. Ready to create the `.md` file, or let me know what else to adjust.
-<!-- agent:boundary:355fac42 -->
+### Re: File created (HEAD)
+
+Blog post written to `src/briantakita.me-dev/app/briantakita.me/post/content/2026-04-01-agent-security-multiuser-lessons.md`
+
+v3 draft with correct framing. Auto-discovered by `index.generate.ts` on next build. Ready to build and preview, or make further edits to the file directly.
+<!-- agent:boundary:66bf0106 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Blog post v3 ready — create file when approved
+- Blog post file created — ready to build/preview/deploy
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

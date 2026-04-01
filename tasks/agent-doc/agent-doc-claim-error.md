@@ -3078,7 +3078,7 @@ All three changes are done:
 - JetBrains plugin builds successfully (both unsigned and signed zips)
 
 **To install:** reinstall the plugin zip from `src/agent-doc/editors/jetbrains/build/distributions/`. Since ClaimAction lost fields/methods, do a full uninstall → restart → install → restart cycle.
-<!-- agent:boundary:27315d76 -->
+<!-- agent:boundary:b67aad1f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

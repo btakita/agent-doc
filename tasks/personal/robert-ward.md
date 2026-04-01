@@ -614,7 +614,7 @@ Corrected. You spent $400 on groceries at Whole Foods yourself.
 
 Where are the 3 most recent transcript files?
 Please print the paths.
-### Re: Transcript file paths (HEAD)
+### Re: Transcript file paths
 
 The 3 most recent **transcribed** recordings (.txt files):
 
@@ -628,7 +628,7 @@ What about the transcripts for?
 /home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260330-040607_3109684542.amr
 /home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260330-212922_3109684542.amr
 /home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260401-042624_3109684542.amr
-### Re: Transcript file paths (HEAD)
+### Re: Transcript file paths
 
 The 3 most recent **transcribed** recordings (.txt files):
 
@@ -637,5 +637,5 @@ The 3 most recent **transcribed** recordings (.txt files):
 3. `mail/contacts/robert-ward/recordings/phone_20260327-212919_3109684542.txt`
 
 Note: The 3 most recent recordings (Apr 1, Mar 30 x2) don't have transcripts yet. You can generate them with `corky transcribe --diarize --speakers "Brian,Robert"`.
-<!-- agent:boundary:9e8d402d -->
+<!-- agent:boundary:b3f6571c -->
 <!-- /agent:exchange -->

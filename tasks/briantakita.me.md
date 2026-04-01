@@ -564,7 +564,7 @@ Ready to apply the optional security tightening and deploy. Or review the file d
 Positive framing, no double negative, names the specific features on the roadmap.
 
 Release blog post
-### Re: Blog post released (HEAD)
+### Re: Blog post released
 
 **Committed and pushed:**
 1. `briantakita.me` (inner submodule): blog post committed and pushed to `main`
@@ -576,7 +576,7 @@ CI/CD should deploy to Cloudflare Pages automatically. The post will be at `bria
 **Next steps:**
 - Verify the deploy completes (check GitHub Actions)
 - Post LinkedIn teaser when live
-<!-- agent:boundary:498f2ac5 -->
+<!-- agent:boundary:523fd2df -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

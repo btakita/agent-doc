@@ -573,14 +573,30 @@ Release blog post
 
 CI/CD should deploy to Cloudflare Pages automatically. The post will be at `briantakita.me/post/2026-04-01-agent-security-multiuser-lessons`.
 
+I don't see it at https://briantakita.me/post/2026-04-01-agent-security-multiuser-lessons
+Also don't see it at http://localhost:4100/
+
+Why not?
+
 **Next steps:**
 - Verify the deploy completes (check GitHub Actions)
 - Post LinkedIn teaser when live
-<!-- agent:boundary:523fd2df -->
+
+Let's add to briantakita.me-dev AGENTS.md -> CLAUDE.md
+Bette
+### Re: Post not visible — fixed (HEAD)
+
+The blog post file existed but wasn't registered. `post/index.ts` is a generated manifest — it lists all posts as imports. The new post wasn't in it.
+
+**Fix:** Ran `bun post/index.generate.ts` to regenerate the index, committed and pushed to all three repos (briantakita.me, briantakita.me-dev, agent-loop).
+
+For localhost: restart `bun run dev` to pick up the change. CI should now deploy with the post included.
+<!-- agent:boundary:d0311379 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Verify deploy to briantakita.me
+- Verify deploy to briantakita.me (CI triggered)
+- Verify localhost after dev server restart
 - LinkedIn teaser post
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

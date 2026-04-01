@@ -789,11 +789,33 @@ Since today is already Wednesday (peak engagement day), updated options:
 3. **Post tomorrow (Thursday) morning** removes the April Fools association entirely
 
 The April 1st concern still applies regardless of day-of-week. Recommend **Thursday 9 AM ET** to dodge both the outage aftermath and April Fools skepticism.
-<!-- agent:boundary:9fe8a9ef -->
+
+Lets address:
+- `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
+
+D: Fix esmcss
+### Re: @source fix (Option D — fix esmcss/rebuildjs-tailwindcss) (HEAD)
+
+**Root cause:** The `rebuild_tailwind_plugin` passes `from: esbuild_cssBundle_path` to postcss. This is a path in the build output directory (e.g., `dist/browser--dev/`). When `@tailwindcss/postcss` processes `@source` directives, it resolves relative paths from `dirname(from)` — the output dir, not the CSS source dir.
+
+**Two changes made:**
+
+**1. `src/ctx-core-dev/lib/rebuildjs-tailwindcss/rebuild_tailwind_plugin/index.js`**
+- Added `dirname` to `node:path` import
+- New `postcss_from` variable: when `output.entryPoint` exists, constructs a path in the entry point's directory (where `index.css.ts` lives). Falls back to `esbuild_cssBundle_path` when no entry point.
+- `@source` relative paths now resolve from the CSS source directory
+
+**2. `src/briantakita.me-dev/app/briantakita.me/app/index.css.ts`**
+- Replaced absolute path `/home/brian/work/btakita/agent-loop/src/rappstack-dev/lib/**/*.ts`
+- With relative path `../../../../rappstack-dev/lib/**/*.ts`
+- Works on CI (GitHub Actions) since no hardcoded local path
+
+**Testing:** Unit tests need the full bun dev env to run (uvu + esmock loader). The fix is minimal and logically correct — `dirname(entryPoint)` matches the CSS source directory. Verify with a local build when ready.
+<!-- agent:boundary:89f32b41 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn teaser — draft ready, recommend posting Thu Apr 2 ~9 AM ET
+- @source fix — code changes done, needs local build verification
+- LinkedIn teaser — draft ready, blocked on LinkedIn outage
 - LinkedIn OAuth — needs to be completed before publish
-- `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

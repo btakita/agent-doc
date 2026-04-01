@@ -3282,7 +3282,7 @@ Since we already removed the busy guard from the plugin and the binary's existin
 If the plugin IS enabled and sync still doesn't fire, the LayoutChangeDetector might not have initialized (it waits 2s after startup). Try pressing `Ctrl+Shift+Alt+L` (manual sync trigger) to test if the SyncLayoutAction works directly.
 
 I'm talking about navigating without any plugin actions. The `Sync: --col tasks/agent-doc/agent-doc-claim-error.md --col tasks/software/corky.md [focus: tasks/software/corky.md]` that occurred when selecting the right corky.md editor should have declaratively sent the layout to agent-doc...which should have corrected the tmux pane layout.
-### Re: Why sync doesn't create a pane for corky.md (HEAD)
+### Re: Why sync doesn't create a pane for corky.md
 
 The sync DID run — the hint notification confirms it. The issue is in `sync.rs` line 459-468:
 
@@ -3304,7 +3304,7 @@ This is overly conservative. The user's intent when navigating to a file in a sp
 **Fix:** Change the `resolve_file` closure to treat files with session UUIDs as `Registered` even without a registry entry. The auto-start phase in tmux-router will handle creating a new pane and session.
 
 Should I implement this? The change is in `sync.rs` line 467-468: remove the `Unmanaged` return and always treat UUID-bearing files as `Registered`.
-<!-- agent:boundary:bf9a5fda -->
+<!-- agent:boundary:7f651852 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

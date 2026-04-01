@@ -651,12 +651,12 @@ Should the link be in the post or in the 1st comment?
 > 532 git commits in one day. 11 parallel AI agent sessions. 292 commits debugging one cascade of bugs.
 
 AI agent sessions or AI document agent sessions or AI document sessions or AI document agents?
-### Re: Naming (HEAD)
+### Re: Naming
 
 **"AI agent sessions"** for the hook (recognition), **"interactive document sessions"** in the body (differentiation). The hook grabs attention with a familiar term; the body introduces the novel concept.
 
 Keep the opening as: "532 git commits in one day. 11 parallel AI agent sessions."
-<!-- agent:boundary:e3f2027a -->
+<!-- agent:boundary:204869f4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

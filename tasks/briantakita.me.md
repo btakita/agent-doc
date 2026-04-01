@@ -535,6 +535,10 @@ Should we link to the corky github?
 Also include document links to synchronize data/context between documents
 
 Please create a separate security expert agent to review the blog post. Make sure there are no oopsies in the blog post.
+> 532 Commits in One Day
+> 292 of those commits
+
+We should emphasize that these commits are not entirely for the software itself...but most were from prompts and agent response patches.
 ### Re: Updates + security review
 
 **Applied:**
@@ -544,15 +548,25 @@ Please create a separate security expert agent to review the blog post. Make sur
 
 **Security review (expert agent):** SAFE TO PUBLISH. 5/6 PASS, 1 low-severity FLAG on prompt injection disclosure (attacks a feature that doesn't exist yet, mitigations stated). Optional tightening: change "under development" to "will not ship without" — sets a quality gate instead of implying a timeline.
 
+Convert "will not ship without" to a positive instead of a double negative. Just for clarity.
+
+Emphanize through security architecture.
+
 **Corky link:** Yes, linked to https://github.com/btakita/corky in the table.
 
 Ready to apply the optional security tightening and deploy. Or review the file directly first.
-<!-- agent:boundary:485b2c85 -->
+### Re: Commit clarification + positive security wording (HEAD)
+
+**Commits clarified:** Opening now explains these are "conversation commits" — prompts and agent response patches, not traditional code commits. The 292 debugging commits are described as "prompts asking Claude to investigate, agent responses proposing fixes, test results, and back-and-forth tracing."
+
+**Security wording (positive):** Changed to: "Multi-user agent-doc sessions will ship with a shared security model that addresses this — per-user signing, edit attribution, and content integrity verification are on the roadmap. Until then, the private repo boundary is the security boundary."
+
+Positive framing, no double negative, names the specific features on the roadmap.
+<!-- agent:boundary:6f69a469 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Blog post: optional security wording tightening
-- Blog post: build, preview, deploy to briantakita.me
+- Blog post v6 — build, preview, deploy
 - LinkedIn teaser post
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

@@ -374,7 +374,7 @@ Updated the blog post file with three additions:
 3. **Closing line strengthened** — enterprise angle now covers both credential exposure AND prompt injection across session boundaries.
 
 File updated at `src/briantakita.me-dev/app/briantakita.me/post/content/2026-04-01-agent-security-multiuser-lessons.md`.
-### Re: "This is news to me" — clarification needed (HEAD)
+### Re: "This is news to me" — clarification needed
 
 The OAuth and Cargo token incidents came from the **Security Notes** section of this document, which states:
 
@@ -384,7 +384,7 @@ The OAuth and Cargo token incidents came from the **Security Notes** section of 
 I treated those as factual and built the blog post around them. If they didn't happen as described — or you're questioning the "reviewed the session documents afterward" framing specifically — the blog post needs correction.
 
 What actually happened? I should write about real events, not what a previous session's notes claim.
-<!-- agent:boundary:2127031d -->
+<!-- agent:boundary:23f9f1f8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

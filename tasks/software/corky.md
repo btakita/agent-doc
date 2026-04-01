@@ -1090,7 +1090,20 @@ resolve_unknown = false
 Ready for a real-world test with a long audio file. Want to try it?
 
 ## User
-<!-- agent:boundary:a76f99c3 -->
+Try it on the April call with robert-ward.
+
+Run nvi
+### Re: Try it on the April call with robert-ward (HEAD)
+
+Running `corky transcribe` on the April 1 call:
+
+```
+corky transcribe --diarize --speakers "Brian,Robert" \
+  mail/contacts/robert-ward/recordings/phone_20260401-042624_3109684542.amr
+```
+
+Transcription in progress... will update with results.
+<!-- agent:boundary:dd0d55aa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

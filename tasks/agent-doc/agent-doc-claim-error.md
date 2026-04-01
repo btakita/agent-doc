@@ -3541,7 +3541,7 @@ release
 
 Want me to proceed with publishing?
 yes
-### Re: v0.31.1 published (HEAD)
+### Re: v0.31.1 published
 
 - **crates.io**: published ✓
 - **GitHub Release**: https://github.com/btakita/agent-doc/releases/tag/v0.31.1 (with prebuilt binary) ✓
@@ -3549,7 +3549,7 @@ yes
 - **PyPI**: skipped — requires manylinux Docker build (local glibc too new for manylinux2014 compliance)
 
 Note: `pass` token path is `btak/CARGO_REGISTRY_TOKEN` (not `crates.io/token`).
-<!-- agent:boundary:55c08732 -->
+<!-- agent:boundary:dc045a6b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

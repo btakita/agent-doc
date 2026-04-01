@@ -1141,18 +1141,29 @@ Ideally, we can track an iteration as a narrative story into markdown for evalua
 **Editor buffer docs:** Will add 4-state model (snapshot, baseline, file, buffer) to SPEC.md Section 8.
 
 **Blog post / Josh email:** Noted. This debugging session (CRDT concurrency bug + ops logging + stale baseline) is relevant content for both.
-<!-- agent:boundary:70366c1a -->
+
+continue:
+- [ ] **Update SKILL.md** to use preflight baseline_file
+- [ ] **SPEC.md: 4-state model** (snapshot, baseline, file, buffer)
+### Re: SKILL.md + SPEC.md updates done (HEAD)
+
+**SKILL.md updated:** Baseline instructions now reference `baseline_file` from preflight JSON output. Falls back to manual `cp` for older binaries.
+
+**SPEC.md Section 6.6 added:** "Document State Model (4 States)" with table showing snapshot, baseline, file on disk, and editor buffer. Includes consistency invariants and staleness risk documentation.
+
+Both committed and pushed.
+<!-- agent:boundary:4c7876e0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **v0.29.0 released** + ops logging + Bug 1 v2 + preflight baseline
-- [ ] **Update SKILL.md** to use preflight baseline_file
-- [ ] **SPEC.md: 4-state model** (snapshot, baseline, file, buffer)
-- [ ] **Blog post** about this debugging session
+- [x] **SKILL.md updated** to use preflight baseline_file
+- [x] **SPEC.md Section 6.6** — 4-state document model
 - [ ] **Bug 2A: Divergence check before auto-start**
 - [ ] **Bug 2B: Rollback guard in commit()**
 - [ ] **Multi-harness hooks** (agent-kit)
+- [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)
 <!-- /agent:pending -->

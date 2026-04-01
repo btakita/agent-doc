@@ -374,10 +374,20 @@ Updated the blog post file with three additions:
 3. **Closing line strengthened** — enterprise angle now covers both credential exposure AND prompt injection across session boundaries.
 
 File updated at `src/briantakita.me-dev/app/briantakita.me/post/content/2026-04-01-agent-security-multiuser-lessons.md`.
-<!-- agent:boundary:95d54ad9 -->
+### Re: "This is news to me" — clarification needed (HEAD)
+
+The OAuth and Cargo token incidents came from the **Security Notes** section of this document, which states:
+
+> - Google OAuth refresh tokens were exposed in March 13 session transcript
+> - CARGO_REGISTRY_TOKEN was exposed in cleartext in March 14 session
+
+I treated those as factual and built the blog post around them. If they didn't happen as described — or you're questioning the "reviewed the session documents afterward" framing specifically — the blog post needs correction.
+
+What actually happened? I should write about real events, not what a previous session's notes claim.
+<!-- agent:boundary:2127031d -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Blog post updated with prompt injection + IPC sections — ready to review
+- Blog post premise under review — awaiting clarification on security incidents
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

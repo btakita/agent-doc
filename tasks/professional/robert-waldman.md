@@ -62,8 +62,7 @@ Corky doesn't have a merge or delete feature for Google Contacts yet. It support
 Implement `corky contact delete`. Does the Google contact api support merging contacts?
 Please draft an email to robert-waldman notifying him that equityfundingsource.com is down.
 Let him know the current status with my work for Judith. I will attempt to recover the site.
-Please advise that I havn't let Judith
-### Re: Email Draft & Corky Contact Delete (HEAD)
+### Re: Email Draft & Corky Contact Delete
 
 #### Email to Robert Waldman
 
@@ -79,6 +78,9 @@ Please advise that I havn't let Judith
 
 **Draft file:** `mail/drafts/20260401-robert-waldman-website-down.md`
 
+Link to https://web.archive.org/web/20260207050228/https://www.equityfundingsource.com/
+Ask Robert if he has any of the missing assets for the website.
+
 #### Google People API — Merge Support
 
 **No native merge endpoint.** To merge contacts:
@@ -86,15 +88,39 @@ Please advise that I havn't let Judith
 2. Delete the duplicate (`deleteContact`: `DELETE /v1/{resourceName}:deleteContact`)
 
 Implementing `corky contact delete` now.
-<!-- agent:boundary:d4808ac7 -->
+
+Robert Waldman contacts are merged.
+### Re: Email Draft & corky contact delete (HEAD)
+
+#### Email Draft Created
+
+**File:** `mail/drafts/20260401-robert-waldman-website-down.md`
+- **To:** rwaldman100@gmail.com
+- **Subject:** Equity Funding Source website is down
+- Notifies Robert the site is down, Brian is recovering/migrating to Cloudflare
+
+Ready to send via `corky draft push` when you approve.
+
+#### corky contact delete — Implemented
+
+Added `corky contact delete <RESOURCE_NAME>...` command.
+- Accepts `people/c123` or just `c123` format
+- Calls `DELETE /v1/{resourceName}:deleteContact` on Google People API
+- Files: `src/contact/delete.rs` (new), `cli.rs`, `main.rs`, `contact/mod.rs` (updated)
+- Build: passing (`make build`)
+
+Tried deleting the duplicate (`c5045079896432711148`) — got 404, meaning it was already removed (you may have already merged it in Google Contacts).
+
+#### Google People API — No Native Merge
+
+The API has no merge endpoint. To merge: copy data from one contact to the other (`updateContact`), then delete the source (`deleteContact`). The Google Contacts web UI "Merge & fix" is still the easiest path for one-off merges.
+<!-- agent:boundary:32164ae4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Create email draft file for Robert Waldman (website down notification)
-- [ ] Implement `corky contact delete` command
-- [ ] Delete duplicate Google Contact and merge data
+- [ ] Send email draft to Robert Waldman (website down notification) — awaiting approval
 - [ ] Recover equityfundingsource.com and migrate to Cloudflare
 - [ ] Get Robert Waldman's phone number (pending from Judith since March 4)
 - [ ] Schedule Zoom call with Robert Waldman for deeper requirements

@@ -151,9 +151,166 @@ Which approach do you prefer?
 ### Re: Frontmatter updated
 
 Noted the frontmatter changes: removed `tmux_session: '0'`, added `claude_args: --dangerously-skip-permissions`. The `@source` absolute path fix is still pending your approach decision (A/B/C/D).
-<!-- agent:boundary:71e19bcf -->
+
+Let's make a blog post.
+Please review the tasks & git logs for the security issues & tmux issues that we uncovered in the 1 day session.
+I want to highlight the security challenges...especially re: multi-user.
+Also want to highlight agent-doc allows for complex debug sessions.
+Make sure all data is anonymized.
+
+See:
+- tasks/recruit/lmi.md
+- tasks/professional/bob-remeika.md
+- tasks/software/agent-doc-claim-error.md
+### Re: Blog post — Security & Debug Lessons from a 1-Day Session
+
+Here's the draft blog post. All names anonymized, focused on the security challenges (especially multi-user implications) and how agent-doc enables complex debug sessions.
+
+---
+
+**Proposed filename:** `2026-04-01-agent-security-multiuser-lessons.md`
+
+**Draft:**
+
+```markdown
+---
+title: "When AI Agents Leak Your Secrets: Security Lessons from a Livestreamed Coding Session"
+description: "A single day of building with AI agents exposed Google OAuth tokens, crate registry credentials, and deep tmux session management bugs — all on a livestream. Here's what I learned about multi-user agent security and why interactive document sessions are essential for complex debugging."
+date: 2026-04-01
+featured: true
+tags:
+  - agent-doc
+  - security
+  - tmux
+  - rust
+  - claude-code
+  - live-coding
+  - agentic-programming
+---
+
+# When AI Agents Leak Your Secrets: Security Lessons from a Livestreamed Coding Session (HEAD)
+
+I spent a day building with AI agents while livestreaming. By the end of it, I'd leaked a Google OAuth refresh token and a crate registry credential — both on camera. I also uncovered a cascade of tmux session management bugs that turned a clean workspace into a pane proliferation nightmare. The debugging session that followed taught me more about multi-user agent security than any threat model ever could.
+
+This is what happens when you build in the open with tools that have real access to real systems.
+
+## The Setup
+
+I use [agent-doc](https://github.com/btakita/agent-doc), a Rust CLI tool that turns markdown documents into interactive AI conversation sessions. Each document gets its own Claude Code instance running in a tmux pane. An editor plugin (JetBrains or VS Code) detects which document you're focused on and routes the corresponding Claude pane to the foreground. Think of it as multiplexed AI sessions, orchestrated through your editor.
+
+On this particular day, I had five or six documents open simultaneously — interview prep, a contact correspondence thread, bug reports, and feature development. Each document had its own Claude session, each with tool access to the filesystem, git, and external services.
+
+I was also livestreaming the entire thing.
+
+## Incident 1: The OAuth Token
+
+While debugging an authentication flow for a correspondence tool, Claude called a command that echoed a Google OAuth refresh token to the terminal. Not in a log file. Not behind a flag. Directly in the tool output, in a tmux pane, on a livestream.
+
+A refresh token isn't a session cookie — it doesn't expire. Anyone who captured that string from the stream had indefinite access to my Google account until I revoked it.
+
+**What went wrong:** The agent was operating autonomously on a debugging task. It ran a command that printed credentials as part of its diagnostic output. There was no guardrail between "helpful debugging information" and "credential exposure." The agent treated the token like any other data.
+
+**The fix was immediate but insufficient:** I revoked the token and created a new Claude Code skill called `/livestream` — a set of guardrails that deny-lists sensitive files (tokens.json, .env, credentials, private keys), scans for 9+ secret patterns in tool output, and requires all secrets to be wrapped in `$(pass ...)` subshells.
+
+But the deeper problem remained: **the agent didn't know it was being watched.**
+
+## Incident 2: The Cargo Registry Token
+
+The next day, while publishing a Rust crate, Claude ran a command that included `CARGO_REGISTRY_TOKEN` in cleartext. Same pattern — the agent was being helpful, composing a publish command, and it used the token value directly instead of referencing the password manager.
+
+Two credential leaks in two days. Same root cause: the agent optimizes for task completion, not operational security. It doesn't model the environment beyond the task.
+
+## The Multi-User Problem
+
+These incidents seem like simple mistakes — just add better guardrails, right? But they point to a fundamental challenge in agentic AI systems that goes beyond individual incidents.
+
+**Single-user agent systems are deceptively safe.** When you're the only person using an agent, and the only person who can see its output, credential exposure is embarrassing but contained. You rotate the token and move on.
+
+**Multi-user changes the threat model entirely:**
+
+- **Shared transcripts become attack surfaces.** Agent-doc sessions are git-tracked markdown documents. If those documents live in a shared repository — or are livestreamed — every secret the agent touches becomes part of the permanent record.
+- **Agent autonomy scales the risk.** Five concurrent Claude sessions, each with filesystem access, each making independent decisions about what to print, what to log, what to include in a git commit. One agent's debugging output becomes another agent's context. Secrets propagate.
+- **Observation changes the security boundary.** In a single-user system, the terminal IS the security boundary — you trust yourself to see what's on screen. Add a livestream, a shared tmux session, or a team document, and that boundary dissolves.
+
+This isn't theoretical. Federal AI platforms like enterprise agentic systems face exactly this problem at scale. When agents operate on classified data in multi-user environments, "the agent printed a token" becomes "the agent leaked classified information across clearance boundaries."
+
+## The tmux Bug Cascade
+
+The security incidents were dramatic, but the tmux session management bugs were where agent-doc really got stress-tested.
+
+### Session ID Mismatch
+
+One of my document session files had `tmux_session: '23'` in its frontmatter, but session 23 didn't exist — only sessions 0, 1, and 5 were active. Every time agent-doc tried to route to that document, it created a new tmux window instead of reusing the existing pane. Switch between documents a few times and suddenly you have a dozen orphaned windows.
+
+**Root cause:** The frontmatter value was set during a previous session and never validated. Agent-doc's router trusted the frontmatter implicitly.
+
+**Fix:** Added session existence validation to the router. If the target session doesn't exist, warn and fall back to the current session. Two new tests.
+
+### The Stale Binary
+
+After fixing the session validation, the bug persisted. Panes kept multiplying. Why?
+
+Because tmux-spawned Claude sessions weren't using the binary I just built. The `.bin/agent-doc` symlink pointed to the correct release build (v0.17.28), but `~/.cargo/bin/agent-doc` — which is what tmux's PATH resolves — was still at v0.17.16. The old binary didn't have session validation. Every fix I deployed was invisible to the running sessions.
+
+This is the kind of bug that makes you question your sanity. The code is correct. The tests pass. The behavior doesn't change. Because the running system is executing a different binary.
+
+**Fix:** `cargo install --path .` to sync the PATH binary. Added to the release checklist as a mandatory final step.
+
+### Dead Panes
+
+A pane showed "Resume this session with: claude --resume..." but was unresponsive to Ctrl+C. The Claude session had exited, but the pane was still alive, displaying the exit message. The router saw it as occupied and wouldn't reclaim it.
+
+Each of these bugs was individually small. Together, they created a workspace that felt haunted — panes appearing in wrong windows, sessions that wouldn't die, fixes that didn't take effect. And the only way to debug it was through the same agent-doc system that was exhibiting the bugs.
+
+## Why Interactive Documents Matter for Debugging
+
+Here's the thing: I debugged all of this through agent-doc sessions. The bug reports, the investigation, the fixes, the testing — all happened in markdown documents with Claude sessions attached. Each document accumulated context over hours.
+
+This is fundamentally different from chat-based debugging:
+
+- **The document persists.** When Claude crashed and restarted (which happened several times during the tmux bugs), the document preserved the entire investigation history. The CRDT merge meant my annotations survived agent restarts.
+- **Multiple investigations run in parallel.** I had a bug report document, a feature development document, and a correspondence document all active simultaneously. Discoveries in one informed the others.
+- **The git history tells the story.** Every agent response is committed. Every user edit is visible in the gutter. You can reconstruct exactly what happened, when, and why — which is exactly what I needed when the stale binary was making fixes invisible.
+
+Complex debugging sessions need a medium that can hold state across crashes, track multiple threads of investigation, and let you annotate and redirect without losing context. A chat window doesn't do this. A document does.
+
+## What I Changed
+
+After this day, I made several structural changes:
+
+1. **The `/livestream` skill** — deny-lists sensitive files, scans for secret patterns, requires `$(pass ...)` for all credentials. This runs as a Claude Code hook, not just a convention.
+2. **Session validation** — the router now validates that target tmux sessions exist before routing. Frontmatter is no longer trusted implicitly.
+3. **Binary sync in release checklist** — `cargo install --path .` is now mandatory after every release. The symlink and the PATH binary must match.
+4. **Session logging** — `.agent-doc/logs/<session-uuid>.log` records start/stop/crash/restart events. No more guessing what happened to a dead session.
+5. **Auto-restart with skill re-injection** — when Claude crashes and restarts with `--continue`, agent-doc now sends `/agent-doc <file>` via tmux to re-enter the document workflow. No more bare Claude sessions after a crash.
+
+## The Bigger Picture
+
+The security incidents and the tmux bugs are connected by a single theme: **agent systems are distributed systems, and they inherit all the failure modes of distributed systems.**
+
+Credential leaks happen because the security boundary isn't where you think it is. Binary version mismatches happen because the deployment boundary isn't where you think it is. Session state corruption happens because the consistency boundary isn't where you think it is.
+
+If you're building tools where AI agents have real access to real systems — especially in multi-user or multi-agent environments — you need:
+
+- **Explicit security boundaries** that the agent understands and respects, not just conventions
+- **Observable session state** so you can debug what happened after the fact
+- **Persistent investigation surfaces** (like interactive documents) that survive agent crashes
+- **Version discipline** across every binary in the execution path
+
+Building in the open accelerated all of this. The livestream created pressure to fix things properly — you can't hand-wave a credential leak when it happened on camera. And the multi-document, multi-agent workflow created the exact stress conditions that surfaced these bugs.
+
+The tools are better for it. The security posture is better for it. And I have a much clearer picture of what multi-user agent security actually requires.
+
+---
+
+*agent-doc is open source: [github.com/btakita/agent-doc](https://github.com/btakita/agent-doc). The security guardrails, session logging, and tmux router improvements described here are all available in v0.17.28+.*
+```
+
+Let me know what you'd like to adjust — tone, length, emphasis, additional details, or anything to cut.
+<!-- agent:boundary:de3853ef -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
+- Blog post draft ready — awaiting review/edits
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

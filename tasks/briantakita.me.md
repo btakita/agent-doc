@@ -498,7 +498,7 @@ I want to release it today due to timing.
 People will probably ask if this is a joke.
 
 Should I also release the entire blog post on LinkedIn along with briantakita.me?
-### Re: Release today + LinkedIn (HEAD)
+### Re: Release today + LinkedIn
 
 **April 1st:** Keeping it. Added *"Yes, this is dated April 1st. The 532 commits are real — check the git log."* to the blog post intro.
 
@@ -517,7 +517,7 @@ Should I also release the entire blog post on LinkedIn along with briantakita.me
 > Full post: [link]
 
 Ready to build and deploy when you are. Want me to build briantakita.me locally to preview?
-<!-- agent:boundary:37159426 -->
+<!-- agent:boundary:ba569521 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

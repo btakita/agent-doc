@@ -2851,6 +2851,7 @@ Update SPEC.md, README.md, ontology, module-harness
 - `af8c61b` (agent-doc) — docs: add session command to SPEC.md + CLAUDE.md
 - `54b8ed5e` (parent) — submodule pointer updated
 release
+Is VERSIONS.md updated and backfilled?
 ### Re: v0.31.0 Released
 
 **Published:**
@@ -2868,11 +2869,14 @@ release
 - Stale UUID → Unmanaged in sync
 - 8 unused variable warnings fixed
 - 601 tests, zero failures
-<!-- agent:boundary:b55310a3 -->
+### Re: VERSIONS.md status (HEAD)
+
+Yes, VERSIONS.md was updated before the release commit. The 0.31.0 entry includes all 7 bullet points covering the session CLI, stash safety, resolve_target_session consolidation, stale UUID handling, unused var cleanup, docs, and test count. It was committed as part of `fd961a4` (the v0.31.0 release commit).
+<!-- agent:boundary:2ea9a560 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **PyPI publish** — `maturin publish --no-sdist` (optional)
+(empty)
 <!-- /agent:pending -->

@@ -795,7 +795,7 @@ Backtesting can also be applied to datasets, agent harness, + prompts.
 
 > I also wrote up a detailed post about a day
 
-This was immediately after the interview until today.
+This was immediately after the interview until today. 
 ### Re: Backtesting Scope + Timeline Correction
 
 Applied both updates to the Josh email draft:
@@ -807,21 +807,34 @@ Applied both updates to the Josh email draft:
 Updated draft at: `mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-interactive-document-genera.md`
 
 Ready to send when you approve.
-<!-- agent:boundary:6d033380 -->
+
+> exactly the kind of human-in-the-loop control LIGER needs for federal trust.
+
+This may be overselling the feature.
+### Re: Overselling Fix (HEAD)
+
+Good catch. Changed line 17 from:
+
+> "...exactly the kind of human-in-the-loop control LIGER needs for federal trust."
+
+To:
+
+> "...the same human-in-the-loop pattern that matters for high-trust environments."
+
+This describes the pattern without claiming agent-doc is what LIGER specifically needs. Keeps it factual — the prototype demonstrates the pattern, not the production solution.
+<!-- agent:boundary:22b65d5e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Send Josh Malloy follow-up email (backtesting + timeline updated, pending approval)
+- [ ] Send Josh Malloy follow-up email (pending approval)
 - [ ] agent-doc README: security section (single-user, prompt injection)
 - [ ] Corky: HTML body extraction for emails
 - [ ] Research LMI uncleared role options
 - [x] All contacts created
-- [x] All post-interview tasks complete
-- [x] Security clearance + subcontracting guidance provided
-- [x] Josh email source link fixed
-- [x] Prototype spike framing applied to Josh email
-- [x] Backtesting bullet added to Josh email
-- [x] Blog post timeline corrected in Josh email
+- [x] Prototype spike framing applied
+- [x] Backtesting bullet added
+- [x] Blog post timeline corrected
+- [x] Overselling language toned down
 <!-- /agent:pending -->

@@ -477,7 +477,7 @@ Applying Robert's coaching (short, not alarming, just checking in):
 > Hi Judith, it's Brian. I noticed equityfundingsource.com appears to be down — were you aware? Just wanted to check before I start working on things. Hope you're doing well!
 
 Short, casual, non-alarming. Doesn't imply blame or urgency. Just a heads-up question.
-<!-- agent:boundary:7236efb9 -->
+<!-- agent:boundary:94f0bcea -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

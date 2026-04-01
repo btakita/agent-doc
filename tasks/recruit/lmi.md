@@ -761,7 +761,7 @@ Strong framing. For a federal audience, this is actually more credible than pres
 Should I apply the prototype framing revisions to the email draft?
 
 Please read updates to email draft. Please update with additional framing.
-### Re: Email Draft — Prototype Spike Framing Applied (HEAD)
+### Re: Email Draft — Prototype Spike Framing Applied
 
 Read the draft and applied three revisions:
 
@@ -776,7 +776,7 @@ The framing now signals: working prototype → validated interaction model → s
 Draft updated at: `mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-interactive-document-genera.md`
 
 Ready to send when you approve.
-<!-- agent:boundary:3b283ccf -->
+<!-- agent:boundary:fa6a40d5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

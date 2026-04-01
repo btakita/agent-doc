@@ -148,10 +148,10 @@ This hardcoded path won't exist on CI (GitHub Actions uses `/home/runner/work/..
 | **D. Fix esmcss** | Resolve `@source` relative to CSS file, not temp dir | Root cause fix | Deeper change |
 
 Which approach do you prefer?
-### Re: Frontmatter updated (HEAD)
+### Re: Frontmatter updated
 
 Noted the frontmatter changes: removed `tmux_session: '0'`, added `claude_args: --dangerously-skip-permissions`. The `@source` absolute path fix is still pending your approach decision (A/B/C/D).
-<!-- agent:boundary:f8fbfafa -->
+<!-- agent:boundary:b54487e7 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

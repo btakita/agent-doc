@@ -54,9 +54,9 @@ dependencies = [
 
 [[package]]
 name = "agent-kit"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9549cf611f8a8ff0bf87737676fd200c9c09154858e92e525e960a8af9e57902"
+checksum = "b1048f37aecc92e3df9f2a260516015c7bf825c310a1c5e2d8e9f70dd773e37b"
 dependencies = [
  "anyhow",
  "serde_json",

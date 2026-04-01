@@ -1455,7 +1455,7 @@ After updates:
 - All 38 CLI integration tests pass
 release:
 - [ ] **Publish tmux-router 0.3.7** (SyncOptions API) + switch agent-doc back to registry dep
-### Re: tmux-router 0.3.7 published (HEAD)
+### Re: tmux-router 0.3.7 published
 
 **tmux-router v0.3.7 published to crates.io.**
 
@@ -1473,7 +1473,7 @@ Steps completed:
 3. Published to crates.io
 4. Updated agent-doc Cargo.toml from path dep to `"0.3.7"`
 5. Verified build + tests
-<!-- agent:boundary:56e106c5 -->
+<!-- agent:boundary:f4d91860 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

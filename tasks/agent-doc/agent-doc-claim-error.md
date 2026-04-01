@@ -3483,7 +3483,7 @@ This explains why navigating to files didn't create panes — the old binary at 
 
 Works.
 - [ ] Add `build.stamp` to .gitignore
-### Re: Confirmed working + gitignore already covers build.stamp (HEAD)
+### Re: Confirmed working + gitignore already covers build.stamp
 
 `.agent-doc` is already in `.gitignore` (line 12), so `build.stamp` at `.agent-doc/build.stamp` is automatically excluded. No change needed.
 
@@ -3496,7 +3496,7 @@ Session summary — all issues resolved:
 - Build stamp for stale-cache detection (build.rs + sync.rs)
 - Plugin now resolves correct binary via basePath (EditorTabSyncListener.kt + SyncLayoutAction.kt)
 - Both binary paths updated (`cargo install --path .`)
-<!-- agent:boundary:0484d2c0 -->
+<!-- agent:boundary:07514fcd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

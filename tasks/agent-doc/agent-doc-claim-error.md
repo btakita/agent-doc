@@ -2277,7 +2277,39 @@ The boundary reposition modifies the file through the IDE's Document API. Even t
 3. **Use IDE `DocumentListener`** — check if user modified the document recently before applying IPC patches
 
 Want me to dig into the boundary reposition code to find the exact trigger?
-<!-- agent:boundary:694db19e -->
+First...the change should happen via the FFI plugin -> JB Plugin handling CRDT.
+Second...we should delay the CRDT until the human has stopped typing.
+### Re: FFI-first boundary reposition with typing debounce (HEAD)
+
+Agreed on both points. Here's the current flow and proposed fix:
+
+**Current flow (no debounce):**
+1. `git.rs:267` → `try_ipc_reposition_boundary(file)` sends socket IPC "reposition"
+2. `PatchWatcher.kt:177-182` → receives message, calls `invokeAndWait`
+3. `PatchWatcher.kt:204-211` → `WriteCommandAction` + `document.setText(result)` — **immediately**, no typing check
+4. `PatchWatcher.kt:213` → `saveDocument()` — triggers disk write + "externally modified" event
+
+The `document.setText()` replaces the full document. If the user typed a character between the last IDE sync and `setText`, that character is lost.
+
+**Fix — two layers:**
+
+**Layer 1: FFI typing guard (`ffi.rs`)**
+Add `agent_doc_is_typing(file_path, window_ms) -> bool` — checks if `record_document_change` was called within `window_ms`. The infrastructure already exists (`agent_doc_record_document_change` + `agent_doc_await_idle`).
+
+**Layer 2: JB Plugin deferred reposition (`PatchWatcher.kt`)**
+Before applying reposition, check the FFI typing guard:
+```kotlin
+if (NativePatching.isTyping(filePath, 500)) {
+    // Retry after 500ms
+    schedule(500ms) { repositionBoundaryViaDocument(filePath) }
+    return
+}
+```
+
+Retries until user stops typing for 500ms, then applies. Same pattern as the existing `SubmitAction` debounce.
+
+Want me to implement both layers?
+<!-- agent:boundary:d54fca11 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -2285,7 +2317,7 @@ Want me to dig into the boundary reposition code to find the exact trigger?
 <!-- agent:pending patch=replace -->
 - [x] **Fix stash-everything guard** — skip stash when managed files have unresolved panes
 - [ ] **Fix tmux_session config drift** — route.rs should follow pane when it moves sessions; claim.rs should update config.toml
-- [ ] **Fix boundary reposition keystroke loss** — debounce or skip IPC reposition when user is actively typing
+- [ ] **Fix boundary reposition keystroke loss** — FFI `is_typing` guard + JB plugin deferred reposition
 - [ ] **Publish tmux-router v0.3.8** + update agent-doc dep
 - [ ] **Release agent-doc v0.30.1** (all fixes)
 - [ ] **Blog post** about this debugging session

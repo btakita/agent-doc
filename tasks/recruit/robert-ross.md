@@ -20,10 +20,17 @@ Note his background says:
 - A.I. IS EATING SOFTWARE
 - AGENTS ARE EATING A.I.
 
-Please research robert-ross. He is at a high level. Note he wants to schedule a call. See /home/brian/work/btakita/agent-loop/mail/conversations/brian-rob-zoom.md
+Please research robert-ross. He is at a high level. Note he wants to schedule a call.
+- https://x.com/robross
+- https://www.crunchbase.com/person/rob-ross
+
+See /home/brian/work/btakita/agent-loop/mail/conversations/brian-rob-zoom.md
+
+What would be a
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- Respond to Rob Ross (Dreamable) — schedule meeting Wed/Thu 12-4pm PT
 <!-- /agent:pending -->

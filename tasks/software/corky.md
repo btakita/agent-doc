@@ -973,7 +973,7 @@ For the following, see tasks/personal/robert-ward.md for more context:
 - [ ] `corky transcribe --resolve-unknown` — LLM-based speaker attribution for remaining Unknown segments
 
 I would like `corky transcribe` to attempt to do the `--adaptive-chunk` and `--resolve-unknown` by default. Perhaps we can have an opt-out somewhere like the config?
-## Assistant (HEAD)
+## Assistant
 
 ### Re: adaptive-chunk and resolve-unknown as defaults
 
@@ -999,8 +999,8 @@ CLI flags would be opt-out: `--no-adaptive-chunk` and `--no-resolve-unknown`.
 
 **One concern:** LLM inference in `--resolve-unknown` adds a dependency (API key, model choice, cost). The config should let users specify which model/provider to use, or we could default to a local model. What's your preference — Claude API, local LLM, or configurable?
 
-## User (HEAD)
-<!-- agent:boundary:3ad02fc8 -->
+## User
+<!-- agent:boundary:e7387c89 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

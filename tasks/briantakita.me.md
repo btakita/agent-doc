@@ -387,7 +387,7 @@ I treated those as factual and built the blog post around them. If they didn't h
 
 What actually happened? I should write about real events, not what a previous session's notes claim.
 Also mention that a shared security model is under development.
-### Re: Rewritten — 3/31-4/1 scope, actual data (HEAD)
+### Re: Rewritten — 3/31-4/1 scope, actual data
 
 Complete rewrite based on what actually happened 3/31-4/1:
 
@@ -403,7 +403,7 @@ Complete rewrite based on what actually happened 3/31-4/1:
 - **Self-referential**: "I pointed Claude at the git logs and it counted 532 commits across 11 documents"
 
 File updated at `src/briantakita.me-dev/app/briantakita.me/post/content/2026-04-01-agent-security-multiuser-lessons.md`.
-<!-- agent:boundary:b949b67e -->
+<!-- agent:boundary:5d277d2d -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

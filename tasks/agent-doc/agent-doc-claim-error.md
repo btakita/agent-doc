@@ -2940,7 +2940,7 @@ We are in a bad tmux window state
   ⎿  $ cat <<'RESPONSE' | agent-doc write /home/brian/work/btakita/agent-loop/tasks/briantakita.me.md --baseline-file
      /home/brian/work/btakita/agent-loop/.agent-doc/baselines/fcbeac6845e4489b13706dd01be9c0f9132816a800493c7409b7ba77450ce236.md --stream
      <!-- patch:exchange -->
-     ### Re: Frontmatter updated (HEAD)
+     ### Re: Frontmatter updated
      …
 
   Bash(agent-doc commit /home/brian/work/btakita/agent-loop/tasks/briantakita.me.md)
@@ -2986,7 +2986,7 @@ We are in a bad tmux window state
   ❯ /agent-doc tasks/briantakita.me.md
   ❯ /agent-doc tasks/briantakita.me.md
 ```
-### Re: Claim for Tmux Pane failed to open second pane (HEAD)
+### Re: Claim for Tmux Pane failed to open second pane
 
 **Root cause analysis:**
 
@@ -3021,7 +3021,7 @@ The repeated `/agent-doc tasks/briantakita.me.md` commands in the terminal (25+ 
 4. **Registry protection**: `agent-doc claim` should refuse to overwrite an existing session's pane unless `--force` is used. Currently, claiming to an already-registered pane silently replaces the entry.
 
 Want me to implement any of these fixes?
-<!-- agent:boundary:b1ec40b5 -->
+<!-- agent:boundary:c50d3961 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

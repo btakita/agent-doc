@@ -1484,13 +1484,32 @@ Please help me strategically schedule a good time.
 | 4:00 PM | 1:00 PM | Robert Ross call |
 
 Clean separation, no conflicts, respectful times for both Bay Area contacts. Want me to draft a reschedule message to Bob?
-<!-- agent:boundary:21ebc949 -->
+
+Would 11:30 Eastern be better? I believe Bob has an appointments between 12:30 and 13:30.
+### Re: 11:30 ET is better (HEAD)
+
+Yes, **11:30 AM ET / 8:30 AM PT** is the better call. If Bob has 12:30-1:30 PM ET blocked, a noon start would butt right up against it with no buffer. 11:30 gives:
+
+- **30 min buffer** for Bob before his 12:30 appointment
+- **90 min buffer** for you before childcare at 1:00 PM
+- 8:30 AM PT is early but reasonable for a CEO
+
+**Updated Thursday schedule:**
+
+| Time (ET) | Time (PT) | Event |
+|-----------|-----------|-------|
+| 11:30 AM | 8:30 AM | Bob Remeika call (30 min) |
+| 1:00-3:00 PM | -- | Childcare |
+| 4:00 PM | 1:00 PM | Robert Ross call |
+
+Want me to draft the reschedule message to Bob for the 11:30 AM ET slot?
+<!-- agent:boundary:79d25436 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Draft reschedule message to Bob (new time: 12:00 PM ET / 9:00 AM PT Thursday)
+- Draft reschedule message to Bob (new time: 11:30 AM ET / 8:30 AM PT Thursday)
 - Schedule Robert Ross call at 4:00 PM ET / 1:00 PM PT Thursday
 - Prep talking points for Bob call (JB plugin demo, security architecture, Ragie Parse pitch)
 - Prep talking points for Dreamable/Robert Ross call

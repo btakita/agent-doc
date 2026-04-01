@@ -867,7 +867,6 @@ Updated draft. These corrections make the email stronger — presenting what you
 
 > built-in traceability.
 
-With agentic authored automated reports.
 ### Re: Automated Reports Added
 
 Updated the auditable workflow bullet to include "with automated cadence of reports." Now reads:
@@ -878,7 +877,12 @@ This adds a concrete operational detail — the audit trail isn't just passive h
 ### Re: Simplified
 
 Updated draft: "built-in traceability with automated reports." Cleaner.
-<!-- agent:boundary:6e3c0b08 -->
+
+With agent authored reports?
+### Re: Agent-Authored Reports (HEAD)
+
+Updated to "agent-authored reports." More precise — these aren't cron-job automated reports, they're authored by the agent within the document workflow.
+<!-- agent:boundary:266a1346 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

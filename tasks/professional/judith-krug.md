@@ -6,6 +6,7 @@ agent_doc_write: crdt
 links:
   - ../personal/robert-ward.md
   - ./bob-remeika.md
+  - ./robert-waldman.md
 ---
 
 # Judith Krug — Equity Funding Source
@@ -467,10 +468,20 @@ This is a **female third party** who built and hosts the site. Judith described 
 - Action item #3 from March 4 meeting: "Website takeover from current host" was Judith's responsibility, status: Pending
 
 **This actually strengthens the pitch for tonight's call** ... her website is literally down. You can say: "Your website is down right now. I can get it back up on Cloudflare today and you'll own everything. No more depending on someone you can't reach."
-<!-- agent:boundary:37ff7bca -->
+
+Please draft a text for Judith about her website. Ask if the site being down is planned/expected?
+### Re: Text Draft for Judith — Website Down (HEAD)
+
+Applying Robert's coaching (short, not alarming, just checking in):
+
+> Hi Judith, it's Brian. I noticed equityfundingsource.com appears to be down — were you aware? Just wanted to check before I start working on things. Hope you're doing well!
+
+Short, casual, non-alarming. Doesn't imply blame or urgency. Just a heads-up question.
+<!-- agent:boundary:cf5e0088 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
+- [ ] Send text to Judith about website being down — awaiting approval
 - [ ] Prepare email draft file (`mail/drafts/20260401-judith-call-followup.md`)
 - [ ] Website migration to Cloudflare ... website is DOWN, urgent deliverable for tonight
 - [ ] Check in with Robert this afternoon before the Judith call

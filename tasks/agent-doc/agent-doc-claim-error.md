@@ -2247,7 +2247,7 @@ And in `claim.rs`, after registering the session, update the config:
 let pane_session = /* get session name from the claimed pane */;
 crate::config::update_project_tmux_session(&pane_session)?;
 ```
-<!-- agent:boundary:3c29c9c6 -->
+<!-- agent:boundary:ba33e465 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

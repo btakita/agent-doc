@@ -455,13 +455,24 @@ fn run_with_options(
         let content = std::fs::read_to_string(path).ok()?;
         let (fm, _) = frontmatter::parse(&content).ok()?;
         match fm.session {
-            Some(key) => {
+            Some(ref key) => {
+                // Only treat as registered if the session has a registry entry.
+                // Files with a stale frontmatter UUID (no registry entry) are
+                // treated as unmanaged — sync should not auto-start sessions
+                // for files that were never properly claimed or whose claim expired.
+                let has_registry_entry = sessions::lookup(key)
+                    .ok()
+                    .flatten()
+                    .is_some();
+                if !has_registry_entry {
+                    return Some(FileResolution::Unmanaged);
+                }
                 session_files
                     .borrow_mut()
                     .push((key.clone(), path.to_path_buf()));
                 // tmux_session comes from project config, not frontmatter
                 Some(FileResolution::Registered {
-                    key,
+                    key: key.clone(),
                     tmux_session: None,
                 })
             }
@@ -556,6 +567,20 @@ fn run_with_options(
             let registered_pane = sessions::lookup(&session_id)
                 .ok()
                 .flatten();
+
+            // Skip files that have a session UUID in frontmatter but no registry
+            // entry. These are unclaimed files (stale frontmatter or never properly
+            // claimed). Only files with a live registry entry should be auto-started.
+            if registered_pane.is_none() {
+                let has_registry_entry = sessions::load()
+                    .ok()
+                    .map(|reg| reg.contains_key(&session_id))
+                    .unwrap_or(false);
+                if !has_registry_entry {
+                    sync_log(&format!("skipping {} — session UUID in frontmatter but no registry entry", file_path.display()));
+                    continue;
+                }
+            }
             let has_alive_pane = registered_pane
                 .as_ref()
                 .map(|pane| {
@@ -1225,6 +1250,132 @@ mod tests {
             }
             _ => panic!("expected Registered"),
         }
+    }
+
+    /// Sync skips files that have no `agent_doc_session` in frontmatter.
+    /// These are regular files that were never claimed — they should resolve as Unmanaged.
+    #[test]
+    fn sync_skips_file_without_session_in_frontmatter() {
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        // Create a file with no frontmatter session UUID
+        let doc = tmp.path().join("no-session.md");
+        std::fs::write(&doc, "# Just a regular file\n\nNo frontmatter at all.\n").unwrap();
+
+        let content = std::fs::read_to_string(&doc).unwrap();
+        let (fm, _) = crate::frontmatter::parse(&content).unwrap();
+        assert!(fm.session.is_none(), "file should have no session UUID");
+
+        // Simulate resolve_file: no session → Unmanaged
+        let resolution = match fm.session {
+            Some(_) => unreachable!("session should be None"),
+            None => FileResolution::Unmanaged,
+        };
+        assert!(matches!(resolution, FileResolution::Unmanaged));
+    }
+
+    /// Sync skips files that have a session UUID in frontmatter but no registry entry.
+    /// This prevents auto-starting sessions for files that were never properly claimed
+    /// or whose claim expired.
+    #[test]
+    fn sync_skips_file_with_session_uuid_but_no_registry() {
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        // Create an empty registry
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            tmp.path().join(".agent-doc/sessions.json"),
+            "{}",
+        ).unwrap();
+
+        // Create a file with a session UUID but no matching registry entry
+        let doc = tmp.path().join("stale-claim.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: orphan-uuid-123\n---\n\n## User\n\nHello\n",
+        ).unwrap();
+
+        let content = std::fs::read_to_string(&doc).unwrap();
+        let (fm, _) = crate::frontmatter::parse(&content).unwrap();
+        assert_eq!(fm.session, Some("orphan-uuid-123".to_string()));
+
+        // Load registry directly from the temp path (avoid CWD dependency)
+        let reg_content = std::fs::read_to_string(
+            tmp.path().join(".agent-doc/sessions.json"),
+        ).unwrap();
+        let registry: sessions::SessionRegistry = serde_json::from_str(&reg_content).unwrap();
+        let has_registry_entry = registry.contains_key("orphan-uuid-123");
+        assert!(!has_registry_entry, "should NOT have a registry entry");
+
+        // This is what the fixed resolve_file does — returns Unmanaged for stale claims
+        let resolution = if has_registry_entry {
+            FileResolution::Registered {
+                key: "orphan-uuid-123".to_string(),
+                tmux_session: None,
+            }
+        } else {
+            FileResolution::Unmanaged
+        };
+        assert!(
+            matches!(resolution, FileResolution::Unmanaged),
+            "file with session UUID but no registry entry should be Unmanaged"
+        );
+    }
+
+    /// Sync routes files that have both a session UUID in frontmatter AND a registry entry.
+    #[test]
+    fn sync_routes_file_with_session_uuid_and_registry_entry() {
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        // Create registry with a matching entry
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let registry_content = serde_json::json!({
+            "claimed-uuid-456": {
+                "pane": "%99",
+                "pid": 12345,
+                "cwd": "/tmp",
+                "started": "2026-01-01T00:00:00Z",
+                "file": "claimed.md",
+                "window": "@0"
+            }
+        });
+        std::fs::write(
+            tmp.path().join(".agent-doc/sessions.json"),
+            serde_json::to_string_pretty(&registry_content).unwrap(),
+        ).unwrap();
+
+        // Create a file with a session UUID that matches the registry
+        let doc = tmp.path().join("claimed.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: claimed-uuid-456\n---\n\n## User\n\nHello\n",
+        ).unwrap();
+
+        let content = std::fs::read_to_string(&doc).unwrap();
+        let (fm, _) = crate::frontmatter::parse(&content).unwrap();
+        assert_eq!(fm.session, Some("claimed-uuid-456".to_string()));
+
+        // Load registry directly from the temp path (avoid CWD dependency)
+        let reg_content = std::fs::read_to_string(
+            tmp.path().join(".agent-doc/sessions.json"),
+        ).unwrap();
+        let registry: sessions::SessionRegistry = serde_json::from_str(&reg_content).unwrap();
+        let has_registry_entry = registry.contains_key("claimed-uuid-456");
+        assert!(has_registry_entry, "should have a registry entry");
+
+        // This is what the fixed resolve_file does — returns Registered for claimed files
+        let resolution = if has_registry_entry {
+            FileResolution::Registered {
+                key: "claimed-uuid-456".to_string(),
+                tmux_session: None,
+            }
+        } else {
+            FileResolution::Unmanaged
+        };
+        assert!(
+            matches!(resolution, FileResolution::Registered { .. }),
+            "file with session UUID AND registry entry should be Registered"
+        );
     }
 
     /// Empty col_args are filtered out before processing (JetBrains plugin sends phantom columns).

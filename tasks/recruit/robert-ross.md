@@ -43,12 +43,26 @@ What would be a good strategic time to meet with Rob on Thursday?
 - ~6 person company, so expect a conversation about culture fit and wearing many hats
 
 Please draft an email proposing 1PM PT (4 PM ET).
-<!-- agent:boundary:f506ba4e -->
+### Re: Draft reply to Rob (HEAD)
+
+**Draft email:**
+
+> Hi Rob,
+>
+> Thanks for reaching out... I'd love to chat about the role at Dreamable.
+>
+> Thursday at 1pm PT / 4pm ET works great for me. Looking forward to it.
+>
+> Best,
+> Brian
+
+Short and warm, mirrors his direct tone. Ready to send via corky when you approve. Should I push this to Gmail Drafts?
+<!-- agent:boundary:e4d726b9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Reply to Rob Ross (Dreamable) — propose Thursday Apr 2 at 1pm PT
+- Send reply to Rob Ross — propose Thu Apr 2, 1pm PT (awaiting approval to push to Gmail Drafts)
 - Prep talking points for Dreamable call (agent experience, AI agent thesis alignment)
 <!-- /agent:pending -->

@@ -363,7 +363,7 @@ v3 draft with correct framing. Auto-discovered by `index.generate.ts` on next bu
 > It wasn't until I reviewed the session documents afterward that I found the problems: a Google OAuth refresh token in one session's history.
 
 Please elaborate. This is news to me.
-### Re: Emphasis — prompt injection + IPC debugging (HEAD)
+### Re: Emphasis — prompt injection + IPC debugging
 
 Updated the blog post file with three additions:
 
@@ -374,7 +374,7 @@ Updated the blog post file with three additions:
 3. **Closing line strengthened** — enterprise angle now covers both credential exposure AND prompt injection across session boundaries.
 
 File updated at `src/briantakita.me-dev/app/briantakita.me/post/content/2026-04-01-agent-security-multiuser-lessons.md`.
-<!-- agent:boundary:4b6a8fec -->
+<!-- agent:boundary:95d54ad9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

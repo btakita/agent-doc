@@ -2648,7 +2648,7 @@ There are also two legitimate fallback paths in route.rs (lines 144-155 and 488-
 We probably should have a way in the agent-doc cli to explicitly change the tmux session.
 We should also use the config.toml as the source of truth. The only exception is when the session is not running. Then config.toml can be overwritten.
 However, we should also have a way to explicitly update config.toml and in effect transfer all active tmux panes to the newly configured tmux session.
-### Re: Kill stashed sessions + session management CLI (HEAD)
+### Re: Kill stashed sessions + session management CLI
 
 **Stashed sessions killed.** %353 and %352 are gone. Config is stable at `tmux_session = "5"`. No more old-binary interference.
 
@@ -2672,7 +2672,7 @@ agent-doc session migrate <from> <to> # Move panes between sessions explicitly
 3. `agent-doc session set <name>` — updates config + moves agent-doc window + updates registry entries to new session. This is the only sanctioned way to change the session.
 
 This is a good feature to add in the next release. Want me to implement it now, or track it in pending?
-<!-- agent:boundary:dc61dbb6 -->
+<!-- agent:boundary:7894ecff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

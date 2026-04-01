@@ -648,5 +648,5 @@ Done. All 3 recordings transcribed with GPU + diarization and saved:
 3. `mail/contacts/robert-ward/recordings/phone_20260330-040607_3109684542.txt` (37:38, Mar 30 morning -- diarization failed, single speaker block)
 
 Note: Diarization only succeeded on the Mar 30 evening call (short call, clear speaker turns). The other two produced 0 diarization segments, so the text is attributed to "Unknown" as a single block. This sometimes happens with longer AMR recordings where speaker boundaries are less distinct.
-<!-- agent:boundary:aaa0886a -->
+<!-- agent:boundary:aac1be6c -->
 <!-- /agent:exchange -->

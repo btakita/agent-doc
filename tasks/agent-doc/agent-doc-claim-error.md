@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Session complete. All features deployed. Bug 2B regression fixed. Diff detection working.
+Diff detection verified working. User edits were in Claude prompt, not document.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1614,19 +1614,30 @@ To continue: edit the document in your editor and trigger `/agent-doc` — the d
 
 Implement agent-kit changes.
 Implement updates to agent-doc.
-<!-- agent:boundary:897cb3e5 -->
+### Re: "No changes" — not a regression (HEAD)
+
+**The diff detection is working correctly.** The file and snapshot are identical (95,098 bytes each, only boundary marker ID differs). Your edits were typed in the Claude Code prompt, not the document — so there's nothing for the diff to detect.
+
+**This is expected behavior:** agent-doc diffs the document file against the snapshot. If you type in the Claude Code chat instead of the document, the file doesn't change, so `no_changes: true`.
+
+**To interact with agent-doc:** Edit the document file directly in your editor (the JetBrains tab showing `agent-doc-claim-error.md`). Type your message after the boundary marker. Then trigger `/agent-doc` — the diff will pick it up.
+
+**Alternatively:** If you want to send a message from the Claude Code prompt to the document, you can ask me to write it there (like I'm doing now). But the normal flow is: edit document → trigger → agent responds.
+
+**Verification:** I confirmed the fix is working:
+- File size: 95,098 bytes
+- Snapshot size: 95,098 bytes  
+- Only diff: boundary marker ID (stripped during comparison)
+- No user edits present in the file
+
+The Bug 2B regression from earlier IS fixed — the component-aware divergence check is deployed. This `no_changes` is correct behavior, not a regression.
+<!-- agent:boundary:9c0355b6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **v0.29.0 shipped** + all bug fixes + docs + tmux-router 0.3.7
-- [x] **Refine stale baseline guard** — component-aware (11 tests)
-- [x] **Session resume on document switch** — busy pane guard
-- [x] **Fix auto-start race** — startup lock with 5s TTL
-- [x] **Bug 2A** — IPC snapshot save failure now non-fatal
-- [x] **Bug 2B** — commit divergence detection (regression fixed)
-- [x] **Docs + audit** — SPEC.md, README.md, audit 5→3
+- [x] **All session work complete** — bugs fixed, guards deployed, docs updated, tmux-router 0.3.7 published
 - [ ] **Multi-harness hooks** (agent-kit v0.3)
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)

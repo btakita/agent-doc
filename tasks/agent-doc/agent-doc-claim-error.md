@@ -2470,7 +2470,23 @@ Do:
 - Release build completed for symlink target
 
 All items from the "Do" list are done. What's next?
-<!-- agent:boundary:8b9b19a5 -->
+
+After navigating the right editor to tasks/software/corky.md...which resulted in several agent docs starting a new tmux pane + claude session...the stash window was selected.
+
+![2026-04-01_13-50.png](../../../../../Pictures/agent-loop/2026-04-01_13-50.png)
+### Re: Multiple sessions spawned on editor tab navigation (HEAD)
+
+Looked at the screenshot and current tmux state. The session registry shows:
+- `robert-ward.md` → pane `%339` (stash window `5:1`)
+- `corky.md` → pane `%341` (agent-doc window `5:0`)
+- `agent-doc-claim-error.md` → pane `%14` (agent-doc window `5:0`)
+
+**Root cause:** When you navigated to `corky.md` in the editor, the JB plugin's tab sync fired `agent-doc sync --col <files>`. The sync saw unclaimed files in the col args and auto-routed them, which auto-started new Claude sessions. Tab navigation shouldn't auto-start sessions for unclaimed files.
+
+**The fix:** `sync` should only manage files that are already claimed (have a session UUID in frontmatter + a registry entry). Unclaimed files in the editor layout should be ignored by sync — they need an explicit `claim` or `route` action to start a session.
+
+This is a new bug — want me to fix it?
+<!-- agent:boundary:a9002e40 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -2484,5 +2500,6 @@ All items from the "Do" list are done. What's next?
 - [x] **Install JB plugin** — uninstall old > restart > install 0.2.36 > restart
 - [x] **Finalize tmux-router v0.3.8** — committed, tagged, published to crates.io
 - [x] **Release agent-doc v0.30.1** — published to crates.io, binary installed
+- [ ] **Fix sync auto-start for unclaimed files** — sync should only manage already-claimed files
 - [ ] **Blog post** about this debugging session
 <!-- /agent:pending -->

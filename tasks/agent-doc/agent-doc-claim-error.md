@@ -1654,7 +1654,7 @@ All 595 tests pass. Release binary deployed. Snapshot cleaned (removed baked-in 
 
 Go
 - [ ] **Implement agent-kit changes** — multi-harness hooks (agent-kit v0.3)
-### Re: agent-kit hooks + agent-doc integration (HEAD)
+### Re: agent-kit hooks + agent-doc integration
 
 **agent-kit hooks module implemented** (feature-gated behind `hooks`).
 
@@ -1690,7 +1690,7 @@ Wired into:
 **Dependencies:** agent-doc uses path dep for agent-kit during development (`features = ["hooks"]`). Will switch to registry after publishing agent-kit v0.3.
 
 All 595 tests pass (including 6 new hooks tests). Release binary built.
-<!-- agent:boundary:61aa595d -->
+<!-- agent:boundary:e366f7d1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

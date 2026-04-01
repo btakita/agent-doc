@@ -591,17 +591,26 @@ The blog post file existed but wasn't registered. `post/index.ts` is a generated
 **Fix:** Ran `bun post/index.generate.ts` to regenerate the index, committed and pushed to all three repos (briantakita.me, briantakita.me-dev, agent-loop).
 
 For localhost: restart `bun run dev` to pick up the change. CI should now deploy with the post included.
-This should either be a precommit hook or part of the build. or
+This should either be a precommit hook or part of the build or both. Which one is best option?
 ### Re: Reindex as part of release
 
 Added `bun post/index.generate.ts` as a CI step in `deploy.yml`, right before the build. Now new blog posts will always be included in the build even if the local `index.ts` wasn't regenerated before pushing.
 
 Committed and pushed to briantakita.me-dev. The CI push will also trigger a fresh deploy with the regenerated index — so this should also fix the current deploy.
-<!-- agent:boundary:2c1435c6 -->
+### Re: Precommit hook vs build step (HEAD)
+
+**Best option: both.**
+
+- **CI build step** (already done) — safety net for deploys
+- **Pre-commit hook** — keeps local `index.ts` in sync for `bun run dev`
+
+CI alone is sufficient for deploy correctness. The hook is a DX improvement. Want me to add the pre-commit hook?
+<!-- agent:boundary:707e0019 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Verify deploy to briantakita.me (CI re-triggered with index regen)
+- Optional: pre-commit hook for post index regen
+- Verify deploy to briantakita.me
 - LinkedIn teaser post
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Stash guard implemented. Session destruction prevented. Binary installed.
+Typing debounce for boundary reposition implemented (FFI + JB plugin). Needs release build + plugin rebuild.
 <!-- /agent:status -->
 
 ## Exchange
@@ -2309,15 +2309,37 @@ if (NativePatching.isTyping(filePath, 500)) {
 Retries until user stops typing for 500ms, then applies. Same pattern as the existing `SubmitAction` debounce.
 
 Want me to implement both layers?
-<!-- agent:boundary:0174bd8f -->
+Yes
+### Re: Implementation complete (HEAD)
+
+Implemented both layers:
+
+**Layer 1: FFI `agent_doc_is_idle`** (`ffi.rs`)
+- Non-blocking check using existing `debounce::is_idle`
+- Returns `true` if no `document_changed` event within `debounce_ms`
+- 2 new tests: untracked → true, recently-changed → false
+
+**Layer 2: JB Plugin deferred reposition** (`PatchWatcher.kt`)
+- `repositionBoundaryViaDocument` checks `NativePatching.isIdle(filePath, 500)` before applying
+- If user is typing, retries after 500ms (max 10 retries = 5s deferral)
+- Uses `AppExecutorUtil` scheduler → `invokeLater` pattern
+
+**Files changed:**
+- `src/agent-doc/src/ffi.rs` — `agent_doc_is_idle` + 2 tests
+- `editors/jetbrains/.../NativeLib.kt` — JNA binding + `NativePatching.isIdle` wrapper
+- `editors/jetbrains/.../PatchWatcher.kt` — typing-aware deferred reposition
+
+All 597 tests pass. Needs: `cargo build --release` + rebuild JB plugin to test live.
+<!-- agent:boundary:c163db7f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **Fix stash-everything guard** — skip stash when managed files have unresolved panes
+- [x] **Fix boundary reposition keystroke loss** — FFI `is_idle` guard + JB plugin deferred reposition
 - [ ] **Fix tmux_session config drift** — route.rs should follow pane when it moves sessions; claim.rs should update config.toml
-- [ ] **Fix boundary reposition keystroke loss** — FFI `is_typing` guard + JB plugin deferred reposition
+- [ ] **Rebuild JB plugin** — build + install to test typing debounce live
 - [ ] **Publish tmux-router v0.3.8** + update agent-doc dep
 - [ ] **Release agent-doc v0.30.1** (all fixes)
 - [ ] **Blog post** about this debugging session

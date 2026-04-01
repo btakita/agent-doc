@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Typing debounce for boundary reposition implemented (FFI + JB plugin). Needs release build + plugin rebuild.
+koffi FFI bindings added to VS Code. Both editors now FFI-first for boundary reposition + typing debounce.
 <!-- /agent:status -->
 
 ## Exchange
@@ -2387,15 +2387,36 @@ Updated the VS Code extension with matching reposition handling:
 **On FFI-first lock-step:**
 - Short term: both plugins handle the same IPC protocol. Reposition logic is simple enough that TS duplication is low-risk.
 - Long term: add Node FFI bindings (`koffi`) to VS Code extension, eliminating TS duplication and achieving true FFI-first parity.
-<!-- agent:boundary:777d06c5 -->
+
+Let's add the koffi support.
+### Re: koffi FFI support added to VS Code extension (HEAD)
+
+**New file: `editors/vscode/src/native.ts`**
+- `repositionBoundaryToEnd(doc)` — calls `agent_doc_reposition_boundary_to_end` via FFI
+- `isIdle(filePath, debounceMs)` — calls `agent_doc_is_idle`
+- `awaitIdle(filePath, debounceMs, timeoutMs)` — calls `agent_doc_await_idle`
+- `documentChanged(filePath)` — calls `agent_doc_document_changed`
+- Library resolution: `$AGENT_DOC_LIB_PATH` > `.agent-doc/lib/` > `~/.local/lib/` > cargo target
+- Graceful fallback when koffi or library unavailable
+
+**Updated `extension.ts`:**
+- Import `native` module
+- Typing listener calls `native.documentChanged()` (shared FFI debounce tracker)
+- `repositionBoundaryWithDebounce` — prefers `native.isIdle()`, falls back to TS timestamps
+- Reposition — prefers `native.repositionBoundaryToEnd()`, falls back to `repositionBoundaryToEndTs()`
+
+**`package.json`:** Added `koffi: ^2.9.0` dependency.
+
+Both editors now share the same FFI debounce tracker and reposition logic when koffi is available. The TS fallback ensures the extension works without native deps.
+<!-- agent:boundary:23c5a3f7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **Fix stash-everything guard** — skip stash when managed files have unresolved panes
-- [x] **Fix boundary reposition keystroke loss** — FFI `await_idle` (JB) + TS debounce (VS Code)
-- [x] **VS Code reposition handling** — typing debounce + boundary manipulation via WorkspaceEdit
+- [x] **Fix boundary reposition keystroke loss** — FFI `await_idle` (JB) + FFI/TS debounce (VS Code)
+- [x] **VS Code koffi FFI bindings** — native.ts with graceful fallback
 - [ ] **Fix tmux_session config drift** — route.rs should follow pane when it moves sessions; claim.rs should update config.toml
 - [ ] **Rebuild JB plugin + VS Code extension** — build and install both to test live
 - [ ] **Publish tmux-router v0.3.8** + update agent-doc dep

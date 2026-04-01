@@ -31,14 +31,14 @@ Sources used: March 4 three-way call transcript + diarized notes, email CC heade
 **Note:** Phone number was never shared. Action item #1 from March 4 meeting ("Judith to send Robert's email + phone") is still pending for the phone number.
 
 Use corky to sync my Robert Waldman contact with https://contacts.google.com/person/c2907734623862917833
-### Re: Google Contacts Sync (HEAD)
+### Re: Google Contacts Sync
 
 Added `robert-waldman` to `mail/.corky.toml` and pushed to Google Contacts via `corky contact push`.
 
 **Result:** Created new Google Contact — `people/c5045079896432711148`
 
 **Duplicate warning:** You provided Google Contacts URL with person ID `c2907734623862917833`, but corky created a new one (`c5045079896432711148`). Robert Waldman already exists in your Google Contacts. You may want to merge the duplicate in Google Contacts.
-<!-- agent:boundary:4205b77a -->
+<!-- agent:boundary:c15f34a6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

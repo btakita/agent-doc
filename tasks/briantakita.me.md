@@ -776,11 +776,24 @@ Should we delay teaser post until tomorrow morning or post when LinkedIn comes b
 **Recommendation:** Schedule for Wednesday April 2nd, ~9 AM ET. Fresh eyes, peak engagement window, no outage noise, no April Fools associations.
 
 Want me to set up a corky scheduled publish for tomorrow morning?
-<!-- agent:boundary:1dc82e85 -->
+
+Today is Wed April 1st. Why is your date incorrect?
+### Re: Date correction (HEAD)
+
+You're right, I had the day wrong. Today is **Wednesday April 1st, 2026**. Apologies.
+
+Since today is already Wednesday (peak engagement day), updated options:
+
+1. **Post tonight** once LinkedIn is back — evening engagement is lower, but the content is fresh
+2. **Post Thursday April 2nd, ~9 AM ET** — morning peak window, still a strong engagement day
+3. **Post tomorrow (Thursday) morning** removes the April Fools association entirely
+
+The April 1st concern still applies regardless of day-of-week. Recommend **Thursday 9 AM ET** to dodge both the outage aftermath and April Fools skepticism.
+<!-- agent:boundary:3d6e94b5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn teaser — draft ready, recommend posting Wed Apr 2 ~9 AM ET
+- LinkedIn teaser — draft ready, recommend posting Thu Apr 2 ~9 AM ET
 - LinkedIn OAuth — needs to be completed before publish
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

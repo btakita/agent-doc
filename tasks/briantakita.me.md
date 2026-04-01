@@ -614,10 +614,10 @@ Installed at the briantakita.me submodule's git hooks directory. It triggers whe
 Now both layers are in place:
 - **Local:** pre-commit hook regenerates index on commit
 - **CI:** deploy workflow regenerates index before build
-### Re: Index in the commit? (HEAD)
+### Re: Index in the commit?
 
 Yes. The hook runs `git add post/index.ts` after regeneration, so the updated index is staged and lands in the same commit as the blog post file.
-<!-- agent:boundary:960235c0 -->
+<!-- agent:boundary:02249006 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

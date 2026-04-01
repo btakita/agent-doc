@@ -3480,7 +3480,23 @@ Both binary paths now point to the same fixed code. Plugin rebuilt.
 This explains why navigating to files didn't create panes — the old binary at `~/.cargo/bin/` still had both registry guards that blocked auto-start for unregistered files.
 
 **Plugin zip:** `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.38.zip`
-<!-- agent:boundary:581d412e -->
+
+Works.
+- [ ] Add `build.stamp` to .gitignore
+### Re: Confirmed working + gitignore already covers build.stamp (HEAD)
+
+`.agent-doc` is already in `.gitignore` (line 12), so `build.stamp` at `.agent-doc/build.stamp` is automatically excluded. No change needed.
+
+Session summary — all issues resolved:
+- Claim action unified with sync (ClaimAction.kt simplified)
+- Registry protection added (claim.rs)
+- Duplicate heading (HEAD) marker bug fixed (git.rs)
+- Busy guard removed from plugin (EditorTabSyncListener.kt)
+- Sync auto-starts files with session UUIDs regardless of registry state (sync.rs)
+- Build stamp for stale-cache detection (build.rs + sync.rs)
+- Plugin now resolves correct binary via basePath (EditorTabSyncListener.kt + SyncLayoutAction.kt)
+- Both binary paths updated (`cargo install --path .`)
+<!-- agent:boundary:0484d2c0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -3493,10 +3509,10 @@ This explains why navigating to files didn't create panes — the old binary at 
 - [x] Fix: sync auto-starts files with session UUIDs (both guards removed)
 - [x] Add logging to sync auto-start path
 - [x] Old-instance protection: build stamp (A+B)
-- [x] Fix: plugin resolveAgentDoc now passes basePath (was using old ~/.cargo/bin binary)
+- [x] Fix: plugin resolveAgentDoc now passes basePath
 - [x] Bump JB plugin version to 0.2.38
 - [x] `cargo install --path .` — both binary paths are now current
-- [ ] Install plugin 0.2.38 and verify end-to-end
-- [ ] Add `build.stamp` to .gitignore
+- [x] Install plugin 0.2.38 and verify end-to-end
+- [x] Add `build.stamp` to .gitignore (already covered by `.agent-doc` rule)
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

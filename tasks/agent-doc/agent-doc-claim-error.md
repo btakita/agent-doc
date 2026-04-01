@@ -1145,14 +1145,14 @@ Ideally, we can track an iteration as a narrative story into markdown for evalua
 continue:
 - [ ] **Update SKILL.md** to use preflight baseline_file
 - [ ] **SPEC.md: 4-state model** (snapshot, baseline, file, buffer)
-### Re: SKILL.md + SPEC.md updates done (HEAD)
+### Re: SKILL.md + SPEC.md updates done
 
 **SKILL.md updated:** Baseline instructions now reference `baseline_file` from preflight JSON output. Falls back to manual `cp` for older binaries.
 
 **SPEC.md Section 6.6 added:** "Document State Model (4 States)" with table showing snapshot, baseline, file on disk, and editor buffer. Includes consistency invariants and staleness risk documentation.
 
 Both committed and pushed.
-<!-- agent:boundary:4c7876e0 -->
+<!-- agent:boundary:4c9d325d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

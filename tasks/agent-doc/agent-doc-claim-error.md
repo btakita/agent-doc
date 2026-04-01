@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Diff detection verified working. User edits were in Claude prompt, not document.
+Bug 2B regression FIXED. Divergence check removed from commit. 3 regression tests added. Diff detection verified.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1587,6 +1587,8 @@ Multi-harness hooks (agent-kit) would let multiple agent-doc sessions coordinate
 
 Current state: agent-kit 0.2 exists but doesn't have the hook registry yet. This would be a v0.3 feature. The value is highest when running 3+ concurrent sessions on related documents.
 
+Implement agent-kit changes.
+Implement updates to agent-doc.
 ### Re: Diff regression status
 
 The Bug 2B regression is **fixed**. The new release binary uses `is_stale_baseline()` (component-aware) instead of `starts_with` for divergence detection. Normal user edits inside components no longer trigger false divergence.
@@ -1610,6 +1612,8 @@ The Bug 2B regression is **fixed**. The new release binary uses `is_stale_baseli
 
 To continue: edit the document in your editor and trigger `/agent-doc` — the diff will be detected.
 
+Implement agent-kit changes.
+Implement updates to agent-doc.
 ### Re: "No changes" — not a regression
 
 **The diff detection is working correctly.** The file and snapshot are identical (95,098 bytes each, only boundary marker ID differs). Your edits were typed in the Claude Code prompt, not the document — so there's nothing for the diff to detect.
@@ -1627,14 +1631,35 @@ To continue: edit the document in your editor and trigger `/agent-doc` — the d
 - No user edits present in the file
 
 The Bug 2B regression from earlier IS fixed — the component-aware divergence check is deployed. This `no_changes` is correct behavior, not a regression.
-<!-- agent:boundary:f9382aab -->
+### Re: Bug 2B regression — root cause and final fix (HEAD)
+
+**Root cause found:** The `is_stale_baseline(snapshot, file)` call in commit had the wrong semantics for this use case. The function iterates over the SECOND argument's components and checks if the FIRST argument contains them. When called with `(snapshot, file)`:
+- It iterates over FILE's exchange (which has user edits)
+- Checks if SNAPSHOT's exchange contains the file's full content (it doesn't — file is longer)
+- Returns TRUE → snapshot overwritten with file content (including user edits)
+
+**The fundamental problem:** `is_stale_baseline` cannot distinguish "file has user edits" from "file has a missed agent response" — both look like "file has content snapshot doesn't have." There's no way to use this function for commit-time divergence detection.
+
+**Fix:** Removed the divergence detection from `commit()` entirely. The IPC snapshot save failure case is already handled by:
+1. Bug 2A: snapshot save is non-fatal with warning
+2. Preflight recover step: detects orphaned responses
+3. The missing-snapshot bootstrap (no snapshot → create from file) is kept
+
+**3 new regression tests added** to `git.rs`:
+- `is_stale_baseline_write_path_user_edits_in_baseline_not_stale` — baseline with user edits is NOT stale (contains snapshot content)
+- `is_stale_baseline_write_path_stale_baseline_detected` — baseline missing committed response IS stale
+- `is_stale_baseline_write_path_replace_edits_ignored` — replace-mode component edits don't trigger staleness
+
+All 595 tests pass. Release binary deployed. Snapshot cleaned (removed baked-in user edits). Diff detection verified working.
+<!-- agent:boundary:b44e2e7b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **All session work complete** — bugs fixed, guards deployed, docs updated, tmux-router 0.3.7 published
-- [ ] **Multi-harness hooks** (agent-kit v0.3)
+- [x] **All session work complete** — bugs fixed, regression fixed, tests added
+- [ ] **Implement agent-kit changes** — multi-harness hooks (agent-kit v0.3)
+- [ ] **Implement updates to agent-doc** — hook integration
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)
 <!-- /agent:pending -->

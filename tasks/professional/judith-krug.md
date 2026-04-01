@@ -477,11 +477,21 @@ Applying Robert's coaching (short, not alarming, just checking in):
 > Hi Judith, it's Brian. I noticed equityfundingsource.com appears to be down — were you aware? Just wanted to check before I start working on things. Hope you're doing well!
 
 Short, casual, non-alarming. Doesn't imply blame or urgency. Just a heads-up question.
-<!-- agent:boundary:94f0bcea -->
+### Re: Text Sent (2026-04-01) (HEAD)
+
+Noted — text to Judith about the website being down has been sent. Checked off from pending.
+
+**Next up:**
+1. Create the backup email draft file (`mail/drafts/20260401-judith-call-followup.md`)
+2. Website migration to Cloudflare (equityfundingsource task)
+3. Check in with Robert this afternoon
+
+Let me know when you want me to create the email draft file or if you're jumping to the website work first.
+<!-- agent:boundary:e7ea13fa -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Send text to Judith about website being down — awaiting approval
+- [x] Send text to Judith about website being down
 - [ ] Prepare email draft file (`mail/drafts/20260401-judith-call-followup.md`)
 - [ ] Website migration to Cloudflare ... website is DOWN, urgent deliverable for tonight
 - [ ] Check in with Robert this afternoon before the Judith call

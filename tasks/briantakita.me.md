@@ -583,7 +583,7 @@ Why not?
 - Post LinkedIn teaser when live
 
 Let's add to briantakita.me-dev AGENTS.md -> CLAUDE.md
-Bette
+Better yet, make the reindex a script that is part of the build.
 ### Re: Post not visible — fixed
 
 The blog post file existed but wasn't registered. `post/index.ts` is a generated manifest — it lists all posts as imports. The new post wasn't in it.
@@ -591,12 +591,17 @@ The blog post file existed but wasn't registered. `post/index.ts` is a generated
 **Fix:** Ran `bun post/index.generate.ts` to regenerate the index, committed and pushed to all three repos (briantakita.me, briantakita.me-dev, agent-loop).
 
 For localhost: restart `bun run dev` to pick up the change. CI should now deploy with the post included.
-<!-- agent:boundary:65ef3d7b -->
+This should either be a precommit hook or part of the build. or
+### Re: Reindex as part of release (HEAD)
+
+Added `bun post/index.generate.ts` as a CI step in `deploy.yml`, right before the build. Now new blog posts will always be included in the build even if the local `index.ts` wasn't regenerated before pushing.
+
+Committed and pushed to briantakita.me-dev. The CI push will also trigger a fresh deploy with the regenerated index — so this should also fix the current deploy.
+<!-- agent:boundary:ff7f0b59 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Verify deploy to briantakita.me (CI triggered)
-- Verify localhost after dev server restart
+- Verify deploy to briantakita.me (CI re-triggered with index regen)
 - LinkedIn teaser post
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

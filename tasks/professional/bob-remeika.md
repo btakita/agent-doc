@@ -1431,16 +1431,67 @@ You've got two days to prep. The key items before the call:
 2. **Security architecture talking points** (prompt injection, data isolation, content signing)
 3. **Ragie Parse pitch** for Judith's loan docs and Ron's patent corpus
 4. **Web architecture walkthrough** (even without a live demo, the design doc works)
-<!-- agent:boundary:7d23a7c7 -->
+
+I have to reschedule my call with bob-remeika again. My wife has a dentist appointment from 13:00 Eastern to around 15:00 Eastern. During that time I have to watch my daughter. Here are the available times on Thursday.
+
+10:00am
+10:30am
+11:00am
+11:30am
+12:00pm
+1:30pm
+Former Time
+2:00pm
+2:30pm
+3:00pm
+5:00pm
+5:30pm
+6:00pm
+6:30pm
+7:00pm
+7:30pm
+8:00pm
+8:30pm
+
+Note that I also want to schedule a call with robert-ross (tasks/recruit/robert-ross.md) between 12:00-16:00 Pacific (15:00-19:00 Eastern).
+
+Please help me strategically schedule a good time.
+### Re: Rescheduling Bob & Coordinating with Robert Ross (HEAD)
+
+**Constraints:**
+- You're unavailable 1:00-3:00 PM ET (watching daughter during dentist)
+- Bob is Bay Area (PT) -- morning PT is ideal for a CEO
+- Robert Ross call needs 12:00-4:00 PM PT (3:00-7:00 PM ET)
+
+**Recommendation: Bob at 12:00 PM ET / 9:00 AM PT**
+
+- **9 AM PT is a natural start-of-day for Bob** -- fresh, no competing meetings
+- **You're free at noon ET** -- 60 min buffer before childcare starts
+- **Avoids the too-early slots** (10-11 AM ET = 7-8 AM PT, not ideal for a CEO)
+- The former 2:00 PM ET slot falls right in your childcare window, so that's out
+
+**Robert Ross: 4:00 PM ET / 1:00 PM PT**
+
+- Squarely in his 12-4 PM PT window
+- Gives you recovery time after childcare ends (~3 PM ET)
+- 1 PM PT is the sweet spot the robert-ross doc already identified
+
+**Full Thursday schedule:**
+| Time (ET) | Time (PT) | Event |
+|-----------|-----------|-------|
+| 12:00 PM | 9:00 AM | Bob Remeika call (30 min) |
+| 1:00-3:00 PM | -- | Childcare |
+| 4:00 PM | 1:00 PM | Robert Ross call |
+
+Clean separation, no conflicts, respectful times for both Bay Area contacts. Want me to draft a reschedule message to Bob?
+<!-- agent:boundary:8dec93cb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Thursday April 3, 2:00 PM ET / 11:00 AM PT — call with Bob (scheduled)
-- Demo prep: JB plugin demo ready, security-aware framing
-- Security architecture talking points (prompt injection, data isolation, content signing)
-- Ragie Parse discussion points for Judith + patents
-- Web architecture walkthrough (design doc if no live demo)
-- Patent mining proposal as Ragie pitch material
+- Draft reschedule message to Bob (new time: 12:00 PM ET / 9:00 AM PT Thursday)
+- Schedule Robert Ross call at 4:00 PM ET / 1:00 PM PT Thursday
+- Prep talking points for Bob call (JB plugin demo, security architecture, Ragie Parse pitch)
+- Prep talking points for Dreamable/Robert Ross call
 <!-- /agent:pending -->

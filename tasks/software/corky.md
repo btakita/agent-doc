@@ -758,7 +758,7 @@ The `htmd` conversion preserves:
 Note: Some marketing emails still have CSS/tracking artifacts in the markdown (e.g., `@media` queries, tracking pixels). This is inherent to the HTML source — `htmd` passes through CSS in `<style>` blocks that are inline rather than in `<head>`. A future improvement could strip `@media` blocks and tracking image tags, but the content is now readable.
 
 Let's strip unnecessary @media queries and tracking pixels. Basic styling is preferred. Do you think this stripping of @media queries and other unnecessary css would break the rendered layout of the converted markdown?
-### Re: Stripping @media queries and tracking pixels (HEAD)
+### Re: Stripping @media queries and tracking pixels
 
 No — stripping CSS won't break markdown rendering at all. Here's why:
 
@@ -782,7 +782,7 @@ fn clean_markdown(md: &str) -> String {
 ```
 
 This is a ~20-line function added after the `html_to_markdown()` call. Want me to implement it?
-<!-- agent:boundary:16fe9ea5 -->
+<!-- agent:boundary:26e5bdcc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

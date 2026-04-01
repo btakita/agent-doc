@@ -875,10 +875,10 @@ Updated the auditable workflow bullet to include "with automated cadence of repo
 > "...built-in traceability with automated cadence of reports."
 
 This adds a concrete operational detail — the audit trail isn't just passive history, it feeds into regular reporting.
-### Re: Simplified (HEAD)
+### Re: Simplified
 
 Updated draft: "built-in traceability with automated reports." Cleaner.
-<!-- agent:boundary:315e28c6 -->
+<!-- agent:boundary:6e3c0b08 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

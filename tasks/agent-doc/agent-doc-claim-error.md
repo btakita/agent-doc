@@ -1163,14 +1163,42 @@ Adding tests for the new features. I'll cover:
 3. Ops logging events
 
 Implementing now.
-<!-- agent:boundary:cf1956a2 -->
+
+Status?
+Continue:
+- [ ] **Tests for preflight baseline + stale baseline guard + ops logging** ← active
+### Re: Status (HEAD)
+
+This document has grown very long (1150+ lines in the exchange). The session has covered a lot of ground. Here's a summary of everything shipped and pending:
+
+**Shipped this session:**
+- v0.29.0: links frontmatter, URL fetch, htmd HTML-to-markdown, session logging, auto-trigger on restart, security docs
+- Bug 1 fix: stale baseline guard (baseline-vs-snapshot comparison)
+- Preflight baseline save (baseline_file in JSON output)
+- Operation-level logging (ops.log)
+- SKILL.md updated to use preflight baseline
+- SPEC.md Section 6.6 (4-state document model), Section 10 (Security)
+- README.md security section
+- 7 new tests (URL/HTML features)
+
+**Pending (not yet implemented):**
+- Tests for preflight baseline + stale baseline guard + ops logging
+- Refine stale baseline guard (too aggressive, fires on user edits)
+- Bug 2A: divergence check before auto-start
+- Bug 2B: rollback guard in commit()
+- Multi-harness hooks (agent-kit)
+- Blog post
+
+Recommend compacting this exchange before continuing with tests. It's very long.
+<!-- agent:boundary:d0ef25b7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **v0.29.0 released** + ops logging + Bug 1 v2 + preflight baseline + SKILL/SPEC updates
-- [ ] **Tests for preflight baseline + stale baseline guard + ops logging** ← active
+- [x] **v0.29.0 shipped** + ops logging + Bug 1 v2 + preflight baseline + docs
+- [ ] **Refine stale baseline guard** (fires on user edits, too aggressive)
+- [ ] **Tests** for preflight baseline, stale baseline guard, ops logging
 - [ ] **Bug 2A: Divergence check before auto-start**
 - [ ] **Bug 2B: Rollback guard in commit()**
 - [ ] **Multi-harness hooks** (agent-kit)

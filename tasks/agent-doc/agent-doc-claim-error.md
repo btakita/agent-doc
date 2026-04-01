@@ -1981,7 +1981,7 @@ The Tailwind CSS LSP is configured to watch all files (including `.md`) and rece
 agent-doc:
 audit docs
 Update SPEC.md, README.md, ontology, module-harness
-### Re: Audit docs + doc updates (HEAD)
+### Re: Audit docs + doc updates
 
 **Audit results unchanged:** 2 issues, both informational:
 1. **Large table** (CLAUDE.md:22-35) — 13-row module layout table. Not actionable.
@@ -1993,7 +1993,7 @@ Update SPEC.md, README.md, ontology, module-harness
 - CLAUDE.md — 3 new modules in layout
 
 Line budget: 431/1000 (57% headroom). Ready for v0.30.0 release.
-<!-- agent:boundary:67c3fb94 -->
+<!-- agent:boundary:88e38456 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

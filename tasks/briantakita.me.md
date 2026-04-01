@@ -647,10 +647,19 @@ Should the link be in the post or in the 1st comment?
 
 1. Post body ends with "Full post linked in the first comment."
 2. Immediately comment with the URL: `https://briantakita.me/posts/agent-security-multiuser-lessons/`
-<!-- agent:boundary:f9fcbea0 -->
+
+> 532 git commits in one day. 11 parallel AI agent sessions. 292 commits debugging one cascade of bugs.
+
+AI agent sessions or AI document agent sessions or AI document sessions or AI document agents?
+### Re: Naming (HEAD)
+
+**"AI agent sessions"** for the hook (recognition), **"interactive document sessions"** in the body (differentiation). The hook grabs attention with a familiar term; the body introduces the novel concept.
+
+Keep the opening as: "532 git commits in one day. 11 parallel AI agent sessions."
+<!-- agent:boundary:e3f2027a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn teaser — post body + first comment ready
+- LinkedIn teaser — ready to post
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

@@ -967,7 +967,7 @@ All done:
 - Automatic chunking cascade: full -> 10min -> 2min -> 30s
 - Reassembly with frontmatter stripping
 - LLM inference step could be a separate `corky transcribe --resolve-unknown` post-processing pass
-<!-- agent:boundary:645e745a -->
+<!-- agent:boundary:1e684428 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

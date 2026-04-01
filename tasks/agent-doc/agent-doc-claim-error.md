@@ -2571,7 +2571,7 @@ All 388 tests pass. Binary reinstalled.
 - `purge_orphaned_agent_panes` — only runs on manual `resync --fix`. Not automatic.
 - `sync.rs` file rename kill — only when old file path doesn't exist. Not applicable here.
 - `apply_fixes` WrongSession — requires `tmux_session` frontmatter mismatch. Rare.
-### Re: Background agent claim + deletion (HEAD)
+### Re: Background agent claim + deletion
 
 You're right — the equityfundingsource.md session had an active `agent-doc start` (pane %344) with a full Claude + chrome-devtools MCP tree. When stashed, a subsequent `resync::prune()` call from another operation (this session's preflight, a route, or claim) ran `purge_unregistered_stash_panes_bulk()` which killed the pane because it was running `claude` and wasn't found in the registry at that moment.
 
@@ -2586,7 +2586,7 @@ This means a stashed Claude session will survive indefinitely until either:
 3. `agent-doc resync --fix` (explicit manual command)
 
 The binary is already rebuilt and installed with this fix.
-<!-- agent:boundary:c75fb475 -->
+<!-- agent:boundary:4778fc48 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

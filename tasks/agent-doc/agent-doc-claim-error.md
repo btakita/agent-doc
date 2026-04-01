@@ -2173,7 +2173,7 @@ This is the highest-priority fix — it's a data loss risk (tmux session state d
 **After:** Dead panes → no resolution → WARNING logged → layout preserved
 
 All 595 tests pass. Release binary + cargo install updated.
-<!-- agent:boundary:ba7feac8 -->
+<!-- agent:boundary:e1810dec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

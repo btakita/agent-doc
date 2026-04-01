@@ -401,7 +401,7 @@ Where do you want to start? Website migration or Ragie setup?
 I don't need a demo for Ragie yet. I will talk to Bob tomorrow.
 Let's have an email ready to go.
 I will create a separate task for equityfundingsource.com
-### Re: Email Backup & Updated Plan (HEAD)
+### Re: Email Backup & Updated Plan
 
 Got it — no Ragie demo needed yet (talking to Bob tomorrow), and equityfundingsource.com gets its own task.
 
@@ -442,7 +442,7 @@ Here's the backup email draft for if Judith says "just send me an email":
 - Ball in her court
 
 Want me to create the draft file now?
-<!-- agent:boundary:295772d5 -->
+<!-- agent:boundary:269129be -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

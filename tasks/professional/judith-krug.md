@@ -619,7 +619,7 @@ Good call on "prompts" over "queries" — it frames the Ragie interaction as tal
 
 Please draft the proposal. As discussed with robert-ward, let's present strong options without being overwhelming with choices.
 Include website + document uploads in the proposal as well.
-### Re: Proposal Draft (HEAD)
+### Re: Proposal Draft
 
 **Draft:** `mail/drafts/20260401-judith-proposal-options.md`
 **To:** judithkrug@gmail.com | **CC:** rwaldman100@gmail.com
@@ -660,7 +660,7 @@ Include website + document uploads in the proposal as well.
 - CC's Robert Waldman so he can help her understand the technical parts
 
 Want me to create the draft file?
-<!-- agent:boundary:f36af9ed -->
+<!-- agent:boundary:8532a7fb -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

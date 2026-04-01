@@ -4,6 +4,16 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.0
+
+- **`agent-doc session` CLI**: Show/set configured tmux session with pane migration (`session_cmd.rs`).
+- **Stash pane safety**: `purge_unregistered_stash_panes` no longer kills agent processes (agent-doc, claude, node) in stash — only idle shells. Prevents loss of active Claude sessions when registry goes stale.
+- **Session resolution consolidation**: `resolve_target_session()` extracts duplicated session-targeting logic from route.rs into a single function. Config.toml is the source of truth; claim/route no longer auto-overwrite it.
+- **Stale UUID handling**: Files with frontmatter session UUID but no registry entry are treated as Unmanaged by sync — prevents auto-starting sessions for unclaimed files.
+- **Unused variable cleanup**: Fixed 8 warnings across route.rs and template.rs.
+- **Docs**: SPEC.md §7.27 (session command), CLAUDE.md module layout updated.
+- **Tests**: 601 total, 1 new (`purge_preserves_unregistered_agent_process_in_stash`).
+
 ## 0.30.1
 
 - **FFI `agent_doc_is_idle`**: Non-blocking typing check for editor plugins to query idle state before boundary reposition.

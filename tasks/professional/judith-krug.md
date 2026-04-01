@@ -580,7 +580,7 @@ judith-krug will likely ask robert-waldman to help her understand the proposal.
 **For Robert Waldman:** He'll understand RAG (Retrieval Augmented Generation). Ragie is a managed RAG service backed by Craft Ventures (David Sacks). Handles document ingestion, OCR, chunking, embeddings, vector search. Brian integrates via API. Bob Remeika (CEO) is a personal contact ... early access conversation tomorrow.
 
 With your understand of Judith's business...please come up with a list of queries that will be beneficial for Judith and her team.
-### Re: Ragie Query Examples for Judith's Business (HEAD)
+### Re: Ragie Query Examples for Judith's Business
 
 **Loan Pipeline & Deal Management:**
 - "Show me all active loan applications over $500K"
@@ -613,7 +613,7 @@ With your understand of Judith's business...please come up with a list of querie
 - "What's my investor utilization rate ... how many investors have funded a deal in the last year?"
 
 **The pitch angle:** These queries currently require Judith or her staff to manually dig through files, emails, and Dropbox. With Ragie, it's a 10-second phone query. For a one-person brokerage handling millions in deals, that's transformative.
-<!-- agent:boundary:e39113b7 -->
+<!-- agent:boundary:a8ac0cbb -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

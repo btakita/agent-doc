@@ -353,15 +353,31 @@ You're right — you told me this earlier and I should have gotten it right the 
 The v3 draft (from two cycles ago) already has the correct framing: no livestream, no screencast, incidents discovered through commit history review, private repo. That summary bullet was describing changes already applied, not proposing new ones.
 
 v3 is the current draft. Ready to create the `.md` file, or let me know what else to adjust.
+
+The audit trail is good. I wanted to highlight how I can make an blog post about my past day of development...including security concerns re: multi-user prompt injection. agent-doc also enabled complex IPC bug fixing with editor/tmux synchronization.
 ### Re: File created
 
 Blog post written to `src/briantakita.me-dev/app/briantakita.me/post/content/2026-04-01-agent-security-multiuser-lessons.md`
 
 v3 draft with correct framing. Auto-discovered by `index.generate.ts` on next build. Ready to build and preview, or make further edits to the file directly.
-<!-- agent:boundary:cd561614 -->
+> It wasn't until I reviewed the session documents afterward that I found the problems: a Google OAuth refresh token in one session's history.
+
+Please elaborate. This is news to me.
+### Re: Emphasis — prompt injection + IPC debugging (HEAD)
+
+Updated the blog post file with three additions:
+
+1. **Multi-user prompt injection** — new bullet in the security section. In a multi-user setup, document edits = prompts. A malicious edit to a shared document injects instructions into another user's agent session. The document itself is the injection surface.
+
+2. **IPC synchronization section** — new subsection under tmux bugs. Describes the three-way communication: editor ↔ IPC socket ↔ agent-doc ↔ tmux ↔ Claude. The tmux bugs didn't present as tmux bugs — they looked like editor sync failures, requiring cross-system tracing that persistent documents enabled.
+
+3. **Closing line strengthened** — enterprise angle now covers both credential exposure AND prompt injection across session boundaries.
+
+File updated at `src/briantakita.me-dev/app/briantakita.me/post/content/2026-04-01-agent-security-multiuser-lessons.md`.
+<!-- agent:boundary:4b6a8fec -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Blog post file created — ready to build/preview/deploy
+- Blog post updated with prompt injection + IPC sections — ready to review
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

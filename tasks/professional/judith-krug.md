@@ -442,14 +442,39 @@ Here's the backup email draft for if Judith says "just send me an email":
 - Ball in her court
 
 Want me to create the draft file now?
-<!-- agent:boundary:269129be -->
+
+Judith's website equityfundingsource.com is down for some reason.
+Look through the phone call transcriptions with robert-ward and judith-krug.
+Is her ex-boyfriend...the "control freak"...responsible for the website?
+### Re: Website Down & "Control Freak" Investigation (HEAD)
+
+**The "control freak" is NOT an ex-boyfriend.** From the March 4 meeting transcript with Judith and Robert Waldman, Judith refers to "the lady who has my website" as a separate person:
+
+> "I should have control over my website, too, not just give it to a person that is a control freak or I can't get a hold of."
+> "So I talked to the lady who has my website and tell her that we're going to need some sort of, like, have her release it somehow or something."
+
+This is a **female third party** who built and hosts the site. Judith described it as "a very rudimentary job" and said the creator also hosts it. It's not her ex-boyfriend.
+
+**The ex-boyfriend** is a separate person entirely. From the March 30 call with Robert Ward, the ex-boyfriend is someone who "blows up her phone" and is "needy" asking for money. Robert says Judith told him she's "not going to deal with him at all." The ex-boyfriend is a personal distraction, not a website person.
+
+**That said, the website being down could be related.** The "lady who has my website" was described as a control freak and hard to reach. If Judith never got the host to "release" the site (that action item was still Pending as of March 4), and the host let hosting lapse or took it down, that could explain it going offline.
+
+**Key facts from meeting notes:**
+- Domain is on GoDaddy (Judith owns it)
+- Website hosting is controlled by this third-party woman
+- Judith has ~5 domain names registered
+- Robert Waldman wrote the existing site copy
+- Action item #3 from March 4 meeting: "Website takeover from current host" was Judith's responsibility, status: Pending
+
+**This actually strengthens the pitch for tonight's call** ... her website is literally down. You can say: "Your website is down right now. I can get it back up on Cloudflare today and you'll own everything. No more depending on someone you can't reach."
+<!-- agent:boundary:25d35242 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [ ] Prepare email draft file (`mail/drafts/20260401-judith-call-followup.md`)
-- [ ] Copy Judith's website to Cloudflare ... demonstrable progress for tonight's call
+- [ ] Website migration to Cloudflare ... website is DOWN, urgent deliverable for tonight
 - [ ] Check in with Robert this afternoon before the Judith call
-- [ ] Tonight's call with Judith ... present options, ask for retainer
+- [ ] Tonight's call with Judith ... present options, ask for retainer, mention website is down
 - [ ] Ragie integration scoping (separate task for equityfundingsource.com)
 - [ ] Talk to Bob Remeika about Ragie tomorrow
 - [ ] Schedule Zoom call with Judith and Robert Waldman

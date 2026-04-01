@@ -756,7 +756,33 @@ The `htmd` conversion preserves:
 - Paragraphs → proper spacing
 
 Note: Some marketing emails still have CSS/tracking artifacts in the markdown (e.g., `@media` queries, tracking pixels). This is inherent to the HTML source — `htmd` passes through CSS in `<style>` blocks that are inline rather than in `<head>`. A future improvement could strip `@media` blocks and tracking image tags, but the content is now readable.
-<!-- agent:boundary:0a374d84 -->
+
+Let's strip unnecessary @media queries and tracking pixels. Basic styling is preferred. Do you think this stripping of @media queries and other unnecessary css would break the rendered layout of the converted markdown?
+### Re: Stripping @media queries and tracking pixels (HEAD)
+
+No — stripping CSS won't break markdown rendering at all. Here's why:
+
+**Markdown doesn't render CSS.** The conversation files are plain markdown viewed in editors (JetBrains, VS Code, etc.) or parsed by AI agents. CSS has zero effect on markdown rendering. The `@media` blocks, inline `style` attributes, and `<style>` tags are just noise that `htmd` passes through verbatim because they're in the HTML source.
+
+**What to strip (safe to remove, zero layout impact):**
+
+1. **`@media` query blocks** — responsive email CSS, meaningless in markdown
+2. **Tracking pixels** — `<img>` tags with 1x1 dimensions or known tracking domains (e.g., `sendgrid.net/wf/open`, `manage.turing.com/analytics`, `url*.*.ai/wf/open`)
+3. **Inline `style` attributes** — `htmd` sometimes passes through `style="..."` on elements; these do nothing in markdown
+4. **`<style>` blocks** — embedded CSS, irrelevant in markdown context
+
+**Implementation approach:** Post-process the `htmd` output with a simple cleanup pass rather than modifying the HTML before conversion. This keeps the `htmd` conversion clean and the cleanup logic separate:
+
+```rust
+fn clean_markdown(md: &str) -> String {
+    // Strip @media blocks (may span multiple lines)
+    // Strip tracking pixel images (1x1 or known domains)
+    // Strip orphaned style attributes
+}
+```
+
+This is a ~20-line function added after the `html_to_markdown()` call. Want me to implement it?
+<!-- agent:boundary:16fe9ea5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -765,5 +791,5 @@ Note: Some marketing emails still have CSS/tracking artifacts in the markdown (e
 - Respond to Rob Ross (Dreamable) — schedule meeting Wed/Thu 12-4pm PT
 - crates.io token — renew and publish corky
 - VERSIONS.md — add entry before next release
-- Optional: strip CSS @media blocks and tracking pixels from htmd output
+- **corky: markdown cleanup pass** — strip @media, tracking pixels, inline styles from htmd output
 <!-- /agent:pending -->

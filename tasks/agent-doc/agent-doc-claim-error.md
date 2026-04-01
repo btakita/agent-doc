@@ -2173,13 +2173,88 @@ This is the highest-priority fix — it's a data loss risk (tmux session state d
 **After:** Dead panes → no resolution → WARNING logged → layout preserved
 
 All 595 tests pass. Release binary + cargo install updated.
-<!-- agent:boundary:e1810dec -->
+
+.agent-doc/config.toml is incorrect.
+tmux_session = "1"
+
+I manually moved the 0:agent-doc window to tmux session 5.
+We need a way to correct this with our agent-doc commands.
+
+Also go into this state.
+```
+~/work/btakita/agent-loop main ⇡460 !48 ?13                                                                                                                                                                                            04:05:59
+❯
+~/work/btakita/agent-loop main ⇡460 !48 ?13                                                                                                                                                                                           04:05:59
+❯ date
+Tue Mar 31 05:54:49 PM EDT 2026
+~/work/btakita/agent-loop main ⇡95 !66 ?19                                                                                                                                                                                            17:54:49
+❯ tmux list-sessions
+1: 3 windows (created Thu Mar 26 04:05:44 2026) (attached)
+3: 1 windows (created Sat Mar 28 00:35:26 2026) (attached)
+claude: 2 windows (created Thu Mar 26 02:23:08 2026) (attached)
+~/work/btakita/agent-loop main ⇡215 !66 ?19                                                                                                                                                                                           08:27:27
+❯ tmux list-sessions
+1: 4 windows (created Thu Mar 26 04:05:44 2026) (attached)
+3: 1 windows (created Sat Mar 28 00:35:26 2026) (attached)
+5: 1 windows (created Wed Apr  1 12:49:44 2026) (attached)
+~/work/btakita/agent-loop main ⇡315 !69 ?19                                                                                                                                                                                           12:49:58
+❯ /agent-doc tasks/agent-doc/agent-doc-claim-error.md
+zsh: no such file or directory: /agent-doc
+~/work/btakita/agent-loop main ⇡317 !69 ?19
+~/work/btakita/agent-loop main ⇡317 !69 ?19                                                                    12:56:18
+❯
+```
+
+Now tmux session has 3 agent-doc windows. Something is messed up with the logic.
+![img_3.png](img_3.png)
+
+Manually claiming seems to have fixed the state. We should refactor the commands to always self-correct.
+
+I manually set `tmux_session = "5"`...this fixed our `
+### Re: tmux_session config drift and duplicate windows (HEAD)
+
+The root cause is in `src/agent-doc/src/route.rs:141-155`. The auto-correction logic only fires when the configured tmux session is **dead**:
+
+```rust
+let configured_alive = configured_session.as_ref().is_some_and(|s| tmux.session_alive(s));
+let target_session = if configured_alive {
+    configured_session.unwrap()  // ← always uses "1" since session 1 is alive
+} else {
+    // auto-correct only happens here, when session is dead
+```
+
+When you moved the agent-doc window from session "1" to session "5", session "1" was still alive (it has other windows). So route kept targeting session "1" and spawning new agent-doc windows there.
+
+**Two fixes needed:**
+
+1. **Route should detect pane-session mismatch** — after resolving the target session from config, check if the *registered pane* is actually in that session. If the registered pane moved to a different session, update config.toml to match.
+
+2. **Claim should update config.toml** — `claim.rs` currently has a comment saying `tmux_session` frontmatter is deprecated, but it doesn't update `config.toml` either. When you manually claim in session "5", it should write `tmux_session = "5"` to `.agent-doc/config.toml`.
+
+**Self-correction approach:** In `resolve_or_create_pane()` at line 194-215, the code already detects when a pane is alive but in the wrong session. Instead of re-creating, it should update the config to match reality:
+
+```rust
+if pane_session != target_session {
+    // Pane moved to a different session — update config to follow
+    crate::config::update_project_tmux_session(&pane_session)?;
+    // Reuse the existing pane instead of creating a new one
+}
+```
+
+And in `claim.rs`, after registering the session, update the config:
+
+```rust
+let pane_session = /* get session name from the claimed pane */;
+crate::config::update_project_tmux_session(&pane_session)?;
+```
+<!-- agent:boundary:45e7db69 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **Fix stash-everything guard** — skip stash when managed files have unresolved panes
+- [ ] **Fix tmux_session config drift** — route.rs should follow pane when it moves sessions; claim.rs should update config.toml
 - [ ] **Publish tmux-router v0.3.8** + update agent-doc dep
 - [ ] **Release agent-doc v0.30.1** (all fixes)
 - [ ] **Blog post** about this debugging session

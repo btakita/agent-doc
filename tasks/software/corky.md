@@ -782,7 +782,41 @@ fn clean_markdown(md: &str) -> String {
 ```
 
 This is a ~20-line function added after the `html_to_markdown()` call. Want me to implement it?
-<!-- agent:boundary:26e5bdcc -->
+
+It may be good to see if there is a tracking pixel in the markdown. To track which emails are tracking us.
+### Re: Tracking pixel detection (HEAD)
+
+Good call. Quick scan found **47 emails with tracking pixels** across the current conversations. Top tracking domains:
+
+| Count | Domain |
+|-------|--------|
+| 17 | sendgrid.net (u33389577) |
+| 7 | outlier.ai |
+| 7 | turing.com |
+| 5 | sendgrid.net (u24859734) |
+| 4 | sendgrid.net (u9255466) |
+| 2 | lever-analytics.com |
+| 2+ | Various sendgrid subaccounts |
+
+**Implementation plan — two behaviors:**
+
+1. **Strip tracking pixels from markdown body** — remove `![](tracking_url)` patterns matching known tracking indicators:
+   - 1x1 images (`width='1'`, `height='1'`)
+   - Known tracking paths (`/wf/open`, `/analytics/open`, `/o.gif`, `/t.gif`)
+   - Known tracking domains (sendgrid.net open trackers, lever-analytics, etc.)
+
+2. **Log tracking metadata** — before stripping, append a `**Tracking:**` metadata line to the conversation file header listing detected tracker domains. This gives visibility into who tracks without cluttering the body.
+
+Example output in conversation file:
+```markdown
+**Labels**: INBOX
+**Accounts**: btak.dev
+**Thread ID**: 19d1e4f28d091132
+**Tracking**: sendgrid.net, outlier.ai
+```
+
+This way you can `grep "**Tracking**" conversations/*.md` to audit which senders track. Want me to implement both the strip + metadata approach?
+<!-- agent:boundary:11914fb7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -791,5 +825,5 @@ This is a ~20-line function added after the `html_to_markdown()` call. Want me t
 - Respond to Rob Ross (Dreamable) — schedule meeting Wed/Thu 12-4pm PT
 - crates.io token — renew and publish corky
 - VERSIONS.md — add entry before next release
-- **corky: markdown cleanup pass** — strip @media, tracking pixels, inline styles from htmd output
+- **corky: markdown cleanup + tracking detection** — strip @media/CSS, detect & log tracking pixels, strip from body
 <!-- /agent:pending -->

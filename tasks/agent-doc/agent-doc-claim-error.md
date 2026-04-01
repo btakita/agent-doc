@@ -2488,7 +2488,7 @@ Looked at the screenshot and current tmux state. The session registry shows:
 This is a new bug — want me to fix it?
 Yes.
 Add tests.
-### Re: Sync auto-start fix implemented (HEAD)
+### Re: Sync auto-start fix implemented
 
 **Two changes in `sync.rs`:**
 
@@ -2502,7 +2502,7 @@ Add tests.
 - `sync_routes_file_with_session_uuid_and_registry_entry` — UUID + registry → Registered
 
 All 600 tests pass. Needs `cargo build --release` + reinstall to test live.
-<!-- agent:boundary:3b3d6874 -->
+<!-- agent:boundary:424c298a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

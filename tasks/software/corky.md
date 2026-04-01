@@ -967,7 +967,40 @@ All done:
 - Automatic chunking cascade: full -> 10min -> 2min -> 30s
 - Reassembly with frontmatter stripping
 - LLM inference step could be a separate `corky transcribe --resolve-unknown` post-processing pass
-<!-- agent:boundary:6a522b10 -->
+
+For the following, see tasks/personal/robert-ward.md for more context:
+- [ ] `corky transcribe --adaptive-chunk` — cascading chunk diarization for long audio
+- [ ] `corky transcribe --resolve-unknown` — LLM-based speaker attribution for remaining Unknown segments
+
+I would like `corky transcribe` to attempt to do the `--adaptive-chunk` and `--resolve-unknown` by default. Perhaps we can have an opt-out somewhere like the config?
+## Assistant (HEAD)
+
+### Re: adaptive-chunk and resolve-unknown as defaults
+
+Yes, making these default behaviors with opt-out makes sense. The `.corky.toml` config already has a `[transcription]` section — we can extend it:
+
+```toml
+[transcription]
+model = "large-v3-turbo"
+language = "en"
+adaptive_chunk = true        # default: true (cascade: full → 10min → 2min → 30s)
+resolve_unknown = true       # default: true (LLM post-pass for Unknown speakers)
+```
+
+CLI flags would be opt-out: `--no-adaptive-chunk` and `--no-resolve-unknown`.
+
+**Why default-on:** These features improve quality for the common case (long recordings with multiple speakers). Users who want raw speed or don't need diarization can opt out via config or flag.
+
+**Implementation order:**
+1. `--adaptive-chunk` first — it's self-contained within the transcribe pipeline (chunk audio → diarize each → reassemble)
+2. `--resolve-unknown` second — it depends on adaptive-chunk output quality and needs an LLM integration point
+
+**Key design decision:** Should `--resolve-unknown` require `--diarize` implicitly? I'd say yes — if you're resolving unknown speakers, diarization must have run. So enabling `resolve_unknown = true` in config would also imply `diarize = true`.
+
+**One concern:** LLM inference in `--resolve-unknown` adds a dependency (API key, model choice, cost). The config should let users specify which model/provider to use, or we could default to a local model. What's your preference — Claude API, local LLM, or configurable?
+
+## User (HEAD)
+<!-- agent:boundary:3ad02fc8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

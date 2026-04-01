@@ -12,8 +12,7 @@ agent_doc_write: crdt
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-Please create a contact for robert-waldman.
-Please use correspondence with judith-krug, including a 3 way phone call, to get his contact info + context.
+
 ### Re: Robert Waldman Contact Created
 
 Created `mail/contacts/robert-waldman/AGENTS.md` (with `CLAUDE.md` symlink).
@@ -30,12 +29,22 @@ Created `mail/contacts/robert-waldman/AGENTS.md` (with `CLAUDE.md` symlink).
 Sources used: March 4 three-way call transcript + diarized notes, email CC headers from proposal/kickoff/onboarding emails.
 
 **Note:** Phone number was never shared. Action item #1 from March 4 meeting ("Judith to send Robert's email + phone") is still pending for the phone number.
-<!-- agent:boundary:98b00807 -->
+
+Use corky to sync my Robert Waldman contact with https://contacts.google.com/person/c2907734623862917833
+### Re: Google Contacts Sync (HEAD)
+
+Added `robert-waldman` to `mail/.corky.toml` and pushed to Google Contacts via `corky contact push`.
+
+**Result:** Created new Google Contact — `people/c5045079896432711148`
+
+**Duplicate warning:** You provided Google Contacts URL with person ID `c2907734623862917833`, but corky created a new one (`c5045079896432711148`). Robert Waldman already exists in your Google Contacts. You may want to merge the duplicate in Google Contacts.
+<!-- agent:boundary:4205b77a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Merge duplicate Robert Waldman in Google Contacts (c2907734623862917833 vs c5045079896432711148)
 - [ ] Get Robert Waldman's phone number (pending from Judith since March 4)
 - [ ] Schedule Zoom call with Robert Waldman for deeper requirements
 <!-- /agent:pending -->

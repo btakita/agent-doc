@@ -832,7 +832,7 @@ Is backtesting the same pattern? LIGER seems more like a general pipeline verifi
 I don't really know. There may be some overlap.
 
 I don't think I would take this job unless it is setup in a good way to continue collab with Lucas and my existing clients. But agent-doc could lead to a nice gig as a domain expert.
-### Re: Honest Framing + Strategic Direction (HEAD)
+### Re: Honest Framing + Strategic Direction
 
 Good instincts on all three points.
 
@@ -849,7 +849,7 @@ Good instincts on all three points.
 The email doesn't need to mention any of this. Let Josh's response tell you which door to walk through.
 
 Updated draft ready for review.
-<!-- agent:boundary:c16d3181 -->
+<!-- agent:boundary:05c66132 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

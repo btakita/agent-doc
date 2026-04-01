@@ -719,7 +719,7 @@ Read the full blog post. The security story is about **multiuser prompt injectio
 **First comment:** `https://briantakita.me/posts/agent-security-multiuser-lessons/`
 
 Ready to publish via corky. Say the word.
-<!-- agent:boundary:17a51547 -->
+<!-- agent:boundary:b623af44 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

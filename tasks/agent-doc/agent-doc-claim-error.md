@@ -1515,7 +1515,7 @@ Implement now.
 ---
 
 **Summary:** Both bugs are edge cases narrowed by this session's work. Neither is actively causing issues. Recommend moving to the queue for the next session.
-### Re: Bug 2A + Bug 2B implemented (HEAD)
+### Re: Bug 2A + Bug 2B implemented
 
 Both bugs fixed. Here's what was done:
 
@@ -1549,7 +1549,10 @@ Both bugs fixed. Here's what was done:
 3. User sees committed response in git (not stale snapshot)
 
 All 592 tests pass. Release binary built.
-<!-- agent:boundary:3e82e6f8 -->
+
+How would Multi-harness hooks be implemented?
+Can agent-doc take advantage of these hooks to better deterministic event handling?
+<!-- agent:boundary:d004adad -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

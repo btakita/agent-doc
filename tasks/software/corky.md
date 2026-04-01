@@ -1000,14 +1000,55 @@ CLI flags would be opt-out: `--no-adaptive-chunk` and `--no-resolve-unknown`.
 **One concern:** LLM inference in `--resolve-unknown` adds a dependency (API key, model choice, cost). The config should let users specify which model/provider to use, or we could default to a local model. What's your preference — Claude API, local LLM, or configurable?
 
 ## User
-<!-- agent:boundary:e7387c89 -->
+## Assistant
+
+### Re: adaptive-chunk and resolve-unknown as defaults
+
+Yes, making these default behaviors with opt-out makes sense. The `.corky.toml` config already has a `[transcription]` section — we can extend it:
+
+```toml
+[transcription]
+model = "large-v3-turbo"
+language = "en"
+adaptive_chunk = true        # default: true (cascade: full → 10min → 2min → 30s)
+resolve_unknown = true       # default: true (LLM post-pass for Unknown speakers)
+```
+
+CLI flags would be opt-out: `--no-adaptive-chunk` and `--no-resolve-unknown`.
+
+**Why default-on:** These features improve quality for the common case (long recordings with multiple speakers). Users who want raw speed or don't need diarization can opt out via config or flag.
+
+**Implementation order:**
+1. `--adaptive-chunk` first — it's self-contained within the transcribe pipeline (chunk audio → diarize each → reassemble)
+2. `--resolve-unknown` second — it depends on adaptive-chunk output quality and needs an LLM integration point
+
+**Key design decision:** Should `--resolve-unknown` require `--diarize` implicitly? I'd say yes — if you're resolving unknown speakers, diarization must have run. So enabling `resolve_unknown = true` in config would also imply `diarize = true`.: yes
+
+**One concern:** LLM inference in `--resolve-unknown` adds a dependency (API key, model choice, cost). The config should let users specify which model/provider to use, or we could default to a local model. What's your preference — Claude API, local LLM, or configurable?: The current agent harness.
+
+## User
+### Re: design decisions locked in (HEAD)
+
+Good, both decisions simplify the implementation:
+
+1. **`--resolve-unknown` implies `--diarize`** — when `resolve_unknown = true` in config (or `--resolve-unknown` on CLI), we auto-enable diarization. No need for the user to pass both flags. If they explicitly pass `--no-diarize --resolve-unknown`, that's a conflict we can error on.
+
+2. **Claude API via agent harness** — this means `--resolve-unknown` will use the same Claude API key/model already configured for agent-doc sessions. The transcribe pipeline sends a prompt like "Given these diarized segments with 'Unknown' speakers and these known speakers [list], attribute each Unknown segment to the most likely speaker based on context." No new dependency to wire up — just an API call using the existing Anthropic SDK integration.
+
+**Updated implementation plan:**
+1. `--adaptive-chunk` — chunking cascade (full → 10min → 2min → 30s), reassembly
+2. `--resolve-unknown` — Claude API post-pass, uses existing `ANTHROPIC_API_KEY`, sends diarized transcript with Unknown segments for attribution
+3. Both default-on in `.corky.toml`, opt-out via `--no-adaptive-chunk` / `--no-resolve-unknown`
+
+## User
+<!-- agent:boundary:84dba0d7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] `corky transcribe --adaptive-chunk` — cascading chunk diarization for long audio
-- [ ] `corky transcribe --resolve-unknown` — LLM-based speaker attribution for remaining Unknown segments
+- [ ] `corky transcribe --adaptive-chunk` — cascading chunk diarization for long audio (default-on, opt-out via `--no-adaptive-chunk`)
+- [ ] `corky transcribe --resolve-unknown` — Claude API speaker attribution for Unknown segments (default-on, implies `--diarize`, opt-out via `--no-resolve-unknown`)
 - [ ] crates.io publish — needs token refresh
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:pending -->

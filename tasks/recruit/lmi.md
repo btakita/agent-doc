@@ -822,19 +822,42 @@ To:
 > "...the same human-in-the-loop pattern that matters for high-trust environments."
 
 This describes the pattern without claiming agent-doc is what LIGER specifically needs. Keeps it factual — the prototype demonstrates the pattern, not the production solution.
-<!-- agent:boundary:14cf43a2 -->
+
+> Same pattern as LIGER's fact-checking: generate output, then verify against source.
+
+Is backtesting the same pattern? LIGER seems more like a general pipeline verification.
+
+> I think there's real overlap with where LIGER is heading on document generation.
+
+I don't really know. There may be some overlap.
+
+I don't think I would take this job unless it is setup in a good way to continue collab with Lucas and my existing clients. But agent-doc could lead to a nice gig as a domain expert.
+### Re: Honest Framing + Strategic Direction (HEAD)
+
+Good instincts on all three points.
+
+**Backtesting ≠ LIGER's fact-checking:** You're right. Backtesting (spec → implementation drift detection) is a different pattern from LIGER's pipeline (generate → verify against source material). Removed the false equivalence. Now reads: "A general pipeline verification approach that catches drift early."
+
+**Overlap uncertainty:** Changed the closing from "I think there's real overlap" to "I'd be curious to hear how this compares to what you're building on the document generation side." This invites conversation instead of asserting a connection you're not sure exists.
+
+**Strategic reframe — domain expert vs. employee:** This is a much stronger positioning. The email as written still works for this angle...it demonstrates deep domain expertise in agentic document workflows without committing to the employee path. If Josh responds with genuine interest in agent-doc, you have a natural opening to explore:
+- Consulting/domain expert engagement
+- Uncleared advisory role
+- Technical collaboration that doesn't require clearance or full-time commitment
+- Arrangement that preserves Lucas collaboration and existing client work
+
+The email doesn't need to mention any of this. Let Josh's response tell you which door to walk through.
+
+Updated draft ready for review.
+<!-- agent:boundary:c16d3181 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Send Josh Malloy follow-up email (pending approval)
+- [ ] Send Josh Malloy follow-up email (pending final approval)
 - [ ] agent-doc README: security section (single-user, prompt injection)
 - [ ] Corky: HTML body extraction for emails
-- [ ] Research LMI uncleared role options
-- [x] All contacts created
-- [x] Prototype spike framing applied
-- [x] Backtesting bullet added
-- [x] Blog post timeline corrected
-- [x] Overselling language toned down
+- [x] Backtesting language corrected (removed false LIGER equivalence)
+- [x] Closing reframed as curiosity, not assertion
 <!-- /agent:pending -->

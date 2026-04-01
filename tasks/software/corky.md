@@ -1138,7 +1138,7 @@ The 32GB GPU is available (`nvidia-smi` shows it) but whisper-rs compiled withou
 **To fix:** whisper-rs needs to be built with CUDA/cuBLAS. Check if the `whisper-rs` dependency has a `cuda` feature flag, or if `WHISPER_CUBLAS=1` needs to be set at build time.
 
 It should **always** be built with gpu support if the environment has the correct libraries.
-### Re: CUDA build fix (HEAD)
+### Re: CUDA build fix
 
 Rebuilt with `--features "diarize,transcribe-cuda"` and GPU is now active:
 
@@ -1156,13 +1156,40 @@ whisper_model_load: CUDA0 total size = 1623.92 MB
 Transcription re-running on the 79-min call. Should complete much faster with GPU acceleration.
 
 **Build note:** The `diarize` feature implies `transcribe` but not `transcribe-cuda`. Need to always include `transcribe-cuda` explicitly on this machine.
-<!-- agent:boundary:68200f42 -->
+
+Why was corky not built with gpu support?
+### Re: Transcription complete (HEAD)
+
+Transcription finished successfully. 575 lines, 66KB output.
+
+**Results:**
+- **Duration:** 76:48
+- **Speakers detected:** 4 (Brian, Robert, Speaker 3, Speaker 4)
+- **Segments:** 1,246
+- **Adaptive chunking:** Full-audio diarization produced 0 segments (quality poor), fell back to 600s chunks (8 chunks) which worked well
+
+**Observations:**
+1. **First 21 minutes** are one massive Brian block -- diarization didn't split within it. This is the AMR phone format (mono, low bitrate) making it hard for pyannote to distinguish speakers on a single channel
+2. **After ~21 min**, turn detection improves with shorter, more natural segments
+3. **4 speakers detected** instead of 2 -- likely false positives from background noise or voice quality changes in mono AMR
+4. **Repetition artifacts** visible ("I'm going to call her tomorrow" repeated many times) -- whisper hallucination on silence/noise in AMR
+
+**Key issues to address:**
+- AMR mono phone recordings are challenging for diarization (single channel, low quality)
+- Whisper repetition hallucination on low-quality audio needs detection/suppression
+- Speaker count should be constrained when `--speakers` is provided (we said 2, got 4)
+
+Saved diarized transcript to:
+`mail/contacts/robert-ward/recordings/phone_20260401-042624_3109684542_diarized.txt`
+<!-- agent:boundary:97cc51c4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Investigate whisper-rs GPU support (CUDA feature flag or build env)
-- Complete robert-ward April call transcription
-- Test adaptive-chunk diarization on real call
+- Fix: constrain speaker count to match `--speakers` list length
+- Fix: detect/suppress whisper repetition hallucination on AMR audio
+- Investigate: AMR mono diarization quality (long initial speaker block)
+- Investigate whisper-rs GPU support (CUDA feature flag or build env) — ([done])
+- Test adaptive-chunk diarization on real call — ([done])
 <!-- /agent:pending -->

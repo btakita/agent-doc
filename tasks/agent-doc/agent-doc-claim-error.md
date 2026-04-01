@@ -1152,15 +1152,25 @@ continue:
 **SPEC.md Section 6.6 added:** "Document State Model (4 States)" with table showing snapshot, baseline, file on disk, and editor buffer. Includes consistency invariants and staleness risk documentation.
 
 Both committed and pushed.
-<!-- agent:boundary:cd6d4498 -->
+Add tests.
+### Re: Add tests (HEAD)
+
+Using the preflight-provided baseline for this write (first time!). Let me verify it eliminates the stale baseline warning.
+
+Adding tests for the new features. I'll cover:
+1. Preflight baseline save (baseline_file in output)
+2. Stale baseline detection guard in write.rs
+3. Ops logging events
+
+Implementing now.
+<!-- agent:boundary:f11f038e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **v0.29.0 released** + ops logging + Bug 1 v2 + preflight baseline
-- [x] **SKILL.md updated** to use preflight baseline_file
-- [x] **SPEC.md Section 6.6** — 4-state document model
+- [x] **v0.29.0 released** + ops logging + Bug 1 v2 + preflight baseline + SKILL/SPEC updates
+- [ ] **Tests for preflight baseline + stale baseline guard + ops logging** ← active
 - [ ] **Bug 2A: Divergence check before auto-start**
 - [ ] **Bug 2B: Rollback guard in commit()**
 - [ ] **Multi-harness hooks** (agent-kit)

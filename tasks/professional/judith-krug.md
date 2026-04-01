@@ -335,12 +335,78 @@ I will start with Judith's website. Also need to plan Ragie integration with Jud
 ### Re: Bob Remeika Link Added
 
 Linked `./bob-remeika.md` — Bob Remeika (CEO, Ragie) is now a related contact for this document. This ties into the Ragie RAG integration planned for equityfundingsource.com. When ready to scope that work, the bob-remeika doc and `tasks/software/ragie-web-doc.md` have the Ragie context.
-<!-- agent:boundary:fbfe893b -->
+
+I need you to read through the transcription for mail/contacts/robert-ward/recordings/phone_20260401-042624_3109684542.txt to come up with a gameplan for tonight's call.
+### Re: Robert Ward Call Summary & Tonight's Gameplan (HEAD)
+
+**Call summary (phone_20260401-042624):** ~30 min call at 4:30am ET. Robert coaching Brian on tonight's call with Judith.
+
+**Key updates from Robert:**
+- Judith has **verbally agreed to pay Brian** ... Robert told her Brian already started homework, she said "I'll pay him"
+- Robert will call Judith first today (around 2pm PT / 5pm ET, possibly later after 5pm PT) to feel things out
+- Robert wants to be on the call too if possible
+- Check-in with Robert planned for this afternoon
+
+---
+
+**Gameplan for Tonight's Call with Judith:**
+
+**1. Lead with value, save money for last** (Robert's #1 coaching point)
+- Present the technical capabilities first ... "blow her mind"
+- Show what you've accomplished and what's possible
+- Don't mention payment until AFTER she's excited about the work
+
+**2. Present clear options (keep it simple, don't overwhelm):**
+- **Option A:** Stick with Mortgage Automator (if forced by contract) ... Brian builds complementary layer
+- **Option B:** Use The Mortgage Office (~$600/mo) ... Brian builds integrations
+- **Option C (the play):** Skip both MA and TMO entirely ... Brian builds everything custom with Ragie for documents/OCR/AI. Saves her $600-1,100+/mo in platform fees
+
+**3. The Ragie pitch (platform-independent killer feature):**
+- All her documents into Ragie for AI-powered search and business intelligence
+- OCR included ... scan forms, index everything, make it searchable
+- Query from her phone: "show me all funders contributing over $1M" or "customers who corresponded in the last year"
+- ~$100/mo for the service (or self-hosted for less)
+- Works regardless of which path she chooses
+- Backed by Craft Ventures (David Sacks) ... serious company, not a side project
+
+**4. Show deliverables:**
+- Website copied to new system (Cloudflare)
+- Document upload portal in progress
+- Ragie document ingestion ready to demo
+- AI query capabilities
+
+**5. The money ask (at the END):**
+- Frame as: "I have some family things to take care of, so I'd like to move at a quicker pace"
+- **Give her choices:**
+  - **Retainer** ($2K-$4K) ... Brian waives research hours as incentive. Ideal: 40 hours / $4K
+  - **Invoice** for hours worked so far (~$400 for research)
+- Don't say "broke" or "desperate" ... frame as "short-term cash flow" and a "favor"
+- Robert already primed her that Brian started work and she agreed to pay
+
+**6. Have email ready as backup**
+- If she says "send me an email and I'll think about it" ... have a concise summary ready to send immediately so it doesn't drag out another week
+
+**7. Keep it under 20-30 minutes** ... she gets overwhelmed and busy
+
+---
+
+**Immediate action items before the call:**
+- [ ] Copy Judith's website to Cloudflare (new system) ... demonstrable progress
+- [ ] Set up Ragie document ingestion ... have a demo ready
+- [ ] Prepare concise options doc / email backup
+- [ ] Check in with Robert this afternoon before the call
+- [ ] Study mortgage broker workflows enough to speak intelligently
+
+Where do you want to start? Website migration or Ragie setup?
+<!-- agent:boundary:18e0d757 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
+- [ ] Copy Judith's website to Cloudflare ... demonstrable progress for tonight's call
+- [ ] Set up Ragie document ingestion ... demo ready for Judith
+- [ ] Prepare concise options doc / email backup for call
+- [ ] Check in with Robert this afternoon before the Judith call
+- [ ] Tonight's call with Judith ... present options, ask for retainer
 - [ ] Ragie integration scoping for equityfundingsource.com (linked via bob-remeika.md)
-- [ ] Judith reviews proposal and decides MA vs TMO + custom
 - [ ] Schedule Zoom call with Judith and Robert Waldman
-- [ ] Website Phase 1 kickoff (pending Judith's return from retreat)
 <!-- /agent:pending -->

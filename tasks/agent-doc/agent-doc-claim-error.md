@@ -3540,15 +3540,23 @@ release
 4. Tag: `git tag v0.31.1 && git push origin v0.31.1`
 
 Want me to proceed with publishing?
-<!-- agent:boundary:9628aaa9 -->
+yes
+### Re: v0.31.1 published (HEAD)
+
+- **crates.io**: published ✓
+- **GitHub Release**: https://github.com/btakita/agent-doc/releases/tag/v0.31.1 (with prebuilt binary) ✓
+- **Tag**: v0.31.1 pushed ✓
+- **PyPI**: skipped — requires manylinux Docker build (local glibc too new for manylinux2014 compliance)
+
+Note: `pass` token path is `btak/CARGO_REGISTRY_TOKEN` (not `crates.io/token`).
+<!-- agent:boundary:55c08732 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] All implementation, tests, and audit docs complete
-- [x] Version bumped to 0.31.1 (Cargo.toml + pyproject.toml + VERSIONS.md)
-- [x] Release binary built and installed
-- [ ] Publish: cargo publish, maturin publish, gh release create
+- [x] All implementation, tests, audit docs, and release complete
+- [x] Published: crates.io ✓, GitHub Release ✓
+- [ ] PyPI publish (needs manylinux Docker build)
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

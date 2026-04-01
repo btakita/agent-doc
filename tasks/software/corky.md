@@ -873,7 +873,7 @@ Done. All tests pass (246), release built and 555 threads resynced.
 
 Add tests.
 Update SPEC.md, README.md, ontology, module-harness
-### Re: Tests + docs update complete (HEAD)
+### Re: Tests + docs update complete
 
 All 252 tests pass.
 
@@ -899,7 +899,7 @@ All 252 tests pass.
 #### Not applicable:
 - **README.md** — no user-facing CLI changes, sync internals documented in SPEC
 - **Ontology / module-harness** — no new domain terms or modules introduced; `markdown_clean` is a utility within the existing sync module, not a new bounded context
-<!-- agent:boundary:213cb80f -->
+<!-- agent:boundary:a5f99782 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

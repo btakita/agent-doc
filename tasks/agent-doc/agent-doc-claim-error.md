@@ -2408,7 +2408,22 @@ Let's add the koffi support.
 **`package.json`:** Added `koffi: ^2.9.0` dependency.
 
 Both editors now share the same FFI debounce tracker and reposition logic when koffi is available. The TS fallback ensures the extension works without native deps.
-<!-- agent:boundary:42aed6a6 -->
+
+> Graceful fallback when koffi or library unavailable
+
+Why would koffi or the library be unavailable?
+### Re: Why koffi or library might be unavailable (HEAD)
+
+Two scenarios:
+
+1. **koffi unavailable** — it's a native Node addon requiring platform-specific compilation. If the `.vsix` is built on Linux x86_64 but installed on ARM or macOS, the prebuilt binary won't load. VS Code Marketplace extensions typically bundle platform-specific native deps, but koffi needs to match the exact Node ABI that VS Code ships.
+
+2. **libagent_doc.so unavailable** — users who install the VS Code extension without building agent-doc from source won't have the shared library. The search paths (`.agent-doc/lib/`, `~/.local/lib/`, cargo target) all assume a local build exists.
+
+**In practice for you:** Both are always available since you build from source. The fallback exists for distribution to other users.
+
+**To make FFI "just work":** We could add `agent-doc plugin install --lib` to copy the `.so` to `~/.local/lib/` or `.agent-doc/lib/`, and bundle platform-specific koffi binaries in the `.vsix` build. That's a release concern, not a blocker for the current fix.
+<!-- agent:boundary:eea657f7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -2419,6 +2434,7 @@ Both editors now share the same FFI debounce tracker and reposition logic when k
 - [x] **VS Code koffi FFI bindings** — native.ts with graceful fallback
 - [ ] **Fix tmux_session config drift** — route.rs should follow pane when it moves sessions; claim.rs should update config.toml
 - [ ] **Rebuild JB plugin + VS Code extension** — build and install both to test live
+- [ ] **`agent-doc plugin install --lib`** — copy libagent_doc to discoverable path for VS Code FFI
 - [ ] **Publish tmux-router v0.3.8** + update agent-doc dep
 - [ ] **Release agent-doc v0.30.1** (all fixes)
 - [ ] **Blog post** about this debugging session

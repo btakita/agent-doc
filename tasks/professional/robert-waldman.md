@@ -115,7 +115,7 @@ Tried deleting the duplicate (`c5045079896432711148`) — got 404, meaning it wa
 #### Google People API — No Native Merge
 
 The API has no merge endpoint. To merge: copy data from one contact to the other (`updateContact`), then delete the source (`deleteContact`). The Google Contacts web UI "Merge & fix" is still the easiest path for one-off merges.
-### Re: Email Draft Updated (HEAD)
+### Re: Email Draft Updated
 
 Updated `mail/drafts/20260401-robert-waldman-website-down.md`:
 - Added Wayback Machine archive link
@@ -124,7 +124,7 @@ Updated `mail/drafts/20260401-robert-waldman-website-down.md`:
 - You'll handle the CSS layout fix
 
 Ready to send via `corky draft push` when you approve.
-<!-- agent:boundary:ac7e3045 -->
+<!-- agent:boundary:2054a035 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -3306,7 +3306,6 @@ This is overly conservative. The user's intent when navigating to a file in a sp
 
 Should I implement this? The change is in `sync.rs` line 467-468: remove the `Unmanaged` return and always treat UUID-bearing files as `Registered`.
 Yes...as we discussed earlier, autostarting new tmux + agent harness sessions should be guaranteed to not race.
-Should the agent-doc binary itself (not the editor plugin nor the ffi plugin) handle the locks and guards?
 ### Re: Sync now auto-starts files with stale UUIDs
 
 Done. Removed the registry-entry guard from `sync.rs` `resolve_file`. Files with session UUIDs are now always treated as `Registered` — sync will auto-start new sessions for them even if the registry entry was pruned.
@@ -3316,9 +3315,32 @@ Done. Removed the registry-entry guard from `sync.rs` `resolve_file`. Files with
 - Module doc updated
 
 The release binary is live. Try switching to corky.md in the right split — sync should now create a second tmux pane and auto-start a Claude session.
+Not working. Why?
 
 You're right that I should have traced the `non_managed=1` signal from the sync output immediately rather than chasing plugin state. The log data was there.
-<!-- agent:boundary:5f685301 -->
+Should the agent-doc binary itself (not the editor plugin nor the ffi plugin) handle the locks and guards?
+### Re: Where locks and guards should live (HEAD)
+
+Yes — the agent-doc binary should own all locks and guards. This follows the FFI-first / Shared Foundation pattern:
+
+**Current state (already correct):**
+- **Startup lock** (5s TTL) — `route.rs` `auto_start_in_session()` prevents double-spawn
+- **Registry lock** — `sessions.rs` `RegistryLock` serializes registry reads/writes
+- **Sync concurrency** — `tmux-router/sync.rs` handles pane layout atomically
+
+**What the plugin should do (thin reporter):**
+- Detect layout changes → call `agent-doc sync --col ... --col ...`
+- Debounce rapid events (500ms) — this is appropriate in the plugin since it's about reducing unnecessary CLI calls
+- FFI generation counter — prevents stale events from reaching the binary
+
+**What the plugin should NOT do:**
+- Busy guards (removed ✓)
+- Position detection for claims (removed ✓)
+- Auto-start via `tmux send-keys` (removed ✓)
+- Any registry manipulation
+
+The binary is the single source of truth for session state, pane management, and concurrency. The plugin just says "the editor looks like this" and the binary figures out how to make tmux match.
+<!-- agent:boundary:2508292d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

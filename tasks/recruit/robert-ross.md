@@ -27,7 +27,7 @@ Please research robert-ross. He is at a high level. Note he wants to schedule a 
 See /home/brian/work/btakita/agent-loop/mail/conversations/brian-rob-zoom.md
 
 What would be a good strategic time to meet with Rob on Thursday?
-### Re: Strategic meeting time with Rob on Thursday (HEAD)
+### Re: Strategic meeting time with Rob on Thursday
 
 **Recommended: 1:00 PM PT Thursday (Apr 2)**
 
@@ -41,7 +41,7 @@ What would be a good strategic time to meet with Rob on Thursday?
 - He's a BD/sales-oriented founder — expect questions about practical agent applications, not just technical depth
 - He reviewed your "work and videos" — know which videos are public and be ready to discuss them
 - ~6 person company, so expect a conversation about culture fit and wearing many hats
-<!-- agent:boundary:f506ba4e -->
+<!-- agent:boundary:95f567a8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

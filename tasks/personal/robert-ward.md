@@ -519,5 +519,5 @@ Re-transcribed all 17 calls using Whisper large-v3-turbo + RTX 5090 CUDA (74–1
 - Friend Ari (stockbroker) depressed after market crash
 - Ian has PTSD from prison, depression
 - Consistently following up with Judith on Brian's behalf
-<!-- agent:boundary:cd262027 -->
+<!-- agent:boundary:0a601521 -->
 <!-- /agent:exchange -->

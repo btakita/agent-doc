@@ -2520,7 +2520,7 @@ The audit docs + Update SPEC.md, README.md, ontology, module-harness
 
 We lost the tmux pane + session when I swithed to this document in the left editor. Why?
 ![2026-04-01_14-18.png](../../../../../Pictures/agent-loop/2026-04-01_14-18.png)
-### Re: Build + install + doc audit (HEAD)
+### Re: Build + install + doc audit
 
 **Build + install:** Done. `cargo build` (debug) + `cargo install --path .` (release) completed.
 
@@ -2532,7 +2532,7 @@ We lost the tmux pane + session when I swithed to this document in the left edit
 - CLAUDE.md, SKILL.md: Touched timestamps (content was current)
 - Remaining warning: large table in CLAUDE.md (module layout, intentional)
 
-### Re: Tmux pane/session loss (HEAD)
+### Re: Tmux pane/session loss
 
 **The pane wasn't lost...it was stashed.** When you switched to `agent-doc-claim-error.md` in the left editor, `tmux-router sync` reconciled the layout and moved the `equityfundingsource.md` pane to the `stash` window (pane %344). The full Claude session is still alive:
 
@@ -2544,7 +2544,7 @@ stash.0 %344 → agent-doc start tasks/professional/equityfundingsource.md
 **Why it happened:** tmux-router only shows panes for files currently open in the editor. When you opened this document, it replaced equityfundingsource in the layout. The stash-and-rescue mechanism keeps the pane alive so when you switch back to that file, `route`'s `rescue_from_stash()` brings it back.
 
 **To recover:** Open `tasks/professional/equityfundingsource.md` in the editor and the pane will be rescued from stash automatically.
-<!-- agent:boundary:5b65ca8f -->
+<!-- agent:boundary:72100224 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

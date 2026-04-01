@@ -2334,7 +2334,7 @@ All 597 tests pass. Needs: `cargo build --release` + rebuild JB plugin to test l
 
 Please update the VSCode plugin as well to match the logic.
 We need a way to always ensure that the editor plugins are edited in lock-step. Prefer FFI plugin logic.
-### Re: Consolidated FFI-first approach (HEAD)
+### Re: Consolidated FFI-first approach
 
 Refactored. The retry/scheduling logic now lives entirely in FFI:
 
@@ -2361,7 +2361,7 @@ Changes:
 - `NativePatching.isIdle` kept as a utility but no longer used for reposition
 
 All 597 tests pass.
-<!-- agent:boundary:944b27a6 -->
+<!-- agent:boundary:6bc0427a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

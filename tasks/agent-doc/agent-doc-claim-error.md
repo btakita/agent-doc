@@ -3179,7 +3179,7 @@ Yes. Should we use `/btw` to preempt a busy loop for sync?
 
 On the other items:
 - Tests, audit docs, SPEC.md, module-harness updates — I'll queue those after the sync fix.
-### Re: Busy guard removed + /btw question (HEAD)
+### Re: Busy guard removed + /btw question
 
 Done — removed the busy guard from `EditorTabSyncListener.kt`. The 500ms debounce + FFI generation counter + sync lock are sufficient to prevent cascade. Plugin rebuilt.
 
@@ -3193,7 +3193,7 @@ The existing guards against sync loops are:
 5. **Startup lock** (5s TTL) in Rust — prevents double-spawn of Claude sessions
 
 These should prevent busy loops. Is there a specific loop scenario you're concerned about?
-<!-- agent:boundary:42a1e56f -->
+<!-- agent:boundary:49a9f858 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -3421,7 +3421,7 @@ I don't want to restart & kill existing runs.
 Which approach appeals to you? Or a different mechanism?
 
 All 3 options are good. Note that C should not kill an active run.
-### Re: Speculation labeling, logging, and old-instance protection (HEAD)
+### Re: Speculation labeling, logging, and old-instance protection
 
 **Speculation labeling:** Noted. When uncertain, I'll say "I don't know" or explicitly label speculation as "speculation:". Added to memory.
 
@@ -3440,7 +3440,7 @@ These would make it possible to trace exactly what happened in the 16:26 sync. I
 - **C (graceful restart):** Wait for idle sessions, then restart. Never kill active runs — only restart sessions that are at a prompt (idle). Could use `agent-doc resync` to detect idle panes.
 
 These are good items for a future session — not blocking the current work. I'll add them to pending.
-<!-- agent:boundary:018619b4 -->
+<!-- agent:boundary:c4f8ba56 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

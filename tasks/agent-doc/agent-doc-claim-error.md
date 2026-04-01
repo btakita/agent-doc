@@ -2861,6 +2861,7 @@ Is VERSIONS.md updated and backfilled?
 - Tag pushed: `v0.31.0` ✓
 
 **Skipped PyPI** — maturin publish requires `--no-sdist` with path dev-dependencies. Can do separately if needed.
+We should use versioned dev-dependencies for our releases.
 
 **What's in v0.31.0:**
 - `agent-doc session` CLI (show/set with pane migration)
@@ -2872,11 +2873,18 @@ Is VERSIONS.md updated and backfilled?
 ### Re: VERSIONS.md status
 
 Yes, VERSIONS.md was updated before the release commit. The 0.31.0 entry includes all 7 bullet points covering the session CLI, stash safety, resolve_target_session consolidation, stale UUID handling, unused var cleanup, docs, and test count. It was committed as part of `fd961a4` (the v0.31.0 release commit).
-<!-- agent:boundary:c03800b2 -->
+### Re: Versioned dev-dependencies + PyPI (HEAD)
+
+**Dev-dependencies are already versioned.** `existence = "0.4"` and `module-harness = "0.2"` are published crates. The `--no-sdist` issue was from when they were path dependencies, which has been resolved.
+
+**PyPI publish failed** — `linux_x86_64` platform tag is rejected by PyPI. Needs `manylinux` tag which requires building in a manylinux container (e.g., `maturin publish` inside a `quay.io/pypa/manylinux_2_28_x86_64` container, or via CI). This is a CI/packaging task, not a code change.
+
+For now, users install via `cargo install agent-doc` or the GitHub Release binary. PyPI publishing can be added when CI is set up.
+<!-- agent:boundary:3d5b0e95 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-(empty)
+- **PyPI manylinux packaging** — needs CI container build for proper platform tags
 <!-- /agent:pending -->

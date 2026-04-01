@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-agent-doc v0.30.1 + tmux-router v0.3.8 published. All session bugs fixed and released.
+Sync auto-start bug fixed. Unclaimed files no longer spawn sessions on tab navigation.
 <!-- /agent:status -->
 
 ## Exchange
@@ -2486,7 +2486,23 @@ Looked at the screenshot and current tmux state. The session registry shows:
 **The fix:** `sync` should only manage files that are already claimed (have a session UUID in frontmatter + a registry entry). Unclaimed files in the editor layout should be ignored by sync — they need an explicit `claim` or `route` action to start a session.
 
 This is a new bug — want me to fix it?
-<!-- agent:boundary:40979d6b -->
+Yes.
+Add tests.
+### Re: Sync auto-start fix implemented (HEAD)
+
+**Two changes in `sync.rs`:**
+
+1. **`resolve_file` closure (~line 454):** Before returning `FileResolution::Registered`, now checks `sessions::lookup()` to verify the session UUID has a registry entry. Files with a stale/orphaned frontmatter UUID resolve as `Unmanaged` instead — preventing `tmux_router::sync` from arranging panes for them.
+
+2. **Auto-start loop (~line 564):** Added a guard when `registered_pane` is `None`. Now also checks `sessions::load()` for any registry entry. If none exists, skips the file with a log message instead of falling through to auto-start.
+
+**3 tests added:**
+- `sync_skips_file_without_session_in_frontmatter` — no UUID → Unmanaged
+- `sync_skips_file_with_session_uuid_but_no_registry` — stale UUID, empty registry → Unmanaged
+- `sync_routes_file_with_session_uuid_and_registry_entry` — UUID + registry → Registered
+
+All 600 tests pass. Needs `cargo build --release` + reinstall to test live.
+<!-- agent:boundary:3b3d6874 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -2500,6 +2516,7 @@ This is a new bug — want me to fix it?
 - [x] **Install JB plugin** — uninstall old > restart > install 0.2.36 > restart
 - [x] **Finalize tmux-router v0.3.8** — committed, tagged, published to crates.io
 - [x] **Release agent-doc v0.30.1** — published to crates.io, binary installed
-- [ ] **Fix sync auto-start for unclaimed files** — sync should only manage already-claimed files
+- [x] **Fix sync auto-start for unclaimed files** — sync skips files without registry entries + 3 tests
+- [ ] **Build + install v0.30.2** — release build + cargo install for sync fix
 - [ ] **Blog post** about this debugging session
 <!-- /agent:pending -->

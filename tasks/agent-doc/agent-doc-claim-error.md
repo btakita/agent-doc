@@ -1631,7 +1631,7 @@ Implement updates to agent-doc.
 - No user edits present in the file
 
 The Bug 2B regression from earlier IS fixed — the component-aware divergence check is deployed. This `no_changes` is correct behavior, not a regression.
-### Re: Bug 2B regression — root cause and final fix (HEAD)
+### Re: Bug 2B regression — root cause and final fix
 
 **Root cause found:** The `is_stale_baseline(snapshot, file)` call in commit had the wrong semantics for this use case. The function iterates over the SECOND argument's components and checks if the FIRST argument contains them. When called with `(snapshot, file)`:
 - It iterates over FILE's exchange (which has user edits)
@@ -1651,7 +1651,7 @@ The Bug 2B regression from earlier IS fixed — the component-aware divergence c
 - `is_stale_baseline_write_path_replace_edits_ignored` — replace-mode component edits don't trigger staleness
 
 All 595 tests pass. Release binary deployed. Snapshot cleaned (removed baked-in user edits). Diff detection verified working.
-<!-- agent:boundary:b44e2e7b -->
+<!-- agent:boundary:3437ba1f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

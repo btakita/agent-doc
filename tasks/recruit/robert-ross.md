@@ -57,12 +57,30 @@ Please draft an email proposing 1PM PT (4 PM ET).
 > Brian
 
 Short and warm, mirrors his direct tone. Ready to send via corky when you approve. Should I push this to Gmail Drafts?
-<!-- agent:boundary:b559c9ed -->
+
+Send this email. No need for the draft.
+### Re: Send email (HEAD)
+
+Email sent directly to rob@dreamable.com via corky (`--send`). Replied to thread "Brian / Rob Zoom" (thread ID: 19d479af292d8d99) from btak.dev@gmail.com.
+
+**Sent content:**
+> Hi Rob,
+>
+> Thanks for reaching out... I'd love to chat about the role at Dreamable.
+>
+> Thursday at 1pm PT / 4pm ET works great for me. Looking forward to it.
+>
+> Best,
+> Brian
+
+Draft file: `mail/drafts/2026-04-01-re-brian-rob-zoom.md` (status: sent)
+<!-- agent:boundary:71f4aea2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send reply to Rob Ross — propose Thu Apr 2, 1pm PT (awaiting approval to push to Gmail Drafts)
+- ([done]) Reply sent to Rob Ross — proposed Thu Apr 2, 1pm PT
 - Prep talking points for Dreamable call (agent experience, AI agent thesis alignment)
+- Watch for Rob's confirmation reply
 <!-- /agent:pending -->

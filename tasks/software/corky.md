@@ -784,7 +784,7 @@ fn clean_markdown(md: &str) -> String {
 This is a ~20-line function added after the `html_to_markdown()` call. Want me to implement it?
 
 It may be good to see if there is a tracking pixel in the markdown. To track which emails are tracking us.
-### Re: Tracking pixel detection (HEAD)
+### Re: Tracking pixel detection
 
 Good call. Quick scan found **47 emails with tracking pixels** across the current conversations. Top tracking domains:
 
@@ -816,7 +816,7 @@ Example output in conversation file:
 ```
 
 This way you can `grep "**Tracking**" conversations/*.md` to audit which senders track. Want me to implement both the strip + metadata approach?
-<!-- agent:boundary:11914fb7 -->
+<!-- agent:boundary:6cb447a7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

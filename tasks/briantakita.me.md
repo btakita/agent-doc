@@ -794,7 +794,7 @@ Lets address:
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 
 D: Fix esmcss
-### Re: @source fix (Option D — fix esmcss/rebuildjs-tailwindcss) (HEAD)
+### Re: @source fix (Option D — fix esmcss/rebuildjs-tailwindcss)
 
 **Root cause:** The `rebuild_tailwind_plugin` passes `from: esbuild_cssBundle_path` to postcss. This is a path in the build output directory (e.g., `dist/browser--dev/`). When `@tailwindcss/postcss` processes `@source` directives, it resolves relative paths from `dirname(from)` — the output dir, not the CSS source dir.
 
@@ -811,7 +811,7 @@ D: Fix esmcss
 - Works on CI (GitHub Actions) since no hardcoded local path
 
 **Testing:** Unit tests need the full bun dev env to run (uvu + esmock loader). The fix is minimal and logically correct — `dirname(entryPoint)` matches the CSS source directory. Verify with a local build when ready.
-<!-- agent:boundary:89f32b41 -->
+<!-- agent:boundary:83905309 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

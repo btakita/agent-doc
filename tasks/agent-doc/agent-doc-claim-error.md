@@ -2740,7 +2740,7 @@ It should have create another pane. This is core behavior for agent-doc.
 These are real bugs that needed fixing. The good news: all fixes are in the binary, tested, and deployed. The session management should be much more stable now.
 
 Want to commit all the agent-doc submodule changes and wrap up this session? Or are there more issues to address?
-### Re: Whack-a-mole / simplification (HEAD)
+### Re: Whack-a-mole / simplification
 
 I hear the frustration. The bugs found today are interconnected:
 
@@ -2757,7 +2757,7 @@ I hear the frustration. The bugs found today are interconnected:
 - Add a `--dry-run` flag to resync to preview what would change before applying
 
 Want to commit the submodule changes and wrap up, or keep digging?
-<!-- agent:boundary:6aee8dd2 -->
+<!-- agent:boundary:45cd0145 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

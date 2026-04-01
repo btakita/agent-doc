@@ -702,7 +702,7 @@ All 4 Unknown segments replaced with **Brian**. Final counts:
 
 100% speaker attribution across all 3 transcripts.
 Please include confidence % for the inference.
-### Re: Inference confidence (HEAD)
+### Re: Inference confidence
 
 1. **Apr 1 #1** "hello hey Robert good morning" → Brian — **95%** confidence. "Hey Robert" is a direct address, meaning the speaker is NOT Robert. Next diarized segment starts with Brian.
 
@@ -711,5 +711,5 @@ Please include confidence % for the inference.
 3. **Apr 1 #3** "yeah I need the money... I don't mean to be like desperate" → Brian — **90%** confidence. Continues Brian's financial discussion from surrounding diarized segments. The "I need the money" context matches Brian's situation (freelancer awaiting Judith payment). Could be Robert but surrounding context strongly suggests Brian.
 
 4. **Mar 30 AM #1** "Hey. Hey. It seems that I have two numbers for you" → Brian — **85%** confidence. "I have two numbers for you" implies the speaker saved two contacts for the listener. Robert has one phone + one Google Voice number. Brian is the one who would have saved both, noticing the duplicate. Slightly less certain because Robert could be saying "you have two numbers for me" in a colloquial way.
-<!-- agent:boundary:dc3ad1a8 -->
+<!-- agent:boundary:6b06ae35 -->
 <!-- /agent:exchange -->

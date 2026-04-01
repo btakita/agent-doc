@@ -1955,7 +1955,7 @@ This is a v0.31.0 feature — separate from the v0.30.0 release which ships the 
 Proceed with v0.30.0 release?
 I am seeing something like "IntelliJ is not responding. Jump threads" when I type at times.
 Please review Idea logs to see if the JB or IPC Plugin is interfering with the editing.
-### Re: IntelliJ responsiveness — Tailwind CSS LSP is the culprit (HEAD)
+### Re: IntelliJ responsiveness — Tailwind CSS LSP is the culprit
 
 **Found it.** The **Tailwind CSS language server** is processing markdown files and sending the FULL document content on every keystroke:
 
@@ -1977,7 +1977,7 @@ The Tailwind CSS LSP is configured to watch all files (including `.md`) and rece
 3. **Reduce document sync** — The LSP is using `textDocument/syncKind: 1` (full sync). Some LSP clients support incremental sync, but this is a Tailwind plugin issue, not agent-doc.
 
 **Recommendation:** Option 1 or 2. The Tailwind CSS plugin has no business processing 95KB markdown files.
-<!-- agent:boundary:6a8987ac -->
+<!-- agent:boundary:2918a3bd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

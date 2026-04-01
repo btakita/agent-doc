@@ -879,10 +879,10 @@ This adds a concrete operational detail — the audit trail isn't just passive h
 Updated draft: "built-in traceability with automated reports." Cleaner.
 
 With agent authored reports?
-### Re: Agent-Authored Reports (HEAD)
+### Re: Agent-Authored Reports
 
 Updated to "agent-authored reports." More precise — these aren't cron-job automated reports, they're authored by the agent within the document workflow.
-<!-- agent:boundary:266a1346 -->
+<!-- agent:boundary:9bd6b10b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -408,10 +408,85 @@ File updated at `src/briantakita.me-dev/app/briantakita.me/post/content/2026-04-
 Updated the prompt injection section. Now states: "A shared security model for multi-user agent-doc sessions is currently under development, but until it ships, the private repo boundary is the security boundary."
 
 File updated at `src/briantakita.me-dev/app/briantakita.me/post/content/2026-04-01-agent-security-multiuser-lessons.md`.
-<!-- agent:boundary:20b22fb0 -->
+
+> 292 of those commits were debugging a single tmux/IPC synchronization bug.
+
+Please review tasks/agent-doc/agent-doc-claim-error.md: But there were several bugs...correct?
+
+Remember we should have anonymous names...why are you showing real names and companies?
+The following are file...the rest should be anonymized:
+- agent-doc-claim-error
+- corky
+- briantakita.me
+```
+| Document | Commits | Purpose |
+|----------|---------|---------|
+| agent-doc-claim-error | 292 | tmux/IPC bug debugging |
+| corky | 60 | Correspondence tool development |
+| judith-krug | 33 | Client project |
+| briantakita.me | 27 | Blog and site maintenance |
+| robert-ward | 26 | Contact correspondence |
+| lmi | 22 | Interview prep |
+| bob-remeika | 19 | Contact correspondence |
+| robert-waldman | 16 | Contact correspondence |
+| justin-caird | 10 | Contact correspondence |
+| robert-ross | 9 | Contact correspondence |
+| equityfundingsource | 8 | Client project |
+```
+
+Will the following make me look bad? Are these security issues even in a private repo?
+
+```
+- Reading files across the entire repository (session documents reference each other)
+- Running shell commands with filesystem access
+- Composing emails and correspondence (real names, real content)
+- Accessing git history (which contains prior session transcripts)
+- Writing responses that become part of the permanent record
+
+In a private repository with a single user, this is fine. The audit trail is a feature — it's how I debug, how I trace decisions, and how I'm writing this post right now.
+```
+
+> One of my document session files had `tmux_session: '23'` in its frontmatter
+
+This is an old bug. You are looking too far back into the git history. Please limit how far back you go.
+
+> Complex debugging sessions need a medium that can hold state across crashes, track multiple threads of investigation, and let you annotate and redirect without losing context. A chat window doesn't do this. A document does.
+
+We should note that the complexity of this issue is agent-doc being a complex challenge in itself. But we are able to address due to dog-fooding the process. The SPEC is being iterated upon...as this interaction is novel. But the complexity is worth it...because other complex problems are tractable with agent-doc.
+
+META: Am I divulging too much? Can I expose myself to risk by publishing this?
+### Re: v5 — anonymized, real bugs, dog-fooding theme, risk assessment (HEAD)
+
+Major rewrite addressing all your feedback:
+
+**Anonymization:**
+- Table now shows "agent-doc bugs", "correspondence tool", "various contacts", "client projects" — no real names or companies
+- Only briantakita.me kept by name (it's your public site)
+
+**Real bugs from 3/31-4/1 (not old tmux_session:'23'):**
+- Snapshot rollback (new session starts with stale snapshot, un-commits responses)
+- Duplicate response writes (rollback + re-generation cycle)
+- Session detection failures (ghost sessions in registry)
+- IPC synchronization tracing across three systems
+
+**Security reframed:**
+- Removed the "ominous" list of what agents do. Replaced with "routine audit checks of private commit history can reveal patterns worth monitoring" — constructive, not alarming
+- Credential exposure is explicitly a hypothetical from prior sessions, not this day
+- Private repo emphasized as the security boundary
+
+**Dog-fooding theme:**
+- New section: "Dog-Fooding as a Development Strategy"
+- "The interaction model is novel. There's no established SPEC. The specification is being iterated."
+- "The complexity is worth it because it makes other complex problems tractable"
+
+**META — Risk assessment:**
+Low risk. The post describes architecture of an open-source tool, standard agentic security considerations, bug-fixing competence, and forward-looking concerns. No credentials, no client details, no real names. The dog-fooding angle shows builder credibility. The security discussion shows you're thinking about this before shipping multi-user.
+
+File updated at `src/briantakita.me-dev/app/briantakita.me/post/content/2026-04-01-agent-security-multiuser-lessons.md`.
+<!-- agent:boundary:393b3113 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Blog post v4 with shared security model mention — ready to review/deploy
+- Blog post v5 (anonymized, real bugs, dog-fooding) — ready to review
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

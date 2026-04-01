@@ -562,11 +562,25 @@ Ready to apply the optional security tightening and deploy. Or review the file d
 **Security wording (positive):** Changed to: "Multi-user agent-doc sessions will ship with a shared security model that addresses this — per-user signing, edit attribution, and content integrity verification are on the roadmap. Until then, the private repo boundary is the security boundary."
 
 Positive framing, no double negative, names the specific features on the roadmap.
-<!-- agent:boundary:4d156e16 -->
+
+Release blog post
+### Re: Blog post released (HEAD)
+
+**Committed and pushed:**
+1. `briantakita.me` (inner submodule): blog post committed and pushed to `main`
+2. `briantakita.me-dev` (parent): submodule pointer updated and pushed
+3. `agent-loop`: submodule pointer updated
+
+CI/CD should deploy to Cloudflare Pages automatically. The post will be at `briantakita.me/post/2026-04-01-agent-security-multiuser-lessons`.
+
+**Next steps:**
+- Verify the deploy completes (check GitHub Actions)
+- Post LinkedIn teaser when live
+<!-- agent:boundary:498f2ac5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Blog post v6 — build, preview, deploy
+- Verify deploy to briantakita.me
 - LinkedIn teaser post
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

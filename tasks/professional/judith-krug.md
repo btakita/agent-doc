@@ -545,7 +545,7 @@ Present the 4 options that robert-ward and I discussed.
 Highlight the benefits of Ragie for RAG AI for **all** of Judith's documents.
 She is likely unfamiliar with the terms. robert-waldman has likely heard of RAG...but not Ragie.
 judith-krug will likely ask robert-waldman to help her understand the proposal.
-### Re: Updated Options with Ragie Integration (HEAD)
+### Re: Updated Options with Ragie Integration
 
 **3 paths for tonight's call — all featuring Ragie as the document intelligence layer:**
 
@@ -578,7 +578,7 @@ judith-krug will likely ask robert-waldman to help her understand the proposal.
 "Imagine every document your company has ever handled ... loan applications, bank statements, investor agreements, emails ... all searchable instantly from your phone. You could ask 'show me all loans over $500K in the last year' or 'which investors haven't been contacted in 6 months' and get answers in seconds. That's what Ragie does. It reads your documents (even scanned paper), understands them, and lets you search across everything with AI. It's like having a brilliant assistant who's read every file in your office."
 
 **For Robert Waldman:** He'll understand RAG (Retrieval Augmented Generation). Ragie is a managed RAG service backed by Craft Ventures (David Sacks). Handles document ingestion, OCR, chunking, embeddings, vector search. Brian integrates via API. Bob Remeika (CEO) is a personal contact ... early access conversation tomorrow.
-<!-- agent:boundary:161d6826 -->
+<!-- agent:boundary:a6cc20a7 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

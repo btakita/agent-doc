@@ -2454,7 +2454,7 @@ All three items done:
 Do:
 - [ ] **Finalize tmux-router v0.3.8** — commit sync.rs changes, update VERSIONS.md, bump, tag, publish
 - [ ] **Release agent-doc v0.30.1** — update tmux-router dep, bump version, publish
-### Re: Releases complete (HEAD)
+### Re: Releases complete
 
 **tmux-router v0.3.8** — published to crates.io
 - Committed sync.rs stash guard changes
@@ -2470,7 +2470,7 @@ Do:
 - Release build completed for symlink target
 
 All items from the "Do" list are done. What's next?
-<!-- agent:boundary:c5119374 -->
+<!-- agent:boundary:8b9b19a5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

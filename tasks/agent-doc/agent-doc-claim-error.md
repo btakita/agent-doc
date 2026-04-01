@@ -1691,7 +1691,7 @@ Wired into:
 
 All 595 tests pass (including 6 new hooks tests). Release binary built.
 Are these hooks integrated with claude code hooks? Cursor hooks? Opencode hooks? Pi hooks?
-### Re: Hook integration with agent harnesses (HEAD)
+### Re: Hook integration with agent harnesses
 
 **No — these hooks are agent-doc's own event system, not integrated with Claude Code hooks, Cursor, OpenCode, or Pi.**
 
@@ -1716,7 +1716,7 @@ The distinction:
 **The real value** is #1: bridging Claude Code's existing hook system into agent-doc's multi-session coordination. This would let Claude Code hooks trigger cross-document updates automatically.
 
 Should I implement the Claude Code hook bridge?
-<!-- agent:boundary:7014e145 -->
+<!-- agent:boundary:3f6530d2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

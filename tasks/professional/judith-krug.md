@@ -579,7 +579,7 @@ judith-krug will likely ask robert-waldman to help her understand the proposal.
 
 **For Robert Waldman:** He'll understand RAG (Retrieval Augmented Generation). Ragie is a managed RAG service backed by Craft Ventures (David Sacks). Handles document ingestion, OCR, chunking, embeddings, vector search. Brian integrates via API. Bob Remeika (CEO) is a personal contact ... early access conversation tomorrow.
 
-With your understand of Judith's business...please come up with a list of queries that will be beneficial for Judith and her team.
+With your understand of Judith's business...please come up with a list of prompts that will be beneficial for Judith and her team.
 ### Re: Ragie Query Examples for Judith's Business
 
 **Loan Pipeline & Deal Management:**
@@ -613,13 +613,16 @@ With your understand of Judith's business...please come up with a list of querie
 - "What's my investor utilization rate ... how many investors have funded a deal in the last year?"
 
 **The pitch angle:** These queries currently require Judith or her staff to manually dig through files, emails, and Dropbox. With Ragie, it's a 10-second phone query. For a one-person brokerage handling millions in deals, that's transformative.
-<!-- agent:boundary:a8ac0cbb -->
+### Re: Prompts vs Queries (HEAD)
+
+Good call on "prompts" over "queries" — it frames the Ragie interaction as talking to an AI assistant rather than running database queries, which is more intuitive for Judith. The examples above all work as natural-language prompts. When presenting to Judith, use language like "you just ask it" or "you tell it what you need" rather than "query" or "search."
+<!-- agent:boundary:0e2f5a83 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [x] Send text to Judith about website being down
 - [x] Reply to Judith's text
-- [ ] Prepare email draft file with 3 options + query examples (`mail/drafts/20260401-judith-call-followup.md`)
+- [ ] Prepare email draft file with 3 options + prompt examples (`mail/drafts/20260401-judith-call-followup.md`)
 - [ ] Website migration to Cloudflare ... website is DOWN
 - [ ] Check in with Robert Ward this afternoon
 - [ ] Tonight's call with Judith ... present 3 options, ask for retainer

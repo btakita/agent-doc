@@ -535,7 +535,7 @@ Should we link to the corky github?
 Also include document links to synchronize data/context between documents
 
 Please create a separate security expert agent to review the blog post. Make sure there are no oopsies in the blog post.
-### Re: Updates + security review (HEAD)
+### Re: Updates + security review
 
 **Applied:**
 - corky linked to GitHub in the table
@@ -547,7 +547,7 @@ Please create a separate security expert agent to review the blog post. Make sur
 **Corky link:** Yes, linked to https://github.com/btakita/corky in the table.
 
 Ready to apply the optional security tightening and deploy. Or review the file directly first.
-<!-- agent:boundary:5978b0c1 -->
+<!-- agent:boundary:485b2c85 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

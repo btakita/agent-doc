@@ -675,7 +675,7 @@ Split the failed 10-min chunks into 2-min segments and re-diarized. Results:
 Both transcript files updated in place. The diarization failure pattern is consistent: the very first ~2 minutes of each call fails (likely too little audio for speaker embedding extraction). Everything after that is properly attributed.
 
 Split the Unknown segments and try again.
-### Re: Further splitting (HEAD)
+### Re: Further splitting
 
 Split the remaining Unknown 2-min segments into 30-second micro-chunks. Results:
 
@@ -685,5 +685,5 @@ Split the remaining Unknown 2-min segments into 30-second micro-chunks. Results:
 More diarized speaker turns recovered from the 30s-90s range. The remaining 3+1 Unknown segments are all exactly `[00:00:00 -> 00:00:30]` -- the first 30 seconds of each boundary where pyannote simply can't build speaker embeddings. This is the hard floor for this diarization approach.
 
 The transcripts are updated in place. Those first-30s Unknown blocks are just a few sentences of audio each.
-<!-- agent:boundary:48ab334d -->
+<!-- agent:boundary:462d3b1e -->
 <!-- /agent:exchange -->

@@ -2851,7 +2851,7 @@ Update SPEC.md, README.md, ontology, module-harness
 - `af8c61b` (agent-doc) — docs: add session command to SPEC.md + CLAUDE.md
 - `54b8ed5e` (parent) — submodule pointer updated
 release
-### Re: v0.31.0 Released (HEAD)
+### Re: v0.31.0 Released
 
 **Published:**
 - crates.io: `agent-doc v0.31.0` ✓
@@ -2868,7 +2868,7 @@ release
 - Stale UUID → Unmanaged in sync
 - 8 unused variable warnings fixed
 - 601 tests, zero failures
-<!-- agent:boundary:c6d9a900 -->
+<!-- agent:boundary:b55310a3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

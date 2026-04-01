@@ -3404,6 +3404,10 @@ Also worth noting: `~/.cargo/bin/agent-doc` is still the OLD binary (from 15:19,
 
 I don't know why the second pane didn't appear from the plugin's sync at 16:26 but did appear after `/agent-doc`. The sync log showed `exit=0` but that doesn't prove the pane was created — it may have exited successfully without creating anything due to a code path I haven't traced. I should have said this rather than speculating.
 
+If you speculate, please say so. Add to AGENT.md. Otherwise say I don't know. Let's avoid being "confidently wrong".
+
+With that being said, should we add more logging so you would know next time?
+
 **On old-instance protection:** Good idea. Options:
 
 A. **Version check in sync:** The binary could embed a build timestamp or git hash. If the calling binary's version doesn't match the installed binary, warn or refuse.
@@ -3412,8 +3416,31 @@ B. **Binary hash self-check:** On startup, hash the current binary and compare a
 
 C. **`agent-doc upgrade --restart`:** After building, explicitly restart all running agent-doc processes (send SIGHUP or kill+restart via tmux send-keys).
 
+I don't want to restart & kill existing runs.
+
 Which approach appeals to you? Or a different mechanism?
-<!-- agent:boundary:68b3770d -->
+
+All 3 options are good. Note that C should not kill an active run.
+### Re: Speculation labeling, logging, and old-instance protection (HEAD)
+
+**Speculation labeling:** Noted. When uncertain, I'll say "I don't know" or explicitly label speculation as "speculation:". Added to memory.
+
+**More logging:** Yes, the sync auto-start path should log whether it actually created a pane vs. skipped. Specifically:
+- Log when auto-start is attempted: file, session_id, target session
+- Log when auto-start succeeds: file → pane_id
+- Log when auto-start is skipped (startup lock, etc.)
+- Log when `resolve_file` returns `Unmanaged` vs `Registered`
+
+These would make it possible to trace exactly what happened in the 16:26 sync. I'll add these as a pending item.
+
+**Old-instance protection — all 3, with C being graceful:**
+
+- **A (version check):** Embed build hash, warn on mismatch
+- **B (binary hash):** Clear stale caches on new build detection
+- **C (graceful restart):** Wait for idle sessions, then restart. Never kill active runs — only restart sessions that are at a prompt (idle). Could use `agent-doc resync` to detect idle panes.
+
+These are good items for a future session — not blocking the current work. I'll add them to pending.
+<!-- agent:boundary:018619b4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -3429,8 +3456,8 @@ Which approach appeals to you? Or a different mechanism?
 - [x] Audit docs (SPEC.md, claim.rs, git.rs, sync.rs module docs)
 - [x] Fix: sync auto-starts files with session UUIDs (both guards removed)
 - [x] Verify end-to-end: 2 panes confirmed in agent-doc window
-- [ ] Investigate why plugin sync at 16:26 didn't visibly create second pane
-- [ ] Design old-instance protection mechanism
+- [ ] Add logging to sync auto-start path (attempt/success/skip)
+- [ ] Old-instance protection: version check (A), binary hash cache clear (B), graceful restart (C)
 - [ ] `cargo install --path .` to update ~/.cargo/bin/agent-doc
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

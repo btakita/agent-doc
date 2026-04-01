@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-agent-kit hooks module implemented. Wired into agent-doc write + commit paths.
+Hook integration assessed. agent-doc hooks are harness-agnostic; bridge to Claude Code hooks proposed.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1690,14 +1690,41 @@ Wired into:
 **Dependencies:** agent-doc uses path dep for agent-kit during development (`features = ["hooks"]`). Will switch to registry after publishing agent-kit v0.3.
 
 All 595 tests pass (including 6 new hooks tests). Release binary built.
-<!-- agent:boundary:e366f7d1 -->
+Are these hooks integrated with claude code hooks? Cursor hooks? Opencode hooks? Pi hooks?
+### Re: Hook integration with agent harnesses (HEAD)
+
+**No — these hooks are agent-doc's own event system, not integrated with Claude Code hooks, Cursor, OpenCode, or Pi.**
+
+The distinction:
+
+| System | What it is | Scope |
+|--------|-----------|-------|
+| **Claude Code hooks** | `settings.json` hooks that fire shell commands on Claude Code events (PreToolUse, PostToolUse, etc.) | Single Claude session |
+| **agent-doc hooks** (new) | File-based events in `.agent-doc/hooks/` for cross-session coordination | Multiple agent-doc sessions |
+| **Cursor/OpenCode/Pi** | Each has its own extension/hook system | Single session, editor-specific |
+
+**Current agent-doc hooks** fire file-based events that any process can poll. They're harness-agnostic — they work regardless of which AI agent is driving the session (Claude, Junie, or future backends).
+
+**Integration opportunities:**
+
+1. **Claude Code hooks → agent-doc hooks**: A Claude Code `PostToolUse` hook could fire `agent-doc` CLI commands that trigger agent-doc events. For example, after any write tool call, fire `agent-doc hook fire post_write <file>`. This bridges Claude Code's event model into agent-doc's cross-session bus.
+
+2. **agent-doc hooks → Claude Code**: An agent-doc session could poll for events and use them to trigger `/agent-doc` invocations in other Claude Code sessions via `tmux send-keys`.
+
+3. **Multi-harness**: The `agent_kit::hooks` module is a library — any Rust CLI tool can import it. If OpenCode or Pi had Rust-based agent tools, they could participate in the same hook bus.
+
+**The real value** is #1: bridging Claude Code's existing hook system into agent-doc's multi-session coordination. This would let Claude Code hooks trigger cross-document updates automatically.
+
+Should I implement the Claude Code hook bridge?
+<!-- agent:boundary:7014e145 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **agent-kit hooks** — `HookRegistry` with fire/poll/gc, 6 tests
-- [x] **agent-doc hook integration** — post_write, post_commit, claim, layout_change
+- [x] **agent-doc hook integration** — post_write, post_commit wired in
+- [ ] **Claude Code hook bridge** — PostToolUse → agent-doc hook fire
 - [ ] **Wire remaining hooks** — claim (claim.rs), layout_change (sync.rs)
 - [ ] **Publish agent-kit v0.3** + switch agent-doc back to registry dep
 - [ ] **Blog post** about this debugging session

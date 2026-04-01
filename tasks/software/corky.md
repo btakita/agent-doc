@@ -841,7 +841,7 @@ If you later want to investigate a specific tracker's behavior, the full URL is 
 
 So: **domain only** for the `**Tracking:**` metadata line. Implement?
 Implement
-### Re: Markdown cleanup + tracking detection implemented (HEAD)
+### Re: Markdown cleanup + tracking detection implemented
 
 Done. All tests pass (246), release built and 555 threads resynced.
 
@@ -870,7 +870,7 @@ Done. All tests pass (246), release built and 555 threads resynced.
 5. `src/sync/imap_sync.rs` — cleanup in `merge_message_to_file`, raw htmd in `html_to_markdown`
 6. `src/sync/gmail_api_sync.rs` — same pattern
 7. Tests updated across markdown.rs and test_sync.rs
-<!-- agent:boundary:de28d143 -->
+<!-- agent:boundary:95707208 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

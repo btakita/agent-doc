@@ -337,7 +337,7 @@ I will start with Judith's website. Also need to plan Ragie integration with Jud
 Linked `./bob-remeika.md` — Bob Remeika (CEO, Ragie) is now a related contact for this document. This ties into the Ragie RAG integration planned for equityfundingsource.com. When ready to scope that work, the bob-remeika doc and `tasks/software/ragie-web-doc.md` have the Ragie context.
 
 I need you to read through the transcription for mail/contacts/robert-ward/recordings/phone_20260401-042624_3109684542.txt to come up with a gameplan for tonight's call.
-### Re: Robert Ward Call Summary & Tonight's Gameplan (HEAD)
+### Re: Robert Ward Call Summary & Tonight's Gameplan
 
 **Call summary (phone_20260401-042624):** ~30 min call at 4:30am ET. Robert coaching Brian on tonight's call with Judith.
 
@@ -398,7 +398,7 @@ I need you to read through the transcription for mail/contacts/robert-ward/recor
 - [ ] Study mortgage broker workflows enough to speak intelligently
 
 Where do you want to start? Website migration or Ragie setup?
-<!-- agent:boundary:18e0d757 -->
+<!-- agent:boundary:a07753ba -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

@@ -20,7 +20,7 @@ Create a private repo at btakita/equityfundingsource
 Add as a git submodule in agent-loop.
 
 Use rappstack. Create the site architecture.
-### Re: Reconstruct equityfundingsource.com (HEAD)
+### Re: Reconstruct equityfundingsource.com
 
 I crawled the Wayback Machine archive. Here's what the site contained:
 
@@ -55,7 +55,7 @@ equityfundingsource-dev/
 2. Property images -- download from Wayback Machine or use placeholders?
 3. Google Forms links for applications -- keep external or build custom?
 4. Blog + Broker Portal -- include as stubs or skip?
-<!-- agent:boundary:5284e6aa -->
+<!-- agent:boundary:530d25c1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

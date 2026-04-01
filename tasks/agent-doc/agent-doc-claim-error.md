@@ -3012,20 +3012,61 @@ The repeated `/agent-doc tasks/briantakita.me.md` commands in the terminal (25+ 
 
 **Recommended fixes:**
 
-1. **`ClaimAction.kt`**: When position detection returns `null`, show an error notification instead of proceeding with a blind fallback. The user needs to know the claim targeted the wrong pane.
+1. **`ClaimAction.kt`**: When position detection returns `null`, show an error notification instead of proceeding with a blind fallback. The user needs to know the claim targeted the wrong pane.: Yes. Is this meant to be a fallback in case agent-doc or the FFI plugin cannot resolve the claim?
 
-2. **`ClaimAction.kt`**: When pane ID regex extraction fails, show a warning "Claimed but auto-start skipped — pane ID not found in output".
+2. **`ClaimAction.kt`**: When pane ID regex extraction fails, show a warning "Claimed but auto-start skipped — pane ID not found in output".: ok
 
-3. **`agent-doc claim`**: Add `--split` flag that forces creating a new pane via `tmux split-window` rather than claiming an existing one. This would guarantee a second pane.
+3. **`agent-doc claim`**: Add `--split` flag that forces creating a new pane via `tmux split-window` rather than claiming an existing one. This would guarantee a second pane.: The command should be declarative. The FFI plugin should simply send the layout. The tmux pane layout should match the editor layout. If the tmux has 1 pane but the editor has a split view, the tmux window panes should adjust to match the layout. I'm ok with the old behavior of starting a new tmux session + agent harness session if one does not already exist...if we can guarantee there will be no race conditions.
 
-4. **Registry protection**: `agent-doc claim` should refuse to overwrite an existing session's pane unless `--force` is used. Currently, claiming to an already-registered pane silently replaces the entry.
+4. **Registry protection**: `agent-doc claim` should refuse to overwrite an existing session's pane unless `--force` is used. Currently, claiming to an already-registered pane silently replaces the entry.: Yes
 
 Want me to implement any of these fixes?
-<!-- agent:boundary:c50d3961 -->
+When I navigate to the right editor with corky.md, the JB plugin show a prompt
+`Sync: --col tasks/agent-doc/agent-doc-claim-error.md --col tasks/software/corky.md [focus: tasks/software/corky.md]`
+
+This should also declaratively ensure the tmux layout matches.
+
+We should refactor the agent-doc code so all of the declarative layout logic f
+### Re: Architecture clarification and implementation plan (HEAD)
+
+**On #1 (position detection fallback):** The position detection in `ClaimAction.kt` is entirely Kotlin-side — it walks the Swing Splitter tree to determine left/right/top/bottom. The FFI plugin handles sync generation/locking, not position detection. So if the Splitter walk fails, the claim falls back to no `--position` arg, which means the Rust side uses `TMUX_PANE` or current pane — almost certainly wrong.
+
+**On #3 (declarative layout — the key insight):** The sync mechanism **already does exactly what you're describing**. `SyncLayoutAction.syncLayout()` detects the editor layout, sends `agent-doc sync --col "file1.md,file2.md" --col "file3.md"`, and the Rust side adjusts tmux panes to match. It handles auto-starting new sessions, stashing, pane routing — the works.
+
+The bug is that **ClaimAction bypasses sync entirely**. It does its own position detection and calls `agent-doc claim` independently, then tries to auto-start via `tmux send-keys`. This is a parallel code path that duplicates sync logic poorly.
+
+**Proposed fix:** ClaimAction should just trigger a sync. The flow becomes:
+1. User hits Ctrl+Shift+Alt+C on a new file
+2. ClaimAction calls `SyncLayoutAction.syncLayout()` 
+3. Sync detects the new file in the editor layout, creates the tmux pane, auto-starts Claude
+4. Done — no independent claim/position/regex/send-keys needed
+
+This eliminates all 4 failure points at once:
+- No position detection (sync uses full layout, not per-file position)
+- No pane ID regex extraction (sync handles auto-start internally)
+- Declarative by design (editor layout → tmux layout)  
+- Registry protection lives in sync's `register_synced_files()`
+
+**One edge case:** Race conditions with auto-start. The sync flow uses startup locks (5s TTL) to prevent double-spawn. But if the user claims rapidly, the lock could cause skips. We should ensure the lock feedback is visible — "session start pending, locked for Ns" — rather than silent.
+
+**Implementation plan:**
+
+1. **`ClaimAction.kt`**: Replace claim+auto-start logic with `SyncLayoutAction.syncLayout(project, notify = true)`. Keep the keybinding.
+2. **`SyncLayoutAction.kt`**: Add `notify` parameter to show user feedback on what sync did (created pane, reused existing, etc.).
+3. **`sync.rs`**: Add structured output for sync results (panes created, files routed, errors) so the plugin can display meaningful feedback.
+4. **`claim.rs`**: Add registry protection — refuse to overwrite existing session's pane without `--force`. This protects against any remaining direct `claim` calls.
+5. **Startup lock feedback**: When `auto_start_in_session()` is blocked by lock, log a visible warning instead of silent return.
+
+Shall I implement this?
+<!-- agent:boundary:4bc6b241 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-(empty)
+- [ ] ClaimAction.kt: replace claim+auto-start with SyncLayoutAction.syncLayout()
+- [ ] SyncLayoutAction.kt: add notify parameter for user feedback
+- [ ] sync.rs: add structured output for sync results
+- [ ] claim.rs: add registry protection against overwriting existing sessions
+- [ ] route.rs: add startup lock feedback (visible warning on lock skip)
 <!-- /agent:pending -->

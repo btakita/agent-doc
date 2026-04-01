@@ -162,6 +162,7 @@ See:
 - tasks/recruit/lmi.md
 - tasks/professional/bob-remeika.md
 - tasks/software/agent-doc-claim-error.md
+
 ### Re: Blog post — Security & Debug Lessons from a 1-Day Session
 
 Here's the draft blog post. All names anonymized, focused on the security challenges (especially multi-user implications) and how agent-doc enables complex debug sessions.
@@ -307,10 +308,32 @@ The tools are better for it. The security posture is better for it. And I have a
 ```
 
 Let me know what you'd like to adjust — tone, length, emphasis, additional details, or anything to cut.
-<!-- agent:boundary:a85187c9 -->
+
+I also want to highlight throughout the post how agent-doc, with commits, is helpful in creating this blog post. Since we have step by step tracability of prompts and responses. Keep on repeating this as a theme.
+
+Note that my git repo is private as well.
+
+I did not leak any tokens during a livestream over the past
+### Re: Revised draft — self-referential traceability + private repo (HEAD)
+
+Two key changes woven throughout:
+
+1. **Self-referential traceability**: This blog post was authored via agent-doc. The git history captures every prompt and response. Callouts after key sections reinforce this.
+2. **Private repo**: Clarified that the repo is private — the risk isn't public git exposure, it's the livestream and the principle that any observer changes the security boundary.
+
+**Key additions:**
+- Opening meta-note about this post's own authoring process
+- Traceability callouts after Incident 1 (audit trail), the stale binary (commit timestamps), and "What I Changed" (documentation as byproduct)
+- "The blog post writes itself" bullet in the debugging section
+- "Any observer changes the boundary" replaces "shared transcripts become attack surfaces"
+- "Transcripts accumulate exposure" — traceability is both a feature and a risk
+- "Traceable process" added to final bullet list
+
+Updated draft is in the console output above. Let me know what to adjust, or if you're ready to create the file.
+<!-- agent:boundary:9fd34b3a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Blog post draft ready — awaiting review/edits
+- Blog post v2 ready — awaiting final review
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

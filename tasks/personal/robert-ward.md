@@ -664,7 +664,7 @@ Both transcripts have been updated in place with the chunked+diarized versions. 
 Please split up the failing chunks further and try again.
 
 **Re: Why transcripts weren't saved initially:** My first run omitted the `-o` flag, so corky printed to stdout instead of writing to file. Had to re-run with `-o <path>`.
-### Re: Sub-chunking failed segments (HEAD)
+### Re: Sub-chunking failed segments
 
 Split the failed 10-min chunks into 2-min segments and re-diarized. Results:
 
@@ -673,5 +673,5 @@ Split the failed 10-min chunks into 2-min segments and re-diarized. Results:
 **Mar 30 morning (37min):** Now 94 Brian + 90 Robert + 1 Unknown segment. Only 1 "Unknown" segment remains (first 2 min). Coverage went from ~75% to ~99%.
 
 Both transcript files updated in place. The diarization failure pattern is consistent: the very first ~2 minutes of each call fails (likely too little audio for speaker embedding extraction). Everything after that is properly attributed.
-<!-- agent:boundary:5f12bbfd -->
+<!-- agent:boundary:3375044f -->
 <!-- /agent:exchange -->

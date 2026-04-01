@@ -1181,7 +1181,7 @@ Transcription finished successfully. 575 lines, 66KB output.
 
 Saved diarized transcript to:
 `mail/contacts/robert-ward/recordings/phone_20260401-042624_3109684542_diarized.txt`
-### Re: Cube ACR settings, repetition, speaker count (HEAD)
+### Re: Cube ACR settings, repetition, speaker count
 
 #### Cube ACR Recording Settings
 
@@ -1212,7 +1212,7 @@ Confirmed -- only 2 real speakers, other 2 are hallucinations from voice quality
 When `--speakers` provides N names, pass `num_speakers = N` to pyannote-rs. The pyannote pipeline accepts a `num_speakers` parameter that constrains clustering. Currently we're letting it auto-detect, which over-segments on noisy mono audio.
 
 This is a one-line fix in the diarization code -- just wire the speakers list length through to the pyannote config.
-<!-- agent:boundary:c6c314d2 -->
+<!-- agent:boundary:448621d1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

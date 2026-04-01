@@ -761,6 +761,8 @@ Strong framing. For a federal audience, this is actually more credible than pres
 Should I apply the prototype framing revisions to the email draft?
 
 Please read updates to email draft. Please update with additional framing.
+Note that during the interview I brought up backtesting codebases...and how it would be useful for a well defined and known spec.
+
 ### Re: Email Draft — Prototype Spike Framing Applied
 
 Read the draft and applied three revisions:
@@ -776,12 +778,25 @@ The framing now signals: working prototype → validated interaction model → s
 Draft updated at: `mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-interactive-document-genera.md`
 
 Ready to send when you approve.
-<!-- agent:boundary:fa6a40d5 -->
+Backtesting can also be applied to datasets, agent harness, + prompts.
+### Re: Backtesting Codebases — Adding to Email (HEAD)
+
+From the interview (~10:08), you discussed backtesting with Josh: detecting drift between implementation and specs, running the codebase against its own specification. This maps to LIGER's fact-checking use case.
+
+**Suggested addition to email** (after the auditable workflow state bullet):
+
+> - **Backtesting against specs**: With a well-defined spec and full revision history, you can backtest the codebase against its own specification...detecting drift between what was intended and what was implemented. This is the same pattern as LIGER's fact-checking: generate output, then verify against source.
+
+Your second note got cut off: "Backtesting can al..." — finish the thought and I'll incorporate it.
+
+Want me to add the backtesting bullet to the draft now, or wait for your complete thought?
+<!-- agent:boundary:e6bba584 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Add backtesting bullet to Josh email (pending user's complete thought)
 - [ ] Send Josh Malloy follow-up email (prototype framing applied, pending approval)
 - [ ] agent-doc README: security section (single-user, prompt injection)
 - [ ] Corky: HTML body extraction for emails

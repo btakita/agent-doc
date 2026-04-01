@@ -2899,7 +2899,7 @@ Please fix windows build: https://github.com/btakita/agent-doc/actions/runs/2386
 **Re: PyPI manylinux** — the existing GitHub Actions workflow already builds manylinux wheels via CI containers. The local `maturin publish` fails because it's not in a manylinux container. CI handles this automatically on release.
 
 Failed tests on gh actions https://github.com/btakita/agent-doc/actions/runs/23866905916/job/69588365153
-### Re: CI test failures fixed (HEAD)
+### Re: CI test failures fixed
 
 **Root cause:** Skill tests hardcoded `.claude/skills/agent-doc/SKILL.md` as the expected path. In CI (no `.claude` directory), `Environment::detect()` resolves to `Generic` which installs to `AGENTS.md` instead. Tests passed locally because the environment detects Claude Code.
 
@@ -2908,7 +2908,7 @@ Failed tests on gh actions https://github.com/btakita/agent-doc/actions/runs/238
 **The Windows build failure** (agent-kit SocketTransport) was already fixed in the previous cycle via `agent-kit` v0.3.2.
 
 Both fixes are pushed. The next CI run should be green.
-<!-- agent:boundary:77632f0a -->
+<!-- agent:boundary:89b40cd8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

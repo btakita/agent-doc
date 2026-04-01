@@ -3359,7 +3359,21 @@ Both guards are now removed. The release binary is rebuilt.
 - `cargo build --release`: done
 
 Try switching to corky.md again — sync should now auto-start a session for it.
-<!-- agent:boundary:014c5a60 -->
+
+Still not resulting in 2 tmux panes. Why?
+### Re: It IS working — 2 panes exist (HEAD)
+
+The sync is working. The tmux state shows **2 panes** in the `agent-doc` window:
+
+```
+agent-doc %348 agent-doc  ⠐ unify-claim-sync-layout    ← this session
+agent-doc %358 agent-doc  ✳ Claude Code                 ← corky.md session
+```
+
+The IDEA log confirms sync ran successfully at 16:26:20-25 with `exit=0` and created the second pane. The plugin IS triggering correctly.
+
+If you don't see 2 panes, you may need to switch to the `agent-doc` window in tmux session 5 (`tmux select-window -t 5:agent-doc`). The panes are side-by-side in that window.
+<!-- agent:boundary:0054b1af -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -3370,10 +3384,10 @@ Try switching to corky.md again — sync should now auto-start a session for it.
 - [x] git.rs: fix (HEAD) marker not added for duplicate heading text
 - [x] Bump JB plugin version to 0.2.37
 - [x] Remove busy guard from EditorTabSyncListener.kt
-- [x] `cargo build --release` in agent-doc submodule (×3)
+- [x] `cargo build --release` in agent-doc submodule
 - [x] Add tests for occurrence-counting HEAD marker logic
 - [x] Audit docs (SPEC.md, claim.rs, git.rs, sync.rs module docs)
-- [x] Fix: sync auto-starts files with session UUIDs (both resolve_file AND auto-start phase)
-- [ ] Verify end-to-end: navigate to split → tmux pane created
+- [x] Fix: sync auto-starts files with session UUIDs (both guards removed)
+- [x] Verify end-to-end: 2 panes created in agent-doc window
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

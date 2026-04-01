@@ -64,6 +64,10 @@ The typical edit cycle: write in your editor, trigger `agent-doc route <file>` v
 - **Git integration** — auto-commit each run; squash history with `agent-doc clean`
 - **Bulk resync** — validates session state and fixes stale/orphaned panes in 3 subprocess calls instead of ~20-40
 - **Column memory** — `.agent-doc/last_layout.json` remembers column→agent-doc mapping; preserves 2-pane tmux layout when one editor column switches to a non-agent file
+- **Busy pane guard** — DETACH phase skips panes running active agent-doc/claude sessions; prevents stashing panes with live sessions during layout changes
+- **Startup lock** — `.agent-doc/starting/<hash>.lock` with 5s TTL prevents double-spawn when sync fires twice in quick succession
+- **Component-aware baseline guard** — detects stale baselines by comparing append-mode components only; user edits to replace-mode components (status, pending) don't trigger false positives
+- **Hook system** — cross-session event coordination via `agent-doc hook fire/poll/listen/gc`; integrates with Claude Code hooks via `PostToolUse` bridge
 
 ## Architecture
 

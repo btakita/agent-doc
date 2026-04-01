@@ -4,6 +4,20 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.30.0
+
+- **Stale baseline guard (component-aware)**: `is_stale_baseline()` now parses components and only checks append-mode (exchange, findings). Replace-mode components (status, pending) are skipped. Falls back to prefix check for inline docs. 11 new tests.
+- **Busy pane guard**: `SyncOptions.protect_pane` callback in tmux-router DETACH phase + `layout.rs`. Prevents stashing panes with active agent-doc/claude sessions during layout changes.
+- **Auto-start startup lock**: `.agent-doc/starting/<hash>.lock` with 5s TTL prevents double-spawn when sync fires twice in quick succession.
+- **Bug 2A fix**: IPC snapshot save failure after successful write is now non-fatal with warning. Commit auto-recovers via divergence detection.
+- **Bug 2B fix**: Removed commit-time divergence detection that was eating user edits into the snapshot.
+- **Hook system**: `agent-doc hook fire/poll/listen/gc` CLI. Cross-session event coordination via `agent-kit` hooks (v0.3). `post_write` and `post_commit` events fired from write + commit paths.
+- **HookTransport trait**: Abstract delivery mechanism with `FileTransport`, `SocketTransport`, `ChainTransport` implementations.
+- **Ops logging tests**: 2 new tests for `.agent-doc/logs/ops.log`.
+- **Dependencies**: `agent-kit` v0.3 (hooks feature), `tmux-router` v0.3.7 (SyncOptions).
+- **Docs**: SPEC.md §6.6/§7.9/§7.20/§9.5, README.md key features, CLAUDE.md module layout.
+- **Tests**: 595 total (16 new), 0 failures.
+
 ## 0.29.0
 
 - **Links frontmatter**: Renamed `related_docs` → `links` (backward-compat alias). URL links (`http://`/`https://`) are fetched via `ureq`, converted HTML→markdown via `htmd` (stripping script/style/nav/footer), cached in `.agent-doc/links_cache/`, and diffed on each preflight. Non-HTML content passes through unchanged.

@@ -165,7 +165,12 @@ A document has four concurrent representations during a write cycle:
 - After `agent-doc commit`: git HEAD contains `snapshot + (HEAD) marker`
 - The editor buffer may diverge from all three persistent states (unsaved user edits)
 
-**Staleness risk:** If the baseline is saved before preflight (the old SKILL.md approach), it becomes stale when commit repositions the boundary marker. The binary guard in `write.rs` detects this by comparing baseline against snapshot and re-applies patches to the current file content.
+**Staleness risk:** If the baseline is saved before preflight (the old SKILL.md approach), it becomes stale when commit repositions the boundary marker. The binary guard in `write.rs` detects this via component-aware comparison:
+- Parses both snapshot and baseline into components (`component::parse`)
+- Only checks **append-mode** components (exchange, findings) — these grow monotonically
+- Skips **replace-mode** components (status, pending) — user-editable, expected to diverge
+- Falls back to prefix check for non-template (inline) documents
+- When stale: re-applies patches to current file content instead of the stale baseline
 
 ## 7. Commands
 
@@ -240,13 +245,14 @@ Two modes:
 > **Deprecation note:** `tmux_session` in frontmatter is deprecated. The tmux session is now determined at runtime: `--window` argument (sync), `current_tmux_session()` (route/start), or future `.agent-doc/config.toml` settings. The field is still read for backward compatibility and auto-repaired by sync. It will be removed in a future version.
 
 **Auto-start algorithm (`auto_start_in_session`):**
-1. Read `tmux_session` from the document's frontmatter (fall back to default `claude` session name)
-2. Find a split target pane:
+1. **Startup lock:** Check `.agent-doc/starting/<hash>.lock`. If exists and age < 5s → skip (prevents double-spawn when sync fires twice rapidly). Create lock file before proceeding. Best-effort: skipped if file doesn't exist or hash fails.
+2. Read `tmux_session` from the document's frontmatter (fall back to default `claude` session name)
+3. Find a split target pane:
    - **Sync path** (`skip_wait=true`): pick the split target by column position — first pane in the agent-doc window for left-column files, last pane for right-column files. This places the new pane adjacent to its column neighbors.
    - **Route path** (`skip_wait=false`): search `sessions.json` for any registered pane alive in the target session.
-3. If found → `tmux split-window` alongside that pane (`-dbh` for left-column, `-dh` for right-column)
-4. If split-window fails → fall back to creating a new window
-5. If no split target found → create a new window via `tmux new-window` (the session may not exist yet, in which case a new session is created)
+4. If found → `tmux split-window` alongside that pane (`-dbh` for left-column, `-dh` for right-column)
+5. If split-window fails → fall back to creating a new window
+6. If no split target found → create a new window via `tmux new-window` (the session may not exist yet, in which case a new session is created)
 
 ### 7.10 claim
 
@@ -404,12 +410,14 @@ Mirrors a columnar editor layout in tmux. Each `--col` is a comma-separated list
 
 **No early exits:** The full reconcile path always runs regardless of how many panes resolve (0, 1, or 2+). The DETACH phase stashes excess panes from previous layouts. Previous versions had early exits for `resolved < 2` that bypassed stashing, leaving orphaned panes visible.
 
+**Busy pane guard:** The DETACH phase checks each unwanted pane via `SyncOptions.protect_pane` callback before stashing. agent-doc's sync passes `is_pane_busy()` which inspects the pane's process tree (`ps -p <pid> -o command=` + child processes via `pgrep -P`) for running `agent-doc` or `claude` processes. Protected panes are skipped with `"skipped — protected (busy pane)"` log. The same guard is applied in `layout.rs` for the `break_pane` path.
+
 **Reconciliation algorithm** (attach-first order):
 1. **SNAPSHOT** — query current pane order in target window
 2. **FAST PATH** — if current order matches desired, done
 3. **ATTACH** — `join-pane` missing desired panes into target window (isolate from shared windows first, then join with correct split direction: `-h` for columns, `-v` for stacking)
 4. **SELECT** — select focus pane before stashing (prevents tmux auto-selecting an unintended pane)
-5. **DETACH** — stash unwanted panes out of target window (panes stay alive in stash)
+5. **DETACH** — stash unwanted panes out of target window (panes stay alive in stash; busy panes skipped)
 6. **REORDER** — if all panes present but wrong order, break non-first panes out and rejoin in order
 7. **VERIFY** — confirm final layout matches desired order
 
@@ -715,6 +723,29 @@ The stash system preserves running Claude sessions when the user switches editor
 - Commit: `git add -f {file}` (bypasses .gitignore) + `git commit -m "agent-doc: {timestamp}" --no-verify`
 - Branch: `git checkout -b agent-doc/{filestem}`
 - Squash: soft-reset to before first `agent-doc:` commit, recommit as one
+
+## 9.5 Hook System
+
+Cross-session event coordination via `agent-kit` hooks (v0.3).
+
+**CLI:** `agent-doc hook fire|poll|listen|gc`
+
+- `fire <EVENT> <FILE>` — write event JSON to `.agent-doc/hooks/<event>/`, auto-reads session ID from frontmatter
+- `poll <EVENT> [--since SECS]` — read events newer than timestamp, clean expired
+- `listen [--root PATH]` — start Unix socket listener at `.agent-doc/hooks.sock`
+- `gc [--root PATH]` — clean expired events across all hooks
+
+**Lifecycle hooks fired by agent-doc:**
+- `post_write` — after IPC write succeeds (from `write.rs`)
+- `post_commit` — after successful git commit (from `git.rs`)
+- `claim` / `layout_change` — available via CLI, not yet wired into binary paths
+
+**Transport:** `HookTransport` trait with `FileTransport` (default), `SocketTransport` (Unix socket), `ChainTransport` (fallback chain). Socket transport connects to `.agent-doc/hooks.sock` and expects `ok\n` ack.
+
+**Claude Code bridge:** Add `PostToolUse` hook to `settings.json`:
+```json
+{"hooks":{"PostToolUse":[{"matcher":"Write|Edit","command":"agent-doc hook fire post_write \"$TOOL_INPUT_FILE\""}]}}
+```
 
 ## 10. Security
 

@@ -93,7 +93,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::sessions::Tmux;
-use crate::{frontmatter, prompt, resync, sessions, sync};
+use crate::{frontmatter, prompt, resync, sessions, snapshot, sync};
 
 const TMUX_SESSION_NAME: &str = "claude";
 
@@ -506,6 +506,33 @@ fn auto_start_ext(
 /// When `skip_wait` is true, skips `wait_for_claude_ready` and `send_command`.
 /// Used by sync which only needs the pane to exist with Claude starting.
 fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: &str, session_name: &str, skip_wait: bool, split_before: bool) -> Result<()> {
+    // Startup lock: prevent double-spawn when sync fires twice in quick succession.
+    // Check for a lock file; if it exists and is < 5s old, skip this auto-start.
+    // Best-effort: skip lock entirely if file doesn't exist or hash fails.
+    if let Ok(canonical) = std::fs::canonicalize(file)
+        && let Some(project_root) = snapshot::find_project_root(&canonical)
+        && let Ok(hash) = snapshot::doc_hash(file)
+    {
+        let starting_dir = project_root.join(".agent-doc/starting");
+        let lock_path = starting_dir.join(format!("{}.lock", hash));
+        if lock_path.exists() {
+            if let Ok(meta) = lock_path.metadata()
+                && let Ok(modified) = meta.modified()
+                && let Ok(age) = modified.elapsed()
+                && age.as_secs() < 5
+            {
+                eprintln!(
+                    "[route] startup lock exists for {} (age {:.1}s), skipping auto-start",
+                    file_path, age.as_secs_f64()
+                );
+                return Ok(());
+            }
+        }
+        // Create the lock
+        let _ = std::fs::create_dir_all(&starting_dir);
+        let _ = std::fs::write(&lock_path, "");
+    }
+
     let cwd = std::env::current_dir().context("failed to get current directory")?;
 
     // Resolve the agent-doc binary path (same binary that's currently running)

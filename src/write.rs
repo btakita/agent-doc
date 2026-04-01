@@ -196,6 +196,66 @@ fn is_append_mode_component(name: &str) -> bool {
 }
 
 
+/// Detect whether a baseline is stale relative to the current snapshot.
+///
+/// Only checks **append-mode** components (exchange, findings, etc.) — these grow
+/// monotonically and must contain the snapshot's committed content. Replace-mode
+/// components (status, pending) are freely user-editable and are skipped.
+///
+/// Returns `true` if the baseline is stale (missing committed snapshot content).
+pub fn is_stale_baseline(baseline: &str, snapshot: &str) -> bool {
+    let base_clean = strip_boundary_for_dedup(baseline);
+    let snap_clean = strip_boundary_for_dedup(snapshot);
+
+    // Fast path: identical content
+    if base_clean == snap_clean {
+        return false;
+    }
+
+    // Try structural comparison via components
+    if let (Ok(snap_components), Ok(base_components)) = (
+        component::parse(snapshot),
+        component::parse(baseline),
+    ) {
+        if !snap_components.is_empty() {
+            // Only check append-mode components — these grow monotonically and must
+            // contain the snapshot's committed content. Replace-mode components
+            // (status, pending) are user-editable and should be skipped.
+            for snap_comp in &snap_components {
+                let is_append = snap_comp.patch_mode()
+                    .map(|m| m == "append")
+                    .unwrap_or(is_append_mode_component(&snap_comp.name));
+                if !is_append {
+                    continue;
+                }
+                let snap_content = strip_boundary_for_dedup(
+                    snap_comp.content(snapshot).trim(),
+                );
+                if snap_content.is_empty() {
+                    continue;
+                }
+                // Find matching component in baseline by name
+                if let Some(base_comp) = base_components.iter().find(|c| c.name == snap_comp.name) {
+                    let base_content = strip_boundary_for_dedup(
+                        base_comp.content(baseline).trim(),
+                    );
+                    // Baseline's append component must contain the snapshot's content
+                    if !base_content.contains(&snap_content) {
+                        return true;
+                    }
+                } else {
+                    // Snapshot has an append component that baseline lacks entirely
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    // Fallback for non-template docs: prefix check (original behavior)
+    !base_clean.starts_with(&snap_clean)
+}
+
 /// Strip boundary markers for dedup comparison.
 /// Boundary markers (`<!-- agent:boundary:XXXXXXXX -->`) get a fresh ID on each write,
 /// so they must be excluded from content equality checks.
@@ -515,17 +575,18 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                 eprintln!("[perf] apply_patches_with_overrides: {}ms", elapsed_apply);
             }
 
-            // Guard: detect stale baseline by comparing it against the current snapshot.
-            // If the baseline doesn't match the snapshot (after stripping boundary markers),
-            // the baseline is stale — re-apply patches to the current file content instead.
-            // This prevents snapshot rollback regardless of whether content_ours is longer
-            // or shorter than the snapshot.
+            // Guard: detect stale baseline by structural component comparison.
+            // A baseline is stale when it's MISSING committed content from the snapshot
+            // (e.g., a previous response was committed but the baseline predates it).
+            // A baseline with EXTRA content beyond the snapshot is normal (user edits).
+            //
+            // Compare component-by-component: for each component in the snapshot, check
+            // that the baseline's corresponding component contains the snapshot content.
+            // This handles user edits anywhere in the document (not just appended at end).
             if let Ok(Some(current_snap)) = snapshot::load(file) {
-                let snap_clean = strip_boundary_for_dedup(&current_snap);
-                let base_clean = strip_boundary_for_dedup(base);
-                if snap_clean != base_clean {
+                if is_stale_baseline(base, &current_snap) {
                     eprintln!(
-                        "[write] WARNING: baseline doesn't match snapshot — stale baseline detected, using current file as baseline"
+                        "[write] WARNING: baseline missing snapshot content — stale baseline detected, using current file as baseline"
                     );
                     crate::ops_log::log_op(file, &format!(
                         "stale_baseline_detected file={} base_len={} snap_len={} file_len={}",
@@ -561,6 +622,9 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                     "ipc_write_consumed file={} patches={}",
                     file.display(), patches.len()
                 ));
+                // Fire post_write hook for cross-session coordination
+                let session_id = frontmatter::read_session_id(file).unwrap_or_default();
+                crate::hooks::fire_post_write(file, &session_id, patches.len());
                 recover::clear_pending(file)?;
                 return Ok(());
             }
@@ -1036,16 +1100,32 @@ pub fn try_ipc(
         match crate::ipc_socket::send_message(&project_root, &socket_payload) {
             Ok(Some(_ack)) => {
                 eprintln!("[write] socket IPC patch delivered");
-                // Save snapshot — use content_ours (baseline + response) when available
+                // Save snapshot — use content_ours (baseline + response) when available.
+                // Bug 2A fix: snapshot save failure after IPC success is non-fatal.
+                // The plugin already has the correct content; the snapshot can be
+                // recovered by commit's divergence detection (Bug 2B fix).
                 let snap_content = if let Some(ours) = content_ours {
                     ours.to_string()
                 } else {
                     std::fs::read_to_string(file)
                         .with_context(|| format!("failed to read {} after socket IPC", file.display()))?
                 };
-                snapshot::save(file, &snap_content)?;
-                let crdt_doc = crate::crdt::CrdtDoc::from_text(&snap_content);
-                snapshot::save_crdt(file, &crdt_doc.encode_state())?;
+                if let Err(e) = snapshot::save(file, &snap_content) {
+                    eprintln!(
+                        "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
+                         Commit will auto-recover via divergence detection.",
+                        e
+                    );
+                    crate::ops_log::log_op(file, &format!(
+                        "snapshot_save_failed_after_ipc file={} error={}",
+                        file.display(), e
+                    ));
+                } else {
+                    let crdt_doc = crate::crdt::CrdtDoc::from_text(&snap_content);
+                    if let Err(e) = snapshot::save_crdt(file, &crdt_doc.encode_state()) {
+                        eprintln!("[write] WARNING: CRDT state save failed: {}", e);
+                    }
+                }
                 return Ok(true);
             }
             Ok(None) => {
@@ -1305,16 +1385,30 @@ fn write_ipc_and_poll(
             // Use content_ours (baseline + response) when available, NOT the current
             // file. The current file may include user edits typed after the boundary,
             // which would be absorbed into the snapshot and lost to the next diff.
+            // Bug 2A fix: snapshot save failure after IPC success is non-fatal.
             let snap_content = if let Some(ours) = content_ours {
                 ours.to_string()
             } else {
                 std::fs::read_to_string(doc_file)
                     .with_context(|| format!("failed to read {} after IPC", doc_file.display()))?
             };
-            snapshot::save(doc_file, &snap_content)?;
-            let crdt_doc = crate::crdt::CrdtDoc::from_text(&snap_content);
-            snapshot::save_crdt(doc_file, &crdt_doc.encode_state())?;
-            eprintln!("[write] IPC patch consumed by plugin — snapshot updated");
+            if let Err(e) = snapshot::save(doc_file, &snap_content) {
+                eprintln!(
+                    "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
+                     Commit will auto-recover via divergence detection.",
+                    e
+                );
+                crate::ops_log::log_op(doc_file, &format!(
+                    "snapshot_save_failed_after_ipc file={} error={}",
+                    doc_file.display(), e
+                ));
+            } else {
+                let crdt_doc = crate::crdt::CrdtDoc::from_text(&snap_content);
+                if let Err(e) = snapshot::save_crdt(doc_file, &crdt_doc.encode_state()) {
+                    eprintln!("[write] WARNING: CRDT state save failed: {}", e);
+                }
+                eprintln!("[write] IPC patch consumed by plugin — snapshot updated");
+            }
             return Ok(true);
         }
         std::thread::sleep(poll_interval);
@@ -2072,5 +2166,136 @@ mod tests {
         let content = "<!-- agent:exchange -->\nSome text.\n<!-- agent:boundary:real-uuid-5678 -->\nMore text.\n<!-- /agent:exchange -->\n";
         let result = find_boundary_id(content, "exchange");
         assert_eq!(result, Some("real-uuid-5678".to_string()));
+    }
+
+    #[test]
+    fn stale_baseline_guard_prefix_check() {
+        // Baseline that starts with snapshot content (user added text) = NOT stale
+        let snapshot = "## Exchange\nResponse here.\n";
+        let baseline_with_user_edit = "## Exchange\nResponse here.\nNew user question\n";
+        let snap_clean = strip_boundary_for_dedup(snapshot);
+        let base_clean = strip_boundary_for_dedup(baseline_with_user_edit);
+        assert!(
+            base_clean.starts_with(&snap_clean),
+            "baseline with user edits should start with snapshot content"
+        );
+
+        // Baseline that doesn't contain snapshot content = STALE
+        let stale_baseline = "## Exchange\nOld content only.\n";
+        let stale_clean = strip_boundary_for_dedup(stale_baseline);
+        assert!(
+            !stale_clean.starts_with(&snap_clean),
+            "stale baseline should not start with snapshot content"
+        );
+    }
+
+    // --- is_stale_baseline tests ---
+
+    #[test]
+    fn stale_baseline_identical_content_not_stale() {
+        let doc = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
+        assert!(!is_stale_baseline(doc, doc));
+    }
+
+    #[test]
+    fn stale_baseline_user_appended_text_not_stale() {
+        let snapshot = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\nResponse.\nUser question\n<!-- /agent:exchange -->\n";
+        assert!(!is_stale_baseline(baseline, snapshot));
+    }
+
+    #[test]
+    fn stale_baseline_user_edited_replace_component_not_stale() {
+        // User edits replace-mode component (status) — should NOT trigger stale guard
+        let snapshot = "<!-- agent:status patch=replace -->\nOld status\n<!-- /agent:status -->\n\
+                         <!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:status patch=replace -->\nEdited status by user\n<!-- /agent:status -->\n\
+                         <!-- agent:exchange patch=append -->\nResponse.\nNew question\n<!-- /agent:exchange -->\n";
+        assert!(
+            !is_stale_baseline(baseline, snapshot),
+            "user editing replace-mode status component should NOT trigger stale guard"
+        );
+    }
+
+    #[test]
+    fn stale_baseline_missing_committed_content_is_stale() {
+        let snapshot = "<!-- agent:exchange patch=append -->\nCommitted response from agent.\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\nOld content only.\n<!-- /agent:exchange -->\n";
+        assert!(
+            is_stale_baseline(baseline, snapshot),
+            "baseline missing committed content should be stale"
+        );
+    }
+
+    #[test]
+    fn stale_baseline_missing_append_component_is_stale() {
+        // Missing an append-mode component = stale
+        let snapshot = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:other patch=append -->\nDifferent.\n<!-- /agent:other -->\n";
+        assert!(
+            is_stale_baseline(baseline, snapshot),
+            "baseline missing an append-mode component should be stale"
+        );
+    }
+
+    #[test]
+    fn stale_baseline_missing_replace_component_not_stale() {
+        // Missing a replace-mode component is fine — user can delete it
+        let snapshot = "<!-- agent:status patch=replace -->\nActive\n<!-- /agent:status -->\n\
+                         <!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
+        assert!(
+            !is_stale_baseline(baseline, snapshot),
+            "missing replace-mode component should NOT trigger stale guard"
+        );
+    }
+
+    #[test]
+    fn stale_baseline_boundary_markers_ignored() {
+        let snapshot = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- agent:boundary:xyz -->\nUser edit\n<!-- /agent:exchange -->\n";
+        assert!(
+            !is_stale_baseline(baseline, snapshot),
+            "different boundary marker IDs should not cause false stale detection"
+        );
+    }
+
+    #[test]
+    fn stale_baseline_non_template_fallback_to_prefix() {
+        // Non-template (no components) falls back to prefix check
+        let snapshot = "## Exchange\nResponse.\n";
+        let baseline = "## Exchange\nResponse.\nNew question\n";
+        assert!(!is_stale_baseline(baseline, snapshot));
+
+        let stale = "## Exchange\nDifferent content.\n";
+        assert!(is_stale_baseline(stale, snapshot));
+    }
+
+    #[test]
+    fn stale_baseline_empty_snapshot_component_skipped() {
+        // Empty append components in snapshot should not cause false positives
+        let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\nUser added content\n<!-- /agent:exchange -->\n";
+        assert!(!is_stale_baseline(baseline, snapshot));
+    }
+
+    #[test]
+    fn stale_baseline_default_exchange_is_append() {
+        // exchange without explicit patch attr defaults to append via is_append_mode_component
+        let snapshot = "<!-- agent:exchange -->\nResponse.\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange -->\nOld stuff.\n<!-- /agent:exchange -->\n";
+        assert!(
+            is_stale_baseline(baseline, snapshot),
+            "exchange without patch attr should default to append-mode check"
+        );
+    }
+
+    #[test]
+    fn strip_boundary_for_dedup_removes_markers() {
+        let with_boundary = "Hello\n<!-- agent:boundary:abc123 -->\nWorld\n";
+        let without = strip_boundary_for_dedup(with_boundary);
+        assert!(!without.contains("agent:boundary"));
+        assert!(without.contains("Hello"));
+        assert!(without.contains("World"));
     }
 }

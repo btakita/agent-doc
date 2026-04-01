@@ -129,13 +129,32 @@ pub fn commit(file: &Path) -> Result<()> {
     // snapshot version without touching the working tree file. This means:
     // - Agent response → committed (no git gutter)
     // - User's subsequent edits → uncommitted (green git gutter)
-    let snapshot_content = crate::snapshot::load(file)?;
-    let file_len = std::fs::metadata(file).map(|m| m.len()).unwrap_or(0);
+    let mut snapshot_content = crate::snapshot::load(file)?;
+    let file_content = std::fs::read_to_string(file).unwrap_or_default();
+    let file_len = file_content.len();
     let snap_len = snapshot_content.as_ref().map(|s| s.len()).unwrap_or(0);
     crate::ops_log::log_op(file, &format!(
         "commit_staging file={} snap_len={} file_len={}",
         file.display(), snap_len, file_len
     ));
+
+    // Handle missing snapshot: if no snapshot exists but file has content, create one.
+    // This bootstraps the commit flow for files that were never written by agent-doc.
+    //
+    // NOTE: Snapshot/file divergence detection (Bug 2B) was removed here because it
+    // cannot distinguish "file has user edits" from "file has a missed agent response".
+    // Both cases look identical (file has content snapshot doesn't). The IPC snapshot
+    // save failure case is handled by Bug 2A (non-fatal save with warning) and the
+    // recover step in preflight (detects orphaned responses).
+    if snapshot_content.is_none() && !file_content.is_empty() {
+        eprintln!(
+            "[commit] WARNING: no snapshot exists for {}. Creating from file content.",
+            file.display()
+        );
+        crate::snapshot::save(file, &file_content)?;
+        snapshot_content = Some(file_content.clone());
+    }
+
     let t_staging = std::time::Instant::now();
     if let Some(ref snap) = snapshot_content {
         // Add (HEAD) marker to the last ### Re: heading in the snapshot.
@@ -196,6 +215,9 @@ pub fn commit(file: &Path) -> Result<()> {
     match &commit_status {
         Ok(s) if s.success() => {
             crate::ops_log::log_op(file, &format!("commit_success file={}", file.display()));
+            // Fire post_commit hook for cross-session coordination
+            let session_id = crate::frontmatter::read_session_id(file).unwrap_or_default();
+            crate::hooks::fire_post_commit(file, &session_id);
         }
         Ok(s) => {
             crate::ops_log::log_op(file, &format!(
@@ -740,5 +762,68 @@ mod tests {
         let boundary_pos = result.find("<!-- agent:boundary:").unwrap();
         let user_pos = result.find("User prompt.").unwrap();
         assert!(boundary_pos > user_pos, "boundary must be after user text");
+    }
+
+    // --- Bug 2B regression tests ---
+    // Verify that commit does NOT overwrite the snapshot with user edits.
+    // The divergence detection was removed from commit because is_stale_baseline
+    // cannot distinguish "file has user edits" from "file has a missed agent response" —
+    // both look like "file has content snapshot doesn't have".
+
+    #[test]
+    fn is_stale_baseline_write_path_user_edits_in_baseline_not_stale() {
+        // Write path: baseline has user edits appended, snapshot is the committed state.
+        // is_stale_baseline(baseline_with_edits, snapshot) should be FALSE
+        // because the baseline's exchange CONTAINS the snapshot's exchange content.
+        let snapshot = "<!-- agent:exchange patch=append -->\n\
+            ### Re: Response\n\
+            Agent response text.\n\
+            <!-- /agent:exchange -->\n";
+        let baseline_with_user_edits = "<!-- agent:exchange patch=append -->\n\
+            ### Re: Response\n\
+            Agent response text.\n\
+            Implement agent-kit changes.\n\
+            Implement updates to agent-doc.\n\
+            <!-- /agent:exchange -->\n";
+
+        assert!(
+            !crate::write::is_stale_baseline(baseline_with_user_edits, snapshot),
+            "baseline with user edits should NOT be stale (it contains snapshot content)"
+        );
+    }
+
+    #[test]
+    fn is_stale_baseline_write_path_stale_baseline_detected() {
+        // Write path: baseline is from before the last agent response.
+        // is_stale_baseline(old_baseline, current_snapshot) should be TRUE.
+        let current_snapshot = "<!-- agent:exchange patch=append -->\n\
+            ### Re: Response 1\n\
+            First response.\n\
+            ### Re: Response 2\n\
+            Second response.\n\
+            <!-- /agent:exchange -->\n";
+        let old_baseline = "<!-- agent:exchange patch=append -->\n\
+            ### Re: Response 1\n\
+            First response.\n\
+            <!-- /agent:exchange -->\n";
+
+        assert!(
+            crate::write::is_stale_baseline(old_baseline, current_snapshot),
+            "baseline missing committed response should be stale"
+        );
+    }
+
+    #[test]
+    fn is_stale_baseline_write_path_replace_edits_ignored() {
+        // Write path: user edited a replace-mode component in the baseline.
+        // Only append-mode components are checked. Replace edits are fine.
+        let snapshot = "<!-- agent:status patch=replace -->\nOriginal\n<!-- /agent:status -->\n\
+            <!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:status patch=replace -->\nUser changed\n<!-- /agent:status -->\n\
+            <!-- agent:exchange patch=append -->\nResponse.\nUser question\n<!-- /agent:exchange -->\n";
+        assert!(
+            !crate::write::is_stale_baseline(baseline, snapshot),
+            "user edits in replace + append components should NOT be stale"
+        );
     }
 }

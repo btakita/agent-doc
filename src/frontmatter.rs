@@ -422,6 +422,13 @@ pub fn ensure_session(content: &str) -> Result<(String, String)> {
     Ok((updated, session_id))
 }
 
+/// Read the session UUID from a document file. Returns empty string if not found.
+pub fn read_session_id(file: &std::path::Path) -> Option<String> {
+    let content = std::fs::read_to_string(file).ok()?;
+    let (fm, _) = parse(&content).ok()?;
+    fm.session
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

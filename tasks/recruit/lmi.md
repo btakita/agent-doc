@@ -790,14 +790,30 @@ From the interview (~10:08), you discussed backtesting with Josh: detecting drif
 Your second note got cut off: "Backtesting can al..." — finish the thought and I'll incorporate it.
 
 Want me to add the backtesting bullet to the draft now, or wait for your complete thought?
-<!-- agent:boundary:e19c74c9 -->
+
+Backtesting can also be applied to datasets, agent harness, + prompts.
+
+> I also wrote up a detailed post about a day
+
+This was immediately after the interview until today.
+### Re: Backtesting Scope + Timeline Correction (HEAD)
+
+Applied both updates to the Josh email draft:
+
+1. **Backtesting bullet added** (after auditable workflow state): Expanded scope to include codebases, datasets, agent harness configurations, and prompts. Connected to LIGER's fact-checking pattern.
+
+2. **Timeline corrected**: Changed "a day where I ran..." to "the work I did from immediately after our interview through today..." — accurately describes the timeframe.
+
+Updated draft at: `mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-interactive-document-genera.md`
+
+Ready to send when you approve.
+<!-- agent:boundary:45b8e5ac -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Add backtesting bullet to Josh email (pending user's complete thought)
-- [ ] Send Josh Malloy follow-up email (prototype framing applied, pending approval)
+- [ ] Send Josh Malloy follow-up email (backtesting + timeline updated, pending approval)
 - [ ] agent-doc README: security section (single-user, prompt injection)
 - [ ] Corky: HTML body extraction for emails
 - [ ] Research LMI uncleared role options
@@ -806,4 +822,6 @@ Want me to add the backtesting bullet to the draft now, or wait for your complet
 - [x] Security clearance + subcontracting guidance provided
 - [x] Josh email source link fixed
 - [x] Prototype spike framing applied to Josh email
+- [x] Backtesting bullet added to Josh email
+- [x] Blog post timeline corrected in Josh email
 <!-- /agent:pending -->

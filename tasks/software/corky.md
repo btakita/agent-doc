@@ -647,7 +647,37 @@ fn extract_body_from_parts(parts: &[Part], token: &str, message_id: &str) -> Str
 ```
 
 Same pattern for `imap_sync.rs`. Want me to implement it?
-<!-- agent:boundary:749b6817 -->
+Should we prefer "text/html" over "text/plain" so we can have formatted markdown? Since "text/html" has formatting info.
+### Re: Prefer text/html over text/plain (HEAD)
+
+Yes — preferring `text/html` → `htmd` conversion over raw `text/plain` would produce better markdown. Here's the comparison:
+
+| Source | Bold/italic | Links | Lists | Tables | Signatures |
+|--------|-------------|-------|-------|--------|------------|
+| `text/plain` | Lost | Bare URLs | Inconsistent | None | Messy |
+| `text/html` → htmd | **Preserved** | `[text](url)` | Proper markdown | Converted | Cleaner (styled divs → structured) |
+
+**Recommendation: HTML-first with plain-text fallback.**
+
+Priority order:
+1. `text/html` → convert via `htmd::HtmlToMarkdown` → markdown
+2. `text/plain` → use as-is (fallback when no HTML part exists)
+
+This reverses the current logic. Benefits:
+- Links render as `[Click here](url)` instead of bare URLs or missing entirely
+- Bold, italic, headings preserved as markdown
+- Newsletter/marketing emails become readable (these are the 297 empty ones — all HTML-only)
+- Personal emails also improve — most email clients send `multipart/alternative` with both parts, and the HTML version has the formatting
+
+**One concern:** Some HTML emails have heavy boilerplate (tracking pixels, wrapper tables, footer legalese). `htmd` handles this reasonably — it strips `<style>`, `<script>`, and invisible elements. The output won't be perfect for marketing emails but will be far better than empty.
+
+Ready to implement. The change touches:
+1. `src/corky/Cargo.toml` — add `htmd = "0.5"`
+2. `src/corky/src/sync/gmail_api_sync.rs` — `extract_body_from_parts` and `extract_body_from_payload`
+3. `src/corky/src/sync/imap_sync.rs` — `extract_body`
+
+Want me to go ahead?
+<!-- agent:boundary:60466be1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -655,5 +685,5 @@ Same pattern for `imap_sync.rs`. Want me to implement it?
 <!-- agent:pending -->
 - Respond to Rob Ross (Dreamable) — schedule meeting Wed/Thu 12-4pm PT
 - crates.io token — renew and publish corky 0.23.0
-- **corky: html2text fallback** — add `htmd` dep, update `extract_body` in both sync modules (297 emails affected)
+- **corky: HTML-first email body extraction** — add `htmd`, prefer text/html→markdown over text/plain in both sync modules
 <!-- /agent:pending -->

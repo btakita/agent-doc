@@ -2069,7 +2069,7 @@ This requires passing the `wanted` pane set into the callback so it can distingu
 For now, the quick fix: remove the busy pane guard from the DETACH phase and rely on column memory + stash rescue for session preservation. The guard was solving a narrow edge case (layout collapse on non-agent switch) but causing a worse problem (pane accumulation).
 
 Want me to remove the guard or implement the smarter replacement-aware version?
-### Re: Busy pane guard removed from DETACH (HEAD)
+### Re: Busy pane guard removed from DETACH
 
 **Fixed.** Removed the `protect_pane` callback from the sync DETACH phase. The guard was causing 3-pane accumulation when switching documents in the same column.
 
@@ -2085,7 +2085,7 @@ When the user switches to a different agent doc:
 5. If the user switches back, stash rescue brings it back
 
 The `layout.rs` busy pane guard is still in place (for the older `layout` command path). All 595 tests pass. Release binary deployed.
-<!-- agent:boundary:7d49b269 -->
+<!-- agent:boundary:c70d34b2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

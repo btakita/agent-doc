@@ -621,7 +621,7 @@ Yes. The hook runs `git add post/index.ts` after regeneration, so the updated in
 I see it at https://briantakita.me/posts/agent-security-multiuser-lessons/
 
 Please draft the LinkedIn teaser post.
-### Re: Live + LinkedIn teaser (HEAD)
+### Re: Live + LinkedIn teaser
 
 Post confirmed live at `https://briantakita.me/posts/agent-security-multiuser-lessons/`.
 
@@ -640,7 +640,7 @@ Post confirmed live at `https://briantakita.me/posts/agent-security-multiuser-le
 > Full post: https://briantakita.me/posts/agent-security-multiuser-lessons/
 
 Ready to post when you are.
-<!-- agent:boundary:30cda428 -->
+<!-- agent:boundary:4178569f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

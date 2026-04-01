@@ -675,13 +675,22 @@ Created `mail/drafts/20260401-judith-proposal-options.md` — full proposal with
 The P.S. lets Judith visualize the power without cluttering the main email. Closes with "Like having a brilliant assistant who's read every file in your office."
 
 Ready to send via `corky draft push` when you approve.
-<!-- agent:boundary:37a9cd29 -->
+
+Let's include Ragie and my call with Bob Remeika tomorrow re: integration + OCR.
+### Re: Ragie + Bob Remeika Added to Proposal (HEAD)
+
+Updated `mail/drafts/20260401-judith-proposal-options.md` — the "What's included" section now mentions Ragie by name and your call with the CEO:
+
+> "AI-powered document intelligence through Ragie ... I'm talking with the CEO tomorrow about integration and early access for your account."
+
+This signals two things: a real company (credibility) and a personal relationship with the CEO (trust + exclusivity). Robert Waldman will recognize this as a serious play.
+<!-- agent:boundary:5b2fac69 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [x] Send text to Judith about website being down
 - [x] Reply to Judith's text
-- [x] Create proposal email draft file with prompts P.S.
+- [x] Create proposal email draft with prompts P.S. + Ragie mention
 - [ ] Send proposal email — awaiting approval
 - [ ] Website migration to Cloudflare ... website is DOWN
 - [ ] Check in with Robert Ward this afternoon

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-CRITICAL: claude session destroyed. Panes rescued to 1:agent-doc. Implementing stash guard.
+Stash guard implemented. Session destruction prevented. Binary installed.
 <!-- /agent:status -->
 
 ## Exchange
@@ -2143,7 +2143,7 @@ Whe agent-doc tmux pane closed. Why?
 
 This needs to be fixed before v0.30.1 release.
 The entire tmux session closed. Why?
-### Re: Entire tmux session closed (HEAD)
+### Re: Entire tmux session closed
 
 **The `claude` tmux session was destroyed** because:
 
@@ -2162,14 +2162,25 @@ The entire tmux session closed. Why?
 **For now:** The agent-doc panes are alive in `1:agent-doc`. This session is working. The JB plugin needs to be pointed at the correct window for future syncs. A manual `agent-doc resync --fix` should repair the registry entries.
 
 This is the highest-priority fix — it's a data loss risk (tmux session state destroyed). Implementing now.
-<!-- agent:boundary:5ccada17 -->
+### Re: Stash-everything guard implemented (HEAD)
+
+**Fixed.** The reconciler now checks for unresolved managed files before stashing:
+
+- If managed files (with session UUIDs) failed to resolve → preserve existing layout, return early
+- Only truly unmanaged files (no session UUID) trigger the stash path
+
+**Before:** Dead panes → no resolution → stash everything → session destroyed
+**After:** Dead panes → no resolution → WARNING logged → layout preserved
+
+All 595 tests pass. Release binary + cargo install updated.
+<!-- agent:boundary:eeb49f68 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Fix stash-everything guard** — never stash all panes when managed files exist
+- [x] **Fix stash-everything guard** — skip stash when managed files have unresolved panes
+- [ ] **Publish tmux-router v0.3.8** + update agent-doc dep
 - [ ] **Release agent-doc v0.30.1** (all fixes)
 - [ ] **Blog post** about this debugging session
-- [ ] **Collaborative security model** (TBD)
 <!-- /agent:pending -->

@@ -2,6 +2,8 @@
 agent_doc_session: 8a5e0e07-d470-4965-9ed4-1f8db8bbf465
 agent_doc_format: template
 agent_doc_write: crdt
+links:
+  - ./judith-krug.md
 ---
 
 ## Status
@@ -47,13 +49,22 @@ Please create a bi-directional link between this document + judith-krug.md
 - `tasks/professional/judith-krug.md` → links to `./robert-waldman.md`
 
 Both frontmatter `links` arrays updated.
-<!-- agent:boundary:06b1f972 -->
+Implement. Does corky need a feature to perform this action?
+- [ ] Merge duplicate Robert Waldman in Google Contacts (c2907734623862917833 vs c5045079896432711148)
+### Re: Google Contacts Merge (HEAD)
+
+Corky doesn't have a merge or delete feature for Google Contacts yet. It supports `createContact` and `updateContact` but not `deleteContact`.
+
+**Simplest fix:** Open Google Contacts in your browser, search "Robert Waldman", and merge the two entries. Google has a built-in "Merge & fix" feature that detects duplicates automatically.
+
+**For corky:** A `corky contact delete` subcommand (calls `people.googleapis.com/v1/{resourceName}:deleteContact`) would be a small feature to add later. Not worth building just for this one merge.
+<!-- agent:boundary:30d5a03b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Merge duplicate Robert Waldman in Google Contacts (c2907734623862917833 vs c5045079896432711148)
+- [ ] Merge duplicate Robert Waldman in Google Contacts manually (browser)
 - [ ] Get Robert Waldman's phone number (pending from Judith since March 4)
 - [ ] Schedule Zoom call with Robert Waldman for deeper requirements
 <!-- /agent:pending -->

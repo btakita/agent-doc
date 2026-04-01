@@ -606,6 +606,7 @@ Committed and pushed to briantakita.me-dev. The CI push will also trigger a fres
 
 CI alone is sufficient for deploy correctness. The hook is a DX improvement. Want me to add the pre-commit hook?
 Yes
+Will the updated index file be part of the commit?
 ### Re: Pre-commit hook added
 
 Installed at the briantakita.me submodule's git hooks directory. It triggers when any file in `post/content/` is staged, runs `bun post/index.generate.ts`, and auto-stages the updated `index.ts`.
@@ -613,7 +614,10 @@ Installed at the briantakita.me submodule's git hooks directory. It triggers whe
 Now both layers are in place:
 - **Local:** pre-commit hook regenerates index on commit
 - **CI:** deploy workflow regenerates index before build
-<!-- agent:boundary:5a7e457e -->
+### Re: Index in the commit? (HEAD)
+
+Yes. The hook runs `git add post/index.ts` after regeneration, so the updated index is staged and lands in the same commit as the blog post file.
+<!-- agent:boundary:960235c0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

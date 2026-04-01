@@ -1212,14 +1212,38 @@ Confirmed -- only 2 real speakers, other 2 are hallucinations from voice quality
 When `--speakers` provides N names, pass `num_speakers = N` to pyannote-rs. The pyannote pipeline accepts a `num_speakers` parameter that constrains clustering. Currently we're letting it auto-detect, which over-segments on noisy mono audio.
 
 This is a one-line fix in the diarization code -- just wire the speakers list length through to the pyannote config.
-<!-- agent:boundary:448621d1 -->
+
+continue:
+- Implement speaker count constraint from `--speakers` length (one-line fix)
+- Add whisper repetition detection/suppression (post-processing)
+- Tune whisper no_speech_threshold for AMR audio
+### Re: Implementing fixes (HEAD)
+
+All three fixes implemented and building now. Testing on the same 79-min call.
+
+#### 1. Speaker count constraint (diarize.rs)
+
+The bug was in `merge_cross_chunk_speakers()` -- it had no `max_speakers` limit. Each chunk correctly limited to N speakers, but the cross-chunk merging could create new global IDs without bound when embeddings didn't match (cosine sim < 0.5 on noisy AMR).
+
+Fix: Added `max_speakers` parameter to `merge_cross_chunk_speakers()`. When the global speaker count reaches the limit, new embeddings are force-assigned to the closest existing speaker instead of creating a new ID.
+
+#### 2. Whisper repetition detection (engine.rs)
+
+Added `collapse_repeated_phrases()` post-processing after `collect_whisper_segments()`. It detects phrases of 4-15 words that repeat 3+ times consecutively and collapses them to a single occurrence. This catches the "I'm going to call her tomorrow" x12 pattern.
+
+#### 3. no_speech_threshold tuning (engine.rs)
+
+Set `params.set_no_speech_thold(0.8)` (default was 0.6). More aggressive about marking silence as non-speech, which reduces hallucination on low-quality audio. Note: whisper-rs comment says "not implemented as of v1.3.0" but the field is set on the C struct -- likely works in newer whisper.cpp versions.
+
+Re-running transcription now to verify all three fixes.
+<!-- agent:boundary:5f234a8f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Implement speaker count constraint from `--speakers` length (one-line fix)
-- Add whisper repetition detection/suppression (post-processing)
-- Tune whisper no_speech_threshold for AMR audio
+- Verify speaker count fix (expect 2 speakers, not 4)
+- Verify repetition collapse works on the call
+- Verify no_speech_thold reduces hallucination
 - User switching Cube ACR from AMR to WAV/M4A format
 <!-- /agent:pending -->

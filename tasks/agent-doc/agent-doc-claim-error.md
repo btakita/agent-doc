@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Audit: 2 informational issues. Docs current. Ready for v0.30.0 release.
+agent-doc v0.30.0 published to crates.io. Binary installed. Session complete.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1993,15 +1993,36 @@ Update SPEC.md, README.md, ontology, module-harness
 - CLAUDE.md — 3 new modules in layout
 
 Line budget: 431/1000 (57% headroom). Ready for v0.30.0 release.
-<!-- agent:boundary:88e38456 -->
+release
+### Re: agent-doc v0.30.0 released (HEAD)
+
+**Published to crates.io.** All steps completed:
+
+1. Bumped version to 0.30.0
+2. Updated VERSIONS.md with full changelog
+3. clippy clean + 595 tests pass
+4. Committed, pushed, tagged `v0.30.0`
+5. Published to crates.io
+6. `cargo install --path .` — updated `~/.cargo/bin/agent-doc`
+7. Release binary built — `.bin/agent-doc` symlink updated
+
+**v0.30.0 changelog highlights:**
+- Stale baseline guard (component-aware, 11 tests)
+- Busy pane guard (SyncOptions.protect_pane)
+- Auto-start startup lock (5s TTL)
+- Bug 2A/2B fixes
+- Hook system (fire/poll/listen/gc CLI)
+- HookTransport trait + 3 implementations
+- agent-kit v0.3 + tmux-router v0.3.7 deps
+- 595 tests, 0 failures
+<!-- agent:boundary:db4d4077 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **Fix Tailwind CSS LSP** — excluded .md files
-- [x] **Audit docs** — 2 informational issues, docs current
-- [ ] **Release agent-doc v0.30.0** — bump, VERSIONS.md, make check, publish
+- [x] **agent-doc v0.30.0 released** — crates.io + GitHub + binary installed
+- [ ] **Multi-harness skill install** (v0.31.0)
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)
 <!-- /agent:pending -->

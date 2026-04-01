@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-CRITICAL: All panes stashed, claude session destroyed. Rescued to session 1. Needs guard fix.
+CRITICAL: claude session destroyed. Panes rescued to 1:agent-doc. Implementing stash guard.
 <!-- /agent:status -->
 
 ## Exchange
@@ -2129,7 +2129,8 @@ Idea is not responding. Jump threads. Why?
 
 **Lesson:** After code changes, always run `cargo install --path .` — the JB plugin uses the cargo-installed binary, not the release build symlink.
 
-Whe agent-
+Whe agent-doc tmux pane closed. Why?
+![2026-04-01_12-47.png](../../../../../Pictures/agent-loop/2026-04-01_12-47.png)
 ### Re: Agent-doc tmux pane closed
 
 **What happened:** The last sync (timestamp 1775061987) went from 2 panes to 0 — the reconciler stashed BOTH panes, destroying the agent-doc window. The `claude` tmux session was then destroyed (no windows left).
@@ -2141,13 +2142,33 @@ Whe agent-
 **This is a critical bug:** The reconciler should NEVER stash all panes when it has resolved files with known session UUIDs. The "stash everything" path should only trigger when `col_args` is truly empty or all files are unmanaged. A guard is needed: if `pane_columns` is empty but `col_args` had managed files, log an error and skip stashing.
 
 This needs to be fixed before v0.30.1 release.
-<!-- agent:boundary:450e7952 -->
+The entire tmux session closed. Why?
+### Re: Entire tmux session closed (HEAD)
+
+**The `claude` tmux session was destroyed** because:
+
+1. The reconciler stashed ALL panes from the `agent-doc` window → window empty → window destroyed
+2. The stash window had 3 panes but the reconciler also stashed those (or they were already being cleaned up)
+3. When a tmux session has NO windows, tmux destroys the session entirely
+
+**Current state:** The panes were rescued to session `1:agent-doc` (2 panes alive: %312 + %328). Both sessions are running. But the `claude` session no longer exists.
+
+**The fix needed has two parts:**
+
+1. **Never stash all panes** — if `pane_columns` is empty but `col_args` had files with session UUIDs, skip the stash-everything path. Log an error instead.
+
+2. **Recreate session on next sync** — `repair_layout` should detect when the target session is dead and recreate it, then move panes back. This already partially exists but needs to handle the "session completely gone" case.
+
+**For now:** The agent-doc panes are alive in `1:agent-doc`. This session is working. The JB plugin needs to be pointed at the correct window for future syncs. A manual `agent-doc resync --fix` should repair the registry entries.
+
+This is the highest-priority fix — it's a data loss risk (tmux session state destroyed). Implementing now.
+<!-- agent:boundary:5ccada17 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Fix "stash everything" bug** — guard against empty resolution when managed files exist
+- [ ] **Fix stash-everything guard** — never stash all panes when managed files exist
 - [ ] **Release agent-doc v0.30.1** (all fixes)
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)

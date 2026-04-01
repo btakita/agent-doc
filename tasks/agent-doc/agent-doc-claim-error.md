@@ -2361,7 +2361,7 @@ Changes:
 - `NativePatching.isIdle` kept as a utility but no longer used for reposition
 
 All 597 tests pass.
-<!-- agent:boundary:6bc0427a -->
+<!-- agent:boundary:5e379787 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

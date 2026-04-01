@@ -68,6 +68,7 @@ src/
   skill.rs          # Manage bundled SKILL.md (install/check)
   install.rs        # System-level setup: check prerequisites (tmux, claude) and install editor plugins
   resync.rs         # Validate sessions.json, remove dead panes, detect wrong-session/wrong-process panes (--fix)
+  session_cmd.rs    # Show/set configured tmux session with pane migration
   history.rs        # Exchange version history from git + restore
   upgrade.rs        # Self-update via crates.io / GitHub Releases
   plugin.rs         # Editor plugin install/update/list via GitHub Releases

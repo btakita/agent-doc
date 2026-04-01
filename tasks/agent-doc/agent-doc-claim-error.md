@@ -2210,7 +2210,7 @@ Now tmux session has 3 agent-doc windows. Something is messed up with the logic.
 
 Manually claiming seems to have fixed the state. We should refactor the commands to always self-correct.
 
-I manually set `tmux_session = "5"`...this fixed our `
+I manually set `tmux_session = "5"`...this fixed our `Run Agent Doc` issues.
 ### Re: tmux_session config drift and duplicate windows
 
 The root cause is in `src/agent-doc/src/route.rs:141-155`. The auto-correction logic only fires when the configured tmux session is **dead**:
@@ -2247,7 +2247,10 @@ And in `claim.rs`, after registering the session, update the config:
 let pane_session = /* get session name from the claimed pane */;
 crate::config::update_project_tmux_session(&pane_session)?;
 ```
-<!-- agent:boundary:ba33e465 -->
+### Re: editorial fix (HEAD)
+
+Noted — sentence completed. Ready when you want to proceed with the implementation.
+<!-- agent:boundary:b44e19e3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

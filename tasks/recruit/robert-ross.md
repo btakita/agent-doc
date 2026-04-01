@@ -43,7 +43,7 @@ What would be a good strategic time to meet with Rob on Thursday?
 - ~6 person company, so expect a conversation about culture fit and wearing many hats
 
 Please draft an email proposing 1PM PT (4 PM ET).
-### Re: Draft reply to Rob (HEAD)
+### Re: Draft reply to Rob
 
 **Draft email:**
 
@@ -57,7 +57,7 @@ Please draft an email proposing 1PM PT (4 PM ET).
 > Brian
 
 Short and warm, mirrors his direct tone. Ready to send via corky when you approve. Should I push this to Gmail Drafts?
-<!-- agent:boundary:e4d726b9 -->
+<!-- agent:boundary:b559c9ed -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

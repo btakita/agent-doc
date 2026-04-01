@@ -2796,7 +2796,7 @@ fn resolve_target_session(
 **`--dry-run` for resync:** Already exists — running `agent-doc resync` without `--fix` shows all issues without applying them. No code change needed.
 
 **Remaining:** The "pane creation for new files" gap — when you switch to a file without an agent-doc session (like corky.md), the sync should auto-start a pane. That's a separate feature, not part of this consolidation.
-<!-- agent:boundary:6f2ea10b -->
+<!-- agent:boundary:81e75194 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

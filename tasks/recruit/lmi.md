@@ -790,7 +790,7 @@ From the interview (~10:08), you discussed backtesting with Josh: detecting drif
 Your second note got cut off: "Backtesting can al..." — finish the thought and I'll incorporate it.
 
 Want me to add the backtesting bullet to the draft now, or wait for your complete thought?
-<!-- agent:boundary:37daf84f -->
+<!-- agent:boundary:e19c74c9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

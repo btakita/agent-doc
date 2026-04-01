@@ -565,5 +565,5 @@ Please transcribe + diarize:
 - Retainer strategy: $4K ideal (40 hrs), $2K fallback
 - Ragie integration is the immediate deliverable (document OCR + AI search for all Judith's business docs)
 - Next step: Robert calling Judith Thu/Fri, getting Brian on the call
-<!-- agent:boundary:ff6f43de -->
+<!-- agent:boundary:bff2d3be -->
 <!-- /agent:exchange -->

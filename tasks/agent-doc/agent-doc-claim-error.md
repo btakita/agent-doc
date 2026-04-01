@@ -3185,6 +3185,9 @@ Done — removed the busy guard from `EditorTabSyncListener.kt`. The 500ms debou
 
 **On `/btw`:** I'm not familiar with a `/btw` command. Could you clarify what you mean? Are you asking about a mechanism to interrupt/preempt a sync that's stuck in a loop, or is this a slash command I'm not seeing?
 
+See https://code.claude.com/docs/en/interactive-mode#side-questions-with-/btw
+This may be only a claude code feature. Some other harnesses may support a similar preemption command. Some may not.
+
 The existing guards against sync loops are:
 1. **500ms debounce** — coalesces rapid events into one sync
 2. **FFI generation counter** — supersedes stale events
@@ -3193,7 +3196,21 @@ The existing guards against sync loops are:
 5. **Startup lock** (5s TTL) in Rust — prevents double-spawn of Claude sessions
 
 These should prevent busy loops. Is there a specific loop scenario you're concerned about?
-<!-- agent:boundary:49a9f858 -->
+### Re: /btw as preemption for sync (HEAD)
+
+Got it — `/btw` is Claude Code's side-question feature that runs a subtask without interrupting the main conversation. The idea is: could the agent harness preempt the busy session to run sync as a side-task?
+
+That's an interesting architectural pattern: instead of the plugin deciding whether to skip sync (busy guard), the **harness** could handle preemption — accepting a sync command via `/btw` while the main agent-doc session continues.
+
+For now, removing the busy guard solves the immediate problem (sync runs regardless of session activity). But the `/btw` pattern points to a deeper design:
+
+- **Current:** Plugin → CLI (`agent-doc sync`) → tmux. Plugin decides when to sync.
+- **Future:** Plugin → harness preemption → agent handles sync inline. The agent is aware of session state and can coordinate sync without race conditions.
+
+This is a good design direction for later — sync becomes an agent-level concern rather than a CLI-level concern. For now, the CLI-level guards (debounce + generation + lock) are working.
+
+Shall I proceed with the remaining items? Next up: `cargo build --release`, then tests and audit docs.
+<!-- agent:boundary:37106e9a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

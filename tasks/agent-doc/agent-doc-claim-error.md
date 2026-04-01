@@ -2797,7 +2797,7 @@ fn resolve_target_session(
 
 **Remaining:** The "pane creation for new files" gap — when you switch to a file without an agent-doc session (like corky.md), the sync should auto-start a pane. That's a separate feature, not part of this consolidation.
 continue
-### Re: Submodule committed (HEAD)
+### Re: Submodule committed
 
 **Two commits in agent-doc submodule:**
 
@@ -2821,7 +2821,7 @@ continue
 - `SPEC.md` — stash pane safety guarantee
 - `README.md` — fix subprocess count
 - Test: `purge_preserves_unregistered_agent_process_in_stash`
-<!-- agent:boundary:647feed1 -->
+<!-- agent:boundary:eba300ac -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -47,7 +47,7 @@ class SyncLayoutAction : AnAction() {
             }
             Thread {
                 try {
-                    val agentDoc = TerminalUtil.resolveAgentDoc()
+                    val agentDoc = TerminalUtil.resolveAgentDoc(basePath)
                     // Always pass --window: use resolved ID, or fall back to "agent-doc" name
                     val windowArgs = listOf("--window", windowId ?: "agent-doc")
                     val focusArgs = if (focusedFile != null) listOf("--focus", focusedFile) else emptyList()

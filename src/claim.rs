@@ -44,6 +44,9 @@
 //! ## Agentic Contracts
 //! - Claim is idempotent for an already-claimed live pane: re-claiming updates the
 //!   registry entry and refocuses the pane without side-effects.
+//! - **Registry protection:** If the target pane is already claimed by a different
+//!   session and the pane is alive, claim refuses unless `--force` is passed. This
+//!   prevents silent corruption when position detection falls back to the wrong pane.
 //! - Stale claims (dead pane) are cleaned before the new claim is written; the
 //!   caller never observes a registry with two entries for the same file.
 //! - `agent_doc_format` and `agent_doc_write` are only set when ALL three of
@@ -80,7 +83,7 @@ use std::path::Path;
 
 use crate::{frontmatter, resync, sessions};
 
-pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Option<&str>, _force: bool) -> Result<()> {
+pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Option<&str>, force: bool) -> Result<()> {
     let _ = resync::prune(); // Clean stale entries before window resolution
 
     // Check for stale claims on this specific file and log if found
@@ -190,8 +193,26 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
         }
     }
 
-    // Register session → pane (use the pane's actual PID, not our short-lived CLI PID)
+    // Check for existing claim on this pane by a different session
     let file_str = file.to_string_lossy();
+    {
+        let registry = sessions::load().unwrap_or_default();
+        for (existing_id, entry) in &registry {
+            if entry.pane == pane_id && *existing_id != session_id
+                && tmux.pane_alive(&pane_id)
+            {
+                if !force {
+                    anyhow::bail!(
+                        "pane {} is already claimed by {} (file: {}). Use --force to overwrite.",
+                        pane_id, &existing_id[..8], entry.file
+                    );
+                }
+                eprintln!("warning: overwriting claim on pane {} (was {} → {})", pane_id, &existing_id[..8], &session_id[..8]);
+            }
+        }
+    }
+
+    // Register session → pane (use the pane's actual PID, not our short-lived CLI PID)
     let pane_pid = sessions::pane_pid(&pane_id).unwrap_or(std::process::id());
     sessions::register_with_pid(&session_id, &pane_id, &file_str, pane_pid)?;
 

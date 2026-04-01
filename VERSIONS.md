@@ -4,6 +4,19 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.1
+
+- **Declarative layout sync**: Navigating to a file in a split editor now creates a tmux pane automatically. Files with session UUIDs are always treated as Registered by sync, even without a registry entry (reverses 0.31.0 Unmanaged guard). Auto-start phase also no longer requires registry entries.
+- **ClaimAction simplified**: JetBrains ClaimAction (Ctrl+Shift+Alt+C) now delegates entirely to SyncLayoutAction — removed 200+ lines of position detection, pane ID extraction, and independent auto-start logic.
+- **Claim registry protection**: `agent-doc claim` refuses to overwrite an existing live claim without `--force`, preventing silent pane corruption from fallback position detection.
+- **HEAD marker duplicate fix**: `add_head_marker` uses occurrence counting instead of substring matching, correctly marking new headings even when the same heading text exists earlier in the document.
+- **Busy guard removed**: EditorTabSyncListener no longer blocks sync when any visible file has an active session. The binary's own concurrency guards (startup locks, registry locks) are sufficient.
+- **Build stamp**: New `build.rs` embeds a build timestamp. On sync, the binary compares against `.agent-doc/build.stamp` and clears stale startup locks on new build detection.
+- **Plugin binary resolution fix**: EditorTabSyncListener and SyncLayoutAction now pass `basePath` to `resolveAgentDoc()`, correctly resolving `.bin/agent-doc` instead of falling through to `~/.cargo/bin/agent-doc`.
+- **JetBrains plugin**: Version 0.2.38. Requires uninstall→restart→install→restart (structural class changes).
+- **Tests**: 602 total. New: `add_head_marker_duplicate_heading_text`.
+- **Docs**: SPEC.md §7.10 (claim protection), §7.15 (occurrence counting), §7.20 (UUID-always-registered, build stamp). Ontology claim.md updated.
+
 ## 0.31.0
 
 - **`agent-doc session` CLI**: Show/set configured tmux session with pane migration (`session_cmd.rs`).

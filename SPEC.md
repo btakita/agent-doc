@@ -263,7 +263,9 @@ Two modes:
 3. Determine pane: `--pane P` overrides, else `--position` resolves via tmux pane geometry, else `$TMUX_PANE`
 4. Register session → pane in `sessions.json`, including window ID
 
-Unlike `start`, does not launch Claude — the caller is already inside a Claude session. Last-call-wins: a subsequent `claim` for the same file overrides the previous pane mapping. `--position` is used by the JetBrains plugin to map editor split positions to tmux panes.
+Unlike `start`, does not launch Claude — the caller is already inside a Claude session. `--position` is used by the JetBrains plugin to map editor split positions to tmux panes.
+
+**Registry protection:** If the target pane is already claimed by a different session (and the pane is alive), `claim` refuses with an error. Use `--force` to overwrite an existing claim. This prevents silent corruption when position detection falls back to the wrong pane.
 
 **Default components on claim:** For new template documents, `agent-doc claim` scaffolds `<!-- agent:status patch=replace -->` and `<!-- agent:exchange patch=append -->` components by default.
 
@@ -359,6 +361,8 @@ Exits with error if the pane is dead or no session is registered.
 
 **HEAD marker:** The committed version has ` (HEAD)` appended to new root-level headings. When no markdown headings exist, bold-text pseudo-headers (`**...**` on its own line) receive the marker instead. The working tree does not have these markers. This creates a single modified-line gutter (blue) at each heading — a visual boundary between committed agent response and uncommitted user input.
 
+**Duplicate heading detection:** Headings are identified as "new" by comparing occurrence counts between the current content and git HEAD. A heading is new if it appears more times in the current content than in HEAD. This correctly handles duplicate heading text across exchange cycles (e.g., multiple `### Re: Implementation complete` headings from different responses).
+
 **Post-commit cleanup:** After a successful commit, `(HEAD)` markers are stripped from headings and bold-text pseudo-headers in both the snapshot and the working tree file. This prevents stale markers from accumulating across commits.
 
 ### 7.16 skill
@@ -402,7 +406,9 @@ Supported editors: `jetbrains`, `vscode`. Downloads plugin assets from GitHub Re
 
 Mirrors a columnar editor layout in tmux. Each `--col` is a comma-separated list of files. Columns arrange left-to-right; files stack top-to-bottom within each column.
 
-**Pre-sync file resolution:** Before the layout algorithm runs, sync parses file paths from `--col` args and resolves each file. Files without a session UUID in frontmatter are treated as **unmanaged** and skipped (no auto-initialization of frontmatter). Only `agent-doc claim` adds session UUIDs. For managed files (those with session UUIDs) whose registered pane is in a stash window, sync **rescues** the pane back to the agent-doc window (via `swap-pane`, falling back to `join-pane`) — preserving the existing Claude session context. Only if rescue fails, or if no alive pane exists at all, does sync auto-start a fresh Claude session (via `route::auto_start()`).
+**Pre-sync file resolution:** Before the layout algorithm runs, sync parses file paths from `--col` args and resolves each file. Files without a session UUID in frontmatter are treated as **unmanaged** and skipped (no auto-initialization of frontmatter). Only `agent-doc claim` adds session UUIDs. Files with session UUIDs are always treated as **registered**, even if the registry entry was pruned (dead pane). This enables the declarative layout flow: navigating to a file in a split creates a tmux pane regardless of registry state. For managed files whose registered pane is in a stash window, sync **rescues** the pane back to the agent-doc window (via `swap-pane`, falling back to `join-pane`) — preserving the existing Claude session context. Only if rescue fails, or if no alive pane exists at all, does sync auto-start a fresh Claude session (via `route::auto_start()`).
+
+**Build stamp:** On each sync invocation, the binary compares its embedded build timestamp (`AGENT_DOC_BUILD_TIMESTAMP` from `build.rs`) against `.agent-doc/build.stamp`. On mismatch (new build detected), all startup locks (`.agent-doc/starting/*.lock`) are cleared and the stamp is updated. This prevents stale locks from old binary instances from blocking auto-start.
 
 **Empty col_args filtering:** Before processing, empty strings in `col_args` are filtered out. The JetBrains plugin sometimes sends phantom empty columns when editor splits change rapidly.
 

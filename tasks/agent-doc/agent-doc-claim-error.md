@@ -3232,7 +3232,7 @@ Add evaluate utility of `/btw` wrt agent-doc into agent:pending
 `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.37.zip`
 
 Switching to the right editor `corky.md` still **does not** update th tmux layout. Why?
-### Re: Plugin not yet installed (HEAD)
+### Re: Plugin not yet installed
 
 The updated plugin (0.2.37) has been built but **not installed in your IDE**. The currently loaded plugin is still 0.2.36, which has the busy guard that blocks sync during active sessions.
 
@@ -3242,7 +3242,7 @@ To install:
 3. Since classes changed structurally (ClaimAction lost methods, EditorTabSyncListener removed code): **uninstall first → restart → install → restart**
 
 After the restart, switching to corky.md should trigger sync because the busy guard is gone.
-<!-- agent:boundary:9374a70c -->
+<!-- agent:boundary:82056ded -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

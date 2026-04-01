@@ -870,7 +870,36 @@ Done. All tests pass (246), release built and 555 threads resynced.
 5. `src/sync/imap_sync.rs` — cleanup in `merge_message_to_file`, raw htmd in `html_to_markdown`
 6. `src/sync/gmail_api_sync.rs` — same pattern
 7. Tests updated across markdown.rs and test_sync.rs
-<!-- agent:boundary:95707208 -->
+
+Add tests.
+Update SPEC.md, README.md, ontology, module-harness
+### Re: Tests + docs update complete (HEAD)
+
+All 252 tests pass.
+
+#### Tests added:
+
+**markdown_clean.rs** (4 new, 11 total):
+- `strips_analytics_open_tracking` — Turing-style analytics/open paths
+- `strips_nested_media_queries` — complex @media with nested selectors
+- `plain_text_passes_through_unchanged` — no false positives on clean text
+- `multiple_tracking_domains_detected` — multi-domain detection
+
+**markdown.rs** (2 new):
+- `test_tracking_roundtrip` — serialize/parse `**Tracking:**` metadata line
+- `test_no_tracking_line_when_empty` — no Tracking line for clean emails
+
+#### Bug fix:
+`META_RE` regex used `\s*` which matched `\n`, causing `**Last updated**: ` to greedily consume the next line as its value (swallowing `**Tracking**: ...`). Fixed by changing `\s*` to `[ ]*` (spaces only, no newlines). This was a latent bug that only manifested when a metadata line had an empty value followed by another metadata line.
+
+#### SPEC.md updated:
+- §3.1 conversation format: added `**Tracking**` metadata field documentation
+- §6.3 Message Parsing: added body cleanup and tracking detection description
+
+#### Not applicable:
+- **README.md** — no user-facing CLI changes, sync internals documented in SPEC
+- **Ontology / module-harness** — no new domain terms or modules introduced; `markdown_clean` is a utility within the existing sync module, not a new bounded context
+<!-- agent:boundary:213cb80f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

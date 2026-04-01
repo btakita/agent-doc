@@ -1093,7 +1093,7 @@ Ready for a real-world test with a long audio file. Want to try it?
 Try it on the April call with robert-ward.
 
 Run nvi
-### Re: Try it on the April call with robert-ward (HEAD)
+### Re: Try it on the April call with robert-ward
 
 Running `corky transcribe` on the April 1 call:
 
@@ -1103,7 +1103,7 @@ corky transcribe --diarize --speakers "Brian,Robert" \
 ```
 
 Transcription in progress... will update with results.
-<!-- agent:boundary:dd0d55aa -->
+<!-- agent:boundary:82fc2a4a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

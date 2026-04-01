@@ -1322,7 +1322,7 @@ Please close the gap.
 - **Death:** Process exits (Claude session ends) → pane auto-closes → registry pruned by `resync`
 
 The busy pane guard prevents step "Stashed" from happening to panes with active sessions, which was the root cause of your document switch issue.
-### Re: Session restarts, editor lag, stash mechanics, column memory, layout.rs gap (HEAD)
+### Re: Session restarts, editor lag, stash mechanics, column memory, layout.rs gap
 
 #### Claude session restarting
 
@@ -1376,7 +1376,7 @@ Currently: `["tasks/agent-doc/agent-doc-claim-error.md", "tasks/software/corky.m
 #### layout.rs gap closed
 
 Added `is_pane_busy()` check before `break_pane` in `layout.rs:208-216`. Busy panes (running agent-doc/claude) are now skipped with a log message instead of being broken out. Release binary built.
-<!-- agent:boundary:9084321b -->
+<!-- agent:boundary:7f7e42ac -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -3230,7 +3230,19 @@ Add evaluate utility of `/btw` wrt agent-doc into agent:pending
 
 **Ready for plugin install.** The JB plugin zip is at:
 `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.37.zip`
-<!-- agent:boundary:10833cd8 -->
+
+Switching to the right editor `corky.md` still **does not** update th tmux layout. Why?
+### Re: Plugin not yet installed (HEAD)
+
+The updated plugin (0.2.37) has been built but **not installed in your IDE**. The currently loaded plugin is still 0.2.36, which has the busy guard that blocks sync during active sessions.
+
+To install:
+1. IDEA → Settings → Plugins → gear icon → "Install Plugin from Disk..."
+2. Select: `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.37.zip`
+3. Since classes changed structurally (ClaimAction lost methods, EditorTabSyncListener removed code): **uninstall first → restart → install → restart**
+
+After the restart, switching to corky.md should trigger sync because the busy guard is gone.
+<!-- agent:boundary:9374a70c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -3244,6 +3256,7 @@ Add evaluate utility of `/btw` wrt agent-doc into agent:pending
 - [x] `cargo build --release` in agent-doc submodule
 - [x] Add tests for occurrence-counting HEAD marker logic
 - [x] Audit docs (SPEC.md, claim.rs, git.rs module docs)
-- [ ] Install updated JetBrains plugin and verify
+- [ ] Install updated JetBrains plugin (uninstall → restart → install → restart)
+- [ ] Verify sync triggers on editor tab switch
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

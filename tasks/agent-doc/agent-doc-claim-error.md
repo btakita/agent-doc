@@ -2716,7 +2716,7 @@ This means `agent-doc commit` couldn't selectively stage just the agent response
 **This is a known limitation of streaming checkpoints.** The checkpoint write updates the snapshot, and if the final write's baseline doesn't match the post-checkpoint snapshot, the stale baseline guard fires. The fix would be to save a new baseline after each checkpoint (which the skill instructions say to do), but I didn't do that correctly in the previous cycle.
 
 **For this session going forward:** I'll only use checkpoints when the response is genuinely multi-part and takes a long time. For the `session` CLI implementation, the checkpoint was unnecessary — I should have just written the final response directly.
-<!-- agent:boundary:2d772bf6 -->
+<!-- agent:boundary:7391e243 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

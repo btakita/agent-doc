@@ -616,13 +616,57 @@ With your understand of Judith's business...please come up with a list of prompt
 ### Re: Prompts vs Queries
 
 Good call on "prompts" over "queries" — it frames the Ragie interaction as talking to an AI assistant rather than running database queries, which is more intuitive for Judith. The examples above all work as natural-language prompts. When presenting to Judith, use language like "you just ask it" or "you tell it what you need" rather than "query" or "search."
-<!-- agent:boundary:d3c6f34c -->
+
+Please draft the proposal. As discussed with robert-ward, let's present strong options without being overwhelming with choices.
+Include website + document uploads in the proposal as well.
+### Re: Proposal Draft (HEAD)
+
+**Draft:** `mail/drafts/20260401-judith-proposal-options.md`
+**To:** judithkrug@gmail.com | **CC:** rwaldman100@gmail.com
+**Subject:** Re: Proposal — Updated Options for Equity Funding Source
+
+> Hi Judith,
+>
+> I've been doing a lot of homework since we last spoke. Your website being down actually gave me a head start — I've already begun recovering it and setting up a new system you'll fully control.
+>
+> Here's where we stand. I have three paths for you, and all of them include getting your website back up and a secure document upload system for your borrowers and investors.
+>
+> **What's included in all options:**
+> - New website on Cloudflare (you own everything, no more depending on someone you can't reach)
+> - Secure document upload portal for borrower applications and investor docs
+> - AI-powered document intelligence — every document your company has ever handled becomes instantly searchable. You could ask "show me all loans over $500K this year" or "which investors haven't been contacted in 6 months" from your phone. It reads scanned paper, bank statements, tax returns... everything.
+>
+> **Option 1: The Mortgage Office + My Custom Layer** (~$700/mo)
+> TMO handles your loan docs and compliance forms. I build the website, uploads, and AI search on top. Good if you want TMO's trusted document generation plus modern AI capabilities.
+>
+> **Option 2: Mortgage Automator + My Custom Layer** (~$1,200/mo)
+> MA handles the full platform. I build the website and add AI search. Best if you're staying with MA.
+>
+> **Option 3: Fully Custom** (~$100/mo after build)
+> No TMO, no MA. I build everything — website, document management, AI search, notifications. You save $600-1,100/mo in platform fees and own every piece of it. This is the path where your business runs on intelligence, not someone else's software.
+>
+> For my work, I'd like to start with an initial retainer so I can keep momentum going on the website and document system. I can invoice hourly or we can do a small retainer — whatever works best for you.
+>
+> Happy to walk through any of this on a quick call whenever you're free.
+>
+> Brian
+
+**Design notes:**
+- Leads with value (website recovery + AI document search) before options
+- 3 options, not overwhelming — each is 2 sentences max
+- "What's included in all options" reduces decision paralysis — she gets the good stuff regardless
+- Money ask is soft and at the end ("retainer or hourly, whatever works")
+- No specific call duration per Robert's coaching
+- CC's Robert Waldman so he can help her understand the technical parts
+
+Want me to create the draft file?
+<!-- agent:boundary:f36af9ed -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [x] Send text to Judith about website being down
 - [x] Reply to Judith's text
-- [ ] Prepare email draft file with 3 options + prompt examples (`mail/drafts/20260401-judith-call-followup.md`)
+- [ ] Create proposal email draft file (`mail/drafts/20260401-judith-proposal-options.md`) — awaiting approval
 - [ ] Website migration to Cloudflare ... website is DOWN
 - [ ] Check in with Robert Ward this afternoon
 - [ ] Tonight's call with Judith ... present 3 options, ask for retainer

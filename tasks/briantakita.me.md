@@ -656,7 +656,7 @@ AI agent sessions or AI document agent sessions or AI document sessions or AI do
 **"AI agent sessions"** for the hook (recognition), **"interactive document sessions"** in the body (differentiation). The hook grabs attention with a familiar term; the body introduces the novel concept.
 
 Keep the opening as: "532 git commits in one day. 11 parallel AI agent sessions."
-<!-- agent:boundary:204869f4 -->
+<!-- agent:boundary:d363df91 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

@@ -130,7 +130,7 @@ Acknowledged the compacted exchange. The open items from prior sessions are:
 
 Which would you like to tackle, or is there new work to start?
 1 and 2
-### Re: 1 and 2 (HEAD)
+### Re: 1 and 2
 
 **1. JSON-LD VideoObject — already done.** `post__doc_html.ts` already injects `VideoObject` structured data when `video_url` is present in frontmatter. All 13 video posts have it. Sitemap `<video:video>` entries are also generated. No work needed — closing this item.
 
@@ -148,7 +148,7 @@ This hardcoded path won't exist on CI (GitHub Actions uses `/home/runner/work/..
 | **D. Fix esmcss** | Resolve `@source` relative to CSS file, not temp dir | Root cause fix | Deeper change |
 
 Which approach do you prefer?
-<!-- agent:boundary:303bff93 -->
+<!-- agent:boundary:111315f3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

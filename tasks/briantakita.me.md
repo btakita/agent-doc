@@ -455,7 +455,7 @@ This is an old bug. You are looking too far back into the git history. Please li
 We should note that the complexity of this issue is agent-doc being a complex challenge in itself. But we are able to address due to dog-fooding the process. The SPEC is being iterated upon...as this interaction is novel. But the complexity is worth it...because other complex problems are tractable with agent-doc.
 
 META: Am I divulging too much? Can I expose myself to risk by publishing this?
-### Re: v5 — anonymized, real bugs, dog-fooding theme, risk assessment (HEAD)
+### Re: v5 — anonymized, real bugs, dog-fooding theme, risk assessment
 
 Major rewrite addressing all your feedback:
 
@@ -483,7 +483,7 @@ Major rewrite addressing all your feedback:
 Low risk. The post describes architecture of an open-source tool, standard agentic security considerations, bug-fixing competence, and forward-looking concerns. No credentials, no client details, no real names. The dog-fooding angle shows builder credibility. The security discussion shows you're thinking about this before shipping multi-user.
 
 File updated at `src/briantakita.me-dev/app/briantakita.me/post/content/2026-04-01-agent-security-multiuser-lessons.md`.
-<!-- agent:boundary:393b3113 -->
+<!-- agent:boundary:a8fd91aa -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

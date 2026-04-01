@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Hook integration assessed. agent-doc hooks are harness-agnostic; bridge to Claude Code hooks proposed.
+Transport abstraction designed. HookTransport trait + socket/tmux/MCP transports proposed.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1709,23 +1709,97 @@ The distinction:
 
 1. **Claude Code hooks → agent-doc hooks**: A Claude Code `PostToolUse` hook could fire `agent-doc` CLI commands that trigger agent-doc events. For example, after any write tool call, fire `agent-doc hook fire post_write <file>`. This bridges Claude Code's event model into agent-doc's cross-session bus.
 
+Is this Rust only or shell commands?
+
 2. **agent-doc hooks → Claude Code**: An agent-doc session could poll for events and use them to trigger `/agent-doc` invocations in other Claude Code sessions via `tmux send-keys`.
 
 3. **Multi-harness**: The `agent_kit::hooks` module is a library — any Rust CLI tool can import it. If OpenCode or Pi had Rust-based agent tools, they could participate in the same hook bus.
 
+Why must it be a Rust CLI tool? Can it be any CLI tool instead?
+
 **The real value** is #1: bridging Claude Code's existing hook system into agent-doc's multi-session coordination. This would let Claude Code hooks trigger cross-document updates automatically.
 
 Should I implement the Claude Code hook bridge?
-<!-- agent:boundary:3f6530d2 -->
+Yes.
+We should also consider making tmux one of many ways of integrating with the agent harness.
+For example, we may want to use MCP or a service approach. There should be an appropriate abstraction that can be used to interporate other mechanisms.
+### Re: Hook transport abstraction + Claude Code bridge (HEAD)
+
+#### Shell commands, not Rust-only
+
+**Both.** The file-based hook system is just JSON files in `.agent-doc/hooks/`. Any process — shell script, Python, Node, Go — can fire events by writing JSON files and poll by reading them. The Rust `HookRegistry` is a convenience library, not a requirement.
+
+A shell-based fire:
+```bash
+mkdir -p .agent-doc/hooks/post_write
+cat > ".agent-doc/hooks/post_write/$(date +%s)-event.json" <<EOF
+{"event":"post_write","file":"doc.md","session_id":"abc","timestamp":$(date +%s),"data":{}}
+EOF
+```
+
+Any CLI tool in any language can participate. The `agent-kit` Rust crate just provides ergonomic wrappers.
+
+#### Transport abstraction
+
+Good call. tmux `send-keys` is one transport for triggering sessions. But we should abstract this behind a **Transport trait** so other mechanisms can plug in:
+
+| Transport | How it triggers | Pros | Cons |
+|-----------|----------------|------|------|
+| **tmux send-keys** | Sends keystrokes to pane | Works now, no setup | Fragile, requires tmux |
+| **MCP** (Model Context Protocol) | Tool call to running agent | Structured, bidirectional | Needs MCP server per session |
+| **Unix socket IPC** | JSON message to socket | Low latency, already exists in agent-doc | Process must be listening |
+| **HTTP service** | REST API call | Language-agnostic, scalable | Needs daemon |
+| **File watch** | Write trigger file, agent watches | Simple, universal | Higher latency |
+
+agent-doc already has Unix socket IPC (for plugin writes). Extending it for hook delivery is the lowest-friction path.
+
+#### Architecture: `HookTransport` trait
+
+```rust
+pub trait HookTransport {
+    /// Deliver an event to a target session.
+    fn deliver(&self, target_session: &str, event: &ReceivedEvent) -> Result<bool>;
+    /// Check if the target is reachable.
+    fn is_available(&self, target_session: &str) -> bool;
+}
+```
+
+Implementations:
+- `TmuxTransport` — current: `tmux send-keys` to pane (from sessions.json)
+- `SocketTransport` — deliver via Unix domain socket (extend existing IPC)
+- `McpTransport` — future: deliver as MCP tool call
+
+The `HookRegistry` would gain a `deliver()` method that uses the configured transport to push events to subscribers, in addition to the existing file-based poll mechanism.
+
+#### Claude Code hook bridge
+
+For the Claude Code side, we add a `settings.json` hook that fires on relevant events:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [{
+      "matcher": "Write|Edit",
+      "command": "agent-doc hook fire post_write \"$FILE\""
+    }]
+  }
+}
+```
+
+This bridges Claude Code's event model → agent-doc's hook bus → other sessions via transport.
+
+This is the right direction but it's a significant architectural piece. Recommend: ship the `HookTransport` trait + socket transport in agent-kit v0.3, then wire the Claude Code bridge as a follow-up.
+<!-- agent:boundary:e96c8ad0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **agent-kit hooks** — `HookRegistry` with fire/poll/gc, 6 tests
+- [x] **agent-kit hooks** — file-based fire/poll, 6 tests
 - [x] **agent-doc hook integration** — post_write, post_commit wired in
-- [ ] **Claude Code hook bridge** — PostToolUse → agent-doc hook fire
-- [ ] **Wire remaining hooks** — claim (claim.rs), layout_change (sync.rs)
+- [ ] **HookTransport trait** — abstract delivery mechanism (socket, tmux, MCP)
+- [ ] **SocketTransport** — extend existing IPC for hook delivery
+- [ ] **Claude Code hook bridge** — PostToolUse settings.json → agent-doc hook fire
 - [ ] **Publish agent-kit v0.3** + switch agent-doc back to registry dep
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)

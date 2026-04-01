@@ -597,7 +597,7 @@ This should either be a precommit hook or part of the build or both. Which one i
 Added `bun post/index.generate.ts` as a CI step in `deploy.yml`, right before the build. Now new blog posts will always be included in the build even if the local `index.ts` wasn't regenerated before pushing.
 
 Committed and pushed to briantakita.me-dev. The CI push will also trigger a fresh deploy with the regenerated index — so this should also fix the current deploy.
-### Re: Precommit hook vs build step (HEAD)
+### Re: Precommit hook vs build step
 
 **Best option: both.**
 
@@ -605,7 +605,7 @@ Committed and pushed to briantakita.me-dev. The CI push will also trigger a fres
 - **Pre-commit hook** — keeps local `index.ts` in sync for `bun run dev`
 
 CI alone is sufficient for deploy correctness. The hook is a DX improvement. Want me to add the pre-commit hook?
-<!-- agent:boundary:707e0019 -->
+<!-- agent:boundary:ae38ade4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

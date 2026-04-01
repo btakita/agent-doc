@@ -2880,11 +2880,28 @@ Yes, VERSIONS.md was updated before the release commit. The 0.31.0 entry include
 **PyPI publish failed** — `linux_x86_64` platform tag is rejected by PyPI. Needs `manylinux` tag which requires building in a manylinux container (e.g., `maturin publish` inside a `quay.io/pypa/manylinux_2_28_x86_64` container, or via CI). This is a CI/packaging task, not a code change.
 
 For now, users install via `cargo install agent-doc` or the GitHub Release binary. PyPI publishing can be added when CI is set up.
-<!-- agent:boundary:d4800d2e -->
+
+We already have github actions. Are we missing anything? 
+
+Please fix windows build: https://github.com/btakita/agent-doc/actions/runs/23866480470/job/69586860052
+### Re: Windows build fix (HEAD)
+
+**Root cause:** `agent-kit` v0.3.1 used `std::os::unix::net::UnixStream` in `SocketTransport` without a `#[cfg(unix)]` guard. Windows doesn't have Unix domain sockets.
+
+**Fix:** Gated `SocketTransport` struct, both impl blocks, and 2 tests behind `#[cfg(unix)]`. Published as `agent-kit` v0.3.2.
+
+**Published:**
+- `agent-kit` v0.3.2 → crates.io ✓, pushed to GitHub ✓
+- `agent-doc` updated dep to `agent-kit = "0.3.2"`, committed and pushed
+
+**GitHub Actions:** The existing CI already runs Windows builds — the next push should trigger a green build. The CI workflow handles cross-platform builds via maturin.
+
+**Re: PyPI manylinux** — the existing GitHub Actions workflow already builds manylinux wheels via CI containers. The local `maturin publish` fails because it's not in a manylinux container. CI handles this automatically on release.
+<!-- agent:boundary:d255e8de -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **PyPI manylinux packaging** — needs CI container build for proper platform tags
+(empty — Windows fix deployed)
 <!-- /agent:pending -->

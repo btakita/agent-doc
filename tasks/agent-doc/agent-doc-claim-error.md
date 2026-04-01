@@ -1902,14 +1902,14 @@ All tests pass. Release binary deployed.
 > SKILL.md staleness (managed by binary)
 
 Does this need to be fixed?
-### Re: SKILL.md staleness (HEAD)
+### Re: SKILL.md staleness
 
 **No fix needed.** The SKILL.md is intentionally managed by the binary (`agent-doc skill install`), not manually edited. The audit checks modification time of source files against docs — since we changed `main.rs` (added Hook command), SKILL.md appears "stale." But SKILL.md only describes the agent-doc workflow for Claude Code sessions, not the full CLI surface. The `hook` subcommand is a binary-level feature, not a skill-level instruction.
 
 Running `agent-doc skill install` would regenerate SKILL.md from the binary's bundled template, but since the Hook command is used from the CLI (not from within a Claude Code skill session), there's nothing to add to SKILL.md.
 
 The audit warning is a false positive for this case — SKILL.md doesn't need updating when internal CLI commands change. It only needs updating when the agent-doc session workflow (diff → respond → write → commit) changes.
-<!-- agent:boundary:e3db1714 -->
+<!-- agent:boundary:52774485 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

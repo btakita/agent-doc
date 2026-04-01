@@ -1158,7 +1158,7 @@ Transcription re-running on the 79-min call. Should complete much faster with GP
 **Build note:** The `diarize` feature implies `transcribe` but not `transcribe-cuda`. Need to always include `transcribe-cuda` explicitly on this machine.
 
 Why was corky not built with gpu support?
-### Re: Transcription complete (HEAD)
+### Re: Transcription complete
 
 Transcription finished successfully. 575 lines, 66KB output.
 
@@ -1181,7 +1181,7 @@ Transcription finished successfully. 575 lines, 66KB output.
 
 Saved diarized transcript to:
 `mail/contacts/robert-ward/recordings/phone_20260401-042624_3109684542_diarized.txt`
-<!-- agent:boundary:97cc51c4 -->
+<!-- agent:boundary:35a39b24 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

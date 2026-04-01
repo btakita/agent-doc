@@ -778,7 +778,7 @@ Should we delay teaser post until tomorrow morning or post when LinkedIn comes b
 Want me to set up a corky scheduled publish for tomorrow morning?
 
 Today is Wed April 1st. Why is your date incorrect?
-### Re: Date correction (HEAD)
+### Re: Date correction
 
 You're right, I had the day wrong. Today is **Wednesday April 1st, 2026**. Apologies.
 
@@ -789,7 +789,7 @@ Since today is already Wednesday (peak engagement day), updated options:
 3. **Post tomorrow (Thursday) morning** removes the April Fools association entirely
 
 The April 1st concern still applies regardless of day-of-week. Recommend **Thursday 9 AM ET** to dodge both the outage aftermath and April Fools skepticism.
-<!-- agent:boundary:3d6e94b5 -->
+<!-- agent:boundary:9fe8a9ef -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

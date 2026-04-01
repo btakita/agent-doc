@@ -584,7 +584,21 @@ Refetched thread `19d479af292d8d99` via `corky sync refetch`. The email body was
 
 **From:** Robert Ross <rob@dreamable.com> — Tue, 31 Mar 2026 22:53:38 -0700
 **Content:** Rob reviewed your application and videos, wants to schedule a chat about the role at Dreamable. Requests Wed (Apr 2) or Thu (Apr 3) 12-4pm PT.
-<!-- agent:boundary:eb2792f5 -->
+
+Please go through synchronized emails in /home/brian/work/btakita/agent-loop/mail/conversations
+Note which ones have an empty body. Please resync those email threads.
+### Re: Email body resync (HEAD)
+
+Scanned all conversation files in `mail/conversations/` — found **555 emails with empty bodies**.
+
+Ran `corky sync refetch` on all 555 threads (0 errors).
+
+**Results:**
+- **258** emails now have bodies (text content recovered)
+- **297** remain empty — these are HTML-only emails (newsletters, marketing, tracking pixels) where the original message had no plain-text part. Corky stored the raw HTML but the body detection script considers them empty since they're just markup, not readable text.
+
+The 297 remaining empty ones are a potential corky improvement — an html2text fallback for emails that only have `text/html` MIME parts. This would extract readable content from HTML-only emails during sync.
+<!-- agent:boundary:a465bb72 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -592,4 +606,5 @@ Refetched thread `19d479af292d8d99` via `corky sync refetch`. The email body was
 <!-- agent:pending -->
 - Respond to Rob Ross (Dreamable) — schedule meeting Wed/Thu 12-4pm PT
 - crates.io token — renew and publish corky 0.23.0
+- corky improvement: html2text fallback for HTML-only emails (297 emails affected)
 <!-- /agent:pending -->

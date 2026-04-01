@@ -2719,7 +2719,7 @@ This means `agent-doc commit` couldn't selectively stage just the agent response
 **For this session going forward:** I'll only use checkpoints when the response is genuinely multi-part and takes a long time. For the `session` CLI implementation, the checkpoint was unnecessary — I should have just written the final response directly.
 
 It seems we are playing whack-a-mole. One fix breaks other things. Can we refactor to simplify the codebase?
-### Re: Lost right pane when switching to corky.md (HEAD)
+### Re: Lost right pane when switching to corky.md
 
 **Expected behavior, but not great UX.** When you switched the right editor to `tasks/software/corky.md`, the tmux-router synced the layout. Since corky.md has no agent-doc session, the judith-krug pane (%343) was stashed. The agent-doc window went from 2 panes to 1.
 
@@ -2738,7 +2738,7 @@ It seems we are playing whack-a-mole. One fix breaks other things. Can we refact
 These are real bugs that needed fixing. The good news: all fixes are in the binary, tested, and deployed. The session management should be much more stable now.
 
 Want to commit all the agent-doc submodule changes and wrap up this session? Or are there more issues to address?
-<!-- agent:boundary:d8316333 -->
+<!-- agent:boundary:24375227 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

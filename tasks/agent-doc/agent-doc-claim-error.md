@@ -1424,7 +1424,7 @@ I did a `git submodule init && git submodule update`. Recheck.
 audit docs
 add tests
 update SPEC.md, README.md, ontologies, module-harness
-### Re: Audit docs, tests, documentation updates (HEAD)
+### Re: Audit docs, tests, documentation updates
 
 #### censible-core submodule
 
@@ -1453,7 +1453,7 @@ After updates:
 - 2 ops_log tests — file creation/append + graceful degradation
 - 4 auto_start tests — still pass with startup lock (best-effort skip for test fixtures)
 - All 38 CLI integration tests pass
-<!-- agent:boundary:571918eb -->
+<!-- agent:boundary:38e1916d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

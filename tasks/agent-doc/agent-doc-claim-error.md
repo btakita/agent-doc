@@ -1473,7 +1473,7 @@ Steps completed:
 3. Published to crates.io
 4. Updated agent-doc Cargo.toml from path dep to `"0.3.7"`
 5. Verified build + tests
-<!-- agent:boundary:8665ceeb -->
+<!-- agent:boundary:e90e794e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

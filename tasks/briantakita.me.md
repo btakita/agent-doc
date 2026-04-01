@@ -641,13 +641,13 @@ Post confirmed live at `https://briantakita.me/posts/agent-security-multiuser-le
 
 Ready to post when you are.
 Should the link be in the post or in the 1st comment?
-### Re: Link placement (HEAD)
+### Re: Link placement
 
 **First comment.** LinkedIn deprioritizes posts with external links in the body. Standard practice:
 
 1. Post body ends with "Full post linked in the first comment."
 2. Immediately comment with the URL: `https://briantakita.me/posts/agent-security-multiuser-lessons/`
-<!-- agent:boundary:231e75fe -->
+<!-- agent:boundary:f9fcbea0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

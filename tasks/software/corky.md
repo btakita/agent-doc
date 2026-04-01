@@ -648,7 +648,7 @@ fn extract_body_from_parts(parts: &[Part], token: &str, message_id: &str) -> Str
 
 Same pattern for `imap_sync.rs`. Want me to implement it?
 Should we prefer "text/html" over "text/plain" so we can have formatted markdown? Since "text/html" has formatting info.
-### Re: Prefer text/html over text/plain (HEAD)
+### Re: Prefer text/html over text/plain
 
 Yes — preferring `text/html` → `htmd` conversion over raw `text/plain` would produce better markdown. Here's the comparison:
 
@@ -677,7 +677,7 @@ Ready to implement. The change touches:
 3. `src/corky/src/sync/imap_sync.rs` — `extract_body`
 
 Want me to go ahead?
-<!-- agent:boundary:60466be1 -->
+<!-- agent:boundary:cae55944 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

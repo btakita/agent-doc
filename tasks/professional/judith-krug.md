@@ -332,6 +332,7 @@ The reply looks good. Full send.
 
 Please read the transcript for the last phone call with robert-ward. Come up with a plan for today.
 I will start with Judith's website. Also need to plan Ragie integration with Judith's at equity-fundng-source.
+<!-- agent:boundary:e6d7972b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

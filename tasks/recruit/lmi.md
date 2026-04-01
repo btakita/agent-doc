@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-Josh email corrected — ready to send
+Josh email revised with prototype spike framing — ready for approval
 <!-- /agent:status -->
 
 ## Exchange
@@ -759,14 +759,30 @@ Strong framing. For a federal audience, this is actually more credible than pres
 3. Closing (line 30): reframe as "walkthrough of the prototype and the production spec we're developing from it"
 
 Should I apply the prototype framing revisions to the email draft?
-<!-- agent:boundary:ad78b4e8 -->
+
+Please read updates to email draft. Please update with additional framing.
+### Re: Email Draft — Prototype Spike Framing Applied (HEAD)
+
+Read the draft and applied three revisions:
+
+1. **Line 14 — qualifying capabilities:** "Those map directly to what I've been exploring in the agent-doc prototype:"
+2. **Line 32 — security reframed:** "the prototype operates in a single-user security model..." and "Lessons from the prototype are driving the spec."
+3. **Line 34 — closing reframed:** "Would be happy to walk through the prototype and the production spec we're developing from it. The spike has validated the interaction model...now we're iterating on the spec with security scrutiny before committing to production architecture."
+
+The framing now signals: working prototype → validated interaction model → spec under development → production with security scrutiny. This is exactly how federal engineering teams think about software maturation.
+
+**Note:** Your message got cut off: "Note that during the interview I broug..." — want to finish that thought?
+
+Draft updated at: `mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-interactive-document-genera.md`
+
+Ready to send when you approve.
+<!-- agent:boundary:3b283ccf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Revise Josh email with prototype spike framing (pending approval)
-- [ ] Send Josh Malloy follow-up email (after revision)
+- [ ] Send Josh Malloy follow-up email (prototype framing applied, pending approval)
 - [ ] agent-doc README: security section (single-user, prompt injection)
 - [ ] Corky: HTML body extraction for emails
 - [ ] Research LMI uncleared role options
@@ -774,4 +790,5 @@ Should I apply the prototype framing revisions to the email draft?
 - [x] All post-interview tasks complete
 - [x] Security clearance + subcontracting guidance provided
 - [x] Josh email source link fixed
+- [x] Prototype spike framing applied to Josh email
 <!-- /agent:pending -->

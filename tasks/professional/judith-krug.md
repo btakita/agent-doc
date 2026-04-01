@@ -660,13 +660,29 @@ Include website + document uploads in the proposal as well.
 - CC's Robert Waldman so he can help her understand the technical parts
 
 Want me to create the draft file?
-<!-- agent:boundary:8532a7fb -->
+Let's include the example prompts as a p.s. to the email. I want Judith to visualize the power of what she will be getting.
+She will be able to run prompts from her phone.
+### Re: Draft Created with P.S. Prompts (HEAD)
+
+Created `mail/drafts/20260401-judith-proposal-options.md` — full proposal with P.S. section showcasing 8 example prompts:
+
+- Loan pipeline (active applications over $500K)
+- Investor relations (who hasn't been contacted in 90 days, IRA/trust accounts)
+- Compliance (trust deeds, missing construction budgets)
+- Geographic (Malibu, Pacific Palisades)
+- Business intelligence (average loan size, investor utilization)
+
+The P.S. lets Judith visualize the power without cluttering the main email. Closes with "Like having a brilliant assistant who's read every file in your office."
+
+Ready to send via `corky draft push` when you approve.
+<!-- agent:boundary:88c653b8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [x] Send text to Judith about website being down
 - [x] Reply to Judith's text
-- [ ] Create proposal email draft file (`mail/drafts/20260401-judith-proposal-options.md`) — awaiting approval
+- [x] Create proposal email draft file with prompts P.S.
+- [ ] Send proposal email — awaiting approval
 - [ ] Website migration to Cloudflare ... website is DOWN
 - [ ] Check in with Robert Ward this afternoon
 - [ ] Tonight's call with Judith ... present 3 options, ask for retainer

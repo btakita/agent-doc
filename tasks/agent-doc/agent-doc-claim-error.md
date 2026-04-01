@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Docs updated (SPEC.md, README.md). Audit down to 3 issues (from 5). All 382 tests pass.
+tmux-router 0.3.7 published. agent-doc back on registry dep. All 592 tests pass.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1453,7 +1453,27 @@ After updates:
 - 2 ops_log tests — file creation/append + graceful degradation
 - 4 auto_start tests — still pass with startup lock (best-effort skip for test fixtures)
 - All 38 CLI integration tests pass
-<!-- agent:boundary:38e1916d -->
+release:
+- [ ] **Publish tmux-router 0.3.7** (SyncOptions API) + switch agent-doc back to registry dep
+### Re: tmux-router 0.3.7 published (HEAD)
+
+**tmux-router v0.3.7 published to crates.io.**
+
+Changes:
+- `SyncOptions` struct with `protect_pane: Option<&dyn Fn(&str) -> bool>` callback
+- `sync_with_options()` variant accepting `SyncOptions`
+- DETACH phase + empty-panes stash path respect `protect_pane`
+- Backward-compatible: `sync()` uses default options
+
+**agent-doc switched back to registry dependency** (`tmux-router = "0.3.7"`). All 592 tests pass. Release binary built.
+
+Steps completed:
+1. Bumped tmux-router to 0.3.7
+2. Committed, pushed, tagged in submodule
+3. Published to crates.io
+4. Updated agent-doc Cargo.toml from path dep to `"0.3.7"`
+5. Verified build + tests
+<!-- agent:boundary:56e106c5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1465,8 +1485,8 @@ After updates:
 - [x] **Session resume on document switch** — busy pane guard in DETACH + layout.rs
 - [x] **Fix auto-start race** — startup lock with 5s TTL
 - [x] **Docs updated** — SPEC.md §6.6/§7.9/§7.20, README.md key features
-- [x] **Audit docs** — 5 → 3 issues (remaining are informational/no-change-needed)
-- [ ] **Publish tmux-router 0.3.7** (SyncOptions API) + switch agent-doc back to registry dep
+- [x] **Audit docs** — 5 → 3 issues
+- [x] **Publish tmux-router 0.3.7** + switch agent-doc back to registry dep
 - [ ] **Bug 2A: Divergence check before auto-start**
 - [ ] **Bug 2B: Rollback guard in commit()**
 - [ ] **Multi-harness hooks** (agent-kit)

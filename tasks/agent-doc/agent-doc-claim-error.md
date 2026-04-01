@@ -2310,7 +2310,7 @@ Retries until user stops typing for 500ms, then applies. Same pattern as the exi
 
 Want me to implement both layers?
 Yes
-### Re: Implementation complete (HEAD)
+### Re: Implementation complete
 
 Implemented both layers:
 
@@ -2330,7 +2330,7 @@ Implemented both layers:
 - `editors/jetbrains/.../PatchWatcher.kt` — typing-aware deferred reposition
 
 All 597 tests pass. Needs: `cargo build --release` + rebuild JB plugin to test live.
-<!-- agent:boundary:c163db7f -->
+<!-- agent:boundary:834a2872 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -62,7 +62,7 @@ The typical edit cycle: write in your editor, trigger `agent-doc route <file>` v
 - **Linked resources** — `links` frontmatter field for local files and URLs; URL content fetched, converted HTML→markdown via `htmd`, cached, and diffed on each preflight
 - **Session logging** — persistent logs at `.agent-doc/logs/<session-uuid>.log` for debugging session crashes and restarts
 - **Git integration** — auto-commit each run; squash history with `agent-doc clean`
-- **Bulk resync** — validates session state and fixes stale/orphaned panes in 3 subprocess calls instead of ~20-40
+- **Bulk resync** — validates session state and fixes stale/orphaned panes in 2 subprocess calls instead of ~20-40
 - **Column memory** — `.agent-doc/last_layout.json` remembers column→agent-doc mapping; preserves 2-pane tmux layout when one editor column switches to a non-agent file
 - **Stash + rescue** — replaced panes are stashed (alive in background); stash rescue brings them back when the user switches to that document again
 - **Startup lock** — `.agent-doc/starting/<hash>.lock` with 5s TTL prevents double-spawn when sync fires twice in quick succession

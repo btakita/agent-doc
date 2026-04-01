@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Bug 2A/2B reassessed: both deferred (low-risk edge cases, partially addressed by session work).
+Bug 2A + 2B implemented. IPC snapshot failures non-fatal; commit auto-recovers divergence.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1494,6 +1494,8 @@ What's NOT addressed: The specific scenario where IPC write succeeds but snapsho
 
 **Recommendation: Defer.** The risk is low and the existing guards cover the common failure modes. If it recurs, the ops log now captures enough data to diagnose.
 
+We should at least have an stderr message. Would a fix/mitigation be practical as well? We should just do it now if practical.
+
 ---
 
 **Bug 2B: Rollback guard in commit()**
@@ -1508,10 +1510,46 @@ The remaining scenario: IPC write succeeds (plugin applies patch) but the Rust p
 
 **Recommendation: Defer to next session.** This is a robustness improvement, not a regression. The fix is straightforward (compare file content vs snapshot in `git.rs:commit()`, warn or auto-update snapshot), but it's not blocking anything right now.
 
+Implement now.
+
 ---
 
 **Summary:** Both bugs are edge cases narrowed by this session's work. Neither is actively causing issues. Recommend moving to the queue for the next session.
-<!-- agent:boundary:f09f8374 -->
+### Re: Bug 2A + Bug 2B implemented (HEAD)
+
+Both bugs fixed. Here's what was done:
+
+#### Bug 2A: IPC write succeeds but snapshot save fails
+
+**Fix:** Made snapshot save failure after IPC success **non-fatal** in both IPC paths (socket and file-based):
+
+- Socket IPC path (`try_ipc`, line ~1103): `snapshot::save` wrapped in `if let Err(e)` instead of `?`
+- File IPC path (`write_ipc_and_poll`, line ~1390): same treatment
+- Both paths: stderr WARNING with error details + ops log entry `snapshot_save_failed_after_ipc`
+- CRDT state save also wrapped (non-fatal)
+- The IPC write still returns `Ok(true)` — the plugin has the correct content
+
+**Recovery:** When commit runs next, Bug 2B's divergence detection auto-updates the snapshot from the file.
+
+#### Bug 2B: Snapshot/file divergence in commit
+
+**Fix:** Added divergence detection at the top of `git.rs:commit()`, before staging:
+
+1. Load snapshot and read file content
+2. Strip boundary markers, compare:
+   - If file has content the snapshot doesn't AND file doesn't start with snapshot → **diverged**
+   - Auto-update snapshot from file content
+   - stderr WARNING + ops log entry `snapshot_divergence_detected`
+3. Special case: no snapshot exists but file has content → create snapshot from file
+4. Staging then uses the corrected snapshot
+
+**How they work together:**
+1. `agent-doc write` → IPC write succeeds, snapshot save fails → WARNING logged
+2. `agent-doc commit` → detects file != snapshot → auto-updates snapshot → stages correct content
+3. User sees committed response in git (not stale snapshot)
+
+All 592 tests pass. Release binary built.
+<!-- agent:boundary:3e82e6f8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1525,7 +1563,8 @@ The remaining scenario: IPC write succeeds (plugin applies patch) but the Rust p
 - [x] **Docs updated** — SPEC.md, README.md
 - [x] **Audit docs** — 5 → 3 issues
 - [x] **Publish tmux-router 0.3.7** + registry dep restored
-- [ ] **Bug 2A/2B** — deferred (low-risk, partially addressed)
+- [x] **Bug 2A** — IPC snapshot save failure now non-fatal with warning
+- [x] **Bug 2B** — commit auto-recovers snapshot/file divergence
 - [ ] **Multi-harness hooks** (agent-kit)
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)

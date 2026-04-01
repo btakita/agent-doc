@@ -3400,7 +3400,7 @@ When you then ran `/agent-doc` (Run Agent Doc) on this document, the preflight c
 **Summary:** The fix is working end-to-end. The plugin's sync creates the second pane. The timing confusion was because the second pane existed but wasn't visually prominent until the next sync cycle adjusted focus/proportions.
 
 Also worth noting: `~/.cargo/bin/agent-doc` is still the OLD binary (from 15:19, before all fixes). Running `cargo install --path .` would update it. The symlink-based `.bin/agent-doc` is correct though.
-### Re: Honest assessment + old instance protection (HEAD)
+### Re: Honest assessment + old instance protection
 
 I don't know why the second pane didn't appear from the plugin's sync at 16:26 but did appear after `/agent-doc`. The sync log showed `exit=0` but that doesn't prove the pane was created — it may have exited successfully without creating anything due to a code path I haven't traced. I should have said this rather than speculating.
 
@@ -3413,7 +3413,7 @@ B. **Binary hash self-check:** On startup, hash the current binary and compare a
 C. **`agent-doc upgrade --restart`:** After building, explicitly restart all running agent-doc processes (send SIGHUP or kill+restart via tmux send-keys).
 
 Which approach appeals to you? Or a different mechanism?
-<!-- agent:boundary:cc27a292 -->
+<!-- agent:boundary:68b3770d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

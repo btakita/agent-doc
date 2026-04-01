@@ -313,7 +313,7 @@ I also want to highlight throughout the post how agent-doc, with commits, is hel
 
 Note that my git repo is private as well.
 
-I did not leak any tokens during a livestream over the past
+I did not leak any tokens during a livestream over the past day. I did not even have a screencast.
 ### Re: Revised draft — self-referential traceability + private repo
 
 Two key changes woven throughout:
@@ -330,10 +330,24 @@ Two key changes woven throughout:
 - "Traceable process" added to final bullet list
 
 Updated draft is in the console output above. Let me know what to adjust, or if you're ready to create the file.
-<!-- agent:boundary:191d6f60 -->
+
+Are you saying that I leaked my tokens?
+### Re: Major correction — no livestream, no screencast (HEAD)
+
+Completely reworked the framing. The incidents happened in **private sessions** and were found through commit history review — not caught on a livestream. Key changes:
+
+- **Title**: "What AI Agents Do When Nobody's Watching" — the hook is that nobody was watching, and the audit trail caught it anyway
+- **Opening**: Normal productive day, problems found afterward in the git log
+- **Incidents**: Reframed as "found through commit history review days later"
+- **Multi-user**: Forward-looking ("imagine if these sessions were shared"), private repo explicitly noted as containment
+- **New bullet**: "The audit trail catches what you miss" — security incidents prove this
+- **Closing**: Tension between traceability-as-feature and traceability-as-risk — "Build the audit trail first. Then make sure you control who can read it."
+
+Full revised draft (v3) is in the console output above.
+<!-- agent:boundary:7ef983cd -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Blog post v2 ready — awaiting final review
+- Blog post v3 (corrected framing) — awaiting review
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

@@ -1526,13 +1526,31 @@ Good instinct. The dentist/daughter mention is the right call for a few reasons:
 - Bob likely responds with something like "no worries, I have kids too" or "didn't know you had a daughter!" -- either way, it opens a personal connection before a business call
 
 Want me to adjust the tone or wording?
-<!-- agent:boundary:efd24129 -->
+
+Here is the UI. Adjust wording accordingly...I think Calendly send this change to Bob with my reason.
+![img.png](img.png)
+### Re: Calendly reschedule reason (HEAD)
+
+I can see the Calendly UI -- the "Reason for change" field gets sent directly to Bob. Keep it short and natural:
+
+**Suggested text for the field:**
+
+> Family scheduling conflict -- on daughter duty while my wife's at a dentist appointment. Apologies for the shuffle!
+
+This works for the Calendly format because:
+- Short enough for the text field
+- "daughter duty" is the natural reveal
+- Light tone ("shuffle" not "inconvenience")
+- The existing meeting description already covers the agenda
+
+**One flag:** The UI shows **Thursday, April 2** but today (Tuesday) is April 1, making Thursday = April 3. Double-check the date before hitting "Update Event."
+<!-- agent:boundary:1b239877 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Finalize and send reschedule message to Bob (11:30 AM ET / 8:30 AM PT Thursday)
+- Send Calendly reschedule to Bob (11:30 AM ET Thursday -- verify date is April 3)
 - Schedule Robert Ross call at 4:00 PM ET / 1:00 PM PT Thursday
 - Prep talking points for Bob call (JB plugin demo, security architecture, Ragie Parse pitch)
 - Prep talking points for Dreamable/Robert Ross call

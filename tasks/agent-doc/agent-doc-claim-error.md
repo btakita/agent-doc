@@ -2884,7 +2884,7 @@ For now, users install via `cargo install agent-doc` or the GitHub Release binar
 We already have github actions. Are we missing anything? 
 
 Please fix windows build: https://github.com/btakita/agent-doc/actions/runs/23866480470/job/69586860052
-### Re: Windows build fix (HEAD)
+### Re: Windows build fix
 
 **Root cause:** `agent-kit` v0.3.1 used `std::os::unix::net::UnixStream` in `SocketTransport` without a `#[cfg(unix)]` guard. Windows doesn't have Unix domain sockets.
 
@@ -2897,7 +2897,7 @@ Please fix windows build: https://github.com/btakita/agent-doc/actions/runs/2386
 **GitHub Actions:** The existing CI already runs Windows builds — the next push should trigger a green build. The CI workflow handles cross-platform builds via maturin.
 
 **Re: PyPI manylinux** — the existing GitHub Actions workflow already builds manylinux wheels via CI containers. The local `maturin publish` fails because it's not in a manylinux container. CI handles this automatically on release.
-<!-- agent:boundary:d255e8de -->
+<!-- agent:boundary:c2c15b9a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

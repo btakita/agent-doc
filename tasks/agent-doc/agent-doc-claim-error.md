@@ -3175,9 +3175,25 @@ C. **Narrow to write-busy only** — add a separate `is_write_busy()` FFI functi
 
 I'd recommend **A** (remove entirely) since `agent-doc sync` already has its own concurrency guards. The plugin-side busy guard is redundant and causes this exact failure mode. Want me to implement that?
 
+Yes. Should we use `/btw` to preempt a busy loop for sync?
+
 On the other items:
 - Tests, audit docs, SPEC.md, module-harness updates — I'll queue those after the sync fix.
-<!-- agent:boundary:58489106 -->
+### Re: Busy guard removed + /btw question (HEAD)
+
+Done — removed the busy guard from `EditorTabSyncListener.kt`. The 500ms debounce + FFI generation counter + sync lock are sufficient to prevent cascade. Plugin rebuilt.
+
+**On `/btw`:** I'm not familiar with a `/btw` command. Could you clarify what you mean? Are you asking about a mechanism to interrupt/preempt a sync that's stuck in a loop, or is this a slash command I'm not seeing?
+
+The existing guards against sync loops are:
+1. **500ms debounce** — coalesces rapid events into one sync
+2. **FFI generation counter** — supersedes stale events
+3. **FFI sync lock** — only one sync runs at a time, others skip
+4. **Layout hash dedup** in `LayoutChangeDetector` — only syncs when layout actually changes
+5. **Startup lock** (5s TTL) in Rust — prevents double-spawn of Claude sessions
+
+These should prevent busy loops. Is there a specific loop scenario you're concerned about?
+<!-- agent:boundary:42a1e56f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -3187,7 +3203,7 @@ On the other items:
 - [x] claim.rs: add registry protection against overwriting existing sessions
 - [x] git.rs: fix (HEAD) marker not added for duplicate heading text
 - [x] Bump JB plugin version to 0.2.37
-- [ ] Fix busy guard blocking sync for non-busy files
+- [x] Remove busy guard from EditorTabSyncListener.kt
 - [ ] `cargo build --release` in agent-doc submodule
 - [ ] Install updated JetBrains plugin
 - [ ] Add tests for occurrence-counting HEAD marker logic

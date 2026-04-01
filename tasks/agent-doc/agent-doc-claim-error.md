@@ -2850,11 +2850,29 @@ Update SPEC.md, README.md, ontology, module-harness
 **Committed:**
 - `af8c61b` (agent-doc) — docs: add session command to SPEC.md + CLAUDE.md
 - `54b8ed5e` (parent) — submodule pointer updated
-<!-- agent:boundary:6c5e4a4f -->
+release
+### Re: v0.31.0 Released (HEAD)
+
+**Published:**
+- crates.io: `agent-doc v0.31.0` ✓
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.31.0 ✓
+- Binary installed: `~/.cargo/bin/agent-doc` ✓
+- Tag pushed: `v0.31.0` ✓
+
+**Skipped PyPI** — maturin publish requires `--no-sdist` with path dev-dependencies. Can do separately if needed.
+
+**What's in v0.31.0:**
+- `agent-doc session` CLI (show/set with pane migration)
+- Stash pane safety (never auto-kill agent processes)
+- `resolve_target_session()` consolidation
+- Stale UUID → Unmanaged in sync
+- 8 unused variable warnings fixed
+- 601 tests, zero failures
+<!-- agent:boundary:c6d9a900 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-(empty — all items from this session are complete)
+- **PyPI publish** — `maturin publish --no-sdist` (optional)
 <!-- /agent:pending -->

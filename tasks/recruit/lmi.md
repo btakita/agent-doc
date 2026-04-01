@@ -886,7 +886,7 @@ Updated to "agent-authored reports." More precise — these aren't cron-job auto
 > especially the distinction between goal-oriented and normative alignment
 
 Should we expand on this or leave it as is with "That's the kind of rigor that makes me excited about this role."?
-### Re: Alignment Mention — Leave As Is (HEAD)
+### Re: Alignment Mention — Leave As Is
 
 Leave it. The one-liner works better here:
 
@@ -896,7 +896,7 @@ Leave it. The one-liner works better here:
 4. If Josh wants to explore alignment theory further, the hook is set — he'll bring it up
 
 Expanding risks diluting the email's focus. The compliment-as-acknowledgment is the right weight.
-<!-- agent:boundary:3555e64e -->
+<!-- agent:boundary:a18e2f6c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

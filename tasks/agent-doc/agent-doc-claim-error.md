@@ -2049,7 +2049,7 @@ Published: agent-kit v0.3.1 on crates.io. agent-doc uses registry dep. Release b
 I got an incorrect 3 pane layout:
 ![2026-04-01_12-36.png](../../../../../Pictures/agent-loop/2026-04-01_12-36.png)
 Why?
-### Re: 3-pane layout bug (HEAD)
+### Re: 3-pane layout bug
 
 **Cause:** The busy pane guard is protecting pane %323 (`robert-ward.md`) from being stashed because it's running an active Claude session. But the editor explicitly switched to `judith-krug.md` in that column — the old pane should give way.
 
@@ -2069,7 +2069,7 @@ This requires passing the `wanted` pane set into the callback so it can distingu
 For now, the quick fix: remove the busy pane guard from the DETACH phase and rely on column memory + stash rescue for session preservation. The guard was solving a narrow edge case (layout collapse on non-agent switch) but causing a worse problem (pane accumulation).
 
 Want me to remove the guard or implement the smarter replacement-aware version?
-<!-- agent:boundary:54b9fad5 -->
+<!-- agent:boundary:f0faf062 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

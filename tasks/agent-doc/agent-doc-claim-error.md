@@ -3361,7 +3361,7 @@ Both guards are now removed. The release binary is rebuilt.
 Try switching to corky.md again — sync should now auto-start a session for it.
 
 Still not resulting in 2 tmux panes. Why?
-### Re: It IS working — 2 panes exist (HEAD)
+### Re: It IS working — 2 panes exist
 
 The sync is working. The tmux state shows **2 panes** in the `agent-doc` window:
 
@@ -3373,7 +3373,7 @@ agent-doc %358 agent-doc  ✳ Claude Code                 ← corky.md session
 The IDEA log confirms sync ran successfully at 16:26:20-25 with `exit=0` and created the second pane. The plugin IS triggering correctly.
 
 If you don't see 2 panes, you may need to switch to the `agent-doc` window in tmux session 5 (`tmux select-window -t 5:agent-doc`). The panes are side-by-side in that window.
-<!-- agent:boundary:0054b1af -->
+<!-- agent:boundary:ac1f8c73 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

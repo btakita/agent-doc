@@ -719,10 +719,19 @@ Read the full blog post. The security story is about **multiuser prompt injectio
 **First comment:** `https://briantakita.me/posts/agent-security-multiuser-lessons/`
 
 Ready to publish via corky. Say the word.
-<!-- agent:boundary:b623af44 -->
+
+publish
+### Re: Publishing (HEAD)
+
+Created draft at `/home/brian/Documents/mail/social/20260401-181027-linkedin.md`.
+
+LinkedIn OAuth needed first ... corky is running the auth flow now. A browser window should have opened for you to authorize. Once you complete the OAuth, I'll publish the post and add the first comment with the link.
+
+**Draft file:** `/home/brian/Documents/mail/social/20260401-181027-linkedin.md`
+<!-- agent:boundary:8c5f63fb -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn teaser — revised with security + audit trail, awaiting publish confirmation
+- LinkedIn publish — OAuth in progress, then publish + first comment
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

@@ -794,6 +794,10 @@ Lets address:
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 
 D: Fix esmcss
+
+I want to send the blog post to Josh Malloy.
+Should I send him the blog post directly or the linkedin teaser tomorrow?
+I will discuss more with him as well.
 ### Re: @source fix (Option D — fix esmcss/rebuildjs-tailwindcss)
 
 **Root cause:** The `rebuild_tailwind_plugin` passes `from: esbuild_cssBundle_path` to postcss. This is a path in the build output directory (e.g., `dist/browser--dev/`). When `@tailwindcss/postcss` processes `@source` directives, it resolves relative paths from `dirname(from)` — the output dir, not the CSS source dir.
@@ -811,11 +815,24 @@ D: Fix esmcss
 - Works on CI (GitHub Actions) since no hardcoded local path
 
 **Testing:** Unit tests need the full bun dev env to run (uvu + esmock loader). The fix is minimal and logically correct — `dirname(entryPoint)` matches the CSS source directory. Verify with a local build when ready.
-<!-- agent:boundary:83905309 -->
+### Re: Sharing with Josh Malloy (HEAD)
+
+**Send the blog post directly via email, not the LinkedIn teaser.** Reasons:
+
+1. **He's already interested** — "I would have dove deeper into [agent-doc]...we're open to ideas on that front." The full post gives him the technical depth he'd value.
+2. **Maps to LIGER's needs** — interactive document generation, audit trails, agent orchestration. The teaser is too surface-level for someone primed on the concept.
+3. **Personal email > LinkedIn post** — he's a potential collaborator, not a general audience. Direct touchpoint lands differently.
+4. **Timing:** Send today. Don't wait for the LinkedIn post.
+
+**Suggested approach:** Short email to jmalloy@lmi.org referencing the interview, link to the blog post, mention being open to discussing how agent-doc could apply to LIGER's document generation and fact-checking needs.
+
+Want me to draft the email via corky?
+<!-- agent:boundary:6512d297 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
+- Josh Malloy email — awaiting approval to draft
 - @source fix — code changes done, needs local build verification
-- LinkedIn teaser — draft ready, blocked on LinkedIn outage
+- LinkedIn teaser — draft ready, posting Thu Apr 2 ~9 AM ET
 - LinkedIn OAuth — needs to be completed before publish
 <!-- /agent:pending -->

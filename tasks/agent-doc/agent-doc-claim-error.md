@@ -3440,7 +3440,30 @@ These would make it possible to trace exactly what happened in the 16:26 sync. I
 - **C (graceful restart):** Wait for idle sessions, then restart. Never kill active runs — only restart sessions that are at a prompt (idle). Could use `agent-doc resync` to detect idle panes.
 
 These are good items for a future session — not blocking the current work. I'll add them to pending.
-<!-- agent:boundary:c4f8ba56 -->
+
+Implement:
+- [ ] Add logging to sync auto-start path (attempt/success/skip)
+- [ ] Old-instance protection: version check (A), binary hash cache clear (B), graceful restart (C)
+### Re: Logging and build stamp implemented (HEAD)
+
+**1. Sync auto-start logging added:**
+- `resolve_file`: logs `Registered (session=..., registry=yes/no)` for every file
+- `auto-start check`: logs file, session_id, registered_pane before each decision
+- These complement the existing `auto-starting session` and `warning: auto-start failed` logs
+
+**2. Build stamp (A+B) implemented:**
+- `build.rs` embeds `AGENT_DOC_BUILD_TIMESTAMP` (Unix epoch seconds) at compile time
+- `check_build_stamp()` runs at the start of every sync
+- On first run or build mismatch: clears all `.agent-doc/starting/*.lock` files, updates `.agent-doc/build.stamp`
+- Logs: `[sync] new build detected (old→new), clearing stale caches`
+
+**3. Graceful restart (C)** — deferred. This needs more design around detecting idle sessions. The build stamp already handles the main problem (stale locks from old binaries blocking auto-start).
+
+- `make check`: all 602 tests pass
+- `cargo build --release`: done
+
+The `.agent-doc/build.stamp` file should be gitignored — it's machine-local.
+<!-- agent:boundary:41391357 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -3456,8 +3479,10 @@ These are good items for a future session — not blocking the current work. I'l
 - [x] Audit docs (SPEC.md, claim.rs, git.rs, sync.rs module docs)
 - [x] Fix: sync auto-starts files with session UUIDs (both guards removed)
 - [x] Verify end-to-end: 2 panes confirmed in agent-doc window
-- [ ] Add logging to sync auto-start path (attempt/success/skip)
-- [ ] Old-instance protection: version check (A), binary hash cache clear (B), graceful restart (C)
+- [x] Add logging to sync auto-start path (resolve_file + auto-start check)
+- [x] Old-instance protection: build stamp (A+B) — clear stale locks on new build
+- [ ] Add `build.stamp` to .gitignore
+- [ ] Old-instance protection: graceful restart (C) — deferred, needs design
 - [ ] `cargo install --path .` to update ~/.cargo/bin/agent-doc
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

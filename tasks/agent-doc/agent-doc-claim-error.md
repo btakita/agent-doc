@@ -2279,7 +2279,7 @@ The boundary reposition modifies the file through the IDE's Document API. Even t
 Want me to dig into the boundary reposition code to find the exact trigger?
 First...the change should happen via the FFI plugin -> JB Plugin handling CRDT.
 Second...we should delay the CRDT until the human has stopped typing.
-### Re: FFI-first boundary reposition with typing debounce (HEAD)
+### Re: FFI-first boundary reposition with typing debounce
 
 Agreed on both points. Here's the current flow and proposed fix:
 
@@ -2309,7 +2309,7 @@ if (NativePatching.isTyping(filePath, 500)) {
 Retries until user stops typing for 500ms, then applies. Same pattern as the existing `SubmitAction` debounce.
 
 Want me to implement both layers?
-<!-- agent:boundary:d54fca11 -->
+<!-- agent:boundary:0174bd8f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

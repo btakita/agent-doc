@@ -1104,7 +1104,7 @@ corky transcribe --diarize --speakers "Brian,Robert" \
 Transcription in progress... will update with results.
 
 Run nvidia-smi to detect if we are using the gpu.
-### Re: Run nvi (HEAD)
+### Re: Run nvi
 
 Transcription still running (10+ min elapsed on a 79-min call). Status:
 
@@ -1120,13 +1120,31 @@ The GPU isn't being used right now. This suggests pyannote-rs diarization is run
 For a 79-minute call, CPU-only diarization could take 15-20+ minutes. The process is still actively computing (not stuck).
 
 Want me to check the corky diarization code to confirm whether pyannote-rs supports GPU acceleration?
-<!-- agent:boundary:9cc48405 -->
+
+Why was the gpu not used with corky transcribe?
+### Re: Transcription results (HEAD)
+
+Transcription completed but `head -50` truncated the output to just initialization logs. Re-running with `-o /tmp/robert-ward-20260401.txt`.
+
+**Issue found: GPU not detected by whisper-rs**
+
+```
+whisper_backend_init_gpu: no GPU found
+whisper_model_load: CPU total size = 1623.92 MB
+```
+
+The 32GB GPU is available (`nvidia-smi` shows it) but whisper-rs compiled without GPU support. This forced the entire 79-min transcription onto CPU only, which is why it took 10+ minutes.
+
+**To fix:** whisper-rs needs to be built with CUDA/cuBLAS. Check if the `whisper-rs` dependency has a `cuda` feature flag, or if `WHISPER_CUBLAS=1` needs to be set at build time.
+
+Re-running transcription now (will take another ~10 min on CPU). Will update with results and investigate the GPU build issue.
+<!-- agent:boundary:6d06161f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Real-world test with long audio file (adaptive-chunk + resolve-unknown)
-- [ ] crates.io publish — needs token refresh
-- [ ] `corky doc upload` — deferred (Google Drive OAuth design)
+- Investigate whisper-rs GPU support (CUDA feature flag or build env)
+- Complete robert-ward April call transcription
+- Test adaptive-chunk diarization on real call
 <!-- /agent:pending -->

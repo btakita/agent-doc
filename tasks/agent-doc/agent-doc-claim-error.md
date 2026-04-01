@@ -1827,7 +1827,7 @@ All 31 agent-kit tests + 595 agent-doc tests pass. Release binary built.
 Implement:
 - [ ] **Hook socket listener in agent-doc** — accept events on `.agent-doc/hooks.sock`
 - [ ] **Claude Code hook bridge** — PostToolUse settings.json → agent-doc hook fire
-### Re: Hook CLI + socket listener + Claude Code bridge (HEAD)
+### Re: Hook CLI + socket listener + Claude Code bridge
 
 **Implemented.** New `agent-doc hook` subcommand with 4 actions:
 
@@ -1875,7 +1875,7 @@ This fires a `post_write` event whenever Claude Code writes/edits a file. Other 
 - Updated `main.rs` — `Hook` command variant + `HookAction` enum
 
 All 595 tests pass. Release binary built and verified.
-<!-- agent:boundary:1e27ec1b -->
+<!-- agent:boundary:c25f2169 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

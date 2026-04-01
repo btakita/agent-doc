@@ -1167,7 +1167,7 @@ Implementing now.
 Status?
 Continue:
 - [ ] **Tests for preflight baseline + stale baseline guard + ops logging** ← active
-### Re: Status (HEAD)
+### Re: Status
 
 This document has grown very long (1150+ lines in the exchange). The session has covered a lot of ground. Here's a summary of everything shipped and pending:
 
@@ -1190,7 +1190,7 @@ This document has grown very long (1150+ lines in the exchange). The session has
 - Blog post
 
 Recommend compacting this exchange before continuing with tests. It's very long.
-<!-- agent:boundary:d0ef25b7 -->
+<!-- agent:boundary:02ed1bbf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

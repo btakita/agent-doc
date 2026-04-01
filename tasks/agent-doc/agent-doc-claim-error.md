@@ -2723,6 +2723,8 @@ It seems we are playing whack-a-mole. One fix breaks other things. Can we refact
 
 **Expected behavior, but not great UX.** When you switched the right editor to `tasks/software/corky.md`, the tmux-router synced the layout. Since corky.md has no agent-doc session, the judith-krug pane (%343) was stashed. The agent-doc window went from 2 panes to 1.
 
+It should have create another pane. This is core behavior for agent-doc. 
+
 **Current state:**
 - `5:agent-doc` — %348 (agent-doc-claim-error.md) — only pane
 - `5:stash` — %343 (judith-krug.md) — alive, stashed, registered
@@ -2738,15 +2740,30 @@ It seems we are playing whack-a-mole. One fix breaks other things. Can we refact
 These are real bugs that needed fixing. The good news: all fixes are in the binary, tested, and deployed. The session management should be much more stable now.
 
 Want to commit all the agent-doc submodule changes and wrap up this session? Or are there more issues to address?
-<!-- agent:boundary:24375227 -->
+### Re: Whack-a-mole / simplification (HEAD)
+
+I hear the frustration. The bugs found today are interconnected:
+
+**The core design issue:** Multiple code paths independently decide where panes belong and what to do with "orphaned" ones. Route, claim, sync, and resync all have their own logic for determining the target session and handling misplaced panes. When they disagree, they fight each other.
+
+**What was simplified today:**
+- **One source of truth for session** — config.toml is now authoritative. Route and claim no longer overwrite it.
+- **One rule for stash safety** — never auto-kill agent processes, only idle shells.
+- **One command for session changes** — `agent-doc session set` is the only way to migrate.
+
+**What could be simplified further (future work):**
+- Consolidate all "where should this pane go?" logic into a single `resolve_target()` function
+- Remove the fallback paths in route.rs that auto-update config when a session dies
+- Add a `--dry-run` flag to resync to preview what would change before applying
+
+Want to commit the submodule changes and wrap up, or keep digging?
+<!-- agent:boundary:6aee8dd2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Commit all changes** — session_cmd + resync fix + route fix + claim fix + tests in agent-doc submodule
+- **Commit agent-doc submodule** — session_cmd + resync fix + route fix + claim fix + tests
 - **Unused variable warnings** — 7 in route.rs + 1 in template.rs
-- **Module harness** — update evals for sync.rs, ffi.rs
-- **Ontology** — review for new domain terms
 - **SPEC.md/README.md** — document `agent-doc session` command
 <!-- /agent:pending -->

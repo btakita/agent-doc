@@ -816,7 +816,31 @@ Example output in conversation file:
 ```
 
 This way you can `grep "**Tracking**" conversations/*.md` to audit which senders track. Want me to implement both the strip + metadata approach?
-<!-- agent:boundary:6cb447a7 -->
+
+Would it be useful to specify the path of the tracking pixel? Or is the domain name sufficient?
+### Re: Tracking pixel path vs domain (HEAD)
+
+Domain is sufficient. Here's why:
+
+**Tracking pixel URLs are opaque tokens**, not meaningful paths. They look like:
+- `sendgrid.net/wf/open?upn=u001.ekXzrh6HTgOsQrpQbkIFH...` (200+ char hash)
+- `manage.turing.com/analytics/open/e83e8427a8aa3f22...` (per-email unique ID)
+- `t.lever-analytics.com/email-tracking/open?...` (query params with user/email IDs)
+
+The full paths would be:
+- Extremely long (bloating the metadata line)
+- Unique per email (no aggregation value)
+- Potentially contain your email address or user IDs (privacy concern in a committed file)
+
+**Domain tells you everything actionable:**
+- Who is tracking (SendGrid = mass mailer, lever-analytics = recruiting tool, etc.)
+- Which senders use tracking (audit via grep)
+- Whether to unsubscribe or filter
+
+If you later want to investigate a specific tracker's behavior, the full URL is still in the email body (or can be recovered from the original HTML via refetch). The metadata line just needs to flag *that* tracking exists and *who* does it.
+
+So: **domain only** for the `**Tracking:**` metadata line. Implement?
+<!-- agent:boundary:2754ed4c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -825,5 +849,5 @@ This way you can `grep "**Tracking**" conversations/*.md` to audit which senders
 - Respond to Rob Ross (Dreamable) — schedule meeting Wed/Thu 12-4pm PT
 - crates.io token — renew and publish corky
 - VERSIONS.md — add entry before next release
-- **corky: markdown cleanup + tracking detection** — strip @media/CSS, detect & log tracking pixels, strip from body
+- **corky: markdown cleanup + tracking detection** — strip @media/CSS, detect & log tracking pixel domains, strip from body
 <!-- /agent:pending -->

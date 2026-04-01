@@ -1181,7 +1181,7 @@ Transcription finished successfully. 575 lines, 66KB output.
 
 Saved diarized transcript to:
 `mail/contacts/robert-ward/recordings/phone_20260401-042624_3109684542_diarized.txt`
-<!-- agent:boundary:35a39b24 -->
+<!-- agent:boundary:36dc26e9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

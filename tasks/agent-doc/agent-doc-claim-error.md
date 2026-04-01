@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Bug 2B regression FIXED. Divergence check removed from commit. 3 regression tests added. Diff detection verified.
+agent-kit hooks module implemented. Wired into agent-doc write + commit paths.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1651,15 +1651,55 @@ The Bug 2B regression from earlier IS fixed — the component-aware divergence c
 - `is_stale_baseline_write_path_replace_edits_ignored` — replace-mode component edits don't trigger staleness
 
 All 595 tests pass. Release binary deployed. Snapshot cleaned (removed baked-in user edits). Diff detection verified working.
-<!-- agent:boundary:3437ba1f -->
+
+Go
+- [ ] **Implement agent-kit changes** — multi-harness hooks (agent-kit v0.3)
+### Re: agent-kit hooks + agent-doc integration (HEAD)
+
+**agent-kit hooks module implemented** (feature-gated behind `hooks`).
+
+#### agent-kit v0.3 changes (`src/agent-kit/src/hooks.rs`)
+
+File-based event hooks for cross-session coordination:
+
+- **`HookRegistry`** — manages `.agent-doc/hooks/<event_name>/` directories
+- **`fire(name, event)`** — writes timestamped JSON event file, returns event_id
+- **`poll(name, since_secs)`** — reads events newer than timestamp, cleans expired
+- **`list_hooks()`** — lists all hook names with events
+- **`gc()`** — clean expired events across all hooks
+- **TTL-based expiry** — default 60s, configurable via `with_ttl()`
+- **`hooks_dir_for_file()`** — resolves hooks directory by walking up to `.agent-doc/`
+
+6 tests: fire+poll round trip, timestamp filtering, TTL expiry, nonexistent hook, list hooks, multiple events ordering.
+
+#### agent-doc integration (`src/agent-doc/src/hooks.rs`)
+
+Best-effort wrappers (failures never block main operation):
+
+- **`fire_post_write(file, session_id, patch_count)`** — fired after IPC write succeeds
+- **`fire_post_commit(file, session_id)`** — fired after successful git commit
+- **`fire_claim(file, session_id, pane_id)`** — for claim events
+- **`fire_layout_change(file, session_id, action)`** — for layout changes
+- **`poll(file, hook_name, since_secs)`** — poll for events
+
+Wired into:
+- `write.rs` — `fire_post_write` after IPC write consumed
+- `git.rs` — `fire_post_commit` after successful commit
+- `frontmatter.rs` — added `read_session_id()` helper
+
+**Dependencies:** agent-doc uses path dep for agent-kit during development (`features = ["hooks"]`). Will switch to registry after publishing agent-kit v0.3.
+
+All 595 tests pass (including 6 new hooks tests). Release binary built.
+<!-- agent:boundary:61aa595d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **All session work complete** — bugs fixed, regression fixed, tests added
-- [ ] **Implement agent-kit changes** — multi-harness hooks (agent-kit v0.3)
-- [ ] **Implement updates to agent-doc** — hook integration
+- [x] **agent-kit hooks** — `HookRegistry` with fire/poll/gc, 6 tests
+- [x] **agent-doc hook integration** — post_write, post_commit, claim, layout_change
+- [ ] **Wire remaining hooks** — claim (claim.rs), layout_change (sync.rs)
+- [ ] **Publish agent-kit v0.3** + switch agent-doc back to registry dep
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)
 <!-- /agent:pending -->

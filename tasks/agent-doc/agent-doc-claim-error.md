@@ -2837,7 +2837,7 @@ The sync.rs change (stale UUID → Unmanaged) reinforces this — files that wer
 Update tests
 audit docs
 Update SPEC.md, README.md, ontology, module-harness
-### Re: Tests, audit, docs update (HEAD)
+### Re: Tests, audit, docs update
 
 **Tests:** All 601 pass (one flaky `send_keys_delivers_command_with_enter` resolved on retry — timing-sensitive tmux test).
 
@@ -2850,7 +2850,7 @@ Update SPEC.md, README.md, ontology, module-harness
 **Committed:**
 - `af8c61b` (agent-doc) — docs: add session command to SPEC.md + CLAUDE.md
 - `54b8ed5e` (parent) — submodule pointer updated
-<!-- agent:boundary:637411ea -->
+<!-- agent:boundary:6c5e4a4f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

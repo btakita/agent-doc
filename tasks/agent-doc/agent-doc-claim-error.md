@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.30.0 release proposed. 668 insertions, 14 files changed. Awaiting go.
+Multi-harness skill install assessed. v0.30.0 release ready (current work). Multi-harness = v0.31.0.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1911,6 +1911,7 @@ Running `agent-doc skill install` would regenerate SKILL.md from the binary's bu
 The audit warning is a false positive for this case — SKILL.md doesn't need updating when internal CLI commands change. It only needs updating when the agent-doc session workflow (diff → respond → write → commit) changes.
 
 Does agent-doc need a release?
+Will there be a command to install the Claude Code skills...how about other agent harnesses? 
 ### Re: agent-doc release
 
 **Yes.** 668 insertions across 14 files since v0.29.0. This is a v0.30.0 release. Changes:
@@ -1928,13 +1929,38 @@ Does agent-doc need a release?
 - **Docs** — SPEC.md, README.md, CLAUDE.md updated
 
 Ready to release? I'll bump version, update VERSIONS.md, run make check, commit, tag, and publish.
-<!-- agent:boundary:14db0711 -->
+### Re: Skill install for multiple agent harnesses (HEAD)
+
+**Currently:** `agent-doc skill install` installs to `.claude/skills/agent-doc/SKILL.md` — Claude Code only. The `agent-kit` crate's `detect::Environment` enum already knows about Claude Code, OpenCode, Codex, and Generic environments. The `SkillConfig::install()` method uses the detected environment to pick the install path.
+
+**For other harnesses:**
+
+| Harness | Skill location | Status |
+|---------|---------------|--------|
+| Claude Code | `.claude/skills/<name>/SKILL.md` | Implemented |
+| OpenCode | `.opencode/skills/<name>/SKILL.md` | Planned (same pattern) |
+| Codex | `.codex/AGENTS.md` or similar | TBD (Codex uses different convention) |
+| Cursor | `.cursor/rules/` or `.cursorrules` | TBD |
+| Generic | Project-level `AGENTS.md` | Fallback |
+
+`agent-kit::detect::detect()` auto-detects the environment from env vars (`CLAUDE_CODE`, `OPENCODE`, `CODEX_CLI`). So `agent-doc skill install` would automatically pick the right path based on which harness is running.
+
+**What's needed:**
+1. Add install path patterns for OpenCode, Cursor, Codex to `agent-kit::skill`
+2. Each harness may have different skill formats (Claude uses SKILL.md with frontmatter, Cursor uses plain rules)
+3. A `--harness` flag to override auto-detection: `agent-doc skill install --harness cursor`
+
+This is a v0.31.0 feature — separate from the v0.30.0 release which ships the current bug fixes + hooks.
+
+Proceed with v0.30.0 release?
+<!-- agent:boundary:63da8342 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Release agent-doc v0.30.0** — bump, VERSIONS.md, make check, publish
+- [ ] **Release agent-doc v0.30.0** — current session's bug fixes + hooks
+- [ ] **Multi-harness skill install** — OpenCode, Cursor, Codex support (v0.31.0)
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)
 <!-- /agent:pending -->

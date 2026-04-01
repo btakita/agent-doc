@@ -740,7 +740,7 @@ All complete. `make check` passes (239 tests), `corky audit-docs` clean.
 
 **Module harness / ontology**: Not applicable — no new modules or ontology terms introduced. This is a behavior change within existing sync modules.
 Please resync the conversations with an empty body.
-### Re: Resync complete (HEAD)
+### Re: Resync complete
 
 Built release binary with `make release-gpu` (includes `htmd`). Resynced all 555 threads.
 
@@ -756,7 +756,7 @@ The `htmd` conversion preserves:
 - Paragraphs → proper spacing
 
 Note: Some marketing emails still have CSS/tracking artifacts in the markdown (e.g., `@media` queries, tracking pixels). This is inherent to the HTML source — `htmd` passes through CSS in `<style>` blocks that are inline rather than in `<head>`. A future improvement could strip `@media` blocks and tracking image tags, but the content is now readable.
-<!-- agent:boundary:d218e713 -->
+<!-- agent:boundary:0a374d84 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -2869,10 +2869,10 @@ Is VERSIONS.md updated and backfilled?
 - Stale UUID → Unmanaged in sync
 - 8 unused variable warnings fixed
 - 601 tests, zero failures
-### Re: VERSIONS.md status (HEAD)
+### Re: VERSIONS.md status
 
 Yes, VERSIONS.md was updated before the release commit. The 0.31.0 entry includes all 7 bullet points covering the session CLI, stash safety, resolve_target_session consolidation, stale UUID handling, unused var cleanup, docs, and test count. It was committed as part of `fd961a4` (the v0.31.0 release commit).
-<!-- agent:boundary:2ea9a560 -->
+<!-- agent:boundary:c03800b2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

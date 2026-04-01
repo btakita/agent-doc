@@ -779,7 +779,7 @@ Draft updated at: `mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-inter
 
 Ready to send when you approve.
 Backtesting can also be applied to datasets, agent harness, + prompts.
-### Re: Backtesting Codebases — Adding to Email (HEAD)
+### Re: Backtesting Codebases — Adding to Email
 
 From the interview (~10:08), you discussed backtesting with Josh: detecting drift between implementation and specs, running the codebase against its own specification. This maps to LIGER's fact-checking use case.
 
@@ -790,7 +790,7 @@ From the interview (~10:08), you discussed backtesting with Josh: detecting drif
 Your second note got cut off: "Backtesting can al..." — finish the thought and I'll incorporate it.
 
 Want me to add the backtesting bullet to the draft now, or wait for your complete thought?
-<!-- agent:boundary:e6bba584 -->
+<!-- agent:boundary:dd3a570b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -864,7 +864,18 @@ I'm not doing this yet. Just mentioned it as an idea during the interview.
 **Backtesting:** Reframed as "one idea I mentioned during our conversation...not implemented yet, but the audit trail makes it feasible." Honest about where it stands.
 
 Updated draft. These corrections make the email stronger — presenting what you actually have rather than extrapolating.
-<!-- agent:boundary:76ccc4e6 -->
+
+> built-in traceability.
+
+With automated cadence of reports.
+### Re: Automated Reports Added (HEAD)
+
+Updated the auditable workflow bullet to include "with automated cadence of reports." Now reads:
+
+> "...built-in traceability with automated cadence of reports."
+
+This adds a concrete operational detail — the audit trail isn't just passive history, it feeds into regular reporting.
+<!-- agent:boundary:5c29a836 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -873,6 +884,5 @@ Updated draft. These corrections make the email stronger — presenting what you
 - [ ] Send Josh Malloy follow-up email (pending final approval)
 - [ ] agent-doc README: security section (single-user, prompt injection)
 - [ ] Corky: HTML body extraction for emails
-- [x] Template boundaries overclaim fixed
-- [x] Backtesting reframed as idea, not feature
+- [x] Automated reports added to auditable workflow bullet
 <!-- /agent:pending -->

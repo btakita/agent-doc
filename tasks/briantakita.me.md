@@ -640,10 +640,17 @@ Post confirmed live at `https://briantakita.me/posts/agent-security-multiuser-le
 > Full post: https://briantakita.me/posts/agent-security-multiuser-lessons/
 
 Ready to post when you are.
-<!-- agent:boundary:4178569f -->
+Should the link be in the post or in the 1st comment?
+### Re: Link placement (HEAD)
+
+**First comment.** LinkedIn deprioritizes posts with external links in the body. Standard practice:
+
+1. Post body ends with "Full post linked in the first comment."
+2. Immediately comment with the URL: `https://briantakita.me/posts/agent-security-multiuser-lessons/`
+<!-- agent:boundary:231e75fe -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn teaser — draft ready, awaiting approval to post
+- LinkedIn teaser — post body + first comment ready
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

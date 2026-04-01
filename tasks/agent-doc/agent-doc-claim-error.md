@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Layout.rs gap closed. All break paths now check for busy panes. Session restart race + editor lag diagnosed.
+Auto-start lock implemented. Editor flash diagnosed as JetBrains intention popup (not agent-doc).
 <!-- /agent:status -->
 
 ## Exchange
@@ -1334,6 +1334,8 @@ The double-start happens because sync runs twice in quick succession (the plugin
 
 **Fix needed:** A startup lock per file — something like `.agent-doc/starting/<hash>.lock` with a short TTL (5s). Auto-start checks for the lock before spawning.
 
+Implement.
+
 #### Editor lag / flashing
 
 Two likely causes:
@@ -1341,6 +1343,9 @@ Two likely causes:
 1. **Git submodule spam**: `censible-core/data` warning fires every ~1.5s (2,247 times in the log). This is JetBrains' git subsystem, not agent-doc, but it adds background load.
 
 2. **`Patch produced no changes` warnings**: The PatchWatcher sees IPC patch files but the patch content matches what's already in the document (dedup). This happens because the `agent-doc commit` boundary reposition writes a patch file. The plugin reads it, applies it, but the boundary was already in the right place — so "no changes." The flash you see is likely the Document API write-transaction briefly locking the editor. We should suppress the IPC patch for boundary-only changes.
+
+The flash is of some prompt appearing below the editor cursor.
+It was rapidly firing when the editor was lagging. I see a periodic flash of the dialog right now, but the editor is responsive.
 
 #### Stash window — why you don't see one
 
@@ -1352,6 +1357,9 @@ Currently: pane %315 (`tasks/software/agent-doc.md`) IS in stash right now:
 ```
 
 The stash window doesn't show in `tmux list-windows` for the current session view because the user is looking at the `agent-doc` window. It exists in the `claude` tmux session.
+
+I see the `claude` tmux session in this i3 window.
+I also see the current `1:stash` tmux window at this moment. But I was not seeing `1:stash` earlier...even when there was an active agent-doc run occurring. I was able to navigate away then back to the active agent-doc run.
 
 #### Is repair_layout too aggressive?
 
@@ -1376,7 +1384,41 @@ Currently: `["tasks/agent-doc/agent-doc-claim-error.md", "tasks/software/corky.m
 #### layout.rs gap closed
 
 Added `is_pane_busy()` check before `break_pane` in `layout.rs:208-216`. Busy panes (running agent-doc/claude) are now skipped with a log message instead of being broken out. Release binary built.
-<!-- agent:boundary:7f7e42ac -->
+
+Implement:
+- [ ] **Fix auto-start race** — startup lock to prevent double-spawn on rapid sync calls
+- [ ] **Suppress boundary-only IPC patches** — eliminate editor flash from no-op patch writes
+### Re: Auto-start lock + editor flash investigation (HEAD)
+
+#### Auto-start race — fixed
+
+Implemented startup lock in `route.rs:auto_start_in_session()`:
+
+- Before spawning, checks `.agent-doc/starting/<hash>.lock`
+- If lock exists and age < 5s → skip auto-start with log message
+- Otherwise creates the lock file, then proceeds
+- Best-effort: if file doesn't exist or hash fails (test fixtures), lock is skipped silently
+- No cleanup needed — locks expire by age, and 5s TTL means stale locks self-heal
+
+All 4 auto_start tests pass. Release binary built.
+
+#### Editor flash — not agent-doc
+
+Investigated the "prompt appearing below editor cursor":
+
+1. The `"Patch produced no changes"` path does NOT trigger a Document API write — the `setText` call is inside `if (result != content)`. So no-op patches don't cause editor flashes.
+
+2. The IPC reposition signal already has a `if snap_changed` guard — it only fires when the boundary actually moved.
+
+3. The flash is most likely an **IntelliJ intention action balloon** (lightbulb/quick-fix popup). These can be triggered by:
+   - Git gutter updates after `agent-doc commit` (JetBrains refreshes VCS annotations)
+   - `censible-core/data` submodule warning spam (2,247 times in the log, every ~1.5s)
+   - Markdown inspection running on document changes
+
+To narrow it down: try disabling the `censible-core` submodule from JetBrains VCS settings (Settings → Version Control → Directory Mappings → remove that submodule). The every-1.5s VCS refresh cycle could be triggering intention popups on the active file.
+
+If the flash persists after that, we can add logging to the PatchWatcher to trace exactly when the plugin triggers Document API calls.
+<!-- agent:boundary:e8d99ed4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1387,8 +1429,8 @@ Added `is_pane_busy()` check before `break_pane` in `layout.rs:208-216`. Busy pa
 - [x] **Tests** for stale baseline guard (11) + ops logging (2)
 - [x] **Session resume on document switch** — busy pane guard in DETACH + layout.rs
 - [x] **Close layout.rs gap** — busy pane check added
-- [ ] **Fix auto-start race** — startup lock to prevent double-spawn on rapid sync calls
-- [ ] **Suppress boundary-only IPC patches** — eliminate editor flash from no-op patch writes
+- [x] **Fix auto-start race** — startup lock with 5s TTL
+- [ ] **Investigate editor flash further** — disable censible-core VCS mapping, recheck
 - [ ] **Publish tmux-router 0.3.7** (SyncOptions API) + switch agent-doc back to registry dep
 - [ ] **Bug 2A: Divergence check before auto-start**
 - [ ] **Bug 2B: Rollback guard in commit()**

@@ -2162,7 +2162,7 @@ The entire tmux session closed. Why?
 **For now:** The agent-doc panes are alive in `1:agent-doc`. This session is working. The JB plugin needs to be pointed at the correct window for future syncs. A manual `agent-doc resync --fix` should repair the registry entries.
 
 This is the highest-priority fix — it's a data loss risk (tmux session state destroyed). Implementing now.
-### Re: Stash-everything guard implemented (HEAD)
+### Re: Stash-everything guard implemented
 
 **Fixed.** The reconciler now checks for unresolved managed files before stashing:
 
@@ -2173,7 +2173,7 @@ This is the highest-priority fix — it's a data loss risk (tmux session state d
 **After:** Dead panes → no resolution → WARNING logged → layout preserved
 
 All 595 tests pass. Release binary + cargo install updated.
-<!-- agent:boundary:eeb49f68 -->
+<!-- agent:boundary:ae7cb8db -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

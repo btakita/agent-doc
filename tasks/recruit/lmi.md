@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-Josh email on hold — revising binary/audit framing
+Josh email sent to jmalloy@lmi.org
 <!-- /agent:status -->
 
 ## Exchange
@@ -939,13 +939,20 @@ If you want to reach others later, separate emails with tailored angles:
 - **Andrew**: frontend/full-stack (would need frontend content)
 
 But the Josh email is the highest-value follow-up based on interview signals.
-<!-- agent:boundary:3e47a5a8 -->
+
+Ok...direct send without draft
+### Re: Email Sent (HEAD)
+
+Email sent directly to jmalloy@lmi.org via corky. Status updated to `sent` in the draft file.
+
+Subject: Re: Interview Follow-up — agent-doc & Interactive Document Generation
+<!-- agent:boundary:91b061a5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Send Josh Malloy follow-up email (on hold — reviewing)
 - [ ] agent-doc README: security section (single-user, prompt injection)
 - [ ] Corky: HTML body extraction for emails
+- [x] Josh Malloy follow-up email sent
 <!-- /agent:pending -->

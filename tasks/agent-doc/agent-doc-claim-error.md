@@ -3341,7 +3341,7 @@ Yes — the agent-doc binary should own all locks and guards. This follows the F
 
 The binary is the single source of truth for session state, pane management, and concurrency. The plugin just says "the editor looks like this" and the binary figures out how to make tmux match.
 Navigating to the right editor, seeing the JB plugin prompt, `Sync: --col tasks/agent-doc/agent-doc-claim-error.md --col tasks/software/corky.md [focus: tasks/software/corky.md]`...does not result in the 2 tmux pane layout. Why?
-### Re: Second registry guard found and removed (HEAD)
+### Re: Second registry guard found and removed
 
 There were **two** places checking for registry entries — I only fixed one. The second was in the auto-start phase (`sync.rs` lines 568-579):
 
@@ -3359,7 +3359,7 @@ Both guards are now removed. The release binary is rebuilt.
 - `cargo build --release`: done
 
 Try switching to corky.md again — sync should now auto-start a session for it.
-<!-- agent:boundary:a4d23060 -->
+<!-- agent:boundary:014c5a60 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

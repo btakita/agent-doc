@@ -379,7 +379,7 @@ Transcribed 18 phone calls using Whisper large-v3-turbo with CUDA/RTX 5090 (130�
 
 Please re-transcribe + diarize the conversations from the last round. I already did `phone_20260328-000319_3109684542.amr` so that can be skipped.
 
-### Re-Transcribed Phone Calls with Speaker Diarization (Mar 21–28) (HEAD)
+### Re-Transcribed Phone Calls with Speaker Diarization (Mar 21–28)
 
 Re-transcribed all 17 calls using Whisper large-v3-turbo + RTX 5090 CUDA (74–133x realtime) with pyannote speaker diarization. Speakers labeled as Brian Takita and Robert Ward. Full diarized transcripts saved to `mail/contacts/robert-ward/recordings/*.txt`.
 
@@ -488,7 +488,7 @@ Re-transcribed all 17 calls using Whisper large-v3-turbo + RTX 5090 CUDA (74–1
 
 ---
 
-### Updated Key Takeaways (Mar 21–28, Diarized) (HEAD)
+### Updated Key Takeaways (Mar 21–28, Diarized)
 
 **Judith Krug / Equity Funding Source:**
 - Judith confirmed through Robert multiple times: Brian is building the website
@@ -519,5 +519,5 @@ Re-transcribed all 17 calls using Whisper large-v3-turbo + RTX 5090 CUDA (74–1
 - Friend Ari (stockbroker) depressed after market crash
 - Ian has PTSD from prison, depression
 - Consistently following up with Judith on Brian's behalf
-<!-- agent:boundary:66bb8699 -->
+<!-- agent:boundary:cd262027 -->
 <!-- /agent:exchange -->

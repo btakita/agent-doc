@@ -3280,7 +3280,31 @@ Since we already removed the busy guard from the plugin and the binary's existin
 **On "still not working":** The IDEA log confirmed the plugin was disabled by Settings Sync after the uninstall/reinstall cycle. Can you verify in Settings → Plugins that `agent-doc` shows as enabled? The IPC (PatchWatcher) works independently of the listener registration — patches arriving doesn't mean the sync listener is active.
 
 If the plugin IS enabled and sync still doesn't fire, the LayoutChangeDetector might not have initialized (it waits 2s after startup). Try pressing `Ctrl+Shift+Alt+L` (manual sync trigger) to test if the SyncLayoutAction works directly.
-<!-- agent:boundary:0321bb85 -->
+
+I'm talking about navigating without any plugin actions. The `Sync: --col tasks/agent-doc/agent-doc-claim-error.md --col tasks/software/corky.md [focus: tasks/software/corky.md]` that occurred when selecting the right corky.md editor should have declaratively sent the layout to agent-doc...which should have corrected the tmux pane layout.
+### Re: Why sync doesn't create a pane for corky.md (HEAD)
+
+The sync DID run — the hint notification confirms it. The issue is in `sync.rs` line 459-468:
+
+```rust
+// Only treat as registered if the session has a registry entry.
+// Files with a stale frontmatter UUID (no registry entry) are
+// treated as unmanaged — sync should not auto-start sessions
+// for files that were never properly claimed or whose claim expired.
+let has_registry_entry = sessions::lookup(key).ok().flatten().is_some();
+if !has_registry_entry {
+    return Some(FileResolution::Unmanaged);
+}
+```
+
+`corky.md` has a session UUID (`584ef929...`) but no entry in `sessions.json` — the registry was pruned because its pane died. So sync treats it as `Unmanaged` and skips it entirely.
+
+This is overly conservative. The user's intent when navigating to a file in a split is clear: "I want this file in the tmux layout." If the file has a session UUID, sync should auto-start a session regardless of whether the registry entry exists.
+
+**Fix:** Change the `resolve_file` closure to treat files with session UUIDs as `Registered` even without a registry entry. The auto-start phase in tmux-router will handle creating a new pane and session.
+
+Should I implement this? The change is in `sync.rs` line 467-468: remove the `Unmanaged` return and always treat UUID-bearing files as `Registered`.
+<!-- agent:boundary:bf9a5fda -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -3294,7 +3318,8 @@ If the plugin IS enabled and sync still doesn't fire, the LayoutChangeDetector m
 - [x] `cargo build --release` in agent-doc submodule
 - [x] Add tests for occurrence-counting HEAD marker logic
 - [x] Audit docs (SPEC.md, claim.rs, git.rs module docs)
-- [ ] Verify plugin is enabled in IDEA after Settings Sync disabled it
-- [ ] Test manual sync via Ctrl+Shift+Alt+L
+- [ ] Fix: sync should auto-start files with session UUIDs even without registry entry
+- [ ] Rebuild release binary after sync fix
+- [ ] Re-enable plugin in IDEA and verify end-to-end
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

@@ -1589,7 +1589,7 @@ Current state: agent-kit 0.2 exists but doesn't have the hook registry yet. This
 
 Implement agent-kit changes.
 Implement updates to agent-doc.
-### Re: Diff regression status (HEAD)
+### Re: Diff regression status
 
 The Bug 2B regression is **fixed**. The new release binary uses `is_stale_baseline()` (component-aware) instead of `starts_with` for divergence detection. Normal user edits inside components no longer trigger false divergence.
 
@@ -1611,7 +1611,10 @@ The Bug 2B regression is **fixed**. The new release binary uses `is_stale_baseli
 | Audit docs: 5 → 3 issues | Done |
 
 To continue: edit the document in your editor and trigger `/agent-doc` — the diff will be detected.
-<!-- agent:boundary:84f642da -->
+
+Implement agent-kit changes.
+Implement updates to agent-doc.
+<!-- agent:boundary:897cb3e5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

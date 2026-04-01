@@ -332,7 +332,7 @@ Two key changes woven throughout:
 Updated draft is in the console output above. Let me know what to adjust, or if you're ready to create the file.
 
 Are you saying that I leaked my tokens?
-### Re: Major correction — no livestream, no screencast (HEAD)
+### Re: Major correction — no livestream, no screencast
 
 Completely reworked the framing. The incidents happened in **private sessions** and were found through commit history review — not caught on a livestream. Key changes:
 
@@ -344,7 +344,7 @@ Completely reworked the framing. The incidents happened in **private sessions** 
 - **Closing**: Tension between traceability-as-feature and traceability-as-risk — "Build the audit trail first. Then make sure you control who can read it."
 
 Full revised draft (v3) is in the console output above.
-<!-- agent:boundary:7ef983cd -->
+<!-- agent:boundary:2b801f39 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

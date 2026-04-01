@@ -3113,7 +3113,7 @@ No blue gutter. Can you detect what happened in the logs? If not, please add mis
 
 No, I didn't increment it. Currently `0.2.36`. Should I bump to `0.2.37`?
 Yes
-### Re: Found the (HEAD) marker bug + plugin bumped (HEAD)
+### Re: Found the (HEAD) marker bug + plugin bumped
 
 **Root cause of missing blue gutter:**
 
@@ -3132,7 +3132,7 @@ All tests pass (`make check` clean).
 > Would staying on the file or navigating past the file result in the tmux layout matching the declarative sync?
 
 Yes. The startup lock (5s TTL) prevents double-spawn during rapid sync events. If the user stays or navigates, the next sync cycle (triggered by `LayoutChangeDetector` or manual `Ctrl+Shift+Alt+L`) will pick up the file and auto-start it. The lock just prevents the same file from spawning two Claude sessions within 5 seconds. So no prompt needed — the lock is a transient guard, not a permanent block.
-<!-- agent:boundary:30c2ebe4 -->
+<!-- agent:boundary:b45fbb2c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

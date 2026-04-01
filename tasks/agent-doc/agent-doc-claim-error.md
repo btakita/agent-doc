@@ -2474,7 +2474,7 @@ All items from the "Do" list are done. What's next?
 After navigating the right editor to tasks/software/corky.md...which resulted in several agent docs starting a new tmux pane + claude session...the stash window was selected.
 
 ![2026-04-01_13-50.png](../../../../../Pictures/agent-loop/2026-04-01_13-50.png)
-### Re: Multiple sessions spawned on editor tab navigation (HEAD)
+### Re: Multiple sessions spawned on editor tab navigation
 
 Looked at the screenshot and current tmux state. The session registry shows:
 - `robert-ward.md` → pane `%339` (stash window `5:1`)
@@ -2486,7 +2486,7 @@ Looked at the screenshot and current tmux state. The session registry shows:
 **The fix:** `sync` should only manage files that are already claimed (have a session UUID in frontmatter + a registry entry). Unclaimed files in the editor layout should be ignored by sync — they need an explicit `claim` or `route` action to start a session.
 
 This is a new bug — want me to fix it?
-<!-- agent:boundary:a9002e40 -->
+<!-- agent:boundary:40979d6b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -2824,7 +2824,7 @@ continue
 
 Switching the editor to corky.md did not create a tmux pane. The old behavior was to eagerly create a claude session. But it may be ok not to be eager...since rapidly navigating through several inactive agent docs used to rapidly run `agent-doc start` commands. Which likely caused race conditions.
 `Run Agent Doc` on corky.md created the tmux page...good
-### Re: Lazy pane creation is the right call (HEAD)
+### Re: Lazy pane creation is the right call
 
 Good observation. The old eager behavior (auto-starting Claude sessions on every editor tab switch) caused race conditions when rapidly navigating files. The new behavior is better:
 
@@ -2834,7 +2834,7 @@ Good observation. The old eager behavior (auto-starting Claude sessions on every
 This is intentional lazy initialization. The user explicitly triggers `Run Agent Doc` when they want to interact with a document, rather than having sessions spawn just because a file was opened in the editor. Prevents wasted Claude sessions and race conditions from rapid navigation.
 
 The sync.rs change (stale UUID → Unmanaged) reinforces this — files that were never properly claimed don't get auto-started during sync.
-<!-- agent:boundary:6f188f02 -->
+<!-- agent:boundary:ed52bc69 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

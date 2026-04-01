@@ -584,14 +584,14 @@ Why not?
 
 Let's add to briantakita.me-dev AGENTS.md -> CLAUDE.md
 Bette
-### Re: Post not visible — fixed (HEAD)
+### Re: Post not visible — fixed
 
 The blog post file existed but wasn't registered. `post/index.ts` is a generated manifest — it lists all posts as imports. The new post wasn't in it.
 
 **Fix:** Ran `bun post/index.generate.ts` to regenerate the index, committed and pushed to all three repos (briantakita.me, briantakita.me-dev, agent-loop).
 
 For localhost: restart `bun run dev` to pick up the change. CI should now deploy with the post included.
-<!-- agent:boundary:d0311379 -->
+<!-- agent:boundary:65ef3d7b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

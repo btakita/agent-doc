@@ -3113,6 +3113,7 @@ No blue gutter. Can you detect what happened in the logs? If not, please add mis
 
 No, I didn't increment it. Currently `0.2.36`. Should I bump to `0.2.37`?
 Yes
+
 ### Re: Found the (HEAD) marker bug + plugin bumped
 
 **Root cause of missing blue gutter:**
@@ -3127,12 +3128,30 @@ Yes
 
 All tests pass (`make check` clean).
 
+Add tests.
+aud
+
 **On the startup lock question:**
 
 > Would staying on the file or navigating past the file result in the tmux layout matching the declarative sync?
 
 Yes. The startup lock (5s TTL) prevents double-spawn during rapid sync events. If the user stays or navigates, the next sync cycle (triggered by `LayoutChangeDetector` or manual `Ctrl+Shift+Alt+L`) will pick up the file and auto-start it. The lock just prevents the same file from spawning two Claude sessions within 5 seconds. So no prompt needed — the lock is a transient guard, not a permanent block.
-<!-- agent:boundary:b45fbb2c -->
+
+Why is a plugin update needed. `Sync: --col tasks/agent-doc/agent-doc-claim-error.md --col tasks/software/corky.md [focus: tasks/software/corky.md]` seems correct.
+### Re: Why plugin update is needed (HEAD)
+
+You're right that sync works correctly — the `--col` output confirms the layout detection is fine. The plugin update removes the **redundant `agent-doc claim` call** that runs before sync in ClaimAction.
+
+Old flow (Ctrl+Shift+Alt+C):
+1. `agent-doc claim <file> --position <pos>` ← this is the part that was failing silently
+2. `SyncLayoutAction.syncLayout()` ← this already does everything correctly
+
+The old step 1 was harmless when it succeeded (sync would fix the layout anyway), but when it failed — like in your case — it could corrupt the registry by claiming the wrong pane, which sync then had to work around. Removing it eliminates the failure mode entirely.
+
+So the plugin update isn't fixing sync (which works), it's removing the claim call that was causing the problem you reported. Without the update, Ctrl+Shift+Alt+C still runs the broken claim flow first.
+
+The `(HEAD)` marker fix is in the Rust binary, not the plugin — that takes effect with `cargo build --release`.
+<!-- agent:boundary:75a534cd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -3140,8 +3159,8 @@ Yes. The startup lock (5s TTL) prevents double-spawn during rapid sync events. I
 <!-- agent:pending patch=replace -->
 - [x] ClaimAction.kt: replace claim+auto-start with SyncLayoutAction.syncLayout()
 - [x] claim.rs: add registry protection against overwriting existing sessions
-- [x] route.rs: startup lock feedback (already existed)
 - [x] git.rs: fix (HEAD) marker not added for duplicate heading text
 - [x] Bump JB plugin version to 0.2.37
-- [ ] Install updated JetBrains plugin and verify changes
+- [ ] `cargo build --release` in agent-doc submodule (for HEAD marker fix)
+- [ ] Install updated JetBrains plugin (for ClaimAction fix)
 <!-- /agent:pending -->

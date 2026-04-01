@@ -2430,7 +2430,7 @@ Two scenarios:
 **To make FFI "just work":** We could add `agent-doc plugin install --lib` to copy the `.so` to `~/.local/lib/` or `.agent-doc/lib/`, and bundle platform-specific koffi binaries in the `.vsix` build. That's a release concern, not a blocker for the current fix.
 
 Is the shared library released with the agent-doc binary? What if it were installed using the `curl | sh`? I thought agent-doc has a command that returns the path to the shared library.
-### Re: Implementation batch complete (HEAD)
+### Re: Implementation batch complete
 
 All three items done:
 
@@ -2450,7 +2450,7 @@ All three items done:
 - Needs: finalize sync.rs changes, update VERSIONS.md, bump to 0.3.8, tag + publish
 
 **To install JB plugin:** IDEA > Settings > Plugins > gear > Install from Disk > select `agent-doc-jetbrains-0.2.36.zip`. Since classes changed structurally (new `isIdle` method), uninstall first > restart > install > restart.
-<!-- agent:boundary:ed4550c4 -->
+<!-- agent:boundary:0b76c8cb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

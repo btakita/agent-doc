@@ -148,6 +148,25 @@ After the IDE plugin consumes an IPC patch file:
 
 `sync_after_claim()` uses editor-provided `col_args` when available (authoritative layout from the IDE plugin). Only falls back to registry-based file discovery when no `col_args` given. This prevents stale registry entries from creating incorrect multi-pane layouts.
 
+### 6.6 Document State Model (4 States)
+
+A document has four concurrent representations during a write cycle:
+
+| State | Location | Owner | Purpose |
+|-------|----------|-------|---------|
+| **Snapshot** | `.agent-doc/snapshots/<hash>.md` | Binary | Last committed agent state. Used by `diff::compute()` to detect user changes since last response. |
+| **Baseline** | `.agent-doc/baselines/<hash>.md` | Binary (preflight) | Document at start of response generation. Common ancestor for 3-way/CRDT merge. Saved by preflight after commit (step 2b). |
+| **File on disk** | The document file | Editor (auto-save) | Last editor save. Lags behind the editor buffer. Used by non-IPC write paths. |
+| **Editor buffer** | Editor memory | Editor (Document API) | Live content including unsaved edits. IPC writes target this via the Document API, preserving cursor position and undo history. |
+
+**Consistency invariants:**
+- After preflight step 2b: `baseline == snapshot` (minus boundary markers)
+- After `agent-doc write`: `snapshot == baseline + response` (content_ours)
+- After `agent-doc commit`: git HEAD contains `snapshot + (HEAD) marker`
+- The editor buffer may diverge from all three persistent states (unsaved user edits)
+
+**Staleness risk:** If the baseline is saved before preflight (the old SKILL.md approach), it becomes stale when commit repositions the boundary marker. The binary guard in `write.rs` detects this by comparing baseline against snapshot and re-applies patches to the current file content.
+
 ## 7. Commands
 
 ### 7.1 run

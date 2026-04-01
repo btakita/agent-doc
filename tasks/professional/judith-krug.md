@@ -470,14 +470,14 @@ This is a **female third party** who built and hosts the site. Judith described 
 **This actually strengthens the pitch for tonight's call** ... her website is literally down. You can say: "Your website is down right now. I can get it back up on Cloudflare today and you'll own everything. No more depending on someone you can't reach."
 
 Please draft a text for Judith about her website. Ask if the site being down is planned/expected?
-### Re: Text Draft for Judith — Website Down (HEAD)
+### Re: Text Draft for Judith — Website Down
 
 Applying Robert's coaching (short, not alarming, just checking in):
 
 > Hi Judith, it's Brian. I noticed equityfundingsource.com appears to be down — were you aware? Just wanted to check before I start working on things. Hope you're doing well!
 
 Short, casual, non-alarming. Doesn't imply blame or urgency. Just a heads-up question.
-<!-- agent:boundary:cf5e0088 -->
+<!-- agent:boundary:7236efb9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

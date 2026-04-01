@@ -1485,7 +1485,7 @@ Please help me strategically schedule a good time.
 
 Clean separation, no conflicts, respectful times for both Bay Area contacts. Want me to draft a reschedule message to Bob?
 
-Would 11:30 Eastern be better? I believe Bob has an appointments between 12:30 and 13:30.
+Would 11:30 Eastern be better? I believe Bob has an appointments between 12:30 and 13:30. 
 ### Re: 11:30 ET is better
 
 Yes, **11:30 AM ET / 8:30 AM PT** is the better call. If Bob has 12:30-1:30 PM ET blocked, a noon start would butt right up against it with no buffer. 11:30 gives:
@@ -1503,13 +1503,36 @@ Yes, **11:30 AM ET / 8:30 AM PT** is the better call. If Bob has 12:30-1:30 PM E
 | 4:00 PM | 1:00 PM | Robert Ross call |
 
 Want me to draft the reschedule message to Bob for the 11:30 AM ET slot?
-<!-- agent:boundary:e2cb5cf5 -->
+
+What should I put as my reason for change?
+Should I mention that my wife has a dentist appointment & I have to watch my daughter?
+Look at our history. Bob probably does not know I have a daughter...so this may be a low key way to introduce that info.
+### Re: Reschedule reason & the daughter reveal (HEAD)
+
+Good instinct. The dentist/daughter mention is the right call for a few reasons:
+
+1. **It's honest and specific** -- vague "scheduling conflict" reads as dodgy when you're rescheduling a second time. A concrete reason builds trust.
+2. **Natural daughter introduction** -- if Bob doesn't know you have a daughter, this is the perfect low-key reveal. It lands as context, not an announcement.
+3. **It humanizes the reschedule** -- "I'm on dad duty" is universally relatable and actually makes you more likable, not less professional.
+
+**Suggested Calendly reschedule message:**
+
+> Hey Bob, need to move our Thursday call -- my wife has a dentist appointment that afternoon and I'm on daughter duty. Would 11:30 AM ET / 8:30 AM PT work for you instead? Apologies for the shuffle.
+
+**Why this works:**
+- "daughter duty" is warm and casual -- not "I have a child" (too formal) or "watching my kid" (too detached)
+- One sentence of reason, one sentence of new time, one sentence of acknowledgment
+- No over-apologizing -- you're rescheduling by 2.5 hours, not canceling
+- Bob likely responds with something like "no worries, I have kids too" or "didn't know you had a daughter!" -- either way, it opens a personal connection before a business call
+
+Want me to adjust the tone or wording?
+<!-- agent:boundary:dfaec1c6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Draft reschedule message to Bob (new time: 11:30 AM ET / 8:30 AM PT Thursday)
+- Finalize and send reschedule message to Bob (11:30 AM ET / 8:30 AM PT Thursday)
 - Schedule Robert Ross call at 4:00 PM ET / 1:00 PM PT Thursday
 - Prep talking points for Bob call (JB plugin demo, security architecture, Ragie Parse pitch)
 - Prep talking points for Dreamable/Robert Ross call

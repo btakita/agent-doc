@@ -890,7 +890,8 @@ All 252 tests pass.
 - `test_no_tracking_line_when_empty` — no Tracking line for clean emails
 
 #### Bug fix:
-`META_RE` regex used `\s*` which matched `\n`, causing `**Last updated**: ` to greedily consume the next line as its value (swallowing `**Tracking**: ...`). Fixed by changing `\s*` to `[ ]*` (spaces only, no newlines). This was a latent bug that only manifested when a metadata line had an empty value followed by another metadata line.
+`META_RE` regex used `\s*` which matched `\
+`, causing `**Last updated**: ` to greedily consume the next line as its value (swallowing `**Tracking**: ...`). Fixed by changing `\s*` to `[ ]*` (spaces only, no newlines). This was a latent bug that only manifested when a metadata line had an empty value followed by another metadata line.
 
 #### SPEC.md updated:
 - §3.1 conversation format: added `**Tracking**` metadata field documentation
@@ -899,13 +900,42 @@ All 252 tests pass.
 #### Not applicable:
 - **README.md** — no user-facing CLI changes, sync internals documented in SPEC
 - **Ontology / module-harness** — no new domain terms or modules introduced; `markdown_clean` is a utility within the existing sync module, not a new bounded context
-<!-- agent:boundary:a5f99782 -->
+
+do:
+- crates.io token — renew and publish corky
+- VERSIONS.md — add entry before next release
+### Re: VERSIONS.md + crates.io publish (HEAD)
+
+**VERSIONS.md updated** — added 4 entries under 0.23.0:
+- HTML-first email body extraction
+- Markdown cleanup (CSS/tracking/styles)
+- Tracking pixel detection
+- META_RE regex fix
+
+**crates.io token status:** Token exists in `pass` and `cargo publish --dry-run` runs (it complains about dirty files, which is expected). Token appears valid.
+
+**Before publishing, need to commit changes to the corky submodule.** The dirty files are:
+
+- `Cargo.toml` (htmd dep)
+- `Cargo.lock`
+- `AGENTS.md` (sync behavior update)
+- `SPEC.md` (body extraction, tracking metadata)
+- `VERSIONS.md` (new entries)
+- `src/sync/gmail_api_sync.rs` (HTML-first)
+- `src/sync/imap_sync.rs` (HTML-first + cleanup in merge)
+- `src/sync/markdown.rs` (tracking serialize/parse + META_RE fix)
+- `src/sync/markdown_clean.rs` (new module)
+- `src/sync/mod.rs` (registered module)
+- `src/sync/types.rs` (tracking field)
+- `tests/test_sync.rs` (tracking field in test structs)
+
+Ready to commit inside `src/corky/`, then publish. Want me to proceed with the commit?
+<!-- agent:boundary:7e8742fb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - Respond to Rob Ross (Dreamable) — schedule meeting Wed/Thu 12-4pm PT
-- crates.io token — renew and publish corky
-- VERSIONS.md — add entry before next release
+- **corky: commit + publish 0.23.0** — commit submodule changes, cargo publish, update GitHub release
 <!-- /agent:pending -->

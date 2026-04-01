@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-3-pane layout bug: busy pane guard too aggressive. Protecting panes that should give way to replacements.
+Busy pane guard removed from DETACH. 3-pane bug fixed. Column memory + stash rescue preserved.
 <!-- /agent:status -->
 
 ## Exchange
@@ -2069,14 +2069,30 @@ This requires passing the `wanted` pane set into the callback so it can distingu
 For now, the quick fix: remove the busy pane guard from the DETACH phase and rely on column memory + stash rescue for session preservation. The guard was solving a narrow edge case (layout collapse on non-agent switch) but causing a worse problem (pane accumulation).
 
 Want me to remove the guard or implement the smarter replacement-aware version?
-<!-- agent:boundary:f0faf062 -->
+### Re: Busy pane guard removed from DETACH (HEAD)
+
+**Fixed.** Removed the `protect_pane` callback from the sync DETACH phase. The guard was causing 3-pane accumulation when switching documents in the same column.
+
+**What changed:** `sync.rs` now calls `tmux_router::sync()` (default options, no guard) instead of `sync_with_options()` with the busy pane callback.
+
+**Why this is safe:** Column memory (`.agent-doc/last_layout.json`) + stash rescue handle the original concern (pane collapse on non-agent-file switch). When the user opens a non-agent file:
+1. Column memory substitutes the remembered agent doc
+2. The pane resolves normally → no stashing needed
+
+When the user switches to a different agent doc:
+3. The new pane takes the column position
+4. The old pane gets stashed (alive in stash window)
+5. If the user switches back, stash rescue brings it back
+
+The `layout.rs` busy pane guard is still in place (for the older `layout` command path). All 595 tests pass. Release binary deployed.
+<!-- agent:boundary:7d49b269 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Fix busy pane guard** — replacement-aware or remove from DETACH
-- [ ] **Release agent-doc v0.30.1** (multi-harness + guard fix)
+- [x] **Fix 3-pane layout bug** — removed busy pane guard from DETACH
+- [ ] **Release agent-doc v0.30.1** (guard fix + multi-harness)
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)
 <!-- /agent:pending -->

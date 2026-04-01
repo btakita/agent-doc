@@ -3080,14 +3080,14 @@ All three changes are done:
 - JetBrains plugin builds successfully (both unsigned and signed zips)
 
 **To install:** reinstall the plugin zip from `src/agent-doc/editors/jetbrains/build/distributions/`. Since ClaimAction lost fields/methods, do a full uninstall → restart → install → restart cycle.
-### Re: Stale "Go" text (HEAD)
+### Re: Stale "Go" text
 
 You're right — the "Go" text was your approval signal and should have been consumed/removed when I responded. The `### Re: Implementation complete` heading got appended after it rather than replacing it. This is a skill-side issue: when the user writes a short approval like "Go", the response should replace that text rather than appending below it.
 
 This is an edge case in the exchange append flow — the user's approval text becomes part of the permanent exchange history rather than being consumed. Worth noting but not blocking. I'll clean it up now by including it in context.
 
 The plugin zip is ready at `src/agent-doc/editors/jetbrains/build/distributions/`. Do you want to install it now, or is there anything else to address first?
-<!-- agent:boundary:41321581 -->
+<!-- agent:boundary:16ed33a9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

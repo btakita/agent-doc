@@ -811,7 +811,7 @@ Ready to send when you approve.
 > exactly the kind of human-in-the-loop control LIGER needs for federal trust.
 
 This may be overselling the feature.
-### Re: Overselling Fix (HEAD)
+### Re: Overselling Fix
 
 Good catch. Changed line 17 from:
 
@@ -822,7 +822,7 @@ To:
 > "...the same human-in-the-loop pattern that matters for high-trust environments."
 
 This describes the pattern without claiming agent-doc is what LIGER specifically needs. Keeps it factual — the prototype demonstrates the pattern, not the production solution.
-<!-- agent:boundary:22b65d5e -->
+<!-- agent:boundary:14cf43a2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

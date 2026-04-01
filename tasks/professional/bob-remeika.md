@@ -1431,7 +1431,7 @@ You've got two days to prep. The key items before the call:
 2. **Security architecture talking points** (prompt injection, data isolation, content signing)
 3. **Ragie Parse pitch** for Judith's loan docs and Ron's patent corpus
 4. **Web architecture walkthrough** (even without a live demo, the design doc works)
-<!-- agent:boundary:c208057d -->
+<!-- agent:boundary:7d23a7c7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

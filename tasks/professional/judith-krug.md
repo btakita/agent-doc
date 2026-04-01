@@ -5,7 +5,7 @@ agent_doc_format: template
 agent_doc_write: crdt
 links:
   - ../personal/robert-ward.md
-  
+  - ./bob-remeika.md
 ---
 
 # Judith Krug — Equity Funding Source
@@ -332,8 +332,15 @@ The reply looks good. Full send.
 
 Please read the transcript for the last phone call with robert-ward. Come up with a plan for today.
 I will start with Judith's website. Also need to plan Ragie integration with Judith's at equity-fundng-source.
-<!-- agent:boundary:e6d7972b -->
+### Re: Bob Remeika Link Added (HEAD)
+
+Linked `./bob-remeika.md` — Bob Remeika (CEO, Ragie) is now a related contact for this document. This ties into the Ragie RAG integration planned for equityfundingsource.com. When ready to scope that work, the bob-remeika doc and `tasks/software/ragie-web-doc.md` have the Ragie context.
+<!-- agent:boundary:473dc36a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
+- [ ] Ragie integration scoping for equityfundingsource.com (linked via bob-remeika.md)
+- [ ] Judith reviews proposal and decides MA vs TMO + custom
+- [ ] Schedule Zoom call with Judith and Robert Waldman
+- [ ] Website Phase 1 kickoff (pending Judith's return from retreat)
 <!-- /agent:pending -->

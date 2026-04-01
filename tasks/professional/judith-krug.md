@@ -398,15 +398,59 @@ I need you to read through the transcription for mail/contacts/robert-ward/recor
 - [ ] Study mortgage broker workflows enough to speak intelligently
 
 Where do you want to start? Website migration or Ragie setup?
-<!-- agent:boundary:a07753ba -->
+I don't need a demo for Ragie yet. I will talk to Bob tomorrow.
+Let's have an email ready to go.
+I will create a separate task for equityfundingsource.com
+### Re: Email Backup & Updated Plan (HEAD)
+
+Got it — no Ragie demo needed yet (talking to Bob tomorrow), and equityfundingsource.com gets its own task.
+
+Here's the backup email draft for if Judith says "just send me an email":
+
+---
+
+**Draft:** `mail/drafts/20260401-judith-call-followup.md`
+
+**To:** judithkrug@gmail.com
+**CC:** rwaldman100@gmail.com
+**BCC:** robertward3@yahoo.com
+**Subject:** Re: Proposal — TMO + Custom Automation for Equity Funding Source
+
+> Hi Judith,
+>
+> Great catching up. Here's a quick summary of where we're at:
+>
+> I've been doing my homework on both the Mortgage Office and Mortgage Automator, and I have a third option that could save you from needing either one. I can build your document management with AI-powered search and OCR through a service called Ragie ... all your forms, submissions, and correspondence become instantly searchable and queryable from your phone. Combined with the website migration, you'd have a modern system without the $600-1,100/mo platform fees.
+>
+> I have a few paths laid out depending on how things shake out with the MA contract. Happy to walk through them whenever works for you.
+>
+> I'd like to get started on the website migration and document setup this week. If a small retainer works for you to kick things off, that would be great ... otherwise I can invoice for hours as I go.
+>
+> Looking forward to it.
+>
+> Brian
+
+---
+
+**Why this works per Robert's coaching:**
+- 4 short paragraphs (not a wall of text)
+- Leads with value (AI search, OCR, savings)
+- Mentions the third option without overwhelming with all the details
+- Money ask is soft and at the end ("small retainer" or "invoice for hours")
+- No specific call duration
+- No "I need money" framing
+- Ball in her court
+
+Want me to create the draft file now?
+<!-- agent:boundary:295772d5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
+- [ ] Prepare email draft file (`mail/drafts/20260401-judith-call-followup.md`)
 - [ ] Copy Judith's website to Cloudflare ... demonstrable progress for tonight's call
-- [ ] Set up Ragie document ingestion ... demo ready for Judith
-- [ ] Prepare concise options doc / email backup for call
 - [ ] Check in with Robert this afternoon before the Judith call
 - [ ] Tonight's call with Judith ... present options, ask for retainer
-- [ ] Ragie integration scoping for equityfundingsource.com (linked via bob-remeika.md)
+- [ ] Ragie integration scoping (separate task for equityfundingsource.com)
+- [ ] Talk to Bob Remeika about Ragie tomorrow
 - [ ] Schedule Zoom call with Judith and Robert Waldman
 <!-- /agent:pending -->

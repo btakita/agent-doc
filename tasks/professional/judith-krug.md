@@ -477,7 +477,7 @@ Applying Robert's coaching (short, not alarming, just checking in):
 > Hi Judith, it's Brian. I noticed equityfundingsource.com appears to be down — were you aware? Just wanted to check before I start working on things. Hope you're doing well!
 
 Short, casual, non-alarming. Doesn't imply blame or urgency. Just a heads-up question.
-### Re: Text Sent (2026-04-01) (HEAD)
+### Re: Text Sent (2026-04-01)
 
 Noted — text to Judith about the website being down has been sent. Checked off from pending.
 
@@ -487,7 +487,7 @@ Noted — text to Judith about the website being down has been sent. Checked off
 3. Check in with Robert this afternoon
 
 Let me know when you want me to create the email draft file or if you're jumping to the website work first.
-<!-- agent:boundary:e7ea13fa -->
+<!-- agent:boundary:b267b980 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

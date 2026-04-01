@@ -493,10 +493,35 @@ Publishing a technical security post on April 1st creates irony:
 - **Options:** (1) Change to April 2nd, (2) Lean in with "No, the 532 commits are not a joke," (3) Ignore it.
 
 Recommendation: change to April 2nd unless you want the irony as a hook.
-<!-- agent:boundary:2ccb1b0d -->
+
+I want to release it today due to timing.
+People will probably ask if this is a joke.
+
+Should I also release the entire blog post on LinkedIn along with briantakita.me?
+### Re: Release today + LinkedIn (HEAD)
+
+**April 1st:** Keeping it. Added *"Yes, this is dated April 1st. The 532 commits are real — check the git log."* to the blog post intro.
+
+**LinkedIn:** Recommend teaser post linking to full article on briantakita.me. Draft teaser:
+
+> 532 git commits in one day. 11 parallel AI agent sessions. 292 commits debugging one cascade of bugs.
+>
+> Yes, this is dated April 1st. No, it's not a joke.
+>
+> I spent a day running agent-doc — my Rust CLI for interactive AI document sessions — at scale. Each document gets its own Claude Code instance in a tmux pane, orchestrated by editor focus. Every prompt and response is committed to git.
+>
+> What I found: snapshot rollbacks when sessions die and restart with stale state. Duplicate response writes from the rollback/regeneration cycle. Ghost sessions in the registry. And a three-way IPC synchronization layer where bugs in one system present as failures in another.
+>
+> The meta-lesson: the only way to debug a tool this complex is to dog-food it on itself.
+>
+> Full post: [link]
+
+Ready to build and deploy when you are. Want me to build briantakita.me locally to preview?
+<!-- agent:boundary:37159426 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Blog post v5 — date decision (April 1 vs 2)
+- Blog post v5 with April 1st line — build, preview, deploy
+- LinkedIn teaser draft ready
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

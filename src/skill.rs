@@ -104,6 +104,18 @@ pub fn install_and_check_updated() -> Result<bool> {
     Ok(!was_current)
 }
 
+/// Install the skill for a specific harness environment.
+pub fn install_for(env: agent_kit::detect::Environment) -> Result<()> {
+    let resolved = resolve_root();
+    config().install_for(env, resolved.as_deref())
+}
+
+/// Install the skill for all supported harnesses.
+pub fn install_all() -> Result<()> {
+    let resolved = resolve_root();
+    config().install_all(resolved.as_deref())
+}
+
 /// Check if the installed skill matches the bundled version.
 /// When `root` is None, resolves to git superproject root (or CWD fallback).
 pub fn check_at(root: Option<&Path>) -> Result<()> {

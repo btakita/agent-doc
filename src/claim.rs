@@ -195,6 +195,25 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
     let pane_pid = sessions::pane_pid(&pane_id).unwrap_or(std::process::id());
     sessions::register_with_pid(&session_id, &pane_id, &file_str, pane_pid)?;
 
+    // Sync config.toml tmux_session to match the pane's actual session
+    if tmux.pane_alive(&pane_id) {
+        let pane_session = tmux
+            .cmd()
+            .args(["display-message", "-t", &pane_id, "-p", "#{session_name}"])
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+        if !pane_session.is_empty() {
+            let configured = crate::config::project_tmux_session();
+            if configured.as_deref() != Some(&pane_session)
+                && let Err(e) = crate::config::update_project_tmux_session(&pane_session)
+            {
+                eprintln!("warning: failed to update project tmux_session config: {}", e);
+            }
+        }
+    }
+
     // Focus the claimed pane (select-window + select-pane for cross-window support)
     if tmux.pane_alive(&pane_id) {
         if let Err(e) = tmux.select_pane(&pane_id) {

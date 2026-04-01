@@ -37,6 +37,7 @@ pub fn fire_post_commit(file: &Path, session_id: &str) {
 }
 
 /// Fire a claim hook event.
+#[allow(dead_code)]
 pub fn fire_claim(file: &Path, session_id: &str, pane_id: &str) {
     if let Some(registry) = registry_for_file(file) {
         let _ = registry.fire("claim", Event {
@@ -48,6 +49,7 @@ pub fn fire_claim(file: &Path, session_id: &str, pane_id: &str) {
 }
 
 /// Fire a layout_change hook event.
+#[allow(dead_code)]
 pub fn fire_layout_change(file: &Path, session_id: &str, action: &str) {
     if let Some(registry) = registry_for_file(file) {
         let _ = registry.fire("layout_change", Event {
@@ -59,6 +61,7 @@ pub fn fire_layout_change(file: &Path, session_id: &str, action: &str) {
 }
 
 /// Poll for new events on a named hook since the given timestamp.
+#[allow(dead_code)]
 pub fn poll(file: &Path, hook_name: &str, since_secs: u64) -> Vec<agent_kit::hooks::ReceivedEvent> {
     registry_for_file(file)
         .and_then(|r| r.poll(hook_name, since_secs).ok())

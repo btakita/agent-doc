@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { execFile } from 'child_process';
+import * as native from './native';
 
 // ---------------------------------------------------------------------------
 // CLI Resolution (Feature 9)
@@ -589,13 +590,17 @@ interface IpcPatch {
     unmatched: string;
     frontmatter?: string;
     fullContent?: string;
+    reposition_boundary?: boolean;
 }
 
 class PatchWatcher implements vscode.Disposable {
     private watcher: vscode.FileSystemWatcher | undefined;
     private signalWatcher: vscode.FileSystemWatcher | undefined;
+    private typingListener: vscode.Disposable | undefined;
     private patchesDir: string | undefined;
     private outputChannel: vscode.OutputChannel;
+    /** Track last typing time per file for debounce */
+    private lastTypingTime = new Map<string, number>();
 
     constructor() {
         this.outputChannel = vscode.window.createOutputChannel('Agent Doc Patches');
@@ -627,6 +632,16 @@ class PatchWatcher implements vscode.Disposable {
         this.signalWatcher = vscode.workspace.createFileSystemWatcher(signalPattern, false, false, true);
         this.signalWatcher.onDidCreate(() => this.onVcsRefreshSignal(patchesDir));
         this.signalWatcher.onDidChange(() => this.onVcsRefreshSignal(patchesDir));
+
+        // Track typing events for debounce (TS fallback + FFI)
+        this.typingListener = vscode.workspace.onDidChangeTextDocument((e) => {
+            if (e.document.languageId === 'markdown' && e.contentChanges.length > 0) {
+                const fsPath = e.document.uri.fsPath;
+                this.lastTypingTime.set(fsPath, Date.now());
+                // Also record in FFI debounce tracker (shared with JB plugin)
+                native.documentChanged(fsPath, this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined);
+            }
+        });
 
         this.outputChannel.appendLine(`PatchWatcher: watching ${patchesDir}`);
 
@@ -695,6 +710,12 @@ class PatchWatcher implements vscode.Disposable {
                 return;
             }
 
+            // Handle reposition-only signals with typing debounce
+            if (patch.reposition_boundary && patch.patches.length === 0) {
+                this.repositionBoundaryWithDebounce(patch.file, uri.fsPath);
+                return;
+            }
+
             const applied = await this.applyPatch(patch);
 
             if (applied) {
@@ -710,6 +731,91 @@ class PatchWatcher implements vscode.Disposable {
         } catch (e: any) {
             this.outputChannel.appendLine(`PatchWatcher: failed to process ${uri.fsPath}: ${e.message}`);
         }
+    }
+
+    /**
+     * Reposition boundary marker with typing debounce.
+     * Waits until the user stops typing (500ms idle) before applying,
+     * up to a 5s timeout. ACKs the patch file after applying.
+     *
+     * Uses FFI `agent_doc_reposition_boundary_to_end` when available,
+     * falls back to TS implementation.
+     */
+    private repositionBoundaryWithDebounce(filePath: string, patchFilePath: string, elapsed = 0): void {
+        const debounceMs = 500;
+        const timeoutMs = 5000;
+        const projectRoot = this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined;
+
+        // Check typing idle — prefer FFI, fall back to TS timestamp
+        const ffiIdle = native.isAvailable(projectRoot)
+            ? native.isIdle(filePath, debounceMs, projectRoot)
+            : null;
+        const tsIdle = (Date.now() - (this.lastTypingTime.get(filePath) ?? 0)) >= debounceMs;
+        const idle = ffiIdle ?? tsIdle;
+
+        if (!idle && elapsed < timeoutMs) {
+            setTimeout(() => {
+                this.repositionBoundaryWithDebounce(filePath, patchFilePath, elapsed + 500);
+            }, 500);
+            return;
+        }
+
+        // Apply reposition via WorkspaceEdit (cursor-safe)
+        const fileUri = vscode.Uri.file(filePath);
+        vscode.workspace.openTextDocument(fileUri).then(async (document) => {
+            const content = document.getText();
+            // Prefer FFI reposition, fall back to TS
+            const repositioned = native.repositionBoundaryToEnd(content, projectRoot)
+                ?? this.repositionBoundaryToEndTs(content, 'exchange');
+            if (repositioned && repositioned !== content) {
+                const fullRange = new vscode.Range(
+                    document.positionAt(0),
+                    document.positionAt(content.length),
+                );
+                const edit = new vscode.WorkspaceEdit();
+                edit.replace(fileUri, fullRange, repositioned);
+                await vscode.workspace.applyEdit(edit);
+                await document.save();
+            }
+            // ACK: delete the patch file
+            try { fs.unlinkSync(patchFilePath); } catch { /* already consumed */ }
+        }).then(undefined, (err: any) => {
+            this.outputChannel.appendLine(`PatchWatcher: reposition failed: ${err.message}`);
+            try { fs.unlinkSync(patchFilePath); } catch { /* best effort ACK */ }
+        });
+    }
+
+    /**
+     * TS fallback: reposition boundary marker to end of exchange component.
+     * Removes all existing `<!-- agent:boundary:... -->` markers and inserts
+     * a single fresh one just before the close tag.
+     * Used when FFI (koffi) is not available.
+     */
+    private repositionBoundaryToEndTs(doc: string, component: string): string | null {
+        const openPattern = new RegExp(`<!-- agent:${this.escapeRegex(component)}(\\s[^>]*)? -->`);
+        const closeTag = `<!-- /agent:${component} -->`;
+
+        const openMatch = openPattern.exec(doc);
+        if (!openMatch) return null;
+
+        const closeIdx = doc.indexOf(closeTag, openMatch.index + openMatch[0].length);
+        if (closeIdx < 0) return null;
+
+        const contentStart = openMatch.index + openMatch[0].length;
+        let content = doc.substring(contentStart, closeIdx);
+
+        // Remove all existing boundary markers
+        content = content.replace(/<!-- agent:boundary:[a-f0-9]+ -->\n?/g, '');
+
+        // Generate a fresh boundary ID (8 hex chars)
+        const id = Array.from({ length: 8 }, () =>
+            Math.floor(Math.random() * 16).toString(16)
+        ).join('');
+
+        const trimmed = content.trimEnd();
+        const newContent = `${trimmed}\n<!-- agent:boundary:${id} -->\n`;
+
+        return doc.substring(0, contentStart) + newContent + doc.substring(closeIdx);
     }
 
     private async applyPatch(patch: IpcPatch): Promise<boolean> {
@@ -931,6 +1037,7 @@ class PatchWatcher implements vscode.Disposable {
     dispose(): void {
         this.watcher?.dispose();
         this.signalWatcher?.dispose();
+        this.typingListener?.dispose();
         this.outputChannel.dispose();
     }
 }

@@ -176,9 +176,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             }
             "reposition" -> {
                 val file = extractStringField(json, "file") ?: return false
-                ApplicationManager.getApplication().invokeAndWait {
-                    repositionBoundaryViaDocument(file)
-                }
+                repositionBoundaryViaDocument(file)
                 true
             }
             "vcs_refresh" -> {
@@ -195,22 +193,36 @@ class PatchWatcher(private val project: Project) : Disposable {
     /**
      * Reposition boundary marker in a document via Document API.
      * Used by socket IPC "reposition" messages.
+     *
+     * Waits for typing to settle via FFI `await_idle` (blocking, runs on
+     * background thread) before applying the reposition on the EDT.
+     * This prevents keystroke loss from Document API writes racing with
+     * user input.
      */
     private fun repositionBoundaryViaDocument(filePath: String) {
-        val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return
-        targetFile.refresh(false, false)
-        val document = FileDocumentManager.getInstance().getDocument(targetFile) ?: return
-
-        WriteCommandAction.runWriteCommandAction(project, "Agent Doc Reposition", null, {
-            val content = document.text
-            val result = NativePatching.repositionBoundaryToEnd(content)
-                ?: repositionBoundaryToEnd(content, "exchange")
-                ?: return@runWriteCommandAction
-            if (result != content) {
-                document.setText(result)
+        com.intellij.util.concurrency.AppExecutorUtil.getAppExecutorService().submit {
+            val lib = AgentDocLib.get()
+            if (lib != null) {
+                // Block on background thread until user stops typing (500ms idle, 5s timeout)
+                lib.agent_doc_await_idle(filePath, 500, 5000)
             }
-        })
-        FileDocumentManager.getInstance().saveDocument(document)
+            ApplicationManager.getApplication().invokeLater {
+                val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeLater
+                targetFile.refresh(false, false)
+                val document = FileDocumentManager.getInstance().getDocument(targetFile) ?: return@invokeLater
+
+                WriteCommandAction.runWriteCommandAction(project, "Agent Doc Reposition", null, {
+                    val content = document.text
+                    val result = NativePatching.repositionBoundaryToEnd(content)
+                        ?: repositionBoundaryToEnd(content, "exchange")
+                        ?: return@runWriteCommandAction
+                    if (result != content) {
+                        document.setText(result)
+                    }
+                })
+                FileDocumentManager.getInstance().saveDocument(document)
+            }
+        }
     }
 
     private fun processPatchFile(patchFile: File) {

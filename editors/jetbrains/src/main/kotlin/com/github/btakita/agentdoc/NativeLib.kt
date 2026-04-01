@@ -89,6 +89,9 @@ interface AgentDocLib : Library {
     /** Record a document change event for debounce tracking. */
     fun agent_doc_document_changed(file_path: String)
 
+    /** Non-blocking idle check. Returns true if no document_changed event within debounce_ms. */
+    fun agent_doc_is_idle(file_path: String, debounce_ms: Long): Boolean
+
     /** Block until document is idle for debounce_ms, or timeout_ms expires. Returns true if idle. */
     fun agent_doc_await_idle(file_path: String, debounce_ms: Long, timeout_ms: Long): Boolean
 
@@ -284,6 +287,15 @@ object NativePatching {
         } finally {
             lib.agent_doc_free_string(result.text)
         }
+    }
+
+    /**
+     * Non-blocking idle check via FFI debounce tracker.
+     * Returns true if the user hasn't typed within debounceMs, or if FFI is unavailable.
+     */
+    fun isIdle(filePath: String, debounceMs: Long): Boolean {
+        val lib = AgentDocLib.get() ?: return true // No FFI — assume idle (don't block)
+        return lib.agent_doc_is_idle(filePath, debounceMs)
     }
 
     /**

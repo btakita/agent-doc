@@ -1236,7 +1236,7 @@ New approach:
 All 382 tests pass. Release binary built.
 Claude code has hooks. Not sure about other agent harnesses.
 This behavior may belong in agent-kit.
-### Re: Session collapse on document switch — busy pane guard (HEAD)
+### Re: Session collapse on document switch — busy pane guard
 
 Got it — the issue is clearer now. Here's the bug trace:
 
@@ -1276,7 +1276,7 @@ This protects active sessions at the DETACH level — even when column memory fa
 All tests pass. Release binary built.
 
 **Note:** `Cargo.toml` uses `path = "../tmux-router"` for now. Before publishing, we'll need to publish tmux-router 0.3.7 first, then switch back to the registry version.
-<!-- agent:boundary:fc192eb4 -->
+<!-- agent:boundary:46af2edf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -815,7 +815,7 @@ I will discuss more with him as well.
 - Works on CI (GitHub Actions) since no hardcoded local path
 
 **Testing:** Unit tests need the full bun dev env to run (uvu + esmock loader). The fix is minimal and logically correct — `dirname(entryPoint)` matches the CSS source directory. Verify with a local build when ready.
-### Re: Sharing with Josh Malloy (HEAD)
+### Re: Sharing with Josh Malloy
 
 **Send the blog post directly via email, not the LinkedIn teaser.** Reasons:
 
@@ -827,7 +827,7 @@ I will discuss more with him as well.
 **Suggested approach:** Short email to jmalloy@lmi.org referencing the interview, link to the blog post, mention being open to discussing how agent-doc could apply to LIGER's document generation and fact-checking needs.
 
 Want me to draft the email via corky?
-<!-- agent:boundary:6512d297 -->
+<!-- agent:boundary:9ecadc0a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

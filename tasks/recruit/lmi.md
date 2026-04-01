@@ -903,7 +903,7 @@ Cancel send
 
 Please explain more. "deterministic binary (Rust) handles everything auditable" doesn't align with my thinking on this.
 It's just deterministic. Some agent work also handles auditing.
-### Re: Cancel Send + Binary/Audit Clarification (HEAD)
+### Re: Cancel Send + Binary/Audit Clarification
 
 Send cancelled.
 
@@ -918,7 +918,7 @@ Proposed:
 > "The deterministic binary (Rust) handles reliable operations (merging, snapshots, git) while the skill layer handles reasoning. Both produce auditable output."
 
 Want me to apply this, or do you have different wording in mind?
-<!-- agent:boundary:eb32b6bb -->
+<!-- agent:boundary:6a6c0c0b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

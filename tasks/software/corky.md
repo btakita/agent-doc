@@ -677,7 +677,22 @@ Ready to implement. The change touches:
 3. `src/corky/src/sync/imap_sync.rs` — `extract_body`
 
 Want me to go ahead?
-<!-- agent:boundary:cae55944 -->
+Implement
+### Re: Implementation complete (HEAD)
+
+Done. All tests pass (235+).
+
+**Changes:**
+1. `Cargo.toml` — added `htmd = "0.5"`
+2. `gmail_api_sync.rs` — `extract_body_from_payload` and `extract_body_from_parts` now prefer `text/html` → `htmd::HtmlToMarkdown` conversion, with `text/plain` as fallback
+3. `imap_sync.rs` — `extract_body` same pattern: prefer HTML→markdown, plain text fallback
+4. Both modules share a local `html_to_markdown()` helper
+5. Updated 2 tests to expect HTML-derived output instead of plain text
+
+**Behavior change:** Emails with both `text/html` and `text/plain` parts now get the HTML version converted to markdown (preserving links, formatting). Emails with only `text/plain` still work as before. The 297 previously empty HTML-only emails will now have readable content on next sync.
+
+Next step: build release binary and resync to populate the 297 empty emails. Want me to proceed?
+<!-- agent:boundary:32663720 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -685,5 +700,5 @@ Want me to go ahead?
 <!-- agent:pending -->
 - Respond to Rob Ross (Dreamable) — schedule meeting Wed/Thu 12-4pm PT
 - crates.io token — renew and publish corky 0.23.0
-- **corky: HTML-first email body extraction** — add `htmd`, prefer text/html→markdown over text/plain in both sync modules
+- **corky: build release + resync** — build with HTML-first, resync 555 threads to get markdown bodies
 <!-- /agent:pending -->

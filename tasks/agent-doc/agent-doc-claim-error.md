@@ -2121,14 +2121,14 @@ Remaining 2 issues are informational (large table, SKILL.md managed by binary).
 You are processing melissa-lewis.md. But the prompt is uncommitted. Why?
 ![img_2.png](img_2.png)
 Idea is not responding. Jump threads. Why?
-### Re: 3-pane layout with melissa-lewis.md (HEAD)
+### Re: 3-pane layout with melissa-lewis.md
 
 **Root cause:** The JB plugin calls `/home/brian/.cargo/bin/agent-doc` (installed via `cargo install`). That binary was still v0.30.0 with the busy pane guard. The release build at `.bin/agent-doc` had the fix, but the plugin doesn't use that path.
 
 **Fixed:** Re-ran `cargo install --path .` to update `~/.cargo/bin/agent-doc`. Verified: sync now produces 2 panes, no "protected (busy pane)" messages.
 
 **Lesson:** After code changes, always run `cargo install --path .` — the JB plugin uses the cargo-installed binary, not the release build symlink.
-<!-- agent:boundary:bbfb23e3 -->
+<!-- agent:boundary:d450b3dd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

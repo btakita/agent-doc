@@ -38,7 +38,16 @@ Added `robert-waldman` to `mail/.corky.toml` and pushed to Google Contacts via `
 **Result:** Created new Google Contact — `people/c5045079896432711148`
 
 **Duplicate warning:** You provided Google Contacts URL with person ID `c2907734623862917833`, but corky created a new one (`c5045079896432711148`). Robert Waldman already exists in your Google Contacts. You may want to merge the duplicate in Google Contacts.
-<!-- agent:boundary:c15f34a6 -->
+Yes
+
+Please create a bi-directional link between this document + judith-krug.md
+### Re: Bi-directional Links Created (HEAD)
+
+- `tasks/professional/robert-waldman.md` → links to `./judith-krug.md`
+- `tasks/professional/judith-krug.md` → links to `./robert-waldman.md`
+
+Both frontmatter `links` arrays updated.
+<!-- agent:boundary:aa9e531f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -79,7 +79,8 @@ Let him know the current status with my work for Judith. I will attempt to recov
 **Draft file:** `mail/drafts/20260401-robert-waldman-website-down.md`
 
 Link to https://web.archive.org/web/20260207050228/https://www.equityfundingsource.com/
-Ask Robert if he has any of the missing assets for the website.
+Note that the CSS does not layout correctly and some of the images are missing.
+Ask Robert if he has any of the missing assets for the website. I will work on the css layout.
 
 #### Google People API — Merge Support
 
@@ -114,14 +115,25 @@ Tried deleting the duplicate (`c5045079896432711148`) — got 404, meaning it wa
 #### Google People API — No Native Merge
 
 The API has no merge endpoint. To merge: copy data from one contact to the other (`updateContact`), then delete the source (`deleteContact`). The Google Contacts web UI "Merge & fix" is still the easiest path for one-off merges.
-<!-- agent:boundary:f7352aab -->
+### Re: Email Draft Updated (HEAD)
+
+Updated `mail/drafts/20260401-robert-waldman-website-down.md`:
+- Added Wayback Machine archive link
+- Noted CSS layout issues and missing images
+- Asking Robert for original assets (images, logos)
+- You'll handle the CSS layout fix
+
+Ready to send via `corky draft push` when you approve.
+<!-- agent:boundary:ac7e3045 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Send email draft to Robert Waldman (website down notification) — awaiting approval
-- [ ] Recover equityfundingsource.com and migrate to Cloudflare
+- [ ] Send email draft to Robert Waldman (website down + asset request) — awaiting approval
+- [ ] Fix CSS layout from Wayback Machine recovery
+- [ ] Recover missing images for equityfundingsource.com
+- [ ] Migrate site to Cloudflare
 - [ ] Get Robert Waldman's phone number (pending from Judith since March 4)
 - [ ] Schedule Zoom call with Robert Waldman for deeper requirements
 <!-- /agent:pending -->

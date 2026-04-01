@@ -796,7 +796,7 @@ Backtesting can also be applied to datasets, agent harness, + prompts.
 > I also wrote up a detailed post about a day
 
 This was immediately after the interview until today.
-### Re: Backtesting Scope + Timeline Correction (HEAD)
+### Re: Backtesting Scope + Timeline Correction
 
 Applied both updates to the Josh email draft:
 
@@ -807,7 +807,7 @@ Applied both updates to the Josh email draft:
 Updated draft at: `mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-interactive-document-genera.md`
 
 Ready to send when you approve.
-<!-- agent:boundary:45b8e5ac -->
+<!-- agent:boundary:6d033380 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

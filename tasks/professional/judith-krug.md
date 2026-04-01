@@ -677,14 +677,14 @@ The P.S. lets Judith visualize the power without cluttering the main email. Clos
 Ready to send via `corky draft push` when you approve.
 
 Let's include Ragie and my call with Bob Remeika tomorrow re: integration + OCR.
-### Re: Ragie + Bob Remeika Added to Proposal (HEAD)
+### Re: Ragie + Bob Remeika Added to Proposal
 
 Updated `mail/drafts/20260401-judith-proposal-options.md` — the "What's included" section now mentions Ragie by name and your call with the CEO:
 
 > "AI-powered document intelligence through Ragie ... I'm talking with the CEO tomorrow about integration and early access for your account."
 
 This signals two things: a real company (credibility) and a personal relationship with the CEO (trust + exclusivity). Robert Waldman will recognize this as a serious play.
-<!-- agent:boundary:5b2fac69 -->
+<!-- agent:boundary:a1320260 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

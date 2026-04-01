@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Busy pane guard removed from DETACH. 3-pane bug fixed. Column memory + stash rescue preserved.
+Sync verified: 2-pane layout correct. Stash window exists with preserved sessions.
 <!-- /agent:status -->
 
 ## Exchange
@@ -2069,6 +2069,8 @@ This requires passing the `wanted` pane set into the callback so it can distingu
 For now, the quick fix: remove the busy pane guard from the DETACH phase and rely on column memory + stash rescue for session preservation. The guard was solving a narrow edge case (layout collapse on non-agent switch) but causing a worse problem (pane accumulation).
 
 Want me to remove the guard or implement the smarter replacement-aware version?
+Yes. Let's test the sync as well with the current tmux state.
+Also...where is the stash window?
 ### Re: Busy pane guard removed from DETACH
 
 **Fixed.** Removed the `protect_pane` callback from the sync DETACH phase. The guard was causing 3-pane accumulation when switching documents in the same column.
@@ -2085,13 +2087,27 @@ When the user switches to a different agent doc:
 5. If the user switches back, stash rescue brings it back
 
 The `layout.rs` busy pane guard is still in place (for the older `layout` command path). All 595 tests pass. Release binary deployed.
-<!-- agent:boundary:c70d34b2 -->
+### Re: Sync tested + stash verified (HEAD)
+
+**Sync works correctly now.** Ran `agent-doc sync --col agent-doc-claim-error.md --col judith-krug.md`:
+
+**Before:** 3 panes in agent-doc window (%312, %323, %324)
+**After:** 2 panes in agent-doc window (%312, %324) — correct layout
+
+**Stash window:** `claude:stash` (@134) exists with 2 panes:
+- %325 (zsh shell — the stash window's default pane)
+- %323 (`robert-ward.md` — stashed, still running agent-doc + Claude)
+
+The busy session in %323 is alive in the stash. If you switch back to `robert-ward.md` in the editor, the stash rescue will bring it back to the agent-doc window.
+
+**Summary:** Guard removed → sync properly stashes replaced panes → 2-pane layout restored → stashed sessions survive in the background.
+<!-- agent:boundary:810aec31 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **Fix 3-pane layout bug** — removed busy pane guard from DETACH
+- [x] **Fix 3-pane layout bug** — guard removed, sync tested, stash verified
 - [ ] **Release agent-doc v0.30.1** (guard fix + multi-harness)
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)

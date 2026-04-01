@@ -739,7 +739,24 @@ All complete. `make check` passes (239 tests), `corky audit-docs` clean.
 **README.md**: No changes needed — sync details live in SPEC.md/AGENTS.md.
 
 **Module harness / ontology**: Not applicable — no new modules or ontology terms introduced. This is a behavior change within existing sync modules.
-<!-- agent:boundary:1b1d76b8 -->
+Please resync the conversations with an empty body.
+### Re: Resync complete (HEAD)
+
+Built release binary with `make release-gpu` (includes `htmd`). Resynced all 555 threads.
+
+**Result: 555/555 emails now have bodies** (previously 297 were empty).
+
+Spot-checked `1-minute-onboarding-survey-chance-to-win-100.md` (Outlier AI) — was completely empty, now has full markdown with heading, links, and text content converted from HTML.
+
+The `htmd` conversion preserves:
+- Headings → `#`
+- Links → `[text](url)`
+- Bold → `**text**`
+- Images → `![alt](src)`
+- Paragraphs → proper spacing
+
+Note: Some marketing emails still have CSS/tracking artifacts in the markdown (e.g., `@media` queries, tracking pixels). This is inherent to the HTML source — `htmd` passes through CSS in `<style>` blocks that are inline rather than in `<head>`. A future improvement could strip `@media` blocks and tracking image tags, but the content is now readable.
+<!-- agent:boundary:d218e713 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -747,6 +764,6 @@ All complete. `make check` passes (239 tests), `corky audit-docs` clean.
 <!-- agent:pending -->
 - Respond to Rob Ross (Dreamable) — schedule meeting Wed/Thu 12-4pm PT
 - crates.io token — renew and publish corky
-- **corky: build release + resync** — build with HTML-first, resync all threads to get markdown bodies
 - VERSIONS.md — add entry before next release
+- Optional: strip CSS @media blocks and tracking pixels from htmd output
 <!-- /agent:pending -->

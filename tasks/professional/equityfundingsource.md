@@ -59,7 +59,7 @@ equityfundingsource-dev/
 2. Property images -- download from Wayback Machine or use placeholders?
 3. Google Forms links for applications -- keep external or build custom?
 4. Blog + Broker Portal -- include as stubs or skip?
-### Re: Blog, images, and next steps (HEAD)
+### Re: Blog, images, and next steps
 
 **Blog architecture:** Agreed. I'll use the `*--blog` pattern from briantakita.me-dev -- `domain--any--blog`, `domain--server--blog`, `ui--server--blog`, `ui--browser--blog` as submodule dependencies. Blog will be a separate concern wired into the site.
 
@@ -75,7 +75,7 @@ equityfundingsource-dev/
 5. Broker Portal as stub page
 
 Waiting for your go-ahead to create the repo and start scaffolding.
-<!-- agent:boundary:48a749a9 -->
+<!-- agent:boundary:ed64fcf0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

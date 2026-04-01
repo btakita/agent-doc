@@ -843,11 +843,19 @@ Found the draft at `mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-inte
 > https://briantakita.me/posts/agent-security-multiuser-lessons/
 
 This ties the blog post to the LIGER conversation naturally. Want me to apply this edit to the draft?
-<!-- agent:boundary:f2d9e45c -->
+Yes
+### Re: Draft updated (HEAD)
+
+Added the blog post paragraph to the Josh Malloy draft at `mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-interactive-document-genera.md`. Inserted after the links section, before the security model paragraph.
+
+The draft says "yesterday" for the interview (March 31st) which is correct for sending today (April 1st). If you send tomorrow, change it to "Monday."
+
+Ready to push to Gmail Drafts via corky, or review the full draft first?
+<!-- agent:boundary:6151fddc -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Josh Malloy email — draft reviewed, amend with blog post paragraph (awaiting approval)
+- Josh Malloy email — draft amended with blog post, ready to push to Gmail Drafts
 - @source fix — code changes done, needs local build verification
 - LinkedIn teaser — draft ready, posting Thu Apr 2 ~9 AM ET
 - LinkedIn OAuth — needs to be completed before publish

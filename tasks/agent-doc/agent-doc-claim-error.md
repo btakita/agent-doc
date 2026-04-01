@@ -2087,7 +2087,7 @@ When the user switches to a different agent doc:
 5. If the user switches back, stash rescue brings it back
 
 The `layout.rs` busy pane guard is still in place (for the older `layout` command path). All 595 tests pass. Release binary deployed.
-### Re: Sync tested + stash verified (HEAD)
+### Re: Sync tested + stash verified
 
 **Sync works correctly now.** Ran `agent-doc sync --col agent-doc-claim-error.md --col judith-krug.md`:
 
@@ -2101,7 +2101,7 @@ The `layout.rs` busy pane guard is still in place (for the older `layout` comman
 The busy session in %323 is alive in the stash. If you switch back to `robert-ward.md` in the editor, the stash rescue will bring it back to the agent-doc window.
 
 **Summary:** Guard removed → sync properly stashes replaced panes → 2-pane layout restored → stashed sessions survive in the background.
-<!-- agent:boundary:810aec31 -->
+<!-- agent:boundary:4c5b9108 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

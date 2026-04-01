@@ -1911,7 +1911,7 @@ Running `agent-doc skill install` would regenerate SKILL.md from the binary's bu
 The audit warning is a false positive for this case — SKILL.md doesn't need updating when internal CLI commands change. It only needs updating when the agent-doc session workflow (diff → respond → write → commit) changes.
 
 Does agent-doc need a release?
-### Re: agent-doc release (HEAD)
+### Re: agent-doc release
 
 **Yes.** 668 insertions across 14 files since v0.29.0. This is a v0.30.0 release. Changes:
 
@@ -1928,7 +1928,7 @@ Does agent-doc need a release?
 - **Docs** — SPEC.md, README.md, CLAUDE.md updated
 
 Ready to release? I'll bump version, update VERSIONS.md, run make check, commit, tag, and publish.
-<!-- agent:boundary:13727aed -->
+<!-- agent:boundary:14db0711 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

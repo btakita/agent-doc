@@ -639,6 +639,7 @@ The 3 most recent **transcribed** recordings (.txt files):
 Note: The 3 most recent recordings (Apr 1, Mar 30 x2) don't have transcripts yet. You can generate them with `corky transcribe --diarize --speakers "Brian,Robert"`.
 
 transcribe + diarize using the gpu
+I already did that. Why were the transcripts not written to files?
 ### Re: Transcription
 
 Done. All 3 recordings transcribed with GPU + diarization and saved:
@@ -648,5 +649,18 @@ Done. All 3 recordings transcribed with GPU + diarization and saved:
 3. `mail/contacts/robert-ward/recordings/phone_20260330-040607_3109684542.txt` (37:38, Mar 30 morning -- diarization failed, single speaker block)
 
 Note: Diarization only succeeded on the Mar 30 evening call (short call, clear speaker turns). The other two produced 0 diarization segments, so the text is attributed to "Unknown" as a single block. This sometimes happens with longer AMR recordings where speaker boundaries are less distinct.
-<!-- agent:boundary:aac1be6c -->
+
+Can the diarization for the longer blocks be fixed? What if we segment the audio into chunks?
+### Re: Chunked diarization (HEAD)
+
+Splitting into 10-minute chunks and re-diarizing worked well:
+
+**Apr 1 (76min):** 6 of 8 chunks got proper 2-speaker diarization (252 speaker-attributed segments). Chunks 0-1 (first 20min) fell back to "Unknown" single block -- seems to be a warmup/silence issue.
+
+**Mar 30 morning (37min):** 3 of 4 chunks got proper 2-speaker diarization (138 speaker-attributed segments). Chunk 0 (first 10min) fell back to "Unknown".
+
+Both transcripts have been updated in place with the chunked+diarized versions. The first ~10-20 minutes of each call lack speaker labels but the rest is properly attributed to Brian/Robert.
+
+**Re: Why transcripts weren't saved initially:** My first run omitted the `-o` flag, so corky printed to stdout instead of writing to file. Had to re-run with `-o <path>`.
+<!-- agent:boundary:5c1bb0fd -->
 <!-- /agent:exchange -->

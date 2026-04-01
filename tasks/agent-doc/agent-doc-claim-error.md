@@ -2796,13 +2796,37 @@ fn resolve_target_session(
 **`--dry-run` for resync:** Already exists — running `agent-doc resync` without `--fix` shows all issues without applying them. No code change needed.
 
 **Remaining:** The "pane creation for new files" gap — when you switch to a file without an agent-doc session (like corky.md), the sync should auto-start a pane. That's a separate feature, not part of this consolidation.
-<!-- agent:boundary:13fce6c5 -->
+continue
+### Re: Submodule committed (HEAD)
+
+**Two commits in agent-doc submodule:**
+
+1. `fb0b2f3` — fix: session management hardening + resolve_target_session consolidation
+   - 8 files changed, 224 insertions(+), 67 deletions(-)
+   - New file: `src/session_cmd.rs`
+
+2. `2ec2a0c` — fix: treat files with stale frontmatter UUID as unmanaged in sync
+   - 1 file changed, 153 insertions(+), 2 deletions(-)
+
+**Parent repo updated:** `f6c82480` — submodule pointer advanced.
+
+**Session summary — all changes this session:**
+- `resync.rs` — never auto-kill agent processes in stash
+- `route.rs` — extract `resolve_target_session()`, no wrong-session following
+- `claim.rs` — no config.toml overwrite
+- `session_cmd.rs` — new `agent-doc session` CLI
+- `main.rs` — wire Session command
+- `template.rs` — fix unused var
+- `sync.rs` — stale UUID files treated as unmanaged
+- `SPEC.md` — stash pane safety guarantee
+- `README.md` — fix subprocess count
+- Test: `purge_preserves_unregistered_agent_process_in_stash`
+<!-- agent:boundary:647feed1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Commit agent-doc submodule** — all changes from this session
 - **Pane creation for unmanaged files** — sync should auto-start for files without agent-doc sessions
-- **SPEC.md/README.md** — document `agent-doc session` command + `resolve_target_session`
+- **SPEC.md/README.md** — document `agent-doc session` command
 <!-- /agent:pending -->

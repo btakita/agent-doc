@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-Josh email revised with prototype spike framing — ready for approval
+Josh email on hold — revising binary/audit framing
 <!-- /agent:status -->
 
 ## Exchange
@@ -896,13 +896,36 @@ Leave it. The one-liner works better here:
 4. If Josh wants to explore alignment theory further, the hook is set — he'll bring it up
 
 Expanding risks diluting the email's focus. The compliment-as-acknowledgment is the right weight.
-<!-- agent:boundary:12e89e2b -->
+
+Cancel send
+
+> The deterministic binary (Rust) handles everything auditable while the skill layer handles the non-deterministic reasoning.
+
+Please explain more. "deterministic binary (Rust) handles everything auditable" doesn't align with my thinking on this.
+It's just deterministic. Some agent work also handles auditing.
+### Re: Cancel Send + Binary/Audit Clarification (HEAD)
+
+Send cancelled.
+
+You're right about the binary/audit claim. The binary's value is **determinism** (CRDT merge, snapshot, git staging, file I/O), not "auditability" — the agent skill also produces auditable output (structured responses, patch blocks, commit messages). Auditing spans both layers.
+
+**Suggested revision (line 21):**
+
+Current:
+> "The deterministic binary (Rust) handles everything auditable while the skill layer handles the non-deterministic reasoning."
+
+Proposed:
+> "The deterministic binary (Rust) handles reliable operations (merging, snapshots, git) while the skill layer handles reasoning. Both produce auditable output."
+
+Want me to apply this, or do you have different wording in mind?
+<!-- agent:boundary:eb32b6bb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Send Josh Malloy follow-up email (pending final approval)
+- [ ] Revise binary/audit claim in Josh email (pending wording)
+- [ ] Send Josh Malloy follow-up email (on hold)
 - [ ] agent-doc README: security section (single-user, prompt injection)
 - [ ] Corky: HTML body extraction for emails
 <!-- /agent:pending -->

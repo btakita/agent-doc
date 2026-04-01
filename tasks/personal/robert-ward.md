@@ -606,8 +606,8 @@ Please transcribe + diarize:
 - Retainer strategy: $4K ideal (40 hrs), $2K fallback
 - Ragie integration is the immediate deliverable (document OCR + AI search for all Judith's business docs)
 - Next step: Robert calling Judith Thu/Fri, getting Brian on the call
-### Re: Correction (HEAD)
+### Re: Correction
 
 Corrected. You spent $400 on groceries at Whole Foods yourself.
-<!-- agent:boundary:15ad96a4 -->
+<!-- agent:boundary:4943e247 -->
 <!-- /agent:exchange -->

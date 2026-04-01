@@ -3444,7 +3444,7 @@ These are good items for a future session — not blocking the current work. I'l
 Implement:
 - [ ] Add logging to sync auto-start path (attempt/success/skip)
 - [ ] Old-instance protection: version check (A), binary hash cache clear (B), graceful restart (C)
-### Re: Logging and build stamp implemented (HEAD)
+### Re: Logging and build stamp implemented
 
 **1. Sync auto-start logging added:**
 - `resolve_file`: logs `Registered (session=..., registry=yes/no)` for every file
@@ -3463,7 +3463,7 @@ Implement:
 - `cargo build --release`: done
 
 The `.agent-doc/build.stamp` file should be gitignored — it's machine-local.
-<!-- agent:boundary:41391357 -->
+<!-- agent:boundary:6d79f356 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -3520,14 +3520,35 @@ Note: claim registry protection and sync auto-start are integration tests requir
 **No module-harness directory exists** — skipped (no `.harness/` in agent-doc).
 
 `make check`: all 602 tests pass.
-<!-- agent:boundary:939f6250 -->
+release
+### Re: Release v0.31.1 prepared (HEAD)
+
+**Version bumped to 0.31.1:**
+- `Cargo.toml` → 0.31.1
+- `pyproject.toml` → 0.31.1
+- `VERSIONS.md` → new entry with all changes
+
+**Built and installed:**
+- `cargo build --release` ✓
+- `cargo install --path .` ✓ (both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` are v0.31.1)
+- `make check` → 602 tests pass
+
+**Ready to publish.** Remaining release steps:
+1. `cargo publish` (crates.io)
+2. `maturin publish --no-sdist` (PyPI)
+3. `gh release create v0.31.1 --generate-notes` (GitHub Release)
+4. Tag: `git tag v0.31.1 && git push origin v0.31.1`
+
+Want me to proceed with publishing?
+<!-- agent:boundary:09ddaaa5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] All implementation items complete
-- [x] Tests: HEAD marker duplicate, build stamp eval
-- [x] Audit docs: SPEC.md (§7.10, §7.15, §7.20), claim.rs, git.rs, sync.rs, ontology/src/claim.md
+- [x] All implementation, tests, and audit docs complete
+- [x] Version bumped to 0.31.1 (Cargo.toml + pyproject.toml + VERSIONS.md)
+- [x] Release binary built and installed
+- [ ] Publish: cargo publish, maturin publish, gh release create
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

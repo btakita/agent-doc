@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Config drift fixed. All plugins built. tmux-router v0.3.8 pending sync.rs finalization.
+agent-doc v0.30.1 + tmux-router v0.3.8 published. All session bugs fixed and released.
 <!-- /agent:status -->
 
 ## Exchange
@@ -2450,7 +2450,27 @@ All three items done:
 - Needs: finalize sync.rs changes, update VERSIONS.md, bump to 0.3.8, tag + publish
 
 **To install JB plugin:** IDEA > Settings > Plugins > gear > Install from Disk > select `agent-doc-jetbrains-0.2.36.zip`. Since classes changed structurally (new `isIdle` method), uninstall first > restart > install > restart.
-<!-- agent:boundary:db727823 -->
+
+Do:
+- [ ] **Finalize tmux-router v0.3.8** — commit sync.rs changes, update VERSIONS.md, bump, tag, publish
+- [ ] **Release agent-doc v0.30.1** — update tmux-router dep, bump version, publish
+### Re: Releases complete (HEAD)
+
+**tmux-router v0.3.8** — published to crates.io
+- Committed sync.rs stash guard changes
+- Updated VERSIONS.md with v0.3.7 + v0.3.8 entries
+- Tagged, pushed, published
+
+**agent-doc v0.30.1** — published to crates.io
+- Updated tmux-router dep 0.3.7 → 0.3.8
+- Bumped version to 0.30.1 in Cargo.toml + pyproject.toml
+- VERSIONS.md updated with v0.30.1 entry
+- 21 files changed, 554 insertions, 110 deletions
+- Published, tagged, `cargo install` done → `agent-doc 0.30.1` confirmed
+- Release build completed for symlink target
+
+All items from the "Do" list are done. What's next?
+<!-- agent:boundary:c5119374 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -2461,8 +2481,8 @@ All three items done:
 - [x] **VS Code koffi FFI bindings** — native.ts with graceful fallback
 - [x] **Fix tmux_session config drift** — route.rs follows pane; claim.rs updates config.toml
 - [x] **Rebuild JB plugin + VS Code extension** — JB 0.2.36, VS Code 0.2.3, binary v0.30.0
-- [ ] **Install JB plugin** — uninstall old > restart > install 0.2.36 > restart (structural class changes)
-- [ ] **Finalize tmux-router v0.3.8** — commit sync.rs changes, update VERSIONS.md, bump, tag, publish
-- [ ] **Release agent-doc v0.30.1** — update tmux-router dep, bump version, publish
+- [x] **Install JB plugin** — uninstall old > restart > install 0.2.36 > restart
+- [x] **Finalize tmux-router v0.3.8** — committed, tagged, published to crates.io
+- [x] **Release agent-doc v0.30.1** — published to crates.io, binary installed
 - [ ] **Blog post** about this debugging session
 <!-- /agent:pending -->

@@ -3374,7 +3374,7 @@ agent-doc %358 agent-doc  ✳ Claude Code                 ← corky.md session
 The IDEA log confirms sync ran successfully at 16:26:20-25 with `exit=0` and created the second pane. The plugin IS triggering correctly.
 
 If you don't see 2 panes, you may need to switch to the `agent-doc` window in tmux session 5 (`tmux select-window -t 5:agent-doc`). The panes are side-by-side in that window.
-### Re: Why the second pane appeared after Run Agent Doc (HEAD)
+### Re: Why the second pane appeared after Run Agent Doc
 
 The timeline explains this:
 
@@ -3386,7 +3386,7 @@ The key question: which `agent-doc` binary does the plugin invoke?
 
 Let me check:
 We should protect against running old agent-doc instances. agent-doc should probab
-### Re: Timing and binary resolution (corrected) (HEAD)
+### Re: Timing and binary resolution (corrected)
 
 The plugin uses `.bin/agent-doc` (symlink → `target/release/agent-doc`, rebuilt at 16:25). The IDEA log shows sync ran successfully at 16:26 with `exit=0` and created pane `%358`. So the fix WAS working — the second pane was created by the plugin's sync.
 
@@ -3397,7 +3397,7 @@ When you then ran `/agent-doc` (Run Agent Doc) on this document, the preflight c
 **Summary:** The fix is working end-to-end. The plugin's sync creates the second pane. The timing confusion was because the second pane existed but wasn't visually prominent until the next sync cycle adjusted focus/proportions.
 
 Also worth noting: `~/.cargo/bin/agent-doc` is still the OLD binary (from 15:19, before all fixes). Running `cargo install --path .` would update it. The symlink-based `.bin/agent-doc` is correct though.
-<!-- agent:boundary:814e9234 -->
+<!-- agent:boundary:8327d1ff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

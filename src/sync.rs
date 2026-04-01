@@ -680,8 +680,16 @@ fn run_with_options(
         sync_log(&format!("pre-tmux_router::sync: window={} panes={}", w, pane_count));
     }
 
+    // Protect busy panes: check if a pane is running an active agent-doc/claude session.
+    // This prevents stashing panes with running sessions when the user switches editors.
+    let protect_pane = |pane_id: &str| -> bool {
+        is_pane_busy(tmux, pane_id)
+    };
+    let sync_options = tmux_router::SyncOptions {
+        protect_pane: Some(&protect_pane),
+    };
     let result =
-        tmux_router::sync(col_args, window, focus, tmux, &registry_path, &resolve_file)?;
+        tmux_router::sync_with_options(col_args, window, focus, tmux, &registry_path, &resolve_file, &sync_options)?;
 
     // Log pane count after tmux_router::sync
     if let Some(w) = window {
@@ -872,6 +880,57 @@ fn find_alive_pane_for_file(tmux: &Tmux, file_path: &str) -> Option<String> {
 /// Check if a process (by PID) is running agent-doc for a specific file.
 ///
 /// Uses `ps -p <pid> -o command=` which works on both Linux and macOS.
+/// Check if a tmux pane is running an active agent-doc or claude session.
+///
+/// Used as a `protect_pane` callback to prevent stashing panes with active sessions.
+/// Checks the pane's PID and its child processes for agent-doc or claude in the command line.
+fn is_pane_busy(tmux: &Tmux, pane_id: &str) -> bool {
+    let output = tmux.cmd()
+        .args(["display-message", "-t", pane_id, "-p", "#{pane_pid}"])
+        .output();
+    let pid_str = match output {
+        Ok(ref o) if o.status.success() => {
+            String::from_utf8_lossy(&o.stdout).trim().to_string()
+        }
+        _ => return false,
+    };
+    if pid_str.is_empty() {
+        return false;
+    }
+
+    // Check the pane's direct process
+    if pid_is_agent_session(&pid_str) {
+        return true;
+    }
+
+    // Check child processes (pane PID is usually a shell)
+    if let Ok(children) = std::process::Command::new("pgrep")
+        .args(["-P", &pid_str])
+        .output()
+    {
+        for child_pid in String::from_utf8_lossy(&children.stdout).lines() {
+            let child_pid = child_pid.trim();
+            if !child_pid.is_empty() && pid_is_agent_session(child_pid) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Check if a process (by PID) is running agent-doc or claude (any file).
+fn pid_is_agent_session(pid: &str) -> bool {
+    let output = match std::process::Command::new("ps")
+        .args(["-p", pid, "-o", "command="])
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return false,
+    };
+    let cmdline = String::from_utf8_lossy(&output.stdout);
+    cmdline.contains("agent-doc") || cmdline.contains("claude")
+}
+
 fn pid_has_agent_doc_for_file(pid: &str, file_path: &str) -> bool {
     let output = match std::process::Command::new("ps")
         .args(["-p", pid, "-o", "command="])

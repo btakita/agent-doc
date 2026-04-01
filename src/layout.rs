@@ -210,6 +210,11 @@ pub fn run_with_tmux(files: &[&Path], split: Split, pane: Option<&str>, window: 
             && session_panes.contains(existing_pane)
             && window_panes.len() > 1
         {
+            // Skip busy panes (running agent-doc/claude sessions)
+            if is_pane_busy(tmux, existing_pane) {
+                eprintln!("Skipped busy pane {} in window {}", existing_pane, target_window);
+                continue;
+            }
             tmux.break_pane(existing_pane)?;
             eprintln!("Broke out pane {} from window {}", existing_pane, target_window);
         }
@@ -239,4 +244,48 @@ pub fn run_with_tmux(files: &[&Path], split: Split, pane: Option<&str>, window: 
         }
     );
     Ok(())
+}
+
+/// Check if a tmux pane is running an active agent-doc or claude session.
+fn is_pane_busy(tmux: &Tmux, pane_id: &str) -> bool {
+    let output = tmux.cmd()
+        .args(["display-message", "-t", pane_id, "-p", "#{pane_pid}"])
+        .output();
+    let pid_str = match output {
+        Ok(ref o) if o.status.success() => {
+            String::from_utf8_lossy(&o.stdout).trim().to_string()
+        }
+        _ => return false,
+    };
+    if pid_str.is_empty() {
+        return false;
+    }
+    if pid_is_agent_session(&pid_str) {
+        return true;
+    }
+    // Check child processes (pane PID is usually a shell)
+    if let Ok(children) = std::process::Command::new("pgrep")
+        .args(["-P", &pid_str])
+        .output()
+    {
+        for child_pid in String::from_utf8_lossy(&children.stdout).lines() {
+            let child_pid = child_pid.trim();
+            if !child_pid.is_empty() && pid_is_agent_session(child_pid) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn pid_is_agent_session(pid: &str) -> bool {
+    let output = match std::process::Command::new("ps")
+        .args(["-p", pid, "-o", "command="])
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return false,
+    };
+    let cmdline = String::from_utf8_lossy(&output.stdout);
+    cmdline.contains("agent-doc") || cmdline.contains("claude")
 }

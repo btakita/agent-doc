@@ -32,3 +32,49 @@ fn try_log_op(file: &Path, message: &str) -> Option<()> {
         .ok()?;
     writeln!(f, "[{}] {}", ts, message).ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn log_op_creates_file_and_appends() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let project_root = tmp.path();
+
+        // Create project root marker (.agent-doc dir) and the file
+        fs::create_dir_all(project_root.join(".agent-doc")).unwrap();
+        let doc_path = project_root.join("test.md");
+        fs::write(&doc_path, "test").unwrap();
+
+        log_op(&doc_path, "test_event file=test.md");
+        log_op(&doc_path, "second_event file=test.md");
+
+        let log_path = project_root.join(".agent-doc/logs/ops.log");
+        assert!(log_path.exists(), "ops.log should be created");
+
+        let content = fs::read_to_string(&log_path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 2, "should have 2 log lines");
+        assert!(lines[0].contains("test_event"), "first line should contain message");
+        assert!(lines[1].contains("second_event"), "second line should contain message");
+
+        // Verify timestamp format [epoch_secs]
+        assert!(lines[0].starts_with('['), "should start with timestamp bracket");
+        assert!(lines[0].contains("] "), "should have ] separator after timestamp");
+    }
+
+    #[test]
+    fn log_op_no_panic_on_missing_project_root() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc_path = tmp.path().join("orphan.md");
+        fs::write(&doc_path, "test").unwrap();
+
+        // No .agent-doc dir — should silently return without panic
+        log_op(&doc_path, "should_not_crash");
+
+        // Verify no log was created
+        assert!(!tmp.path().join(".agent-doc/logs/ops.log").exists());
+    }
+}

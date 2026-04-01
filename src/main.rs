@@ -57,6 +57,8 @@ mod extract;
 mod focus;
 mod git;
 mod history;
+mod hook_cmd;
+mod hooks;
 mod init;
 mod install;
 mod layout;
@@ -501,6 +503,51 @@ enum Commands {
     #[command(name = "commands")]
     #[allow(clippy::enum_variant_names)]
     ListCommands,
+    /// Hook system for cross-session coordination
+    Hook {
+        #[command(subcommand)]
+        action: HookAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum HookAction {
+    /// Fire a hook event
+    Fire {
+        /// Event name (e.g., post_write, post_commit, claim)
+        event: String,
+        /// Document file path
+        file: String,
+        /// Session ID (auto-read from frontmatter if omitted)
+        #[arg(long)]
+        session_id: Option<String>,
+        /// JSON data to attach to the event
+        #[arg(long)]
+        data: Option<String>,
+    },
+    /// Poll for hook events
+    Poll {
+        /// Event name to poll
+        event: String,
+        /// Only return events newer than this timestamp (unix seconds)
+        #[arg(long, default_value_t = 0)]
+        since: u64,
+        /// Project root directory
+        #[arg(long)]
+        root: Option<String>,
+    },
+    /// Start hook socket listener
+    Listen {
+        /// Project root directory
+        #[arg(long)]
+        root: Option<String>,
+    },
+    /// Clean up expired events
+    Gc {
+        /// Project root directory
+        #[arg(long)]
+        root: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -767,5 +814,19 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Commands::ListCommands => commands::run(),
+        Commands::Hook { action } => match action {
+            HookAction::Fire { event, file, session_id, data } => {
+                hook_cmd::fire(&event, &file, session_id.as_deref(), data.as_deref())
+            }
+            HookAction::Poll { event, since, root } => {
+                hook_cmd::poll(&event, since, root.as_deref())
+            }
+            HookAction::Listen { root } => {
+                hook_cmd::listen(root.as_deref())
+            }
+            HookAction::Gc { root } => {
+                hook_cmd::gc(root.as_deref())
+            }
+        },
     }
 }

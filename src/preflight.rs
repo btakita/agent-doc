@@ -919,4 +919,40 @@ mod tests {
         assert!(cache_path.exists());
         assert!(cache_path.ends_with("links_cache"));
     }
+
+    #[test]
+    fn preflight_output_includes_baseline_file() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: true,
+            claims: vec![],
+            diff: None,
+            no_changes: true,
+            document: "content".to_string(),
+            linked_changes: vec![],
+            baseline_file: Some("/tmp/baseline.md".to_string()),
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["baseline_file"], "/tmp/baseline.md");
+    }
+
+    #[test]
+    fn preflight_output_omits_baseline_file_when_none() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: None,
+            no_changes: true,
+            document: "content".to_string(),
+            linked_changes: vec![],
+            baseline_file: None,
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.get("baseline_file").is_none(), "baseline_file should be omitted when None");
+    }
 }

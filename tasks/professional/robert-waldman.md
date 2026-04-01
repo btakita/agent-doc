@@ -58,13 +58,44 @@ Corky doesn't have a merge or delete feature for Google Contacts yet. It support
 **Simplest fix:** Open Google Contacts in your browser, search "Robert Waldman", and merge the two entries. Google has a built-in "Merge & fix" feature that detects duplicates automatically.
 
 **For corky:** A `corky contact delete` subcommand (calls `people.googleapis.com/v1/{resourceName}:deleteContact`) would be a small feature to add later. Not worth building just for this one merge.
-<!-- agent:boundary:522592e4 -->
+
+Implement `corky contact delete`. Does the Google contact api support merging contacts?
+Please draft an email to robert-waldman notifying him that equityfundingsource.com is down.
+Let him know the current status with my work for Judith. I will attempt to recover the site.
+Please advise that I havn't let Judith
+### Re: Email Draft & Corky Contact Delete (HEAD)
+
+#### Email to Robert Waldman
+
+> Hi Robert,
+>
+> Just a heads up — equityfundingsource.com appears to be down. I noticed it while preparing for our call with Judith.
+>
+> I'm going to work on recovering the site and migrating it to Cloudflare today. Since the current host has been unreliable (the "control freak" situation Judith mentioned), this is a good opportunity to get it moved over to infrastructure we control.
+>
+> I'll keep you posted on progress. If Judith asks about it, you can let her know I'm already on it.
+>
+> Brian
+
+**Draft file:** `mail/drafts/20260401-robert-waldman-website-down.md`
+
+#### Google People API — Merge Support
+
+**No native merge endpoint.** To merge contacts:
+1. Copy data from one contact to the other (`updateContact`)
+2. Delete the duplicate (`deleteContact`: `DELETE /v1/{resourceName}:deleteContact`)
+
+Implementing `corky contact delete` now.
+<!-- agent:boundary:d4808ac7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Merge duplicate Robert Waldman in Google Contacts manually (browser)
+- [ ] Create email draft file for Robert Waldman (website down notification)
+- [ ] Implement `corky contact delete` command
+- [ ] Delete duplicate Google Contact and merge data
+- [ ] Recover equityfundingsource.com and migrate to Cloudflare
 - [ ] Get Robert Waldman's phone number (pending from Judith since March 4)
 - [ ] Schedule Zoom call with Robert Waldman for deeper requirements
 <!-- /agent:pending -->

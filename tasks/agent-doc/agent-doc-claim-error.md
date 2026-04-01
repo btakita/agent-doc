@@ -2515,7 +2515,7 @@ The changes that need documenting:
 - **Module harness** — update evals for sync.rs (3 new tests), ffi.rs (2 new tests)
 
 Want me to start the doc audit now, or handle the build + install first?
-<!-- agent:boundary:2c585762 -->
+<!-- agent:boundary:0f14486d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

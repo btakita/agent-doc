@@ -314,7 +314,7 @@ I also want to highlight throughout the post how agent-doc, with commits, is hel
 Note that my git repo is private as well.
 
 I did not leak any tokens during a livestream over the past
-### Re: Revised draft — self-referential traceability + private repo (HEAD)
+### Re: Revised draft — self-referential traceability + private repo
 
 Two key changes woven throughout:
 
@@ -330,7 +330,7 @@ Two key changes woven throughout:
 - "Traceable process" added to final bullet list
 
 Updated draft is in the console output above. Let me know what to adjust, or if you're ready to create the file.
-<!-- agent:boundary:9fd34b3a -->
+<!-- agent:boundary:191d6f60 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

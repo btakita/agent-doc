@@ -403,10 +403,15 @@ Complete rewrite based on what actually happened 3/31-4/1:
 - **Self-referential**: "I pointed Claude at the git logs and it counted 532 commits across 11 documents"
 
 File updated at `src/briantakita.me-dev/app/briantakita.me/post/content/2026-04-01-agent-security-multiuser-lessons.md`.
-<!-- agent:boundary:5d277d2d -->
+### Re: Shared security model mention added (HEAD)
+
+Updated the prompt injection section. Now states: "A shared security model for multi-user agent-doc sessions is currently under development, but until it ships, the private repo boundary is the security boundary."
+
+File updated at `src/briantakita.me-dev/app/briantakita.me/post/content/2026-04-01-agent-security-multiuser-lessons.md`.
+<!-- agent:boundary:3e9b0405 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Blog post v4 (corrected scope, real data) — ready to review
+- Blog post v4 with shared security model mention — ready to review/deploy
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

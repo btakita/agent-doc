@@ -2450,7 +2450,7 @@ All three items done:
 - Needs: finalize sync.rs changes, update VERSIONS.md, bump to 0.3.8, tag + publish
 
 **To install JB plugin:** IDEA > Settings > Plugins > gear > Install from Disk > select `agent-doc-jetbrains-0.2.36.zip`. Since classes changed structurally (new `isIdle` method), uninstall first > restart > install > restart.
-<!-- agent:boundary:76665b54 -->
+<!-- agent:boundary:db727823 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

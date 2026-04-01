@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Editor lag diagnosed: Tailwind CSS LSP sending full 95KB doc on every keystroke. Not agent-doc.
+Audit: 2 informational issues. Docs current. Ready for v0.30.0 release.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1977,13 +1977,30 @@ The Tailwind CSS LSP is configured to watch all files (including `.md`) and rece
 3. **Reduce document sync** — The LSP is using `textDocument/syncKind: 1` (full sync). Some LSP clients support incremental sync, but this is a Tailwind plugin issue, not agent-doc.
 
 **Recommendation:** Option 1 or 2. The Tailwind CSS plugin has no business processing 95KB markdown files.
-<!-- agent:boundary:2918a3bd -->
+
+agent-doc:
+audit docs
+Update SPEC.md, README.md, ontology, module-harness
+### Re: Audit docs + doc updates (HEAD)
+
+**Audit results unchanged:** 2 issues, both informational:
+1. **Large table** (CLAUDE.md:22-35) — 13-row module layout table. Not actionable.
+2. **SKILL.md older than main.rs** — Expected; only updates when session workflow changes.
+
+**Docs already current** from earlier this session:
+- SPEC.md — §6.6, §7.9, §7.20, §9.5
+- README.md — 4 new key features
+- CLAUDE.md — 3 new modules in layout
+
+Line budget: 431/1000 (57% headroom). Ready for v0.30.0 release.
+<!-- agent:boundary:67c3fb94 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Fix Tailwind CSS LSP** — exclude .md files or disable plugin
+- [x] **Fix Tailwind CSS LSP** — excluded .md files
+- [x] **Audit docs** — 2 informational issues, docs current
 - [ ] **Release agent-doc v0.30.0** — bump, VERSIONS.md, make check, publish
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)

@@ -3107,10 +3107,32 @@ To answer your specific question: no, this shouldn't be related to being the fir
 
 Can you clarify what you observed? Did the heading show no blue gutter (both committed and working tree matched)?
 
+No blue gutter. Can you detect what happened in the logs? If not, please add missing logging.
+
 **On the JB plugin version:**
 
 No, I didn't increment it. Currently `0.2.36`. Should I bump to `0.2.37`?
-<!-- agent:boundary:e55498f6 -->
+Yes
+### Re: Found the (HEAD) marker bug + plugin bumped (HEAD)
+
+**Root cause of missing blue gutter:**
+
+`git.rs:441` — `!hc.contains(heading_text)` uses a **substring match** against the entire git HEAD content. Since there's already a `### Re: Implementation complete` at line 2314 (from a previous exchange cycle), the NEW `### Re: Implementation complete` at line 3066 was NOT treated as new — `contains()` found the older duplicate and returned `true`, so the `(HEAD)` marker was never added.
+
+**Fix:** Replaced `contains()` with occurrence counting. For each heading text, count how many times it appears in HEAD vs. current content. A heading is "new" if its occurrence count in current exceeds HEAD. This correctly handles duplicate heading text across exchange cycles.
+
+**File:** `src/agent-doc/src/git.rs` — `add_head_marker()` function, Step 3.
+
+**Plugin version:** Bumped to `0.2.37` in `gradle.properties`. Plugin rebuilt (both unsigned and signed zips).
+
+All tests pass (`make check` clean).
+
+**On the startup lock question:**
+
+> Would staying on the file or navigating past the file result in the tmux layout matching the declarative sync?
+
+Yes. The startup lock (5s TTL) prevents double-spawn during rapid sync events. If the user stays or navigates, the next sync cycle (triggered by `LayoutChangeDetector` or manual `Ctrl+Shift+Alt+L`) will pick up the file and auto-start it. The lock just prevents the same file from spawning two Claude sessions within 5 seconds. So no prompt needed — the lock is a transient guard, not a permanent block.
+<!-- agent:boundary:30c2ebe4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -3119,6 +3141,7 @@ No, I didn't increment it. Currently `0.2.36`. Should I bump to `0.2.37`?
 - [x] ClaimAction.kt: replace claim+auto-start with SyncLayoutAction.syncLayout()
 - [x] claim.rs: add registry protection against overwriting existing sessions
 - [x] route.rs: startup lock feedback (already existed)
-- [ ] Bump JB plugin version to 0.2.37
-- [ ] Install updated JetBrains plugin and verify Ctrl+Shift+Alt+C triggers sync
+- [x] git.rs: fix (HEAD) marker not added for duplicate heading text
+- [x] Bump JB plugin version to 0.2.37
+- [ ] Install updated JetBrains plugin and verify changes
 <!-- /agent:pending -->

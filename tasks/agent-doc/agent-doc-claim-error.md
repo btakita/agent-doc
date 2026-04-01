@@ -3282,6 +3282,7 @@ Since we already removed the busy guard from the plugin and the binary's existin
 If the plugin IS enabled and sync still doesn't fire, the LayoutChangeDetector might not have initialized (it waits 2s after startup). Try pressing `Ctrl+Shift+Alt+L` (manual sync trigger) to test if the SyncLayoutAction works directly.
 
 I'm talking about navigating without any plugin actions. The `Sync: --col tasks/agent-doc/agent-doc-claim-error.md --col tasks/software/corky.md [focus: tasks/software/corky.md]` that occurred when selecting the right corky.md editor should have declaratively sent the layout to agent-doc...which should have corrected the tmux pane layout.
+There should be logs that report on what has happened. So you should have understood what I was saying based on the logs.
 ### Re: Why sync doesn't create a pane for corky.md
 
 The sync DID run — the hint notification confirms it. The issue is in `sync.rs` line 459-468:
@@ -3304,7 +3305,20 @@ This is overly conservative. The user's intent when navigating to a file in a sp
 **Fix:** Change the `resolve_file` closure to treat files with session UUIDs as `Registered` even without a registry entry. The auto-start phase in tmux-router will handle creating a new pane and session.
 
 Should I implement this? The change is in `sync.rs` line 467-468: remove the `Unmanaged` return and always treat UUID-bearing files as `Registered`.
-<!-- agent:boundary:7f651852 -->
+Yes...as we discussed earlier, autostarting new tmux + agent harness sessions should be guaranteed to not race.
+Should the agent-doc binary itself (not the editor plugin nor the ffi plugin) handle the locks and guards?
+### Re: Sync now auto-starts files with stale UUIDs (HEAD)
+
+Done. Removed the registry-entry guard from `sync.rs` `resolve_file`. Files with session UUIDs are now always treated as `Registered` — sync will auto-start new sessions for them even if the registry entry was pruned.
+
+- `make check`: all 602 tests pass (0 failures)
+- `cargo build --release`: rebuilt
+- Module doc updated
+
+The release binary is live. Try switching to corky.md in the right split — sync should now create a second tmux pane and auto-start a Claude session.
+
+You're right that I should have traced the `non_managed=1` signal from the sync output immediately rather than chasing plugin state. The log data was there.
+<!-- agent:boundary:a52894ed -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -3317,9 +3331,8 @@ Should I implement this? The change is in `sync.rs` line 467-468: remove the `Un
 - [x] Remove busy guard from EditorTabSyncListener.kt
 - [x] `cargo build --release` in agent-doc submodule
 - [x] Add tests for occurrence-counting HEAD marker logic
-- [x] Audit docs (SPEC.md, claim.rs, git.rs module docs)
-- [ ] Fix: sync should auto-start files with session UUIDs even without registry entry
-- [ ] Rebuild release binary after sync fix
-- [ ] Re-enable plugin in IDEA and verify end-to-end
+- [x] Audit docs (SPEC.md, claim.rs, git.rs, sync.rs module docs)
+- [x] Fix: sync auto-starts files with session UUIDs even without registry entry
+- [ ] Verify end-to-end: navigate to split → tmux pane created
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

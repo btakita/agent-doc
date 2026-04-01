@@ -2590,6 +2590,8 @@ The binary is already rebuilt and installed with this fix.
 Add tests
 audit docs
 Update SPEC.md, README.md, ontology, module-harness
+Now when I switch panes, we are stuck in a 1 pane layout. Why?
+The changes has regressions.
 ### Re: Tests, audit docs, doc updates
 
 **Tests added:**
@@ -2604,14 +2606,39 @@ Update SPEC.md, README.md, ontology, module-harness
 **Audit docs:** All clean (1 pre-existing warning about large table in CLAUDE.md).
 
 **All 389 tests pass.** Binary reinstalled.
-<!-- agent:boundary:b8f52d11 -->
+
+The tmux window was moved to tmux session 1. Why?
+It should have stayed in tmux session 5.
+Note .agent-doc/config.toml has `tmux_session = "5"`
+
+Now tmux session 5 is gone. Why?
+We need a way to recover the agent-doc tmux pane. Can we have a way to move the
+### Re: 1-pane layout stuck + session migration (HEAD)
+
+**Root cause:** Two bugs in route.rs and claim.rs caused a cascading session migration.
+
+**Bug 1 — route.rs:212-222:** When a pane was alive but in a different session (e.g., pane in session 1, config says session 5), route would "follow" the pane by updating config.toml to the wrong session. This cascaded: next sync targets session 1, moves all other panes there too, and the agent-doc window permanently migrates.
+
+**Fix:** Route no longer follows panes to a different session. Instead, it rescues the pane back to the configured session. Config.toml is the source of truth.
+
+**Bug 2 — claim.rs:198-214:** Every claim auto-updated config.toml to match the pane's actual session. If a claim happened while a pane was temporarily in the wrong session (e.g., during rescue), it would overwrite the config.
+
+**Fix:** Claim no longer overwrites config.toml. It logs the mismatch but leaves config unchanged.
+
+**Immediate fix applied:**
+- Moved agent-doc window from session 1 back to session 5 (`tmux move-window`)
+- Reset config.toml to `tmux_session = "5"`
+- Both panes (%348 and %343) are back in `5:agent-doc`
+
+All 389 tests pass. Binary reinstalled.
+<!-- agent:boundary:825540f7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Commit all changes** — resync fix + test + doc updates in agent-doc submodule
+- **Commit all changes** — resync fix + route fix + claim fix + test in agent-doc submodule
 - **Unused variable warnings** — 7 in route.rs + 1 in template.rs (prefix with `_`)
 - **Module harness** — update evals for sync.rs (3 new tests), ffi.rs (2 new tests)
-- **Ontology** — review for any new domain terms from stash safety work
+- **Ontology** — review for any new domain terms from session scope work
 <!-- /agent:pending -->

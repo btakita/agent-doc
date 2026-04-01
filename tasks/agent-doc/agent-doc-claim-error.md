@@ -3500,7 +3500,7 @@ Session summary — all issues resolved:
 add tests
 audit docs
 Update SPEC.md, README.md, ontology, module-harness
-### Re: Tests and audit docs updated (HEAD)
+### Re: Tests and audit docs updated
 
 **Tests:**
 - `add_head_marker_duplicate_heading_text` — already added earlier, verifies occurrence counting
@@ -3520,7 +3520,7 @@ Note: claim registry protection and sync auto-start are integration tests requir
 **No module-harness directory exists** — skipped (no `.harness/` in agent-doc).
 
 `make check`: all 602 tests pass.
-<!-- agent:boundary:33c5358c -->
+<!-- agent:boundary:939f6250 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

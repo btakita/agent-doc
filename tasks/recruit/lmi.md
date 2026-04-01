@@ -701,7 +701,7 @@ Reviewed the Josh Malloy follow-up email for consistency.
 Well you missed something. https://github.com/btakita/agent-loop is the private repo that is mentioned in:
 
 > backed by a private git repo
-### Re: Private Repo Correction (HEAD)
+### Re: Private Repo Correction
 
 You're right — I missed that. `btakita/agent-loop` is confirmed private on GitHub. "Backed by a private git repo" is literally accurate.
 
@@ -712,7 +712,7 @@ You're right — I missed that. `btakita/agent-loop` is confirmed private on Git
 2. Replace with "Source available on request" to signal real code without a dead link
 3. Replace with the public agent-doc GitHub repo if one exists separately
 4. Keep it and mention "private repo, happy to grant access if you'd like to review the code": I don't want to grant access. I can create a sample repo if requested.
-### Re: Email Link Fix (HEAD)
+### Re: Email Link Fix
 
 Understood — no granting access to the private repo. You'd create a sample repo if requested.
 
@@ -731,7 +731,7 @@ Note my edit above
 This keeps the signal that real code exists without a dead link, and sets the expectation of a curated sample rather than full repo access.
 
 Want me to apply this edit to the draft now?
-### Re: Source Link Updated (HEAD)
+### Re: Source Link Updated
 
 Applied the edit to the email draft. Line 26 now reads:
 
@@ -759,7 +759,7 @@ Strong framing. For a federal audience, this is actually more credible than pres
 3. Closing (line 30): reframe as "walkthrough of the prototype and the production spec we're developing from it"
 
 Should I apply the prototype framing revisions to the email draft?
-<!-- agent:boundary:3341d41a -->
+<!-- agent:boundary:ad78b4e8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

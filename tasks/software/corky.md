@@ -840,7 +840,37 @@ The full paths would be:
 If you later want to investigate a specific tracker's behavior, the full URL is still in the email body (or can be recovered from the original HTML via refetch). The metadata line just needs to flag *that* tracking exists and *who* does it.
 
 So: **domain only** for the `**Tracking:**` metadata line. Implement?
-<!-- agent:boundary:ffbde197 -->
+Implement
+### Re: Markdown cleanup + tracking detection implemented (HEAD)
+
+Done. All tests pass (246), release built and 555 threads resynced.
+
+**New module:** `src/sync/markdown_clean.rs` — post-processing for HTML→markdown output.
+
+**What it strips:**
+- `@media` CSS blocks (responsive email noise)
+- Tracking pixel images (`/wf/open`, `/analytics/open`, 1x1 images, etc.)
+- Inline `style="..."` attributes
+- Excessive blank lines (collapsed to double newline)
+
+**Tracking detection:**
+- 53 emails detected with tracking pixels (up from 47 — the htmd conversion exposed more)
+- `**Tracking:**` metadata line added to conversation file headers
+- Top trackers: SendGrid (various subaccounts), Outlier AI, Mandrill, Turing, Lever Analytics
+
+**Example before/after** (`1-minute-onboarding-survey-chance-to-win-100.md`):
+- Before: `@media only screen and (max-width: 720px) { table...` (CSS dump)
+- After: Clean markdown with `**Tracking**: url9405.outlier.ai` in header
+
+**Files changed:**
+1. `src/sync/markdown_clean.rs` — new module (7 tests)
+2. `src/sync/mod.rs` — registered module
+3. `src/sync/types.rs` — added `tracking: Vec<String>` to Thread
+4. `src/sync/markdown.rs` — serialize/parse `**Tracking:**` metadata
+5. `src/sync/imap_sync.rs` — cleanup in `merge_message_to_file`, raw htmd in `html_to_markdown`
+6. `src/sync/gmail_api_sync.rs` — same pattern
+7. Tests updated across markdown.rs and test_sync.rs
+<!-- agent:boundary:de28d143 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -849,5 +879,4 @@ So: **domain only** for the `**Tracking:**` metadata line. Implement?
 - Respond to Rob Ross (Dreamable) — schedule meeting Wed/Thu 12-4pm PT
 - crates.io token — renew and publish corky
 - VERSIONS.md — add entry before next release
-- **corky: markdown cleanup + tracking detection** — strip @media/CSS, detect & log tracking pixel domains, strip from body
 <!-- /agent:pending -->

@@ -2250,7 +2250,34 @@ crate::config::update_project_tmux_session(&pane_session)?;
 ### Re: editorial fix
 
 Noted — sentence completed. Ready when you want to proceed with the implementation.
-<!-- agent:boundary:f6f9bc24 -->
+
+File being changed externally with tasks/professional/judith-krug.md
+While I was typing, I would lose the last character due to the file being externally modified. Why?
+### Re: External file modification causing lost keystrokes (HEAD)
+
+This is likely caused by the **boundary marker repositioning** after `agent-doc commit`. The sequence:
+
+1. You type in the document
+2. Another session (judith-krug.md) or this file's own preflight triggers `agent-doc commit`
+3. Commit runs boundary reposition → IPC signal → IDE plugin modifies the document
+4. The IDE's Document API write interrupts your keystroke → last character dropped
+
+Every commit cycle outputs:
+```
+[commit] repositioned boundary in snapshot
+[commit] IPC reposition boundary signal sent
+[commit] plugin repositioned boundary via IPC
+```
+
+The boundary reposition modifies the file through the IDE's Document API. Even though it targets a specific heading marker, the document modification event can race with your typing.
+
+**Potential fixes:**
+1. **Debounce IPC writes** — if the user is actively typing (caret moved in last 500ms), defer the boundary reposition
+2. **Skip boundary reposition when no content changed** — if only the snapshot changed, don't touch the document
+3. **Use IDE `DocumentListener`** — check if user modified the document recently before applying IPC patches
+
+Want me to dig into the boundary reposition code to find the exact trigger?
+<!-- agent:boundary:5be5a04c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -2258,6 +2285,7 @@ Noted — sentence completed. Ready when you want to proceed with the implementa
 <!-- agent:pending patch=replace -->
 - [x] **Fix stash-everything guard** — skip stash when managed files have unresolved panes
 - [ ] **Fix tmux_session config drift** — route.rs should follow pane when it moves sessions; claim.rs should update config.toml
+- [ ] **Fix boundary reposition keystroke loss** — debounce or skip IPC reposition when user is actively typing
 - [ ] **Publish tmux-router v0.3.8** + update agent-doc dep
 - [ ] **Release agent-doc v0.30.1** (all fixes)
 - [ ] **Blog post** about this debugging session

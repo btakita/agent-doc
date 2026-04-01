@@ -639,6 +639,17 @@ When the sync path (`skip_wait=true`) creates new panes, it prefers splitting in
 
 **Fast path:** When the target window already exists and there is at most one stash window, Phases 1 and 2 are skipped entirely. Only Phase 3 (index normalization) executes, making the common case a lightweight check.
 
+### 7.27 session
+
+`agent-doc session` — show the configured tmux session.
+`agent-doc session set <name>` — update config.toml and migrate panes to the new session.
+
+**Show:** Reads `.agent-doc/config.toml` `tmux_session` field and prints it (or "(none)").
+
+**Set:** Updates config.toml, then moves the `agent-doc` window and `stash` window from the old session to the new one via `tmux move-window`. If the move fails (target session doesn't exist), config is still updated — subsequent route/claim operations will target the new session.
+
+**Session resolution (`resolve_target_session`):** Single function in route.rs that all session-targeting code paths use. Priority: (1) context_session from sync --window, (2) config.toml if alive, (3) fallback to current session. Config is auto-updated only when the configured session is dead.
+
 ## 8. Session Routing
 
 ### 8.1 Registry

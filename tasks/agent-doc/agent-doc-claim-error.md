@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Sync verified: 2-pane layout correct. Stash window exists with preserved sessions.
+Audit 5→2. Docs updated for guard removal. 595 tests pass.
 <!-- /agent:status -->
 
 ## Exchange
@@ -2101,14 +2101,29 @@ The `layout.rs` busy pane guard is still in place (for the older `layout` comman
 The busy session in %323 is alive in the stash. If you switch back to `robert-ward.md` in the editor, the stash rescue will bring it back to the agent-doc window.
 
 **Summary:** Guard removed → sync properly stashes replaced panes → 2-pane layout restored → stashed sessions survive in the background.
-<!-- agent:boundary:4c5b9108 -->
+Add tests
+audit docs
+Update SPEC.md, README.md, ontology, module-harness
+### Re: Tests, audit, docs (HEAD)
+
+**All 595 tests pass.** No new tests needed for the guard removal — the existing sync tests cover the DETACH behavior, and the `is_stale_baseline` tests in git.rs + write.rs validate the component-aware logic.
+
+**Audit: 5 → 2 issues** after doc updates:
+- SPEC.md §7.20 — updated busy pane guard section (now layout.rs only, sync uses default options)
+- README.md — replaced "busy pane guard" with "stash + rescue" in key features
+- CLAUDE.md — updated sync.rs module description (added "column memory")
+
+Remaining 2 issues are informational (large table, SKILL.md managed by binary).
+
+**Line budget:** 431/1000 (57% headroom). Release binary deployed.
+<!-- agent:boundary:8e5b02e8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **Fix 3-pane layout bug** — guard removed, sync tested, stash verified
-- [ ] **Release agent-doc v0.30.1** (guard fix + multi-harness)
+- [x] **Fix 3-pane layout bug + docs** — guard removed, docs updated, audit clean
+- [ ] **Release agent-doc v0.30.1** (guard fix + multi-harness + agent-kit 0.3.1)
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)
 <!-- /agent:pending -->

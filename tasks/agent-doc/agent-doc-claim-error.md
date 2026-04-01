@@ -1929,7 +1929,7 @@ Will there be a command to install the Claude Code skills...how about other agen
 - **Docs** — SPEC.md, README.md, CLAUDE.md updated
 
 Ready to release? I'll bump version, update VERSIONS.md, run make check, commit, tag, and publish.
-### Re: Skill install for multiple agent harnesses (HEAD)
+### Re: Skill install for multiple agent harnesses
 
 **Currently:** `agent-doc skill install` installs to `.claude/skills/agent-doc/SKILL.md` — Claude Code only. The `agent-kit` crate's `detect::Environment` enum already knows about Claude Code, OpenCode, Codex, and Generic environments. The `SkillConfig::install()` method uses the detected environment to pick the install path.
 
@@ -1953,7 +1953,7 @@ Ready to release? I'll bump version, update VERSIONS.md, run make check, commit,
 This is a v0.31.0 feature — separate from the v0.30.0 release which ships the current bug fixes + hooks.
 
 Proceed with v0.30.0 release?
-<!-- agent:boundary:63da8342 -->
+<!-- agent:boundary:80140529 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1196,7 +1196,7 @@ I switched documents in the editor. Upon coming back to this document in the edi
 Implement:
 - [ ] **Refine stale baseline guard** (fires on user edits, too aggressive)
 - [ ] **Tests** for preflight baseline, stale baseline guard, ops logging
-### Re: Active session + stale baseline refinement (HEAD)
+### Re: Active session + stale baseline refinement
 
 **Active session:** Yes — pane %306 ("stash" window) has an active `agent-doc start` running on `tasks/recruit/robert-ross.md`. The preflight flagged it: `"stash window 'stash' has non-idle pane %306 running 'agent-doc'"`.
 
@@ -1226,7 +1226,7 @@ New approach:
 - `log_op_no_panic_on_missing_project_root`: verifies graceful degradation
 
 All 382 tests pass. Release binary built.
-<!-- agent:boundary:e33f5957 -->
+<!-- agent:boundary:d7a7ed5b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

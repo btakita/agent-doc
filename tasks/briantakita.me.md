@@ -148,7 +148,7 @@ This hardcoded path won't exist on CI (GitHub Actions uses `/home/runner/work/..
 | **D. Fix esmcss** | Resolve `@source` relative to CSS file, not temp dir | Root cause fix | Deeper change |
 
 Which approach do you prefer?
-<!-- agent:boundary:111315f3 -->
+<!-- agent:boundary:06980deb -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

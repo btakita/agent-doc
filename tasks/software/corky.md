@@ -818,7 +818,7 @@ Example output in conversation file:
 This way you can `grep "**Tracking**" conversations/*.md` to audit which senders track. Want me to implement both the strip + metadata approach?
 
 Would it be useful to specify the path of the tracking pixel? Or is the domain name sufficient?
-### Re: Tracking pixel path vs domain (HEAD)
+### Re: Tracking pixel path vs domain
 
 Domain is sufficient. Here's why:
 
@@ -840,7 +840,7 @@ The full paths would be:
 If you later want to investigate a specific tracker's behavior, the full URL is still in the email body (or can be recovered from the original HTML via refetch). The metadata line just needs to flag *that* tracking exists and *who* does it.
 
 So: **domain only** for the `**Tracking:**` metadata line. Implement?
-<!-- agent:boundary:2754ed4c -->
+<!-- agent:boundary:ffbde197 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -827,7 +827,7 @@ I will discuss more with him as well.
 **Suggested approach:** Short email to jmalloy@lmi.org referencing the interview, link to the blog post, mention being open to discussing how agent-doc could apply to LIGER's document generation and fact-checking needs.
 
 Want me to draft the email via corky?
-<!-- agent:boundary:9ecadc0a -->
+<!-- agent:boundary:b688dcc2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

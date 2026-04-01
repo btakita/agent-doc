@@ -1,8 +1,8 @@
 ---
 agent_doc_session: 7322672d-726a-47c7-9a81-a836b968bdc9
-tmux_session: '0'
 agent_doc_format: template
 agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
 ---
 
 ## Current Architecture
@@ -148,9 +148,12 @@ This hardcoded path won't exist on CI (GitHub Actions uses `/home/runner/work/..
 | **D. Fix esmcss** | Resolve `@source` relative to CSS file, not temp dir | Root cause fix | Deeper change |
 
 Which approach do you prefer?
-<!-- agent:boundary:157487f1 -->
+### Re: Frontmatter updated (HEAD)
+
+Noted the frontmatter changes: removed `tmux_session: '0'`, added `claude_args: --dangerously-skip-permissions`. The `@source` absolute path fix is still pending your approach decision (A/B/C/D).
+<!-- agent:boundary:f8fbfafa -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- `@source` absolute path CI fix — awaiting approach decision
+- `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

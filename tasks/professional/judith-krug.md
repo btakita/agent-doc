@@ -446,7 +446,7 @@ Want me to create the draft file now?
 Judith's website equityfundingsource.com is down for some reason.
 Look through the phone call transcriptions with robert-ward and judith-krug.
 Is her ex-boyfriend...the "control freak"...responsible for the website?
-### Re: Website Down & "Control Freak" Investigation (HEAD)
+### Re: Website Down & "Control Freak" Investigation
 
 **The "control freak" is NOT an ex-boyfriend.** From the March 4 meeting transcript with Judith and Robert Waldman, Judith refers to "the lady who has my website" as a separate person:
 
@@ -467,7 +467,7 @@ This is a **female third party** who built and hosts the site. Judith described 
 - Action item #3 from March 4 meeting: "Website takeover from current host" was Judith's responsibility, status: Pending
 
 **This actually strengthens the pitch for tonight's call** ... her website is literally down. You can say: "Your website is down right now. I can get it back up on Cloudflare today and you'll own everything. No more depending on someone you can't reach."
-<!-- agent:boundary:25d35242 -->
+<!-- agent:boundary:37ff7bca -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

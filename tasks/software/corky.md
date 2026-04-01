@@ -931,7 +931,7 @@ do:
 
 Ready to commit inside `src/corky/`, then publish. Want me to proceed with the commit?
 go
-### Re: Published corky v0.23.0 (HEAD)
+### Re: Published corky v0.23.0
 
 All done:
 
@@ -942,11 +942,39 @@ All done:
 5. **Installed** `~/.cargo/bin/corky` with CUDA support
 6. **Updated** [GitHub Release](https://github.com/btakita/corky/releases/tag/v0.23.0) with new notes + CUDA binary
 7. **Updated** parent agent-loop submodule pointer
-<!-- agent:boundary:a3bb7f01 -->
+### Feature: `corky transcribe` — Adaptive Chunked Diarization with Unknown Attribution (HEAD)
+
+**Problem:** pyannote-rs diarization fails (0 segments detected) on long audio files and on very short segments (<30s). This leaves speaker turns attributed to "Unknown".
+
+**Algorithm (proven in robert-ward transcription session):**
+
+1. **Initial transcription** with `--diarize --speakers` on full file
+2. **If diarization returns 0 segments**, split audio into 10-minute chunks via ffmpeg segment muxer and re-transcribe each chunk
+3. **For chunks that still fail**, split further into 2-minute segments and re-transcribe
+4. **For 2-min segments that still fail**, split into 30-second micro-chunks and re-transcribe
+5. **For remaining Unknown segments** (typically first 30s of each boundary where pyannote can't build speaker embeddings), use LLM inference on transcript content + surrounding context to attribute speakers:
+   - Direct address ("hey Robert") implies speaker is NOT the named person
+   - Personal references ("Brooke's sister") imply speaker is the person whose partner is Brooke
+   - Continuity from surrounding diarized segments
+   - Include confidence score with each inference
+
+**Reassembly:** Concatenate chunk transcripts, stripping YAML frontmatter from all chunks after the first. Replace "Unknown" segments with inferred speakers.
+
+**Results achieved:** 100% speaker attribution on 76min + 37min + 8min calls (was 0% diarized on the two longer calls).
+
+**Implementation scope:**
+- `--adaptive-chunk` flag on `corky transcribe`
+- Automatic chunking cascade: full -> 10min -> 2min -> 30s
+- Reassembly with frontmatter stripping
+- LLM inference step could be a separate `corky transcribe --resolve-unknown` post-processing pass
+<!-- agent:boundary:8cffacc0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Respond to Rob Ross (Dreamable) — schedule meeting Wed/Thu 12-4pm PT
+- [ ] `corky transcribe --adaptive-chunk` — cascading chunk diarization for long audio
+- [ ] `corky transcribe --resolve-unknown` — LLM-based speaker attribution for remaining Unknown segments
+- [ ] crates.io publish — needs token refresh
+- [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:pending -->

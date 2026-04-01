@@ -656,7 +656,6 @@ AI agent sessions or AI document agent sessions or AI document sessions or AI do
 **"AI agent sessions"** for the hook (recognition), **"interactive document sessions"** in the body (differentiation). The hook grabs attention with a familiar term; the body introduces the novel concept.
 
 Keep the opening as: "532 git commits in one day. 11 parallel AI agent sessions."
-Ok. Publish
 
 Make sure the post does not have the link...but the first comment has the link.
 The teaser does not talk about security at all. It should.
@@ -690,10 +689,40 @@ Update the linkedin teaser draft to include additions.
 3. `corky linkedin comment <file>` to add the link as first comment
 
 Ready to publish? I'll run the corky commands when you confirm.
-<!-- agent:boundary:b5cc8833 -->
+
+> The security story: snapshot rollbacks when sessions restart with stale state. Duplicate response writes from the rollback/regeneration cycle. Ghost sessions in the registry. A three-way IPC synchronization layer where bugs in one system present as failures in another. Each of these is a potential attack surface when multiple agents share a filesystem.
+
+Please read /home/brian/work/btakita/agent-loop/src/briantakita.me-dev/app/briantakita.me/post/content/2026-04-01-agent-security-multiuser-lessons.md
+The security story is the audit trail...and the multiuser prompt injection. 
+
+Include the agent-doc bugs as well. But let's get the teaser correct.
+### Re: Revised teaser — security + audit trail (HEAD)
+
+Read the full blog post. The security story is about **multiuser prompt injection** (the document IS the prompt, so anyone with repo access can inject instructions) and the **audit trail** (every exchange committed to git, blog post generated from that history).
+
+**Revised LinkedIn teaser:**
+
+> 532 git commits in one day. 11 parallel AI agent sessions. 292 commits debugging one cascade of bugs.
+>
+> Yes, this is dated April 1st. No, it's not a joke.
+>
+> I spent a day running agent-doc ... my Rust CLI for interactive AI document sessions ... at scale. Each document gets its own Claude Code instance. Every prompt and response is committed to git.
+>
+> The security lesson: when the document IS the prompt, anyone with repo access can inject instructions into your agent's context. Multi-agent workflows create attack surfaces that don't exist in single-agent systems. The private repo boundary becomes the security boundary.
+>
+> The audit trail lesson: this blog post was generated from the agent documents and git commits themselves. I pointed Claude at 532 commits and said "review what happened." Every interaction is a commit. The history IS the documentation.
+>
+> The meta-lesson: the only way to debug a tool this complex is to dog-food it on itself.
+>
+> Full post linked in the first comment.
+
+**First comment:** `https://briantakita.me/posts/agent-security-multiuser-lessons/`
+
+Ready to publish via corky. Say the word.
+<!-- agent:boundary:5cc3cc90 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn teaser — updated, awaiting publish confirmation
+- LinkedIn teaser — revised with security + audit trail, awaiting publish confirmation
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

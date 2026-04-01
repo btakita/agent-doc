@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Multi-harness skill install shipped. agent-kit v0.3.1 published. 5 harnesses supported.
+3-pane layout bug: busy pane guard too aggressive. Protecting panes that should give way to replacements.
 <!-- /agent:status -->
 
 ## Exchange
@@ -2045,15 +2045,38 @@ agent-doc skill install --all              # all harnesses
 ```
 
 Published: agent-kit v0.3.1 on crates.io. agent-doc uses registry dep. Release binary built.
-<!-- agent:boundary:c66f9368 -->
+
+I got an incorrect 3 pane layout:
+![2026-04-01_12-36.png](../../../../../Pictures/agent-loop/2026-04-01_12-36.png)
+Why?
+### Re: 3-pane layout bug (HEAD)
+
+**Cause:** The busy pane guard is protecting pane %323 (`robert-ward.md`) from being stashed because it's running an active Claude session. But the editor explicitly switched to `judith-krug.md` in that column — the old pane should give way.
+
+**Current state:**
+- %312 = `agent-doc-claim-error.md` (correct, left column)
+- %323 = `robert-ward.md` (leftover, should be stashed)
+- %324 = `judith-krug.md` (correct, right column)
+
+**The bug:** The busy pane guard is too aggressive. It should only protect panes when:
+- The layout shrinks (e.g., user switches to a non-agent file in one column)
+- NOT when another agent-doc file explicitly replaces it in the same column
+
+**Fix:** The protect_pane callback should check if the pane being considered for stash has a REPLACEMENT in the wanted set for the same column position. If yes, allow stashing (the user chose a different file). If no (layout shrinking), protect.
+
+This requires passing the `wanted` pane set into the callback so it can distinguish "replaced by another agent doc" from "no replacement (column went non-agent)."
+
+For now, the quick fix: remove the busy pane guard from the DETACH phase and rely on column memory + stash rescue for session preservation. The guard was solving a narrow edge case (layout collapse on non-agent switch) but causing a worse problem (pane accumulation).
+
+Want me to remove the guard or implement the smarter replacement-aware version?
+<!-- agent:boundary:54b9fad5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **Multi-harness skill install** — Claude, OpenCode, Codex, Cursor, Generic
-- [x] **agent-kit v0.3.1** published
-- [ ] **Release agent-doc v0.30.1** (multi-harness + agent-kit 0.3.1 dep)
+- [ ] **Fix busy pane guard** — replacement-aware or remove from DETACH
+- [ ] **Release agent-doc v0.30.1** (multi-harness + guard fix)
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)
 <!-- /agent:pending -->

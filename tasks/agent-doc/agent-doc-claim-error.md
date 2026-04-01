@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-agent-doc v0.30.0 published to crates.io. Binary installed. Session complete.
+Multi-harness skill install shipped. agent-kit v0.3.1 published. 5 harnesses supported.
 <!-- /agent:status -->
 
 ## Exchange
@@ -2015,14 +2015,45 @@ release
 - HookTransport trait + 3 implementations
 - agent-kit v0.3 + tmux-router v0.3.7 deps
 - 595 tests, 0 failures
-<!-- agent:boundary:a6549eb5 -->
+
+Implement:
+- [ ] **Multi-harness skill install** (v0.31.0)
+### Re: Multi-harness skill install (HEAD)
+
+**Implemented and published.**
+
+#### agent-kit v0.3.1
+
+- Per-environment skill paths:
+  - Claude Code: `.claude/skills/{name}/SKILL.md`
+  - OpenCode: `.opencode/skills/{name}/SKILL.md`
+  - Codex: `.codex/AGENTS.md`
+  - Cursor: `.cursor/rules/{name}.md`
+  - Generic: `AGENTS.md`
+- `Environment::from_name()` — parse "claude", "cursor", etc.
+- `Environment::all_skill_rel_paths()` — all env paths for `--all`
+- `SkillConfig::install_for(env)` + `install_all()`
+- Cursor detection via `CURSOR_SESSION_ID` / `CURSOR` env vars
+- 7 new tests (24 total)
+
+#### agent-doc CLI
+
+```
+agent-doc skill install                    # auto-detect harness
+agent-doc skill install --harness cursor   # specific harness
+agent-doc skill install --all              # all harnesses
+```
+
+Published: agent-kit v0.3.1 on crates.io. agent-doc uses registry dep. Release binary built.
+<!-- agent:boundary:5d272e79 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **agent-doc v0.30.0 released** — crates.io + GitHub + binary installed
-- [ ] **Multi-harness skill install** (v0.31.0)
+- [x] **Multi-harness skill install** — Claude, OpenCode, Codex, Cursor, Generic
+- [x] **agent-kit v0.3.1** published
+- [ ] **Release agent-doc v0.30.1** (multi-harness + agent-kit 0.3.1 dep)
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)
 <!-- /agent:pending -->

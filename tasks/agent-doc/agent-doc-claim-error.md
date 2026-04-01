@@ -2704,7 +2704,19 @@ agent-doc session set <N>  # Update config + move agent-doc & stash windows
 - Both bulk and non-bulk purge variants fixed
 
 All 601 tests pass. Binary installed.
-<!-- agent:boundary:877699d6 -->
+
+The entire previous response patch was uncommitted. Why? It should be committed.
+![img_4.png](img_4.png)
+### Re: Uncommitted response patch
+
+**What happened:** The previous cycle used a streaming checkpoint (wrote "Building it now. Starting implementation." first, then wrote the full response later). Between the checkpoint and the final write, the baseline went stale — triggering the "WARNING: baseline missing snapshot content" message. When the baseline is stale, the write falls back to using the current file as baseline, and the snapshot captures the full file (including user edits) instead of just the agent content.
+
+This means `agent-doc commit` couldn't selectively stage just the agent response — the snapshot matched the full file, so the commit staged everything (including user input) together. The boundary marker repositioning happened, but the selective staging was effectively a no-op because the snapshot already contained the user's edits.
+
+**This is a known limitation of streaming checkpoints.** The checkpoint write updates the snapshot, and if the final write's baseline doesn't match the post-checkpoint snapshot, the stale baseline guard fires. The fix would be to save a new baseline after each checkpoint (which the skill instructions say to do), but I didn't do that correctly in the previous cycle.
+
+**For this session going forward:** I'll only use checkpoints when the response is genuinely multi-part and takes a long time. For the `session` CLI implementation, the checkpoint was unnecessary — I should have just written the final response directly.
+<!-- agent:boundary:2d772bf6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

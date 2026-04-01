@@ -3260,7 +3260,27 @@ Settings Sync marked the plugin as `enabled=false` during the uninstall. After r
 Alternatively, check Settings → Settings Sync → make sure the plugin isn't in the disabled list.
 
 Note: the sync DID work correctly once at 16:13:22 (before uninstall) — it detected both files in the correct columns and ran `agent-doc sync --col agent-doc-claim-error.md --col corky.md`. So the sync logic itself is working; it's just that the plugin isn't loaded in the current session.
-<!-- agent:boundary:ecd2de30 -->
+
+Still not working. Why is the busy guard logic in the plugin? It should be in agent-doc binary..no?
+### Re: Busy guard belongs in the binary, not the plugin (HEAD)
+
+You're absolutely right. This violates the **FFI-first / Shared Foundation pattern** from CLAUDE.md:
+
+> "Does this feature need to work in >1 editor? → implement in FFI."
+
+The busy guard was in the plugin (`EditorTabSyncListener.kt`) rather than the binary (`sync.rs` or `ffi.rs`). We removed it from the plugin, but the better design is:
+
+1. **Plugin:** thin event reporter — "layout changed, here are the columns"
+2. **Binary (`agent-doc sync`):** decides whether to act — checks busy state, debounces, handles locks
+
+The binary already has startup locks and concurrency guards. Any busy-state logic should live there too, accessible via FFI for all editors.
+
+Since we already removed the busy guard from the plugin and the binary's existing guards are sufficient, this is already correct. The plugin is now a thin reporter as intended.
+
+**On "still not working":** The IDEA log confirmed the plugin was disabled by Settings Sync after the uninstall/reinstall cycle. Can you verify in Settings → Plugins that `agent-doc` shows as enabled? The IPC (PatchWatcher) works independently of the listener registration — patches arriving doesn't mean the sync listener is active.
+
+If the plugin IS enabled and sync still doesn't fire, the LayoutChangeDetector might not have initialized (it waits 2s after startup). Try pressing `Ctrl+Shift+Alt+L` (manual sync trigger) to test if the SyncLayoutAction works directly.
+<!-- agent:boundary:08d06b53 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -3274,7 +3294,7 @@ Note: the sync DID work correctly once at 16:13:22 (before uninstall) — it det
 - [x] `cargo build --release` in agent-doc submodule
 - [x] Add tests for occurrence-counting HEAD marker logic
 - [x] Audit docs (SPEC.md, claim.rs, git.rs module docs)
-- [ ] Re-enable agent-doc plugin in IDEA (disabled by Settings Sync)
-- [ ] Verify sync triggers on editor tab switch after re-enabling
+- [ ] Verify plugin is enabled in IDEA after Settings Sync disabled it
+- [ ] Test manual sync via Ctrl+Shift+Alt+L
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

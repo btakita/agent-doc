@@ -1790,7 +1790,7 @@ This bridges Claude Code's event model → agent-doc's hook bus → other sessio
 
 This is the right direction but it's a significant architectural piece. Recommend: ship the `HookTransport` trait + socket transport in agent-kit v0.3, then wire the Claude Code bridge as a follow-up.
 Go
-### Re: HookTransport trait + implementations (HEAD)
+### Re: HookTransport trait + implementations
 
 **Implemented.** `HookTransport` trait + 3 implementations + `fire_and_deliver` method.
 
@@ -1823,7 +1823,7 @@ pub trait HookTransport: Send + Sync {
 - `fire_and_deliver_fires_locally_and_delivers` — local fire + delivery to target
 
 All 31 agent-kit tests + 595 agent-doc tests pass. Release binary built.
-<!-- agent:boundary:241707df -->
+<!-- agent:boundary:9bb89b77 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

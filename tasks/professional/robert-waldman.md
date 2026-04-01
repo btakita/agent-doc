@@ -124,7 +124,18 @@ Updated `mail/drafts/20260401-robert-waldman-website-down.md`:
 - You'll handle the CSS layout fix
 
 Ready to send via `corky draft push` when you approve.
-<!-- agent:boundary:2054a035 -->
+
+Ask Robert if he knows about this.
+I don't want to alarm Judith and I know that she is busy.
+### Re: Email Updated — Ask Robert, Don't Alarm Judith (HEAD)
+
+Updated the draft to:
+- Ask Robert if he knew the site was down and what happened with the hosting
+- Explicitly note: don't alarm Judith, just have it handled before the call
+- If she asks, Robert can say Brian's on it
+
+Ready to send when you approve.
+<!-- agent:boundary:429370fd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

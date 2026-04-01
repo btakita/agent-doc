@@ -721,6 +721,7 @@ Read the full blog post. The security story is about **multiuser prompt injectio
 Ready to publish via corky. Say the word.
 
 publish
+The 
 ### Re: Publishing
 
 Created draft at `/home/brian/Documents/mail/social/20260401-181027-linkedin.md`.
@@ -728,10 +729,24 @@ Created draft at `/home/brian/Documents/mail/social/20260401-181027-linkedin.md`
 LinkedIn OAuth needed first ... corky is running the auth flow now. A browser window should have opened for you to authorize. Once you complete the OAuth, I'll publish the post and add the first comment with the link.
 
 **Draft file:** `/home/brian/Documents/mail/social/20260401-181027-linkedin.md`
-<!-- agent:boundary:10793376 -->
+
+Oauth was pending...did nothing
+![2026-04-01_18-13.png](../../. ./../Pictures/agent-loop/2026-04-01_18-13.png)
+
+Same behavior. Not moving on.
+
+Looks like there's an outage https://www.linkedin-status.com/
+### Re: OAuth retry (HEAD)
+
+The first attempt had empty `client_id` (wrong pass paths). The second attempt had the correct client_id but timed out because you were looking at the first attempt's blank page.
+
+Running OAuth again now — a new browser tab should have opened with the correct LinkedIn authorization page. Complete it there. The callback listener is on `http://127.0.0.1:8484/callback`.
+
+Once authorized, I'll immediately publish + comment.
+<!-- agent:boundary:91aa35eb -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn publish — OAuth in progress, then publish + first comment
+- LinkedIn publish — OAuth retry #3 in progress, complete in browser
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

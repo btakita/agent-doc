@@ -3340,7 +3340,7 @@ Yes — the agent-doc binary should own all locks and guards. This follows the F
 - Any registry manipulation
 
 The binary is the single source of truth for session state, pane management, and concurrency. The plugin just says "the editor looks like this" and the binary figures out how to make tmux match.
-<!-- agent:boundary:eccde632 -->
+<!-- agent:boundary:42cefbbd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

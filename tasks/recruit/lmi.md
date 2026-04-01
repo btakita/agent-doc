@@ -918,14 +918,20 @@ Proposed:
 > "The deterministic binary (Rust) handles reliable operations (merging, snapshots, git) while the skill layer handles reasoning. Both produce auditable output."
 
 Want me to apply this, or do you have different wording in mind?
-<!-- agent:boundary:6a6c0c0b -->
+Yes...apply.
+### Re: Applied (HEAD)
+
+Updated line 21 in the draft. Now reads:
+
+> "The deterministic binary (Rust) handles reliable operations (merging, snapshots, git) while the skill layer handles reasoning. Both produce auditable output."
+<!-- agent:boundary:a80899cf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Revise binary/audit claim in Josh email (pending wording)
 - [ ] Send Josh Malloy follow-up email (on hold)
 - [ ] agent-doc README: security section (single-user, prompt injection)
 - [ ] Corky: HTML body extraction for emails
+- [x] Binary/audit framing corrected
 <!-- /agent:pending -->

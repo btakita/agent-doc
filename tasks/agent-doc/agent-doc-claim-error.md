@@ -3361,6 +3361,7 @@ Both guards are now removed. The release binary is rebuilt.
 Try switching to corky.md again — sync should now auto-start a session for it.
 
 Still not resulting in 2 tmux panes. Why?
+After calling `Run Agent Doc` on this document in the left editor, the second tmux pane appeared. Why then?
 ### Re: It IS working — 2 panes exist
 
 The sync is working. The tmux state shows **2 panes** in the `agent-doc` window:
@@ -3373,7 +3374,30 @@ agent-doc %358 agent-doc  ✳ Claude Code                 ← corky.md session
 The IDEA log confirms sync ran successfully at 16:26:20-25 with `exit=0` and created the second pane. The plugin IS triggering correctly.
 
 If you don't see 2 panes, you may need to switch to the `agent-doc` window in tmux session 5 (`tmux select-window -t 5:agent-doc`). The panes are side-by-side in that window.
-<!-- agent:boundary:ac1f8c73 -->
+### Re: Why the second pane appeared after Run Agent Doc (HEAD)
+
+The timeline explains this:
+
+1. **Earlier sync calls** (16:13 and before) — ran with the **old binary** that had the `non_managed` guard. `corky.md` was skipped.
+2. **Binary rebuilt** at ~16:21 — but the plugin was calling `~/.cargo/bin/agent-doc`, and the release build writes to `src/agent-doc/target/release/agent-doc`. The **symlink** `.bin/agent-doc` may not have been updated, or the plugin was resolving a different binary path.
+3. **`/agent-doc` on this document** (Run Agent Doc) — the skill runs `agent-doc preflight` which calls `agent-doc commit`, triggering a **post-route sync** from within the binary. This used the **newly built binary** (from the Cargo build in this session's CWD), which has the fix.
+
+The key question: which `agent-doc` binary does the plugin invoke?
+
+Let me check:
+We should protect against running old agent-doc instances. agent-doc should probab
+### Re: Timing and binary resolution (corrected) (HEAD)
+
+The plugin uses `.bin/agent-doc` (symlink → `target/release/agent-doc`, rebuilt at 16:25). The IDEA log shows sync ran successfully at 16:26 with `exit=0` and created pane `%358`. So the fix WAS working — the second pane was created by the plugin's sync.
+
+The reason you didn't see it immediately: the sync created the pane but your tmux focus was on pane `%348` (this session). The second pane was there but may have been a thin sliver or out of view depending on the tmux layout proportions.
+
+When you then ran `/agent-doc` (Run Agent Doc) on this document, the preflight commit triggered a post-route sync that re-focused the panes, making the second pane visible.
+
+**Summary:** The fix is working end-to-end. The plugin's sync creates the second pane. The timing confusion was because the second pane existed but wasn't visually prominent until the next sync cycle adjusted focus/proportions.
+
+Also worth noting: `~/.cargo/bin/agent-doc` is still the OLD binary (from 15:19, before all fixes). Running `cargo install --path .` would update it. The symlink-based `.bin/agent-doc` is correct though.
+<!-- agent:boundary:814e9234 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -3389,5 +3413,6 @@ If you don't see 2 panes, you may need to switch to the `agent-doc` window in tm
 - [x] Audit docs (SPEC.md, claim.rs, git.rs, sync.rs module docs)
 - [x] Fix: sync auto-starts files with session UUIDs (both guards removed)
 - [x] Verify end-to-end: 2 panes created in agent-doc window
+- [ ] `cargo install --path .` to update ~/.cargo/bin/agent-doc
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

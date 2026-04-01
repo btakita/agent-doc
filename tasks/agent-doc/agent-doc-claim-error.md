@@ -3319,7 +3319,7 @@ Not working. Why?
 
 You're right that I should have traced the `non_managed=1` signal from the sync output immediately rather than chasing plugin state. The log data was there.
 Should the agent-doc binary itself (not the editor plugin nor the ffi plugin) handle the locks and guards?
-### Re: Where locks and guards should live (HEAD)
+### Re: Where locks and guards should live
 
 Yes — the agent-doc binary should own all locks and guards. This follows the FFI-first / Shared Foundation pattern:
 
@@ -3340,7 +3340,7 @@ Yes — the agent-doc binary should own all locks and guards. This follows the F
 - Any registry manipulation
 
 The binary is the single source of truth for session state, pane management, and concurrency. The plugin just says "the editor looks like this" and the binary figures out how to make tmux match.
-<!-- agent:boundary:2508292d -->
+<!-- agent:boundary:eccde632 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -687,7 +687,7 @@ More diarized speaker turns recovered from the 30s-90s range. The remaining 3+1 
 The transcripts are updated in place. Those first-30s Unknown blocks are just a few sentences of audio each.
 
 Can we use the transcribed content to infer who said what?
-### Re: Inferring Unknown speakers (HEAD)
+### Re: Inferring Unknown speakers
 
 Read the content of each Unknown segment and used context clues to attribute them:
 
@@ -701,5 +701,5 @@ All 4 Unknown segments replaced with **Brian**. Final counts:
 - **Mar 30 AM:** 102 Brian + 96 Robert + 0 Unknown
 
 100% speaker attribution across all 3 transcripts.
-<!-- agent:boundary:3648d7ae -->
+<!-- agent:boundary:5e6d6a39 -->
 <!-- /agent:exchange -->

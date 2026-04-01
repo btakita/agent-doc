@@ -2104,7 +2104,7 @@ The busy session in %323 is alive in the stash. If you switch back to `robert-wa
 Add tests
 audit docs
 Update SPEC.md, README.md, ontology, module-harness
-### Re: Tests, audit, docs (HEAD)
+### Re: Tests, audit, docs
 
 **All 595 tests pass.** No new tests needed for the guard removal — the existing sync tests cover the DETACH behavior, and the `is_stale_baseline` tests in git.rs + write.rs validate the component-aware logic.
 
@@ -2116,7 +2116,7 @@ Update SPEC.md, README.md, ontology, module-harness
 Remaining 2 issues are informational (large table, SKILL.md managed by binary).
 
 **Line budget:** 431/1000 (57% headroom). Release binary deployed.
-<!-- agent:boundary:8e5b02e8 -->
+<!-- agent:boundary:b8bdf2ac -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

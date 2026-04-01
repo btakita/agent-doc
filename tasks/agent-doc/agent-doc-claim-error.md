@@ -1388,7 +1388,7 @@ Added `is_pane_busy()` check before `break_pane` in `layout.rs:208-216`. Busy pa
 Implement:
 - [ ] **Fix auto-start race** — startup lock to prevent double-spawn on rapid sync calls
 - [ ] **Suppress boundary-only IPC patches** — eliminate editor flash from no-op patch writes
-### Re: Auto-start lock + editor flash investigation (HEAD)
+### Re: Auto-start lock + editor flash investigation
 
 #### Auto-start race — fixed
 
@@ -1418,7 +1418,7 @@ Investigated the "prompt appearing below editor cursor":
 To narrow it down: try disabling the `censible-core` submodule from JetBrains VCS settings (Settings → Version Control → Directory Mappings → remove that submodule). The every-1.5s VCS refresh cycle could be triggering intention popups on the active file.
 
 If the flash persists after that, we can add logging to the PatchWatcher to trace exactly when the plugin triggers Document API calls.
-<!-- agent:boundary:e8d99ed4 -->
+<!-- agent:boundary:f9cdbf08 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

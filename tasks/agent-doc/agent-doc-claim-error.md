@@ -3340,7 +3340,26 @@ Yes — the agent-doc binary should own all locks and guards. This follows the F
 - Any registry manipulation
 
 The binary is the single source of truth for session state, pane management, and concurrency. The plugin just says "the editor looks like this" and the binary figures out how to make tmux match.
-<!-- agent:boundary:2f07ea6a -->
+Navigating to the right editor, seeing the JB plugin prompt, `Sync: --col tasks/agent-doc/agent-doc-claim-error.md --col tasks/software/corky.md [focus: tasks/software/corky.md]`...does not result in the 2 tmux pane layout. Why?
+### Re: Second registry guard found and removed (HEAD)
+
+There were **two** places checking for registry entries — I only fixed one. The second was in the auto-start phase (`sync.rs` lines 568-579):
+
+```rust
+// Skip files that have a session UUID in frontmatter but no registry
+// entry. These are unclaimed files...
+if registered_pane.is_none() {
+    if !has_registry_entry { continue; }
+}
+```
+
+Both guards are now removed. The release binary is rebuilt.
+
+- `make check`: all 602 tests pass
+- `cargo build --release`: done
+
+Try switching to corky.md again — sync should now auto-start a session for it.
+<!-- agent:boundary:a4d23060 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -3351,10 +3370,10 @@ The binary is the single source of truth for session state, pane management, and
 - [x] git.rs: fix (HEAD) marker not added for duplicate heading text
 - [x] Bump JB plugin version to 0.2.37
 - [x] Remove busy guard from EditorTabSyncListener.kt
-- [x] `cargo build --release` in agent-doc submodule
+- [x] `cargo build --release` in agent-doc submodule (×3)
 - [x] Add tests for occurrence-counting HEAD marker logic
 - [x] Audit docs (SPEC.md, claim.rs, git.rs, sync.rs module docs)
-- [x] Fix: sync auto-starts files with session UUIDs even without registry entry
+- [x] Fix: sync auto-starts files with session UUIDs (both resolve_file AND auto-start phase)
 - [ ] Verify end-to-end: navigate to split → tmux pane created
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

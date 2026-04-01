@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Multi-harness skill install assessed. v0.30.0 release ready (current work). Multi-harness = v0.31.0.
+Editor lag diagnosed: Tailwind CSS LSP sending full 95KB doc on every keystroke. Not agent-doc.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1953,14 +1953,38 @@ Ready to release? I'll bump version, update VERSIONS.md, run make check, commit,
 This is a v0.31.0 feature — separate from the v0.30.0 release which ships the current bug fixes + hooks.
 
 Proceed with v0.30.0 release?
-<!-- agent:boundary:80140529 -->
+I am seeing something like "IntelliJ is not responding. Jump threads" when I type at times.
+Please review Idea logs to see if the JB or IPC Plugin is interfering with the editing.
+### Re: IntelliJ responsiveness — Tailwind CSS LSP is the culprit (HEAD)
+
+**Found it.** The **Tailwind CSS language server** is processing markdown files and sending the FULL document content on every keystroke:
+
+- `textDocument/didChange` for `agent-doc-claim-error.md` — **961 times** in the log
+- `textDocument/documentColor` + `textDocument/documentLink` — **598 times** for this markdown file
+- `bob-remeika.md` — **6,278 mentions** (another large agent-doc file)
+- Each `didChange` sends the ENTIRE document content (~95KB) as a single `contentChanges` entry
+
+The Tailwind CSS LSP is configured to watch all files (including `.md`) and receives full-document sync on every keystroke. For a 95KB markdown file, that's ~95KB of JSON per keystroke sent to the LSP.
+
+**The agent-doc PatchWatcher is NOT the issue.** It only fires when an IPC patch file appears (4 times in the last 10 minutes). No EDT blocking detected from the PatchWatcher.
+
+**Fix options (pick one):**
+
+1. **Exclude markdown from Tailwind LSP** — In IntelliJ settings, configure the Tailwind CSS plugin to only process CSS/HTML/JSX files (Settings → Languages & Frameworks → Tailwind CSS → File patterns)
+
+2. **Disable Tailwind CSS plugin** — If you're not actively writing Tailwind in this project, disable the plugin entirely (Settings → Plugins → Tailwind CSS → Disable)
+
+3. **Reduce document sync** — The LSP is using `textDocument/syncKind: 1` (full sync). Some LSP clients support incremental sync, but this is a Tailwind plugin issue, not agent-doc.
+
+**Recommendation:** Option 1 or 2. The Tailwind CSS plugin has no business processing 95KB markdown files.
+<!-- agent:boundary:6a8987ac -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Release agent-doc v0.30.0** — current session's bug fixes + hooks
-- [ ] **Multi-harness skill install** — OpenCode, Cursor, Codex support (v0.31.0)
+- [ ] **Fix Tailwind CSS LSP** — exclude .md files or disable plugin
+- [ ] **Release agent-doc v0.30.0** — bump, VERSIONS.md, make check, publish
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)
 <!-- /agent:pending -->

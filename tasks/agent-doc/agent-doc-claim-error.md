@@ -1994,7 +1994,7 @@ Update SPEC.md, README.md, ontology, module-harness
 
 Line budget: 431/1000 (57% headroom). Ready for v0.30.0 release.
 release
-### Re: agent-doc v0.30.0 released (HEAD)
+### Re: agent-doc v0.30.0 released
 
 **Published to crates.io.** All steps completed:
 
@@ -2015,7 +2015,7 @@ release
 - HookTransport trait + 3 implementations
 - agent-kit v0.3 + tmux-router v0.3.7 deps
 - 595 tests, 0 failures
-<!-- agent:boundary:db4d4077 -->
+<!-- agent:boundary:a6549eb5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

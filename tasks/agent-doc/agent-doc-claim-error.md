@@ -3244,7 +3244,7 @@ To install:
 3. Since classes changed structurally (ClaimAction lost methods, EditorTabSyncListener removed code): **uninstall first → restart → install → restart**
 
 After the restart, switching to corky.md should trigger sync because the busy guard is gone.
-### Re: Plugin disabled by Settings Sync (HEAD)
+### Re: Plugin disabled by Settings Sync
 
 The IDEA log (`IntelliJIdea2026.1/log/idea.log`) shows:
 
@@ -3260,7 +3260,7 @@ Settings Sync marked the plugin as `enabled=false` during the uninstall. After r
 Alternatively, check Settings → Settings Sync → make sure the plugin isn't in the disabled list.
 
 Note: the sync DID work correctly once at 16:13:22 (before uninstall) — it detected both files in the correct columns and ran `agent-doc sync --col agent-doc-claim-error.md --col corky.md`. So the sync logic itself is working; it's just that the plugin isn't loaded in the current session.
-<!-- agent:boundary:1d92decf -->
+<!-- agent:boundary:ecd2de30 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

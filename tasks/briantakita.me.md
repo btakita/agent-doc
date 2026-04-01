@@ -827,11 +827,27 @@ I will discuss more with him as well.
 **Suggested approach:** Short email to jmalloy@lmi.org referencing the interview, link to the blog post, mention being open to discussing how agent-doc could apply to LIGER's document generation and fact-checking needs.
 
 Want me to draft the email via corky?
-<!-- agent:boundary:b688dcc2 -->
+
+Yes. There is already a draft email for Josh. Review that.
+Consider whether we should replace the existing draft entirely or amend it with our addional content wrt the blog post + LIGER framing.
+### Re: Existing Josh draft — amend, not replace (HEAD)
+
+Found the draft at `mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-interactive-document-genera.md`. It's strong — maps agent-doc to LIGER's needs (claim identification, CRDT merge, audit trail), references "Beyond the Vending Machine," includes links.
+
+**Recommendation: Amend.** Add a paragraph about the blog post after the links section, before "One thing worth noting." The blog post is proof of the concepts discussed — 532 commits, 11 parallel sessions, the security surface analysis. It turns the email from "here's what it could do" to "here's what it actually does at scale."
+
+**Proposed addition** (after the YouTube/crates.io links):
+
+> I also wrote up a detailed post about a day where I ran 11 simultaneous agent-doc sessions and produced 532 git commits, including 292 debugging agent-doc with itself. It covers the security surfaces that multi-agent workflows create and how the audit trail makes complex debugging tractable:
+>
+> https://briantakita.me/posts/agent-security-multiuser-lessons/
+
+This ties the blog post to the LIGER conversation naturally. Want me to apply this edit to the draft?
+<!-- agent:boundary:3bd05d1f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Josh Malloy email — awaiting approval to draft
+- Josh Malloy email — draft reviewed, amend with blog post paragraph (awaiting approval)
 - @source fix — code changes done, needs local build verification
 - LinkedIn teaser — draft ready, posting Thu Apr 2 ~9 AM ET
 - LinkedIn OAuth — needs to be completed before publish

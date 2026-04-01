@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-3-pane bug fixed: cargo install updated. JB plugin now uses fixed binary.
+CRITICAL: All panes stashed, claude session destroyed. Rescued to session 1. Needs guard fix.
 <!-- /agent:status -->
 
 ## Exchange
@@ -2128,14 +2128,27 @@ Idea is not responding. Jump threads. Why?
 **Fixed:** Re-ran `cargo install --path .` to update `~/.cargo/bin/agent-doc`. Verified: sync now produces 2 panes, no "protected (busy pane)" messages.
 
 **Lesson:** After code changes, always run `cargo install --path .` — the JB plugin uses the cargo-installed binary, not the release build symlink.
-<!-- agent:boundary:d450b3dd -->
+
+Whe agent-
+### Re: Agent-doc tmux pane closed (HEAD)
+
+**What happened:** The last sync (timestamp 1775061987) went from 2 panes to 0 — the reconciler stashed BOTH panes, destroying the agent-doc window. The `claude` tmux session was then destroyed (no windows left).
+
+**Root cause:** The reconciler's `resolve_file` callback returned 0 resolved panes for the 2 files. When no panes resolve, the "empty panes" path stashes everything in the window. This likely happened because `resync::prune()` (which runs at the start of sync) removed or invalidated the registry entries, causing `lookup(session_id)` to return None for both files.
+
+**Recovery:** Rescued %312 and %328 from stash via `break-pane` + `join-pane`. The panes are now in `1:agent-doc` (moved from the destroyed `claude` session to session `1`).
+
+**This is a critical bug:** The reconciler should NEVER stash all panes when it has resolved files with known session UUIDs. The "stash everything" path should only trigger when `col_args` is truly empty or all files are unmanaged. A guard is needed: if `pane_columns` is empty but `col_args` had managed files, log an error and skip stashing.
+
+This needs to be fixed before v0.30.1 release.
+<!-- agent:boundary:a8b8e9c1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **Fix 3-pane layout bug** — guard removed + cargo install updated
-- [ ] **Release agent-doc v0.30.1** (guard fix + multi-harness + agent-kit 0.3.1)
+- [ ] **Fix "stash everything" bug** — guard against empty resolution when managed files exist
+- [ ] **Release agent-doc v0.30.1** (all fixes)
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)
 <!-- /agent:pending -->

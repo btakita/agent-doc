@@ -1075,13 +1075,13 @@ Both features are implemented and `make check` passes (clippy + tests).
 
 **Usage:**
 ```bash
-# Default (both features on): (HEAD)
+# Default (both features on):
 corky transcribe call.wav --diarize --speakers "Brian,Robert"
 
-# Opt out: (HEAD)
+# Opt out:
 corky transcribe call.wav --diarize --no-adaptive-chunk --no-resolve-unknown
 
-# Config (.corky.toml): (HEAD)
+# Config (.corky.toml):
 [transcription]
 adaptive_chunk = false
 resolve_unknown = false
@@ -1090,7 +1090,7 @@ resolve_unknown = false
 Ready for a real-world test with a long audio file. Want to try it?
 
 ## User
-<!-- agent:boundary:363a4c63 -->
+<!-- agent:boundary:a76f99c3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

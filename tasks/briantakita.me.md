@@ -759,10 +759,28 @@ Got it. LinkedIn is having an outage per their status page. The OAuth callback w
 3. `! CORKY_LINKEDIN_CLIENT_ID="$(pass corky/linkedin/client_id)" CORKY_LINKEDIN_CLIENT_SECRET="$(pass corky/linkedin/client_secret)" corky linkedin comment /home/brian/Documents/mail/social/20260401-181027-linkedin.md "https://briantakita.me/posts/agent-security-multiuser-lessons/"`
 
 Or just trigger `/agent-doc tasks/briantakita.me.md` and tell me LinkedIn is back.
-<!-- agent:boundary:5ccaf316 -->
+
+Should we delay teaser post until tomorrow morning or post when LinkedIn comes back. Will reduced activity + posts be an advantage or disadvantage?
+### Re: Timing — post now vs. tomorrow morning (HEAD)
+
+**Post tomorrow morning (8-10 AM ET).** Here's why:
+
+1. **LinkedIn engagement peaks** Tuesday-Thursday, 8-10 AM local time. April 1st (Tuesday evening) during an outage means reduced visibility. Wednesday morning is better.
+
+2. **Post-outage surge works against you.** When LinkedIn comes back, everyone's queued posts and notifications flood the feed simultaneously. Your post gets buried.
+
+3. **Reduced activity = reduced reach.** LinkedIn's algorithm weights early engagement heavily (first 60-90 minutes). Fewer people online during/after an outage means fewer initial reactions, which means the algorithm deprioritizes it.
+
+4. **April 1st skepticism.** Even though the post says "No, it's not a joke," posting on April 1st invites dismissal. Tomorrow removes that friction entirely.
+
+**Recommendation:** Schedule for Wednesday April 2nd, ~9 AM ET. Fresh eyes, peak engagement window, no outage noise, no April Fools associations.
+
+Want me to set up a corky scheduled publish for tomorrow morning?
+<!-- agent:boundary:125aa7f0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn publish — blocked on LinkedIn outage, draft ready
+- LinkedIn teaser — draft ready, recommend posting Wed Apr 2 ~9 AM ET
+- LinkedIn OAuth — needs to be completed before publish
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

@@ -524,11 +524,35 @@ Ready to build and deploy when you are. Want me to build briantakita.me locally 
 Removed the "check the git log" link — can't verify a private repo. Now just: *"Yes, this is dated April 1st. The 532 commits are real."*
 
 Simple, confident, no empty promises. :-)
-<!-- agent:boundary:86a3939e -->
+
+Switched to Document(s) in table header.
+
+Switch correspondence tool -> corky
+Should we link to the corky github?
+
+> - Cross-session information flow (one agent reading another session's document)
+
+Also include document links to synchronize data/context between documents
+
+Please create a separate security expert agent to review the blog post. Make sure there are no oopsies in the blog post.
+### Re: Updates + security review (HEAD)
+
+**Applied:**
+- corky linked to GitHub in the table
+- Document links bullet added to security audit patterns
+- Table header already shows "Document(s)" from your edit
+
+**Security review (expert agent):** SAFE TO PUBLISH. 5/6 PASS, 1 low-severity FLAG on prompt injection disclosure (attacks a feature that doesn't exist yet, mitigations stated). Optional tightening: change "under development" to "will not ship without" — sets a quality gate instead of implying a timeline.
+
+**Corky link:** Yes, linked to https://github.com/btakita/corky in the table.
+
+Ready to apply the optional security tightening and deploy. Or review the file directly first.
+<!-- agent:boundary:5978b0c1 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Blog post v5 final — build, preview, deploy
-- LinkedIn teaser draft ready
+- Blog post: optional security wording tightening
+- Blog post: build, preview, deploy to briantakita.me
+- LinkedIn teaser post
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

@@ -1027,7 +1027,7 @@ CLI flags would be opt-out: `--no-adaptive-chunk` and `--no-resolve-unknown`.
 **One concern:** LLM inference in `--resolve-unknown` adds a dependency (API key, model choice, cost). The config should let users specify which model/provider to use, or we could default to a local model. What's your preference — Claude API, local LLM, or configurable?: The current agent harness.
 
 ## User
-### Re: design decisions locked in (HEAD)
+### Re: design decisions locked in
 
 Good, both decisions simplify the implementation:
 
@@ -1041,7 +1041,7 @@ Good, both decisions simplify the implementation:
 3. Both default-on in `.corky.toml`, opt-out via `--no-adaptive-chunk` / `--no-resolve-unknown`
 
 ## User
-<!-- agent:boundary:84dba0d7 -->
+<!-- agent:boundary:518e387d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

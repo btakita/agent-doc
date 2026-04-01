@@ -1175,21 +1175,51 @@ Transcription finished successfully. 575 lines, 66KB output.
 4. **Repetition artifacts** visible ("I'm going to call her tomorrow" repeated many times) -- whisper hallucination on silence/noise in AMR
 
 **Key issues to address:**
-- AMR mono phone recordings are challenging for diarization (single channel, low quality)
-- Whisper repetition hallucination on low-quality audio needs detection/suppression
-- Speaker count should be constrained when `--speakers` is provided (we said 2, got 4)
+- AMR mono phone recordings are challenging for diarization (single channel, low quality): I'm using Cube ACR. What settings do you recommend?
+- Whisper repetition hallucination on low-quality audio needs detection/suppression: recommendations?
+- Speaker count should be constrained when `--speakers` is provided (we said 2, got 4): There were only 2 speakers. The other 2 were hallucinations.
 
 Saved diarized transcript to:
 `mail/contacts/robert-ward/recordings/phone_20260401-042624_3109684542_diarized.txt`
-<!-- agent:boundary:8011c3fc -->
+### Re: Cube ACR settings, repetition, speaker count (HEAD)
+
+#### Cube ACR Recording Settings
+
+For best transcription/diarization quality:
+
+1. **Format:** Switch from AMR to **WAV (PCM)** or **M4A (AAC)**. AMR is heavily compressed (4.75-12.2 kbps) and destroys the spectral detail pyannote needs for speaker embeddings. WAV/M4A preserves much more signal.
+   - Cube ACR Settings > Recording > Audio format > **WAV** (best quality) or **M4A** (good quality, smaller files)
+2. **Sample rate:** If Cube ACR offers it, use **16kHz or higher** (whisper resamples to 16kHz anyway, but starting higher is better than upsampling from AMR's 8kHz)
+3. **Audio source:** "Voice Call" or "Voice Communication" usually captures both sides. If only getting one side, try "Microphone" or "Media" depending on your Android version
+4. **Stereo vs mono:** Some phones support stereo recording where each channel is a different caller -- this would massively improve diarization. Check if your device supports it (device-dependent, not always available)
+
+The single biggest improvement will be switching from AMR to WAV/M4A. AMR at 8kHz mono is the worst case for both whisper and pyannote.
+
+#### Whisper Repetition Hallucination
+
+This is a known whisper issue, especially on low-quality audio with silence/noise. Recommendations:
+
+1. **Post-processing detection** (implement in corky): Detect repeated phrases (n-gram overlap > threshold) and collapse them. This is straightforward -- scan sliding windows of text, detect when the same 5+ word sequence repeats 3+ times consecutively
+2. **Whisper parameters:** `no_speech_threshold` and `logprob_threshold` can help. The whisper-rs API exposes these -- tightening `no_speech_threshold` (e.g., 0.6 → 0.8) makes it more aggressive about marking silence as non-speech
+3. **Compression ratio filter:** whisper-rs has a `max_initial_ts` and segment-level compression ratio. Segments with abnormally high compression ratios are likely hallucinations
+
+I'd implement option 1 (post-processing) first since it's simple and catches the problem regardless of cause.
+
+#### Speaker Count Constraint
+
+Confirmed -- only 2 real speakers, other 2 are hallucinations from voice quality variation in mono AMR. Fix:
+
+When `--speakers` provides N names, pass `num_speakers = N` to pyannote-rs. The pyannote pipeline accepts a `num_speakers` parameter that constrains clustering. Currently we're letting it auto-detect, which over-segments on noisy mono audio.
+
+This is a one-line fix in the diarization code -- just wire the speakers list length through to the pyannote config.
+<!-- agent:boundary:c6c314d2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Fix: constrain speaker count to match `--speakers` list length
-- Fix: detect/suppress whisper repetition hallucination on AMR audio
-- Investigate: AMR mono diarization quality (long initial speaker block)
-- Investigate whisper-rs GPU support (CUDA feature flag or build env) — ([done])
-- Test adaptive-chunk diarization on real call — ([done])
+- Implement speaker count constraint from `--speakers` length (one-line fix)
+- Add whisper repetition detection/suppression (post-processing)
+- Tune whisper no_speech_threshold for AMR audio
+- User switching Cube ACR from AMR to WAV/M4A format
 <!-- /agent:pending -->

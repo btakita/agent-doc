@@ -531,17 +531,63 @@ She's at the doctor and will check on the website. "Ok" is not too short given c
 3. **"No rush, hope the appointment goes well!"** — slightly warmer, still short
 
 **Recommendation: "No rush!"** — 2 words, acknowledges she's at the doctor without being dismissive or overly chatty. "Ok" works too but could read slightly curt. Per Robert's coaching: short, not needy, not pushy.
-<!-- agent:boundary:7b942da2 -->
+
+See refreshed judith-krug-sms.txt.
+Waiting on her direction re: website.
+Let's continue with the website + Ragie plan.
+Note that Ragie has OCR and I will be talking to bob-remeika about early access.
+Present the 4 options that robert-ward and I discussed.
+
+1. TMO + OCR + Ragie
+2. MA + Ragie
+3. Custom forms + OCR + Ragie
+
+Highlight the benefits of Ragie for RAG AI for **all** of Judith's documents.
+She is likely unfamiliar with the terms. robert-waldman has likely heard of RAG...but not Ragie.
+judith-krug will likely ask robert-waldman to help her understand the proposal.
+### Re: Updated Options with Ragie Integration (HEAD)
+
+**3 paths for tonight's call — all featuring Ragie as the document intelligence layer:**
+
+**Option 1: TMO + Brian's Custom Layer + Ragie**
+- TMO handles loan origination, doc generation, compliance forms (~$600/mo)
+- Brian builds: website, document upload portal, notifications
+- Ragie handles: OCR for all incoming documents, AI-powered search across everything
+- Monthly: ~$700/mo (TMO $600 + Ragie ~$100)
+- Best for: Judith wants TMO's trusted doc generation + AI superpowers on top
+
+**Option 2: Mortgage Automator + Ragie**
+- MA handles the full platform ($1,137/mo)
+- Brian builds: website, MA integrations
+- Ragie handles: document search/intelligence layer on top of MA
+- Monthly: ~$1,237/mo (MA $1,137 + Ragie ~$100)
+- Best for: stuck in the MA contract, make the most of it
+
+**Option 3: Custom Everything + Ragie (the play)**
+- No TMO, no MA ... Brian builds it all
+- Ragie replaces the need for either platform's document handling
+- OCR, document storage, AI search, business intelligence ... all through Ragie
+- Monthly: ~$100/mo (just Ragie + hosting)
+- Best for: maximum savings, full control, no vendor lock-in
+- Saves $600-1,100+/mo vs options 1 & 2
+
+---
+
+**How to explain Ragie to Judith (non-technical):**
+
+"Imagine every document your company has ever handled ... loan applications, bank statements, investor agreements, emails ... all searchable instantly from your phone. You could ask 'show me all loans over $500K in the last year' or 'which investors haven't been contacted in 6 months' and get answers in seconds. That's what Ragie does. It reads your documents (even scanned paper), understands them, and lets you search across everything with AI. It's like having a brilliant assistant who's read every file in your office."
+
+**For Robert Waldman:** He'll understand RAG (Retrieval Augmented Generation). Ragie is a managed RAG service backed by Craft Ventures (David Sacks). Handles document ingestion, OCR, chunking, embeddings, vector search. Brian integrates via API. Bob Remeika (CEO) is a personal contact ... early access conversation tomorrow.
+<!-- agent:boundary:161d6826 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [x] Send text to Judith about website being down
-- [ ] Reply to Judith's text (awaiting your pick)
-- [ ] Prepare email draft file (`mail/drafts/20260401-judith-call-followup.md`)
-- [ ] Website migration to Cloudflare ... website is DOWN, urgent deliverable for tonight
-- [ ] Check in with Robert this afternoon before the Judith call
-- [ ] Tonight's call with Judith ... present options, ask for retainer, mention website is down
-- [ ] Ragie integration scoping (separate task for equityfundingsource.com)
-- [ ] Talk to Bob Remeika about Ragie tomorrow
+- [x] Reply to Judith's text
+- [ ] Prepare email draft file with 3 options (`mail/drafts/20260401-judith-call-followup.md`)
+- [ ] Website migration to Cloudflare ... website is DOWN
+- [ ] Check in with Robert Ward this afternoon
+- [ ] Tonight's call with Judith ... present 3 options, ask for retainer
+- [ ] Talk to Bob Remeika about Ragie early access (tomorrow)
 - [ ] Schedule Zoom call with Judith and Robert Waldman
 <!-- /agent:pending -->

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-SKILL.md staleness assessed: false positive. No update needed.
+v0.30.0 release proposed. 668 insertions, 14 files changed. Awaiting go.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1909,15 +1909,32 @@ Does this need to be fixed?
 Running `agent-doc skill install` would regenerate SKILL.md from the binary's bundled template, but since the Hook command is used from the CLI (not from within a Claude Code skill session), there's nothing to add to SKILL.md.
 
 The audit warning is a false positive for this case — SKILL.md doesn't need updating when internal CLI commands change. It only needs updating when the agent-doc session workflow (diff → respond → write → commit) changes.
-<!-- agent:boundary:52774485 -->
+
+Does agent-doc need a release?
+### Re: agent-doc release (HEAD)
+
+**Yes.** 668 insertions across 14 files since v0.29.0. This is a v0.30.0 release. Changes:
+
+- **Stale baseline guard** — component-aware, only checks append-mode components (11 tests)
+- **Busy pane guard** — `SyncOptions.protect_pane` in DETACH + layout.rs
+- **Auto-start startup lock** — `.agent-doc/starting/<hash>.lock` with 5s TTL
+- **Bug 2A** — IPC snapshot save failure now non-fatal with warning
+- **Bug 2B** — commit divergence detection removed (was eating user edits)
+- **Ops logging tests** (2 tests)
+- **Hook system** — `agent-doc hook fire/poll/listen/gc` CLI
+- **Hook integration** — post_write, post_commit events fired from write + commit paths
+- **agent-kit v0.3** dependency with hooks feature
+- **tmux-router v0.3.7** dependency with SyncOptions
+- **Docs** — SPEC.md, README.md, CLAUDE.md updated
+
+Ready to release? I'll bump version, update VERSIONS.md, run make check, commit, tag, and publish.
+<!-- agent:boundary:13727aed -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **All code shipped** — bugs, guards, hooks, transports, CLI
-- [x] **agent-kit v0.3.0 + tmux-router v0.3.7** published
-- [x] **All docs updated + audited** (2 informational issues remain)
+- [ ] **Release agent-doc v0.30.0** — bump, VERSIONS.md, make check, publish
 - [ ] **Blog post** about this debugging session
 - [ ] **Collaborative security model** (TBD)
 <!-- /agent:pending -->

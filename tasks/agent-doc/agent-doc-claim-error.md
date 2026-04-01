@@ -2631,7 +2631,6 @@ Now tmux session 5 is gone. Why?
 
 All 389 tests pass. Binary reinstalled.
 
-We probably should have a way in the
 ### Re: Config keeps resetting to "1"
 
 Config got overwritten to `tmux_session = "1"` again after I fixed it. This is likely from the **old binary** still running in stashed panes %353 and %352 — they have the pre-fix code that auto-updates config in claim.rs. The new binary (with the fix) is installed but those stashed sessions are still running the old binary from memory.
@@ -2642,16 +2641,44 @@ The fix code I applied prevents new claim/route operations from overwriting conf
 - Session 5 is alive and attached (2 windows: agent-doc + stash)
 - Both panes %348 and %343 are in `5:agent-doc`
 - Config reset to `tmux_session = "5"` (again)
-- The old stashed sessions (%353, %352) may continue overwriting until killed
+- The old stashed sessions (%353, %352) may continue overwriting until killed: kill these sessions please.
 
 There are also two legitimate fallback paths in route.rs (lines 144-155 and 488-499) that update config when the configured session is dead. These are safe — they only fire when session 5 doesn't exist. Not a concern right now since session 5 is alive.
-<!-- agent:boundary:1bf31994 -->
+
+We probably should have a way in the agent-doc cli to explicitly change the tmux session.
+We should also use the config.toml as the source of truth. The only exception is when the session is not running. Then config.toml can be overwritten.
+However, we should also have a way to explicitly update config.toml and in effect transfer all active tmux panes to the newly configured tmux session.
+### Re: Kill stashed sessions + session management CLI (HEAD)
+
+**Stashed sessions killed.** %353 and %352 are gone. Config is stable at `tmux_session = "5"`. No more old-binary interference.
+
+**Current layout:**
+- `5:agent-doc` — %348 (agent-doc-claim-error.md), %343 (judith-krug.md)
+- No stash windows remain
+
+**Feature request acknowledged — `agent-doc session` CLI command:**
+
+Proposed design:
+
+```
+agent-doc session                    # Show current configured session
+agent-doc session set <name>         # Set config.toml + migrate all registered panes
+agent-doc session migrate <from> <to> # Move panes between sessions explicitly
+```
+
+**Config.toml as source of truth rules:**
+1. Config.toml is authoritative — never auto-overwrite from pane state
+2. **Exception:** When configured session is dead AND no panes are alive in it, fall back to current session and update config (existing route.rs:144-155 behavior, but only for truly dead sessions)
+3. `agent-doc session set <name>` — updates config + moves agent-doc window + updates registry entries to new session. This is the only sanctioned way to change the session.
+
+This is a good feature to add in the next release. Want me to implement it now, or track it in pending?
+<!-- agent:boundary:dc61dbb6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Kill stashed old-binary sessions** — %353 and %352 running old agent-doc binary that overwrites config
+- **`agent-doc session` CLI** — set/migrate tmux session with pane transfer (feature request)
 - **Commit all changes** — resync fix + route fix + claim fix + test in agent-doc submodule
 - **Unused variable warnings** — 7 in route.rs + 1 in template.rs
 - **Module harness** — update evals for sync.rs, ffi.rs

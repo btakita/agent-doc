@@ -2361,16 +2361,43 @@ Changes:
 - `NativePatching.isIdle` kept as a utility but no longer used for reposition
 
 All 597 tests pass.
-<!-- agent:boundary:5e379787 -->
+
+You missed my prompt:
+Please update the VSCode plugin as well to match the logic.
+We need a way to always ensure that the editor plugins are edited in lock-step. Prefer FFI plugin logic.
+### Re: VS Code plugin updated + lock-step strategy (HEAD)
+
+Updated the VS Code extension with matching reposition handling:
+
+**Changes to `editors/vscode/src/extension.ts`:**
+1. **`IpcPatch.reposition_boundary`** — new field in the IPC interface
+2. **Typing tracking** — `onDidChangeTextDocument` records per-file timestamps in `lastTypingTime` map
+3. **`repositionBoundaryWithDebounce`** — defers reposition until 500ms idle (5s max), then applies via `WorkspaceEdit` (cursor-safe)
+4. **`repositionBoundaryToEnd`** — TS implementation: removes all `<!-- agent:boundary:... -->` markers, inserts fresh one at end of exchange
+5. **`dispose`** — cleans up typing listener
+
+**Architecture comparison:**
+
+| | JetBrains | VS Code |
+|---|---|---|
+| **Typing debounce** | FFI `await_idle` (Rust) | TS `lastTypingTime` map |
+| **Reposition logic** | FFI `reposition_boundary_to_end` (Rust) | TS `repositionBoundaryToEnd` |
+| **Apply** | `document.setText` on EDT | `WorkspaceEdit.replace` (cursor-safe) |
+
+**On FFI-first lock-step:**
+- Short term: both plugins handle the same IPC protocol. Reposition logic is simple enough that TS duplication is low-risk.
+- Long term: add Node FFI bindings (`koffi`) to VS Code extension, eliminating TS duplication and achieving true FFI-first parity.
+<!-- agent:boundary:de7d49bf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **Fix stash-everything guard** — skip stash when managed files have unresolved panes
-- [x] **Fix boundary reposition keystroke loss** — FFI `await_idle` + JB plugin background thread
+- [x] **Fix boundary reposition keystroke loss** — FFI `await_idle` (JB) + TS debounce (VS Code)
+- [x] **VS Code reposition handling** — typing debounce + boundary manipulation via WorkspaceEdit
 - [ ] **Fix tmux_session config drift** — route.rs should follow pane when it moves sessions; claim.rs should update config.toml
-- [ ] **Rebuild JB plugin** — build + install to test typing debounce live
+- [ ] **Rebuild JB plugin + VS Code extension** — build and install both to test live
 - [ ] **Publish tmux-router v0.3.8** + update agent-doc dep
 - [ ] **Release agent-doc v0.30.1** (all fixes)
 - [ ] **Blog post** about this debugging session

@@ -2547,6 +2547,8 @@ stash.0 %344 → agent-doc start tasks/professional/equityfundingsource.md
 
 We seem to have lost the equityfundingsource.md task. Why?
 Please guarantee that we don't close running tasks. There seems to be a place where we over-eagerly close live cause agent sessions.
+There was a background agent running in equityfundingsource.md claiming pane.
+It seems we deleted it.
 ### Re: Lost equityfundingsource.md task + over-eager kill
 
 **Root cause found and fixed.** The function `purge_unregistered_stash_panes_bulk()` in `resync.rs:602-642` was killing active agent processes (claude, agent-doc, node) in stash windows whenever they weren't found in the registry. This runs automatically on every `route`, `sync`, and `claim` operation.
@@ -2569,14 +2571,29 @@ All 388 tests pass. Binary reinstalled.
 - `purge_orphaned_agent_panes` — only runs on manual `resync --fix`. Not automatic.
 - `sync.rs` file rename kill — only when old file path doesn't exist. Not applicable here.
 - `apply_fixes` WrongSession — requires `tmux_session` frontmatter mismatch. Rare.
-<!-- agent:boundary:dfc08f7e -->
+### Re: Background agent claim + deletion (HEAD)
+
+You're right — the equityfundingsource.md session had an active `agent-doc start` (pane %344) with a full Claude + chrome-devtools MCP tree. When stashed, a subsequent `resync::prune()` call from another operation (this session's preflight, a route, or claim) ran `purge_unregistered_stash_panes_bulk()` which killed the pane because it was running `claude` and wasn't found in the registry at that moment.
+
+**The fix is already applied.** `purge_unregistered_stash_panes_bulk()` now:
+- Kills idle shells in stash (safe — no active work)
+- Logs but **skips** agent processes (agent-doc, claude, node) even if unregistered
+- The pane stays alive in stash for `rescue_from_stash()` to bring back
+
+This means a stashed Claude session will survive indefinitely until either:
+1. The user opens that document again → pane rescued automatically
+2. The user manually kills it
+3. `agent-doc resync --fix` (explicit manual command)
+
+The binary is already rebuilt and installed with this fix.
+<!-- agent:boundary:c75fb475 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- **Commit resync fix** — commit the `purge_unregistered_stash_panes_bulk` change in agent-doc submodule
 - **Unused variable warnings** — 7 warnings in route.rs + 1 in template.rs
 - **Module harness** — update evals for sync.rs (3 new tests), ffi.rs (2 new tests)
 - **Ontology** — review for any new domain terms from FFI/IPC work
-- **Commit resync fix** — the `purge_unregistered_stash_panes_bulk` fix needs to be committed in the agent-doc submodule
 <!-- /agent:pending -->

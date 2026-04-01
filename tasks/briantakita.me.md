@@ -743,10 +743,26 @@ The first attempt had empty `client_id` (wrong pass paths). The second attempt h
 Running OAuth again now — a new browser tab should have opened with the correct LinkedIn authorization page. Complete it there. The callback listener is on `http://127.0.0.1:8484/callback`.
 
 Once authorized, I'll immediately publish + comment.
-<!-- agent:boundary:a505236d -->
+Looks like there's a LinkedIn outage. See https://www.linkedin-status.com/
+### Re: LinkedIn outage (HEAD)
+
+Got it. LinkedIn is having an outage per their status page. The OAuth callback won't complete until they're back up.
+
+**What's ready to go once LinkedIn is back:**
+- Draft file: `/home/brian/Documents/mail/social/20260401-181027-linkedin.md` (status: ready)
+- Profile config: `.corky.toml` has `[profiles.btakita.linkedin]`
+- Pass credentials: `corky/linkedin/client_id` and `corky/linkedin/client_secret`
+
+**When LinkedIn is back, run:**
+1. `! CORKY_LINKEDIN_CLIENT_ID="$(pass corky/linkedin/client_id)" CORKY_LINKEDIN_CLIENT_SECRET="$(pass corky/linkedin/client_secret)" corky linkedin auth --profile btakita`
+2. `! CORKY_LINKEDIN_CLIENT_ID="$(pass corky/linkedin/client_id)" CORKY_LINKEDIN_CLIENT_SECRET="$(pass corky/linkedin/client_secret)" corky linkedin publish /home/brian/Documents/mail/social/20260401-181027-linkedin.md`
+3. `! CORKY_LINKEDIN_CLIENT_ID="$(pass corky/linkedin/client_id)" CORKY_LINKEDIN_CLIENT_SECRET="$(pass corky/linkedin/client_secret)" corky linkedin comment /home/brian/Documents/mail/social/20260401-181027-linkedin.md "https://briantakita.me/posts/agent-security-multiuser-lessons/"`
+
+Or just trigger `/agent-doc tasks/briantakita.me.md` and tell me LinkedIn is back.
+<!-- agent:boundary:8c666e78 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn publish — OAuth retry #3 in progress, complete in browser
+- LinkedIn publish — blocked on LinkedIn outage, draft ready
 - `@source` absolute path CI fix — awaiting approach decision (A/B/C/D)
 <!-- /agent:pending -->

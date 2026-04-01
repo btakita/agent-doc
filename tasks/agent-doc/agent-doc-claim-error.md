@@ -2547,7 +2547,7 @@ stash.0 %344 → agent-doc start tasks/professional/equityfundingsource.md
 
 We seem to have lost the equityfundingsource.md task. Why?
 Please guarantee that we don't close running tasks. There seems to be a place where we over-eagerly close live cause agent sessions.
-### Re: Lost equityfundingsource.md task + over-eager kill (HEAD)
+### Re: Lost equityfundingsource.md task + over-eager kill
 
 **Root cause found and fixed.** The function `purge_unregistered_stash_panes_bulk()` in `resync.rs:602-642` was killing active agent processes (claude, agent-doc, node) in stash windows whenever they weren't found in the registry. This runs automatically on every `route`, `sync`, and `claim` operation.
 
@@ -2569,7 +2569,7 @@ All 388 tests pass. Binary reinstalled.
 - `purge_orphaned_agent_panes` — only runs on manual `resync --fix`. Not automatic.
 - `sync.rs` file rename kill — only when old file path doesn't exist. Not applicable here.
 - `apply_fixes` WrongSession — requires `tmux_session` frontmatter mismatch. Rare.
-<!-- agent:boundary:b086190c -->
+<!-- agent:boundary:dfc08f7e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

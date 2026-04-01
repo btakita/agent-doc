@@ -31,6 +31,9 @@
 //!   single stash). Phase 3 always runs.
 //! - The `resolve_file` closure reads each file's frontmatter session UUID and
 //!   produces a `FileResolution::Registered` (or `Unmanaged` when no UUID is present).
+//!   Files with session UUIDs are always treated as registered, even if the registry
+//!   entry was pruned — sync will auto-start a new session for them. This enables the
+//!   declarative layout flow: navigating to a file in a split creates a tmux pane.
 //!   It never propagates `tmux_session` from frontmatter — that field is deprecated.
 //! - When a registered pane is found in a stash window, sync attempts to **rescue** it
 //!   back to the agent-doc window (via `swap-pane`, falling back to `join-pane`)
@@ -84,6 +87,8 @@
 //!   and the file path is returned; panes without a matching cmdline are skipped.
 //! - empty_col_args_filtered: col_args `["file1.md", "", "file2.md", ""]` → after
 //!   filtering, only `["file1.md", "file2.md"]` are processed.
+//! - check_build_stamp_clears_locks: new build timestamp → stale `.lock` files removed,
+//!   stamp file updated.
 
 use anyhow::Result;
 use std::cell::RefCell;
@@ -351,6 +356,39 @@ fn sync_log(msg: &str) {
     }
 }
 
+/// Check if this binary is a new build and clear stale caches if so.
+/// Compares the embedded build timestamp against `.agent-doc/build.stamp`.
+/// On mismatch: clears startup locks (`.agent-doc/starting/*.lock`) and updates stamp.
+fn check_build_stamp() {
+    let build_ts = env!("AGENT_DOC_BUILD_TIMESTAMP");
+    let cwd = match std::env::current_dir() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let stamp_path = cwd.join(".agent-doc/build.stamp");
+    let stored = std::fs::read_to_string(&stamp_path).unwrap_or_default();
+    if stored.trim() == build_ts {
+        return; // Same build
+    }
+    eprintln!("[sync] new build detected ({}→{}), clearing stale caches", stored.trim(), build_ts);
+    // Clear startup locks
+    let starting_dir = cwd.join(".agent-doc/starting");
+    if starting_dir.exists()
+        && let Ok(entries) = std::fs::read_dir(&starting_dir)
+    {
+        for entry in entries.flatten() {
+            if entry.path().extension().map(|e| e == "lock").unwrap_or(false) {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    // Update stamp
+    if let Some(parent) = stamp_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&stamp_path, build_ts);
+}
+
 fn run_with_options(
     col_args: &[String],
     window: Option<&str>,
@@ -358,6 +396,9 @@ fn run_with_options(
     auto_start: bool,
     tmux: &Tmux,
 ) -> Result<()> {
+    // Check for new build and clear stale caches
+    check_build_stamp();
+
     // Filter empty col_args — the JetBrains plugin sometimes sends phantom empty columns.
     let col_args: Vec<String> = col_args.iter()
         .filter(|s| !s.trim().is_empty())
@@ -456,17 +497,16 @@ fn run_with_options(
         let (fm, _) = frontmatter::parse(&content).ok()?;
         match fm.session {
             Some(ref key) => {
-                // Only treat as registered if the session has a registry entry.
-                // Files with a stale frontmatter UUID (no registry entry) are
-                // treated as unmanaged — sync should not auto-start sessions
-                // for files that were never properly claimed or whose claim expired.
-                let has_registry_entry = sessions::lookup(key)
-                    .ok()
-                    .flatten()
-                    .is_some();
-                if !has_registry_entry {
-                    return Some(FileResolution::Unmanaged);
-                }
+                // Treat all files with session UUIDs as registered, even if
+                // the registry entry was pruned (dead pane). Sync will auto-start
+                // a new session for files without alive panes. This enables the
+                // declarative layout flow: navigating to a file in a split should
+                // create a tmux pane regardless of registry state.
+                let has_registry = sessions::lookup(key).ok().flatten().is_some();
+                eprintln!(
+                    "[sync] resolve_file: {} → Registered (session={}, registry={})",
+                    path.display(), &key[..8.min(key.len())], if has_registry { "yes" } else { "no (will auto-start)" }
+                );
                 session_files
                     .borrow_mut()
                     .push((key.clone(), path.to_path_buf()));
@@ -568,19 +608,15 @@ fn run_with_options(
                 .ok()
                 .flatten();
 
-            // Skip files that have a session UUID in frontmatter but no registry
-            // entry. These are unclaimed files (stale frontmatter or never properly
-            // claimed). Only files with a live registry entry should be auto-started.
-            if registered_pane.is_none() {
-                let has_registry_entry = sessions::load()
-                    .ok()
-                    .map(|reg| reg.contains_key(&session_id))
-                    .unwrap_or(false);
-                if !has_registry_entry {
-                    sync_log(&format!("skipping {} — session UUID in frontmatter but no registry entry", file_path.display()));
-                    continue;
-                }
-            }
+            // Files with session UUIDs but no registry entry are auto-started.
+            // The registry was likely pruned when the pane died. The user's intent
+            // (navigating to the file in a split) is clear — create a pane for it.
+            eprintln!(
+                "[sync] auto-start check: {} session={} registered_pane={}",
+                file_path.display(),
+                &session_id[..8.min(session_id.len())],
+                registered_pane.as_deref().unwrap_or("none")
+            );
             let has_alive_pane = registered_pane
                 .as_ref()
                 .map(|pane| {

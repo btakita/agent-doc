@@ -10,7 +10,7 @@ Claims are stored as entries in `~/.local/share/agent-doc/sessions.json`. Each e
 
 Claims matter because they enforce the one-session-per-document invariant. Without a claim registry, two tmux panes could both attempt to respond to the same document simultaneously, producing conflicting writes and corrupted history. The claim is the lock — not a filesystem flock (which guards atomic writes), but a registry-level agreement that a given pane has authority over a given document.
 
-`agent-doc claim` establishes a new claim for the current pane. `agent-doc resync` validates all live claims, removing entries whose panes are dead or whose processes are no longer running. The [Route](./route.md) algorithm reads claims to dispatch commands correctly.
+`agent-doc claim` establishes a new claim for the current pane. Claims are protected: if the target pane is already claimed by a different session (and alive), the claim is refused unless `--force` is passed. This prevents silent corruption when position detection falls back to the wrong pane. `agent-doc resync` validates all live claims, removing entries whose panes are dead or whose processes are no longer running. The [Route](./route.md) algorithm reads claims to dispatch commands correctly.
 
 ## [Epistemology](../../../existence-lang/ontology/src/epistemology.md)
 

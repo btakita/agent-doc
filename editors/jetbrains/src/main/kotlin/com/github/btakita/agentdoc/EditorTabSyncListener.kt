@@ -76,24 +76,8 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     return@Thread
                 }
 
-                // FFI busy guard: skip if an agent-doc operation is in progress
-                // for any of the visible files (prevents cascade from layout events).
-                if (lib != null) {
-                    val anyBusy = visibleMdFiles.any { relPath ->
-                        try {
-                            val absPath = java.io.File(basePath, relPath).absolutePath
-                            lib.agent_doc_is_busy(absPath)
-                        } catch (_: Exception) { false }
-                    }
-                    if (anyBusy) {
-                        log("guard: agent-doc is busy, skipping sync")
-                        lib?.agent_doc_sync_unlock() ?: fallbackRunning.set(false)
-                        return@Thread
-                    }
-                }
-
                 try {
-                    val agentDoc = TerminalUtil.resolveAgentDoc()
+                    val agentDoc = TerminalUtil.resolveAgentDoc(basePath)
                     val windowId = TerminalUtil.projectWindowId(project)
                     // Always pass --window: use resolved ID, or fall back to "agent-doc" name
                     val windowArgs = listOf("--window", windowId ?: "agent-doc")

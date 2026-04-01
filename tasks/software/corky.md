@@ -561,7 +561,7 @@ Go
 `make check` passes — clippy clean, 235 tests pass. Ready to commit and release.
 
 release
-### Re: Released v0.23.0 — Sync Refetch (HEAD)
+### Re: Released v0.23.0 — Sync Refetch
 
 **Committed** (`76b7836`):
 - `sync refetch` command (4 files), 3 new tests (235 total)
@@ -575,7 +575,7 @@ release
 - crates.io — skipped (token still expired)
 
 **Installed:** corky 0.23.0 locally with GPU (transcribe-cuda)
-<!-- agent:boundary:c144f68d -->
+<!-- agent:boundary:62a1b491 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

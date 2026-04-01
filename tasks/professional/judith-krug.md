@@ -332,10 +332,10 @@ The reply looks good. Full send.
 
 Please read the transcript for the last phone call with robert-ward. Come up with a plan for today.
 I will start with Judith's website. Also need to plan Ragie integration with Judith's at equity-fundng-source.
-### Re: Bob Remeika Link Added (HEAD)
+### Re: Bob Remeika Link Added
 
 Linked `./bob-remeika.md` — Bob Remeika (CEO, Ragie) is now a related contact for this document. This ties into the Ragie RAG integration planned for equityfundingsource.com. When ready to scope that work, the bob-remeika doc and `tasks/software/ragie-web-doc.md` have the Ragie context.
-<!-- agent:boundary:473dc36a -->
+<!-- agent:boundary:a33437b2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

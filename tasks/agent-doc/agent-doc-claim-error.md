@@ -2544,13 +2544,39 @@ stash.0 %344 → agent-doc start tasks/professional/equityfundingsource.md
 **Why it happened:** tmux-router only shows panes for files currently open in the editor. When you opened this document, it replaced equityfundingsource in the layout. The stash-and-rescue mechanism keeps the pane alive so when you switch back to that file, `route`'s `rescue_from_stash()` brings it back.
 
 **To recover:** Open `tasks/professional/equityfundingsource.md` in the editor and the pane will be rescued from stash automatically.
-<!-- agent:boundary:72100224 -->
+
+We seem to have lost the equityfundingsource.md task. Why?
+Please guarantee that we don't close running tasks. There seems to be a place where we over-eagerly close live cause agent sessions.
+### Re: Lost equityfundingsource.md task + over-eager kill (HEAD)
+
+**Root cause found and fixed.** The function `purge_unregistered_stash_panes_bulk()` in `resync.rs:602-642` was killing active agent processes (claude, agent-doc, node) in stash windows whenever they weren't found in the registry. This runs automatically on every `route`, `sync`, and `claim` operation.
+
+The vulnerability: the registry can go stale between when a pane is stashed and when prune() runs. If the registry entry was missing at that moment (timing, concurrent writes, deregistration from another path), the active Claude session gets killed.
+
+**The fix (resync.rs:622-637):**
+- Before: killed both idle shells AND agent processes if unregistered in stash
+- After: only kills idle shells. Agent processes get a warning log but are left alive for rescue
+- Active Claude sessions in stash will never be auto-killed, even if unregistered
+
+```
+resync: stash pane %344 running 'claude' is unregistered — skipping kill (may be rescuable)
+```
+
+All 388 tests pass. Binary reinstalled.
+
+**Other kill paths audited (all safe):**
+- `purge_stash_windows_bulk` — only kills windows where ALL panes are idle shells (30s grace). Safe.
+- `purge_orphaned_agent_panes` — only runs on manual `resync --fix`. Not automatic.
+- `sync.rs` file rename kill — only when old file path doesn't exist. Not applicable here.
+- `apply_fixes` WrongSession — requires `tmux_session` frontmatter mismatch. Rare.
+<!-- agent:boundary:b086190c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Unused variable warnings** — 7 warnings in route.rs (rescued_win, agent_doc_win_id, etc.) and 1 in template.rs. Should prefix with `_` or remove.
+- **Unused variable warnings** — 7 warnings in route.rs + 1 in template.rs
 - **Module harness** — update evals for sync.rs (3 new tests), ffi.rs (2 new tests)
 - **Ontology** — review for any new domain terms from FFI/IPC work
+- **Commit resync fix** — the `purge_unregistered_stash_panes_bulk` fix needs to be committed in the agent-doc submodule
 <!-- /agent:pending -->

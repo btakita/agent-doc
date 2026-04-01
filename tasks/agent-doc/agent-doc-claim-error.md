@@ -3027,7 +3027,7 @@ When I navigate to the right editor with corky.md, the JB plugin show a prompt
 This should also declaratively ensure the tmux layout matches.
 
 We should refactor the agent-doc code so all of the declarative layout logic f
-### Re: Architecture clarification and implementation plan (HEAD)
+### Re: Architecture clarification and implementation plan
 
 **On #1 (position detection fallback):** The position detection in `ClaimAction.kt` is entirely Kotlin-side — it walks the Swing Splitter tree to determine left/right/top/bottom. The FFI plugin handles sync generation/locking, not position detection. So if the Splitter walk fails, the claim falls back to no `--position` arg, which means the Rust side uses `TMUX_PANE` or current pane — almost certainly wrong.
 
@@ -3058,7 +3058,7 @@ This eliminates all 4 failure points at once:
 5. **Startup lock feedback**: When `auto_start_in_session()` is blocked by lock, log a visible warning instead of silent return.
 
 Shall I implement this?
-<!-- agent:boundary:4bc6b241 -->
+<!-- agent:boundary:c0a6dc5c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

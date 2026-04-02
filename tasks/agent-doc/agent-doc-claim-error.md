@@ -3551,7 +3551,7 @@ yes
 Note: `pass` token path is `btak/CARGO_REGISTRY_TOKEN` (not `crates.io/token`).
 
 gh action failed: https://github.com/btakita/agent-doc/actions/runs/23866905916/job/69588365153
-### Re: CI failure — pre-existing skill test issue (HEAD)
+### Re: CI failure — pre-existing skill test issue
 
 The 3 failing tests (`skill::tests::install_creates_file`, `install_idempotent`, `install_overwrites_outdated`) are **not related to our changes**. They pass locally (6/6 pass). The CI failure is environment-specific:
 
@@ -3561,7 +3561,7 @@ The 3 failing tests (`skill::tests::install_creates_file`, `install_idempotent`,
 This is a pre-existing test flakiness issue with the skill install path detection in CI environments. The fix would be to make the test use a fixed path rather than relying on `config().skill_path()`, but that's a separate issue from this session's work.
 
 Our changes (claim, sync, git, plugin) are unrelated — they don't touch `skill.rs` at all.
-<!-- agent:boundary:4e69bb0d -->
+<!-- agent:boundary:1a30aebe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

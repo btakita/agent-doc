@@ -1609,7 +1609,7 @@ The call landed the collaboration angle even with the demo hiccup. Bob enabling 
 - Start building EFS Tier 3 (Ragie Parse indexing) now that Parse is enabled
 
 Add to ragie-web-doc.md to for long lived credentials. Use the context from this document for guideance.
-### Re: Add credential context to ragie-web-doc.md (HEAD)
+### Re: Add credential context to ragie-web-doc.md
 
 Done. Updated `tasks/software/ragie-web-doc.md` with:
 - Bob call context (credential issue hit live, Bob enabled Ragie Parse)
@@ -1619,7 +1619,7 @@ Done. Updated `tasks/software/ragie-web-doc.md` with:
 The ragie-web-doc pane owns that file (pane %388), so I edited directly rather than using `agent-doc write`. The next cycle in that pane will pick up the changes.
 
 **Option 3 summary:** Cloudflare Worker already exists. Add fallback to `env.ANTHROPIC_API_KEY` when no `x-api-key` header is sent. Make the API key field optional in the UI when proxy URL is configured. Demo stays live without client-side credentials.
-<!-- agent:boundary:0f9ebe90 -->
+<!-- agent:boundary:e1296064 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -197,7 +197,7 @@ I'll add this to pending as a high-priority item. This needs investigation into 
 
 I don't have enough context yet to know the exact trigger path without looking at `tasks/recruit/robert-ross.md`. Should I investigate this now or queue it for the next session?
 Yes...Fix this now
-### Re: Root cause — single char treated as valid input (HEAD)
+### Re: Root cause — single char treated as valid input
 
 Found the issue in `diff.rs:351-354`:
 
@@ -221,7 +221,7 @@ C. **Minimum content threshold** — require at least 2 added characters or a co
 I'd recommend **A** — the most conservative and safest. A 1.5s delay on genuine single-char responses is acceptable. The alternative (acting on `S` and sending a wrong email) is much worse.
 
 Should I implement option A?
-<!-- agent:boundary:1a6e4bc2 -->
+<!-- agent:boundary:e5bd6a5c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

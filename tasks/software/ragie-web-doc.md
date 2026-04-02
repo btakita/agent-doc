@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Use Haiku (Sonnet rate-limited on OAuth token) | Ready for demo
+LIVE: https://agent-doc-js.pages.dev | Use Haiku or dedicated API key to avoid 429 | Ready for demo
 <!-- /agent:status -->
 
 ## Exchange
@@ -1291,6 +1291,7 @@ Are we doing claude requests for all of our automated tests on agent-doc-js?
 The 429 rate limit came from those few real calls sharing your OAuth token's limits with active Claude Code sessions.
 
 I can't seem to get past the 429 errors.
+Why would the browser have a 429 but this session does not?
 ### Re: 429 errors — it's model-specific rate limiting
 
 **Sonnet is rate-limited, Haiku works fine.** Your OAuth token's Sonnet quota is exhausted from active Claude Code sessions (which default to Sonnet).
@@ -1303,18 +1304,27 @@ Verified:
 **Fix for the demo:** Use Haiku for now. Switch to Sonnet once the rate limit window resets. Or use a standard API key which has separate rate limits from the OAuth token.
 
 In the Settings dialog, change the model to **Claude Haiku 4.5** and it should work immediately.
-<!-- agent:boundary:2642aa6b -->
+### Re: Why browser 429 but not this session? (HEAD)
+
+**Different tokens and routing.** This Claude Code session has its own token (refreshed independently) and uses the SDK's built-in retry/backoff. The browser uses the raw HTTP API with the shared OAuth token from `~/.claude/.credentials.json`.
+
+All local Claude Code sessions + the browser share the same OAuth token's Sonnet rate limit pool. When multiple sessions are active (this one, others in tmux), Sonnet quota gets exhausted quickly.
+
+**Options:**
+1. Use **Haiku** in the browser (works now, separate rate limits)
+2. Generate a **dedicated API key** from console.anthropic.com (own rate limits, not shared with OAuth)
+3. Wait for the Sonnet rate limit window to reset
+<!-- agent:boundary:99e13bd6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Create `btakita/agent-doc-js` GitHub repo
-- [x] Scaffold SPA + bun bundler + Claude API
-- [x] Deploy Cloudflare Worker proxy + Pages
+- [x] SPA built, deployed, and working (https://agent-doc-js.pages.dev)
+- [x] Cloudflare Worker proxy for CORS
 - [x] Setup script + hash param onboarding
-- [x] Fix history.replaceState shadow + Ctrl+Enter bugs
-- [x] Diagnose 429: Sonnet rate-limited, Haiku works
+- [x] All bugs fixed (history shadow, Ctrl+Enter, duplicate instances)
+- [x] 429 diagnosed: Sonnet rate-limited on shared OAuth token
 - [ ] Add CNAME for `agent-doc.briantakita.me` (Cloudflare dashboard)
 - [ ] Demo script for Bob call
 - [ ] (deferred) OAuth flow, Yjs CRDT, WebSocket sync, Ragie, MCP

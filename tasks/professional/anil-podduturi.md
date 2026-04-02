@@ -71,7 +71,7 @@ Let's revise a bit.
 > If you know anyone looking for AI agent tooling or someone to build it
 
 Is this too forward?
-### Re: Softening the ask (HEAD)
+### Re: Softening the ask
 
 You're right to question it. Asking for intros in the same message where he just said he can't help with BCG could feel like a pivot from one ask to another. Here's a softer version:
 
@@ -82,7 +82,7 @@ You're right to question it. Asking for intros in the same message where he just
 > Either way, let's catch up — always good to stay connected, and I'd love to hear what you're getting into next.
 
 The demo offer implies you're building something real without explicitly asking for referrals. Save the intro ask for a follow-up conversation.
-<!-- agent:boundary:a3582e44 -->
+<!-- agent:boundary:ce558232 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

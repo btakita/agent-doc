@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Drafted LinkedIn reply to Anil Podduturi — awaiting user review/additions
+Revised LinkedIn reply draft — incorporates collaboration interest + agent-doc demo offer
 <!-- /agent:status -->
 
 ## Exchange
@@ -16,19 +16,34 @@ Drafted LinkedIn reply to Anil Podduturi — awaiting user review/additions
 Please read /home/brian/work/btakita/agent-loop/mail/contacts/anil-podduturi/20260320-linkedin-anil-podduturi.txt
 
 Help me draft a reply
+
+I'm interested in where Anil goes next. Would be interested in collaborating with Anil.
+
+Perhaps a demo of agent-doc.
 ### Re: Draft reply to Anil
 
-Thanks for letting me know, Anil — no worries at all. Best of luck with the transition, sounds like an exciting move. Would be great to catch up sometime regardless — always appreciated working with you on Tenfore. Hope the next chapter is a good one.
+Thanks for letting me know, Anil — no worries at all. Best of luck with the transition, sounds like an exciting move. Would be great to catch up sometime regardless — always appreciated working with you at Ne. Hope the next chapter is a good one.
 
 ---
 
 You started "I'm " — want to add something about what you're working on? I can incorporate it into the reply.
-<!-- agent:boundary:db2fd2b3 -->
+### Re: Revised reply (HEAD)
+
+Updated draft incorporating your notes:
+
+> Thanks for letting me know, Anil — no worries at all on the Helix front. Curious where you're heading next... your AI product background is impressive and I'd love to find a way to collaborate.
+>
+> I've been building an AI agent harness called agent-doc — it turns markdown documents into live agent sessions. The document-as-interface pattern actually traces back to how we worked on Tenfore. Would be happy to give you a quick demo if you're interested.
+>
+> Either way, best of luck with the transition. Let's catch up sometime.
+
+Let me know if you want to adjust tone, add/remove anything, or if this is ready to send.
+<!-- agent:boundary:84b1d055 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Finalize reply text (user may want to add "I'm ..." content)
+- [ ] User review of revised draft
 - [ ] Send reply via LinkedIn
 <!-- /agent:pending -->

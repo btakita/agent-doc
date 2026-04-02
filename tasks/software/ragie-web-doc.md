@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Import with injection scanning | Ragie ready | Demo-ready
+LIVE: https://agent-doc-js.pages.dev | Clean export (no terminal) | Demo-ready
 <!-- /agent:status -->
 
 ## Exchange
@@ -1851,16 +1851,22 @@ Implement some sort of scanning to warn against malicious/dangerous prompts when
 **Export** already worked — now you can round-trip: Export -> share file -> recipient Imports.
 
 Deployed.
-<!-- agent:boundary:8eeaecce -->
+
+Export should not include Terminal output
+### Re: Export — terminal output removed (HEAD)
+
+Export now downloads the document content only, no terminal output appended. Clean `.md` file for sharing.
+
+Deployed.
+<!-- agent:boundary:94a428bc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] SPA feature-complete: export, import with injection scanning
+- [x] SPA feature-complete: export (doc only), import with injection scanner
 - [x] Ragie: 18 docs indexed and searchable
 - [x] Full RAG pipeline active
-- [ ] Test Ragie retrieval in browser
 - [ ] CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
 <!-- /agent:pending -->

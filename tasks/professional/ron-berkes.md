@@ -817,7 +817,7 @@ Please look through shared spreadsheet.
 https://docs.google.com/spreadsheets/d/1F1NfBcMM3r692zgkVPxKFtV4jdmFvLU7_xyHNqD2B1o/edit?gid=0#gid=0
 
 Should we have corky support Google documents?
-### Re: Patent spreadsheet & Google Docs support (HEAD)
+### Re: Patent spreadsheet & Google Docs support
 
 **Spreadsheet access:** The Google Sheet requires authentication and I can't access it right now (Chrome DevTools timed out, WebFetch got 401). Could you either:
 - Make the sheet publicly viewable (Share > Anyone with the link), or
@@ -829,7 +829,7 @@ Should we have corky support Google documents?
 - Would use the Google Docs/Sheets API with the same OAuth flow corky already uses for Gmail
 
 It would be useful for cases exactly like this -- pulling spreadsheet data into agent workflows. Worth adding to the corky roadmap. The Gmail OAuth scope could be extended to include Docs/Sheets scopes.
-<!-- agent:boundary:74c24514 -->
+<!-- agent:boundary:d925c0dc -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

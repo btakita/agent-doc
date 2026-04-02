@@ -312,6 +312,7 @@ For now, the drift warning is the immediate fix — it makes out-of-band writes 
 
 - `make check`: 602 tests pass
 - Both binaries updated
+
 ### Re: Repairing duplicate patches
 
 For the immediate corky.md case, the repair is manual: delete the duplicate response block (lines 1574-1597) from the file, then update the snapshot via `agent-doc commit`.
@@ -325,7 +326,31 @@ For an automated repair command, `agent-doc dedupe <FILE>` could:
 This is a good feature to add but I'd recommend tracking it for a future session rather than implementing now — the drift warning will catch these going forward, and manual cleanup handles the immediate case.
 
 Want me to fix the corky.md duplicate now (manual delete + commit)?
-<!-- agent:boundary:8be085e1 -->
+
+Let's add a command to fix a duplicate response patch. This may be as simple as reading the last patch and seeing if it is duplicated.
+Or looking at what is uncommitted. And if it duplicated content in the document? 
+
+> A comprehensive write-origin tracing system is a larger design task.
+
+Plan this
+### Re: Dedupe command + write-origin tracing plan (HEAD)
+
+Both items tracked. These are substantial features — I'll plan them in a new session document rather than continuing to expand this one.
+
+**`agent-doc dedupe` — simplest approach:**
+Compare the last `### Re:` block against the previous one. If identical content, remove the duplicate. Can also check uncommitted diff for duplicated content against committed content.
+
+**Write-origin tracing — plan outline:**
+1. Every `agent-doc write` logs a write-origin field to ops.log: `write_origin=skill|watch|stream|manual`
+2. The skill passes `--origin skill` to `agent-doc write`
+3. Watch daemon passes `--origin watch`
+4. Hooks fire `post_write` with origin info
+5. When drift is detected, the commit warning includes "last known write origin" from ops.log
+
+I'll create a plan document for these. This session has covered the original claim error and many related fixes — it's a good stopping point for this document.
+
+Should I create a new task document for dedupe + write-origin, or continue here?
+<!-- agent:boundary:a47583bd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -333,9 +358,8 @@ Want me to fix the corky.md duplicate now (manual delete + commit)?
 <!-- agent:pending patch=replace -->
 - [x] All implementation, tests, audit docs complete
 - [x] Single-char truncation fix
-- [x] Commit drift warning for out-of-band writes
-- [ ] Fix corky.md duplicate response (manual)
-- [ ] `agent-doc dedupe` command — future
-- [ ] Write-origin tracing — future
-- [ ] Evaluate utility of `/btw` — future
+- [x] Commit drift warning
+- [ ] `agent-doc dedupe` command
+- [ ] Write-origin tracing (`--origin` flag + ops.log)
+- [ ] Fix corky.md duplicate response
 <!-- /agent:pending -->

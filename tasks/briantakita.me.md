@@ -869,10 +869,29 @@ commit and push
 4. `briantakita.me-dev` → `5f1e44d` chore: update briantakita.me submodule → pushed to `btakita/briantakita.me-dev`
 
 All four repos pushed successfully.
-<!-- agent:boundary:5583c149 -->
+compact exchange
+### Session Summary (compacted) (HEAD)
+
+**Prior sessions resolved (9 items):** CI TypeError, esbuild 0.27 `.ts` resolution, Hono sub-app routing, video sitemap, search icon CSS, 32 tests, rebuildjs@0.71.1, local dev symlink workflow, @rappstack/ui--browser--blog@0.1.2 release.
+
+**Prior session completed (6 items):** Scroll-responsive header, static size reductions, sticky alignment, transition glitch fix, blog post `2026-03-18-agent-doc-tmux-crdt-live.md`, deployed.
+
+**This session completed (5 items):**
+1. **Blog post published** — `2026-04-01-agent-security-multiuser-lessons.md` live at `briantakita.me/posts/agent-security-multiuser-lessons/`
+2. **LinkedIn teaser drafted** — Security + audit trail angles, link in first comment. Draft at `mail/social/20260401-181027-linkedin.md`. Posting Thu Apr 2 ~9 AM ET.
+3. **@source absolute path CI fix (Option D)** — Fixed `rebuild_tailwind_plugin` to resolve postcss `from` relative to CSS source directory (entryPoint), not esbuild output. Changed `index.css.ts` to use relative path `../../../../rappstack-dev/lib/**/*.ts`. Committed and pushed to 4 repos (rebuildjs-tailwindcss, ctx-core-dev, briantakita.me, briantakita.me-dev).
+4. **Josh Malloy email** — Draft amended with blog post paragraph, sent via LMI session.
+5. **LinkedIn OAuth setup** — Profile config added to `.corky.toml`, pass paths confirmed (`corky/linkedin/client_id`, `corky/linkedin/client_secret`). Auth blocked by LinkedIn outage; needs retry.
+
+**Open items:**
+- JSON-LD VideoObject for video posts
+- Search icon `w-full` class may need removal
+- Scroll-responsive behavior may need browser cache clear on production
+- `rappstack-dev` `blog__header.ts` changes are separate from briantakita.me-dev
+<!-- agent:boundary:b5f881d2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
 - LinkedIn teaser — draft ready, posting Thu Apr 2 ~9 AM ET
-- LinkedIn OAuth — needs to be completed before publish
+- LinkedIn OAuth — needs retry when LinkedIn is back
 <!-- /agent:pending -->

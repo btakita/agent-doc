@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Sources panel added | Smart update preserves cursor | Demo-ready
+LIVE: https://agent-doc-js.pages.dev | Sources panel + gutter spinner | Demo-ready
 <!-- /agent:status -->
 
 ## Exchange
@@ -1978,15 +1978,31 @@ Done. Deployed to https://agent-doc-js.pages.dev
 - `src/app.js` — `searchRagie()` now returns raw chunks + formatted text, added `renderSources()`, wired up toggle/close buttons
 
 Try submitting a query that triggers Ragie retrieval to see it in action.
-<!-- agent:boundary:4e15aea5 -->
+
+Should we have a spinner in the diff gutter that is currently being run?
+
+How do I have the response patch show the source documents?
+See /home/brian/work/btakita/agent-loop/tmp/agent-doc-js/agent-doc-export-no-source.md
+### Re: Gutter spinner during submit (HEAD)
+
+Done. Deployed to https://agent-doc-js.pages.dev
+
+**How it works:**
+- When you hit Submit, the changed lines (green gutter markers) switch to a **pulsing blue animation** — fades between 30% and 100% opacity on a 1.2s cycle
+- This shows which lines triggered the submit and that the agent is processing
+- Once the response arrives and patches are applied, the normal diff gutter resumes (snapshot updates, so the old changes disappear and any new response lines get fresh markers)
+
+**Implementation:**
+- New `processingMarker` GutterMarker type with `diff-processing` CSS class
+- `markProcessing(view, snapshotText)` computes changed lines and applies processing markers
+- Called at the start of `handleSubmit()` before the API call
+- CSS `@keyframes gutter-pulse` handles the animation
+<!-- agent:boundary:7a6f9b21 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Add sources panel HTML structure
-- [x] Add sources panel CSS (collapsible right side panel)
-- [x] Modify searchRagie to return raw chunk data
-- [x] Add panel rendering and toolbar toggle
-- [x] Deploy to Cloudflare Pages
+- [x] Pulsing gutter spinner during submit
+- [x] Sources panel (Ragie document viewer)
 <!-- /agent:pending -->

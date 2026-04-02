@@ -1653,7 +1653,7 @@ The pending component works the same as in local agent-doc — Claude manages th
 Deployed to Cloudflare Pages.
 
 Let's have a reset butt
-### Re: Reset button added (HEAD)
+### Re: Reset button added
 
 Toolbar now: `[Haiku 4.5 v] [Submit] [Reset] [Settings]`
 
@@ -1663,7 +1663,7 @@ Toolbar now: `[Haiku 4.5 v] [Submit] [Reset] [Settings]`
 - Terminal logs "Document reset to default"
 
 Deployed.
-<!-- agent:boundary:2a0a31a5 -->
+<!-- agent:boundary:05b0c302 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

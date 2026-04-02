@@ -1029,14 +1029,14 @@ favicon.ico:1
 ﻿
 
 ```
-### Re: Fixed CodeMirror duplicate instance error (HEAD)
+### Re: Fixed CodeMirror duplicate instance error
 
 The error was caused by esm.sh loading separate copies of `@codemirror/state` for each CodeMirror package — breaking `instanceof` checks internally.
 
 **Fix:** Moved all CodeMirror imports into the `index.html` bootstrap with `?external=` params to force shared dependency resolution. `app.js` now reads from `window.__CM` globals instead of import maps.
 
 Pushed to btakita/agent-doc-js. Reload `http://localhost:8089` to test.
-<!-- agent:boundary:c5ae66ec -->
+<!-- agent:boundary:8086d130 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

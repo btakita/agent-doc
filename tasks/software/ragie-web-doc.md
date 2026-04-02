@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Ctrl+Enter fixed | All known bugs resolved | Ready for demo
+LIVE: https://agent-doc-js.pages.dev | All bugs fixed | Only 2-3 real API calls in testing | Ready for demo
 <!-- /agent:status -->
 
 ## Exchange
@@ -1264,6 +1264,7 @@ This is from our rapid automated testing — multiple API calls in quick success
 
 If rate limits persist, use a standard API key (`sk-ant-api03-...`) instead of the OAuth token — standard keys typically have separate/higher limits.
 Pressing `Ctrl+Enter` inserts a newline in the document. It should only run the submit command. Not add a newline.
+
 ### Re: Fixed Ctrl+Enter newline bug
 
 The issue: CodeMirror's default keymap was handling Enter (inserting a newline) before the document-level event listener could intercept it. Ctrl+Enter was processed as a regular Enter by CodeMirror.
@@ -1273,7 +1274,22 @@ The issue: CodeMirror's default keymap was handling Enter (inserting a newline) 
 Removed the document-level `keydown` listener since it's no longer needed.
 
 Deployed to Cloudflare Pages. Ctrl+Enter now submits without inserting a newline.
-<!-- agent:boundary:206b6303 -->
+
+Are we doing claude requests for all of our automated tests on agent-doc-js?
+### Re: Automated test API usage (HEAD)
+
+**No — most tests used mocked responses.** Only 2-3 real API calls total:
+
+| Test | Real API? | Method |
+|------|-----------|--------|
+| Editor loads, CodeMirror rendering | No | DOM checks via DevTools Protocol |
+| Edit + submit (structural test) | No | `window.fetch` mocked with fake patch response |
+| Edit + submit (real API verification) | **Yes** | OAuth token via proxy — 2-3 calls |
+| Hash param population | No | localStorage + DOM checks |
+| Ctrl+Enter fix | No | Keymap only, no submit |
+
+The 429 rate limit came from those few real calls sharing your OAuth token's limits with active Claude Code sessions.
+<!-- agent:boundary:9365f7dd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1283,8 +1299,7 @@ Deployed to Cloudflare Pages. Ctrl+Enter now submits without inserting a newline
 - [x] Scaffold SPA + bun bundler + Claude API
 - [x] Deploy Cloudflare Worker proxy + Pages
 - [x] Setup script + hash param onboarding
-- [x] Fix history.replaceState shadow bug
-- [x] Fix Ctrl+Enter newline insertion
+- [x] Fix history.replaceState shadow + Ctrl+Enter bugs
 - [ ] Add CNAME for `agent-doc.briantakita.me` (Cloudflare dashboard)
 - [ ] Demo script for Bob call
 - [ ] (deferred) OAuth flow, Yjs CRDT, WebSocket sync, Ragie, MCP

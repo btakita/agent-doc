@@ -432,6 +432,7 @@ fn test_cli_skill_install_creates_file() {
     let tmp = tempfile::TempDir::new().unwrap();
     let mut cmd = agent_doc_cmd();
     cmd.current_dir(tmp.path());
+    cmd.env("CLAUDE_CODE", "1"); // Force ClaudeCode environment for deterministic path
     cmd.args(["skill", "install"]);
     cmd.assert().success();
 
@@ -448,12 +449,14 @@ fn test_cli_skill_check_after_install() {
     // Install first
     let mut cmd = agent_doc_cmd();
     cmd.current_dir(tmp.path());
+    cmd.env("CLAUDE_CODE", "1");
     cmd.args(["skill", "install"]);
     cmd.assert().success();
 
     // Check should succeed (version matches)
     let mut cmd = agent_doc_cmd();
     cmd.current_dir(tmp.path());
+    cmd.env("CLAUDE_CODE", "1");
     cmd.args(["skill", "check"]);
     cmd.assert().success();
 }
@@ -465,12 +468,14 @@ fn test_cli_skill_install_idempotent() {
     // First install
     let mut cmd = agent_doc_cmd();
     cmd.current_dir(tmp.path());
+    cmd.env("CLAUDE_CODE", "1");
     cmd.args(["skill", "install"]);
     cmd.assert().success();
 
     // Second install must also succeed
     let mut cmd = agent_doc_cmd();
     cmd.current_dir(tmp.path());
+    cmd.env("CLAUDE_CODE", "1");
     cmd.args(["skill", "install"]);
     cmd.assert().success();
 
@@ -483,6 +488,7 @@ fn test_cli_skill_install_reload_compact() {
     let tmp = tempfile::TempDir::new().unwrap();
     let mut cmd = agent_doc_cmd();
     cmd.current_dir(tmp.path());
+    cmd.env("CLAUDE_CODE", "1");
     cmd.args(["skill", "install", "--reload", "compact"]);
     let output = cmd.output().unwrap();
     assert!(output.status.success(), "skill install --reload compact should succeed");
@@ -502,6 +508,7 @@ fn test_skill_md_contains_required_steps() {
     let tmp = tempfile::TempDir::new().unwrap();
     let mut cmd = agent_doc_cmd();
     cmd.current_dir(tmp.path());
+    cmd.env("CLAUDE_CODE", "1");
     cmd.args(["skill", "install"]);
     cmd.assert().success();
 
@@ -522,6 +529,7 @@ fn test_skill_md_references_valid_commands() {
     let tmp = tempfile::TempDir::new().unwrap();
     let mut cmd = agent_doc_cmd();
     cmd.current_dir(tmp.path());
+    cmd.env("CLAUDE_CODE", "1");
     cmd.args(["skill", "install"]);
     cmd.assert().success();
 

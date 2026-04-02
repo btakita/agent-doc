@@ -757,7 +757,18 @@ Rob approves.
 Check your Gmail drafts to review and send.
 
 **Form backend:** Starting on the Cloudflare Worker + D1 option for Apply Now and Contact forms next. Will store submissions in D1 and email Judith on each submission.
-<!-- agent:boundary:6816bd40 -->
+
+Add to tasks/professional/equityfundingsource.md:
+- [ ] Wire up form submission backend (Apply Now + Contact)
+- [ ] Review and send proposal email from Gmail
+### Re: Items added to equityfundingsource.md (HEAD)
+
+Added to `tasks/professional/equityfundingsource.md` pending list:
+- "Wire up form submission backend" -- already tracked there with full Tier 0-3 breakdown
+- "Review and send proposal email to Judith from Gmail" -- added
+
+These items belong in the EFS task file. Removing from this doc's pending.
+<!-- agent:boundary:03a62599 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -768,6 +779,5 @@ Check your Gmail drafts to review and send.
 - [x] Redirect proposal to Robert Ward for review first
 - [x] Update proposal with live EFS website link
 - [x] Re-address to Judith (cc Robert Waldman) and push to Gmail Drafts
-- [ ] Wire up form submission backend (Apply Now + Contact)
-- [ ] Review and send proposal email from Gmail
+- [x] Add form backend + email send items to equityfundingsource.md
 <!-- /agent:pending -->

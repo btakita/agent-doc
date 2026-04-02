@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Auto-wrap fallback fixes missing patches | Ragie still indexing
+LIVE: https://agent-doc-js.pages.dev | Duplication fixed, terminal in export | Ready for demo
 <!-- /agent:status -->
 
 ## Exchange
@@ -1717,7 +1717,6 @@ Click Export to download the current document as `agent-doc-export.md`. Terminal
 
 Deployed.
 
-The export should also include the "Terminal" output
 ### Re: Fixed — responses now always patch into document
 
 Two fixes:
@@ -1729,15 +1728,26 @@ Two fixes:
 **Ragie status:** Still "partitioning" — all 10 visible docs. The search returned no results because indexing isn't complete. Once it finishes, searches will work. The fallback (general Claude response without retrieval context) now works correctly.
 
 Deployed. Try the same prompt again — the response should now appear in the document.
-<!-- agent:boundary:fc9c84be -->
+The export should also include the "Terminal" output
+
+The prompt was duplicated in the response patch.
+/home/brian/work/btakita/agent-loop/tmp/agent-doc-js/agent-doc-export.md
+### Re: Fixed duplication + terminal in export (HEAD)
+
+**Prompt duplication fix:** Auto-wrapped responses now include a `### Re:` header prefix, preventing the exchange append mode from duplicating the user's content.
+
+**Export includes terminal:** The exported `.md` file now has a `## Terminal Output` section at the bottom with all terminal log lines in a code block.
+
+Deployed. Reset the document and try again — the duplication should be gone.
+<!-- agent:boundary:aa2ca615 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] SPA feature-complete with auto-wrap fallback
-- [x] SKILL.md-driven RAG (works once Ragie finishes indexing)
-- [ ] Ragie indexing still processing (partitioning)
+- [x] SPA feature-complete with all fixes
+- [x] SKILL.md-driven RAG
+- [ ] Ragie indexing still processing
 - [ ] CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
 <!-- /agent:pending -->

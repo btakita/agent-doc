@@ -1576,10 +1576,12 @@ Here's a clear roadmap narrative — "what exists → what's next → where Ragi
 - **Corky** (Rust CLI) — correspondence toolkit with email, calendar, transcription, YouTube, doc management. Already has `corky ragie push/sync/search` commands for cloud document indexing.
 - **agent-doc** — interactive document sessions (JetBrains plugin + CLI). Real-time AI collaboration with git gutter feedback. Powers all project tracking and client correspondence.
 - **agent-doc-js** — browser version at agent-doc-js.pages.dev. Ragie retrieval built in. No developer setup for end users.
+agent-doc-js had an issue with the credentials
 
 **Active client integrations:**
 - **EFS (Equity Funding Source)** — commercial RE broker. Full website rebuilt and deployed. Building a 4-tier document intake pipeline: WAF → Workers AI classification → Claude API review → Ragie Parse indexing. Loan applications, appraisals, compliance docs. Ragie Parse handles the heavy lifting on approved documents, but need content validation *before* indexing (the question for you).
 - **Patent mining** — client manually searches USPTO design patents. Building semantic retrieval over unstructured technical documents to automate lead generation. Another Ragie indexing use case.
+Will get back to Bob about the tenant. Bob agreed to enble Ragie Parse.
 
 **Where Ragie fits in the stack:**
 - Ragie is the **shared/collaborative retrieval layer**. Local hybrid search for personal workflow; anything multi-user or client-facing goes through Ragie.
@@ -1590,19 +1592,30 @@ Here's a clear roadmap narrative — "what exists → what's next → where Ragi
 - Content validation before indexing — customer's job, or Ragie building toward it?
 - Multi-tenant isolation for these client use cases
 - Whether there's a collaboration path beyond just being a customer
-<!-- agent:boundary:d9b4a06c -->
+### Re: Post-call notes (HEAD)
+
+Good outcomes from the call:
+
+1. **agent-doc-js credential issue** — demo hit a credentials problem. Debug separately (check tasks/software/ragie-web-doc.md).
+2. **Bob agreed to enable Ragie Parse** — unlocks the EFS document pipeline. Parse will be available on your tenant.
+3. **Follow up with Bob about the tenant** — he's expecting to hear back on tenant setup/configuration.
+
+The call landed the collaboration angle even with the demo hiccup. Bob enabling Parse shows he sees value in the integration work.
+
+**Immediate next steps:**
+- Debug agent-doc-js credentials issue
+- Follow up with Bob on tenant details
+- Send follow-up message with security post link + agent-doc-js demo link (once fixed)
+- Start building EFS Tier 3 (Ragie Parse indexing) now that Parse is enabled
+<!-- agent:boundary:03a8d9f2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [done] Draft roadmap narrative for Bob call
-- [done] Create 1-page call structure PDF
-- [done] Draft pre-call message for Bob
-- Prep JB plugin demo environment for Bob call (today)
-- Prep EFS Tier 0-3 architecture walkthrough for Bob call
-- [stretch] Polish ragie-web-doc demo for Bob call
+- Debug agent-doc-js credentials issue from Bob call demo
+- Follow up with Bob on Ragie tenant setup/configuration
+- Send post-call follow-up: security post (briantakita.me/posts/agent-security-multiuser-lessons/) + agent-doc-js link
+- Start EFS Tier 3 pipeline (Ragie Parse indexing for approved loan docs)
 - Schedule Robert Ross call at 4:00 PM ET / 1:00 PM PT Thursday
-- Post-call follow-up: share security post + agent-doc-js link with Bob
-- Discuss EFS document pipeline with Bob: Ragie Parse for indexing, Tier 1-2 validation before indexing
 <!-- /agent:pending -->

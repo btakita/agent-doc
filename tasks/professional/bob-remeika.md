@@ -1553,14 +1553,14 @@ Created and saved to: [file:///home/brian/work/btakita/agent-loop/tmp/bob-remeik
 Source markdown also at `tmp/bob-remeika-call-structure.md` if you want to edit and regenerate.
 
 Make this a 1 page summary
-### Re: 1-page summary (HEAD)
+### Re: 1-page summary
 
 Condensed into a single-page reference card with a table layout: [file:///home/brian/work/btakita/agent-loop/tmp/bob-remeika-call-structure.pdf](file:///home/brian/work/btakita/agent-loop/tmp/bob-remeika-call-structure.pdf)
 
 6 blocks (Reconnect → Demo → Architecture → Use Cases → Security → Collab) with time allocations, key points, questions for Bob, and follow-up actions. All on one page.
 
 Source: `tmp/bob-remeika-call-structure.md`
-<!-- agent:boundary:b5422776 -->
+<!-- agent:boundary:31fba17e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

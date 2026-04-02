@@ -224,7 +224,7 @@ Compared localhost:4200 vs equityfundingnow.com using headless Chromium screensh
 - **Footer:** Dark card background with "Contact Info" heading -- matches live site
 
 All 31 tests updated and passing.
-### Re: Visual parity achieved (HEAD)
+### Re: Visual parity achieved
 
 **Fixed:** Images were 404 because the static middleware only served from `dist/browser--dev/`, not `public/`. Added a Bun file middleware for `/assets/*` that serves from the project root `public/` directory.
 
@@ -241,7 +241,7 @@ All 31 tests updated and passing.
 - Portfolio (18 deal cards in 3-col grid) -- parity
 
 All 31 tests passing. All 32 images loading. CSS, style, and content parity achieved.
-<!-- agent:boundary:5ab2d284 -->
+<!-- agent:boundary:8d0d065b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

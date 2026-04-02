@@ -374,7 +374,7 @@ The duplicate had slightly different lengths because the second block included a
 
 **Write-origin tracing** is the remaining item. Should I plan that now?
 Go
-### Re: Write-origin tracing implemented (HEAD)
+### Re: Write-origin tracing implemented
 
 **`--origin` flag added to `agent-doc write`:**
 
@@ -394,7 +394,7 @@ The SKILL.md should be updated to pass `--origin skill` in the write command. I'
 - Both binaries updated
 
 **Next:** Update SKILL.md to include `--origin skill` in the write template.
-<!-- agent:boundary:8bdfc1af -->
+<!-- agent:boundary:c6a8f6e9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

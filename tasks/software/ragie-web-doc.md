@@ -1732,14 +1732,14 @@ The export should also include the "Terminal" output
 
 The prompt was duplicated in the response patch.
 /home/brian/work/btakita/agent-loop/tmp/agent-doc-js/agent-doc-export.md
-### Re: Fixed duplication + terminal in export (HEAD)
+### Re: Fixed duplication + terminal in export
 
 **Prompt duplication fix:** Auto-wrapped responses now include a `### Re:` header prefix, preventing the exchange append mode from duplicating the user's content.
 
 **Export includes terminal:** The exported `.md` file now has a `## Terminal Output` section at the bottom with all terminal log lines in a code block.
 
 Deployed. Reset the document and try again — the duplication should be gone.
-<!-- agent:boundary:aa2ca615 -->
+<!-- agent:boundary:ca5f24f1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

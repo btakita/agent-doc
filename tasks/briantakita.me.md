@@ -901,12 +901,54 @@ Finish open items
 **4. rappstack-dev `blog__header.ts` changes** — Files are identical and synchronized at version 0.1.2 in both repos. No outstanding changes to pull. **Status: Done, can close.**
 
 **Summary:** Items 3 and 4 are resolved. Item 2 needs a small fix (remove `w-full` from search icon span). Item 1 is functional but could be enhanced with BlogPosting wrapper.
-<!-- agent:boundary:528684ef -->
+
+
+Re: the LinkedIn teaser.
+
+> 532 git commits in one day. 11 parallel AI agent sessions. 292 commits debugging one cascade of bugs.
+
+I'm not sure if this is as impressive as it once was. It's good to put into the teaser somewhere.
+But we need the meat as the first line.
+Collaborative Security, Tracability, and How agent-doc helps with multi-tasking complex workflows
+
+>
+> Yes, this is dated April 1st. No, it's not a joke.
+
+It is now April 2. So remove the April Fools part.
+
+[//]: # (Continue with 1 & 2.)
+### Re: LinkedIn teaser revision (HEAD)
+
+Revised draft — leads with the security substance, commit stats moved to supporting role, April Fools removed:
+
+---
+
+Multi-agent AI sessions create security surfaces that don't exist in single-agent systems. Here's what running 11 parallel agent-doc sessions in one day taught me.
+
+When every agent has filesystem access, git access, and tool use — all operating on the same private repository — you need to think about:
+
+→ Prompt injection across sessions: the document IS the prompt. In a shared repo, one user's edits become another agent's context. There's no built-in distinction between "authorized prompt" and "injected content."
+→ Credential exposure in audit trails: agents optimize for task completion, not operational security. Without guardrails like $(pass ...) wrappers, secrets end up in committed responses.
+→ Snapshot rollbacks from stale sessions: a new agent starting with an old snapshot can silently un-commit another agent's work. 292 commits to trace that one.
+
+The solution isn't to remove agent access — it's to make the audit trail first-class. agent-doc commits every prompt and every response to git. The commit history IS the security audit. Private repo as the trust boundary, operation-level logging, and session lifecycle guards.
+
+532 git commits across 11 parallel sessions. Correspondence, client work, tool development, and a 292-commit debugging cascade — all traceable.
+
+Full write-up with architecture details and the bug cascade narrative:
+https://briantakita.me/posts/agent-security-multiuser-lessons/
+
+First comment: link to agent-doc repo
+
+---
+
+Changes from original: Led with collaborative security + traceability angle. Commit stats now support the narrative rather than lead it. April Fools line removed.
+<!-- agent:boundary:5404bc63 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
+- LinkedIn teaser — revised draft ready, needs user approval before posting
+- LinkedIn OAuth — needs retry when LinkedIn is back
 - Search icon `w-full` fix — remove `w-full` from icon span in rappstack-dev
 - JSON-LD VideoObject enhancement — add BlogPosting wrapper, duration, publisher (optional)
-- LinkedIn teaser — draft ready, posting Thu Apr 2 ~9 AM ET
-- LinkedIn OAuth — needs retry when LinkedIn is back
 <!-- /agent:pending -->

@@ -1122,7 +1122,7 @@ Posted via corky. First comment added with blog post + repo links.
 Continue with:
 - Search icon `w-full` fix — remove `w-full` from icon span in rappstack-dev
 - JSON-LD VideoObject enhancement — add BlogPosting wrapper, duration, publisher (optional)
-### Re: Both items done (HEAD)
+### Re: Both items done
 
 **1. Search icon `w-full` fix** — Removed `w-full` from icon span in `rappstack-dev/lib/ui--browser--blog/search/blog_search__div.ts`. Icon keeps `absolute left-0 h-full` positioning.
 
@@ -1134,7 +1134,7 @@ Continue with:
 - TypeScript checks pass
 
 Note: esbuild build fails with a pre-existing JSON parse error (not related to these changes). Will need a `bun install` or esbuild version check to resolve separately.
-<!-- agent:boundary:1e7767f0 -->
+<!-- agent:boundary:c24e0f05 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

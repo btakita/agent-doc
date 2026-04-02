@@ -1547,7 +1547,7 @@ Fix threading email bugs:
 - **Gmail API threading fix (Bug 2)** — `send_via_gmail_api` and `push_to_drafts_via_gmail_api` only send `{ "raw": encoded }`. Gmail API requires `"threadId"` in the request body to thread replies into existing conversations. Add `thread_id` field to draft YAML frontmatter and include it in the API request JSON. Files: `src/draft/mod.rs` (lines 371-433).
 
 See tasks/recruit/robert-ross.md
-### Re: Gmail API Threading Bugs (HEAD)
+### Re: Gmail API Threading Bugs
 
 Both bugs confirmed after code review.
 
@@ -1571,7 +1571,6 @@ Both bugs confirmed after code review.
 5. `SPEC.md` — document `thread_id` in draft YAML format
 
 Ready to implement on your go.
-<!-- agent:boundary:1f7a9f78 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | 18 blog posts uploaded to Ragie (processing) | Retrieval will work once indexed
+LIVE: https://agent-doc-js.pages.dev | Ragie search auto-runs on submit | 18 docs indexing (partitioning)
 <!-- /agent:status -->
 
 ## Exchange
@@ -1550,7 +1550,6 @@ What was in the Library?
 ...
 ```
 
-How can we access the ragie se
 ### Re: Blog posts uploaded to Ragie
 
 **All 18 briantakita.me blog posts uploaded** to Ragie with metadata `{"source": "briantakita.me", "type": "blog_post"}`.
@@ -1563,18 +1562,36 @@ How can we access the ragie se
 **Documents will be searchable once processing completes** (usually a few minutes). After that, the agent-doc-js SPA will automatically retrieve relevant blog post content when you submit.
 
 **Test search:** Currently returning 0 chunks (still processing). Will be populated soon.
-<!-- agent:boundary:972ffabe -->
+
+How can we access the ragie search from prompts?
+### Re: Ragie search from prompts (HEAD)
+
+**Already wired up.** When you submit (Ctrl+Enter), the SPA automatically:
+
+1. Extracts your new edits from the diff
+2. Sends them as a search query to Ragie via the proxy
+3. Injects the top 5 retrieved chunks into the Claude prompt as `<retrieved-context>`
+4. Claude responds with awareness of your indexed blog posts
+
+**Requirements:**
+- Set your Ragie API key in Settings
+- Documents must be indexed (currently still "partitioning" — 10 docs processing)
+
+**From terminal prompt:** Currently terminal sends direct Claude prompts without Ragie. Can add Ragie to terminal too if you want.
+
+**Status:** All 10 visible documents still in "partitioning" status. Ragie free tier may take a few more minutes. Will test again soon.
+<!-- agent:boundary:ad5a4c47 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] SPA: editor + toolbar + terminal + diff gutter
-- [x] Ragie retrieval integration
-- [x] Uploaded 18 briantakita.me blog posts to Ragie (tagged briantakita.me)
-- [ ] Wait for Ragie indexing to complete, then test retrieval
-- [ ] Yjs CRDT for concurrent editing during response
+- [x] Ragie retrieval integration (wired to submit flow)
+- [x] Uploaded 18 blog posts to Ragie
+- [ ] Wait for Ragie indexing, then test end-to-end retrieval
+- [ ] Add Ragie search to terminal prompt (optional)
+- [ ] Yjs CRDT for concurrent editing
 - [ ] Add CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
-- [ ] (deferred) WebSocket sync, MCP
 <!-- /agent:pending -->

@@ -857,7 +857,7 @@ tasks/recruit/lmi.md already sent email to Josh Malloy.
 @source fix seems to work.
 
 commit and push
-### Re: Committed and pushed (HEAD)
+### Re: Committed and pushed
 
 **Josh email:** Already sent via the LMI session. Done.
 
@@ -869,7 +869,7 @@ commit and push
 4. `briantakita.me-dev` → `5f1e44d` chore: update briantakita.me submodule → pushed to `btakita/briantakita.me-dev`
 
 All four repos pushed successfully.
-<!-- agent:boundary:24f4a1a0 -->
+<!-- agent:boundary:5583c149 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

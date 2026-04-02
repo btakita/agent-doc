@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Server-side credentials (always-ready) | Sources panel + gutter spinner | Demo-ready
+LIVE: https://agent-doc-js.pages.dev | Dual auth (API key + session token) | Server-side fallback | Demo-ready
 <!-- /agent:status -->
 
 ## Exchange
@@ -2056,7 +2056,27 @@ Anthropic doesn't offer OAuth for API access yet. The current options are:
 The server-side key approach we just implemented is the right solution. The worker holds the long-lived API key, the browser only needs the proxy URL, and key rotation is a single `wrangler secret put` command.
 
 The demo should now be always-ready — no credential setup needed for Bob or anyone else.
-<!-- agent:boundary:a2e3df26 -->
+
+The web doc should allow either the session token or an API Key
+Please mention in the interface that API Keys are long lived and session tokens are short lived.
+### Re: Session token + API key dual auth (HEAD)
+
+Done. The app now accepts both credential types:
+
+**How it works:**
+- **API key** (`sk-ant-api...`) → `x-api-key` header → `api.anthropic.com` (long-lived, doesn't expire)
+- **Session token** (`sk-ant-sid...`) → `Authorization: Bearer` header → `api.claude.ai` (short-lived, from Claude Code)
+- **No key** → worker falls back to its own `ANTHROPIC_API_KEY` secret
+
+The worker auto-detects the token type by prefix. The frontend sends the appropriate header format. The settings UI now says "Anthropic API Key or Session Token" with a note explaining both options.
+
+The `setup.sh` script still works — it passes the session token which the worker now routes correctly to `api.claude.ai`.
+
+**Three auth modes, all work:**
+1. Proxy-only (no client key) — worker uses its secret
+2. API key in browser — long-lived, user's own key
+3. Session token via `setup.sh` — short-lived but auto-provisioned from Claude Code
+<!-- agent:boundary:ade09273 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -2064,6 +2084,7 @@ The demo should now be always-ready — no credential setup needed for Bob or an
 <!-- agent:pending patch=replace -->
 - [x] Worker: fall back to env secret when no client API key
 - [x] UI: make API key optional when proxy is configured
+- [x] Support both session tokens and API keys
 - [ ] Follow up with Bob: working demo link + security post
 - [ ] Test Ragie Parse now that Bob enabled it on the tenant
 <!-- /agent:pending -->

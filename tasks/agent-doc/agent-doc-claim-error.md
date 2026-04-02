@@ -110,7 +110,7 @@ The `files.exclude` JSON you pasted won't take effect in IntelliJ. The JetBrains
 If you already unchecked it and the lag persists, restart the IDE — the Tailwind CSS LSP process may still be running from the previous session.
 
 Disabled the plugin. Still getting lag when editing ragie-web-doc.md. Why?
-### Re: Lag on ragie-web-doc.md — PatchWatcher is the culprit (HEAD)
+### Re: Lag on ragie-web-doc.md — PatchWatcher is the culprit
 
 Tailwind CSS is no longer firing (confirmed in logs). The lag is now from the **PatchWatcher** in the agent-doc plugin:
 
@@ -126,7 +126,7 @@ This is happening every ~5 seconds — `ragie-web-doc.md` has a session running 
 **Root cause:** The PatchWatcher shouldn't acquire a write-action for no-op patches. It should check if the patch would produce changes BEFORE locking the document.
 
 This is a separate bug — should I investigate and fix the PatchWatcher?
-<!-- agent:boundary:ed1bda9f -->
+<!-- agent:boundary:934567de -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -260,11 +260,18 @@ What makes this different from a chatbot:
 - **Git integration** — visual gutter markers show what's committed (agent response) vs uncommitted (Brian's next input)
 
 It's essentially a developer workflow where the document *is* the interface — no context switching between editor and terminal.
-<!-- agent:boundary:cddd7330 -->
+
+Miguel is an agentic creator. Please say hi to Miguel.
+### Re: Hi Miguel! (HEAD)
+
+Hey Miguel! Great to meet a fellow agentic creator. What you're seeing here is a live agent-doc session — Brian types into this markdown document, and the AI responds right here in the same file, in real-time. No chat window, no context switching. The document *is* the conversation.
+
+Welcome to the demo!
+<!-- agent:boundary:17a28935 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Call with Rob Ross — in progress
+- Call with Rob Ross & Miguel — in progress
 <!-- /agent:pending -->

@@ -712,7 +712,7 @@ Are we capturing uploads and contact info?
 The rest of the proposal (three options, Ragie mention, AI search examples, retainer discussion) is unchanged. The wrapper to Rob is also unchanged.
 
 This is a stronger pitch... instead of "I started working on it," Judith sees a finished product.
-### Re: Form submission status (HEAD)
+### Re: Form submission status
 
 No, not yet. The Apply Now and Contact forms are built as frontend pages but they're **static HTML only**... no backend captures submissions. From the equityfundingsource task, the form submission backend is still pending:
 
@@ -727,7 +727,7 @@ For the proposal to Rob, this is fine -- you're showing the site is rebuilt and 
 1. **Simplest:** Wire forms to email (Formspree or `mailto:` link) -- 30 min
 2. **Better:** Cloudflare Worker + D1 that stores submissions and sends email notification -- a few hours
 3. **Full pipeline:** The Tier 0-3 architecture from equityfundingsource.md -- bigger project
-<!-- agent:boundary:a4dc41e0 -->
+<!-- agent:boundary:fa41e6ce -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

@@ -1983,7 +1983,7 @@ Should we have a spinner in the diff gutter that is currently being run?
 
 How do I have the response patch show the source documents?
 See /home/brian/work/btakita/agent-loop/tmp/agent-doc-js/agent-doc-export-no-source.md
-### Re: Gutter spinner during submit (HEAD)
+### Re: Gutter spinner during submit
 
 Done. Deployed to https://agent-doc-js.pages.dev
 
@@ -1997,7 +1997,7 @@ Done. Deployed to https://agent-doc-js.pages.dev
 - `markProcessing(view, snapshotText)` computes changed lines and applies processing markers
 - Called at the start of `handleSubmit()` before the API call
 - CSS `@keyframes gutter-pulse` handles the animation
-<!-- agent:boundary:7a6f9b21 -->
+<!-- agent:boundary:efd86893 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

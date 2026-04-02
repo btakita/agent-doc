@@ -746,7 +746,7 @@ Rob approves.
 
 - [ ] Wire up form submission backend (Apply Now + Contact)
 - [ ] re-address to Judith (cc Robert Waldman) and send
-### Re: Rob approves -- email re-addressed + form backend (HEAD)
+### Re: Rob approves -- email re-addressed + form backend
 
 **Email updated and pushed to Gmail Drafts:**
 - **To:** judithkrug@gmail.com
@@ -757,7 +757,7 @@ Rob approves.
 Check your Gmail drafts to review and send.
 
 **Form backend:** Starting on the Cloudflare Worker + D1 option for Apply Now and Contact forms next. Will store submissions in D1 and email Judith on each submission.
-<!-- agent:boundary:a3ef29ef -->
+<!-- agent:boundary:6816bd40 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

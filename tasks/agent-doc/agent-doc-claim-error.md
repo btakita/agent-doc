@@ -35,7 +35,80 @@ Option 1
 Go to Settings → Languages & Frameworks → Tailwind CSS → uncheck "Enable Tailwind CSS support for this project". This stops the LSP from processing every keystroke in `.md` files.
 
 If the lag persists after unchecking, restart the IDE to fully stop the Tailwind CSS language server process.
-<!-- agent:boundary:83675c7f -->
+
+Why is the file exclude not working?
+
+```
+{
+  "inspectPort": null,
+  "emmetCompletions": false,
+  "classAttributes": ["class", "className", "ngClass", "class:list"],
+  "classFunctions": [],
+  "codeActions": true,
+  "codeLens": true,
+  "hovers": true,
+  "suggestions": true,
+  "validate": true,
+  "colorDecorators": true,
+  "rootFontSize": 16,
+  "lint": {
+    "cssConflict": "warning",
+    "invalidApply": "error",
+    "invalidScreen": "error",
+    "invalidVariant": "error",
+    "invalidConfigPath": "error",
+    "invalidTailwindDirective": "error",
+    "invalidSourceDirective": "error",
+    "recommendedVariantOrder": "warning",
+    "usedBlocklistedClass": "warning"
+  },
+  "showPixelEquivalents": true,
+  "includeLanguages": {
+    "ftl": "html",
+    "jinja": "html",
+    "jinja2": "html",
+    "smarty": "html",
+    "tmpl": "gohtml",
+    "cshtml": "html",
+    "vbhtml": "html",
+    "razor": "html"
+  },
+  "files": {
+    "exclude": [
+      "**/.git/**",
+      "**/.hg/**",
+      "**/.svn/**",
+      "**/node_modules/**",
+      "**/.yarn/**",
+      "**/.venv/**",
+      "**/venv/**",
+      "**/.next/**",
+      "**/.parcel-cache/**",
+      "**/.svelte-kit/**",
+      "**/.turbo/**",
+      "**/__pycache__/**",
+			"**/*.md"
+    ]
+  },
+  "experimental": {
+    "configFile": null,
+    "classRegex": []
+  }
+}
+```
+### Re: Tailwind CSS file exclude not working (HEAD)
+
+The `files.exclude` config in the Tailwind CSS settings is for the **VS Code extension**, not the JetBrains plugin. The JetBrains Tailwind CSS plugin uses its own settings and doesn't read this JSON config format.
+
+For JetBrains, the Tailwind CSS LSP is bundled and controlled by:
+- Settings → Languages & Frameworks → Tailwind CSS → **Enable** checkbox (per-project)
+
+The `files.exclude` JSON you pasted won't take effect in IntelliJ. The JetBrains plugin doesn't support per-file-type exclusion — it's all-or-nothing via the Enable checkbox.
+
+**Recommended action:** Uncheck "Enable Tailwind CSS support" for this project. The agent-loop workspace doesn't need Tailwind CSS processing. The submodules that do use Tailwind (prescience-notes-dev, briantakita.me-dev) have their own IDEA project contexts.
+
+If you already unchecked it and the lag persists, restart the IDE — the Tailwind CSS LSP process may still be running from the previous session.
+<!-- agent:boundary:917d8c35 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -44,6 +117,6 @@ If the lag persists after unchecking, restart the IDE to fully stop the Tailwind
 - [x] All implementation, tests, audit docs, and release complete
 - [x] Published: crates.io ✓, GitHub Release ✓
 - [x] CI fixes: skill unit tests + CLI integration tests + Windows compilation
-- [x] Disable Tailwind CSS LSP for agent-loop project
+- [ ] Disable Tailwind CSS for agent-loop project (uncheck Enable, restart IDE)
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

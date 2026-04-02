@@ -554,7 +554,7 @@ bunx wrangler pages secret put RESEND_API_KEY --project-name equityfundingsource
 Get a free API key from resend.com (100 emails/day free tier). The from address `notifications@equityfundingsource.com` needs verification in Resend, or use `onboarding@resend.dev` for testing.
 
 **Live:** https://equityfundingsource.pages.dev
-<!-- agent:boundary:cbb8b88c -->
+<!-- agent:boundary:f3fd3fe0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

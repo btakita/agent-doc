@@ -1489,7 +1489,7 @@ corky doc sheet <SHEET_URL> -o data.csv --format csv
 
 Ready to commit and test. Need to add the scopes to the GCP console before first use.
 continue
-### Re: Committed (HEAD)
+### Re: Committed
 
 ```
 bf65e7d feat(doc): Google Drive upload, Docs read/write, Sheets read
@@ -1502,7 +1502,7 @@ bf65e7d feat(doc): Google Drive upload, Docs read/write, Sheets read
 2. Add scopes: `drive.file`, `documents`, `spreadsheets.readonly`
 3. Enable APIs: Google Drive API, Google Docs API, Google Sheets API
 4. First run of any command will trigger re-auth for the new scopes
-<!-- agent:boundary:ce5ce215 -->
+<!-- agent:boundary:b5a74769 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

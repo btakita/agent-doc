@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Ragie docs still partitioning | Ready for demo (without retrieval for now)
+LIVE: https://agent-doc-js.pages.dev | SPA auto-RAG for demo, SKILL.md RAG for production | Docs indexing
 <!-- /agent:status -->
 
 ## Exchange
@@ -1593,22 +1593,35 @@ Will the diff go through Claude first or Ragie first?
 
 Ragie provides context *to* Claude. The SPA orchestrates the pipeline — Ragie enriches the prompt before Claude sees it.
 
-So Ragie is not meant to be used with a SKILL.md w
+So Ragie is not meant to be used with a SKILL.md which would prompt claude to perform RAG queries?
 ### Re: Ragie indexing status
 
 Still partitioning (10 docs). Search returns 0 chunks. Ragie's processing queue may be backed up — free tier can take longer.
 
 We can proceed with other work and test retrieval once indexing completes. The SPA will automatically use it once docs are searchable.
-<!-- agent:boundary:6b730dec -->
+### Re: Ragie with SKILL.md — prompt-driven RAG (HEAD)
+
+**Both approaches work:**
+
+1. **SPA-orchestrated (current):** SPA calls Ragie, injects context into Claude prompt. Simple HTTP calls, no MCP needed. Claude doesn't "know" it's doing RAG.
+
+2. **SKILL.md / MCP-driven (production):** Claude Code uses SKILL.md instructions to call Ragie as an MCP tool. Claude decides when/what to search. More powerful — iterative queries, relevance judgment, multi-step retrieval.
+
+**For the web SPA demo:** Auto-RAG is appropriate. No MCP in the browser.
+**For local agent-doc (Claude Code):** SKILL.md-driven RAG via MCP is the better architecture.
+
+Both feed into the same Ragie index — the difference is who orchestrates the search (SPA code vs Claude's reasoning).
+<!-- agent:boundary:db8f9054 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] SPA: editor + toolbar + terminal + diff gutter
-- [x] Ragie retrieval integration + 18 blog posts uploaded
-- [ ] Ragie indexing still processing (partitioning)
+- [x] Ragie retrieval (SPA-orchestrated) + 18 blog posts uploaded
+- [ ] Ragie indexing still processing
 - [ ] Yjs CRDT for concurrent editing
 - [ ] Add CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
+- [ ] (future) SKILL.md-driven RAG via MCP for local agent-doc
 <!-- /agent:pending -->

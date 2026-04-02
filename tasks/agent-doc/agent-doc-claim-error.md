@@ -255,10 +255,10 @@ Update SPEC.md, README.md, ontology, module-harness
 No SPEC.md diff section exists — the truncation behavior is documented in the `diff.rs` module doc which is the authoritative source.
 
 tasks/software/corky.md has a duplicate response patch. Why?
-### Re: Duplicate response in corky.md (HEAD)
+### Re: Duplicate response in corky.md
 
 I don't know why without investigating the file. This could be a separate issue from this session's work. Should I look at `tasks/software/corky.md` now, or is this for a different session?
-<!-- agent:boundary:68729782 -->
+<!-- agent:boundary:405a9345 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

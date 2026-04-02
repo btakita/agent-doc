@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-Architecture locked: SPA (CodeMirror + xterm.js) + Chrome DevTools MCP + Yjs CRDT | Ready to build
+Architecture finalized: SPA + direct Claude API (Bob's token in localStorage) + static server | Starting build
 <!-- /agent:status -->
 
 ## Exchange
@@ -812,7 +812,7 @@ Bob's browser (SPA)
 2. **You host the MCP endpoint** — SPA connects to your tunneled server. Your API key, your Ragie. Bob just uses the web UI.
 
 This should be simple.
-Bob opens the webpage, connects his mcp
+Bob opens the webpage, connects his mcp...and works with interactive documents.
 
 **What the SPA needs:**
 
@@ -845,6 +845,8 @@ agent-doc-web/
 **For the morning demo:** Build a minimal SPA that lets Bob edit a document and see agent responses. Connect it to your Claude Code via MCP tunnel. Bob types, agent responds, Ragie retrieves — all in his browser.
 
 Should I start building `agent-doc-web`?
+Yes. This can be a website that serves the page...with instructions to connect via mcp.
+Would require chrome dev tools mcp server?
 ### Re: CRDT, embedded terminal, and Chrome DevTools MCP
 
 **CRDT merge — yes, you're right.** I was thinking single-editor = no conflicts, but the agent writing back while the user is editing is exactly the concurrent-edit scenario CRDT solves. Same problem as local agent-doc. The JS implementation needs CRDT for the response patch application.
@@ -898,24 +900,78 @@ Bob's browser (SPA)
 
 This is much simpler than building MCP into the JS. Claude Code already knows how to use Chrome DevTools. The SPA just needs to be a good editor.
 
+Can we just have Bob pass in his Claude Code token into the webpage...put onto local storage?
+
 **For tonight's build:**
 1. Static SPA: CodeMirror 6 + xterm.js + WebSocket
 2. Server: axum — serves SPA, WebSocket for terminal PTY + file sync
 3. Chrome DevTools MCP for Claude Code to read/write the document
-<!-- agent:boundary:2c5f7dd6 -->
+### Re: Token in localStorage — this simplifies everything (HEAD)
+
+**Yes — Bob's Claude API token in localStorage eliminates the entire server-side Claude Code dependency.**
+
+If the SPA calls the Claude API directly from Bob's browser:
+
+- No server-side PTY or Claude Code process needed
+- No Chrome DevTools MCP needed
+- No xterm.js needed (agent responses render directly in the document)
+- The server becomes a **static file server** — serve the SPA, done
+
+**Simplified architecture:**
+
+```
+Bob's browser (SPA)
+    |
+    |-- CodeMirror 6 editor (Yjs CRDT)
+    |-- agent-doc logic in JS (diff, template, patch)
+    |-- Claude API client (Bob's token from localStorage)
+    |-- Ragie API client (Ragie token from localStorage, optional)
+    |
+    |-- calls Claude API directly (CORS-enabled)
+    |-- calls Ragie API directly (optional)
+    |
+    No server-side AI needed
+```
+
+**The server is just:**
+```
+agent-doc serve <FILE>
+    |-- serves static SPA (HTML + JS + CSS)
+    |-- WebSocket for live document sync (your edits appear in Bob's browser)
+    |-- that's it
+```
+
+**MCP is not required for MVP.** The SPA calls Claude's HTTP API directly. MCP becomes a future enhancement for tool use (file access, git, etc.).
+
+**Token security for the demo:** Bob enters his API key in a settings panel, stored in `localStorage`. It never leaves his browser — API calls go directly from his browser to `api.anthropic.com`. Your server never sees the token.
+
+**What to build:**
+
+| Component | What | Complexity |
+|-----------|------|-----------|
+| `index.html` | SPA shell | Trivial |
+| `editor.js` | CodeMirror 6 + Yjs CRDT | Medium |
+| `agent.js` | Diff -> Claude API -> patch response into document | Core logic (~150 lines) |
+| `settings.js` | Token input -> localStorage | Trivial |
+| `server.rs` | Serve static files + WebSocket for doc sync | Light axum |
+
+**For the demo:** Bob opens the URL, enters his Anthropic API key, and starts editing. The agent responds inline. No installs, no MCP config, no Chrome DevTools. Just a web page.
+
+Let me start building.
+<!-- agent:boundary:dea45361 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Build SPA: CodeMirror 6 editor with Yjs CRDT + markdown support
-- [ ] Add xterm.js terminal panel below editor (WebSocket to server PTY)
-- [ ] Server: axum — serve static SPA + WebSocket for PTY + file sync
-- [ ] Wire Chrome DevTools MCP for Claude Code to interact with SPA
-- [ ] localStorage snapshot management in JS
+- [ ] **BUILD** SPA: `index.html` + CodeMirror 6 editor with Yjs CRDT
+- [ ] **BUILD** `agent.js`: diff computation + Claude API call + response patch
+- [ ] **BUILD** `settings.js`: API key input -> localStorage
+- [ ] **BUILD** `server.rs`: axum static file server + WebSocket doc sync
 - [ ] cloudflared tunnel for Bob access
 - [ ] Demo script for Bob call
+- [ ] (deferred) MCP integration for tool use
+- [ ] (deferred) Ragie API integration in SPA
 - [ ] (deferred) Multi-user editing with injection sandboxing
-- [ ] (deferred) Authorization / trust tiers
-- [ ] (deferred) Custom MCP server (`agent-doc mcp-server`)
+- [ ] (deferred) xterm.js terminal panel
 <!-- /agent:pending -->

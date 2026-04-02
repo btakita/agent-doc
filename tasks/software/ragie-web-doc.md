@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-Evaluating demo strategy: screenshare-first vs web prototype | JetBrains + agent-doc + Ragie is strong standalone demo
+Revised MVP: web view + MCP for zero-install Bob demo | Deciding build order: MCP server vs web UI first
 <!-- /agent:status -->
 
 ## Exchange
@@ -703,19 +703,66 @@ What the web prototype adds:
 The JetBrains plugin + agent-doc + Ragie retrieval is already a strong demo without a web UI. The web piece is the roadmap slide, not the headline.
 
 What's your read?
-<!-- agent:boundary:fdd48a51 -->
+
+I want Bob to try it out.
+The web flow is an easy way to test it.
+Perhaps we could have an easy way to do this on a webpage with MCP connections, so Bob doesn't need to install agent-doc.
+I have not tested an from scratch install and I have not tested in different editors.
+### Re: Hands-on access for Bob — web + MCP is the path (HEAD)
+
+**You're right — "try it" requires zero-install access.** Screenshare is watching. Bob interacting with a live document is experiencing the product. That's a fundamentally different demo.
+
+**The friction problem is real:**
+- Fresh install is untested — risky to ask Bob to install agent-doc cold
+- Editor compatibility is untested — Bob might use a different IDE
+- A web page with MCP sidesteps all of this
+
+**Revised MVP for the demo:**
+
+```
+Bob's browser                          Your machine
+    |                                      |
+    |-- opens URL                          |
+    |                                      |
+    |-- sees live document (read-only)     |
+    |-- types in chat/prompt box           |
+    |                                      |
+    |      MCP connection (optional)       |
+    |-- Bob's Claude Code connects --------+-- agent-doc mcp-server
+    |   via MCP endpoint                   |   (read_document, suggest)
+    |                                      |
+    |-- watches agent respond live         |
+```
+
+**Two access tiers for Bob:**
+
+1. **Browser only** (minimum viable) — Bob opens a URL, sees the document live, can suggest prompts via chat. You process them. Zero install.
+
+2. **MCP connection** (power user) — Bob adds your MCP endpoint to his Claude Code. His agent can read the document and submit suggestions. Still no agent-doc install needed — MCP is built into Claude Code.
+
+**What to build tonight:**
+
+| Priority | What | Why |
+|----------|------|-----|
+| 1 | `agent-doc serve` — read-only web view + chat | Bob can see and interact immediately |
+| 2 | `agent-doc mcp-server` — expose `read_document` + `suggest` | Bob's Claude Code can connect |
+| 3 | cloudflared tunnel (`--tunnel`) | Instant HTTPS URL for Bob |
+
+The MCP server is actually simpler than the web UI — it's just a stdio server wrapping `agent-doc preflight` + a suggestion queue. Bob's Claude Code does the rendering.
+
+Want me to start with the MCP server (simpler, lets Bob use his own Claude Code) or the web view (visual, more impressive)?
+<!-- agent:boundary:841c9ce0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] `agent-doc serve` — axum server with inotify file watching + WebSocket push
-- [ ] Static frontend — CodeMirror 6 read-only markdown view
-- [ ] Chat panel — input box + message relay via WebSocket
-- [ ] `--tunnel` flag — cloudflared integration for instant HTTPS sharing
-- [ ] Demo script for Bob call (screenshare-first strategy)
+- [ ] `agent-doc serve` — read-only web view + WebSocket live updates + chat suggestions
+- [ ] `agent-doc mcp-server` — stdio MCP server (`read_document`, `suggest` tools)
+- [ ] cloudflared tunnel integration (`--tunnel` flag) for instant HTTPS sharing
+- [ ] Demo script for Bob call (hands-on, not screenshare)
+- [ ] Test fresh install flow (before recommending to Bob)
 - [ ] (deferred) Multi-user editing with injection sandboxing
-- [ ] (deferred) MCP server (`agent-doc mcp-server`)
 - [ ] (deferred) Authorization / trust tiers
 - [ ] (deferred) Injection scanning
 - [ ] (deferred) Content signing (git commit signatures)

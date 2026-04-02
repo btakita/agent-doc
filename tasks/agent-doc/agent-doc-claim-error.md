@@ -482,7 +482,7 @@ This is simpler than a full IPC queue — it uses the existing flock mechanism a
 Should I implement the flock-based write lock now? It's a targeted change in `write.rs`.
 How long would a flock be held? Just for the file write?
 What happens if the flock is busy? Can the blocked process compare the before write and after write document content?
-### Re: Flock design — hold duration and contention handling (HEAD)
+### Re: Flock design — hold duration and contention handling
 
 **How long held:** The flock covers: read current content → apply patches → write file → update snapshot. For IPC writes this is ~300ms (IPC round-trip). For disk writes it's ~5ms. The flock is released immediately after snapshot save.
 
@@ -505,7 +505,7 @@ This eliminates the duplicate response bug entirely — the second writer sees t
 The timeout prevents deadlocks (e.g., 30s). If timeout expires, log a warning and proceed without the lock (degraded mode, same as current behavior).
 
 Shall I implement this?
-<!-- agent:boundary:ff761b6e -->
+<!-- agent:boundary:9a378d5b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

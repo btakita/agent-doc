@@ -1443,7 +1443,7 @@ Not counting on it but would be awesome if it works.
 
 I want to use my ragie free account with some sample documents.
 Use a connected ragie-web-doc to work with ragie from the interactive documents...query and viewing content from the ragie documents.
-### Re: Ragie-powered agent-doc-js demo for Bob call (HEAD)
+### Re: Ragie-powered agent-doc-js demo for Bob call
 
 Smart to have this as a stretch goal. Even a partial demo showing Ragie retrieval inside the browser-based agent-doc would be a powerful "show don't tell" moment for Bob.
 
@@ -1464,7 +1464,7 @@ Smart to have this as a stretch goal. Even a partial demo showing Ragie retrieva
 - If not ready: JB plugin demo is already strong, web prototype becomes "here's the architecture, here's the code, shipping next week"
 
 No pressure to finish — it's a bonus, not the main event. The JB plugin demo + EFS pipeline discussion carry the call on their own.
-<!-- agent:boundary:cc99b925 -->
+<!-- agent:boundary:6639982e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

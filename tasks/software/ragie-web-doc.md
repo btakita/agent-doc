@@ -1491,7 +1491,7 @@ curl -s https://agent-doc-js.pages.dev/setup.sh | sh
 Your "Sho" got cut off — were you going to say "Should not happen" or something else?
 
 Please make the
-### Re: Terminal panel added (HEAD)
+### Re: Terminal panel added
 
 Added a terminal panel below the editor:
 
@@ -1504,7 +1504,7 @@ Added a terminal panel below the editor:
 Layout: Editor (top) | Terminal header | Terminal output | Status bar (bottom)
 
 Deployed to Cloudflare Pages.
-<!-- agent:boundary:6abb251c -->
+<!-- agent:boundary:fbfa67a4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

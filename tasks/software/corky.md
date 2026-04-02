@@ -1572,7 +1572,7 @@ Both bugs confirmed after code review.
 
 Ready to implement on your go.
 Go
-### Re: Implementing Threading Fixes (HEAD)
+### Re: Implementing Threading Fixes
 
 Both bugs fixed across 8 files, `cargo check` passes clean.
 
@@ -1589,7 +1589,6 @@ Both bugs fixed across 8 files, `cargo check` passes clean.
 - `draft/migrate.rs`: Added `thread_id: None` to legacy migration
 
 Next: run `corky sync` on a mailbox to populate Message-IDs, then test a threaded reply draft.
-<!-- agent:boundary:c41dcfc4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

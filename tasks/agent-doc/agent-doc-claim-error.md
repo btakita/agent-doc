@@ -127,7 +127,7 @@ This is happening every ~5 seconds — `ragie-web-doc.md` has a session running 
 
 This is a separate bug — should I investigate and fix the PatchWatcher?
 Yes
-### Re: PatchWatcher no-op fix (HEAD)
+### Re: PatchWatcher no-op fix
 
 Fixed. Patch computation now runs **outside** `WriteCommandAction`. The write lock is only acquired when the result differs from the current document content. No-op patches skip the write action entirely.
 
@@ -137,7 +137,7 @@ After: no-op patches → early return, no EDT blocking
 Plugin version bumped to 0.2.39. Plugin zip: `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.39.zip`
 
 Reinstall the plugin to fix the lag.
-<!-- agent:boundary:fbd5d1af -->
+<!-- agent:boundary:e97d693f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1997,12 +1997,40 @@ Done. Deployed to https://agent-doc-js.pages.dev
 - `markProcessing(view, snapshotText)` computes changed lines and applies processing markers
 - Called at the start of `handleSubmit()` before the API call
 - CSS `@keyframes gutter-pulse` handles the animation
-<!-- agent:boundary:bcc3625c -->
+
+The claude credentials keep on expiring. What are some options for longer lived credentials
+### Re: Longer-lived Claude credentials (HEAD)
+
+The issue is that API keys entered in the browser expire or get rotated. Here are the options:
+
+**1. Proxy worker with server-side key (recommended)**
+The app already supports a proxy URL. Deploy a Cloudflare Worker that holds the API key as a secret. The browser never sees the key.
+- Key rotation happens once on the worker, not per-client
+- Can add rate limiting, auth
+- Already partially built: `worker.js` exists with the proxy endpoint
+
+**2. Longer-lived API keys**
+Anthropic API keys don't expire on their own — they persist until revoked. If yours are expiring, it might be because:
+- The `setup.sh` script populates from Claude Code's session token (which does expire)
+- Browser localStorage is being cleared
+- The key is being regenerated in the Anthropic console
+
+**3. Environment-based auth via the proxy (simplest)**
+Set `ANTHROPIC_API_KEY` as a Cloudflare Worker secret:
+```
+wrangler secret put ANTHROPIC_API_KEY
+```
+The worker reads `env.ANTHROPIC_API_KEY` — no client-side key needed. The web app only needs the proxy URL. Make the API key field optional when a proxy is configured.
+
+**Recommendation:** Option 3. The worker already exists. We'd just have the worker fall back to its own secret when no `x-api-key` header is sent, and make the API key optional in the UI.
+
+Want me to implement option 3?
+<!-- agent:boundary:18a27fcb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Pulsing gutter spinner during submit
-- [x] Sources panel (Ragie document viewer)
+- [ ] Worker: fall back to env secret when no client API key (awaiting approval)
+- [ ] UI: make API key optional when proxy is configured
 <!-- /agent:pending -->

@@ -11,7 +11,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-25 pages deployed. AI agent architecture discussed for document review pipeline.
+25 pages deployed. Document pipeline architecture: Tier 0-3 (WAF -> Workers AI -> Claude -> Ragie).
 <!-- /agent:status -->
 
 ## Exchange
@@ -407,23 +407,51 @@ Cloudflare has Workers AI with direct model access from Workers -- no external A
 - Could cross-validate with Claude
 
 **Claude Code** is a CLI dev tool, not a runtime API -- the Worker calls the Anthropic API directly via HTTP fetch.
-<!-- agent:boundary:4fc06e0d -->
+
+Please read through https://www.ragie.ai/parse
+Would ragie be sufficient for qualifying uploads from the web?
+Or would we need Tier 1 + Tier 2?
+### Re: Ragie Parse for qualifying uploads (HEAD)
+
+Based on the Ragie Parse page, **Ragie alone is NOT sufficient for qualifying uploads from the web.**
+
+**What Ragie Parse does well:**
+- Parses messy PDFs, scanned docs, handwritten content, spreadsheets, images, audio/video
+- Extracts structured data: tables, form fields, key-value pairs, charts, signatures
+- Bounding boxes for traceability back to source documents
+
+**What Ragie Parse does NOT do:**
+- No content validation or quality checks
+- No security screening or malware detection
+- No adversarial content / prompt injection detection
+- No legitimacy verification
+
+**You still need Tier 1 + Tier 2.** Ragie is the knowledge base, not the gatekeeper:
+
+| Layer | Tool | Purpose |
+|-------|------|---------|
+| **Tier 0** | Cloudflare WAF + upload limits | Block malicious payloads, enforce file size/type |
+| **Tier 1** | Workers AI | File type check, basic spam detection |
+| **Tier 2** | Claude API | Content review, prompt injection check, legitimacy, field extraction |
+| **Tier 3** | Ragie Parse + Index | Parse approved docs into structured data, index for RAG retrieval |
+
+**Flow:** Upload -> CF WAF -> Worker validates -> R2 quarantine -> Claude reviews (async) -> approved? -> Ragie Parse + Index -> rejected? -> flag for human review
+<!-- agent:boundary:4818ddec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Create private repo + scaffold rappstack project
-- [x] CSS, style, and content parity with live site
 - [x] All pages built (25 total, 50 tests passing)
 - [x] Deploy to Cloudflare Pages (equityfundingsource.pages.dev)
 - [ ] Form submission backend
+  - [ ] Tier 0: Cloudflare WAF + upload limits
+  - [ ] Tier 1: Workers AI pre-screening
+  - [ ] Tier 2: Claude API document review
+  - [ ] Tier 3: Ragie Parse + Index for approved docs
   - [ ] Worker API endpoints (/api/apply, /api/contact)
   - [ ] D1 database for submissions
   - [ ] R2 quarantine for uploaded documents
-  - [ ] Tier 1: Workers AI pre-screening (file validation, spam)
-  - [ ] Tier 2: Claude API document review (context poisoning, legitimacy, extraction)
-  - [ ] Ragie indexing for approved submissions
   - [ ] Admin dashboard (Cloudflare Access auth)
   - [ ] Token-based document upload flow
   - [ ] Notification emails

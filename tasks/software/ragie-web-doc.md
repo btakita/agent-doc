@@ -1422,7 +1422,7 @@ Deployed to Cloudflare Pages. Settings changes now persist correctly.
 
 The model being used should be in a dropdown at the top of the page.
 Changing the dropdown value should automatically select the model without needing to press a Save button.
-### Re: Model dropdown in toolbar (HEAD)
+### Re: Model dropdown in toolbar
 
 Added a model dropdown to the toolbar header. Changing the dropdown instantly saves the selection to localStorage — no Save button needed.
 
@@ -1432,7 +1432,7 @@ Added a model dropdown to the toolbar header. Changing the dropdown instantly sa
 - **Synced:** Settings dialog model dropdown stays in sync with toolbar
 
 Deployed to Cloudflare Pages.
-<!-- agent:boundary:13bc00c5 -->
+<!-- agent:boundary:b0ecdb87 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

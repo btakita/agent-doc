@@ -1959,7 +1959,7 @@ Got it — you want a panel that shows the Ragie-retrieved source chunks when th
 3. JS: store retrieved chunks, render them in the panel, add toolbar toggle
 
 Implementing now.
-### Re: Sources panel implemented (HEAD)
+### Re: Sources panel implemented
 
 Done. Deployed to https://agent-doc-js.pages.dev
 
@@ -1978,7 +1978,7 @@ Done. Deployed to https://agent-doc-js.pages.dev
 - `src/app.js` — `searchRagie()` now returns raw chunks + formatted text, added `renderSources()`, wired up toggle/close buttons
 
 Try submitting a query that triggers Ragie retrieval to see it in action.
-<!-- agent:boundary:dd282385 -->
+<!-- agent:boundary:4e15aea5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

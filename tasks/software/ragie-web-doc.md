@@ -1450,7 +1450,7 @@ What do you want to tackle first?
 1
 We have `RAGIE_API_KEY="$(pass btak/RAGIE_API_KEY)"`
 Perhaps we should have a field for the RAGIE_API_KEY?
-### Re: Ragie integration built and deployed (HEAD)
+### Re: Ragie integration built and deployed
 
 **Done.** Ragie retrieval is integrated into the submit flow.
 
@@ -1474,7 +1474,7 @@ corky ragie upload <file>
 Or via the Ragie dashboard.
 
 **Next:** Upload demo docs to Ragie, then the full flow (edit -> Ragie retrieval -> Claude with context) will work end-to-end.
-<!-- agent:boundary:212d38ac -->
+<!-- agent:boundary:c13f044c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

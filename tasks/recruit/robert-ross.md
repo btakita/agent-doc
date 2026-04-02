@@ -141,7 +141,7 @@ Note: the previous version was already sent directly (I jumped the gun on "S" be
 You did 2 thing wrong.
 First, you just sent it when I asked you to save it as a draft.
 Second, it did not thread correctly.
-### Re: Two mistakes acknowledged (HEAD)
+### Re: Two mistakes acknowledged
 
 You're right on both counts. I'm sorry.
 
@@ -158,7 +158,7 @@ You're right on both counts. I'm sorry.
 - Or I can implement the corky fix first, then resend
 
 What would you like to do?
-<!-- agent:boundary:b772c911 -->
+<!-- agent:boundary:4cd25aa6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

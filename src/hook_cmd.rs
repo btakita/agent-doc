@@ -76,6 +76,7 @@ pub fn poll(event_name: &str, since_secs: u64, project_root: Option<&str>) -> Re
 ///
 /// Listens on `.agent-doc/hooks.sock` for JSON messages from `SocketTransport`.
 /// Each received event is written to the file-based hook directory for other sessions to poll.
+#[cfg(unix)]
 pub fn listen(project_root: Option<&str>) -> Result<()> {
     let root = if let Some(r) = project_root {
         PathBuf::from(r)
@@ -129,6 +130,12 @@ pub fn listen(project_root: Option<&str>) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Start a hook socket listener (not supported on non-Unix platforms).
+#[cfg(not(unix))]
+pub fn listen(_project_root: Option<&str>) -> Result<()> {
+    anyhow::bail!("hook socket listener is only supported on Unix platforms")
 }
 
 /// Handle a single hook message from the socket.

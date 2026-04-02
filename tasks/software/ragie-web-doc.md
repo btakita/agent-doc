@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | agent:pending component added | Claude manages task list
+LIVE: https://agent-doc-js.pages.dev | Reset button added | Feature-complete for demo
 <!-- /agent:status -->
 
 ## Exchange
@@ -1651,14 +1651,26 @@ Added:
 The pending component works the same as in local agent-doc — Claude manages the task list as the conversation progresses.
 
 Deployed to Cloudflare Pages.
-<!-- agent:boundary:2272c523 -->
+
+Let's have a reset butt
+### Re: Reset button added (HEAD)
+
+Toolbar now: `[Haiku 4.5 v] [Submit] [Reset] [Settings]`
+
+- Confirm dialog before resetting
+- Clears editor content, snapshot, and localStorage
+- Reloads the default document template (with exchange + pending components)
+- Terminal logs "Document reset to default"
+
+Deployed.
+<!-- agent:boundary:2a0a31a5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] SPA: editor + toolbar + terminal + diff gutter + pending
-- [x] SKILL.md-driven RAG with Ragie search
+- [x] SPA: editor + toolbar + terminal + diff gutter + pending + reset
+- [x] SKILL.md-driven RAG
 - [x] 18 blog posts uploaded to Ragie
 - [ ] Ragie indexing still processing
 - [ ] Yjs CRDT for concurrent editing

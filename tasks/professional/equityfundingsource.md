@@ -475,7 +475,25 @@ Implement. See tasks/professor/judith-krug.md:
 - Tier 1-3 validation pipeline (Workers AI, Claude API, Ragie)
 
 54 tests passing.
-<!-- agent:boundary:2e56bb59 -->
+
+continue:
+- [ ] Create D1 database and run migration (`wrangler d1 create equityfundingsource`)
+### Re: Create D1 database (HEAD)
+
+**Blocker:** `wrangler d1 create equityfundingsource` failed with authentication error (code 10000). Your OAuth token has d1 write permissions but the API request was rejected. Likely a stale token.
+
+**Fix:** Run `npx wrangler login` from `src/equityfundingsource-dev/` to re-authenticate, then retry:
+```bash
+cd src/equityfundingsource-dev
+npx wrangler login
+npx wrangler d1 create equityfundingsource
+```
+
+After creating the database, update the `database_id` in `wrangler.toml` with the ID from the output, then run:
+```bash
+npx wrangler d1 migrations apply equityfundingsource
+```
+<!-- agent:boundary:b703bfe5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -486,7 +504,7 @@ Implement. See tasks/professor/judith-krug.md:
 - [x] Add EFS document pipeline topic to bob-remeika.md
 - [x] Wire up form submission backend (Apply Now + Contact) -- D1 + R2, 54 tests passing
 - [x] Review and send proposal email to Judith from Gmail -- pushed to Drafts
-- [ ] Create D1 database and run migration (`wrangler d1 create equityfundingsource`)
+- [ ] Create D1 database and run migration -- **blocked: wrangler auth expired, need `npx wrangler login`**
 - [ ] Redeploy to Cloudflare Pages with form backend
 - [ ] Form submission pipeline
   - [ ] Tier 0: Cloudflare WAF + upload limits

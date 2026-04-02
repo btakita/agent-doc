@@ -182,7 +182,7 @@ Send the LinkedIn message manually. The drafted text is ready:
 The corky `threadId` fix can happen separately — it's a code improvement for future emails, not urgent for this reply.
 
 Why was the email reply not threaded?
-### Re: Why the email reply was not threaded (HEAD)
+### Re: Why the email reply was not threaded
 
 Two separate bugs compounded:
 
@@ -191,7 +191,7 @@ Two separate bugs compounded:
 **Bug 2 — Missing `threadId` in Gmail API request:** Even after fixing Bug 1 (using the correct Message-ID in the headers), the email still didn't thread. When sending via the Gmail API, you must include `"threadId": "19d479af292d8d99"` in the JSON request body alongside the raw RFC 2822 message. Corky's `send_via_gmail_api` function only sends `{ "raw": encoded }` — it doesn't pass `threadId`. Without this, Gmail creates a new thread.
 
 **Summary:** Both the RFC headers AND the Gmail API `threadId` field are needed. Corky was missing both, and fixing one without the other still breaks threading.
-<!-- agent:boundary:5b28715a -->
+<!-- agent:boundary:d7505b5b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

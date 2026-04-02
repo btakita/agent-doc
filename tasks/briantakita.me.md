@@ -1101,11 +1101,20 @@ Draft updated at `mail/social/20260402-security-blog-linkedin.md`.
 ### Re: Em dash fix
 
 Replaced all ` — ` with `...` in the draft. Updated `mail/social/20260402-security-blog-linkedin.md`.
-<!-- agent:boundary:05fea691 -->
+
+> Multi-agent workflows create attack surfaces that don't exist in single-agent systems.
+
+Again, the security exercise was considering multi-user collaborative documents. Not multi-agent workflows.
+### Re: Multi-user not multi-agent (HEAD)
+
+Fixed. Changed "Multi-agent workflows create attack surfaces that don't exist in single-agent systems" to "Collaborative documents create attack surfaces that don't exist when you're the only one editing." The concern is about who writes the document, not how many agents are running.
+
+Draft updated.
+<!-- agent:boundary:f77fe090 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn teaser — draft updated (em dashes fixed), ready to post
+- LinkedIn teaser — draft corrected (multi-user framing), ready to post
 - LinkedIn OAuth — needs retry or manual paste
 - Search icon `w-full` fix — remove `w-full` from icon span in rappstack-dev
 - JSON-LD VideoObject enhancement — add BlogPosting wrapper, duration, publisher (optional)

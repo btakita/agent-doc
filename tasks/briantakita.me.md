@@ -952,7 +952,7 @@ Please write a draft file.
 Saved the revised teaser as `mail/social/20260402-security-blog-linkedin.md`. The previous draft (`mail/social/20260401-181027-linkedin.md`) referenced in the session summary doesn't exist — it was lost. This new file replaces it.
 
 Ready to post when you are. LinkedIn OAuth still needs retry (was blocked by outage last session).
-<!-- agent:boundary:1bf2431a -->
+<!-- agent:boundary:fed2e42e -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

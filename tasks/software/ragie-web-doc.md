@@ -1739,7 +1739,7 @@ The prompt was duplicated in the response patch.
 **Export includes terminal:** The exported `.md` file now has a `## Terminal Output` section at the bottom with all terminal log lines in a code block.
 
 Deployed. Reset the document and try again — the duplication should be gone.
-<!-- agent:boundary:ca5f24f1 -->
+<!-- agent:boundary:207a37c7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1523,7 +1523,7 @@ Can we do snapshot detection. With diffs. We don't have git, but can we simulate
 
 Please add Yjs CRDT to handle user typing while response patch happens.
 Or we can just wait until the user is done typing before sending response.
-### Re: Diff gutter + layout fix (HEAD)
+### Re: Diff gutter + layout fix
 
 **Diff gutter added.** Green markers on the left edge show lines that changed since the last snapshot (like git gutter in IDEs).
 
@@ -1536,7 +1536,7 @@ Or we can just wait until the user is done typing before sending response.
 **Yjs CRDT:** Your request got cut off at "response p" — I'll add Yjs CRDT for handling concurrent edits (user typing while response patches are applied) in the next cycle. Confirm and I'll build it.
 
 Deployed to Cloudflare Pages.
-<!-- agent:boundary:8ef48c64 -->
+<!-- agent:boundary:e9c73079 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

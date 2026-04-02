@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Prompt echo fix deployed | Reset and test
+LIVE: https://agent-doc-js.pages.dev | Ragie: 18 docs stuck in partitioning | SPA ready, waiting on indexing
 <!-- /agent:status -->
 
 ## Exchange
@@ -1779,15 +1779,31 @@ The duplication was Claude echoing the user's question text inside its `<!-- pat
 This is a prompting fix — Haiku was being helpful by repeating the question before answering. The instruction tells it to skip that.
 
 Deployed. Reset and try again.
-<!-- agent:boundary:07080874 -->
+
+It doesn't seem like the Ragie integration is working. Is Ragie done indexing?
+Duplicate Prompt in Response patch. See /home/brian/work/btakita/agent-loop/tmp/agent-doc-js/agent-doc-export (1).md
+### Re: Ragie indexing status — all 18 docs stuck in "partitioning" (HEAD)
+
+All 18 blog posts are visible in Ragie but all stuck in "partitioning" status for 30+ minutes. This is a Ragie-side processing issue — likely free tier queue backlog.
+
+**Options:**
+1. **Wait** — Ragie's queue will eventually process them
+2. **Try smaller docs** — upload a single small test document to see if processing works at all
+3. **Check Ragie status page** — may be a service incident
+4. **Contact Ragie support** — if stuck for hours
+
+The SPA works correctly — when Ragie returns results, they'll be injected into the Claude prompt. The pipeline is ready; the data just isn't indexed yet.
+
+**On the duplicate prompt issue:** I already updated SKILL.md to tell Claude not to echo user text. If you're still seeing duplicates, it may be that the deployed version hasn't been picked up (hard refresh the page), or the SKILL.md in Settings needs to be updated (Reset the Settings to get the new default).
+<!-- agent:boundary:eaa314d4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] SPA feature-complete with all fixes
-- [x] SKILL.md no-echo guideline
-- [ ] Ragie indexing (still partitioning)
+- [ ] Ragie indexing stuck in "partitioning" — free tier queue issue
+- [ ] Test with real Ragie retrieval once indexing completes
 - [ ] CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
 <!-- /agent:pending -->

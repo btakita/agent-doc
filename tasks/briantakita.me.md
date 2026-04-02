@@ -870,7 +870,7 @@ commit and push
 
 All four repos pushed successfully.
 compact exchange
-### Session Summary (compacted) (HEAD)
+### Session Summary (compacted)
 
 **Prior sessions resolved (9 items):** CI TypeError, esbuild 0.27 `.ts` resolution, Hono sub-app routing, video sitemap, search icon CSS, 32 tests, rebuildjs@0.71.1, local dev symlink workflow, @rappstack/ui--browser--blog@0.1.2 release.
 
@@ -888,7 +888,7 @@ compact exchange
 - Search icon `w-full` class may need removal
 - Scroll-responsive behavior may need browser cache clear on production
 - `rappstack-dev` `blog__header.ts` changes are separate from briantakita.me-dev
-<!-- agent:boundary:b5f881d2 -->
+<!-- agent:boundary:40cbed8c -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

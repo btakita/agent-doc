@@ -1437,7 +1437,34 @@ Here's a focused prep plan for the 30-minute call:
 - JB plugin demo environment ready (clean session, good example doc)
 - EFS Tier 0-3 architecture diagram or doc walkthrough ready
 - Ragie Parse questions written down (content moderation roadmap, multi-tenant isolation, enterprise pricing)
-<!-- agent:boundary:07ed763c -->
+
+I'm working on a agent-doc-js demo in tasks/software/ragie-web-doc.md
+Not counting on it but would be awesome if it works.
+
+I want to use my ragie free account with some sample documents.
+Use a connected ragie-web-doc to work with ragie from the interactive documents...query and viewing content from the ragie documents.
+### Re: Ragie-powered agent-doc-js demo for Bob call (HEAD)
+
+Smart to have this as a stretch goal. Even a partial demo showing Ragie retrieval inside the browser-based agent-doc would be a powerful "show don't tell" moment for Bob.
+
+**What the demo could look like:**
+- Open ragie-web-doc in the browser (localhost:8089)
+- Query a document indexed in your Ragie free account (e.g. the patent mining proposal or a sample loan doc)
+- Ragie search results appear in a side panel or inline in the document
+- Agent uses retrieved context to answer questions — Bob sees his API powering the workflow live
+
+**Sample documents to upload to Ragie free tier:**
+- Patent mining proposal (Ron's use case — shows complex document retrieval)
+- A sample commercial RE loan doc or appraisal (Judith's use case — shows Ragie Parse value)
+- Your resume or a contact profile (lightweight, proves the pipeline works)
+
+**For the Bob call, even a minimal version works:**
+- If full integration lands: live demo with Ragie retrieval in the browser editor
+- If partial: show the CodeMirror editor + walk through the Ragie API calls in code — "here's what happens when a user queries"
+- If not ready: JB plugin demo is already strong, web prototype becomes "here's the architecture, here's the code, shipping next week"
+
+No pressure to finish — it's a bonus, not the main event. The JB plugin demo + EFS pipeline discussion carry the call on their own.
+<!-- agent:boundary:cc99b925 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1446,6 +1473,8 @@ Here's a focused prep plan for the 30-minute call:
 - Prep JB plugin demo environment for Bob call (Thursday April 3, 11:30 AM ET)
 - Prep EFS Tier 0-3 architecture walkthrough for Bob call
 - Write Ragie Parse questions (content moderation roadmap, multi-tenant isolation, pricing)
+- Upload sample docs to Ragie free tier (patent proposal, loan doc sample, resume)
+- [stretch] Get ragie-web-doc demo working for Bob call (tasks/software/ragie-web-doc.md)
 - Schedule Robert Ross call at 4:00 PM ET / 1:00 PM PT Thursday
 - Discuss EFS document pipeline: Ragie Parse for indexing approved loan docs, but need Tier 1-2 validation before indexing (Workers AI pre-screen + Claude API review for context poisoning, legitimacy, extraction). Ragie has no built-in content moderation. See tasks/professional/equityfundingsource.md
 <!-- /agent:pending -->

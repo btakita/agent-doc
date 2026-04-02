@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Ragie: 18 docs stuck in partitioning | SPA ready, waiting on indexing
+LIVE: https://agent-doc-js.pages.dev | SKILL.md reset button added | Ready for demo
 <!-- /agent:status -->
 
 ## Exchange
@@ -1795,15 +1795,23 @@ All 18 blog posts are visible in Ragie but all stuck in "partitioning" status fo
 The SPA works correctly — when Ragie returns results, they'll be injected into the Claude prompt. The pipeline is ready; the data just isn't indexed yet.
 
 **On the duplicate prompt issue:** I already updated SKILL.md to tell Claude not to echo user text. If you're still seeing duplicates, it may be that the deployed version hasn't been picked up (hard refresh the page), or the SKILL.md in Settings needs to be updated (Reset the Settings to get the new default).
-<!-- agent:boundary:2107a22b -->
+
+Can I reset the SKILL.md? If not, please add a button in the settings dialog.
+### Re: Reset SKILL.md button added (HEAD)
+
+Settings dialog now has a "Reset SKILL.md to Default" button below the SKILL.md textarea. Click it to restore the built-in default, then click Save to persist.
+
+This gets you the latest SKILL.md with the no-echo guidelines and pending instructions without having to clear localStorage.
+
+Deployed.
+<!-- agent:boundary:c061cdfc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] SPA feature-complete with all fixes
-- [ ] Ragie indexing stuck in "partitioning" — free tier queue issue
-- [ ] Test with real Ragie retrieval once indexing completes
+- [x] SPA feature-complete: all buttons, terminal, diff gutter, SKILL.md reset
+- [ ] Ragie indexing stuck in partitioning
 - [ ] CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
 <!-- /agent:pending -->

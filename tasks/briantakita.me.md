@@ -954,10 +954,10 @@ Saved the revised teaser as `mail/social/20260402-security-blog-linkedin.md`. Th
 Ready to post when you are. LinkedIn OAuth still needs retry (was blocked by outage last session).
 
 I updated the draft with the teaser that we were discussing last evening.
-### Re: Updated draft (HEAD)
+### Re: Updated draft
 
 Acknowledged — `mail/social/20260402-security-blog-linkedin.md` is updated with your revised teaser. Leads with the commit stats hook, follows with security/audit/meta lessons, concise format. Ready to post whenever LinkedIn OAuth is working.
-<!-- agent:boundary:02bffe3a -->
+<!-- agent:boundary:1e204d35 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

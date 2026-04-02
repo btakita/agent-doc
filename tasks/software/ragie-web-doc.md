@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Ragie search auto-runs on submit | 18 docs indexing (partitioning)
+LIVE: https://agent-doc-js.pages.dev | Pipeline: diff -> Ragie search -> Claude with context -> patch | Docs indexing
 <!-- /agent:status -->
 
 ## Exchange
@@ -1580,17 +1580,28 @@ How can we access the ragie search from prompts?
 **From terminal prompt:** Currently terminal sends direct Claude prompts without Ragie. Can add Ragie to terminal too if you want.
 
 **Status:** All 10 visible documents still in "partitioning" status. Ragie free tier may take a few more minutes. Will test again soon.
-<!-- agent:boundary:46b6a4ef -->
+
+Will the diff go through C
+### Re: Ragie first, then Claude (HEAD)
+
+**Ragie runs first.** The flow:
+
+1. Ctrl+Enter -> diff computed
+2. **Ragie search** (diff as query) -> retrieves relevant chunks
+3. **Claude API call** (document + diff + Ragie context) -> generates response
+4. Response patched into document
+
+Ragie provides context *to* Claude. The SPA orchestrates the pipeline — Ragie enriches the prompt before Claude sees it.
+<!-- agent:boundary:976b547c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] SPA: editor + toolbar + terminal + diff gutter
-- [x] Ragie retrieval integration (wired to submit flow)
+- [x] Ragie retrieval integration (Ragie -> Claude pipeline)
 - [x] Uploaded 18 blog posts to Ragie
-- [ ] Wait for Ragie indexing, then test end-to-end retrieval
-- [ ] Add Ragie search to terminal prompt (optional)
+- [ ] Wait for Ragie indexing, test end-to-end retrieval
 - [ ] Yjs CRDT for concurrent editing
 - [ ] Add CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call

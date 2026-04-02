@@ -1527,12 +1527,24 @@ The OAuth token was obtained as the `btak.dev` account (stored under `gmail:defa
 2. If the sheet is owned by a different account, re-auth with that account: the current code uses `gmail:default` which maps to whatever account you sign in with
 
 Which account owns this sheet?
-<!-- agent:boundary:d6f49aaf -->
+brian.takita@gmail.com has access
+### Re: Account-based auth (HEAD)
+
+Added `--account` flag to all doc commands. Token keys now use the email (e.g., `gmail:brian.takita@gmail.com`), so different Google accounts get separate cached tokens.
+
+Re-authed with `brian.takita@gmail.com` login hint but still got 403. Possible causes:
+
+1. Sheet isn't actually shared with `brian.takita@gmail.com` (check sharing settings)
+2. Different account picked in browser despite hint
+3. GCP app in "testing" mode -- `brian.takita@gmail.com` not in test users list
+
+Can you verify the sheet's sharing settings? Or try "Anyone with the link" to test?
+<!-- agent:boundary:e787930f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Share sheet with authenticated account or re-auth with correct account
+- Verify sheet sharing / GCP test users
 - Re-test sheet read
 <!-- /agent:pending -->

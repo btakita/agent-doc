@@ -1502,12 +1502,19 @@ bf65e7d feat(doc): Google Drive upload, Docs read/write, Sheets read
 2. Add scopes: `drive.file`, `documents`, `spreadsheets.readonly`
 3. Enable APIs: Google Drive API, Google Docs API, Google Sheets API
 4. First run of any command will trigger re-auth for the new scopes
-<!-- agent:boundary:b5a74769 -->
+
+Test with https://docs.google.com/spreadsheets/d/1F1NfBcMM3r692zgkVPxKFtV4jdmFvLU7_xyHNqD2B1o/edit?gid=0#gid=0
+### Re: Testing sheet read (HEAD)
+
+OAuth triggered -- waiting for browser auth. The Sheets API scope (`spreadsheets.readonly`) needs consent. Complete the Google sign-in in your browser to proceed.
+
+The callback is listening on `http://127.0.0.1:8484/callback`.
+<!-- agent:boundary:1073636a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Add Drive/Docs/Sheets scopes + enable APIs in GCP console
-- Test all doc commands with real files
+- Complete OAuth consent for spreadsheets.readonly scope (waiting for browser)
+- Test sheet read after auth
 <!-- /agent:pending -->

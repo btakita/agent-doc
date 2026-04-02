@@ -223,10 +223,10 @@ I'd recommend **A** — the most conservative and safest. A 1.5s delay on genuin
 
 Should I implement option A?
 Yes
-### Re: Implementing option A (HEAD)
+### Re: Implementing option A
 
 Implementing option A — removing the single-char exception so all single characters go through the stability check.
-### Re: Single-char truncation fix deployed (HEAD)
+### Re: Single-char truncation fix deployed
 
 Done. Single characters are now treated as potentially truncated in `looks_truncated()`. Instead of immediately accepting `S` as a valid choice response, it goes through the stability check (3 consecutive reads at 500ms each = 1.5s delay).
 
@@ -236,7 +236,7 @@ Done. Single characters are now treated as potentially truncated in `looks_trunc
 - `cargo build --release` + `cargo install --path .` done
 
 The fix is live in both `.bin/agent-doc` and `~/.cargo/bin/agent-doc`. No plugin update needed — this is binary-side only.
-<!-- agent:boundary:6773a6c6 -->
+<!-- agent:boundary:e359b0fa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

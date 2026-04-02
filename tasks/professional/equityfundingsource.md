@@ -411,7 +411,7 @@ Cloudflare has Workers AI with direct model access from Workers -- no external A
 Please read through https://www.ragie.ai/parse
 Would ragie be sufficient for qualifying uploads from the web?
 Or would we need Tier 1 + Tier 2?
-### Re: Ragie Parse for qualifying uploads (HEAD)
+### Re: Ragie Parse for qualifying uploads
 
 Based on the Ragie Parse page, **Ragie alone is NOT sufficient for qualifying uploads from the web.**
 
@@ -436,7 +436,7 @@ Based on the Ragie Parse page, **Ragie alone is NOT sufficient for qualifying up
 | **Tier 3** | Ragie Parse + Index | Parse approved docs into structured data, index for RAG retrieval |
 
 **Flow:** Upload -> CF WAF -> Worker validates -> R2 quarantine -> Claude reviews (async) -> approved? -> Ragie Parse + Index -> rejected? -> flag for human review
-<!-- agent:boundary:4818ddec -->
+<!-- agent:boundary:42ec7d32 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

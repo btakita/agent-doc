@@ -829,12 +829,17 @@ Should we have corky support Google documents?
 - Would use the Google Docs/Sheets API with the same OAuth flow corky already uses for Gmail
 
 It would be useful for cases exactly like this -- pulling spreadsheet data into agent workflows. Worth adding to the corky roadmap. The Gmail OAuth scope could be extended to include Docs/Sheets scopes.
-<!-- agent:boundary:d925c0dc -->
+
+Add to tasks/software/corky.md
+### Re: Added to corky roadmap (HEAD)
+
+Added "Google Docs/Sheets integration" to `tasks/software/corky.md` status section as an open item. When implemented, it would extend the existing Gmail OAuth scopes to include Docs/Sheets API access for reading spreadsheets and collaborating on documents directly from agent workflows.
+<!-- agent:boundary:1ece2109 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [ ] Review Ron's patent spreadsheet (needs access -- share publicly or export CSV)
-- [ ] Corky Google Docs/Sheets support (roadmap item)
+- [ ] Corky Google Docs/Sheets support (added to tasks/software/corky.md)
 - [ ] Wait for Ron to confirm Steve intro / Steve responds
 - [ ] Review transcript speaker labels for accuracy corrections
 - [ ] Patent mining automation -- review Ron's spreadsheet when shared

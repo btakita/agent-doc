@@ -1053,7 +1053,7 @@ The esm.sh CDN approach was fundamentally broken for CodeMirror — no combinati
 - 11 lines of default template content visible
 
 Screenshot verified — the SPA is working. Next step: test the Claude API call (enter an API key and submit).
-<!-- agent:boundary:a2ff30e3 -->
+<!-- agent:boundary:4bbf7b7e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

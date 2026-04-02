@@ -988,7 +988,7 @@ btakita/agent-doc-js + agent-doc.briantakita.me
 
 Let's also have some sample agent documents to get started.
 Such as research tools or ragie integration
-### Re: Renamed to agent-doc-js — repo created and scaffolded (HEAD)
+### Re: Renamed to agent-doc-js — repo created and scaffolded
 
 **Done.** btakita/agent-doc-js is live: https://github.com/btakita/agent-doc-js
 
@@ -1016,7 +1016,7 @@ Such as research tools or ragie integration
 - Submodule added to agent-loop at `src/agent-doc-js`
 
 Running locally at `http://localhost:8089` for testing.
-<!-- agent:boundary:b0eb4d05 -->
+<!-- agent:boundary:36174275 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

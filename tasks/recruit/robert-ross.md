@@ -242,7 +242,7 @@ Also create a 1 page pdf for my call with robert-ross
 
 Robert Ross is watching the screenshare right now.
 Please describe to Robert Ross what agent-doc is.
-### Re: What is agent-doc (HEAD)
+### Re: What is agent-doc
 
 Hi Rob — what you're seeing right now is **agent-doc** in action.
 
@@ -260,7 +260,7 @@ What makes this different from a chatbot:
 - **Git integration** — visual gutter markers show what's committed (agent response) vs uncommitted (Brian's next input)
 
 It's essentially a developer workflow where the document *is* the interface — no context switching between editor and terminal.
-<!-- agent:boundary:b2c021d0 -->
+<!-- agent:boundary:cddd7330 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

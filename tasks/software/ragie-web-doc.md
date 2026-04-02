@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Demo badge + credentials notice added | Custom domain pending
+LIVE: https://agent-doc-js.pages.dev | setup.sh for zero-friction onboarding | Ready for Bob demo
 <!-- /agent:status -->
 
 ## Exchange
@@ -1123,6 +1123,7 @@ This can be set up in the Cloudflare dashboard under Pages > agent-doc-js > Cust
 
 Specify that this is a demo and credentials are save to local storage.
 ![img.png](img.png)
+
 ### Re: Added demo notice and credentials disclaimer
 
 **Updated and redeployed.** The SPA now shows:
@@ -1134,7 +1135,33 @@ Specify that this is a demo and credentials are save to local storage.
 The screenshot shows the settings dialog working correctly on the deployed site. The API key field, model selector, proxy URL, and system prompt are all functional.
 
 **Redeployed to Cloudflare Pages** — live at https://agent-doc-js.pages.dev
-<!-- agent:boundary:87124051 -->
+
+Provide a `curl | sh` script to populate credential fields.
+### Re: Setup script for credential auto-population
+
+**Created `setup.sh`** — reads `~/.claude/.credentials.json` and opens the SPA with credentials in the URL hash.
+
+**Usage:**
+```bash
+# From the repo (HEAD)
+./setup.sh
+
+# Or curl from the deployed site (HEAD)
+bash <(curl -s https://agent-doc-js.pages.dev/setup.sh)
+```
+
+**How it works:**
+1. Reads OAuth token from `~/.claude/.credentials.json`
+2. Generates URL: `https://agent-doc-js.pages.dev#apiKey=...&proxyUrl=...&model=...`
+3. Opens in browser (xdg-open on Linux, open on Mac)
+4. SPA reads hash params, stores in localStorage, clears hash from URL
+
+**Security:** The hash fragment is never sent to the server (it's client-side only). After the SPA reads it, `history.replaceState` removes it from the URL bar so it's not visible.
+
+**For Bob:** He runs `./setup.sh` (or the curl one-liner) and the SPA opens pre-configured. No manual copy-pasting of tokens.
+
+Deployed to Cloudflare Pages.
+<!-- agent:boundary:82543796 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1147,6 +1174,7 @@ The screenshot shows the settings dialog working correctly on the deployed site.
 - [x] Deploy Cloudflare Worker proxy for CORS
 - [x] Deploy to Cloudflare Pages
 - [x] Add demo notice and credentials disclaimer
+- [x] Setup script for credential auto-population
 - [ ] Add CNAME for `agent-doc.briantakita.me` (Cloudflare dashboard)
 - [ ] Demo script for Bob call
 - [ ] (deferred) Yjs CRDT for concurrent edit merging

@@ -1580,7 +1580,7 @@ How can we access the ragie search from prompts?
 **From terminal prompt:** Currently terminal sends direct Claude prompts without Ragie. Can add Ragie to terminal too if you want.
 
 **Status:** All 10 visible documents still in "partitioning" status. Ragie free tier may take a few more minutes. Will test again soon.
-<!-- agent:boundary:0aee7117 -->
+<!-- agent:boundary:46b6a4ef -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

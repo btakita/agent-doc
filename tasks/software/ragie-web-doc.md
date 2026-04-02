@@ -1934,13 +1934,40 @@ Yes, a rendered markdown preview is a great addition. Here's what I'm thinking:
 **Alternative: Ragie source document viewer**
 If you meant showing the *Ragie-retrieved source documents* (the context pulled from indexed docs), that would be a different feature — a panel showing the retrieved chunks alongside the conversation.
 
+I'm talking about **Alternative: Ragie source document viewer**. A side or bottom panel with a small view of the document or thumbnail.
+
 Which direction do you want? I'll implement whichever you prefer.
-<!-- agent:boundary:045fc773 -->
+### Re: Ragie source document viewer panel (HEAD)
+
+Got it — you want a panel that shows the Ragie-retrieved source chunks when they come back during a submit.
+
+**UI: Collapsible right side panel**
+- Sits to the right of the editor (horizontal split)
+- Shows retrieved chunks with document name, relevance score, and text content
+- Collapsible like the terminal panel — toggle button in the toolbar
+- Each chunk is a card with the document name as header
+- Empty state: "No retrieved documents yet" when no Ragie results
+
+**Data flow:**
+- Currently `searchRagie()` returns formatted text — discarded in the UI (only logged to terminal)
+- Store the raw chunk data (document_name, score, text) so we can render it in the panel
+- Update the panel each time a Ragie search completes (including Claude's iterative `<ragie-search>` calls)
+
+**Implementation:**
+1. Add `#sources-panel` to HTML (right side of editor, inside a flex wrapper)
+2. CSS for the side panel layout with toggle
+3. JS: store retrieved chunks, render them in the panel, add toolbar toggle
+
+Implementing now.
+<!-- agent:boundary:fdb17174 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Implement markdown preview pane (awaiting direction: rendered preview vs Ragie source viewer)
-- [ ] Toolbar toggle for preview visibility
+- [ ] Add sources panel HTML structure
+- [ ] Add sources panel CSS (collapsible right side panel)
+- [ ] Modify searchRagie to return raw chunk data
+- [ ] Add panel rendering and toolbar toggle
+- [ ] Deploy to Cloudflare Pages
 <!-- /agent:pending -->

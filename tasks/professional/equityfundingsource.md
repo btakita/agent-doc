@@ -2,12 +2,16 @@
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
 agent_doc_format: template
 agent_doc_write: crdt
+links:
+  - ./judith-krug.md
+  - ./robert-waldman.md
+  - ../personal/robert-ward.md
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-25 pages deployed. 50 tests passing. Form backend architecture discussed -- Ragie + D1 + R2 + security layers.
+25 pages deployed. AI agent architecture discussed for document review pipeline.
 <!-- /agent:status -->
 
 ## Exchange
@@ -364,28 +368,63 @@ Good thinking on the security layers. Here's how this could work:
 - Dashboard to view submissions, review flagged docs, manage borrower accounts
 
 This is a significant backend project. Want me to scope out the phases, or is this for a future session after the demo is approved?
-<!-- agent:boundary:54a139c0 -->
+
+On CloudFlare, how would I access agents. Given what we know about this project...discuss the different agents to use for the document + Ragie document base:
+- Claude Code
+- Anthropic API
+- Gemini API
+- OpenAI
+- any others?
+### Re: AI agents on Cloudflare for document review (HEAD)
+
+**Cloudflare Workers AI (built-in):**
+Cloudflare has Workers AI with direct model access from Workers -- no external API calls, lowest latency. Models include Llama 3, Mistral, etc. Good for simple classification/filtering, but not as capable as Claude/GPT for nuanced context poisoning detection.
+
+**Recommendation by tier:**
+
+| Agent | Best For | CF Integration | Cost |
+|-------|----------|----------------|------|
+| **Workers AI (Llama 3)** | Quick pre-screening, spam, file validation | Native binding, zero-latency | Free tier |
+| **Anthropic API (Claude)** | Document review, context poisoning, loan analysis | HTTP fetch from Worker | ~$3-15/1M tokens |
+| **OpenAI API** | Alternative reviewer, structured extraction | HTTP fetch from Worker | ~$2.50-10/1M tokens |
+| **Gemini API** | PDF/image understanding (multimodal), large context | HTTP fetch from Worker | Generous free tier |
+
+**Recommended architecture for EFS:**
+
+1. **Tier 1 -- Workers AI (free, instant):** Pre-screen uploads. Check file type, size, basic content classification. Reject obvious junk.
+2. **Tier 2 -- Claude API (primary reviewer):** Deep document review -- context poisoning detection, document legitimacy check, data extraction (property address, values, borrower info), summary for Judith.
+3. **Ragie indexing:** After Claude approves, index document + extracted metadata.
+
+**Why Claude as primary reviewer:**
+- Best at detecting adversarial content / prompt injection
+- Strong at understanding real estate docs (appraisals, title reports)
+- Structured output for extracting fields into D1
+- You already use the Anthropic API
+
+**Gemini as supplement:**
+- Better multimodal (scanned PDFs, handwritten docs, photos)
+- 2M token context for large appraisal reports
+- Could cross-validate with Claude
+
+**Claude Code** is a CLI dev tool, not a runtime API -- the Worker calls the Anthropic API directly via HTTP fetch.
+<!-- agent:boundary:d02ca9a7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Create private repo btakita/equityfundingsource-dev
-- [x] Add as git submodule in agent-loop/src/
-- [x] Scaffold rappstack project structure
-- [x] Crawl equityfundingnow.com for real content
+- [x] Create private repo + scaffold rappstack project
 - [x] CSS, style, and content parity with live site
-- [x] Individual portfolio deal detail pages (18 pages)
+- [x] All pages built (25 total, 50 tests passing)
 - [x] Deploy to Cloudflare Pages (equityfundingsource.pages.dev)
-- [x] Build Apply Now + Message Us pages
-- [x] Fix social media icons
-- [ ] Form submission backend (Worker + D1 + R2 + Ragie)
-  - [ ] API endpoints for form submission
+- [ ] Form submission backend
+  - [ ] Worker API endpoints (/api/apply, /api/contact)
   - [ ] D1 database for submissions
   - [ ] R2 quarantine for uploaded documents
-  - [ ] AI agent document review (quality + context poisoning check)
-  - [ ] Ragie indexing for clean submissions
-  - [ ] Admin dashboard (auth + submission management)
-  - [ ] Token-based document upload flow (email invite)
-  - [ ] Notification emails to Judith
+  - [ ] Tier 1: Workers AI pre-screening (file validation, spam)
+  - [ ] Tier 2: Claude API document review (context poisoning, legitimacy, extraction)
+  - [ ] Ragie indexing for approved submissions
+  - [ ] Admin dashboard (Cloudflare Access auth)
+  - [ ] Token-based document upload flow
+  - [ ] Notification emails
 <!-- /agent:pending -->

@@ -1261,7 +1261,7 @@ Implemented a two-pass approach:
 The "I'm going to call her tomorrow" hallucination has "tomorrow" appearing 30+ times in the repeated region -- the spike detector will find this at the first 100-word window where it exceeds 10 occurrences, then cut the text at the preceding sentence boundary.
 
 Building and testing on the same 79-min call now.
-### Re: Repetition filter v2 results (HEAD)
+### Re: Repetition filter v2 results
 
 Fixed. The issue was that the filter ran on individual whisper segments (~30s each), but the hallucination spans across many segments. Moved the frequency spike filter to run on **merged speaker blocks** (the concatenated text for each continuous speaker turn).
 
@@ -1282,7 +1282,7 @@ All three fixes implemented and verified:
 1. Speaker count constraint in cross-chunk merging
 2. Frequency spike repetition detection on merged blocks
 3. no_speech_thold tuning (minor, inconclusive)
-<!-- agent:boundary:797287bf -->
+<!-- agent:boundary:d3978d5b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

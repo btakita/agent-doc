@@ -1409,7 +1409,7 @@ This actually strengthens the meeting framing: instead of just pitching use case
 
 I cleaned up the scheduling.
 Let's plan for the call with Bob in the morning.
-### Re: Bob Call Prep — Thursday April 3, 11:30 AM ET (HEAD)
+### Re: Bob Call Prep — Thursday April 3, 11:30 AM ET
 
 Here's a focused prep plan for the 30-minute call:
 
@@ -1437,7 +1437,7 @@ Here's a focused prep plan for the 30-minute call:
 - JB plugin demo environment ready (clean session, good example doc)
 - EFS Tier 0-3 architecture diagram or doc walkthrough ready
 - Ragie Parse questions written down (content moderation roadmap, multi-tenant isolation, enterprise pricing)
-<!-- agent:boundary:24190704 -->
+<!-- agent:boundary:d5f303ec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

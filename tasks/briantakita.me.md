@@ -917,7 +917,7 @@ Collaborative Security, Tracability, and How agent-doc helps with multi-tasking 
 It is now April 2. So remove the April Fools part.
 
 [//]: # (Continue with 1 & 2.)
-### Re: LinkedIn teaser revision (HEAD)
+### Re: LinkedIn teaser revision
 
 Revised draft — leads with the security substance, commit stats moved to supporting role, April Fools removed:
 
@@ -943,7 +943,7 @@ First comment: link to agent-doc repo
 ---
 
 Changes from original: Led with collaborative security + traceability angle. Commit stats now support the narrative rather than lead it. April Fools line removed.
-<!-- agent:boundary:5404bc63 -->
+<!-- agent:boundary:b493511c -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

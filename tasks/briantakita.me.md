@@ -1112,13 +1112,13 @@ Fixed. Changed "Multi-agent workflows create attack surfaces that don't exist in
 Draft updated.
 
 Publish to LinkedIn
-### Re: Published to LinkedIn (HEAD)
+### Re: Published to LinkedIn
 
 Posted via corky. First comment added with blog post + repo links.
 
 - Post: https://www.linkedin.com/feed/update/urn:li:share:7445470177976020992
 - Comment: blog post link + agent-doc repo
-<!-- agent:boundary:8b6c74c0 -->
+<!-- agent:boundary:0c2077a3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

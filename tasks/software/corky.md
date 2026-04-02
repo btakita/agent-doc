@@ -1517,7 +1517,7 @@ https://console.developers.google.com/apis/api/sheets.googleapis.com/overview?pr
 
 After enabling, wait a minute, then retry the command.
 Enabled
-### Re: Permission denied on sheet (HEAD)
+### Re: Permission denied on sheet
 
 Sheets API is enabled and OAuth works. The 403 "caller does not have permission" means the authenticated Google account doesn't have access to this specific spreadsheet.
 
@@ -1527,7 +1527,7 @@ The OAuth token was obtained as the `btak.dev` account (stored under `gmail:defa
 2. If the sheet is owned by a different account, re-auth with that account: the current code uses `gmail:default` which maps to whatever account you sign in with
 
 Which account owns this sheet?
-<!-- agent:boundary:5fa1c895 -->
+<!-- agent:boundary:d6f49aaf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

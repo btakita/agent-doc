@@ -1315,11 +1315,34 @@ For the 77-min call (this AMR file is 7.1 MB):
 For a phone with 128 GB storage, 37 MB per hour-long call is very manageable (~3,400 hours before filling up). The quality improvement for transcription/diarization is massive since AAC preserves the spectral detail that AMR destroys at 12 kbps.
 
 WAV is overkill for phone recordings -- it's lossless but the phone mic/codec doesn't capture enough detail to justify the 20x size increase.
-<!-- agent:boundary:c8cc274b -->
+
+amr seems ok. Is there something in between amr and m4a ~64kbs? Is there a 24 or 32 kbps?
+### Re: Lower bitrate options (HEAD)
+
+Yes, there are options between AMR (12 kbps) and M4A 64 kbps:
+
+| Format | Bitrate | Est. Size (77 min) | Cube ACR? | Quality for transcription |
+|--------|---------|-------------------|-----------|--------------------------|
+| AMR-NB | 12.2 kbps | 7.1 MB | Yes (default) | Poor -- 8kHz, heavy compression |
+| **AMR-WB** | **23.85 kbps** | **~14 MB** | Some devices | Better -- **16kHz**, wider band |
+| **OGG (Opus)** | **24-32 kbps** | **~14-18 MB** | Yes | Good -- Opus is excellent at low bitrates |
+| M4A (AAC) | 32 kbps | ~18 MB | Yes | Decent -- still much better than AMR-NB |
+| M4A (AAC) | 64 kbps | ~37 MB | Yes | Good |
+
+**Best middle-ground options:**
+
+1. **OGG/Opus at 24-32 kbps** -- Opus is specifically designed for speech and outperforms AAC at low bitrates. At 24 kbps Opus sounds nearly as good as AAC at 64 kbps for voice. Cube ACR supports OGG format.
+
+2. **M4A at 32 kbps** -- ~18 MB for 77 min (2.5x AMR). Still a big quality jump over AMR because AAC at 32 kbps keeps much more spectral information than AMR-NB at 12 kbps.
+
+3. **AMR-WB** (wideband) -- If Cube ACR offers it, this doubles the sample rate to 16 kHz at ~24 kbps. Same file size category as AMR-NB but much better for whisper (which resamples to 16 kHz anyway).
+
+**My recommendation:** Try **OGG/Opus** in Cube ACR settings. It's the best codec for speech at low bitrates, and 24-32 kbps Opus should give you much better transcription/diarization quality at only 2x the AMR file size.
+<!-- agent:boundary:e401d8d9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- User switching Cube ACR from AMR to M4A format
+- User switching Cube ACR format (evaluating OGG/Opus or M4A at lower bitrate)
 <!-- /agent:pending -->

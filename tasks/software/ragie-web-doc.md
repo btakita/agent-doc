@@ -1264,7 +1264,7 @@ This is from our rapid automated testing — multiple API calls in quick success
 
 If rate limits persist, use a standard API key (`sk-ant-api03-...`) instead of the OAuth token — standard keys typically have separate/higher limits.
 Pressing `Ctrl+Enter` inserts a newline in the document. It should only run the submit command. Not add a newline.
-### Re: Fixed Ctrl+Enter newline bug (HEAD)
+### Re: Fixed Ctrl+Enter newline bug
 
 The issue: CodeMirror's default keymap was handling Enter (inserting a newline) before the document-level event listener could intercept it. Ctrl+Enter was processed as a regular Enter by CodeMirror.
 
@@ -1273,7 +1273,7 @@ The issue: CodeMirror's default keymap was handling Enter (inserting a newline) 
 Removed the document-level `keydown` listener since it's no longer needed.
 
 Deployed to Cloudflare Pages. Ctrl+Enter now submits without inserting a newline.
-<!-- agent:boundary:adb39510 -->
+<!-- agent:boundary:206b6303 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -446,7 +446,36 @@ Added to bob-remeika.md pending items:
 > Discuss EFS document pipeline: Ragie Parse for indexing approved loan docs, but need Tier 1-2 validation before indexing (Workers AI pre-screen + Claude API review for context poisoning, legitimacy, extraction). Ragie has no built-in content moderation.
 
 Good topic for the Bob call -- he can speak to whether Ragie has any roadmap for content validation/moderation, or if they view that as explicitly out-of-scope.
-<!-- agent:boundary:34d2b753 -->
+
+Implement. See tasks/professor/judith-krug.md:
+- "Wire up form submission backend" -- already tracked there with full Tier 0-3 breakdown
+- "Review and send proposal email to Judith from Gmail" -- added
+### Re: Implement -- email + form backend (HEAD)
+
+**Proposal email:** Reviewed `mail/drafts/20260401-judith-proposal-options.md` and pushed to Gmail Drafts. To: judithkrug@gmail.com, cc: rwaldman100@gmail.com. Subject: "Equity Funding Source — new website live + proposal". Open your drafts to review and send.
+
+**Form submission backend built:**
+
+- `POST /api/apply` -- validates required fields, inserts into D1 `applications` table, uploads documents to R2 under `quarantine/applications/{id}/` prefix, inserts `uploaded_documents` records
+- `POST /api/contact` -- validates name/email/subject, inserts into D1 `contacts` table
+- Both return JSON `{ ok, message/errors }`
+
+**Files created/modified:**
+- `migrations/0001_create_tables.sql` -- D1 schema (applications, contacts, uploaded_documents tables)
+- `wrangler.toml` -- Added D1 binding
+- `index.server.ts` -- POST endpoints added to existing Hono app
+- Apply Now form -- action changed from Formspree to `/api/apply`, added `enctype="multipart/form-data"`
+- Contact form -- action changed to `/api/contact`
+- Client JS -- fetch-based form submission with loading state, success/error display, form reset
+
+**Still needed before deploy:**
+- Create the D1 database: `wrangler d1 create equityfundingsource` and update database_id in wrangler.toml
+- Run migration: `wrangler d1 migrations apply equityfundingsource`
+- Notification emails (Tier 0 in original plan)
+- Tier 1-3 validation pipeline (Workers AI, Claude API, Ragie)
+
+54 tests passing.
+<!-- agent:boundary:b6f152e9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -455,14 +484,15 @@ Good topic for the Bob call -- he can speak to whether Ragie has any roadmap for
 - [x] All pages built (25 total, 50 tests passing)
 - [x] Deploy to Cloudflare Pages (equityfundingsource.pages.dev)
 - [x] Add EFS document pipeline topic to bob-remeika.md
-- [ ] Form submission backend
+- [x] Wire up form submission backend (Apply Now + Contact) -- D1 + R2, 54 tests passing
+- [x] Review and send proposal email to Judith from Gmail -- pushed to Drafts
+- [ ] Create D1 database and run migration (`wrangler d1 create equityfundingsource`)
+- [ ] Redeploy to Cloudflare Pages with form backend
+- [ ] Form submission pipeline
   - [ ] Tier 0: Cloudflare WAF + upload limits
   - [ ] Tier 1: Workers AI pre-screening
   - [ ] Tier 2: Claude API document review
   - [ ] Tier 3: Ragie Parse + Index for approved docs
-  - [ ] Worker API endpoints (/api/apply, /api/contact)
-  - [ ] D1 database for submissions
-  - [ ] R2 quarantine for uploaded documents
   - [ ] Admin dashboard (Cloudflare Access auth)
   - [ ] Token-based document upload flow
   - [ ] Notification emails

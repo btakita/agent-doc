@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Revised LinkedIn reply — softened closing, removed direct intro ask
+Revised LinkedIn reply — broadened background reference per user feedback
 <!-- /agent:status -->
 
 ## Exchange
@@ -75,19 +75,34 @@ Is this too forward?
 
 You're right to question it. Asking for intros in the same message where he just said he can't help with BCG could feel like a pivot from one ask to another. Here's a softer version:
 
-> Thanks for letting me know, Anil — no worries at all on the Helix front. Curious where you're heading next... with your AI product background, I'd love to explore ways to work together.
->
-> I've been building agent-doc — a document-as-interface harness for AI agents. The pattern actually traces back to how we collaborated at Neo. Ragie handles the document data backend, and I have a JS frontend prototype that makes it all interactive. Happy to give you a quick demo sometime.
->
-> Either way, let's catch up — always good to stay connected, and I'd love to hear what you're getting into next.
+Thanks for letting me know, Anil...no worries at all on the Helix front. Curious where you're heading next... with your AI product background, I'd love to explore ways to work together.
+
+I've been building agent-doc...a document-as-interface harness for AI agents. The pattern actually traces back to how we collaborated at Neo. Ragie handles the document data backend, and I have a JS frontend prototype that makes it all interactive. Happy to give you a quick demo sometime.
+
+Either way, let's catch up...always good to stay connected, and I'd love to hear what you're getting into next.
 
 The demo offer implies you're building something real without explicitly asking for referrals. Save the intro ask for a follow-up conversation.
-<!-- agent:boundary:ce558232 -->
+> with your AI product background
+
+Anil has much more a background than AI products.
+See https://anilpod.com/
+### Re: Broadening the reference (HEAD)
+
+Good call — Anil's background spans product leadership, digital transformation, interim CPO at National Grid, BCG X. "AI product" is too narrow. Updated:
+
+> Thanks for letting me know, Anil...no worries at all on the Helix front. Curious where you're heading next... with your experience across product, AI, and digital transformation, I'd love to explore ways to work together.
+>
+> I've been building agent-doc...a document-as-interface harness for AI agents. The pattern actually traces back to how we collaborated at Neo. Ragie handles the document data backend, and I have a JS frontend prototype that makes it all interactive. Happy to give you a quick demo sometime.
+>
+> Either way, let's catch up...always good to stay connected, and I'd love to hear what you're getting into next.
+
+Changed "your AI product background" → "your experience across product, AI, and digital transformation" — acknowledges the full breadth.
+<!-- agent:boundary:a160031a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] User review of softened draft
+- [ ] User review of broadened draft
 - [ ] Send reply via LinkedIn
 <!-- /agent:pending -->

@@ -1528,7 +1528,7 @@ The OAuth token was obtained as the `btak.dev` account (stored under `gmail:defa
 
 Which account owns this sheet?
 brian.takita@gmail.com has access
-### Re: Account-based auth (HEAD)
+### Re: Account-based auth
 
 Added `--account` flag to all doc commands. Token keys now use the email (e.g., `gmail:brian.takita@gmail.com`), so different Google accounts get separate cached tokens.
 
@@ -1539,7 +1539,7 @@ Re-authed with `brian.takita@gmail.com` login hint but still got 403. Possible c
 3. GCP app in "testing" mode -- `brian.takita@gmail.com` not in test users list
 
 Can you verify the sheet's sharing settings? Or try "Anyone with the link" to test?
-<!-- agent:boundary:e787930f -->
+<!-- agent:boundary:13cec57e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1536,7 +1536,7 @@ And a request for access to Ragie Parse OCR
 **TL;DR:** The message stays tight. Judith and Ron are call ammo, not DM content.
 
 Please make a pdf of the call structure
-### Re: Call structure PDF (HEAD)
+### Re: Call structure PDF
 
 Created and saved to: [file:///home/brian/work/btakita/agent-loop/tmp/bob-remeika-call-structure.pdf](file:///home/brian/work/btakita/agent-loop/tmp/bob-remeika-call-structure.pdf)
 
@@ -1551,7 +1551,7 @@ Created and saved to: [file:///home/brian/work/btakita/agent-loop/tmp/bob-remeik
 **Questions for Bob:** Content moderation roadmap, multi-tenant isolation, enterprise pricing, Ragie Parse roadmap
 
 Source markdown also at `tmp/bob-remeika-call-structure.md` if you want to edit and regenerate.
-<!-- agent:boundary:8dc9771f -->
+<!-- agent:boundary:39044f02 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

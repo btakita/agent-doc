@@ -961,7 +961,7 @@ I'm wondering what the 1st sentence should be.
 Acknowledged — `mail/social/20260402-security-blog-linkedin.md` is updated with your revised teaser. Leads with the commit stats hook, follows with security/audit/meta lessons, concise format. Ready to post whenever LinkedIn OAuth is working.
 
 The prompt injection risk is allowing multiple people working on the same document.
-### Re: First sentence options (HEAD)
+### Re: First sentence options
 
 Current draft opens with stats: *"532 git commits in one day."* Scroll-stopper but it's a "what" not a "why." Alternatives that lead with insight:
 
@@ -981,7 +981,7 @@ Current draft opens with stats: *"532 git commits in one day."* Scroll-stopper b
 "532 git commits. Every one traceable. That's the point."
 
 Recommendation: **B** — combines narrative pull with security angle, stats appear naturally in body. For pure "meat first," **A** is sharpest.
-<!-- agent:boundary:3b680f32 -->
+<!-- agent:boundary:d2036e71 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

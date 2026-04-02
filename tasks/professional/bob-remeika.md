@@ -1607,15 +1607,28 @@ The call landed the collaboration angle even with the demo hiccup. Bob enabling 
 - Follow up with Bob on tenant details
 - Send follow-up message with security post link + agent-doc-js demo link (once fixed)
 - Start building EFS Tier 3 (Ragie Parse indexing) now that Parse is enabled
-<!-- agent:boundary:d9c0c5c5 -->
+
+Add to ragie-web-doc.md to for long lived credentials. Use the context from this document for guideance.
+### Re: Add credential context to ragie-web-doc.md (HEAD)
+
+Done. Updated `tasks/software/ragie-web-doc.md` with:
+- Bob call context (credential issue hit live, Bob enabled Ragie Parse)
+- Instruction to implement option 3 (Worker env secret fallback)
+- Updated pending items with priority flag
+
+The ragie-web-doc pane owns that file (pane %388), so I edited directly rather than using `agent-doc write`. The next cycle in that pane will pick up the changes.
+
+**Option 3 summary:** Cloudflare Worker already exists. Add fallback to `env.ANTHROPIC_API_KEY` when no `x-api-key` header is sent. Make the API key field optional in the UI when proxy URL is configured. Demo stays live without client-side credentials.
+<!-- agent:boundary:0f9ebe90 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Debug agent-doc-js credentials issue from Bob call demo
+- Fix agent-doc-js credentials (option 3: Worker env secret fallback) — see ragie-web-doc.md
 - Follow up with Bob on Ragie tenant setup/configuration
-- Send post-call follow-up: security post (briantakita.me/posts/agent-security-multiuser-lessons/) + agent-doc-js link
-- Start EFS Tier 3 pipeline (Ragie Parse indexing for approved loan docs)
+- Send post-call follow-up: security post + working agent-doc-js link
+- Start EFS Tier 3 pipeline (Ragie Parse indexing)
+- Test Ragie Parse on Bob's tenant
 - Schedule Robert Ross call at 4:00 PM ET / 1:00 PM PT Thursday
 <!-- /agent:pending -->

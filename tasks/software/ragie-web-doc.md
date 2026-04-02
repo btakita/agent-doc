@@ -1564,7 +1564,7 @@ What was in the Library?
 **Test search:** Currently returning 0 chunks (still processing). Will be populated soon.
 
 How can we access the ragie search from prompts?
-### Re: Ragie search from prompts (HEAD)
+### Re: Ragie search from prompts
 
 **Already wired up.** When you submit (Ctrl+Enter), the SPA automatically:
 
@@ -1580,7 +1580,7 @@ How can we access the ragie search from prompts?
 **From terminal prompt:** Currently terminal sends direct Claude prompts without Ragie. Can add Ragie to terminal too if you want.
 
 **Status:** All 10 visible documents still in "partitioning" status. Ragie free tier may take a few more minutes. Will test again soon.
-<!-- agent:boundary:ad5a4c47 -->
+<!-- agent:boundary:0aee7117 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1674,7 +1674,7 @@ The agent:pending instructions was missing from the SKILL.md. From the session:
 - How to mark items complete `[x]` vs incomplete `[ ]`
 - When to add/remove items from the pending list
 - The format for pending updates
-### Re: Enhanced SKILL.md pending instructions (HEAD)
+### Re: Enhanced SKILL.md pending instructions
 
 Updated the default SKILL.md with more explicit pending component instructions:
 
@@ -1686,7 +1686,7 @@ Updated the default SKILL.md with more explicit pending component instructions:
 The pending instructions were already there but now have the format example and clearer rules. If you need to customize further, edit in Settings.
 
 Deployed.
-<!-- agent:boundary:f9ac235a -->
+<!-- agent:boundary:8a4fe83b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

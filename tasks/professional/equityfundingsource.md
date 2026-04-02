@@ -574,7 +574,28 @@ Removed Robert Waldman from CC. Updated draft pushed to Gmail Drafts:
 - **To:** judithkrug@gmail.com
 - **CC:** (none)
 - **Subject:** Equity Funding Source — new website live + proposal
-<!-- agent:boundary:6d5d8f71 -->
+Update the draft. Mention that her equityfundingsource online presence has some issue.
+Use a google search to verify.
+Let her know that I can clean up her SEO and agent search presence as well.
+### Re: Email updated with online presence issues (HEAD)
+
+Searched Google for Judith's online presence. Found a fragmented mess:
+
+- **equityfundingsource.com** -- still down, but Google still indexes it
+- **equityfundingnow.com** -- current live site, different domain
+- **equityfunding.weebly.com** -- old Weebly site still indexed
+- **equityfundingsource.wordpress.com** -- old WordPress site still indexed
+- **Directory listings** -- Yelp, Manta, hardmoneyoffers.com, hardmoneylendersonline.com, Freedom Mentor all point to different/outdated URLs
+- **Two Facebook pages** -- fragmented social presence
+- **LinkedIn** -- exists but may not be optimized
+
+Updated the proposal email with:
+1. A paragraph explaining the online presence issues (broken links, old pages, fragmented listings)
+2. Mention that SEO and AI search results pull from these listings
+3. Added "online presence cleanup" to the "included in all options" list
+
+Draft re-pushed to Gmail Drafts.
+<!-- agent:boundary:abe0c9bd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -584,11 +605,17 @@ Removed Robert Waldman from CC. Updated draft pushed to Gmail Drafts:
 - [x] Deploy to Cloudflare Pages (equityfundingsource.pages.dev)
 - [x] Add EFS document pipeline topic to bob-remeika.md
 - [x] Wire up form submission backend (Apply Now + Contact) -- D1 + R2 + Pages Functions
-- [x] Review and send proposal email to Judith from Gmail -- updated, pushed to Drafts (no CC)
+- [x] Review and send proposal email to Judith from Gmail -- updated with SEO/presence info, in Drafts
 - [x] Create D1 database and run migration
 - [x] Redeploy with form backend + email notifications
 - [x] Configure Resend API key for email notifications
 - [ ] Verify equityfundingsource.com domain in Resend (or use sandbox from address)
+- [ ] Online presence cleanup (after Judith approves)
+  - [ ] Consolidate domains under equityfundingsource.com
+  - [ ] Take down/redirect Weebly and WordPress sites
+  - [ ] Update directory listings (Yelp, Manta, hard money directories)
+  - [ ] Consolidate Facebook pages
+  - [ ] Optimize LinkedIn profile
 - [ ] Form submission pipeline
   - [ ] Tier 0: Cloudflare WAF + upload limits
   - [ ] Tier 1: Workers AI pre-screening

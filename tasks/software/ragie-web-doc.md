@@ -1782,7 +1782,7 @@ Deployed. Reset and try again.
 
 It doesn't seem like the Ragie integration is working. Is Ragie done indexing?
 Duplicate Prompt in Response patch. See /home/brian/work/btakita/agent-loop/tmp/agent-doc-js/agent-doc-export (1).md
-### Re: Ragie indexing status — all 18 docs stuck in "partitioning" (HEAD)
+### Re: Ragie indexing status — all 18 docs stuck in "partitioning"
 
 All 18 blog posts are visible in Ragie but all stuck in "partitioning" status for 30+ minutes. This is a Ragie-side processing issue — likely free tier queue backlog.
 
@@ -1795,7 +1795,7 @@ All 18 blog posts are visible in Ragie but all stuck in "partitioning" status fo
 The SPA works correctly — when Ragie returns results, they'll be injected into the Claude prompt. The pipeline is ready; the data just isn't indexed yet.
 
 **On the duplicate prompt issue:** I already updated SKILL.md to tell Claude not to echo user text. If you're still seeing duplicates, it may be that the deployed version hasn't been picked up (hard refresh the page), or the SKILL.md in Settings needs to be updated (Reset the Settings to get the new default).
-<!-- agent:boundary:eaa314d4 -->
+<!-- agent:boundary:2107a22b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

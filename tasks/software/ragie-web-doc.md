@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Clean export (no terminal) | Demo-ready
+LIVE: https://agent-doc-js.pages.dev | Disclaimer added | Demo-ready with Ragie
 <!-- /agent:status -->
 
 ## Exchange
@@ -1853,20 +1853,42 @@ Implement some sort of scanning to warn against malicious/dangerous prompts when
 Deployed.
 
 Export should not include Terminal output
+
+There should be a disclaimer that agent-doc-js does not match the full functionality of agent-doc running on a workstation.
+Should we have an article about the differences?
 ### Re: Export — terminal output removed
 
 Export now downloads the document content only, no terminal output appended. Clean `.md` file for sharing.
 
 Deployed.
-<!-- agent:boundary:52cefa80 -->
+### Re: Disclaimer added + differences article idea (HEAD)
+
+**Disclaimer added** to the Settings dialog: "This is a web demo of agent-doc. The full workstation version includes git integration, CRDT merge, IDE plugins, and Claude Code tool access."
+
+**Key differences for an article:**
+
+| Feature | agent-doc (workstation) | agent-doc-js (web) |
+|---------|------------------------|-------------------|
+| Editor | JetBrains, VS Code, any editor | CodeMirror in browser |
+| AI backend | Claude Code (full tool access) | Direct Claude API (text only) |
+| Git | Full git + snapshots + commits | localStorage snapshots |
+| CRDT | Rust implementation | Not yet |
+| Tools | Bash, Read, Write, Edit, etc. | None (sandboxed) |
+| Ragie | MCP or CLI | Browser-side via proxy |
+| Security | File permissions + git review | localStorage + injection scanner |
+
+An article comparing them would be a good resource for the Bob meeting — shows the product roadmap from demo to production.
+
+Deployed.
+<!-- agent:boundary:663197a5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] SPA feature-complete: export (doc only), import with injection scanner
+- [x] SPA feature-complete with disclaimer
 - [x] Ragie: 18 docs indexed and searchable
-- [x] Full RAG pipeline active
+- [ ] Write comparison article (agent-doc vs agent-doc-js)
 - [ ] CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
 <!-- /agent:pending -->

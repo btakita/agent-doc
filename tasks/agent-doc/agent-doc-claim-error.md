@@ -108,7 +108,25 @@ The `files.exclude` JSON you pasted won't take effect in IntelliJ. The JetBrains
 **Recommended action:** Uncheck "Enable Tailwind CSS support" for this project. The agent-loop workspace doesn't need Tailwind CSS processing. The submodules that do use Tailwind (prescience-notes-dev, briantakita.me-dev) have their own IDEA project contexts.
 
 If you already unchecked it and the lag persists, restart the IDE — the Tailwind CSS LSP process may still be running from the previous session.
-<!-- agent:boundary:f268fc55 -->
+
+Disabled the plugin. Still getting lag when editing ragie-web-doc.md. Why?
+### Re: Lag on ragie-web-doc.md — PatchWatcher is the culprit (HEAD)
+
+Tailwind CSS is no longer firing (confirmed in logs). The lag is now from the **PatchWatcher** in the agent-doc plugin:
+
+```
+PatchWatcher - Patch produced no changes for ragie-web-doc.md
+ProgressManagerImpl - checkCancelled is invoked while write-action is pending
+```
+
+The PatchWatcher polls `.agent-doc/patches/` for patch files every few seconds. When it finds one (or checks for one), it acquires a **write-action** on the Document API to apply it. Even when the patch produces no changes, the write-action blocks the EDT (Event Dispatch Thread), causing typing lag.
+
+This is happening every ~5 seconds — `ragie-web-doc.md` has a session running that's producing patch files that result in no-ops.
+
+**Root cause:** The PatchWatcher shouldn't acquire a write-action for no-op patches. It should check if the patch would produce changes BEFORE locking the document.
+
+This is a separate bug — should I investigate and fix the PatchWatcher?
+<!-- agent:boundary:ed1bda9f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -116,7 +134,8 @@ If you already unchecked it and the lag persists, restart the IDE — the Tailwi
 <!-- agent:pending patch=replace -->
 - [x] All implementation, tests, audit docs, and release complete
 - [x] Published: crates.io ✓, GitHub Release ✓
-- [x] CI fixes: skill unit tests + CLI integration tests + Windows compilation
-- [ ] Disable Tailwind CSS for agent-loop project (uncheck Enable, restart IDE)
+- [x] CI fixes complete
+- [x] Tailwind CSS disabled (was causing lag)
+- [ ] Fix PatchWatcher: skip write-action for no-op patches (causes EDT lag)
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

@@ -523,7 +523,7 @@ How are merges handled? CRDT? Implement
 add tests
 audit docs
 Update SPEC.md, README.md, ontology, module-harness
-### Re: Audit docs updated (HEAD)
+### Re: Audit docs updated
 
 **SPEC.md:**
 - §7.22 (write): added `--origin` flag documentation
@@ -544,7 +544,7 @@ Update SPEC.md, README.md, ontology, module-harness
 `make check`: 606 tests pass.
 
 All audit docs are current.
-<!-- agent:boundary:402d4467 -->
+<!-- agent:boundary:b61c799f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

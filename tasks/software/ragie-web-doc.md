@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Sources panel + gutter spinner | Demo-ready
+LIVE: https://agent-doc-js.pages.dev | Server-side credentials (always-ready) | Sources panel + gutter spinner | Demo-ready
 <!-- /agent:status -->
 
 ## Exchange
@@ -2025,12 +2025,45 @@ The worker reads `env.ANTHROPIC_API_KEY` — no client-side key needed. The web 
 **Recommendation:** Option 3. The worker already exists. We'd just have the worker fall back to its own secret when no `x-api-key` header is sent, and make the API key optional in the UI.
 
 Want me to implement option 3?
-<!-- agent:boundary:63a33602 -->
+
+Bob call (2026-04-02) — demo hit the credential expiration issue live. Bob agreed to enable Ragie Parse on the tenant. Priority: fix credential flow so demo stays always-ready.
+
+Context from bob-remeika.md:
+- agent-doc-js demo at agent-doc-js.pages.dev showed credential issue during the call
+- Need long-lived credentials so the demo is always ready for follow-ups
+- Bob expecting follow-up with working demo link + security post
+
+Implement option 3: Worker falls back to env secret when no client API key. Make API key optional in UI when proxy is configured.
+
+Would Claude Oauth work in this case?
+### Re: Server-side credentials + Claude OAuth (HEAD)
+
+**Implemented: Worker env secret fallback**
+
+Both the Claude and Ragie API keys are now stored as Cloudflare Worker secrets. The demo at agent-doc-js.pages.dev works without any client-side credentials when the proxy URL is set to `https://agent-doc-proxy.brian-takita.workers.dev`.
+
+Changes:
+- **Worker:** Falls back to `env.ANTHROPIC_API_KEY` and `env.RAGIE_API_KEY` when no client header is sent
+- **Frontend:** API key fields are optional when proxy URL is configured. Settings dialog doesn't auto-open. Submit works without client keys.
+- **Deployed:** Worker redeployed with both secrets set via `wrangler secret put`
+
+**Re: Claude OAuth**
+
+Anthropic doesn't offer OAuth for API access yet. The current options are:
+1. **API keys** (what we're using) — long-lived, don't expire unless revoked
+2. **Claude Code session tokens** — short-lived (the `setup.sh` script uses these, which is likely why they kept expiring)
+
+The server-side key approach we just implemented is the right solution. The worker holds the long-lived API key, the browser only needs the proxy URL, and key rotation is a single `wrangler secret put` command.
+
+The demo should now be always-ready — no credential setup needed for Bob or anyone else.
+<!-- agent:boundary:eee2cef0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Worker: fall back to env secret when no client API key (awaiting approval)
-- [ ] UI: make API key optional when proxy is configured
+- [x] Worker: fall back to env secret when no client API key
+- [x] UI: make API key optional when proxy is configured
+- [ ] Follow up with Bob: working demo link + security post
+- [ ] Test Ragie Parse now that Bob enabled it on the tenant
 <!-- /agent:pending -->

@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE + WORKING: https://agent-doc-js.pages.dev | Hash param onboarding verified | Ready for Bob demo
+LIVE + WORKING: https://agent-doc-js.pages.dev | 429 is rate limit from testing, not a bug | Ready for demo
 <!-- /agent:status -->
 
 ## Exchange
@@ -1247,7 +1247,23 @@ The bug was CodeMirror's `import { history }` shadowing `window.history` in the 
 The full flow works: `curl | sh` -> browser opens with hash -> credentials auto-populated -> ready to edit.
 
 Deployed to Cloudflare Pages.
-<!-- agent:boundary:0a86fe9c -->
+
+```
+app.js:54 
+ POST https://agent-doc-proxy.brian-takita.workers.dev/v1/messages 429 (Too Many Requests)
+app.js:64 Error: Claude API error (429): {"type":"error","error":{"type":"rate_limit_error","message":"Error"},"request_id":"req_011CZePSTQSpZWdi1SqphdC7"}
+    at bW (app.js:54:567)
+    at async wX (app.js:64:458)
+﻿
+```
+### Re: 429 Rate limit error (HEAD)
+
+This is from our rapid automated testing — multiple API calls in quick succession. The OAuth token from `~/.claude/.credentials.json` shares rate limits with your Claude Code sessions.
+
+**Not a bug.** Wait a minute and try again. For the demo with Bob, this won't be an issue — you'll make one request at a time with natural pauses between edits.
+
+If rate limits persist, use a standard API key (`sk-ant-api03-...`) instead of the OAuth token — standard keys typically have separate/higher limits.
+<!-- agent:boundary:bef9f3c0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1259,7 +1275,7 @@ Deployed to Cloudflare Pages.
 - [x] Test submit flow end-to-end (mocked + real API)
 - [x] Deploy Cloudflare Worker proxy for CORS
 - [x] Deploy to Cloudflare Pages
-- [x] Demo notice, credentials disclaimer, curl instructions in dialog
+- [x] Demo notice, credentials disclaimer, curl instructions
 - [x] Setup script + hash param credential auto-population
 - [x] Fix history.replaceState shadow bug
 - [ ] Add CNAME for `agent-doc.briantakita.me` (Cloudflare dashboard)

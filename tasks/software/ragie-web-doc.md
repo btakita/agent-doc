@@ -1797,14 +1797,14 @@ The SPA works correctly — when Ragie returns results, they'll be injected into
 **On the duplicate prompt issue:** I already updated SKILL.md to tell Claude not to echo user text. If you're still seeing duplicates, it may be that the deployed version hasn't been picked up (hard refresh the page), or the SKILL.md in Settings needs to be updated (Reset the Settings to get the new default).
 
 Can I reset the SKILL.md? If not, please add a button in the settings dialog.
-### Re: Reset SKILL.md button added (HEAD)
+### Re: Reset SKILL.md button added
 
 Settings dialog now has a "Reset SKILL.md to Default" button below the SKILL.md textarea. Click it to restore the built-in default, then click Save to persist.
 
 This gets you the latest SKILL.md with the no-echo guidelines and pending instructions without having to clear localStorage.
 
 Deployed.
-<!-- agent:boundary:c061cdfc -->
+<!-- agent:boundary:9c42ad46 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

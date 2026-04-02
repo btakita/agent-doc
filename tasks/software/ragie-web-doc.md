@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Smart update preserves cursor | Demo-ready
+LIVE: https://agent-doc-js.pages.dev | Sources panel added | Smart update preserves cursor | Demo-ready
 <!-- /agent:status -->
 
 ## Exchange
@@ -1937,7 +1937,7 @@ If you meant showing the *Ragie-retrieved source documents* (the context pulled 
 I'm talking about **Alternative: Ragie source document viewer**. A side or bottom panel with a small view of the document or thumbnail.
 
 Which direction do you want? I'll implement whichever you prefer.
-### Re: Ragie source document viewer panel (HEAD)
+### Re: Ragie source document viewer panel
 
 Got it — you want a panel that shows the Ragie-retrieved source chunks when they come back during a submit.
 
@@ -1959,15 +1959,34 @@ Got it — you want a panel that shows the Ragie-retrieved source chunks when th
 3. JS: store retrieved chunks, render them in the panel, add toolbar toggle
 
 Implementing now.
-<!-- agent:boundary:fdb17174 -->
+### Re: Sources panel implemented (HEAD)
+
+Done. Deployed to https://agent-doc-js.pages.dev
+
+**What was built:**
+- Collapsible right side panel (320px wide) with "Sources" header
+- Each retrieved chunk rendered as a card: document name (blue, accent color), relevance score, and text content
+- Toolbar "Sources" button to toggle the panel open/closed
+- Panel auto-opens when Ragie returns results during a submit
+- Chunks accumulate across iterative `<ragie-search>` calls within a single submit cycle
+- Panel resets on each new submit
+- Empty state shows "No retrieved documents yet"
+
+**Files changed:**
+- `index.html` — added sources panel HTML + toolbar button
+- `style.css` — added sources panel styles (cards, header, collapsible layout)
+- `src/app.js` — `searchRagie()` now returns raw chunks + formatted text, added `renderSources()`, wired up toggle/close buttons
+
+Try submitting a query that triggers Ragie retrieval to see it in action.
+<!-- agent:boundary:dd282385 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Add sources panel HTML structure
-- [ ] Add sources panel CSS (collapsible right side panel)
-- [ ] Modify searchRagie to return raw chunk data
-- [ ] Add panel rendering and toolbar toggle
-- [ ] Deploy to Cloudflare Pages
+- [x] Add sources panel HTML structure
+- [x] Add sources panel CSS (collapsible right side panel)
+- [x] Modify searchRagie to return raw chunk data
+- [x] Add panel rendering and toolbar toggle
+- [x] Deploy to Cloudflare Pages
 <!-- /agent:pending -->

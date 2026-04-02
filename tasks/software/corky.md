@@ -69,6 +69,7 @@ claude_args: --dangerously-skip-permissions
 - [x] `corky sync refetch` — v0.23.0
 - [ ] crates.io publish — needs token refresh
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
+- [ ] Google Docs/Sheets integration — read/write Google Docs, read Google Sheets (extends Gmail OAuth scopes)
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
@@ -1377,10 +1378,57 @@ compact exchange
 Committed: `3ddb08e` (corky), `6f963b5a` (agent-loop parent).
 
 ## User
-<!-- agent:boundary:10598c95 -->
+Plan:
+- [ ] `corky doc upload` — deferred (Google Drive OAuth design)
+- [ ] Google Docs/Sheets integration — read/write Google Docs, read Google Sheets (extends Gmail OAuth scopes)
+### Re: Google Docs/Sheets and doc upload plan (HEAD)
+
+#### `corky doc upload` — Google Drive upload
+
+Upload markdown/PDF/DOCX to Google Drive. Requires Google Drive API OAuth scope.
+
+**Scope needed:** `https://www.googleapis.com/auth/drive.file` (create/open files only, not full Drive access)
+
+**Implementation:**
+1. Add `drive.file` scope to existing Gmail OAuth flow (corky already has Google OAuth for Gmail)
+2. `corky doc upload <FILE> [--folder <DRIVE_FOLDER>]` -- uploads file to Drive
+3. Support formats: `.md` (convert to Google Doc), `.pdf`, `.docx` (upload as-is)
+4. Return shareable link
+
+**Effort:** Small -- reuses existing OAuth infrastructure, just adds a scope + one API call.
+
+#### Google Docs/Sheets integration
+
+Read/write Google Docs, read Google Sheets.
+
+**Scopes needed:**
+- `https://www.googleapis.com/auth/documents` (read/write Docs)
+- `https://www.googleapis.com/auth/spreadsheets.readonly` (read Sheets)
+
+**Use cases:**
+- `corky doc read <DOC_URL>` -- export Google Doc as markdown
+- `corky doc write <DOC_URL> <FILE>` -- update Google Doc from markdown
+- `corky sheet read <SHEET_URL> [--range A1:D10]` -- export Sheet range as CSV/markdown table
+
+**Implementation plan:**
+1. **Phase 1: OAuth scope expansion** -- Add Drive/Docs/Sheets scopes to the existing GCP OAuth client. Users re-auth once to grant new permissions.
+2. **Phase 2: `corky doc upload`** -- Drive API file upload with folder targeting
+3. **Phase 3: `corky doc read/write`** -- Docs API export (as HTML → markdown via htmd) and batch update
+4. **Phase 4: `corky sheet read`** -- Sheets API range read, format as markdown table or CSV
+
+**Dependencies:**
+- `google-docs1` or raw REST API via `reqwest` (the googleapis crates are heavy)
+- Recommend raw REST + `reqwest` since corky already uses reqwest for Gmail
+
+Want me to start with Phase 1 (OAuth scope expansion) and Phase 2 (doc upload)?
+<!-- agent:boundary:904e29c3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- Phase 1: Add Drive/Docs/Sheets OAuth scopes to GCP client
+- Phase 2: `corky doc upload` (Drive API)
+- Phase 3: `corky doc read/write` (Docs API)
+- Phase 4: `corky sheet read` (Sheets API)
 <!-- /agent:pending -->

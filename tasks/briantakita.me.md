@@ -1110,12 +1110,18 @@ Again, the security exercise was considering multi-user collaborative documents.
 Fixed. Changed "Multi-agent workflows create attack surfaces that don't exist in single-agent systems" to "Collaborative documents create attack surfaces that don't exist when you're the only one editing." The concern is about who writes the document, not how many agents are running.
 
 Draft updated.
-<!-- agent:boundary:40b665bf -->
+
+Publish to LinkedIn
+### Re: Published to LinkedIn (HEAD)
+
+Posted via corky. First comment added with blog post + repo links.
+
+- Post: https://www.linkedin.com/feed/update/urn:li:share:7445470177976020992
+- Comment: blog post link + agent-doc repo
+<!-- agent:boundary:8b6c74c0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn teaser — draft corrected (multi-user framing), ready to post
-- LinkedIn OAuth — needs retry or manual paste
 - Search icon `w-full` fix — remove `w-full` from icon span in rappstack-dev
 - JSON-LD VideoObject enhancement — add BlogPosting wrapper, duration, publisher (optional)
 <!-- /agent:pending -->

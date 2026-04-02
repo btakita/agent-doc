@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | setup.sh for zero-friction onboarding | Ready for Bob demo
+LIVE: https://agent-doc-js.pages.dev | `bash <(curl -s .../setup.sh)` for zero-config onboarding | Ready for demo
 <!-- /agent:status -->
 
 ## Exchange
@@ -1161,7 +1161,25 @@ bash <(curl -s https://agent-doc-js.pages.dev/setup.sh)
 **For Bob:** He runs `./setup.sh` (or the curl one-liner) and the SPA opens pre-configured. No manual copy-pasting of tokens.
 
 Deployed to Cloudflare Pages.
-<!-- agent:boundary:999eb9f2 -->
+
+Provide `curl | sh` command to run to autopopulate the credentials as a url hash.
+### Re: curl | sh command (HEAD)
+
+The setup script is already deployed. The command is:
+
+```bash
+bash <(curl -s https://agent-doc-js.pages.dev/setup.sh)
+```
+
+This:
+1. Downloads `setup.sh` from the deployed site
+2. Reads `~/.claude/.credentials.json` (requires Claude Code installed)
+3. Generates URL: `https://agent-doc-js.pages.dev#apiKey=...&proxyUrl=...&model=...`
+4. Opens in default browser (`xdg-open` on Linux, `open` on Mac)
+5. SPA reads hash, stores in localStorage, clears hash from URL
+
+**One command. Zero manual config.**
+<!-- agent:boundary:16c47f2d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1174,7 +1192,7 @@ Deployed to Cloudflare Pages.
 - [x] Deploy Cloudflare Worker proxy for CORS
 - [x] Deploy to Cloudflare Pages
 - [x] Add demo notice and credentials disclaimer
-- [x] Setup script for credential auto-population
+- [x] Setup script for credential auto-population (`curl | sh`)
 - [ ] Add CNAME for `agent-doc.briantakita.me` (Cloudflare dashboard)
 - [ ] Demo script for Bob call
 - [ ] (deferred) Yjs CRDT for concurrent edit merging

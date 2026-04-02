@@ -699,7 +699,7 @@ Done. Updated the draft (`mail/drafts/20260401-judith-proposal-options.md`):
 Pushed to Gmail Drafts — check your drafts to review and send.
 
 Update the email draft with the equityfundingsource website that we did. See tasks/professional/equityfundingsource.md
-### Re: Updated proposal with EFS website (HEAD)
+### Re: Updated proposal with EFS website
 
 Updated `mail/drafts/20260401-judith-proposal-options.md`. Key change to the opening:
 
@@ -710,7 +710,7 @@ Updated `mail/drafts/20260401-judith-proposal-options.md`. Key change to the ope
 The rest of the proposal (three options, Ragie mention, AI search examples, retainer discussion) is unchanged. The wrapper to Rob is also unchanged.
 
 This is a stronger pitch... instead of "I started working on it," Judith sees a finished product.
-<!-- agent:boundary:97113a69 -->
+<!-- agent:boundary:952e98f1 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

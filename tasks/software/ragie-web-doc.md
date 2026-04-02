@@ -1914,7 +1914,7 @@ Note: I didn't use Yjs for this. The `diffLines`-based approach is simpler and s
 Deployed.
 
 Can we have a preview or a side pane showing the source document?
-### Re: Source document preview pane (HEAD)
+### Re: Source document preview pane
 
 Yes, a rendered markdown preview is a great addition. Here's what I'm thinking:
 
@@ -1935,7 +1935,7 @@ Yes, a rendered markdown preview is a great addition. Here's what I'm thinking:
 If you meant showing the *Ragie-retrieved source documents* (the context pulled from indexed docs), that would be a different feature — a panel showing the retrieved chunks alongside the conversation.
 
 Which direction do you want? I'll implement whichever you prefer.
-<!-- agent:boundary:8d7370f3 -->
+<!-- agent:boundary:045fc773 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

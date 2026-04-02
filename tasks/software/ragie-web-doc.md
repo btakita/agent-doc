@@ -1615,7 +1615,7 @@ Both feed into the same Ragie index — the difference is who orchestrates the s
 How can we have the web demo use SKILL.md + MCP-driven? Does it really need MCP or can it just do RAG commands directly?
 We should have a default SKILL.md that supports Ragie...assuming we can get it workirg soon.
 The SKILL.md should be editable in the Settings.
-### Re: SKILL.md-driven RAG — implemented (HEAD)
+### Re: SKILL.md-driven RAG — implemented
 
 **Done.** Claude now drives the RAG — no MCP needed.
 
@@ -1636,7 +1636,7 @@ The SKILL.md should be editable in the Settings.
 **This is tool use without MCP** — the SPA is the tool executor. Claude reasons about when to search, what to query, and how to use the results.
 
 Deployed to Cloudflare Pages.
-<!-- agent:boundary:05a28446 -->
+<!-- agent:boundary:6b551b7f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

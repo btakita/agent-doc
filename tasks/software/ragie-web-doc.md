@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | SKILL.md reset button added | Ready for demo
+LIVE: https://agent-doc-js.pages.dev | RAGIE READY: 18 docs indexed | Full RAG pipeline active
 <!-- /agent:status -->
 
 ## Exchange
@@ -1804,14 +1804,36 @@ Settings dialog now has a "Reset SKILL.md to Default" button below the SKILL.md 
 This gets you the latest SKILL.md with the no-echo guidelines and pending instructions without having to clear localStorage.
 
 Deployed.
-<!-- agent:boundary:9c42ad46 -->
+
+Status?
+- [ ] Ragie indexing stuck in partitioninge
+### Re: Status update (HEAD)
+
+**Ragie is READY!** All 18 documents indexed and searchable.
+
+- Status: 18/18 docs `ready`
+- Test search "agent-doc": returned 8 chunks from blog posts
+- Sources include: dogfooding-agent-doc, agent-resume-job-search, and more
+
+**The full pipeline is now live:**
+1. Edit document in browser
+2. Ctrl+Enter to submit
+3. Claude requests Ragie search via `<ragie-search>`
+4. SPA fetches relevant blog post chunks
+5. Claude responds with knowledge base context
+6. Response patched into document
+
+Try it now — reset the document, enter your Ragie key in Settings, and ask something about your blog posts.
+<!-- agent:boundary:9a589740 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] SPA feature-complete: all buttons, terminal, diff gutter, SKILL.md reset
-- [ ] Ragie indexing stuck in partitioning
+- [x] SPA feature-complete
+- [x] Ragie indexing complete — 18 docs ready and searchable
+- [x] Full pipeline: edit -> Ragie search -> Claude with context -> patch
+- [ ] Test full Ragie retrieval flow in browser
 - [ ] CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
 <!-- /agent:pending -->

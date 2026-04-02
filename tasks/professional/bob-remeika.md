@@ -1464,7 +1464,7 @@ Smart to have this as a stretch goal. Even a partial demo showing Ragie retrieva
 - If not ready: JB plugin demo is already strong, web prototype becomes "here's the architecture, here's the code, shipping next week"
 
 No pressure to finish — it's a bonus, not the main event. The JB plugin demo + EFS pipeline discussion carry the call on their own.
-<!-- agent:boundary:6639982e -->
+<!-- agent:boundary:a0448b4e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -169,6 +169,8 @@ Draft LinkedIn message for Rob Ross:
 Ready for your review. Edit as needed, then you can send it manually from LinkedIn.
 
 What do you think. Should we try the email again or LinkedIn?
+
+
 ### Re: Email or LinkedIn?
 
 **LinkedIn is the better move here.** Rob already got 2 emails (unthreaded original + resend) — a third risks looking cluttered. LinkedIn is a clean separate channel, and Rob is clearly active there (his profile tagline is his pitch).
@@ -178,7 +180,18 @@ Send the LinkedIn message manually. The drafted text is ready:
 > Hi Rob, I sent you an email reply about meeting today but it may not have threaded with your original message. Just wanted to make sure you saw it — I'm open to whenever works for you today. Looking forward to chatting about Dreamable.
 
 The corky `threadId` fix can happen separately — it's a code improvement for future emails, not urgent for this reply.
-<!-- agent:boundary:b674a81e -->
+
+Why was the email reply not threaded?
+### Re: Why the email reply was not threaded (HEAD)
+
+Two separate bugs compounded:
+
+**Bug 1 — Wrong value in `in_reply_to`:** The first email used `in_reply_to: 19d479af292d8d99`, which is a Gmail **thread ID** (an internal API identifier). The `In-Reply-To` email header requires an RFC 2822 **Message-ID** (e.g., `<CAMrCVsDSX0zWO2DyZfh9ugzS=pUHSt_MtAEs+0qnfw7-njWZ2w@mail.gmail.com>`). The conversation file only stores the thread ID, not individual message IDs, so the wrong value was used.
+
+**Bug 2 — Missing `threadId` in Gmail API request:** Even after fixing Bug 1 (using the correct Message-ID in the headers), the email still didn't thread. When sending via the Gmail API, you must include `"threadId": "19d479af292d8d99"` in the JSON request body alongside the raw RFC 2822 message. Corky's `send_via_gmail_api` function only sends `{ "raw": encoded }` — it doesn't pass `threadId`. Without this, Gmail creates a new thread.
+
+**Summary:** Both the RFC headers AND the Gmail API `threadId` field are needed. Corky was missing both, and fixing one without the other still breaks threading.
+<!-- agent:boundary:5b28715a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -186,5 +199,6 @@ The corky `threadId` fix can happen separately — it's a code improvement for f
 <!-- agent:pending patch=replace -->
 - Send LinkedIn message to Rob manually (draft ready above)
 - Corky fix: add `threadId` to Gmail API request body for proper threading
+- Corky fix: store Message-IDs in conversation files (not just thread IDs)
 - Prep talking points for Dreamable call (agent experience, AI agent thesis alignment)
 <!-- /agent:pending -->

@@ -530,7 +530,7 @@ Even with a perfect sandbox, there's a fundamental leak: **the model's response 
 **The honest answer:** If Bob runs `--dangerously-skip-permissions` and processes untrusted docs in a session that has his secrets in context, no sandboxing prevents leakage through the response channel. The only real defense is **context isolation** — shared documents in a clean, separate session with no sensitive data loaded.
 
 This is an unsolved problem in the broader LLM agent space. The best we can do: make the safe path (isolated sessions) the default, and make the unsafe path (shared context with untrusted content) require explicit opt-in.
-### Re: Organizational trust, authorization, and hardened prompt injection defense (HEAD)
+### Re: Organizational trust, authorization, and hardened prompt injection defense
 
 **Authorization is secondary to injection.** If we solve injection, authorization is standard RBAC (well-understood). If we don't solve injection, authorization is meaningless — a compromised agent ignores ACLs.
 
@@ -607,7 +607,7 @@ Flagged content quarantined with warning markers for human review.
 Each step minimizes attack surface. The only remaining risk: LLM generating misleading text. That's a content moderation problem, not a security breach. The document cannot cause code execution, data exfiltration, or filesystem access.
 
 **For the org trust context (Ragie, shared resources):** Authorization is layered on top of this. The MCP server checks Bob's token against ACLs before returning document content. But the injection defense is independent of authorization — even if Bob has full access to a document, the sandboxed processing protects him from injection in that document.
-<!-- agent:boundary:68557405 -->
+<!-- agent:boundary:3aca8be9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

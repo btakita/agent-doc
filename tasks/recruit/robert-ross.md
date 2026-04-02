@@ -74,13 +74,30 @@ Email sent directly to rob@dreamable.com via corky (`--send`). Replied to thread
 > Brian
 
 Draft file: `mail/drafts/2026-04-01-re-brian-rob-zoom.md` (status: sent)
-<!-- agent:boundary:14e2fb9c -->
+
+The email was sent...but not as a reply to the original message.
+
+See /home/brian/work/btakita/agent-loop/tmp/Brian _ Rob Zoom.eml
+### Re: Email threading issue (HEAD)
+
+Checked the .eml file. The problem: `In-Reply-To: 19d479af292d8d99` used the Gmail **thread ID** instead of the RFC Message-ID from Rob's original email. Proper threading requires the actual `Message-ID` header (e.g., `<CAxxxxxx@mail.gmail.com>`).
+
+**Impact:** Gmail often threads by subject line anyway, so Rob likely sees the reply in the same conversation. The `Re: Brian / Rob Zoom` subject matches, which helps.
+
+**Root cause:** The corky draft's `in_reply_to` field was set to the thread ID from the conversation file. Corky needs to fetch the actual Message-ID from the Gmail API when replying.
+
+**Next steps:**
+- Check Gmail web UI to confirm whether the reply landed in the same thread visually
+- File a corky enhancement to resolve Message-IDs from thread IDs when building reply headers
+<!-- agent:boundary:e132cec8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - ([done]) Reply sent to Rob Ross — proposed Thu Apr 2, 1pm PT
+- Verify reply threading in Gmail web UI
+- Corky fix: resolve actual Message-ID from Gmail API for `in_reply_to` (not thread ID)
 - Prep talking points for Dreamable call (agent experience, AI agent thesis alignment)
 - Watch for Rob's confirmation reply
 <!-- /agent:pending -->

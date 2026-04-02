@@ -1467,7 +1467,7 @@ No pressure to finish — it's a bonus, not the main event. The JB plugin demo +
 
 Should I send Bob a message about https://briantakita.me/posts/agent-security-multiuser-lessons/ before our call, or would that be too much?
 Let him discover it on LinkedIn?
-### Re: Sharing the security post with Bob (HEAD)
+### Re: Sharing the security post with Bob
 
 Let him discover it on LinkedIn. Here's why:
 
@@ -1480,7 +1480,7 @@ Let him discover it on LinkedIn. Here's why:
 4. **Save it for the follow-up** — after the call, when you send a "great talking with you" message, include the link: "Here's the security architecture writeup I mentioned." Gives him a reason to re-engage post-call.
 
 **TL;DR:** Don't send it. Use it during the call as a live reference, then share in the follow-up.
-<!-- agent:boundary:3f4fe7c8 -->
+<!-- agent:boundary:215019ee -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

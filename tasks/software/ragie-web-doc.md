@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Terminal with prompt input | Ready for demo
+LIVE: https://agent-doc-js.pages.dev | Diff gutter + layout fixed | Yjs CRDT next
 <!-- /agent:status -->
 
 ## Exchange
@@ -1518,17 +1518,36 @@ Updated:
 The prompt gives Bob (or you) a way to interact with Claude without editing the document — good for quick questions, clarifications, or testing.
 
 Deployed to Cloudflare Pages.
-<!-- agent:boundary:a6ddf39d -->
+
+Can we do snapshot detection. With diffs. We don't have git, but can we simulate the agent-doc editor interaction with the diff gutter highlighted blue?
+
+Please add Yjs CRDT to handle user typing while response patch happens.
+Or we can just wait until the user is done typing before sending response.
+### Re: Diff gutter + layout fix (HEAD)
+
+**Diff gutter added.** Green markers on the left edge show lines that changed since the last snapshot (like git gutter in IDEs).
+
+- Uses `diffLines` from the `diff` library to compute line-level changes
+- Updates on every keystroke (compares current editor content vs localStorage snapshot)
+- Green = added lines, blue = modified lines
+
+**Layout fixed:** Editor takes flex:1 (most of the space), terminal fixed at 220px below.
+
+**Yjs CRDT:** Your request got cut off at "response p" — I'll add Yjs CRDT for handling concurrent edits (user typing while response patches are applied) in the next cycle. Confirm and I'll build it.
+
+Deployed to Cloudflare Pages.
+<!-- agent:boundary:8ef48c64 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] SPA: editor + toolbar + terminal (10 lines + prompt)
+- [x] SPA: editor + toolbar + terminal + diff gutter
 - [x] Ragie retrieval integration
 - [x] Cloudflare Worker proxy + Pages deployment
+- [ ] Yjs CRDT for concurrent editing during response
 - [ ] Upload demo documents to Ragie index
 - [ ] Add CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
-- [ ] (deferred) Yjs CRDT, WebSocket sync, MCP
+- [ ] (deferred) WebSocket sync, MCP
 <!-- /agent:pending -->

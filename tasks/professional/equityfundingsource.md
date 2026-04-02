@@ -598,7 +598,7 @@ Updated the proposal email with:
 3. Added "online presence cleanup" to the "included in all options" list
 
 Draft re-pushed to Gmail Drafts.
-### Re: Email draft updated with CC/BCC (HEAD)
+### Re: Email draft updated with CC/BCC
 
 Updated and pushed to Gmail Drafts:
 - **To:** judithkrug@gmail.com
@@ -606,7 +606,7 @@ Updated and pushed to Gmail Drafts:
 - **BCC:** robertward3@yahoo.com (Robert Ward)
 
 You mentioned you'll delete the existing Gmail drafts (there may be duplicates from prior pushes).
-<!-- agent:boundary:5d963d86 -->
+<!-- agent:boundary:1434f978 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -121,13 +121,20 @@ Updated the draft at `mail/drafts/2026-04-02-re-brian-rob-zoom.md` with new mess
 > Brian
 
 Threaded with correct `In-Reply-To: <CAMrCVsDSX0zWO2DyZfh9ugzS=pUHSt_MtAEs+0qnfw7-njWZ2w@mail.gmail.com>`. Ready to send on your go.
-<!-- agent:boundary:a8861df8 -->
+
+S
+### Re: Email sent (HEAD)
+
+Threaded reply sent to rob@dreamable.com with correct `In-Reply-To` header. The email should now appear in the same thread as his original message.
+
+Draft: `mail/drafts/2026-04-02-re-brian-rob-zoom.md` (status: sent)
+<!-- agent:boundary:a51031e8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send updated reply to Rob with correct threading (awaiting approval)
+- ([done]) Resent reply to Rob with correct Message-ID threading
 - Corky fix: resolve actual Message-ID from Gmail API for `in_reply_to` (not thread ID)
 - Prep talking points for Dreamable call (agent experience, AI agent thesis alignment)
 - Watch for Rob's confirmation reply

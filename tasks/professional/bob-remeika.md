@@ -1619,16 +1619,37 @@ Done. Updated `tasks/software/ragie-web-doc.md` with:
 The ragie-web-doc pane owns that file (pane %388), so I edited directly rather than using `agent-doc write`. The next cycle in that pane will pick up the changes.
 
 **Option 3 summary:** Cloudflare Worker already exists. Add fallback to `env.ANTHROPIC_API_KEY` when no `x-api-key` header is sent. Make the API key field optional in the UI when proxy URL is configured. Demo stays live without client-side credentials.
-<!-- agent:boundary:e1296064 -->
+
+Please transcribe + diarize [2026-04-02 11-29-19.mp4](../../../../../Videos/2026-04-02%2011-29-19.mp4)
+### Re: Transcription of Bob call (HEAD)
+
+Transcribed and diarized. Saved to: `tmp/bob-remeika-call-2026-04-02.txt`
+
+**Stats:** 41 min, 401 segments, 2 speakers, 160x realtime (RTX 5090)
+
+**Diarization note:** Speaker separation is rough — long segments merge both voices. This happens with screen-share recordings where audio isn't channel-separated. The content is all there but speaker attribution on the longer segments is unreliable.
+
+**Key takeaways from the transcript:**
+- Bob was receptive but honest: "I don't think I understand the UI here at all... it feels very like, you get it because you built it"
+- Bob agreed to enable Ragie Parse: "all I need from you is just create a tenant and then send me an email with the name of the tenant"
+- Demo auth issue hit live: "oh shoot, I got an authentication error"
+- Bob offered to keep sending opportunities: "I'll still send you stuff and you can kind of decide what you want to do"
+- Bob's closing: "don't be a stranger and let me know what you're doing... if I can help you in any way, I would love to"
+
+**Action items from the call:**
+1. Create a Ragie tenant and email Bob the tenant name to get Parse enabled
+2. Fix the auth/credential issue on the web demo
+3. Consider Bob's UX feedback — the JetBrains workflow is developer-native but not intuitive for non-builders. The web demo needs to be much simpler for Bob's perspective.
+<!-- agent:boundary:537a92da -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Fix agent-doc-js credentials (option 3: Worker env secret fallback) — see ragie-web-doc.md
-- Follow up with Bob on Ragie tenant setup/configuration
-- Send post-call follow-up: security post + working agent-doc-js link
-- Start EFS Tier 3 pipeline (Ragie Parse indexing)
-- Test Ragie Parse on Bob's tenant
+- Create Ragie tenant and email Bob tenant name (he'll enable Parse)
+- Fix agent-doc-js credentials (option 3: Worker env secret fallback)
+- Send post-call follow-up with working demo + security post
+- Consider UX simplification based on Bob's feedback ("I don't know where I'd start")
+- Start EFS Tier 3 pipeline once Parse is enabled
 - Schedule Robert Ross call at 4:00 PM ET / 1:00 PM PT Thursday
 <!-- /agent:pending -->

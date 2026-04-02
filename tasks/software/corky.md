@@ -50,6 +50,8 @@ claude_args: --dangerously-skip-permissions
 - `corky doc upload` (stashed, coming soon)
 - `corky schedule run` for email drafts — scan `mail/drafts/*.md` for `scheduled_at` past due + `status: approved`, auto-send via `corky draft push --send`. Enables cron-based scheduled email sends without Gmail web UI.
 - **HTML email sending** — `corky draft push --send` should convert markdown body to HTML (`pulldown-cmark`), send as `multipart/alternative` (HTML + plain text fallback). Currently sends raw markdown as plain text, causing `**bold**` to appear as literal asterisks. Default behavior, no flag needed. Files: `src/draft/mod.rs` (`compose_email()`), `Cargo.toml`.
+- **Gmail API threading fix (Bug 1)** — `in_reply_to` in draft YAML currently accepts a Gmail thread ID (e.g., `19d479af292d8d99`), but the `In-Reply-To` email header requires an RFC 2822 Message-ID (e.g., `<CAxxxxxx@mail.gmail.com>`). Corky should either: (a) store Message-IDs in conversation markdown files during sync, or (b) resolve thread IDs to Message-IDs via the Gmail API when composing replies. Files: `src/sync/markdown.rs`, `src/draft/mod.rs`.
+- **Gmail API threading fix (Bug 2)** — `send_via_gmail_api` and `push_to_drafts_via_gmail_api` only send `{ "raw": encoded }`. Gmail API requires `"threadId"` in the request body to thread replies into existing conversations. Add `thread_id` field to draft YAML frontmatter and include it in the API request JSON. Files: `src/draft/mod.rs` (lines 371-433).
 
 <!-- agent:status mode=replace -->
 - [x] HTML email sending (multipart/alternative) — v0.16.0
@@ -1527,7 +1529,7 @@ The OAuth token was obtained as the `btak.dev` account (stored under `gmail:defa
 2. If the sheet is owned by a different account, re-auth with that account: the current code uses `gmail:default` which maps to whatever account you sign in with
 
 Which account owns this sheet?
-brian.takita@gmail.com has access
+brian.takita@gmail.com has access 
 ### Re: Account-based auth
 
 Added `--account` flag to all doc commands. Token keys now use the email (e.g., `gmail:brian.takita@gmail.com`), so different Google accounts get separate cached tokens.
@@ -1539,7 +1541,37 @@ Re-authed with `brian.takita@gmail.com` login hint but still got 403. Possible c
 3. GCP app in "testing" mode -- `brian.takita@gmail.com` not in test users list
 
 Can you verify the sheet's sharing settings? Or try "Anyone with the link" to test?
-<!-- agent:boundary:c22fb7ec -->
+
+Fix threading email bugs:
+- **Gmail API threading fix (Bug 1)** — `in_reply_to` in draft YAML currently accepts a Gmail thread ID (e.g., `19d479af292d8d99`), but the `In-Reply-To` email header requires an RFC 2822 Message-ID (e.g., `<CAxxxxxx@mail.gmail.com>`). Corky should either: (a) store Message-IDs in conversation markdown files during sync, or (b) resolve thread IDs to Message-IDs via the Gmail API when composing replies. Files: `src/sync/markdown.rs`, `src/draft/mod.rs`.
+- **Gmail API threading fix (Bug 2)** — `send_via_gmail_api` and `push_to_drafts_via_gmail_api` only send `{ "raw": encoded }`. Gmail API requires `"threadId"` in the request body to thread replies into existing conversations. Add `thread_id` field to draft YAML frontmatter and include it in the API request JSON. Files: `src/draft/mod.rs` (lines 371-433).
+
+See tasks/recruit/robert-ross.md
+### Re: Gmail API Threading Bugs (HEAD)
+
+Both bugs confirmed after code review.
+
+**Bug 1 — `in_reply_to` format mismatch:**
+- `EmailDraftMeta.in_reply_to` gets passed directly to the `In-Reply-To` RFC 2822 header (`draft/mod.rs:122-124`, `230-234`)
+- Gmail sync (`gmail_api_sync.rs:277-284`) only extracts From/To/Cc/Date/Subject...no Message-ID
+- Conversation markdown files have no `**Message-ID**` metadata line
+- Fix: (1) extract Message-ID during sync, (2) store in conversation markdown, (3) validate/convert in draft composition
+
+**Bug 2 — Missing `threadId` in API requests:**
+- `send_via_gmail_api()` (line 384): sends `{ "raw": encoded }`...no `threadId`
+- `push_to_drafts_via_gmail_api()` (line 417-419): sends `{ "message": { "raw": encoded } }`...no `threadId`
+- `EmailDraftMeta` has no `thread_id` field at all
+- Fix: (1) add `thread_id` to `EmailDraftMeta`, (2) include `threadId` in both API request bodies
+
+**Implementation plan — files to change:**
+1. `src/sync/types.rs` — add `message_id: String` to `Message` struct
+2. `src/sync/gmail_api_sync.rs` — extract `Message-ID` header
+3. `src/sync/markdown.rs` — store/parse `**Message-ID**` metadata line
+4. `src/draft/mod.rs` — add `thread_id` field to `EmailDraftMeta`, pass `threadId` in both API functions
+5. `SPEC.md` — document `thread_id` in draft YAML format
+
+Ready to implement on your go.
+<!-- agent:boundary:1f7a9f78 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

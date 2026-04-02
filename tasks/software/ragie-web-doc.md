@@ -1276,7 +1276,7 @@ Removed the document-level `keydown` listener since it's no longer needed.
 Deployed to Cloudflare Pages. Ctrl+Enter now submits without inserting a newline.
 
 Are we doing claude requests for all of our automated tests on agent-doc-js?
-### Re: Automated test API usage (HEAD)
+### Re: Automated test API usage
 
 **No — most tests used mocked responses.** Only 2-3 real API calls total:
 
@@ -1289,7 +1289,7 @@ Are we doing claude requests for all of our automated tests on agent-doc-js?
 | Ctrl+Enter fix | No | Keymap only, no submit |
 
 The 429 rate limit came from those few real calls sharing your OAuth token's limits with active Claude Code sessions.
-<!-- agent:boundary:9365f7dd -->
+<!-- agent:boundary:2b2fbb36 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

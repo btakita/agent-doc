@@ -960,7 +960,6 @@ I'm wondering what the 1st sentence should be.
 
 Acknowledged — `mail/social/20260402-security-blog-linkedin.md` is updated with your revised teaser. Leads with the commit stats hook, follows with security/audit/meta lessons, concise format. Ready to post whenever LinkedIn OAuth is working.
 
-The prompt injection risk is allowing multiple people working on the same document.
 ### Re: First sentence options
 
 Current draft opens with stats: *"532 git commits in one day."* Scroll-stopper but it's a "what" not a "why." Alternatives that lead with insight:
@@ -981,7 +980,26 @@ Current draft opens with stats: *"532 git commits in one day."* Scroll-stopper b
 "532 git commits. Every one traceable. That's the point."
 
 Recommendation: **B** — combines narrative pull with security angle, stats appear naturally in body. For pure "meat first," **A** is sharpest.
-<!-- agent:boundary:d2036e71 -->
+The prompt injection risk is allowing multiple people working on the same document.
+And running untrusted documents.
+### Re: Prompt injection framing (HEAD)
+
+Good sharpening. Two distinct attack vectors:
+
+1. **Shared documents** — collaborator (or attacker with repo access) injects instructions into a document another user's agent processes
+2. **Untrusted documents** — opening a document from an external source where the content IS the prompt
+
+Revised options with this framing:
+
+**A (revised):**
+"Your AI agent trusts the document it's reading. What happens when someone else writes part of it?"
+
+**B (revised):**
+"I ran 11 AI agents on shared documents. The security question isn't 'can they access files' — it's 'who wrote the prompt they're following?'"
+
+**F (new):**
+"Two prompt injection risks nobody talks about: shared documents where collaborators inject instructions, and untrusted documents where the content IS the attack."
+<!-- agent:boundary:da302eda -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

@@ -1568,7 +1568,7 @@ Regenerated with 0.4in margins, 10pt font, compact spacing: [file:///home/brian/
 Uses the same reference-card style as the LMI prep doc — bold section headers, tight bullet points, all on one page.
 
 I'm not being clear with communicating my roadmap. Please assist with a draft
-### Re: Roadmap draft for the Bob call (HEAD)
+### Re: Roadmap draft for the Bob call
 
 Here's a clear roadmap narrative — "what exists → what's next → where Ragie fits":
 
@@ -1590,7 +1590,7 @@ Here's a clear roadmap narrative — "what exists → what's next → where Ragi
 - Content validation before indexing — customer's job, or Ragie building toward it?
 - Multi-tenant isolation for these client use cases
 - Whether there's a collaboration path beyond just being a customer
-<!-- agent:boundary:771e647a -->
+<!-- agent:boundary:d9b4a06c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

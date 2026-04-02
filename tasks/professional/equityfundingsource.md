@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Full visual parity with equityfundingnow.com. 31 tests passing. Ready for deployment.
+18 deal detail pages implemented. 40 tests passing. Full visual parity.
 <!-- /agent:status -->
 
 ## Exchange
@@ -241,7 +241,24 @@ All 31 tests updated and passing.
 - Portfolio (18 deal cards in 3-col grid) -- parity
 
 All 31 tests passing. All 32 images loading. CSS, style, and content parity achieved.
-<!-- agent:boundary:326e5259 -->
+
+Good enough. Please implement each of the portfolio pages.
+See https://www.equityfundingnow.com/portfolio/chula-vista-ca-100000/
+### Re: Portfolio detail pages implemented (HEAD)
+
+Each of the 18 funded deals now has its own page at `/portfolio/:slug`:
+
+**Features:**
+- Large property image spanning full width
+- Location, loan type, and amount below
+- Prev/next navigation arrows to browse between deals
+- Grid icon to return to portfolio listing
+- All portfolio grid cards and home page featured deals link to detail pages
+
+**URL slugs match the live site:** e.g., `/portfolio/chula-vista-ca-100000/`, `/portfolio/oahu-hi-1465000/`, `/portfolio/malibu-ca500000/`
+
+**Tests:** 40 total (9 new for deal detail + data helpers), all passing.
+<!-- agent:boundary:82bdb915 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -255,11 +272,12 @@ All 31 tests passing. All 32 images loading. CSS, style, and content parity achi
 - [x] Download property images (32 files)
 - [x] Configure Cloudflare Workers + R2 deployment
 - [x] bun install + verify dev server runs (port 4200)
-- [x] Add page tests (31 tests, all passing)
+- [x] Add page tests (40 tests, all passing)
 - [x] Fix CSS loading (hashed asset URLs)
 - [x] Dark theme + layout matching equityfundingnow.com
 - [x] Serve public assets (images now loading)
 - [x] CSS, style, and content parity with live site
+- [x] Individual portfolio deal detail pages (18 pages)
 - [ ] Create R2 bucket + upload assets
 - [ ] Build Apply Now page (form or Google Forms link)
 - [ ] Build Message Us / Contact page

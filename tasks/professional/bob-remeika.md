@@ -1551,20 +1551,28 @@ Created and saved to: [file:///home/brian/work/btakita/agent-loop/tmp/bob-remeik
 **Questions for Bob:** Content moderation roadmap, multi-tenant isolation, enterprise pricing, Ragie Parse roadmap
 
 Source markdown also at `tmp/bob-remeika-call-structure.md` if you want to edit and regenerate.
-<!-- agent:boundary:39044f02 -->
+
+Make this a 1 page summary
+### Re: 1-page summary (HEAD)
+
+Condensed into a single-page reference card with a table layout: [file:///home/brian/work/btakita/agent-loop/tmp/bob-remeika-call-structure.pdf](file:///home/brian/work/btakita/agent-loop/tmp/bob-remeika-call-structure.pdf)
+
+6 blocks (Reconnect → Demo → Architecture → Use Cases → Security → Collab) with time allocations, key points, questions for Bob, and follow-up actions. All on one page.
+
+Source: `tmp/bob-remeika-call-structure.md`
+<!-- agent:boundary:b5422776 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [done] Create call structure PDF for Bob meeting
-- Prep JB plugin demo environment for Bob call (today, ~1 hour)
+- [done] Create 1-page call structure PDF for Bob meeting
+- Prep JB plugin demo environment for Bob call (today)
 - Prep EFS Tier 0-3 architecture walkthrough for Bob call
-- Write Ragie Parse questions (content moderation roadmap, multi-tenant isolation, pricing)
 - Prep Judith (EFS) and Ron (patent) talking points for the call
 - [done] Draft pre-call message for Bob
 - [stretch] Polish ragie-web-doc demo for Bob call (tasks/software/ragie-web-doc.md)
 - Schedule Robert Ross call at 4:00 PM ET / 1:00 PM PT Thursday
 - Post-call follow-up: share security post (briantakita.me/posts/agent-security-multiuser-lessons/) with Bob
-- Discuss EFS document pipeline: Ragie Parse for indexing approved loan docs, but need Tier 1-2 validation before indexing. See tasks/professional/equityfundingsource.md
+- Discuss EFS document pipeline: Ragie Parse for indexing approved loan docs, but need Tier 1-2 validation before indexing
 <!-- /agent:pending -->

@@ -952,11 +952,16 @@ Please write a draft file.
 Saved the revised teaser as `mail/social/20260402-security-blog-linkedin.md`. The previous draft (`mail/social/20260401-181027-linkedin.md`) referenced in the session summary doesn't exist — it was lost. This new file replaces it.
 
 Ready to post when you are. LinkedIn OAuth still needs retry (was blocked by outage last session).
-<!-- agent:boundary:fed2e42e -->
+
+I updated the draft with the teaser that we were discussing last evening.
+### Re: Updated draft (HEAD)
+
+Acknowledged — `mail/social/20260402-security-blog-linkedin.md` is updated with your revised teaser. Leads with the commit stats hook, follows with security/audit/meta lessons, concise format. Ready to post whenever LinkedIn OAuth is working.
+<!-- agent:boundary:02bffe3a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn teaser — saved to `mail/social/20260402-security-blog-linkedin.md`, ready to post
+- LinkedIn teaser — draft finalized at `mail/social/20260402-security-blog-linkedin.md`, ready to post
 - LinkedIn OAuth — needs retry when LinkedIn is back
 - Search icon `w-full` fix — remove `w-full` from icon span in rappstack-dev
 - JSON-LD VideoObject enhancement — add BlogPosting wrapper, duration, publisher (optional)

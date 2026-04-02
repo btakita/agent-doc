@@ -179,7 +179,7 @@ Bun v1.3.10 (Linux x64)
 error: script "dev" exited with code 1
 error: script "dev" exited with code 1
 ```
-### Re: Fix dev server startup (HEAD)
+### Re: Fix dev server startup
 
 Fixed 3 issues:
 
@@ -188,7 +188,7 @@ Fixed 3 issues:
 3. **Tailwind CSS syntax:** Changed `@import "tailwindcss"` to `@tailwind base; @tailwind components; @tailwind utilities;` (Tailwind v4 `@import` not compatible with this esbuild plugin chain)
 
 Dev server now starts successfully on port 4200.
-<!-- agent:boundary:47a94dff -->
+<!-- agent:boundary:5b05b109 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

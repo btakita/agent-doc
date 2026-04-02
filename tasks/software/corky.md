@@ -1282,12 +1282,25 @@ All three fixes implemented and verified:
 1. Speaker count constraint in cross-chunk merging
 2. Frequency spike repetition detection on merged blocks
 3. no_speech_thold tuning (minor, inconclusive)
-<!-- agent:boundary:d3978d5b -->
+
+continue:
+- Commit all fixes to corky repo
+### Re: Committed (HEAD)
+
+Committed to corky repo:
+
+```
+3ddb08e feat(transcribe): speaker count constraint, repetition filter, adaptive diarization
+```
+
+- Clippy clean
+- 10 files changed, 479 insertions, 13 deletions
+- Parent submodule pointer updated (6f963b5a)
+<!-- agent:boundary:c0544c82 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Commit all fixes to corky repo
 - User switching Cube ACR from AMR to WAV/M4A format
 <!-- /agent:pending -->

@@ -1143,10 +1143,10 @@ Provide a `curl | sh` script to populate credential fields.
 
 **Usage:**
 ```bash
-# From the repo (HEAD)
+# From the repo
 ./setup.sh
 
-# Or curl from the deployed site (HEAD)
+# Or curl from the deployed site
 bash <(curl -s https://agent-doc-js.pages.dev/setup.sh)
 ```
 
@@ -1161,7 +1161,7 @@ bash <(curl -s https://agent-doc-js.pages.dev/setup.sh)
 **For Bob:** He runs `./setup.sh` (or the curl one-liner) and the SPA opens pre-configured. No manual copy-pasting of tokens.
 
 Deployed to Cloudflare Pages.
-<!-- agent:boundary:82543796 -->
+<!-- agent:boundary:999eb9f2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

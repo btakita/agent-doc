@@ -126,7 +126,18 @@ This is happening every ~5 seconds — `ragie-web-doc.md` has a session running 
 **Root cause:** The PatchWatcher shouldn't acquire a write-action for no-op patches. It should check if the patch would produce changes BEFORE locking the document.
 
 This is a separate bug — should I investigate and fix the PatchWatcher?
-<!-- agent:boundary:934567de -->
+Yes
+### Re: PatchWatcher no-op fix (HEAD)
+
+Fixed. Patch computation now runs **outside** `WriteCommandAction`. The write lock is only acquired when the result differs from the current document content. No-op patches skip the write action entirely.
+
+Before: every patch (including no-ops) → `WriteCommandAction` → blocks EDT → typing lag
+After: no-op patches → early return, no EDT blocking
+
+Plugin version bumped to 0.2.39. Plugin zip: `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.39.zip`
+
+Reinstall the plugin to fix the lag.
+<!-- agent:boundary:fbd5d1af -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -135,7 +146,8 @@ This is a separate bug — should I investigate and fix the PatchWatcher?
 - [x] All implementation, tests, audit docs, and release complete
 - [x] Published: crates.io ✓, GitHub Release ✓
 - [x] CI fixes complete
-- [x] Tailwind CSS disabled (was causing lag)
-- [ ] Fix PatchWatcher: skip write-action for no-op patches (causes EDT lag)
+- [x] Tailwind CSS disabled
+- [x] PatchWatcher: skip write-action for no-op patches
+- [ ] Install plugin 0.2.39 and verify lag is gone
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

@@ -710,7 +710,7 @@ Updated `mail/drafts/20260401-judith-proposal-options.md`. Key change to the ope
 The rest of the proposal (three options, Ragie mention, AI search examples, retainer discussion) is unchanged. The wrapper to Rob is also unchanged.
 
 This is a stronger pitch... instead of "I started working on it," Judith sees a finished product.
-<!-- agent:boundary:952e98f1 -->
+<!-- agent:boundary:c5b83896 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

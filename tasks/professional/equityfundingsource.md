@@ -244,7 +244,7 @@ All 31 tests passing. All 32 images loading. CSS, style, and content parity achi
 
 Good enough. Please implement each of the portfolio pages.
 See https://www.equityfundingnow.com/portfolio/chula-vista-ca-100000/
-### Re: Portfolio detail pages implemented (HEAD)
+### Re: Portfolio detail pages implemented
 
 Each of the 18 funded deals now has its own page at `/portfolio/:slug`:
 
@@ -258,7 +258,7 @@ Each of the 18 funded deals now has its own page at `/portfolio/:slug`:
 **URL slugs match the live site:** e.g., `/portfolio/chula-vista-ca-100000/`, `/portfolio/oahu-hi-1465000/`, `/portfolio/malibu-ca500000/`
 
 **Tests:** 40 total (9 new for deal detail + data helpers), all passing.
-<!-- agent:boundary:82bdb915 -->
+<!-- agent:boundary:84d737ce -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

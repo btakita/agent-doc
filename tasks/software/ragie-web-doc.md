@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Proxy retries 429s | Sonnet per-minute limit saturated by concurrent sessions | Use Haiku for demo
+LIVE: https://agent-doc-js.pages.dev | Sonnet rate-limited on OAuth token (use Haiku) | Ready for demo
 <!-- /agent:status -->
 
 ## Exchange
@@ -1322,22 +1322,38 @@ You're right — the /usage dashboard shows overall quota, but the 429 is a **pe
 
 With 16+ Claude processes running concurrently, the per-minute Sonnet rate is saturated. Each active Claude Code session consumes from the same pool.
 
+> With 16+ Claude processes running concurrently
+
+Most of the sessions should be idle. Is this not the case?
+
 **Updated proxy with retry logic:** 3 retries with exponential backoff (1s, 2s, 4s). Tested — retries execute but Sonnet stays rate-limited with this many concurrent sessions.
 
 **For the demo:**
 - Use **Haiku** (separate per-minute limits, not saturated)
 - Or reduce active Claude Code sessions before demoing with Sonnet
 - Proxy now retries automatically — if Sonnet has brief availability windows, it'll catch them
-<!-- agent:boundary:0bd58d2a -->
+
+There needs to be feedback when Ctrl+S
+### Re: Idle sessions and rate limits (HEAD)
+
+You're right — idle sessions don't make API calls. I checked and the 429 persists even with a direct API call (no proxy) to Sonnet using the OAuth token. Haiku works fine.
+
+This is likely a **Claude Max subscription-specific per-minute limit for Sonnet** on `sk-ant-oat01` tokens. The limit may be lower than expected for the OAuth token type, or this session's Sonnet activity (which has been heavy) is still within the rate limit window.
+
+**The bottom line:** The OAuth token has a Sonnet per-minute ceiling that's been reached. Haiku isn't affected. For the demo, either:
+- Use Haiku
+- Wait for the rate limit window to fully reset (could be minutes to an hour)
+- Use a standard API key from console.anthropic.com
+<!-- agent:boundary:4f12ee81 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] SPA built, deployed, all bugs fixed
-- [x] Proxy with retry logic for transient 429s
-- [x] 429 root cause: per-minute Sonnet burst limit saturated by 16+ concurrent Claude sessions
-- [ ] Add CNAME for `agent-doc.briantakita.me` (Cloudflare dashboard)
+- [x] Proxy with retry logic
+- [x] Rate limit investigation: OAuth token Sonnet limit, Haiku unaffected
+- [ ] Add CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
 - [ ] (deferred) OAuth flow, Yjs CRDT, WebSocket sync, Ragie, MCP
 <!-- /agent:pending -->

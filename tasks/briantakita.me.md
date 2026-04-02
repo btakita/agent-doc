@@ -999,11 +999,32 @@ Revised options with this framing:
 
 **F (new):**
 "Two prompt injection risks nobody talks about: shared documents where collaborators inject instructions, and untrusted documents where the content IS the attack."
-<!-- agent:boundary:b5d5cde9 -->
+
+> "Your AI agent trusts the document it's reading. What happens when someone else writes part of it?"
+
+I like A. But the blog post does not solve problem. Only says agent-doc assumes private repo with trusted users.
+We are working on a collaborative security model.
+
+Should A be tweaked to reflect this?
+### Re: Tweaking A for honesty (HEAD)
+
+Yes — A should signal this is a problem being surfaced, not solved. Tweaks:
+
+**A1 — Question + admission:**
+"Your AI agent trusts the document it's reading. What happens when someone else writes part of it? We don't have a full answer yet."
+
+**A2 — Question + discovery framing:**
+"Your AI agent trusts the document it's reading. What happens when someone else writes part of it? Here's what running 11 parallel sessions revealed."
+
+**A3 — Question + current boundary:**
+"Your AI agent trusts the document it's reading. What happens when someone else writes part of it? Right now, the answer is: keep the repo private."
+
+Recommendation: **A2** — keeps the hook, positions the post as discovery not solution, avoids overpromising. The "collaborative security model in development" note fits naturally in the body of the teaser.
+<!-- agent:boundary:bad90546 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn teaser — first sentence decision pending, draft at `mail/social/20260402-security-blog-linkedin.md`
+- LinkedIn teaser — first sentence decision pending (A2 recommended), draft at `mail/social/20260402-security-blog-linkedin.md`
 - LinkedIn OAuth — needs retry when LinkedIn is back
 - Search icon `w-full` fix — remove `w-full` from icon span in rappstack-dev
 - JSON-LD VideoObject enhancement — add BlogPosting wrapper, duration, publisher (optional)

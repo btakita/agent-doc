@@ -519,19 +519,32 @@ Migration `0001_create_tables.sql` applied to remote D1 (4 commands, 0.48ms):
 - `uploaded_documents` table
 
 54 tests passing. Ready to redeploy with form backend.
-<!-- agent:boundary:1d7d23b3 -->
+
+do:
+- [ ] Redeploy to Cloudflare Pages with form backend
+### Re: Redeployed to Cloudflare Pages (HEAD)
+
+Deployed with form backend. 25 pages generated, 27 new files uploaded.
+
+**Live:** https://equityfundingsource.pages.dev
+
+Forms now submit to `/api/apply` and `/api/contact` with D1 storage + R2 quarantine for uploads. The D1 database is live with the `applications`, `contacts`, and `uploaded_documents` tables.
+
+**Note:** The static site deploy (Cloudflare Pages) serves pre-rendered HTML. The POST endpoints (`/api/apply`, `/api/contact`) require a Cloudflare Workers deployment to actually process submissions. The current Pages deploy includes the client-side JS for form submission, but the server-side handlers need a Workers deploy. Want me to set that up next?
+<!-- agent:boundary:9c784f4a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] All pages built (25 total, 50 tests passing)
+- [x] All pages built (25 total, 54 tests passing)
 - [x] Deploy to Cloudflare Pages (equityfundingsource.pages.dev)
 - [x] Add EFS document pipeline topic to bob-remeika.md
 - [x] Wire up form submission backend (Apply Now + Contact) -- D1 + R2, 54 tests passing
 - [x] Review and send proposal email to Judith from Gmail -- pushed to Drafts
 - [x] Create D1 database and run migration -- database_id: 280e1539-b940-4c59-8988-fbed63c12ac0
-- [ ] Redeploy to Cloudflare Pages with form backend
+- [x] Redeploy to Cloudflare Pages with form backend
+- [ ] Deploy Workers for POST endpoint processing (/api/apply, /api/contact)
 - [ ] Form submission pipeline
   - [ ] Tier 0: Cloudflare WAF + upload limits
   - [ ] Tier 1: Workers AI pre-screening

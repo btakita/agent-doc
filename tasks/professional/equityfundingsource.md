@@ -12,7 +12,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-25 pages deployed. Document pipeline architecture: Tier 0-3 (WAF -> Workers AI -> Claude -> Ragie).
+25 pages deployed with form backend (D1 + R2 + email). Document pipeline architecture: Tier 0-3 (WAF -> Workers AI -> Claude -> Ragie).
 <!-- /agent:status -->
 
 ## Exchange
@@ -522,6 +522,7 @@ Migration `0001_create_tables.sql` applied to remote D1 (4 commands, 0.48ms):
 
 do:
 - [ ] Redeploy to Cloudflare Pages with form backend
+
 ### Re: Redeployed to Cloudflare Pages
 
 Deployed with form backend. 25 pages generated, 27 new files uploaded.
@@ -531,7 +532,29 @@ Deployed with form backend. 25 pages generated, 27 new files uploaded.
 Forms now submit to `/api/apply` and `/api/contact` with D1 storage + R2 quarantine for uploads. The D1 database is live with the `applications`, `contacts`, and `uploaded_documents` tables.
 
 **Note:** The static site deploy (Cloudflare Pages) serves pre-rendered HTML. The POST endpoints (`/api/apply`, `/api/contact`) require a Cloudflare Workers deployment to actually process submissions. The current Pages deploy includes the client-side JS for form submission, but the server-side handlers need a Workers deploy. Want me to set that up next?
-<!-- agent:boundary:6570c9cb -->
+
+These forms submissions should be emailed to brian.takita@gmail.com for now.
+### Re: Email notifications + Pages Functions deployed (HEAD)
+
+**Deployed** with server-side form handling. Pages Functions now process POST requests:
+
+- `POST /api/apply` -- validates fields, stores in D1, uploads docs to R2 quarantine, sends email
+- `POST /api/contact` -- validates fields, stores in D1, sends email
+
+**Email notifications** via Resend API to brian.takita@gmail.com:
+- Application emails: "New EFS Application: {name}" with all loan details
+- Contact emails: "New EFS Contact: {name}" with message content
+- Gracefully skips if Resend API key not configured
+
+**To activate email:**
+```bash
+cd src/equityfundingsource-dev
+bunx wrangler pages secret put RESEND_API_KEY --project-name equityfundingsource
+```
+Get a free API key from resend.com (100 emails/day free tier). The from address `notifications@equityfundingsource.com` needs verification in Resend, or use `onboarding@resend.dev` for testing.
+
+**Live:** https://equityfundingsource.pages.dev
+<!-- agent:boundary:90bf673d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -540,11 +563,11 @@ Forms now submit to `/api/apply` and `/api/contact` with D1 storage + R2 quarant
 - [x] All pages built (25 total, 54 tests passing)
 - [x] Deploy to Cloudflare Pages (equityfundingsource.pages.dev)
 - [x] Add EFS document pipeline topic to bob-remeika.md
-- [x] Wire up form submission backend (Apply Now + Contact) -- D1 + R2, 54 tests passing
+- [x] Wire up form submission backend (Apply Now + Contact) -- D1 + R2 + Pages Functions
 - [x] Review and send proposal email to Judith from Gmail -- pushed to Drafts
-- [x] Create D1 database and run migration -- database_id: 280e1539-b940-4c59-8988-fbed63c12ac0
-- [x] Redeploy to Cloudflare Pages with form backend
-- [ ] Deploy Workers for POST endpoint processing (/api/apply, /api/contact)
+- [x] Create D1 database and run migration
+- [x] Redeploy with form backend + email notifications
+- [ ] Configure Resend API key for email notifications
 - [ ] Form submission pipeline
   - [ ] Tier 0: Cloudflare WAF + upload limits
   - [ ] Tier 1: Workers AI pre-screening
@@ -552,6 +575,5 @@ Forms now submit to `/api/apply` and `/api/contact` with D1 storage + R2 quarant
   - [ ] Tier 3: Ragie Parse + Index for approved docs
   - [ ] Admin dashboard (Cloudflare Access auth)
   - [ ] Token-based document upload flow
-  - [ ] Notification emails
 - [ ] Discuss Ragie content validation with Bob Remeika (scheduled call)
 <!-- /agent:pending -->

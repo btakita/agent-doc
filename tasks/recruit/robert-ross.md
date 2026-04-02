@@ -91,7 +91,7 @@ Checked the .eml file. The problem: `In-Reply-To: 19d479af292d8d99` used the Gma
 - File a corky enhancement to resolve Message-IDs from thread IDs when building reply headers
 I don't see it in the same thread visually.
 Sshould
-### Re: Threading fix — ready to resend (HEAD)
+### Re: Threading fix — ready to resend
 
 Found Rob's original Message-ID from the .eml: `<CAMrCVsDSX0zWO2DyZfh9ugzS=pUHSt_MtAEs+0qnfw7-njWZ2w@mail.gmail.com>`
 
@@ -103,7 +103,7 @@ Created a new draft with the correct `In-Reply-To` header: `mail/drafts/2026-04-
 3. **Skip resending** — Rob likely received the first reply fine; the broken threading is mainly a Gmail UI issue on your side
 
 Which approach do you want?
-<!-- agent:boundary:04bfb8bc -->
+<!-- agent:boundary:71b5be87 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

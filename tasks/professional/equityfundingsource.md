@@ -261,7 +261,7 @@ Each of the 18 funded deals now has its own page at `/portfolio/:slug`:
 **URL slugs match the live site:** e.g., `/portfolio/chula-vista-ca-100000/`, `/portfolio/oahu-hi-1465000/`, `/portfolio/malibu-ca500000/`
 
 **Tests:** 40 total (9 new for deal detail + data helpers), all passing.
-### Re: Deployed to Cloudflare Pages (HEAD)
+### Re: Deployed to Cloudflare Pages
 
 **Live demo:** https://equityfundingsource.pages.dev
 
@@ -280,7 +280,7 @@ Each of the 18 funded deals now has its own page at `/portfolio/:slug`:
 ```
 make deploy    # build + generate static + deploy to Cloudflare Pages
 ```
-<!-- agent:boundary:628b2627 -->
+<!-- agent:boundary:febd3f1a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

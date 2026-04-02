@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Submit feedback added | Ready for demo
+LIVE: https://agent-doc-js.pages.dev | Defaults to Haiku | Change model in Settings or re-run setup.sh
 <!-- /agent:status -->
 
 ## Exchange
@@ -1381,7 +1381,26 @@ Added visual feedback when submitting:
 4. All three reset when the call completes (success or error)
 
 Deployed to Cloudflare Pages.
-<!-- agent:boundary:b8612360 -->
+
+Still getting 429 with Haiku selected.
+### Re: 429 with Haiku — likely stale Sonnet in localStorage (HEAD)
+
+Haiku works from server-side curl. The issue is your browser's localStorage on the deployed site still has `claude-sonnet-4-6` from the earlier `setup.sh` run (which hardcoded Sonnet).
+
+**Fixed:**
+- `setup.sh` now defaults to `claude-haiku-4-5-20251001` (configurable via `AGENT_DOC_MODEL` env var)
+- App default model changed to Haiku
+- Dropdown reordered: Haiku first
+
+**To fix your current browser:**
+1. Open Settings on the deployed site
+2. Change model to **Claude Haiku 4.5**
+3. Click **Save**
+
+Or re-run: `curl -s https://agent-doc-js.pages.dev/setup.sh | sh`
+
+Deployed to Cloudflare Pages.
+<!-- agent:boundary:56a062c5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1389,7 +1408,7 @@ Deployed to Cloudflare Pages.
 <!-- agent:pending patch=replace -->
 - [x] SPA built, deployed, all bugs fixed
 - [x] Proxy with retry logic
-- [x] Submit visual feedback (button + status bar pulse)
+- [x] Default to Haiku (avoid OAuth Sonnet rate limit)
 - [ ] Add CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
 - [ ] (deferred) OAuth flow, Yjs CRDT, WebSocket sync, Ragie, MCP

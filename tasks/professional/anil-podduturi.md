@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Revised LinkedIn reply — more active tone, mentions Ragie/agent-doc-js, asks for intros
+Revised LinkedIn reply — softened closing, removed direct intro ask
 <!-- /agent:status -->
 
 ## Exchange
@@ -55,22 +55,39 @@ Also Ragie is a great backend for the document data. The agent-doc-js is a proto
 
 Revised to be more forward-leaning — asks for intros, mentions the stack:
 
-> Thanks for letting me know, Anil — no worries at all on the Helix front. Curious where you're heading next... with your AI product background, I'd love to explore ways to work together.
->
-> I've been building agent-doc — a document-as-interface harness for AI agents. The pattern actually traces back to how we collaborated at Neo. Ragie handles the document data backend, and I have a JS frontend prototype (agent-doc-js) that makes it all interactive. Happy to give you a quick demo sometime.
->
-> If you know anyone looking for AI agent tooling or someone to build it, I'd appreciate the intro. Either way, let's catch up — would be great to reconnect.
+Thanks for letting me know, Anil — no worries at all on the Helix front. Curious where you're heading next... with your AI product background, I'd love to explore ways to work together.
+
+I've been building agent-doc — a document-as-interface harness for AI agents. The pattern actually traces back to how we collaborated at Neo. Ragie handles the document data backend, and I have a JS frontend prototype (agent-doc-js) that makes it all interactive. Happy to give you a quick demo sometime.
+
+If you know anyone looking for AI agent tooling or someone to build it, I'd appreciate the intro. Either way, let's catch up — would be great to reconnect.
 
 Changes from previous draft:
 - Added ask for intros ("if you know anyone...")
 - Mentioned Ragie as the backend + agent-doc-js as the frontend prototype
 - More active tone overall — positions you as building something, not just reminiscing
-<!-- agent:boundary:09f89a26 -->
+
+Let's revise a bit.
+
+> If you know anyone looking for AI agent tooling or someone to build it
+
+Is this too forward?
+### Re: Softening the ask (HEAD)
+
+You're right to question it. Asking for intros in the same message where he just said he can't help with BCG could feel like a pivot from one ask to another. Here's a softer version:
+
+> Thanks for letting me know, Anil — no worries at all on the Helix front. Curious where you're heading next... with your AI product background, I'd love to explore ways to work together.
+>
+> I've been building agent-doc — a document-as-interface harness for AI agents. The pattern actually traces back to how we collaborated at Neo. Ragie handles the document data backend, and I have a JS frontend prototype that makes it all interactive. Happy to give you a quick demo sometime.
+>
+> Either way, let's catch up — always good to stay connected, and I'd love to hear what you're getting into next.
+
+The demo offer implies you're building something real without explicitly asking for referrals. Save the intro ask for a follow-up conversation.
+<!-- agent:boundary:a3582e44 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] User review of active draft
+- [ ] User review of softened draft
 - [ ] Send reply via LinkedIn
 <!-- /agent:pending -->

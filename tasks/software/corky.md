@@ -1357,11 +1357,30 @@ From the screenshot, Cube ACR offers 4 formats:
 If MPEG-4 LQ still produces poor diarization results, step up to **MPEG-4** (medium). But I'd start with LQ since you want to minimize storage impact.
 
 No OGG/Opus option unfortunately -- Cube ACR only offers AMR and M4A variants.
-<!-- agent:boundary:99ebd1dc -->
+compact exchange
+### v0.23.1 — Transcription quality (speaker count, repetition filter, CUDA)
+
+**Tested on:** 79-min AMR phone call (robert-ward, April 1)
+
+**Fixes:**
+- **Speaker count constraint:** `merge_cross_chunk_speakers()` now respects `max_speakers` from `--speakers` list length. Before: 4 speakers detected on 2-person call. After: 2.
+- **Repetition filter:** Word frequency spike detection on merged speaker blocks. Truncates at sentence boundary when any word appears 10+ times in a 100-word window. "tomorrow" count: 77→10 (all natural). Output: 66KB→49KB.
+- **CUDA build:** Must use `--features "diarize,transcribe-cuda"` (or `make release-gpu`). RTX 5090 detected, whisper inference on GPU.
+- **no_speech_thold:** Set to 0.8 (default 0.6). Inconclusive effect.
+- **Adaptive chunking:** Full-audio diarization → 0 segments (poor quality on AMR), cascades to 600s chunks → 1246 segments (quality OK).
+
+**Recording format (Cube ACR):**
+- Current: AMR (~12 kbps, 7 MB/hr) -- poor for diarization
+- Recommended: **MPEG-4 LQ** (.m4a, ~24-32 kbps, ~14-18 MB/hr) -- 2-2.5x AMR size, much better spectral quality
+- Also available: MPEG-4 medium (~64 kbps), MPEG-4 HQ (~128 kbps)
+
+Committed: `3ddb08e` (corky), `6f963b5a` (agent-loop parent).
+
+## User (HEAD)
+<!-- agent:boundary:110aec97 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- User switching Cube ACR to MPEG-4 LQ format
 <!-- /agent:pending -->

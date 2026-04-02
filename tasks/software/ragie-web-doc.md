@@ -1599,7 +1599,7 @@ So Ragie is not meant to be used with a SKILL.md which would prompt claude to pe
 Still partitioning (10 docs). Search returns 0 chunks. Ragie's processing queue may be backed up — free tier can take longer.
 
 We can proceed with other work and test retrieval once indexing completes. The SPA will automatically use it once docs are searchable.
-### Re: Ragie with SKILL.md — prompt-driven RAG (HEAD)
+### Re: Ragie with SKILL.md — prompt-driven RAG
 
 **Both approaches work:**
 
@@ -1611,7 +1611,7 @@ We can proceed with other work and test retrieval once indexing completes. The S
 **For local agent-doc (Claude Code):** SKILL.md-driven RAG via MCP is the better architecture.
 
 Both feed into the same Ragie index — the difference is who orchestrates the search (SPA code vs Claude's reasoning).
-<!-- agent:boundary:db8f9054 -->
+<!-- agent:boundary:a20bf96e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Ragie integration ready (needs docs) | setup.sh fixed
+LIVE: https://agent-doc-js.pages.dev | Terminal panel added | Ready for demo
 <!-- /agent:status -->
 
 ## Exchange
@@ -1489,17 +1489,32 @@ curl -s https://agent-doc-js.pages.dev/setup.sh | sh
 ```
 
 Your "Sho" got cut off — were you going to say "Should not happen" or something else?
-<!-- agent:boundary:d70137e7 -->
+
+Please make the
+### Re: Terminal panel added (HEAD)
+
+Added a terminal panel below the editor:
+
+- **Timestamped logs** for all submit activity (model, diff size, Ragie search, API call, response, errors)
+- **Color-coded** entries: green for success, red for errors, blue for Ragie context, gray for info
+- **Toggle** via clicking the header or _ button (collapse/expand)
+- **Clear** via x button
+- Shows "agent-doc-js initialized" on load
+
+Layout: Editor (top) | Terminal header | Terminal output | Status bar (bottom)
+
+Deployed to Cloudflare Pages.
+<!-- agent:boundary:6abb251c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] SPA built, deployed, all bugs fixed, toolbar model dropdown
+- [x] SPA: editor + toolbar model dropdown + terminal panel
 - [x] Ragie retrieval integration
-- [x] Fix setup.sh to not auto-read pass store
+- [x] Cloudflare Worker proxy + Pages deployment
+- [x] Setup script + hash param onboarding
 - [ ] Upload demo documents to Ragie index
-- [ ] Test full Ragie -> Claude flow
 - [ ] Add CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
 - [ ] (deferred) Yjs CRDT, WebSocket sync, MCP

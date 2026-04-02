@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-SPA fully working with real Claude API via Worker proxy | Ready for Cloudflare Pages deploy to agent-doc.briantakita.me
+LIVE: https://agent-doc-js.pages.dev | Worker proxy deployed | Custom domain pending CNAME setup
 <!-- /agent:status -->
 
 ## Exchange
@@ -1099,7 +1099,28 @@ Can we use ~/.claude/.credentials.json?
 - System Prompt
 
 **The SPA is fully functional.** Next: deploy the static site to Cloudflare Pages at `agent-doc.briantakita.me`.
-<!-- agent:boundary:b509413e -->
+
+Continue:
+- [ ] Deploy static site to Cloudflare Pages at `agent-doc.briantakita.me`
+### Re: Deployed to Cloudflare Pages (HEAD)
+
+**Live at:** https://agent-doc-js.pages.dev
+
+**Deployment details:**
+- Cloudflare Pages project: `agent-doc-js`
+- Preview URL: https://7e5ffbb9.agent-doc-js.pages.dev
+- Production URL: https://agent-doc-js.pages.dev
+- 3 files deployed (index.html, style.css, dist/app.js)
+
+**Custom domain `agent-doc.briantakita.me`:** Needs a CNAME record in your DNS:
+- Type: CNAME
+- Name: `agent-doc`
+- Target: `agent-doc-js.pages.dev`
+
+This can be set up in the Cloudflare dashboard under Pages > agent-doc-js > Custom domains.
+
+**For Bob's demo:** Share `https://agent-doc-js.pages.dev` directly. He enters his API key (or your proxy URL) in Settings and starts editing.
+<!-- agent:boundary:5e56a7d9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1108,9 +1129,10 @@ Can we use ~/.claude/.credentials.json?
 - [x] Create `btakita/agent-doc-js` GitHub repo
 - [x] Scaffold SPA: CodeMirror 6 + diff + Claude API
 - [x] Fix CodeMirror duplicate instance error (bun bundler)
-- [x] Test submit flow end-to-end (mocked API)
-- [x] Test with real Claude API via Cloudflare Worker proxy
-- [ ] Deploy static site to Cloudflare Pages at `agent-doc.briantakita.me`
+- [x] Test submit flow end-to-end (mocked + real API)
+- [x] Deploy Cloudflare Worker proxy for CORS
+- [x] Deploy to Cloudflare Pages (https://agent-doc-js.pages.dev)
+- [ ] Add CNAME for `agent-doc.briantakita.me` (Cloudflare dashboard)
 - [ ] Demo script for Bob call
 - [ ] (deferred) Yjs CRDT for concurrent edit merging
 - [ ] (deferred) WebSocket live document sync

@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Revised LinkedIn reply — broadened background reference per user feedback
+Revised LinkedIn reply — subtle approach, no explicit collaboration ask
 <!-- /agent:status -->
 
 ## Exchange
@@ -90,19 +90,34 @@ See https://anilpod.com/
 
 Good call — Anil's background spans product leadership, digital transformation, interim CPO at National Grid, BCG X. "AI product" is too narrow. Updated:
 
-> Thanks for letting me know, Anil...no worries at all on the Helix front. Curious where you're heading next... with your experience across product, AI, and digital transformation, I'd love to explore ways to work together.
+Thanks for letting me know, Anil...no worries at all on the Helix front. Curious where you're heading next... with your experience across product, AI, and digital transformation, I'd love to explore ways to work together.
+
+I've been building agent-doc...a document-as-interface harness for AI agents. The pattern actually traces back to how we collaborated at Neo. Ragie handles the document data backend, and I have a JS frontend prototype that makes it all interactive. Happy to give you a quick demo sometime.
+
+Either way, let's catch up...always good to stay connected, and I'd love to hear what you're getting into next.
+
+Changed "your AI product background" → "your experience across product, AI, and digital transformation" — acknowledges the full breadth.
+
+> I'd love to explore ways to work together.
+
+Should we be so forward or let Anil come to that conclusion via a more subtle offering.
+### Re: Subtler approach (HEAD)
+
+You're right — let the work speak. Removed the explicit collaboration ask:
+
+> Thanks for letting me know, Anil...no worries at all on the Helix front. Curious where you're heading next — would love to hear about it.
 >
 > I've been building agent-doc...a document-as-interface harness for AI agents. The pattern actually traces back to how we collaborated at Neo. Ragie handles the document data backend, and I have a JS frontend prototype that makes it all interactive. Happy to give you a quick demo sometime.
 >
-> Either way, let's catch up...always good to stay connected, and I'd love to hear what you're getting into next.
+> Either way, let's catch up...always good to stay connected.
 
-Changed "your AI product background" → "your experience across product, AI, and digital transformation" — acknowledges the full breadth.
-<!-- agent:boundary:5b6d0e10 -->
+"Would love to hear about it" shows genuine interest in Anil. The demo offer plants the seed. If he's interested, the collaboration talk happens naturally in the follow-up.
+<!-- agent:boundary:03700e3a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] User review of broadened draft
+- [ ] User review of subtle draft
 - [ ] Send reply via LinkedIn
 <!-- /agent:pending -->

@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Prioritizing deferred items for Bob demo | Ragie integration highest impact
+LIVE: https://agent-doc-js.pages.dev | Ragie integration deployed | Need to upload docs to Ragie index
 <!-- /agent:status -->
 
 ## Exchange
@@ -1435,6 +1435,7 @@ Deployed to Cloudflare Pages.
 
 Do:
 - [ ] (deferred) OAuth flow, Yjs CRDT, WebSocket sync, Ragie, MCP
+We can skip OAuth flow
 ### Re: Deferred items — prioritization
 
 These are all substantial features. For the morning demo with Bob, ranked by impact:
@@ -1446,17 +1447,44 @@ These are all substantial features. For the morning demo with Bob, ranked by imp
 5. **OAuth** — Production. Not demo-blocking.
 
 What do you want to tackle first?
-<!-- agent:boundary:15f6cec9 -->
+1
+We have `RAGIE_API_KEY="$(pass btak/RAGIE_API_KEY)"`
+Perhaps we should have a field for the RAGIE_API_KEY?
+### Re: Ragie integration built and deployed (HEAD)
+
+**Done.** Ragie retrieval is integrated into the submit flow.
+
+**How it works:**
+1. When you submit, if Ragie API key is configured, the SPA first searches Ragie using the diff (your new edits) as the query
+2. Top 5 retrieved chunks are injected into the Claude prompt as `<retrieved-context>`
+3. Claude responds with awareness of the retrieved documents
+4. Status bar shows "Searching knowledge base..." then "Context retrieved. Calling Claude..."
+
+**What's deployed:**
+- Worker: `/ragie/*` proxy route forwarding to `api.ragie.ai`
+- Settings: Ragie API Key field
+- `setup.sh`: auto-populates `ragieKey` from `pass btak/RAGIE_API_KEY`
+
+**Tested:** Proxy returns 200 OK. But the Ragie index has **0 documents** — you need to upload documents before retrieval returns results.
+
+**To upload documents to Ragie:**
+```bash
+corky ragie upload <file>
+```
+Or via the Ragie dashboard.
+
+**Next:** Upload demo docs to Ragie, then the full flow (edit -> Ragie retrieval -> Claude with context) will work end-to-end.
+<!-- agent:boundary:212d38ac -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] SPA built, deployed, all bugs fixed, toolbar model dropdown
-- [ ] Ragie API integration (highest demo impact)
-- [ ] WebSocket live document sync
-- [ ] Yjs CRDT for concurrent editing
+- [x] Ragie retrieval integration (proxy + SPA + context injection)
+- [ ] Upload demo documents to Ragie index
+- [ ] Test full Ragie -> Claude flow with real documents
 - [ ] Add CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
-- [ ] (deferred) MCP integration, OAuth flow
+- [ ] (deferred) Yjs CRDT, WebSocket sync, MCP
 <!-- /agent:pending -->

@@ -397,7 +397,7 @@ The SKILL.md should be updated to pass `--origin skill` in the write command. I'
 Why would the skill vs watch vs stream watch?
 Why would multiple of these sources write to the document?
 Should we have an IPC funnel/queue for the writes?
-### Re: Why multiple writers exist + IPC funnel (HEAD)
+### Re: Why multiple writers exist + IPC funnel
 
 **Why each writer exists:**
 - **skill** — the `/agent-doc` Claude Code skill runs `agent-doc write` after generating a response. This is the primary write path.
@@ -420,7 +420,7 @@ Yes, this is the right design direction. All writes should go through a single s
 The IPC write path (`try_ipc` → plugin Document API) is already a single channel. The issue is the disk fallback path — when IPC times out, writes go directly to disk without coordination.
 
 This is a significant architectural change. For now, the `--origin` flag + drift warning give visibility into when it happens. The queue design should be a v0.32 feature.
-<!-- agent:boundary:2b4e48a8 -->
+<!-- agent:boundary:a93c2be8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

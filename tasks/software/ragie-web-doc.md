@@ -1056,7 +1056,7 @@ Screenshot verified — the SPA is working. Next step: test the Claude API call 
 
 go:
 - [ ] Test Claude API call end-to-end (enter key, edit doc, submit)
-### Re: Claude API test — end-to-end verified (HEAD)
+### Re: Claude API test — end-to-end verified
 
 Tested the full submit flow via Chrome DevTools Protocol with a mocked API response:
 
@@ -1076,7 +1076,7 @@ Could not test with a real API key (not found in `pass` store). You'll need to m
 **Screenshot verified** — editor shows the edited document with agent response, status bar confirms success.
 
 Next: deploy to Cloudflare Pages.
-<!-- agent:boundary:096113fd -->
+<!-- agent:boundary:b3ec142c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

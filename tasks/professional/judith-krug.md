@@ -697,7 +697,20 @@ Done. Updated the draft (`mail/drafts/20260401-judith-proposal-options.md`):
 - The full proposal body is preserved between the `---` dividers so Rob sees exactly what Judith would receive.
 
 Pushed to Gmail Drafts — check your drafts to review and send.
-<!-- agent:boundary:a0ca9423 -->
+
+Update the email draft with the equityfundingsource website that we did. See tasks/professional/equityfundingsource.md
+### Re: Updated proposal with EFS website (HEAD)
+
+Updated `mail/drafts/20260401-judith-proposal-options.md`. Key change to the opening:
+
+**Before:** "I've already begun recovering it and setting up a new system you'll fully control."
+
+**After:** "I've already rebuilt it." with a direct link to **https://equityfundingsource.pages.dev** and a summary of what's live (25 pages, 18 funded deals with property images, About with bio, Apply Now form, Contact page).
+
+The rest of the proposal (three options, Ragie mention, AI search examples, retainer discussion) is unchanged. The wrapper to Rob is also unchanged.
+
+This is a stronger pitch... instead of "I started working on it," Judith sees a finished product.
+<!-- agent:boundary:97113a69 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -706,5 +719,6 @@ Pushed to Gmail Drafts — check your drafts to review and send.
 - [x] Draft & send proposal email to Judith with options
 - [x] Add Ragie mention to proposal
 - [x] Redirect proposal to Robert Ward for review first
+- [x] Update proposal with live EFS website link
 - [ ] After Rob approves: re-address to Judith (cc Robert Waldman) and send
 <!-- /agent:pending -->

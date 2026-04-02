@@ -219,7 +219,7 @@ All work. Send whichever feels right.
 Help me tighten up my pitch.
 See tasks/professional/bob-remeika.md and the transcript of our call.
 Also create a 1 page pdf for my call with robert-ross
-### Re: Pitch tightening & call prep PDF (HEAD)
+### Re: Pitch tightening & call prep PDF
 
 **Key lesson from Bob's call transcript:** Your demo was too abstract. Bob said "I don't think I understand the UI here at all" and "I think that's maybe a different conversation" when you got philosophical. For Rob, lead with concrete.
 
@@ -239,7 +239,7 @@ Also create a 1 page pdf for my call with robert-ross
 - What agent systems are you building for clients?
 - What's the tech stack?
 - What does "Lead Software Engineer" mean at this stage?
-<!-- agent:boundary:667c026d -->
+<!-- agent:boundary:139bdb8a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

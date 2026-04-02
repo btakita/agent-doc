@@ -707,10 +707,27 @@ Updated `mail/drafts/20260401-judith-proposal-options.md`. Key change to the ope
 
 **After:** "I've already rebuilt it." with a direct link to **https://equityfundingsource.pages.dev** and a summary of what's live (25 pages, 18 funded deals with property images, About with bio, Apply Now form, Contact page).
 
+Are we capturing uploads and contact info?
+
 The rest of the proposal (three options, Ragie mention, AI search examples, retainer discussion) is unchanged. The wrapper to Rob is also unchanged.
 
 This is a stronger pitch... instead of "I started working on it," Judith sees a finished product.
-<!-- agent:boundary:c5b83896 -->
+### Re: Form submission status (HEAD)
+
+No, not yet. The Apply Now and Contact forms are built as frontend pages but they're **static HTML only**... no backend captures submissions. From the equityfundingsource task, the form submission backend is still pending:
+
+- Worker API endpoints (`/api/apply`, `/api/contact`) -- not built
+- D1 database for storing submissions -- not built
+- R2 quarantine for uploaded documents -- not built
+- The full Tier 0-3 pipeline (WAF -> Workers AI -> Claude -> Ragie) -- not built
+
+For the proposal to Rob, this is fine -- you're showing the site is rebuilt and demonstrating capability. But if Judith clicks "Apply Now" or "Submit" on the demo, nothing will happen.
+
+**Quick options to make the demo functional:**
+1. **Simplest:** Wire forms to email (Formspree or `mailto:` link) -- 30 min
+2. **Better:** Cloudflare Worker + D1 that stores submissions and sends email notification -- a few hours
+3. **Full pipeline:** The Tier 0-3 architecture from equityfundingsource.md -- bigger project
+<!-- agent:boundary:a4dc41e0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -720,5 +737,6 @@ This is a stronger pitch... instead of "I started working on it," Judith sees a 
 - [x] Add Ragie mention to proposal
 - [x] Redirect proposal to Robert Ward for review first
 - [x] Update proposal with live EFS website link
+- [ ] Wire up form submission backend (Apply Now + Contact)
 - [ ] After Rob approves: re-address to Judith (cc Robert Waldman) and send
 <!-- /agent:pending -->

@@ -1256,14 +1256,14 @@ app.js:64 Error: Claude API error (429): {"type":"error","error":{"type":"rate_l
     at async wX (app.js:64:458)
 ﻿
 ```
-### Re: 429 Rate limit error (HEAD)
+### Re: 429 Rate limit error
 
 This is from our rapid automated testing — multiple API calls in quick succession. The OAuth token from `~/.claude/.credentials.json` shares rate limits with your Claude Code sessions.
 
 **Not a bug.** Wait a minute and try again. For the demo with Bob, this won't be an issue — you'll make one request at a time with natural pauses between edits.
 
 If rate limits persist, use a standard API key (`sk-ant-api03-...`) instead of the OAuth token — standard keys typically have separate/higher limits.
-<!-- agent:boundary:bef9f3c0 -->
+<!-- agent:boundary:d5cfdef4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

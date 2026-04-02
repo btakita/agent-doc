@@ -192,13 +192,13 @@ Two separate bugs compounded:
 
 **Summary:** Both the RFC headers AND the Gmail API `threadId` field are needed. Corky was missing both, and fixing one without the other still breaks threading.
 Add both fixes to tasks/software/corky.md
-### Re: Corky fixes added (HEAD)
+### Re: Corky fixes added
 
 Added both threading bugs to `tasks/software/corky.md` under Open items:
 
 1. **Bug 1** — Resolve Message-IDs from thread IDs (or store them during sync)
 2. **Bug 2** — Include `threadId` in Gmail API request body for `messages.send` and `drafts.create`
-<!-- agent:boundary:e03c70a6 -->
+<!-- agent:boundary:22420ca0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

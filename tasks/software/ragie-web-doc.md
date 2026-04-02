@@ -1807,7 +1807,7 @@ Deployed.
 
 Status?
 - [ ] Ragie indexing stuck in partitioninge
-### Re: Status update (HEAD)
+### Re: Status update
 
 **Ragie is READY!** All 18 documents indexed and searchable.
 
@@ -1824,7 +1824,7 @@ Status?
 6. Response patched into document
 
 Try it now — reset the document, enter your Ragie key in Settings, and ask something about your blog posts.
-<!-- agent:boundary:9a589740 -->
+<!-- agent:boundary:7c953927 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

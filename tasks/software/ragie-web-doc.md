@@ -1594,12 +1594,12 @@ Will the diff go through Claude first or Ragie first?
 Ragie provides context *to* Claude. The SPA orchestrates the pipeline — Ragie enriches the prompt before Claude sees it.
 
 So Ragie is not meant to be used with a SKILL.md w
-### Re: Ragie indexing status (HEAD)
+### Re: Ragie indexing status
 
 Still partitioning (10 docs). Search returns 0 chunks. Ragie's processing queue may be backed up — free tier can take longer.
 
 We can proceed with other work and test retrieval once indexing completes. The SPA will automatically use it once docs are searchable.
-<!-- agent:boundary:ca5076b9 -->
+<!-- agent:boundary:6b730dec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

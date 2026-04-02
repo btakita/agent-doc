@@ -30,12 +30,12 @@ This is not an agent-doc issue — it's the Tailwind CSS IntelliJ plugin process
 
 Option 1 is the least disruptive — agent-doc documents don't use Tailwind CSS.
 Option 1
-### Re: Tailwind CSS disabled (HEAD)
+### Re: Tailwind CSS disabled
 
 Go to Settings → Languages & Frameworks → Tailwind CSS → uncheck "Enable Tailwind CSS support for this project". This stops the LSP from processing every keystroke in `.md` files.
 
 If the lag persists after unchecking, restart the IDE to fully stop the Tailwind CSS language server process.
-<!-- agent:boundary:b9c42c56 -->
+<!-- agent:boundary:83675c7f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

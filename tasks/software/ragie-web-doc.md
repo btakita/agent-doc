@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Toolbar model dropdown | Ready for demo
+LIVE: https://agent-doc-js.pages.dev | Prioritizing deferred items for Bob demo | Ragie integration highest impact
 <!-- /agent:status -->
 
 ## Exchange
@@ -1432,15 +1432,31 @@ Added a model dropdown to the toolbar header. Changing the dropdown instantly sa
 - **Synced:** Settings dialog model dropdown stays in sync with toolbar
 
 Deployed to Cloudflare Pages.
-<!-- agent:boundary:b0ecdb87 -->
+
+Do:
+- [ ] (deferred) OAuth flow, Yjs CRDT, WebSocket sync, Ragie, MCP
+### Re: Deferred items — prioritization (HEAD)
+
+These are all substantial features. For the morning demo with Bob, ranked by impact:
+
+1. **Ragie integration** — Most relevant for the pitch. Add retrieval context injection. Bob wants to see document retrieval.
+2. **WebSocket sync** — Live sharing between your editor and browser. "Bob watches your edits live."
+3. **Yjs CRDT** — Concurrent editing. Less critical if one person edits at a time.
+4. **MCP** — Power user. Not demo-blocking.
+5. **OAuth** — Production. Not demo-blocking.
+
+What do you want to tackle first?
+<!-- agent:boundary:d88eb7e2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] SPA built, deployed, all bugs fixed
-- [x] Model dropdown in toolbar with instant save
+- [x] SPA built, deployed, all bugs fixed, toolbar model dropdown
+- [ ] Ragie API integration (highest demo impact)
+- [ ] WebSocket live document sync
+- [ ] Yjs CRDT for concurrent editing
 - [ ] Add CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
-- [ ] (deferred) OAuth flow, Yjs CRDT, WebSocket sync, Ragie, MCP
+- [ ] (deferred) MCP integration, OAuth flow
 <!-- /agent:pending -->

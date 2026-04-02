@@ -1341,7 +1341,7 @@ Yes, there are options between AMR (12 kbps) and M4A 64 kbps:
 
 Describe the different options from the Cube ACR app.
 ![img_7.png](img_7.png)
-### Re: Cube ACR format options (HEAD)
+### Re: Cube ACR format options
 
 From the screenshot, Cube ACR offers 4 formats:
 
@@ -1357,7 +1357,7 @@ From the screenshot, Cube ACR offers 4 formats:
 If MPEG-4 LQ still produces poor diarization results, step up to **MPEG-4** (medium). But I'd start with LQ since you want to minimize storage impact.
 
 No OGG/Opus option unfortunately -- Cube ACR only offers AMR and M4A variants.
-<!-- agent:boundary:75f1dfa1 -->
+<!-- agent:boundary:99ebd1dc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -678,7 +678,7 @@ You (JetBrains/CLI)                    Bob (browser)
 Want me to start building?
 
 How much more compelling would this web demo be than a screenshare?
-### Re: Web demo vs screenshare — is it worth the build? (HEAD)
+### Re: Web demo vs screenshare — is it worth the build?
 
 **Screenshare gets you 80% of the demo value with zero build time.**
 
@@ -703,7 +703,7 @@ What the web prototype adds:
 The JetBrains plugin + agent-doc + Ragie retrieval is already a strong demo without a web UI. The web piece is the roadmap slide, not the headline.
 
 What's your read?
-<!-- agent:boundary:d3049d11 -->
+<!-- agent:boundary:fdd48a51 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

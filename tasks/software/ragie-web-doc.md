@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Disclaimer added | Demo-ready with Ragie
+LIVE: https://agent-doc-js.pages.dev | Source citations added | Reset SKILL.md in Settings to update
 <!-- /agent:status -->
 
 ## Exchange
@@ -1877,18 +1877,31 @@ Deployed.
 | Ragie | MCP or CLI | Browser-side via proxy |
 | Security | File permissions + git review | localStorage + injection scanner |
 
+I thought we had CRDT on the agent-doc-js version.
+
 An article comparing them would be a good resource for the Bob meeting — shows the product roadmap from demo to production.
 
 Deployed.
-<!-- agent:boundary:2a2e9e19 -->
+
+Can we link to the source documents in our response patches?
+### Re: CRDT status + source document citations (HEAD)
+
+**CRDT:** We discussed adding Yjs but haven't implemented it yet. The diff gutter uses `diffLines` for comparison, but there's no concurrent editing merge. Yjs is still on the deferred list.
+
+**Source document links:** Updated SKILL.md to instruct Claude to cite source documents in brackets when referencing retrieved content, e.g. `[2026-03-12-dogfooding-agent-doc-part1-blog.md]`. This gives traceability back to the original blog posts.
+
+Remember to click "Reset SKILL.md to Default" in Settings then Save to pick up this change.
+
+Deployed.
+<!-- agent:boundary:6b8f90ec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] SPA feature-complete with disclaimer
+- [x] SPA feature-complete with source citations in SKILL.md
 - [x] Ragie: 18 docs indexed and searchable
-- [ ] Write comparison article (agent-doc vs agent-doc-js)
+- [ ] Yjs CRDT for concurrent editing (deferred)
 - [ ] CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
 <!-- /agent:pending -->

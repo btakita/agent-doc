@@ -1304,7 +1304,7 @@ Verified:
 **Fix for the demo:** Use Haiku for now. Switch to Sonnet once the rate limit window resets. Or use a standard API key which has separate rate limits from the OAuth token.
 
 In the Settings dialog, change the model to **Claude Haiku 4.5** and it should work immediately.
-### Re: Why browser 429 but not this session? (HEAD)
+### Re: Why browser 429 but not this session?
 
 **Different tokens and routing.** This Claude Code session has its own token (refreshed independently) and uses the SDK's built-in retry/backoff. The browser uses the raw HTTP API with the shared OAuth token from `~/.claude/.credentials.json`.
 
@@ -1314,7 +1314,7 @@ All local Claude Code sessions + the browser share the same OAuth token's Sonnet
 1. Use **Haiku** in the browser (works now, separate rate limits)
 2. Generate a **dedicated API key** from console.anthropic.com (own rate limits, not shared with OAuth)
 3. Wait for the Sonnet rate limit window to reset
-<!-- agent:boundary:99e13bd6 -->
+<!-- agent:boundary:6a96ca49 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

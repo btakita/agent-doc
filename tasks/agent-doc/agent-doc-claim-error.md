@@ -480,12 +480,37 @@ The IPC write funnel is a significant architectural change. This session has bee
 This is simpler than a full IPC queue — it uses the existing flock mechanism and doesn't require a daemon. The watch daemon's busy check we just added is a good first line of defense, but the flock provides a hard guarantee.
 
 Should I implement the flock-based write lock now? It's a targeted change in `write.rs`.
-<!-- agent:boundary:233da9a7 -->
+How long would a flock be held? Just for the file write?
+What happens if the flock is busy? Can the blocked process compare the before write and after write document content?
+### Re: Flock design — hold duration and contention handling (HEAD)
+
+**How long held:** The flock covers: read current content → apply patches → write file → update snapshot. For IPC writes this is ~300ms (IPC round-trip). For disk writes it's ~5ms. The flock is released immediately after snapshot save.
+
+**What happens if busy:** Two approaches:
+
+A. **Block and retry** — the second writer waits for the flock, then re-reads the document (which now includes the first writer's changes). It recomputes its patches against the new baseline. If the diff is now empty (the first writer already handled the same prompt), it skips. If the diff is different, it applies its patches.
+
+B. **Fail fast** — use `try_lock` (non-blocking). If the lock is held, return an error immediately. The caller (watch daemon, skill) handles the contention. This is simpler but loses the write.
+
+**Recommended: Option A with diff recheck.** The flow becomes:
+1. Acquire flock (blocking, with timeout)
+2. Re-read document content (may have changed while waiting)
+3. Recompute diff against snapshot
+4. If diff is empty → skip (another writer handled it)
+5. If diff exists → apply patches, write, update snapshot
+6. Release flock
+
+This eliminates the duplicate response bug entirely — the second writer sees the first writer's response in the document and finds no new user input to respond to.
+
+The timeout prevents deadlocks (e.g., 30s). If timeout expires, log a warning and proceed without the lock (degraded mode, same as current behavior).
+
+Shall I implement this?
+<!-- agent:boundary:ff761b6e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] All previous session items complete
-- [ ] Implement flock-based write lock in write.rs (prevents concurrent writes)
+- [ ] Implement flock-based write lock with diff recheck
 <!-- /agent:pending -->

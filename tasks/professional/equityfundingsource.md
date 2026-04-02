@@ -478,7 +478,7 @@ Implement. See tasks/professor/judith-krug.md:
 
 continue:
 - [ ] Create D1 database and run migration (`wrangler d1 create equityfundingsource`)
-### Re: Create D1 database (HEAD)
+### Re: Create D1 database
 
 **Blocker:** `wrangler d1 create equityfundingsource` failed with authentication error (code 10000). Your OAuth token has d1 write permissions but the API request was rejected. Likely a stale token.
 
@@ -493,7 +493,7 @@ After creating the database, update the `database_id` in `wrangler.toml` with th
 ```bash
 npx wrangler d1 migrations apply equityfundingsource
 ```
-<!-- agent:boundary:b703bfe5 -->
+<!-- agent:boundary:aa11e6cf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

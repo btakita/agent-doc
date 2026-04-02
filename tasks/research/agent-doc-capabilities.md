@@ -19,7 +19,7 @@ Can agent doc identify from the context, weighing differentent factors whether o
 - quantifiable metrics
 
 Pleas
-### Re: Can agent-doc identify when to use subagents + worktrees? (HEAD)
+### Re: Can agent-doc identify when to use subagents + worktrees?
 
 **Short answer: Not yet.** The infrastructure exists, but the intelligent routing layer doesn't.
 
@@ -52,7 +52,7 @@ Pleas
 5. **Conflict predictor** — estimate merge conflict probability based on file overlap between parallel tasks
 
 This is a feature that doesn't exist in Claude Code natively either — the `Agent` tool with `isolation: "worktree"` is available but the decision to use it is always made by the LLM or user, never by a heuristic engine.
-<!-- agent:boundary:431d48e5 -->
+<!-- agent:boundary:65fe4b4b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

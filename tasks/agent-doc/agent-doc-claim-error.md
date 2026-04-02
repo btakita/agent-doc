@@ -140,6 +140,8 @@ Reinstall the plugin to fix the lag.
 
 I did a `Claim for Tmux Pane` on tasks/professional/anil-podduturi.md. I saw the prompt `Sync: --col tasks/professional/anil-podduturi.md --col tasks/professional/bob-remeika.md [focus: tasks/professional/anil-podduturi.md]`, but nothing happened. Why?
 ![img_5.png](img_5.png)
+
+
 ### Re: anil-podduturi.md is empty — no session UUID
 
 The file is 0 bytes (empty). No frontmatter, no session UUID. Sync treats files without session UUIDs as `Unmanaged` — they can't be auto-started because there's no session to start.
@@ -151,6 +153,8 @@ The current flow for new files is:
 
 The "Claim for Tmux Pane" action now delegates to sync, which can't claim empty files. The original `agent-doc claim` CLI command does handle this — it generates the session UUID and scaffolds components.
 
+`Claim for Tmux Pane` should call `agent-doc claim`. Why did you change the behavior?
+
 **Design question:** Should sync auto-claim files that are in the editor layout but have no session UUID? This would make the flow fully declarative — just open a file in a split and it gets a session. But it changes the semantics: currently, only explicit `claim` (or the watch daemon's `autoclaim`) initializes documents. Auto-claiming from sync could cause unwanted sessions for files the user is just reading, not editing.
 
 Options:
@@ -159,7 +163,25 @@ B. **Keep current behavior** — user must claim first (via CLI or `Ctrl+Shift+A
 C. **Auto-claim only on explicit user action** — `Ctrl+Shift+Alt+C` runs `claim` then `sync` for the focused file only
 
 I don't know which you prefer. What's the intended behavior?
-<!-- agent:boundary:86fa90f3 -->
+### Re: ClaimAction should claim then sync (HEAD)
+
+You're right — I oversimplified. `Claim for Tmux Pane` should:
+1. Run `agent-doc claim <focused-file>` (adds frontmatter if missing)
+2. Then run `SyncLayoutAction.syncLayout()` (arranges tmux panes)
+
+The current code only does step 2. For unclaimed files, the claim step is essential — it generates the session UUID and scaffolds components. Without it, sync can't manage the file.
+
+Let me fix ClaimAction to call claim before sync.
+### Re: ClaimAction fixed — claim then sync (HEAD)
+
+Fixed. `ClaimAction` now:
+1. Runs `agent-doc claim <focused-file> [--window W]` — adds frontmatter if missing
+2. Then runs `SyncLayoutAction.syncLayout()` — arranges tmux panes
+
+The claim step handles unclaimed files (empty or without session UUIDs). Uses `resolveAgentDoc(basePath)` for correct binary path. Plugin bumped to 0.2.40.
+
+**Plugin zip:** `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.40.zip`
+<!-- agent:boundary:d7c72b5f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -168,8 +190,8 @@ I don't know which you prefer. What's the intended behavior?
 - [x] All implementation, tests, audit docs, and release complete
 - [x] Published: crates.io ✓, GitHub Release ✓
 - [x] CI fixes complete
-- [x] PatchWatcher no-op fix (plugin 0.2.39)
-- [ ] Design: should sync auto-claim files without session UUIDs?
-- [ ] Install plugin 0.2.39 and verify lag is gone
+- [x] PatchWatcher no-op fix
+- [x] ClaimAction: claim focused file before sync (handles unclaimed files)
+- [ ] Install plugin 0.2.40 and verify claim+sync works for empty files
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

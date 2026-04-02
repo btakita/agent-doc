@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Duplication fixed, terminal in export | Ready for demo
+LIVE: https://agent-doc-js.pages.dev | Prompt echo fix deployed | Reset and test
 <!-- /agent:status -->
 
 ## Exchange
@@ -1739,15 +1739,55 @@ The prompt was duplicated in the response patch.
 **Export includes terminal:** The exported `.md` file now has a `## Terminal Output` section at the bottom with all terminal log lines in a code block.
 
 Deployed. Reset the document and try again — the duplication should be gone.
-<!-- agent:boundary:207a37c7 -->
+
+Duplicate Prompt in Response patch. See /home/brian/work/btakita/agent-loop/tmp/agent-doc-js/agent-doc-export (1).md
+### Re: Fixed prompt echo in SKILL.md (HEAD)
+
+The duplication was Claude echoing the user's question text inside its `<!-- patch:exchange -->` response. Since exchange is `patch=append`, the echo gets appended alongside the original — appearing twice.
+
+**Fix:** Added explicit SKILL.md guidelines:
+- "NEVER echo back the user's text in your patch response"
+- "Only include YOUR response content"
+- "The patch content replaces/appends to the component — do not duplicate what's already there"
+
+This is a prompting fix — Haiku was being helpful by repeating the question before answering. The instruction tells it to skip that.
+
+Deployed. Reset and try again.
+### Re: Fixed prompt echo in SKILL.md (HEAD)
+
+The duplication was Claude echoing the user's question text inside its `<!-- patch:exchange -->` response. Since exchange is `patch=append`, the echo gets appended alongside the original — appearing twice.
+
+**Fix:** Added explicit SKILL.md guidelines:
+- "NEVER echo back the user's text in your patch response"
+- "Only include YOUR response content"
+- "The patch content replaces/appends to the component — do not duplicate what's already there"
+
+This is a prompting fix — Haiku was being helpful by repeating the question before answering. The instruction tells it to skip that.
+
+Deployed. Reset and try again.
+
+The last response patch was not committed.
+### Re: Fixed prompt echo in SKILL.md (HEAD)
+
+The duplication was Claude echoing the user's question text inside its `<!-- patch:exchange -->` response. Since exchange is `patch=append`, the echo gets appended alongside the original — appearing twice.
+
+**Fix:** Added explicit SKILL.md guidelines:
+- "NEVER echo back the user's text in your patch response"
+- "Only include YOUR response content"
+- "The patch content replaces/appends to the component — do not duplicate what's already there"
+
+This is a prompting fix — Haiku was being helpful by repeating the question before answering. The instruction tells it to skip that.
+
+Deployed. Reset and try again.
+<!-- agent:boundary:81c7faab -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] SPA feature-complete with all fixes
-- [x] SKILL.md-driven RAG
-- [ ] Ragie indexing still processing
+- [x] SKILL.md no-echo guideline
+- [ ] Ragie indexing (still partitioning)
 - [ ] CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
 <!-- /agent:pending -->

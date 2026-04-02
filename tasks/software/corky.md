@@ -1516,12 +1516,23 @@ OAuth auth succeeded, but the Sheets API needs to be enabled in the GCP project.
 https://console.developers.google.com/apis/api/sheets.googleapis.com/overview?project=873280095295
 
 After enabling, wait a minute, then retry the command.
-<!-- agent:boundary:1148aacc -->
+Enabled
+### Re: Permission denied on sheet (HEAD)
+
+Sheets API is enabled and OAuth works. The 403 "caller does not have permission" means the authenticated Google account doesn't have access to this specific spreadsheet.
+
+The OAuth token was obtained as the `btak.dev` account (stored under `gmail:default`). Either:
+
+1. **Share the sheet** with your `btak.dev` Google account, or
+2. If the sheet is owned by a different account, re-auth with that account: the current code uses `gmail:default` which maps to whatever account you sign in with
+
+Which account owns this sheet?
+<!-- agent:boundary:5fa1c895 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Enable Google Sheets API in GCP project (user action)
-- Re-test sheet read after API enabled
+- Share sheet with authenticated account or re-auth with correct account
+- Re-test sheet read
 <!-- /agent:pending -->

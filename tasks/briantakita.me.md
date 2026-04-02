@@ -1049,7 +1049,7 @@ Want me to update the draft file with this version?
 > Here's what running 11 parallel sessions revealed.
 
 We explored the topic and did other things. The 11 sessions were not dedicated to this 1 problem.
-### Re: Clarifying the 11 sessions (HEAD)
+### Re: Clarifying the 11 sessions
 
 Right — the sessions were diverse (tool dev, correspondence, client work, debugging). Security emerged from the scale, not from a focused investigation. Revised:
 
@@ -1068,7 +1068,7 @@ The meta-lesson: the only way to debug a tool this complex is to dog-food it on 
 Full post linked in the first comment.
 
 ---
-<!-- agent:boundary:ea51873b -->
+<!-- agent:boundary:cbaffb01 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

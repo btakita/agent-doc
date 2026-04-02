@@ -203,7 +203,7 @@ See mail/contacts/robert-ross/robert-ross-sms.txt
 
  Would this be a good response or too syncphantic?
 > Yes sir...See you then
-### Re: SMS reply to Rob (HEAD)
+### Re: SMS reply to Rob
 
 Rob confirmed! He saw your LinkedIn and wants to shift to **1:30pm PT** (4:30pm ET).
 
@@ -215,7 +215,7 @@ Options if you want to adjust tone:
 - **"1:30 works. See you then"** — most direct
 
 All work. Send whichever feels right.
-<!-- agent:boundary:1dcb70a2 -->
+<!-- agent:boundary:93114fba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

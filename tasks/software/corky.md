@@ -1421,14 +1421,42 @@ Read/write Google Docs, read Google Sheets.
 - Recommend raw REST + `reqwest` since corky already uses reqwest for Gmail
 
 Want me to start with Phase 1 (OAuth scope expansion) and Phase 2 (doc upload)?
-<!-- agent:boundary:47574b59 -->
+yes
+### Re: Phase 1 & 2 implemented (HEAD)
+
+**Phase 1: OAuth scope** -- Added `DRIVE_FILE_SCOPE` (`drive.file`) to `gmail_auth.rs`. Uses the existing OAuth flow with a new scope.
+
+**Phase 2: `corky doc upload`** -- Implemented in `src/doc/upload.rs`:
+
+```
+corky doc upload <FILE>           # upload to Drive root
+corky doc upload <FILE> --share   # upload + set "anyone with link" viewing
+```
+
+Returns the web view link. Supports: PDF, DOCX, markdown, text, HTML, CSV, JSON, images.
+
+**Implementation details:**
+- Uses Drive v3 multipart upload API (metadata JSON + file content)
+- Reuses existing Gmail OAuth credentials (same GCP project)
+- `--share` sets `anyone/reader` permission via Drive permissions API
+- MIME type auto-detected from file extension
+
+**To use:** The GCP OAuth consent screen needs the `drive.file` scope added. First run will trigger re-auth to grant the new permission.
+
+Build: clippy clean, release build OK.
+
+**Not yet implemented:**
+- `--folder` option (upload to specific Drive folder)
+- Google Docs conversion (upload .md as native Google Doc)
+- Phase 3/4 (Docs read/write, Sheets read)
+<!-- agent:boundary:747d44c0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Phase 1: Add Drive/Docs/Sheets OAuth scopes to GCP client
-- Phase 2: `corky doc upload` (Drive API)
+- Add `drive.file` scope to GCP console (user action)
+- Test `corky doc upload` with a real file
 - Phase 3: `corky doc read/write` (Docs API)
 - Phase 4: `corky sheet read` (Sheets API)
 <!-- /agent:pending -->

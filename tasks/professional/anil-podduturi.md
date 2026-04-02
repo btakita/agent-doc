@@ -16,14 +16,14 @@ Drafted LinkedIn reply to Anil Podduturi — awaiting user review/additions
 Please read /home/brian/work/btakita/agent-loop/mail/contacts/anil-podduturi/20260320-linkedin-anil-podduturi.txt
 
 Help me draft a reply
-### Re: Draft reply to Anil (HEAD)
+### Re: Draft reply to Anil
 
 Thanks for letting me know, Anil — no worries at all. Best of luck with the transition, sounds like an exciting move. Would be great to catch up sometime regardless — always appreciated working with you on Tenfore. Hope the next chapter is a good one.
 
 ---
 
 You started "I'm " — want to add something about what you're working on? I can incorporate it into the reply.
-<!-- agent:boundary:659ece5f -->
+<!-- agent:boundary:db2fd2b3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

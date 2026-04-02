@@ -1696,14 +1696,14 @@ Terminal
 ```
 
 ```
-### Re: Export button added (HEAD)
+### Re: Export button added
 
 Toolbar: `[Haiku 4.5 v] [Submit] [Export] [Reset] [Settings]`
 
 Click Export to download the current document as `agent-doc-export.md`. Terminal logs the export.
 
 Deployed.
-<!-- agent:boundary:12640c03 -->
+<!-- agent:boundary:d87dcd1e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

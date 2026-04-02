@@ -890,7 +890,7 @@ compact exchange
 - `rappstack-dev` `blog__header.ts` changes are separate from briantakita.me-dev
 
 Finish open items
-### Re: Finish open items (HEAD)
+### Re: Finish open items
 
 **1. JSON-LD VideoObject for video posts** — Already partially implemented in `post__doc_html.ts` (lines 37-60). VideoObject JSON-LD is generated when `video_url` is present, including name, description, uploadDate, thumbnailUrl, contentUrl, embedUrl, and author. 16 video posts have `video_url` frontmatter. What's missing: `BlogPosting` type wrapper (so VideoObject has context), `duration` field, and `publisher`. This is functional for search engines but could be enhanced. **Status: Working, enhancement-only.**
 
@@ -901,7 +901,7 @@ Finish open items
 **4. rappstack-dev `blog__header.ts` changes** — Files are identical and synchronized at version 0.1.2 in both repos. No outstanding changes to pull. **Status: Done, can close.**
 
 **Summary:** Items 3 and 4 are resolved. Item 2 needs a small fix (remove `w-full` from search icon span). Item 1 is functional but could be enhanced with BlogPosting wrapper.
-<!-- agent:boundary:acd179ff -->
+<!-- agent:boundary:528684ef -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

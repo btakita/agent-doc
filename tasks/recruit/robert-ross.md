@@ -169,7 +169,7 @@ Draft LinkedIn message for Rob Ross:
 Ready for your review. Edit as needed, then you can send it manually from LinkedIn.
 
 What do you think. Should we try the email again or LinkedIn?
-### Re: Email or LinkedIn? (HEAD)
+### Re: Email or LinkedIn?
 
 **LinkedIn is the better move here.** Rob already got 2 emails (unthreaded original + resend) — a third risks looking cluttered. LinkedIn is a clean separate channel, and Rob is clearly active there (his profile tagline is his pitch).
 
@@ -178,7 +178,7 @@ Send the LinkedIn message manually. The drafted text is ready:
 > Hi Rob, I sent you an email reply about meeting today but it may not have threaded with your original message. Just wanted to make sure you saw it — I'm open to whenever works for you today. Looking forward to chatting about Dreamable.
 
 The corky `threadId` fix can happen separately — it's a code improvement for future emails, not urgent for this reply.
-<!-- agent:boundary:1bb6e80e -->
+<!-- agent:boundary:b674a81e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

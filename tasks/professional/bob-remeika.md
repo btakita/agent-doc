@@ -1534,12 +1534,30 @@ And a request for access to Ragie Parse OCR
 - **Ron:** "Another client has a patent mining corpus — unstructured technical documents that need semantic retrieval." → shows breadth of use cases
 
 **TL;DR:** The message stays tight. Judith and Ron are call ammo, not DM content.
-<!-- agent:boundary:f0687ca0 -->
+
+Please make a pdf of the call structure
+### Re: Call structure PDF (HEAD)
+
+Created and saved to: [file:///home/brian/work/btakita/agent-loop/tmp/bob-remeika-call-structure.pdf](file:///home/brian/work/btakita/agent-loop/tmp/bob-remeika-call-structure.pdf)
+
+**Structure (30 min):**
+1. **Reconnect** (2-3 min) — Grockit, LinkedIn endorsement
+2. **Live Demo** (8-10 min) — agent-doc-js.pages.dev + JetBrains plugin
+3. **Ragie Integration Architecture** (5-7 min) — local hybrid + Ragie collaborative layer
+4. **Client Use Cases** (5-7 min) — EFS loan docs (Tier 0-3 pipeline) + patent corpus
+5. **Security Architecture** (3-5 min) — 5-layer model, peer discussion
+6. **Collaboration Angle** (2-3 min) — distribution + integration, open to contract work
+
+**Questions for Bob:** Content moderation roadmap, multi-tenant isolation, enterprise pricing, Ragie Parse roadmap
+
+Source markdown also at `tmp/bob-remeika-call-structure.md` if you want to edit and regenerate.
+<!-- agent:boundary:8dc9771f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [done] Create call structure PDF for Bob meeting
 - Prep JB plugin demo environment for Bob call (today, ~1 hour)
 - Prep EFS Tier 0-3 architecture walkthrough for Bob call
 - Write Ragie Parse questions (content moderation roadmap, multi-tenant isolation, pricing)

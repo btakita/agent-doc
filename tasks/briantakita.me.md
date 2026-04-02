@@ -1085,6 +1085,9 @@ Which approach?
 
 292 commits was were mostly prompt + agent response patches commits. The 532 commits were mostly prompt + agent response patches.
 We should make this clear.
+
+Use `...` instead of ` — `.
+
 ### Re: Clarifying commit nature
 
 Updated the draft. Two changes:
@@ -1095,11 +1098,14 @@ Updated the draft. Two changes:
 This makes clear these are conversation commits, not 292 code fixes. The "Every prompt and response committed to git" line in paragraph 1 sets the frame, and now the numbers reinforce it.
 
 Draft updated at `mail/social/20260402-security-blog-linkedin.md`.
-<!-- agent:boundary:bc433f92 -->
+### Re: Em dash fix (HEAD)
+
+Replaced all ` — ` with `...` in the draft. Updated `mail/social/20260402-security-blog-linkedin.md`.
+<!-- agent:boundary:97724e5a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn teaser — draft updated with commit clarifications, ready to post
+- LinkedIn teaser — draft updated (em dashes fixed), ready to post
 - LinkedIn OAuth — needs retry or manual paste
 - Search icon `w-full` fix — remove `w-full` from icon span in rappstack-dev
 - JSON-LD VideoObject enhancement — add BlogPosting wrapper, duration, publisher (optional)

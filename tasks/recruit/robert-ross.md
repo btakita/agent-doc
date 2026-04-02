@@ -78,7 +78,7 @@ Draft file: `mail/drafts/2026-04-01-re-brian-rob-zoom.md` (status: sent)
 The email was sent...but not as a reply to the original message.
 
 See /home/brian/work/btakita/agent-loop/tmp/Brian _ Rob Zoom.eml
-### Re: Email threading issue (HEAD)
+### Re: Email threading issue
 
 Checked the .eml file. The problem: `In-Reply-To: 19d479af292d8d99` used the Gmail **thread ID** instead of the RFC Message-ID from Rob's original email. Proper threading requires the actual `Message-ID` header (e.g., `<CAxxxxxx@mail.gmail.com>`).
 
@@ -89,7 +89,7 @@ Checked the .eml file. The problem: `In-Reply-To: 19d479af292d8d99` used the Gma
 **Next steps:**
 - Check Gmail web UI to confirm whether the reply landed in the same thread visually
 - File a corky enhancement to resolve Message-IDs from thread IDs when building reply headers
-<!-- agent:boundary:e132cec8 -->
+<!-- agent:boundary:c10c4996 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

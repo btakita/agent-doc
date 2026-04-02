@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Researched agent-doc subagent/worktree capabilities. Infrastructure exists (worktree.rs, parallel.rs), but no intelligent routing or metrics layer.
+Added subagent decision framework: 7 criteria (context state, model, topic spread, file overlap, duration, reversibility, token economics), 6 heuristics, 4 anti-patterns.
 <!-- /agent:status -->
 
 ## Exchange
@@ -18,7 +18,10 @@ Can agent doc identify from the context, weighing differentent factors whether o
 - success rate
 - quantifiable metrics
 
-Pleas
+Please give me tips on what criteria + attributes that are better suited for subagents. Examples such as:
+- context state
+- model
+- topic spread
 ### Re: Can agent-doc identify when to use subagents + worktrees?
 
 **Short answer: Not yet.** The infrastructure exists, but the intelligent routing layer doesn't.
@@ -52,7 +55,43 @@ Pleas
 5. **Conflict predictor** — estimate merge conflict probability based on file overlap between parallel tasks
 
 This is a feature that doesn't exist in Claude Code natively either — the `Agent` tool with `isolation: "worktree"` is available but the decision to use it is always made by the LLM or user, never by a heuristic engine.
-<!-- agent:boundary:65fe4b4b -->
+### Re: Criteria for when to use subagents (HEAD)
+
+Here's a practical decision framework based on real-world usage patterns:
+
+**Use a subagent when:**
+
+| Criterion | Inline (main context) | Subagent | Subagent + Worktree |
+|-----------|----------------------|----------|---------------------|
+| **Context state** | Task needs prior conversation history, decisions, user preferences | Task is self-contained; can be fully specified in the prompt | Task modifies files that could conflict with main work |
+| **Model** | Needs the strongest model (complex reasoning, architecture decisions) | Routine/mechanical work — haiku or sonnet suffices | Same as subagent; worktree is orthogonal to model choice |
+| **Topic spread** | Single-topic, linear conversation | Multiple independent topics that don't share state | Independent topics that also touch different files |
+| **File overlap** | Editing files you're actively discussing | Read-only research, or editing unrelated files | Editing files that main context might also touch |
+| **Task duration** | Quick (< 30s) | Long-running (research, multi-file analysis) | Long-running + produces code changes |
+| **Reversibility** | Exploratory, might change direction | Well-defined deliverable, unlikely to need rework | Changes need review before merging to main |
+| **Token economics** | High-value reasoning that benefits from full context | Bulk work that would bloat the main context window | Same as subagent |
+
+**Specific heuristics:**
+
+1. **Context pollution test** — Will this task's output (tool calls, file reads, search results) consume >5K tokens of context that won't be useful for the next user interaction? → Subagent.
+
+2. **Independence test** — Can you write a self-contained prompt that fully specifies the task without referencing "what we discussed"? → Subagent. If you'd need to paste half the conversation → inline.
+
+3. **Parallelism test** — Are there 2+ tasks with no data dependency? → Parallel subagents. Even if each task is small, the wall-clock speedup justifies the overhead.
+
+4. **Model downgrade test** — Does the task require creative judgment, architectural reasoning, or nuanced understanding of user intent? → Strong model inline. Is it grep-and-summarize, format conversion, or mechanical refactoring? → Weaker model subagent.
+
+5. **File conflict test** — Will the task modify files that the main context or other tasks might also modify? → Worktree isolation. Read-only or writing to new files → no worktree needed.
+
+6. **Review gate test** — Should the user see and approve the changes before they land in the working tree? → Worktree (changes stay on a branch until explicitly merged).
+
+**Anti-patterns to avoid:**
+
+- **Over-delegation** — Spawning a subagent for a 3-line grep wastes more tokens on the prompt than it saves
+- **Context amnesia** — Delegating a task that requires understanding user preferences or prior decisions; the subagent won't have that context
+- **Premature parallelism** — Splitting a task into parallel subtasks when the subtasks actually depend on each other's outputs
+- **Worktree overhead for read-only tasks** — Worktrees are for isolation of *writes*; pure research doesn't need them
+<!-- agent:boundary:f67b1287 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

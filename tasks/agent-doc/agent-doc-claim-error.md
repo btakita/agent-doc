@@ -3589,7 +3589,7 @@ The PyPI workflow should re-trigger since the release tag was updated. The Linux
 Note: the skill test fix from earlier was also included in this commit (it was already staged). Both fixes are now in the v0.31.1 tag.
 
 Still failing: https://github.com/btakita/agent-doc/actions/runs/23881319987/job/69634906272
-### Re: CLI test env fix pushed (HEAD)
+### Re: CLI test env fix pushed
 
 The remaining CI failures were in `test_cli.rs` — same environment detection issue but in CLI integration tests. All 7 skill-related CLI test commands now set `CLAUDE_CODE=1` to force deterministic path resolution.
 
@@ -3597,7 +3597,7 @@ The remaining CI failures were in `test_cli.rs` — same environment detection i
 - Committed, pushed, tag moved forward
 
 The CI should now pass for all test suites.
-<!-- agent:boundary:ff7b010c -->
+<!-- agent:boundary:687cca8b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

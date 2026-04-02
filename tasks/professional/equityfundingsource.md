@@ -142,7 +142,7 @@ Crawled the live site and updated the scaffold with real content:
 - Blog integration
 
 Download the assets from the live site. Let's gitignore the assets. Will use R2 and deploy site to Cloudflare.
-### Re: Assets downloaded, R2 + Cloudflare configured (HEAD)
+### Re: Assets downloaded, R2 + Cloudflare configured
 
 **Assets downloaded (32 files, 2MB total):**
 - `public/assets/images/deals/` -- 18 property images matching each funded deal
@@ -166,7 +166,7 @@ Download the assets from the live site. Let's gitignore the assets. Will use R2 
 2. Upload assets: `make assets-upload`
 3. Point DNS: `equityfundingsource.com` CNAME to Cloudflare
 4. `make deploy`
-<!-- agent:boundary:1c5068a6 -->
+<!-- agent:boundary:c214d7bc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

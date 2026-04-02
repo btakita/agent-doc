@@ -352,7 +352,7 @@ I'll create a plan document for these. This session has covered the original cla
 Should I create a new task document for dedupe + write-origin, or continue here?
 
 We can continue.
-### Re: Dedupe command implemented + corky.md fixed (HEAD)
+### Re: Dedupe command implemented + corky.md fixed
 
 **`agent-doc dedupe <FILE>`** — new command that removes consecutive duplicate `### Re:` blocks.
 
@@ -373,7 +373,7 @@ The duplicate had slightly different lengths because the second block included a
 - Both binaries updated
 
 **Write-origin tracing** is the remaining item. Should I plan that now?
-<!-- agent:boundary:5a174a8d -->
+<!-- agent:boundary:0587b105 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | SPA auto-RAG for demo, SKILL.md RAG for production | Docs indexing
+LIVE: https://agent-doc-js.pages.dev | SKILL.md-driven RAG deployed | Claude decides when to search
 <!-- /agent:status -->
 
 ## Exchange
@@ -1611,17 +1611,43 @@ We can proceed with other work and test retrieval once indexing completes. The S
 **For local agent-doc (Claude Code):** SKILL.md-driven RAG via MCP is the better architecture.
 
 Both feed into the same Ragie index — the difference is who orchestrates the search (SPA code vs Claude's reasoning).
-<!-- agent:boundary:a20bf96e -->
+
+How can we have the web demo use SKILL.md + MCP-driven? Does it really need MCP or can it just do RAG commands directly?
+We should have a default SKILL.md that supports Ragie...assuming we can get it workirg soon.
+The SKILL.md should be editable in the Settings.
+### Re: SKILL.md-driven RAG — implemented (HEAD)
+
+**Done.** Claude now drives the RAG — no MCP needed.
+
+**How it works:**
+1. SKILL.md (system prompt) tells Claude to output `<ragie-search query="..."/>` when it needs context
+2. SPA intercepts the search command in Claude's response
+3. SPA calls Ragie API with the query
+4. Results sent back to Claude in a follow-up message
+5. Claude produces final response with context (up to 3 search rounds)
+
+**SKILL.md is editable in Settings** — the textarea now shows the default skill with Ragie instructions. You can customize it for different use cases.
+
+**Default SKILL.md includes:**
+- Response format (patch blocks)
+- Knowledge base search instructions (`<ragie-search>` command)
+- General guidelines
+
+**This is tool use without MCP** — the SPA is the tool executor. Claude reasons about when to search, what to query, and how to use the results.
+
+Deployed to Cloudflare Pages.
+<!-- agent:boundary:05a28446 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] SPA: editor + toolbar + terminal + diff gutter
-- [x] Ragie retrieval (SPA-orchestrated) + 18 blog posts uploaded
+- [x] SKILL.md-driven RAG (Claude requests searches, SPA executes)
+- [x] Uploaded 18 blog posts to Ragie
+- [x] SKILL.md editable in Settings
 - [ ] Ragie indexing still processing
 - [ ] Yjs CRDT for concurrent editing
 - [ ] Add CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
-- [ ] (future) SKILL.md-driven RAG via MCP for local agent-doc
 <!-- /agent:pending -->

@@ -100,3 +100,6 @@
 [submodule "src/eval-runner"]
 	path = src/eval-runner
 	url = git@github.com:btakita/eval-runner.git
+[submodule "src/agent-doc-js"]
+	path = src/agent-doc-js
+	url = git@github.com:btakita/agent-doc-js.git

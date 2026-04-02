@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-Fixed CodeMirror esm.sh duplicate instance bug | Reload localhost:8089 to test
+SPA working: CodeMirror editor + settings dialog + dark theme | Needs Claude API test + Cloudflare Pages deploy
 <!-- /agent:status -->
 
 ## Exchange
@@ -1027,7 +1027,6 @@ index.js:1994 Uncaught Error: Unrecognized extension value in extension set ([ob
 favicon.ico:1 
  GET http://localhost:8089/favicon.ico 404 (File not found)
 ﻿
-
 ```
 ### Re: Fixed CodeMirror duplicate instance error
 
@@ -1036,21 +1035,38 @@ The error was caused by esm.sh loading separate copies of `@codemirror/state` fo
 **Fix:** Moved all CodeMirror imports into the `index.html` bootstrap with `?external=` params to force shared dependency resolution. `app.js` now reads from `window.__CM` globals instead of import maps.
 
 Pushed to btakita/agent-doc-js. Reload `http://localhost:8089` to test.
-<!-- agent:boundary:8086d130 -->
+
+Please test using chrome headless browser.
+Iterate until it works as expected.
+Can we use chromium-bridge with the headless Chrome browser?
+### Re: Fixed — switched to bun bundler (HEAD)
+
+The esm.sh CDN approach was fundamentally broken for CodeMirror — no combination of `?external=`, `?deps=`, `?bundle-deps`, or build API could prevent duplicate `@codemirror/state` instances.
+
+**Solution:** Switched to bun as the bundler. `bun build src/app.js --outdir dist --bundle --minify` creates a single 527KB bundle with guaranteed deduplication.
+
+**Tested via Chrome DevTools Protocol:**
+- Editor loads cleanly (no errors from the bundle itself)
+- Settings dialog appears on first visit
+- Status bar shows "Ready"
+- CodeMirror editor renders with dark theme and line numbers
+- 11 lines of default template content visible
+
+Screenshot verified — the SPA is working. Next step: test the Claude API call (enter an API key and submit).
+<!-- agent:boundary:032afba2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] Create `btakita/agent-doc-js` GitHub repo
-- [x] Scaffold SPA: index.html + CodeMirror 6 + diff + Claude API
-- [x] Fix CodeMirror duplicate instance error
-- [ ] Test in browser — verify editor loads and Submit works
+- [x] Scaffold SPA: CodeMirror 6 + diff + Claude API
+- [x] Fix CodeMirror duplicate instance error (switched to bun bundler)
+- [ ] Test Claude API call end-to-end (enter key, edit doc, submit)
 - [ ] Deploy to Cloudflare Pages at `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
 - [ ] (deferred) Yjs CRDT for concurrent edit merging
 - [ ] (deferred) WebSocket live document sync
 - [ ] (deferred) Ragie API integration
 - [ ] (deferred) MCP integration
-- [ ] (deferred) Multi-user editing / sandboxing
 <!-- /agent:pending -->

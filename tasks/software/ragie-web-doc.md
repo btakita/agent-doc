@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Defaults to Haiku | Change model in Settings or re-run setup.sh
+LIVE: https://agent-doc-js.pages.dev | Settings Save fixed | Haiku working | Ready for demo
 <!-- /agent:status -->
 
 ## Exchange
@@ -1383,6 +1383,9 @@ Added visual feedback when submitting:
 Deployed to Cloudflare Pages.
 
 Still getting 429 with Haiku selected.
+
+Changing model and pressing Save does not persist change.
+Please test until behavior works.
 ### Re: 429 with Haiku — likely stale Sonnet in localStorage
 
 Haiku works from server-side curl. The issue is your browser's localStorage on the deployed site still has `claude-sonnet-4-6` from the earlier `setup.sh` run (which hardcoded Sonnet).
@@ -1400,7 +1403,23 @@ Haiku works from server-side curl. The issue is your browser's localStorage on t
 Or re-run: `curl -s https://agent-doc-js.pages.dev/setup.sh | sh`
 
 Deployed to Cloudflare Pages.
-<!-- agent:boundary:23bb3778 -->
+Still not updating.
+Please test in headless browser until behavior works as expected.
+### Re: Fixed Settings Save not persisting (HEAD)
+
+The bug: the dialog close handler checked `dialog.returnValue` which was always empty (the submit button's `value` wasn't being propagated). Settings were never actually saved.
+
+**Fix:** Moved save logic directly into the Save button's click handler. Save runs before `dialog.close()`, not after.
+
+**Verified end-to-end:**
+1. Set model to Sonnet in localStorage
+2. Opened Settings, changed to Haiku, clicked Save
+3. localStorage now shows `claude-haiku-4-5-20251001`
+4. Status shows "Settings saved"
+5. Submit with Haiku: "Response received"
+
+Deployed to Cloudflare Pages. Settings changes now persist correctly.
+<!-- agent:boundary:31ebd6cb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1408,7 +1427,8 @@ Deployed to Cloudflare Pages.
 <!-- agent:pending patch=replace -->
 - [x] SPA built, deployed, all bugs fixed
 - [x] Proxy with retry logic
-- [x] Default to Haiku (avoid OAuth Sonnet rate limit)
+- [x] Settings Save persistence fixed
+- [x] Default to Haiku
 - [ ] Add CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
 - [ ] (deferred) OAuth flow, Yjs CRDT, WebSocket sync, Ragie, MCP

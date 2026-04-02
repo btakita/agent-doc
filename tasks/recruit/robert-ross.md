@@ -164,18 +164,27 @@ What would you like to do?
 
 Draft LinkedIn message for Rob Ross:
 
-> Hi Rob, I sent you an email reply about meeting Thursday but it may not have threaded with your original message. Just wanted to make sure you saw it — I'm open to whenever works for you on Thursday. Looking forward to chatting about Dreamable.
+> Hi Rob, I sent you an email reply about meeting today but it may not have threaded with your original message. Just wanted to make sure you saw it — I'm open to whenever works for you today. Looking forward to chatting about Dreamable.
 
 Ready for your review. Edit as needed, then you can send it manually from LinkedIn.
-<!-- agent:boundary:62923b64 -->
+
+What do you think. Should we try the email again or LinkedIn?
+### Re: Email or LinkedIn? (HEAD)
+
+**LinkedIn is the better move here.** Rob already got 2 emails (unthreaded original + resend) — a third risks looking cluttered. LinkedIn is a clean separate channel, and Rob is clearly active there (his profile tagline is his pitch).
+
+Send the LinkedIn message manually. The drafted text is ready:
+
+> Hi Rob, I sent you an email reply about meeting today but it may not have threaded with your original message. Just wanted to make sure you saw it — I'm open to whenever works for you today. Looking forward to chatting about Dreamable.
+
+The corky `threadId` fix can happen separately — it's a code improvement for future emails, not urgent for this reply.
+<!-- agent:boundary:1bb6e80e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Review and send LinkedIn message to Rob (drafted above, not sent)
-- Reply to Rob via Gmail web UI (for proper threading)
-- Delete the unthreaded sent emails from Gmail
+- Send LinkedIn message to Rob manually (draft ready above)
 - Corky fix: add `threadId` to Gmail API request body for proper threading
 - Prep talking points for Dreamable call (agent experience, AI agent thesis alignment)
 <!-- /agent:pending -->

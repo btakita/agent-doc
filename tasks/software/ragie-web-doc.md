@@ -1474,7 +1474,7 @@ corky ragie upload <file>
 Or via the Ragie dashboard.
 
 **Next:** Upload demo docs to Ragie, then the full flow (edit -> Ragie retrieval -> Claude with context) will work end-to-end.
-<!-- agent:boundary:c13f044c -->
+<!-- agent:boundary:3fea6671 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

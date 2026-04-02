@@ -375,7 +375,7 @@ On CloudFlare, how would I access agents. Given what we know about this project.
 - Gemini API
 - OpenAI
 - any others?
-### Re: AI agents on Cloudflare for document review (HEAD)
+### Re: AI agents on Cloudflare for document review
 
 **Cloudflare Workers AI (built-in):**
 Cloudflare has Workers AI with direct model access from Workers -- no external API calls, lowest latency. Models include Llama 3, Mistral, etc. Good for simple classification/filtering, but not as capable as Claude/GPT for nuanced context poisoning detection.
@@ -407,7 +407,7 @@ Cloudflare has Workers AI with direct model access from Workers -- no external A
 - Could cross-validate with Claude
 
 **Claude Code** is a CLI dev tool, not a runtime API -- the Worker calls the Anthropic API directly via HTTP fetch.
-<!-- agent:boundary:d02ca9a7 -->
+<!-- agent:boundary:4fc06e0d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

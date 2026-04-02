@@ -727,7 +727,21 @@ For the proposal to Rob, this is fine -- you're showing the site is rebuilt and 
 1. **Simplest:** Wire forms to email (Formspree or `mailto:` link) -- 30 min
 2. **Better:** Cloudflare Worker + D1 that stores submissions and sends email notification -- a few hours
 3. **Full pipeline:** The Tier 0-3 architecture from equityfundingsource.md -- bigger project
-<!-- agent:boundary:fa41e6ce -->
+
+> **Better:** Cloudflare Worker + D1 that stores submissions and sends email notification -- a few hours
+
+Where would the email notification go?
+### Re: Email notification destination (HEAD)
+
+For the Cloudflare Worker + D1 option, the email notification would go to **Judith's email** (contact@equityfundingsource.com or judithkrug@gmail.com) so she's alerted when someone submits an application or contact form.
+
+The Worker would use one of these:
+- **Cloudflare Email Workers** (free, native) -- send from a `@equityfundingsource.com` address if you set up the domain
+- **Resend / SendGrid** -- HTTP API call from the Worker, more deliverability control
+- **Simple option:** Forward to Judith's Gmail via Cloudflare email routing
+
+The notification email would include the form data (name, phone, loan amount, property address) so Judith can triage from her inbox without logging into a dashboard. Could also cc you or add admin notifications.
+<!-- agent:boundary:14c06ab3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

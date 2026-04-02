@@ -107,7 +107,7 @@ Created a new draft with the correct `In-Reply-To` header: `mail/drafts/2026-04-
 3. **Skip resending** — Rob likely received the first reply fine; the broken threading is mainly a Gmail UI issue on your side
 
 Which approach do you want?
-### Re: Updated draft — ready to send (HEAD)
+### Re: Updated draft — ready to send
 
 Updated the draft at `mail/drafts/2026-04-02-re-brian-rob-zoom.md` with new messaging:
 
@@ -121,7 +121,7 @@ Updated the draft at `mail/drafts/2026-04-02-re-brian-rob-zoom.md` with new mess
 > Brian
 
 Threaded with correct `In-Reply-To: <CAMrCVsDSX0zWO2DyZfh9ugzS=pUHSt_MtAEs+0qnfw7-njWZ2w@mail.gmail.com>`. Ready to send on your go.
-<!-- agent:boundary:6a0302f2 -->
+<!-- agent:boundary:a8861df8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

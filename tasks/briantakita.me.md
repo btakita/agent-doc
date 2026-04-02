@@ -954,14 +954,38 @@ Saved the revised teaser as `mail/social/20260402-security-blog-linkedin.md`. Th
 Ready to post when you are. LinkedIn OAuth still needs retry (was blocked by outage last session).
 
 I updated the draft with the teaser that we were discussing last evening.
+
+I'm wondering what the 1st sentence should be.
 ### Re: Updated draft
 
 Acknowledged — `mail/social/20260402-security-blog-linkedin.md` is updated with your revised teaser. Leads with the commit stats hook, follows with security/audit/meta lessons, concise format. Ready to post whenever LinkedIn OAuth is working.
-<!-- agent:boundary:1e204d35 -->
+
+The prompt injection risk is allowing multiple people working on the same document.
+### Re: First sentence options (HEAD)
+
+Current draft opens with stats: *"532 git commits in one day."* Scroll-stopper but it's a "what" not a "why." Alternatives that lead with insight:
+
+**A — Problem statement:**
+"When the document IS the prompt, anyone with repo access can inject instructions into your AI agent's context."
+
+**B — Tension:**
+"I ran 11 AI agents in parallel on a shared repository. The bugs were interesting. The security implications were more interesting."
+
+**C — Direct:**
+"Multi-agent AI sessions create attack surfaces that don't exist when you're working with one agent."
+
+**D — Narrative hook:**
+"I spent a day debugging my own AI tool with that same AI tool. 292 commits later, the security lessons were clearer than the bug fixes."
+
+**E — Keep stats but reframe:**
+"532 git commits. Every one traceable. That's the point."
+
+Recommendation: **B** — combines narrative pull with security angle, stats appear naturally in body. For pure "meat first," **A** is sharpest.
+<!-- agent:boundary:3b680f32 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn teaser — draft finalized at `mail/social/20260402-security-blog-linkedin.md`, ready to post
+- LinkedIn teaser — first sentence decision pending, draft at `mail/social/20260402-security-blog-linkedin.md`
 - LinkedIn OAuth — needs retry when LinkedIn is back
 - Search icon `w-full` fix — remove `w-full` from icon span in rappstack-dev
 - JSON-LD VideoObject enhancement — add BlogPosting wrapper, duration, publisher (optional)

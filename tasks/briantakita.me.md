@@ -1022,7 +1022,7 @@ Yes — A should signal this is a problem being surfaced, not solved. Tweaks:
 Recommendation: **A2** — keeps the hook, positions the post as discovery not solution, avoids overpromising. The "collaborative security model in development" note fits naturally in the body of the teaser.
 
 We also should mention how the tracability of agent-doc allows for detailed blog posts to be generated.
-### Re: Traceability angle (HEAD)
+### Re: Traceability angle
 
 Good call — that's the meta selling point. The blog post itself demonstrates it: you pointed Claude at 532 commits and it reconstructed the narrative. The audit trail isn't just for security — it's a content generation pipeline.
 
@@ -1045,7 +1045,7 @@ Full post linked in the first comment.
 ---
 
 Want me to update the draft file with this version?
-<!-- agent:boundary:f0ab8f77 -->
+<!-- agent:boundary:e92bf040 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

@@ -430,16 +430,34 @@ The drift warning worked: `drift_warning file=corky.md drift=919 snap_len=84399 
 The IPC write funnel is becoming urgent. The current architecture allows concurrent writes from multiple processes to the same file without coordination, leading to lost snapshot updates and duplicate responses.
 
 For an immediate mitigation: the watch daemon should skip files that have an active agent-doc session running (check if the registered pane is busy). This would prevent the watch daemon from competing with the skill's writes.
-<!-- agent:boundary:4360e467 -->
+
+continue:
+- [ ] Immediate: watch daemon should skip files with active sessions
+### Re: Watch daemon busy guard implemented (HEAD)
+
+The watch daemon now checks `is_busy(file)` before submitting. If a file has an active agent-doc operation (skill write, stream, etc.), the watch daemon skips it with:
+
+```
+[watch] skipping <file> — busy (active operation in progress)
+```
+
+This prevents the watch daemon from competing with the skill's writes, which was causing the duplicate response bug on corky.md.
+
+- `make check`: 606 tests pass
+- Both binaries updated
+
+The `is_busy()` check uses the status file signal (`debounce.rs`), which is set during writes and clears after 30s of inactivity. This is the same mechanism the JetBrains plugin uses.
+<!-- agent:boundary:769e3be5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] All implementation complete
-- [x] `agent-doc dedupe` command (used twice now)
-- [x] Write-origin tracing + drift warning
-- [ ] Immediate: watch daemon should skip files with active sessions
-- [ ] IPC write funnel/queue (v0.32)
+- [x] `agent-doc dedupe` command
+- [x] Write-origin tracing (`--origin` flag)
+- [x] Commit drift warning
+- [x] Watch daemon busy guard (prevents duplicate responses)
 - [ ] Update SKILL.md to pass `--origin skill`
+- [ ] IPC write funnel/queue (v0.32)
 <!-- /agent:pending -->

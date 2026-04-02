@@ -333,7 +333,7 @@ Or looking at what is uncommitted. And if it duplicated content in the document?
 > A comprehensive write-origin tracing system is a larger design task.
 
 Plan this
-### Re: Dedupe command + write-origin tracing plan (HEAD)
+### Re: Dedupe command + write-origin tracing plan
 
 Both items tracked. These are substantial features — I'll plan them in a new session document rather than continuing to expand this one.
 
@@ -350,7 +350,7 @@ Compare the last `### Re:` block against the previous one. If identical content,
 I'll create a plan document for these. This session has covered the original claim error and many related fixes — it's a good stopping point for this document.
 
 Should I create a new task document for dedupe + write-origin, or continue here?
-<!-- agent:boundary:a47583bd -->
+<!-- agent:boundary:dac8fd12 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

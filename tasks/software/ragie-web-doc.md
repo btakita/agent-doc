@@ -1481,15 +1481,15 @@ Or via the Ragie dashboard.
 Removed the `pass btak/RAGIE_API_KEY` auto-read from `setup.sh`. The Ragie key is now only populated from the `RAGIE_API_KEY` environment variable:
 
 ```bash
-# With Ragie key: (HEAD)
+# With Ragie key:
 RAGIE_API_KEY=ragie_... curl -s https://agent-doc-js.pages.dev/setup.sh | sh
 
-# Without Ragie key (just Claude): (HEAD)
+# Without Ragie key (just Claude):
 curl -s https://agent-doc-js.pages.dev/setup.sh | sh
 ```
 
 Your "Sho" got cut off — were you going to say "Should not happen" or something else?
-<!-- agent:boundary:fa38a6e8 -->
+<!-- agent:boundary:d0f47066 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

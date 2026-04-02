@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Use Haiku or dedicated API key to avoid 429 | Ready for demo
+LIVE: https://agent-doc-js.pages.dev | Proxy retries 429s | Sonnet per-minute limit saturated by concurrent sessions | Use Haiku for demo
 <!-- /agent:status -->
 
 ## Exchange
@@ -1314,17 +1314,29 @@ All local Claude Code sessions + the browser share the same OAuth token's Sonnet
 1. Use **Haiku** in the browser (works now, separate rate limits)
 2. Generate a **dedicated API key** from console.anthropic.com (own rate limits, not shared with OAuth)
 3. Wait for the Sonnet rate limit window to reset
-<!-- agent:boundary:6a96ca49 -->
+
+Sonnet is not near usage limits. See /usage.
+### Re: Sonnet not near usage limits (HEAD)
+
+You're right — the /usage dashboard shows overall quota, but the 429 is a **per-minute burst limit**, not daily quota. The `x-should-retry: true` header confirms it's transient.
+
+With 16+ Claude processes running concurrently, the per-minute Sonnet rate is saturated. Each active Claude Code session consumes from the same pool.
+
+**Updated proxy with retry logic:** 3 retries with exponential backoff (1s, 2s, 4s). Tested — retries execute but Sonnet stays rate-limited with this many concurrent sessions.
+
+**For the demo:**
+- Use **Haiku** (separate per-minute limits, not saturated)
+- Or reduce active Claude Code sessions before demoing with Sonnet
+- Proxy now retries automatically — if Sonnet has brief availability windows, it'll catch them
+<!-- agent:boundary:e3e0bc44 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] SPA built, deployed, and working (https://agent-doc-js.pages.dev)
-- [x] Cloudflare Worker proxy for CORS
-- [x] Setup script + hash param onboarding
-- [x] All bugs fixed (history shadow, Ctrl+Enter, duplicate instances)
-- [x] 429 diagnosed: Sonnet rate-limited on shared OAuth token
+- [x] SPA built, deployed, all bugs fixed
+- [x] Proxy with retry logic for transient 429s
+- [x] 429 root cause: per-minute Sonnet burst limit saturated by 16+ concurrent Claude sessions
 - [ ] Add CNAME for `agent-doc.briantakita.me` (Cloudflare dashboard)
 - [ ] Demo script for Bob call
 - [ ] (deferred) OAuth flow, Yjs CRDT, WebSocket sync, Ragie, MCP

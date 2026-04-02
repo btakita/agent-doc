@@ -1464,7 +1464,23 @@ Smart to have this as a stretch goal. Even a partial demo showing Ragie retrieva
 - If not ready: JB plugin demo is already strong, web prototype becomes "here's the architecture, here's the code, shipping next week"
 
 No pressure to finish — it's a bonus, not the main event. The JB plugin demo + EFS pipeline discussion carry the call on their own.
-<!-- agent:boundary:a0448b4e -->
+
+Should I send Bob a message about https://briantakita.me/posts/agent-security-multiuser-lessons/ before our call, or would that be too much?
+Let him discover it on LinkedIn?
+### Re: Sharing the security post with Bob (HEAD)
+
+Let him discover it on LinkedIn. Here's why:
+
+1. **You already have the meeting booked** — sending the post now risks looking like you're front-loading homework for him. CEOs are busy; don't give him pre-reading obligations.
+
+2. **It's better as a call asset** — when security comes up in the meeting (and it will, given your agenda), you can say "I actually wrote up the full threat model" and drop the link in chat. That's a power move — it shows depth in the moment rather than trying to impress beforehand.
+
+3. **LinkedIn organic discovery is free credibility** — if Bob sees it in his feed independently, it validates you without any ask attached. He's already engaging with your posts.
+
+4. **Save it for the follow-up** — after the call, when you send a "great talking with you" message, include the link: "Here's the security architecture writeup I mentioned." Gives him a reason to re-engage post-call.
+
+**TL;DR:** Don't send it. Use it during the call as a live reference, then share in the follow-up.
+<!-- agent:boundary:3f4fe7c8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1476,5 +1492,6 @@ No pressure to finish — it's a bonus, not the main event. The JB plugin demo +
 - Upload sample docs to Ragie free tier (patent proposal, loan doc sample, resume)
 - [stretch] Get ragie-web-doc demo working for Bob call (tasks/software/ragie-web-doc.md)
 - Schedule Robert Ross call at 4:00 PM ET / 1:00 PM PT Thursday
-- Discuss EFS document pipeline: Ragie Parse for indexing approved loan docs, but need Tier 1-2 validation before indexing (Workers AI pre-screen + Claude API review for context poisoning, legitimacy, extraction). Ragie has no built-in content moderation. See tasks/professional/equityfundingsource.md
+- Post-call follow-up: share security post (briantakita.me/posts/agent-security-multiuser-lessons/) with Bob
+- Discuss EFS document pipeline: Ragie Parse for indexing approved loan docs, but need Tier 1-2 validation before indexing. See tasks/professional/equityfundingsource.md
 <!-- /agent:pending -->

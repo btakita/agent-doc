@@ -756,7 +756,7 @@ Want me to start with the MCP server (simpler, lets Bob use his own Claude Code)
 
 Can we build a web (js) version of agent-doc or would the logic be too difficult to process?
 If we have a SPA with an agent doc, it could hook into the local Claude Code via MCP.
-### Re: Web SPA agent-doc — feasibility and MCP integration (HEAD)
+### Re: Web SPA agent-doc — feasibility and MCP integration
 
 **A JS SPA that IS agent-doc is the right framing.** Not a viewer — an editor.
 
@@ -834,7 +834,7 @@ agent-doc-web/
 **For the morning demo:** Build a minimal SPA that lets Bob edit a document and see agent responses. Connect it to your Claude Code via MCP tunnel. Bob types, agent responds, Ragie retrieves — all in his browser.
 
 Should I start building `agent-doc-web`?
-<!-- agent:boundary:d5327c54 -->
+<!-- agent:boundary:806077bc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

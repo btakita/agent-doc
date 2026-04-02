@@ -1853,12 +1853,12 @@ Implement some sort of scanning to warn against malicious/dangerous prompts when
 Deployed.
 
 Export should not include Terminal output
-### Re: Export — terminal output removed (HEAD)
+### Re: Export — terminal output removed
 
 Export now downloads the document content only, no terminal output appended. Clean `.md` file for sharing.
 
 Deployed.
-<!-- agent:boundary:94a428bc -->
+<!-- agent:boundary:52cefa80 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

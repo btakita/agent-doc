@@ -1123,7 +1123,7 @@ This can be set up in the Cloudflare dashboard under Pages > agent-doc-js > Cust
 
 Specify that this is a demo and credentials are save to local storage.
 ![img.png](img.png)
-### Re: Added demo notice and credentials disclaimer (HEAD)
+### Re: Added demo notice and credentials disclaimer
 
 **Updated and redeployed.** The SPA now shows:
 
@@ -1134,7 +1134,7 @@ Specify that this is a demo and credentials are save to local storage.
 The screenshot shows the settings dialog working correctly on the deployed site. The API key field, model selector, proxy URL, and system prompt are all functional.
 
 **Redeployed to Cloudflare Pages** — live at https://agent-doc-js.pages.dev
-<!-- agent:boundary:008bdbd9 -->
+<!-- agent:boundary:87124051 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

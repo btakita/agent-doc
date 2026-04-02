@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | SKILL.md pending instructions enhanced | Feature-complete
+LIVE: https://agent-doc-js.pages.dev | Export button added | Feature-complete
 <!-- /agent:status -->
 
 ## Exchange
@@ -1674,6 +1674,7 @@ The agent:pending instructions was missing from the SKILL.md. From the session:
 - How to mark items complete `[x]` vs incomplete `[ ]`
 - When to add/remove items from the pending list
 - The format for pending updates
+
 ### Re: Enhanced SKILL.md pending instructions
 
 Updated the default SKILL.md with more explicit pending component instructions:
@@ -1686,16 +1687,32 @@ Updated the default SKILL.md with more explicit pending component instructions:
 The pending instructions were already there but now have the format example and clearer rules. If you need to customize further, edit in Settings.
 
 Deployed.
-<!-- agent:boundary:8a4fe83b -->
+
+Add an export button so we can debug in this session.
+
+I prompted `Tell me about agent-doc's CRDT`
+
+Terminal
+```
+
+```
+### Re: Export button added (HEAD)
+
+Toolbar: `[Haiku 4.5 v] [Submit] [Export] [Reset] [Settings]`
+
+Click Export to download the current document as `agent-doc-export.md`. Terminal logs the export.
+
+Deployed.
+<!-- agent:boundary:12640c03 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] SPA feature-complete: editor, toolbar, terminal, diff gutter, pending, reset
-- [x] SKILL.md-driven RAG with enhanced pending instructions
+- [x] SPA feature-complete: editor, toolbar (model/submit/export/reset/settings), terminal, diff gutter, pending
+- [x] SKILL.md-driven RAG
 - [x] 18 blog posts uploaded to Ragie
-- [ ] Ragie indexing (check if complete)
+- [ ] Ragie indexing (check status)
 - [ ] CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
 <!-- /agent:pending -->

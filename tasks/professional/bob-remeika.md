@@ -1437,7 +1437,7 @@ Here's a focused prep plan for the 30-minute call:
 - JB plugin demo environment ready (clean session, good example doc)
 - EFS Tier 0-3 architecture diagram or doc walkthrough ready
 - Ragie Parse questions written down (content moderation roadmap, multi-tenant isolation, enterprise pricing)
-<!-- agent:boundary:d5f303ec -->
+<!-- agent:boundary:07ed763c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

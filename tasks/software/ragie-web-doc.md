@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Feature-complete for demo | Ragie docs indexing
+LIVE: https://agent-doc-js.pages.dev | SKILL.md pending instructions enhanced | Feature-complete
 <!-- /agent:status -->
 
 ## Exchange
@@ -1666,17 +1666,36 @@ Deployed.
 ### Re: Acknowledged
 
 Reset button is already in place. Anything else for the demo?
-<!-- agent:boundary:83e807ca -->
+
+The agent:pending instructions was missing from the SKILL.md. From the session:
+
+**What should be in SKILL.md:**
+- The requirement to update pending components on every response
+- How to mark items complete `[x]` vs incomplete `[ ]`
+- When to add/remove items from the pending list
+- The format for pending updates
+### Re: Enhanced SKILL.md pending instructions (HEAD)
+
+Updated the default SKILL.md with more explicit pending component instructions:
+
+- **Format example** showing the exact `<!-- patch:pending -->` block structure
+- **Checkbox syntax** explicitly documented: `[x]` complete, `[ ]` incomplete
+- **Rules** for updating: add new, mark complete, reorder by priority, remove stale
+- **Mandatory** — "This is not optional" language
+
+The pending instructions were already there but now have the format example and clearer rules. If you need to customize further, edit in Settings.
+
+Deployed.
+<!-- agent:boundary:f9ac235a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] SPA: editor + toolbar (model/submit/reset/settings) + terminal + diff gutter + pending
-- [x] SKILL.md-driven RAG with editable system prompt
+- [x] SPA feature-complete: editor, toolbar, terminal, diff gutter, pending, reset
+- [x] SKILL.md-driven RAG with enhanced pending instructions
 - [x] 18 blog posts uploaded to Ragie
-- [ ] Ragie indexing (still processing)
-- [ ] Yjs CRDT for concurrent editing
+- [ ] Ragie indexing (check if complete)
 - [ ] CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
 <!-- /agent:pending -->

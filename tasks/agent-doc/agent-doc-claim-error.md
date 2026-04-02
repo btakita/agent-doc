@@ -544,11 +544,21 @@ Update SPEC.md, README.md, ontology, module-harness
 `make check`: 606 tests pass.
 
 All audit docs are current.
-<!-- agent:boundary:b61c799f -->
+
+release
+### Re: v0.31.2 released (HEAD)
+
+- **crates.io**: published ✓
+- **GitHub Release**: https://github.com/btakita/agent-doc/releases/tag/v0.31.2 ✓
+- **Tag**: v0.31.2 pushed ✓
+- Both binaries updated
+
+All session work is released.
+<!-- agent:boundary:3954ec90 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] All session items complete including audit docs
+- [x] v0.31.2 released (crates.io + GitHub)
 <!-- /agent:pending -->

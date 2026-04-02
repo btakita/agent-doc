@@ -1069,7 +1069,7 @@ Full post linked in the first comment.
 
 ---
 Post to Linked In. Image or no?
-### Re: Post to LinkedIn — image or no? (HEAD)
+### Re: Post to LinkedIn — image or no?
 
 Draft file updated at `mail/social/20260402-security-blog-linkedin.md`.
 
@@ -1080,7 +1080,7 @@ Draft file updated at `mail/social/20260402-security-blog-linkedin.md`.
 2. Copy-paste from draft into LinkedIn web UI
 
 Which approach?
-<!-- agent:boundary:97837944 -->
+<!-- agent:boundary:3d3e4f5f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

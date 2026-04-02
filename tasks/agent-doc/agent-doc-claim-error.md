@@ -236,7 +236,7 @@ Done. Single characters are now treated as potentially truncated in `looks_trunc
 - `cargo build --release` + `cargo install --path .` done
 
 The fix is live in both `.bin/agent-doc` and `~/.cargo/bin/agent-doc`. No plugin update needed — this is binary-side only.
-<!-- agent:boundary:e359b0fa -->
+<!-- agent:boundary:d80e46ea -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

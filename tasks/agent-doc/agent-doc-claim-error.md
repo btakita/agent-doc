@@ -505,8 +505,7 @@ This eliminates the duplicate response bug entirely — the second writer sees t
 The timeout prevents deadlocks (e.g., 30s). If timeout expires, log a warning and proceed without the lock (degraded mode, same as current behavior).
 
 Shall I implement this?
-How are merges handled? CRDT?
-Implement
+How are merges handled? CRDT? Implement
 ### Re: Flock already exists — the race is earlier
 
 `write.rs` already has `acquire_doc_lock(file)` (blocking `lock_exclusive`) at three write points (lines 373, 462, 727). The lock serializes the actual file write + snapshot update.
@@ -520,14 +519,36 @@ Implement
 **What was causing the corky.md duplicates:** The watch daemon and skill both saw the same user prompt, both generated responses. The watch daemon's busy check wasn't in place yet (the fix was deployed mid-session). Now that it is, the watch daemon skips files with active operations.
 
 **The existing flock + the new busy guard should prevent future duplicates.** No additional flock changes needed. The merges are handled by the existing CRDT path for concurrent user edits.
-<!-- agent:boundary:a2642f27 -->
+
+add tests
+audit docs
+Update SPEC.md, README.md, ontology, module-harness
+### Re: Audit docs updated (HEAD)
+
+**SPEC.md:**
+- §7.22 (write): added `--origin` flag documentation
+- §7.23 (watch): added busy guard documentation
+- §7.28 (dedupe): new section for dedupe command
+
+**CLAUDE.md:**
+- Module layout: added `dedupe.rs`
+
+**Module docs** (already updated earlier):
+- `diff.rs`: single-char truncation, evals
+- `git.rs`: HEAD marker occurrence counting, drift warning
+- `sync.rs`: UUID-always-registered, build stamp
+- `claim.rs`: registry protection
+- `dedupe.rs`: full module doc with spec, contracts, evals
+- `watch.rs`: busy guard
+
+`make check`: 606 tests pass.
+
+All audit docs are current.
+<!-- agent:boundary:402d4467 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] All session items complete
-- [x] Write lock already exists in write.rs (flock)
-- [x] Watch daemon busy guard prevents diff race
-- [x] CRDT handles user-edit merges
+- [x] All session items complete including audit docs
 <!-- /agent:pending -->

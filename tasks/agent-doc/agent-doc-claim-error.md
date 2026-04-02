@@ -278,7 +278,7 @@ This is a snapshot update failure — the `agent-doc write` or `agent-doc commit
 
 This is a different bug from what we fixed in this session. Should I investigate the snapshot update failure now, or track it for a future session?
 Investigate
-### Re: Duplicate response root cause (HEAD)
+### Re: Duplicate response root cause
 
 **Timeline:**
 1. `00:44:44` — Last successful write+commit. snap=80404, file=80405 (1 byte boundary diff). Correct.
@@ -295,7 +295,7 @@ Without access to the corky session's terminal history, I can't determine which 
 **Mitigation:** The `agent-doc commit` should detect when `file_len >> snap_len` (significant drift) and log a warning like `[commit] WARNING: file is N bytes larger than snapshot — possible out-of-band write`. This would make these incidents visible immediately rather than silently duplicating responses.
 
 Should I add that warning?
-<!-- agent:boundary:1367405a -->
+<!-- agent:boundary:ae2f2572 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

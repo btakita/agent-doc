@@ -461,14 +461,14 @@ Yes. Both binaries are from 15:17 (the latest build with the watch daemon busy g
 - `.bin/agent-doc` symlinks to `target/release/agent-doc`
 
 The watch daemon needs to be restarted to pick up the new binary. Run `agent-doc watch --stop && agent-doc watch` or it will restart automatically on the next file change.
-### Re: SKILL.md updated with --origin skill (HEAD)
+### Re: SKILL.md updated with --origin skill
 
 Done. All `agent-doc write` examples in SKILL.md now include `--origin skill`. Version bumped to `0.31.1` in frontmatter. Skill installed.
 
 The next `/agent-doc` invocation will use the updated SKILL.md with `--origin skill` in write commands. You'll need to `/compact` to reload the skill in the current session.
 
 All items from this session are complete.
-<!-- agent:boundary:05667dde -->
+<!-- agent:boundary:55c30ad7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

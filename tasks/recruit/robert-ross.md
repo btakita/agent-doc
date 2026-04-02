@@ -191,14 +191,20 @@ Two separate bugs compounded:
 **Bug 2 — Missing `threadId` in Gmail API request:** Even after fixing Bug 1 (using the correct Message-ID in the headers), the email still didn't thread. When sending via the Gmail API, you must include `"threadId": "19d479af292d8d99"` in the JSON request body alongside the raw RFC 2822 message. Corky's `send_via_gmail_api` function only sends `{ "raw": encoded }` — it doesn't pass `threadId`. Without this, Gmail creates a new thread.
 
 **Summary:** Both the RFC headers AND the Gmail API `threadId` field are needed. Corky was missing both, and fixing one without the other still breaks threading.
-<!-- agent:boundary:d7505b5b -->
+Add both fixes to tasks/software/corky.md
+### Re: Corky fixes added (HEAD)
+
+Added both threading bugs to `tasks/software/corky.md` under Open items:
+
+1. **Bug 1** — Resolve Message-IDs from thread IDs (or store them during sync)
+2. **Bug 2** — Include `threadId` in Gmail API request body for `messages.send` and `drafts.create`
+<!-- agent:boundary:e03c70a6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - Send LinkedIn message to Rob manually (draft ready above)
-- Corky fix: add `threadId` to Gmail API request body for proper threading
-- Corky fix: store Message-IDs in conversation files (not just thread IDs)
+- ([done]) Added corky threading fixes to tasks/software/corky.md
 - Prep talking points for Dreamable call (agent experience, AI agent thesis alignment)
 <!-- /agent:pending -->

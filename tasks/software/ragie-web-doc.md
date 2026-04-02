@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Sonnet rate-limited on OAuth token (use Haiku) | Ready for demo
+LIVE: https://agent-doc-js.pages.dev | Submit feedback added | Ready for demo
 <!-- /agent:status -->
 
 ## Exchange
@@ -1333,7 +1333,6 @@ Most of the sessions should be idle. Is this not the case?
 - Or reduce active Claude Code sessions before demoing with Sonnet
 - Proxy now retries automatically — if Sonnet has brief availability windows, it'll catch them
 
-There needs to be feedback when Ctrl+S
 ### Re: Idle sessions and rate limits
 
 You're right — idle sessions don't make API calls. I checked and the 429 persists even with a direct API call (no proxy) to Sonnet using the OAuth token. Haiku works fine.
@@ -1344,7 +1343,45 @@ This is likely a **Claude Max subscription-specific per-minute limit for Sonnet*
 - Use Haiku
 - Wait for the rate limit window to fully reset (could be minutes to an hour)
 - Use a standard API key from console.anthropic.com
-<!-- agent:boundary:7861d20e -->
+
+There needs to be feedback when Ctrl+Shift or Submit is pressed.
+
+I switched to Haiku
+```
+app.js:54  POST https://agent-doc-proxy.brian-takita.workers.dev/v1/messages 429 (Too Many Requests)
+bW @ app.js:54
+mX @ app.js:64
+run @ app.js:54
+j @ app.js:10
+MK @ app.js:10
+keydown @ app.js:10
+(anonymous) @ app.js:9
+runHandlers @ app.js:9
+handleEvent @ app.js:9
+app.js:64 Error: Claude API error (429): {"type":"error","error":{"type":"rate_limit_error","message":"Error"},"request_id":"req_011CZeQHHxXh8NkJLy8bpd9s"}
+    at bW (app.js:54:567)
+    at async mX (app.js:64:458)
+mX @ app.js:64
+await in mX
+run @ app.js:54
+j @ app.js:10
+MK @ app.js:10
+keydown @ app.js:10
+(anonymous) @ app.js:9
+runHandlers @ app.js:9
+handleEvent @ app.js:9
+```
+### Re: Submit feedback (HEAD)
+
+Added visual feedback when submitting:
+
+1. **Submit button** changes text to "Submitting..." and grays out (disabled + cursor: wait)
+2. **Status bar** gets an accent-colored background with a pulsing animation
+3. **Status text** shows "Calling Claude..."
+4. All three reset when the call completes (success or error)
+
+Deployed to Cloudflare Pages.
+<!-- agent:boundary:47e45d8c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1352,7 +1389,7 @@ This is likely a **Claude Max subscription-specific per-minute limit for Sonnet*
 <!-- agent:pending patch=replace -->
 - [x] SPA built, deployed, all bugs fixed
 - [x] Proxy with retry logic
-- [x] Rate limit investigation: OAuth token Sonnet limit, Haiku unaffected
+- [x] Submit visual feedback (button + status bar pulse)
 - [ ] Add CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
 - [ ] (deferred) OAuth flow, Yjs CRDT, WebSocket sync, Ragie, MCP

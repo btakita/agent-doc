@@ -556,7 +556,7 @@ Get a free API key from resend.com (100 emails/day free tier). The from address 
 **Live:** https://equityfundingsource.pages.dev
 
 RESEND_API_KEY="$(pass btak/RESEND_API_KEY)"
-### Re: Resend API key configured (HEAD)
+### Re: Resend API key configured
 
 Set `RESEND_API_KEY` secret on Cloudflare Pages production environment. Email notifications are now active.
 
@@ -565,7 +565,7 @@ Form submissions will email brian.takita@gmail.com with:
 - "New EFS Contact: {name}" for contact form messages
 
 **Note:** The from address in the code is `notifications@equityfundingsource.com`. This domain needs to be verified in Resend for emails to deliver. Until then, you can change it to `onboarding@resend.dev` (Resend's default sandbox) for testing. Want me to update the from address?
-<!-- agent:boundary:8dcfb551 -->
+<!-- agent:boundary:6e351e2a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

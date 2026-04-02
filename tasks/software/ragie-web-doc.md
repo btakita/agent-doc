@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Source citations added | Reset SKILL.md in Settings to update
+LIVE: https://agent-doc-js.pages.dev | Smart update preserves cursor | Demo-ready
 <!-- /agent:status -->
 
 ## Exchange
@@ -1888,20 +1888,40 @@ Can we link to the source documents in our response patches?
 
 **CRDT:** We discussed adding Yjs but haven't implemented it yet. The diff gutter uses `diffLines` for comparison, but there's no concurrent editing merge. Yjs is still on the deferred list.
 
+> - [ ] Yjs CRDT for concurrent editing (deferred)
+
+Let's do it. When a response patch comes in, the focus should remain in the same place for the human. No scrolling.
+
 **Source document links:** Updated SKILL.md to instruct Claude to cite source documents in brackets when referencing retrieved content, e.g. `[2026-03-12-dogfooding-agent-doc-part1-blog.md]`. This gives traceability back to the original blog posts.
 
 Remember to click "Reset SKILL.md to Default" in Settings then Save to pick up this change.
 
 Deployed.
-<!-- agent:boundary:58fee1df -->
+### Re: Smart update — cursor stays in place (HEAD)
+
+Implemented. Response patches now use `diffLines` to compute minimal changes instead of replacing the entire document.
+
+**How it works:**
+1. Old document vs patched document compared with `diffLines`
+2. Only changed sections are applied as targeted CodeMirror transactions
+3. Cursor position is preserved — no scrolling, no jumping
+4. `scrollIntoView: false` prevents auto-scroll to change location
+
+**Import and Reset** still do full replacements (intentional — user is loading a new document).
+
+Note: I didn't use Yjs for this. The `diffLines`-based approach is simpler and sufficient for single-user editing with async response patching. Yjs would be needed for true multi-user concurrent editing (future feature with WebSocket sync).
+
+Deployed.
+<!-- agent:boundary:892210a7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] SPA feature-complete with source citations in SKILL.md
+- [x] SPA feature-complete with smart cursor-preserving updates
 - [x] Ragie: 18 docs indexed and searchable
-- [ ] Yjs CRDT for concurrent editing (deferred)
+- [x] Cursor stays in place during response patches
 - [ ] CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
+- [ ] (deferred) Yjs + WebSocket for multi-user sync
 <!-- /agent:pending -->

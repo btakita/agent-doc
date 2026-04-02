@@ -3572,7 +3572,22 @@ Implement:
 **PyPI:** The PyPI workflow (`pypi.yml`) triggers automatically on release publish. It ran but failed — the Windows build target (`x86_64-pc-windows-msvc`) hit a maturin error. This is a pre-existing issue (all 3 recent PyPI runs failed the same way). The PyPI workflow needs fixing for Windows builds, but that's a separate issue.
 
 The Linux and macOS PyPI builds may have succeeded — let me check.
-<!-- agent:boundary:07e8ba73 -->
+
+Fix:
+- [ ] PyPI: Windows build fails in CI (pre-existing — separate issue)
+### Re: Windows compilation fixed (HEAD)
+
+The PyPI CI failure was a Windows compilation error: `hook_cmd::listen()` uses `std::os::unix::net::UnixListener` without a platform guard. Fixed:
+
+- `listen()` now `#[cfg(unix)]` gated
+- Non-unix stub added that returns an error
+- All 602 tests pass locally
+- Committed, pushed, tag moved forward
+
+The PyPI workflow should re-trigger since the release tag was updated. The Linux/macOS builds should now succeed alongside the Windows fix.
+
+Note: the skill test fix from earlier was also included in this commit (it was already staged). Both fixes are now in the v0.31.1 tag.
+<!-- agent:boundary:ea9e8d0a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -3581,6 +3596,7 @@ The Linux and macOS PyPI builds may have succeeded — let me check.
 - [x] All implementation, tests, audit docs, and release complete
 - [x] Published: crates.io ✓, GitHub Release ✓
 - [x] CI skill tests fixed (explicit environment)
-- [ ] PyPI: Windows build fails in CI (pre-existing — separate issue)
+- [x] Windows compilation fixed (#[cfg(unix)] on hook_cmd::listen)
+- [ ] Verify PyPI CI passes after tag update
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

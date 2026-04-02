@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-25 pages deployed. 50 tests passing. Blog is optional (was empty on original site).
+25 pages deployed. 50 tests passing. Form backend architecture discussed -- Ragie + D1 + R2 + security layers.
 <!-- /agent:status -->
 
 ## Exchange
@@ -322,7 +322,49 @@ Where did you see the blog? equityfundingnow.com or the archive.org pages?
 The blog was from the **Wayback Machine archive** of equityfundingsource.com (the original site). The archived navigation showed "Blog" and "Broker Portal" as menu items, but both pages were empty/minimal at the time of capture. The live equityfundingnow.com site does **not** have a blog section in its current navigation.
 
 So the blog is not an existing feature to replicate -- it was a planned-but-never-built section on the original site. We can skip it unless Judith wants one added.
-<!-- agent:boundary:61cb76c3 -->
+
+Discuss:
+- [ ] Form submission backend (Formspree or custom)
+
+I want the form to go into Ragie.
+Raw submissions can be a security risk if the uploaded documents have malware.
+Context poisoning is another risk.
+
+Perhaps the agent can verify that the uploaded document is of good quality and is legitimate.
+Human override should always be possible on the backend.
+We should have admin accounts as well.
+
+Another document upload flow is when an email with a link containing a token is sent.
+This can be associated with the account that the uploaded document will be associated with.
+### Re: Form submission architecture (HEAD)
+
+Good thinking on the security layers. Here's how this could work:
+
+**Submission flow:**
+1. Form submits to a Cloudflare Worker endpoint (`/api/apply`, `/api/contact`)
+2. Worker validates fields, stores submission in D1 (Cloudflare SQL database)
+3. Document uploads go to R2 with a pending/quarantine status
+4. AI agent (via Ragie) reviews the submission: validates document quality, checks for context poisoning, flags suspicious content
+5. Clean submissions get indexed in Ragie for retrieval by Judith/admin
+6. Notification email sent to Judith
+
+**Security layers:**
+- **Malware scanning** -- Cloudflare has built-in upload scanning, or use ClamAV via Workers
+- **Context poisoning** -- AI agent reviews uploaded document content before indexing in Ragie. Documents with prompt injection or adversarial content get flagged, not indexed
+- **Human override** -- admin dashboard shows all submissions with approve/reject/flag status. Flagged submissions require manual review before Ragie indexing
+
+**Token-based upload flow:**
+- Admin sends email invite with signed token link
+- Borrower clicks link, uploads documents to their account
+- Token ties the upload to a specific application/borrower record
+- Prevents anonymous uploads, creates audit trail
+
+**Admin accounts:**
+- Simple auth (Cloudflare Access or custom JWT)
+- Dashboard to view submissions, review flagged docs, manage borrower accounts
+
+This is a significant backend project. Want me to scope out the phases, or is this for a future session after the demo is approved?
+<!-- agent:boundary:7244398a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -332,18 +374,18 @@ So the blog is not an existing feature to replicate -- it was a planned-but-neve
 - [x] Add as git submodule in agent-loop/src/
 - [x] Scaffold rappstack project structure
 - [x] Crawl equityfundingnow.com for real content
-- [x] Update all page content from live site
-- [x] Download property images (32 files)
-- [x] Configure Cloudflare Pages deployment
-- [x] bun install + verify dev server runs (port 4200)
-- [x] Add page tests (50 tests, all passing)
-- [x] Dark theme + layout matching equityfundingnow.com
 - [x] CSS, style, and content parity with live site
 - [x] Individual portfolio deal detail pages (18 pages)
 - [x] Deploy to Cloudflare Pages (equityfundingsource.pages.dev)
-- [x] Build Apply Now page (full loan application form)
-- [x] Build Message Us / Contact page
-- [x] Fix social media icons (SVG icons)
-- [ ] Form submission backend (Formspree or custom)
-- [ ] Blog setup (optional -- was empty on original site, not on equityfundingnow.com)
+- [x] Build Apply Now + Message Us pages
+- [x] Fix social media icons
+- [ ] Form submission backend (Worker + D1 + R2 + Ragie)
+  - [ ] API endpoints for form submission
+  - [ ] D1 database for submissions
+  - [ ] R2 quarantine for uploaded documents
+  - [ ] AI agent document review (quality + context poisoning check)
+  - [ ] Ragie indexing for clean submissions
+  - [ ] Admin dashboard (auth + submission management)
+  - [ ] Token-based document upload flow (email invite)
+  - [ ] Notification emails to Judith
 <!-- /agent:pending -->

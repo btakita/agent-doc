@@ -1529,7 +1529,7 @@ Want me to adjust the tone or wording?
 
 Here is the UI. Adjust wording accordingly...I think Calendly send this change to Bob with my reason.
 ![img.png](img.png)
-### Re: Calendly reschedule reason (HEAD)
+### Re: Calendly reschedule reason
 
 I can see the Calendly UI -- the "Reason for change" field gets sent directly to Bob. Keep it short and natural:
 
@@ -1544,7 +1544,7 @@ This works for the Calendly format because:
 - The existing meeting description already covers the agenda
 
 **One flag:** The UI shows **Thursday, April 2** but today (Tuesday) is April 1, making Thursday = April 3. Double-check the date before hitting "Update Event."
-<!-- agent:boundary:1b239877 -->
+<!-- agent:boundary:7577403c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

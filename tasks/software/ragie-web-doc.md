@@ -1582,7 +1582,7 @@ How can we access the ragie search from prompts?
 **Status:** All 10 visible documents still in "partitioning" status. Ragie free tier may take a few more minutes. Will test again soon.
 
 Will the diff go through C
-### Re: Ragie first, then Claude (HEAD)
+### Re: Ragie first, then Claude
 
 **Ragie runs first.** The flow:
 
@@ -1592,7 +1592,7 @@ Will the diff go through C
 4. Response patched into document
 
 Ragie provides context *to* Claude. The SPA orchestrates the pipeline — Ragie enriches the prompt before Claude sees it.
-<!-- agent:boundary:976b547c -->
+<!-- agent:boundary:6437d5a1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

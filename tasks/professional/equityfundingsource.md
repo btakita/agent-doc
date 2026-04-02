@@ -509,7 +509,7 @@ binding = "equityfundingsource"
 database_name = "equityfundingsource"
 database_id = "280e1539-b940-4c59-8988-fbed63c12ac0"
 ```
-### Re: D1 database created + migration applied (HEAD)
+### Re: D1 database created + migration applied
 
 Updated `wrangler.toml` with database ID `280e1539-b940-4c59-8988-fbed63c12ac0`.
 
@@ -519,7 +519,7 @@ Migration `0001_create_tables.sql` applied to remote D1 (4 commands, 0.48ms):
 - `uploaded_documents` table
 
 54 tests passing. Ready to redeploy with form backend.
-<!-- agent:boundary:f060ad58 -->
+<!-- agent:boundary:1d7d23b3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

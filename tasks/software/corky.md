@@ -1422,7 +1422,7 @@ Read/write Google Docs, read Google Sheets.
 
 Want me to start with Phase 1 (OAuth scope expansion) and Phase 2 (doc upload)?
 yes
-### Re: Phase 1 & 2 implemented (HEAD)
+### Re: Phase 1 & 2 implemented
 
 **Phase 1: OAuth scope** -- Added `DRIVE_FILE_SCOPE` (`drive.file`) to `gmail_auth.rs`. Uses the existing OAuth flow with a new scope.
 
@@ -1449,7 +1449,7 @@ Build: clippy clean, release build OK.
 - `--folder` option (upload to specific Drive folder)
 - Google Docs conversion (upload .md as native Google Doc)
 - Phase 3/4 (Docs read/write, Sheets read)
-<!-- agent:boundary:747d44c0 -->
+<!-- agent:boundary:41cd2a83 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

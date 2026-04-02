@@ -38,7 +38,7 @@ Updated draft incorporating your notes:
 > Either way, best of luck with the transition. Let's catch up sometime.
 
 Let me know if you want to adjust tone, add/remove anything, or if this is ready to send.
-### Re: Neo correction noted (HEAD)
+### Re: Neo correction noted
 
 Fixed. Here's the final draft ready to send:
 
@@ -49,7 +49,7 @@ Fixed. Here's the final draft ready to send:
 > Either way, best of luck with the transition. Let's catch up sometime.
 
 Ready to send via LinkedIn when you give the go-ahead.
-<!-- agent:boundary:70e2d89e -->
+<!-- agent:boundary:18d30210 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

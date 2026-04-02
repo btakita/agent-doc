@@ -3561,15 +3561,26 @@ The 3 failing tests (`skill::tests::install_creates_file`, `install_idempotent`,
 This is a pre-existing test flakiness issue with the skill install path detection in CI environments. The fix would be to make the test use a fixed path rather than relying on `config().skill_path()`, but that's a separate issue from this session's work.
 
 Our changes (claim, sync, git, plugin) are unrelated — they don't touch `skill.rs` at all.
-<!-- agent:boundary:1a30aebe -->
+
+Implement:
+- [ ] Fix CI: skill tests fail in environments without Claude Code harness (pre-existing)
+- [ ] PyPI publish (needs manylinux Docker build)
+### Re: CI fix + PyPI status (HEAD)
+
+**CI skill tests fixed:** Tests now use `SkillConfig::with_environment(ClaudeCode)` instead of `Environment::detect()`. This makes path resolution deterministic regardless of CI environment variables. Committed, pushed, tag moved forward to include fix.
+
+**PyPI:** The PyPI workflow (`pypi.yml`) triggers automatically on release publish. It ran but failed — the Windows build target (`x86_64-pc-windows-msvc`) hit a maturin error. This is a pre-existing issue (all 3 recent PyPI runs failed the same way). The PyPI workflow needs fixing for Windows builds, but that's a separate issue.
+
+The Linux and macOS PyPI builds may have succeeded — let me check.
+<!-- agent:boundary:d3c6d390 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] All implementation, tests, audit docs, and release complete
-- [x] Published: crates.io ✓, GitHub Release ✓, tag ✓
-- [ ] Fix CI: skill tests fail in environments without Claude Code harness (pre-existing)
-- [ ] PyPI publish (needs manylinux Docker build)
+- [x] Published: crates.io ✓, GitHub Release ✓
+- [x] CI skill tests fixed (explicit environment)
+- [ ] PyPI: Windows build fails in CI (pre-existing — separate issue)
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

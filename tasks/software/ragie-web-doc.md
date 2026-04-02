@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Settings Save fixed | Haiku working | Ready for demo
+LIVE: https://agent-doc-js.pages.dev | Toolbar model dropdown | Ready for demo
 <!-- /agent:status -->
 
 ## Exchange
@@ -1419,16 +1419,27 @@ The bug: the dialog close handler checked `dialog.returnValue` which was always 
 5. Submit with Haiku: "Response received"
 
 Deployed to Cloudflare Pages. Settings changes now persist correctly.
-<!-- agent:boundary:e28f67ce -->
+
+The model being used should be in a dropdown at the top of the page.
+Changing the dropdown value should automatically select the model without needing to press a Save button.
+### Re: Model dropdown in toolbar (HEAD)
+
+Added a model dropdown to the toolbar header. Changing the dropdown instantly saves the selection to localStorage — no Save button needed.
+
+- **Toolbar:** `[Haiku 4.5 v] [Submit] [Settings]`
+- **Auto-save:** Selecting a different model immediately persists it
+- **Status feedback:** Shows "Model: Sonnet 4.6" etc. on change
+- **Synced:** Settings dialog model dropdown stays in sync with toolbar
+
+Deployed to Cloudflare Pages.
+<!-- agent:boundary:13bc00c5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] SPA built, deployed, all bugs fixed
-- [x] Proxy with retry logic
-- [x] Settings Save persistence fixed
-- [x] Default to Haiku
+- [x] Model dropdown in toolbar with instant save
 - [ ] Add CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
 - [ ] (deferred) OAuth flow, Yjs CRDT, WebSocket sync, Ragie, MCP

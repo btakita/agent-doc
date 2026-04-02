@@ -3575,7 +3575,7 @@ The Linux and macOS PyPI builds may have succeeded — let me check.
 
 Fix:
 - [ ] PyPI: Windows build fails in CI (pre-existing — separate issue)
-### Re: Windows compilation fixed (HEAD)
+### Re: Windows compilation fixed
 
 The PyPI CI failure was a Windows compilation error: `hook_cmd::listen()` uses `std::os::unix::net::UnixListener` without a platform guard. Fixed:
 
@@ -3587,7 +3587,7 @@ The PyPI CI failure was a Windows compilation error: `hook_cmd::listen()` uses `
 The PyPI workflow should re-trigger since the release tag was updated. The Linux/macOS builds should now succeed alongside the Windows fix.
 
 Note: the skill test fix from earlier was also included in this commit (it was already staged). Both fixes are now in the v0.31.1 tag.
-<!-- agent:boundary:ea9e8d0a -->
+<!-- agent:boundary:c793f182 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

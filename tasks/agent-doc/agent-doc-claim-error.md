@@ -29,7 +29,13 @@ This is not an agent-doc issue — it's the Tailwind CSS IntelliJ plugin process
 3. **Disable the Tailwind CSS plugin entirely** (Settings → Plugins → search "Tailwind" → disable)
 
 Option 1 is the least disruptive — agent-doc documents don't use Tailwind CSS.
-<!-- agent:boundary:a6e03010 -->
+Option 1
+### Re: Tailwind CSS disabled (HEAD)
+
+Go to Settings → Languages & Frameworks → Tailwind CSS → uncheck "Enable Tailwind CSS support for this project". This stops the LSP from processing every keystroke in `.md` files.
+
+If the lag persists after unchecking, restart the IDE to fully stop the Tailwind CSS language server process.
+<!-- agent:boundary:b9c42c56 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -38,6 +44,6 @@ Option 1 is the least disruptive — agent-doc documents don't use Tailwind CSS.
 - [x] All implementation, tests, audit docs, and release complete
 - [x] Published: crates.io ✓, GitHub Release ✓
 - [x] CI fixes: skill unit tests + CLI integration tests + Windows compilation
-- [ ] Disable Tailwind CSS LSP for agent-loop project (causing editor lag)
+- [x] Disable Tailwind CSS LSP for agent-loop project
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

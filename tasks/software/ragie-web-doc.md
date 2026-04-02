@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | `curl -s .../setup.sh | sh` for onboarding | Ready for demo
+LIVE: https://agent-doc-js.pages.dev | curl instructions in dialog | Ready for demo
 <!-- /agent:status -->
 
 ## Exchange
@@ -1192,7 +1192,17 @@ bash <(curl -s https://agent-doc-js.pages.dev/setup.sh)
 ```
 
 Both download and execute the same script. The `-s` flag silences curl's progress bar.
-<!-- agent:boundary:80ecce6f -->
+
+Add instructions on the dialog to run `curl -s https://agent-doc-js.pages.dev/setup.sh | sh` to autopopulate the credentials.
+Is
+### Re: curl instructions added to settings dialog (HEAD)
+
+Updated the settings dialog to include the `curl | sh` command directly in the demo notice. The command text is styled in green with `user-select: all` so clicking it selects the whole command for easy copy.
+
+Redeployed to Cloudflare Pages.
+
+(Your "Is " at the end looks like it got cut off — what were you going to ask?)
+<!-- agent:boundary:1f90f181 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1206,10 +1216,8 @@ Both download and execute the same script. The `-s` flag silences curl's progres
 - [x] Deploy to Cloudflare Pages
 - [x] Add demo notice and credentials disclaimer
 - [x] Setup script (`curl | sh`) for zero-config onboarding
+- [x] Add curl instructions to settings dialog
 - [ ] Add CNAME for `agent-doc.briantakita.me` (Cloudflare dashboard)
 - [ ] Demo script for Bob call
-- [ ] (deferred) Yjs CRDT for concurrent edit merging
-- [ ] (deferred) WebSocket live document sync
-- [ ] (deferred) Ragie API integration
-- [ ] (deferred) MCP integration
+- [ ] (deferred) Yjs CRDT, WebSocket sync, Ragie, MCP
 <!-- /agent:pending -->

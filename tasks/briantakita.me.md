@@ -916,6 +916,8 @@ Collaborative Security, Tracability, and How agent-doc helps with multi-tasking 
 
 It is now April 2. So remove the April Fools part.
 
+The teaser is in this document.
+
 [//]: # (Continue with 1 & 2.)
 ### Re: LinkedIn teaser revision
 
@@ -943,11 +945,18 @@ First comment: link to agent-doc repo
 ---
 
 Changes from original: Led with collaborative security + traceability angle. Commit stats now support the narrative rather than lead it. April Fools line removed.
-<!-- agent:boundary:b493511c -->
+
+Please write a draft file.
+### Re: The teaser is in this document (HEAD)
+
+Saved the revised teaser as `mail/social/20260402-security-blog-linkedin.md`. The previous draft (`mail/social/20260401-181027-linkedin.md`) referenced in the session summary doesn't exist — it was lost. This new file replaces it.
+
+Ready to post when you are. LinkedIn OAuth still needs retry (was blocked by outage last session).
+<!-- agent:boundary:8db09aaf -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn teaser — revised draft ready, needs user approval before posting
+- LinkedIn teaser — saved to `mail/social/20260402-security-blog-linkedin.md`, ready to post
 - LinkedIn OAuth — needs retry when LinkedIn is back
 - Search icon `w-full` fix — remove `w-full` from icon span in rappstack-dev
 - JSON-LD VideoObject enhancement — add BlogPosting wrapper, duration, publisher (optional)

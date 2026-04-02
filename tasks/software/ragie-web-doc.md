@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Ragie integration deployed | Need to upload docs to Ragie index
+LIVE: https://agent-doc-js.pages.dev | Ragie integration ready (needs docs) | setup.sh fixed
 <!-- /agent:status -->
 
 ## Exchange
@@ -1463,7 +1463,9 @@ Perhaps we should have a field for the RAGIE_API_KEY?
 **What's deployed:**
 - Worker: `/ragie/*` proxy route forwarding to `api.ragie.ai`
 - Settings: Ragie API Key field
-- `setup.sh`: auto-populates `ragieKey` from `pass btak/RAGIE_API_KEY`
+- `setup.sh`: auto-populates `ragieKey` from `pass btak/RAGIE_API_KEY`: This should not happen. There can be a field to enter in the RAGIE_API_KEY.
+
+If RAGIE_API_KEY is an env variable, that can be populated via setup.sh.
 
 **Tested:** Proxy returns 200 OK. But the Ragie index has **0 documents** — you need to upload documents before retrieval returns results.
 
@@ -1474,16 +1476,30 @@ corky ragie upload <file>
 Or via the Ragie dashboard.
 
 **Next:** Upload demo docs to Ragie, then the full flow (edit -> Ragie retrieval -> Claude with context) will work end-to-end.
-<!-- agent:boundary:3fea6671 -->
+### Re: Fixed setup.sh — no auto-read from pass
+
+Removed the `pass btak/RAGIE_API_KEY` auto-read from `setup.sh`. The Ragie key is now only populated from the `RAGIE_API_KEY` environment variable:
+
+```bash
+# With Ragie key: (HEAD)
+RAGIE_API_KEY=ragie_... curl -s https://agent-doc-js.pages.dev/setup.sh | sh
+
+# Without Ragie key (just Claude): (HEAD)
+curl -s https://agent-doc-js.pages.dev/setup.sh | sh
+```
+
+Your "Sho" got cut off — were you going to say "Should not happen" or something else?
+<!-- agent:boundary:fa38a6e8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] SPA built, deployed, all bugs fixed, toolbar model dropdown
-- [x] Ragie retrieval integration (proxy + SPA + context injection)
+- [x] Ragie retrieval integration
+- [x] Fix setup.sh to not auto-read pass store
 - [ ] Upload demo documents to Ragie index
-- [ ] Test full Ragie -> Claude flow with real documents
+- [ ] Test full Ragie -> Claude flow
 - [ ] Add CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
 - [ ] (deferred) Yjs CRDT, WebSocket sync, MCP

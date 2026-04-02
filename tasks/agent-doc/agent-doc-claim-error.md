@@ -350,7 +350,30 @@ Compare the last `### Re:` block against the previous one. If identical content,
 I'll create a plan document for these. This session has covered the original claim error and many related fixes — it's a good stopping point for this document.
 
 Should I create a new task document for dedupe + write-origin, or continue here?
-<!-- agent:boundary:dac8fd12 -->
+
+We can continue.
+### Re: Dedupe command implemented + corky.md fixed (HEAD)
+
+**`agent-doc dedupe <FILE>`** — new command that removes consecutive duplicate `### Re:` blocks.
+
+- Compares consecutive response blocks (ignoring boundary markers)
+- Removes exact duplicates, keeps the first occurrence
+- Updates snapshot after removal
+- 4 unit tests
+
+**corky.md fixed:**
+```
+[dedupe] duplicate found: "### Re: Gmail API Threading Bugs" (lines 1574-1598)
+[dedupe] removed 1406 bytes of duplicate content
+```
+
+The duplicate had slightly different lengths because the second block included a boundary marker — the comparison now strips `<!-- agent:boundary:* -->` lines before comparing.
+
+- `make check`: 606 tests pass
+- Both binaries updated
+
+**Write-origin tracing** is the remaining item. Should I plan that now?
+<!-- agent:boundary:5a174a8d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -359,7 +382,7 @@ Should I create a new task document for dedupe + write-origin, or continue here?
 - [x] All implementation, tests, audit docs complete
 - [x] Single-char truncation fix
 - [x] Commit drift warning
-- [ ] `agent-doc dedupe` command
+- [x] `agent-doc dedupe` command implemented
+- [x] corky.md duplicate fixed
 - [ ] Write-origin tracing (`--origin` flag + ops.log)
-- [ ] Fix corky.md duplicate response
 <!-- /agent:pending -->

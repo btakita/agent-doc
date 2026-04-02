@@ -556,6 +556,8 @@ Get a free API key from resend.com (100 emails/day free tier). The from address 
 **Live:** https://equityfundingsource.pages.dev
 
 RESEND_API_KEY="$(pass btak/RESEND_API_KEY)"
+Update the email draft to judith-krug
+Don't send to robert-waldman. Only judith-krug. BCC robert-ward
 ### Re: Resend API key configured
 
 Set `RESEND_API_KEY` secret on Cloudflare Pages production environment. Email notifications are now active.
@@ -565,7 +567,14 @@ Form submissions will email brian.takita@gmail.com with:
 - "New EFS Contact: {name}" for contact form messages
 
 **Note:** The from address in the code is `notifications@equityfundingsource.com`. This domain needs to be verified in Resend for emails to deliver. Until then, you can change it to `onboarding@resend.dev` (Resend's default sandbox) for testing. Want me to update the from address?
-<!-- agent:boundary:6e351e2a -->
+Yes
+### Re: Email draft updated (HEAD)
+
+Removed Robert Waldman from CC. Updated draft pushed to Gmail Drafts:
+- **To:** judithkrug@gmail.com
+- **CC:** (none)
+- **Subject:** Equity Funding Source — new website live + proposal
+<!-- agent:boundary:cb2305a5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -575,7 +584,7 @@ Form submissions will email brian.takita@gmail.com with:
 - [x] Deploy to Cloudflare Pages (equityfundingsource.pages.dev)
 - [x] Add EFS document pipeline topic to bob-remeika.md
 - [x] Wire up form submission backend (Apply Now + Contact) -- D1 + R2 + Pages Functions
-- [x] Review and send proposal email to Judith from Gmail -- pushed to Drafts
+- [x] Review and send proposal email to Judith from Gmail -- updated, pushed to Drafts (no CC)
 - [x] Create D1 database and run migration
 - [x] Redeploy with form backend + email notifications
 - [x] Configure Resend API key for email notifications

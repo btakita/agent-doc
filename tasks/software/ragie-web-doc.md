@@ -1506,7 +1506,7 @@ Added a terminal panel below the editor:
 Layout: Editor (top) | Terminal header | Terminal output | Status bar (bottom)
 
 Deployed to Cloudflare Pages.
-### Re: Terminal — 10 lines + prompt input (HEAD)
+### Re: Terminal — 10 lines + prompt input
 
 Updated:
 
@@ -1518,7 +1518,7 @@ Updated:
 The prompt gives Bob (or you) a way to interact with Claude without editing the document — good for quick questions, clarifications, or testing.
 
 Deployed to Cloudflare Pages.
-<!-- agent:boundary:95491b03 -->
+<!-- agent:boundary:d8cb93c4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

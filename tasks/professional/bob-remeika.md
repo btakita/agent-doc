@@ -1488,7 +1488,7 @@ Please see...note this message was the weekend...5 days ago
 /home/brian/work/btakita/agent-loop/mail/contacts/bob-remeika/20260402-linkedin-bob-remeika.txt
 
 Please draft a message for Bob acknowledging what he said and in preperation for our call in 1 hour.
-### Re: Draft message for Bob before the call (HEAD)
+### Re: Draft message for Bob before the call
 
 Here's a LinkedIn message for Bob:
 
@@ -1513,7 +1513,7 @@ See you in a bit!
 - The agent-doc-js demo is the headline since it directly uses Ragie
 
 Want me to adjust the tone or add/remove anything?
-<!-- agent:boundary:b3acdd02 -->
+<!-- agent:boundary:045b376f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -577,6 +577,9 @@ Removed Robert Waldman from CC. Updated draft pushed to Gmail Drafts:
 Update the draft. Mention that her equityfundingsource online presence has some issue.
 Use a google search to verify.
 Let her know that I can clean up her SEO and agent search presence as well.
+CC robert-waldman BCC robert-ward
+
+I will delete existing gmail drafts
 ### Re: Email updated with online presence issues
 
 Searched Google for Judith's online presence. Found a fragmented mess:
@@ -595,7 +598,15 @@ Updated the proposal email with:
 3. Added "online presence cleanup" to the "included in all options" list
 
 Draft re-pushed to Gmail Drafts.
-<!-- agent:boundary:8475ca48 -->
+### Re: Email draft updated with CC/BCC (HEAD)
+
+Updated and pushed to Gmail Drafts:
+- **To:** judithkrug@gmail.com
+- **CC:** rwaldman100@gmail.com (Robert Waldman)
+- **BCC:** robertward3@yahoo.com (Robert Ward)
+
+You mentioned you'll delete the existing Gmail drafts (there may be duplicates from prior pushes).
+<!-- agent:boundary:5d963d86 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -605,7 +616,7 @@ Draft re-pushed to Gmail Drafts.
 - [x] Deploy to Cloudflare Pages (equityfundingsource.pages.dev)
 - [x] Add EFS document pipeline topic to bob-remeika.md
 - [x] Wire up form submission backend (Apply Now + Contact) -- D1 + R2 + Pages Functions
-- [x] Review and send proposal email to Judith from Gmail -- updated with SEO/presence info, in Drafts
+- [x] Review and send proposal email to Judith -- in Drafts (CC Waldman, BCC Ward, SEO info)
 - [x] Create D1 database and run migration
 - [x] Redeploy with form backend + email notifications
 - [x] Configure Resend API key for email notifications

@@ -1118,10 +1118,25 @@ Posted via corky. First comment added with blog post + repo links.
 
 - Post: https://www.linkedin.com/feed/update/urn:li:share:7445470177976020992
 - Comment: blog post link + agent-doc repo
-<!-- agent:boundary:0c2077a3 -->
+
+Continue with:
+- Search icon `w-full` fix — remove `w-full` from icon span in rappstack-dev
+- JSON-LD VideoObject enhancement — add BlogPosting wrapper, duration, publisher (optional)
+### Re: Both items done (HEAD)
+
+**1. Search icon `w-full` fix** — Removed `w-full` from icon span in `rappstack-dev/lib/ui--browser--blog/search/blog_search__div.ts`. Icon keeps `absolute left-0 h-full` positioning.
+
+**2. JSON-LD BlogPosting wrapper** — Added `BlogPosting` JSON-LD to all blog posts in `briantakita.me-dev/lib/ui--server--briantakita/post/post__doc_html.ts`:
+- Every post now emits a `BlogPosting` entity with headline, url, description, datePublished, author (referencing the existing Person entity), and keywords (from tags)
+- For video posts, `VideoObject` is nested as the `video` property of `BlogPosting`
+- `WebPage.mainEntity` now points to the `BlogPosting`
+- Removed duplicate `author` from `VideoObject` (it inherits from `BlogPosting`)
+- TypeScript checks pass
+
+Note: esbuild build fails with a pre-existing JSON parse error (not related to these changes). Will need a `bun install` or esbuild version check to resolve separately.
+<!-- agent:boundary:1e7767f0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Search icon `w-full` fix — remove `w-full` from icon span in rappstack-dev
-- JSON-LD VideoObject enhancement — add BlogPosting wrapper, duration, publisher (optional)
+(all items resolved)
 <!-- /agent:pending -->

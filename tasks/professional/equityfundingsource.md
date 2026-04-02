@@ -450,7 +450,7 @@ Good topic for the Bob call -- he can speak to whether Ragie has any roadmap for
 Implement. See tasks/professor/judith-krug.md:
 - "Wire up form submission backend" -- already tracked there with full Tier 0-3 breakdown
 - "Review and send proposal email to Judith from Gmail" -- added
-### Re: Implement -- email + form backend (HEAD)
+### Re: Implement -- email + form backend
 
 **Proposal email:** Reviewed `mail/drafts/20260401-judith-proposal-options.md` and pushed to Gmail Drafts. To: judithkrug@gmail.com, cc: rwaldman100@gmail.com. Subject: "Equity Funding Source — new website live + proposal". Open your drafts to review and send.
 
@@ -475,7 +475,7 @@ Implement. See tasks/professor/judith-krug.md:
 - Tier 1-3 validation pipeline (Workers AI, Claude API, Ragie)
 
 54 tests passing.
-<!-- agent:boundary:b6f152e9 -->
+<!-- agent:boundary:2e56bb59 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

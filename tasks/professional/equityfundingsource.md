@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Social icons fixed. 25 pages deployed. 50 tests passing.
+25 pages deployed. 50 tests passing. Blog is optional (was empty on original site).
 <!-- /agent:status -->
 
 ## Exchange
@@ -315,7 +315,14 @@ Replaced the text-letter social links ("f", "l", "i") with proper SVG icons:
 - **Instagram** -- camera/square icon
 
 Deployed to https://equityfundingsource.pages.dev. 50 tests passing.
-<!-- agent:boundary:9944cf50 -->
+
+Where did you see the blog? equityfundingnow.com or the archive.org pages?
+### Re: Blog source (HEAD)
+
+The blog was from the **Wayback Machine archive** of equityfundingsource.com (the original site). The archived navigation showed "Blog" and "Broker Portal" as menu items, but both pages were empty/minimal at the time of capture. The live equityfundingnow.com site does **not** have a blog section in its current navigation.
+
+So the blog is not an existing feature to replicate -- it was a planned-but-never-built section on the original site. We can skip it unless Judith wants one added.
+<!-- agent:boundary:9f8a8f42 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -330,16 +337,13 @@ Deployed to https://equityfundingsource.pages.dev. 50 tests passing.
 - [x] Configure Cloudflare Pages deployment
 - [x] bun install + verify dev server runs (port 4200)
 - [x] Add page tests (50 tests, all passing)
-- [x] Fix CSS loading (hashed asset URLs)
 - [x] Dark theme + layout matching equityfundingnow.com
 - [x] CSS, style, and content parity with live site
 - [x] Individual portfolio deal detail pages (18 pages)
-- [x] Static site generation (25 pages)
 - [x] Deploy to Cloudflare Pages (equityfundingsource.pages.dev)
-- [x] R2 bucket created + assets uploaded
 - [x] Build Apply Now page (full loan application form)
 - [x] Build Message Us / Contact page
 - [x] Fix social media icons (SVG icons)
-- [ ] Blog setup (briantakita.me-dev pattern)
 - [ ] Form submission backend (Formspree or custom)
+- [ ] Blog setup (optional -- was empty on original site, not on equityfundingnow.com)
 <!-- /agent:pending -->

@@ -1039,7 +1039,7 @@ Pushed to btakita/agent-doc-js. Reload `http://localhost:8089` to test.
 Please test using chrome headless browser.
 Iterate until it works as expected.
 Can we use chromium-bridge with the headless Chrome browser?
-### Re: Fixed — switched to bun bundler (HEAD)
+### Re: Fixed — switched to bun bundler
 
 The esm.sh CDN approach was fundamentally broken for CodeMirror — no combination of `?external=`, `?deps=`, `?bundle-deps`, or build API could prevent duplicate `@codemirror/state` instances.
 
@@ -1053,7 +1053,7 @@ The esm.sh CDN approach was fundamentally broken for CodeMirror — no combinati
 - 11 lines of default template content visible
 
 Screenshot verified — the SPA is working. Next step: test the Claude API call (enter an API key and submit).
-<!-- agent:boundary:032afba2 -->
+<!-- agent:boundary:a2ff30e3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

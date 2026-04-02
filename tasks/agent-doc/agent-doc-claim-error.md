@@ -260,7 +260,7 @@ tasks/software/corky.md has a duplicate response patch. Why?
 I don't know why without investigating the file. This could be a separate issue from this session's work. Should I look at `tasks/software/corky.md` now, or is this for a different session?
 
 Yes. Look in the logs
-### Re: Duplicate response in corky.md — snapshot not updating (HEAD)
+### Re: Duplicate response in corky.md — snapshot not updating
 
 The ops log tells the story:
 
@@ -277,7 +277,7 @@ The snapshot wasn't updated after the first response write. The file grew from 8
 This is a snapshot update failure — the `agent-doc write` or `agent-doc commit` didn't save the updated snapshot. I don't know the exact cause without more investigation. Speculation: it could be the stale baseline detection (`baseline_file` mismatch) causing the snapshot to be saved with old content instead of new content.
 
 This is a different bug from what we fixed in this session. Should I investigate the snapshot update failure now, or track it for a future session?
-<!-- agent:boundary:5479d8cc -->
+<!-- agent:boundary:9d120d14 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

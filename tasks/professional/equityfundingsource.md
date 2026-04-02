@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Scaffolded. Repo created, submodule added, all pages built with placeholders. Awaiting assets from tonight's call.
+Content updated from equityfundingnow.com crawl. Real deals, nav, copy all in place. Images still placeholder.
 <!-- /agent:status -->
 
 ## Exchange
@@ -117,7 +117,30 @@ equityfundingsource-dev/
 - Blog setup (will wire in `*--blog` submodule deps after scaffold is running)
 
 To run: `cd src/equityfundingsource-dev && cp .env.example .env && bun install && bun dev`
-<!-- agent:boundary:de15b6e6 -->
+
+I found a copy of the site at https://www.equityfundingnow.com/
+
+Please base our website off of crawling https://www.equityfundingnow.com/
+### Re: Crawled equityfundingnow.com (HEAD)
+
+Crawled the live site and updated the scaffold with real content:
+
+**Content updated from equityfundingnow.com:**
+- **18 real funded deals** with actual locations and amounts (Malibu $500K, Oahu $1.465M, Flintridge $780K, etc.)
+- **Site config** -- address (P.O. Box 421327, LA 90042), fax, social links (Facebook, LinkedIn, Instagram), both email addresses
+- **Navigation** matches live site: Start / About / Portfolio / Message Us / Apply Now
+- **Home page** -- hero with real tagline, investor section with trust deed investment copy, "We Offer" cards with actual service descriptions, 3 featured deals, investor CTA
+- **About page** -- real company description, services list (65% LTV, rehab/construction loans, interest-only), Judith Krug bio, property types
+- **Portfolio page** -- all 18 deals with location-first cards (matches live site style)
+- **Header** -- top bar with phone + email, nav with Apply Now CTA
+- **Footer** -- headquarters address, licenses, social links
+
+**Still needed:**
+- Property images (currently placeholders) -- equityfundingnow.com has them, we can download
+- Judith Krug headshot
+- "Apply Now" and "Message Us" pages (forms or links to Google Forms)
+- Blog integration
+<!-- agent:boundary:d5e0ec93 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -125,17 +148,17 @@ To run: `cd src/equityfundingsource-dev && cp .env.example .env && bun install &
 <!-- agent:pending patch=replace -->
 - [x] Create private repo btakita/equityfundingsource-dev
 - [x] Add as git submodule in agent-loop/src/
-- [x] Scaffold rappstack project structure (with blog deps)
-- [ ] Recover images from Wayback Machine
-- [ ] Contact robert-waldman for missing assets (user action)
-- [ ] Get property images + Judith headshot from tonight's call
-- [ ] Confirm Google Forms URLs
-- [ ] Build Home page -- done, needs real images
-- [ ] Build About page -- done, needs Judith photo
-- [ ] Build Funded Deals page -- done, needs property images
+- [x] Scaffold rappstack project structure
+- [x] Crawl equityfundingnow.com for real content
+- [x] Update deals data with real funded deals (18)
+- [x] Update site config (address, social, fax, emails)
+- [x] Update all page content from live site
+- [ ] Download property images from equityfundingnow.com
+- [ ] Download Judith Krug headshot
+- [ ] Build Apply Now page (form or Google Forms link)
+- [ ] Build Message Us / Contact page
 - [ ] Blog setup (briantakita.me-dev pattern)
 - [ ] Broker Portal page -- stub done
-- [ ] Tailwind styling -- base styling done
 - [ ] Deploy configuration
 - [ ] bun install + verify dev server runs
 <!-- /agent:pending -->

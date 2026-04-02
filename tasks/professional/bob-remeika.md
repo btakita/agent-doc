@@ -1560,13 +1560,19 @@ Condensed into a single-page reference card with a table layout: [file:///home/b
 6 blocks (Reconnect → Demo → Architecture → Use Cases → Security → Collab) with time allocations, key points, questions for Bob, and follow-up actions. All on one page.
 
 Source: `tmp/bob-remeika-call-structure.md`
-<!-- agent:boundary:31fba17e -->
+Please reduce margins. Use a similar template as tasks/recruit/lmi.md
+### Re: Reduced margins, LMI-style template (HEAD)
+
+Regenerated with 0.4in margins, 10pt font, compact spacing: [file:///home/brian/work/btakita/agent-loop/tmp/bob-remeika-call-structure.pdf](file:///home/brian/work/btakita/agent-loop/tmp/bob-remeika-call-structure.pdf)
+
+Uses the same reference-card style as the LMI prep doc — bold section headers, tight bullet points, all on one page.
+<!-- agent:boundary:44899c9a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [done] Create 1-page call structure PDF for Bob meeting
+- [done] Create 1-page call structure PDF (reduced margins, LMI-style)
 - Prep JB plugin demo environment for Bob call (today)
 - Prep EFS Tier 0-3 architecture walkthrough for Bob call
 - Prep Judith (EFS) and Ron (patent) talking points for the call

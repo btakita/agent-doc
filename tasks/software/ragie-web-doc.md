@@ -961,7 +961,7 @@ Let me start building.
 
 Create a github repo for this component. btakita/agent-doc-web?
 We will serve it on a website with it's own repo. agent-doc.briantakita.me?
-### Re: GitHub repo and hosting (HEAD)
+### Re: GitHub repo and hosting
 
 **`btakita/agent-doc-web`** — good name. Clean separation from the Rust `agent-doc` CLI.
 
@@ -984,7 +984,7 @@ We'll figure this out during build. If CORS is blocked, a Worker proxy is trivia
 4. Deploy to Cloudflare Pages at `agent-doc.briantakita.me`
 
 Ready to create the repo?
-<!-- agent:boundary:4589ee9c -->
+<!-- agent:boundary:88abbbff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

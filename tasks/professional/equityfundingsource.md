@@ -534,7 +534,7 @@ Forms now submit to `/api/apply` and `/api/contact` with D1 storage + R2 quarant
 **Note:** The static site deploy (Cloudflare Pages) serves pre-rendered HTML. The POST endpoints (`/api/apply`, `/api/contact`) require a Cloudflare Workers deployment to actually process submissions. The current Pages deploy includes the client-side JS for form submission, but the server-side handlers need a Workers deploy. Want me to set that up next?
 
 These forms submissions should be emailed to brian.takita@gmail.com for now.
-### Re: Email notifications + Pages Functions deployed (HEAD)
+### Re: Email notifications + Pages Functions deployed
 
 **Deployed** with server-side form handling. Pages Functions now process POST requests:
 
@@ -554,7 +554,7 @@ bunx wrangler pages secret put RESEND_API_KEY --project-name equityfundingsource
 Get a free API key from resend.com (100 emails/day free tier). The from address `notifications@equityfundingsource.com` needs verification in Resend, or use `onboarding@resend.dev` for testing.
 
 **Live:** https://equityfundingsource.pages.dev
-<!-- agent:boundary:90bf673d -->
+<!-- agent:boundary:cbb8b88c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

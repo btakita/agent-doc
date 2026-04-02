@@ -1509,14 +1509,14 @@ Test with https://docs.google.com/spreadsheets/d/1F1NfBcMM3r692zgkVPxKFtV4jdmFvL
 OAuth triggered -- waiting for browser auth. The Sheets API scope (`spreadsheets.readonly`) needs consent. Complete the Google sign-in in your browser to proceed.
 
 The callback is listening on `http://127.0.0.1:8484/callback`.
-### Re: Sheets API not enabled (HEAD)
+### Re: Sheets API not enabled
 
 OAuth auth succeeded, but the Sheets API needs to be enabled in the GCP project. Enable it here:
 
 https://console.developers.google.com/apis/api/sheets.googleapis.com/overview?project=873280095295
 
 After enabling, wait a minute, then retry the command.
-<!-- agent:boundary:9f5bee93 -->
+<!-- agent:boundary:1148aacc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

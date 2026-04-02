@@ -1098,10 +1098,10 @@ Updated the draft. Two changes:
 This makes clear these are conversation commits, not 292 code fixes. The "Every prompt and response committed to git" line in paragraph 1 sets the frame, and now the numbers reinforce it.
 
 Draft updated at `mail/social/20260402-security-blog-linkedin.md`.
-### Re: Em dash fix (HEAD)
+### Re: Em dash fix
 
 Replaced all ` — ` with `...` in the draft. Updated `mail/social/20260402-security-blog-linkedin.md`.
-<!-- agent:boundary:97724e5a -->
+<!-- agent:boundary:05fea691 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

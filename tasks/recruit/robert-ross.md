@@ -59,7 +59,7 @@ Please draft an email proposing 1PM PT (4 PM ET).
 Short and warm, mirrors his direct tone. Ready to send via corky when you approve. Should I push this to Gmail Drafts?
 
 Send this email. No need for the draft.
-### Re: Send email (HEAD)
+### Re: Send email
 
 Email sent directly to rob@dreamable.com via corky (`--send`). Replied to thread "Brian / Rob Zoom" (thread ID: 19d479af292d8d99) from btak.dev@gmail.com.
 
@@ -74,7 +74,7 @@ Email sent directly to rob@dreamable.com via corky (`--send`). Replied to thread
 > Brian
 
 Draft file: `mail/drafts/2026-04-01-re-brian-rob-zoom.md` (status: sent)
-<!-- agent:boundary:71f4aea2 -->
+<!-- agent:boundary:14e2fb9c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

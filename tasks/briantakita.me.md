@@ -851,12 +851,28 @@ Added the blog post paragraph to the Josh Malloy draft at `mail/drafts/2026-03-3
 The draft says "yesterday" for the interview (March 31st) which is correct for sending today (April 1st). If you send tomorrow, change it to "Monday."
 
 Ready to push to Gmail Drafts via corky, or review the full draft first?
-<!-- agent:boundary:c1d83b3d -->
+
+tasks/recruit/lmi.md already sent email to Josh Malloy.
+
+@source fix seems to work.
+
+commit and push
+### Re: Committed and pushed (HEAD)
+
+**Josh email:** Already sent via the LMI session. Done.
+
+**@source fix — committed and pushed (inside-out):**
+
+1. `rebuildjs-tailwindcss` → `c591e95` fix: resolve postcss @source paths relative to CSS source directory → pushed to `rebuildjs/tailwindcss`
+2. `ctx-core-dev` → `535fa30` chore: update rebuildjs-tailwindcss submodule → pushed to `ctx-core/dev`
+3. `briantakita.me` → `8f9d718` fix: use relative @source path for rappstack-dev → pushed to `btakita/briantakita.me`
+4. `briantakita.me-dev` → `5f1e44d` chore: update briantakita.me submodule → pushed to `btakita/briantakita.me-dev`
+
+All four repos pushed successfully.
+<!-- agent:boundary:24f4a1a0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Josh Malloy email — draft amended with blog post, ready to push to Gmail Drafts
-- @source fix — code changes done, needs local build verification
 - LinkedIn teaser — draft ready, posting Thu Apr 2 ~9 AM ET
 - LinkedIn OAuth — needs to be completed before publish
 <!-- /agent:pending -->

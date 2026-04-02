@@ -215,13 +215,37 @@ Options if you want to adjust tone:
 - **"1:30 works. See you then"** — most direct
 
 All work. Send whichever feels right.
-<!-- agent:boundary:93114fba -->
+
+Help me tighten up my pitch.
+See tasks/professional/bob-remeika.md and the transcript of our call.
+Also create a 1 page pdf for my call with robert-ross
+### Re: Pitch tightening & call prep PDF (HEAD)
+
+**Key lesson from Bob's call transcript:** Your demo was too abstract. Bob said "I don't think I understand the UI here at all" and "I think that's maybe a different conversation" when you got philosophical. For Rob, lead with concrete.
+
+**PDF created:** `file:///home/brian/work/btakita/agent-loop/tmp/robert-ross-call-prep.pdf`
+
+**Top 5 adjustments for Rob's call:**
+1. **Start with a clean demo** — test auth/everything before the call. Bob's had an auth error mid-demo.
+2. **Lead with what, not why** — "I build AI agent tools in Rust" beats "the philosophy of agent orchestration"
+3. **Show the workflow in action** — open JetBrains, run `/agent-doc`, let him watch the response cycle
+4. **Connect to his thesis** — "Software -> AI -> Agents" maps directly to your stack (agent-doc, corky, agent-loop)
+5. **Be direct** — Rob is a BD guy with 5 exits. He respects clarity about mutual fit.
+
+**Suggested flow:** Intros (2m) -> Demo (5m) -> Architecture (5m) -> What Dreamable is building (6m) -> Q&A (7m) -> Next steps (5m)
+
+**Questions to ask Rob:**
+- What does the day-to-day look like at a 6-person company?
+- What agent systems are you building for clients?
+- What's the tech stack?
+- What does "Lead Software Engineer" mean at this stage?
+<!-- agent:boundary:667c026d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- ([done]) Rob confirmed meeting — 1:30pm PT today (Apr 2)
-- Reply to Rob's SMS (draft ready above)
-- Prep talking points for Dreamable call at 1:30pm PT
+- Review call prep PDF before 1:30pm PT
+- Test demo setup (auth, JetBrains plugin, agent-doc workflow)
+- Call with Rob Ross at 1:30pm PT today
 <!-- /agent:pending -->

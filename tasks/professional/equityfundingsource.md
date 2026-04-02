@@ -121,7 +121,7 @@ To run: `cd src/equityfundingsource-dev && cp .env.example .env && bun install &
 I found a copy of the site at https://www.equityfundingnow.com/
 
 Please base our website off of crawling https://www.equityfundingnow.com/
-### Re: Crawled equityfundingnow.com (HEAD)
+### Re: Crawled equityfundingnow.com
 
 Crawled the live site and updated the scaffold with real content:
 
@@ -140,7 +140,7 @@ Crawled the live site and updated the scaffold with real content:
 - Judith Krug headshot
 - "Apply Now" and "Message Us" pages (forms or links to Google Forms)
 - Blog integration
-<!-- agent:boundary:d5e0ec93 -->
+<!-- agent:boundary:702d0bc9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

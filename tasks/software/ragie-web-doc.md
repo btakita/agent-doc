@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | All bugs fixed | Only 2-3 real API calls in testing | Ready for demo
+LIVE: https://agent-doc-js.pages.dev | Use Haiku (Sonnet rate-limited on OAuth token) | Ready for demo
 <!-- /agent:status -->
 
 ## Exchange
@@ -1289,7 +1289,21 @@ Are we doing claude requests for all of our automated tests on agent-doc-js?
 | Ctrl+Enter fix | No | Keymap only, no submit |
 
 The 429 rate limit came from those few real calls sharing your OAuth token's limits with active Claude Code sessions.
-<!-- agent:boundary:2b2fbb36 -->
+
+I can't seem to get past the 429 errors.
+### Re: 429 errors — it's model-specific rate limiting (HEAD)
+
+**Sonnet is rate-limited, Haiku works fine.** Your OAuth token's Sonnet quota is exhausted from active Claude Code sessions (which default to Sonnet).
+
+Verified:
+- `claude-haiku-4-5-20251001` via proxy: **200 OK** — response received
+- `claude-sonnet-4-6` via proxy: **429** — rate limited
+- `claude-haiku-4-5-20251001` via browser submit: **works** — "Response received"
+
+**Fix for the demo:** Use Haiku for now. Switch to Sonnet once the rate limit window resets. Or use a standard API key which has separate rate limits from the OAuth token.
+
+In the Settings dialog, change the model to **Claude Haiku 4.5** and it should work immediately.
+<!-- agent:boundary:3c5d6b20 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1300,6 +1314,7 @@ The 429 rate limit came from those few real calls sharing your OAuth token's lim
 - [x] Deploy Cloudflare Worker proxy + Pages
 - [x] Setup script + hash param onboarding
 - [x] Fix history.replaceState shadow + Ctrl+Enter bugs
+- [x] Diagnose 429: Sonnet rate-limited, Haiku works
 - [ ] Add CNAME for `agent-doc.briantakita.me` (Cloudflare dashboard)
 - [ ] Demo script for Bob call
 - [ ] (deferred) OAuth flow, Yjs CRDT, WebSocket sync, Ragie, MCP

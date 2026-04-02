@@ -160,14 +160,14 @@ You're right on both counts. I'm sorry.
 - Or I can implement the corky fix first, then resend
 
 What would you like to do?
-### Re: LinkedIn message draft (HEAD)
+### Re: LinkedIn message draft
 
 Draft LinkedIn message for Rob Ross:
 
 > Hi Rob, I sent you an email reply about meeting Thursday but it may not have threaded with your original message. Just wanted to make sure you saw it — I'm open to whenever works for you on Thursday. Looking forward to chatting about Dreamable.
 
 Ready for your review. Edit as needed, then you can send it manually from LinkedIn.
-<!-- agent:boundary:22f3fedb -->
+<!-- agent:boundary:62923b64 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

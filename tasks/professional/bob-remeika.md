@@ -1561,12 +1561,12 @@ Condensed into a single-page reference card with a table layout: [file:///home/b
 
 Source: `tmp/bob-remeika-call-structure.md`
 Please reduce margins. Use a similar template as tasks/recruit/lmi.md
-### Re: Reduced margins, LMI-style template (HEAD)
+### Re: Reduced margins, LMI-style template
 
 Regenerated with 0.4in margins, 10pt font, compact spacing: [file:///home/brian/work/btakita/agent-loop/tmp/bob-remeika-call-structure.pdf](file:///home/brian/work/btakita/agent-loop/tmp/bob-remeika-call-structure.pdf)
 
 Uses the same reference-card style as the LMI prep doc — bold section headers, tight bullet points, all on one page.
-<!-- agent:boundary:44899c9a -->
+<!-- agent:boundary:8e70b330 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1232,7 +1232,7 @@ Uncaught TypeError: UZ.replaceState is not a function
     at vW (app.js:64:1028)
     at app.js:64:2242
 ```
-### Re: Fixed history.replaceState error (HEAD)
+### Re: Fixed history.replaceState error
 
 The bug was CodeMirror's `import { history }` shadowing `window.history` in the bundled output. The bundler minified `history.replaceState` into `UZ.replaceState` (CodeMirror's history function, not the browser global).
 
@@ -1247,7 +1247,7 @@ The bug was CodeMirror's `import { history }` shadowing `window.history` in the 
 The full flow works: `curl | sh` -> browser opens with hash -> credentials auto-populated -> ready to edit.
 
 Deployed to Cloudflare Pages.
-<!-- agent:boundary:7364a955 -->
+<!-- agent:boundary:0a86fe9c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

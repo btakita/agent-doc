@@ -280,7 +280,7 @@ Each of the 18 funded deals now has its own page at `/portfolio/:slug`:
 ```
 make deploy    # build + generate static + deploy to Cloudflare Pages
 ```
-<!-- agent:boundary:febd3f1a -->
+<!-- agent:boundary:6213a088 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

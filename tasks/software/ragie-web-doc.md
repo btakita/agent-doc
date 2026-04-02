@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-Revised MVP: web view + MCP for zero-install Bob demo | Deciding build order: MCP server vs web UI first
+Pivoted: full web SPA agent-doc (not read-only viewer) | Bob drives changes in browser via MCP to Claude Code | Building agent-doc-web
 <!-- /agent:status -->
 
 ## Exchange
@@ -738,6 +738,8 @@ Bob's browser                          Your machine
 
 1. **Browser only** (minimum viable) — Bob opens a URL, sees the document live, can suggest prompts via chat. You process them. Zero install.
 
+Not really compelling. Same as screenshare. If Bob can drive the changes in the agent doc, then it would be compelling. 
+
 2. **MCP connection** (power user) — Bob adds your MCP endpoint to his Claude Code. His agent can read the document and submit suggestions. Still no agent-doc install needed — MCP is built into Claude Code.
 
 **What to build tonight:**
@@ -751,17 +753,98 @@ Bob's browser                          Your machine
 The MCP server is actually simpler than the web UI — it's just a stdio server wrapping `agent-doc preflight` + a suggestion queue. Bob's Claude Code does the rendering.
 
 Want me to start with the MCP server (simpler, lets Bob use his own Claude Code) or the web view (visual, more impressive)?
-<!-- agent:boundary:9e4145b1 -->
+
+Can we build a web (js) version of agent-doc or would the logic be too difficult to process?
+If we have a SPA with an agent doc, it could hook into the local Claude Code via MCP.
+### Re: Web SPA agent-doc — feasibility and MCP integration (HEAD)
+
+**A JS SPA that IS agent-doc is the right framing.** Not a viewer — an editor.
+
+**The core question: how much agent-doc logic needs to be in JS?**
+
+For a single-user SPA, surprisingly little:
+
+| agent-doc feature | JS complexity | Needed for SPA? |
+|-------------------|--------------|-----------------|
+| Markdown editing | CodeMirror 6 — done | Yes |
+| Diff computation | `jsdiff` npm package | Yes |
+| Template components | Regex parsing (~50 lines) | Yes |
+| Patch application | String replace (~30 lines) | Yes |
+| CRDT merge | Not needed — single editor, no conflicts | No |
+| Snapshot | localStorage or server-side | Yes |
+| Git integration | Server-side via API | Optional |
+
+**The hard part (Claude API) is already solved by MCP.** The SPA doesn't call Claude directly — it connects to Claude Code (or any MCP-compatible AI backend) which does the inference.
+
+**Architecture:**
+
+```
+Bob's browser (SPA)
+    |
+    |-- CodeMirror 6 editor (full read/write)
+    |-- agent-doc logic in JS (diff, template, patch)
+    |-- MCP client (connects to Claude Code)
+    |
+    |----> Bob's local Claude Code (MCP server)
+    |      |-- Claude API (inference)
+    |      |-- Ragie API (retrieval)
+    |
+    OR
+    |
+    |----> Your hosted MCP endpoint (tunnel)
+           |-- Claude API
+           |-- Ragie API
+           |-- git (server-side)
+```
+
+**Two deployment modes:**
+
+1. **Bob runs Claude Code locally** — SPA connects to `localhost` MCP. Bob's API key, Bob's context. Zero trust issues.
+
+2. **You host the MCP endpoint** — SPA connects to your tunneled server. Your API key, your Ragie. Bob just uses the web UI.
+
+**What the SPA needs:**
+
+```
+agent-doc-web/
+  index.html          -- single page
+  editor.js           -- CodeMirror 6 setup
+  agent-doc.js        -- diff, template parsing, patch application (~200 lines)
+  mcp-client.js       -- MCP protocol over WebSocket/HTTP (~100 lines)
+  style.css           -- layout
+```
+
+**The MCP tool schema the SPA exposes (or consumes):**
+
+```json
+{
+  "tools": [
+    { "name": "read_document", "description": "Read the current document" },
+    { "name": "write_response", "description": "Write agent response to document",
+      "input_schema": { "response": "string" } },
+    { "name": "get_diff", "description": "Get diff since last response" },
+    { "name": "ragie_search", "description": "Search indexed documents",
+      "input_schema": { "query": "string" } }
+  ]
+}
+```
+
+**Build estimate:** This is a weekend project, not an overnight sprint. But a bare-bones version (editor + diff + one MCP tool call) could work in ~2 hours.
+
+**For the morning demo:** Build a minimal SPA that lets Bob edit a document and see agent responses. Connect it to your Claude Code via MCP tunnel. Bob types, agent responds, Ragie retrieves — all in his browser.
+
+Should I start building `agent-doc-web`?
+<!-- agent:boundary:d5327c54 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] `agent-doc serve` — read-only web view + WebSocket live updates + chat suggestions
-- [ ] `agent-doc mcp-server` — stdio MCP server (`read_document`, `suggest` tools)
-- [ ] cloudflared tunnel integration (`--tunnel` flag) for instant HTTPS sharing
-- [ ] Demo script for Bob call (hands-on, not screenshare)
-- [ ] Test fresh install flow (before recommending to Bob)
+- [ ] Build `agent-doc-web` SPA — CodeMirror 6 editor + diff + template patch logic in JS
+- [ ] MCP client in JS — connect SPA to Claude Code backend
+- [ ] `agent-doc serve` — host the SPA + MCP relay endpoint
+- [ ] cloudflared tunnel (`--tunnel`) for instant HTTPS sharing
+- [ ] Demo script for Bob call (Bob drives the document in his browser)
 - [ ] (deferred) Multi-user editing with injection sandboxing
 - [ ] (deferred) Authorization / trust tiers
 - [ ] (deferred) Injection scanning

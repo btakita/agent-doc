@@ -240,7 +240,7 @@ The fix is live in both `.bin/agent-doc` and `~/.cargo/bin/agent-doc`. No plugin
 Add tests
 audit docs
 Update SPEC.md, README.md, ontology, module-harness
-### Re: Tests and audit docs for single-char fix (HEAD)
+### Re: Tests and audit docs for single-char fix
 
 **Tests:**
 - `truncated_single_chars` test already added — verifies `A`, `S`, `1`, `y` all return `true` from `looks_truncated()`
@@ -253,7 +253,7 @@ Update SPEC.md, README.md, ontology, module-harness
 `make check`: all 602 tests pass.
 
 No SPEC.md diff section exists — the truncation behavior is documented in the `diff.rs` module doc which is the authoritative source.
-<!-- agent:boundary:8ed505a7 -->
+<!-- agent:boundary:1e3cc087 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

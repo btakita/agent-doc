@@ -1334,7 +1334,7 @@ Most of the sessions should be idle. Is this not the case?
 - Proxy now retries automatically — if Sonnet has brief availability windows, it'll catch them
 
 There needs to be feedback when Ctrl+S
-### Re: Idle sessions and rate limits (HEAD)
+### Re: Idle sessions and rate limits
 
 You're right — idle sessions don't make API calls. I checked and the 429 persists even with a direct API call (no proxy) to Sonnet using the OAuth token. Haiku works fine.
 
@@ -1344,7 +1344,7 @@ This is likely a **Claude Max subscription-specific per-minute limit for Sonnet*
 - Use Haiku
 - Wait for the rate limit window to fully reset (could be minutes to an hour)
 - Use a standard API key from console.anthropic.com
-<!-- agent:boundary:4f12ee81 -->
+<!-- agent:boundary:7861d20e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

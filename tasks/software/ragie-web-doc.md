@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Terminal panel added | Ready for demo
+LIVE: https://agent-doc-js.pages.dev | Terminal with prompt input | Ready for demo
 <!-- /agent:status -->
 
 ## Exchange
@@ -1490,7 +1490,9 @@ curl -s https://agent-doc-js.pages.dev/setup.sh | sh
 
 Your "Sho" got cut off — were you going to say "Should not happen" or something else?
 
-Please make the
+Please make the "terminal" under the document 10 lines tall.
+
+Add a prompt input so a human can run claude commands from the "terminal".
 ### Re: Terminal panel added
 
 Added a terminal panel below the editor:
@@ -1504,16 +1506,27 @@ Added a terminal panel below the editor:
 Layout: Editor (top) | Terminal header | Terminal output | Status bar (bottom)
 
 Deployed to Cloudflare Pages.
-<!-- agent:boundary:fbfa67a4 -->
+### Re: Terminal — 10 lines + prompt input (HEAD)
+
+Updated:
+
+1. **Terminal height:** 10 lines (was fixed 200px)
+2. **Prompt input:** Green `>` prefix, type a command, press Enter
+3. Commands sent directly to Claude API as chat prompts
+4. Response displayed line-by-line in the terminal
+
+The prompt gives Bob (or you) a way to interact with Claude without editing the document — good for quick questions, clarifications, or testing.
+
+Deployed to Cloudflare Pages.
+<!-- agent:boundary:95491b03 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] SPA: editor + toolbar model dropdown + terminal panel
+- [x] SPA: editor + toolbar + terminal (10 lines + prompt)
 - [x] Ragie retrieval integration
 - [x] Cloudflare Worker proxy + Pages deployment
-- [x] Setup script + hash param onboarding
 - [ ] Upload demo documents to Ragie index
 - [ ] Add CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call

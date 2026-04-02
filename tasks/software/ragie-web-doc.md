@@ -1291,7 +1291,7 @@ Are we doing claude requests for all of our automated tests on agent-doc-js?
 The 429 rate limit came from those few real calls sharing your OAuth token's limits with active Claude Code sessions.
 
 I can't seem to get past the 429 errors.
-### Re: 429 errors — it's model-specific rate limiting (HEAD)
+### Re: 429 errors — it's model-specific rate limiting
 
 **Sonnet is rate-limited, Haiku works fine.** Your OAuth token's Sonnet quota is exhausted from active Claude Code sessions (which default to Sonnet).
 
@@ -1303,7 +1303,7 @@ Verified:
 **Fix for the demo:** Use Haiku for now. Switch to Sonnet once the rate limit window resets. Or use a standard API key which has separate rate limits from the OAuth token.
 
 In the Settings dialog, change the model to **Claude Haiku 4.5** and it should work immediately.
-<!-- agent:boundary:3c5d6b20 -->
+<!-- agent:boundary:2642aa6b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

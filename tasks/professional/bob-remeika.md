@@ -1487,7 +1487,7 @@ See tasks/software/ragic-web-doc.md
 Please see...note this message was the weekend...5 days ago
 /home/brian/work/btakita/agent-loop/mail/contacts/bob-remeika/20260402-linkedin-bob-remeika.txt
 
-Please draft a message for Bob acknowledging what he said and in preperation for our call in 1 hour.
+Please draft a message for Bob acknowledging what he said and in preparation for our call in 1 hour.
 ### Re: Draft message for Bob before the call
 
 Here's a LinkedIn message for Bob:
@@ -1513,7 +1513,28 @@ See you in a bit!
 - The agent-doc-js demo is the headline since it directly uses Ragie
 
 Want me to adjust the tone or add/remove anything?
-<!-- agent:boundary:045b376f -->
+
+Should we also mention judith-krug + ron-berkes projects?
+
+And a request for access to Ragie Parse OCR
+### Re: Should we mention Judith & Ron's projects? (HEAD)
+
+**No — keep it lean.** Here's why:
+
+1. **The message is a pre-call warmup, not a pitch deck.** Listing multiple client projects in a LinkedIn message feels like you're overselling before you've even connected.
+
+2. **Save specifics for the call.** Judith's EFS loan doc pipeline and Ron's patent corpus are your strongest vertical use cases for Ragie — they deserve proper explanation with architecture context, not a bullet point in a DM.
+
+3. **Bob said the contract is filled.** Leading with "here are all my projects" could read as "please reconsider me" rather than the peer-to-peer technical conversation you want.
+
+4. **The agent-doc-js demo already implies real clients.** When Bob sees his API powering a live document editor, the question "who's using this?" comes naturally. Then you drop Judith and Ron as concrete use cases during the call.
+
+**On the call**, absolutely bring them up:
+- **EFS (Judith):** "I have a client with commercial RE loan docs — appraisals, applications, compliance paperwork. Ragie Parse is exactly what we need for the indexing layer, but I'm designing a content validation pipeline in front of it." → natural segue into security architecture
+- **Ron:** "Another client has a patent mining corpus — unstructured technical documents that need semantic retrieval." → shows breadth of use cases
+
+**TL;DR:** The message stays tight. Judith and Ron are call ammo, not DM content.
+<!-- agent:boundary:3d492383 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1522,6 +1543,7 @@ Want me to adjust the tone or add/remove anything?
 - Prep JB plugin demo environment for Bob call (today, ~1 hour)
 - Prep EFS Tier 0-3 architecture walkthrough for Bob call
 - Write Ragie Parse questions (content moderation roadmap, multi-tenant isolation, pricing)
+- Prep Judith (EFS) and Ron (patent) talking points for the call
 - [done] Draft pre-call message for Bob
 - [stretch] Polish ragie-web-doc demo for Bob call (tasks/software/ragie-web-doc.md)
 - Schedule Robert Ross call at 4:00 PM ET / 1:00 PM PT Thursday

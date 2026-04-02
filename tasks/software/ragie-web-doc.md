@@ -1999,7 +1999,7 @@ Done. Deployed to https://agent-doc-js.pages.dev
 - CSS `@keyframes gutter-pulse` handles the animation
 
 The claude credentials keep on expiring. What are some options for longer lived credentials
-### Re: Longer-lived Claude credentials (HEAD)
+### Re: Longer-lived Claude credentials
 
 The issue is that API keys entered in the browser expire or get rotated. Here are the options:
 
@@ -2025,7 +2025,7 @@ The worker reads `env.ANTHROPIC_API_KEY` — no client-side key needed. The web 
 **Recommendation:** Option 3. The worker already exists. We'd just have the worker fall back to its own secret when no `x-api-key` header is sent, and make the API key optional in the UI.
 
 Want me to implement option 3?
-<!-- agent:boundary:18a27fcb -->
+<!-- agent:boundary:63a33602 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

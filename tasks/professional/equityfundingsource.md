@@ -574,7 +574,7 @@ Removed Robert Waldman from CC. Updated draft pushed to Gmail Drafts:
 - **To:** judithkrug@gmail.com
 - **CC:** (none)
 - **Subject:** Equity Funding Source — new website live + proposal
-<!-- agent:boundary:a9a85204 -->
+<!-- agent:boundary:6d5d8f71 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

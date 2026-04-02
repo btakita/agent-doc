@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-Hardened security architecture designed | 5-layer defense: instruction/data separation, deterministic processing, response-only mode, content signing, injection scanning
+MVP scoped: single-user authoring + read-only web view + chat suggestions | Building `agent-doc serve` for morning demo with Bob
 <!-- /agent:status -->
 
 ## Exchange
@@ -607,31 +607,89 @@ Flagged content quarantined with warning markers for human review.
 Each step minimizes attack surface. The only remaining risk: LLM generating misleading text. That's a content moderation problem, not a security breach. The document cannot cause code execution, data exfiltration, or filesystem access.
 
 **For the org trust context (Ragie, shared resources):** Authorization is layered on top of this. The MCP server checks Bob's token against ACLs before returning document content. But the injection defense is independent of authorization — even if Bob has full access to a document, the sandboxed processing protects him from injection in that document.
-<!-- agent:boundary:3aca8be9 -->
+
+Perhaps we should target single user documents until multi-user security is figured out.
+We can have read only viewing for now.
+Perhaps participants can chat or suggest prompts.
+Let's see if we can have a quick prototype by the time we meet with Bob in the morning.
+### Re: MVP prototype — single-user + read-only viewers + chat (HEAD)
+
+Good call — scoping to single-user with read-only viewing removes the entire multi-user injection surface and lets us ship fast.
+
+**Scope for morning demo:**
+
+**What the prototype does:**
+1. You author the document locally (agent-doc as-is)
+2. `agent-doc serve` exposes a read-only web view
+3. Bob opens the URL and sees the document live (WebSocket push on file change)
+4. Bob can send chat messages / prompt suggestions (separate channel, not document edits)
+5. You see Bob's suggestions in a sidebar/panel — you decide what goes into the document
+
+**Architecture:**
+
+```
+You (JetBrains/CLI)                    Bob (browser)
+       |                                    |
+       |-- edit document                    |
+       |                                    |
+  agent-doc write --> filesystem --> inotify
+                                        |
+                                   axum server
+                                        |
+                              ws push --+
+                                        |
+                              read-only view <-- Bob sees it
+                              chat input ------- Bob suggests
+                                        |
+                              ws message --> you see suggestion
+```
+
+**No injection risk:** Bob never writes to the document. His suggestions are displayed as chat, not processed by the agent. You manually incorporate anything useful.
+
+**Minimal stack:**
+- `agent-doc serve <FILE>` — axum server (~200 lines Rust)
+- Static HTML + JS — CodeMirror 6 read-only mode + chat panel
+- WebSocket — file changes pushed to viewers, chat messages relayed
+- No auth needed for demo (localhost + tunnel)
+
+**Demo flow for Bob:**
+1. You run `agent-doc serve tasks/software/ragie-web-doc.md --tunnel`
+2. Bob opens the generated URL
+3. You edit the document, agent responds — Bob watches it happen live
+4. Bob types a suggestion in the chat panel
+5. You see it, decide whether to incorporate it
+
+**What's deferred:**
+- Multi-user editing (security story TBD)
+- Authorization / trust tiers
+- Injection scanning
+- MCP server
+
+**Implementation plan for tonight:**
+
+| Step | Time | What |
+|------|------|------|
+| 1 | 30min | `agent-doc serve` — axum server, serves static HTML, WebSocket for file watch |
+| 2 | 30min | Frontend — CodeMirror 6 read-only + rendered markdown preview |
+| 3 | 20min | Chat panel — input box + message list, WebSocket relay |
+| 4 | 10min | `--tunnel` flag — cloudflared integration for instant sharing |
+| 5 | 10min | Polish for demo |
+
+Want me to start building?
+<!-- agent:boundary:09be31b2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Implement structural instruction/data separation (Claude API with system prompt isolation)
-- [ ] Build deterministic injection scanner (pattern matching before LLM processing)
-- [ ] Design response-only mode for shared documents (no tool access, text output only)
-- [ ] Integrate git commit signatures for content signing trust tiers
-- [ ] Design sandbox permission model (`--sandbox` flag, `--allowedTools` with path scoping)
-- [ ] Implement context isolation for shared document processing (fresh session, no prior state)
-- [ ] Add response content scanning for secret patterns before `agent-doc write`
-- [ ] Hardcode file paths in sandboxed tool calls (not model-controlled)
-- [ ] Implement auto-detection of shared documents (git history, frontmatter, MCP origin)
-- [ ] Add `trust` frontmatter field for explicit sandbox control
-- [ ] Implement trust tiers for multi-author agent-doc (owner/collaborator/PR/external)
-- [ ] Add `<user-edit>` content boundaries to agent-doc preflight output
-- [ ] Design MCP server tool schema (`read_document`, `write_document`, `preflight`, `list_documents`)
-- [ ] Implement `agent-doc mcp-server` subcommand (stdio transport)
-- [ ] Add `--share` flag with cloudflared tunnel integration for instant HTTPS sharing
-- [ ] Add token-based auth for MCP endpoints
-- [ ] Add document-level scoping for MCP access control
-- [ ] Implement `agent-doc serve` subcommand (axum + inotify + WebSocket)
-- [ ] Build CodeMirror 6 frontend (editor + markdown preview + WebSocket client)
-- [ ] Add Ragie retrieval panel to web frontend
-- [ ] Prepare demo script for Bob call
+- [ ] `agent-doc serve` — axum server with inotify file watching + WebSocket push
+- [ ] Static frontend — CodeMirror 6 read-only markdown view
+- [ ] Chat panel — input box + message relay via WebSocket
+- [ ] `--tunnel` flag — cloudflared integration for instant HTTPS sharing
+- [ ] Demo script for Bob call
+- [ ] (deferred) Multi-user editing with injection sandboxing
+- [ ] (deferred) MCP server (`agent-doc mcp-server`)
+- [ ] (deferred) Authorization / trust tiers
+- [ ] (deferred) Injection scanning
+- [ ] (deferred) Content signing (git commit signatures)
 <!-- /agent:pending -->

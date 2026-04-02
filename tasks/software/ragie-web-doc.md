@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-btakita/agent-doc-js created and scaffolded | SPA running at localhost:8089 | Testing before Cloudflare Pages deploy
+Fixed CodeMirror esm.sh duplicate instance bug | Reload localhost:8089 to test
 <!-- /agent:status -->
 
 ## Exchange
@@ -1016,7 +1016,27 @@ Such as research tools or ragie integration
 - Submodule added to agent-loop at `src/agent-doc-js`
 
 Running locally at `http://localhost:8089` for testing.
-<!-- agent:boundary:19285326 -->
+
+UI elements are non-responsive.
+```
+index.js:1994 Uncaught Error: Unrecognized extension value in extension set ([object Object]). This sometimes happens because multiple instances of @codemirror/state are loaded, breaking instanceof checks.
+    at createEditor (app.js:162:29)
+    at init (app.js:262:12)
+    at app.js:320:1
+(index):1 [DOM] Input elements should have autocomplete attributes (suggested: "new-password"): (More info: https://goo.gl/9p2vKq) 
+favicon.ico:1 
+ GET http://localhost:8089/favicon.ico 404 (File not found)
+﻿
+
+```
+### Re: Fixed CodeMirror duplicate instance error (HEAD)
+
+The error was caused by esm.sh loading separate copies of `@codemirror/state` for each CodeMirror package — breaking `instanceof` checks internally.
+
+**Fix:** Moved all CodeMirror imports into the `index.html` bootstrap with `?external=` params to force shared dependency resolution. `app.js` now reads from `window.__CM` globals instead of import maps.
+
+Pushed to btakita/agent-doc-js. Reload `http://localhost:8089` to test.
+<!-- agent:boundary:c5ae66ec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1024,9 +1044,9 @@ Running locally at `http://localhost:8089` for testing.
 <!-- agent:pending patch=replace -->
 - [x] Create `btakita/agent-doc-js` GitHub repo
 - [x] Scaffold SPA: index.html + CodeMirror 6 + diff + Claude API
-- [ ] Test in browser and fix any issues
+- [x] Fix CodeMirror duplicate instance error
+- [ ] Test in browser — verify editor loads and Submit works
 - [ ] Deploy to Cloudflare Pages at `agent-doc.briantakita.me`
-- [ ] Add submodule pointer commit in agent-loop
 - [ ] Demo script for Bob call
 - [ ] (deferred) Yjs CRDT for concurrent edit merging
 - [ ] (deferred) WebSocket live document sync

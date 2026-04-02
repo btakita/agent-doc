@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-18 deal detail pages implemented. 40 tests passing. Full visual parity.
+Deployed to equityfundingsource.pages.dev. Custom domain efs.briantakita.me pending dashboard setup.
 <!-- /agent:status -->
 
 ## Exchange
@@ -244,6 +244,9 @@ All 31 tests passing. All 32 images loading. CSS, style, and content parity achi
 
 Good enough. Please implement each of the portfolio pages.
 See https://www.equityfundingnow.com/portfolio/chula-vista-ca-100000/
+
+Let's have the website be efs.briantakita.me in the short term. For demo purposes.
+We will deploy to equityfundingsource.com when site is approved.
 ### Re: Portfolio detail pages implemented
 
 Each of the 18 funded deals now has its own page at `/portfolio/:slug`:
@@ -258,7 +261,26 @@ Each of the 18 funded deals now has its own page at `/portfolio/:slug`:
 **URL slugs match the live site:** e.g., `/portfolio/chula-vista-ca-100000/`, `/portfolio/oahu-hi-1465000/`, `/portfolio/malibu-ca500000/`
 
 **Tests:** 40 total (9 new for deal detail + data helpers), all passing.
-<!-- agent:boundary:84d737ce -->
+### Re: Deployed to Cloudflare Pages (HEAD)
+
+**Live demo:** https://equityfundingsource.pages.dev
+
+**What was done:**
+- Created `generate.ts` -- pre-renders all 22 pages to static HTML (home, about, portfolio, 18 deal pages, broker portal)
+- Static site includes CSS, JS, and all 32 images bundled together
+- Deployed to Cloudflare Pages via `make deploy`
+- R2 bucket created with all assets uploaded (for future production use)
+
+**Custom domain `efs.briantakita.me`:** Needs to be added via the Cloudflare dashboard:
+1. Go to Pages > equityfundingsource > Custom domains
+2. Add `efs.briantakita.me`
+3. Cloudflare will automatically add the DNS record since briantakita.me is on your account
+
+**Deployment workflow:**
+```
+make deploy    # build + generate static + deploy to Cloudflare Pages
+```
+<!-- agent:boundary:628b2627 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -270,17 +292,18 @@ Each of the 18 funded deals now has its own page at `/portfolio/:slug`:
 - [x] Crawl equityfundingnow.com for real content
 - [x] Update all page content from live site
 - [x] Download property images (32 files)
-- [x] Configure Cloudflare Workers + R2 deployment
+- [x] Configure Cloudflare Pages deployment
 - [x] bun install + verify dev server runs (port 4200)
 - [x] Add page tests (40 tests, all passing)
 - [x] Fix CSS loading (hashed asset URLs)
 - [x] Dark theme + layout matching equityfundingnow.com
-- [x] Serve public assets (images now loading)
 - [x] CSS, style, and content parity with live site
 - [x] Individual portfolio deal detail pages (18 pages)
-- [ ] Create R2 bucket + upload assets
+- [x] Static site generation (22 pages)
+- [x] Deploy to Cloudflare Pages (equityfundingsource.pages.dev)
+- [x] R2 bucket created + assets uploaded
+- [ ] Add custom domain efs.briantakita.me (Cloudflare dashboard)
 - [ ] Build Apply Now page (form or Google Forms link)
 - [ ] Build Message Us / Contact page
 - [ ] Blog setup (briantakita.me-dev pattern)
-- [ ] DNS + deploy to Cloudflare
 <!-- /agent:pending -->

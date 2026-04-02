@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Diff gutter + layout fixed | Yjs CRDT next
+LIVE: https://agent-doc-js.pages.dev | 18 blog posts uploaded to Ragie (processing) | Retrieval will work once indexed
 <!-- /agent:status -->
 
 ## Exchange
@@ -1523,6 +1523,10 @@ Can we do snapshot detection. With diffs. We don't have git, but can we simulate
 
 Please add Yjs CRDT to handle user typing while response patch happens.
 Or we can just wait until the user is done typing before sending response.
+
+Add all of my briantakita.me blog post markdown to my Ragie database.
+
+tag as briantakita.me
 ### Re: Diff gutter + layout fix
 
 **Diff gutter added.** Green markers on the left edge show lines that changed since the last snapshot (like git gutter in IDEs).
@@ -1536,7 +1540,30 @@ Or we can just wait until the user is done typing before sending response.
 **Yjs CRDT:** Your request got cut off at "response p" — I'll add Yjs CRDT for handling concurrent edits (user typing while response patches are applied) in the next cycle. Confirm and I'll build it.
 
 Deployed to Cloudflare Pages.
-<!-- agent:boundary:e9c73079 -->
+
+The inline prompt is duplicated in the response:
+```
+What was in the Library?
+
+What was in the Library?
+
+...
+```
+
+How can we access the ragie se
+### Re: Blog posts uploaded to Ragie (HEAD)
+
+**All 18 briantakita.me blog posts uploaded** to Ragie with metadata `{"source": "briantakita.me", "type": "blog_post"}`.
+
+- 12 uploaded in the first batch
+- Hit 30 requests/min rate limit
+- Remaining 6 uploaded after the rate limit window reset
+- All documents currently in "partitioning" status — Ragie is processing them
+
+**Documents will be searchable once processing completes** (usually a few minutes). After that, the agent-doc-js SPA will automatically retrieve relevant blog post content when you submit.
+
+**Test search:** Currently returning 0 chunks (still processing). Will be populated soon.
+<!-- agent:boundary:1d303cfc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1544,9 +1571,9 @@ Deployed to Cloudflare Pages.
 <!-- agent:pending patch=replace -->
 - [x] SPA: editor + toolbar + terminal + diff gutter
 - [x] Ragie retrieval integration
-- [x] Cloudflare Worker proxy + Pages deployment
+- [x] Uploaded 18 briantakita.me blog posts to Ragie (tagged briantakita.me)
+- [ ] Wait for Ragie indexing to complete, then test retrieval
 - [ ] Yjs CRDT for concurrent editing during response
-- [ ] Upload demo documents to Ragie index
 - [ ] Add CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
 - [ ] (deferred) WebSocket sync, MCP

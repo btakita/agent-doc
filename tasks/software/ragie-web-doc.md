@@ -2059,7 +2059,7 @@ The demo should now be always-ready — no credential setup needed for Bob or an
 
 The web doc should allow either the session token or an API Key
 Please mention in the interface that API Keys are long lived and session tokens are short lived.
-### Re: Session token + API key dual auth (HEAD)
+### Re: Session token + API key dual auth
 
 Done. The app now accepts both credential types:
 
@@ -2076,7 +2076,7 @@ The `setup.sh` script still works — it passes the session token which the work
 1. Proxy-only (no client key) — worker uses its secret
 2. API key in browser — long-lived, user's own key
 3. Session token via `setup.sh` — short-lived but auto-provisioned from Claude Code
-<!-- agent:boundary:ade09273 -->
+<!-- agent:boundary:0ca86b9c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

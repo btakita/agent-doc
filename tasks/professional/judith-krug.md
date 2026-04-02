@@ -697,7 +697,7 @@ Done. Updated the draft (`mail/drafts/20260401-judith-proposal-options.md`):
 - The full proposal body is preserved between the `---` dividers so Rob sees exactly what Judith would receive.
 
 Pushed to Gmail Drafts — check your drafts to review and send.
-<!-- agent:boundary:0e23efe0 -->
+<!-- agent:boundary:a0ca9423 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

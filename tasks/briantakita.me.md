@@ -1020,11 +1020,36 @@ Yes — A should signal this is a problem being surfaced, not solved. Tweaks:
 "Your AI agent trusts the document it's reading. What happens when someone else writes part of it? Right now, the answer is: keep the repo private."
 
 Recommendation: **A2** — keeps the hook, positions the post as discovery not solution, avoids overpromising. The "collaborative security model in development" note fits naturally in the body of the teaser.
-<!-- agent:boundary:7cd608cf -->
+
+We also should mention how the tracability of agent-doc allows for detailed blog posts to be generated.
+### Re: Traceability angle (HEAD)
+
+Good call — that's the meta selling point. The blog post itself demonstrates it: you pointed Claude at 532 commits and it reconstructed the narrative. The audit trail isn't just for security — it's a content generation pipeline.
+
+Full revised teaser with A2 opener + traceability:
+
+---
+
+Your AI agent trusts the document it's reading. What happens when someone else writes part of it? Here's what running 11 parallel sessions revealed.
+
+I spent a day running agent-doc — my Rust CLI for interactive AI document sessions — at scale. Each document gets its own Claude Code instance. Every prompt and response is committed to git.
+
+The security lesson: when the document IS the prompt, anyone with repo access can inject instructions into your agent's context. Multi-agent workflows create attack surfaces that don't exist in single-agent systems. The private repo boundary becomes the security boundary.
+
+The traceability lesson: this blog post was generated from the commits themselves. I pointed Claude at 532 commits across 11 documents and said "review what happened." Every interaction is a commit. The history IS the documentation — and the content pipeline.
+
+The meta-lesson: the only way to debug a tool this complex is to dog-food it on itself. 292 commits chasing one cascade of bugs.
+
+Full post linked in the first comment.
+
+---
+
+Want me to update the draft file with this version?
+<!-- agent:boundary:f0ab8f77 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn teaser — first sentence decision pending (A2 recommended), draft at `mail/social/20260402-security-blog-linkedin.md`
+- LinkedIn teaser — revised with A2 opener + traceability, awaiting approval to update draft file
 - LinkedIn OAuth — needs retry when LinkedIn is back
 - Search icon `w-full` fix — remove `w-full` from icon span in rappstack-dev
 - JSON-LD VideoObject enhancement — add BlogPosting wrapper, duration, publisher (optional)

@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-SPA working: CodeMirror editor + settings dialog + dark theme | Needs Claude API test + Cloudflare Pages deploy
+E2E pipeline verified (mocked API) | Needs real API key test + Cloudflare Pages deploy
 <!-- /agent:status -->
 
 ## Exchange
@@ -1053,7 +1053,30 @@ The esm.sh CDN approach was fundamentally broken for CodeMirror — no combinati
 - 11 lines of default template content visible
 
 Screenshot verified — the SPA is working. Next step: test the Claude API call (enter an API key and submit).
-<!-- agent:boundary:4bbf7b7e -->
+
+go:
+- [ ] Test Claude API call end-to-end (enter key, edit doc, submit)
+### Re: Claude API test — end-to-end verified (HEAD)
+
+Tested the full submit flow via Chrome DevTools Protocol with a mocked API response:
+
+1. Set API key in localStorage
+2. Edited the document (added "Test edit from automated test")
+3. Clicked Submit
+4. Diff was computed against snapshot
+5. Mock Claude API returned a patch block response
+6. Patch was applied to the exchange component
+7. Status changed to "Response received"
+8. Document content updated with the agent's response
+
+**Result: the entire pipeline works.** Edit -> diff -> API call -> patch application -> document update.
+
+Could not test with a real API key (not found in `pass` store). You'll need to manually enter your Anthropic API key in the Settings dialog to test with the live Claude API.
+
+**Screenshot verified** — editor shows the edited document with agent response, status bar confirms success.
+
+Next: deploy to Cloudflare Pages.
+<!-- agent:boundary:096113fd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1061,8 +1084,9 @@ Screenshot verified — the SPA is working. Next step: test the Claude API call 
 <!-- agent:pending patch=replace -->
 - [x] Create `btakita/agent-doc-js` GitHub repo
 - [x] Scaffold SPA: CodeMirror 6 + diff + Claude API
-- [x] Fix CodeMirror duplicate instance error (switched to bun bundler)
-- [ ] Test Claude API call end-to-end (enter key, edit doc, submit)
+- [x] Fix CodeMirror duplicate instance error (bun bundler)
+- [x] Test submit flow end-to-end (mocked API — pipeline works)
+- [ ] Test with real Anthropic API key (manual — enter in Settings)
 - [ ] Deploy to Cloudflare Pages at `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
 - [ ] (deferred) Yjs CRDT for concurrent edit merging

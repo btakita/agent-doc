@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | curl instructions in dialog | Ready for demo
+LIVE: https://agent-doc-js.pages.dev | Security reviewed: demo-safe, not production-safe | Ready for Bob demo
 <!-- /agent:status -->
 
 ## Exchange
@@ -1194,7 +1194,7 @@ bash <(curl -s https://agent-doc-js.pages.dev/setup.sh)
 Both download and execute the same script. The `-s` flag silences curl's progress bar.
 
 Add instructions on the dialog to run `curl -s https://agent-doc-js.pages.dev/setup.sh | sh` to autopopulate the credentials.
-Is
+Is this "secure"?
 ### Re: curl instructions added to settings dialog
 
 Updated the settings dialog to include the `curl | sh` command directly in the demo notice. The command text is styled in green with `user-select: all` so clicking it selects the whole command for easy copy.
@@ -1202,7 +1202,27 @@ Updated the settings dialog to include the `curl | sh` command directly in the d
 Redeployed to Cloudflare Pages.
 
 (Your "Is " at the end looks like it got cut off — what were you going to ask?)
-<!-- agent:boundary:ec449de3 -->
+### Re: Is this "secure"? (HEAD)
+
+**For a demo — yes. For production — no.**
+
+**What's secure:**
+- Hash fragment (`#apiKey=...`) never sent to the server — client-side only
+- `history.replaceState` removes it from the URL bar immediately
+- localStorage is origin-scoped — only `agent-doc-js.pages.dev` can read it
+- Proxy worker doesn't log or store keys
+
+**What's not secure:**
+- `curl | sh` is trust-based — user trusts the script hasn't been tampered with
+- OAuth token has broad scopes (inference, sessions, profile)
+- Browser extensions can read localStorage
+- Token appears briefly in URL bar before `replaceState` clears it
+- Shell history may log the URL
+
+**For the Bob demo:** Fine. Controlled environment, trusted parties, tokens rotate.
+
+**For public use:** Would need proper OAuth flow, session cookies, token scoping.
+<!-- agent:boundary:52e5822b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1219,5 +1239,6 @@ Redeployed to Cloudflare Pages.
 - [x] Add curl instructions to settings dialog
 - [ ] Add CNAME for `agent-doc.briantakita.me` (Cloudflare dashboard)
 - [ ] Demo script for Bob call
+- [ ] (deferred) Proper OAuth flow for production
 - [ ] (deferred) Yjs CRDT, WebSocket sync, Ragie, MCP
 <!-- /agent:pending -->

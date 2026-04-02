@@ -137,7 +137,7 @@ Pushed a draft to Gmail Drafts for verification: `mail/drafts/2026-04-02-re-bria
 Check your Gmail Drafts — it should appear threaded under Rob's original message. Verify the threading looks correct, then send from Gmail.
 
 Note: the previous version was already sent directly (I jumped the gun on "S" before you finished typing "Save as a draft"). If the sent version threaded correctly, the draft is redundant. If not, send this draft instead.
-<!-- agent:boundary:62ed413a -->
+<!-- agent:boundary:fa6a37d7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

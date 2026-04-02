@@ -1571,6 +1571,25 @@ Both bugs confirmed after code review.
 5. `SPEC.md` — document `thread_id` in draft YAML format
 
 Ready to implement on your go.
+Go
+### Re: Implementing Threading Fixes (HEAD)
+
+Both bugs fixed across 8 files, `cargo check` passes clean.
+
+**Bug 1 — Message-ID storage during sync:**
+- `sync/types.rs`: Added `message_id: Option<String>` to `Message`
+- `sync/gmail_api_sync.rs`: Extracts `Message-ID` header via existing `get_header()` pattern
+- `sync/markdown.rs`: Writes `**Message-ID**: <value>` metadata per message, parses it back
+- Added `message_id: None` to all other `Message` constructions (imap, sms, slack, telegram)
+
+**Bug 2 — threadId in API requests:**
+- `draft/mod.rs`: Added `thread_id: Option<String>` to `EmailDraftMeta`
+- `send_via_gmail_api()` and `push_to_drafts_via_gmail_api()` now accept and pass `threadId`
+- Call sites in `run()` extract and forward `meta.thread_id`
+- `draft/migrate.rs`: Added `thread_id: None` to legacy migration
+
+Next: run `corky sync` on a mailbox to populate Message-IDs, then test a threaded reply draft.
+<!-- agent:boundary:c41dcfc4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

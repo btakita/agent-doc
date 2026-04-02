@@ -48,6 +48,7 @@ src/
   submit.rs         # Core loop: diff, send, merge-safe write, snapshot, git
   init.rs           # Scaffold session document; no-arg mode initializes project (.agent-doc/ dirs + SKILL.md)
   reset.rs          # Clear session + snapshot
+  dedupe.rs         # Remove consecutive duplicate response blocks
   diff.rs           # Preview diff (dry run) + comment stripping
   clean.rs          # Squash git history
   component.rs      # Component parser (<!-- agent:name --> markers) + name validation

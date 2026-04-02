@@ -541,6 +541,14 @@ fn run_event_loop(
                 state.last_hash = hash_content(&path);
             }
 
+            // Skip if file has an active agent-doc operation (prevents duplicate
+            // responses from watch daemon competing with skill/stream writes)
+            let file_str = path.to_string_lossy().to_string();
+            if agent_doc::debounce::is_busy(&file_str) {
+                eprintln!("[watch] skipping {} — busy (active operation in progress)", path.display());
+                continue;
+            }
+
             // Submit
             eprintln!("Change detected: {}", path.display());
             match run::run(&path, false, None, None, false, false, config) {

@@ -2,7 +2,7 @@
 description: Submit a session document to an AI agent and append the response
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.25.4"
+agent-doc-version: "0.31.1"
 ---
 
 # agent-doc
@@ -80,7 +80,7 @@ When responding to a document with multiple user questions/topics, flush partial
 
 1. After completing each logical section (e.g., answering one question), flush the accumulated response so far:
    ```bash
-   cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream
+   cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream --origin skill
    <partial response as patch blocks>
    RESPONSE
    ```
@@ -116,7 +116,7 @@ Use `agent-doc write --stream` to atomically append the response:
 1. **Save a baseline copy** of the document content (before step 1) to a temp file
 2. **Pipe your response** through `agent-doc write`:
    ```bash
-   cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream
+   cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream --origin skill
    <your response>
    RESPONSE
    ```
@@ -147,7 +147,7 @@ The agent responds with **patch blocks** that target specific components.
    - Component modes (replace/append/prepend) are configured in `.agent-doc/components.toml`
 3. **Pipe through `agent-doc write` with `--stream` flag:**
    ```bash
-   cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream
+   cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream --origin skill
    <your patch response>
    RESPONSE
    ```

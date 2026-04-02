@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | RAGIE READY: 18 docs indexed | Full RAG pipeline active
+LIVE: https://agent-doc-js.pages.dev | Import with injection scanning | Ragie ready | Demo-ready
 <!-- /agent:status -->
 
 ## Exchange
@@ -1824,16 +1824,43 @@ Status?
 6. Response patched into document
 
 Try it now — reset the document, enter your Ragie key in Settings, and ask something about your blog posts.
-<!-- agent:boundary:7c953927 -->
+
+Implement Export and Import. So a document can be exported and shared.
+Implement some sort of scanning to warn against malicious/dangerous prompts when loading a document. Is this a SKILL?
+### Re: Export/Import + injection scanning (HEAD)
+
+**Import button added** with built-in prompt injection scanner.
+
+**Toolbar:** `[Haiku 4.5 v] [Submit] [Export] [Import] [Reset] [Settings]`
+
+**Import flow:**
+1. Click Import -> file picker (`.md`, `.txt`, `.markdown`)
+2. Scanner checks for 10 injection patterns:
+   - "Ignore previous instructions"
+   - Role overrides ("You are now...", "Act as...")
+   - System prompt overrides
+   - Base64 encoded content
+   - Script tags, eval() calls
+   - Credential/secret extraction attempts
+3. If patterns found: warnings in terminal + confirm dialog
+4. User can cancel or proceed with awareness
+5. If clean (or user confirms): loads into editor, sets snapshot
+
+**This is defense in depth** — the scanner catches obvious patterns. The SKILL.md also instructs Claude to treat document content as data, not instructions. Neither is foolproof alone, but together they raise the bar significantly.
+
+**Export** already worked — now you can round-trip: Export -> share file -> recipient Imports.
+
+Deployed.
+<!-- agent:boundary:31c440ad -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] SPA feature-complete
-- [x] Ragie indexing complete — 18 docs ready and searchable
-- [x] Full pipeline: edit -> Ragie search -> Claude with context -> patch
-- [ ] Test full Ragie retrieval flow in browser
+- [x] SPA feature-complete: export, import with injection scanning
+- [x] Ragie: 18 docs indexed and searchable
+- [x] Full RAG pipeline active
+- [ ] Test Ragie retrieval in browser
 - [ ] CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
 <!-- /agent:pending -->

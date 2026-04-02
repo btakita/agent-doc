@@ -1884,7 +1884,7 @@ An article comparing them would be a good resource for the Bob meeting — shows
 Deployed.
 
 Can we link to the source documents in our response patches?
-### Re: CRDT status + source document citations (HEAD)
+### Re: CRDT status + source document citations
 
 **CRDT:** We discussed adding Yjs but haven't implemented it yet. The diff gutter uses `diffLines` for comparison, but there's no concurrent editing merge. Yjs is still on the deferred list.
 
@@ -1893,7 +1893,7 @@ Can we link to the source documents in our response patches?
 Remember to click "Reset SKILL.md to Default" in Settings then Save to pick up this change.
 
 Deployed.
-<!-- agent:boundary:6b8f90ec -->
+<!-- agent:boundary:58fee1df -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

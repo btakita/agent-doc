@@ -141,6 +141,22 @@ pub fn commit(file: &Path) -> Result<()> {
         file.display(), snap_len, file_len
     ));
 
+    // Warn on significant file/snapshot drift — may indicate an out-of-band write
+    // that bypassed the agent-doc write pipeline (snapshot not updated).
+    if snap_len > 0 && file_len > snap_len {
+        let drift = file_len - snap_len;
+        if drift > 100 {
+            eprintln!(
+                "[commit] WARNING: file is {} bytes larger than snapshot for {} — possible out-of-band write (snap={}, file={})",
+                drift, file.display(), snap_len, file_len
+            );
+            crate::ops_log::log_op(file, &format!(
+                "drift_warning file={} drift={} snap_len={} file_len={}",
+                file.display(), drift, snap_len, file_len
+            ));
+        }
+    }
+
     // Handle missing snapshot: if no snapshot exists but file has content, create one.
     // This bootstraps the commit flow for files that were never written by agent-doc.
     //

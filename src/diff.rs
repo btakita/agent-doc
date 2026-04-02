@@ -33,8 +33,8 @@
 //! - `wait_for_stable_content` always terminates: the `MAX_RECHECKS` bound guarantees
 //!   it returns within ~6 s regardless of file activity.
 //! - `looks_truncated` never returns `true` for empty strings, markdown headings,
-//!   slash commands, fenced code fences, or single alphanumeric characters (choice
-//!   selections).
+//!   slash commands, or fenced code fences. Single characters (including alphanumeric)
+//!   are always treated as truncated — the stability check confirms completion.
 //! - Callers of `compute` can assume: `Some(diff)` → there is user-visible content
 //!   to respond to; `None` → skip the response cycle.
 //!
@@ -55,6 +55,7 @@
 //! - `truncated_mid_sentence`: line ending mid-word → `looks_truncated` returns `true`
 //! - `not_truncated_complete_sentence`: line ending with `.` → `looks_truncated` returns `false`
 //! - `not_truncated_single_word_command`: bare word like `"release"` → `looks_truncated` returns `false`
+//! - `truncated_single_chars`: single characters like `"A"`, `"S"`, `"1"` → `looks_truncated` returns `true` (stability check required)
 //! - `wait_for_stable_content_returns_immediately_when_complete`: already-complete content → returns in < 500 ms
 
 use anyhow::Result;
@@ -348,9 +349,17 @@ fn looks_truncated(line: &str) -> bool {
         return false;
     }
 
-    // Single alphanumeric char — choice selection (A, B, 1, 2, y, n)
-    if trimmed.len() == 1 && trimmed.chars().next().is_some_and(|c| c.is_alphanumeric()) {
-        return false;
+    // Single characters are treated as potentially truncated — the user may be
+    // mid-typing (e.g., "S" as the start of "Save as a draft."). The stability
+    // check (3 consecutive reads at 500ms each) will confirm if the input is
+    // complete. Previously, single alphanumeric chars were exempt (treated as
+    // choice selection like "A", "B", "y"), but this caused a bug where "S"
+    // from "Save as a draft." triggered an immediate run that sent a wrong email.
+    //
+    // The 1.5s delay on genuine single-char responses (like "y" or "A") is
+    // acceptable — the cost of acting on partial input is much higher.
+    if trimmed.len() == 1 {
+        return true;
     }
 
     // Single word that looks like a command/keyword (e.g., "go", "ok", "release")
@@ -806,15 +815,15 @@ Please fix the bug.\n\
     }
 
     #[test]
-    fn not_truncated_single_alphanumeric() {
-        // Choice selections
-        assert!(!looks_truncated("A"));
-        assert!(!looks_truncated("B"));
-        assert!(!looks_truncated("1"));
-        assert!(!looks_truncated("2"));
-        // Yes/no shortcuts
-        assert!(!looks_truncated("y"));
-        assert!(!looks_truncated("n"));
+    fn truncated_single_chars() {
+        // Single characters are now treated as potentially truncated.
+        // The stability check will confirm if the input is complete.
+        // This prevents partial typing (e.g., "S" from "Save as a draft.")
+        // from triggering immediate runs.
+        assert!(looks_truncated("A"));
+        assert!(looks_truncated("S"));
+        assert!(looks_truncated("1"));
+        assert!(looks_truncated("y"));
     }
 
     #[test]

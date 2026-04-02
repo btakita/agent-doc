@@ -292,57 +292,65 @@ class PatchWatcher(private val project: Project) : Disposable {
             null
         }
 
-        WriteCommandAction.runWriteCommandAction(project, "Agent Doc Patch", null, {
-            val content = document.text
+        // Compute the patched result OUTSIDE the write action to avoid
+        // blocking the EDT for no-op patches. Only acquire the write lock
+        // if the content actually changed.
+        val content = document.text
 
-            // Full content replacement (append-mode documents without component markers)
-            if (!patch.fullContent.isNullOrEmpty()) {
-                if (patch.fullContent != content) {
-                    document.setText(patch.fullContent)
-                }
-                return@runWriteCommandAction
-            }
-
-            // Component-based patching (template/stream-mode documents)
-            var result = content
-
-            // Apply frontmatter patch first (before component patches)
-            if (!patch.frontmatter.isNullOrBlank()) {
-                result = NativePatching.mergeFrontmatter(result, patch.frontmatter)
-                    ?: applyFrontmatterPatchKotlin(result, patch.frontmatter)
-            }
-
-            for (p in patch.patches) {
-                val effectiveBoundaryId = if (p.ensureBoundary && p.boundaryId == null) {
-                    // No boundary on disk — find any existing boundary in the Document API content
-                    findBoundaryInComponent(result, p.component)
-                } else {
-                    p.boundaryId
-                }
-                result = applyComponentPatchNative(result, p.component, p.content, caretOffset, effectiveBoundaryId)
-            }
-
-            // Apply unmatched content to exchange or output component
-            if (patch.unmatched.isNotBlank()) {
-                val exchangeResult = applyComponentPatchNative(result, "exchange", patch.unmatched, caretOffset)
-                result = if (exchangeResult != result) exchangeResult
-                    else applyComponentPatchNative(result, "output", patch.unmatched, caretOffset)
-            }
-
-            // Reposition boundary to end of exchange if requested
-            // Prefer FFI (removes ALL stale boundaries), fallback to Kotlin
-            if (patch.repositionBoundary) {
-                result = NativePatching.repositionBoundaryToEnd(result)
-                    ?: repositionBoundaryToEnd(result, "exchange")
-                    ?: result
-            }
-
-            if (result != content) {
-                document.setText(result)
-                LOG.info("Patch applied to ${patch.file} (${result.length - content.length} chars changed)")
-            } else {
+        // Full content replacement (append-mode documents without component markers)
+        if (!patch.fullContent.isNullOrEmpty()) {
+            if (patch.fullContent == content) {
                 LOG.warn("Patch produced no changes for ${patch.file}")
+                return true
             }
+            WriteCommandAction.runWriteCommandAction(project, "Agent Doc Patch", null, {
+                document.setText(patch.fullContent)
+                LOG.info("Patch applied (full content) to ${patch.file}")
+            })
+            FileDocumentManager.getInstance().saveDocument(document)
+            return true
+        }
+
+        // Component-based patching (template/stream-mode documents)
+        var result = content
+
+        // Apply frontmatter patch first (before component patches)
+        if (!patch.frontmatter.isNullOrBlank()) {
+            result = NativePatching.mergeFrontmatter(result, patch.frontmatter)
+                ?: applyFrontmatterPatchKotlin(result, patch.frontmatter)
+        }
+
+        for (p in patch.patches) {
+            val effectiveBoundaryId = if (p.ensureBoundary && p.boundaryId == null) {
+                findBoundaryInComponent(result, p.component)
+            } else {
+                p.boundaryId
+            }
+            result = applyComponentPatchNative(result, p.component, p.content, caretOffset, effectiveBoundaryId)
+        }
+
+        // Apply unmatched content to exchange or output component
+        if (patch.unmatched.isNotBlank()) {
+            val exchangeResult = applyComponentPatchNative(result, "exchange", patch.unmatched, caretOffset)
+            result = if (exchangeResult != result) exchangeResult
+                else applyComponentPatchNative(result, "output", patch.unmatched, caretOffset)
+        }
+
+        // Reposition boundary to end of exchange if requested
+        if (patch.repositionBoundary) {
+            result = NativePatching.repositionBoundaryToEnd(result)
+                ?: repositionBoundaryToEnd(result, "exchange")
+                ?: result
+        }
+
+        if (result == content) {
+            LOG.warn("Patch produced no changes for ${patch.file}")
+            return true
+        }
+
+        WriteCommandAction.runWriteCommandAction(project, "Agent Doc Patch", null, {
+            document.setText(result)
+            LOG.info("Patch applied to ${patch.file} (${result.length - content.length} chars changed)")
         })
 
         // Save the document to disk (so snapshot can read it)

@@ -52,6 +52,7 @@ mod config;
 mod convert;
 mod parallel;
 mod preflight;
+mod dedupe;
 mod diff;
 mod extract;
 mod focus;
@@ -235,6 +236,11 @@ enum Commands {
         /// Path to the session document
         file: PathBuf,
     },
+    /// Remove consecutive duplicate response blocks
+    Dedupe {
+        /// Path to the session document
+        file: PathBuf,
+    },
     /// Claim a document for the current tmux pane
     Claim {
         /// Path to the session document
@@ -353,6 +359,9 @@ enum Commands {
         /// Force direct disk write, skip IPC even when plugin is installed
         #[arg(long)]
         force_disk: bool,
+        /// Write origin identifier for tracing (e.g., "skill", "watch", "stream")
+        #[arg(long)]
+        origin: Option<String>,
     },
     /// Stream agent output to document in real-time (CRDT merge)
     Stream {
@@ -658,6 +667,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Commit { file } => git::commit(&file),
+        Commands::Dedupe { file } => dedupe::run(&file),
         Commands::Claim { file, position, pane, window, force } => claim::run(&file, position.as_deref(), pane.as_deref(), window.as_deref(), force),
         Commands::Focus { file, pane } => focus::run(&file, pane.as_deref()),
         Commands::Layout { files, split, pane, window } => {
@@ -742,7 +752,11 @@ fn main() -> anyhow::Result<()> {
             PluginAction::Update { editor } => plugin::update(&editor),
             PluginAction::List => plugin::list(),
         },
-        Commands::Write { file, baseline_file, template: is_template, stream: is_stream, ipc: is_ipc, force_disk } => {
+        Commands::Write { file, baseline_file, template: is_template, stream: is_stream, ipc: is_ipc, force_disk, origin } => {
+            // Log write origin for tracing
+            if let Some(ref orig) = origin {
+                crate::ops_log::log_op(&file, &format!("write_origin file={} origin={}", file.display(), orig));
+            }
             let baseline = baseline_file
                 .as_ref()
                 .map(std::fs::read_to_string)

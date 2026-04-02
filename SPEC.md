@@ -457,7 +457,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 
 ### 7.22 write
 
-`agent-doc write <FILE> [--baseline-file PATH] [--stream] [--ipc] [--force-disk]` — apply patch blocks from stdin to a template document.
+`agent-doc write <FILE> [--baseline-file PATH] [--stream] [--ipc] [--force-disk] [--origin ORIGIN]` — apply patch blocks from stdin to a template document.
 
 1. Read response (patch blocks) from stdin
 2. Parse `<!-- patch:name -->...<!-- /patch:name -->` blocks
@@ -473,6 +473,8 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 **`--ipc` flag:** Writes a JSON patch file to `.agent-doc/patches/` for IDE plugin consumption instead of modifying the document directly.
 
 **`--force-disk` flag:** Bypasses IPC and writes directly to disk, even when `.agent-doc/patches/` exists (plugin installed).
+
+**`--origin` flag:** Write-origin identifier for tracing (e.g., `skill`, `watch`, `stream`). Logged to `ops.log` as `write_origin file=<path> origin=<value>`. Used with the commit drift warning to trace which process wrote to a file.
 
 **IPC-first behavior (v0.17.5):** When `.agent-doc/patches/` exists (plugin installed) and `--force-disk` is not set, IPC is tried first. `try_ipc()` handles component patches; `try_ipc_full_content()` handles full-document replacement (inline mode). Both check for `.agent-doc/patches/` directory existence first — if absent (no plugin active), they return immediately without delay. On IPC timeout (2s), exits with code 75 (`EX_TEMPFAIL`) instead of falling back to disk write. On IPC success, snapshot is saved from `content_ours` (baseline + response), NOT the current file on disk. This ensures user edits typed after the boundary marker are not absorbed into the snapshot and remain visible to the next diff. CRDT state is also saved from `content_ours`.
 
@@ -513,6 +515,7 @@ post_patch = "cmd"     # Shell command: fire-and-forget
 - On file change (after debounce), runs `submit::run()` on the changed file
 - **Reactive mode:** CRDT-mode documents (`agent_doc_write: crdt`) are discovered with `reactive: true` and use zero debounce (`Duration::ZERO`) for instant re-submit on file change. Reactive paths are tracked in a `HashSet<PathBuf>`.
 - **Loop prevention:** changes within the debounce window after a submit are treated as agent-triggered; agent-triggered changes increment a cycle counter; if content hash matches previous submit, stop (convergence); hard cap at `--max-cycles` (default 3)
+- **Busy guard:** Before submitting, checks `is_busy(file)` via the debounce status signal. If the file has an active agent-doc operation (skill write, stream), the watch daemon skips the file. This prevents the watch daemon from competing with skill writes and causing duplicate responses.
 - `--stop` sends SIGTERM to the running daemon (via `.agent-doc/watch.pid`)
 - `--status` reports whether the daemon is running
 - `--debounce` sets the debounce delay in milliseconds (default 500)
@@ -655,6 +658,12 @@ When the sync path (`skip_wait=true`) creates new panes, it prefers splitting in
 **Set:** Updates config.toml, then moves the `agent-doc` window and `stash` window from the old session to the new one via `tmux move-window`. If the move fails (target session doesn't exist), config is still updated — subsequent route/claim operations will target the new session.
 
 **Session resolution (`resolve_target_session`):** Single function in route.rs that all session-targeting code paths use. Priority: (1) context_session from sync --window, (2) config.toml if alive, (3) fallback to current session. Config is auto-updated only when the configured session is dead.
+
+### 7.28 dedupe
+
+`agent-doc dedupe <FILE>` — remove consecutive duplicate response blocks.
+
+Detects consecutive `### Re:` blocks with identical content (after stripping boundary markers) and removes the duplicate. Updates the snapshot after removal. Idempotent — running twice produces the same result.
 
 ## 8. Session Routing
 

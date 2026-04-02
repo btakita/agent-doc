@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Worker proxy deployed | Custom domain pending CNAME setup
+LIVE: https://agent-doc-js.pages.dev | Demo badge + credentials notice added | Custom domain pending
 <!-- /agent:status -->
 
 ## Exchange
@@ -1120,7 +1120,21 @@ Continue:
 This can be set up in the Cloudflare dashboard under Pages > agent-doc-js > Custom domains.
 
 **For Bob's demo:** Share `https://agent-doc-js.pages.dev` directly. He enters his API key (or your proxy URL) in Settings and starts editing.
-<!-- agent:boundary:bcc73f8e -->
+
+Specify that this is a demo and credentials are save to local storage.
+![img.png](img.png)
+### Re: Added demo notice and credentials disclaimer (HEAD)
+
+**Updated and redeployed.** The SPA now shows:
+
+1. **"agent-doc demo" badge** in the toolbar header
+2. **Credentials notice** in the settings dialog: "Demo: credentials are stored in your browser's localStorage and never sent to this server."
+3. `autocomplete="off"` on the API key input
+
+The screenshot shows the settings dialog working correctly on the deployed site. The API key field, model selector, proxy URL, and system prompt are all functional.
+
+**Redeployed to Cloudflare Pages** — live at https://agent-doc-js.pages.dev
+<!-- agent:boundary:008bdbd9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1131,7 +1145,8 @@ This can be set up in the Cloudflare dashboard under Pages > agent-doc-js > Cust
 - [x] Fix CodeMirror duplicate instance error (bun bundler)
 - [x] Test submit flow end-to-end (mocked + real API)
 - [x] Deploy Cloudflare Worker proxy for CORS
-- [x] Deploy to Cloudflare Pages (https://agent-doc-js.pages.dev)
+- [x] Deploy to Cloudflare Pages
+- [x] Add demo notice and credentials disclaimer
 - [ ] Add CNAME for `agent-doc.briantakita.me` (Cloudflare dashboard)
 - [ ] Demo script for Bob call
 - [ ] (deferred) Yjs CRDT for concurrent edit merging

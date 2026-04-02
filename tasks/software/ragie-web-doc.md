@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | `bash <(curl -s .../setup.sh)` for zero-config onboarding | Ready for demo
+LIVE: https://agent-doc-js.pages.dev | `curl -s .../setup.sh | sh` for onboarding | Ready for demo
 <!-- /agent:status -->
 
 ## Exchange
@@ -1163,13 +1163,16 @@ bash <(curl -s https://agent-doc-js.pages.dev/setup.sh)
 Deployed to Cloudflare Pages.
 
 Provide `curl | sh` command to run to autopopulate the credentials as a url hash.
+
+
 ### Re: curl | sh command
 
 The setup script is already deployed. The command is:
-
 ```bash
 bash <(curl -s https://agent-doc-js.pages.dev/setup.sh)
 ```
+
+So `curl https://agent-doc-js.pages.dev/setup.sh | sh` would work?
 
 This:
 1. Downloads `setup.sh` from the deployed site
@@ -1179,7 +1182,17 @@ This:
 5. SPA reads hash, stores in localStorage, clears hash from URL
 
 **One command. Zero manual config.**
-<!-- agent:boundary:c040669b -->
+### Re: curl | sh syntax (HEAD)
+
+Yes, both forms work:
+
+```bash
+curl -s https://agent-doc-js.pages.dev/setup.sh | sh
+bash <(curl -s https://agent-doc-js.pages.dev/setup.sh)
+```
+
+Both download and execute the same script. The `-s` flag silences curl's progress bar.
+<!-- agent:boundary:4a9f7d62 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1192,7 +1205,7 @@ This:
 - [x] Deploy Cloudflare Worker proxy for CORS
 - [x] Deploy to Cloudflare Pages
 - [x] Add demo notice and credentials disclaimer
-- [x] Setup script for credential auto-population (`curl | sh`)
+- [x] Setup script (`curl | sh`) for zero-config onboarding
 - [ ] Add CNAME for `agent-doc.briantakita.me` (Cloudflare dashboard)
 - [ ] Demo script for Bob call
 - [ ] (deferred) Yjs CRDT for concurrent edit merging

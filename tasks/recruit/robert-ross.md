@@ -123,12 +123,12 @@ Updated the draft at `mail/drafts/2026-04-02-re-brian-rob-zoom.md` with new mess
 Threaded with correct `In-Reply-To: <CAMrCVsDSX0zWO2DyZfh9ugzS=pUHSt_MtAEs+0qnfw7-njWZ2w@mail.gmail.com>`. Ready to send on your go.
 
 S
-### Re: Email sent (HEAD)
+### Re: Email sent
 
 Threaded reply sent to rob@dreamable.com with correct `In-Reply-To` header. The email should now appear in the same thread as his original message.
 
 Draft: `mail/drafts/2026-04-02-re-brian-rob-zoom.md` (status: sent)
-<!-- agent:boundary:a51031e8 -->
+<!-- agent:boundary:5f8dcf5d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1912,16 +1912,35 @@ Implemented. Response patches now use `diffLines` to compute minimal changes ins
 Note: I didn't use Yjs for this. The `diffLines`-based approach is simpler and sufficient for single-user editing with async response patching. Yjs would be needed for true multi-user concurrent editing (future feature with WebSocket sync).
 
 Deployed.
-<!-- agent:boundary:4c5d9cdf -->
+
+Can we have a preview or a side pane showing the source document?
+### Re: Source document preview pane (HEAD)
+
+Yes, a rendered markdown preview is a great addition. Here's what I'm thinking:
+
+**Side-by-side layout:**
+- Left pane: CodeMirror editor (existing)
+- Right pane: Live markdown preview (rendered HTML)
+- Toggle button in the toolbar to show/hide the preview
+- Preview updates as the user types (debounced)
+
+**Implementation approach:**
+- Use a lightweight markdown renderer (marked.js or markdown-it) — no heavy dependencies
+- Split the editor area horizontally when preview is active
+- Auto-scroll sync between editor and preview (optional, can be added later)
+- Style the rendered markdown with the existing Catppuccin dark theme
+- Template component boundaries (`<!-- agent:* -->`) could be visually highlighted in the preview
+
+**Alternative: Ragie source document viewer**
+If you meant showing the *Ragie-retrieved source documents* (the context pulled from indexed docs), that would be a different feature — a panel showing the retrieved chunks alongside the conversation.
+
+Which direction do you want? I'll implement whichever you prefer.
+<!-- agent:boundary:8d7370f3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] SPA feature-complete with smart cursor-preserving updates
-- [x] Ragie: 18 docs indexed and searchable
-- [x] Cursor stays in place during response patches
-- [ ] CNAME for `agent-doc.briantakita.me`
-- [ ] Demo script for Bob call
-- [ ] (deferred) Yjs + WebSocket for multi-user sync
+- [ ] Implement markdown preview pane (awaiting direction: rendered preview vs Ragie source viewer)
+- [ ] Toolbar toggle for preview visibility
 <!-- /agent:pending -->

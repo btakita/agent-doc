@@ -1381,7 +1381,7 @@ Committed: `3ddb08e` (corky), `6f963b5a` (agent-loop parent).
 Plan:
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 - [ ] Google Docs/Sheets integration — read/write Google Docs, read Google Sheets (extends Gmail OAuth scopes)
-### Re: Google Docs/Sheets and doc upload plan (HEAD)
+### Re: Google Docs/Sheets and doc upload plan
 
 #### `corky doc upload` — Google Drive upload
 
@@ -1421,7 +1421,7 @@ Read/write Google Docs, read Google Sheets.
 - Recommend raw REST + `reqwest` since corky already uses reqwest for Gmail
 
 Want me to start with Phase 1 (OAuth scope expansion) and Phase 2 (doc upload)?
-<!-- agent:boundary:904e29c3 -->
+<!-- agent:boundary:47574b59 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

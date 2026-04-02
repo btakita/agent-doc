@@ -1338,11 +1338,30 @@ Yes, there are options between AMR (12 kbps) and M4A 64 kbps:
 3. **AMR-WB** (wideband) -- If Cube ACR offers it, this doubles the sample rate to 16 kHz at ~24 kbps. Same file size category as AMR-NB but much better for whisper (which resamples to 16 kHz anyway).
 
 **My recommendation:** Try **OGG/Opus** in Cube ACR settings. It's the best codec for speech at low bitrates, and 24-32 kbps Opus should give you much better transcription/diarization quality at only 2x the AMR file size.
-<!-- agent:boundary:7119beff -->
+
+Describe the different options from the Cube ACR app.
+![img_7.png](img_7.png)
+### Re: Cube ACR format options (HEAD)
+
+From the screenshot, Cube ACR offers 4 formats:
+
+| Option | Format | Size | Quality | For transcription |
+|--------|--------|------|---------|------------------|
+| **AMR** | .amr, small size, normal quality | ~7 MB/hr | Poor | Current -- 8kHz, heavy lossy compression |
+| **MPEG-4 LQ** | .m4a, small size, normal quality | ~14-18 MB/hr | Decent | Low-bitrate AAC (~24-32 kbps). **Good middle ground** |
+| **MPEG-4** | .m4a, medium size, better quality | ~37 MB/hr | Good | Standard AAC (~64 kbps). Strong improvement |
+| **MPEG-4 HQ** | .m4a, large size, best quality | ~74 MB/hr | Excellent | High-bitrate AAC (~128 kbps). Overkill for phone |
+
+**Recommendation: MPEG-4 LQ** -- it's the closest to what you want (between AMR and full M4A). Roughly 2-2.5x AMR file size but much better spectral quality for both whisper and pyannote diarization. The "LQ" is relative to the other M4A options -- it's still a big upgrade from AMR.
+
+If MPEG-4 LQ still produces poor diarization results, step up to **MPEG-4** (medium). But I'd start with LQ since you want to minimize storage impact.
+
+No OGG/Opus option unfortunately -- Cube ACR only offers AMR and M4A variants.
+<!-- agent:boundary:75f1dfa1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- User switching Cube ACR format (evaluating OGG/Opus or M4A at lower bitrate)
+- User switching Cube ACR to MPEG-4 LQ format
 <!-- /agent:pending -->

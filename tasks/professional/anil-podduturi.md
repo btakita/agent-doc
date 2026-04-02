@@ -97,7 +97,7 @@ Good call — Anil's background spans product leadership, digital transformation
 > Either way, let's catch up...always good to stay connected, and I'd love to hear what you're getting into next.
 
 Changed "your AI product background" → "your experience across product, AI, and digital transformation" — acknowledges the full breadth.
-<!-- agent:boundary:63fdbe6e -->
+<!-- agent:boundary:5b6d0e10 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

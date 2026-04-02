@@ -1718,7 +1718,7 @@ Click Export to download the current document as `agent-doc-export.md`. Terminal
 Deployed.
 
 The export should also include the "Terminal" output
-### Re: Fixed — responses now always patch into document (HEAD)
+### Re: Fixed — responses now always patch into document
 
 Two fixes:
 
@@ -1729,7 +1729,7 @@ Two fixes:
 **Ragie status:** Still "partitioning" — all 10 visible docs. The search returned no results because indexing isn't complete. Once it finishes, searches will work. The fallback (general Claude response without retrieval context) now works correctly.
 
 Deployed. Try the same prompt again — the response should now appear in the document.
-<!-- agent:boundary:1e3dfa75 -->
+<!-- agent:boundary:fc9c84be -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

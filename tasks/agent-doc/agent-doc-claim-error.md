@@ -471,7 +471,7 @@ All items from this session are complete.
 
 Implement:
 - [ ] IPC write funnel/queue (v0.32 — future session)
-### Re: IPC write funnel — scoping for implementation (HEAD)
+### Re: IPC write funnel — scoping for implementation
 
 The IPC write funnel is a significant architectural change. This session has been very long — let me scope the minimal viable implementation that prevents the duplicate response bug, then we can build from there.
 
@@ -480,7 +480,7 @@ The IPC write funnel is a significant architectural change. This session has bee
 This is simpler than a full IPC queue — it uses the existing flock mechanism and doesn't require a daemon. The watch daemon's busy check we just added is a good first line of defense, but the flock provides a hard guarantee.
 
 Should I implement the flock-based write lock now? It's a targeted change in `write.rs`.
-<!-- agent:boundary:7736d8b8 -->
+<!-- agent:boundary:233da9a7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

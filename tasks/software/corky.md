@@ -1236,7 +1236,7 @@ Added `collapse_repeated_phrases()` post-processing after `collect_whisper_segme
 Set `params.set_no_speech_thold(0.8)` (default was 0.6). More aggressive about marking silence as non-speech, which reduces hallucination on low-quality audio. Note: whisper-rs comment says "not implemented as of v1.3.0" but the field is set on the C struct -- likely works in newer whisper.cpp versions.
 
 Re-running transcription now to verify all three fixes.
-### Re: Test results (HEAD)
+### Re: Test results
 
 **Speaker count fix: working.** 2 speakers detected (Brian, Robert) vs 4 before. 495 lines vs 575 (-14%).
 
@@ -1249,7 +1249,7 @@ Need a different approach for escalating repetitions:
 **no_speech_thold: inconclusive.** Same transcript output -- the param may not be effective in whisper-rs 0.16 (comment says "not implemented as of v1.3.0"). Would need to compare word counts to confirm any effect.
 
 The speaker count fix is the clear win here. Want me to also improve the repetition detection for escalating patterns, or save that for later?
-<!-- agent:boundary:cd6a7384 -->
+<!-- agent:boundary:4ef969d8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

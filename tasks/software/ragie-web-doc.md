@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE + WORKING: https://agent-doc-js.pages.dev | 429 is rate limit from testing, not a bug | Ready for demo
+LIVE: https://agent-doc-js.pages.dev | Ctrl+Enter fixed | All known bugs resolved | Ready for demo
 <!-- /agent:status -->
 
 ## Exchange
@@ -1263,22 +1263,29 @@ This is from our rapid automated testing — multiple API calls in quick success
 **Not a bug.** Wait a minute and try again. For the demo with Bob, this won't be an issue — you'll make one request at a time with natural pauses between edits.
 
 If rate limits persist, use a standard API key (`sk-ant-api03-...`) instead of the OAuth token — standard keys typically have separate/higher limits.
-<!-- agent:boundary:d5cfdef4 -->
+Pressing `Ctrl+Enter` inserts a newline in the document. It should only run the submit command. Not add a newline.
+### Re: Fixed Ctrl+Enter newline bug (HEAD)
+
+The issue: CodeMirror's default keymap was handling Enter (inserting a newline) before the document-level event listener could intercept it. Ctrl+Enter was processed as a regular Enter by CodeMirror.
+
+**Fix:** Added a CodeMirror keymap binding for `Ctrl-Enter` / `Cmd-Enter` that calls `handleSubmit()` and returns `true` (consumed). This binding is registered before `defaultKeymap` so it takes priority.
+
+Removed the document-level `keydown` listener since it's no longer needed.
+
+Deployed to Cloudflare Pages. Ctrl+Enter now submits without inserting a newline.
+<!-- agent:boundary:adb39510 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] Create `btakita/agent-doc-js` GitHub repo
-- [x] Scaffold SPA: CodeMirror 6 + diff + Claude API
-- [x] Fix CodeMirror duplicate instance error (bun bundler)
-- [x] Test submit flow end-to-end (mocked + real API)
-- [x] Deploy Cloudflare Worker proxy for CORS
-- [x] Deploy to Cloudflare Pages
-- [x] Demo notice, credentials disclaimer, curl instructions
-- [x] Setup script + hash param credential auto-population
+- [x] Scaffold SPA + bun bundler + Claude API
+- [x] Deploy Cloudflare Worker proxy + Pages
+- [x] Setup script + hash param onboarding
 - [x] Fix history.replaceState shadow bug
+- [x] Fix Ctrl+Enter newline insertion
 - [ ] Add CNAME for `agent-doc.briantakita.me` (Cloudflare dashboard)
 - [ ] Demo script for Bob call
-- [ ] (deferred) Proper OAuth flow, Yjs CRDT, WebSocket sync, Ragie, MCP
+- [ ] (deferred) OAuth flow, Yjs CRDT, WebSocket sync, Ragie, MCP
 <!-- /agent:pending -->

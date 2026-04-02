@@ -1551,7 +1551,7 @@ What was in the Library?
 ```
 
 How can we access the ragie se
-### Re: Blog posts uploaded to Ragie (HEAD)
+### Re: Blog posts uploaded to Ragie
 
 **All 18 briantakita.me blog posts uploaded** to Ragie with metadata `{"source": "briantakita.me", "type": "blog_post"}`.
 
@@ -1563,7 +1563,7 @@ How can we access the ragie se
 **Documents will be searchable once processing completes** (usually a few minutes). After that, the agent-doc-js SPA will automatically retrieve relevant blog post content when you submit.
 
 **Test search:** Currently returning 0 chunks (still processing). Will be populated soon.
-<!-- agent:boundary:1d303cfc -->
+<!-- agent:boundary:972ffabe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

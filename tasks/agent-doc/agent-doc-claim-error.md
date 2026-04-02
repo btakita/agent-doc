@@ -15,6 +15,7 @@ Sync auto-start bug fixed. Unclaimed files no longer spawn sessions on tab navig
 
 <!-- agent:exchange patch=append -->
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/4674cbdd322fce519fe66718682225f86b088adb9a6e63aa6f5df754c59a4ef1-20260402-030850.md`*
+<!-- agent:boundary:1eb3f555 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

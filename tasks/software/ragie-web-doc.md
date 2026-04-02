@@ -1663,10 +1663,10 @@ Toolbar now: `[Haiku 4.5 v] [Submit] [Reset] [Settings]`
 - Terminal logs "Document reset to default"
 
 Deployed.
-### Re: Acknowledged (HEAD)
+### Re: Acknowledged
 
 Reset button is already in place. Anything else for the demo?
-<!-- agent:boundary:46a060c5 -->
+<!-- agent:boundary:86aacca9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

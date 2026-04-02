@@ -612,7 +612,7 @@ Perhaps we should target single user documents until multi-user security is figu
 We can have read only viewing for now.
 Perhaps participants can chat or suggest prompts.
 Let's see if we can have a quick prototype by the time we meet with Bob in the morning.
-### Re: MVP prototype — single-user + read-only viewers + chat (HEAD)
+### Re: MVP prototype — single-user + read-only viewers + chat
 
 Good call — scoping to single-user with read-only viewing removes the entire multi-user injection surface and lets us ship fast.
 
@@ -676,7 +676,7 @@ You (JetBrains/CLI)                    Bob (browser)
 | 5 | 10min | Polish for demo |
 
 Want me to start building?
-<!-- agent:boundary:09be31b2 -->
+<!-- agent:boundary:1e3cc107 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

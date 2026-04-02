@@ -397,6 +397,7 @@ The SKILL.md should be updated to pass `--origin skill` in the write command. I'
 Why would the skill vs watch vs stream watch?
 Why would multiple of these sources write to the document?
 Should we have an IPC funnel/queue for the writes?
+Note that the duplicate response patch happened again in corky.md
 ### Re: Why multiple writers exist + IPC funnel
 
 **Why each writer exists:**
@@ -420,16 +421,25 @@ Yes, this is the right design direction. All writes should go through a single s
 The IPC write path (`try_ipc` → plugin Document API) is already a single channel. The issue is the disk fallback path — when IPC times out, writes go directly to disk without coordination.
 
 This is a significant architectural change. For now, the `--origin` flag + drift warning give visibility into when it happens. The queue design should be a v0.32 feature.
-<!-- agent:boundary:a93c2be8 -->
+### Re: Duplicate happened again — drift warning caught it (HEAD)
+
+Ran `agent-doc dedupe` — removed duplicate `### Re: Implementing Threading Fixes` (952 bytes).
+
+The drift warning worked: `drift_warning file=corky.md drift=919 snap_len=84399 file_len=85318`. No `write_origin` was logged, confirming the write came from a path without `--origin` — likely the watch daemon's `run::run()` path or a direct `agent-doc write` without the flag.
+
+The IPC write funnel is becoming urgent. The current architecture allows concurrent writes from multiple processes to the same file without coordination, leading to lost snapshot updates and duplicate responses.
+
+For an immediate mitigation: the watch daemon should skip files that have an active agent-doc session running (check if the registered pane is busy). This would prevent the watch daemon from competing with the skill's writes.
+<!-- agent:boundary:b94a95b2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] All implementation complete for this session
-- [x] `agent-doc dedupe` command
-- [x] Write-origin tracing (`--origin` flag)
-- [x] Commit drift warning
-- [ ] IPC write funnel/queue (v0.32 feature)
+- [x] All implementation complete
+- [x] `agent-doc dedupe` command (used twice now)
+- [x] Write-origin tracing + drift warning
+- [ ] Immediate: watch daemon should skip files with active sessions
+- [ ] IPC write funnel/queue (v0.32)
 - [ ] Update SKILL.md to pass `--origin skill`
 <!-- /agent:pending -->

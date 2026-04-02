@@ -277,7 +277,25 @@ The snapshot wasn't updated after the first response write. The file grew from 8
 This is a snapshot update failure — the `agent-doc write` or `agent-doc commit` didn't save the updated snapshot. I don't know the exact cause without more investigation. Speculation: it could be the stale baseline detection (`baseline_file` mismatch) causing the snapshot to be saved with old content instead of new content.
 
 This is a different bug from what we fixed in this session. Should I investigate the snapshot update failure now, or track it for a future session?
-<!-- agent:boundary:9d120d14 -->
+Investigate
+### Re: Duplicate response root cause (HEAD)
+
+**Timeline:**
+1. `00:44:44` — Last successful write+commit. snap=80404, file=80405 (1 byte boundary diff). Correct.
+2. **~14 hour gap** — no ops log entries for corky.md
+3. `14:40:36` — Preflight commit: snap=80404, file=82104. The file grew by 1700 bytes but **no write event was logged** between events 1 and 2.
+
+**Key finding:** The 1700 bytes appeared in the file without any `ipc_write_consumed` or `snapshot_save` event. This means the response was written to the file **outside the `agent-doc write` pipeline** — either:
+- The skill used the Edit tool or direct file write instead of `agent-doc write`
+- The `agent-doc write` command exited with code 75 (IPC timeout) and the skill fell back to a method that doesn't update the snapshot
+- A different Claude session wrote to the file
+
+Without access to the corky session's terminal history, I can't determine which path was taken. The write pipeline's invariant is: `agent-doc write` always updates the snapshot. If the snapshot wasn't updated, the write didn't go through the pipeline.
+
+**Mitigation:** The `agent-doc commit` should detect when `file_len >> snap_len` (significant drift) and log a warning like `[commit] WARNING: file is N bytes larger than snapshot — possible out-of-band write`. This would make these incidents visible immediately rather than silently duplicating responses.
+
+Should I add that warning?
+<!-- agent:boundary:1367405a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -285,6 +303,6 @@ This is a different bug from what we fixed in this session. Should I investigate
 <!-- agent:pending patch=replace -->
 - [x] All implementation, tests, audit docs complete
 - [x] Single-char truncation fix
-- [ ] Investigate snapshot update failure causing duplicate responses (corky.md)
+- [ ] Add commit warning when file significantly drifts from snapshot
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

@@ -2036,7 +2036,7 @@ Context from bob-remeika.md:
 Implement option 3: Worker falls back to env secret when no client API key. Make API key optional in UI when proxy is configured.
 
 Would Claude Oauth work in this case?
-### Re: Server-side credentials + Claude OAuth (HEAD)
+### Re: Server-side credentials + Claude OAuth
 
 **Implemented: Worker env secret fallback**
 
@@ -2056,7 +2056,7 @@ Anthropic doesn't offer OAuth for API access yet. The current options are:
 The server-side key approach we just implemented is the right solution. The worker holds the long-lived API key, the browser only needs the proxy URL, and key rotation is a single `wrangler secret put` command.
 
 The demo should now be always-ready — no credential setup needed for Bob or anyone else.
-<!-- agent:boundary:eee2cef0 -->
+<!-- agent:boundary:a2e3df26 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -190,7 +190,7 @@ Fixed 3 issues:
 3. **Tailwind CSS syntax:** Changed `@import "tailwindcss"` to `@tailwind base; @tailwind components; @tailwind utilities;` (Tailwind v4 `@import` not compatible with this esbuild plugin chain)
 
 Dev server now starts successfully on port 4200.
-### Re: Page tests added (HEAD)
+### Re: Page tests added
 
 31 tests across 5 test suites, all passing (31ms):
 
@@ -201,7 +201,7 @@ Dev server now starts successfully on port 4200.
 - **Layout components** (9 tests) -- header nav links, contact bar, mobile menu toggle, footer headquarters/fax/licenses/social links/copyright
 
 Run with `cd app/equityfundingsource && bun test`
-<!-- agent:boundary:e39bb483 -->
+<!-- agent:boundary:3d3ae95e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

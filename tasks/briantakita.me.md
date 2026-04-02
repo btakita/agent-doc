@@ -844,14 +844,14 @@ Found the draft at `mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-inte
 
 This ties the blog post to the LIGER conversation naturally. Want me to apply this edit to the draft?
 Yes
-### Re: Draft updated (HEAD)
+### Re: Draft updated
 
 Added the blog post paragraph to the Josh Malloy draft at `mail/drafts/2026-03-31-re-interview-follow-up-agent-doc-interactive-document-genera.md`. Inserted after the links section, before the security model paragraph.
 
 The draft says "yesterday" for the interview (March 31st) which is correct for sending today (April 1st). If you send tomorrow, change it to "Monday."
 
 Ready to push to Gmail Drafts via corky, or review the full draft first?
-<!-- agent:boundary:6151fddc -->
+<!-- agent:boundary:c1d83b3d -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

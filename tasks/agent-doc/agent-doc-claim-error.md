@@ -17,7 +17,7 @@ Sync auto-start bug fixed. Unclaimed files no longer spawn sessions on tab navig
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/4674cbdd322fce519fe66718682225f86b088adb9a6e63aa6f5df754c59a4ef1-20260402-030850.md`*
 
 The JB editor is very laggy with typing. Please look in the logs.
-### Re: Editor lag — Tailwind CSS LSP is the culprit (HEAD)
+### Re: Editor lag — Tailwind CSS LSP is the culprit
 
 The IDEA log shows the **Tailwind CSS language service** sending `textDocument/didChange` for every single keystroke, with the **entire file content** (~180KB) in each message. Every character you type triggers a 180KB JSON payload to the Tailwind CSS LSP.
 
@@ -29,7 +29,7 @@ This is not an agent-doc issue — it's the Tailwind CSS IntelliJ plugin process
 3. **Disable the Tailwind CSS plugin entirely** (Settings → Plugins → search "Tailwind" → disable)
 
 Option 1 is the least disruptive — agent-doc documents don't use Tailwind CSS.
-<!-- agent:boundary:a369629d -->
+<!-- agent:boundary:a6e03010 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

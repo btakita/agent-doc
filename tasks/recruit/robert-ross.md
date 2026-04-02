@@ -141,6 +141,8 @@ Note: the previous version was already sent directly (I jumped the gun on "S" be
 You did 2 thing wrong.
 First, you just sent it when I asked you to save it as a draft.
 Second, it did not thread correctly.
+Draft a LinkedIn message here.
+Please do not send.
 ### Re: Two mistakes acknowledged
 
 You're right on both counts. I'm sorry.
@@ -158,15 +160,22 @@ You're right on both counts. I'm sorry.
 - Or I can implement the corky fix first, then resend
 
 What would you like to do?
-<!-- agent:boundary:4cd25aa6 -->
+### Re: LinkedIn message draft (HEAD)
+
+Draft LinkedIn message for Rob Ross:
+
+> Hi Rob, I sent you an email reply about meeting Thursday but it may not have threaded with your original message. Just wanted to make sure you saw it — I'm open to whenever works for you on Thursday. Looking forward to chatting about Dreamable.
+
+Ready for your review. Edit as needed, then you can send it manually from LinkedIn.
+<!-- agent:boundary:22f3fedb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Reply to Rob — either via Gmail web UI or after corky fix
-- Corky fix: add `threadId` to Gmail API request body for proper threading
-- Corky fix: add `thread_id` field to draft YAML metadata
+- Review and send LinkedIn message to Rob (drafted above, not sent)
+- Reply to Rob via Gmail web UI (for proper threading)
 - Delete the unthreaded sent emails from Gmail
+- Corky fix: add `threadId` to Gmail API request body for proper threading
 - Prep talking points for Dreamable call (agent experience, AI agent thesis alignment)
 <!-- /agent:pending -->

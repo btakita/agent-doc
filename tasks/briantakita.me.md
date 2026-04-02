@@ -1006,7 +1006,7 @@ I like A. But the blog post does not solve problem. Only says agent-doc assumes 
 We are working on a collaborative security model.
 
 Should A be tweaked to reflect this?
-### Re: Tweaking A for honesty (HEAD)
+### Re: Tweaking A for honesty
 
 Yes — A should signal this is a problem being surfaced, not solved. Tweaks:
 
@@ -1020,7 +1020,7 @@ Yes — A should signal this is a problem being surfaced, not solved. Tweaks:
 "Your AI agent trusts the document it's reading. What happens when someone else writes part of it? Right now, the answer is: keep the repo private."
 
 Recommendation: **A2** — keeps the hook, positions the post as discovery not solution, avoids overpromising. The "collaborative security model in development" note fits naturally in the body of the teaser.
-<!-- agent:boundary:bad90546 -->
+<!-- agent:boundary:7cd608cf -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

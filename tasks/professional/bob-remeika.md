@@ -1566,19 +1566,43 @@ Please reduce margins. Use a similar template as tasks/recruit/lmi.md
 Regenerated with 0.4in margins, 10pt font, compact spacing: [file:///home/brian/work/btakita/agent-loop/tmp/bob-remeika-call-structure.pdf](file:///home/brian/work/btakita/agent-loop/tmp/bob-remeika-call-structure.pdf)
 
 Uses the same reference-card style as the LMI prep doc — bold section headers, tight bullet points, all on one page.
-<!-- agent:boundary:8e70b330 -->
+
+I'm not being clear with communicating my roadmap. Please assist with a draft
+### Re: Roadmap draft for the Bob call (HEAD)
+
+Here's a clear roadmap narrative — "what exists → what's next → where Ragie fits":
+
+**What's live today:**
+- **Corky** (Rust CLI) — correspondence toolkit with email, calendar, transcription, YouTube, doc management. Already has `corky ragie push/sync/search` commands for cloud document indexing.
+- **agent-doc** — interactive document sessions (JetBrains plugin + CLI). Real-time AI collaboration with git gutter feedback. Powers all project tracking and client correspondence.
+- **agent-doc-js** — browser version at agent-doc-js.pages.dev. Ragie retrieval built in. No developer setup for end users.
+
+**Active client integrations:**
+- **EFS (Equity Funding Source)** — commercial RE broker. Full website rebuilt and deployed. Building a 4-tier document intake pipeline: WAF → Workers AI classification → Claude API review → Ragie Parse indexing. Loan applications, appraisals, compliance docs. Ragie Parse handles the heavy lifting on approved documents, but need content validation *before* indexing (the question for you).
+- **Patent mining** — client manually searches USPTO design patents. Building semantic retrieval over unstructured technical documents to automate lead generation. Another Ragie indexing use case.
+
+**Where Ragie fits in the stack:**
+- Ragie is the **shared/collaborative retrieval layer**. Local hybrid search for personal workflow; anything multi-user or client-facing goes through Ragie.
+- Corky already integrates. agent-doc-js already integrates. EFS pipeline designed around Ragie Parse as terminal indexing step.
+- Not just consuming the API — building integration tooling and bringing real clients with real document workflows.
+
+**What I want to discuss:**
+- Content validation before indexing — customer's job, or Ragie building toward it?
+- Multi-tenant isolation for these client use cases
+- Whether there's a collaboration path beyond just being a customer
+<!-- agent:boundary:771e647a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [done] Create 1-page call structure PDF (reduced margins, LMI-style)
+- [done] Draft roadmap narrative for Bob call
+- [done] Create 1-page call structure PDF
+- [done] Draft pre-call message for Bob
 - Prep JB plugin demo environment for Bob call (today)
 - Prep EFS Tier 0-3 architecture walkthrough for Bob call
-- Prep Judith (EFS) and Ron (patent) talking points for the call
-- [done] Draft pre-call message for Bob
-- [stretch] Polish ragie-web-doc demo for Bob call (tasks/software/ragie-web-doc.md)
+- [stretch] Polish ragie-web-doc demo for Bob call
 - Schedule Robert Ross call at 4:00 PM ET / 1:00 PM PT Thursday
-- Post-call follow-up: share security post (briantakita.me/posts/agent-security-multiuser-lessons/) with Bob
-- Discuss EFS document pipeline: Ragie Parse for indexing approved loan docs, but need Tier 1-2 validation before indexing
+- Post-call follow-up: share security post + agent-doc-js link with Bob
+- Discuss EFS document pipeline with Bob: Ragie Parse for indexing, Tier 1-2 validation before indexing
 <!-- /agent:pending -->

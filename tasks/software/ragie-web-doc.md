@@ -708,7 +708,7 @@ I want Bob to try it out.
 The web flow is an easy way to test it.
 Perhaps we could have an easy way to do this on a webpage with MCP connections, so Bob doesn't need to install agent-doc.
 I have not tested an from scratch install and I have not tested in different editors.
-### Re: Hands-on access for Bob — web + MCP is the path (HEAD)
+### Re: Hands-on access for Bob — web + MCP is the path
 
 **You're right — "try it" requires zero-install access.** Screenshare is watching. Bob interacting with a live document is experiencing the product. That's a fundamentally different demo.
 
@@ -751,7 +751,7 @@ Bob's browser                          Your machine
 The MCP server is actually simpler than the web UI — it's just a stdio server wrapping `agent-doc preflight` + a suggestion queue. Bob's Claude Code does the rendering.
 
 Want me to start with the MCP server (simpler, lets Bob use his own Claude Code) or the web view (visual, more impressive)?
-<!-- agent:boundary:841c9ce0 -->
+<!-- agent:boundary:9e4145b1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

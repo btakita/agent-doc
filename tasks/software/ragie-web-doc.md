@@ -1897,7 +1897,7 @@ Let's do it. When a response patch comes in, the focus should remain in the same
 Remember to click "Reset SKILL.md to Default" in Settings then Save to pick up this change.
 
 Deployed.
-### Re: Smart update — cursor stays in place (HEAD)
+### Re: Smart update — cursor stays in place
 
 Implemented. Response patches now use `diffLines` to compute minimal changes instead of replacing the entire document.
 
@@ -1912,7 +1912,7 @@ Implemented. Response patches now use `diffLines` to compute minimal changes ins
 Note: I didn't use Yjs for this. The `diffLines`-based approach is simpler and sufficient for single-user editing with async response patching. Yjs would be needed for true multi-user concurrent editing (future feature with WebSocket sync).
 
 Deployed.
-<!-- agent:boundary:892210a7 -->
+<!-- agent:boundary:4c5d9cdf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

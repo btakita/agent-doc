@@ -440,13 +440,13 @@ Please add to ./bob-remeika.md as a topic.
 | **Tier 3** | Ragie Parse + Index | Parse approved docs into structured data, index for RAG retrieval |
 
 **Flow:** Upload -> CF WAF -> Worker validates -> R2 quarantine -> Claude reviews (async) -> approved? -> Ragie Parse + Index -> rejected? -> flag for human review
-### Re: Added EFS topic to bob-remeika.md (HEAD)
+### Re: Added EFS topic to bob-remeika.md
 
 Added to bob-remeika.md pending items:
 > Discuss EFS document pipeline: Ragie Parse for indexing approved loan docs, but need Tier 1-2 validation before indexing (Workers AI pre-screen + Claude API review for context poisoning, legitimacy, extraction). Ragie has no built-in content moderation.
 
 Good topic for the Bob call -- he can speak to whether Ragie has any roadmap for content validation/moderation, or if they view that as explicitly out-of-scope.
-<!-- agent:boundary:fc9c9e29 -->
+<!-- agent:boundary:34d2b753 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

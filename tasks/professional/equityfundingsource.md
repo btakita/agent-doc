@@ -478,6 +478,7 @@ Implement. See tasks/professor/judith-krug.md:
 
 continue:
 - [ ] Create D1 database and run migration (`wrangler d1 create equityfundingsource`)
+
 ### Re: Create D1 database
 
 **Blocker:** `wrangler d1 create equityfundingsource` failed with authentication error (code 10000). Your OAuth token has d1 write permissions but the API request was rejected. Likely a stale token.
@@ -493,7 +494,32 @@ After creating the database, update the `database_id` in `wrangler.toml` with th
 ```bash
 npx wrangler d1 migrations apply equityfundingsource
 ```
-<!-- agent:boundary:aa11e6cf -->
+
+```
+~/work/btakita/agent-loop/src/equityfundingsource-dev main !7 ?1                                                                                                                                                                      16:05:52
+❯ bunx wrangler d1 create equityfundingsource
+ ⛅️ wrangler 4.80.0
+───────────────────
+✅ Successfully created DB 'equityfundingsource' in region ENAM
+Created your new D1 database.
+
+To access your new D1 Database in your Worker, add the following snippet to your configuration file:
+[[d1_databases]]
+binding = "equityfundingsource"
+database_name = "equityfundingsource"
+database_id = "280e1539-b940-4c59-8988-fbed63c12ac0"
+```
+### Re: D1 database created + migration applied (HEAD)
+
+Updated `wrangler.toml` with database ID `280e1539-b940-4c59-8988-fbed63c12ac0`.
+
+Migration `0001_create_tables.sql` applied to remote D1 (4 commands, 0.48ms):
+- `applications` table
+- `contacts` table
+- `uploaded_documents` table
+
+54 tests passing. Ready to redeploy with form backend.
+<!-- agent:boundary:f060ad58 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -504,7 +530,7 @@ npx wrangler d1 migrations apply equityfundingsource
 - [x] Add EFS document pipeline topic to bob-remeika.md
 - [x] Wire up form submission backend (Apply Now + Contact) -- D1 + R2, 54 tests passing
 - [x] Review and send proposal email to Judith from Gmail -- pushed to Drafts
-- [ ] Create D1 database and run migration -- **blocked: wrangler auth expired, need `npx wrangler login`**
+- [x] Create D1 database and run migration -- database_id: 280e1539-b940-4c59-8988-fbed63c12ac0
 - [ ] Redeploy to Cloudflare Pages with form backend
 - [ ] Form submission pipeline
   - [ ] Tier 0: Cloudflare WAF + upload limits

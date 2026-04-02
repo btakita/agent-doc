@@ -577,7 +577,7 @@ Removed Robert Waldman from CC. Updated draft pushed to Gmail Drafts:
 Update the draft. Mention that her equityfundingsource online presence has some issue.
 Use a google search to verify.
 Let her know that I can clean up her SEO and agent search presence as well.
-### Re: Email updated with online presence issues (HEAD)
+### Re: Email updated with online presence issues
 
 Searched Google for Judith's online presence. Found a fragmented mess:
 
@@ -595,7 +595,7 @@ Updated the proposal email with:
 3. Added "online presence cleanup" to the "included in all options" list
 
 Draft re-pushed to Gmail Drafts.
-<!-- agent:boundary:abe0c9bd -->
+<!-- agent:boundary:8475ca48 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

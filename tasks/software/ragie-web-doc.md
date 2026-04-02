@@ -1383,7 +1383,7 @@ Added visual feedback when submitting:
 Deployed to Cloudflare Pages.
 
 Still getting 429 with Haiku selected.
-### Re: 429 with Haiku — likely stale Sonnet in localStorage (HEAD)
+### Re: 429 with Haiku — likely stale Sonnet in localStorage
 
 Haiku works from server-side curl. The issue is your browser's localStorage on the deployed site still has `claude-sonnet-4-6` from the earlier `setup.sh` run (which hardcoded Sonnet).
 
@@ -1400,7 +1400,7 @@ Haiku works from server-side curl. The issue is your browser's localStorage on t
 Or re-run: `curl -s https://agent-doc-js.pages.dev/setup.sh | sh`
 
 Deployed to Cloudflare Pages.
-<!-- agent:boundary:56a062c5 -->
+<!-- agent:boundary:23bb3778 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

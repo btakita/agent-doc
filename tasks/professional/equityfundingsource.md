@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Dev server running. 31 tests passing. Assets downloaded. Cloudflare deployment configured.
+Dark theme matching live site. CSS fixed. 31 tests passing. Ready for deployment.
 <!-- /agent:status -->
 
 ## Exchange
@@ -201,7 +201,29 @@ Dev server now starts successfully on port 4200.
 - **Layout components** (9 tests) -- header nav links, contact bar, mobile menu toggle, footer headquarters/fax/licenses/social links/copyright
 
 Run with `cd app/equityfundingsource && bun test`
-<!-- agent:boundary:3d3ae95e -->
+
+CSS not working.
+Please use chromium-bridge to compare localhost:4200 with equityfundingnow.com page by page...element by element.
+Find close to parity. While keeping simplified tailwind classes.
+### Re: CSS fix + dark theme matching equityfundingnow.com (HEAD)
+
+**Fixed CSS loading:** The core issue was that rhonojs builds CSS/JS with hashed filenames (e.g., `index.server-LAPOVN5K_H5XS5X56.css`) but the layout template hardcoded `/index.css`. Created an asset resolver that reads the `dist/browser--dev/` directory at request time to find the correct hashed filenames.
+
+**Redesigned to match live site:**
+
+Compared localhost:4200 vs equityfundingnow.com using headless Chromium screenshots. Updated all components:
+
+- **Color scheme:** Dark backgrounds (#111/#1a1a1a), green accent (#7ed957) -- matches live site
+- **Hero:** Split layout (text left, property image right) -- matches live site
+- **Header:** Social icons top bar + "Contact us now" bar with phone/email icons -- matches live site
+- **Investor section:** Image-text split with property collage -- matches live site
+- **"We Offer" cards:** Green-bordered circular icons on dark background -- matches live site
+- **Funded Deals:** Dark cards with green heading, property images -- matches live site
+- **About page:** Alternating image-text sections, "Quick & Easy Funding" bullets -- matches live site
+- **Footer:** Dark card background with "Contact Info" heading -- matches live site
+
+All 31 tests updated and passing.
+<!-- agent:boundary:9c91f19b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -216,6 +238,8 @@ Run with `cd app/equityfundingsource && bun test`
 - [x] Configure Cloudflare Workers + R2 deployment
 - [x] bun install + verify dev server runs (port 4200)
 - [x] Add page tests (31 tests, all passing)
+- [x] Fix CSS loading (hashed asset URLs)
+- [x] Dark theme + layout matching equityfundingnow.com
 - [ ] Create R2 bucket + upload assets
 - [ ] Build Apply Now page (form or Google Forms link)
 - [ ] Build Message Us / Contact page

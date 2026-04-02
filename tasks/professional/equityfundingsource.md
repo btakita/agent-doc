@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Assets downloaded (32 images). R2 + Cloudflare Workers configured. Ready for bun install + deploy.
+Dev server running on port 4200. Assets downloaded. Cloudflare deployment configured.
 <!-- /agent:status -->
 
 ## Exchange
@@ -166,7 +166,29 @@ Download the assets from the live site. Let's gitignore the assets. Will use R2 
 2. Upload assets: `make assets-upload`
 3. Point DNS: `equityfundingsource.com` CNAME to Cloudflare
 4. `make deploy`
-<!-- agent:boundary:c214d7bc -->
+
+Cannot run locally
+```
+~/work/btakita/agent-loop/src/equityfundingsource-dev main                                                                                                                                                                            22:25:12
+❯ bun run dev
+$ cd ./app/equityfundingsource && bun dev
+$ bun ./bin/dev.ts
+error: Cannot find module '@rappstack/domain--server/marked' from '/home/brian/work/btakita/agent-loop/src/equityfundingsource-dev/app/equityfundingsource/config/index.ts'
+
+Bun v1.3.10 (Linux x64)
+error: script "dev" exited with code 1
+error: script "dev" exited with code 1
+```
+### Re: Fix dev server startup (HEAD)
+
+Fixed 3 issues:
+
+1. **Bad import:** `@rappstack/domain--server/marked` doesn't exist. Replaced with proper `config__init()` using `rhonojs/server` context (port, cwd, src_path) -- same pattern as briantakita.me
+2. **Missing entry point:** Added `app/index.ts` with compression + static middleware (required by rhonojs build pipeline)
+3. **Tailwind CSS syntax:** Changed `@import "tailwindcss"` to `@tailwind base; @tailwind components; @tailwind utilities;` (Tailwind v4 `@import` not compatible with this esbuild plugin chain)
+
+Dev server now starts successfully on port 4200.
+<!-- agent:boundary:47a94dff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -177,11 +199,9 @@ Download the assets from the live site. Let's gitignore the assets. Will use R2 
 - [x] Scaffold rappstack project structure
 - [x] Crawl equityfundingnow.com for real content
 - [x] Update all page content from live site
-- [x] Download property images from equityfundingnow.com (32 files)
-- [x] Download Judith Krug headshot
+- [x] Download property images (32 files)
 - [x] Configure Cloudflare Workers + R2 deployment
-- [x] Gitignore assets, add upload/download scripts
-- [ ] bun install + verify dev server runs
+- [x] bun install + verify dev server runs (port 4200)
 - [ ] Create R2 bucket + upload assets
 - [ ] Build Apply Now page (form or Google Forms link)
 - [ ] Build Message Us / Contact page

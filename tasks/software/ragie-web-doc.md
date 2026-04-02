@@ -1316,7 +1316,7 @@ All local Claude Code sessions + the browser share the same OAuth token's Sonnet
 3. Wait for the Sonnet rate limit window to reset
 
 Sonnet is not near usage limits. See /usage.
-### Re: Sonnet not near usage limits (HEAD)
+### Re: Sonnet not near usage limits
 
 You're right — the /usage dashboard shows overall quota, but the 429 is a **per-minute burst limit**, not daily quota. The `x-should-retry: true` header confirms it's transient.
 
@@ -1328,7 +1328,7 @@ With 16+ Claude processes running concurrently, the per-minute Sonnet rate is sa
 - Use **Haiku** (separate per-minute limits, not saturated)
 - Or reduce active Claude Code sessions before demoing with Sonnet
 - Proxy now retries automatically — if Sonnet has brief availability windows, it'll catch them
-<!-- agent:boundary:e3e0bc44 -->
+<!-- agent:boundary:0bd58d2a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

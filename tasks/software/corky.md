@@ -1317,7 +1317,7 @@ For a phone with 128 GB storage, 37 MB per hour-long call is very manageable (~3
 WAV is overkill for phone recordings -- it's lossless but the phone mic/codec doesn't capture enough detail to justify the 20x size increase.
 
 amr seems ok. Is there something in between amr and m4a ~64kbs? Is there a 24 or 32 kbps?
-### Re: Lower bitrate options (HEAD)
+### Re: Lower bitrate options
 
 Yes, there are options between AMR (12 kbps) and M4A 64 kbps:
 
@@ -1338,7 +1338,7 @@ Yes, there are options between AMR (12 kbps) and M4A 64 kbps:
 3. **AMR-WB** (wideband) -- If Cube ACR offers it, this doubles the sample rate to 16 kHz at ~24 kbps. Same file size category as AMR-NB but much better for whisper (which resamples to 16 kHz anyway).
 
 **My recommendation:** Try **OGG/Opus** in Cube ACR settings. It's the best codec for speech at low bitrates, and 24-32 kbps Opus should give you much better transcription/diarization quality at only 2x the AMR file size.
-<!-- agent:boundary:e401d8d9 -->
+<!-- agent:boundary:7119beff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

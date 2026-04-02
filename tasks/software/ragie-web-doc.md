@@ -1861,7 +1861,7 @@ Should we have an article about the differences?
 Export now downloads the document content only, no terminal output appended. Clean `.md` file for sharing.
 
 Deployed.
-### Re: Disclaimer added + differences article idea (HEAD)
+### Re: Disclaimer added + differences article idea
 
 **Disclaimer added** to the Settings dialog: "This is a web demo of agent-doc. The full workstation version includes git integration, CRDT merge, IDE plugins, and Claude Code tool access."
 
@@ -1880,7 +1880,7 @@ Deployed.
 An article comparing them would be a good resource for the Bob meeting — shows the product roadmap from demo to production.
 
 Deployed.
-<!-- agent:boundary:663197a5 -->
+<!-- agent:boundary:2a2e9e19 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

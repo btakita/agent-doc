@@ -1406,152 +1406,46 @@ Absolutely. Bob would be well-positioned to discuss the security challenges sinc
 - **Content signing / provenance**... your 5-layer security architecture (instruction/data separation, deterministic processing, response-only mode, content signing, injection scanning) would be a substantive technical conversation, not just a sales pitch
 
 This actually strengthens the meeting framing: instead of just pitching use cases, you're having a peer-level technical discussion about shared security challenges in LLM-mediated document systems. That's the kind of conversation that turns a sales call into a partnership conversation.
-### Re: Scheduling with Bob
 
-Morning Pacific makes sense for Bob since he's Bay Area based (Ragie is SF). I'd suggest **10:00 AM PT / 1:00 PM ET** as a sweet spot... late enough that he's settled in, early enough that you're not competing with afternoon meetings. If that slot's taken, **11:00 AM PT / 2:00 PM ET** works too.
+I cleaned up the scheduling.
+Let's plan for the call with Bob in the morning.
+### Re: Bob Call Prep — Thursday April 3, 11:30 AM ET (HEAD)
 
-For Calendly, set the meeting for 30 minutes. In the invite description, something brief:
+Here's a focused prep plan for the 30-minute call:
 
-> "Catching up on agent-doc + Ragie integration. Have a couple client use cases to discuss plus some security architecture questions."
+**Call structure (30 min):**
 
-That gives him enough context to be interested without overloading the invite.
+| Time | Topic |
+|------|-------|
+| 0-5 min | Catch up. Grockit/Yammer nostalgia. "What's new at Ragie?" |
+| 5-12 min | JB plugin demo — live agent-doc session, gutter boundaries, tmux orchestration |
+| 12-20 min | Ragie integration pitch — where document retrieval fits in agent-doc |
+| 20-27 min | EFS document pipeline — Ragie Parse for loan docs, Tier 0-3 validation architecture, does Ragie have content moderation on their roadmap? |
+| 27-30 min | Next steps — collaboration, partnership, or working together |
 
-This is too early. I want 1PM Eastern but it scheduled me for 10AM Eastern.
-### Re: Calendly Time Fix
+**Key talking points:**
 
-My bad on the confusion. I suggested 10 AM PT which equals 1 PM ET... but if Calendly scheduled you for 10 AM ET, that's 7 AM PT, way too early for Bob. You'll want to reschedule the Calendly link to **1:00 PM ET / 10:00 AM PT** explicitly. Double-check the timezone setting in your Calendly event... it may be defaulting to Eastern when you need to set the target time in Eastern directly.
+1. **JB plugin demo** (your strongest asset) — show a live session, the gutter system, real-time agent collaboration. This is concrete and impressive.
 
-I rescheduled for 14:00 Eastern on Thursday.
-### Re: Thursday 2 PM ET Confirmed
+2. **Ragie Parse for EFS** — Judith's commercial real estate loan docs need OCR extraction (appraisals, applications, compliance docs). Ragie Parse handles the parsing, but you've designed a Tier 0-3 validation pipeline (WAF → Workers AI → Claude API → Ragie Parse) because web uploads need content moderation before indexing. Ask Bob: does Ragie have plans for content validation, or is that explicitly the customer's responsibility?
 
-2:00 PM ET / 11:00 AM PT on Thursday April 3. That works well... Bob's had his morning meetings and lunch, you're solidly in your afternoon. Good slot.
+3. **Security architecture** — your 5-layer model (instruction/data separation, deterministic processing, response-only mode, content signing, injection scanning). Bob deals with enterprise RAG customers who care deeply about this. Peer-level technical discussion, not a pitch.
 
-You've got two days to prep. The key items before the call:
-1. **JB plugin demo ready** (your strongest asset, already built)
-2. **Security architecture talking points** (prompt injection, data isolation, content signing)
-3. **Ragie Parse pitch** for Judith's loan docs and Ron's patent corpus
-4. **Web architecture walkthrough** (even without a live demo, the design doc works)
+4. **Collaboration angle** — you're bringing distribution (real clients with real document workflows) and deep technical integration, not just consuming the API. Frame as: "I have two vertical use cases ready to go (loan docs, patent corpus) and I'm building the integration tooling."
 
-I have to reschedule my call with bob-remeika again. My wife has a dentist appointment from 13:00 Eastern to around 15:00 Eastern. During that time I have to watch my daughter. Here are the available times on Thursday.
-
-10:00am
-10:30am
-11:00am
-11:30am
-12:00pm
-1:30pm
-Former Time
-2:00pm
-2:30pm
-3:00pm
-5:00pm
-5:30pm
-6:00pm
-6:30pm
-7:00pm
-7:30pm
-8:00pm
-8:30pm
-
-Note that I also want to schedule a call with robert-ross (tasks/recruit/robert-ross.md) between 12:00-16:00 Pacific (15:00-19:00 Eastern).
-
-Please help me strategically schedule a good time.
-### Re: Rescheduling Bob & Coordinating with Robert Ross
-
-**Constraints:**
-- You're unavailable 1:00-3:00 PM ET (watching daughter during dentist)
-- Bob is Bay Area (PT) -- morning PT is ideal for a CEO
-- Robert Ross call needs 12:00-4:00 PM PT (3:00-7:00 PM ET)
-
-**Recommendation: Bob at 12:00 PM ET / 9:00 AM PT**
-
-- **9 AM PT is a natural start-of-day for Bob** -- fresh, no competing meetings
-- **You're free at noon ET** -- 60 min buffer before childcare starts
-- **Avoids the too-early slots** (10-11 AM ET = 7-8 AM PT, not ideal for a CEO)
-- The former 2:00 PM ET slot falls right in your childcare window, so that's out
-
-**Robert Ross: 4:00 PM ET / 1:00 PM PT**
-
-- Squarely in his 12-4 PM PT window
-- Gives you recovery time after childcare ends (~3 PM ET)
-- 1 PM PT is the sweet spot the robert-ross doc already identified
-
-**Full Thursday schedule:**
-| Time (ET) | Time (PT) | Event |
-|-----------|-----------|-------|
-| 12:00 PM | 9:00 AM | Bob Remeika call (30 min) |
-| 1:00-3:00 PM | -- | Childcare |
-| 4:00 PM | 1:00 PM | Robert Ross call |
-
-Clean separation, no conflicts, respectful times for both Bay Area contacts. Want me to draft a reschedule message to Bob?
-
-Would 11:30 Eastern be better? I believe Bob has an appointments between 12:30 and 13:30. 
-### Re: 11:30 ET is better
-
-Yes, **11:30 AM ET / 8:30 AM PT** is the better call. If Bob has 12:30-1:30 PM ET blocked, a noon start would butt right up against it with no buffer. 11:30 gives:
-
-- **30 min buffer** for Bob before his 12:30 appointment
-- **90 min buffer** for you before childcare at 1:00 PM
-- 8:30 AM PT is early but reasonable for a CEO
-
-**Updated Thursday schedule:**
-
-| Time (ET) | Time (PT) | Event |
-|-----------|-----------|-------|
-| 11:30 AM | 8:30 AM | Bob Remeika call (30 min) |
-| 1:00-3:00 PM | -- | Childcare |
-| 4:00 PM | 1:00 PM | Robert Ross call |
-
-Want me to draft the reschedule message to Bob for the 11:30 AM ET slot?
-
-What should I put as my reason for change?
-Should I mention that my wife has a dentist appointment & I have to watch my daughter?
-Look at our history. Bob probably does not know I have a daughter...so this may be a low key way to introduce that info.
-### Re: Reschedule reason & the daughter reveal
-
-Good instinct. The dentist/daughter mention is the right call for a few reasons:
-
-1. **It's honest and specific** -- vague "scheduling conflict" reads as dodgy when you're rescheduling a second time. A concrete reason builds trust.
-2. **Natural daughter introduction** -- if Bob doesn't know you have a daughter, this is the perfect low-key reveal. It lands as context, not an announcement.
-3. **It humanizes the reschedule** -- "I'm on dad duty" is universally relatable and actually makes you more likable, not less professional.
-
-**Suggested Calendly reschedule message:**
-
-> Hey Bob, need to move our Thursday call -- my wife has a dentist appointment that afternoon and I'm on daughter duty. Would 11:30 AM ET / 8:30 AM PT work for you instead? Apologies for the shuffle.
-
-**Why this works:**
-- "daughter duty" is warm and casual -- not "I have a child" (too formal) or "watching my kid" (too detached)
-- One sentence of reason, one sentence of new time, one sentence of acknowledgment
-- No over-apologizing -- you're rescheduling by 2.5 hours, not canceling
-- Bob likely responds with something like "no worries, I have kids too" or "didn't know you had a daughter!" -- either way, it opens a personal connection before a business call
-
-Want me to adjust the tone or wording?
-
-Here is the UI. Adjust wording accordingly...I think Calendly send this change to Bob with my reason.
-![img.png](img.png)
-### Re: Calendly reschedule reason
-
-I can see the Calendly UI -- the "Reason for change" field gets sent directly to Bob. Keep it short and natural:
-
-**Suggested text for the field:**
-
-> Family scheduling conflict -- on daughter duty while my wife's at a dentist appointment. Apologies for the shuffle!
-
-This works for the Calendly format because:
-- Short enough for the text field
-- "daughter duty" is the natural reveal
-- Light tone ("shuffle" not "inconvenience")
-- The existing meeting description already covers the agenda
-
-**One flag:** The UI shows **Thursday, April 2** but today (Tuesday) is April 1, making Thursday = April 3. Double-check the date before hitting "Update Event."
-<!-- agent:boundary:624a579b -->
+**What to prep before the call:**
+- JB plugin demo environment ready (clean session, good example doc)
+- EFS Tier 0-3 architecture diagram or doc walkthrough ready
+- Ragie Parse questions written down (content moderation roadmap, multi-tenant isolation, enterprise pricing)
+<!-- agent:boundary:24190704 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send Calendly reschedule to Bob (11:30 AM ET Thursday -- verify date is April 3)
+- Prep JB plugin demo environment for Bob call (Thursday April 3, 11:30 AM ET)
+- Prep EFS Tier 0-3 architecture walkthrough for Bob call
+- Write Ragie Parse questions (content moderation roadmap, multi-tenant isolation, pricing)
 - Schedule Robert Ross call at 4:00 PM ET / 1:00 PM PT Thursday
-- Prep talking points for Bob call (JB plugin demo, security architecture, Ragie Parse pitch)
-- Prep talking points for Dreamable/Robert Ross call
+- Discuss EFS document pipeline: Ragie Parse for indexing approved loan docs, but need Tier 1-2 validation before indexing (Workers AI pre-screen + Claude API review for context poisoning, legitimacy, extraction). Ragie has no built-in content moderation. See tasks/professional/equityfundingsource.md
 <!-- /agent:pending -->

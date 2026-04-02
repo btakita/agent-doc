@@ -6,6 +6,7 @@ links:
   - ./judith-krug.md
   - ./robert-waldman.md
   - ../personal/robert-ward.md
+  - ./bob-remeika.md
 ---
 
 ## Status
@@ -426,6 +427,9 @@ Based on the Ragie Parse page, **Ragie alone is NOT sufficient for qualifying up
 - No adversarial content / prompt injection detection
 - No legitimacy verification
 
+We should talk to bob-remeika about this.
+Please add to ./bob-remeika.md as a topic.
+
 **You still need Tier 1 + Tier 2.** Ragie is the knowledge base, not the gatekeeper:
 
 | Layer | Tool | Purpose |
@@ -436,7 +440,13 @@ Based on the Ragie Parse page, **Ragie alone is NOT sufficient for qualifying up
 | **Tier 3** | Ragie Parse + Index | Parse approved docs into structured data, index for RAG retrieval |
 
 **Flow:** Upload -> CF WAF -> Worker validates -> R2 quarantine -> Claude reviews (async) -> approved? -> Ragie Parse + Index -> rejected? -> flag for human review
-<!-- agent:boundary:42ec7d32 -->
+### Re: Added EFS topic to bob-remeika.md (HEAD)
+
+Added to bob-remeika.md pending items:
+> Discuss EFS document pipeline: Ragie Parse for indexing approved loan docs, but need Tier 1-2 validation before indexing (Workers AI pre-screen + Claude API review for context poisoning, legitimacy, extraction). Ragie has no built-in content moderation.
+
+Good topic for the Bob call -- he can speak to whether Ragie has any roadmap for content validation/moderation, or if they view that as explicitly out-of-scope.
+<!-- agent:boundary:fc9c9e29 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -444,6 +454,7 @@ Based on the Ragie Parse page, **Ragie alone is NOT sufficient for qualifying up
 <!-- agent:pending patch=replace -->
 - [x] All pages built (25 total, 50 tests passing)
 - [x] Deploy to Cloudflare Pages (equityfundingsource.pages.dev)
+- [x] Add EFS document pipeline topic to bob-remeika.md
 - [ ] Form submission backend
   - [ ] Tier 0: Cloudflare WAF + upload limits
   - [ ] Tier 1: Workers AI pre-screening
@@ -455,4 +466,5 @@ Based on the Ragie Parse page, **Ragie alone is NOT sufficient for qualifying up
   - [ ] Admin dashboard (Cloudflare Access auth)
   - [ ] Token-based document upload flow
   - [ ] Notification emails
+- [ ] Discuss Ragie content validation with Bob Remeika (scheduled call)
 <!-- /agent:pending -->

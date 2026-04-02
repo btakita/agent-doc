@@ -686,7 +686,7 @@ Updated `mail/drafts/20260401-judith-proposal-options.md` — the "What's includ
 This signals two things: a real company (credibility) and a personal relationship with the CEO (trust + exclusivity). Robert Waldman will recognize this as a serious play.
 
 Please send the email to robert-ward...not judith-krug or robert-waldman...so robert-ward can look it over before sending it to judith-krug + robert-waldman.
-### Re: Send to Robert Ward first (HEAD)
+### Re: Send to Robert Ward first
 
 Done. Updated the draft (`mail/drafts/20260401-judith-proposal-options.md`):
 
@@ -697,7 +697,7 @@ Done. Updated the draft (`mail/drafts/20260401-judith-proposal-options.md`):
 - The full proposal body is preserved between the `---` dividers so Rob sees exactly what Judith would receive.
 
 Pushed to Gmail Drafts — check your drafts to review and send.
-<!-- agent:boundary:993dbe38 -->
+<!-- agent:boundary:0e23efe0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

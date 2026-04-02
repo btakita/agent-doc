@@ -1080,11 +1080,26 @@ Draft file updated at `mail/social/20260402-security-blog-linkedin.md`.
 2. Copy-paste from draft into LinkedIn web UI
 
 Which approach?
-<!-- agent:boundary:3d3e4f5f -->
+
+> The meta-lesson: the only way to debug a tool this complex is to dog-food it on itself. 292 commits chasing one cascade of bugs.
+
+292 commits was were mostly prompt + agent response patches commits. The 532 commits were mostly prompt + agent response patches.
+We should make this clear.
+### Re: Clarifying commit nature (HEAD)
+
+Updated the draft. Two changes:
+
+1. "532 conversation commits" and "Every interaction — prompt, response, test result — is a commit"
+2. "292 conversation commits — prompts, agent responses, test results — chasing one cascade of bugs"
+
+This makes clear these are conversation commits, not 292 code fixes. The "Every prompt and response committed to git" line in paragraph 1 sets the frame, and now the numbers reinforce it.
+
+Draft updated at `mail/social/20260402-security-blog-linkedin.md`.
+<!-- agent:boundary:8f9262f3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn teaser — draft finalized, ready to post
+- LinkedIn teaser — draft updated with commit clarifications, ready to post
 - LinkedIn OAuth — needs retry or manual paste
 - Search icon `w-full` fix — remove `w-full` from icon span in rappstack-dev
 - JSON-LD VideoObject enhancement — add BlogPosting wrapper, duration, publisher (optional)

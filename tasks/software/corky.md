@@ -1449,14 +1449,52 @@ Build: clippy clean, release build OK.
 - `--folder` option (upload to specific Drive folder)
 - Google Docs conversion (upload .md as native Google Doc)
 - Phase 3/4 (Docs read/write, Sheets read)
-<!-- agent:boundary:41cd2a83 -->
+Continue
+### Re: Phase 3 & 4 implemented (HEAD)
+
+All four phases complete. Clippy clean.
+
+**Phase 3: Google Docs read/write** (`src/doc/gdocs.rs`)
+
+```
+corky doc read <DOC_URL>                    # export Google Doc as text (stdout)
+corky doc read <DOC_URL> -o output.md       # export to file
+corky doc write <DOC_URL> content.md        # replace Doc content from markdown
+```
+
+- Read: exports via Drive API as HTML, strips to text
+- Write: uses Docs API batchUpdate (delete all + insertText)
+- Parses doc ID from full URL or bare ID
+
+**Phase 4: Google Sheets read** (`src/doc/sheets.rs`)
+
+```
+corky doc sheet <SHEET_URL>                        # read first sheet as markdown table
+corky doc sheet <SHEET_URL> --range "A1:D10"       # specific range
+corky doc sheet <SHEET_URL> --format csv           # CSV output
+corky doc sheet <SHEET_URL> -o data.csv --format csv
+```
+
+- Auto-detects first sheet name if no range given
+- Markdown table output with aligned columns
+- CSV output with proper quoting
+
+**OAuth scopes added:**
+- `drive.file` (upload)
+- `documents` (Docs read/write)
+- `spreadsheets.readonly` (Sheets read)
+
+**New files:** `gdocs.rs`, `sheets.rs`, `upload.rs` in `src/doc/`
+**No new dependencies** -- uses existing `ureq`, `serde_json`, basic HTML stripping
+
+Ready to commit and test. Need to add the scopes to the GCP console before first use.
+<!-- agent:boundary:9ca05c14 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Add `drive.file` scope to GCP console (user action)
-- Test `corky doc upload` with a real file
-- Phase 3: `corky doc read/write` (Docs API)
-- Phase 4: `corky sheet read` (Sheets API)
+- Commit Phase 3/4 to corky repo
+- Add Drive/Docs/Sheets scopes to GCP console (user action)
+- Test all commands with real Google Docs/Sheets
 <!-- /agent:pending -->

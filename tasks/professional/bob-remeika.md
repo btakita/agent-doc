@@ -1480,17 +1480,50 @@ Let him discover it on LinkedIn. Here's why:
 4. **Save it for the follow-up** — after the call, when you send a "great talking with you" message, include the link: "Here's the security architecture writeup I mentioned." Gives him a reason to re-engage post-call.
 
 **TL;DR:** Don't send it. Use it during the call as a live reference, then share in the follow-up.
-<!-- agent:boundary:abf67f51 -->
+
+We have a working agent-doc-js demo at https://agent-doc-js.pages.dev/
+See tasks/software/ragic-web-doc.md
+
+Please see...note this message was the weekend...5 days ago
+/home/brian/work/btakita/agent-loop/mail/contacts/bob-remeika/20260402-linkedin-bob-remeika.txt
+
+Please draft a message for Bob acknowledging what he said and in preperation for our call in 1 hour.
+### Re: Draft message for Bob before the call (HEAD)
+
+Here's a LinkedIn message for Bob:
+
+---
+
+Hey Bob — no worries on the contract gig, glad you got strong responses! That's a good sign for Ragie's pull.
+
+Looking forward to our call shortly. I've got a few things to show you:
+
+- A browser-based interactive document editor I built on top of Ragie's API (live at agent-doc-js.pages.dev) — uses your retrieval pipeline for context-aware document sessions
+- The JetBrains plugin side of the same system — real-time agent collaboration with git gutter feedback
+- Some thoughts on the security architecture for multi-user RAG deployments
+
+See you in a bit!
+
+---
+
+**Why this works:**
+- Acknowledges the contract news gracefully, no disappointment
+- Teases the Ragie integration — now he's curious to see his own API in action
+- Keeps it short — he'll see details on the call
+- The agent-doc-js demo is the headline since it directly uses Ragie
+
+Want me to adjust the tone or add/remove anything?
+<!-- agent:boundary:b3acdd02 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Prep JB plugin demo environment for Bob call (Thursday April 3, 11:30 AM ET)
+- Prep JB plugin demo environment for Bob call (today, ~1 hour)
 - Prep EFS Tier 0-3 architecture walkthrough for Bob call
 - Write Ragie Parse questions (content moderation roadmap, multi-tenant isolation, pricing)
-- Upload sample docs to Ragie free tier (patent proposal, loan doc sample, resume)
-- [stretch] Get ragie-web-doc demo working for Bob call (tasks/software/ragie-web-doc.md)
+- [done] Draft pre-call message for Bob
+- [stretch] Polish ragie-web-doc demo for Bob call (tasks/software/ragie-web-doc.md)
 - Schedule Robert Ross call at 4:00 PM ET / 1:00 PM PT Thursday
 - Post-call follow-up: share security post (briantakita.me/posts/agent-security-multiuser-lessons/) with Bob
 - Discuss EFS document pipeline: Ragie Parse for indexing approved loan docs, but need Tier 1-2 validation before indexing. See tasks/professional/equityfundingsource.md

@@ -449,7 +449,7 @@ This prevents the watch daemon from competing with the skill's writes, which was
 The `is_busy()` check uses the status file signal (`debounce.rs`), which is set during writes and clears after 30s of inactivity. This is the same mechanism the JetBrains plugin uses.
 
 Is the binary change installed?
-### Re: Binary is installed (HEAD)
+### Re: Binary is installed
 
 Yes. Both binaries are from 15:17 (the latest build with the watch daemon busy guard):
 - `~/.cargo/bin/agent-doc` — Apr 2 15:17
@@ -457,7 +457,7 @@ Yes. Both binaries are from 15:17 (the latest build with the watch daemon busy g
 - `.bin/agent-doc` symlinks to `target/release/agent-doc`
 
 The watch daemon needs to be restarted to pick up the new binary. Run `agent-doc watch --stop && agent-doc watch` or it will restart automatically on the next file change.
-<!-- agent:boundary:4ef00c64 -->
+<!-- agent:boundary:a31dc5a8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

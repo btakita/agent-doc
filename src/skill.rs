@@ -135,6 +135,7 @@ pub fn check() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_kit::detect::Environment;
 
     #[test]
     fn bundled_skill_is_not_empty() {
@@ -146,16 +147,26 @@ mod tests {
         assert!(BUNDLED_SKILL.contains("agent-doc"));
     }
 
-    /// Resolve expected skill path for the detected environment.
+    /// Use an explicit ClaudeCode environment for deterministic test paths.
+    /// Environment::detect() is non-deterministic in CI (depends on env vars).
+    fn test_config() -> SkillConfig {
+        SkillConfig::with_environment("agent-doc", BUNDLED_SKILL, VERSION, Environment::ClaudeCode)
+    }
+
+    /// Resolve expected skill path using the explicit test environment.
     fn expected_path(dir: &std::path::Path) -> std::path::PathBuf {
-        config().skill_path(Some(dir))
+        test_config().skill_path(Some(dir))
+    }
+
+    fn install_test(root: Option<&std::path::Path>) -> anyhow::Result<()> {
+        test_config().install(root)
     }
 
     #[test]
     fn install_creates_file() {
         let dir = tempfile::tempdir().unwrap();
 
-        install_at(Some(dir.path())).unwrap();
+        install_test(Some(dir.path())).unwrap();
 
         let path = expected_path(dir.path());
         assert!(path.exists(), "skill not found at {}", path.display());
@@ -167,8 +178,8 @@ mod tests {
     fn install_idempotent() {
         let dir = tempfile::tempdir().unwrap();
 
-        install_at(Some(dir.path())).unwrap();
-        install_at(Some(dir.path())).unwrap();
+        install_test(Some(dir.path())).unwrap();
+        install_test(Some(dir.path())).unwrap();
 
         let path = expected_path(dir.path());
         let content = std::fs::read_to_string(&path).unwrap();
@@ -191,7 +202,7 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "old content").unwrap();
 
-        install_at(Some(dir.path())).unwrap();
+        install_test(Some(dir.path())).unwrap();
 
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content, BUNDLED_SKILL);

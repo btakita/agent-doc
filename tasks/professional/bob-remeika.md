@@ -1592,7 +1592,7 @@ Will get back to Bob about the tenant. Bob agreed to enble Ragie Parse.
 - Content validation before indexing — customer's job, or Ragie building toward it?
 - Multi-tenant isolation for these client use cases
 - Whether there's a collaboration path beyond just being a customer
-### Re: Post-call notes (HEAD)
+### Re: Post-call notes
 
 Good outcomes from the call:
 
@@ -1607,7 +1607,7 @@ The call landed the collaboration angle even with the demo hiccup. Bob enabling 
 - Follow up with Bob on tenant details
 - Send follow-up message with security post link + agent-doc-js demo link (once fixed)
 - Start building EFS Tier 3 (Ragie Parse indexing) now that Parse is enabled
-<!-- agent:boundary:03a8d9f2 -->
+<!-- agent:boundary:d9c0c5c5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

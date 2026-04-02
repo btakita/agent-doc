@@ -77,7 +77,7 @@ equityfundingsource-dev/
 Waiting for your go-ahead to create the repo and start scaffolding.
 
 Let's go ahead...even though we are missing assets. I will have a call with judith-krug and robert-ward tonight.
-### Re: Scaffolding equityfundingsource-dev (HEAD)
+### Re: Scaffolding equityfundingsource-dev
 
 Done. Here's what was created:
 
@@ -117,7 +117,7 @@ equityfundingsource-dev/
 - Blog setup (will wire in `*--blog` submodule deps after scaffold is running)
 
 To run: `cd src/equityfundingsource-dev && cp .env.example .env && bun install && bun dev`
-<!-- agent:boundary:287c7d4a -->
+<!-- agent:boundary:de15b6e6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

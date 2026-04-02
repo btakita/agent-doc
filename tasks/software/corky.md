@@ -1589,6 +1589,18 @@ Both bugs fixed across 8 files, `cargo check` passes clean.
 - `draft/migrate.rs`: Added `thread_id: None` to legacy migration
 
 Next: run `corky sync` on a mailbox to populate Message-IDs, then test a threaded reply draft.
+
+Go
+### Re: Build & Test Results (HEAD)
+
+`make check` passes clean — 373+ tests, clippy clean.
+
+- Fixed `message_id: None` in all test `Message` constructions (22 instances in `tests/test_sync.rs`)
+- All existing roundtrip, dedup, label accumulation, slug collision tests pass
+- Build compiles with `make build` (GCP credentials via `pass`)
+
+Ready to commit in corky submodule. Note: there are also prior uncommitted changes (account-based auth `--account` flag on doc commands). Commit everything together or split?
+<!-- agent:boundary:67b4ad19 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

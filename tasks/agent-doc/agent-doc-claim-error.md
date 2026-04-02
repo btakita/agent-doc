@@ -394,14 +394,42 @@ The SKILL.md should be updated to pass `--origin skill` in the write command. I'
 - Both binaries updated
 
 **Next:** Update SKILL.md to include `--origin skill` in the write template.
-<!-- agent:boundary:c6a8f6e9 -->
+Why would the skill vs watch vs stream watch?
+Why would multiple of these sources write to the document?
+Should we have an IPC funnel/queue for the writes?
+### Re: Why multiple writers exist + IPC funnel (HEAD)
+
+**Why each writer exists:**
+- **skill** — the `/agent-doc` Claude Code skill runs `agent-doc write` after generating a response. This is the primary write path.
+- **watch** — the watch daemon auto-submits when files change. It calls `run::run()` which eventually writes via `agent-doc write`. This is the reactive/automated path.
+- **stream** — `agent-doc stream` writes CRDT chunks on a timer (200ms intervals). This is the real-time output path.
+
+**Why multiple could write to the same document:**
+In normal operation, they shouldn't. But race conditions exist:
+1. Watch daemon detects a file change, triggers a run
+2. Skill is already responding to the same file
+3. Both write, one's snapshot update gets lost
+
+**IPC funnel/queue:**
+Yes, this is the right design direction. All writes should go through a single serialized channel:
+1. Writers (skill, watch, stream) submit write requests to a queue
+2. A single writer process applies them in order
+3. Each write atomically updates the document + snapshot
+4. No lost snapshots, no duplicate responses
+
+The IPC write path (`try_ipc` → plugin Document API) is already a single channel. The issue is the disk fallback path — when IPC times out, writes go directly to disk without coordination.
+
+This is a significant architectural change. For now, the `--origin` flag + drift warning give visibility into when it happens. The queue design should be a v0.32 feature.
+<!-- agent:boundary:2b4e48a8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] All implementation complete
+- [x] All implementation complete for this session
 - [x] `agent-doc dedupe` command
 - [x] Write-origin tracing (`--origin` flag)
-- [ ] Update SKILL.md template to pass `--origin skill`
+- [x] Commit drift warning
+- [ ] IPC write funnel/queue (v0.32 feature)
+- [ ] Update SKILL.md to pass `--origin skill`
 <!-- /agent:pending -->

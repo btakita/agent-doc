@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | Pipeline: diff -> Ragie search -> Claude with context -> patch | Docs indexing
+LIVE: https://agent-doc-js.pages.dev | Ragie docs still partitioning | Ready for demo (without retrieval for now)
 <!-- /agent:status -->
 
 ## Exchange
@@ -1581,7 +1581,7 @@ How can we access the ragie search from prompts?
 
 **Status:** All 10 visible documents still in "partitioning" status. Ragie free tier may take a few more minutes. Will test again soon.
 
-Will the diff go through C
+Will the diff go through Claude first or Ragie first?
 ### Re: Ragie first, then Claude
 
 **Ragie runs first.** The flow:
@@ -1592,16 +1592,22 @@ Will the diff go through C
 4. Response patched into document
 
 Ragie provides context *to* Claude. The SPA orchestrates the pipeline — Ragie enriches the prompt before Claude sees it.
-<!-- agent:boundary:6437d5a1 -->
+
+So Ragie is not meant to be used with a SKILL.md w
+### Re: Ragie indexing status (HEAD)
+
+Still partitioning (10 docs). Search returns 0 chunks. Ragie's processing queue may be backed up — free tier can take longer.
+
+We can proceed with other work and test retrieval once indexing completes. The SPA will automatically use it once docs are searchable.
+<!-- agent:boundary:ca5076b9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] SPA: editor + toolbar + terminal + diff gutter
-- [x] Ragie retrieval integration (Ragie -> Claude pipeline)
-- [x] Uploaded 18 blog posts to Ragie
-- [ ] Wait for Ragie indexing, test end-to-end retrieval
+- [x] Ragie retrieval integration + 18 blog posts uploaded
+- [ ] Ragie indexing still processing (partitioning)
 - [ ] Yjs CRDT for concurrent editing
 - [ ] Add CNAME for `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call

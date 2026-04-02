@@ -1182,7 +1182,7 @@ This:
 5. SPA reads hash, stores in localStorage, clears hash from URL
 
 **One command. Zero manual config.**
-### Re: curl | sh syntax (HEAD)
+### Re: curl | sh syntax
 
 Yes, both forms work:
 
@@ -1192,7 +1192,7 @@ bash <(curl -s https://agent-doc-js.pages.dev/setup.sh)
 ```
 
 Both download and execute the same script. The `-s` flag silences curl's progress bar.
-<!-- agent:boundary:4a9f7d62 -->
+<!-- agent:boundary:80ecce6f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

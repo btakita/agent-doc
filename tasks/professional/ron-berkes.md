@@ -792,12 +792,33 @@ Send the email. We can bypass the draft.
 - **From:** brian.takita@gmail.com
 - **Subject:** Patent Mining Automation — Proposal
 - **Status:** sent and committed to mail submodule
-<!-- agent:boundary:338c1280 -->
+
+corky transcribe + diarize /home/brian/work/btakita/agent-loop/mail/contacts/ron-berkes/recordings/phone_20260331-142825_6504368181.amr
+Make sure gpu is being used.
+### Re: Transcription of March 31 phone call (HEAD)
+
+Transcribed `phone_20260331-142825_6504368181.amr` with GPU diarization (RTX 5090, 124x realtime, 6.2s for 12:49 of audio).
+
+Saved to: `mail/contacts/ron-berkes/recordings/phone_20260331-142825_6504368181.md`
+
+**Key topics from the call:**
+
+1. **Steve (367 Bait & Tackle)** -- going through radiation treatments, rough week. Ron wants Brian to be the lead on everything including Shopify migration decision. Main priorities: site speed (bounce rate), Kentucky tax compliance, blog content via AI.
+
+2. **Catfish directory naming** -- Ron not sold on "catfish dude" name. Agreement to use something like "Catfish Outdoors" for the directory. Strategy: become the authority/directory for top catfishing people, then build partnerships and affiliate programs.
+
+3. **Ron & Brian partnership** -- Ron wants to build residual income together. Willing to share work and let Brian handle tech side.
+
+4. **Julian / 3A Credit API integration** -- Ron wants an API bridging their systems so factory reports can be pulled from Ron's site, monetized via Julian's data, with 50-50 (or 60-40) revenue share. Julian would fund the development. Brian estimated 1 week for simple API, up to a month for more complex agentic flow. Plans to use Ragie or SIFT.
+
+5. **Patent mining** -- Ron adding Brian to spreadsheet. Focus on design patents for simple-to-medium complexity physical products (no electronics/circuit boards). Target patent holders who don't know what to do with their patents.
+<!-- agent:boundary:88ae73d8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [x] Transcribe phone_20260330-104440_6504368181.amr with GPU diarization
 - [x] Transcribe phone_20260330-114040_6504368181.amr with GPU diarization
+- [x] Transcribe phone_20260331-142825_6504368181.amr with GPU diarization
 - [x] Research MonsterRodHolders.com site structure for optimization plan
 - [x] Run ManufacturingChina.com site analysis (Ron requested)
 - [x] Update email proposal with analyst + compensation + Julian angle
@@ -807,11 +828,13 @@ Send the email. We can bypass the draft.
 - [x] Commit sent email drafts to mail submodule
 - [x] Merge call summary income items into patent proposal
 - [x] Reframe Julian as data provider + research services consumer
-- [x] Remove Julian intro ask — data already available as CSVs
+- [x] Remove Julian intro ask -- data already available as CSVs
 - [x] Verify 3A Credit publicly listed (China) + create mail topic
 - [x] Send patent mining proposal to Ron
 - [ ] Wait for Ron to confirm Steve intro / Steve responds
 - [ ] Review transcript speaker labels for accuracy corrections
-- [ ] Patent mining automation — review Ron's spreadsheet when shared
+- [ ] Patent mining automation -- review Ron's spreadsheet when shared
+- [ ] Look into "Catfish Outdoors" domain availability
+- [ ] Draft Julian API integration proposal (factory reports, revenue share model)
 <!-- /agent:pending -->
  

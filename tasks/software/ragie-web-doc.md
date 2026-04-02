@@ -1195,14 +1195,14 @@ Both download and execute the same script. The `-s` flag silences curl's progres
 
 Add instructions on the dialog to run `curl -s https://agent-doc-js.pages.dev/setup.sh | sh` to autopopulate the credentials.
 Is
-### Re: curl instructions added to settings dialog (HEAD)
+### Re: curl instructions added to settings dialog
 
 Updated the settings dialog to include the `curl | sh` command directly in the demo notice. The command text is styled in green with `user-select: all` so clicking it selects the whole command for easy copy.
 
 Redeployed to Cloudflare Pages.
 
 (Your "Is " at the end looks like it got cut off — what were you going to ask?)
-<!-- agent:boundary:1f90f181 -->
+<!-- agent:boundary:ec449de3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

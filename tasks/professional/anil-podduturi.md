@@ -51,7 +51,7 @@ Fixed. Here's the final draft ready to send:
 Ready to send via LinkedIn when you give the go-ahead.
 I would like to make this a bit more active. Even if he doesn't have a role, he may know people who need something done.
 Also Ragie is a great backend for the document data. The agent-doc-js is a prototype for a front end.
-### Re: More active draft (HEAD)
+### Re: More active draft
 
 Revised to be more forward-leaning — asks for intros, mentions the stack:
 
@@ -65,7 +65,7 @@ Changes from previous draft:
 - Added ask for intros ("if you know anyone...")
 - Mentioned Ragie as the backend + agent-doc-js as the frontend prototype
 - More active tone overall — positions you as building something, not just reminiscing
-<!-- agent:boundary:186a11ea -->
+<!-- agent:boundary:ac67b03f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

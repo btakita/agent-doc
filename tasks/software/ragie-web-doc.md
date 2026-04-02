@@ -1163,7 +1163,7 @@ bash <(curl -s https://agent-doc-js.pages.dev/setup.sh)
 Deployed to Cloudflare Pages.
 
 Provide `curl | sh` command to run to autopopulate the credentials as a url hash.
-### Re: curl | sh command (HEAD)
+### Re: curl | sh command
 
 The setup script is already deployed. The command is:
 
@@ -1179,7 +1179,7 @@ This:
 5. SPA reads hash, stores in localStorage, clears hash from URL
 
 **One command. Zero manual config.**
-<!-- agent:boundary:16c47f2d -->
+<!-- agent:boundary:c040669b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

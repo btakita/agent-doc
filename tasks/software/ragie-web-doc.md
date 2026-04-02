@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-MVP scoped: single-user authoring + read-only web view + chat suggestions | Building `agent-doc serve` for morning demo with Bob
+Evaluating demo strategy: screenshare-first vs web prototype | JetBrains + agent-doc + Ragie is strong standalone demo
 <!-- /agent:status -->
 
 ## Exchange
@@ -676,7 +676,34 @@ You (JetBrains/CLI)                    Bob (browser)
 | 5 | 10min | Polish for demo |
 
 Want me to start building?
-<!-- agent:boundary:1e3cc107 -->
+
+How much more compelling would this web demo be than a screenshare?
+### Re: Web demo vs screenshare — is it worth the build? (HEAD)
+
+**Screenshare gets you 80% of the demo value with zero build time.**
+
+What screenshare gives you:
+- Bob sees the document live (your screen)
+- Bob sees the agent respond in real-time
+- Bob sees the JetBrains plugin, VS Code, the full workflow
+- You narrate, he asks questions over audio
+
+What the web prototype adds:
+- Bob can **interact** (chat, suggest prompts) instead of just watching
+- Bob sees it **in his own browser** — feels like a product, not a demo
+- Bob can scroll/explore the document at his own pace
+- It's a **proof of concept** for the actual product you'd build together
+
+**The honest assessment:** For a 30-min introductory call, screenshare is sufficient and proven. The web prototype is impressive but risky — if anything breaks during demo, it's worse than a clean screenshare.
+
+**Counter-argument:** If the goal is to pitch Bob on building this together as a product, showing a working web prototype says "I built the first version in a night" which is way more compelling than "I have a plan." It de-risks the project for Bob.
+
+**My recommendation:** Lead with screenshare of the existing local workflow (JetBrains plugin, agent-doc in action). That's rock solid and impressive on its own. If you have time tonight, build the web prototype as a "one more thing" bonus — but don't depend on it for the demo.
+
+The JetBrains plugin + agent-doc + Ragie retrieval is already a strong demo without a web UI. The web piece is the roadmap slide, not the headline.
+
+What's your read?
+<!-- agent:boundary:d3049d11 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -686,7 +713,7 @@ Want me to start building?
 - [ ] Static frontend — CodeMirror 6 read-only markdown view
 - [ ] Chat panel — input box + message relay via WebSocket
 - [ ] `--tunnel` flag — cloudflared integration for instant HTTPS sharing
-- [ ] Demo script for Bob call
+- [ ] Demo script for Bob call (screenshare-first strategy)
 - [ ] (deferred) Multi-user editing with injection sandboxing
 - [ ] (deferred) MCP server (`agent-doc mcp-server`)
 - [ ] (deferred) Authorization / trust tiers

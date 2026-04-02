@@ -1480,7 +1480,7 @@ Let him discover it on LinkedIn. Here's why:
 4. **Save it for the follow-up** — after the call, when you send a "great talking with you" message, include the link: "Here's the security architecture writeup I mentioned." Gives him a reason to re-engage post-call.
 
 **TL;DR:** Don't send it. Use it during the call as a live reference, then share in the follow-up.
-<!-- agent:boundary:5e803624 -->
+<!-- agent:boundary:abf67f51 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -3587,7 +3587,17 @@ The PyPI CI failure was a Windows compilation error: `hook_cmd::listen()` uses `
 The PyPI workflow should re-trigger since the release tag was updated. The Linux/macOS builds should now succeed alongside the Windows fix.
 
 Note: the skill test fix from earlier was also included in this commit (it was already staged). Both fixes are now in the v0.31.1 tag.
-<!-- agent:boundary:c793f182 -->
+
+Still failing: https://github.com/btakita/agent-doc/actions/runs/23881319987/job/69634906272
+### Re: CLI test env fix pushed (HEAD)
+
+The remaining CI failures were in `test_cli.rs` — same environment detection issue but in CLI integration tests. All 7 skill-related CLI test commands now set `CLAUDE_CODE=1` to force deterministic path resolution.
+
+- `make check`: all 602 tests pass
+- Committed, pushed, tag moved forward
+
+The CI should now pass for all test suites.
+<!-- agent:boundary:ff7b010c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -3595,8 +3605,7 @@ Note: the skill test fix from earlier was also included in this commit (it was a
 <!-- agent:pending patch=replace -->
 - [x] All implementation, tests, audit docs, and release complete
 - [x] Published: crates.io ✓, GitHub Release ✓
-- [x] CI skill tests fixed (explicit environment)
-- [x] Windows compilation fixed (#[cfg(unix)] on hook_cmd::listen)
-- [ ] Verify PyPI CI passes after tag update
+- [x] CI fixes: skill unit tests + CLI integration tests + Windows compilation
+- [ ] Verify CI passes after latest push
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

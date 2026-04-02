@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Final LinkedIn reply draft ready — awaiting send approval
+Revised LinkedIn reply — more active tone, mentions Ragie/agent-doc-js, asks for intros
 <!-- /agent:status -->
 
 ## Exchange
@@ -49,11 +49,28 @@ Fixed. Here's the final draft ready to send:
 > Either way, best of luck with the transition. Let's catch up sometime.
 
 Ready to send via LinkedIn when you give the go-ahead.
-<!-- agent:boundary:18d30210 -->
+I would like to make this a bit more active. Even if he doesn't have a role, he may know people who need something done.
+Also Ragie is a great backend for the document data. The agent-doc-js is a prototype for a front end.
+### Re: More active draft (HEAD)
+
+Revised to be more forward-leaning — asks for intros, mentions the stack:
+
+> Thanks for letting me know, Anil — no worries at all on the Helix front. Curious where you're heading next... with your AI product background, I'd love to explore ways to work together.
+>
+> I've been building agent-doc — a document-as-interface harness for AI agents. The pattern actually traces back to how we collaborated at Neo. Ragie handles the document data backend, and I have a JS frontend prototype (agent-doc-js) that makes it all interactive. Happy to give you a quick demo sometime.
+>
+> If you know anyone looking for AI agent tooling or someone to build it, I'd appreciate the intro. Either way, let's catch up — would be great to reconnect.
+
+Changes from previous draft:
+- Added ask for intros ("if you know anyone...")
+- Mentioned Ragie as the backend + agent-doc-js as the frontend prototype
+- More active tone overall — positions you as building something, not just reminiscing
+<!-- agent:boundary:186a11ea -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Send reply via LinkedIn (awaiting user approval)
+- [ ] User review of active draft
+- [ ] Send reply via LinkedIn
 <!-- /agent:pending -->

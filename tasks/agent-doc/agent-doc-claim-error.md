@@ -421,7 +421,7 @@ Yes, this is the right design direction. All writes should go through a single s
 The IPC write path (`try_ipc` → plugin Document API) is already a single channel. The issue is the disk fallback path — when IPC times out, writes go directly to disk without coordination.
 
 This is a significant architectural change. For now, the `--origin` flag + drift warning give visibility into when it happens. The queue design should be a v0.32 feature.
-### Re: Duplicate happened again — drift warning caught it (HEAD)
+### Re: Duplicate happened again — drift warning caught it
 
 Ran `agent-doc dedupe` — removed duplicate `### Re: Implementing Threading Fixes` (952 bytes).
 
@@ -430,7 +430,7 @@ The drift warning worked: `drift_warning file=corky.md drift=919 snap_len=84399 
 The IPC write funnel is becoming urgent. The current architecture allows concurrent writes from multiple processes to the same file without coordination, leading to lost snapshot updates and duplicate responses.
 
 For an immediate mitigation: the watch daemon should skip files that have an active agent-doc session running (check if the registered pane is busy). This would prevent the watch daemon from competing with the skill's writes.
-<!-- agent:boundary:b94a95b2 -->
+<!-- agent:boundary:4360e467 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

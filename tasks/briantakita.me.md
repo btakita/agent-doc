@@ -1134,9 +1134,20 @@ Continue with:
 - TypeScript checks pass
 
 Note: esbuild build fails with a pre-existing JSON parse error (not related to these changes). Will need a `bun install` or esbuild version check to resolve separately.
-<!-- agent:boundary:c24e0f05 -->
+
+continue
+### Re: Continue — committed and pushed (HEAD)
+
+All changes committed and pushed:
+
+1. **rappstack-dev** — `ui--browser--blog` search icon `w-full` fix pushed
+2. **briantakita.me-dev** — BlogPosting JSON-LD + build fix pushed
+3. **CI deploying** — run #23904564227 queued
+
+Build verified locally (`bun run build` passes after `bun install`). CI should deploy the BlogPosting JSON-LD to production.
+<!-- agent:boundary:6d62b615 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-(all items resolved)
+- CI deploy — verifying BlogPosting JSON-LD on production
 <!-- /agent:pending -->

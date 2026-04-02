@@ -89,14 +89,27 @@ Checked the .eml file. The problem: `In-Reply-To: 19d479af292d8d99` used the Gma
 **Next steps:**
 - Check Gmail web UI to confirm whether the reply landed in the same thread visually
 - File a corky enhancement to resolve Message-IDs from thread IDs when building reply headers
-<!-- agent:boundary:c10c4996 -->
+I don't see it in the same thread visually.
+Sshould
+### Re: Threading fix — ready to resend (HEAD)
+
+Found Rob's original Message-ID from the .eml: `<CAMrCVsDSX0zWO2DyZfh9ugzS=pUHSt_MtAEs+0qnfw7-njWZ2w@mail.gmail.com>`
+
+Created a new draft with the correct `In-Reply-To` header: `mail/drafts/2026-04-02-re-brian-rob-zoom.md`
+
+**Before sending — consider your options:**
+1. **Send the threaded reply** — Rob gets a duplicate (identical content), but it threads properly on both ends
+2. **Delete the unthreaded one first** in Gmail, then send the threaded one — cleanest result
+3. **Skip resending** — Rob likely received the first reply fine; the broken threading is mainly a Gmail UI issue on your side
+
+Which approach do you want?
+<!-- agent:boundary:04bfb8bc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- ([done]) Reply sent to Rob Ross — proposed Thu Apr 2, 1pm PT
-- Verify reply threading in Gmail web UI
+- Resend reply with correct Message-ID threading (awaiting user decision)
 - Corky fix: resolve actual Message-ID from Gmail API for `in_reply_to` (not thread ID)
 - Prep talking points for Dreamable call (agent experience, AI agent thesis alignment)
 - Watch for Rob's confirmation reply

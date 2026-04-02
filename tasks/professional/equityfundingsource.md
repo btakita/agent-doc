@@ -554,7 +554,18 @@ bunx wrangler pages secret put RESEND_API_KEY --project-name equityfundingsource
 Get a free API key from resend.com (100 emails/day free tier). The from address `notifications@equityfundingsource.com` needs verification in Resend, or use `onboarding@resend.dev` for testing.
 
 **Live:** https://equityfundingsource.pages.dev
-<!-- agent:boundary:f3fd3fe0 -->
+
+RESEND_API_KEY="$(pass btak/RESEND_API_KEY)"
+### Re: Resend API key configured (HEAD)
+
+Set `RESEND_API_KEY` secret on Cloudflare Pages production environment. Email notifications are now active.
+
+Form submissions will email brian.takita@gmail.com with:
+- "New EFS Application: {name}" for loan applications
+- "New EFS Contact: {name}" for contact form messages
+
+**Note:** The from address in the code is `notifications@equityfundingsource.com`. This domain needs to be verified in Resend for emails to deliver. Until then, you can change it to `onboarding@resend.dev` (Resend's default sandbox) for testing. Want me to update the from address?
+<!-- agent:boundary:8dcfb551 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -567,7 +578,8 @@ Get a free API key from resend.com (100 emails/day free tier). The from address 
 - [x] Review and send proposal email to Judith from Gmail -- pushed to Drafts
 - [x] Create D1 database and run migration
 - [x] Redeploy with form backend + email notifications
-- [ ] Configure Resend API key for email notifications
+- [x] Configure Resend API key for email notifications
+- [ ] Verify equityfundingsource.com domain in Resend (or use sandbox from address)
 - [ ] Form submission pipeline
   - [ ] Tier 0: Cloudflare WAF + upload limits
   - [ ] Tier 1: Workers AI pre-screening

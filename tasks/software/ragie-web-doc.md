@@ -1641,7 +1641,7 @@ agent:pending should update as with agent-doc in the editor.
 
 Deployed to Cloudflare Pages.
 Should we use MCP instead for the demo?
-### Re: agent:pending in default template (HEAD)
+### Re: agent:pending in default template
 
 Added:
 
@@ -1651,7 +1651,7 @@ Added:
 The pending component works the same as in local agent-doc — Claude manages the task list as the conversation progresses.
 
 Deployed to Cloudflare Pages.
-<!-- agent:boundary:028bd007 -->
+<!-- agent:boundary:2272c523 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-LIVE: https://agent-doc-js.pages.dev | SKILL.md-driven RAG deployed | Claude decides when to search
+LIVE: https://agent-doc-js.pages.dev | agent:pending component added | Claude manages task list
 <!-- /agent:status -->
 
 ## Exchange
@@ -1613,8 +1613,12 @@ We can proceed with other work and test retrieval once indexing completes. The S
 Both feed into the same Ragie index — the difference is who orchestrates the search (SPA code vs Claude's reasoning).
 
 How can we have the web demo use SKILL.md + MCP-driven? Does it really need MCP or can it just do RAG commands directly?
-We should have a default SKILL.md that supports Ragie...assuming we can get it workirg soon.
+We should have a default SKILL.md that supports Ragie...assuming we can get it working soon.
 The SKILL.md should be editable in the Settings.
+
+The base document should have a agent:pending element.
+
+agent:pending should update as with agent-doc in the editor.
 ### Re: SKILL.md-driven RAG — implemented
 
 **Done.** Claude now drives the RAG — no MCP needed.
@@ -1636,16 +1640,26 @@ The SKILL.md should be editable in the Settings.
 **This is tool use without MCP** — the SPA is the tool executor. Claude reasons about when to search, what to query, and how to use the results.
 
 Deployed to Cloudflare Pages.
-<!-- agent:boundary:6b551b7f -->
+Should we use MCP instead for the demo?
+### Re: agent:pending in default template (HEAD)
+
+Added:
+
+1. **Default document** now includes `&lt;!-- agent:pending --&gt;` component with `patch=replace` mode
+2. **SKILL.md** instructs Claude to include a `<!-- patch:pending -->` block in every response, updating task state (mark complete, add new, reorder)
+
+The pending component works the same as in local agent-doc — Claude manages the task list as the conversation progresses.
+
+Deployed to Cloudflare Pages.
+<!-- agent:boundary:028bd007 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] SPA: editor + toolbar + terminal + diff gutter
-- [x] SKILL.md-driven RAG (Claude requests searches, SPA executes)
-- [x] Uploaded 18 blog posts to Ragie
-- [x] SKILL.md editable in Settings
+- [x] SPA: editor + toolbar + terminal + diff gutter + pending
+- [x] SKILL.md-driven RAG with Ragie search
+- [x] 18 blog posts uploaded to Ragie
 - [ ] Ragie indexing still processing
 - [ ] Yjs CRDT for concurrent editing
 - [ ] Add CNAME for `agent-doc.briantakita.me`

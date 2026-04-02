@@ -1518,7 +1518,7 @@ Updated:
 The prompt gives Bob (or you) a way to interact with Claude without editing the document — good for quick questions, clarifications, or testing.
 
 Deployed to Cloudflare Pages.
-<!-- agent:boundary:d8cb93c4 -->
+<!-- agent:boundary:99649b2e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

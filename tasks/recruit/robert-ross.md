@@ -239,13 +239,32 @@ Also create a 1 page pdf for my call with robert-ross
 - What agent systems are you building for clients?
 - What's the tech stack?
 - What does "Lead Software Engineer" mean at this stage?
-<!-- agent:boundary:139bdb8a -->
+
+Robert Ross is watching the screenshare right now.
+Please describe to Robert Ross what agent-doc is.
+### Re: What is agent-doc (HEAD)
+
+Hi Rob — what you're seeing right now is **agent-doc** in action.
+
+**agent-doc** is an interactive document system where an AI agent and a human collaborate through a shared markdown document. Here's what's happening:
+
+1. **Brian writes in this document** — questions, instructions, edits — just like writing notes
+2. **The agent responds directly in the same document** — you can see the `### Re:` sections appearing in real-time
+3. **Everything is version-controlled** — each response is committed to git, so there's a full history of the conversation
+4. **The document is the UI** — no separate chat window. Brian stays in his editor (JetBrains), types into the document, hits a command, and the agent reads the diff, responds, and writes back
+
+What makes this different from a chatbot:
+- **Persistent sessions** — this document has been a running conversation all day (scheduling your call, drafting emails, prepping)
+- **Template components** — the document has named sections (Exchange, Pending, Status) that the agent can update independently
+- **CRDT merging** — Brian can keep editing while the agent is responding. No conflicts.
+- **Git integration** — visual gutter markers show what's committed (agent response) vs uncommitted (Brian's next input)
+
+It's essentially a developer workflow where the document *is* the interface — no context switching between editor and terminal.
+<!-- agent:boundary:b2c021d0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Review call prep PDF before 1:30pm PT
-- Test demo setup (auth, JetBrains plugin, agent-doc workflow)
-- Call with Rob Ross at 1:30pm PT today
+- Call with Rob Ross — in progress
 <!-- /agent:pending -->

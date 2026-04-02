@@ -906,7 +906,7 @@ Can we just have Bob pass in his Claude Code token into the webpage...put onto l
 1. Static SPA: CodeMirror 6 + xterm.js + WebSocket
 2. Server: axum — serves SPA, WebSocket for terminal PTY + file sync
 3. Chrome DevTools MCP for Claude Code to read/write the document
-### Re: Token in localStorage — this simplifies everything (HEAD)
+### Re: Token in localStorage — this simplifies everything
 
 **Yes — Bob's Claude API token in localStorage eliminates the entire server-side Claude Code dependency.**
 
@@ -958,7 +958,7 @@ agent-doc serve <FILE>
 **For the demo:** Bob opens the URL, enters his Anthropic API key, and starts editing. The agent responds inline. No installs, no MCP config, no Chrome DevTools. Just a web page.
 
 Let me start building.
-<!-- agent:boundary:dea45361 -->
+<!-- agent:boundary:d5c96bba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

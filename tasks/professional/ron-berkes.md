@@ -812,10 +812,34 @@ Saved to: `mail/contacts/ron-berkes/recordings/phone_20260331-142825_6504368181.
 4. **Julian / 3A Credit API integration** -- Ron wants an API bridging their systems so factory reports can be pulled from Ron's site, monetized via Julian's data, with 50-50 (or 60-40) revenue share. Julian would fund the development. Brian estimated 1 week for simple API, up to a month for more complex agentic flow. Plans to use Ragie or SIFT.
 
 5. **Patent mining** -- Ron adding Brian to spreadsheet. Focus on design patents for simple-to-medium complexity physical products (no electronics/circuit boards). Target patent holders who don't know what to do with their patents.
-<!-- agent:boundary:0fb5b7f8 -->
+
+Please look through shared spreadsheet.
+https://docs.google.com/spreadsheets/d/1F1NfBcMM3r692zgkVPxKFtV4jdmFvLU7_xyHNqD2B1o/edit?gid=0#gid=0
+
+Should we have corky support Google documents?
+### Re: Patent spreadsheet & Google Docs support (HEAD)
+
+**Spreadsheet access:** The Google Sheet requires authentication and I can't access it right now (Chrome DevTools timed out, WebFetch got 401). Could you either:
+- Make the sheet publicly viewable (Share > Anyone with the link), or
+- Export it as CSV and save it locally (File > Download > CSV)
+
+**Corky Google Docs support:** That's an interesting idea. Right now corky handles email (Gmail API), YouTube, and audio transcription. Adding Google Docs/Sheets integration would mean:
+- Reading/writing Google Docs (for document collaboration)
+- Reading Google Sheets (for structured data like this patent spreadsheet)
+- Would use the Google Docs/Sheets API with the same OAuth flow corky already uses for Gmail
+
+It would be useful for cases exactly like this -- pulling spreadsheet data into agent workflows. Worth adding to the corky roadmap. The Gmail OAuth scope could be extended to include Docs/Sheets scopes.
+<!-- agent:boundary:74c24514 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
+- [ ] Review Ron's patent spreadsheet (needs access -- share publicly or export CSV)
+- [ ] Corky Google Docs/Sheets support (roadmap item)
+- [ ] Wait for Ron to confirm Steve intro / Steve responds
+- [ ] Review transcript speaker labels for accuracy corrections
+- [ ] Patent mining automation -- review Ron's spreadsheet when shared
+- [ ] Look into "Catfish Outdoors" domain availability
+- [ ] Draft Julian API integration proposal (factory reports, revenue share model)
 - [x] Transcribe phone_20260330-104440_6504368181.amr with GPU diarization
 - [x] Transcribe phone_20260330-114040_6504368181.amr with GPU diarization
 - [x] Transcribe phone_20260331-142825_6504368181.amr with GPU diarization
@@ -831,10 +855,5 @@ Saved to: `mail/contacts/ron-berkes/recordings/phone_20260331-142825_6504368181.
 - [x] Remove Julian intro ask -- data already available as CSVs
 - [x] Verify 3A Credit publicly listed (China) + create mail topic
 - [x] Send patent mining proposal to Ron
-- [ ] Wait for Ron to confirm Steve intro / Steve responds
-- [ ] Review transcript speaker labels for accuracy corrections
-- [ ] Patent mining automation -- review Ron's spreadsheet when shared
-- [ ] Look into "Catfish Outdoors" domain availability
-- [ ] Draft Julian API integration proposal (factory reports, revenue share model)
 <!-- /agent:pending -->
  

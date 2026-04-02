@@ -1296,11 +1296,30 @@ Committed to corky repo:
 - Clippy clean
 - 10 files changed, 479 insertions, 13 deletions
 - Parent submodule pointer updated (6f963b5a)
-<!-- agent:boundary:20f7371a -->
+
+How much bigger would audio in wav/m4a formats be than amr?
+### Re: WAV/M4A size vs AMR (HEAD)
+
+For the 77-min call (this AMR file is 7.1 MB):
+
+| Format | Bitrate | Est. Size | vs AMR |
+|--------|---------|-----------|--------|
+| **AMR-NB** | ~12.2 kbps | **7.1 MB** (actual) | 1x |
+| **M4A (AAC-LC)** | ~64 kbps | ~37 MB | 5x |
+| **M4A (AAC-LC)** | ~128 kbps | ~74 MB | 10x |
+| **WAV (PCM 16-bit)** | 256 kbps (16kHz mono) | ~141 MB | 20x |
+| **WAV (PCM 16-bit)** | 1536 kbps (48kHz stereo) | ~845 MB | 119x |
+
+**Practical recommendation:** M4A at 64 kbps is the sweet spot -- 5x larger than AMR but dramatically better quality for both whisper and pyannote. Cube ACR's M4A option typically records at 64-128 kbps.
+
+For a phone with 128 GB storage, 37 MB per hour-long call is very manageable (~3,400 hours before filling up). The quality improvement for transcription/diarization is massive since AAC preserves the spectral detail that AMR destroys at 12 kbps.
+
+WAV is overkill for phone recordings -- it's lossless but the phone mic/codec doesn't capture enough detail to justify the 20x size increase.
+<!-- agent:boundary:ff59a4c5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- User switching Cube ACR from AMR to WAV/M4A format
+- User switching Cube ACR from AMR to M4A format
 <!-- /agent:pending -->

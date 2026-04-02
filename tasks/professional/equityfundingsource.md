@@ -205,7 +205,7 @@ Run with `cd app/equityfundingsource && bun test`
 CSS not working.
 Please use chromium-bridge to compare localhost:4200 with equityfundingnow.com page by page...element by element.
 Find close to parity. While keeping simplified tailwind classes.
-### Re: CSS fix + dark theme matching equityfundingnow.com (HEAD)
+### Re: CSS fix + dark theme matching equityfundingnow.com
 
 **Fixed CSS loading:** The core issue was that rhonojs builds CSS/JS with hashed filenames (e.g., `index.server-LAPOVN5K_H5XS5X56.css`) but the layout template hardcoded `/index.css`. Created an asset resolver that reads the `dist/browser--dev/` directory at request time to find the correct hashed filenames.
 
@@ -223,7 +223,7 @@ Compared localhost:4200 vs equityfundingnow.com using headless Chromium screensh
 - **Footer:** Dark card background with "Contact Info" heading -- matches live site
 
 All 31 tests updated and passing.
-<!-- agent:boundary:9c91f19b -->
+<!-- agent:boundary:b533dbf1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

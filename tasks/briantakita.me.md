@@ -1068,12 +1068,24 @@ The meta-lesson: the only way to debug a tool this complex is to dog-food it on 
 Full post linked in the first comment.
 
 ---
-<!-- agent:boundary:cbaffb01 -->
+Post to Linked In. Image or no?
+### Re: Post to LinkedIn — image or no? (HEAD)
+
+Draft file updated at `mail/social/20260402-security-blog-linkedin.md`.
+
+**Image:** I'd skip it. Text-only posts get better LinkedIn reach, and the content is conceptual not visual. If you do want one, a git log screenshot showing 532 commits would be the strongest option — makes "every interaction is a commit" visceral.
+
+**Posting:** LinkedIn OAuth was blocked last session. Options:
+1. Retry corky LinkedIn OAuth
+2. Copy-paste from draft into LinkedIn web UI
+
+Which approach?
+<!-- agent:boundary:97837944 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn teaser — latest revision above, awaiting approval to update draft file
-- LinkedIn OAuth — needs retry when LinkedIn is back
+- LinkedIn teaser — draft finalized, ready to post
+- LinkedIn OAuth — needs retry or manual paste
 - Search icon `w-full` fix — remove `w-full` from icon span in rappstack-dev
 - JSON-LD VideoObject enhancement — add BlogPosting wrapper, duration, publisher (optional)
 <!-- /agent:pending -->

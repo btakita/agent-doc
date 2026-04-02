@@ -433,7 +433,7 @@ For an immediate mitigation: the watch daemon should skip files that have an act
 
 continue:
 - [ ] Immediate: watch daemon should skip files with active sessions
-### Re: Watch daemon busy guard implemented (HEAD)
+### Re: Watch daemon busy guard implemented
 
 The watch daemon now checks `is_busy(file)` before submitting. If a file has an active agent-doc operation (skill write, stream, etc.), the watch daemon skips it with:
 
@@ -447,7 +447,7 @@ This prevents the watch daemon from competing with the skill's writes, which was
 - Both binaries updated
 
 The `is_busy()` check uses the status file signal (`debounce.rs`), which is set during writes and clears after 30s of inactivity. This is the same mechanism the JetBrains plugin uses.
-<!-- agent:boundary:769e3be5 -->
+<!-- agent:boundary:2ecb39c0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

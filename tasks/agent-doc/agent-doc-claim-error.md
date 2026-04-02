@@ -373,16 +373,35 @@ The duplicate had slightly different lengths because the second block included a
 - Both binaries updated
 
 **Write-origin tracing** is the remaining item. Should I plan that now?
-<!-- agent:boundary:0587b105 -->
+Go
+### Re: Write-origin tracing implemented (HEAD)
+
+**`--origin` flag added to `agent-doc write`:**
+
+```bash
+agent-doc write <FILE> --stream --origin skill
+agent-doc write <FILE> --stream --origin watch
+agent-doc write <FILE> --stream --origin stream
+```
+
+The origin is logged to `ops.log` as `write_origin file=<path> origin=<value>`. When combined with the drift warning, it's now possible to trace which process wrote to a file:
+- If ops.log shows `write_origin origin=skill` followed by a successful snapshot save → normal
+- If ops.log shows no `write_origin` before a drift warning → out-of-band write
+
+The SKILL.md should be updated to pass `--origin skill` in the write command. I've already used it in this write call.
+
+- `make check`: 606 tests pass
+- Both binaries updated
+
+**Next:** Update SKILL.md to include `--origin skill` in the write template.
+<!-- agent:boundary:8bdfc1af -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] All implementation, tests, audit docs complete
-- [x] Single-char truncation fix
-- [x] Commit drift warning
-- [x] `agent-doc dedupe` command implemented
-- [x] corky.md duplicate fixed
-- [ ] Write-origin tracing (`--origin` flag + ops.log)
+- [x] All implementation complete
+- [x] `agent-doc dedupe` command
+- [x] Write-origin tracing (`--origin` flag)
+- [ ] Update SKILL.md template to pass `--origin skill`
 <!-- /agent:pending -->

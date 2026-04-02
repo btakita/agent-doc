@@ -1105,12 +1105,12 @@ Replaced all ` — ` with `...` in the draft. Updated `mail/social/20260402-secu
 > Multi-agent workflows create attack surfaces that don't exist in single-agent systems.
 
 Again, the security exercise was considering multi-user collaborative documents. Not multi-agent workflows.
-### Re: Multi-user not multi-agent (HEAD)
+### Re: Multi-user not multi-agent
 
 Fixed. Changed "Multi-agent workflows create attack surfaces that don't exist in single-agent systems" to "Collaborative documents create attack surfaces that don't exist when you're the only one editing." The concern is about who writes the document, not how many agents are running.
 
 Draft updated.
-<!-- agent:boundary:f77fe090 -->
+<!-- agent:boundary:40b665bf -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

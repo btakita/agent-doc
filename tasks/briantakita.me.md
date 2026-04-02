@@ -1045,11 +1045,34 @@ Full post linked in the first comment.
 ---
 
 Want me to update the draft file with this version?
-<!-- agent:boundary:e92bf040 -->
+
+> Here's what running 11 parallel sessions revealed.
+
+We explored the topic and did other things. The 11 sessions were not dedicated to this 1 problem.
+### Re: Clarifying the 11 sessions (HEAD)
+
+Right — the sessions were diverse (tool dev, correspondence, client work, debugging). Security emerged from the scale, not from a focused investigation. Revised:
+
+---
+
+Your AI agent trusts the document it's reading. What happens when someone else writes part of it?
+
+I spent a day running 11 parallel AI agent sessions — tool development, correspondence, client work, debugging — each with its own Claude Code instance. Every prompt and response committed to git. The security questions weren't the goal. They were what the scale revealed.
+
+The security lesson: when the document IS the prompt, anyone with repo access can inject instructions into your agent's context. Multi-agent workflows create attack surfaces that don't exist in single-agent systems. The private repo boundary becomes the security boundary.
+
+The traceability lesson: this blog post was generated from the commits themselves. I pointed Claude at 532 commits across 11 documents and said "review what happened." Every interaction is a commit. The history IS the documentation — and the content pipeline.
+
+The meta-lesson: the only way to debug a tool this complex is to dog-food it on itself. 292 commits chasing one cascade of bugs.
+
+Full post linked in the first comment.
+
+---
+<!-- agent:boundary:ea51873b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn teaser — revised with A2 opener + traceability, awaiting approval to update draft file
+- LinkedIn teaser — latest revision above, awaiting approval to update draft file
 - LinkedIn OAuth — needs retry when LinkedIn is back
 - Search icon `w-full` fix — remove `w-full` from icon span in rappstack-dev
 - JSON-LD VideoObject enhancement — add BlogPosting wrapper, duration, publisher (optional)

@@ -214,14 +214,29 @@ if trimmed.len() == 1 && trimmed.chars().next().is_some_and(|c| c.is_alphanumeri
 
 A. **Remove single-char exception** — treat all single chars as potentially truncated. Wait for the stability check (3 consecutive reads at 500ms each = 1.5s). If the user really meant `S`, they'll wait 1.5s.
 
-B. **Require explicit termination** — single chars only accepted if followed by Enter/newline in the diff (the user typed `S\n` explicitly). Partial typing produces `S` without a trailing newline.
+B. **Require explicit termination** — single chars only accepted if followed by Enter/newline in the diff (the user typed `S\
+` explicitly). Partial typing produces `S` without a trailing newline.
 
 C. **Minimum content threshold** — require at least 2 added characters or a complete line (ending in terminal punctuation) before accepting the diff.
 
 I'd recommend **A** — the most conservative and safest. A 1.5s delay on genuine single-char responses is acceptable. The alternative (acting on `S` and sending a wrong email) is much worse.
 
 Should I implement option A?
-<!-- agent:boundary:e5bd6a5c -->
+Yes
+### Re: Implementing option A (HEAD)
+
+Implementing option A — removing the single-char exception so all single characters go through the stability check.
+### Re: Single-char truncation fix deployed (HEAD)
+
+Done. Single characters are now treated as potentially truncated in `looks_truncated()`. Instead of immediately accepting `S` as a valid choice response, it goes through the stability check (3 consecutive reads at 500ms each = 1.5s delay).
+
+- `diff.rs:351-354`: changed from `return false` (not truncated) to `return true` (truncated)
+- Test updated: `not_truncated_single_alphanumeric` → `truncated_single_chars`
+- `make check`: all 602 tests pass
+- `cargo build --release` + `cargo install --path .` done
+
+The fix is live in both `.bin/agent-doc` and `~/.cargo/bin/agent-doc`. No plugin update needed — this is binary-side only.
+<!-- agent:boundary:6773a6c6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -232,6 +247,6 @@ Should I implement option A?
 - [x] CI fixes complete
 - [x] PatchWatcher no-op fix
 - [x] ClaimAction: claim + sync
-- [ ] **HIGH PRIORITY:** Fix single-char truncation detection (diff.rs:351-354)
+- [x] Single-char truncation fix (diff.rs) — prevents partial typing from triggering runs
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

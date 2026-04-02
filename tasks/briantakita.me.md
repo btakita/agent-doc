@@ -947,12 +947,12 @@ First comment: link to agent-doc repo
 Changes from original: Led with collaborative security + traceability angle. Commit stats now support the narrative rather than lead it. April Fools line removed.
 
 Please write a draft file.
-### Re: The teaser is in this document (HEAD)
+### Re: The teaser is in this document
 
 Saved the revised teaser as `mail/social/20260402-security-blog-linkedin.md`. The previous draft (`mail/social/20260401-181027-linkedin.md`) referenced in the session summary doesn't exist — it was lost. This new file replaces it.
 
 Ready to post when you are. LinkedIn OAuth still needs retry (was blocked by outage last session).
-<!-- agent:boundary:8db09aaf -->
+<!-- agent:boundary:1bf2431a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

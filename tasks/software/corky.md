@@ -1249,13 +1249,25 @@ Need a different approach for escalating repetitions:
 **no_speech_thold: inconclusive.** Same transcript output -- the param may not be effective in whisper-rs 0.16 (comment says "not implemented as of v1.3.0"). Would need to compare word counts to confirm any effect.
 
 The speaker count fix is the clear win here. Want me to also improve the repetition detection for escalating patterns, or save that for later?
-<!-- agent:boundary:4ef969d8 -->
+Implement now
+### Re: Implementing improved repetition detection (HEAD)
+
+Implemented a two-pass approach:
+
+**Pass 1: Exact n-gram** (existing) -- catches "X. X. X." patterns where a phrase repeats exactly 3+ times.
+
+**Pass 2: Word frequency spike** (new) -- scans 100-word sliding windows for any single word appearing 10+ times. When detected, truncates the text at the sentence boundary before the spike starts. This catches the "tomorrow tomorrow tomorrow tomorrow..." escalating pattern.
+
+The "I'm going to call her tomorrow" hallucination has "tomorrow" appearing 30+ times in the repeated region -- the spike detector will find this at the first 100-word window where it exceeds 10 occurrences, then cut the text at the preceding sentence boundary.
+
+Building and testing on the same 79-min call now.
+<!-- agent:boundary:958a4482 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Improve repetition detection for escalating whisper hallucinations
-- User switching Cube ACR from AMR to WAV/M4A format (biggest quality win)
-- Commit speaker count fix to corky repo
+- Verify improved repetition filter on April call
+- Commit all fixes to corky repo
+- User switching Cube ACR from AMR to WAV/M4A format
 <!-- /agent:pending -->

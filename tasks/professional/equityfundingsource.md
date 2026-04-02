@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Content updated from equityfundingnow.com crawl. Real deals, nav, copy all in place. Images still placeholder.
+Assets downloaded (32 images). R2 + Cloudflare Workers configured. Ready for bun install + deploy.
 <!-- /agent:status -->
 
 ## Exchange
@@ -140,7 +140,33 @@ Crawled the live site and updated the scaffold with real content:
 - Judith Krug headshot
 - "Apply Now" and "Message Us" pages (forms or links to Google Forms)
 - Blog integration
-<!-- agent:boundary:702d0bc9 -->
+
+Download the assets from the live site. Let's gitignore the assets. Will use R2 and deploy site to Cloudflare.
+### Re: Assets downloaded, R2 + Cloudflare configured (HEAD)
+
+**Assets downloaded (32 files, 2MB total):**
+- `public/assets/images/deals/` -- 18 property images matching each funded deal
+- `public/assets/images/hero/` -- hero house, investor section images
+- `public/assets/images/about/` -- Judith Krug headshot, family/property lifestyle images
+- `public/assets/images/credentials/` -- Private Lenders Association logo, real estate badges
+
+**Gitignored:** `public/assets/images/` excluded from git. Scripts handle sync:
+- `make assets-download` -- re-download from equityfundingnow.com
+- `make assets-upload` -- push to R2 bucket
+
+**Cloudflare deployment:**
+- `wrangler.toml` -- Workers + R2 bucket (`equityfundingsource-assets`)
+- Production route: `www.equityfundingsource.com/*`
+- `make deploy` -- deploy to Cloudflare Workers
+
+**UI updated:** All placeholder `[Property Image]` and `[Photo]` replaced with real `<img>` tags pointing to R2-served asset paths.
+
+**Before deploying, need to:**
+1. Create the R2 bucket: `wrangler r2 bucket create equityfundingsource-assets`
+2. Upload assets: `make assets-upload`
+3. Point DNS: `equityfundingsource.com` CNAME to Cloudflare
+4. `make deploy`
+<!-- agent:boundary:1c5068a6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -150,15 +176,15 @@ Crawled the live site and updated the scaffold with real content:
 - [x] Add as git submodule in agent-loop/src/
 - [x] Scaffold rappstack project structure
 - [x] Crawl equityfundingnow.com for real content
-- [x] Update deals data with real funded deals (18)
-- [x] Update site config (address, social, fax, emails)
 - [x] Update all page content from live site
-- [ ] Download property images from equityfundingnow.com
-- [ ] Download Judith Krug headshot
+- [x] Download property images from equityfundingnow.com (32 files)
+- [x] Download Judith Krug headshot
+- [x] Configure Cloudflare Workers + R2 deployment
+- [x] Gitignore assets, add upload/download scripts
+- [ ] bun install + verify dev server runs
+- [ ] Create R2 bucket + upload assets
 - [ ] Build Apply Now page (form or Google Forms link)
 - [ ] Build Message Us / Contact page
 - [ ] Blog setup (briantakita.me-dev pattern)
-- [ ] Broker Portal page -- stub done
-- [ ] Deploy configuration
-- [ ] bun install + verify dev server runs
+- [ ] DNS + deploy to Cloudflare
 <!-- /agent:pending -->

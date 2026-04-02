@@ -297,7 +297,7 @@ Without access to the corky session's terminal history, I can't determine which 
 Should I add that warning?
 Yes. Let's see if we can have a way of detecting which processes write and why.
 Would it make sense to have hooks generate logs?
-### Re: Drift warning + hook logging (HEAD)
+### Re: Drift warning + hook logging
 
 **Drift warning implemented:** `commit()` now warns when `file_len - snap_len > 100 bytes`:
 ```
@@ -311,7 +311,7 @@ For now, the drift warning is the immediate fix — it makes out-of-band writes 
 
 - `make check`: 602 tests pass
 - Both binaries updated
-<!-- agent:boundary:20d0a410 -->
+<!-- agent:boundary:250fc6a9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

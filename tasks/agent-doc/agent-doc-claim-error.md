@@ -163,7 +163,7 @@ B. **Keep current behavior** — user must claim first (via CLI or `Ctrl+Shift+A
 C. **Auto-claim only on explicit user action** — `Ctrl+Shift+Alt+C` runs `claim` then `sync` for the focused file only
 
 I don't know which you prefer. What's the intended behavior?
-### Re: ClaimAction should claim then sync (HEAD)
+### Re: ClaimAction should claim then sync
 
 You're right — I oversimplified. `Claim for Tmux Pane` should:
 1. Run `agent-doc claim <focused-file>` (adds frontmatter if missing)
@@ -172,7 +172,7 @@ You're right — I oversimplified. `Claim for Tmux Pane` should:
 The current code only does step 2. For unclaimed files, the claim step is essential — it generates the session UUID and scaffolds components. Without it, sync can't manage the file.
 
 Let me fix ClaimAction to call claim before sync.
-### Re: ClaimAction fixed — claim then sync (HEAD)
+### Re: ClaimAction fixed — claim then sync
 
 Fixed. `ClaimAction` now:
 1. Runs `agent-doc claim <focused-file> [--window W]` — adds frontmatter if missing
@@ -181,7 +181,7 @@ Fixed. `ClaimAction` now:
 The claim step handles unclaimed files (empty or without session UUIDs). Uses `resolveAgentDoc(basePath)` for correct binary path. Plugin bumped to 0.2.40.
 
 **Plugin zip:** `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.40.zip`
-<!-- agent:boundary:d7c72b5f -->
+<!-- agent:boundary:9d5254ff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

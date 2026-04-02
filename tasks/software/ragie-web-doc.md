@@ -1078,7 +1078,7 @@ Could not test with a real API key (not found in `pass` store). You'll need to m
 Next: deploy to Cloudflare Pages.
 
 Can we use ~/.claude/.credentials.json?
-### Re: CORS fix — Cloudflare Worker proxy deployed (HEAD)
+### Re: CORS fix — Cloudflare Worker proxy deployed
 
 **The OAuth token from `~/.claude/.credentials.json` works**, but CORS is blocked by org policy for direct browser calls.
 
@@ -1099,7 +1099,7 @@ Can we use ~/.claude/.credentials.json?
 - System Prompt
 
 **The SPA is fully functional.** Next: deploy the static site to Cloudflare Pages at `agent-doc.briantakita.me`.
-<!-- agent:boundary:6c3ecddc -->
+<!-- agent:boundary:b509413e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

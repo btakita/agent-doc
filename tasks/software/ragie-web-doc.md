@@ -1997,7 +1997,7 @@ Done. Deployed to https://agent-doc-js.pages.dev
 - `markProcessing(view, snapshotText)` computes changed lines and applies processing markers
 - Called at the start of `handleSubmit()` before the API call
 - CSS `@keyframes gutter-pulse` handles the animation
-<!-- agent:boundary:efd86893 -->
+<!-- agent:boundary:bcc3625c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

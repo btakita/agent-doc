@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-Architecture finalized: SPA + direct Claude API (Bob's token in localStorage) + static server | Starting build
+Ready to create btakita/agent-doc-web repo | SPA on Cloudflare Pages at agent-doc.briantakita.me | Standalone demo for Bob
 <!-- /agent:status -->
 
 ## Exchange
@@ -958,20 +958,48 @@ agent-doc serve <FILE>
 **For the demo:** Bob opens the URL, enters his Anthropic API key, and starts editing. The agent responds inline. No installs, no MCP config, no Chrome DevTools. Just a web page.
 
 Let me start building.
-<!-- agent:boundary:d5c96bba -->
+
+Create a github repo for this component. btakita/agent-doc-web?
+We will serve it on a website with it's own repo. agent-doc.briantakita.me?
+### Re: GitHub repo and hosting (HEAD)
+
+**`btakita/agent-doc-web`** — good name. Clean separation from the Rust `agent-doc` CLI.
+
+**`agent-doc.briantakita.me`** — perfect for the demo. Bob just opens a URL.
+
+**Hosting:** Cloudflare Pages — free, auto-deploys from GitHub, custom domain trivial. Since this is a pure SPA (static files + client-side Claude API calls), Pages is all you need. No server required for MVP.
+
+The `server.rs` axum piece is only needed later for live document sync between your local editor and Bob's browser. For the first demo, the SPA can be fully standalone.
+
+**CORS question:** Does the Anthropic API support CORS from browsers? If not, the SPA can't call `api.anthropic.com` directly from client-side JS. We'd need either:
+1. A thin Cloudflare Worker proxy (10 lines) that forwards API calls
+2. Bob runs a local proxy
+
+We'll figure this out during build. If CORS is blocked, a Worker proxy is trivial to deploy alongside the Pages site.
+
+**Plan:**
+1. Create `btakita/agent-doc-web` on GitHub
+2. Add as submodule under `src/agent-doc-web`
+3. Scaffold SPA (index.html, editor.js, agent.js, settings.js)
+4. Deploy to Cloudflare Pages at `agent-doc.briantakita.me`
+
+Ready to create the repo?
+<!-- agent:boundary:4589ee9c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **BUILD** SPA: `index.html` + CodeMirror 6 editor with Yjs CRDT
-- [ ] **BUILD** `agent.js`: diff computation + Claude API call + response patch
-- [ ] **BUILD** `settings.js`: API key input -> localStorage
-- [ ] **BUILD** `server.rs`: axum static file server + WebSocket doc sync
-- [ ] cloudflared tunnel for Bob access
+- [ ] Create `btakita/agent-doc-web` GitHub repo
+- [ ] Add as submodule under `src/agent-doc-web`
+- [ ] Scaffold SPA: index.html + CodeMirror 6 + Yjs CRDT
+- [ ] Build `agent.js`: diff + Claude API call + response patch
+- [ ] Build `settings.js`: API key input -> localStorage
+- [ ] Test CORS with Anthropic API (may need Cloudflare Worker proxy)
+- [ ] Deploy to Cloudflare Pages at `agent-doc.briantakita.me`
 - [ ] Demo script for Bob call
+- [ ] (deferred) `server.rs`: axum for live doc sync between local + web
 - [ ] (deferred) MCP integration for tool use
-- [ ] (deferred) Ragie API integration in SPA
-- [ ] (deferred) Multi-user editing with injection sandboxing
-- [ ] (deferred) xterm.js terminal panel
+- [ ] (deferred) Ragie API integration
+- [ ] (deferred) Multi-user editing / sandboxing
 <!-- /agent:pending -->

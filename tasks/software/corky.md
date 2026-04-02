@@ -1450,7 +1450,7 @@ Build: clippy clean, release build OK.
 - Google Docs conversion (upload .md as native Google Doc)
 - Phase 3/4 (Docs read/write, Sheets read)
 Continue
-### Re: Phase 3 & 4 implemented (HEAD)
+### Re: Phase 3 & 4 implemented
 
 All four phases complete. Clippy clean.
 
@@ -1488,7 +1488,7 @@ corky doc sheet <SHEET_URL> -o data.csv --format csv
 **No new dependencies** -- uses existing `ureq`, `serde_json`, basic HTML stripping
 
 Ready to commit and test. Need to add the scopes to the GCP console before first use.
-<!-- agent:boundary:9ca05c14 -->
+<!-- agent:boundary:30aba631 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

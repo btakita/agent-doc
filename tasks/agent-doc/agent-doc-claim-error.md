@@ -449,6 +449,10 @@ This prevents the watch daemon from competing with the skill's writes, which was
 The `is_busy()` check uses the status file signal (`debounce.rs`), which is set during writes and clears after 30s of inactivity. This is the same mechanism the JetBrains plugin uses.
 
 Is the binary change installed?
+
+do:
+- [ ] Update SKILL.md to pass `--origin skill`
+
 ### Re: Binary is installed
 
 Yes. Both binaries are from 15:17 (the latest build with the watch daemon busy guard):
@@ -457,14 +461,20 @@ Yes. Both binaries are from 15:17 (the latest build with the watch daemon busy g
 - `.bin/agent-doc` symlinks to `target/release/agent-doc`
 
 The watch daemon needs to be restarted to pick up the new binary. Run `agent-doc watch --stop && agent-doc watch` or it will restart automatically on the next file change.
-<!-- agent:boundary:a31dc5a8 -->
+### Re: SKILL.md updated with --origin skill (HEAD)
+
+Done. All `agent-doc write` examples in SKILL.md now include `--origin skill`. Version bumped to `0.31.1` in frontmatter. Skill installed.
+
+The next `/agent-doc` invocation will use the updated SKILL.md with `--origin skill` in write commands. You'll need to `/compact` to reload the skill in the current session.
+
+All items from this session are complete.
+<!-- agent:boundary:05667dde -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Watch daemon busy guard deployed
-- [ ] Restart watch daemon to pick up new binary
-- [ ] Update SKILL.md to pass `--origin skill`
-- [ ] IPC write funnel/queue (v0.32)
+- [x] All session items complete
+- [x] SKILL.md updated with `--origin skill`
+- [ ] IPC write funnel/queue (v0.32 — future session)
 <!-- /agent:pending -->

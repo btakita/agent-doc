@@ -568,13 +568,13 @@ Form submissions will email brian.takita@gmail.com with:
 
 **Note:** The from address in the code is `notifications@equityfundingsource.com`. This domain needs to be verified in Resend for emails to deliver. Until then, you can change it to `onboarding@resend.dev` (Resend's default sandbox) for testing. Want me to update the from address?
 Yes
-### Re: Email draft updated (HEAD)
+### Re: Email draft updated
 
 Removed Robert Waldman from CC. Updated draft pushed to Gmail Drafts:
 - **To:** judithkrug@gmail.com
 - **CC:** (none)
 - **Subject:** Equity Funding Source — new website live + proposal
-<!-- agent:boundary:cb2305a5 -->
+<!-- agent:boundary:0fb9306b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

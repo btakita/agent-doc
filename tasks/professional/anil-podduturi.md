@@ -27,7 +27,7 @@ Thanks for letting me know, Anil — no worries at all. Best of luck with the tr
 ---
 
 You started "I'm " — want to add something about what you're working on? I can incorporate it into the reply.
-### Re: Revised reply (HEAD)
+### Re: Revised reply
 
 Updated draft incorporating your notes:
 
@@ -38,7 +38,7 @@ Updated draft incorporating your notes:
 > Either way, best of luck with the transition. Let's catch up sometime.
 
 Let me know if you want to adjust tone, add/remove anything, or if this is ready to send.
-<!-- agent:boundary:84b1d055 -->
+<!-- agent:boundary:e3f943bc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1419,7 +1419,7 @@ The bug: the dialog close handler checked `dialog.returnValue` which was always 
 5. Submit with Haiku: "Response received"
 
 Deployed to Cloudflare Pages. Settings changes now persist correctly.
-<!-- agent:boundary:725bcba1 -->
+<!-- agent:boundary:e28f67ce -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

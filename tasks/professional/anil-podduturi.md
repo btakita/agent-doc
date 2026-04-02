@@ -86,7 +86,7 @@ The demo offer implies you're building something real without explicitly asking 
 
 Anil has much more a background than AI products.
 See https://anilpod.com/
-### Re: Broadening the reference (HEAD)
+### Re: Broadening the reference
 
 Good call — Anil's background spans product leadership, digital transformation, interim CPO at National Grid, BCG X. "AI product" is too narrow. Updated:
 
@@ -97,7 +97,7 @@ Good call — Anil's background spans product leadership, digital transformation
 > Either way, let's catch up...always good to stay connected, and I'd love to hear what you're getting into next.
 
 Changed "your AI product background" → "your experience across product, AI, and digital transformation" — acknowledges the full breadth.
-<!-- agent:boundary:a160031a -->
+<!-- agent:boundary:63fdbe6e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

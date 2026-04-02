@@ -1405,7 +1405,7 @@ Or re-run: `curl -s https://agent-doc-js.pages.dev/setup.sh | sh`
 Deployed to Cloudflare Pages.
 Still not updating.
 Please test in headless browser until behavior works as expected.
-### Re: Fixed Settings Save not persisting (HEAD)
+### Re: Fixed Settings Save not persisting
 
 The bug: the dialog close handler checked `dialog.returnValue` which was always empty (the submit button's `value` wasn't being propagated). Settings were never actually saved.
 
@@ -1419,7 +1419,7 @@ The bug: the dialog close handler checked `dialog.returnValue` which was always 
 5. Submit with Haiku: "Response received"
 
 Deployed to Cloudflare Pages. Settings changes now persist correctly.
-<!-- agent:boundary:31ebd6cb -->
+<!-- agent:boundary:725bcba1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

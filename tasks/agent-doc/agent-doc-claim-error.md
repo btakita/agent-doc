@@ -258,14 +258,33 @@ tasks/software/corky.md has a duplicate response patch. Why?
 ### Re: Duplicate response in corky.md
 
 I don't know why without investigating the file. This could be a separate issue from this session's work. Should I look at `tasks/software/corky.md` now, or is this for a different session?
-<!-- agent:boundary:405a9345 -->
+
+Yes. Look in the logs
+### Re: Duplicate response in corky.md — snapshot not updating (HEAD)
+
+The ops log tells the story:
+
+```
+snap_len=80404 file_len=82104  ← 3 commits with same snapshot, file growing
+snap_len=80404 file_len=82104  ← snapshot stuck at 80404
+snap_len=80404 file_len=82104  ← same
+stale_baseline_detected         ← second write cycle starts
+snap_len=83477 file_len=84850  ← more content added (second duplicate)
+```
+
+The snapshot wasn't updated after the first response write. The file grew from 80404 to 82104 (the first response), but the snapshot stayed at 80404. The next cycle saw the same user prompt as new diff and generated the identical response again.
+
+This is a snapshot update failure — the `agent-doc write` or `agent-doc commit` didn't save the updated snapshot. I don't know the exact cause without more investigation. Speculation: it could be the stale baseline detection (`baseline_file` mismatch) causing the snapshot to be saved with old content instead of new content.
+
+This is a different bug from what we fixed in this session. Should I investigate the snapshot update failure now, or track it for a future session?
+<!-- agent:boundary:5479d8cc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] All implementation, tests, audit docs complete
-- [x] Single-char truncation fix with tests and docs
-- [ ] Investigate duplicate response patch in tasks/software/corky.md
+- [x] Single-char truncation fix
+- [ ] Investigate snapshot update failure causing duplicate responses (corky.md)
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

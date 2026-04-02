@@ -1741,7 +1741,7 @@ The prompt was duplicated in the response patch.
 Deployed. Reset the document and try again — the duplication should be gone.
 
 Duplicate Prompt in Response patch. See /home/brian/work/btakita/agent-loop/tmp/agent-doc-js/agent-doc-export (1).md
-### Re: Fixed prompt echo in SKILL.md (HEAD)
+### Re: Fixed prompt echo in SKILL.md
 
 The duplication was Claude echoing the user's question text inside its `<!-- patch:exchange -->` response. Since exchange is `patch=append`, the echo gets appended alongside the original — appearing twice.
 
@@ -1753,7 +1753,7 @@ The duplication was Claude echoing the user's question text inside its `<!-- pat
 This is a prompting fix — Haiku was being helpful by repeating the question before answering. The instruction tells it to skip that.
 
 Deployed. Reset and try again.
-### Re: Fixed prompt echo in SKILL.md (HEAD)
+### Re: Fixed prompt echo in SKILL.md
 
 The duplication was Claude echoing the user's question text inside its `<!-- patch:exchange -->` response. Since exchange is `patch=append`, the echo gets appended alongside the original — appearing twice.
 
@@ -1767,7 +1767,7 @@ This is a prompting fix — Haiku was being helpful by repeating the question be
 Deployed. Reset and try again.
 
 The last response patch was not committed.
-### Re: Fixed prompt echo in SKILL.md (HEAD)
+### Re: Fixed prompt echo in SKILL.md
 
 The duplication was Claude echoing the user's question text inside its `<!-- patch:exchange -->` response. Since exchange is `patch=append`, the echo gets appended alongside the original — appearing twice.
 
@@ -1779,7 +1779,7 @@ The duplication was Claude echoing the user's question text inside its `<!-- pat
 This is a prompting fix — Haiku was being helpful by repeating the question before answering. The instruction tells it to skip that.
 
 Deployed. Reset and try again.
-<!-- agent:boundary:81c7faab -->
+<!-- agent:boundary:07080874 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

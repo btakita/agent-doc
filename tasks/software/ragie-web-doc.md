@@ -1489,7 +1489,7 @@ curl -s https://agent-doc-js.pages.dev/setup.sh | sh
 ```
 
 Your "Sho" got cut off — were you going to say "Should not happen" or something else?
-<!-- agent:boundary:d0f47066 -->
+<!-- agent:boundary:8f95cbe9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

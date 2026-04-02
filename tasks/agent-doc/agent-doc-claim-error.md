@@ -295,7 +295,23 @@ Without access to the corky session's terminal history, I can't determine which 
 **Mitigation:** The `agent-doc commit` should detect when `file_len >> snap_len` (significant drift) and log a warning like `[commit] WARNING: file is N bytes larger than snapshot — possible out-of-band write`. This would make these incidents visible immediately rather than silently duplicating responses.
 
 Should I add that warning?
-<!-- agent:boundary:ae2f2572 -->
+Yes. Let's see if we can have a way of detecting which processes write and why.
+Would it make sense to have hooks generate logs?
+### Re: Drift warning + hook logging (HEAD)
+
+**Drift warning implemented:** `commit()` now warns when `file_len - snap_len > 100 bytes`:
+```
+[commit] WARNING: file is 1700 bytes larger than snapshot — possible out-of-band write
+```
+Also logged to `ops.log` as `drift_warning` for forensic analysis.
+
+**On hook-based process logging:** Yes, hooks could generate logs that identify which process wrote to the file. The current hook system (`hooks.rs`) fires events like `post_write` and `post_commit`. Adding a `pre_write` hook or a write-origin field to the ops log would help trace which process (skill, watch daemon, direct edit) triggered each write.
+
+For now, the drift warning is the immediate fix — it makes out-of-band writes visible. A comprehensive write-origin tracing system is a larger design task.
+
+- `make check`: 602 tests pass
+- Both binaries updated
+<!-- agent:boundary:20d0a410 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -303,6 +319,7 @@ Should I add that warning?
 <!-- agent:pending patch=replace -->
 - [x] All implementation, tests, audit docs complete
 - [x] Single-char truncation fix
-- [ ] Add commit warning when file significantly drifts from snapshot
+- [x] Commit drift warning for out-of-band writes
+- [ ] Write-origin tracing (hook-based process identification) — future
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

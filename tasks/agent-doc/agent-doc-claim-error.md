@@ -185,7 +185,7 @@ The claim step handles unclaimed files (empty or without session UUIDs). Uses `r
 We really need to get debouncing to work.
 I had a major email error occur because the agent-doc run picked up a partial diff `S` in `Save as a draft.`
 See tasks/recruit/robert-ross.md
-### Re: Partial diff debounce — critical issue (HEAD)
+### Re: Partial diff debounce — critical issue
 
 This is a serious problem. A single character `S` (from typing "Save as a draft.") triggered an agent-doc run that caused an email error. The system should never act on partial input.
 
@@ -194,7 +194,7 @@ This is a different issue from layout sync debouncing — it's about the **watch
 I'll add this to pending as a high-priority item. This needs investigation into where the premature trigger occurs — is it the watch daemon, the JB plugin's auto-run, or manual `/agent-doc` invocation on a file with unsaved partial edits?
 
 I don't have enough context yet to know the exact trigger path without looking at `tasks/recruit/robert-ross.md`. Should I investigate this now or queue it for the next session?
-<!-- agent:boundary:8c803879 -->
+<!-- agent:boundary:a2de16b1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

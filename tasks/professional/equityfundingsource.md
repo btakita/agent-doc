@@ -241,7 +241,7 @@ All 31 tests updated and passing.
 - Portfolio (18 deal cards in 3-col grid) -- parity
 
 All 31 tests passing. All 32 images loading. CSS, style, and content parity achieved.
-<!-- agent:boundary:8d0d065b -->
+<!-- agent:boundary:326e5259 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

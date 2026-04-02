@@ -1102,7 +1102,7 @@ Can we use ~/.claude/.credentials.json?
 
 Continue:
 - [ ] Deploy static site to Cloudflare Pages at `agent-doc.briantakita.me`
-### Re: Deployed to Cloudflare Pages (HEAD)
+### Re: Deployed to Cloudflare Pages
 
 **Live at:** https://agent-doc-js.pages.dev
 
@@ -1120,7 +1120,7 @@ Continue:
 This can be set up in the Cloudflare dashboard under Pages > agent-doc-js > Custom domains.
 
 **For Bob's demo:** Share `https://agent-doc-js.pages.dev` directly. He enters his API key (or your proxy URL) in Settings and starts editing.
-<!-- agent:boundary:5e56a7d9 -->
+<!-- agent:boundary:bcc73f8e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

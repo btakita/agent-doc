@@ -297,6 +297,7 @@ Without access to the corky session's terminal history, I can't determine which 
 Should I add that warning?
 Yes. Let's see if we can have a way of detecting which processes write and why.
 Would it make sense to have hooks generate logs?
+Can we have a way to repair a duplicate patch?
 ### Re: Drift warning + hook logging
 
 **Drift warning implemented:** `commit()` now warns when `file_len - snap_len > 100 bytes`:
@@ -311,7 +312,20 @@ For now, the drift warning is the immediate fix — it makes out-of-band writes 
 
 - `make check`: 602 tests pass
 - Both binaries updated
-<!-- agent:boundary:250fc6a9 -->
+### Re: Repairing duplicate patches (HEAD)
+
+For the immediate corky.md case, the repair is manual: delete the duplicate response block (lines 1574-1597) from the file, then update the snapshot via `agent-doc commit`.
+
+For an automated repair command, `agent-doc dedupe <FILE>` could:
+1. Parse the exchange component
+2. Detect consecutive identical `### Re:` blocks (same heading + same content)
+3. Remove the duplicate, keeping only the first occurrence
+4. Update snapshot
+
+This is a good feature to add but I'd recommend tracking it for a future session rather than implementing now — the drift warning will catch these going forward, and manual cleanup handles the immediate case.
+
+Want me to fix the corky.md duplicate now (manual delete + commit)?
+<!-- agent:boundary:4d991c96 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -320,6 +334,8 @@ For now, the drift warning is the immediate fix — it makes out-of-band writes 
 - [x] All implementation, tests, audit docs complete
 - [x] Single-char truncation fix
 - [x] Commit drift warning for out-of-band writes
-- [ ] Write-origin tracing (hook-based process identification) — future
-- [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
+- [ ] Fix corky.md duplicate response (manual)
+- [ ] `agent-doc dedupe` command — future
+- [ ] Write-origin tracing — future
+- [ ] Evaluate utility of `/btw` — future
 <!-- /agent:pending -->

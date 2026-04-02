@@ -3565,14 +3565,14 @@ Our changes (claim, sync, git, plugin) are unrelated — they don't touch `skill
 Implement:
 - [ ] Fix CI: skill tests fail in environments without Claude Code harness (pre-existing)
 - [ ] PyPI publish (needs manylinux Docker build)
-### Re: CI fix + PyPI status (HEAD)
+### Re: CI fix + PyPI status
 
 **CI skill tests fixed:** Tests now use `SkillConfig::with_environment(ClaudeCode)` instead of `Environment::detect()`. This makes path resolution deterministic regardless of CI environment variables. Committed, pushed, tag moved forward to include fix.
 
 **PyPI:** The PyPI workflow (`pypi.yml`) triggers automatically on release publish. It ran but failed — the Windows build target (`x86_64-pc-windows-msvc`) hit a maturin error. This is a pre-existing issue (all 3 recent PyPI runs failed the same way). The PyPI workflow needs fixing for Windows builds, but that's a separate issue.
 
 The Linux and macOS PyPI builds may have succeeded — let me check.
-<!-- agent:boundary:d3c6d390 -->
+<!-- agent:boundary:07e8ba73 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

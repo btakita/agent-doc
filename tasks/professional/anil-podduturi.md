@@ -65,7 +65,7 @@ Changes from previous draft:
 - Added ask for intros ("if you know anyone...")
 - Mentioned Ragie as the backend + agent-doc-js as the frontend prototype
 - More active tone overall — positions you as building something, not just reminiscing
-<!-- agent:boundary:ac67b03f -->
+<!-- agent:boundary:09f89a26 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

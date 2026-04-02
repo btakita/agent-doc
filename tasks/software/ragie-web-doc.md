@@ -845,7 +845,7 @@ agent-doc-web/
 **For the morning demo:** Build a minimal SPA that lets Bob edit a document and see agent responses. Connect it to your Claude Code via MCP tunnel. Bob types, agent responds, Ragie retrieves — all in his browser.
 
 Should I start building `agent-doc-web`?
-### Re: CRDT, embedded terminal, and Chrome DevTools MCP (HEAD)
+### Re: CRDT, embedded terminal, and Chrome DevTools MCP
 
 **CRDT merge — yes, you're right.** I was thinking single-editor = no conflicts, but the agent writing back while the user is editing is exactly the concurrent-edit scenario CRDT solves. Same problem as local agent-doc. The JS implementation needs CRDT for the response patch application.
 
@@ -902,7 +902,7 @@ This is much simpler than building MCP into the JS. Claude Code already knows ho
 1. Static SPA: CodeMirror 6 + xterm.js + WebSocket
 2. Server: axum — serves SPA, WebSocket for terminal PTY + file sync
 3. Chrome DevTools MCP for Claude Code to read/write the document
-<!-- agent:boundary:89fd3db5 -->
+<!-- agent:boundary:2c5f7dd6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

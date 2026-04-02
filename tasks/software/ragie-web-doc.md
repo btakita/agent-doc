@@ -1202,7 +1202,7 @@ Updated the settings dialog to include the `curl | sh` command directly in the d
 Redeployed to Cloudflare Pages.
 
 (Your "Is " at the end looks like it got cut off — what were you going to ask?)
-### Re: Is this "secure"? (HEAD)
+### Re: Is this "secure"?
 
 **For a demo — yes. For production — no.**
 
@@ -1222,7 +1222,7 @@ Redeployed to Cloudflare Pages.
 **For the Bob demo:** Fine. Controlled environment, trusted parties, tokens rotate.
 
 **For public use:** Would need proper OAuth flow, session cookies, token scoping.
-<!-- agent:boundary:52e5822b -->
+<!-- agent:boundary:b171a44d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -10,7 +10,7 @@ links:
 ## Status
 
 <!-- agent:status patch=replace -->
-Pivoted: full web SPA agent-doc (not read-only viewer) | Bob drives changes in browser via MCP to Claude Code | Building agent-doc-web
+Architecture locked: SPA (CodeMirror + xterm.js) + Chrome DevTools MCP + Yjs CRDT | Ready to build
 <!-- /agent:status -->
 
 ## Exchange
@@ -774,7 +774,15 @@ For a single-user SPA, surprisingly little:
 | Snapshot | localStorage or server-side | Yes |
 | Git integration | Server-side via API | Optional |
 
+CRDT merge would be beneficial to handle response patches from the agent harness.
+
+Local storage is good enough.
+Single window is ok.
+Would be great if the Claude code terminal can be under the document on the webpage.
+
 **The hard part (Claude API) is already solved by MCP.** The SPA doesn't call Claude directly — it connects to Claude Code (or any MCP-compatible AI backend) which does the inference.
+
+We can use chrome dev tools for the MCP.
 
 **Architecture:**
 
@@ -802,6 +810,9 @@ Bob's browser (SPA)
 1. **Bob runs Claude Code locally** — SPA connects to `localhost` MCP. Bob's API key, Bob's context. Zero trust issues.
 
 2. **You host the MCP endpoint** — SPA connects to your tunneled server. Your API key, your Ragie. Bob just uses the web UI.
+
+This should be simple.
+Bob opens the webpage, connects his mcp
 
 **What the SPA needs:**
 
@@ -834,19 +845,77 @@ agent-doc-web/
 **For the morning demo:** Build a minimal SPA that lets Bob edit a document and see agent responses. Connect it to your Claude Code via MCP tunnel. Bob types, agent responds, Ragie retrieves — all in his browser.
 
 Should I start building `agent-doc-web`?
-<!-- agent:boundary:806077bc -->
+### Re: CRDT, embedded terminal, and Chrome DevTools MCP (HEAD)
+
+**CRDT merge — yes, you're right.** I was thinking single-editor = no conflicts, but the agent writing back while the user is editing is exactly the concurrent-edit scenario CRDT solves. Same problem as local agent-doc. The JS implementation needs CRDT for the response patch application.
+
+Good news: Yjs (JS CRDT library) handles this natively with CodeMirror 6. The `y-codemirror.next` binding gives you conflict-free concurrent edits out of the box. The agent's response patches merge cleanly with whatever Bob is typing.
+
+**localStorage for snapshots — perfect.** No server needed for state. `localStorage.setItem('snapshot:' + docId, content)`.
+
+**Single window — clean.** Editor on top, terminal on bottom.
+
+**Claude Code terminal under the document — this is the killer feature.** Bob sees:
+
+```
++------------------------------------------+
+|  CodeMirror editor (markdown)            |
+|  - Bob types here                        |
+|  - Agent responses appear via CRDT       |
+|                                          |
++------------------------------------------+
+|  Claude Code terminal (xterm.js)         |
+|  - Shows agent thinking/streaming        |
+|  - Shows tool calls, diffs               |
+|  - Full Claude Code UX in the browser    |
++------------------------------------------+
+```
+
+This is essentially Claude Code in the browser with a document-first UI. The terminal gives Bob the same experience you have locally.
+
+**Implementation:** `xterm.js` for the terminal emulator. Connect it to a server-side PTY running Claude Code via WebSocket. This is how web-based IDEs (Gitpod, Codespaces) work.
+
+**Chrome DevTools MCP — smart.** Instead of building a custom MCP client in JS, use the existing `chrome-devtools` MCP server. The SPA runs in Chrome, and Claude Code can interact with it via the DevTools protocol. Claude Code can read the document from the page DOM, write responses by updating the editor, and see what Bob is doing in real-time.
+
+This flips the architecture: instead of the SPA being an MCP client, **Claude Code uses Chrome DevTools MCP to interact with the SPA as a tool**. The SPA is just a web page — Claude Code drives it.
+
+**Simplified architecture with Chrome DevTools:**
+
+```
+Claude Code (local)
+    |
+    |-- Chrome DevTools MCP
+    |   |-- reads document from SPA
+    |   |-- writes responses to SPA
+    |   |-- watches for user edits
+    |
+    |-- Ragie MCP (retrieval)
+    |
+Bob's browser (SPA)
+    |-- CodeMirror editor
+    |-- xterm.js terminal (WebSocket to Claude Code PTY)
+```
+
+This is much simpler than building MCP into the JS. Claude Code already knows how to use Chrome DevTools. The SPA just needs to be a good editor.
+
+**For tonight's build:**
+1. Static SPA: CodeMirror 6 + xterm.js + WebSocket
+2. Server: axum — serves SPA, WebSocket for terminal PTY + file sync
+3. Chrome DevTools MCP for Claude Code to read/write the document
+<!-- agent:boundary:89fd3db5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Build `agent-doc-web` SPA — CodeMirror 6 editor + diff + template patch logic in JS
-- [ ] MCP client in JS — connect SPA to Claude Code backend
-- [ ] `agent-doc serve` — host the SPA + MCP relay endpoint
-- [ ] cloudflared tunnel (`--tunnel`) for instant HTTPS sharing
-- [ ] Demo script for Bob call (Bob drives the document in his browser)
+- [ ] Build SPA: CodeMirror 6 editor with Yjs CRDT + markdown support
+- [ ] Add xterm.js terminal panel below editor (WebSocket to server PTY)
+- [ ] Server: axum — serve static SPA + WebSocket for PTY + file sync
+- [ ] Wire Chrome DevTools MCP for Claude Code to interact with SPA
+- [ ] localStorage snapshot management in JS
+- [ ] cloudflared tunnel for Bob access
+- [ ] Demo script for Bob call
 - [ ] (deferred) Multi-user editing with injection sandboxing
 - [ ] (deferred) Authorization / trust tiers
-- [ ] (deferred) Injection scanning
-- [ ] (deferred) Content signing (git commit signatures)
+- [ ] (deferred) Custom MCP server (`agent-doc mcp-server`)
 <!-- /agent:pending -->

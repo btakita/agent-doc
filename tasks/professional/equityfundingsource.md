@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Deployed to equityfundingsource.pages.dev. Custom domain efs.briantakita.me pending dashboard setup.
+25 pages deployed. Apply Now + Message Us forms built. 50 tests passing.
 <!-- /agent:status -->
 
 ## Exchange
@@ -280,7 +280,31 @@ Each of the 18 funded deals now has its own page at `/portfolio/:slug`:
 ```
 make deploy    # build + generate static + deploy to Cloudflare Pages
 ```
-<!-- agent:boundary:6213a088 -->
+
+The pages url is ok for demo purposes.
+
+Continue:
+- [ ] Build Apply Now page (form or Google Forms link)
+- [ ] Build Message Us / Contact page
+### Re: Apply Now + Message Us pages built and deployed (HEAD)
+
+**Apply Now page** (`/apply`) -- full loan application form matching equityfundingnow.com:
+- Borrower info (name, email, phone, document upload)
+- Subject property address (street, city, state, zip, country)
+- Property type (7 radio options: single family, 2-4 units, 5+ units, condo, commercial, land, other)
+- Borrower type (4 options: individual, trust, LLC/corporation, other)
+- Loan details (credit score, proposed amount, occupancy, lien position, transaction type)
+- Financial details (purchase price, appraised value, existing balance, broker fees)
+- Loan purpose, referral source, additional notes
+
+**Message Us page** (`/contact` and `/message`) -- contact form:
+- Name, email, subject, message fields
+- Image sidebar (matching live site)
+
+**Deployed:** Live at https://equityfundingsource.pages.dev (25 pages total)
+
+**Tests:** 50 total (10 new for contact + apply), all passing.
+<!-- agent:boundary:9a6537bd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -294,16 +318,16 @@ make deploy    # build + generate static + deploy to Cloudflare Pages
 - [x] Download property images (32 files)
 - [x] Configure Cloudflare Pages deployment
 - [x] bun install + verify dev server runs (port 4200)
-- [x] Add page tests (40 tests, all passing)
+- [x] Add page tests (50 tests, all passing)
 - [x] Fix CSS loading (hashed asset URLs)
 - [x] Dark theme + layout matching equityfundingnow.com
 - [x] CSS, style, and content parity with live site
 - [x] Individual portfolio deal detail pages (18 pages)
-- [x] Static site generation (22 pages)
+- [x] Static site generation (25 pages)
 - [x] Deploy to Cloudflare Pages (equityfundingsource.pages.dev)
 - [x] R2 bucket created + assets uploaded
-- [ ] Add custom domain efs.briantakita.me (Cloudflare dashboard)
-- [ ] Build Apply Now page (form or Google Forms link)
-- [ ] Build Message Us / Contact page
+- [x] Build Apply Now page (full loan application form)
+- [x] Build Message Us / Contact page
 - [ ] Blog setup (briantakita.me-dev pattern)
+- [ ] Form submission backend (Formspree or custom)
 <!-- /agent:pending -->

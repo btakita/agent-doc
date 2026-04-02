@@ -286,7 +286,7 @@ The pages url is ok for demo purposes.
 Continue:
 - [ ] Build Apply Now page (form or Google Forms link)
 - [ ] Build Message Us / Contact page
-### Re: Apply Now + Message Us pages built and deployed (HEAD)
+### Re: Apply Now + Message Us pages built and deployed
 
 **Apply Now page** (`/apply`) -- full loan application form matching equityfundingnow.com:
 - Borrower info (name, email, phone, document upload)
@@ -304,7 +304,7 @@ Continue:
 **Deployed:** Live at https://equityfundingsource.pages.dev (25 pages total)
 
 **Tests:** 50 total (10 new for contact + apply), all passing.
-<!-- agent:boundary:9a6537bd -->
+<!-- agent:boundary:bd224637 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

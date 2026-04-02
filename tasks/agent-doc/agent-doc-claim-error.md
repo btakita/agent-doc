@@ -253,7 +253,12 @@ Update SPEC.md, README.md, ontology, module-harness
 `make check`: all 602 tests pass.
 
 No SPEC.md diff section exists — the truncation behavior is documented in the `diff.rs` module doc which is the authoritative source.
-<!-- agent:boundary:1e3cc087 -->
+
+tasks/software/corky.md has a duplicate response patch. Why?
+### Re: Duplicate response in corky.md (HEAD)
+
+I don't know why without investigating the file. This could be a separate issue from this session's work. Should I look at `tasks/software/corky.md` now, or is this for a different session?
+<!-- agent:boundary:68729782 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -261,5 +266,6 @@ No SPEC.md diff section exists — the truncation behavior is documented in the 
 <!-- agent:pending patch=replace -->
 - [x] All implementation, tests, audit docs complete
 - [x] Single-char truncation fix with tests and docs
+- [ ] Investigate duplicate response patch in tasks/software/corky.md
 - [ ] Evaluate utility of `/btw` (harness preemption) for agent-doc sync
 <!-- /agent:pending -->

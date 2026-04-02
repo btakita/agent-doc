@@ -1488,13 +1488,26 @@ corky doc sheet <SHEET_URL> -o data.csv --format csv
 **No new dependencies** -- uses existing `ureq`, `serde_json`, basic HTML stripping
 
 Ready to commit and test. Need to add the scopes to the GCP console before first use.
-<!-- agent:boundary:30aba631 -->
+continue
+### Re: Committed (HEAD)
+
+```
+bf65e7d feat(doc): Google Drive upload, Docs read/write, Sheets read
+```
+
+7 files changed, 525 insertions. Parent updated (dd02cb14).
+
+**Next steps to use:**
+1. Go to Google Cloud Console > APIs & Services > OAuth consent screen
+2. Add scopes: `drive.file`, `documents`, `spreadsheets.readonly`
+3. Enable APIs: Google Drive API, Google Docs API, Google Sheets API
+4. First run of any command will trigger re-auth for the new scopes
+<!-- agent:boundary:ce5ce215 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Commit Phase 3/4 to corky repo
-- Add Drive/Docs/Sheets scopes to GCP console (user action)
-- Test all commands with real Google Docs/Sheets
+- Add Drive/Docs/Sheets scopes + enable APIs in GCP console
+- Test all doc commands with real files
 <!-- /agent:pending -->

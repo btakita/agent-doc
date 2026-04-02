@@ -982,7 +982,7 @@ Current draft opens with stats: *"532 git commits in one day."* Scroll-stopper b
 Recommendation: **B** — combines narrative pull with security angle, stats appear naturally in body. For pure "meat first," **A** is sharpest.
 The prompt injection risk is allowing multiple people working on the same document.
 And running untrusted documents.
-### Re: Prompt injection framing (HEAD)
+### Re: Prompt injection framing
 
 Good sharpening. Two distinct attack vectors:
 
@@ -999,7 +999,7 @@ Revised options with this framing:
 
 **F (new):**
 "Two prompt injection risks nobody talks about: shared documents where collaborators inject instructions, and untrusted documents where the content IS the attack."
-<!-- agent:boundary:da302eda -->
+<!-- agent:boundary:b5d5cde9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

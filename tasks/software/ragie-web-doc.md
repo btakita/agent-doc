@@ -1435,7 +1435,7 @@ Deployed to Cloudflare Pages.
 
 Do:
 - [ ] (deferred) OAuth flow, Yjs CRDT, WebSocket sync, Ragie, MCP
-### Re: Deferred items — prioritization (HEAD)
+### Re: Deferred items — prioritization
 
 These are all substantial features. For the morning demo with Bob, ranked by impact:
 
@@ -1446,7 +1446,7 @@ These are all substantial features. For the morning demo with Bob, ranked by imp
 5. **OAuth** — Production. Not demo-blocking.
 
 What do you want to tackle first?
-<!-- agent:boundary:d88eb7e2 -->
+<!-- agent:boundary:15f6cec9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

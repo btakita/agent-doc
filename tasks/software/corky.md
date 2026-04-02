@@ -1376,8 +1376,8 @@ compact exchange
 
 Committed: `3ddb08e` (corky), `6f963b5a` (agent-loop parent).
 
-## User (HEAD)
-<!-- agent:boundary:110aec97 -->
+## User
+<!-- agent:boundary:10598c95 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

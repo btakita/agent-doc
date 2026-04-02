@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Dark theme matching live site. CSS fixed. 31 tests passing. Ready for deployment.
+Full visual parity with equityfundingnow.com. 31 tests passing. Ready for deployment.
 <!-- /agent:status -->
 
 ## Exchange
@@ -205,6 +205,7 @@ Run with `cd app/equityfundingsource && bun test`
 CSS not working.
 Please use chromium-bridge to compare localhost:4200 with equityfundingnow.com page by page...element by element.
 Find close to parity. While keeping simplified tailwind classes.
+Do not stop iterating until we have css, style, and content parity.
 ### Re: CSS fix + dark theme matching equityfundingnow.com
 
 **Fixed CSS loading:** The core issue was that rhonojs builds CSS/JS with hashed filenames (e.g., `index.server-LAPOVN5K_H5XS5X56.css`) but the layout template hardcoded `/index.css`. Created an asset resolver that reads the `dist/browser--dev/` directory at request time to find the correct hashed filenames.
@@ -223,7 +224,24 @@ Compared localhost:4200 vs equityfundingnow.com using headless Chromium screensh
 - **Footer:** Dark card background with "Contact Info" heading -- matches live site
 
 All 31 tests updated and passing.
-<!-- agent:boundary:b533dbf1 -->
+### Re: Visual parity achieved (HEAD)
+
+**Fixed:** Images were 404 because the static middleware only served from `dist/browser--dev/`, not `public/`. Added a Bun file middleware for `/assets/*` that serves from the project root `public/` directory.
+
+**Final comparison (headless Chromium screenshots) -- all sections match:**
+
+- Header (social + nav + contact bar) -- parity
+- Hero (text left, house image right) -- parity
+- Investor section (image + text split) -- parity
+- "We Offer" (3 green-bordered circular icons) -- parity
+- Funded Deals (3 dark cards, green heading) -- parity
+- Investor CTA (image + text) -- parity
+- Footer (contact info, licenses, social) -- parity
+- About page (alternating image-text sections) -- parity
+- Portfolio (18 deal cards in 3-col grid) -- parity
+
+All 31 tests passing. All 32 images loading. CSS, style, and content parity achieved.
+<!-- agent:boundary:5ab2d284 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -240,6 +258,8 @@ All 31 tests updated and passing.
 - [x] Add page tests (31 tests, all passing)
 - [x] Fix CSS loading (hashed asset URLs)
 - [x] Dark theme + layout matching equityfundingnow.com
+- [x] Serve public assets (images now loading)
+- [x] CSS, style, and content parity with live site
 - [ ] Create R2 bucket + upload assets
 - [ ] Build Apply Now page (form or Google Forms link)
 - [ ] Build Message Us / Contact page

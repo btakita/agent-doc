@@ -307,7 +307,7 @@ Continue:
 
 Please fix the social media links at the top of the template
 ![img_1.png](img_1.png)
-### Re: Social media icons fixed (HEAD)
+### Re: Social media icons fixed
 
 Replaced the text-letter social links ("f", "l", "i") with proper SVG icons:
 - **Facebook** -- path icon
@@ -315,7 +315,7 @@ Replaced the text-letter social links ("f", "l", "i") with proper SVG icons:
 - **Instagram** -- camera/square icon
 
 Deployed to https://equityfundingsource.pages.dev. 50 tests passing.
-<!-- agent:boundary:4596333d -->
+<!-- agent:boundary:9944cf50 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

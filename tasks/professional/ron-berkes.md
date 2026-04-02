@@ -795,7 +795,7 @@ Send the email. We can bypass the draft.
 
 corky transcribe + diarize /home/brian/work/btakita/agent-loop/mail/contacts/ron-berkes/recordings/phone_20260331-142825_6504368181.amr
 Make sure gpu is being used.
-### Re: Transcription of March 31 phone call (HEAD)
+### Re: Transcription of March 31 phone call
 
 Transcribed `phone_20260331-142825_6504368181.amr` with GPU diarization (RTX 5090, 124x realtime, 6.2s for 12:49 of audio).
 
@@ -812,7 +812,7 @@ Saved to: `mail/contacts/ron-berkes/recordings/phone_20260331-142825_6504368181.
 4. **Julian / 3A Credit API integration** -- Ron wants an API bridging their systems so factory reports can be pulled from Ron's site, monetized via Julian's data, with 50-50 (or 60-40) revenue share. Julian would fund the development. Brian estimated 1 week for simple API, up to a month for more complex agentic flow. Plans to use Ragie or SIFT.
 
 5. **Patent mining** -- Ron adding Brian to spreadsheet. Focus on design patents for simple-to-medium complexity physical products (no electronics/circuit boards). Target patent holders who don't know what to do with their patents.
-<!-- agent:boundary:88ae73d8 -->
+<!-- agent:boundary:0fb5b7f8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

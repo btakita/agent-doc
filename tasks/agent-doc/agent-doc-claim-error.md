@@ -507,7 +507,7 @@ The timeout prevents deadlocks (e.g., 30s). If timeout expires, log a warning an
 Shall I implement this?
 How are merges handled? CRDT?
 Implement
-### Re: Flock already exists — the race is earlier (HEAD)
+### Re: Flock already exists — the race is earlier
 
 `write.rs` already has `acquire_doc_lock(file)` (blocking `lock_exclusive`) at three write points (lines 373, 462, 727). The lock serializes the actual file write + snapshot update.
 
@@ -520,7 +520,7 @@ Implement
 **What was causing the corky.md duplicates:** The watch daemon and skill both saw the same user prompt, both generated responses. The watch daemon's busy check wasn't in place yet (the fix was deployed mid-session). Now that it is, the watch daemon skips files with active operations.
 
 **The existing flock + the new busy guard should prevent future duplicates.** No additional flock changes needed. The merges are handled by the existing CRDT path for concurrent user edits.
-<!-- agent:boundary:cd30cb8f -->
+<!-- agent:boundary:a2642f27 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

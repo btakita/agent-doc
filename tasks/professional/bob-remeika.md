@@ -1534,7 +1534,7 @@ And a request for access to Ragie Parse OCR
 - **Ron:** "Another client has a patent mining corpus — unstructured technical documents that need semantic retrieval." → shows breadth of use cases
 
 **TL;DR:** The message stays tight. Judith and Ron are call ammo, not DM content.
-<!-- agent:boundary:a9070164 -->
+<!-- agent:boundary:f0687ca0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

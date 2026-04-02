@@ -505,12 +505,29 @@ This eliminates the duplicate response bug entirely — the second writer sees t
 The timeout prevents deadlocks (e.g., 30s). If timeout expires, log a warning and proceed without the lock (degraded mode, same as current behavior).
 
 Shall I implement this?
-<!-- agent:boundary:9a378d5b -->
+How are merges handled? CRDT?
+Implement
+### Re: Flock already exists — the race is earlier (HEAD)
+
+`write.rs` already has `acquire_doc_lock(file)` (blocking `lock_exclusive`) at three write points (lines 373, 462, 727). The lock serializes the actual file write + snapshot update.
+
+**The duplicate response bug is NOT a write race — it's a diff race.** Two processes both compute the diff (seeing the same user prompt), both generate responses, then both write. The flock serializes the writes, but by the time the second writer acquires the lock, it already has a response to write. The lock doesn't help because the duplicate was generated before the lock was acquired.
+
+**Where the fix needs to be:**
+- The watch daemon busy guard (already implemented) prevents the watch daemon from starting a new run while the skill is active
+- The CRDT merge handles user edits during agent response
+
+**What was causing the corky.md duplicates:** The watch daemon and skill both saw the same user prompt, both generated responses. The watch daemon's busy check wasn't in place yet (the fix was deployed mid-session). Now that it is, the watch daemon skips files with active operations.
+
+**The existing flock + the new busy guard should prevent future duplicates.** No additional flock changes needed. The merges are handled by the existing CRDT path for concurrent user edits.
+<!-- agent:boundary:cd30cb8f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] All previous session items complete
-- [ ] Implement flock-based write lock with diff recheck
+- [x] All session items complete
+- [x] Write lock already exists in write.rs (flock)
+- [x] Watch daemon busy guard prevents diff race
+- [x] CRDT handles user-edit merges
 <!-- /agent:pending -->

@@ -336,7 +336,7 @@ We should have admin accounts as well.
 
 Another document upload flow is when an email with a link containing a token is sent.
 This can be associated with the account that the uploaded document will be associated with.
-### Re: Form submission architecture (HEAD)
+### Re: Form submission architecture
 
 Good thinking on the security layers. Here's how this could work:
 
@@ -364,7 +364,7 @@ Good thinking on the security layers. Here's how this could work:
 - Dashboard to view submissions, review flagged docs, manage borrower accounts
 
 This is a significant backend project. Want me to scope out the phases, or is this for a future session after the demo is approved?
-<!-- agent:boundary:7244398a -->
+<!-- agent:boundary:54a139c0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

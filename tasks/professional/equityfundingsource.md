@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-25 pages deployed. Apply Now + Message Us forms built. 50 tests passing.
+Social icons fixed. 25 pages deployed. 50 tests passing.
 <!-- /agent:status -->
 
 ## Exchange
@@ -304,7 +304,18 @@ Continue:
 **Deployed:** Live at https://equityfundingsource.pages.dev (25 pages total)
 
 **Tests:** 50 total (10 new for contact + apply), all passing.
-<!-- agent:boundary:bd224637 -->
+
+Please fix the social media links at the top of the template
+![img_1.png](img_1.png)
+### Re: Social media icons fixed (HEAD)
+
+Replaced the text-letter social links ("f", "l", "i") with proper SVG icons:
+- **Facebook** -- path icon
+- **LinkedIn** -- person + network icon
+- **Instagram** -- camera/square icon
+
+Deployed to https://equityfundingsource.pages.dev. 50 tests passing.
+<!-- agent:boundary:4596333d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -328,6 +339,7 @@ Continue:
 - [x] R2 bucket created + assets uploaded
 - [x] Build Apply Now page (full loan application form)
 - [x] Build Message Us / Contact page
+- [x] Fix social media icons (SVG icons)
 - [ ] Blog setup (briantakita.me-dev pattern)
 - [ ] Form submission backend (Formspree or custom)
 <!-- /agent:pending -->

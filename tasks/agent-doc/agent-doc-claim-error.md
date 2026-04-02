@@ -140,7 +140,7 @@ Reinstall the plugin to fix the lag.
 
 I did a `Claim for Tmux Pane` on tasks/professional/anil-podduturi.md. I saw the prompt `Sync: --col tasks/professional/anil-podduturi.md --col tasks/professional/bob-remeika.md [focus: tasks/professional/anil-podduturi.md]`, but nothing happened. Why?
 ![img_5.png](img_5.png)
-### Re: anil-podduturi.md is empty — no session UUID (HEAD)
+### Re: anil-podduturi.md is empty — no session UUID
 
 The file is 0 bytes (empty). No frontmatter, no session UUID. Sync treats files without session UUIDs as `Unmanaged` — they can't be auto-started because there's no session to start.
 
@@ -159,7 +159,7 @@ B. **Keep current behavior** — user must claim first (via CLI or `Ctrl+Shift+A
 C. **Auto-claim only on explicit user action** — `Ctrl+Shift+Alt+C` runs `claim` then `sync` for the focused file only
 
 I don't know which you prefer. What's the intended behavior?
-<!-- agent:boundary:5dcf70c6 -->
+<!-- agent:boundary:86fa90f3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

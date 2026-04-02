@@ -1827,7 +1827,7 @@ Try it now — reset the document, enter your Ragie key in Settings, and ask som
 
 Implement Export and Import. So a document can be exported and shared.
 Implement some sort of scanning to warn against malicious/dangerous prompts when loading a document. Is this a SKILL?
-### Re: Export/Import + injection scanning (HEAD)
+### Re: Export/Import + injection scanning
 
 **Import button added** with built-in prompt injection scanner.
 
@@ -1851,7 +1851,7 @@ Implement some sort of scanning to warn against malicious/dangerous prompts when
 **Export** already worked — now you can round-trip: Export -> share file -> recipient Imports.
 
 Deployed.
-<!-- agent:boundary:31c440ad -->
+<!-- agent:boundary:8eeaecce -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

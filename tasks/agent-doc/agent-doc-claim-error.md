@@ -96,7 +96,7 @@ Why is the file exclude not working?
   }
 }
 ```
-### Re: Tailwind CSS file exclude not working (HEAD)
+### Re: Tailwind CSS file exclude not working
 
 The `files.exclude` config in the Tailwind CSS settings is for the **VS Code extension**, not the JetBrains plugin. The JetBrains Tailwind CSS plugin uses its own settings and doesn't read this JSON config format.
 
@@ -108,7 +108,7 @@ The `files.exclude` JSON you pasted won't take effect in IntelliJ. The JetBrains
 **Recommended action:** Uncheck "Enable Tailwind CSS support" for this project. The agent-loop workspace doesn't need Tailwind CSS processing. The submodules that do use Tailwind (prescience-notes-dev, briantakita.me-dev) have their own IDEA project contexts.
 
 If you already unchecked it and the lag persists, restart the IDE — the Tailwind CSS LSP process may still be running from the previous session.
-<!-- agent:boundary:917d8c35 -->
+<!-- agent:boundary:f268fc55 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

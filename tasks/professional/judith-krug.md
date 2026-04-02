@@ -741,7 +741,23 @@ The Worker would use one of these:
 - **Simple option:** Forward to Judith's Gmail via Cloudflare email routing
 
 The notification email would include the form data (name, phone, loan amount, property address) so Judith can triage from her inbox without logging into a dashboard. Could also cc you or add admin notifications.
-<!-- agent:boundary:e2846086 -->
+
+Rob approves.
+
+- [ ] Wire up form submission backend (Apply Now + Contact)
+- [ ] re-address to Judith (cc Robert Waldman) and send
+### Re: Rob approves -- email re-addressed + form backend (HEAD)
+
+**Email updated and pushed to Gmail Drafts:**
+- **To:** judithkrug@gmail.com
+- **Cc:** rwaldman100@gmail.com
+- **Subject:** "Equity Funding Source -- new website live + proposal"
+- Removed Rob's wrapper text. Clean proposal directly to Judith.
+
+Check your Gmail drafts to review and send.
+
+**Form backend:** Starting on the Cloudflare Worker + D1 option for Apply Now and Contact forms next. Will store submissions in D1 and email Judith on each submission.
+<!-- agent:boundary:a3ef29ef -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -751,6 +767,7 @@ The notification email would include the form data (name, phone, loan amount, pr
 - [x] Add Ragie mention to proposal
 - [x] Redirect proposal to Robert Ward for review first
 - [x] Update proposal with live EFS website link
+- [x] Re-address to Judith (cc Robert Waldman) and push to Gmail Drafts
 - [ ] Wire up form submission backend (Apply Now + Contact)
-- [ ] After Rob approves: re-address to Judith (cc Robert Waldman) and send
+- [ ] Review and send proposal email from Gmail
 <!-- /agent:pending -->

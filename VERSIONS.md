@@ -4,6 +4,20 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.2
+
+- **`agent-doc dedupe`**: New command removes consecutive duplicate response blocks. Ignores boundary markers in comparison. Used to fix duplicate responses caused by watch daemon race conditions.
+- **Write-origin tracing**: `--origin` flag on `agent-doc write` logs the write source (skill/watch/stream) to ops.log. Aids diagnosis when snapshot drift occurs.
+- **Commit drift warning**: Warns when `file_len - snap_len > 100` bytes, indicating a possible out-of-band write that bypassed the snapshot pipeline.
+- **Watch daemon busy guard**: Skips files with active agent-doc operations (`is_busy()` check), preventing the watch daemon from generating duplicate responses when competing with the skill.
+- **PatchWatcher EDT fix**: Patch computation moved outside `WriteCommandAction`. No-op patches skip the write action entirely, eliminating EDT blocking and typing lag.
+- **ClaimAction claim+sync**: `Ctrl+Shift+Alt+C` now calls `agent-doc claim` on the focused file before syncing, handling unclaimed/empty files.
+- **Single-char truncation fix**: Single characters are treated as potentially truncated in `looks_truncated()`, requiring 1.5s stability check. Prevents partial typing (e.g., "S" from "Save as a draft.") from triggering premature runs.
+- **SKILL.md**: All write examples include `--origin skill`. Version 0.31.2.
+- **JetBrains plugin**: Version 0.2.40.
+- **Tests**: 606 total. New: `truncated_single_chars`, `dedupe_*` (4 tests).
+- **Docs**: SPEC.md §7.22 (--origin), §7.23 (busy guard), §7.28 (dedupe). CLAUDE.md module layout.
+
 ## 0.31.1
 
 - **Declarative layout sync**: Navigating to a file in a split editor now creates a tmux pane automatically. Files with session UUIDs are always treated as Registered by sync, even without a registry entry (reverses 0.31.0 Unmanaged guard). Auto-start phase also no longer requires registry entries.

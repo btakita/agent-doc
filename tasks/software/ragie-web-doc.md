@@ -1016,7 +1016,7 @@ Such as research tools or ragie integration
 - Submodule added to agent-loop at `src/agent-doc-js`
 
 Running locally at `http://localhost:8089` for testing.
-<!-- agent:boundary:36174275 -->
+<!-- agent:boundary:ef8cfb38 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

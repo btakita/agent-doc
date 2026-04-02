@@ -90,7 +90,11 @@ Checked the .eml file. The problem: `In-Reply-To: 19d479af292d8d99` used the Gma
 - Check Gmail web UI to confirm whether the reply landed in the same thread visually
 - File a corky enhancement to resolve Message-IDs from thread IDs when building reply headers
 I don't see it in the same thread visually.
-Sshould
+Should I resend the email?
+Please note that I had an issue with the reply.
+Let Rob know that since the the reply wasn't attached to the original email via Message-ID, I'm open to whenever he can meet.
+
+Original email is at /home/brian/work/btakita/agent-loop/tmp/Brian_Rob_Zoom_first.eml
 ### Re: Threading fix — ready to resend
 
 Found Rob's original Message-ID from the .eml: `<CAMrCVsDSX0zWO2DyZfh9ugzS=pUHSt_MtAEs+0qnfw7-njWZ2w@mail.gmail.com>`
@@ -103,13 +107,27 @@ Created a new draft with the correct `In-Reply-To` header: `mail/drafts/2026-04-
 3. **Skip resending** — Rob likely received the first reply fine; the broken threading is mainly a Gmail UI issue on your side
 
 Which approach do you want?
-<!-- agent:boundary:71b5be87 -->
+### Re: Updated draft — ready to send (HEAD)
+
+Updated the draft at `mail/drafts/2026-04-02-re-brian-rob-zoom.md` with new messaging:
+
+> Hi Rob,
+>
+> Apologies...my earlier reply didn't thread properly due to a technical issue on my end, so resending to make sure you see it.
+>
+> I'd love to chat about the role at Dreamable. I'm open to whenever works for you on Thursday. Looking forward to it.
+>
+> Best,
+> Brian
+
+Threaded with correct `In-Reply-To: <CAMrCVsDSX0zWO2DyZfh9ugzS=pUHSt_MtAEs+0qnfw7-njWZ2w@mail.gmail.com>`. Ready to send on your go.
+<!-- agent:boundary:6a0302f2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Resend reply with correct Message-ID threading (awaiting user decision)
+- Send updated reply to Rob with correct threading (awaiting approval)
 - Corky fix: resolve actual Message-ID from Gmail API for `in_reply_to` (not thread ID)
 - Prep talking points for Dreamable call (agent experience, AI agent thesis alignment)
 - Watch for Rob's confirmation reply

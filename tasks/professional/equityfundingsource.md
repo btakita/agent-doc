@@ -522,7 +522,7 @@ Migration `0001_create_tables.sql` applied to remote D1 (4 commands, 0.48ms):
 
 do:
 - [ ] Redeploy to Cloudflare Pages with form backend
-### Re: Redeployed to Cloudflare Pages (HEAD)
+### Re: Redeployed to Cloudflare Pages
 
 Deployed with form backend. 25 pages generated, 27 new files uploaded.
 
@@ -531,7 +531,7 @@ Deployed with form backend. 25 pages generated, 27 new files uploaded.
 Forms now submit to `/api/apply` and `/api/contact` with D1 storage + R2 quarantine for uploads. The D1 database is live with the `applications`, `contacts`, and `uploaded_documents` tables.
 
 **Note:** The static site deploy (Cloudflare Pages) serves pre-rendered HTML. The POST endpoints (`/api/apply`, `/api/contact`) require a Cloudflare Workers deployment to actually process submissions. The current Pages deploy includes the client-side JS for form submission, but the server-side handlers need a Workers deploy. Want me to set that up next?
-<!-- agent:boundary:9c784f4a -->
+<!-- agent:boundary:6570c9cb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

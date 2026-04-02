@@ -312,7 +312,7 @@ For now, the drift warning is the immediate fix — it makes out-of-band writes 
 
 - `make check`: 602 tests pass
 - Both binaries updated
-### Re: Repairing duplicate patches (HEAD)
+### Re: Repairing duplicate patches
 
 For the immediate corky.md case, the repair is manual: delete the duplicate response block (lines 1574-1597) from the file, then update the snapshot via `agent-doc commit`.
 
@@ -325,7 +325,7 @@ For an automated repair command, `agent-doc dedupe <FILE>` could:
 This is a good feature to add but I'd recommend tracking it for a future session rather than implementing now — the drift warning will catch these going forward, and manual cleanup handles the immediate case.
 
 Want me to fix the corky.md duplicate now (manual delete + commit)?
-<!-- agent:boundary:4d991c96 -->
+<!-- agent:boundary:8be085e1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

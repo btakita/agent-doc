@@ -1298,7 +1298,7 @@ Committed to corky repo:
 - Parent submodule pointer updated (6f963b5a)
 
 How much bigger would audio in wav/m4a formats be than amr?
-### Re: WAV/M4A size vs AMR (HEAD)
+### Re: WAV/M4A size vs AMR
 
 For the 77-min call (this AMR file is 7.1 MB):
 
@@ -1315,7 +1315,7 @@ For the 77-min call (this AMR file is 7.1 MB):
 For a phone with 128 GB storage, 37 MB per hour-long call is very manageable (~3,400 hours before filling up). The quality improvement for transcription/diarization is massive since AAC preserves the spectral detail that AMR destroys at 12 kbps.
 
 WAV is overkill for phone recordings -- it's lossless but the phone mic/codec doesn't capture enough detail to justify the 20x size increase.
-<!-- agent:boundary:ff59a4c5 -->
+<!-- agent:boundary:c8cc274b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

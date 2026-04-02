@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Dev server running on port 4200. Assets downloaded. Cloudflare deployment configured.
+Dev server running. 31 tests passing. Assets downloaded. Cloudflare deployment configured.
 <!-- /agent:status -->
 
 ## Exchange
@@ -179,6 +179,8 @@ Bun v1.3.10 (Linux x64)
 error: script "dev" exited with code 1
 error: script "dev" exited with code 1
 ```
+
+Please add tests for each page.
 ### Re: Fix dev server startup
 
 Fixed 3 issues:
@@ -188,7 +190,18 @@ Fixed 3 issues:
 3. **Tailwind CSS syntax:** Changed `@import "tailwindcss"` to `@tailwind base; @tailwind components; @tailwind utilities;` (Tailwind v4 `@import` not compatible with this esbuild plugin chain)
 
 Dev server now starts successfully on port 4200.
-<!-- agent:boundary:5b05b109 -->
+### Re: Page tests added (HEAD)
+
+31 tests across 5 test suites, all passing (31ms):
+
+- **Home page** (8 tests) -- hero section, value props, rate range, featured deals, investor section, CTAs, phone number
+- **About page** (7 tests) -- document render, company description, services list, trust deed section, Judith Krug bio + headshot, license numbers
+- **Portfolio page** (4 tests) -- all 18 deal locations, amounts, deal types, property images
+- **Broker Portal** (3 tests) -- document render, contact info, coming soon message
+- **Layout components** (9 tests) -- header nav links, contact bar, mobile menu toggle, footer headquarters/fax/licenses/social links/copyright
+
+Run with `cd app/equityfundingsource && bun test`
+<!-- agent:boundary:e39bb483 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -202,6 +215,7 @@ Dev server now starts successfully on port 4200.
 - [x] Download property images (32 files)
 - [x] Configure Cloudflare Workers + R2 deployment
 - [x] bun install + verify dev server runs (port 4200)
+- [x] Add page tests (31 tests, all passing)
 - [ ] Create R2 bucket + upload assets
 - [ ] Build Apply Now page (form or Google Forms link)
 - [ ] Build Message Us / Contact page

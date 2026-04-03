@@ -86,12 +86,12 @@ Update SPEC.md, README.md, ontology, module-harness
 `make check`: 608 tests pass.
 
 release
-### Re: v0.31.3 released (HEAD)
+### Re: v0.31.3 released
 
 - **crates.io**: published ✓
 - **GitHub Release**: https://github.com/btakita/agent-doc/releases/tag/v0.31.3 ✓
 - Both binaries updated
-<!-- agent:boundary:e5b56e8d -->
+<!-- agent:boundary:6b861ddb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Session complete. IPC reposition simplified (socket-only), max_lines= inline attribute added, release binary rebuilt.
+v0.31.4 released. IPC reposition socket-only, max_lines= inline attr, boundary hash fix.
 <!-- /agent:status -->
 
 ## Exchange
@@ -61,7 +61,21 @@ Update SPEC.md, README.md, ontology, module-harness
 **Audit-docs:** Down from 5 issues to 2 (pre-existing: large table warning + SKILL.md age).
 
 `make check` passes (clippy + all 612 tests including 4 new max_lines tests).
-<!-- agent:boundary:0f08c8d5 -->
+
+release
+### Re: Release v0.31.4 (HEAD)
+
+Released agent-doc v0.31.4:
+
+1. Committed all changes (14 files, +249/-80)
+2. Tagged `v0.31.4`, pushed to origin
+3. Published to crates.io
+4. PyPI skipped (manylinux platform tag issue — needs container build)
+5. GitHub Release created with prebuilt binary: https://github.com/btakita/agent-doc/releases/tag/v0.31.4
+6. `cargo install --path .` — binary installed to `~/.cargo/bin/`
+
+`agent-doc --version` → `agent-doc 0.31.4`
+<!-- agent:boundary:37129e13 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -70,7 +84,6 @@ Update SPEC.md, README.md, ontology, module-harness
 - [x] IPC reposition → FFI event
 - [x] Inline `max_lines=` attribute on component tags
 - [x] Build and install binary
-- [x] Audit docs
-- [x] Add tests (4 new max_lines tests)
-- [x] Update SPEC.md, README.md, CLAUDE.md
+- [x] Audit docs, tests, doc updates
+- [x] Release v0.31.4 (crates.io + GitHub Release)
 <!-- /agent:pending -->

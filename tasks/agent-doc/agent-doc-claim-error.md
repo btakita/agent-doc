@@ -63,7 +63,7 @@ Update SPEC.md, README.md, ontology, module-harness
 `make check` passes (clippy + all 612 tests including 4 new max_lines tests).
 
 release
-### Re: Release v0.31.4 (HEAD)
+### Re: Release v0.31.4
 
 Released agent-doc v0.31.4:
 
@@ -75,7 +75,7 @@ Released agent-doc v0.31.4:
 6. `cargo install --path .` — binary installed to `~/.cargo/bin/`
 
 `agent-doc --version` → `agent-doc 0.31.4`
-<!-- agent:boundary:37129e13 -->
+<!-- agent:boundary:b54789e1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

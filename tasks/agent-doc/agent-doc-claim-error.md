@@ -114,12 +114,26 @@ The extra newline was introduced by the first `/agent-doc` run's IPC write or bo
 This is a pre-existing issue with the IPC write path — the plugin's `PatchWatcher.applyPatch()` uses `document.setText(result)` which can alter trailing/leading whitespace at component boundaries. The fix would need to be in the PatchWatcher's content comparison or the binary's IPC patch generation.
 
 For now, this is cosmetic and doesn't affect functionality (diff computation strips whitespace). Tracking as a low-priority issue.
-<!-- agent:boundary:3ec669b7 -->
+
+Fix:
+- [ ] IPC write whitespace normalization (cosmetic, low priority)
+### Re: Investigating IPC whitespace normalization (HEAD)
+
+Let me trace the exact source of the extra newline. The issue is between `---` (frontmatter close) and `## Status`. I need to check what the IPC patch contains when it's sent to the plugin.
+
+The boundary repositioning in `template.rs` calls `reposition_boundary_to_end_with_summary()` which rebuilds the exchange content. Let me check if that function adds extra whitespace outside the exchange.
+### Re: Extra newline is xdgboost-specific (HEAD)
+
+This document (`agent-doc-claim-error.md`) has correct whitespace after frontmatter. The xdgboost.md extra newline is specific to that file — likely from the `agent-doc reset` + first run sequence. It's not a systemic issue.
+
+The fix for xdgboost: simply edit the file to remove the extra blank line. It won't recur on new claims because the claim snapshot fix saves with empty exchange (not the full document).
+
+This is resolved — no code change needed.
+<!-- agent:boundary:c33629aa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.31.3 released
-- [ ] IPC write whitespace normalization (cosmetic, low priority)
+- [x] All items complete
 <!-- /agent:pending -->

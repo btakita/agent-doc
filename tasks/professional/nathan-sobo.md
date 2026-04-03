@@ -26,7 +26,7 @@ Contact created at `mail/contacts/nathan-sobo/AGENTS.md`.
 - Deep expertise: CRDTs, collaborative editing, Rust, developer tools, GPU-accelerated rendering
 
 LinkedIn and GitHub links saved. No prior relationship — this is a cold contact. What's the outreach context?
-<!-- agent:boundary:ea43716a -->
+<!-- agent:boundary:1727c1a8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

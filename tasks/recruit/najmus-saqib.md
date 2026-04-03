@@ -57,8 +57,8 @@ Reply was sent. Najmus responded (7:02 PM):
 Please draft a reply.
 Create a custom resume.
 Let's schedule a call for tomorrow.
-Schedule a call
-### Re: Draft Reply + Resume + Call Scheduling (HEAD)
+Schedule a call for Tuesday.
+### Re: Draft Reply + Resume + Call Scheduling
 
 **Custom resume built:** `resume/BrianTakita-guidehouse-sba.pdf`
 - Highlights: Python (Django/FastAPI/Flask/SQLAlchemy), Vue.js/React/Svelte/Angular, AWS, PostgreSQL, Docker, CI/CD, Agile
@@ -67,26 +67,26 @@ Schedule a call
 
 **Draft LinkedIn reply:**
 
-> Hi Najmus,
->
-> Thanks for following up! I've attached my resume. I'm available for a call tomorrow (Monday) — any of these times work:
->
-> - 10:00 AM – 12:00 PM ET
-> - 2:00 PM – 4:00 PM ET
->
-> Looking forward to discussing the details.
->
-> Best,
-> Brian
+Hi Najmus,
+
+Thanks for following up! I've attached my resume. I'm available for a call tomorrow (Tuesday) — any of these times work:
+
+- 10:00 AM – 12:00 PM ET
+- 2:00 PM – 4:00 PM ET
+
+Looking forward to discussing the details.
+
+Best,
+Brian
 
 *Note: Adjust time slots to your actual availability. The 2-4 PM ET slot avoids the 5 PM CopilotKit interview with Jordan Ritter.*
-<!-- agent:boundary:ad1d3b61 -->
+<!-- agent:boundary:83ca4b8a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Send LinkedIn reply with resume PDF attached
-- Confirm Monday call time slots (avoid 5 PM ET CopilotKit interview)
-- Prep for Monday call with Najmus (role details, rate discussion)
+- [x] Send LinkedIn reply with resume PDF attached
+- [ ] Confirm Tuesday call time slots (avoid 5 PM ET CopilotKit interview)
+- [ ] Prep for Tuesday call with Najmus (role details, rate discussion)
 <!-- /agent:pending -->

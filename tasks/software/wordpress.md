@@ -15,7 +15,7 @@ agent_doc_write: crdt
 In WordPress, what is the difference between an Admin and a Super Admin.
 
 Tell me about Liquid Web Wordpress Dedicated.
-### Re: Admin vs Super Admin in WordPress (HEAD)
+### Re: Admin vs Super Admin in WordPress
 
 **Admin** is the highest role within a single WordPress site. An Admin can:
 - Install/manage plugins and themes
@@ -32,7 +32,7 @@ Tell me about Liquid Web Wordpress Dedicated.
 
 Key distinction: An Admin controls one site. A Super Admin controls the entire multisite network.
 
-### Re: Liquid Web WordPress Dedicated (HEAD)
+### Re: Liquid Web WordPress Dedicated
 
 Liquid Web WordPress Dedicated is a managed WordPress hosting platform by Liquid Web, aimed at businesses and agencies needing high performance and hands-off server management.
 
@@ -62,7 +62,36 @@ For dedicated servers specifically (bare metal, not shared WordPress), pricing s
 - [Liquid Web WordPress Hosting](https://www.liquidweb.com/wordpress-hosting/)
 - [Liquid Web Managed WordPress](https://www.liquidweb.com/wordpress-hosting/managed-wordpress/)
 - [Liquid Web Review - CyberNews](https://cybernews.com/best-web-hosting/liquid-web-review/)
-<!-- agent:boundary:5cc8ff5d -->
+  - US or Europe data center choice
+  - 24/7/365 WordPress expert support (59-second response guarantee)
+  - 30-day money-back guarantee
+
+  For dedicated servers specifically (bare metal, not shared WordPress), pricing starts at $149/mo.
+
+  Sources:
+  - https://www.liquidweb.com/wordpress-hosting/
+  - https://www.liquidweb.com/wordpress-hosting/managed-wordpress/
+  - https://cybernews.com/best-web-hosting/liquid-web-review/
+
+  Now writing back to the document.
+
+  Read 1 file (ctrl+o to expand)
+
+● Bash(agent-doc commit tasks/software/wordpress.md)
+  ⎿  [perf] commit.staging (hash_object+update-index): 3ms
+     [perf] commit.git_commit: 18ms
+     [main ed0f7114] agent-doc(wordpress): 2026-04-03 12:21:39
+     … +6 lines (ctrl+o to expand)
+
+● Response written and committed. Both questions answered in the document — Admin vs Super Admin roles, and Liquid Web WordPress Dedicated plans/features/pricing.
+
+✻ Baked for 1m 7s
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+<!-- agent:boundary:bbefba9b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

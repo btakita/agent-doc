@@ -824,7 +824,7 @@ The learnings fall into two categories:
 I'd recommend updating `philosophy/CLAUDE.md` with the precision and bounded/unbounded guidance rather than creating a separate AGENT_LEARNINGS.md. The learnings are about the ontology itself, so they should live with the ontology.
 Please transfer the existence conversation into `tasks/software/existence.md`.
 
-### Re: Transfer existence conversation (HEAD)
+### Re: Transfer existence conversation
 
 Done. Transferred the full Existence Lang conversation to `tasks/software/existence.md` — including:
 
@@ -838,14 +838,12 @@ Done. Transferred the full Existence Lang conversation to `tasks/software/existe
 The transfer preserves the intellectual content and learnings without the back-and-forth iteration — it reads as a distilled record.
 
 This john-cassel.md document retains the full conversation history for context, and the LinkedIn message draft + formatting issue. The existence.md now has the ontological refinements as a reference for future work on the pending items (philosophy/CLAUDE.md updates, new term files, permaculture enrichment).
-<!-- agent:boundary:3400fca3 -->
+<!-- agent:boundary:4e8edc13 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Delete wall-of-text LinkedIn message to John Cassel (manual — CSS :hover limitation)
-- [ ] Resend formatted LinkedIn message with proper paragraph breaks
 - [ ] Update mail/contacts/john-cassel/AGENTS.md communication timeline
 - [ ] Update philosophy/CLAUDE.md with precision + bounded/unbounded guidance
 - [ ] Create philosophy/src/pneuma.md, noumena.md, phenomena.md

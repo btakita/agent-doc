@@ -1,10 +1,8 @@
 ---
-session: c2e479d6-6cb9-43fb-a197-75f58317388e
-resume: null
-agent: null
-model: null
-branch: null
+agent_doc_session: c2e479d6-6cb9-43fb-a197-75f58317388e
+tmux_session: '0'
 ---
+
 
 *
 *Rand

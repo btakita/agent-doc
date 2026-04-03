@@ -55,7 +55,7 @@ Please give me tips on what criteria + attributes that are better suited for sub
 5. **Conflict predictor** — estimate merge conflict probability based on file overlap between parallel tasks
 
 This is a feature that doesn't exist in Claude Code natively either — the `Agent` tool with `isolation: "worktree"` is available but the decision to use it is always made by the LLM or user, never by a heuristic engine.
-### Re: Criteria for when to use subagents (HEAD)
+### Re: Criteria for when to use subagents
 
 Here's a practical decision framework based on real-world usage patterns:
 
@@ -91,7 +91,67 @@ Here's a practical decision framework based on real-world usage patterns:
 - **Context amnesia** — Delegating a task that requires understanding user preferences or prior decisions; the subagent won't have that context
 - **Premature parallelism** — Splitting a task into parallel subtasks when the subtasks actually depend on each other's outputs
 - **Worktree overhead for read-only tasks** — Worktrees are for isolation of *writes*; pure research doesn't need them
-<!-- agent:boundary:f67b1287 -->
+   unlikely to need rework            │ Changes need review before merging to main               │
+  ├─────────────────┼───────────────────────────────────────────────────────────────────────┼──────────────────────────
+  ────────────────────────────────────┼──────────────────────────────────────────────────────────┤
+  │ Token economics │ High-value reasoning that benefits from full context                  │ Bulk work that would
+  bloat the main context window           │ Same as subagent                                         │
+  └─────────────────┴───────────────────────────────────────────────────────────────────────┴──────────────────────────
+  ────────────────────────────────────┴──────────────────────────────────────────────────────────┘
+
+  Specific heuristics:
+
+  1. Context pollution test — Will this task's output (tool calls, file reads, search results) consume >5K tokens of
+  context that won't be useful for the next user interaction? → Subagent.
+  2. Independence test — Can you write a self-contained prompt that fully specifies the task without referencing "what
+  we discussed"? → Subagent. If you'd need to paste half the conversation → inline.
+  3. Parallelism test — Are there 2+ tasks with no data dependency? → Parallel subagents. Even if each task is small,
+  the wall-clock speedup justifies the overhead.
+  4. Model downgrade test — Does the task require creative judgment, architectural reasoning, or nuanced understanding
+  of user intent? → Strong model inline. Is it grep-and-summarize, format conversion, or mechanical refactoring? →
+  Weaker model subagent.
+  5. File conflict test — Will the task modify files that the main context or other tasks might also modify? → Worktree
+   isolation. Read-only or writing to new files → no worktree needed.
+  6. Review gate test — Should the user see and approve the changes before they land in the working tree? → Worktree
+  (changes stay on a branch until explicitly merged).
+
+  Anti-patterns to avoid:
+
+  - Over-delegation — Spawning a subagent for a 3-line grep wastes more tokens on the prompt than it saves
+  - Context amnesia — Delegating a task that requires understanding user preferences or prior decisions; the subagent
+  won't have that context
+  - Premature parallelism — Splitting a task into parallel subtasks when the subtasks actually depend on each other's
+  outputs
+  - Worktree overhead for read-only tasks — Worktrees are for isolation of writes; pure research doesn't need them
+
+  Read 1 file (ctrl+o to expand)
+
+● Bash(agent-doc commit tasks/research/agent-doc-capabilities.md)
+  ⎿  [perf] commit.staging (hash_object+update-index): 5ms
+     [perf] commit.git_commit: 11ms
+     [main 9659d453] agent-doc(agent-doc-capabilities): 2026-04-02 19:08:46
+     … +6 lines (ctrl+o to expand)
+
+● Response written and committed. The document now includes a decision framework with 7 criteria columns (context state,
+  model, topic spread, file overlap, duration, reversibility, token economics), 6 specific heuristics (context pollution,
+   independence, parallelism, model downgrade, file conflict, review gate), and 4 anti-patterns to avoid.
+
+✻ Sautéed for 47s
+
+● Agent "Explore Claude Code subagent/worktree features"
+completed
+
+● Agent "Explore agent-doc subagent/worktree capabilities"
+completed
+
+● Both research agents completed (after the response was already written). Their findings confirm the analysis — notably the first agent also found the ExecutionMode enum in config.rs (Hybrid/Parallel/Sequential) which I didn't mention in
+  the response. That's an existing configuration-driven routing mechanism, though it's deterministic rather than adaptive. The document already covers the key gap accurately.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+<!-- agent:boundary:2de98eb0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

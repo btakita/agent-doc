@@ -71,81 +71,17 @@ All packages upgraded in `app/brookebrodack-site/package.json`:
 - Replace `GH_TOKEN` in WebSub worker with a long-lived GitHub PAT (`actions:write` scope) if current `gh` CLI token expires
 - Add static export to relysjs framework (tracked in `tasks/relysjs.md`)
 
-## User
-
-The deployed website styling is broken.
-https://brookebrodack.net/
+<!-- agent:status mode=replace -->
+- [x] 190 blog posts with AI summaries + Whisper transcripts
+- [x] Yalc migration (10 `@rappstack/*` packages)
+- [x] Server fixes (graceful errors, 404 for missing slugs)
+- [x] SEO: sitemap (194 URLs + video extensions), VideoObject JSON-LD
+- [x] Mailchannels DNS records + WebSub email notifications deployed
+- [x] 23 automated tests
+- [x] CI yalc→npm fallback for GitHub Actions
+- [ ] `ANTHROPIC_API_KEY` GitHub secret (optional, for CI post generation)
+<!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
-### Session Summary (compacted)
 
-**Blog post system (180+ posts):**
-- Generated 190 blog posts from YouTube videos with Whisper GPU transcription (RTX 5090, 184x realtime)
-- AI-generated summaries via 10 parallel agents (2-3 paragraphs, key topics, notable moments)
-- Downloadable transcripts at `/transcripts/{videoId}.txt`
-- `/content/:slug` route with post page UI, back link to `/content`
-- Video cards link to `/content/:slug` (post exists) or YouTube (no post)
-- Full-width video iframes on post pages
-
-**Yalc migration:**
-- All 10 `@rappstack/*` packages linked via yalc from local rappstack-dev
-- `resolutions` in `package.json` forces workspace packages to use yalc
-- CI step replaces yalc paths with `^0.1.0` (npm) before `bun install`
-
-**Server fixes:**
-- Graceful error handling for YouTube API timeouts and missing read times
-- Null coalescing for `youtube_video_a1_` on `/content` page
-- 404 for unknown slugs on `/content/:slug`
-
-**SEO:**
-- Sitemap fixed: 194 URLs (190 posts + 4 static), uses `site__website_` not `request_url__origin_`
-- Video Sitemap: `<video:video>` blocks with thumbnail, title, description, dates
-- VideoObject JSON-LD on each post page’s `@graph`
-- Google Search Console: property exists, sitemap submitted
-
-**Infrastructure:**
-- WebSub email notification via Mailchannels (implemented, needs DNS records + deploy)
-- `generate-posts.ts` CI pipeline for new videos (needs `ANTHROPIC_API_KEY` secret)
-- 23 automated tests (smoke, unit, functional, sitemap)
-
-**Pending:**
-- [ ] Add Mailchannels DNS records (SPF + worker auth TXT)
-- [ ] Deploy WebSub worker with email notification
-- [ ] Add `ANTHROPIC_API_KEY` GitHub secret (optional, for CI post generation)
-
-Add the Mailchannels DNS record using the CF api please
-### Re: Mailchannels DNS records
-
-**Done via Cloudflare API:**
-
-1. **Worker auth TXT** — `_mailchannels.brookebrodack.net` → `v=mc1 cfid=brookebrodack-websub.brian-takita.workers.dev`
-2. **SPF record** — updated existing `v=spf1 include:zoho.com ~all` to `v=spf1 include:zoho.com include:relay.mailchannels.net ~all`
-
-(Preserved the existing Zoho include to avoid breaking email.)
-
-**Ready to deploy the WebSub worker:** `cd src/brookebrodack-dev/workers/websub && npx wrangler deploy`
-
-go
-### Re: Deploy WebSub worker
-
-**Deployed** to `https://brookebrodack-websub.brian-takita.workers.dev`
-
-- 6 env bindings configured
-- Cron: `0 0 */7 * *` (WebSub subscription renewal)
-- Version: `08dcc285-157a-4333-af84-af1ea811a8a3`
-
-Email notifications will fire when YouTube publishes a new Brooke Brodack video.
-
-**All pending items resolved:**
-- [x] Mailchannels DNS records added
-- [x] WebSub worker deployed with email notification
-- [ ] `ANTHROPIC_API_KEY` GitHub secret (optional, for CI post generation)
-
-Change the recipient email to brian.takita@gmail.com
-### Re: Change recipient email
-
-Updated `NOTIFICATION_EMAIL` to `brian.takita@gmail.com` and redeployed. Version: `c28a774d`.
-
-Extract agent:status component.
-compact exchange.
 <!-- /agent:exchange -->

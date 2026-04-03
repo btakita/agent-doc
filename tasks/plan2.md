@@ -1,10 +1,8 @@
 ---
-session: 71d57261-c118-423b-82d3-89b4871157f6
-resume: null
-agent: null
-model: null
-branch: null
+agent_doc_session: 71d57261-c118-423b-82d3-89b4871157f6
+tmux_session: '0'
 ---
+
 Set the env variable into .corky.toml
 
 GMAIL_SYNC_DAYS=3650

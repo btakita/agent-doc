@@ -635,7 +635,7 @@ A `corky linkedin moderate` command could navigate to the post, find the comment
 
 I don't see Hide Comment in the dropdown menu.
 ![img_1.png](img_1.png)
-### Re: No "Hide Comment" option (HEAD)
+### Re: No "Hide Comment" option
 
 The screenshot shows **Elvio Sacchi's** comment, not Eric Irwin's — but the menu is the same for all comments on your own posts.
 
@@ -652,5 +652,35 @@ You're right — LinkedIn's menu for post authors shows **Delete**, not **Hide**
 The engagement count loss is negligible — better than leaving a scam email visible on your post.
 
 **For Elvio Sacchi** (shown in screenshot) — that looks like a legitimate recruiter comment ("We're currently hiring for several industries..."). Worth keeping or replying to.
-<!-- agent:boundary:c3feaf9e -->
+       #12570            ⚖️  Pre-call outreach strategy for Ragie partnership discussion
+       #12571            ⚖️  Client use case disclosure strategy deferred to call
+
+     #S3638 Generate call structure document for Bob Remeika meeting from task file (Apr 2, 11:12 AM)
+
+     tmp/bob-remeika-call-structure.md
+       #12572  11:13 AM  ✅  Call structure document created for Ragie CEO meeting
+
+     tmp/bob-remeika-call-structure.html
+       #12573            ✅  PDF call structure generated for Bob Remeika meeting
+
+     tasks/professional/bob-remeika.md
+       #12574  11:24 AM  ✅  Added one-page summary constraint to Bob Remeika call structure document
+
+     tmp/bob-remeika-call-structure.md
+       #12575            🔄  Condensed Bob Remeika call structure into one-page table format
+
+     tasks/professional/bob-remeika.md
+       #12576  11:26 AM  🟣  Generated call structure PDF for Bob Remeika meeting
+
+     #S3639 Generate call preparation PDF for Bob Remeika meeting with structured agenda blocks (Apr 2, 11:26 AM)
+
+     tmp/bob-remeika-call-structure.md
+       #12577  11:26 AM  🔄  Restructured call document from table to hierarchical format with compact CSS
+
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯    ID.
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)37777
+<!-- agent:boundary:9df3c68d -->
 <!-- /agent:exchange -->

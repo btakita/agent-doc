@@ -567,5 +567,5 @@ Contact saved successfully.
 1. Browser automation (as used for Anil's phone)
 2. Manual via Google Contacts web UI
 3. *(Future)* `corky contact push google` once implemented
-<!-- agent:boundary:776b3f59 -->
+<!-- agent:boundary:7640b9b4 -->
 <!-- /agent:exchange -->

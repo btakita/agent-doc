@@ -944,7 +944,7 @@ So the 1pm Tuesday from the call is invalidated. Your LinkedIn reply should refe
 Also note from the call: "Hawk" is likely the interviewer name (VP of Engineering or CTO alias). Justin mentioned the CTO may have the first round be discussion-only with the VP, saving vibe coding for a later round. Either way, he's sending the markdown exercise tomorrow so you can be proactive.
 
 Yes. I'm concerned about the complexity of the markdown exercise. But I have the Wed-Monday to work through it. Seems like I can fit it in.
-### Re: Markdown exercise timeline (Mar 31) (HEAD)
+### Re: Markdown exercise timeline (Mar 31)
 
 You have a solid window. Justin said the exercise email arrives tomorrow morning (April 1). If you pick Monday April 6 at 1pm for the interview, that's **5 full days** (Tue-Sat) plus Sunday as buffer.
 
@@ -961,7 +961,7 @@ Context that should ease the concern:
 4. Have it ready to share screen during the Monday interview
 
 The complexity concern is valid but manageable. You won't know until you see it, and 5 days is generous for what's designed as a live interview exercise.
-<!-- agent:boundary:1044dc92 -->
+<!-- agent:boundary:7543378a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

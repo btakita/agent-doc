@@ -500,7 +500,7 @@ We are also going to Florida for a month or so.
 **Changes:** "4 now" → "almost 5"; added Florida plans (natural meetup opportunity if timing overlaps with Laura's end-of-April trip); "would be great to get together" now covers both Florida and west coast.
 
 Send via chromium-bridge -> https://pulsesms.app/thread/101342305403002 on Brave
-### SMS typed — ready to send (HEAD)
+### SMS typed — ready to send
 
 Message typed into PulseSMS (`#message-entry`) via chromium-bridge. **Not sent yet** — waiting for your approval.
 
@@ -512,7 +512,7 @@ Message typed into PulseSMS (`#message-entry`) via chromium-bridge. **Not sent y
 > When you have a free moment after things settle down, would love to catch up on a call. No rush.
 
 Review in browser and approve to send, or edit in the text field first.
-<!-- agent:boundary:e636e1bc -->
+<!-- agent:boundary:9916c498 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

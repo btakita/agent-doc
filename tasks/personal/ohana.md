@@ -590,7 +590,7 @@ Two short replies — one engaging her AI interest, one for the photos. Keep it 
 Should I send both via chromium-bridge? Or adjust the drafts?
 
 Send the 2 messages.
-### Re: Laura messages sent (HEAD)
+### Re: Laura messages sent
 
 Sent a combined reply to Laura in OHANA:
 
@@ -599,7 +599,7 @@ Sent a combined reply to Laura in OHANA:
 > Love the LA photos too! Great seeing everyone together 😊
 
 Note: Laura's ChatGPT message from Friday had scrolled out of the visible viewport (Messenger lazy-loads), so I combined both into one message rather than separate reply-to threads. Proper paragraph spacing confirmed in screenshot.
-<!-- agent:boundary:5c0fec5f -->
+<!-- agent:boundary:65b6144d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

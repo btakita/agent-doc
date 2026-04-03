@@ -360,7 +360,7 @@ The `agent-resume` CLI doesn't apply phrase bolding to experience bullets (only 
 **PDF rebuilt** — `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-cdw-payments.pdf`
 
 The message is still loaded in the LinkedIn compose box from earlier. Ready for you to attach the new PDF and send.
-### Re: Add Stripe tokenization to Menu.com (HEAD)
+### Re: Add Stripe tokenization to Menu.com
 
 Done. Updated both `data.toml` and `BrianTakita.md` — Menu.com entry now reads:
 
@@ -369,7 +369,7 @@ Done. Updated both `data.toml` and `BrianTakita.md` — Menu.com entry now reads
 **PDF rebuilt** at `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-cdw-payments.pdf`
 
 Also saved the sent reply to `mail/contacts/kaci-railey/20260330-linkedin-brian-takita.txt` and updated the communication timeline in AGENTS.md.
-<!-- agent:boundary:2d0fe310 -->
+<!-- agent:boundary:2bd8eec1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

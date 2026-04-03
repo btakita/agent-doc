@@ -127,7 +127,7 @@ Ready to send via `corky draft push` when you approve.
 
 Ask Robert if he knows about this.
 I don't want to alarm Judith and I know that she is busy.
-### Re: Email Updated — Ask Robert, Don't Alarm Judith (HEAD)
+### Re: Email Updated — Ask Robert, Don't Alarm Judith
 
 Updated the draft to:
 - Ask Robert if he knew the site was down and what happened with the hosting
@@ -135,7 +135,7 @@ Updated the draft to:
 - If she asks, Robert can say Brian's on it
 
 Ready to send when you approve.
-<!-- agent:boundary:429370fd -->
+<!-- agent:boundary:750c9c2b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -2,7 +2,7 @@
 description: Submit a session document to an AI agent and append the response
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.25.4"
+agent-doc-version: "0.31.1"
 ---
 
 # agent-doc
@@ -80,7 +80,7 @@ When responding to a document with multiple user questions/topics, flush partial
 
 1. After completing each logical section (e.g., answering one question), flush the accumulated response so far:
    ```bash
-   cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream
+   cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream --origin skill
    <partial response as patch blocks>
    RESPONSE
    ```
@@ -113,10 +113,10 @@ Check the document's `agent_doc_mode` frontmatter field (aliases: `mode`, `respo
 
 Use `agent-doc write --stream` to atomically append the response:
 
-1. **Use the preflight baseline** (from `baseline_file` in preflight JSON), or save manually if unavailable
+1. **Save a baseline copy** of the document content (before step 1) to a temp file
 2. **Pipe your response** through `agent-doc write`:
    ```bash
-   cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream
+   cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream --origin skill
    <your response>
    RESPONSE
    ```
@@ -131,7 +131,7 @@ Use `agent-doc write --stream` to atomically append the response:
 Template-mode documents use named components (`<!-- agent:name -->...<!-- /agent:name -->`).
 The agent responds with **patch blocks** that target specific components.
 
-1. **Use the preflight baseline** (from `baseline_file` in preflight JSON), or save manually if unavailable
+1. **Save a baseline copy** of the document content (before step 1) to a temp file
 2. **Format your response as patch blocks:**
    ```markdown
    <!-- patch:output -->
@@ -147,7 +147,7 @@ The agent responds with **patch blocks** that target specific components.
    - Component modes (replace/append/prepend) are configured in `.agent-doc/components.toml`
 3. **Pipe through `agent-doc write` with `--stream` flag:**
    ```bash
-   cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream
+   cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream --origin skill
    <your patch response>
    RESPONSE
    ```
@@ -166,15 +166,11 @@ The agent responds with **patch blocks** that target specific components.
 **IMPORTANT:** Do NOT use the Edit tool for write-back. Use `agent-doc write` via Bash.
 The Edit tool is prone to "file modified since read" errors when the user edits concurrently.
 
-**Baseline file:** The preflight JSON includes a `baseline_file` path — use it directly:
-```bash
-# baseline_file is provided by preflight output (saved after commit, matches snapshot)
-agent-doc write <FILE> --baseline-file <baseline_file_from_preflight> --stream
-```
-If `baseline_file` is missing from the preflight output (older binary), fall back to saving manually:
+**Baseline file:** Before generating your response (step 1), save the current document to a temp file:
 ```bash
 cp <FILE> /tmp/agent-doc-baseline-$$.md
 ```
+Then pass it as `--baseline-file` so the 3-way merge can detect user edits accurately.
 
 ### 3. Git integration
 

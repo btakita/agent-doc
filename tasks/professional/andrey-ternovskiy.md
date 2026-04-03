@@ -16,7 +16,7 @@ Contact profile created from web research. Crunchbase page was access-restricted
 Create a contact for andrey-ternovskiy
 - https://www.crunchbase.com/person/andrey-ternovskiy
 
-### Re: Contact profile (HEAD)
+### Re: Contact profile
 
 **Andrey Ternovskiy**
 
@@ -40,7 +40,7 @@ Create a contact for andrey-ternovskiy
 - Subject of reporting in Laura Shin's *The Cryptopians*
 
 **Current:** Still listed as Founder & CEO of Chatroulette. Limited public activity in 2024-2025.
-<!-- agent:boundary:718d21ea -->
+<!-- agent:boundary:7912d24a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

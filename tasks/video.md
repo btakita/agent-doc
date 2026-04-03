@@ -75,7 +75,7 @@ Cross-referenced your 25 video files (68 GB) against 13 YouTube uploads on brian
 - Should I delete the safe-to-delete files now?
 
 Do the recommendations
-### Re: Do the recommendations (HEAD)
+### Re: Do the recommendations
 
 **Deleted 17 files (~48 GB):**
 
@@ -104,7 +104,7 @@ Uploaded files (7 files, ~2.3 GB):
 | `2026-03-12 17-49-43-cropped.mp4` | 671 MB | 2:01 |
 
 Still need your input on these — are any of them sources for older YouTube videos (Dog-fooding Parts 1-3, Lazily, Sub-1KB Framework)?
-<!-- agent:boundary:7ce0f666 -->
+<!-- agent:boundary:fba9d08f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -359,7 +359,7 @@ Visit both URLs to unblock, then I'll complete the release:
 
 done
 
-### v0.18.0 released! (HEAD)
+### v0.18.0 released!
 
 **Published to all targets:**
 - **crates.io**: `corky v0.18.0` — published

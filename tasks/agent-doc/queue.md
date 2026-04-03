@@ -14,8 +14,7 @@ Queue initialized. 2 pending items. Awaiting task selection.
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-
-### Agent (initial review) (HEAD)
+### Agent (initial review)
 
 **Pending items:**
 1. **install nvidia_greenboost** — ready to pick up. What's the install method? (pip, cargo, apt?)
@@ -34,7 +33,7 @@ Progression:
 - Task assignment locking: flock or claims log?
 - Completion signaling: status component value, or removal from pending?
 - Git conflicts: do parallel agents need isolated branches/worktrees?
-<!-- agent:boundary:b6689b28 -->
+<!-- agent:boundary:9632ec7e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

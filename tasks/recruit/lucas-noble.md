@@ -563,7 +563,7 @@ Yes — `resume/data.toml` was updated this session with 4 changes:
 
 The master template (`BrianTakita.md`) was also updated with: Grafana monitoring bullet at Presence AI, USAA security review bullet at TrueCar, and updated Skills line. These changes are not yet committed in the resume submodule.
 commit and push resume
-### Re: Resume Committed & Pushed (HEAD)
+### Re: Resume Committed & Pushed
 
 Done. Resume submodule committed and pushed:
 
@@ -572,7 +572,7 @@ Done. Resume submodule committed and pushed:
 - **Parent pointer updated:** `25b8ec5` in agent-loop
 
 Files committed: `BrianTakita.md`, `data.toml`, `profiles/nextera-analytics.toml`, `BrianTakita-nextera-analytics.pdf`
-<!-- agent:boundary:9c7bd9f3 -->
+<!-- agent:boundary:67563ec0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

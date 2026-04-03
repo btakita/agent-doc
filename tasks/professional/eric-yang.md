@@ -41,7 +41,7 @@ Researched the three URLs. Medium (@sunyae) returned 403; Vanderbilt Hustler art
 The Vanderbilt Hustler article likely covers the origin story of Junto/Flux — worth reading directly in a browser for the full narrative.
 
 read and contextualize /home/brian/work/btakita/agent-loop/mail/contacts/eric-yang/eric-yang-telegram.json
-### Re: Telegram Conversation Context (HEAD)
+### Re: Telegram Conversation Context
 
 Read and contextualized the full Telegram history (311 messages, Apr 2024 – Mar 2026).
 
@@ -79,7 +79,7 @@ Read and contextualized the full Telegram history (311 messages, Apr 2024 – Ma
 - **Nico** — introduced by Eric (context unclear)
 
 **Relationship Character:** Eric is a connector and mediator who values goodwill over legal leverage. Personally helped Brian financially during transitions. Open to future collaboration but deliberate — won't rush into a venture without conviction.
-<!-- agent:boundary:17ed46ae -->
+<!-- agent:boundary:3a72327b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

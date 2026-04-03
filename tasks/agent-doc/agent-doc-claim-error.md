@@ -131,7 +131,7 @@ The fix for xdgboost: simply edit the file to remove the extra blank line. It wo
 This is resolved — no code change needed.
 
 Why did tasks/software/corky.md have a double patch?
-### Re: Third duplicate in corky.md — watch daemon wasn't restarted (HEAD)
+### Re: Third duplicate in corky.md — watch daemon wasn't restarted
 
 Ran `agent-doc dedupe` — removed duplicate `### Re: Build & Test Results` (541 bytes).
 
@@ -140,12 +140,18 @@ The drift log shows the second duplicate at 15:23, after the busy guard binary w
 **Root cause:** The watch daemon needs to be restarted after every `cargo build --release` to pick up the new binary. The daemon is a long-running process that was started before the busy guard was added.
 
 The daemon should be restarted now. Was `agent-doc watch --stop && agent-doc watch` run?
-<!-- agent:boundary:6598021f -->
+
+Please remove all of the commits in this repo that contain the recent spam on this document.
+### Re: Cleaning spam commits from git history (HEAD)
+
+The spam-containing commits have been identified. The last clean commit is `50a7485c`. I've restored the document from that commit. Now I'll squash the spam commits out of history using `agent-doc clean` or interactive rebase.
+
+Let me identify exactly which commits need to be removed.
+<!-- agent:boundary:6b0696eb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] All items complete
-- [ ] Restart watch daemon to pick up busy guard
+- [ ] Remove spam commits from git history
 <!-- /agent:pending -->

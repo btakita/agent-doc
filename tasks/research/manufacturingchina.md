@@ -9,6 +9,8 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:status patch=replace -->
 Patent mining proposal updated: added manufacturer matching (Step 3), Ragie + Sift search layer section, Bob Remeika meeting mention. Ready for review.
+
+**Related:** [tasks/professional/ron-berkes.md](../professional/ron-berkes.md) — compensation discussion, call transcripts, email drafts
 <!-- /agent:status -->
 
 ## Exchange
@@ -253,7 +255,7 @@ Say "send" to push to Gmail Drafts, or edit first.
 Using Ron's internal database of manufacturers, we can also match the patents with manufacturers.
 
 Warm Ron up to Ragie. I'm going to meet with the CEO/Founder Bob Remeika this week to discuss. Also mention that I'm integrating Sift for local document search.
-### Re: Manufacturer matching + Ragie/Sift (HEAD)
+### Re: Manufacturer matching + Ragie/Sift
 
 Updated the patent mining proposal with both additions:
 
@@ -271,7 +273,7 @@ Framed it as: "together they give the agents access to everything — public pat
 Also updated the "What I'd Need" section to explicitly ask for Ron's factory database/manufacturer list as a required input for the matching engine.
 
 Draft at `mail/drafts/2026-03-30-patent-mining-proposal.md`. Say "send" to push to Gmail Drafts.
-<!-- agent:boundary:a4649a1a -->
+<!-- agent:boundary:38d3d840 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1,8 +1,8 @@
 ---
 agent_doc_session: b8ffc710-b4af-4cb4-947b-32fab6ca3e14
-tmux_session: '23'
 agent_doc_format: template
 agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
 ---
 
 

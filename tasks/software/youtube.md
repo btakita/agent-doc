@@ -401,7 +401,7 @@ Total: 7:34:05 across 6 episodes with SRT closed captions.
 
 I'm looking at https://www.youtube.com/playlist?list=PL4Ma0srhCY3PVBZF3D541tPyPPm1BhnEI
 It says Deleted Videos
-![screenshot.png](../../../../Pictures/screenshot.png)
+![screenshot.png](../../../../../Pictures/screenshot.png)
 
 Looks like it's in the middle of processing the video.
 continue with blog post

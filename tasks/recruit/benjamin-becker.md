@@ -5,7 +5,6 @@ agent_doc_format: template
 agent_doc_write: crdt
 ---
 
-
 ## Status
 
 <!-- agent:status patch=replace -->
@@ -191,7 +190,7 @@ Your resume + contact info gets sold to other recruiters/staffing firms. This is
 
 Please read the benjamin-becker/*_sms.txt
 I am curious about what he can offer. Please help me draft a text to see how he works and whether or not it align with my goal for short term projects.
-### Re: SMS review + draft text (HEAD)
+### Re: SMS review + draft text
 
 **SMS content:** Benjamin texted from +1 831-515-8284 (California area code — different from the 207 Maine WhatsApp number he gave on LinkedIn). His LinkedIn account was "restricted" — which confirms LinkedIn flagged him. He's now contacting via SMS.
 
@@ -209,7 +208,7 @@ I am curious about what he can offer. Please help me draft a text to see how he 
 
 Hi Benjamin. Yes, I'm still interested in exploring this. Before we move forward, a few questions:
 
-1. What's the name of your company or staffing firm?
+1. What's the name of your company or staffing firm?ssssssssssssssss
 2. Can you share an example of the types of contracts you've placed recently?
 3. What's your typical rate structure — do you take a percentage, or is it a flat placement fee?
 4. For the part-time contract stacking model, how many hours/week are the typical engagements?
@@ -221,7 +220,7 @@ Brian
 ---
 
 This keeps things professional, asks verifiable questions (company name, examples, rate structure), and states your goal clearly. His answers will quickly reveal if he's legitimate or not. A real recruiter will have immediate answers to all four questions.
-<!-- agent:boundary:03ee0677 -->
+<!-- agent:boundary:6e654542 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

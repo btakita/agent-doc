@@ -261,13 +261,50 @@ What makes this different from a chatbot:
 
 It's essentially a developer workflow where the document *is* the interface — no context switching between editor and terminal.
 
-Miguel is an agentic creator. Please say hi to Miguel.
-### Re: Hi Miguel! (HEAD)
+Miguel is an agentic creator. Please say hi to Miguel. 
+### Re: Hi Miguel!
 
 Hey Miguel! Great to meet a fellow agentic creator. What you're seeing here is a live agent-doc session — Brian types into this markdown document, and the AI responds right here in the same file, in real-time. No chat window, no context switching. The document *is* the conversation.
 
 Welcome to the demo!
-<!-- agent:boundary:17a28935 -->
+
+
+ ▐▛███▜▌   Claude Code v2.1.89
+▝▜█████▛▘  Opus 4.6 (1M context) · Claude Max
+  ▘▘ ▝▝    ~/work/btakita/agent-loop
+
+✻ Brewed for 32s
+
+❯ /agent-doc tasks/recruit/robert-ross.md
+
+● Bash(agent-doc preflight tasks/recruit/robert-ross.md)
+  ⎿  [preflight] step 0: layout check
+     [preflight] layout issue: stash window 'stash' has non-idle pane %386 running 'agent-doc'
+     [preflight] layout issue: stash window 'stash' has non-idle pane %396 running 'agent-doc'
+     … +77 lines (ctrl+o to expand)
+
+● Bash(cp tasks/recruit/robert-ross.md /tmp/agent-doc-baseline-$$.md && echo "saved: /tmp/agent-doc-baseline-$$.md")
+  ⎿  saved: /tmp/agent-doc-baseline-124347.md
+
+● Hey Miguel! Welcome to the demo. Great to have another agentic creator watching. What you're seeing is a live agent-doc
+  session — Brian types into a markdown document and the AI responds right here in the same file, in real-time. It's
+  agents all the way down.
+
+  Read 1 file (ctrl+o to expand)
+
+● Bash(agent-doc commit tasks/recruit/robert-ross.md)
+  ⎿  [perf] commit.staging (hash_object+update-index): 5ms
+     [perf] commit.git_commit: 12ms
+     [main 584dace4] agent-doc(robert-ross): 2026-04-02 19:01:11
+     … +6 lines (ctrl+o to expand)
+
+● Response written and committed. Hi to Miguel from the agent side!
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+<!-- agent:boundary:a9239765 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

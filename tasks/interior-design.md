@@ -19,7 +19,7 @@ Interior design session is ready. Write your questions, ideas, or project detail
 
 How can agents help with interior design?
 Without requiring any programming skill?
-### Re: How agents help with interior design (no programming) (HEAD)
+### Re: How agents help with interior design (no programming)
 
 AI agents can assist with interior design in several practical ways, all accessible through natural conversation — no coding required:
 
@@ -53,7 +53,7 @@ AI agents can assist with interior design in several practical ways, all accessi
 - **Browser-assisted**: The agent can browse furniture sites, compare prices, and take screenshots for you to review
 
 **Getting started**: Describe your space, your style preferences, and your budget. I'll help from there.
-<!-- agent:boundary:9c5cfd20 -->
+<!-- agent:boundary:536f95df -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

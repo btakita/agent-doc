@@ -1,0 +1,684 @@
+Delivered-To: btak.dev@gmail.com
+Received: by 2002:a05:7108:9489:b0:558:fd25:c800 with SMTP id ih9csp2107905gdb;
+        Mon, 30 Mar 2026 12:48:08 -0700 (PDT)
+X-Received: by 2002:a05:7301:1698:b0:2c7:2cac:8153 with SMTP id 5a478bee46e88-2c72cac8ba7mr1613029eec.31.1774900088628;
+        Mon, 30 Mar 2026 12:48:08 -0700 (PDT)
+ARC-Seal: i=2; a=rsa-sha256; t=1774900088; cv=fail;
+        d=google.com; s=arc-20240605;
+        b=fplcN0Sv7t9/L6Nz2BWSH0L0DqvDSX5pqdoVACOX4A5A2OcMbWK3wKjfXQJ4JTr94u
+         PScdEbXeqbX3ouIoSKftgOC0qo743xO8MQrsic0nkWDu4aeVLQzVo9+iYFwJAUFNADtT
+         7jSwqLqKFUuc0eYoiQPPcn65rl9IG2YkZcrSeo/tIbjQIOBI+n6AINF2DoKVwJC7jNnV
+         +Gs2SSany0jvdeh5ZT8TRzSq046uJONHW21xrQjmzfQVd5VZ9ui0ZAlC99OoKukHyj9y
+         9cSI9a/kL7RJVNKD1+5ljeR8f4cLOBBIydpRWU6azUb2V2a6hcM5tZkR9oLpcsW4Vtv7
+         UvjA==
+ARC-Message-Signature: i=2; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20240605;
+        h=mime-version:content-language:accept-language:message-id:date
+         :thread-index:thread-topic:subject:to:from:dkim-signature;
+        bh=I2U+EmtUArhG6yWJuZtKtjaRm4OkqqO/8A4juyKXZMY=;
+        fh=9CWTfuRO+8X5HlWxzX2QgjfoadXPuWlDts89LCNZPAc=;
+        b=R8fE6y9oXIp/X4xhKehWAVp2Pl1JaAMBd+Kug/HASLPw+wAOBkIVJbuKDTOBj/Ufc8
+         j6wuR27aLF47swmshcYBOWqiMOjPLeK7R4H4GqVWKY5+0gEbIx285My684g+K6PUJ0sY
+         eXxv5C6WNiR7cBrJyorOVfGgwtTnCTq5jeaGSxCoRFaPhR3jdGvV2cL11bv7+iZqb5mM
+         X9Qmp+FVFLUjUXIsmdj6UBsMA5x5Fn2K0KoTI7qoT8F6NrpAriLw9NFOweZGiV1JdhlU
+         rMz4DMrYUH5mdjt81hCy/qs5shw/ezl2FnxKzk+QFlly8Boi2/GcUfu5FtBbR08T9t/Y
+         COCQ==;
+        dara=google.com
+ARC-Authentication-Results: i=2; mx.google.com;
+       dkim=pass header.i=@lmisolutions.com header.s=pps1 header.b=pZ4Z8VX2;
+       arc=fail (signature failed);
+       spf=pass (google.com: domain of prvs=0549776c5b=kathryn.revels@lmisolutions.com designates 66.159.228.41 as permitted sender) smtp.mailfrom="prvs=0549776c5b=kathryn.revels@lmisolutions.com";
+       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=lmisolutions.com
+Return-Path: <prvs=0549776c5b=kathryn.revels@lmisolutions.com>
+Received: from mx0f-00968302.gpphosted.com (mx0f-00968302.gpphosted.com. [66.159.228.41])
+        by mx.google.com with ESMTPS id 5a478bee46e88-2c3c7193e17si20972184eec.49.2026.03.30.12.48.07
+        for <btak.dev@gmail.com>
+        (version=TLS1_2 cipher=ECDHE-ECDSA-AES128-GCM-SHA256 bits=128/128);
+        Mon, 30 Mar 2026 12:48:08 -0700 (PDT)
+Received-SPF: pass (google.com: domain of prvs=0549776c5b=kathryn.revels@lmisolutions.com designates 66.159.228.41 as permitted sender) client-ip=66.159.228.41;
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@lmisolutions.com header.s=pps1 header.b=pZ4Z8VX2;
+       arc=fail (signature failed);
+       spf=pass (google.com: domain of prvs=0549776c5b=kathryn.revels@lmisolutions.com designates 66.159.228.41 as permitted sender) smtp.mailfrom="prvs=0549776c5b=kathryn.revels@lmisolutions.com";
+       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=lmisolutions.com
+Received: from pps.filterd (m0423033.ppops.net [127.0.0.1]) by mx0f-00968302.gpphosted.com (8.18.1.2/8.18.1.2) with ESMTP id 62UJjhu3032278 for <btak.dev@gmail.com>; Mon, 30 Mar 2026 19:48:06 GMT
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=lmisolutions.com; h=from : to : subject : date : message-id : content-type : mime-version; s=pps1; bh=I2U+EmtUArhG6yWJuZtKtjaRm4OkqqO/8A4juyKXZMY=; b=pZ4Z8VX21nr8o5OpWAq/sHFXVyE4L1HZNwF2RTCyyF36xMpFKF4GHyHu7c5/4kTWyUK4 xNJ5R59ok0XFJ5gpDYqRygtcTwqhPFfacEHdbD6PTErOJZwSMx6zvqjOy7p8bBJyOWGv Od9URmQl+WB3FxiP6aIQYSX4fAMpgsmjaLjcHmWdx4tagKCQ+8zNpLYTv1I+kvGLDc0d XGXQX7KRuuSdqyninWggWNdIHuPPfqJBZMYxFv8z6Rh5JH1iuA+jboXXtsu1ZuTRmD4X /jABcbXf6wjLMwMUvEsQJ76nUlchpeDDY+H65Bq99eOWSyK1ei8Fq7M85U8i0v4/4L96 wA==
+Received: from mx0f-00968303.gpphosted.com (mx0f-00968303.gpphosted.com [67.231.155.180]) by mx0f-00968302.gpphosted.com (PPS) with ESMTPS id 4d6w0n0uxc-1 (version=TLSv1.2 cipher=ECDHE-RSA-AES256-GCM-SHA384 bits=256 verify=NOT) for <btak.dev@gmail.com>; Mon, 30 Mar 2026 19:48:06 +0000
+Received: from pps.filterd (m0462782.ppops.net [127.0.0.1]) by mx0f-00968303.gpphosted.com (8.18.1.2/8.18.1.2) with ESMTP id 62UJSZPL000898 for <btak.dev@gmail.com>; Mon, 30 Mar 2026 19:48:06 GMT
+Received: from usg02-cy1-obe.outbound.protection.office365.us (mail-cy1usg02on0062.outbound.protection.office365.us [23.103.209.62]) by mx0f-00968303.gpphosted.com (PPS) with ESMTPS id 4d6w830emr-2 (version=TLSv1.2 cipher=ECDHE-RSA-AES256-GCM-SHA384 bits=256 verify=NOT) for <btak.dev@gmail.com>; Mon, 30 Mar 2026 19:48:05 +0000
+ARC-Seal: i=1; a=rsa-sha256; s=arcselector5401; d=microsoft.com; cv=none; b=Jd52tBRXoWtiojLvaR+LlJ/iqvFnmanyDcGZvxW2iKG3Pefj39eEq+laGhj/74vU6UXYUrroxWQ8gcKI5RsED/MHWaxLQwV6bNxUbeJefRLhUFyv40zmQrdXGXQjQFayei9mBOUbe6qdGPrj6hPQnFjZSDwxWTS21sXwzI0ap2H20NysUtfVOSLymwg+LiD21fmMcnIDDpY+g6DdGplo51hrwcMY+won1QhWMo2yrybWog2hFwV+ZXdMDqdd13QKaihFP1tkRsmcbyFJWIsPf0zw0jNBsSnhzEBq4qcX3vMHAh7HNCh1aRDUMDo7IZSfG1PEXF6//Ecxnwj3JW8oDw==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=microsoft.com; s=arcselector5401; h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-AntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Exchange-AntiSpam-MessageData-1; bh=I2U+EmtUArhG6yWJuZtKtjaRm4OkqqO/8A4juyKXZMY=; b=QVI9R9K4tJ1SitZAJQNaYbXbSwgNagvGGCu7VwK0/Jw3wLI8X2Gsy1lsM93J6gR+7adGc7rXKcACKcycmoA8DdD4gmRKHW/UlFt3GFelcEOVfe6/PaiS8wh12b5OJZRasHwRpFOjdNtQ36HEWMo/UTdEU/m6kLt9qCX+rbOSFrkv/nrAUJcSvRXZCGMw0A9m25ULKFI04pn3vJTL/bGcIrDTmJJNNIB9aZa66TlN5ciH0VGr11zrT7j9qW8yTmFjfY/sBuVfC5AQ/rMUg6uQFJuSN5hz9HaE1x+Z21xfvRu2g7mkdB/rPHLDi7tbNEoP1MhFuHZyqF8EWk7IJdauCg==
+ARC-Authentication-Results: i=1; mx.microsoft.com 1; spf=pass smtp.mailfrom=lmi.org; dmarc=pass action=none header.from=lmi.org; dkim=pass header.d=lmi.org; arc=none
+Received: from SA1P110MB1581.NAMP110.PROD.OUTLOOK.COM (2001:489a:200:195::21) by PH3P110MB1973.NAMP110.PROD.OUTLOOK.COM (2001:489a:200:1b0::21) with Microsoft SMTP Server (version=TLS1_2, cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.9745.24; Mon, 30 Mar 2026 19:48:02 +0000
+Received: from SA1P110MB1581.NAMP110.PROD.OUTLOOK.COM ([fe80::74b2:c24b:1c11:e808]) by SA1P110MB1581.NAMP110.PROD.OUTLOOK.COM ([fe80::74b2:c24b:1c11:e808%4]) with mapi id 15.20.9745.024; Mon, 30 Mar 2026 19:48:01 +0000
+From: "Revels, Kathryn" <kathryn.revels@lmisolutions.com>
+To: "btak.dev@gmail.com" <btak.dev@gmail.com>
+Subject: LMI - Video Conference Interview Confirmation
+Thread-Topic: LMI - Video Conference Interview Confirmation
+Thread-Index: AdzAfXmMAKev8+yRRAWCVo6O2O2eCw==
+Date: Mon, 30 Mar 2026 19:48:01 +0000
+Message-ID: <SA1P110MB15813FB818A83DF218A2A5D58052A@SA1P110MB1581.NAMP110.PROD.OUTLOOK.COM>
+Accept-Language: en-US
+Content-Language: en-US
+X-MS-Has-Attach: yes
+X-MS-TNEF-Correlator:
+x-ms-publictraffictype: Email
+x-ms-traffictypediagnostic: SA1P110MB1581:EE_|PH3P110MB1973:EE_
+x-ms-office365-filtering-correlation-id: 1ab9c770-5bff-47ce-d955-08de8e9540a3
+x-ms-exchange-senderadcheck: 1
+x-microsoft-antispam: BCL:0;ARA:13230040|1800799024|6049299003|41320700013|366016|13003099007|4053099003|56012099003|18002099003|8096899003|38070700021;
+x-microsoft-antispam-message-info: c9Mzb9quy+k2j28B7WajNLLFUn25bCu6wOOpqKnSAkS17eF+WXT+6qk8X1sCnfA0H7v1PX1lDn3G7cDzMW0mtJ05+qDrT80HYS44B6I5SneXGwjIYudszBC4HRcVZvrFvIJXHZmMtJze9rZLqoWybiY+ckuoE5yPY4/yh2qRwRRMSGphZIj/k9ANqd2kyAACGZo1HJrgeUVsEsFqnZPoBa3PhDBMTqmgFOh9b2/pqDos24Yni5bhm5UWfVGyCtpkBgndD3fQs0tBzEtPMVloSUhPGVwlFNUvtxXKD4FcyN22qA16QWQAWs+0uIjh5XtY/2dMvrKhZlULi9/YoJMMGjuxZYy/3+jpv/lfIuhH2pYazQQ0DQ+DNaMb5zp1GHgniwh/84iXr01NDZAVV1rZfNaQ97nEri4c9xJJq6UpwZYWozsD30c/FU8JCcb4UhmPez6gWBIxEw63y6TblFiVM2+6Aewj2l1dAoS+aiOO7hJ9+GL3EnKSX6ZdoxZKHDwKCKfer77lOfwSRjBDNkMSG35oeCir8qkdCkdODHiqAs9LG5dBy5r9CYPGHPtaiTlUllmNwuCRvFpdh5vwuraERRmbuts6ZdQiCw0QyvQa+pOBSGVgM4YgxpbTjViBFMmcl0ZT4nN66sVywQtplp5m2QczV59gqLJUIZF/m/71r1IQ7h601TmRKrSmstbnlC53ARotqD7XvWNuGWayguzoKEHqmIjAxYC3+eaLacRYyPA=
+x-forefront-antispam-report: CIP:255.255.255.255;CTRY:;LANG:en;SCL:1;SRV:;IPV:NLI;SFV:NSPM;H:SA1P110MB1581.NAMP110.PROD.OUTLOOK.COM;PTR:;CAT:NONE;SFS:(13230040)(1800799024)(6049299003)(41320700013)(366016)(13003099007)(4053099003)(56012099003)(18002099003)(8096899003)(38070700021);DIR:OUT;SFP:1101;
+x-ms-exchange-antispam-messagedata-chunkcount: 1
+x-ms-exchange-antispam-messagedata-0: 6JQAxSiLdAhO9GZE2thZOnaA7vX0Fk/jbqWYUcqSfKoaH0N2GupkUmwHNPyvpY/tZ4FXTTqt62thkbI9YI6eLLRR6ROHtSiQC6FHihJR1SsSC8lQynbkEZbIxWexuEPX439ZMj1uijDyl7890gBz1bxJH8jv1s/AS61m+WD2G9DmQuT8aYBRo7XnIqZeUCPOWJ3I97/mCZqR0rLC3++qzpmeXiUTUf+Orv+SCKPPbyecdaZIwPnwZAkeIdhhU0B3ZSVQd0xtB+/g4waiLNKrHe4MW/9hWFxCnkmfbZmYWAmN+OL8Dwbm5VeMWk6+gai88EP3B0adTZRPCxkbwYaYAMKkCF22RyJQBuhILNWIQde0qxY5JBArC55viVHoN5ms826EZ+2g1u3K7qaQ8DtHUVMxpZA3+qTxiwB3ARQjldnHJjCTF7h7z1g9mBiD61mlE8gnngiJY2PF2qQvPdkZ7akSOwzaQM3Oh/B6I8tKZFkncXBw7NbsPQ29I7jQ6SeFP3RKZ1WsapvI5uU8c4ZBixkmGR1YgMLhPO4LP9p+5Z7dm7sbBYsJqVJe2ESbZEfT9udGafZD6hm+5vZAUph+/i7HGCSc5pmxKbSsUrnPtewGbVbFd4SwRHtMzmQJ7WZF/dH1VLe7O7jAJfec7BDMHAiu+AGKOrXwx8ri4uoNdCzFxnWs3UT/Kj8ONdZxh/gDNLgXPxQlfTQSShtvSCT8csJ422aXRwYGBUX8t324kLR+G3QUmHwevmS6GkNcERR4qtZbi1LykS/J7GC4+2P2VAj3GEwDFXMDuaGoAvJU8rGCiKh9kaB8ElXU7LYMrBGQdO9KUEd0Nc01UMA+lBh7njE8fhl1XesNdskcx80JQOBJJvfSkkLP0+Z8RvDpQFKkZ+aq3DYTSjNdGcfdtPrBZdKNAGtBM0w8rK+EwgJy2aC++EVsQ1BhhmVeKtcTLOGFNzz7epXDY0LxvyExYRtm45rzadgcxd8FEvkEgf7fkt0kdrTu0qYi19zSSsmaogQXQNFUASDCKIsSjubgpOyyaDtaJVPhaqMCErmp89AhWhSAI1/p1eff+OGKkauQI0R95e/QqpTaQUpMr4P3EXLL8I+9r620+78AS97u/3ao/+Lqapn0Gk6TzqxtDNfzSucv/Y3hXBoaI6Ac4U99gGhNl8WmjVCEgHoFvJTpBd/3riv4aVPQL3nyly2Y09AdC/rMnEhHxbcmoF2r6tLzOQ2OIq2xrc4XS+fq/u6QbYQnvLapbCRftMrF2ZDXgJ3xfV8H/p/dTg9wQC6h7a2in9CS+wr3OXKo10gFF0ha0O4SvOFkQ9Z30k9sPsybSFhhIIfjfh33iH9LPCApXXyVmiAT8b+DB10iY5sRwIFwemEOgVxVDk/+wViujEYfxhvURGh3Vm8dgtss6XKkmXkQs/31cDOvZdhWTAn0YNCbbvJNkO3WKSxMGqmktQ+/ogqpieYJ3AhGRFfLsrmw7wLXXNhwly9FplueUnDFCBwTOZBf6Q4VaJfNaHYC1azWWTN0JqLRr+S8EX49JEoyaKJRtCPlwTPI/2Ro3JRGwjpNltVSo4iD2VuWDBmAqxBngdTmOVuTcWgiLQumtlhO/sH+J+pHPDrggFPbVjGVi/w2hhafymO9sZKD+jaN/B33bM7uKHBW
+Content-Type: multipart/related; boundary="_008_SA1P110MB15813FB818A83DF218A2A5D58052ASA1P110MB1581NAMP_"; type="multipart/alternative"
+MIME-Version: 1.0
+X-MS-Exchange-AntiSpam-ExternalHop-MessageData-ChunkCount: 1
+X-MS-Exchange-AntiSpam-ExternalHop-MessageData-0: B0fd3146w9pmDQOr9ACTF4rhNSdO1bLmv9YAqsHtkABmy4O8zdeGsJvZvuKOn4/vwtdsXnmmZrcbCMmpsaMJ1hVJx07ANJb7MqhPMFo5aUQ/nImBArChiedxPy2OOCQBSMgbPNJ9ZFnKy2z+6rYRHn2bCIpXpsOCWLRfMhXKSAlj0tKPUZkoAybC5IdS+l9PnNHbX5BHy5VZ03hh3BclOZD4wmbL+1ylxj6hxZ2C1XkVR8BRFpE8Jal4X4kCEuhEqQqV/MuFwgd9DJPmMEZs9mWJBj8K7DUBphmtpviDpNXLFktmiqAzreYScXdXMDbMNa7FJmi+aL6hA6uy/6Wv0lbnHz9XGX/DoL04/Ks1oPl64Xq2yIpT7igrNWpscSP4tWEszJd0goVnofH0P56/c0oGYlfnIS0sGCl9X6WX+wId3vHuFe0AfS6vkx8e174KGfvJvskrDrW+rQv+8mh6zwtPb9So5h1+HEZA9UFxJC+LZApcmYewSeXC6wseGxFnZqwcJNAadT4ZOD7Aklct8P/Sbh6QLocstdUW/GwFYqxEUX0tnV3aJDmtNRlwk/WAv5hfjJCLpLQ5CM7xHjcsOp8QZY4DqE5hht3gQ5H6ZIuU0b9FwA7nqHAsB75he0FM
+X-OriginatorOrg: lmi.org
+X-MS-Exchange-CrossTenant-AuthAs: Internal
+X-MS-Exchange-CrossTenant-AuthSource: SA1P110MB1581.NAMP110.PROD.OUTLOOK.COM
+X-MS-Exchange-CrossTenant-Network-Message-Id: 1ab9c770-5bff-47ce-d955-08de8e9540a3
+X-MS-Exchange-CrossTenant-originalarrivaltime: 30 Mar 2026 19:48:01.8539 (UTC)
+X-MS-Exchange-CrossTenant-fromentityheader: Hosted
+X-MS-Exchange-CrossTenant-id: 0d108003-91fa-4b33-baad-7a5a20b49de7
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: PH3P110MB1973
+X-Proofpoint-Virus-Version: vendor=baseguard engine=ICAP:2.0.293,Aquarius:18.0.1143,Hydra:6.1.51,FMLib:17.12.100.49 definitions=2026-03-30_01,2026-03-28_01,2025-10-01_01
+X-Proofpoint-Spam-Details: rule=notspam policy=default score=0 lowpriorityscore=0 priorityscore=1501 spamscore=0 impostorscore=0 mlxlogscore=999 adultscore=0 suspectscore=0 phishscore=0 mlxscore=0 clxscore=1015 bulkscore=0 malwarescore=0 classifier=spam adjust=0 reason=mlx scancount=1 engine=8.12.0-2603050001 definitions=main-2603300165
+X-Proofpoint-GUID: bcrM6fXVysSh6Moyfs-_eksG7F6hTPha
+X-Proofpoint-ORIG-GUID: bcrM6fXVysSh6Moyfs-_eksG7F6hTPha
+X-Proofpoint-Spam-Details-Enc: AW1haW4tMjYwMzMwMDE2NiBTYWx0ZWRfXwHTwW8A9s+zY ArOJ0fycW1jCVBL/dZ1Z3v5AkI915YMufmsbKTn5PkFh80QmjSaZmoRXVzchVrcPLSvtfeURobC HJoTZH4NpbNqrgVPv6T5jodmSu+M0xrwD/+cnJWBcKHEkhdC1B5cp6oPfU9mminMous68ZNbxcg uovPtgYW//VZiEQjO18tZ74C6PilDuJQ60lvoFYA+lOb3iex5fG1AZmB18Ym2IWKsXFJBFokrG3 B+5qC7m0OGoOJJTtmKtwyw9y/7EXL30w0rgt6s5H/YDHB1GWNrG76dUTlBVt0KgUfYoSVkWa33B gk/6mdIPHKr39Ywfpttp+W1+u4M1rgSmTEjduEs1CFcSMP9h6CW7gdc5svKoMrEUaxX6MkhKIMc YL6ZgSRu
+X-Proofpoint-Virus-Version: vendor=baseguard engine=ICAP:2.0.293,Aquarius:18.0.1143,Hydra:6.1.51,FMLib:17.12.100.49 definitions=2026-03-30_01,2026-03-28_01,2025-10-01_01
+X-Proofpoint-Spam-Details: rule=outbound_notspam policy=outbound score=0 lowpriorityscore=0 clxscore=1015 adultscore=0 spamscore=0 mlxscore=0 suspectscore=0 mlxlogscore=999 priorityscore=1501 phishscore=0 impostorscore=0 bulkscore=0 malwarescore=0 classifier=spam adjust=0 reason=mlx scancount=1 engine=8.12.0-2603050001 definitions=main-2603300166
+
+--_008_SA1P110MB15813FB818A83DF218A2A5D58052ASA1P110MB1581NAMP_
+Content-Type: multipart/alternative; boundary="_000_SA1P110MB15813FB818A83DF218A2A5D58052ASA1P110MB1581NAMP_"
+
+--_000_SA1P110MB15813FB818A83DF218A2A5D58052ASA1P110MB1581NAMP_
+Content-Type: text/plain; charset="us-ascii"
+Content-Transfer-Encoding: quoted-printable
+
+Brian,
+
+This email is to confirm your interview with LMI for Tuesday, March 31 at 1=
+:30pm EST. You will want to allow up to 30 minutes for your interview.  Thi=
+s is a video conference interview, so you must either be in front of a comp=
+uter with a webcam, download the Microsoft Teams on your mobile device, or =
+login via a web browser on your mobile device.
+
+Please confirm receipt of this email and let me know if you have any questi=
+ons.
+
+Interview Team: Luke Stets, Josh Malloy, Andrew Dirks, and Adam Hughes
+https://www.linkedin.com/in/lukestets/
+https://www.linkedin.com/in/josh-malloy/
+https://www.linkedin.com/in/andrew-dirks-3789a5a9/
+https://www.linkedin.com/in/hughesadam87/
+
+https://www.lmisolutions.com/platforms/liger
+___________________________________________________________________________=
+_____
+Microsoft Teams Need help?<https://aka.ms/JoinTeamsMeeting?omkt=3Den-US>
+Join the meeting now<https://gov.teams.microsoft.us/l/meetup-join/19%3agcch=
+%3ameeting_37973f9d65144746aebb4f61ad73c727%40thread.v2/0?context=3D%7b%22T=
+id%22%3a%220d108003-91fa-4b33-baad-7a5a20b49de7%22%2c%22Oid%22%3a%220c966e6=
+f-a5a7-4545-bf71-1ba0b55d1814%22%7d>
+Meeting ID: 992 946 948 306
+Passcode: qQ2Ph6Fj
+________________________________
+Dial in by phone
++1 703-917-7000,,378028685#<tel:+17039177000,,378028685> United States, McL=
+ean
+Find a local number<https://dialin.cpc.gov.teams.microsoft.us/88335b68-de7e=
+-477e-afc8-b69911f2d9d4?id=3D378028685>
+Phone conference ID: 378 028 685#
+Join on a video conferencing device
+Tenant key: teams@cvi.lmisolutions.com<mailto:teams@cvi.lmisolutions.com>
+Video ID: 513 245 012 2
+More info<https://dialinfo.pexgov.com/?conf=3D5132450122&ivr=3Dteams&d=3Dcv=
+i.lmisolutions.com>
+For organizers: Meeting options<https://gov.teams.microsoft.us/meetingOptio=
+ns/?organizerId=3D0c966e6f-a5a7-4545-bf71-1ba0b55d1814&tenantId=3D0d108003-=
+91fa-4b33-baad-7a5a20b49de7&threadId=3D19_gcch_meeting_37973f9d65144746aebb=
+4f61ad73c727@thread.v2&messageId=3D0&language=3Den-US> | Reset dial-in PIN<=
+https://dialin.cpc.gov.teams.microsoft.us/usp>
+___________________________________________________________________________=
+_____
+
+Interview Format & Guidelines
+This interview will be conducted via video conference on Microsoft Teams. P=
+lease ensure you have access to a computer with a webcam or the Microsoft T=
+eams app on your mobile device.
+
+To support a genuine, two-way conversation, we ask that you remain on camer=
+a for the duration of the interview and refrain from using AI tools or inte=
+rview guides. We're most interested in hearing your authentic thoughts and =
+experiences in your own words. While AI should not be used to answer questi=
+ons in real time, you're welcome to share examples of how you use AI to mak=
+e your work more effective.
+
+I will join the call at the start of the interview to confirm your video an=
+d audio are working properly and to address any technical issues.
+
+Job Details:
+We're looking for a full stack developer to help build and extend LIGER, an=
+ enterprise AI platform that connects knowledge, systems, and agentic workf=
+lows to accelerate outcomes across federal missions. You'll join a small, c=
+ross-functional team shipping a ground-up product redesign - and increasing=
+ly, building the agentic capabilities that make LIGER genuinely powerful.
+
+This isn't a maintain-the-backlog role. You'll work across the stack, own f=
+eatures end-to-end, and help shape how AI agents are integrated into workfl=
+ows that real users depend on. If you're excited about building systems whe=
+re models do real work - not just generate text - keep reading.
+
+About This Team
+LIGER sits within LMI's Chief Technology Office. We're a small, high-visibi=
+lity team building AI tools for federal agencies. The culture is more start=
+up than traditional government contractor - we move fast, solve problems in=
+ design spikes rather than scheduled reviews, and care more about outcomes =
+than process. That said, we're building for users who need reliability and =
+trust, so craft and attention to detail matter.
+
+You'll work daily with our designer, engineering lead, and product team. Th=
+e agentic layer of LIGER is still being shaped - this is a real opportunity=
+ to define how it gets built.
+
+To learn more about LIGER, visit: https://www.lmisolutions.com/platforms/li=
+ger
+
+This is a 100% remote role with quarterly travel for in person team plannin=
+g and collaboration events.
+
+Responsibilities:
+What You'll Do
+- Build and ship full stack features across frontend (Angular, Typescript),=
+ backend (Node/Python), and the integration layer between them
+- Design and implement agentic workflows: tool-calling, multi-step reasonin=
+g pipelines, and the infrastructure that makes them reliable
+- Use AI coding tools as a daily part of your development workflow
+- Integrate and maintain connections to external services, data sources, an=
+d APIs as part of agent execution flows
+- Collaborate directly with our designer and engineering lead in working se=
+ssions - you'll shape UX decisions, not just implement them
+- Contribute to backend architecture decisions around agent orchestration, =
+state management, and LLM interaction patterns
+- Ship incrementally and stay close to users - we care about getting things=
+ in front of people, not perfecting in isolation
+
+Qualifications:
+What We're Looking For
+- 3+ years of full stack development experience, or fewer years with demons=
+trable depth in agentic or LLM-native development - comfortable owning both=
+ frontend and backend
+- Experience using PostgreSQL to store, retrieve, and manage structured app=
+lication data, with experience in database design, SQL development, and ope=
+rational support
+- Proficiency in Angular and TypeScript on the frontend
+- Solid backend experience in Node.js and/or Python
+- Hands-on experience building with LLMs (prompt engineering, API integrati=
+on, tool use, and managing model outputs in production)
+- Active use of AI-assisted development tools in your day-to-day coding wor=
+kflow
+- Experience designing and developing RESTful APIs and backend services tha=
+t support scalable, maintainable integration across distributed application=
+ components
+- Familiarity with agentic patterns: orchestration, tool-calling, retrieval=
+-augmented generation (RAG), or multi-step agent flows
+- Ability to move fast and iterate without heavy specs or detailed tickets
+What Will Set You Apart
+- A portfolio of side projects, personal websites, open-source contribution=
+s, or other evidence of a builder's disposition - we care more about what y=
+ou've built than where you've worked
+- Demonstrated fluency with AI coding tools and a workflow that treats them=
+ as force multipliers, not novelties
+- Experience with Model Context Protocol (MCP) - building servers, defining=
+ tools, or integrating MCP into an agent stack
+- Experience building scalable document processing pipelines supporting tex=
+t extraction, chunking, metadata enrichment, indexing, and persistence for =
+downstream semantic retrieval use cases.
+- Background working on AI-native products or internal tooling where models=
+ are core to the user experience, not bolted on
+- Familiarity with frameworks like LangChain, LlamaIndex, or similar orches=
+tration tools
+- Experience developing software in environments governed by federal securi=
+ty and compliance requirements, with attention to secure coding practices, =
+access control, auditability, and deployment constraints
+
+Best,
+
+Kate Revels
+Talent Acquisition
+7940 Jones Branch Drive, Tysons, VA 22102
+kathryn.revels@LMIsolutions.com
+(703)917-7594
+
+[cid:image001.jpg@01DCC05C.95FA10F0]<http://www.lmisolutions.com/>
+
+LMIsolutions.com<http://www.lmisolutions.com/>  |  [LinkedIn logo, click to=
+ follow link] <https://www.linkedin.com/company/lmi/mycompany/>    [Instagr=
+am logo, click to follow link] <https://www.instagram.com/lmisolutionscom> =
+   [Glassdoor logo, click to follow link] <https://www.glassdoor.com/Overvi=
+ew/Working-at-LMI-EI_IE21939.11,14.htm>
+[A picture containing text  Description automatically generated]
+
+
+--_000_SA1P110MB15813FB818A83DF218A2A5D58052ASA1P110MB1581NAMP_
+Content-Type: text/html; charset="us-ascii"
+Content-Transfer-Encoding: quoted-printable
+
+<html xmlns:v=3D"urn:schemas-microsoft-com:vml" xmlns:o=3D"urn:schemas-micr=
+osoft-com:office:office" xmlns:w=3D"urn:schemas-microsoft-com:office:word" =
+xmlns:m=3D"http://schemas.microsoft.com/office/2004/12/omml" xmlns=3D"http:=
+//www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Dus-ascii"=
+>
+<meta name=3D"Generator" content=3D"Microsoft Word 15 (filtered medium)">
+<!--[if !mso]><style>v\:* {behavior:url(#default#VML);}
+o\:* {behavior:url(#default#VML);}
+w\:* {behavior:url(#default#VML);}
+.shape {behavior:url(#default#VML);}
+</style><![endif]--><style><!--
+/* Font Definitions */
+@font-face
+=09{font-family:"Cambria Math";
+=09panose-1:2 4 5 3 5 4 6 3 2 4;}
+@font-face
+=09{font-family:Aptos;}
+@font-face
+=09{font-family:"Segoe UI";
+=09panose-1:2 11 5 2 4 2 4 2 2 3;}
+/* Style Definitions */
+p.MsoNormal, li.MsoNormal, div.MsoNormal
+=09{margin:0in;
+=09font-size:12.0pt;
+=09font-family:"Aptos",sans-serif;
+=09mso-ligatures:standardcontextual;}
+a:link, span.MsoHyperlink
+=09{mso-style-priority:99;
+=09color:#467886;
+=09text-decoration:underline;}
+span.EmailStyle17
+=09{mso-style-type:personal-compose;
+=09font-family:"Aptos",sans-serif;
+=09color:windowtext;}
+span.me-email-text
+=09{mso-style-name:me-email-text;}
+span.me-email-text-secondary
+=09{mso-style-name:me-email-text-secondary;}
+span.me-email-headline
+=09{mso-style-name:me-email-headline;}
+.MsoChpDefault
+=09{mso-style-type:export-only;}
+@page WordSection1
+=09{size:8.5in 11.0in;
+=09margin:1.0in 1.0in 1.0in 1.0in;}
+div.WordSection1
+=09{page:WordSection1;}
+--></style><!--[if gte mso 9]><xml>
+<o:shapedefaults v:ext=3D"edit" spidmax=3D"1026" />
+</xml><![endif]--><!--[if gte mso 9]><xml>
+<o:shapelayout v:ext=3D"edit">
+<o:idmap v:ext=3D"edit" data=3D"1" />
+</o:shapelayout></xml><![endif]-->
+</head>
+<body lang=3D"EN-US" link=3D"#467886" vlink=3D"#96607D" style=3D"word-wrap:=
+break-word">
+<div class=3D"WordSection1">
+<p class=3D"MsoNormal">Brian,<o:p></o:p></p>
+<p class=3D"MsoNormal"><o:p>&nbsp;</o:p></p>
+<p class=3D"MsoNormal">This email is to confirm your interview with LMI for=
+ <b>Tuesday, March 31 at 1:30pm EST.</b> You will want to allow up to 30 mi=
+nutes for your interview.&nbsp; This is a video conference interview, so yo=
+u must either be in front of a computer
+ with a webcam, download the Microsoft Teams on your mobile device, or logi=
+n via a web browser on your mobile device.<o:p></o:p></p>
+<p class=3D"MsoNormal"><o:p>&nbsp;</o:p></p>
+<p class=3D"MsoNormal"><b><u>Please confirm receipt of this email and let m=
+e know if you have any questions.
+</u></b><o:p></o:p></p>
+<p class=3D"MsoNormal">&nbsp;<o:p></o:p></p>
+<p class=3D"MsoNormal"><b>Interview Team:</b>&nbsp;Luke Stets, Josh Malloy,=
+ Andrew Dirks, and Adam Hughes<o:p></o:p></p>
+<p class=3D"MsoNormal"><a href=3D"https://www.linkedin.com/in/lukestets/">h=
+ttps://www.linkedin.com/in/lukestets/</a><o:p></o:p></p>
+<p class=3D"MsoNormal"><a href=3D"https://www.linkedin.com/in/josh-malloy/"=
+>https://www.linkedin.com/in/josh-malloy/</a><o:p></o:p></p>
+<p class=3D"MsoNormal"><a href=3D"https://www.linkedin.com/in/andrew-dirks-=
+3789a5a9/">https://www.linkedin.com/in/andrew-dirks-3789a5a9/</a><o:p></o:p=
+></p>
+<p class=3D"MsoNormal"><a href=3D"https://www.linkedin.com/in/hughesadam87/=
+">https://www.linkedin.com/in/hughesadam87/</a><o:p></o:p></p>
+<p class=3D"MsoNormal"><o:p>&nbsp;</o:p></p>
+<p class=3D"MsoNormal"><a href=3D"https://www.lmisolutions.com/platforms/li=
+ger">https://www.lmisolutions.com/platforms/liger</a><o:p></o:p></p>
+<p class=3D"MsoNormal"><span style=3D"font-family:&quot;Segoe UI&quot;,sans=
+-serif;color:#242424">_____________________________________________________=
+___________________________<span style=3D"mso-ligatures:none"><o:p></o:p></=
+span></span></p>
+<p class=3D"MsoNormal"><span class=3D"me-email-text"><b><span style=3D"font=
+-size:18.0pt;font-family:&quot;Segoe UI&quot;,sans-serif;color:#242424">Mic=
+rosoft Teams</span></b></span><span style=3D"font-family:&quot;Segoe UI&quo=
+t;,sans-serif;color:#242424">
+<a href=3D"https://aka.ms/JoinTeamsMeeting?omkt=3Den-US"><span style=3D"fon=
+t-size:10.5pt;color:#5B5FC7">Need help?</span></a>
+<o:p></o:p></span></p>
+<p class=3D"MsoNormal"><span style=3D"font-family:&quot;Segoe UI&quot;,sans=
+-serif;color:#242424"><a href=3D"https://gov.teams.microsoft.us/l/meetup-jo=
+in/19%3agcch%3ameeting_37973f9d65144746aebb4f61ad73c727%40thread.v2/0?conte=
+xt=3D%7b%22Tid%22%3a%220d108003-91fa-4b33-baad-7a5a20b49de7%22%2c%22Oid%22%=
+3a%220c966e6f-a5a7-4545-bf71-1ba0b55d1814%22%7d" target=3D"_blank" title=3D=
+"Meeting join link"><b><span style=3D"font-size:15.0pt;color:#5B5FC7">Join
+ the meeting now</span></b></a> <o:p></o:p></span></p>
+<p class=3D"MsoNormal"><span class=3D"me-email-text-secondary"><span style=
+=3D"font-size:10.5pt;font-family:&quot;Segoe UI&quot;,sans-serif;color:#616=
+161">Meeting ID:
+</span></span><span class=3D"me-email-text"><span style=3D"font-size:10.5pt=
+;font-family:&quot;Segoe UI&quot;,sans-serif;color:#242424">992 946 948 306=
+</span></span><span style=3D"font-family:&quot;Segoe UI&quot;,sans-serif;co=
+lor:#242424">
+<o:p></o:p></span></p>
+<p class=3D"MsoNormal"><span class=3D"me-email-text-secondary"><span style=
+=3D"font-size:10.5pt;font-family:&quot;Segoe UI&quot;,sans-serif;color:#616=
+161">Passcode:
+</span></span><span class=3D"me-email-text"><span style=3D"font-size:10.5pt=
+;font-family:&quot;Segoe UI&quot;,sans-serif;color:#242424">qQ2Ph6Fj</span>=
+</span><span style=3D"font-family:&quot;Segoe UI&quot;,sans-serif;color:#24=
+2424">
+<o:p></o:p></span></p>
+<div class=3D"MsoNormal" align=3D"center" style=3D"text-align:center"><span=
+ style=3D"font-family:&quot;Segoe UI&quot;,sans-serif;color:#242424">
+<hr size=3D"1" width=3D"100%" align=3D"center">
+</span></div>
+<p class=3D"MsoNormal"><span class=3D"me-email-text"><b><span style=3D"font=
+-family:&quot;Segoe UI&quot;,sans-serif;color:#242424">Dial in by phone</sp=
+an></b></span><span style=3D"font-family:&quot;Segoe UI&quot;,sans-serif;co=
+lor:#242424">
+<o:p></o:p></span></p>
+<p class=3D"MsoNormal"><span style=3D"font-family:&quot;Segoe UI&quot;,sans=
+-serif;color:#242424"><a href=3D"tel:+17039177000,,378028685"><span style=
+=3D"font-size:10.5pt;color:#5B5FC7">+1 703-917-7000,,378028685#</span></a>
+</span><span class=3D"me-email-text"><span style=3D"font-size:10.5pt;font-f=
+amily:&quot;Segoe UI&quot;,sans-serif;color:#616161">United States, McLean<=
+/span></span><span style=3D"font-family:&quot;Segoe UI&quot;,sans-serif;col=
+or:#242424">
+<o:p></o:p></span></p>
+<p class=3D"MsoNormal"><span style=3D"font-family:&quot;Segoe UI&quot;,sans=
+-serif;color:#242424"><a href=3D"https://dialin.cpc.gov.teams.microsoft.us/=
+88335b68-de7e-477e-afc8-b69911f2d9d4?id=3D378028685"><span style=3D"font-si=
+ze:10.5pt;color:#5B5FC7">Find a local number</span></a>
+<o:p></o:p></span></p>
+<p class=3D"MsoNormal"><span class=3D"me-email-text-secondary"><span style=
+=3D"font-size:10.5pt;font-family:&quot;Segoe UI&quot;,sans-serif;color:#616=
+161">Phone conference ID:
+</span></span><span class=3D"me-email-text"><span style=3D"font-size:10.5pt=
+;font-family:&quot;Segoe UI&quot;,sans-serif;color:#242424">378 028 685#</s=
+pan></span><span style=3D"font-family:&quot;Segoe UI&quot;,sans-serif;color=
+:#242424">
+<o:p></o:p></span></p>
+<p class=3D"MsoNormal"><span class=3D"me-email-headline"><b><span style=3D"=
+font-family:&quot;Segoe UI&quot;,sans-serif;color:#242424">Join on a video =
+conferencing device</span></b></span><span style=3D"font-family:&quot;Segoe=
+ UI&quot;,sans-serif;color:#242424">
+<o:p></o:p></span></p>
+<p class=3D"MsoNormal"><span class=3D"me-email-text"><span style=3D"font-si=
+ze:10.5pt;font-family:&quot;Segoe UI&quot;,sans-serif;color:#616161">Tenant=
+ key:
+</span></span><span class=3D"me-email-text"><span style=3D"font-size:10.5pt=
+;font-family:&quot;Segoe UI&quot;,sans-serif;color:#242424"><a href=3D"mail=
+to:teams@cvi.lmisolutions.com">teams@cvi.lmisolutions.com</a></span></span>=
+<span style=3D"font-family:&quot;Segoe UI&quot;,sans-serif;color:#242424">
+<o:p></o:p></span></p>
+<p class=3D"MsoNormal"><span class=3D"me-email-text-secondary"><span style=
+=3D"font-size:10.5pt;font-family:&quot;Segoe UI&quot;,sans-serif;color:#616=
+161">Video ID:
+</span></span><span class=3D"me-email-text"><span style=3D"font-size:10.5pt=
+;font-family:&quot;Segoe UI&quot;,sans-serif;color:#242424">513 245 012 2</=
+span></span><span style=3D"font-family:&quot;Segoe UI&quot;,sans-serif;colo=
+r:#242424">
+<o:p></o:p></span></p>
+<p class=3D"MsoNormal"><span style=3D"font-family:&quot;Segoe UI&quot;,sans=
+-serif;color:#242424"><a href=3D"https://dialinfo.pexgov.com/?conf=3D513245=
+0122&amp;ivr=3Dteams&amp;d=3Dcvi.lmisolutions.com" target=3D"_blank"><span =
+style=3D"font-size:10.5pt;color:#5B5FC7">More info</span></a>
+<o:p></o:p></span></p>
+<p class=3D"MsoNormal"><span class=3D"me-email-text-secondary"><span style=
+=3D"font-size:10.5pt;font-family:&quot;Segoe UI&quot;,sans-serif;color:#616=
+161">For organizers:
+</span></span><span style=3D"font-family:&quot;Segoe UI&quot;,sans-serif;co=
+lor:#242424"><a href=3D"https://gov.teams.microsoft.us/meetingOptions/?orga=
+nizerId=3D0c966e6f-a5a7-4545-bf71-1ba0b55d1814&amp;tenantId=3D0d108003-91fa=
+-4b33-baad-7a5a20b49de7&amp;threadId=3D19_gcch_meeting_37973f9d65144746aebb=
+4f61ad73c727@thread.v2&amp;messageId=3D0&amp;language=3Den-US" target=3D"_b=
+lank"><span style=3D"font-size:10.5pt;color:#5B5FC7">Meeting
+ options</span></a> </span><span style=3D"font-family:&quot;Segoe UI&quot;,=
+sans-serif;color:#616161">|</span><span style=3D"font-family:&quot;Segoe UI=
+&quot;,sans-serif;color:#242424">
+<a href=3D"https://dialin.cpc.gov.teams.microsoft.us/usp" target=3D"_blank"=
+><span style=3D"font-size:10.5pt;color:#5B5FC7">Reset dial-in PIN</span></a=
+>
+<o:p></o:p></span></p>
+<p class=3D"MsoNormal"><span style=3D"font-family:&quot;Segoe UI&quot;,sans=
+-serif;color:#242424">_____________________________________________________=
+___________________________<o:p></o:p></span></p>
+<p class=3D"MsoNormal"><o:p>&nbsp;</o:p></p>
+<p class=3D"MsoNormal"><b>Interview Format &amp; Guidelines</b><o:p></o:p><=
+/p>
+<p class=3D"MsoNormal">This interview will be conducted via video conferenc=
+e on Microsoft Teams. Please ensure you have access to a computer with a we=
+bcam or the Microsoft Teams app on your mobile device.<o:p></o:p></p>
+<p class=3D"MsoNormal">&nbsp;<o:p></o:p></p>
+<p class=3D"MsoNormal">To support a genuine, two-way conversation, we ask t=
+hat you remain on camera for the duration of the interview and refrain from=
+ using AI tools or interview guides. We're most interested in hearing your =
+authentic thoughts and experiences
+ in your own words. While AI should not be used to answer questions in real=
+ time, you're welcome to share examples of how you use AI to make your work=
+ more effective.<o:p></o:p></p>
+<p class=3D"MsoNormal">&nbsp;<o:p></o:p></p>
+<p class=3D"MsoNormal">I will join the call at the start of the interview t=
+o confirm your video and audio are working properly and to address any tech=
+nical issues.<o:p></o:p></p>
+<p class=3D"MsoNormal">&nbsp;<o:p></o:p></p>
+<p class=3D"MsoNormal"><b><u>Job Details:</u></b><o:p></o:p></p>
+<p class=3D"MsoNormal">We&#8217;re looking for a full stack developer to he=
+lp build and extend LIGER, an enterprise AI platform that connects knowledg=
+e, systems, and agentic workflows to accelerate outcomes across federal mis=
+sions. You&#8217;ll join a small, cross-functional
+ team shipping a ground-up product redesign &#8211; and increasingly, build=
+ing the agentic capabilities that make LIGER genuinely powerful.<br>
+&nbsp;<br>
+This isn&#8217;t a maintain-the-backlog role. You&#8217;ll work across the =
+stack, own features end-to-end, and help shape how AI agents are integrated=
+ into workflows that real users depend on. If you&#8217;re excited about bu=
+ilding systems where models do real work &#8211; not just
+ generate text &#8211; keep reading.<o:p></o:p></p>
+<p class=3D"MsoNormal"><br>
+<b><u>About This Team</u></b><br>
+LIGER sits within LMI&#8217;s Chief Technology Office. We&#8217;re a small,=
+ high-visibility team building AI tools for federal agencies. The culture i=
+s more startup than traditional government contractor &#8211; we move fast,=
+ solve problems in design spikes rather than scheduled
+ reviews, and care more about outcomes than process. That said, we&#8217;re=
+ building for users who need reliability and trust, so craft and attention =
+to detail matter.<br>
+&nbsp;<br>
+You&#8217;ll work daily with our designer, engineering lead, and product te=
+am. The agentic layer of LIGER is still being shaped &#8211; this is a real=
+ opportunity to define how it gets built.<br>
+&nbsp;<br>
+To learn more about LIGER, visit: <a href=3D"https://www.lmisolutions.com/p=
+latforms/liger">
+https://www.lmisolutions.com/platforms/liger</a> <br>
+&nbsp;<br>
+This is a 100% remote role with quarterly travel for in person team plannin=
+g and collaboration events.<o:p></o:p></p>
+<p class=3D"MsoNormal">&nbsp;<o:p></o:p></p>
+<p class=3D"MsoNormal"><b><u>Responsibilities:</u><o:p></o:p></b></p>
+<p class=3D"MsoNormal">What You'll Do<br>
+- Build and ship full stack features across frontend (Angular, Typescript),=
+ backend (Node/Python), and the integration layer between them<br>
+- Design and implement agentic workflows: tool-calling, multi-step reasonin=
+g pipelines, and the infrastructure that makes them reliable<br>
+- Use AI coding tools as a daily part of your development workflow<br>
+- Integrate and maintain connections to external services, data sources, an=
+d APIs as part of agent execution flows<br>
+- Collaborate directly with our designer and engineering lead in working se=
+ssions &#8211; you&#8217;ll shape UX decisions, not just implement them<br>
+- Contribute to backend architecture decisions around agent orchestration, =
+state management, and LLM interaction patterns<br>
+- Ship incrementally and stay close to users &#8211; we care about getting =
+things in front of people, not perfecting in isolation<o:p></o:p></p>
+<p class=3D"MsoNormal">&nbsp;<o:p></o:p></p>
+<p class=3D"MsoNormal"><b><u>Qualifications:</u><o:p></o:p></b></p>
+<p class=3D"MsoNormal">What We're Looking For<br>
+- 3+ years of full stack development experience, or fewer years with demons=
+trable depth in agentic or LLM-native development &#8211; comfortable ownin=
+g both frontend and backend<br>
+- Experience using PostgreSQL to store, retrieve, and manage structured app=
+lication data, with experience in database design, SQL development, and ope=
+rational support<br>
+- Proficiency in Angular and TypeScript on the frontend<br>
+- Solid backend experience in Node.js and/or Python<br>
+- Hands-on experience building with LLMs (prompt engineering, API integrati=
+on, tool use, and managing model outputs in production)<br>
+- Active use of AI-assisted development tools in your day-to-day coding wor=
+kflow<br>
+- Experience designing and developing RESTful APIs and backend services tha=
+t support scalable, maintainable integration across distributed application=
+ components<br>
+- Familiarity with agentic patterns: orchestration, tool-calling, retrieval=
+-augmented generation (RAG), or multi-step agent flows<br>
+- Ability to move fast and iterate without heavy specs or detailed tickets<=
+br>
+What Will Set You Apart<br>
+- A portfolio of side projects, personal websites, open-source contribution=
+s, or other evidence of a builder&#8217;s disposition &#8211; we care more =
+about what you&#8217;ve built than where you&#8217;ve worked<br>
+- Demonstrated fluency with AI coding tools and a workflow that treats them=
+ as force multipliers, not novelties<br>
+- Experience with Model Context Protocol (MCP) &#8211; building servers, de=
+fining tools, or integrating MCP into an agent stack<br>
+- Experience building scalable document processing pipelines supporting tex=
+t extraction, chunking, metadata enrichment, indexing, and persistence for =
+downstream semantic retrieval use cases.<br>
+- Background working on AI-native products or internal tooling where models=
+ are core to the user experience, not bolted on<br>
+- Familiarity with frameworks like LangChain, LlamaIndex, or similar orches=
+tration tools<br>
+- Experience developing software in environments governed by federal securi=
+ty and compliance requirements, with attention to secure coding practices, =
+access control, auditability, and deployment constraints<o:p></o:p></p>
+<p class=3D"MsoNormal"><o:p>&nbsp;</o:p></p>
+<p class=3D"MsoNormal"><span style=3D"color:#001771;mso-ligatures:none">Bes=
+t,<o:p></o:p></span></p>
+<p class=3D"MsoNormal"><b><span style=3D"color:#001771;mso-ligatures:none">=
+<o:p>&nbsp;</o:p></span></b></p>
+<p class=3D"MsoNormal"><b><span style=3D"color:#001771;mso-ligatures:none">=
+Kate Revels<o:p></o:p></span></b></p>
+<p class=3D"MsoNormal"><span style=3D"font-size:10.0pt;font-family:&quot;Ar=
+ial&quot;,sans-serif;mso-ligatures:none">Talent Acquisition</span><span sty=
+le=3D"font-size:9.0pt;font-family:&quot;Arial&quot;,sans-serif;mso-ligature=
+s:none"><o:p></o:p></span></p>
+<p class=3D"MsoNormal"><span style=3D"font-size:10.0pt;font-family:&quot;Ar=
+ial&quot;,sans-serif;mso-ligatures:none">7940 Jones Branch Drive, Tysons, V=
+A 22102<o:p></o:p></span></p>
+<p class=3D"MsoNormal"><span style=3D"font-size:10.0pt;font-family:&quot;Ar=
+ial&quot;,sans-serif;mso-ligatures:none">kathryn.revels@LMIsolutions.com<o:=
+p></o:p></span></p>
+<p class=3D"MsoNormal"><span style=3D"font-size:10.0pt;font-family:&quot;Ar=
+ial&quot;,sans-serif;mso-ligatures:none">(703)917-7594</span><span style=3D=
+"font-size:10.0pt;mso-ligatures:none"><o:p></o:p></span></p>
+<p class=3D"MsoNormal"><span style=3D"font-size:9.0pt;font-family:&quot;Ari=
+al&quot;,sans-serif;color:#7F7F7F;mso-ligatures:none"><o:p>&nbsp;</o:p></sp=
+an></p>
+<p class=3D"MsoNormal"><a href=3D"http://www.lmisolutions.com/"><span style=
+=3D"color:windowtext;text-decoration:none"><img border=3D"0" width=3D"69" h=
+eight=3D"28" style=3D"width:.7222in;height:.2916in" id=3D"Picture_x0020_1" =
+src=3D"cid:image001.jpg@01DCC05C.95FA10F0"></span></a><span style=3D"font-s=
+ize:6.5pt;font-family:&quot;Arial&quot;,sans-serif;color:#7F7F7F;mso-ligatu=
+res:none"><o:p></o:p></span></p>
+<p class=3D"MsoNormal"><span style=3D"font-size:2.0pt;font-family:&quot;Ari=
+al&quot;,sans-serif;color:#7F7F7F;mso-ligatures:none"><o:p>&nbsp;</o:p></sp=
+an></p>
+<p class=3D"MsoNormal"><a href=3D"http://www.lmisolutions.com/"><span style=
+=3D"font-size:10.0pt;font-family:&quot;Arial&quot;,sans-serif;color:#001771=
+;mso-ligatures:none">LMIsolutions.com</span></a><span style=3D"font-size:10=
+.0pt;font-family:&quot;Arial&quot;,sans-serif;color:#001771;mso-ligatures:n=
+one">
+ &nbsp;</span><span style=3D"font-size:10.0pt;font-family:&quot;Arial&quot;=
+,sans-serif;color:black;mso-ligatures:none">|</span><span style=3D"font-siz=
+e:9.0pt;font-family:&quot;Arial&quot;,sans-serif;color:#7F7F7F;mso-ligature=
+s:none"> &nbsp;</span><a href=3D"https://www.linkedin.com/company/lmi/mycom=
+pany/"><span style=3D"color:windowtext;text-decoration:none"><img border=3D=
+"0" width=3D"12" height=3D"12" style=3D"width:.125in;height:.125in" id=3D"P=
+icture_x0020_790138621" src=3D"cid:image002.gif@01DCC05C.95FA10F0" alt=3D"L=
+inkedIn logo, click to follow link"></span></a><span style=3D"font-size:9.0=
+pt;font-family:&quot;Arial&quot;,sans-serif;color:#7F7F7F">&nbsp;
+ &nbsp;</span><a href=3D"https://www.instagram.com/lmisolutionscom"><span s=
+tyle=3D"color:windowtext;text-decoration:none"><img border=3D"0" width=3D"1=
+1" height=3D"13" style=3D"width:.118in;height:.1388in" id=3D"Picture_x0020_=
+3" src=3D"cid:image003.gif@01DCC05C.95FA10F0" alt=3D"Instagram logo, click =
+to follow link"></span></a><span style=3D"font-size:9.0pt;font-family:&quot=
+;Arial&quot;,sans-serif;color:#7F7F7F">&nbsp;&nbsp;&nbsp;</span><a href=3D"=
+https://www.glassdoor.com/Overview/Working-at-LMI-EI_IE21939.11,14.htm"><sp=
+an style=3D"color:windowtext;text-decoration:none"><img border=3D"0" width=
+=3D"11" height=3D"13" style=3D"width:.118in;height:.1388in" id=3D"Picture_x=
+0020_82643895" src=3D"cid:image004.gif@01DCC05C.95FA10F0" alt=3D"Glassdoor =
+logo, click to follow link"></span></a><span style=3D"font-size:11.0pt;font=
+-family:&quot;Arial&quot;,sans-serif;mso-ligatures:none"><o:p></o:p></span>=
+</p>
+<p class=3D"MsoNormal"><span style=3D"font-size:9.0pt;font-family:&quot;Ari=
+al&quot;,sans-serif;color:#7F7F7F;position:relative;top:-3.0pt;mso-text-rai=
+se:3.0pt"><img border=3D"0" width=3D"247" height=3D"39" style=3D"width:2.56=
+94in;height:.4027in" id=3D"Picture_x0020_9" src=3D"cid:image005.png@01DCC05=
+C.95FA10F0" alt=3D"A picture containing text
+
+Description automatically generated"></span><o:p></o:p></p>
+<p class=3D"MsoNormal"><o:p>&nbsp;</o:p></p>
+</div>
+</body>
+</html>
+
+--_000_SA1P110MB15813FB818A83DF218A2A5D58052ASA1P110MB1581NAMP_--
+--_008_SA1P110MB15813FB818A83DF218A2A5D58052ASA1P110MB1581NAMP_
+Content-Type: image/jpeg; name="image001.jpg"
+Content-Description: image001.jpg
+Content-Disposition: inline; filename="image001.jpg"; size=5083; creation-date="Mon, 30 Mar 2026 19:48:00 GMT"; modification-date="Mon, 30 Mar 2026 19:48:00 GMT"
+Content-ID: <image001.jpg@01DCC05C.95FA10F0>
+Content-Transfer-Encoding: base64
+
+
+--_008_SA1P110MB15813FB818A83DF218A2A5D58052ASA1P110MB1581NAMP_
+Content-Type: image/gif; name="image002.gif"
+Content-Description: image002.gif
+Content-Disposition: inline; filename="image002.gif"; size=893; creation-date="Mon, 30 Mar 2026 19:48:01 GMT"; modification-date="Mon, 30 Mar 2026 19:48:01 GMT"
+Content-ID: <image002.gif@01DCC05C.95FA10F0>
+Content-Transfer-Encoding: base64
+
+
+--_008_SA1P110MB15813FB818A83DF218A2A5D58052ASA1P110MB1581NAMP_
+Content-Type: image/gif; name="image003.gif"
+Content-Description: image003.gif
+Content-Disposition: inline; filename="image003.gif"; size=928; creation-date="Mon, 30 Mar 2026 19:48:01 GMT"; modification-date="Mon, 30 Mar 2026 19:48:01 GMT"
+Content-ID: <image003.gif@01DCC05C.95FA10F0>
+Content-Transfer-Encoding: base64
+
+
+--_008_SA1P110MB15813FB818A83DF218A2A5D58052ASA1P110MB1581NAMP_
+Content-Type: image/gif; name="image004.gif"
+Content-Description: image004.gif
+Content-Disposition: inline; filename="image004.gif"; size=899; creation-date="Mon, 30 Mar 2026 19:48:01 GMT"; modification-date="Mon, 30 Mar 2026 19:48:01 GMT"
+Content-ID: <image004.gif@01DCC05C.95FA10F0>
+Content-Transfer-Encoding: base64
+
+
+--_008_SA1P110MB15813FB818A83DF218A2A5D58052ASA1P110MB1581NAMP_
+Content-Type: image/png; name="image005.png"
+Content-Description: image005.png
+Content-Disposition: inline; filename="image005.png"; size=6542; creation-date="Mon, 30 Mar 2026 19:48:01 GMT"; modification-date="Mon, 30 Mar 2026 19:48:01 GMT"
+Content-ID: <image005.png@01DCC05C.95FA10F0>
+Content-Transfer-Encoding: base64
+
+
+--_008_SA1P110MB15813FB818A83DF218A2A5D58052ASA1P110MB1581NAMP_--

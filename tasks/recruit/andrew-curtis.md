@@ -235,7 +235,7 @@ Updated `resume/BrianTakita.md` line 56:
 Resume rebuilt: `resume/BrianTakita-andrew-curtis.pdf` — "One Euro filter" now bolded in the Presence AI section.
 
 This change is in the master template, so all future profile builds will include it.
-### Re: LinkedIn Message for Resume (HEAD)
+### Re: LinkedIn Message for Resume
 
 Keep it simple — Andrew already screened you, he just needs the PDF to submit. No re-selling needed.
 
@@ -253,7 +253,7 @@ Brian
 **Attach:** `BrianTakita-andrew-curtis.pdf` (from `resume/BrianTakita-andrew-curtis.pdf`)
 
 Short and professional. Adjust or send?
-<!-- agent:boundary:cd5130cf -->
+<!-- agent:boundary:7d43e156 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

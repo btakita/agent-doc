@@ -4,34 +4,20 @@ agent_doc_format: template
 agent_doc_write: crdt
 ---
 
-## Status (HEAD)
+## Status
 
 <!-- agent:status patch=replace -->
 <!-- /agent:status -->
 
-## Exchange (HEAD)
+## Exchange
 
 <!-- agent:exchange patch=append -->
-     General
-       #12744            🔵  Researched Reel Weeds company and product catalog
-       #12745  12:41 PM  🔵  Completed deep-dive research across Reel Weeds website sections
-
-
-     Access 207k tokens of past research & decisions for just 17,673t. Use the claude-mem skill to access memories by
-     ID.
-
-     View Observations Live @ http://localhost:37777
-
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ 
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)                                                                /buddy
-  ⏵⏵ bypass permissions on (shift+tab to cycle)                                                    ◐ medium · /effort
-  ⏵⏵ bypass permissions on (shift+tab to cycle)
+Give me a 1 page pdf prep for filevine interview.
+filevine.com
 <!-- agent:boundary:f74eede7 -->
 <!-- /agent:exchange -->
 
-## Pending / Not Built (HEAD)
+## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 <!-- /agent:pending -->

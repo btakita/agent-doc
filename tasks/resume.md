@@ -302,10 +302,18 @@ Updated `.claude/skills/email/SKILL.md` with:
 3. **Delivery cascade** replaced with clear two-step: push to Drafts → wait for approval → send
 4. **Account config** updated — `btak.dev` now shows `gmail-api` provider with `gmail.compose` scope (no more "blocked" SMTP note)
 5. **Absolute attachment paths** convention added (tilde not expanded)
-
 commit and push resume repo
+
+### Re: Resume repo committed and pushed
+
+**Committed and pushed** to [btakita/resume](https://github.com/btakita/resume):
+
+8 files changed, 254 insertions:
+- `data.toml` — title update + CI/CD/Docker/Heroku/observability tags + new skills
+- `profiles/wbd-rust.toml`, `profiles/sw-airlines-python.toml` — new profiles
+- All 5 PDFs rebuilt (default + 4 recruiter-specific)
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [x] Update email skill with no-auto-send policy
+- [x] Commit and push resume repo
 <!-- /agent:pending -->

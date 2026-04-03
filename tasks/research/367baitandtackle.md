@@ -86,7 +86,7 @@ No Walmart, Bass Pro, or other big-box retailer listings found. No wholesale/dis
 
 Send from brian.takita@gmail.com
 
-### Re: Email to 367 Bait & Tackle (HEAD)
+### Re: Email to 367 Bait & Tackle
 
 Found their email: **etcpremier@yahoo.com** (from Facebook/business directories).
 
@@ -111,7 +111,7 @@ Drafting an inquiry email:
 > Brian Takita
 
 **Awaiting approval** to push to Gmail Drafts.
-<!-- agent:boundary:1829f525 -->
+<!-- agent:boundary:88cb3b76 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

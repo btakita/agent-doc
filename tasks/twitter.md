@@ -213,7 +213,7 @@ Then in an agent-doc session, Claude Code would have a `browser_fetch` tool that
 Want me to add this to the pending section as a feature spec?
 
 Extract a feature document with the context related to the browser extension integration.
-### Feature document created (HEAD)
+### Feature document created
 
 Extracted to `tasks/todo/browser-bridge.md` — standalone feature spec with:
 

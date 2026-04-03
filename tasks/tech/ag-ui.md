@@ -201,7 +201,7 @@ The `test` ensures status is still "researching" before marking complete — if 
 Yes — the backend agent maintains its own state object, and AG-UI syncs it to the UI via these SSE events. The agent emits `STATE_SNAPSHOT` or `STATE_DELTA` events as it works. The frontend applies them to its local copy. The frontend can also push state changes back to the agent (via `useCoAgent`'s `setState`), making it truly bidirectional.
 Why does RFC 6902 have a redundant event and data.type?
 
-### Re: Why `event:` and `data.type` appear redundant (HEAD)
+### Re: Why `event:` and `data.type` appear redundant
 
 They serve different layers — it's not actually RFC 6902 doing this, it's the **SSE transport + AG-UI protocol** combination:
 
@@ -217,7 +217,7 @@ They serve different layers — it's not actually RFC 6902 doing this, it's the 
 In practice, when using SSE they'll always match. But they exist at different abstraction levels — one is "how the transport delivers it" and the other is "what the protocol says it is."
 
 My examples showed both because that's what the wire format looks like with SSE transport. If AG-UI were running over WebSocket, you'd only see the JSON `{ "type": "STATE_DELTA", ... }` without the `event:` line.
-<!-- agent:boundary:4846e794 -->
+<!-- agent:boundary:45ae454b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

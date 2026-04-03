@@ -14,7 +14,7 @@ Crawled reelweeds.com — site summary complete. Business is for sale (owners re
 
 <!-- agent:exchange patch=append -->
 Give me a site summary and crawl https://www.reelweeds.com/
-### Re: Site Summary & Crawl (HEAD)
+### Re: Site Summary & Crawl
 
 **Reel Weeds by LaDredge Outdoors** — U.S. manufacturer of patented artificial underwater foliage designed to attract fish by replicating natural weed structure. Based in Wisconsin (contact: John, 715-218-2806, reelweeds@gmail.com).
 
@@ -61,7 +61,37 @@ Home | Reel Weeds | Teaser Leaders | The Zack Shack (404) | About Us | Contact U
 - The Zack Shack page returns 404
 - Patent held on the underwater foliage product — described as "the only patented underwater foliage product on the market"
 - All products manufactured in the USA
-<!-- agent:boundary:9bd83aed -->
+  ⎿  Received 28.9KB (200 OK)
+
+● Fetch(https://www.reelweeds.com/contact-us)
+  ⎿  Received 31.1KB (200 OK)
+
+● Now let me write the response to the document.
+
+  Read 1 file (ctrl+o to expand)
+
+● Bash(agent-doc commit tasks/research/reelweeds.md)
+  ⎿  [perf] commit.staging (hash_object+update-index): 4ms
+     [perf] commit.git_commit: 11ms
+     [main 540bdd79] agent-doc(reelweeds): 2026-04-03 12:41:17
+     … +6 lines (ctrl+o to expand)
+
+● Crawled reelweeds.com. Key findings:
+
+  - Reel Weeds by LaDredge Outdoors — patented artificial underwater foliage fish attractors, manufactured in the USA
+  - Products span ice fishing, docks, ponds, aquariums, and AquaHabitat in 1.5'/4'/6' sizes
+  - Also sell Teaser Leaders and Little Tease Fishing Skirts
+  - Business is for sale — owners retiring, described as turn-key ready
+  - Contact: John, 715-218-2806, reelweeds@gmail.com
+  - The Zack Shack page is a dead link (404)
+
+✻ Cogitated for 1m 11s
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+<!-- agent:boundary:94ad544b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

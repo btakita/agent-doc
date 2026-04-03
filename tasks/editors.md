@@ -1,10 +1,8 @@
 ---
-session: 4aee457b-a1f8-45bf-8bb8-c76251fdba5d
-resume: null
-agent: null
-model: null
-branch: null
+agent_doc_session: 4aee457b-a1f8-45bf-8bb8-c76251fdba5d
+tmux_session: '0'
 ---
+
 
 ## User
 

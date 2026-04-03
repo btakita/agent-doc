@@ -257,7 +257,7 @@ Let's finish the pending tasks and update the email draft with the results:
 - [ ] Security assessment of WordPress spam compromise
 - [ ] Certified resellers directory analysis
 
-### Re: Complete pending research (HEAD)
+### Re: Complete pending research
 
 All 5 research tasks completed. Here's the full analysis:
 
@@ -370,7 +370,7 @@ All posted under **MRHadmin** (Author ID 1) — the site's primary admin account
 ---
 
 Email draft has been updated with these findings. Ready to review.
-<!-- agent:boundary:8ca86251 -->
+<!-- agent:boundary:7f94db12 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

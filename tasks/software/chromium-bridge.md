@@ -810,12 +810,73 @@ The `type` command is escaping `!` → `\!` when passing text to CDP `Input.inse
 **Repro:**
 ```bash
 chromium-bridge type '#message-entry' 'Hello!' --tab pulsesms
-# Expected: "Hello!" (HEAD)
-# Actual: "Hello\!" (HEAD)
+# Expected: "Hello!"
+# Actual: "Hello\!"
 ```
 
 **Fix:** Check the `type` command's text preprocessing for unnecessary escape handling.
-<!-- agent:boundary:c818b26e -->
+
+     dist/app.js
+       #12561  10:56 AM  🟣  Ragie sources panel deployed to production Cloudflare Pages
+
+     src/agent-doc-js/index.html
+       #12562  10:59 AM  ✅  Committed Ragie sources panel feature to version control
+
+     src/agent-doc-js
+       #12563            ✅  Pushed sources panel to GitHub and updated parent repository submodule reference
+
+     #S3637 Prepare pre-call materials and outreach strategy for Bob Remeika (Ragie) partnership discussion (Apr 2, 11:11 AM)
+
+     src/agent-doc-js/src/app.js
+       #12564  11:11 AM  🔵  Diff gutter implementation uses CodeMirror StateField and GutterMarker
+       #12565            🟣  Added processing marker type and markProcessing function for diff gutter
+       #12566            🟣  Integrated processing markers into handleSubmit workflow
+
+     src/agent-doc-js/style.css
+       #12567  11:12 AM  🟣  Added pulsing animation CSS for processing diff markers
+
+     General
+       #12568            ✅  Deployed processing spinner feature to Cloudflare Pages
+
+     src/agent-doc-js/index.html
+       #12569            ✅  Committed pulsing gutter spinner feature to git repository
+
+     tasks/professional/bob-remeika.md
+       #12570            ⚖️  Pre-call outreach strategy for Ragie partnership discussion
+       #12571            ⚖️  Client use case disclosure strategy deferred to call
+
+     #S3638 Generate call structure document for Bob Remeika meeting from task file (Apr 2, 11:12 AM)
+
+     tmp/bob-remeika-call-structure.md
+       #12572  11:13 AM  ✅  Call structure document created for Ragie CEO meeting
+
+     tmp/bob-remeika-call-structure.html
+       #12573            ✅  PDF call structure generated for Bob Remeika meeting
+
+     tasks/professional/bob-remeika.md
+       #12574  11:24 AM  ✅  Added one-page summary constraint to Bob Remeika call structure document
+
+     tmp/bob-remeika-call-structure.md
+       #12575            🔄  Condensed Bob Remeika call structure into one-page table format
+
+     tasks/professional/bob-remeika.md
+       #12576  11:26 AM  🟣  Generated call structure PDF for Bob Remeika meeting
+
+     #S3639 Generate call preparation PDF for Bob Remeika meeting with structured agenda blocks (Apr 2, 11:26 AM)
+
+     tmp/bob-remeika-call-structure.md
+       #12577  11:26 AM  🔄  Restructured call document from table to hierarchical format with compact CSS
+
+
+     Access 237k tokens of past research & decisions for just 17,953t. Use the claude-mem skill to access memories by ID.
+
+     View Observations Live @ http://localhost:37777
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+<!-- agent:boundary:d4356fef -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

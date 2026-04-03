@@ -831,10 +831,71 @@ Should we have corky support Google documents?
 It would be useful for cases exactly like this -- pulling spreadsheet data into agent workflows. Worth adding to the corky roadmap. The Gmail OAuth scope could be extended to include Docs/Sheets scopes.
 
 Add to tasks/software/corky.md
-### Re: Added to corky roadmap (HEAD)
+### Re: Added to corky roadmap
 
 Added "Google Docs/Sheets integration" to `tasks/software/corky.md` status section as an open item. When implemented, it would extend the existing Gmail OAuth scopes to include Docs/Sheets API access for reading spreadsheets and collaborating on documents directly from agent workflows.
-<!-- agent:boundary:1ece2109 -->
+     src/agent-doc-js/src/app.js
+       #12554  10:53 AM  🔵  Existing Ragie integration in agent-doc-js web application
+
+     tasks/software/ragie-web-doc.md
+       #12555  10:54 AM  ✅  Implementation plan documented for Ragie source document viewer panel
+
+     src/agent-doc-js/index.html
+       #12556            🟣  Added Sources toggle button to toolbar
+       #12557            🟣  Added sources panel HTML structure and flexbox layout
+
+     src/agent-doc-js/style.css
+       #12558            🟣  Implemented sources panel CSS with card-based chunk display styling
+
+     src/agent-doc-js/src/app.js
+       #12559  10:55 AM  🟣  Implemented sources panel rendering and data handling logic
+       #12560            🟣  Integrated sources panel with Ragie search flow and wired button event handlers
+
+     dist/app.js
+       #12561  10:56 AM  🟣  Ragie sources panel deployed to production Cloudflare Pages
+
+     src/agent-doc-js/index.html
+       #12562  10:59 AM  ✅  Committed Ragie sources panel feature to version control
+
+     src/agent-doc-js
+       #12563            ✅  Pushed sources panel to GitHub and updated parent repository submodule reference
+
+     src/agent-doc-js/src/app.js
+       #12564  11:11 AM  🔵  Diff gutter implementation uses CodeMirror StateField and GutterMarker
+       #12565            🟣  Added processing marker type and markProcessing function for diff gutter
+       #12566            🟣  Integrated processing markers into handleSubmit workflow
+
+     src/agent-doc-js/style.css
+       #12567  11:12 AM  🟣  Added pulsing animation CSS for processing diff markers
+
+     General
+       #12568            ✅  Deployed processing spinner feature to Cloudflare Pages
+
+     src/agent-doc-js/index.html
+       #12569            ✅  Committed pulsing gutter spinner feature to git repository
+
+     tasks/professional/bob-remeika.md
+       #12570            ⚖️  Pre-call outreach strategy for Ragie partnership discussion
+       #12571            ⚖️  Client use case disclosure strategy deferred to call
+
+     #S3637 Prepare pre-call materials and outreach strategy for Bob Remeika (Ragie) partnership discussion (Apr 2, 11:12 AM)
+
+     tmp/bob-remeika-call-structure.md
+       #12572  11:13 AM  ✅  Call structure document created for Ragie CEO meeting
+
+     tmp/bob-remeika-call-structure.html
+       #12573            ✅  PDF call structure generated for Bob Remeika meeting
+
+
+     Access 235k tokens of past research & decisions for just 17,396t. Use the claude-mem skill to access memories by ID.
+
+     View Observations Live @ http://localhost:37777
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+<!-- agent:boundary:47b772d1 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

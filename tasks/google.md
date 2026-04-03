@@ -34,14 +34,14 @@ I can see from the screenshot: **81.62 GB of 15 GB used** — you're way over th
 It says my Visa card is active?
 ![img_2.png](img_2.png)
 
-### Re: Visa card active (HEAD)
+### Re: Visa card active
 
 That screenshot shows Google Play **Payment methods** — it confirms your Visa-2538 is on file, but it doesn't show subscription status. The card being listed just means Google can charge it.
 
 **Next step:** Click the **Subscriptions** tab (right next to "Payment methods" in your screenshot). That will show whether Google One is active, expired, or cancelled.
 
 Or go directly to **[one.google.com](https://one.google.com/)** — it'll immediately show your storage plan status.
-<!-- agent:boundary:306b9a24 -->
+<!-- agent:boundary:4f272d97 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

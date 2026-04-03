@@ -453,7 +453,7 @@ This is relevant for Melissa because wedding professionals deal with vendor cont
 
 Draft updated at `mail/drafts/2026-03-30-melissa-lewis-update.md`. Say "send" to push to Gmail Drafts.
 direct send...bypass gmail draft
-### Re: Email sent directly (HEAD)
+### Re: Email sent directly
 
 **Email sent** to melissa.lewis2019@gmail.com via corky `--send` (bypassed Gmail Drafts).
 
@@ -463,7 +463,7 @@ direct send...bypass gmail draft
 - **Status:** sent
 
 Draft file updated to `status: sent` at `mail/drafts/2026-03-30-melissa-lewis-update.md`.
-<!-- agent:boundary:dfd82ace -->
+<!-- agent:boundary:16fc14d2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

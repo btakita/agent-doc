@@ -212,14 +212,14 @@ Does any eval framework use the toml format?
 If the YAML gotchas concern you, the mitigation is quoting strings that could be misinterpreted (which serde_yaml handles correctly when deserializing to `String` fields anyway).
 
 Transfer to tasks/software/eval-runner.md
-### Re: Transfer to tasks/software/eval-runner.md (HEAD)
+### Re: Transfer to tasks/software/eval-runner.md
 
 Transferred the YAML vs TOML discussion and eval framework survey to `tasks/software/eval-runner.md`. The decision to keep YAML is documented there along with the ecosystem rationale.
 
 The eval-runner document now has two context sections:
 1. Original scaffolding context (from agent-doc session)
 2. Format decision (from this session)
-<!-- agent:boundary:fe5ecbaf -->
+<!-- agent:boundary:9910af1f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

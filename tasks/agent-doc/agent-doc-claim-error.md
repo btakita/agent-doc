@@ -43,7 +43,7 @@ Done. `cargo install --path .` installed to `~/.cargo/bin/agent-doc`. Both the `
 audit docs
 add tests
 Update SPEC.md, README.md, ontology, module-harness
-### Re: Audit, tests, docs (HEAD)
+### Re: Audit, tests, docs
 
 **Tests added** (4 new tests in `template.rs`):
 - `max_lines_inline_attr_trims_content` — verifies trimming to last N lines
@@ -61,7 +61,7 @@ Update SPEC.md, README.md, ontology, module-harness
 **Audit-docs:** Down from 5 issues to 2 (pre-existing: large table warning + SKILL.md age).
 
 `make check` passes (clippy + all 612 tests including 4 new max_lines tests).
-<!-- agent:boundary:354ce009 -->
+<!-- agent:boundary:0f08c8d5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

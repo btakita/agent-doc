@@ -231,12 +231,25 @@ This is correct for `agent-doc stream` (real-time streaming agent output). But i
 - **Skill mode:** `/agent-doc` skill manages the session → file-watch only, no capture
 
 The simplest fix: don't use `StreamCapture` mode for documents whose session was started via `claim`/`route` (skill path). Only use it for documents started via `agent-doc stream`.
-<!-- agent:boundary:df7e7a9c -->
+
+What is `agent-doc stream` used for?
+### Re: What agent-doc stream is for (HEAD)
+
+`agent-doc stream` is a different execution mode from the `/agent-doc` skill:
+
+- **`agent-doc stream <FILE>`** — spawns a Claude CLI process (`claude -p --output-format stream-json`), reads streaming JSON output, and flushes partial responses into the document every 200ms via `flush_to_document()`. The watch daemon captures the tmux pane output to keep the document updated in real-time. This is the "real-time typewriter" mode.
+
+- **`/agent-doc <FILE>` (skill)** — the Claude Code session runs the skill, which computes the diff, generates a complete response, then writes it via `agent-doc write --stream`. No tmux capture needed — the response comes through stdin pipe.
+
+The watch daemon shouldn't use `StreamCapture` for skill-managed sessions. The `discover_entries()` function in `watch.rs` sets `DocMode::StreamCapture` based on `resolved.is_crdt()` — it should instead check whether the session was started via `agent-doc stream` (which sets a specific process pattern) vs `claim`/`route` (which starts Claude Code, not `agent-doc stream`).
+
+The simplest fix: only use `StreamCapture` when the pane is actually running `agent-doc stream` (check the process name), not when it's running Claude Code (`claude` or `agent-doc`).
+<!-- agent:boundary:e32ff4a2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Root cause identified: watch daemon stream capture writes terminal output to skill-managed documents
-- [ ] Fix: distinguish stream-mode vs skill-mode documents in watch daemon
+- [x] Root cause identified
+- [ ] Fix: only use StreamCapture when pane runs `agent-doc stream`, not Claude Code
 <!-- /agent:pending -->

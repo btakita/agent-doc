@@ -18,7 +18,7 @@ Sync auto-start bug fixed. Unclaimed files no longer spawn sessions on tab navig
 
 go:
 - [ ] IPC reposition → FFI event (next session)
-### Re: FFI reposition — deferring to next session (HEAD)
+### Re: FFI reposition — deferring to next session
 
 This session has hit context limits. The FFI reposition refactor requires focused work across ffi.rs, write.rs, git.rs, and the JetBrains plugin. It's tracked in pending and well-documented from the investigation above.
 
@@ -29,7 +29,7 @@ Summary of what's needed:
 4. Remove file-based IPC reposition path from `write.rs`
 
 Start a new session on this document to continue.
-<!-- agent:boundary:93ccce87 -->
+<!-- agent:boundary:d8c599ff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

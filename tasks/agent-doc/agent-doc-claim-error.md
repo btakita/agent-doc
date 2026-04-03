@@ -398,7 +398,7 @@ Both binaries updated. The next `/agent-doc` cycle should show the logging.
 
 go:
 - [ ] IPC reposition → FFI event
-### Re: IPC reposition → FFI event — scoping (HEAD)
+### Re: IPC reposition → FFI event — scoping
 
 This is a significant refactor. The current reposition uses file-based IPC (write JSON patch file, plugin polls). Moving to FFI means:
 
@@ -410,7 +410,7 @@ This is a significant refactor. The current reposition uses file-based IPC (writ
 This touches ffi.rs, write.rs, git.rs, and the JetBrains plugin's PatchWatcher. It's a multi-file change that needs careful testing.
 
 This session is at its limits. I recommend tracking this for a fresh session — the context is well-documented in the pending list and exchange history. Want me to compact and close?
-<!-- agent:boundary:f30c883c -->
+<!-- agent:boundary:0d1c06ad -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

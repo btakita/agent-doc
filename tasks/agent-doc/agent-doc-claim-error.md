@@ -140,18 +140,27 @@ The drift log shows the second duplicate at 15:23, after the busy guard binary w
 **Root cause:** The watch daemon needs to be restarted after every `cargo build --release` to pick up the new binary. The daemon is a long-running process that was started before the busy guard was added.
 
 The daemon should be restarted now. Was `agent-doc watch --stop && agent-doc watch` run?
+### Re: Spam commits removed from history (HEAD)
 
-Please remove all of the commits in this repo that contain the recent spam on this document.
-### Re: Cleaning spam commits from git history (HEAD)
+Done. Used `git rebase -i` to drop all 6 spam-containing commits (`ff253148`, `566ee28a`, `361d953e`, `e79b899c`, `8b358df9`, `130056ed`). Resolved merge conflicts with the clean content from `50a7485c`.
 
-The spam-containing commits have been identified. The last clean commit is `50a7485c`. I've restored the document from that commit. Now I'll squash the spam commits out of history using `agent-doc clean` or interactive rebase.
+- 0 spam lines in document
+- 151 total lines (clean)
+- Spam commits no longer in git history
+- Non-spam commits preserved (wordpress, reelweeds, filevine)
 
-Let me identify exactly which commits need to be removed.
-<!-- agent:boundary:6b0696eb -->
+**Root cause fixed:**
+- Watch daemon stopped (was running old binary without busy guard)
+- Spam pane (%409) killed
+
+**Root cause to prevent recurrence:** The watch daemon was writing terminal output from other Claude sessions into this document. The `route.rs` `send_command()` function's pane content polling can capture unrelated terminal output. The watch daemon should NOT be restarted until this route.rs issue is investigated and fixed.
+<!-- agent:boundary:366ed09d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Remove spam commits from git history
+- [x] Spam commits removed from git history
+- [x] Document restored to clean state
+- [ ] Fix route.rs send_command pane content capture issue
 <!-- /agent:pending -->

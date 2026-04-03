@@ -39,7 +39,7 @@ Removed the file-based IPC fallback from `try_ipc_reposition_boundary` in `write
 
 Will this file editing workflow when we are not using a plugin?
 Let's say we have an editor without a plugin with the agent document...how would it work?
-### Re: No-plugin workflow (HEAD)
+### Re: No-plugin workflow
 
 Without a plugin, the workflow still works — just with a minor cosmetic gap:
 
@@ -52,7 +52,7 @@ Without a plugin, the workflow still works — just with a minor cosmetic gap:
 **The gap:** Between commit and next write, the working-tree boundary is stale (old position). Cosmetic only — snapshot has correct position, diff uses snapshot. Gutter boundary briefly in wrong place, self-corrects on next response.
 
 Same behavior as before removing file-based fallback — file IPC also required `.agent-doc/patches/` (plugin install). No regression for non-plugin editors.
-<!-- agent:boundary:5923ae42 -->
+<!-- agent:boundary:45e8b0be -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

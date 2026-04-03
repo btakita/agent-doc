@@ -314,13 +314,30 @@ This is old
 The `(HEAD)` marker change keeps appearing as a diff because the snapshot has the heading WITHOUT `(HEAD)` but the committed content has it WITH `(HEAD)`. The boundary reposition in the snapshot strips it, but the diff comparison sees the discrepancy.
 
 The "This is old" note suggests this exchange should be compacted. Want me to compact?
-<!-- agent:boundary:70f993b0 -->
+No...`### Re: Investigation of spam source (HEAD)`->`### Re: Investigation of spam source` uncommitted change was old. Not sure why we were seeing that.
+Now it's back to `### Re: Investigation of spam source (HEAD)`. Why?
+### Re: Why (HEAD) appears in the working tree (HEAD)
+
+The `(HEAD)` suffix in the working tree comes from the **IPC reposition signal** sent after each commit. When `agent-doc commit` runs, it:
+
+1. Stages the snapshot content WITH `(HEAD)` markers (committed version)
+2. After commit, strips `(HEAD)` from the snapshot
+3. Sends an IPC reposition signal to the plugin
+4. The plugin repositions the boundary in the Document API — this also writes `(HEAD)` to the working tree
+
+The `(HEAD)` in the working tree is intentional — it creates the blue gutter line (diff between committed `(HEAD)` and working tree `(HEAD)` is zero, but... that means no gutter). Actually, the design is: committed has `(HEAD)`, working tree does NOT — creating the gutter.
+
+But the IPC reposition is adding `(HEAD)` to the working tree, which defeats the purpose. This is a bug in the IPC reposition — it should NOT add `(HEAD)` to the working tree. The `(HEAD)` should only exist in the committed (staged) content.
+
+I'll track this as a separate fix.
+<!-- agent:boundary:e8b1f235 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] agent:console with configurable max_lines
-- [ ] Inline `max_lines=` attribute on component tags
-- [ ] Compact exchange (stale content from earlier sessions)
+- [x] agent:console implemented
+- [ ] Fix: IPC reposition should not add (HEAD) to working tree
+- [ ] Inline `max_lines=` attribute
+- [ ] Compact exchange
 <!-- /agent:pending -->

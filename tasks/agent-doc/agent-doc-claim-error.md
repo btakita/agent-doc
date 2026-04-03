@@ -19,7 +19,7 @@ Sync auto-start bug fixed. Unclaimed files no longer spawn sessions on tab navig
 do:
 > go:
 > - [ ] IPC reposition → FFI event (next session)
-### Re: IPC reposition → FFI event (HEAD)
+### Re: IPC reposition → FFI event
 
 Removed the file-based IPC fallback from `try_ipc_reposition_boundary` in `write.rs`. The function now uses socket IPC exclusively (through the FFI listener callback chain).
 
@@ -36,7 +36,7 @@ Removed the file-based IPC fallback from `try_ipc_reposition_boundary` in `write
 - JetBrains plugin already handles `"reposition"` messages via the FFI callback
 
 `make check` passes (clippy + all 608 tests).
-<!-- agent:boundary:e78b240a -->
+<!-- agent:boundary:a83fd6b7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

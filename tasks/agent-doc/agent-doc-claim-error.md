@@ -140,7 +140,7 @@ The drift log shows the second duplicate at 15:23, after the busy guard binary w
 **Root cause:** The watch daemon needs to be restarted after every `cargo build --release` to pick up the new binary. The daemon is a long-running process that was started before the busy guard was added.
 
 The daemon should be restarted now. Was `agent-doc watch --stop && agent-doc watch` run?
-### Re: Spam commits removed from history (HEAD)
+### Re: Spam commits removed from history
 
 Done. Used `git rebase -i` to drop all 6 spam-containing commits (`ff253148`, `566ee28a`, `361d953e`, `e79b899c`, `8b358df9`, `130056ed`). Resolved merge conflicts with the clean content from `50a7485c`.
 
@@ -154,7 +154,7 @@ Done. Used `git rebase -i` to drop all 6 spam-containing commits (`ff253148`, `5
 - Spam pane (%409) killed
 
 **Root cause to prevent recurrence:** The watch daemon was writing terminal output from other Claude sessions into this document. The `route.rs` `send_command()` function's pane content polling can capture unrelated terminal output. The watch daemon should NOT be restarted until this route.rs issue is investigated and fixed.
-<!-- agent:boundary:366ed09d -->
+<!-- agent:boundary:55c5b404 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

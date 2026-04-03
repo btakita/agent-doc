@@ -338,7 +338,7 @@ What does the IPC reposition mean?
 > The `(HEAD)` should only exist in the committed (staged) content.
 
 Please explain in more detail.
-### Re: (HEAD) marker and IPC reposition explained (HEAD)
+### Re: (HEAD) marker and IPC reposition explained
 
 **What is "IPC reposition"?**
 
@@ -355,7 +355,7 @@ The `(HEAD)` suffix on headings creates a visual boundary in the editor's git gu
 **The bug:** The IPC reposition signal currently sends the snapshot content (which includes `(HEAD)`) to the plugin. The plugin writes this to the Document buffer, putting `(HEAD)` into the working tree. This makes the working tree match the committed content, eliminating the blue gutter — defeating the purpose.
 
 **The fix:** The IPC reposition should send the heading WITHOUT `(HEAD)`. The `(HEAD)` should only exist in the git index (staged via `hash-object + update-index`), never in the working tree or snapshot.
-<!-- agent:boundary:f4540a0e -->
+<!-- agent:boundary:1bcc89af -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

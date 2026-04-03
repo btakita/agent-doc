@@ -73,7 +73,7 @@ After: claim saves file with empty exchange → user prompt is outside snapshot 
 add tests
 audit docs
 Update SPEC.md, README.md, ontology, module-harness
-### Re: Tests and audit docs for claim snapshot fix (HEAD)
+### Re: Tests and audit docs for claim snapshot fix
 
 **Tests added (2 new):**
 - `strip_exchange_content_removes_user_text` — verifies user prompt is removed from snapshot
@@ -84,7 +84,7 @@ Update SPEC.md, README.md, ontology, module-harness
 - `SPEC.md §7.10`: snapshot initialization paragraph
 
 `make check`: 608 tests pass.
-<!-- agent:boundary:2669b86c -->
+<!-- agent:boundary:3d1d67ad -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

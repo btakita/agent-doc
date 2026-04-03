@@ -4,6 +4,17 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.4
+
+- **IPC reposition simplified**: Removed file-based IPC fallback from `try_ipc_reposition_boundary`. Boundary reposition now uses socket IPC exclusively (through FFI listener callback). Non-fatal on failure.
+- **Inline `max_lines=N` attribute**: Component tags support `max_lines=N` to trim content to the last N lines after patching. Precedence: inline attr > `components.toml` > unlimited. Example: `<!-- agent:exchange patch=append max_lines=50 -->`.
+- **Boundary-stripping in watch hash**: `hash_content()` strips boundary markers before hashing, preventing reactive-mode feedback loops where boundary repositions trigger infinite re-runs.
+- **Console component scaffolding**: `agent-doc claim` now scaffolds a `<!-- agent:console -->` component for template-mode documents.
+- **HEAD marker cleanup**: `git.rs` strips stray `(HEAD)` markers from working tree after commit (defensive cleanup).
+- **StreamConfig max_lines**: `agent_doc_stream.max_lines` frontmatter field limits console capture lines (default: 50).
+- **Tests**: 612 total. New: 4 `max_lines_*` tests in template.rs.
+- **Docs**: SPEC.md, README.md, CLAUDE.md updated for max_lines and socket-only IPC.
+
 ## 0.31.3
 
 - **Claim snapshot fix**: `agent-doc claim` now saves the initial snapshot with empty exchange content. Existing user text in the exchange becomes a diff on the next run, preventing unresponded prompts from being absorbed into the baseline.

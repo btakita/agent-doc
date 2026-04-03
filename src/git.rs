@@ -262,10 +262,22 @@ pub fn commit(file: &Path) -> Result<()> {
             // Strip (HEAD) from snapshot
             if let Some(ref snap) = snapshot_content {
                 let clean_snap = strip_head_markers(snap);
-                if clean_snap != *snap
-                    && let Err(e) = crate::snapshot::save(file, &clean_snap)
-                {
-                    eprintln!("[commit] failed to clean snapshot: {}", e);
+                if clean_snap != *snap {
+                    eprintln!("[commit] stripping (HEAD) markers from snapshot ({} chars removed)", snap.len() - clean_snap.len());
+                    if let Err(e) = crate::snapshot::save(file, &clean_snap) {
+                        eprintln!("[commit] failed to clean snapshot: {}", e);
+                    }
+                }
+            }
+            // Also strip (HEAD) from working tree if present — the IPC reposition
+            // may have added it. The working tree should NEVER have (HEAD) markers.
+            if let Ok(working) = std::fs::read_to_string(file) {
+                let clean_working = strip_head_markers(&working);
+                if clean_working != working {
+                    eprintln!("[commit] WARNING: (HEAD) found in working tree — stripping");
+                    if let Err(e) = crate::write::atomic_write_pub(file, &clean_working) {
+                        eprintln!("[commit] failed to clean working tree: {}", e);
+                    }
                 }
             }
             // Note: working tree is NOT modified here. The staged content has (HEAD)

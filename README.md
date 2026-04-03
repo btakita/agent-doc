@@ -51,9 +51,9 @@ The typical edit cycle: write in your editor, trigger `agent-doc route <file>` v
 
 ## Key Features
 
-- **Template mode** — named component regions (`<!-- agent:name -->`) updated independently; inline attr > `components.toml` > built-in defaults
+- **Template mode** — named component regions (`<!-- agent:name -->`) updated independently; inline attrs (`patch=`, `max_lines=`) > `components.toml` > built-in defaults
 - **CRDT merge** — yrs-based conflict-free merge for concurrent edits between agent writes and user edits
-- **IPC-first writes** — socket IPC (Unix domain sockets) with file-based fallback; editor plugin receives JSON patches instead of file overwrites; preserves cursor position, undo history, and avoids "externally modified" dialogs
+- **IPC-first writes** — socket IPC (Unix domain sockets); editor plugin receives JSON patches instead of file overwrites; preserves cursor position, undo history, and avoids "externally modified" dialogs
 - **Tmux routing** — persistent Claude Code sessions per document; `route` dispatches to the correct pane or auto-starts one; reconciler always runs (no early exits) handling 0/1/2+ panes uniformly
 - **Streaming** — real-time CRDT write-back loop (`agent-doc stream`) with optional chain-of-thought routing
 - **Parallel fan-out** — independent git worktrees per subtask, each with its own Claude session (`agent-doc parallel`)

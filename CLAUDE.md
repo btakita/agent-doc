@@ -35,7 +35,7 @@ Interactive document sessions with AI agents.
 | Pending item management (parse, populate, process) | **Skill** (SKILL.md) | Semantic understanding of prompts |
 
 **Rule of thumb:** If the operation can be unit-tested with fixed inputs → binary. If it requires understanding natural language → skill.
-- **Inline component attributes:** `<!-- agent:name patch=append -->` — patch mode is configurable on the tag itself. `mode=` is accepted as a backward-compatible alias; `patch=` takes precedence if both are present. Precedence: inline attr > `components.toml` > built-in defaults.
+- **Inline component attributes:** `<!-- agent:name patch=append max_lines=50 -->` — patch mode and max_lines are configurable on the tag itself. `mode=` is accepted as a backward-compatible alias for `patch=`; `patch=` takes precedence if both are present. `max_lines=N` trims content to the last N lines after patching (0 or absent = unlimited). Precedence: inline attr > `components.toml` > built-in defaults.
 - **`agent_doc_format: inline`** is the canonical name for the old "append" format (`append` accepted as backward-compat alias). Template mode uses components; inline mode uses User/Assistant blocks.
 
 ## Module Layout

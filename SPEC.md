@@ -42,7 +42,7 @@ content here
 
 Marker format: `<!-- agent:{name} -->` (open) and `<!-- /agent:{name} -->` (close). Names must match `[a-zA-Z0-9][a-zA-Z0-9-]*`. Components are patched via `agent-doc patch`.
 
-**Inline attributes:** Open markers support inline attribute overrides: `<!-- agent:name patch=append -->`. `mode=` is accepted as a backward-compatible alias; `patch=` takes precedence if both are present. Precedence chain: inline attribute > `.agent-doc/components.toml` > built-in default (`replace`).
+**Inline attributes:** Open markers support inline attribute overrides: `<!-- agent:name patch=append -->`. `mode=` is accepted as a backward-compatible alias; `patch=` takes precedence if both are present. `max_lines=N` trims component content to the last N lines after patching (0 or absent = unlimited). Precedence chain: inline attribute > `.agent-doc/components.toml` > built-in default (`replace` for patch, unlimited for max_lines).
 
 **Code range exclusion:** Component marker detection uses pulldown-cmark for CommonMark-compliant code range detection, replacing the previous regex-based approach. Markers inside inline code spans or fenced code blocks are excluded and never treated as component boundaries.
 
@@ -453,6 +453,7 @@ Mirrors a columnar editor layout in tmux. Each `--col` is a comma-separated list
 mode = "replace"       # "replace" (default), "append", "prepend"
 timestamp = false      # Auto-prefix with ISO timestamp
 max_entries = 0        # Trim old entries (0 = unlimited)
+max_lines = 0          # Trim to last N lines (0 = unlimited)
 pre_patch = "cmd"      # Shell command: stdin→stdout transform
 post_patch = "cmd"     # Shell command: fire-and-forget
 ```

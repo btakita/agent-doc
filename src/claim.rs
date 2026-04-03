@@ -169,7 +169,7 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
             .unwrap_or(false);
         if resolved.format == frontmatter::AgentDocFormat::Template && !has_components {
             let scaffolded = format!(
-                "{}\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Pending / Not Built\n\n<!-- agent:pending patch=replace -->\n<!-- /agent:pending -->\n",
+                "{}\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Console\n\n<!-- agent:console patch=replace -->\n<!-- /agent:console -->\n\n## Pending / Not Built\n\n<!-- agent:pending patch=replace -->\n<!-- /agent:pending -->\n",
                 content.trim_end()
             );
             std::fs::write(file, &scaffolded)
@@ -189,7 +189,7 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
                 {
                     eprintln!("warning: failed to create .agent-doc dir: {}", e);
                 }
-                let default_config = "[exchange]\nmode = \"append\"\n\n[findings]\nmode = \"append\"\n\n[status]\nmode = \"replace\"\n";
+                let default_config = "[exchange]\nmode = \"append\"\n\n[findings]\nmode = \"append\"\n\n[status]\nmode = \"replace\"\n\n[console]\nmode = \"replace\"\n";
                 match std::fs::write(&components_toml, default_config) {
                     Ok(()) => eprintln!("created {}", components_toml.display()),
                     Err(e) => eprintln!("warning: failed to create components.toml: {}", e),

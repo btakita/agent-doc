@@ -61,6 +61,12 @@ struct ComponentConfig {
     /// Auto-trim old entries in append/prepend modes (0 = unlimited)
     #[serde(default)]
     max_entries: usize,
+    /// Trim component content to the last N lines after patching (0 = unlimited).
+    /// Currently used by template.rs post-patch processing; deserialized here
+    /// for components.toml validation.
+    #[serde(default)]
+    #[allow(dead_code)]
+    max_lines: usize,
     /// Shell command to run before patching (stdin: content, stdout: transformed)
     #[serde(default)]
     pre_patch: Option<String>,

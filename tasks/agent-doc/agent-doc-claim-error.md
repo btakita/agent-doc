@@ -84,11 +84,18 @@ Update SPEC.md, README.md, ontology, module-harness
 - `SPEC.md §7.10`: snapshot initialization paragraph
 
 `make check`: 608 tests pass.
-<!-- agent:boundary:3d1d67ad -->
+
+release
+### Re: v0.31.3 released (HEAD)
+
+- **crates.io**: published ✓
+- **GitHub Release**: https://github.com/btakita/agent-doc/releases/tag/v0.31.3 ✓
+- Both binaries updated
+<!-- agent:boundary:e5b56e8d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Claim snapshot fix with tests and docs
+- [x] v0.31.3 released
 <!-- /agent:pending -->

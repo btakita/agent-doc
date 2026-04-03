@@ -105,7 +105,7 @@ I don't know the exact cause without more investigation. It could be the `strip_
 
 Should I investigate further, or is the cosmetic issue acceptable?
 Invetigate further
-### Re: Extra newline investigation (HEAD)
+### Re: Extra newline investigation
 
 The extra blank line is between `---` (frontmatter close) and `## Status` — NOT inside the exchange component. The `strip_exchange_content()` function only modifies exchange content and doesn't touch this area.
 
@@ -114,7 +114,7 @@ The extra newline was introduced by the first `/agent-doc` run's IPC write or bo
 This is a pre-existing issue with the IPC write path — the plugin's `PatchWatcher.applyPatch()` uses `document.setText(result)` which can alter trailing/leading whitespace at component boundaries. The fix would need to be in the PatchWatcher's content comparison or the binary's IPC patch generation.
 
 For now, this is cosmetic and doesn't affect functionality (diff computation strips whitespace). Tracking as a low-priority issue.
-<!-- agent:boundary:ec634a6e -->
+<!-- agent:boundary:3ec669b7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

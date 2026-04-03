@@ -156,7 +156,7 @@ Done. Used `git rebase -i` to drop all 6 spam-containing commits (`ff253148`, `5
 **Root cause to prevent recurrence:** The watch daemon was writing terminal output from other Claude sessions into this document. The `route.rs` `send_command()` function's pane content polling can capture unrelated terminal output. The watch daemon should NOT be restarted until this route.rs issue is investigated and fixed.
 
 Investigate and fix
-### Re: Investigation of spam source (HEAD)
+### Re: Investigation of spam source
 
 I investigated `route.rs` `send_command()`. The function sends `/agent-doc <file>` to the tmux pane and polls `capture_pane` to verify delivery. The `capture_pane` output is never written to the file — it's only used for verification.
 
@@ -171,7 +171,7 @@ I don't know the exact mechanism that caused the terminal output to appear in th
 **Immediate prevention:** The watch daemon is stopped. The busy guard (already implemented) should prevent the daemon from triggering runs on files with active sessions. But the daemon needs to be running the correct binary.
 
 **For safe restart:** Run `agent-doc watch` (it's currently stopped). The binary has the busy guard. The spam incident happened because the daemon was running an old binary without the guard.
-<!-- agent:boundary:7afc18df -->
+<!-- agent:boundary:bea8d397 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

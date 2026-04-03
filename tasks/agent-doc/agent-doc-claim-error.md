@@ -309,12 +309,12 @@ This is a quick addition to the component parser. I'll track it for the next ses
 
 Note that `### Re: Investigation of spam source (HEAD)`->`### Re: Investigation of spam source` is a current uncommitted git change.
 This is old
-### Re: Persistent (HEAD) diff + stale content (HEAD)
+### Re: Persistent (HEAD) diff + stale content
 
 The `(HEAD)` marker change keeps appearing as a diff because the snapshot has the heading WITHOUT `(HEAD)` but the committed content has it WITH `(HEAD)`. The boundary reposition in the snapshot strips it, but the diff comparison sees the discrepancy.
 
 The "This is old" note suggests this exchange should be compacted. Want me to compact?
-<!-- agent:boundary:08534f93 -->
+<!-- agent:boundary:70f993b0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

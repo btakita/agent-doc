@@ -269,7 +269,7 @@ This is a cleaner architecture than trying to distinguish stream-mode vs skill-m
 
 Should I implement this, or is this for a future session?
 Implement now
-### Re: agent:console implemented (HEAD)
+### Re: agent:console implemented
 
 **Changes:**
 1. **watch.rs:** Stream capture target changed from `"exchange"` to `"console"` (default)
@@ -285,7 +285,7 @@ Stream capture now writes to a dedicated `console` component with replace mode. 
 The watch daemon is safe to restart now. To test: `agent-doc watch`
 
 Note: existing documents need a `&lt;!-- agent:console patch=replace --&gt;` section added manually (or re-claim). New documents get it automatically.
-<!-- agent:boundary:ab34c6ae -->
+<!-- agent:boundary:37e5c132 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

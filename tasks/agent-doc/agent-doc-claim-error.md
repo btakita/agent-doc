@@ -38,7 +38,7 @@ Typed in:
   Edit the document (e.g., add a space or newline in the exchange) and re-run /agent-doc tasks/finance/xdgboost.md so
   the diff picks up the question.
 ```
-### Re: xdgboost.md diff not detected — snapshot includes the prompt (HEAD)
+### Re: xdgboost.md diff not detected — snapshot includes the prompt
 
 The snapshot (442 bytes) already contains the user's prompt. After comment stripping, snapshot and document are identical (409 bytes). The diff correctly reports no changes.
 
@@ -55,7 +55,7 @@ Then re-run `/agent-doc tasks/finance/xdgboost.md`.
 **Root cause:** `agent-doc claim` saves the full file content as the snapshot (line 196 in claim.rs: `sessions::register_with_pid`). When the user's prompt is already in the file at claim time, it becomes part of the baseline.
 
 This is a design tension: claim needs a snapshot for the gutter boundary, but the snapshot should not absorb user input that hasn't been responded to yet.
-<!-- agent:boundary:22911479 -->
+<!-- agent:boundary:9d6063a4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

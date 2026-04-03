@@ -55,12 +55,25 @@ Then re-run `/agent-doc tasks/finance/xdgboost.md`.
 **Root cause:** `agent-doc claim` saves the full file content as the snapshot (line 196 in claim.rs: `sessions::register_with_pid`). When the user's prompt is already in the file at claim time, it becomes part of the baseline.
 
 This is a design tension: claim needs a snapshot for the gutter boundary, but the snapshot should not absorb user input that hasn't been responded to yet.
-<!-- agent:boundary:9d6063a4 -->
+
+Implement:
+- [ ] Fix: claim should not absorb unresponded user input into snapshot
+### Re: Claim snapshot fix implemented (HEAD)
+
+**Fix:** `agent-doc claim` now saves the snapshot with **empty exchange content**. A new `strip_exchange_content()` function replaces the exchange body with `\n`, so existing user text in the exchange becomes a diff on the next `/agent-doc` run.
+
+Before: claim saves full file content (including user prompt) → snapshot = file → diff is empty
+After: claim saves file with empty exchange → user prompt is outside snapshot → diff detects it
+
+- `xdgboost.md` reset via `agent-doc reset` — re-run `/agent-doc` to pick up the prompt
+- `make check`: 606 tests pass
+- Both binaries updated
+<!-- agent:boundary:6cdd2129 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] v0.31.2 released
-- [ ] Fix: claim should not absorb unresponded user input into snapshot
+- [x] Claim snapshot fix (empty exchange in initial snapshot)
+- [x] xdgboost.md reset
 <!-- /agent:pending -->

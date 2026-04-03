@@ -286,7 +286,7 @@ The watch daemon is safe to restart now. To test: `agent-doc watch`
 
 Note: existing documents need a `&lt;!-- agent:console patch=replace --&gt;` section added manually (or re-claim). New documents get it automatically.
 Name the attribute max_lines
-### Re: Configurable max_lines added (HEAD)
+### Re: Configurable max_lines added
 
 Added `max_lines` field to `StreamConfig` frontmatter:
 
@@ -299,7 +299,7 @@ The field flows through `WatchEntry` → `StreamState` → `limit_lines()`. Defa
 
 - `make check`: 608 tests pass
 - Both binaries updated
-<!-- agent:boundary:641bdbe6 -->
+<!-- agent:boundary:fdd4c21c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

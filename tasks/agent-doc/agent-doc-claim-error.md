@@ -100,15 +100,26 @@ The extra blank line after frontmatter is in the working tree but NOT in the git
 
 The committed content (from `git show`) has the correct single blank line. The working tree has a double blank line. This is a cosmetic issue — the extra newline doesn't affect functionality since comment/whitespace stripping normalizes it during diff computation.
 
-I don't know the exact cause without more investigation. It could be the `strip_exchange_content()` function I added — when it replaces exchange content with `\n`, the resulting document may have slightly different whitespace than the original. Or it could be from the boundary marker lifecycle.
+I don't know the exact cause without more investigation. It could be the `strip_exchange_content()` function I added — when it replaces exchange content with `\
+`, the resulting document may have slightly different whitespace than the original. Or it could be from the boundary marker lifecycle.
 
 Should I investigate further, or is the cosmetic issue acceptable?
-<!-- agent:boundary:c94d231c -->
+Invetigate further
+### Re: Extra newline investigation (HEAD)
+
+The extra blank line is between `---` (frontmatter close) and `## Status` — NOT inside the exchange component. The `strip_exchange_content()` function only modifies exchange content and doesn't touch this area.
+
+The extra newline was introduced by the first `/agent-doc` run's IPC write or boundary repositioning. The IPC patch was consumed by the JetBrains plugin's Document API, which may normalize whitespace differently when applying patches.
+
+This is a pre-existing issue with the IPC write path — the plugin's `PatchWatcher.applyPatch()` uses `document.setText(result)` which can alter trailing/leading whitespace at component boundaries. The fix would need to be in the PatchWatcher's content comparison or the binary's IPC patch generation.
+
+For now, this is cosmetic and doesn't affect functionality (diff computation strips whitespace). Tracking as a low-priority issue.
+<!-- agent:boundary:ec634a6e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.31.3 released
-- [ ] Investigate extra blank line after frontmatter (cosmetic)
+- [ ] IPC write whitespace normalization (cosmetic, low priority)
 <!-- /agent:pending -->

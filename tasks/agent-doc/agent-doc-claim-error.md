@@ -247,7 +247,7 @@ The simplest fix: only use `StreamCapture` when the pane is actually running `ag
 
 I rememeber wanting an element that is in replace mode, so show the realtime stream.
 This element is not agent:exchange. It could be agent:console. agent:console should default to mode=replace. agent:console in replace mode should be limited to the fast few messages to avoid expanding indefinately.
-### Re: agent:console component for real-time stream (HEAD)
+### Re: agent:console component for real-time stream
 
 Good design direction. The stream capture output should go to a **dedicated component** with replace mode, not the exchange.
 
@@ -268,7 +268,7 @@ This would fix the spam issue by design: stream capture writes to `agent:console
 This is a cleaner architecture than trying to distinguish stream-mode vs skill-mode sessions. Both modes can use the same capture → console path safely.
 
 Should I implement this, or is this for a future session?
-<!-- agent:boundary:68e45e8c -->
+<!-- agent:boundary:450ac9cc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -295,8 +295,7 @@ agent_doc_stream:
   max_lines: 100  # default: 50
 ```
 
-Also allow overrides max_lines on the element such as:
-`&lt;!-- agent:console patch=replace max_lines=100 --&gt;`
+Also allow overrides max_lines on the element such as:`&lt;!-- agent:console patch=replace max_lines=100 --&gt;`
 
 The field flows through `WatchEntry` → `StreamState` → `limit_lines()`. Default is 50 lines.
 
@@ -307,13 +306,21 @@ The field flows through `WatchEntry` → `StreamState` → `limit_lines()`. Defa
 Good idea — inline component attributes are already supported for `patch=` mode. Adding `max_lines=` follows the same pattern. The precedence chain: inline attr > `components.toml` > frontmatter `stream_config.max_lines` > built-in default (50).
 
 This is a quick addition to the component parser. I'll track it for the next session — the current `StreamConfig.max_lines` via frontmatter covers the immediate need. The inline override adds per-component flexibility.
-<!-- agent:boundary:be98b408 -->
+
+Note that `### Re: Investigation of spam source (HEAD)`->`### Re: Investigation of spam source` is a current uncommitted git change.
+This is old
+### Re: Persistent (HEAD) diff + stale content (HEAD)
+
+The `(HEAD)` marker change keeps appearing as a diff because the snapshot has the heading WITHOUT `(HEAD)` but the committed content has it WITH `(HEAD)`. The boundary reposition in the snapshot strips it, but the diff comparison sees the discrepancy.
+
+The "This is old" note suggests this exchange should be compacted. Want me to compact?
+<!-- agent:boundary:08534f93 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] agent:console with configurable max_lines (frontmatter)
+- [x] agent:console with configurable max_lines
 - [ ] Inline `max_lines=` attribute on component tags
-- [ ] Restart watch daemon and verify
+- [ ] Compact exchange (stale content from earlier sessions)
 <!-- /agent:pending -->

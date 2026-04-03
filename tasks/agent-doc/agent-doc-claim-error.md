@@ -34,7 +34,12 @@ continue
 No watch daemon running — only `agent-doc start` session managers. Release binary rebuilt in-place (`cargo build --release`), so the new code (simplified IPC reposition + max_lines) takes effect on all new command invocations. Existing `start` processes shell out to the binary for each operation, so they pick up changes automatically.
 
 All three items complete.
-<!-- agent:boundary:36223f75 -->
+
+build and install binary to test watch daemon
+### Re: Build and install (HEAD)
+
+Done. `cargo install --path .` installed to `~/.cargo/bin/agent-doc`. Both the `.bin/` symlink (release target) and `~/.cargo/bin/` (tmux-spawned sessions) now have the updated binary with IPC reposition simplification and max_lines support.
+<!-- agent:boundary:c7c26d17 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -43,4 +48,5 @@ All three items complete.
 - [x] IPC reposition → FFI event
 - [x] Inline `max_lines=` attribute on component tags
 - [x] Restart watch daemon (after FFI reposition is done)
+- [x] Build and install binary
 <!-- /agent:pending -->

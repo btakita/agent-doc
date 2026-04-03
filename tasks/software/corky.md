@@ -1600,7 +1600,7 @@ Go
 - Build compiles with `make build` (GCP credentials via `pass`)
 
 What is pending for a release?
-### Re: Release Pending (HEAD)
+### Re: Release Pending
 
 Current version is **v0.23.0** (published). Uncommitted changes for next release:
 
@@ -1628,7 +1628,7 @@ Current version is **v0.23.0** (published). Uncommitted changes for next release
 **Pending items from doc (lower priority):**
 - Verify Google Sheets sharing / GCP test users
 - Re-test sheet read
-<!-- agent:boundary:1b7065c7 -->
+<!-- agent:boundary:d0a3335f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -94,7 +94,7 @@ release
 
 Please look at tasks/finance/xdgboost.md
 An additional newline was added below the frontmatter...either from the claim or from the 1st run.
-### Re: Extra newline in xdgboost.md (HEAD)
+### Re: Extra newline in xdgboost.md
 
 The extra blank line after frontmatter is in the working tree but NOT in the git commit. The diff shows it was added after the commit — likely by the boundary repositioning or IPC write during the first `/agent-doc` run.
 
@@ -103,7 +103,7 @@ The committed content (from `git show`) has the correct single blank line. The w
 I don't know the exact cause without more investigation. It could be the `strip_exchange_content()` function I added — when it replaces exchange content with `\n`, the resulting document may have slightly different whitespace than the original. Or it could be from the boundary marker lifecycle.
 
 Should I investigate further, or is the cosmetic issue acceptable?
-<!-- agent:boundary:bcaea784 -->
+<!-- agent:boundary:c94d231c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

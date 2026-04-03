@@ -58,7 +58,7 @@ This is a design tension: claim needs a snapshot for the gutter boundary, but th
 
 Implement:
 - [ ] Fix: claim should not absorb unresponded user input into snapshot
-### Re: Claim snapshot fix implemented (HEAD)
+### Re: Claim snapshot fix implemented
 
 **Fix:** `agent-doc claim` now saves the snapshot with **empty exchange content**. A new `strip_exchange_content()` function replaces the exchange body with `\n`, so existing user text in the exchange becomes a diff on the next `/agent-doc` run.
 
@@ -68,7 +68,7 @@ After: claim saves file with empty exchange → user prompt is outside snapshot 
 - `xdgboost.md` reset via `agent-doc reset` — re-run `/agent-doc` to pick up the prompt
 - `make check`: 606 tests pass
 - Both binaries updated
-<!-- agent:boundary:6cdd2129 -->
+<!-- agent:boundary:3c82bf07 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -174,7 +174,7 @@ I don't know the exact mechanism that caused the terminal output to appear in th
 
 Do:
 - [ ] Safely restart watch daemon (verify binary has busy guard)
-### Re: Root cause confirmed — reactive mode feedback loop (HEAD)
+### Re: Root cause confirmed — reactive mode feedback loop
 
 The watch daemon spam happened again on restart, confirming the root cause:
 
@@ -183,7 +183,7 @@ The watch daemon spam happened again on restart, confirming the root cause:
 **The fix:** The watch daemon's content hash check should strip boundary markers before hashing. This way, boundary-only changes don't trigger re-runs. The current hash includes the boundary, making each cycle look like a new change.
 
 Do NOT restart `agent-doc watch` until this is fixed. I'll implement the boundary-stripping hash fix now.
-<!-- agent:boundary:b158d275 -->
+<!-- agent:boundary:c55ee9ee -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

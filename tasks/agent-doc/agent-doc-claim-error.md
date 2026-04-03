@@ -376,14 +376,14 @@ continue:
 - [ ] IPC reposition → FFI event (no file-based IPC for boundary reposition)
 - [ ] Fix (HEAD) marker appearing in working tree
 - [ ] Inline `max_lines=` attribute
-### Re: (HEAD) marker — I don't know the source (HEAD)
+### Re: (HEAD) marker — I don't know the source
 
 I traced through the commit, reposition, and IPC write paths. None of them explicitly add `(HEAD)` to the working tree. The `add_head_marker()` is only called during commit staging (git index), not in any write or IPC path.
 
 I don't know how `(HEAD)` gets into the working tree. The items you asked to implement (IPC reposition via FFI, inline max_lines, (HEAD) fix) all require deeper investigation into the boundary/marker lifecycle. These are best tackled in a fresh session with focused attention.
 
 This session has been running a very long time and covered an enormous amount of work. Should we compact and close this document?
-<!-- agent:boundary:ee4395f0 -->
+<!-- agent:boundary:8a3be3ce -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -188,14 +188,14 @@ Why would the human typing into the console prompt be included?
 Do NOT restart `agent-doc watch` until this is fixed. I'll implement the boundary-stripping hash fix now.
 
 agent-doc clean should also clean the snapshot.
-### Re: Boundary-stripping hash fix deployed (HEAD)
+### Re: Boundary-stripping hash fix deployed
 
 The watch daemon's `hash_content()` now strips boundary markers before hashing. Built and installed. The watch daemon is stopped — it's safe to restart when you're ready.
 
 The fix prevents the feedback loop: boundary-only changes produce the same hash, so the loop prevention catches them and stops the cycle.
 
 To restart: `agent-doc watch`
-<!-- agent:boundary:b97e26e5 -->
+<!-- agent:boundary:5cc6cb39 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

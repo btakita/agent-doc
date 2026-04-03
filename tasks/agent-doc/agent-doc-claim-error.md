@@ -330,14 +330,39 @@ The `(HEAD)` in the working tree is intentional — it creates the blue gutter l
 But the IPC reposition is adding `(HEAD)` to the working tree, which defeats the purpose. This is a bug in the IPC reposition — it should NOT add `(HEAD)` to the working tree. The `(HEAD)` should only exist in the committed (staged) content.
 
 I'll track this as a separate fix.
-<!-- agent:boundary:5e19f539 -->
+
+> But the IPC reposition is adding `(HEAD)` to the working tree, which defeats the purpose.
+
+What does the IPC reposition mean?
+
+> The `(HEAD)` should only exist in the committed (staged) content.
+
+Please explain in more detail.
+### Re: (HEAD) marker and IPC reposition explained (HEAD)
+
+**What is "IPC reposition"?**
+
+After `agent-doc commit`, the binary sends a signal to the JetBrains plugin via an IPC patch file. This signal tells the plugin to move the boundary marker (`<!-- agent:boundary:... -->`) to the end of the exchange component in the IDE's Document buffer. This is done through the Document API (not disk writes) to avoid "externally modified" dialogs and preserve cursor position.
+
+**The (HEAD) marker design:**
+
+The `(HEAD)` suffix on headings creates a visual boundary in the editor's git gutter:
+
+1. **Staged content** (what git commits): `### Re: Foo (HEAD)` — the heading WITH `(HEAD)`
+2. **Working tree** (what the user sees): `### Re: Foo` — the heading WITHOUT `(HEAD)`
+3. **Git gutter result**: blue line on the heading (modified) — visual separator between agent response and user input
+
+**The bug:** The IPC reposition signal currently sends the snapshot content (which includes `(HEAD)`) to the plugin. The plugin writes this to the Document buffer, putting `(HEAD)` into the working tree. This makes the working tree match the committed content, eliminating the blue gutter — defeating the purpose.
+
+**The fix:** The IPC reposition should send the heading WITHOUT `(HEAD)`. The `(HEAD)` should only exist in the git index (staged via `hash-object + update-index`), never in the working tree or snapshot.
+<!-- agent:boundary:f4540a0e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] agent:console implemented
-- [ ] Fix: IPC reposition should not add (HEAD) to working tree
+- [ ] Fix: IPC reposition should strip (HEAD) from content sent to plugin
 - [ ] Inline `max_lines=` attribute
 - [ ] Compact exchange
 <!-- /agent:pending -->

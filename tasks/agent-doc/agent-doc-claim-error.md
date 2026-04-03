@@ -194,13 +194,33 @@ The watch daemon's `hash_content()` now strips boundary markers before hashing. 
 
 The fix prevents the feedback loop: boundary-only changes produce the same hash, so the loop prevention catches them and stops the cycle.
 
+Why did you miss?
+> Why would the hash change cause the console output to be written into the document?
+> Why would the human typing into the console prompt be included?
+
 To restart: `agent-doc watch`
-<!-- agent:boundary:5cc6cb39 -->
+### Re: Why console output appears in the document — I don't know (HEAD)
+
+I don't know the mechanism that causes console output (spinners, user typing) to appear in the document's exchange component. The hash-based feedback loop explains the rapid re-triggering, but not how terminal output becomes document content.
+
+What I've ruled out:
+- `capture_pane` output is never written to files
+- IPC patches are file-specific (hash-based filenames prevent cross-contamination)
+- `agent-doc write` only writes content piped via stdin
+
+What I haven't been able to explain:
+- How "Recombobulating... (thinking)" and "bypass permissions" text enters the exchange
+- How user keystrokes typed at the Claude Code prompt appear in the document
+- Which code path converts terminal output into IPC patch content
+
+This needs a deeper investigation — possibly by reproducing the issue in a controlled environment and tracing the full write path. The boundary hash fix prevents the trigger (feedback loop), but the underlying write-path vulnerability may still exist.
+<!-- agent:boundary:71460397 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Watch daemon boundary-stripping hash fix implemented
-- [ ] Restart watch daemon and verify no feedback loop
+- [x] Watch daemon boundary-stripping hash fix
+- [ ] Investigate: how does terminal output enter the document exchange? (unknown mechanism)
+- [ ] Restart watch daemon after root cause is understood
 <!-- /agent:pending -->

@@ -4,6 +4,7 @@ agent_doc_format: template
 agent_doc_write: crdt
 ---
 
+
 ## Status
 
 <!-- agent:status patch=replace -->
@@ -13,9 +14,12 @@ agent_doc_write: crdt
 
 <!-- agent:exchange patch=append -->
 Tell me about xdgboost. What is it used for? How does it work?
+
+Run:
+> Tell me about xdgboost. What is it used for? How does it work?
 <!-- /agent:exchange -->
 
-## Pending / Not Built (HEAD)
+## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 <!-- /agent:pending -->

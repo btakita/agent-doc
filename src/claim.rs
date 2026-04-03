@@ -305,6 +305,13 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
         }
     }
 
+    // Commit the claimed file so the first prompt is recognized as a diff.
+    // Without this, the file is uncommitted and the first agent-doc run
+    // sees no snapshot → no diff → no response.
+    if let Err(e) = crate::git::commit(file) {
+        eprintln!("warning: failed to commit after claim: {}", e);
+    }
+
     // Lazy-start watch daemon if not running
     match crate::watch::ensure_running() {
         Ok(true) => eprintln!("Watch daemon started."),
@@ -361,7 +368,7 @@ fn validate_file_claim(file: &Path) {
 
 /// Strip user content from the exchange component, leaving just the markers.
 /// This creates a snapshot baseline that treats existing user text as a diff.
-fn strip_exchange_content(content: &str) -> String {
+pub(crate) fn strip_exchange_content(content: &str) -> String {
     if let Ok(components) = crate::component::parse(content)
         && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
     {

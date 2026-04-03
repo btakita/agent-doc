@@ -4,6 +4,16 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.5
+
+- **Commit on claim**: `agent-doc claim` now commits the file after saving the initial snapshot. Ensures the first prompt appears as a diff against a committed baseline.
+- **Auto-setup untracked files**: Preflight auto-adds untracked files to git (snapshot + `git add`), so `/agent-doc` works on new files without claiming first.
+- **VCS refresh after commit**: `agent-doc commit` writes a VCS refresh signal file, prompting IDEs to update their git status display.
+- **Preflight `--diff-only` flag**: Omits the full document from preflight JSON output, reducing token usage by ~80% on subsequent cycles.
+- **Skill-bundled runbooks**: `agent-doc skill install` now installs runbooks alongside SKILL.md at `.claude/skills/agent-doc/runbooks/`. First runbook: `compact-exchange.md`.
+- **JetBrains prompt button truncation**: maxLabelLen reduced from 45 to 25 characters.
+- **Debounce module**: New `src/debounce.rs` for reusable debounce logic.
+
 ## 0.31.4
 
 - **IPC reposition simplified**: Removed file-based IPC fallback from `try_ipc_reposition_boundary`. Boundary reposition now uses socket IPC exclusively (through FFI listener callback). Non-fatal on failure.

@@ -256,7 +256,7 @@ pub fn check_layout() -> Vec<String> {
 /// 5. Read document HEAD from disk
 ///
 /// Outputs JSON to stdout. Progress/diagnostic messages go to stderr.
-pub fn run(file: &Path) -> Result<()> {
+pub fn run(file: &Path, diff_only: bool) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -274,6 +274,40 @@ pub fn run(file: &Path) -> Result<()> {
         eprintln!("[preflight] recover warning: {}", e);
         false
     });
+
+    // Step 1b: Auto-setup for untracked files.
+    // If the file isn't tracked by git, create an initial snapshot and add it
+    // so the first agent-doc run can detect content as a diff.
+    {
+        let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+        let project_root = snapshot::find_project_root(&canonical)
+            .unwrap_or_else(|| file.parent().unwrap_or(Path::new(".")).to_path_buf());
+        let is_tracked = Command::new("git")
+            .args(["ls-files", "--error-unmatch"])
+            .arg(&canonical)
+            .current_dir(&project_root)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !is_tracked {
+            eprintln!("[preflight] file is untracked — auto-setup: snapshot + git add");
+            // Save initial snapshot with empty exchange (same as claim)
+            if let Ok(content) = std::fs::read_to_string(file) {
+                let snapshot_content = crate::claim::strip_exchange_content(&content);
+                if let Err(e) = snapshot::save(file, &snapshot_content) {
+                    eprintln!("[preflight] warning: failed to save initial snapshot: {}", e);
+                }
+            }
+            // Stage the file so git::commit can pick it up
+            let _ = Command::new("git")
+                .args(["add", "--"])
+                .arg(&canonical)
+                .current_dir(&project_root)
+                .status();
+        }
+    }
 
     // Step 2: Commit previous cycle.
     eprintln!("[preflight] step 2: commit");
@@ -358,10 +392,15 @@ pub fn run(file: &Path) -> Result<()> {
     let diff_result = diff::compute(file)?;
     let no_changes = diff_result.is_none();
 
-    // Step 5: Read document HEAD from disk.
-    eprintln!("[preflight] step 5: read document");
-    let document = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read document {}", file.display()))?;
+    // Step 5: Read document HEAD from disk (skip if --diff-only).
+    let document = if diff_only {
+        eprintln!("[preflight] step 5: skipped (--diff-only)");
+        String::new()
+    } else {
+        eprintln!("[preflight] step 5: read document");
+        std::fs::read_to_string(file)
+            .with_context(|| format!("failed to read document {}", file.display()))?
+    };
 
     let output = PreflightOutput {
         layout_issues,
@@ -712,14 +751,14 @@ mod tests {
         // Snapshot matches document → no_changes = true.
         snapshot::save(&doc, &std::fs::read_to_string(&doc).unwrap()).unwrap();
 
-        run(&doc).unwrap();
+        run(&doc, false).unwrap();
         // If run() returns Ok(()), the JSON was printed to stdout without error.
         // The test verifies no panic and no error return.
     }
 
     #[test]
     fn preflight_file_not_found() {
-        let err = run(Path::new("/nonexistent/missing.md")).unwrap_err();
+        let err = run(Path::new("/nonexistent/missing.md"), false).unwrap_err();
         assert!(err.to_string().contains("file not found"));
     }
 

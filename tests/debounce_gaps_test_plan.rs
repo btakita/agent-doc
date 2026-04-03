@@ -1,0 +1,684 @@
+//! # Debounce Test Plan: 6 Critical Gaps
+//!
+//! This module outlines test cases for the 6 debounce gaps identified in the architecture:
+//! 1. Mtime Granularity
+//! 2. Untracked File Edge Case
+//! 3. Hash Collision Risk
+//! 4. Reactive Mode CRDT
+//! 5. Status File Staleness
+//! 6. Timing Constants (1500ms Preflight)
+//!
+//! Tests are organized by gap, with prerequisites, validation logic, and expected behavior.
+//! These tests are NOT YET IMPLEMENTED — this is the test plan/spec only.
+
+#![allow(dead_code)]
+
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GAP 1: Mtime Granularity
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Test that rapid edits within filesystem mtime granularity are detected correctly.
+///
+/// ## Spec
+/// - File systems report mtime in different granularities:
+///   - HFS+ (macOS): 1 second
+///   - ext4 (Linux): 1 nanosecond (but can be configured to 1ms granularity)
+///   - NTFS (Windows): 100 nanoseconds
+/// - On HFS+, two edits within 1 second appear to have the same mtime.
+/// - `is_idle()` relies on `Instant::elapsed()` (not `File::metadata().modified()`),
+///   so this is mitigated by in-process state. However, cross-process `is_typing_via_file()`
+///   reads the timestamp from disk and may miss rapid edits if granularity is coarse.
+/// - The preflight 3-second timeout should catch convergence, but we should verify:
+///   - 100ms granularity systems: 10 rapid edits in 100ms should be captured
+///   - 1s granularity systems: same file touched twice in 500ms should mtime-match
+///
+/// ## What it validates
+/// - In-process debounce (`is_idle`) is immune to mtime granularity
+/// - Cross-process debounce (`is_typing_via_file`) correctly handles coarse granularity
+/// - The 3s preflight timeout doesn't incorrectly skip waiting for settling
+///
+/// ## Prerequisites
+/// - A test fixture that can mock filesystem mtime granularity
+/// - Ability to run tests on both HFS+ (1s) and ext4 (ns) systems
+/// - Or: manually set file times using `touch -t` to simulate slow systems
+///
+/// ## Expected behavior (if gap is fixed)
+/// - 10 rapid document_changed() calls within 100ms → all recorded in LAST_CHANGE map
+/// - is_idle() returns false for all 10
+/// - wait_idle_via_file() correctly detects that typing is still active
+/// - Preflight waits the full 500ms debounce, not returning early on mtime-matching files
+///
+/// ## Current behavior (likely to fail)
+/// - On systems with >100ms mtime granularity, the 2nd edit doesn't update file mtime
+/// - is_typing_via_file() reads stale mtime and incorrectly reports idle
+/// - Preflight proceeds before user typing finishes, causing premature agent submit
+///
+#[test]
+#[ignore] // Not yet implemented
+fn test_mtime_granularity_100ms_rapid_edits() {
+    // Setup: Create a document and set up .agent-doc/typing/
+    let tmp = tempfile::TempDir::new().unwrap();
+    let agent_doc_dir = tmp.path().join(".agent-doc");
+    std::fs::create_dir_all(&agent_doc_dir.join("typing")).unwrap();
+    let doc = tmp.path().join("test-rapid-edits.md");
+    std::fs::write(&doc, "initial content").unwrap();
+    let doc_str = doc.to_string_lossy().to_string();
+
+    // Action: Simulate 10 rapid document_changed calls within 100ms
+    let start = std::time::Instant::now();
+    for i in 0..10 {
+        agent_doc::debounce::document_changed(&doc_str);
+        if i < 9 {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    let elapsed = start.elapsed().as_millis();
+    eprintln!("10 edits took {} ms", elapsed);
+
+    // Validation 1: is_idle should return false for 1500ms window
+    assert!(!agent_doc::debounce::is_idle(&doc_str, 1500),
+        "is_idle() should be false immediately after edits");
+
+    // Validation 2: is_typing_via_file should also return true
+    assert!(agent_doc::debounce::is_typing_via_file(&doc_str, 1500),
+        "is_typing_via_file() should detect active typing despite mtime granularity");
+
+    // Validation 3: After 1500ms, should be idle
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(agent_doc::debounce::is_idle(&doc_str, 100),
+        "is_idle() should be true after debounce period");
+}
+
+/// Test that 1-second mtime granularity systems (HFS+) don't skip the debounce.
+///
+/// ## Prerequisites
+/// - Test harness that mocks filesystem behavior or runs on HFS+
+/// - Ability to set file mtime via std::fs::set_file_times()
+///
+/// ## Expected behavior (if gap is fixed)
+/// - Two document_changed() calls at 0ms and 500ms
+/// - File's on-disk mtime might appear unchanged (coarse granularity)
+/// - But is_idle() uses Instant, not File::metadata().modified()
+/// - And is_typing_via_file() reads the actual file mtime (timestamp in .agent-doc/typing/<hash>)
+/// - Both should still correctly report not idle for 1500ms window
+///
+#[test]
+#[ignore] // Not yet implemented
+fn test_mtime_granularity_1s_coarse_system() {
+    // Setup: Create document in temp dir
+    let tmp = tempfile::TempDir::new().unwrap();
+    let agent_doc_dir = tmp.path().join(".agent-doc");
+    std::fs::create_dir_all(&agent_doc_dir.join("typing")).unwrap();
+    let doc = tmp.path().join("test-1s-granularity.md");
+    std::fs::write(&doc, "initial").unwrap();
+    let doc_str = doc.to_string_lossy().to_string();
+
+    // Action: Two document_changed calls 500ms apart
+    agent_doc::debounce::document_changed(&doc_str);
+    std::thread::sleep(Duration::from_millis(500));
+    agent_doc::debounce::document_changed(&doc_str);
+
+    // Validation: Both should still be captured despite mtime appearing to be the same
+    assert!(!agent_doc::debounce::is_idle(&doc_str, 1500),
+        "is_idle() should track both edits in LAST_CHANGE, not rely on file mtime");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GAP 2: Untracked File Edge Case
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Test that is_tracked() correctly distinguishes "never-tracked" from "tracked and idle".
+///
+/// ## Spec
+/// - `is_tracked(file)` returns true only if document_changed() was called at least once.
+/// - `is_idle(file)` returns true for both "never-tracked" AND "tracked but idle" files.
+/// - A non-blocking probe needs to distinguish these:
+///   - "never-tracked" → conservative (assume not idle, don't call await_idle)
+///   - "tracked and idle" → safe to proceed
+/// - Gap: The distinction is subtle in the public API. A probe might call await_idle()
+///   on an untracked file and block for the full timeout.
+///
+/// ## What it validates
+/// - is_tracked() returns false for files with no document_changed() calls
+/// - is_tracked() returns true after any document_changed() call
+/// - is_idle() returns true for untracked files (doesn't block forever)
+/// - Probes can use is_tracked() to avoid unnecessary await_idle() calls
+///
+/// ## Prerequisites
+/// - Fresh LAST_CHANGE state (use test isolation)
+/// - Two separate test files: one tracked, one not
+///
+/// ## Expected behavior (if gap is fixed)
+/// - `is_tracked("/tmp/never-seen.md")` returns false
+/// - `is_idle("/tmp/never-seen.md", 1500)` returns true (safe default)
+/// - `document_changed("/tmp/tracked.md")` → is_tracked returns true
+/// - `is_idle("/tmp/tracked.md", 1500)` returns false (just changed)
+/// - After debounce, `is_idle("/tmp/tracked.md", 100)` returns true
+///
+/// ## Current behavior (likely to fail)
+/// - is_tracked() distinction is correct, but its use is not enforced by type system
+/// - A caller might ignore is_tracked() and call await_idle() unconditionally
+/// - For untracked files, await_idle() returns immediately (due to is_idle() returning true)
+/// - But this is a silent fallback, not explicit error handling
+///
+#[test]
+#[ignore] // Not yet implemented
+fn test_untracked_file_is_idle_returns_true() {
+    // Setup: Fresh state, never call document_changed
+    let untracked_file = "/tmp/never-tracked-test.md";
+
+    // Validation: is_idle returns true for untracked files
+    assert!(agent_doc::debounce::is_idle(untracked_file, 1500),
+        "is_idle() must return true for untracked files to prevent infinite wait");
+}
+
+/// Test that is_tracked() correctly returns false for never-seen files.
+///
+/// ## Prerequisites
+/// - Same as above
+///
+#[test]
+#[ignore] // Not yet implemented
+fn test_untracked_file_is_tracked_returns_false() {
+    let untracked_file = "/tmp/never-tracked-test2.md";
+
+    assert!(!agent_doc::debounce::is_tracked(untracked_file),
+        "is_tracked() must return false for files with no document_changed() calls");
+}
+
+/// Test that is_tracked() correctly returns true after a change.
+///
+#[test]
+#[ignore] // Not yet implemented
+fn test_tracked_file_is_tracked_returns_true() {
+    let tracked_file = "/tmp/just-tracked.md";
+    agent_doc::debounce::document_changed(tracked_file);
+
+    assert!(agent_doc::debounce::is_tracked(tracked_file),
+        "is_tracked() must return true after document_changed() is called");
+}
+
+/// Test that a probe uses is_tracked() to avoid unnecessary awaits.
+///
+/// ## Expected behavior (if pattern is adopted)
+/// - Probes first check `if !is_tracked(file) { return Ok(()) }` before `await_idle()`
+/// - For tracked but idle files, await_idle() returns immediately
+/// - For untracked files, never calls await_idle()
+///
+#[test]
+#[ignore] // Not yet implemented
+fn test_probe_pattern_untracked_skips_await() {
+    let untracked = "/tmp/untracked-probe-test.md";
+
+    // Probe pattern: check is_tracked first
+    if !agent_doc::debounce::is_tracked(untracked) {
+        // Skip await_idle for untracked files
+        assert!(true, "Probe correctly skipped await_idle for untracked file");
+        return;
+    }
+
+    // If we reach here for untracked files, pattern is not adopted
+    panic!("Probe should have returned early for untracked file");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GAP 3: Hash Collision Risk
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Test that hash collision handling works correctly for typing indicator files.
+///
+/// ## Spec
+/// - `typing_indicator_path()` hashes the file path using `DefaultHasher`
+/// - File paths are hashed to `.agent-doc/typing/<hash>` to avoid filename conflicts
+/// - Hash collisions: two different paths hash to the same value
+/// - Risk: if file A and file B collide, they share one typing indicator file
+/// - When A is edited, the indicator shows "A is typing"
+/// - When B checks if it's typing, it reads A's indicator (false positive)
+/// - Or when A's timestamp expires, B's timestamp also expires (false negative)
+///
+/// ## What it validates
+/// - No hash collisions occur for a reasonable set of test paths
+/// - If a collision is detected, behavior is defined (either error or handle gracefully)
+/// - The typing indicator is file-based, so collisions are a real concern
+/// - (Contrast: status file hashing has the same risk)
+///
+/// ## Prerequisites
+/// - A set of "likely to collide" file paths (same file name, different directories)
+/// - Or: exhaustive collision test for common project layouts
+/// - Hash function: std::collections::hash_map::DefaultHasher
+///
+/// ## Expected behavior (if gap is fixed)
+/// - Generate 10,000 distinct paths from a realistic project
+/// - Compute hash for each via typing_indicator_path()
+/// - All hashes are unique
+/// - No two files share the same indicator file
+///
+/// ## Current behavior (likely to fail)
+/// - DefaultHasher uses SipHash-1-3, designed for HashMap security (not collision resistance)
+/// - Over a large file set or adversarial paths, collisions are possible
+/// - Current code has no detection or mitigation
+///
+#[test]
+#[ignore] // Not yet implemented
+fn test_hash_collision_no_collisions_for_common_paths() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(tmp.path().join(".agent-doc/typing")).unwrap();
+
+    // Generate 10,000 plausible file paths
+    let mut hashes = std::collections::HashSet::new();
+    let mut collision_count = 0;
+
+    for i in 0..10_000 {
+        let subdir = format!("src/module{}/", i % 100);
+        let filename = format!("file{}.md", i);
+        let path = tmp.path().join(&subdir).join(&filename);
+        let path_str = path.to_string_lossy().to_string();
+
+        // Compute hash (via typing_indicator_path, which we'd need to expose or test indirectly)
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        path_str.hash(&mut hasher);
+        let hash = hasher.finish();
+
+        if hashes.contains(&hash) {
+            collision_count += 1;
+        }
+        hashes.insert(hash);
+    }
+
+    // Validation: no collisions (or accept bounded collisions with warning)
+    assert_eq!(collision_count, 0,
+        "Hash collisions detected: {} files hashed to same values", collision_count);
+}
+
+/// Test that typing indicator cleanup removes stale files correctly.
+///
+/// ## Spec
+/// - Typing indicator files accumulate over time as files are edited
+/// - No cleanup mechanism exists in debounce.rs
+/// - Risk: .agent-doc/typing/ grows unboundedly
+/// - Gap: no test for cleanup strategy (if one is implemented)
+///
+/// ## Expected behavior (if gap is fixed)
+/// - A cleanup command (external or scheduled) removes indicators older than N days
+/// - Or: indicators are stored in memory (not on disk) and automatically expired
+/// - Or: a documented best-practice for cleanup is provided
+///
+#[test]
+#[ignore] // Not yet implemented
+fn test_hash_collision_cleanup_removes_stale_indicators() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let typing_dir = tmp.path().join(".agent-doc/typing");
+    std::fs::create_dir_all(&typing_dir).unwrap();
+
+    // Create some old indicator files (mtime 30 days ago)
+    for i in 0..100 {
+        let indicator_path = typing_dir.join(format!("{:016x}", i));
+        std::fs::write(&indicator_path, "1000000000000").unwrap();
+        // Set mtime to 30 days ago (would need std::fs::set_file_times)
+        // For now, placeholder
+    }
+
+    // Validation: cleanup removes files older than 7 days
+    // (this would require implementing a cleanup function)
+    let remaining = std::fs::read_dir(&typing_dir).unwrap().count();
+    // expect remaining == 0 if cleanup is implemented
+    let _ = remaining;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GAP 4: Reactive Mode CRDT
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Test that reactive mode (zero debounce) handles CRDT merge failure gracefully.
+///
+/// ## Spec
+/// - Reactive mode: CRDT-mode documents are watched with `Duration::ZERO` debounce
+/// - Every file change triggers an immediate `run::run()` call
+/// - run() calls crdt::merge() to handle concurrent edits
+/// - Risk: if CRDT merge fails (malformed state file, corruption), the document is lost
+/// - Gap: no test for merge failure recovery
+///
+/// ## What it validates
+/// - CRDT merge failure does not silently drop edits
+/// - An error is returned and logged
+/// - The document is NOT overwritten with partial content
+/// - A recovery mechanism exists (snapshot, backup, manual intervention)
+///
+/// ## Prerequisites
+/// - A CRDT-mode document (agent_doc_format: template, agent_doc_write: crdt)
+/// - Ability to corrupt the .agent-doc/crdt/<hash>.yrs file
+/// - A test that induces merge failure
+///
+/// ## Expected behavior (if gap is fixed)
+/// - File change triggers run() → crdt::merge() reads corrupted state file
+/// - merge() returns Err instead of panicking or returning garbage
+/// - Document is NOT written (no partial/corrupted content)
+/// - Error is logged and propagated to watch daemon
+/// - Watch daemon logs error and continues monitoring (doesn't crash)
+///
+/// ## Current behavior (likely to fail)
+/// - If CRDT state is corrupted, merge() may panic or return invalid data
+/// - Document is overwritten with corrupted/partial content
+/// - Watch daemon may crash or retry indefinitely
+///
+#[test]
+#[ignore] // Not yet implemented
+fn test_reactive_mode_crdt_merge_failure_handling() {
+    // Setup: Create a CRDT-mode document
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("reactive-crdt-test.md");
+    let frontmatter = r#"---
+agent_doc_format: template
+agent_doc_write: crdt
+---
+<!-- agent:exchange -->
+Initial content.
+<!-- /agent:exchange -->
+"#;
+    std::fs::write(&doc, frontmatter).unwrap();
+
+    // Setup: Create CRDT state directory
+    let crdt_dir = tmp.path().join(".agent-doc/crdt");
+    std::fs::create_dir_all(&crdt_dir).unwrap();
+
+    // Action: Corrupt the CRDT state file (if it exists)
+    // For a new doc, there may be no state yet, so create a corrupted one
+    let crdt_state_path = crdt_dir.join("corrupted_state.yrs");
+    std::fs::write(&crdt_state_path, &[0xFF, 0xFE, 0xFD, 0xFC]).unwrap(); // Invalid bytes
+
+    // Action: Trigger a merge
+    // This would normally happen in watch.rs when the file changes
+    // For this test, we'd call crdt::merge() directly with the corrupted state
+    // (Pseudocode, requires exposing merge for testing)
+    // let result = agent_doc::crdt::merge(&corrupted_state, &our_content, &their_content);
+
+    // Validation: merge() should return an error, not panic or return garbage
+    // assert!(result.is_err(), "merge() must return error for corrupted state");
+    //
+    // And the document should NOT be modified
+    // let doc_content = std::fs::read_to_string(&doc).unwrap();
+    // assert_eq!(doc_content, frontmatter, "document must not be modified on merge error");
+}
+
+/// Test that reactive mode detects and prevents infinite loops on CRDT merge.
+///
+/// ## Spec
+/// - Reactive mode: zero debounce means every file change triggers run()
+/// - If run() writes to the document, that write triggers another change event
+/// - CRDT merge should be idempotent, but if not, document enters infinite loop:
+///   watch → run() → merge() → write → watch → run() → ...
+/// - Gap: no test for loop detection in reactive mode
+///
+/// ## Expected behavior (if gap is fixed)
+/// - A cycle counter prevents >N consecutive cycles (e.g., max_cycles = 5)
+/// - Or: content hash convergence detection stops the loop (same content = no re-run)
+/// - Watch daemon logs loop warnings and halts after max_cycles
+///
+#[test]
+#[ignore] // Not yet implemented
+fn test_reactive_mode_infinite_loop_prevention() {
+    // Setup: CRDT-mode document + watch daemon
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("reactive-loop-test.md");
+    let content = r#"---
+agent_doc_format: template
+agent_doc_write: crdt
+---
+<!-- agent:exchange -->
+Content
+<!-- /agent:exchange -->
+"#;
+    std::fs::write(&doc, content).unwrap();
+
+    // Action: Simulate a buggy run() that always modifies the document
+    // (In reality, this would be triggered by file-system watch)
+    // For now, we'd set up a watch entry and tick the event loop
+
+    // Validation: After max_cycles (e.g., 5), watch daemon halts re-runs
+    // let cycles = run_until_halt(&doc, 10); // Try 10 cycles
+    // assert!(cycles <= 5, "watch daemon should halt after max_cycles");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GAP 5: Status File Staleness
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Test that get_status_via_file() correctly handles 30-second timeout.
+///
+/// ## Spec
+/// - `get_status_via_file(file)` reads `.agent-doc/status/<hash>` on disk
+/// - File contains "status:timestamp_ms"
+/// - If timestamp is older than 30 seconds, status is considered stale (returns "idle")
+/// - Risk: if an agent operation crashes and forgets to clear the status file,
+///   it remains "busy" for 30 seconds, blocking subsequent operations
+/// - Gap: no test for the 30-second timeout boundary
+///
+/// ## What it validates
+/// - Timestamps exactly 30 seconds old return "idle" (timeout applies)
+/// - Timestamps 29 seconds old return the original status (still busy)
+/// - Timestamps 31 seconds old return "idle"
+/// - Edge case: clock skew (timestamp in future) doesn't break behavior
+///
+/// ## Prerequisites
+/// - Mock system clock or ability to set file timestamps
+/// - A test file with status file at various ages
+///
+/// ## Expected behavior (if gap is fixed)
+/// - Status file created at T=0 with status "generating"
+/// - At T=29s: get_status_via_file() returns "generating"
+/// - At T=30s: get_status_via_file() returns "idle" (timeout)
+/// - At T=31s: get_status_via_file() returns "idle"
+///
+/// ## Current behavior (likely to fail)
+/// - 30-second timeout is hardcoded, not configurable
+/// - If an agent takes 25+ seconds, a timeout is likely during its execution
+/// - No distinction between "truly idle" and "timed out" status
+///
+#[test]
+#[ignore] // Not yet implemented
+fn test_status_file_staleness_30s_timeout() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let status_dir = tmp.path().join(".agent-doc/status");
+    std::fs::create_dir_all(&status_dir).unwrap();
+
+    // Helper: write a status file with a specific timestamp
+    fn write_status_at_time(path: &Path, status: &str, ms_ago: u128) {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        let ts_ms = now_ms - ms_ago;
+        std::fs::write(path, format!("{}:{}", status, ts_ms)).unwrap();
+    }
+
+    let status_file = status_dir.join("test_hash");
+
+    // Test case 1: 29 seconds old (still busy)
+    write_status_at_time(&status_file, "generating", 29_000);
+    let status = agent_doc::debounce::get_status_via_file(status_file.to_string_lossy().as_ref());
+    assert_eq!(status, "generating",
+        "Status 29s old should still be returned, not timed out");
+
+    // Test case 2: exactly 30 seconds old (timeout)
+    write_status_at_time(&status_file, "generating", 30_000);
+    let status = agent_doc::debounce::get_status_via_file(status_file.to_string_lossy().as_ref());
+    assert_eq!(status, "idle",
+        "Status exactly 30s old should be considered timed out");
+
+    // Test case 3: 31 seconds old (definitely timed out)
+    write_status_at_time(&status_file, "generating", 31_000);
+    let status = agent_doc::debounce::get_status_via_file(status_file.to_string_lossy().as_ref());
+    assert_eq!(status, "idle",
+        "Status 31s old should definitely be timed out");
+}
+
+/// Test that set_status() writes the timestamp correctly.
+///
+/// ## Prerequisite
+/// - same as above
+///
+#[test]
+#[ignore] // Not yet implemented
+fn test_status_file_write_includes_current_timestamp() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let status_dir = tmp.path().join(".agent-doc/status");
+    std::fs::create_dir_all(&status_dir).unwrap();
+
+    // Note: set_status() writes to disk, but we don't have direct access
+    // to the file path from the public API. This test would require
+    // either exposing write_status_file or using a documented path.
+
+    // Placeholder: would call something like:
+    // agent_doc::debounce::set_status("/tmp/test.md", "generating");
+    // let file_content = std::fs::read_to_string(status_path).unwrap();
+    // assert!(file_content.contains(":"), "status file must contain timestamp");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GAP 6: Timing Constants (Preflight 1500ms)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Test that the 1500ms hardcoded timeout in preflight is configurable or validated.
+///
+/// ## Spec
+/// - `preflight.rs` line ~366: calls `is_typing_via_file(&file_str, 1500)`
+/// - 1500ms is hardcoded, not configurable
+/// - risk: different projects might need different debounce windows
+///   - Slow CI: might need 5000ms to settle
+///   - Fast local: might want 500ms
+/// - Gap: no test for configurable timing, no validation that 1500ms is reasonable
+///
+/// ## What it validates
+/// - Preflight uses a configurable debounce value, not hardcoded
+/// - Or: if hardcoded, there's a comment explaining why
+/// - A test can override the value for different scenarios
+/// - Preflight timeout (3 seconds total) is appropriately longer than debounce (1500ms)
+///
+/// ## Prerequisites
+/// - Access to preflight config or frontmatter settings
+/// - Ability to pass debounce_ms to preflight::run()
+/// - A test that compares different debounce values
+///
+/// ## Expected behavior (if gap is fixed)
+/// - Frontmatter can specify `debounce_ms: 5000` (for slow CI)
+/// - Preflight::run() respects the frontmatter value
+/// - Or: CLI flag `--debounce=<ms>` overrides default
+/// - Default is 1500ms (reasonable compromise)
+///
+/// ## Current behavior (likely to fail)
+/// - 1500ms is hardcoded in preflight.rs
+/// - No frontmatter field controls it
+/// - No CLI override
+/// - All projects use the same debounce, regardless of build/edit speed
+///
+#[test]
+#[ignore] // Not yet implemented
+fn test_preflight_timing_1500ms_is_configurable() {
+    // Setup: Create a document with custom debounce in frontmatter
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("preflight-timing-test.md");
+    let frontmatter = r#"---
+agent_doc_debounce_ms: 5000
+---
+<!-- agent:exchange -->
+Content
+<!-- /agent:exchange -->
+"#;
+    std::fs::write(&doc, frontmatter).unwrap();
+
+    // Prerequisite: git init and create snapshot
+    std::process::Command::new("git")
+        .args(&["init"])
+        .current_dir(tmp.path())
+        .output()
+        .ok();
+    std::process::Command::new("git")
+        .args(&["config", "user.email", "test@example.com"])
+        .current_dir(tmp.path())
+        .output()
+        .ok();
+    std::process::Command::new("git")
+        .args(&["config", "user.name", "Test"])
+        .current_dir(tmp.path())
+        .output()
+        .ok();
+    std::process::Command::new("git")
+        .args(&["add", "."])
+        .current_dir(tmp.path())
+        .output()
+        .ok();
+    std::process::Command::new("git")
+        .args(&["commit", "-m", "init"])
+        .current_dir(tmp.path())
+        .output()
+        .ok();
+
+    // Action: Call preflight::run() (would need to expose it)
+    // Validation: preflight respects the 5000ms debounce from frontmatter
+    // (Currently, this test can't be written without modifying preflight.rs)
+}
+
+/// Test that preflight 3-second timeout is sufficient for the debounce period.
+///
+/// ## Spec
+/// - Preflight waits "up to 3 seconds" for typing to settle and mtime to age
+/// - Actual debounce is 1500ms (file mtime must be >= 500ms old, plus 1500ms typing wait)
+/// - Total: up to 2000ms, leaving 1000ms margin
+/// - Risk: if a slower system takes 3500ms to settle, preflight times out early
+///
+/// ## Expected behavior (if gap is fixed)
+/// - A test that configures debounce to 2800ms (close to 3s limit)
+/// - Preflight still waits successfully (no early timeout)
+/// - Or: an error is returned with guidance to increase timeout
+///
+#[test]
+#[ignore] // Not yet implemented
+fn test_preflight_3s_timeout_is_sufficient_for_debounce() {
+    // Setup: Document with 2800ms debounce (close to 3s limit)
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("preflight-timeout-test.md");
+    let frontmatter = r#"---
+agent_doc_debounce_ms: 2800
+---
+Content
+"#;
+    std::fs::write(&doc, frontmatter).unwrap();
+
+    // Action: Edit the file, then call preflight
+    std::fs::write(&doc, "Updated content").unwrap();
+    // Simulated: preflight::run(&doc) would be called
+    // The 2800ms debounce + 500ms mtime age ≈ 3300ms total
+    // If 3s timeout is exact, this would fail
+
+    // Validation: preflight completes successfully (or documents that timeout is needed)
+    // This is a boundary test to ensure sufficient margin
+}
+
+/// Test that hardcoded timeout constants are documented.
+///
+/// ## Expected behavior (if gap is fixed)
+/// - Each hardcoded constant (1500ms, 3000ms, 30000ms, 500ms) has a comment explaining:
+///   - Why this value was chosen
+///   - When it should be changed
+///   - Trade-offs (responsiveness vs. battery/CPU)
+///
+/// ## Current behavior
+/// - 30000ms (30s) status file timeout is documented in debounce.rs
+/// - 1500ms preflight debounce is NOT documented (only visible in test evals)
+/// - 3000ms preflight timeout is NOT documented (only in preflight.rs comments)
+///
+#[test]
+#[ignore] // Not yet implemented
+fn test_timing_constants_are_documented() {
+    // This is a code review test, not an executable test
+    // Verification:
+    // - grep -n "1500\|3000\|30000\|500" src/agent-doc/src/*.rs should show comments
+    // - Each constant should have a docstring or comment block explaining it
+
+    // Placeholder assertion to allow this test to exist
+    assert!(true, "See code review for constant documentation");
+}

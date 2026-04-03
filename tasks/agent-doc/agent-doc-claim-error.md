@@ -214,13 +214,29 @@ What I haven't been able to explain:
 - Which code path converts terminal output into IPC patch content
 
 This needs a deeper investigation — possibly by reproducing the issue in a controlled environment and tracing the full write path. The boundary hash fix prevents the trigger (feedback loop), but the underlying write-path vulnerability may still exist.
-<!-- agent:boundary:ac3bb0f6 -->
+
+> reproducing the issue in a controlled environment and tracing the full write path
+
+Let's do this
+### Re: ROOT CAUSE FOUND — stream capture polling (HEAD)
+
+**Found it.** `watch.rs` lines 456-477: the watch daemon polls `capture_pane` for every stream-mode document and **flushes terminal output directly into the document** via `stream::flush_to_document()`.
+
+Documents with `agent_doc_write: crdt` are classified as `DocMode::StreamCapture`. The watch daemon captures the tmux pane's full terminal buffer, extracts new lines since the last capture, and writes them into the exchange component.
+
+This is correct for `agent-doc stream` (real-time streaming agent output). But it's WRONG for documents managed by the `/agent-doc` skill workflow. Skill-managed documents write via `agent-doc write --stream` (piped response), not via tmux capture.
+
+**The fix:** Documents that have an active skill session (running via `/agent-doc` in Claude Code) should NOT use stream capture. The watch daemon needs to distinguish:
+- **Stream mode:** `agent-doc stream` spawned the Claude session → capture pane output
+- **Skill mode:** `/agent-doc` skill manages the session → file-watch only, no capture
+
+The simplest fix: don't use `StreamCapture` mode for documents whose session was started via `claim`/`route` (skill path). Only use it for documents started via `agent-doc stream`.
+<!-- agent:boundary:b90a76ad -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Watch daemon boundary-stripping hash fix
-- [ ] Investigate: how does terminal output enter the document exchange? (unknown mechanism)
-- [ ] Restart watch daemon after root cause is understood
+- [x] Root cause identified: watch daemon stream capture writes terminal output to skill-managed documents
+- [ ] Fix: distinguish stream-mode vs skill-mode documents in watch daemon
 <!-- /agent:pending -->

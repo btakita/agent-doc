@@ -16,26 +16,33 @@ Sync auto-start bug fixed. Unclaimed files no longer spawn sessions on tab navig
 <!-- agent:exchange patch=append -->
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/4674cbdd322fce519fe66718682225f86b088adb9a6e63aa6f5df754c59a4ef1-20260403-193618.md`*
 
-go:
-- [ ] IPC reposition → FFI event (next session)
-### Re: FFI reposition — deferring to next session
+do:
+> go:
+> - [ ] IPC reposition → FFI event (next session)
+### Re: IPC reposition → FFI event (HEAD)
 
-This session has hit context limits. The FFI reposition refactor requires focused work across ffi.rs, write.rs, git.rs, and the JetBrains plugin. It's tracked in pending and well-documented from the investigation above.
+Removed the file-based IPC fallback from `try_ipc_reposition_boundary` in `write.rs`. The function now uses socket IPC exclusively (through the FFI listener callback chain).
 
-Summary of what's needed:
-1. `ffi.rs`: add `agent_doc_reposition_boundary(file_path)` 
-2. `git.rs`: call FFI function instead of `try_ipc_reposition_boundary`
-3. JetBrains plugin: receive boundary event via JNA, reposition in Document API
-4. Remove file-based IPC reposition path from `write.rs`
+**What changed:**
+- `write.rs:1244-1266`: Simplified from ~70 lines to ~20 lines
+- Removed: JSON patch file creation, polling loop, timeout cleanup
+- Kept: socket IPC via `ipc_socket::send_reposition` (delivers through FFI listener callback)
+- Non-fatal on failure (same behavior as before)
 
-Start a new session on this document to continue.
-<!-- agent:boundary:d8c599ff -->
+**What didn't need to change:**
+- `git.rs` already calls `try_ipc_reposition_boundary` correctly
+- `ffi.rs` already has `agent_doc_reposition_boundary_to_end` for text transforms
+- `ipc_socket.rs` socket listener already routes through FFI callback
+- JetBrains plugin already handles `"reposition"` messages via the FFI callback
+
+`make check` passes (clippy + all 608 tests).
+<!-- agent:boundary:e78b240a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] IPC reposition → FFI event
+- [x] IPC reposition → FFI event
 - [ ] Inline `max_lines=` attribute on component tags
 - [ ] Restart watch daemon (after FFI reposition is done)
 <!-- /agent:pending -->

@@ -18,7 +18,7 @@ Sync auto-start bug fixed. Unclaimed files no longer spawn sessions on tab navig
 
 Go
 - [ ] Inline `max_lines=` attribute on component tags
-### Re: Inline `max_lines=` attribute (HEAD)
+### Re: Inline `max_lines=` attribute
 
 Implemented `max_lines=N` as an inline attribute on component tags. Usage: `&lt;!-- agent:exchange patch=append max_lines=50 --&gt;` trims content to the last 50 lines after patching.
 
@@ -28,7 +28,7 @@ Implemented `max_lines=N` as an inline attribute on component tags. Usage: `&lt;
 - Both inline attrs and config file work; inline takes precedence.
 
 `make check` passes (clippy + all tests).
-<!-- agent:boundary:afaa2e0e -->
+<!-- agent:boundary:816d19a8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

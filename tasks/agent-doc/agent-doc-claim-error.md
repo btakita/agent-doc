@@ -546,7 +546,7 @@ Update SPEC.md, README.md, ontology, module-harness
 All audit docs are current.
 
 release
-### Re: v0.31.2 released (HEAD)
+### Re: v0.31.2 released
 
 - **crates.io**: published ✓
 - **GitHub Release**: https://github.com/btakita/agent-doc/releases/tag/v0.31.2 ✓
@@ -554,7 +554,7 @@ release
 - Both binaries updated
 
 All session work is released.
-<!-- agent:boundary:3954ec90 -->
+<!-- agent:boundary:869b656d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

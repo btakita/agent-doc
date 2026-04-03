@@ -233,7 +233,7 @@ This is correct for `agent-doc stream` (real-time streaming agent output). But i
 The simplest fix: don't use `StreamCapture` mode for documents whose session was started via `claim`/`route` (skill path). Only use it for documents started via `agent-doc stream`.
 
 What is `agent-doc stream` used for?
-### Re: What agent-doc stream is for (HEAD)
+### Re: What agent-doc stream is for
 
 `agent-doc stream` is a different execution mode from the `/agent-doc` skill:
 
@@ -244,7 +244,7 @@ What is `agent-doc stream` used for?
 The watch daemon shouldn't use `StreamCapture` for skill-managed sessions. The `discover_entries()` function in `watch.rs` sets `DocMode::StreamCapture` based on `resolved.is_crdt()` — it should instead check whether the session was started via `agent-doc stream` (which sets a specific process pattern) vs `claim`/`route` (which starts Claude Code, not `agent-doc stream`).
 
 The simplest fix: only use `StreamCapture` when the pane is actually running `agent-doc stream` (check the process name), not when it's running Claude Code (`claude` or `agent-doc`).
-<!-- agent:boundary:e32ff4a2 -->
+<!-- agent:boundary:576ffbf1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

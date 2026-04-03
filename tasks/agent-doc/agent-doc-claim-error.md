@@ -199,7 +199,7 @@ Why did you miss?
 > Why would the human typing into the console prompt be included?
 
 To restart: `agent-doc watch`
-### Re: Why console output appears in the document — I don't know (HEAD)
+### Re: Why console output appears in the document — I don't know
 
 I don't know the mechanism that causes console output (spinners, user typing) to appear in the document's exchange component. The hash-based feedback loop explains the rapid re-triggering, but not how terminal output becomes document content.
 
@@ -214,7 +214,7 @@ What I haven't been able to explain:
 - Which code path converts terminal output into IPC patch content
 
 This needs a deeper investigation — possibly by reproducing the issue in a controlled environment and tracing the full write path. The boundary hash fix prevents the trigger (feedback loop), but the underlying write-path vulnerability may still exist.
-<!-- agent:boundary:71460397 -->
+<!-- agent:boundary:ac3bb0f6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

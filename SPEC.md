@@ -280,6 +280,8 @@ When `--window W` is provided:
 
 This prevents the JetBrains plugin from hitting persistent error balloons when a tmux window dies. The same fallback pattern is used in `sync.rs` for dead `--window` handling.
 
+**Snapshot initialization:** After registration, saves a snapshot with empty exchange content (via `strip_exchange_content`). This ensures existing user text in the exchange becomes a diff on the next run, rather than being absorbed into the baseline.
+
 **Notifications:**
 - `tmux display-message` — 3-second overlay on the target pane showing "Claimed {file} (pane {id})"
 - `.agent-doc/claims.log` — appends `Claimed {file} for pane {id}` for deferred display by the SKILL.md workflow on next invocation

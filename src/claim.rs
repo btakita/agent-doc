@@ -54,6 +54,9 @@
 //!   is never overwritten.
 //! - Component scaffolding is only applied when the document has no `status` or
 //!   `exchange` component yet; existing components are preserved.
+//! - **Snapshot initialization:** After registration, saves a snapshot with empty
+//!   exchange content. Existing user text in the exchange becomes a diff on the
+//!   next run, ensuring unresponded prompts are not absorbed into the baseline.
 //! - `claims.log` failures are non-fatal: errors are logged to stderr and the claim
 //!   itself succeeds.
 //! - Watch daemon launch failure is non-fatal: a warning is emitted and claim succeeds.
@@ -76,6 +79,8 @@
 //!   file contains `<!-- agent:status -->` and `<!-- agent:exchange -->` sections.
 //! - claim_does_not_overwrite_existing_format: document with explicit `agent_doc_format`
 //!   set → claim leaves the format field unchanged.
+//! - strip_exchange_content: document with user text in exchange → returns document with
+//!   empty exchange, preserving frontmatter and other components.
 
 use anyhow::{Context, Result};
 use std::io::Write;
@@ -290,6 +295,16 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
         &session_id[..8]
     );
 
+    // Initialize snapshot with empty exchange content so existing user text
+    // in the exchange becomes a diff on the next run. Without this, claim
+    // absorbs the user's unresponded prompt into the baseline.
+    if let Ok(content) = std::fs::read_to_string(file) {
+        let snapshot_content = strip_exchange_content(&content);
+        if let Err(e) = crate::snapshot::save(file, &snapshot_content) {
+            eprintln!("warning: failed to save initial snapshot: {}", e);
+        }
+    }
+
     // Lazy-start watch daemon if not running
     match crate::watch::ensure_running() {
         Ok(true) => eprintln!("Watch daemon started."),
@@ -342,6 +357,17 @@ fn validate_file_claim(file: &Path) {
         registry.remove(key);
     }
     let _ = sessions::save(&registry);
+}
+
+/// Strip user content from the exchange component, leaving just the markers.
+/// This creates a snapshot baseline that treats existing user text as a diff.
+fn strip_exchange_content(content: &str) -> String {
+    if let Ok(components) = crate::component::parse(content)
+        && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
+    {
+        return exchange.replace_content(content, "\n");
+    }
+    content.to_string()
 }
 
 /// Check if a tmux window is alive by listing its panes.
@@ -456,5 +482,20 @@ mod tests {
 
         let result = find_alive_window_in_registry(&registry, "/project", |_| true);
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn strip_exchange_content_removes_user_text() {
+        let content = "---\nagent_doc_session: abc\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nUser prompt here.\n<!-- /agent:exchange -->\n";
+        let result = strip_exchange_content(content);
+        assert!(result.contains("<!-- agent:exchange"));
+        assert!(!result.contains("User prompt here."));
+    }
+
+    #[test]
+    fn strip_exchange_content_preserves_no_exchange() {
+        let content = "---\nagent_doc_session: abc\n---\n\nJust text.\n";
+        let result = strip_exchange_content(content);
+        assert_eq!(result, content);
     }
 }

@@ -273,7 +273,7 @@ Implement now
 
 **Changes:**
 1. **watch.rs:** Stream capture target changed from `"exchange"` to `"console"` (default)
-2. **watch.rs:** Added `limit_lines()` — captured content limited to last 50 lines
+2. **watch.rs:** Added `limit_lines()` — captured content limited to last 50 lines: 50 lines can be the default. Add a `lines: int` attribute...or a more appropriate name to override the default of 50 lines.
 3. **claim.rs:** Scaffold now includes `&lt;!-- agent:console patch=replace --&gt;` section
 4. **claim.rs:** `components.toml` default includes `[console] mode = "replace"`
 
@@ -285,14 +285,26 @@ Stream capture now writes to a dedicated `console` component with replace mode. 
 The watch daemon is safe to restart now. To test: `agent-doc watch`
 
 Note: existing documents need a `&lt;!-- agent:console patch=replace --&gt;` section added manually (or re-claim). New documents get it automatically.
-<!-- agent:boundary:37e5c132 -->
+Name the attribute max_lines
+### Re: Configurable max_lines added (HEAD)
+
+Added `max_lines` field to `StreamConfig` frontmatter:
+
+```yaml
+agent_doc_stream:
+  max_lines: 100  # default: 50
+```
+
+The field flows through `WatchEntry` → `StreamState` → `limit_lines()`. Default is 50 lines.
+
+- `make check`: 608 tests pass
+- Both binaries updated
+<!-- agent:boundary:641bdbe6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] agent:console component implemented
-- [x] Stream capture targets console (replace, bounded 50 lines)
-- [ ] Restart watch daemon to verify no spam
-- [ ] Add agent:console to existing documents
+- [x] agent:console with configurable max_lines
+- [ ] Restart watch daemon and verify
 <!-- /agent:pending -->

@@ -385,7 +385,7 @@ I don't know how `(HEAD)` gets into the working tree. The items you asked to imp
 This session has been running a very long time and covered an enormous amount of work. Should we compact and close this document?
 
 This session is manifesting the `(HEAD)` bug. Can we add logging to isolate why this is happening?
-### Re: (HEAD) logging + working tree cleanup added (HEAD)
+### Re: (HEAD) logging + working tree cleanup added
 
 Added two things to `commit()`:
 
@@ -395,7 +395,7 @@ Added two things to `commit()`:
 This will tell us on the NEXT commit whether `(HEAD)` is appearing in the working tree and when. The cleanup ensures it doesn't persist.
 
 Both binaries updated. The next `/agent-doc` cycle should show the logging.
-<!-- agent:boundary:6d367a3d -->
+<!-- agent:boundary:c8c33528 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

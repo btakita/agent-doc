@@ -218,7 +218,7 @@ This needs a deeper investigation — possibly by reproducing the issue in a con
 > reproducing the issue in a controlled environment and tracing the full write path
 
 Let's do this
-### Re: ROOT CAUSE FOUND — stream capture polling (HEAD)
+### Re: ROOT CAUSE FOUND — stream capture polling
 
 **Found it.** `watch.rs` lines 456-477: the watch daemon polls `capture_pane` for every stream-mode document and **flushes terminal output directly into the document** via `stream::flush_to_document()`.
 
@@ -231,7 +231,7 @@ This is correct for `agent-doc stream` (real-time streaming agent output). But i
 - **Skill mode:** `/agent-doc` skill manages the session → file-watch only, no capture
 
 The simplest fix: don't use `StreamCapture` mode for documents whose session was started via `claim`/`route` (skill path). Only use it for documents started via `agent-doc stream`.
-<!-- agent:boundary:b90a76ad -->
+<!-- agent:boundary:df7e7a9c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

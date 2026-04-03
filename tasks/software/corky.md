@@ -1625,17 +1625,41 @@ Current version is **v0.23.0** (published). Uncommitted changes for next release
 7. Test a threaded reply draft to verify `threadId` works end-to-end
 8. Publish: crates.io, PyPI, GitHub Release, `cargo install`
 
+add tests
+audit docs
+Update SPEC.md, README.md, ontology, module-harness
+
 **Pending items from doc (lower priority):**
 - Verify Google Sheets sharing / GCP test users
 - Re-test sheet read
-<!-- agent:boundary:d0a3335f -->
+### Re: Updated Release Checklist (HEAD)
+
+Acknowledged. Updated release steps:
+
+1. Commit both features in corky submodule
+2. Bump version in `Cargo.toml` + `pyproject.toml`
+3. Update `VERSIONS.md`
+4. **Add tests** — roundtrip test for `message_id` through markdown serialization, test for `thread_id` in draft YAML parsing
+5. **Audit docs** — `corky audit-docs`
+6. **Update SPEC.md, README.md, ontology, module-harness**
+7. `make check`
+8. Run `corky sync` to verify Message-ID extraction
+9. Test a threaded reply draft
+10. Publish: crates.io, PyPI, GitHub Release, `cargo install`
+
+Ready to start executing — say "Go" and I'll work through the list.
+<!-- agent:boundary:e67bb8c7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - Commit threading + account-auth features in corky submodule
-- Bump version, update VERSIONS.md + SPEC.md
+- Bump version, update VERSIONS.md
+- Add tests (message_id roundtrip, thread_id draft parsing)
+- Audit docs (`corky audit-docs`)
+- Update SPEC.md, README.md, ontology, module-harness
+- `make check`
 - Test sync (Message-ID extraction) + threaded reply draft
 - Publish v0.24.0
 - Verify sheet sharing / GCP test users

@@ -316,7 +316,7 @@ The `(HEAD)` marker change keeps appearing as a diff because the snapshot has th
 The "This is old" note suggests this exchange should be compacted. Want me to compact?
 No...`### Re: Investigation of spam source (HEAD)`->`### Re: Investigation of spam source` uncommitted change was old. Not sure why we were seeing that.
 Now it's back to `### Re: Investigation of spam source (HEAD)`. Why?
-### Re: Why (HEAD) appears in the working tree (HEAD)
+### Re: Why (HEAD) appears in the working tree
 
 The `(HEAD)` suffix in the working tree comes from the **IPC reposition signal** sent after each commit. When `agent-doc commit` runs, it:
 
@@ -330,7 +330,7 @@ The `(HEAD)` in the working tree is intentional — it creates the blue gutter l
 But the IPC reposition is adding `(HEAD)` to the working tree, which defeats the purpose. This is a bug in the IPC reposition — it should NOT add `(HEAD)` to the working tree. The `(HEAD)` should only exist in the committed (staged) content.
 
 I'll track this as a separate fix.
-<!-- agent:boundary:e8b1f235 -->
+<!-- agent:boundary:5e19f539 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

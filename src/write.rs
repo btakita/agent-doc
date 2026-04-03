@@ -1161,6 +1161,12 @@ pub fn try_ipc(
         ipc_payload["frontmatter"] = serde_json::Value::String(yaml.to_string());
     }
 
+    // Log IPC write details for debugging cross-contamination
+    crate::ops_log::log_op(file, &format!(
+        "ipc_write_attempt file={} hash={} patches={} unmatched_len={}",
+        file.display(), hash, patches.len(), unmatched.trim().len()
+    ));
+
     write_ipc_and_poll(&patch_file, &ipc_payload, file, patches.len(), content_ours)
 }
 
@@ -1243,68 +1249,20 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
     let project_root = find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
 
-    // Try socket IPC first
-    if crate::ipc_socket::is_listener_active(&project_root) {
-        match crate::ipc_socket::send_reposition(
-            &project_root,
-            &canonical.to_string_lossy(),
-        ) {
-            Ok(true) => {
-                eprintln!("[commit] socket IPC reposition boundary sent");
-                return true;
-            }
-            _ => {
-                eprintln!("[commit] socket IPC reposition failed — falling back to file IPC");
-            }
-        }
-    }
-
-    let hash = match snapshot::doc_hash(file) {
-        Ok(h) => h,
-        Err(_) => return false,
-    };
-    let patches_dir = project_root.join(".agent-doc/patches");
-
-    if !patches_dir.exists() {
+    if !crate::ipc_socket::is_listener_active(&project_root) {
         return false;
     }
 
-    let patch_file = patches_dir.join(format!("{}.json", hash));
-
-    let payload = serde_json::json!({
-        "file": canonical.to_string_lossy(),
-        "patches": [],
-        "unmatched": "",
-        "reposition_boundary": true,
-    });
-
-    let json = match serde_json::to_string_pretty(&payload) {
-        Ok(j) => j,
-        Err(_) => return false,
-    };
-    if atomic_write(&patch_file, &json).is_err() {
-        return false;
-    }
-
-    eprintln!("[commit] IPC reposition boundary signal sent");
-
-    // Short poll — non-critical, don't block long
-    let timeout = std::time::Duration::from_millis(500);
-    let poll_interval = std::time::Duration::from_millis(50);
-    let start = std::time::Instant::now();
-
-    while start.elapsed() < timeout {
-        if !patch_file.exists() {
-            eprintln!("[commit] plugin repositioned boundary via IPC");
-            return true;
+    match crate::ipc_socket::send_reposition(&project_root, &canonical.to_string_lossy()) {
+        Ok(true) => {
+            eprintln!("[commit] IPC reposition boundary signal sent");
+            true
         }
-        std::thread::sleep(poll_interval);
+        _ => {
+            eprintln!("[commit] IPC reposition failed (non-fatal)");
+            false
+        }
     }
-
-    // Timeout — clean up
-    let _ = std::fs::remove_file(&patch_file);
-    eprintln!("[commit] IPC reposition timeout (non-fatal)");
-    false
 }
 
 /// Write an IPC patch file and poll for plugin ACK (file deletion).

@@ -103,6 +103,7 @@ struct StreamState {
     pane: String,
     last_capture: String,
     target: String,
+    max_lines: usize,
 }
 
 /// Entry discovered from sessions registry with mode info.
@@ -111,6 +112,7 @@ struct WatchEntry {
     pane: String,
     mode: DocMode,
     target: String,
+    max_lines: usize,
     /// Reactive mode: skip debounce for stream-mode documents.
     /// CRDT merge handles concurrent edits, so no debounce is needed.
     reactive: bool,
@@ -128,9 +130,37 @@ enum DocMode {
 /// Hash file content for convergence detection.
 fn hash_content(path: &Path) -> Option<u64> {
     let content = std::fs::read_to_string(path).ok()?;
+    // Strip boundary markers before hashing to prevent feedback loops.
+    // Boundary repositions change the marker ID each cycle, making the hash
+    // different even when no meaningful content changed. Without this,
+    // reactive-mode documents (zero debounce) enter an infinite loop:
+    // IPC write → boundary change → watch detects → re-run → IPC write → ...
+    let content = strip_boundaries_for_hash(&content);
     let mut hasher = DefaultHasher::new();
     content.hash(&mut hasher);
     Some(hasher.finish())
+}
+
+/// Limit content to the last N lines to prevent indefinite growth.
+fn limit_lines(content: &str, max_lines: usize) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.len() <= max_lines {
+        return content.to_string();
+    }
+    lines[lines.len() - max_lines..].join("\n")
+}
+
+/// Strip boundary markers from content for hash comparison.
+/// This ensures boundary-only changes don't trigger re-runs.
+fn strip_boundaries_for_hash(content: &str) -> String {
+    content
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            !(trimmed.starts_with("<!-- agent:boundary:") && trimmed.ends_with(" -->"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Check if a PID is alive via /proc.
@@ -309,6 +339,7 @@ fn run_event_loop(
                         pane: entry.pane.clone(),
                         last_capture: String::new(),
                         target: entry.target.clone(),
+                        max_lines: entry.max_lines,
                     },
                 );
                 // Reactive: also file-watch with zero debounce (CRDT handles concurrency)
@@ -392,6 +423,7 @@ fn run_event_loop(
                                     pane: entry.pane.clone(),
                                     last_capture: String::new(),
                                     target: entry.target.clone(),
+                                    max_lines: entry.max_lines,
                                 },
                             );
                         }
@@ -439,10 +471,12 @@ fn run_event_loop(
             match sessions::capture_pane(&tmux, &ss.pane) {
                 Ok(captured) => {
                     if captured != ss.last_capture {
-                        // Extract new lines since last capture
+                        // Extract new lines since last capture, limited to last 50 lines
+                        // to prevent the console component from growing indefinitely
                         let new_content = extract_new_lines(&ss.last_capture, &captured);
-                        if !new_content.is_empty() {
-                            match stream::flush_to_document(path, &new_content, &ss.target, "") {
+                        let limited = limit_lines(&new_content, ss.max_lines);
+                        if !limited.is_empty() {
+                            match stream::flush_to_document(path, &limited, &ss.target, "") {
                                 Ok(()) => {
                                     eprint!(".");
                                 }
@@ -581,7 +615,7 @@ fn discover_entries() -> Result<Vec<WatchEntry>> {
         let canonical = path.canonicalize().unwrap_or(path);
 
         // Detect mode from frontmatter
-        let (mode, target, reactive) = match std::fs::read_to_string(&canonical) {
+        let (mode, target, reactive, max_lines) = match std::fs::read_to_string(&canonical) {
             Ok(content) => match frontmatter::parse(&content) {
                 Ok((fm, _)) => {
                     let resolved = fm.resolve_mode();
@@ -590,15 +624,20 @@ fn discover_entries() -> Result<Vec<WatchEntry>> {
                             .stream_config
                             .as_ref()
                             .and_then(|sc| sc.target.clone())
-                            .unwrap_or_else(|| "exchange".to_string());
-                        (DocMode::StreamCapture, target, true)
+                            .unwrap_or_else(|| "console".to_string());
+                        let max_lines = fm
+                            .stream_config
+                            .as_ref()
+                            .and_then(|sc| sc.max_lines)
+                            .unwrap_or(50);
+                        (DocMode::StreamCapture, target, true, max_lines)
                     } else {
-                        (DocMode::FileWatch, String::new(), false)
+                        (DocMode::FileWatch, String::new(), false, 50)
                     }
                 }
-                Err(_) => (DocMode::FileWatch, String::new(), false),
+                Err(_) => (DocMode::FileWatch, String::new(), false, 50),
             },
-            Err(_) => (DocMode::FileWatch, String::new(), false),
+            Err(_) => (DocMode::FileWatch, String::new(), false, 50),
         };
 
         entries.push(WatchEntry {
@@ -606,6 +645,7 @@ fn discover_entries() -> Result<Vec<WatchEntry>> {
             pane: entry.pane.clone(),
             mode,
             target,
+            max_lines,
             reactive,
         });
     }
@@ -823,7 +863,8 @@ mod tests {
         let mut ss = StreamState {
             pane: "%42".to_string(),
             last_capture: String::new(),
-            target: "exchange".to_string(),
+            target: "console".to_string(),
+            max_lines: 50,
         };
         let capture = "claude output line 1\nclaude output line 2".to_string();
         let new_content = extract_new_lines(&ss.last_capture, &capture);

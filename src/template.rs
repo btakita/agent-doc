@@ -346,6 +346,30 @@ pub fn apply_patches_with_overrides(
         }
     }
 
+    // Post-patch: apply max_lines trimming to components that have it configured.
+    // Precedence: inline attr > components.toml > unlimited (0).
+    {
+        let max_lines_configs = load_max_lines_configs(file);
+        if let Ok(components) = component::parse(&result) {
+            for comp in &components {
+                let max_lines = comp
+                    .attrs
+                    .get("max_lines")
+                    .and_then(|s| s.parse::<usize>().ok())
+                    .or_else(|| max_lines_configs.get(&comp.name).copied())
+                    .unwrap_or(0);
+                if max_lines > 0 {
+                    let content = comp.content(&result);
+                    let trimmed = limit_lines(content, max_lines);
+                    if trimmed.len() != content.len() {
+                        let trimmed = format!("{}\n", trimmed.trim_end());
+                        result = comp.replace_content(&result, &trimmed);
+                    }
+                }
+            }
+        }
+    }
+
     // Post-patch: ensure a boundary exists at the end of the exchange component.
     // This is unconditional for template docs with an exchange — the boundary must
     // always exist for checkpoint writes to work. Checking the original doc's content
@@ -510,6 +534,28 @@ fn load_component_configs(file: &Path) -> std::collections::HashMap<String, Stri
     result
 }
 
+/// Load max_lines settings from `.agent-doc/components.toml`.
+fn load_max_lines_configs(file: &Path) -> std::collections::HashMap<String, usize> {
+    let mut result = std::collections::HashMap::new();
+    let root = find_project_root(file);
+    if let Some(root) = root {
+        let config_path = root.join(".agent-doc/components.toml");
+        if config_path.exists()
+            && let Ok(content) = std::fs::read_to_string(&config_path)
+            && let Ok(table) = content.parse::<toml::Table>()
+        {
+            for (name, value) in &table {
+                if let Some(max_lines) = value.get("max_lines").and_then(|v| v.as_integer())
+                    && max_lines > 0
+                {
+                    result.insert(name.clone(), max_lines as usize);
+                }
+            }
+        }
+    }
+    result
+}
+
 /// Default mode for a component by name.
 /// `exchange` and `findings` default to `append`; all others default to `replace`.
 fn default_mode(name: &str) -> &'static str {
@@ -517,6 +563,15 @@ fn default_mode(name: &str) -> &'static str {
         "exchange" | "findings" => "append",
         _ => "replace",
     }
+}
+
+/// Trim content to the last N lines.
+fn limit_lines(content: &str, max_lines: usize) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.len() <= max_lines {
+        return content.to_string();
+    }
+    lines[lines.len() - max_lines..].join("\n")
 }
 
 /// Apply mode logic (replace/append/prepend).
@@ -1204,5 +1259,86 @@ Some content.
 <!-- /agent:output -->";
         let result = reposition_boundary_to_end(doc);
         assert!(!result.contains("<!-- agent:boundary:"), "no boundary should be added to non-exchange");
+    }
+
+    #[test]
+    fn max_lines_inline_attr_trims_content() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = "<!-- agent:log patch=replace max_lines=3 -->\nold\n<!-- /agent:log -->\n";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "log".to_string(),
+            content: "line1\nline2\nline3\nline4\nline5\n".to_string(),
+        }];
+        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        assert!(!result.contains("line1"));
+        assert!(!result.contains("line2"));
+        assert!(result.contains("line3"));
+        assert!(result.contains("line4"));
+        assert!(result.contains("line5"));
+    }
+
+    #[test]
+    fn max_lines_noop_when_under_limit() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = "<!-- agent:log patch=replace max_lines=10 -->\nold\n<!-- /agent:log -->\n";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "log".to_string(),
+            content: "line1\nline2\n".to_string(),
+        }];
+        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        assert!(result.contains("line1"));
+        assert!(result.contains("line2"));
+    }
+
+    #[test]
+    fn max_lines_from_components_toml() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        std::fs::write(
+            dir.path().join(".agent-doc/components.toml"),
+            "[log]\npatch = \"replace\"\nmax_lines = 2\n",
+        )
+        .unwrap();
+        let doc = "<!-- agent:log -->\nold\n<!-- /agent:log -->\n";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "log".to_string(),
+            content: "a\nb\nc\nd\n".to_string(),
+        }];
+        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        assert!(!result.contains("\na\n"));
+        assert!(!result.contains("\nb\n"));
+        assert!(result.contains("c"));
+        assert!(result.contains("d"));
+    }
+
+    #[test]
+    fn max_lines_inline_beats_toml() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        std::fs::write(
+            dir.path().join(".agent-doc/components.toml"),
+            "[log]\nmax_lines = 1\n",
+        )
+        .unwrap();
+        let doc = "<!-- agent:log patch=replace max_lines=3 -->\nold\n<!-- /agent:log -->\n";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "log".to_string(),
+            content: "a\nb\nc\nd\n".to_string(),
+        }];
+        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        // Inline max_lines=3 should win over toml max_lines=1
+        assert!(result.contains("b"));
+        assert!(result.contains("c"));
+        assert!(result.contains("d"));
     }
 }

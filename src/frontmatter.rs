@@ -180,6 +180,10 @@ pub struct StreamConfig {
     /// is interleaved with response text in the target component.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_target: Option<String>,
+    /// Maximum lines for console capture (default: 50). Limits the content
+    /// written to the console component to prevent indefinite growth.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_lines: Option<usize>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]

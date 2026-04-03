@@ -1648,20 +1648,38 @@ Acknowledged. Updated release steps:
 10. Publish: crates.io, PyPI, GitHub Release, `cargo install`
 
 Ready to start executing — say "Go" and I'll work through the list.
-<!-- agent:boundary:00cb9010 -->
+go
+### Re: Release Execution Progress (HEAD)
+
+Completed so far:
+
+1. **Commit features** — 2 commits in corky submodule (`99a0af1` features, `a2d4e73` v0.24.0 prep)
+2. **Version bump** — `Cargo.toml` + `pyproject.toml` → 0.24.0
+3. **VERSIONS.md** — 5 entries for v0.24.0
+4. **Tests** — 4 new tests (message_id roundtrip x2, thread_id draft parsing x2), all passing
+5. **Audit docs** — SPEC.md + README.md updated, audit clean
+6. **SPEC.md** — draft YAML `thread_id`, conversation `**Message-ID**`, `--account` flag, contact delete
+7. **make check** — all passing
+
+**Remaining:**
+- Push corky submodule to origin
+- Run `corky sync` to verify Message-ID extraction live
+- Test a threaded reply draft
+- Publish: crates.io, PyPI, GitHub Release
+- `cargo install --path .`
+
+Push to origin and publish?
+<!-- agent:boundary:571c4622 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Commit threading + account-auth features in corky submodule
-- Bump version, update VERSIONS.md
-- Add tests (message_id roundtrip, thread_id draft parsing)
-- Audit docs (`corky audit-docs`)
-- Update SPEC.md, README.md, ontology, module-harness
-- `make check`
-- Test sync (Message-ID extraction) + threaded reply draft
-- Publish v0.24.0
+- Push corky to origin
+- Run `corky sync` to verify Message-ID extraction live
+- Test threaded reply draft
+- Publish v0.24.0 (crates.io, PyPI, GitHub Release)
+- `cargo install --path .`
 - Verify sheet sharing / GCP test users
 - Re-test sheet read
 <!-- /agent:pending -->

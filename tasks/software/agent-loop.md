@@ -233,7 +233,7 @@ compact exchange
 6. **src/git.rs** — identified as orphaned test file (safe to delete)
 7. **evals/ directory** — 30 YAML test cases for diff-interpretation, empty placeholders for other categories
 8. **YAML vs TOML decision** — keep YAML for eval cases (ecosystem standard). Discussion transferred to tasks/software/eval-runner.md
-<!-- agent:boundary:3d7e1b62 -->
+<!-- agent:boundary:a716345c -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

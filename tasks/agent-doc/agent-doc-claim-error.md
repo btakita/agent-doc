@@ -36,10 +36,10 @@ No watch daemon running — only `agent-doc start` session managers. Release bin
 All three items complete.
 
 build and install binary to test watch daemon
-### Re: Build and install (HEAD)
+### Re: Build and install
 
 Done. `cargo install --path .` installed to `~/.cargo/bin/agent-doc`. Both the `.bin/` symlink (release target) and `~/.cargo/bin/` (tmux-spawned sessions) now have the updated binary with IPC reposition simplification and max_lines support.
-<!-- agent:boundary:c7c26d17 -->
+<!-- agent:boundary:cd2f00b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

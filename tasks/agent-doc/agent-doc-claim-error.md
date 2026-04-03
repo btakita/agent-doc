@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Sync auto-start bug fixed. Unclaimed files no longer spawn sessions on tab navigation.
+Session complete. IPC reposition simplified (socket-only), max_lines= inline attribute added, release binary rebuilt.
 <!-- /agent:status -->
 
 ## Exchange
@@ -28,7 +28,13 @@ Implemented `max_lines=N` as an inline attribute on component tags. Usage: `&lt;
 - Both inline attrs and config file work; inline takes precedence.
 
 `make check` passes (clippy + all tests).
-<!-- agent:boundary:816d19a8 -->
+continue
+### Re: Watch daemon restart (HEAD)
+
+No watch daemon running — only `agent-doc start` session managers. Release binary rebuilt in-place (`cargo build --release`), so the new code (simplified IPC reposition + max_lines) takes effect on all new command invocations. Existing `start` processes shell out to the binary for each operation, so they pick up changes automatically.
+
+All three items complete.
+<!-- agent:boundary:f5f9e9b6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -36,5 +42,5 @@ Implemented `max_lines=N` as an inline attribute on component tags. Usage: `&lt;
 <!-- agent:pending patch=replace -->
 - [x] IPC reposition → FFI event
 - [x] Inline `max_lines=` attribute on component tags
-- [ ] Restart watch daemon (after FFI reposition is done)
+- [x] Restart watch daemon (after FFI reposition is done)
 <!-- /agent:pending -->

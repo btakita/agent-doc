@@ -37,6 +37,11 @@ use agent_kit::skill::SkillConfig;
 /// The SKILL.md content bundled at build time.
 const BUNDLED_SKILL: &str = include_str!("../SKILL.md");
 
+/// Bundled runbooks installed alongside the skill.
+const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
+    ("compact-exchange.md", include_str!("../runbooks/compact-exchange.md")),
+];
+
 /// Current binary version (from Cargo.toml).
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -74,12 +79,34 @@ fn resolve_root() -> Option<std::path::PathBuf> {
     None
 }
 
+/// Install bundled runbooks alongside the skill.
+/// Writes to `.claude/skills/agent-doc/runbooks/<name>`.
+fn install_runbooks(root: Option<&Path>) -> Result<()> {
+    let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
+    let base = resolved.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    let runbooks_dir = base.join(".claude/skills/agent-doc/runbooks");
+    std::fs::create_dir_all(&runbooks_dir)?;
+    for (name, content) in BUNDLED_RUNBOOKS {
+        let path = runbooks_dir.join(name);
+        // Only write if content changed (idempotent)
+        let needs_write = !path.exists()
+            || std::fs::read_to_string(&path)
+                .map(|existing| existing != *content)
+                .unwrap_or(true);
+        if needs_write {
+            std::fs::write(&path, content)?;
+        }
+    }
+    Ok(())
+}
+
 /// Install the bundled SKILL.md to the project.
 /// When `root` is None, resolves to git superproject root (or CWD fallback).
 #[allow(dead_code)]
 pub fn install_at(root: Option<&Path>) -> Result<()> {
     let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
-    config().install(resolved.as_deref())
+    config().install(resolved.as_deref())?;
+    install_runbooks(resolved.as_deref())
 }
 
 /// Public entry point (resolves to superproject root, called from main).
@@ -101,19 +128,22 @@ pub fn install_and_check_updated() -> Result<bool> {
             .unwrap_or(false);
 
     cfg.install(resolved.as_deref())?;
+    install_runbooks(resolved.as_deref())?;
     Ok(!was_current)
 }
 
 /// Install the skill for a specific harness environment.
 pub fn install_for(env: agent_kit::detect::Environment) -> Result<()> {
     let resolved = resolve_root();
-    config().install_for(env, resolved.as_deref())
+    config().install_for(env, resolved.as_deref())?;
+    install_runbooks(resolved.as_deref())
 }
 
 /// Install the skill for all supported harnesses.
 pub fn install_all() -> Result<()> {
     let resolved = resolve_root();
-    config().install_all(resolved.as_deref())
+    config().install_all(resolved.as_deref())?;
+    install_runbooks(resolved.as_deref())
 }
 
 /// Check if the installed skill matches the bundled version.
@@ -192,6 +222,19 @@ mod tests {
 
         let path = expected_path(dir.path());
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn install_creates_runbooks() {
+        let dir = tempfile::tempdir().unwrap();
+
+        install_test(Some(dir.path())).unwrap();
+        super::install_runbooks(Some(dir.path())).unwrap();
+
+        let runbook_path = dir.path().join(".claude/skills/agent-doc/runbooks/compact-exchange.md");
+        assert!(runbook_path.exists(), "runbook not found at {}", runbook_path.display());
+        let content = std::fs::read_to_string(&runbook_path).unwrap();
+        assert!(content.contains("Compact Exchange"));
     }
 
     #[test]

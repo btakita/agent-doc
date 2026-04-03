@@ -301,6 +301,24 @@ pub fn commit(file: &Path) -> Result<()> {
             if elapsed_reposition > 0 {
                 eprintln!("[perf] commit.reposition: {}ms", elapsed_reposition);
             }
+
+            // Signal plugin to refresh VCS state so the gutter reflects the commit.
+            // Without this, the IDE shows the entire response as uncommitted until
+            // the user manually refreshes the file.
+            // Uses file-based signal (vcs-refresh.signal) since the socket listener
+            // may not be active — the plugin watches .agent-doc/patches/ for both
+            // patch files and signal files.
+            if let Ok(canonical) = file.canonicalize() {
+                let project_root = crate::snapshot::find_project_root(&canonical)
+                    .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+                let signal_file = project_root.join(".agent-doc/patches/vcs-refresh.signal");
+                if signal_file.parent().is_some_and(|p| p.exists()) {
+                    match std::fs::write(&signal_file, "") {
+                        Ok(()) => eprintln!("[commit] VCS refresh signal written"),
+                        Err(e) => eprintln!("[commit] VCS refresh signal failed: {} (non-fatal)", e),
+                    }
+                }
+            }
     }
 
     let elapsed_total = t_total.elapsed().as_millis();

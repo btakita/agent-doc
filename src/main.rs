@@ -394,6 +394,10 @@ enum Commands {
     Preflight {
         /// Path to the session document
         file: PathBuf,
+        /// Omit the full document from output (only include diff).
+        /// Use on subsequent cycles when the document is already in context.
+        #[arg(long)]
+        diff_only: bool,
     },
     /// Archive old exchanges / compact component content
     Compact {
@@ -795,7 +799,7 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Commands::Preflight { file } => preflight::run(&file),
+        Commands::Preflight { file, diff_only } => preflight::run(&file, diff_only),
         Commands::Compact {
             file,
             keep,

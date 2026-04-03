@@ -130,7 +130,7 @@ object PromptPanel {
         optionsPanel.isOpaque = false
 
         val options = info.options ?: return
-        val maxLabelLen = 45
+        val maxLabelLen = 25
         for (opt in options) {
             val fullText = "[${opt.index}] ${opt.label}"
             val displayText = if (fullText.length > maxLabelLen) {

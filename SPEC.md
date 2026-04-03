@@ -799,3 +799,104 @@ agent-doc is designed for single-user, local operation. There is no authenticati
 - Avoid putting secrets (API keys, credentials) in documents or agent context.
 - For shared/collaborative use cases, wait for the planned multi-user security model (access control, session isolation, content scanning).
 - Review agent responses before sharing or publishing document content.
+
+## 11. Debounce System Gaps and Limitations
+
+The debounce subsystem manages multi-layer typing detection across editor plugins (JetBrains, VS Code, Neovim, Zed) and CLI invocations. While the architecture is sound, several known gaps exist that should inform operators and guide future improvements.
+
+### 11.1 Mtime Granularity in Route Path
+
+**Gap:** The route path relies on filesystem mtime for debouncing rapid edits. Filesystem mtime resolution varies:
+- **Coarse-grained systems** (e.g., HFS+ on macOS): 1-second resolution
+- **Fine-grained systems** (Linux ext4): ~100ms resolution
+
+When multiple edits occur within the mtime granularity window, route may miss the intermediate change and only detect the final state.
+
+**Impact:** Rare but real on macOS. User typing very fast may trigger a route call with an editor state that reflects only partial changes.
+
+**Mitigation:** Route path uses a timeout cap (10× debounce duration) to prevent indefinite hangs. Cross-process typing indicator files provide additional fallback for preflight detection.
+
+**Test coverage:** `rapid_edits_within_mtime_granularity` documents this edge case. See `src/debounce.rs`.
+
+### 11.2 Untracked File Edge Case
+
+**Gap:** Files passed to `document_changed()` are tracked in the in-process `LAST_CHANGE` map. Files never passed to `document_changed()` return `idle=true` immediately (design choice to prevent `await_idle` blocking forever on unknown files).
+
+This means the CLI cannot distinguish:
+- "File was tracked and has been idle for 2s"
+- "File was never tracked by any plugin"
+
+**Impact:** Low. The `is_tracked()` function exists to distinguish these cases, but callers must explicitly check. Non-blocking probes may conservatively assume untracked files are NOT idle.
+
+**Mitigation:** Use `is_tracked(file)` before making assumptions about untracked files. Preflight applies both mtime debounce AND typing indicator debounce (redundant but safe).
+
+**Test coverage:** `is_tracked_distinguishes_untracked_from_idle`, `await_idle_on_untracked_file_returns_immediately`. See `src/debounce.rs`.
+
+### 11.3 Hash Collision in Typing Indicator Paths
+
+**Gap:** Typing indicator files are stored in `.agent-doc/typing/<hash>` where hash is computed via `std::collections::hash_map::DefaultHasher`. DefaultHasher is non-cryptographic and designed for hash maps, not for unique identifiers.
+
+Collision probability: ~1 in 4.3 billion for random inputs. Collision is possible but extremely unlikely.
+
+**Impact:** Very low probability. If collision occurs, the most recent change wins (last write to the shared file). The collision is self-correcting in the next debounce cycle because file timestamps diverge.
+
+**Mitigation:** No action needed. Collisions are rare and self-healing. If deterministic behavior is required, consider switching to SHA256 hashing in future.
+
+**Test coverage:** `hash_collision_handling` documents detection logic. See `src/debounce.rs`.
+
+### 11.4 Reactive Mode Assumes CRDT Merge Convergence
+
+**Gap:** Watch daemon's reactive path (used for `agent_doc_write: crdt` documents) applies zero debounce, expecting instant re-submit on file change. This assumes the CRDT merge algorithm always converges to a consistent state.
+
+If a CRDT merge produces unexpected results (e.g., text duplication, loss of edits), reactive mode could cause the watch daemon to re-submit with corrupted state repeatedly.
+
+**Impact:** Medium (data loss risk if CRDT merge is broken). Mitigated by extensive CRDT testing in `src/crdt.rs` and `src/merge.rs`.
+
+**Mitigation:** CRDT implementation is battle-tested with golden-answer test cases (20-30 cases per session diff). See `agent-doc eval-runner` for continuous validation.
+
+**Test coverage:** `reactive_mode_requires_zero_debounce` documents the assumption. CRDT correctness is verified via `agent-doc test` suite.
+
+### 11.5 Status File Staleness Timeout (30s Hardcoded)
+
+**Gap:** Response status files (`.agent-doc/status/<hash>`) expire after 30 seconds with the assumption: "if no update after 30s, the operation probably crashed."
+
+This timeout is hardcoded in `get_status_via_file()` and not configurable.
+
+**Impact:** Medium. Long-running operations (slow CI, expensive LLM calls, network latency) may exceed 30s and be treated as crashed, allowing duplicate submissions.
+
+**Mitigation:** For long-running scenarios, increase the timeout (currently not exposed via config). The binary also sends `set_status()` updates, so well-instrumented operations will keep the timeout alive.
+
+**Test coverage:** `status_file_staleness_timeout`, `status_file_cleared_on_idle` document the behavior. See `src/debounce.rs`.
+
+### 11.6 Hardcoded Timing Constants in Preflight
+
+**Gap:** Preflight applies a hardcoded **1500ms** debounce window via `is_typing_via_file(&file_str, 1500)` in `preflight.rs:366`.
+
+Meanwhile, the poll-based debounce used elsewhere defaults to **500ms**. This creates asymmetry:
+- Typing indicator requires 1500ms to expire
+- Poll-based debounce (watch, route) uses 500ms
+
+Not configurable per-document; one-size-fits-all fails for slow CI systems or fast typists.
+
+**Impact:** Low to Medium. CI systems that take >1500ms to write files will appear to be typing longer than expected, potentially delaying preflight. Conversely, fast typists may experience premature debounce expiry on poll-based paths.
+
+**Mitigation:** Make timing constants configurable via frontmatter (`agent_doc_debounce_ms`, `agent_doc_typing_indicator_ms`). For now, operators can adjust via direct code modification if needed.
+
+**Test coverage:** `timing_constants_are_configurable`, `await_idle_via_file_respects_poll_interval` document current behavior. See `src/debounce.rs`.
+
+### 11.7 Recommended Improvements
+
+1. **Expose timing constants to frontmatter** — Allow per-document control via:
+   ```yaml
+   agent_doc_debounce_ms: 500
+   agent_doc_typing_indicator_ms: 1500
+   agent_doc_status_timeout_ms: 30000
+   ```
+
+2. **Switch to cryptographic hashing** (SHA256) for typing indicator and status file paths to eliminate collision risk entirely.
+
+3. **Make 30s status timeout configurable** — either via config.toml or frontmatter.
+
+4. **Mtime fallback in route path** — If mtime-detected change is stale (>1s), also check cross-process typing indicator as fallback.
+
+5. **CRDT merge monitoring** — Log merge conflicts and convergence issues to `.agent-doc/logs/merge.log` for operator visibility.

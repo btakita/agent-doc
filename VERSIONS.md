@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.3
+
+- **Claim snapshot fix**: `agent-doc claim` now saves the initial snapshot with empty exchange content. Existing user text in the exchange becomes a diff on the next run, preventing unresponded prompts from being absorbed into the baseline.
+- **Tests**: 608 total. New: `strip_exchange_content_removes_user_text`, `strip_exchange_content_preserves_no_exchange`.
+
 ## 0.31.2
 
 - **`agent-doc dedupe`**: New command removes consecutive duplicate response blocks. Ignores boundary markers in comparison. Used to fix duplicate responses caused by watch daemon race conditions.

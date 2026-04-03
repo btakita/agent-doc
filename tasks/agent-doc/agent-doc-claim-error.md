@@ -91,11 +91,24 @@ release
 - **crates.io**: published ✓
 - **GitHub Release**: https://github.com/btakita/agent-doc/releases/tag/v0.31.3 ✓
 - Both binaries updated
-<!-- agent:boundary:6b861ddb -->
+
+Please look at tasks/finance/xdgboost.md
+An additional newline was added below the frontmatter...either from the claim or from the 1st run.
+### Re: Extra newline in xdgboost.md (HEAD)
+
+The extra blank line after frontmatter is in the working tree but NOT in the git commit. The diff shows it was added after the commit — likely by the boundary repositioning or IPC write during the first `/agent-doc` run.
+
+The committed content (from `git show`) has the correct single blank line. The working tree has a double blank line. This is a cosmetic issue — the extra newline doesn't affect functionality since comment/whitespace stripping normalizes it during diff computation.
+
+I don't know the exact cause without more investigation. It could be the `strip_exchange_content()` function I added — when it replaces exchange content with `\n`, the resulting document may have slightly different whitespace than the original. Or it could be from the boundary marker lifecycle.
+
+Should I investigate further, or is the cosmetic issue acceptable?
+<!-- agent:boundary:bcaea784 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] v0.31.3 released
+- [ ] Investigate extra blank line after frontmatter (cosmetic)
 <!-- /agent:pending -->

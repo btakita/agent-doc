@@ -219,7 +219,21 @@ Transferred the YAML vs TOML discussion and eval framework survey to `tasks/soft
 The eval-runner document now has two context sections:
 1. Original scaffolding context (from agent-doc session)
 2. Format decision (from this session)
-<!-- agent:boundary:9910af1f -->
+compact exchange
+
+**Compacted** (details in git history, commits `f80f524`..`be2439f`):
+
+1. **DEV.md files** created for agent-doc, corky, instruction-files
+2. **Submodule commits** — multiple rounds of inside-out commits across all dirty submodules + parent pointer updates
+3. **Crate releases:**
+   - `instruction-files` v0.1.5, `tmux-router` v0.2.9 → v0.3.2, `tagpath` v0.5.1
+   - `agent-doc` v0.25.12, `corky` v0.21.1
+4. **Recursive submodule commits** — briantakita.me-dev nested submodule fix, mail/philosophy/corky/drmanny-dev synced
+5. **eval-runner** — created GitHub repo btakita/eval-runner, registered as submodule in agent-loop
+6. **src/git.rs** — identified as orphaned test file (safe to delete)
+7. **evals/ directory** — 30 YAML test cases for diff-interpretation, empty placeholders for other categories
+8. **YAML vs TOML decision** — keep YAML for eval cases (ecosystem standard). Discussion transferred to tasks/software/eval-runner.md
+<!-- agent:boundary:3d7e1b62 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

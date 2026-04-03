@@ -361,7 +361,7 @@ The `(HEAD)` suffix on headings creates a visual boundary in the editor's git gu
 **The fix:** The IPC reposition should send the heading WITHOUT `(HEAD)`. The `(HEAD)` should only exist in the git index (staged via `hash-object + update-index`), never in the working tree or snapshot.
 
 continue
-### Re: IPC reposition should go through FFI (HEAD)
+### Re: IPC reposition should go through FFI
 
 Agreed. The current reposition uses a file-based IPC patch (`try_ipc_reposition_boundary` in `write.rs`). Per the FFI-first pattern, this should go through the shared FFI library instead:
 
@@ -372,7 +372,7 @@ Agreed. The current reposition uses a file-based IPC patch (`try_ipc_reposition_
 This is a larger refactor (moving reposition from file-based IPC to FFI events). Tracking for the next session alongside the inline `max_lines=` attribute.
 
 The compact and watch daemon restart are also pending. Want me to compact now to reduce this document's size?
-<!-- agent:boundary:6d871794 -->
+<!-- agent:boundary:8a3c90a1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -210,9 +210,8 @@ Does any eval framework use the toml format?
 **Revised recommendation:** Keep YAML. Since eval-runner may eventually interoperate with other eval tools, datasets, or CI pipelines that expect YAML/JSONL, switching to TOML would create friction. The ecosystem alignment argument I made earlier cuts the other way here — Rust ecosystem prefers TOML for *config*, but eval cases are *data*, and the data ecosystem is YAML/JSON.
 
 If the YAML gotchas concern you, the mitigation is quoting strings that could be misinterpreted (which serde_yaml handles correctly when deserializing to `String` fields anyway).
-<!-- agent:boundary:0a4e223f -->
+<!-- agent:boundary:4c196cde -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-
 <!-- /agent:pending -->

@@ -36,7 +36,23 @@ Removed the file-based IPC fallback from `try_ipc_reposition_boundary` in `write
 - JetBrains plugin already handles `"reposition"` messages via the FFI callback
 
 `make check` passes (clippy + all 608 tests).
-<!-- agent:boundary:a83fd6b7 -->
+
+Will this file editing workflow when we are not using a plugin?
+Let's say we have an editor without a plugin with the agent document...how would it work?
+### Re: No-plugin workflow (HEAD)
+
+Without a plugin, the workflow still works — just with a minor cosmetic gap:
+
+1. **`agent-doc write`** — writes directly to disk (IPC skipped when `.agent-doc/patches/` doesn't exist). Boundary marker placed correctly by write command. Editor picks up file change via native file watcher.
+
+2. **`agent-doc commit`** — repositions boundary in snapshot (always works). `try_ipc_reposition_boundary` checks `is_listener_active()` → `false` → returns immediately. Working tree keeps old boundary position.
+
+3. **Next cycle** — next `agent-doc write` places fresh boundary, stale one cleaned up.
+
+**The gap:** Between commit and next write, the working-tree boundary is stale (old position). Cosmetic only — snapshot has correct position, diff uses snapshot. Gutter boundary briefly in wrong place, self-corrects on next response.
+
+Same behavior as before removing file-based fallback — file IPC also required `.agent-doc/patches/` (plugin install). No regression for non-plugin editors.
+<!-- agent:boundary:5923ae42 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

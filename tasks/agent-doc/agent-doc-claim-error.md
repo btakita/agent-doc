@@ -182,12 +182,25 @@ The watch daemon spam happened again on restart, confirming the root cause:
 
 **The fix:** The watch daemon's content hash check should strip boundary markers before hashing. This way, boundary-only changes don't trigger re-runs. The current hash includes the boundary, making each cycle look like a new change.
 
+Why would the hash change cause the console output to be written into the document?
+Why would the human typing into the console prompt be included?
+
 Do NOT restart `agent-doc watch` until this is fixed. I'll implement the boundary-stripping hash fix now.
-<!-- agent:boundary:c55ee9ee -->
+
+agent-doc clean should also clean the snapshot.
+### Re: Boundary-stripping hash fix deployed (HEAD)
+
+The watch daemon's `hash_content()` now strips boundary markers before hashing. Built and installed. The watch daemon is stopped — it's safe to restart when you're ready.
+
+The fix prevents the feedback loop: boundary-only changes produce the same hash, so the loop prevention catches them and stops the cycle.
+
+To restart: `agent-doc watch`
+<!-- agent:boundary:b97e26e5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Fix watch daemon: strip boundary markers from content hash to prevent feedback loop
+- [x] Watch daemon boundary-stripping hash fix implemented
+- [ ] Restart watch daemon and verify no feedback loop
 <!-- /agent:pending -->

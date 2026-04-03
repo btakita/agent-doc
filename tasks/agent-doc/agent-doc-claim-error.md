@@ -244,12 +244,36 @@ What is `agent-doc stream` used for?
 The watch daemon shouldn't use `StreamCapture` for skill-managed sessions. The `discover_entries()` function in `watch.rs` sets `DocMode::StreamCapture` based on `resolved.is_crdt()` — it should instead check whether the session was started via `agent-doc stream` (which sets a specific process pattern) vs `claim`/`route` (which starts Claude Code, not `agent-doc stream`).
 
 The simplest fix: only use `StreamCapture` when the pane is actually running `agent-doc stream` (check the process name), not when it's running Claude Code (`claude` or `agent-doc`).
-<!-- agent:boundary:576ffbf1 -->
+
+I rememeber wanting an element that is in replace mode, so show the realtime stream.
+This element is not agent:exchange. It could be agent:console. agent:console should default to mode=replace. agent:console in replace mode should be limited to the fast few messages to avoid expanding indefinately.
+### Re: agent:console component for real-time stream (HEAD)
+
+Good design direction. The stream capture output should go to a **dedicated component** with replace mode, not the exchange.
+
+**`agent:console` component:**
+- `mode=replace` — each capture cycle replaces the previous content (no accumulation)
+- Limited to last N lines (e.g., 50) to prevent indefinite expansion
+- Shows real-time Claude CLI output (thinking, tool calls, progress)
+- Separate from `agent:exchange` which is the persistent conversation
+
+This would fix the spam issue by design: stream capture writes to `agent:console` (replace, bounded), not `agent:exchange` (append, unbounded). Even if the capture includes terminal UI spam, it gets replaced on the next cycle instead of accumulating.
+
+**Implementation:**
+1. Add `agent:console` to scaffold (claim.rs)
+2. Watch daemon stream capture targets `console` instead of `exchange`
+3. `flush_to_document` uses replace mode for console
+4. Limit to last 50 lines before writing
+
+This is a cleaner architecture than trying to distinguish stream-mode vs skill-mode sessions. Both modes can use the same capture → console path safely.
+
+Should I implement this, or is this for a future session?
+<!-- agent:boundary:68e45e8c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Root cause identified
-- [ ] Fix: only use StreamCapture when pane runs `agent-doc stream`, not Claude Code
+- [x] Root cause identified (stream capture → exchange)
+- [ ] Implement `agent:console` component (replace mode, bounded, stream target)
 <!-- /agent:pending -->

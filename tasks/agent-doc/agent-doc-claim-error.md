@@ -268,12 +268,31 @@ This would fix the spam issue by design: stream capture writes to `agent:console
 This is a cleaner architecture than trying to distinguish stream-mode vs skill-mode sessions. Both modes can use the same capture → console path safely.
 
 Should I implement this, or is this for a future session?
-<!-- agent:boundary:450ac9cc -->
+Implement now
+### Re: agent:console implemented (HEAD)
+
+**Changes:**
+1. **watch.rs:** Stream capture target changed from `"exchange"` to `"console"` (default)
+2. **watch.rs:** Added `limit_lines()` — captured content limited to last 50 lines
+3. **claim.rs:** Scaffold now includes `&lt;!-- agent:console patch=replace --&gt;` section
+4. **claim.rs:** `components.toml` default includes `[console] mode = "replace"`
+
+Stream capture now writes to a dedicated `console` component with replace mode. Terminal UI spam goes into console (replaced each cycle, bounded to 50 lines) instead of exchange (appended forever, unbounded).
+
+- `make check`: 608 tests pass
+- Both binaries updated
+
+The watch daemon is safe to restart now. To test: `agent-doc watch`
+
+Note: existing documents need a `&lt;!-- agent:console patch=replace --&gt;` section added manually (or re-claim). New documents get it automatically.
+<!-- agent:boundary:ab34c6ae -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Root cause identified (stream capture → exchange)
-- [ ] Implement `agent:console` component (replace mode, bounded, stream target)
+- [x] agent:console component implemented
+- [x] Stream capture targets console (replace, bounded 50 lines)
+- [ ] Restart watch daemon to verify no spam
+- [ ] Add agent:console to existing documents
 <!-- /agent:pending -->

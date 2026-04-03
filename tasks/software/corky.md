@@ -1599,107 +1599,45 @@ Go
 - All existing roundtrip, dedup, label accumulation, slug collision tests pass
 - Build compiles with `make build` (GCP credentials via `pass`)
 
-Ready to commit in corky submodule. Note: there are also prior uncommitted changes (account-based auth `--account` flag on doc commands). Commit everything together or split?
- ▐▛███▜▌   Claude Code v2.1.89
-▝▜█████▛▘  Opus 4.6 (1M context) · Claude Max
-  ▘▘ ▝▝    ~/work/btakita/agent-loop/src/corky
+What is pending for a release?
+### Re: Release Pending (HEAD)
 
-● All 373+ tests pass, clippy clean. Now let me verify the roundtrip test actually tests message_id. The first test
-  (test_single_message_roundtrip) constructs a Message with message_id: None — let me check if the roundtrip preserves
-  it, and also verify that a Some(...) value roundtrips correctly.
-   message_id: None — let me che
-  Read 1 file (ctrl+o to expand)
+Current version is **v0.23.0** (published). Uncommitted changes for next release:
 
-● The test doesn't assert on message_id. That's fine for now — the existing tests confirm compilation and the basic
-  structure works. The None case means no **Message-ID** line is written, which is backward compatible.
+**Feature 1 — Gmail API threading (2 bugs fixed):**
+- Message-ID extraction during sync (`types.rs`, `gmail_api_sync.rs`, `markdown.rs`)
+- `thread_id` field in draft YAML + `threadId` in Gmail API requests (`draft/mod.rs`)
+- All importers updated (`imap`, `sms`, `slack`, `telegram`)
+- Tests updated (22 `Message` constructions)
 
-  Now let me write the response back to the document.
+**Feature 2 — Account-based auth for doc commands (prior uncommitted):**
+- `--account` flag on `doc upload`, `doc read`, `doc write`, `doc sheet`
+- `get_access_token_for_user()` in `gmail_auth.rs` (login hint support)
+- CLI + main dispatch updated
 
-  Re: Build & Test Results
+**Before release:**
+1. Commit both features in corky submodule
+2. Bump version in `Cargo.toml` + `pyproject.toml`
+3. Update `VERSIONS.md` with new entries
+4. Update `SPEC.md` (threading fields, `--account` flag)
+5. `make check` (already passing)
+6. Run `corky sync` to verify Message-ID extraction in practice
+7. Test a threaded reply draft to verify `threadId` works end-to-end
+8. Publish: crates.io, PyPI, GitHub Release, `cargo install`
 
-  make check passes clean — 373+ tests, clippy clean. Changes:
-
-  - Fixed message_id: None in all test Message constructions (22 instances in tests/test_sync.rs)
-  - All existing roundtrip, dedup, label accumulation, slug collision tests pass
-  - Build compiles with make build (GCP credentials via pass)
-
-  The changes are ready to commit in the corky submodule. Also noted: there are prior uncommitted changes in the
-  submodule (account-based auth for --account flag on doc commands). Want me to commit everything together or split the
-   threading fixes into a separate commit?
-   collision tests pass
-  Read 1 file (ctrl+o to expand)
-
-● CWD drifted to the corky submodule. Let me use the absolute path.
-  absolute path.e ready to commi
-  Read 1 file (ctrl+o to expand)
-
-● Bash(agent-doc commit /home/brian/work/btakita/agent-loop/tasks/software/corky.md)
-  ⎿  [commit] WARNING: file is 508 bytes larger than snapshot for /home/brian/work/btakita/agent-loop/tasks/software/corky.md — possible out-of-band write (snap=84911, file=85419)
-     [perf] commit.staging (hash_object+update-index): 3ms
-     [perf] commit.git_commit: 7ms
-     … +7 lines (ctrl+o to expand)
-
-● Done. All threading fixes implemented and tests passing. Waiting for your decision on how to commit in the corky submodule — together with the --account auth changes, or split.
-
-✻ Churned for 2m 31s
-
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)
- ▐▛███▜▌   Claude Code v2.1.89
-▝▜█████▛▘  Opus 4.6 (1M context) · Claude Max
-  ▘▘ ▝▝    ~/work/btakita/agent-loop/src/corky
-
-● All 373+ tests pass, clippy clean. Now let me verify the roundtrip test actually tests message_id. The first test
-  (test_single_message_roundtrip) constructs a Message with message_id: None — let me check if the roundtrip preserves
-  it, and also verify that a Some(...) value roundtrips correctly.
-   message_id: None — let me che
-  Read 1 file (ctrl+o to expand)
-
-● The test doesn't assert on message_id. That's fine for now — the existing tests confirm compilation and the basic
-  structure works. The None case means no **Message-ID** line is written, which is backward compatible.
-
-  Now let me write the response back to the document.
-
-  Re: Build & Test Results
-
-  make check passes clean — 373+ tests, clippy clean. Changes:
-
-  - Fixed message_id: None in all test Message constructions (22 instances in tests/test_sync.rs)
-  - All existing roundtrip, dedup, label accumulation, slug collision tests pass
-  - Build compiles with make build (GCP credentials via pass)
-
-  The changes are ready to commit in the corky submodule. Also noted: there are prior uncommitted changes in the
-  submodule (account-based auth for --account flag on doc commands). Want me to commit everything together or split the
-   threading fixes into a separate commit?
-   collision tests pass
-  Read 1 file (ctrl+o to expand)
-
-● CWD drifted to the corky submodule. Let me use the absolute path.
-  absolute path.e ready to commi
-  Read 1 file (ctrl+o to expand)
-
-● Bash(agent-doc commit /home/brian/work/btakita/agent-loop/tasks/software/corky.md)
-  ⎿  [commit] WARNING: file is 508 bytes larger than snapshot for /home/brian/work/btakita/agent-loop/tasks/software/corky.md — possible out-of-band write (snap=84911, file=85419)
-     [perf] commit.staging (hash_object+update-index): 3ms
-     [perf] commit.git_commit: 7ms
-     … +7 lines (ctrl+o to expand)
-
-● Done. All threading fixes implemented and tests passing. Waiting for your decision on how to commit in the corky submodule — together with the --account auth changes, or split.
-
-✻ Churned for 2m 31s
-
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)
-<!-- agent:boundary:c08d6e32 -->
+**Pending items from doc (lower priority):**
+- Verify Google Sheets sharing / GCP test users
+- Re-test sheet read
+<!-- agent:boundary:1b7065c7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- Commit threading + account-auth features in corky submodule
+- Bump version, update VERSIONS.md + SPEC.md
+- Test sync (Message-ID extraction) + threaded reply draft
+- Publish v0.24.0
 - Verify sheet sharing / GCP test users
 - Re-test sheet read
 <!-- /agent:pending -->

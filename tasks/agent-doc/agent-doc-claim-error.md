@@ -129,11 +129,23 @@ This document (`agent-doc-claim-error.md`) has correct whitespace after frontmat
 The fix for xdgboost: simply edit the file to remove the extra blank line. It won't recur on new claims because the claim snapshot fix saves with empty exchange (not the full document).
 
 This is resolved — no code change needed.
-<!-- agent:boundary:367b98d5 -->
+
+Why did tasks/software/corky.md have a double patch?
+### Re: Third duplicate in corky.md — watch daemon wasn't restarted (HEAD)
+
+Ran `agent-doc dedupe` — removed duplicate `### Re: Build & Test Results` (541 bytes).
+
+The drift log shows the second duplicate at 15:23, after the busy guard binary was built at 15:17. But the watch daemon process was still running the OLD binary from before the fix. The build stamp mechanism would detect the mismatch and clear locks, but it doesn't restart the watch daemon.
+
+**Root cause:** The watch daemon needs to be restarted after every `cargo build --release` to pick up the new binary. The daemon is a long-running process that was started before the busy guard was added.
+
+The daemon should be restarted now. Was `agent-doc watch --stop && agent-doc watch` run?
+<!-- agent:boundary:6598021f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] All items complete
+- [ ] Restart watch daemon to pick up busy guard
 <!-- /agent:pending -->

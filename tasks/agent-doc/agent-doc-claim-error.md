@@ -78,14 +78,27 @@ Released agent-doc v0.31.4:
 
 The FFI Plugin + JB Plugin does not refresh the current file...so the precommit git state showed the entire response patch as being uncommitted.
 When I ran the Refresh file command on the file...the commit was recognized.
-### Re: VCS refresh after commit (HEAD)
+### Re: VCS refresh after commit
 
 The issue: after `agent-doc commit`, the JetBrains plugin's VCS state is stale because the commit happens via `git hash-object + update-index` (no working tree write), so IntelliJ doesn't detect the commit.
 
 **Fix:** Added `send_vcs_refresh` call after commit in `git.rs:304-313`. The `vcs_refresh` IPC message tells the plugin to call `GitRepositoryManager.update()`, refreshing gutter markers.
 
 Binary rebuilt and installed. Next commit should auto-refresh VCS state.
-<!-- agent:boundary:4e21d2c8 -->
+
+Please look through the git history over the past few hours.
+There was a bug that committed updates to tasks/**/*.md files that stream the claude console into the agent documents. A tell is adding ` `.
+Please squash these commits with the surrounding commits to make this unwanted history to go away.
+### Re: VCS refresh after commit (HEAD)
+
+The issue: after `agent-doc commit`, IntelliJ's VCS state is stale because the commit uses `git hash-object + update-index` (no working tree change for IntelliJ to detect).
+
+**Root cause:** The socket IPC listener wasn't active (plugin uses file-based IPC via `.agent-doc/patches/`). The initial socket-based fix didn't fire.
+
+**Fix:** Write `vcs-refresh.signal` to `.agent-doc/patches/` after commit. The plugin already watches for this file (PatchWatcher.kt:115) and calls `refreshVcs()` on detection.
+
+Binary rebuilt and installed. This commit should trigger VCS refresh — check gutter markers.
+<!-- agent:boundary:ab2c4556 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

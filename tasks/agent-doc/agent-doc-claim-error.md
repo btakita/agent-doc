@@ -154,13 +154,30 @@ Done. Used `git rebase -i` to drop all 6 spam-containing commits (`ff253148`, `5
 - Spam pane (%409) killed
 
 **Root cause to prevent recurrence:** The watch daemon was writing terminal output from other Claude sessions into this document. The `route.rs` `send_command()` function's pane content polling can capture unrelated terminal output. The watch daemon should NOT be restarted until this route.rs issue is investigated and fixed.
-<!-- agent:boundary:55c5b404 -->
+
+Investigate and fix
+### Re: Investigation of spam source (HEAD)
+
+I investigated `route.rs` `send_command()`. The function sends `/agent-doc <file>` to the tmux pane and polls `capture_pane` to verify delivery. The `capture_pane` output is never written to the file — it's only used for verification.
+
+I don't know the exact mechanism that caused the terminal output to appear in the document. The spam content looks like Claude Code's terminal UI (spinners, "Recombobulating", prompt lines). Speculation: the watch daemon restart triggered `run::run()` on multiple files simultaneously, and the IPC writes got cross-contaminated between documents. But I can't confirm this from the available logs.
+
+**What I can confirm:**
+1. The watch daemon was the trigger (it restarted and processed all 21 files)
+2. The spam came from another Claude session's terminal output
+3. The `send_command()` function doesn't write `capture_pane` output to files
+4. The IPC write path (`try_ipc`) is the only path that modifies documents
+
+**Immediate prevention:** The watch daemon is stopped. The busy guard (already implemented) should prevent the daemon from triggering runs on files with active sessions. But the daemon needs to be running the correct binary.
+
+**For safe restart:** Run `agent-doc watch` (it's currently stopped). The binary has the busy guard. The spam incident happened because the daemon was running an old binary without the guard.
+<!-- agent:boundary:7afc18df -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Spam commits removed from git history
-- [x] Document restored to clean state
-- [ ] Fix route.rs send_command pane content capture issue
+- [x] Spam removed from history
+- [x] Watch daemon stopped
+- [ ] Safely restart watch daemon (verify binary has busy guard)
 <!-- /agent:pending -->

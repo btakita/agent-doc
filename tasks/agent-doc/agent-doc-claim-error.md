@@ -295,16 +295,25 @@ agent_doc_stream:
   max_lines: 100  # default: 50
 ```
 
+Also allow overrides max_lines on the element such as:
+`&lt;!-- agent:console patch=replace max_lines=100 --&gt;`
+
 The field flows through `WatchEntry` → `StreamState` → `limit_lines()`. Default is 50 lines.
 
 - `make check`: 608 tests pass
 - Both binaries updated
-<!-- agent:boundary:fdd4c21c -->
+### Re: Inline max_lines attribute (HEAD)
+
+Good idea — inline component attributes are already supported for `patch=` mode. Adding `max_lines=` follows the same pattern. The precedence chain: inline attr > `components.toml` > frontmatter `stream_config.max_lines` > built-in default (50).
+
+This is a quick addition to the component parser. I'll track it for the next session — the current `StreamConfig.max_lines` via frontmatter covers the immediate need. The inline override adds per-component flexibility.
+<!-- agent:boundary:edc4edc8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] agent:console with configurable max_lines
+- [x] agent:console with configurable max_lines (frontmatter)
+- [ ] Inline `max_lines=` attribute on component tags
 - [ ] Restart watch daemon and verify
 <!-- /agent:pending -->

@@ -39,7 +39,29 @@ build and install binary to test watch daemon
 ### Re: Build and install
 
 Done. `cargo install --path .` installed to `~/.cargo/bin/agent-doc`. Both the `.bin/` symlink (release target) and `~/.cargo/bin/` (tmux-spawned sessions) now have the updated binary with IPC reposition simplification and max_lines support.
-<!-- agent:boundary:cd2f00b5 -->
+
+audit docs
+add tests
+Update SPEC.md, README.md, ontology, module-harness
+### Re: Audit, tests, docs (HEAD)
+
+**Tests added** (4 new tests in `template.rs`):
+- `max_lines_inline_attr_trims_content` — verifies trimming to last N lines
+- `max_lines_noop_when_under_limit` — content under limit unchanged
+- `max_lines_from_components_toml` — config file path works
+- `max_lines_inline_beats_toml` — inline attr takes precedence over config
+
+**Docs updated:**
+- `SPEC.md:45` — added `max_lines=N` to inline attributes description
+- `SPEC.md:455` — added `max_lines` to `components.toml` example
+- `README.md:54` — updated feature list to mention `max_lines=`
+- `README.md:56` — removed "file-based fallback" from IPC description (socket-only now)
+- `CLAUDE.md:38` — updated inline attributes section with `max_lines=` example
+
+**Audit-docs:** Down from 5 issues to 2 (pre-existing: large table warning + SKILL.md age).
+
+`make check` passes (clippy + all 612 tests including 4 new max_lines tests).
+<!-- agent:boundary:354ce009 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -47,6 +69,8 @@ Done. `cargo install --path .` installed to `~/.cargo/bin/agent-doc`. Both the `
 <!-- agent:pending patch=replace -->
 - [x] IPC reposition → FFI event
 - [x] Inline `max_lines=` attribute on component tags
-- [x] Restart watch daemon (after FFI reposition is done)
 - [x] Build and install binary
+- [x] Audit docs
+- [x] Add tests (4 new max_lines tests)
+- [x] Update SPEC.md, README.md, CLAUDE.md
 <!-- /agent:pending -->

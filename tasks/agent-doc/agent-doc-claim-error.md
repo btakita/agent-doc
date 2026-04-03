@@ -29,12 +29,12 @@ Implemented `max_lines=N` as an inline attribute on component tags. Usage: `&lt;
 
 `make check` passes (clippy + all tests).
 continue
-### Re: Watch daemon restart (HEAD)
+### Re: Watch daemon restart
 
 No watch daemon running — only `agent-doc start` session managers. Release binary rebuilt in-place (`cargo build --release`), so the new code (simplified IPC reposition + max_lines) takes effect on all new command invocations. Existing `start` processes shell out to the binary for each operation, so they pick up changes automatically.
 
 All three items complete.
-<!-- agent:boundary:f5f9e9b6 -->
+<!-- agent:boundary:36223f75 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

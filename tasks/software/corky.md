@@ -1632,7 +1632,7 @@ Update SPEC.md, README.md, ontology, module-harness
 **Pending items from doc (lower priority):**
 - Verify Google Sheets sharing / GCP test users
 - Re-test sheet read
-### Re: Updated Release Checklist (HEAD)
+### Re: Updated Release Checklist
 
 Acknowledged. Updated release steps:
 
@@ -1648,7 +1648,7 @@ Acknowledged. Updated release steps:
 10. Publish: crates.io, PyPI, GitHub Release, `cargo install`
 
 Ready to start executing — say "Go" and I'll work through the list.
-<!-- agent:boundary:e67bb8c7 -->
+<!-- agent:boundary:00cb9010 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -75,7 +75,17 @@ Released agent-doc v0.31.4:
 6. `cargo install --path .` — binary installed to `~/.cargo/bin/`
 
 `agent-doc --version` → `agent-doc 0.31.4`
-<!-- agent:boundary:b54789e1 -->
+
+The FFI Plugin + JB Plugin does not refresh the current file...so the precommit git state showed the entire response patch as being uncommitted.
+When I ran the Refresh file command on the file...the commit was recognized.
+### Re: VCS refresh after commit (HEAD)
+
+The issue: after `agent-doc commit`, the JetBrains plugin's VCS state is stale because the commit happens via `git hash-object + update-index` (no working tree write), so IntelliJ doesn't detect the commit.
+
+**Fix:** Added `send_vcs_refresh` call after commit in `git.rs:304-313`. The `vcs_refresh` IPC message tells the plugin to call `GitRepositoryManager.update()`, refreshing gutter markers.
+
+Binary rebuilt and installed. Next commit should auto-refresh VCS state.
+<!-- agent:boundary:4e21d2c8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -83,7 +93,6 @@ Released agent-doc v0.31.4:
 <!-- agent:pending patch=replace -->
 - [x] IPC reposition → FFI event
 - [x] Inline `max_lines=` attribute on component tags
-- [x] Build and install binary
-- [x] Audit docs, tests, doc updates
-- [x] Release v0.31.4 (crates.io + GitHub Release)
+- [x] Release v0.31.4
+- [ ] VCS refresh after commit — verify fix works
 <!-- /agent:pending -->

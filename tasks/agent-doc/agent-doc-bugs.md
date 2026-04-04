@@ -276,7 +276,7 @@ if window_count <= 1 {
 The original window closure was likely caused by pane processes dying (not stashing). When all panes in a window exit, tmux closes the window. This guard prevents sync from stashing the last pane, but can't prevent process death.
 
 **Built, tested (38 pass), installed.** Both the symlink binary and `~/.cargo/bin/agent-doc` are updated.
-<!-- agent:boundary:321df0c4 -->
+<!-- agent:boundary:6d08c014 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

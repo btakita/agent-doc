@@ -1836,7 +1836,7 @@ Updated both to use "By identifying and extracting 12 runbooks, I cut 212 lines.
 
 **Blog post** line 30 also updated to match.
 publish blog post
-### Re: Blog post published (HEAD)
+### Re: Blog post published
 
 Committed and pushed through all three repos (briantakita.me → briantakita.me-dev → agent-loop). CI deploy is in progress.
 
@@ -1846,10 +1846,34 @@ Changes deployed:
 - Problem statement: "by identifying and extracting 12 runbooks, I cut 212 lines — a 28% reduction"
 - Real examples: full breakdown (63 lines from instruction file + 149 from skill files)
 - No jargon — generic framing throughout
-<!-- agent:boundary:5f27bc92 -->
+
+> The loading model is orthogonal — both rules and runbooks can be eager or lazy.
+
+Is this true? Can runbooks be eagerly loaded? I guess they can but it would need to be explicit in the AGENTS.md/CLAUDE.md or SKILLS.md.
+
+Also, most rules implementations only support eager loading.
+
+> What differs is the content type. A rule is guidance. A runbook is a checklist. Naming them differently tells the agent (and the human) what to expect when they open the file.
+
+This is a good point.
+### Re: "The loading model is orthogonal" — revised (HEAD)
+
+You're right on both counts. The "orthogonal" framing was technically true but misleading — it implied eagerly-loaded runbooks are reasonable when the whole point is lazy loading. And most rules implementations *are* eager-only (Cursor "Always", Windsurf, Zed).
+
+Revised the blog post paragraph from:
+
+> The loading model is orthogonal — both rules and runbooks can be eager or lazy.
+
+To:
+
+> In practice, rules are typically always-on — loaded at session start to shape every interaction. Runbooks are the opposite: on-demand procedures loaded only when the agent reaches that specific task. What differs is both the content type and the loading expectation.
+
+This is more honest about how the ecosystem actually works. Ready to commit and push when you say.
+<!-- agent:boundary:64f5750f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
+- Blog post: commit + push revised "runbooks vs rules" paragraph
 - LinkedIn post: revised draft (active voice), pending your edits + publish
 - Cleanup: remove stale directories
 <!-- /agent:pending -->

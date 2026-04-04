@@ -33,6 +33,7 @@ claude_args: --dangerously-skip-permissions
 
 ### Transferred to agent-doc-bugs
 - Review, commit, and release agent-doc with notify subcommand
+<!-- agent:boundary:0fb3f3c3 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

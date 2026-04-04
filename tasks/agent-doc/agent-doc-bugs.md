@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Fixed last-pane guard bug in tmux-router sync — window 0 will no longer close
+Sync too aggressive — stashes claimed panes on editor navigation; needs claimed-pane guard
 <!-- /agent:status -->
 
 ## Exchange
@@ -284,8 +284,7 @@ Now the agent-doc window is showing 1 pane. Why?
 
 Now agent-doc is at 2:agent-doc...not 0:agent-doc.
 
-I called `Run Agent Doc` from th
-### Re: Why were all panes removed from the agent-doc window? (HEAD)
+### Re: Why were all panes removed from the agent-doc window?
 
 Found the bug. It was NOT in agent-doc — it was in **tmux-router** `sync.rs:687-701`.
 
@@ -310,7 +309,36 @@ if remaining <= 1 {
 ```
 
 **Built, tested (623 pass across all suites), installed.** Both symlink and `~/.cargo/bin/agent-doc` updated.
-<!-- agent:boundary:4b4f75d7 -->
+I called `Run Agent Doc` from the JB Plugin, a new 3:agent-doc window was created and selected. Now the tmux session has 3 windows. Why?
+### Re: Pane loss on editor navigation — deeper issue (HEAD)
+
+My earlier fix only covered ONE stash path (the "all unmanaged" path at sync.rs:687). But the **detach path** (sync.rs:1027-1061) is the main culprit during navigation:
+
+When you navigate the left editor away from agent-doc-bugs.md:
+1. Editor sends updated file list to sync (agent-doc-bugs.md removed)
+2. Sync sees pane %433 as "unwanted" (file no longer in editor split)
+3. Detach path stashes %433 (the last-pane guard only protects if it's the ONLY pane)
+4. With 2 panes in the window, the guard allows stashing 1 of them
+
+When you navigate back:
+5. Sync fires again, tries to find pane for agent-doc-bugs.md
+6. Pane %433 is now in stash (or worse — moved to session 1 via rescue logic)
+7. Sync creates new arrangement → different window index
+
+**Current damage visible in tmux:**
+- Two windows named `agent-doc` (index 0 and 3) in session 5
+- Pane %433 migrated to session 1 (check: `1:1.0: %433`)
+- Registry has stale window IDs: `%433 → @7`, `%434 → @192`
+
+**Root cause:** Sync is too aggressive. Brief editor navigation (switching tabs) triggers full pane teardown/rebuild. Stashing should have a grace period or a "pinned" concept for claimed panes.
+
+**Possible fixes:**
+1. **Don't stash claimed panes** — if a pane has a session in `sessions.json`, never stash it on navigation events. Only stash truly orphaned panes.
+2. **Debounce stash** — don't stash immediately on file change; wait for a settle period (e.g., 2s) to handle tab-switching without pane churn.
+3. **Pin registered panes** — treat panes in the registry as "pinned" to their window; only explicit user action (or `--force`) can stash them.
+
+Option 1 is the simplest and most correct: claimed panes should never be stashed by sync. The user explicitly claimed them — sync should respect that.
+<!-- agent:boundary:d0ca511d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -323,5 +351,6 @@ if remaining <= 1 {
 - [x] Fix: claim should be atomic
 - [x] Remove agent:console from default scaffold (already done)
 - [x] Suppress verbose git status in commit output
-- [x] Fix: window closure — last-pane guard missing in tmux-router unmanaged-files stash path
+- [x] Fix: window closure — last-pane guard in unmanaged stash path
+- [ ] Fix: sync stashes claimed panes on editor navigation — needs "don't stash claimed" guard
 <!-- /agent:pending -->

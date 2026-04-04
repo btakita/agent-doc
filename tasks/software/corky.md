@@ -1649,7 +1649,7 @@ Acknowledged. Updated release steps:
 
 Ready to start executing — say "Go" and I'll work through the list.
 go
-### Re: Release Execution Progress (HEAD)
+### Re: Release Execution Progress
 
 Completed so far:
 
@@ -1669,17 +1669,50 @@ Completed so far:
 - `cargo install --path .`
 
 Push to origin and publish?
-<!-- agent:boundary:e8ca1a94 -->
+
+push to origin.
+tasks/briantakita.me.md transferred a task here. agent-doc should have written the prompt of the transfer in this file. Why did it not happen?
+What is the status of the pending release and the transferred task.
+### Re: Push & Transfer Investigation (HEAD)
+
+**Push to origin** — Done. Corky pushed 4 commits to `origin/main` (up to `a2d4e73`).
+
+**Why didn't the briantakita.me transfer write to this file?** — agent-doc sessions are single-file. The briantakita.me session can only write to `tasks/briantakita.me.md`. When it "transferred" the task, it wrote a summary in its own exchange (lines 2176-2189) and said "Open `tasks/software/corky.md` and add this to the exchange when ready." It expected either:
+1. You to manually paste the prompt here, or
+2. A separate `/agent-doc tasks/software/corky.md` session to pick it up
+
+agent-doc has no cross-file write capability — each session only manages its own document. This is a current limitation.
+
+**Transferred task summary** (from briantakita.me):
+- `corky skill install` should manage both email and linkedin skills
+- Need separate LinkedIn SKILL.md (not merged into email)
+- Shared conventions (never send without approval, links in first comment)
+- Replace `.agent/runbooks/linkedin-post.md` with corky-managed skill
+
+**Pending release status (v0.24.0):**
+- [x] Commit features — done (2 commits)
+- [x] Version bump — 0.24.0
+- [x] VERSIONS.md — updated
+- [x] Tests — passing
+- [x] Audit docs — clean
+- [x] Push to origin — **just completed**
+- [ ] Run `corky sync` to verify Message-ID extraction live
+- [ ] Test threaded reply draft
+- [ ] Publish: crates.io, PyPI, GitHub Release
+- [ ] `cargo install --path .`
+
+Ready to continue the release (sync test, publish) or pivot to the skill architecture task?
+<!-- agent:boundary:160d21ce -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Push corky to origin
-- Run `corky sync` to verify Message-ID extraction live
-- Test threaded reply draft
 - Publish v0.24.0 (crates.io, PyPI, GitHub Release)
 - `cargo install --path .`
+- Run `corky sync` to verify Message-ID extraction live
+- Test threaded reply draft
+- Corky skill architecture: `corky skill install` for email + linkedin skills
 - Verify sheet sharing / GCP test users
 - Re-test sheet read
 <!-- /agent:pending -->

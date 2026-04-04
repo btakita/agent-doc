@@ -335,7 +335,7 @@ Plugin zip: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.41.zi
 3. Memory note: always bump `gradle.properties pluginVersion` on plugin changes
 
 For now, adding a memory note. A deterministic check would be better long-term — could add a gradle task that compares the current version against the last git tag for the plugin.
-<!-- agent:boundary:b59b8d89 -->
+<!-- agent:boundary:fd54d655 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

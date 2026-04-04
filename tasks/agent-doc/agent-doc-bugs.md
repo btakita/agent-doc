@@ -692,7 +692,7 @@ The receiving agent sees the blockquote annotation in the diff, knows where cont
 **Files changed:** `extract.rs` — added `format_source_annotation()`, wrapped content in both `run()` and `transfer()`.
 
 Built, tested (38 pass), installed.
-<!-- agent:boundary:54f8376a -->
+<!-- agent:boundary:f9b087c4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

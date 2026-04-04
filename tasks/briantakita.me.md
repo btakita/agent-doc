@@ -2116,7 +2116,7 @@ Live at: https://briantakita.me/post/2026-04-03-agent-runbooks-on-demand-procedu
 The LinkedIn teaser opener ("Is your CLAUDE.md carrying too much weight?") is separate from the blog post — no blog changes needed.
 
 Publish edited LinkedIn teaser.
-### Re: LinkedIn teaser — final paste content (HEAD)
+### Re: LinkedIn teaser — final paste content
 
 Post body and first comment formatted above in the console. Steps:
 
@@ -2125,11 +2125,21 @@ Post body and first comment formatted above in the console. Steps:
 3. Verify both visible
 
 Let me know when it's live and I'll mark it done.
-<!-- agent:boundary:be1deb6e -->
+the linkedin-post runbook should use corky. Should this runbook be moved into corky with the `corky skill install` SKILL.md?
+### Re: LinkedIn runbook → corky (HEAD)
+
+Yes, corky already has LinkedIn in its architecture (`[profiles.btakita.linkedin]`, `social` module roadmap). And `corky skill install` exists.
+
+**But not yet.** The current runbook is a 40-line markdown checklist. Building it into corky means adding a `linkedin` subcommand, API/browser integration, and `.corky.toml` config. That's a feature, not a file move.
+
+**For now:** Keep `.agent/runbooks/linkedin-post.md` as-is. When corky gets LinkedIn support, the runbook becomes the spec for the feature — then it gets replaced by `corky linkedin post`.
+
+The runbook pattern working exactly as designed here — lightweight procedure now, productized feature later.
+<!-- agent:boundary:565ca895 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn blog teaser: POSTING NOW — paste from console
+- LinkedIn blog teaser: paste from console and post
 - Video: edit out WordPress admin section, then post
 - Second blog post + video: target Wed/Thu Apr 9-10
 - Cleanup: remove stale directories

@@ -558,7 +558,7 @@ The sessions are still alive but lost windows during the sync tests. When panes 
 - Session 5's `zsh` window (%438) and `stash` window (%428, %437) were consumed during the manual fixes and sync test runs
 
 The sessions themselves are fine — they just have fewer windows. No data was lost; the Claude Code processes in %433 and %431 are still running.
-<!-- agent:boundary:2539da90 -->
+<!-- agent:boundary:84a06f0f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -399,6 +399,35 @@ fn run_with_options(
     tmux: &Tmux,
 ) -> Result<()> {
     tracing::debug!(cols = ?col_args, window, focus, auto_start, "sync::run_with_options start");
+
+    // Serialize sync calls via file lock. Concurrent syncs (from rapid tab switches)
+    // race against each other's stash operations, causing pane bouncing. A second sync
+    // that arrives while the first is running will block briefly then see the correct state.
+    let lock_path = std::path::Path::new(".agent-doc/sync.lock");
+    if let Some(parent) = lock_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let lock_file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(lock_path);
+    let _lock_guard = lock_file.as_ref().ok().map(|f| {
+        use fs2::FileExt;
+        // Try to acquire exclusive lock. If another sync holds it, wait up to 3s.
+        // On timeout, proceed anyway (better than blocking forever).
+        match f.try_lock_exclusive() {
+            Ok(()) => Some(()),
+            Err(_) => {
+                sync_log("sync lock contention — waiting for previous sync");
+                // Block for up to 3 seconds
+                let _ = f.lock_exclusive();
+                sync_log("sync lock acquired after wait");
+                Some(())
+            }
+        }
+    });
+
     // Check for new build and clear stale caches
     check_build_stamp();
 
@@ -490,7 +519,20 @@ fn run_with_options(
     }
     let window = effective_window.as_deref();
 
+    // Diagnostic: log pane count at key checkpoints to find where stashed panes reappear
+    if let Some(w) = window {
+        let pane_count = tmux.list_window_panes(w).map(|p| p.len()).unwrap_or(0);
+        let pane_list: Vec<String> = tmux.list_window_panes(w).unwrap_or_default();
+        sync_log(&format!("checkpoint:post-repair window={} panes={} list={:?}", w, pane_count, pane_list));
+    }
+
     let _ = resync::prune(); // Clean stale entries before layout calculation
+
+    if let Some(w) = window {
+        let pane_list: Vec<String> = tmux.list_window_panes(w).unwrap_or_default();
+        sync_log(&format!("checkpoint:post-prune window={} panes={} list={:?}", w, pane_list.len(), pane_list));
+    }
+
     let registry_path = sessions::registry_path();
     // Track session_id → file path for post-sync claim updates
     let session_files: RefCell<Vec<(String, PathBuf)>> = RefCell::new(Vec::new());
@@ -747,8 +789,8 @@ fn run_with_options(
 
     // Log pane count before tmux_router::sync
     if let Some(w) = window {
-        let pane_count = tmux.list_window_panes(w).map(|p| p.len()).unwrap_or(0);
-        sync_log(&format!("pre-tmux_router::sync: window={} panes={}", w, pane_count));
+        let pane_list: Vec<String> = tmux.list_window_panes(w).unwrap_or_default();
+        sync_log(&format!("checkpoint:pre-tmux_router window={} panes={} list={:?}", w, pane_list.len(), pane_list));
     }
 
     // NOTE: The busy pane guard (protect_pane) was removed from DETACH because it caused

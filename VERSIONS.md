@@ -4,6 +4,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.7
+
+- **Stash-bounce fix**: Removed `return_stashed_panes_bulk()` from automatic `prune()` path. Active panes now stay in stash until the reconciler explicitly needs them, eliminating the stash→return→stash loop that caused visible pane bouncing.
+- **Sync file lock**: Added `flock` on `.agent-doc/sync.lock` to serialize concurrent sync calls. Prevents race conditions when rapid tab switches fire overlapping syncs.
+- **Route sync removal**: Removed redundant `sync::run_layout_only` from Route command dispatch and `sync_after_claim` from route.rs. The JB plugin's `EditorTabSyncListener` is now the sole authority for layout sync.
+- **Diagnostic checkpoints**: Added checkpoint logging in sync (`post-repair`, `post-prune`, `pre-tmux_router`) to pinpoint pane state at key transitions.
+
 ## 0.31.6
 
 - **Debounce fix**: Default mtime debounce increased from 500ms to 2000ms. Configurable per-document via `agent_doc_debounce` frontmatter field.

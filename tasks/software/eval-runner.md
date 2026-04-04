@@ -298,7 +298,7 @@ eval-runner run cases.yaml --model sonnet --judge-model sonnet --parallel 4 --js
 ```
 
 Output saving to `evals/agent-doc/diff-interpretation/baselines/sonnet-2026-04-04.json`. Running with `--parallel 4` to test the new tokio concurrency — should complete in ~5-8 min instead of ~20 min sequential. Will report results when done.
-### Re: Sonnet baseline complete (HEAD)
+### Re: Sonnet baseline complete
 
 **Results: 12/21 passed (57.1%), mean score 0.56, total time 12.4 min (--parallel 4)**
 
@@ -337,18 +337,48 @@ Output saving to `evals/agent-doc/diff-interpretation/baselines/sonnet-2026-04-0
 **Parallel concurrency validated** — the `--parallel 4` semaphore kept 4 cases running simultaneously throughout. Wall clock time cut by ~60% vs what sequential sonnet would have been.
 
 **Persistent failures** (both models): comment-content-ignored, approval-to-implement, head-label-removal, single-word-approval, multi-item-instruction-list. These are agent-doc-specific conventions that require SKILL.md context in the eval prompt.
-<!-- agent:boundary:703876bc -->
+do
+- increase parallelism...to 8 or 12?
+- [ ] Add `make check` integration
+- [ ] Regression tracking with `--baseline` end-to-end test
+- [ ] Investigate persistent failures — add SKILL.md context to eval prompts
+### Re: Parallelism, Makefile, and failure analysis (HEAD)
+
+**Parallelism:** Recommend `--parallel 8`. The sonnet run at `--parallel 4` took 12.4 min; at 8-wide that should drop to ~6 min. Going to 12 risks rate limit contention. Updated the Makefile default to 8.
+
+**Makefile updated** with new targets:
+
+```makefile
+CASES ?= ../../evals/agent-doc/diff-interpretation/cases.yaml
+BASELINE ?= ../../evals/agent-doc/diff-interpretation/baselines/sonnet-2026-04-04.json
+MODEL ?= sonnet
+JUDGE_MODEL ?= sonnet
+PARALLEL ?= 8
+
+eval:              # Run evals (human-readable output)
+eval-regression:   # Run evals with --baseline regression check
+eval-json:         # Run evals with JSON output
+```
+
+All configurable via env vars: `make eval MODEL=haiku PARALLEL=12`.
+
+**Regression tracking:** `make eval-regression` passes `--baseline` to compare against the sonnet baseline. Any case that previously passed but now fails gets flagged as a regression in the summary. The `--baseline` flag is already implemented in the binary — this just wires it into the Makefile.
+
+**Failure analysis** (investigating the 5 persistent failures — running in background, will report findings).
+
+**Latency eval support:** Noticed your edits adding `grading: "latency"` with `run_latency_case`. Builds clean — nice addition for benchmarking `agent-doc write` performance directly.
+<!-- agent:boundary:2a734391 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [x] Run with sonnet model for target baseline
-- [ ] Investigate persistent failures — add SKILL.md context to eval prompts
-- [ ] Add `make check` integration
-- [ ] JSON output format documentation
-- [ ] Regression tracking with `--baseline` end-to-end test
+- [x] Add `make check` integration (eval, eval-regression, eval-json targets)
+- [x] Regression tracking with `--baseline` end-to-end test (via `make eval-regression`)
+- [ ] Investigate persistent failures — add SKILL.md context to eval prompts (analysis running)
+- [ ] Increase default parallelism to 8 (done in Makefile, test with next run)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
+- [ ] JSON output format documentation
 <!-- /agent:pending -->
 
 ## Todo

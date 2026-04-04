@@ -220,7 +220,7 @@ Runbooks (459 lines) are on-demand only — never loaded unless the user request
 
 The biggest win: Claude Code skill matching only loads the *relevant* skill per invocation. A monolithic skill would load all 695 lines for every corky-related task.
 Can any runbooks be extracted from these skills, to avoid over-eagerly using context tokens?
-### Re: Runbook extraction from skills (HEAD)
+### Re: Runbook extraction from skills
 
 **Email skill (107 lines) — two extraction candidates:**
 1. **Gmail Account Configuration** (28 lines) → `runbooks/gmail-config.md` — only needed for account setup/debug, not every email task
@@ -233,13 +233,29 @@ Can any runbooks be extracted from these skills, to avoid over-eagerly using con
 **Corky skill (71 lines):** Import/transcription commands (~15 lines) could move but marginal gain.
 
 Want me to extract the two email runbooks?
-<!-- agent:boundary:b1df991f -->
+yes...also extract corky runbooks
+report the token savings
+### Re: Runbook extraction — done (HEAD)
+
+**Savings: 236 → 185 lines always-loaded (21% reduction)**
+
+| Skill | Before | After | Saved |
+|-------|--------|-------|-------|
+| corky | 71 | 61 | 10 |
+| email | 107 | 66 | 41 |
+| linkedin | 58 | 58 | — |
+
+**4 new on-demand runbooks:** gmail-config (28), browser-paste (21), imports (21), transcription (28).
+
+All 258 tests pass, clippy clean. Not yet committed.
+<!-- agent:boundary:23712251 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Extract email Gmail config + browser-paste to runbooks (awaiting approval)
+- Commit runbook extractions to corky submodule
+- Release v0.25.1 (or bump)
 - Verify sheet sharing / GCP test users
 - Re-test sheet read
 - Manylinux binary wheel (nice-to-have, needs container/CI)

@@ -310,8 +310,7 @@ claude_args: --dangerously-skip-permissions
 
 We were in a 1 pane state for a while. Event when I initially focused from the left editor to the right editor then back to the editor...then the tmux pane layout became corrected.
 
-This document did not seem to debounce. I was in the middle of typing
-### Re: 1-pane state requiring focus cycling to correct (HEAD)
+### Re: 1-pane state requiring focus cycling to correct
 
 This sounds like the sync/layout correction is event-driven (triggered by editor focus changes) rather than proactively ensuring the correct layout when a session starts or a pane is retrieved from stash.
 
@@ -328,12 +327,54 @@ This sounds like the sync/layout correction is event-driven (triggered by editor
 **To investigate:** We'd need to reproduce the exact sequence — which document was active, which was claimed/started, and whether this was after a `start`, `claim`, or editor navigation event. The tmux-router logs (`agent-doc sync --verbose` or the tmux-router debug output) would show whether a sync was attempted and what layout state it saw.
 
 Is this reproducible, or was it a one-time occurrence? If reproducible, the steps to trigger it would help narrow down which code path is missing the layout correction.
-<!-- agent:boundary:2999b022 -->
+
+This document did not seem to debounce. I was in the middle of typing the following but the then diff was sent to agent-doc
+> We were in a 1 pane state for a while. Event when I initially focused from the left editor to the right editor then back to the editor...then the tmux pane layout became corrected.
+
+I'm not sure how to reproduce this issue. It obviously can be done. Can we be proactive with logging. Should we just log verbosely? At least for my sessions because I'm the developer of agent-doc.
+Are there any missing logs that would have identified what happened?
+### Re: Debounce failure + verbose logging (HEAD)
+
+**Debounce failure analysis:**
+
+The preflight debounce has two layers:
+1. **Mtime debounce:** 500ms hardcoded (`preflight.rs:353`) — file must be unmodified for 500ms
+2. **Typing indicator:** 1500ms (`preflight.rs:366`) — checks `.agent-doc/typing/<hash>` files written by editor plugins
+
+Your mid-typing trigger likely means:
+- The editor plugin wasn't writing typing indicator files (so the cross-process bridge didn't fire)
+- Or you paused >500ms between keystrokes (thinking between words), which the mtime debounce interpreted as "idle"
+
+The 500ms mtime debounce is aggressive for normal typing with think-pauses. The typing indicator is the safeguard, but requires the editor plugin to call `document_changed()` on each keystroke.
+
+**Fix options for debounce:**
+- Increase mtime debounce to 1000-2000ms (simple, covers most typing gaps)
+- Make it configurable via frontmatter: `agent_doc_debounce: 2000`
+- Fix/verify the editor plugin typing indicator bridge
+
+**Verbose logging — current state:**
+
+Agent-doc has no structured logging. Only `eprintln!` and a best-effort `ops.log`. No `--verbose`, no `RUST_LOG`, no tracing crate.
+
+**Recommendation for logging:**
+
+Add `tracing` + `tracing-subscriber`:
+- `AGENT_DOC_LOG=debug` env var enables verbose output to `.agent-doc/logs/debug.log`
+- Instrument sync, debounce, layout, stash/retrieve code paths
+- Log rotation to prevent unbounded growth
+- For your dev sessions: `export AGENT_DOC_LOG=debug` in shell profile
+
+This would catch the 1-pane bug next time it occurs — the log would show exactly which sync events fired (or didn't) and what layout decisions were made.
+
+Both the debounce tuning and logging are implementation tasks. Should I add them to the pending list and tackle one now?
+<!-- agent:boundary:f01e2a73 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Publish tmux-router 0.3.9 to crates.io (awaiting approval)
-- [ ] Investigate 1-pane layout bug if reproducible (need repro steps)
+- [ ] Fix debounce: increase mtime threshold or verify typing indicator bridge
+- [ ] Add structured logging (tracing crate) with AGENT_DOC_LOG env var
+- [ ] Investigate 1-pane layout bug (needs verbose logging first)
 <!-- /agent:pending -->

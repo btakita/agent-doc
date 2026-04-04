@@ -135,7 +135,7 @@ Did we just skip 4 versions?
 | Parent submodule pointer | Updated |
 
 The `/dev/null` config mask worked perfectly — no tmux-router mount needed.
-### Re: pyproject.toml version gap (0.31.5 → 0.31.9) (HEAD)
+### Re: pyproject.toml version gap (0.31.5 → 0.31.9)
 
 No PyPI versions were skipped — the gap is a sync issue:
 
@@ -144,13 +144,28 @@ No PyPI versions were skipped — the gap is a sync issue:
 - Versions 0.31.6-0.31.8 were never published to PyPI — only crates.io + GitHub
 
 The prerelease runbook says "sync pyproject.toml with Cargo.toml" — it should have been bumped at each release regardless of target. Going forward, both files stay in sync on every version bump.
-<!-- agent:boundary:eb4fc3c4 -->
+
+> Going forward, both files stay in sync on every version bump.
+
+How are you ensuring this?
+### Re: How am I ensuring pyproject.toml sync? (HEAD)
+
+Currently: memory + runbook step. Both rely on me remembering — which failed for v0.31.6-0.31.8.
+
+**Best enforcement:** Add a version sync check to `make check`. One-liner that compares Cargo.toml and pyproject.toml versions, fails if they differ. Runs before every release and during development.
+
+| Approach | Reliability |
+|----------|-------------|
+| Memory + runbook (current) | Failed 3 times |
+| `make check` version sync | Catches every time |
+
+Want me to add this to the Makefile?
+<!-- agent:boundary:a76b55f2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Commit tmux-router sync.rs debug logging changes
-- [x] Commit agent-doc submodule changes (runbook updates, skill.rs)
 - [x] Release agent-doc v0.31.9
+- [ ] Add version sync check to `make check` (Cargo.toml vs pyproject.toml)
 <!-- /agent:pending -->

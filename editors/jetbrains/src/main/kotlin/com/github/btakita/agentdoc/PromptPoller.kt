@@ -81,11 +81,22 @@ class PromptPoller(private val project: Project) : Disposable {
         LOG.info("[prompt-poller] starting polling for ${project.name}")
         task = executor.scheduleWithFixedDelay({
             try {
+                val cycleStart = System.nanoTime()
                 // Auto-save is best-effort — must not block prompt detection
                 try { autoSaveTrackedFiles() } catch (_: Exception) {}
+                val saveMs = (System.nanoTime() - cycleStart) / 1_000_000
+
+                val refreshStart = System.nanoTime()
                 refreshTrackedFiles()
+                val refreshMs = (System.nanoTime() - refreshStart) / 1_000_000
+
+                val pollStart = System.nanoTime()
                 val entries = pollAll(basePath) ?: return@scheduleWithFixedDelay
+                val pollMs = (System.nanoTime() - pollStart) / 1_000_000
+
                 handlePollResults(entries, basePath)
+                val totalMs = (System.nanoTime() - cycleStart) / 1_000_000
+                if (totalMs > 200) LOG.info("[perf] prompt-poller cycle: ${totalMs}ms (save=${saveMs}ms refresh=${refreshMs}ms poll=${pollMs}ms)")
             } catch (e: Exception) {
                 LOG.warn("[prompt-poller] poll error: ${e.message}")
             }

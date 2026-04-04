@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Designed navigation swap spec — stash is correct, but retrieval from stash is missing
+Navigation swap spec complete — agent-doc files trigger swap, non-agent-doc files are no-op
 <!-- /agent:status -->
 
 ## Exchange
@@ -346,7 +346,7 @@ When the editor navigates to a different file in the pane:
 3. **Pin registered panes** — treat panes in the registry as "pinned" to their window; only explicit user action (or `--force`) can stash them.
 
 Option 1 is the simplest and most correct: claimed panes should never be stashed by sync. The user explicitly claimed them — sync should respect that.
-### Re: Navigation swap behavior (HEAD)
+### Re: Navigation swap behavior
 
 Your spec clarifies the design — it's a **swap**, not "don't stash." Stashing the old pane IS correct. The bug is that **stashed panes are never retrieved** — sync creates new windows instead of finding the existing claimed pane in stash.
 
@@ -366,7 +366,33 @@ Your spec clarifies the design — it's a **swap**, not "don't stash." Stashing 
 4. Only create a new pane/session if no claimed pane exists anywhere
 
 This preserves agent sessions across navigation — the Claude Code process stays alive in the stashed pane, and swap-back is instant (no cold start).
-<!-- agent:boundary:8ef2eeb6 -->
+
+Make sure we keep the behavior when navigating to an unclaimed file that is not a md file or does not have the agent-doc frontmatter:
+- keep the previous claiming tmux pane open
+### Re: Non-agent-doc file navigation (HEAD)
+
+Correct — the swap should only trigger for agent-doc documents. Updated spec:
+
+| Editor navigates to | Behavior |
+|---------------------|----------|
+| **Agent-doc file** (`.md` with `agent_doc_session` frontmatter) | Swap: retrieve/create target pane, stash current pane |
+| **Non-agent-doc file** (code, config, plain .md without frontmatter) | No-op: keep current tmux pane layout unchanged |
+
+The sync file-type check: read the target file's YAML frontmatter for `agent_doc_session`. If absent or null, skip the swap entirely. This is a fast check (read first ~500 bytes, parse YAML frontmatter).
+
+**Full navigation decision tree:**
+
+```
+Editor navigates to file B (was viewing file A)
+├── B has agent_doc_session?
+│   ├── YES → B has claimed pane in sessions.json?
+│   │   ├── YES → join-pane B's pane from stash, stash A's pane
+│   │   └── NO  → split + claim B with new session, stash A's pane
+│   └── NO  → do nothing (keep A's pane visible)
+```
+
+This is the complete spec for the navigation swap feature. Adding to tasks/software/agent-doc.md.
+<!-- agent:boundary:5421fc72 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -380,5 +406,5 @@ This preserves agent sessions across navigation — the Claude Code process stay
 - [x] Remove agent:console from default scaffold (already done)
 - [x] Suppress verbose git status in commit output
 - [x] Fix: window closure — last-pane guard in unmanaged stash path
-- [ ] Implement navigation swap: retrieve claimed panes from stash instead of creating new ones
+- [ ] Implement navigation swap: retrieve claimed panes from stash; no-op for non-agent-doc files
 <!-- /agent:pending -->

@@ -54,7 +54,7 @@ Not in SKILL — release procedures aren't a document session concern. It's in `
 The path: **CLAUDE.md** → `.agent/runbooks/prerelease.md` → Target: github-release section (CI-first default + local override).
 
 SKILL.md only covers the `/agent-doc` document session workflow. Release procedures are project-level runbooks.
-<!-- agent:boundary:253fd503 -->
+<!-- agent:boundary:70660d0e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

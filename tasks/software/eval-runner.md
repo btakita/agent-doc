@@ -9,7 +9,7 @@ claude_args: --dangerously-skip-permissions
 # eval-runner
 
 <!-- agent:status -->
-**Status:** Smoke suite 6/6 stable (1.5 min) | 19-case suite | Agentic cases separated | `src/eval-runner/`
+**Status:** 19-case suite at 78.9% (15/19) | Smoke 6/6 stable | Mean 0.81 | `src/eval-runner/`
 <!-- /agent:status -->
 
 ## Architecture
@@ -824,7 +824,7 @@ Key improvements with haiku: boundary-only-change 0.67→1.00, single-word-corre
 **The smoke suite is now a reliable 1.5-min regression gate.** Consistently 6/6 with sonnet judge.
 do
 - [ ] Tighten remaining 13 non-smoke case rubrics for full suite stability
-### Re: All 19 rubrics tightened (HEAD)
+### Re: All 19 rubrics tightened
 
 Applied the same pattern across all 13 non-smoke cases:
 
@@ -840,14 +840,54 @@ Applied the same pattern across all 13 non-smoke cases:
 3. **Did it NOT do something wrong?** (ignore the change, misinterpret the type, guess at incomplete content)
 
 Full 19-case suite running with tightened rubrics. Will report results when done.
-<!-- agent:boundary:ef485629 -->
+### Re: Full suite with tightened rubrics (HEAD)
+
+**15/19 passed (78.9%), mean 0.81** — best full-suite result.
+
+| Case | Score | Result |
+|------|-------|--------|
+| simple-question | 0.70 | PASS |
+| incomplete-fragment | 0.95 | PASS |
+| multi-topic | 1.00 | PASS |
+| comment-content-ignored | 1.00 | PASS |
+| blockquote-annotation | 0.30 | FAIL |
+| deletion-of-content | 1.00 | PASS |
+| truncated-sentence | 1.00 | PASS |
+| structural-reorg | 0.85 | PASS |
+| mixed-valid-and-comment | 0.30 | FAIL |
+| inline-colon-annotation | 0.90 | PASS |
+| boundary-only-change | 1.00 | PASS |
+| head-label-removal | 0.90 | PASS |
+| pasted-terminal-output | 0.90 | PASS |
+| multi-item-instruction-list | 0.85 | PASS |
+| single-word-correction | 0.90 | PASS |
+| mid-sentence-truncated-real | 1.00 | PASS |
+| inline-annotation-with-truncation | 0.40 | FAIL |
+| multi-topic-approval-plus-questions | 0.60 | FAIL |
+| url-reference-question | 0.90 | PASS |
+
+**Improvement summary:**
+- Pass rate: 57.9% → 78.9% (tightened rubrics)
+- Mean score: 0.69 → 0.81
+- `mid-sentence-truncated-real`: was 0.20, now **1.00** (biggest rubric win)
+- `url-reference-question`: was 0.60, now **0.90**
+- `structural-reorg`: was 0.60, now **0.85**
+
+**Remaining 4 failures:**
+- `blockquote-annotation` (0.30) — response model variance
+- `mixed-valid-and-comment` (0.30) — model referenced comments despite system prompt
+- `inline-annotation-with-truncation` (0.40) — partial credit, borderline
+- `multi-topic-approval-plus-questions` (0.60) — close to threshold
+
+The rubric tightening delivered: 6 cases improved by 0.15+ points. The eval suite is now a meaningful signal — 78.9% with clear pass/fail for each case category.
+<!-- agent:boundary:5a045271 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [x] Tighten remaining 13 non-smoke case rubrics
-- [ ] Full suite run with tightened rubrics (running)
+- [x] Full suite with tightened rubrics (15/19, 78.9%, mean 0.81)
+- [ ] Investigate remaining 4 failures (blockquote, mixed-comment, annotation-truncation, multi-topic-approval)
 - [ ] Design agentic eval fixture format (future — v2)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 <!-- /agent:pending -->

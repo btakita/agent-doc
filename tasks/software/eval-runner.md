@@ -519,7 +519,7 @@ Agreed — options 1+2 implemented. Updated all 3 cases in `cases.yaml`:
 Option 3 (agentic execution with a baseline repo) is a great future direction — would need a fixture directory with mock files for the model to interact with.
 
 Full eval running with refined prompt + fixed cases. Will report results when done.
-<!-- agent:boundary:086eea37 -->
+<!-- agent:boundary:6166c532 -->
 <!-- /agent:exchange -->
 
 ## Pending

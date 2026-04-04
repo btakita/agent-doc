@@ -192,10 +192,9 @@ Good batch of designs. Priority ordering:
 5. **Reproducible operation logs** — important for debugging but lower urgency than diff pipeline.
 6. **Multi-topic response runbook** — already created, just add `---` separator convention.
 The jetbrains editor has performance issues navigating and editing this document. Please look into why.
-<!-- agent:boundary:d7cbc450 -->
 <!-- /agent:exchange -->
 
-## Pending / Not Built (HEAD)
+## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Implement diff-type classification in preflight (P1)
@@ -218,11 +217,26 @@ JetBrains' markdown highlighter may be doing expensive parsing on these HTML com
 
 **Quick test:** Remove just the `<!-- agent:boundary:d7cbc450 -->` line — if performance improves, it's the boundary marker.
 
+Still slow
+
 **Mitigations:**
 1. Compact exchange (less content for parser)
 2. Disable markdown preview for tasks/ files
 3. If boundary markers are the trigger, consider a format that doesn't use HTML comments (e.g., `[//]: # (boundary:hash)`)
-<!-- agent:boundary:7e01dce4 -->
+
+Something about the `#### 3. Annotated diff format` section in agent-doc-bugs.md is slow. The Plugin Agent Doc thrashes.
+### Re: Root cause — `<!-- patch:exchange -->` inside committed content (HEAD)
+
+Line 96 of agent-doc-bugs.md has a `<!-- patch:exchange transfer-source="..." -->` marker **inside the exchange content**. This was written by the transfer command.
+
+The plugin's PatchWatcher scans documents for `<!-- patch:... -->` patterns. Finding one inside committed content (not in a `.json` patch file) likely causes repeated parse/apply attempts — the CPU thrashing.
+
+**Immediate fix:** Edit bugs.md to escape or remove the patch marker on line 96.
+
+**Root fix:** The transfer command should escape `<!-- patch:... -->` markers when writing content into target documents, or the PatchWatcher should only parse patch blocks from `.json` files (not from document content).
+
+Want me to fix bugs.md now and then address the root cause in the transfer command?
+<!-- agent:boundary:4b8446ba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -231,6 +245,7 @@ JetBrains' markdown highlighter may be doing expensive parsing on these HTML com
 - [x] GC orphaned 3.9 GB blob
 - [x] `agent-doc clean --archive`
 - [x] VCS refresh debounce (500ms)
-- [ ] Test: is `<!-- agent:boundary:hash -->` the JetBrains markdown perf trigger?
+- [ ] Fix bugs.md: escape/remove `<!-- patch:exchange -->` on line 96
+- [ ] Fix transfer command: escape patch markers in transferred content
 - [ ] Discuss archive cutoff point for squash
 <!-- /agent:pending -->

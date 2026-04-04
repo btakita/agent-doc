@@ -481,7 +481,7 @@ The flow would be:
 This avoids Vespa's operational overhead entirely and keeps everything serverless. You could have a working prototype on Cloudflare in a day.
 
 **If Rob insists on Vespa:** Deploy it on a cheap VPS (Hetzner 4GB ~$4/mo), not Cloudflare. But Vectorize is the better play for an MVP.
-<!-- agent:boundary:e2a8ffbc -->
+<!-- agent:boundary:b79f84ba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-All 3 fixes complete — git status suppression deployed
+Fixed last-pane guard bug in tmux-router sync — window 0 will no longer close
 <!-- /agent:status -->
 
 ## Exchange
@@ -253,7 +253,10 @@ do
 - [ ] Remove agent:console from default scaffold in claim.rs
 - [ ] Suppress verbose git status in commit output
 - [ ] Prevent window closure when stashing last pane
-### Re: Implementing 3 fixes (HEAD)
+> - [ ] Prevent window closure when stashing last pane
+
+Why was all of the panes removed from the agent-doc window?
+### Re: Implementing 3 fixes
 
 #### 1. Remove agent:console from default scaffold — already done
 The current scaffold in `claim.rs:194-197` only includes `status`, `exchange`, and `pending` components. Console was already removed from the default scaffold.
@@ -276,7 +279,38 @@ if window_count <= 1 {
 The original window closure was likely caused by pane processes dying (not stashing). When all panes in a window exit, tmux closes the window. This guard prevents sync from stashing the last pane, but can't prevent process death.
 
 **Built, tested (38 pass), installed.** Both the symlink binary and `~/.cargo/bin/agent-doc` are updated.
-<!-- agent:boundary:6d08c014 -->
+I navigated the left editor from this doc to another doc back to this doc.
+Now the agent-doc window is showing 1 pane. Why?
+
+Now agent-doc is at 2:agent-doc...not 0:agent-doc.
+
+I called `Run Agent Doc` from th
+### Re: Why were all panes removed from the agent-doc window? (HEAD)
+
+Found the bug. It was NOT in agent-doc — it was in **tmux-router** `sync.rs:687-701`.
+
+When sync determines all files are "truly unmanaged" (no session UUIDs), it stashes ALL panes:
+
+```rust
+// Lines 692-700 (BEFORE fix)
+for pane in all_panes.iter().rev() {
+    let _ = tmux.stash_pane(pane, &s);  // No last-pane guard!
+}
+```
+
+The detach path (sync.rs:1024-1028) has a last-pane guard, but this "unmanaged files" stash path did NOT. When sync ran and found zero managed files (e.g., after the git squash reset session state), it stashed every pane including the last one, causing tmux to close window 0.
+
+**Fix applied** (`tmux-router/src/sync.rs:687-704`): Added a last-pane guard before each stash:
+```rust
+let remaining = tmux.list_window_panes(w).unwrap_or_default().len();
+if remaining <= 1 {
+    eprintln!("[sync] skipped stashing {} — last pane in window", pane);
+    break;
+}
+```
+
+**Built, tested (623 pass across all suites), installed.** Both symlink and `~/.cargo/bin/agent-doc` updated.
+<!-- agent:boundary:760b1e64 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -289,5 +323,5 @@ The original window closure was likely caused by pane processes dying (not stash
 - [x] Fix: claim should be atomic
 - [x] Remove agent:console from default scaffold (already done)
 - [x] Suppress verbose git status in commit output
-- [x] Prevent window closure when stashing last pane (already guarded in tmux-router)
+- [x] Fix: window closure — last-pane guard missing in tmux-router unmanaged-files stash path
 <!-- /agent:pending -->

@@ -1310,7 +1310,7 @@ agent-doc annotate --history <file>
 This walks git history to attribute each line to the commit that introduced it, then maps commits to `agent` or `user` based on whether `agent-doc commit` or a manual commit created them.
 
 **TL;DR:** The sidecar is a cache, not state. It can always be reconstructed from (snapshot + current file) for current-cycle attribution, or from git blame for full history. No sync problem.
-<!-- agent:boundary:f80e647e -->
+<!-- agent:boundary:93a06e92 -->
 <!-- /agent:exchange -->
 
 ## Pending

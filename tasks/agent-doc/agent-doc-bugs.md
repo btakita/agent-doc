@@ -342,7 +342,7 @@ This handles all JSON escaping correctly (like VS Code's `JSON.parse()`) and eli
 - Keep the hand-rolled parser with the NUL placeholder fix (already working)
 
 **Recommendation:** Replace `extractStringField` with Gson. Zero new deps, correct by construction. Want me to do it?
-<!-- agent:boundary:80fe4f16 -->
+<!-- agent:boundary:137c7bf8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

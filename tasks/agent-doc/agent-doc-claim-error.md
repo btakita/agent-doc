@@ -207,7 +207,7 @@ Should agent-doc autokill orphaned windows? What if they are currently running a
 - No autokill — user decides when stashed sessions are disposable
 
 The stash window is a parking lot — the user put panes there intentionally. Autokilling defeats the purpose. The warning is the right UX: inform, don't act.
-<!-- agent:boundary:865d11a9 -->
+<!-- agent:boundary:290c664f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

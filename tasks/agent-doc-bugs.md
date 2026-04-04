@@ -24,7 +24,7 @@ claude_args: "--dangerously-skip-permissions"
 - tmux_session validation (warns + falls back for non-existent sessions)
 
 **Key bugs fixed this session:**
-- Window proliferation: `tmux_session: '0'` pointed to non-existent session → silent creation loop
+- Window proliferation: `tmux_session: '23'` pointed to non-existent session → silent creation loop
 - Stale binary: `~/.cargo/bin/agent-doc` was v0.17.16 while `.bin/agent-doc` was v0.17.28 → tmux-spawned sessions used old binary
 - Dead pane cleanup: killed non-responsive pane %82
 

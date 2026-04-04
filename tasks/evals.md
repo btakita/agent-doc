@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Planning — proposed eval framework for agent harnesses
+Sonnet baseline complete — 11/21 (52.4%), 5 failure clusters identified
 <!-- /agent:status -->
 
 ## Exchange
@@ -105,7 +105,7 @@ Understood — starting Phase 1 now. First priority is the agent-doc diff interp
 4. Build minimal eval runner using the Anthropic SDK
 
 Once that's working, we can expand to corky threading and skill adherence.
-### Re: Phase 1 Status (HEAD)
+### Re: Phase 1 Status
 
 Phase 1 is nearly complete — prior sessions already built most of it:
 
@@ -115,7 +115,57 @@ Phase 1 is nearly complete — prior sessions already built most of it:
 - **`baselines/sonnet-2026-04-04.json`** — exists but empty (0 bytes) — running now
 
 Running Sonnet baseline against all 20 cases.
-<!-- agent:boundary:4fd5b6b5 -->
+### Re: Sonnet Baseline Results (HEAD)
+
+Sonnet baseline complete. 21 cases, 4 parallel workers.
+
+**Results: 11/21 passed (52.4%), mean score 0.560**
+
+| Model | Passed | Pass Rate | Mean Score |
+|-------|--------|-----------|------------|
+| haiku-2026-04-03 | 9/21 | 42.9% | 0.570 |
+| sonnet-2026-04-04 | 11/21 | 52.4% | 0.560 |
+
+Sonnet passes +2 more cases but mean score is nearly identical — both models are struggling in the same areas.
+
+**Per-case breakdown:**
+
+| Case | Sonnet Score | |
+|------|-------------|--|
+| simple-question | 0.40 | FAIL — didn't mention `&lt;!-- agent:name --&gt;` syntax |
+| incomplete-fragment | 0.70 | PASS |
+| multi-topic | 0.85 | PASS |
+| comment-content-ignored | 0.00 | FAIL — responded to comment scratchpad content |
+| blockquote-annotation | 0.30 | FAIL — acknowledged preference, didn't act |
+| deletion-of-content | 1.00 | PASS |
+| truncated-sentence | 0.75 | PASS |
+| structural-reorg | 1.00 | PASS |
+| approval-to-implement | 0.10 | FAIL — described plan instead of implementing |
+| mixed-valid-and-comment | 0.40 | FAIL — addressed task but also responded to comments |
+| inline-colon-annotation | 0.85 | PASS |
+| boundary-only-change | 0.50 | FAIL — verbose where silence expected |
+| head-label-removal | 0.10 | FAIL — confirmed cleanup, should have been silent |
+| single-word-approval | 0.00 | FAIL — "go" treated as new topic, not approval |
+| pasted-terminal-output | 0.85 | PASS |
+| multi-item-instruction-list | 0.10 | FAIL — asked questions instead of executing |
+| single-word-correction | 0.85 | PASS |
+| mid-sentence-truncated-real | 0.60 | FAIL — correct flag but excessive explanation |
+| inline-annotation-with-truncation | 0.85 | PASS |
+| multi-topic-approval-plus-questions | 0.72 | PASS |
+| url-reference-question | 0.85 | PASS |
+
+**Failure clusters:**
+
+1. **Comment leakage** (comment-content-ignored, mixed-valid-and-comment) — responding to `[//]: # (...)` scratchpad that should be invisible
+2. **Silence vs. response** (boundary-only-change, head-label-removal) — responding when no-op is correct
+3. **Approval interpretation** (single-word-approval, approval-to-implement) — "go"/"yes" → implement, not describe
+4. **Verbosity on partials** (mid-sentence-truncated-real) — flag + stop, not flag + explain
+5. **Multi-item execution** (multi-item-instruction-list) — execute the list, don't confirm first
+
+**Meta:** `single-word-approval` scored 0.00 — this model interpreted "go" (the trigger for this session) as a new topic rather than approval. The case exists exactly for this failure mode.
+
+**Next:** Cross-reference Haiku per-case scores, then pick a failure cluster to attack via SKILL.md improvements.
+<!-- agent:boundary:495bbe61 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -127,5 +177,9 @@ Running Sonnet baseline against all 20 cases.
 - [x] Write first 10 diff interpretation test cases (diff input → expected intent)
 - [x] Build eval runner (Rust CLI, src/eval-runner, with Claude CLI + Anthropic API backends)
 - [x] Haiku baseline: 9/21 passed (42.9%), mean score 0.57
-- [ ] Run Sonnet baseline (sonnet-2026-04-04.json is empty — in progress)
+- [x] Sonnet baseline: 11/21 passed (52.4%), mean score 0.56
+- [ ] Cross-reference Haiku vs Sonnet per-case scores
+- [ ] Pick failure cluster to attack first
+- [ ] Improve SKILL.md/system prompt based on failure patterns
+- [ ] Re-run evals to measure improvement
 <!-- /agent:pending -->

@@ -2023,7 +2023,7 @@ What directory convention are you using for agent config? .agent/, .agents/, .ai
 ---
 
 Copy and paste into LinkedIn. The URLs will auto-link.
-<!-- agent:boundary:af3b547f -->
+<!-- agent:boundary:4c1e56fc -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

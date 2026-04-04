@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.8
+
+- **CI fix**: Removed `path = "../tmux-router"` override from Cargo.toml. CI runners don't have the local submodule; uses crates.io dependency exclusively.
+
 ## 0.31.7
 
 - **Stash-bounce fix**: Removed `return_stashed_panes_bulk()` from automatic `prune()` path. Active panes now stay in stash until the reconciler explicitly needs them, eliminating the stash→return→stash loop that caused visible pane bouncing.

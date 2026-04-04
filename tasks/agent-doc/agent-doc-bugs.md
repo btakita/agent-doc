@@ -442,7 +442,7 @@ Once the pane is in the target window, tmux-router's existing swap fast path han
 **Built, tested (623 pass), installed.** Both symlink and `~/.cargo/bin/agent-doc` updated.
 
 Try navigating between agent-doc files in the editor — the pane should swap atomically without creating new windows.
-<!-- agent:boundary:ec118cdd -->
+<!-- agent:boundary:5c5636d2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

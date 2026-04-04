@@ -240,7 +240,7 @@ agent-runbooks validate ontology/runbook.md --ontology-dir ontology/
 ```
 
 Committed `0398848`, pushed, parent pointer updated.
-<!-- agent:boundary:eb78999f -->
+<!-- agent:boundary:aa34bc16 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

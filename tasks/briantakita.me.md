@@ -1949,12 +1949,12 @@ Given Robert Ross — founder of Dreamable, building agent-native products — l
 
 Want me to format the draft for LinkedIn paste?
 I also have a video creating the agent-runbooks standard. Should that be posted instead?
-### Re: Video vs blog teaser — which to post first? (HEAD)
+### Re: Video vs blog teaser — which to post first?
 
 **Post the video first.**
 
-1. **LinkedIn algorithm favors native video** — 2-3x the reach of text-only posts. If Robert sees one thing before tomorrow's call, make it the highest-engagement format.
-2. **Video shows, text tells.** You creating the agent-runbooks standard is a *demonstration of competence* — more compelling for someone hiring AI agent engineers.
+1. **LinkedIn algorithm favors native video** — 2-3x the reach of text-only posts. If Robert sees one thing before tomorrow's call, make it the highest-engagement format.: In this case, the video will be a youtube video...so it's not a native LinkedIn video
+2. **Video shows, text tells.** You creating the agent-runbooks standard is a *demonstration of competence* — more compelling for someone hiring AI agent engineers.: Robert Ross has already seen some of my videos. And I gave him a demo of agent-doc during a 4 hour interview.
 3. **Blog teaser becomes the follow-up.** Video now, text-based blog teaser Monday/Tuesday. Two posts, two bites at the apple.
 
 **Revised plan:**
@@ -1963,12 +1963,34 @@ I also have a video creating the agent-runbooks standard. Should that be posted 
 3. **Wed/Thu** — second blog post + video
 
 Does the video need editing, or is it ready to upload?
-<!-- agent:boundary:bd2986c9 -->
+
+The video has me navigating to a wordpress admin section. Is this a security risk or does it look bad? It has admin emails in it.
+See ![2026-04-04_10-37.png](../../../../Pictures/agent-loop/2026-04-04_10-37.png)
+### Re: WordPress admin in video — security risk (HEAD)
+
+**Yes, edit this out.** The screenshot shows:
+
+1. **Admin emails exposed** — visible at `monsterrodholders.com/wp-admin/users.php?role=administrator`
+2. **WordPress admin URL confirmed** — attackers know the exact admin path
+3. **User list with roles** — shows who has Administrator access
+4. **Last login timestamps** — reveals activity patterns
+
+Admin emails + confirmed WordPress admin URL = targeted phishing and brute-force attack surface. The site owner wouldn't appreciate their admin panel broadcast publicly.
+
+**Options:**
+1. **Blur/crop** — quickest, edit to blur the admin panel portion
+2. **Cut the segment** — if brief and not essential
+3. **Re-record** — if you need WordPress but can avoid users page
+
+On the YouTube vs native LinkedIn point: you're right, a YouTube link gets less algorithmic boost than native video. But Robert has already seen your demos — so the video is more about public credibility than impressing him specifically. The blog teaser text post might actually be the stronger play for LinkedIn reach in this case.
+
+**Revised recommendation:** Fix the video first (blur/cut the admin section), then decide posting order. No rush — getting it right matters more than getting it out Saturday vs Monday.
+<!-- agent:boundary:4468c2ab -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Video post: upload agent-runbooks video to LinkedIn NOW
-- LinkedIn blog teaser: post Mon/Tue Apr 7-8
+- Video: edit out WordPress admin section before posting
+- LinkedIn blog teaser: draft ready, post after video is clean
 - Second blog post + video: target Wed/Thu Apr 9-10
 - Cleanup: remove stale directories
 <!-- /agent:pending -->

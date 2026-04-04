@@ -288,8 +288,7 @@ Error: Unterminated frontmatter block
 ~/work/btakita/agent-loop main ⇡3 *1 !38 ?27
 ~/work/btakita/agent-loop main ⇡3 *1 !38 ?27                                                                   01:16:32
 ```
-We were in a 1 pane state for a while. Event when I initially focused from  the right editor then the
-### Re: claude_args and on-demand-context crash (HEAD)
+### Re: claude_args and on-demand-context crash
 
 **`claude_args: --dangerously-skip-permissions`** — this was set in the frontmatter of `tasks/research/on-demand-context.md` during the earlier claim scaffolding. It's a frontmatter field that passes extra args to the Claude CLI when `agent-doc start` spawns a session. You didn't explicitly set it — it was likely added by the claim/scaffold process or copied from a template.
 
@@ -308,11 +307,33 @@ claude_args: --dangerously-skip-permissions
 ```
 
 `agent-doc start` now runs successfully (the session registered to pane %433).
-<!-- agent:boundary:090532f0 -->
+
+We were in a 1 pane state for a while. Event when I initially focused from the left editor to the right editor then back to the editor...then the tmux pane layout became corrected.
+
+This document did not seem to debounce. I was in the middle of typing
+### Re: 1-pane state requiring focus cycling to correct (HEAD)
+
+This sounds like the sync/layout correction is event-driven (triggered by editor focus changes) rather than proactively ensuring the correct layout when a session starts or a pane is retrieved from stash.
+
+**What likely happened:**
+1. A session started or a pane was retrieved from stash
+2. The layout should have been 2-pane (editor + agent pane) but stayed at 1-pane
+3. Only after you manually cycled focus (left editor → right editor → back) did the focus event trigger a sync that corrected the layout
+
+**Possible causes:**
+- The `sync` command runs on focus events but the initial session start/claim didn't trigger a layout recalculation
+- The stash-retrieve path brings back the pane but doesn't resize/split the window to accommodate it
+- A race condition where the pane is joined but the layout adjustment hasn't fired yet
+
+**To investigate:** We'd need to reproduce the exact sequence — which document was active, which was claimed/started, and whether this was after a `start`, `claim`, or editor navigation event. The tmux-router logs (`agent-doc sync --verbose` or the tmux-router debug output) would show whether a sync was attempted and what layout state it saw.
+
+Is this reproducible, or was it a one-time occurrence? If reproducible, the steps to trigger it would help narrow down which code path is missing the layout correction.
+<!-- agent:boundary:9d384526 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Publish tmux-router 0.3.9 to crates.io (awaiting approval)
+- [ ] Investigate 1-pane layout bug if reproducible (need repro steps)
 <!-- /agent:pending -->

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-agent-doc v0.31.6 released to crates.io + GitHub
+agent-doc v0.31.10 released to crates.io + GitHub
 <!-- /agent:status -->
 
 ## Exchange
@@ -145,7 +145,7 @@ This would be called from:
 
 Should I implement this in `src/agent-doc`? It's a ~50-line change across 3 entrypoints plus a shared `ensure_initialized()` function.
 yes
-### Re: `ensure_initialized()` implemented (HEAD)
+### Re: `ensure_initialized()` implemented
 
 Done. Added `snapshot::ensure_initialized(doc)` as a shared function and refactored both entrypoints:
 
@@ -162,7 +162,23 @@ Done. Added `snapshot::ensure_initialized(doc)` as a shared function and refacto
 **Sync not included** — sync operates on tmux layout/panes, not individual files. Files enter agent-doc through claim or preflight, both of which now call `ensure_initialized()`.
 
 637 tests pass, clippy clean, release built.
-<!-- agent:boundary:640ece6d -->
+release
+### Re: agent-doc v0.31.10 released (HEAD)
+
+Published to all targets:
+- **crates.io**: v0.31.10
+- **GitHub Release**: v0.31.10 with binary
+- **Local binary**: installed to ~/.cargo/bin/agent-doc
+- **Parent submodule**: pointer updated
+
+6 changes:
+1. Auto-init (`ensure_initialized`) for new documents
+2. Cross-process typing detection (FFI)
+3. Diff stability fix
+4. IPC error propagation
+5. Template boundary fix
+6. CI/build improvements
+<!-- agent:boundary:3821528d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -170,5 +186,5 @@ Done. Added `snapshot::ensure_initialized(doc)` as a shared function and refacto
 <!-- agent:pending patch=replace -->
 - [x] Granola enrich-from-transcript runbook — created
 - [x] Auto-init: `ensure_initialized()` added to claim + preflight
-- [ ] Release v0.31.10 with ensure_initialized (when ready)
+- [x] Release v0.31.10 — published
 <!-- /agent:pending -->

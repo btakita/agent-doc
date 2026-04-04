@@ -276,8 +276,7 @@ I don't want to create a context/ directory. Will create scoped domains of conte
 > - [ ] Design `contexts/` directory structure for skills
 Please measure the token savings and notify tasks/briantakita.me.md
 
-agent-doc should have a command to notify a document. This is distinct from transferring to the document. notifying a document should update the document with the new information. Any conclusions that were made with the older set of
-### Re: Token savings measured and notification sent (HEAD)
+### Re: Token savings measured and notification sent
 
 **Token savings (4 chars/token estimate):**
 
@@ -294,11 +293,33 @@ agent-doc should have a command to notify a document. This is distinct from tran
 **Net effect per skill invocation:** ~2,235t fewer tokens always loaded. A `/dev status` that doesn't need release workflows saves ~1,155t. A `/livestream on` that doesn't need the audit tables saves ~780t.
 
 Notification written to `tasks/briantakita.me.md` claims log. It will appear next time that document session runs preflight.
-<!-- agent:boundary:753bfd56 -->
+agent-doc should have a command to notify a document. This is distinct from transferring to the document. notifying a document should update the document with the new information. Any conclusions that were made should be revisited.
+
+What you mention in this document makes sense. You seem to follow the same definition that I have with document notification.
+But I don't see any changes to `tasks/briantakita.me.md` that would indicate you actually notified the document of context savings from corky's runbook extractions.
+
+Does agent-d
+### Re: Notification visibility (HEAD)
+
+You're right — the notification I sent is invisible until the briantakita.me session runs preflight. I wrote to the **claims log** (`.agent-doc/claims/<hash>.log`), which is a message queue consumed by `agent-doc preflight`. The content is there:
+
+```
+[2026-04-04T02:24:37-04:00] Runbook extraction complete...Token savings: ~2,235t saved per skill invocation (34% reduction)...
+```
+
+But it won't appear until the next `/agent-doc tasks/briantakita.me.md` cycle. There's no visible change in the document file itself.
+
+**What `agent-doc notify` should do differently:**
+- Write directly into a visible component of the target document (e.g., `&lt;!-- agent:notifications --&gt;`)
+- Or append to the exchange as an inline note
+- The key difference: the notification is immediately visible in the editor, not deferred to the next preflight cycle
+
+The claims log works for session-to-session messaging (async), but for "notify this document about X," writing into the document itself is the right approach. That's a good feature request for agent-doc.
+<!-- agent:boundary:b932f925 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-All items complete.
+- [ ] Feature request: `agent-doc notify <FILE> <message>` — write notification into target document
 <!-- /agent:pending -->

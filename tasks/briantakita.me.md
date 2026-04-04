@@ -1997,7 +1997,7 @@ Yes. Blog teaser is ready, video isn't. Post the teaser now — it stands on its
 3. **Wed/Thu** — second blog post + video
 
 Want me to format the draft as plain text for LinkedIn paste?
-<!-- agent:boundary:93b939d2 -->
+<!-- agent:boundary:4cc02252 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

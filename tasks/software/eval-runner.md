@@ -9,7 +9,7 @@ claude_args: --dangerously-skip-permissions
 # eval-runner
 
 <!-- agent:status -->
-**Status:** 20-case suite (split + post-preflight fixes) | Smoke 6/6 | Runbook added | `src/eval-runner/`
+**Status:** 20-case suite at 85.0% (17/20), mean 0.83 | Smoke 6/6 | `src/eval-runner/`
 <!-- /agent:status -->
 
 ## Architecture
@@ -1011,16 +1011,62 @@ Saved Markdown-Annotations reference (iA Writer's spec) to persistent memory. Li
 
 do
 - [ ] Run baseline with updated 20-case suite
-### Re: 20-case baseline running (HEAD)
+### Re: 20-case baseline running
 
 Launched: `make eval` (20 cases, sonnet, --parallel 8, refined system prompt). Will report results when done.
-<!-- agent:boundary:e3f385c2 -->
+### Re: 20-case baseline — new best (HEAD)
+
+**17/20 passed (85.0%), mean 0.83**
+
+| Case | Score | Result |
+|------|-------|--------|
+| simple-question | 0.60 | FAIL |
+| incomplete-fragment | 1.00 | PASS |
+| multi-topic | 1.00 | PASS |
+| comment-content-ignored | 1.00 | PASS |
+| blockquote-annotation | 0.90 | PASS |
+| deletion-of-content | 1.00 | PASS |
+| truncated-sentence | 1.00 | PASS |
+| structural-reorg | 0.10 | FAIL |
+| mixed-valid-and-comment | 0.90 | PASS |
+| inline-colon-annotation | 0.80 | PASS |
+| boundary-only-change | 1.00 | PASS |
+| head-label-removal | 0.90 | PASS |
+| pasted-terminal-output | 0.90 | PASS |
+| multi-item-instruction-list | 0.85 | PASS |
+| single-word-correction | 0.95 | PASS |
+| mid-sentence-truncated-real | 0.90 | PASS |
+| inline-annotation-corrections | 0.20 | FAIL |
+| truncated-line-no-change | 1.00 | PASS |
+| multi-topic-approval-plus-questions | 0.85 | PASS |
+| url-reference-question | 0.85 | PASS |
+
+**Wins from today's changes:**
+- `mixed-valid-and-comment`: 0.30 → 0.90 (post-preflight diff — the biggest fix)
+- `blockquote-annotation`: 0.30 → 0.90 (model variance, but trending up)
+- `multi-topic-approval-plus-questions`: 0.60 → 0.85 (now solidly passing)
+- Both new split cases working: `truncated-line-no-change` at 1.00
+
+**3 remaining failures:**
+- `simple-question` (0.60) — consistent borderline case across all runs
+- `structural-reorg` (0.10) — response model over-explained the reorg
+- `inline-annotation-corrections` (0.20) — new case, needs rubric calibration
+
+**Progress from session start to end:**
+
+| Metric | Start (haiku) | Now (sonnet+refined) |
+|--------|---------------|---------------------|
+| Cases | 21 | 20 |
+| Pass rate | 42.9% | 85.0% |
+| Mean score | 0.57 | 0.83 |
+| Suite time | 19.5 min | ~10 min |
+<!-- agent:boundary:1f563cf9 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [ ] Run baseline with updated 20-case suite (running)
+- [x] Run baseline with updated 20-case suite (17/20, 85.0%)
 - [ ] Design agentic eval fixture format (future — v2)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 <!-- /agent:pending -->

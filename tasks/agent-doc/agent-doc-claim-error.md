@@ -76,7 +76,7 @@ Added to auto memory (`feedback_check_working_tree.md`):
 Also updated the prerelease runbook — but the real fix is the memory, since the mistake happens at the "check status" phase before any release workflow starts.
 
 I wonder if we should have a detailed runbook that is called from memory or the CLAUDE.md.
-### Re: Runbooks referenced from memory/CLAUDE.md (HEAD)
+### Re: Runbooks referenced from memory/CLAUDE.md
 
 This pattern already works — CLAUDE.md's Runbooks section links `.agent/runbooks/*.md` as on-demand procedures. Memory could do the same for edge cases.
 
@@ -92,14 +92,22 @@ This pattern already works — CLAUDE.md's Runbooks section links `.agent/runboo
 **When runbook > memory:** 4+ steps, conditional logic, platform branches, specific command syntax with edge cases (compact-exchange, transfer-extract, prerelease).
 
 The pattern of "memory says what, runbook says how" is already working. No new mechanism needed — just use the right layer for the complexity.
-<!-- agent:boundary:7c744908 -->
+do
+- [ ] Commit tmux-router sync.rs debug logging changes
+- [ ] Commit agent-doc submodule changes (runbook updates, skill.rs)
+### Re: Submodule changes committed (HEAD)
+
+1. **tmux-router** (`d2219eb`): stash debug logging with window/pane/session context
+2. **agent-doc** (`72adf58`): transfer-extract runbook + compact-exchange update + skill.rs bundling + SKILL.md Runbooks section
+3. **agent-loop** (`0ff07ae1`): updated both submodule pointers
+<!-- agent:boundary:3d4bed57 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Commit tmux-router sync.rs debug logging changes
-- [ ] Commit agent-doc submodule changes (runbook updates, skill.rs)
+- [x] Commit tmux-router sync.rs debug logging changes
+- [x] Commit agent-doc submodule changes (runbook updates, skill.rs)
 - [ ] Release agent-doc (version TBD)
-- [ ] Release tmux-router (if warranted)
+- [ ] Release tmux-router (if warranted — only debug logging)
 <!-- /agent:pending -->

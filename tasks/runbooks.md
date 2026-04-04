@@ -232,7 +232,7 @@ So `feedback_distribution_aware_reorg.md` content is already on-demand. The ~1 l
 **Where on-demand context shines:** knowledge useful *when asked about* rather than *before acting*. "How did we solve X last time" = claude-mem. "Don't do X" = auto memory.
 
 If you want a new mechanism beyond these, the gap would be: **context that's triggered by the *type of work* being done, not by explicit user request or agent search.** For example, "when the agent is about to reorganize files, inject distribution-awareness context." That's a hook-based approach — settings.json could match on `Edit` or `Write` tool calls targeting certain paths and inject a reminder. That would be zero always-loaded cost with automatic triggering.
-<!-- agent:boundary:0cabc919 -->
+<!-- agent:boundary:088f2a43 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

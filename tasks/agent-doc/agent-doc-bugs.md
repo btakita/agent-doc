@@ -97,7 +97,7 @@ This would bridge the gap between Granola's hidden context and the agent-doc tem
 Want me to create the runbook?
 Yes
 I also want to note that when robert-ross-granola.md was created, it was not committed to git. Why not?
-### Re: Runbook created + why the granola doc wasn't committed (HEAD)
+### Re: Runbook created + why the granola doc wasn't committed
 
 **Runbook created:** `.claude/skills/granola/runbooks/enrich-from-transcript.md` — documents the manual workflow for extracting Granola's hidden transcript context via the text-selection popup and adding it to the agent-doc exchange. Also updated `SKILL.md` with the runbook index.
 
@@ -106,17 +106,50 @@ I also want to note that when robert-ross-granola.md was created, it was not com
 1. **The granola skill doesn't auto-commit** — the import runbook describes the step but the skill's actual execution may have stopped after creating the file
 2. **No snapshot exists** — `agent-doc commit` requires a snapshot to diff against. If the file was created outside of `agent-doc write`, there's no snapshot, so `agent-doc commit` would need to do an initial commit (add + snapshot creation)
 
+We should have a common path for adding + claiming agent docs...where the baseline commit occurs. This commit should **always** happen once the md file is associated with agent-doc. Otherwise the initial diff will have issues...correct?
+Add steps to skill->runbook and/or agent-doc binary?
+
 **Fix options:**
 - The granola import workflow should call `git add <file> && agent-doc commit <file>` after creating the template
 - Or: add an `agent-doc init <file>` command that creates the initial snapshot + git commit for newly created documents
 
+I believe we have several entrypoints to associate a *.md file with agent-doc. All of these entrypoints should perform the init step. These include:
+- sync
+- run
+- claim
+
+init would be ok as a command if you think it is useful. However, in practice, we already call one of entrypoint commands already.
+
 Which approach do you prefer?
-<!-- agent:boundary:4a285171 -->
+### Re: Auto-init in existing entrypoints (HEAD)
+
+You're right — `agent-doc init` as a standalone command is unnecessary overhead. The init logic should live in the existing entrypoints since they're already called when a file first enters the agent-doc lifecycle.
+
+**Proposed behavior:** When `claim`, `preflight` (which backs `run`), or `sync` encounters a file with no snapshot:
+
+1. `git add <file>` (if untracked)
+2. Create the initial snapshot (copy file to `.agent-doc/snapshots/<hash>.md`)
+3. `git commit` with the standard agent-doc commit message
+
+This means any file that enters agent-doc's orbit gets a clean baseline automatically. The first `/agent-doc` cycle will have an empty diff (correct — no user edits yet), and subsequent edits show up cleanly.
+
+**Where to implement:** The snapshot check already happens early in these commands. The fix is adding an `ensure_initialized()` function that:
+- Checks if snapshot exists
+- If not: `git add` + create snapshot + commit
+- Returns normally (existing flow continues)
+
+This would be called from:
+- `claim.rs` — after pane validation, before registry update
+- `preflight` (in the commit step) — before diff computation
+- `sync` — before layout operations
+
+Should I implement this in `src/agent-doc`? It's a ~50-line change across 3 entrypoints plus a shared `ensure_initialized()` function.
+<!-- agent:boundary:02e8cedd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] Granola enrich-from-transcript runbook — created
-- [ ] Granola import: auto-commit after creating template — awaiting decision
+- [ ] Auto-init: add `ensure_initialized()` to claim/preflight/sync entrypoints — awaiting approval
 <!-- /agent:pending -->

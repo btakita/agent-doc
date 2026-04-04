@@ -128,7 +128,7 @@ The plugin is doing sustained work specific to bugs.md. Most likely:
 3. The VCS refresh debounce helps but doesn't address the root cause — the plugin shouldn't be doing continuous work for stashed sessions
 
 **Fix direction:** PatchWatcher/sync should skip or pause processing for documents with stashed panes. Need to check what the plugin is actually looping on — likely `EditorTabSyncListener` or the watch thread.
-<!-- agent:boundary:0961dbc4 -->
+<!-- agent:boundary:f1431eeb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

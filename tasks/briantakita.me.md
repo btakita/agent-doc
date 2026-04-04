@@ -1871,15 +1871,40 @@ To:
 This is more honest about how the ecosystem actually works. Ready to commit and push when you say.
 
 publish
-### Re: Published (HEAD)
+### Re: Published
 
 Blog post updated and deploying. All three repos pushed (briantakita.me → briantakita.me-dev → agent-loop).
 
 Live at: https://briantakita.me/post/2026-04-03-agent-runbooks-on-demand-procedural-context
-<!-- agent:boundary:406d0a2a -->
+
+show draft
+### Re: LinkedIn draft (HEAD)
+
+Here's the current draft:
+
+---
+
+**Your CLAUDE.md is bloated. Here's what to do about it.**
+
+Every token in your AI instruction file costs you something. Release checklists, deploy procedures, precommit workflows... they're important, but they don't need to occupy context when the agent is writing a utility function.
+
+I've been externalizing step-by-step procedures into **agent runbooks** — plain markdown files that agents load on demand instead of carrying in every interaction. By identifying and extracting 12 runbooks, I cut 212 lines from my instruction files — a 28% reduction in persistent context.
+
+The pattern works with Claude Code, Cursor, Copilot, Windsurf, Gemini CLI, Aider, and Codex. No special syntax. No vendor lock-in.
+
+Blog post + reference repo:
+- https://briantakita.me/post/2026-04-03-agent-runbooks-on-demand-procedural-context
+- https://github.com/btakita/agent-runbooks
+
+What directory convention are you using for agent config? `.agent/`, `.agents/`, `.ai/`? The ecosystem hasn't settled this yet and I'd love to hear what's working for you.
+
+---
+
+Edit inline or tell me what to change.
+<!-- agent:boundary:bd3f5d7c -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn post: revised draft (active voice), pending your edits + publish
+- LinkedIn post: draft shown above, pending your edits + publish
 - Cleanup: remove stale directories
 <!-- /agent:pending -->

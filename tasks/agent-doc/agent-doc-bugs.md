@@ -66,7 +66,7 @@ You're right — there's a gap. The path for `robert-ross-granola.md`:
 This means any file with a session UUID that appears in the editor gets initialized automatically, regardless of whether it was claimed or had `/agent-doc` run on it.
 
 Should I implement this?
-<!-- agent:boundary:6d22e904 -->
+<!-- agent:boundary:f45cf4a3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

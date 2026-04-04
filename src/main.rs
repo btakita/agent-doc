@@ -193,6 +193,9 @@ enum Commands {
     Clean {
         /// Path to the session document
         file: PathBuf,
+        /// Create an archive tag before squashing (preserves full history)
+        #[arg(long)]
+        archive: bool,
     },
     /// Audit instruction files against the codebase
     AuditDocs {
@@ -727,7 +730,7 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Diff { file, wait } => diff::run(&file, wait),
         Commands::Reset { file } => reset::run(&file),
-        Commands::Clean { file } => clean::run(&file),
+        Commands::Clean { file, archive } => clean::run(&file, archive),
         Commands::AuditDocs { root } => audit_docs::run(root.as_deref()),
         Commands::Gc { root, dry_run } => {
             let result = gc::run(root.as_deref(), dry_run)?;

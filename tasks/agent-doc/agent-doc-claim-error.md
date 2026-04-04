@@ -195,7 +195,7 @@ The jetbrains editor has performance issues navigating and editing this document
 <!-- agent:boundary:d7cbc450 -->
 <!-- /agent:exchange -->
 
-## Pending / Not Built
+## Pending / Not Built (HEAD)
 
 <!-- agent:pending patch=replace -->
 - [ ] Implement diff-type classification in preflight (P1)
@@ -222,10 +222,10 @@ JetBrains' markdown highlighter may be doing expensive parsing on these HTML com
 1. Compact exchange (less content for parser)
 2. Disable markdown preview for tasks/ files
 3. If boundary markers are the trigger, consider a format that doesn't use HTML comments (e.g., `[//]: # (boundary:hash)`)
-<!-- agent:boundary:1ea68d98 -->
+<!-- agent:boundary:7e01dce4 -->
 <!-- /agent:exchange -->
 
-## Pending / Not Built (HEAD)
+## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] GC orphaned 3.9 GB blob

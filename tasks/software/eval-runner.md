@@ -1093,7 +1093,7 @@ Option 1 is better — it gives the model the context without adding another rul
 1. `simple-question` — add "For straightforward questions, respond directly" to system prompt
 2. `structural-reorg` — enrich document_context with full document showing Phase 4's original position
 3. `inline-annotation-corrections` — enrich document_context to explain the annotation pattern
-<!-- agent:boundary:1f7c00f3 -->
+<!-- agent:boundary:7d7f864c -->
 <!-- /agent:exchange -->
 
 ## Pending

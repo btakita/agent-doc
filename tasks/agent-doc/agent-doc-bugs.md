@@ -537,7 +537,7 @@ Session 5 has:
 - `2:zsh @200` — %438 (shell)
 
 The stash window in session 5 will be recreated automatically the next time a pane is stashed (via `ensure_stash_window`). It's not needed right now since both agent-doc panes are in the correct window.
-<!-- agent:boundary:64f5cc73 -->
+<!-- agent:boundary:bebc08c6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -122,7 +122,7 @@ n
 | Parent submodule pointer | Updated |
 
 The `/dev/null` config mask worked perfectly — no tmux-router mount needed.
-<!-- agent:boundary:523b2a2a -->
+<!-- agent:boundary:9468b5b2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

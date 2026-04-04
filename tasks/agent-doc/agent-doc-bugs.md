@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Renamed to Runbooks; corky has 3 extractable workflows for runbooks/
+Runbook convention transferred to tasks/runbooks.md
 <!-- /agent:status -->
 
 ## Exchange
@@ -222,7 +222,7 @@ If you agree, I'll rename the section in agent-doc's SKILL.md from `## Operation
 Agreed
 
 Re: agent-runbooks...we do have several runbooks in this project. Does corky have SKILL.md runbooks that can be extracted?
-### Re: Renamed + corky runbook candidates (HEAD)
+### Re: Renamed + corky runbook candidates
 
 **Done:** Renamed `## Operations` → `## Runbooks` in agent-doc SKILL.md.
 
@@ -250,7 +250,20 @@ src/corky/
 The email skill's `runbooks/email-send.md` should probably move into corky's runbooks since corky owns the email workflow.
 
 This is a good task for a separate session — the scope is clear (extract workflows → runbooks, update triggers, consolidate email-send).
-<!-- agent:boundary:6447e937 -->
+Transfer this task into tasks/runbooks.md
+### Re: Transfer to tasks/runbooks.md (HEAD)
+
+Added the following decisions from this session to `tasks/runbooks.md`:
+
+**Decisions made in this session (agent-doc-bugs):**
+1. Section name: `## Runbooks` (not Operations)
+2. Trigger format: `` `trigger phrase` — runbooks/filename.md ``
+3. Corky has 3 extractable workflows: review-inbox, draft-reply, enrich-contact
+4. email skill's `email-send.md` should consolidate into corky
+5. Start runbook management as agent-doc subcommand, extract to `agent-runbooks` crate if scope grows
+
+These items are now tracked in `tasks/runbooks.md`. This document's runbook discussion is complete.
+<!-- agent:boundary:a7385fdf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -258,6 +271,5 @@ This is a good task for a separate session — the scope is clear (extract workf
 <!-- agent:pending patch=replace -->
 - [x] Rename ## Operations → ## Runbooks in SKILL.md
 - [ ] Publish tmux-router 0.3.9 to crates.io (awaiting approval)
-- [ ] Extract corky workflows to runbooks/ (separate session)
-- [ ] Consolidate email skill runbook into corky
+- [ ] Runbook convention work transferred to tasks/runbooks.md
 <!-- /agent:pending -->

@@ -138,7 +138,7 @@ It's already inside `src/agent-doc/.cargo/config.toml` (the submodule). The path
 The pattern is: `.cargo/config.toml` for local dev, selective Docker mounts for CI/release.
 
 Why do we need this specific docker configuration. Does ci not build from the crates version of tmux-router?
-### Re: CI uses crates.io tmux-router — Docker doesn't need mount (HEAD)
+### Re: CI uses crates.io tmux-router — Docker doesn't need mount
 
 `.cargo/config.toml` is **not tracked** in the agent-doc git repo — it's a local-only dev override. CI builds use the crates.io version of tmux-router.
 
@@ -154,7 +154,17 @@ docker run --rm \
 ```
 
 The `/dev/null` bind mount masks the local `.cargo/config.toml`, forcing crates.io resolution. No tmux-router mount needed. Only `src/agent-doc` is exposed to the container.
-<!-- agent:boundary:3228835f -->
+
+Should we add this as a runbook linked from the appropriate SKILL.md?
+### Re: PyPI publish runbook placement (HEAD)
+
+No — this belongs in the **prerelease runbook** (`.agent/runbooks/prerelease.md`), not in agent-doc's SKILL.md. PyPI publishing is a release operation, not a document session operation.
+
+Updated `.agent/runbooks/prerelease.md` Target: pypi section with:
+- Docker command using `/dev/null` mask for `.cargo/config.toml`
+- Upload command using `pass pypi/publish_token`
+- Security note: never mount the entire workspace
+<!-- agent:boundary:1fddb5d2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -165,4 +175,5 @@ The `/dev/null` bind mount masks the local `.cargo/config.toml`, forcing crates.
 - [x] Document `agent-doc transfer`/`extract` in SKILL.md or runbook
 - [x] PyPI publish (manylinux Docker build)
 - [x] Add Docker mount security rule to CLAUDE.md
+- [x] Add PyPI Docker build to prerelease runbook
 <!-- /agent:pending -->

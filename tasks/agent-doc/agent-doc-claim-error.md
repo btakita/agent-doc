@@ -420,7 +420,7 @@ It's re-added because it only exists in **staged/committed content**, never the 
 This creates the 1-line blue gutter that visually separates "agent response" (committed) from "user input" (uncommitted). Without re-adding it each cycle, the boundary disappears.
 
 The bug was marking ALL headings instead of just the last one — not the re-addition itself.
-<!-- agent:boundary:9e977ef2 -->
+<!-- agent:boundary:1be03e8e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -171,7 +171,7 @@ Fields are `skip_serializing_if = "Option::is_none"` — omitted when no diff.
 **Tests:** 9 new tests covering all diff types. All 417 tests pass, clippy clean.
 
 Next steps: the skill can now read `diff_type` from preflight JSON and short-circuit for simple cases. Want me to update the SKILL.md routing logic, or move to P2 (post-preflight eval diffs)?
-<!-- agent:boundary:4ced87cb -->
+<!-- agent:boundary:81f0fbe3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

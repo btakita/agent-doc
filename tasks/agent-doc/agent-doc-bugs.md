@@ -153,7 +153,8 @@ Sync #1 had `window=None` and raced with sync #2's stash operations.
 634 tests pass. Built, installed. Try switching tabs now.
 
 I still see unwanted tmux pane switching when navigating between the left editor and the right editor.
-### Re: Panes still bouncing — deeper investigation (HEAD)
+Also seeing glitch when running an agent doc.
+### Re: Panes still bouncing — deeper investigation
 
 The double-sync from route is eliminated. But the JB plugin's `EditorTabSyncListener` still fires sync on every editor navigation (expected — this IS how layout sync works). The problem is:
 
@@ -170,12 +171,24 @@ The double-sync from route is eliminated. But the JB plugin's `EditorTabSyncList
 The fix would be: when a pane is in stash and NOT in the desired layout, don't pull it out. Only pull it out when it's actually wanted.
 
 Should I investigate the `sync_with_options` pre-reconcile pane setup to find where stashed panes are being joined before reconciliation?
-<!-- agent:boundary:1e8c09a6 -->
+yes
+### Re: Added diagnostic checkpoints — need you to trigger a tab switch (HEAD)
+
+Added 3 checkpoint log lines to `sync_with_options` to pinpoint WHERE stashed panes reappear:
+
+1. `checkpoint:post-repair` — right after repair_layout, before resync::prune
+2. `checkpoint:post-prune` — after resync::prune
+3. `checkpoint:pre-tmux_router` — right before tmux_router::sync (was already there, now shows pane IDs)
+
+**Next step:** Please switch between your left and right editor tabs to trigger a sync event. Then I'll check the sync log to see at which checkpoint the extra panes appear.
+
+Built, installed.
+<!-- agent:boundary:dbf033fd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Find where stashed panes are joined back into agent-doc window before reconcile
-- [ ] Fix: only join stashed panes that are in the desired layout
+- [ ] Identify checkpoint where stashed panes reappear in agent-doc window
+- [ ] Fix the root cause of pane bouncing
 <!-- /agent:pending -->

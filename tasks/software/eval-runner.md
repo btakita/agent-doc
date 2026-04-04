@@ -274,25 +274,36 @@ Done. Changes to `src/eval-runner/`:
 
 **Usage:**
 ```bash
-# Sequential (default, same as before) (HEAD)
+# Sequential (default, same as before)
 eval-runner run cases.yaml --model haiku
 
-# 4-wide parallel (HEAD)
+# 4-wide parallel
 eval-runner run cases.yaml --model haiku --parallel 4
 
-# Full concurrency (rate-limit dependent) (HEAD)
+# Full concurrency (rate-limit dependent)
 eval-runner run cases.yaml --model haiku --parallel 21
 ```
 
 Builds clean. Ready to test with the agent-doc eval cases.
-<!-- agent:boundary:5f8975c2 -->
+
+do
+- [ ] Run with sonnet model for target baseline
+### Re: Running sonnet baseline (HEAD)
+
+Kicked off the sonnet eval with parallel concurrency:
+
+```bash
+eval-runner run cases.yaml --model sonnet --judge-model sonnet --parallel 4 --json
+```
+
+Output saving to `evals/agent-doc/diff-interpretation/baselines/sonnet-2026-04-04.json`. Running with `--parallel 4` to test the new tokio concurrency — should complete in ~5-8 min instead of ~20 min sequential. Will report results when done.
+<!-- agent:boundary:34e2227e -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [x] Re-add tokio, convert to async with `--parallel N` semaphore-based concurrency
-- [ ] Run with sonnet model for target baseline
+- [ ] Run with sonnet model for target baseline (in progress, --parallel 4)
 - [ ] Add `make check` integration
 - [ ] JSON output format documentation
 - [ ] Regression tracking with `--baseline` end-to-end test

@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Stash window consumed during sync tests — will auto-recreate on next stash
+All sessions alive — windows closed when panes moved during sync tests
 <!-- /agent:status -->
 
 ## Exchange
@@ -523,7 +523,7 @@ Final state: both panes side by side in session 5 agent-doc window. All 4 transi
 2. `--window` is authoritative for `target_session` (tmux-router `sync.rs:740-743`)
 3. `Cargo.toml` path dep ensures local tmux-router is used (`path = "../tmux-router"`)
 Where is the stash pane?
-### Re: Where is the stash pane? (HEAD)
+### Re: Where is the stash pane?
 
 The stash window is no longer in session 5. During the sync tests, it was consumed when panes were retrieved from it. The only remaining stash is in session 1:
 
@@ -537,7 +537,28 @@ Session 5 has:
 - `2:zsh @200` — %438 (shell)
 
 The stash window in session 5 will be recreated automatically the next time a pane is stashed (via `ensure_stash_window`). It's not needed right now since both agent-doc panes are in the correct window.
-<!-- agent:boundary:bebc08c6 -->
+
+What happened to the other tmux sessions? Were they closed?
+### Re: Missing tmux sessions/windows (HEAD)
+
+The sessions are still alive but lost windows during the sync tests. When panes are moved out via `join-pane`, tmux closes the now-empty source window.
+
+**Current state (4 sessions, 4 windows):**
+
+| Session | Windows | Notes |
+|---------|---------|-------|
+| 1 (detached) | `1:2 stash` (1 pane) | Lost `claude` + `zsh` windows — panes %433, %431 moved to session 5 |
+| 3 (attached) | `3:0 zsh` (3 panes) | Unchanged |
+| 5 (attached) | `5:0 agent-doc` (2 panes: %433, %431) | Lost `zsh` + old `stash` — %438 pane gone |
+| 8 (attached) | `8:0 zsh` (2 panes) | Unchanged |
+
+**What happened:**
+- Session 1's `claude` window closed when %433 and %431 were joined into session 5
+- Session 1's `zsh` window closed when %166, %167, %436, %434 were stashed during sync tests
+- Session 5's `zsh` window (%438) and `stash` window (%428, %437) were consumed during the manual fixes and sync test runs
+
+The sessions themselves are fine — they just have fewer windows. No data was lost; the Claude Code processes in %433 and %431 are still running.
+<!-- agent:boundary:2c8e22f7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

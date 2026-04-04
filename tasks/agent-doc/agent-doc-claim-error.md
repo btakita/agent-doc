@@ -46,9 +46,11 @@ The response patch in tasks/software/corky.md claims:
 > agent-doc has no cross-file write capability — each session only manages its own document. This is a current limitation.
 
 Is this true? If it is, we should have a transfer and extract directly write to the target document with the annotated prompt.
-### Re: `agent-doc transfer` does write to the target document (HEAD)
+### Re: `agent-doc transfer` does write to the target document
 
 The claim is **incorrect**. Looking at `src/agent-doc/src/extract.rs:148-203`, `agent-doc transfer` absolutely writes to the target document:
+
+Why did it hallucinate? Are we missing a skill or a runbook?
 
 1. Reads source component content (line 169)
 2. Clears source component (lines 175-177)
@@ -61,7 +63,17 @@ So when you ran `agent-doc transfer`, it should have written the transferred con
 If the response in corky.md claimed "no cross-file write capability," that was the skill/LLM hallucinating — the binary handled the transfer correctly. The LLM in the corky session may have responded to the transferred content without realizing the binary already wrote it.
 
 **No code change needed.** The transfer and extract commands already write directly to the target document with annotated prompts.
-<!-- agent:boundary:0a5415ef -->
+The transfer from briantakita.me.md to corky.md did not result with writing to the prompt. It was queued...presumably in the claim log...for the next agent-doc run cycle.
+### Re: Why the hallucination happened — skill doesn't use `agent-doc transfer` (HEAD)
+
+The briantakita.me session did the "transfer" manually — it wrote a summary in its own exchange and said "Open tasks/software/corky.md and add this when ready." It never ran `agent-doc transfer`.
+
+**The gap is in the skill, not the binary.** The `agent-doc transfer` CLI command (`extract.rs:148-203`) writes directly to the target document. But SKILL.md doesn't mention `transfer` or `extract` — the skill doesn't know they exist.
+
+**The corky session was technically correct** about the *skill's* limitations (it can only `agent-doc write` to its own document), but wrong about the *binary's* capabilities (`agent-doc transfer` can write cross-file).
+
+**Fix:** Add transfer/extract usage to SKILL.md or a runbook so the skill knows to run `agent-doc transfer <SOURCE> <TARGET> <COMPONENT>` instead of manually describing the transfer.
+<!-- agent:boundary:653c0bb1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -70,4 +82,5 @@ If the response in corky.md claimed "no cross-file write capability," that was t
 - [x] Release v0.31.5
 - [x] Update compact-exchange runbook: note about preserving uncommitted user input
 - [ ] PyPI publish (needs manylinux Docker build)
+- [ ] Document `agent-doc transfer`/`extract` in SKILL.md or runbook
 <!-- /agent:pending -->

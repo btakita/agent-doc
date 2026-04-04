@@ -489,7 +489,7 @@ After this fix:
 One line to add in `extract.rs:194`: `crate::git::commit(target)?;`
 
 Want me to add it?
-<!-- agent:boundary:7f4b761d -->
+<!-- agent:boundary:05eceb81 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

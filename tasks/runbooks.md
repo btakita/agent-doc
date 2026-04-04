@@ -9,7 +9,7 @@ agent_doc_write: crdt
 <!-- agent:status patch=replace -->
 <!-- /agent:status -->
 
-## Exchange (HEAD)
+## Exchange
 
 <!-- agent:exchange patch=append -->
 In AGENTS.md and in the SKILL.md that we control...Please propose any set of instructions that can be extracted as a runbook
@@ -381,6 +381,8 @@ Annotations: 0,4200 SHA-256 a1b2c3d4
 
 The `*tasks/runbooks.md: 3850,350` annotation marks the notification as **reference material** from the runbooks session (the `*` prefix means "sourced from another document"). The range `3850,350` points to the notification text's grapheme cluster position.
 
+What is the notification text's grapheme cluster position?
+
 **Two layers working together:**
 1. **The blockquote** is the visible prompt -- the agent reads it and acts on the re-evaluation directive
 2. **The annotation block** (`---`...`...`) is provenance metadata -- tracks where content came from, enables auditing
@@ -394,11 +396,22 @@ The `*tasks/runbooks.md: 3850,350` annotation marks the notification as **refere
 >
 > **Re-evaluate:** <affected conclusions>
 ```
-<!-- agent:boundary:49d122f3 -->
+### Re: Grapheme cluster position (HEAD)
+
+`3850,350` means: start at grapheme cluster index 3850, span 350 clusters. A grapheme cluster is one visible character (handles multi-byte Unicode, emoji, combining marks).
+
+Those numbers in the example were **illustrative placeholders**. The real values would be computed by:
+1. Count grapheme clusters from document start to where the notification begins -> start position
+2. Count grapheme clusters in the notification text -> length
+
+For agent-doc to generate these, it would use `unicode-segmentation` crate to count grapheme clusters (not bytes) and record the position after appending.
+
+This is a **v2+ concern** -- the blockquote format alone is sufficient for v1. The annotation block adds provenance metadata for auditing but isn't needed for the agent to read and act on the notification.
+<!-- agent:boundary:352adf6f -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Feature request: `agent-doc notify` — blockquote notification + re-evaluation directive
+- [ ] Feature request: `agent-doc notify` -- blockquote notification + re-evaluation directive
 <!-- /agent:pending -->

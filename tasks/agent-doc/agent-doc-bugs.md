@@ -124,7 +124,7 @@ The "pane already claimed" error should never happen in normal workflow — it w
 3. **Spec clarification needed in CLAUDE.md** — should we add a "Pane Lifecycle" section to `src/agent-doc/CLAUDE.md` documenting when panes are created/stashed/restored? This would be the canonical reference.
 
 Should I add the Pane Lifecycle section to agent-doc's CLAUDE.md?
-<!-- agent:boundary:b3a33af4 -->
+<!-- agent:boundary:f8b8b9ed -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -947,7 +947,7 @@ This would be an `agent-doc` feature, not an eval-runner feature — the preflig
 | Truncation detection | LLM | Keep as LLM — needs contextual judgment |
 
 The biggest wins come from (1) fixing eval cases to use post-preflight diffs and (2) deterministic multi-topic chunking in the preflight pipeline.
-<!-- agent:boundary:a7a62dcc -->
+<!-- agent:boundary:993a0701 -->
 <!-- /agent:exchange -->
 
 ## Pending

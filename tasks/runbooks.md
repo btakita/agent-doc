@@ -90,7 +90,7 @@ All 10 runbooks created and 4 SKILL.md files trimmed:
 - `module-harness/SKILL.md` — ~4 lines removed (audit steps)
 
 Each SKILL.md now has a one-line reference to the runbook. Agents load the runbook only when executing that specific procedure.
-### Re: Context savings for blog post (HEAD)
+### Re: Context savings for blog post
 
 Here are the actual measured savings:
 
@@ -109,11 +109,22 @@ Here are the actual measured savings:
 **After:** `/dev status` loads only the trimmed SKILL.md (196 lines). `/dev release` for a Rust+Maturin project reads SKILL.md (196) + the relevant runbook (~30) = 226 lines vs 273 -- and more importantly, loads only the applicable workflow.
 
 The biggest win is **livestream** at 53% -- the audit pattern tables and deny-list are only needed when running `/livestream audit`, not for `/livestream on` (which is the common case).
-<!-- agent:boundary:1a57b39e -->
+
+Add btakita/agent-runbooks repo as a submodule to agent-loop
+### Re: agent-runbooks submodule added (HEAD)
+
+Added `btakita/agent-runbooks` as a submodule at `src/agent-runbooks/`. Current contents:
+- `examples/` directory
+- `LICENSE`
+- `README.md`
+
+The submodule is staged but not committed yet. Should I commit it, or do you want to move the runbook files we created into this repo first?
+<!-- agent:boundary:fdafd92f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-All items complete.
+- [ ] Decide: move runbooks from `.claude/skills/*/runbooks/` into `src/agent-runbooks/`?
+- [ ] Commit submodule addition
 <!-- /agent:pending -->

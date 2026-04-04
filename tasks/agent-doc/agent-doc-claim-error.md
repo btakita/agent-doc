@@ -103,8 +103,21 @@ do
 
 do
 - [ ] Release tmux-router (if warranted — only debug logging)
-n
-### Re: agent-doc v0.31.9 released, tmux-router skipped (HEAD)
+
+Did we just skip 4 versions?
+```
+● Update(pyproject.toml)
+  ⎿  Added 1 line, removed 1 line
+       4
+       5  [project]
+       6  name = "agent-doc"
+       7 -version = "0.31.5"
+       7 +version = "0.31.9"
+       8  description = "Interactive document sessions with AI agents"
+       9  readme = "README.md"
+      10  license = "MIT"
+```
+### Re: agent-doc v0.31.9 released, tmux-router skipped
 
 **tmux-router:** Release skipped — debug logging only, not user-facing.
 
@@ -122,7 +135,16 @@ n
 | Parent submodule pointer | Updated |
 
 The `/dev/null` config mask worked perfectly — no tmux-router mount needed.
-<!-- agent:boundary:9468b5b2 -->
+### Re: pyproject.toml version gap (0.31.5 → 0.31.9) (HEAD)
+
+No PyPI versions were skipped — the gap is a sync issue:
+
+- **Cargo.toml** was bumped incrementally through 0.31.6/7/8 (crates.io only)
+- **pyproject.toml** was only updated at 0.31.5 (first PyPI publish) and 0.31.9 (this release)
+- Versions 0.31.6-0.31.8 were never published to PyPI — only crates.io + GitHub
+
+The prerelease runbook says "sync pyproject.toml with Cargo.toml" — it should have been bumped at each release regardless of target. Going forward, both files stay in sync on every version bump.
+<!-- agent:boundary:8c4720eb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

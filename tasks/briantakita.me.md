@@ -2089,7 +2089,7 @@ Chrome not running with remote debugging — paste manually. Content is formatte
 > Your CLAUDE.md is bloated. Here's what to do about it.
 
 Should we be less presumptious? The reader may already use a similar solution. Let's tone this down a bit.
-### Re: Less presumptuous opener (HEAD)
+### Re: Less presumptuous opener
 
 Revised: "Your CLAUDE.md is bloated. Here's what to do about it." → "Is your CLAUDE.md carrying too much weight?"
 
@@ -2106,11 +2106,19 @@ The pattern works with Claude Code, Cursor, Copilot, Windsurf, Gemini CLI, Aider
 What directory convention are you using for agent config? .agent/, .agents/, .ai/? The ecosystem hasn't settled this yet and I'd love to hear what's working for you.
 
 Links in the comments.
-<!-- agent:boundary:4b522538 -->
+publish edit
+### Re: Publish edit (HEAD)
+
+All blog post edits are already published and deployed. The briantakita.me working tree is clean — last push included the "runbooks vs rules" revision and the verified numbers (212 lines / 28%).
+
+Live at: https://briantakita.me/post/2026-04-03-agent-runbooks-on-demand-procedural-context
+
+The LinkedIn teaser opener ("Is your CLAUDE.md carrying too much weight?") is separate from the blog post — no blog changes needed.
+<!-- agent:boundary:3f99cfdb -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn blog teaser: revised opener, ready to paste
+- LinkedIn blog teaser: revised opener, ready to paste and post
 - Video: edit out WordPress admin section, then post
 - Second blog post + video: target Wed/Thu Apr 9-10
 - Cleanup: remove stale directories

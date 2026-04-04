@@ -111,7 +111,7 @@ I also want to note that when robert-ross-granola.md was created, it was not com
 - Or: add an `agent-doc init <file>` command that creates the initial snapshot + git commit for newly created documents
 
 Which approach do you prefer?
-<!-- agent:boundary:4035c75b -->
+<!-- agent:boundary:4a285171 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

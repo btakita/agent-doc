@@ -330,7 +330,7 @@ Does agent-doc have a notify command that would make a visible change with the d
 3. Is immediately visible in the editor
 
 Could be implemented as `agent-doc patch --append` or a dedicated `notify` subcommand. Good candidate for the agent-doc-bugs task.
-<!-- agent:boundary:a59ea7f3 -->
+<!-- agent:boundary:4c3c70db -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

@@ -77,7 +77,7 @@ claude_args: --dangerously-skip-permissions
 <!-- agent:exchange mode=append -->
 *Compacted exchange covering v0.15.3 through v0.24.0.*
 
-### Releases in this session (HEAD)
+### Releases in this session
 
 **v0.21.0** — YouTube playlist CRUD (`playlist create/add/list/remove`), 5 tests, 13 total YouTube tests.
 
@@ -93,7 +93,7 @@ claude_args: --dangerously-skip-permissions
 
 **v0.24.0** — Gmail API threading (Message-ID extraction, `thread_id` in draft YAML + API requests), account-based doc auth (`--account` flag), Google Drive upload/Docs read-write/Sheets read, contact delete. Published: crates.io, PyPI (license-files fix), GitHub Release.
 
-### Key decisions (HEAD)
+### Key decisions
 - HTML-first body extraction (prefer `text/html` → htmd over `text/plain`)
 - Tracking pixel detection: domain-only in `**Tracking:**` metadata line
 - Adaptive chunking + resolve-unknown default-on, opt-out via config/CLI
@@ -102,24 +102,35 @@ claude_args: --dangerously-skip-permissions
 - `license-files = ["LICENSE"]` in pyproject.toml for PyPI sdist compliance
 - No-hallucination rule added to CLAUDE.md Core Principles
 
-### Transferred from briantakita.me (HEAD)
+### Transferred from briantakita.me
 - `corky skill install` should manage both email and linkedin skills (separate SKILL.md files)
 - Replace `.agent/runbooks/linkedin-post.md` with corky-managed skill
 - Shared conventions: never send without approval, links in first comment
 
-### Open/deferred (HEAD)
+### Open/deferred
 - crates.io token was expired (fixed in v0.24.0)
 - btak.dev Gmail API OAuth needs re-auth (interactive)
 - Google Sheets 403: verify sharing / GCP test users for `brian.takita@gmail.com`
 - Manylinux binary wheel for PyPI (needs container/CI)
-<!-- agent:boundary:c618ddfb -->
+
+do
+- Push corky license-files fix to origin
+- Re-auth btak.dev Gmail API OAuth (interactive)
+### Re: Push & OAuth (HEAD)
+
+**Pushed** `3daf664` (license-files fix) to corky origin.
+
+**btak.dev OAuth:** Needs interactive browser auth. Run in terminal:
+```
+corky sync account btak.dev
+```
+<!-- agent:boundary:10ec69ad -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Push corky license-files fix to origin
-- Re-auth btak.dev Gmail API OAuth (interactive)
+- Re-auth btak.dev Gmail API OAuth (interactive — run `corky sync account btak.dev`)
 - Corky skill architecture: `corky skill install` for email + linkedin skills
 - Verify sheet sharing / GCP test users
 - Re-test sheet read

@@ -406,7 +406,7 @@ Fix: Changed step 4 to mark only the **last** root-level heading instead of all 
 Committed: `308356b`. 38 tests pass. Binary rebuilt and installed.
 
 The bugs.md `(HEAD)` on all headers should stop after the next `agent-doc commit` cycle on that file.
-<!-- agent:boundary:1208a033 -->
+<!-- agent:boundary:cf8e02d0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

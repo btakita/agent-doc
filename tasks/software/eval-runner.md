@@ -409,7 +409,7 @@ do
 **Eval launched:** `--model sonnet --judge-model sonnet --parallel 8 --system-prompt system-prompt.md`
 
 Saving to `baselines/sonnet-with-context-2026-04-04.json`. Will report results when done.
-<!-- agent:boundary:83c13689 -->
+<!-- agent:boundary:6462445d -->
 <!-- /agent:exchange -->
 
 ## Pending

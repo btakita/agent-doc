@@ -333,23 +333,27 @@ This document did not seem to debounce. I was in the middle of typing the follow
 
 I'm not sure how to reproduce this issue. It obviously can be done. Can we be proactive with logging. Should we just log verbosely? At least for my sessions because I'm the developer of agent-doc.
 Are there any missing logs that would have identified what happened?
-### Re: Debounce failure + verbose logging (HEAD)
+### Re: Debounce failure + verbose logging
 
 **Debounce failure analysis:**
 
 The preflight debounce has two layers:
-1. **Mtime debounce:** 500ms hardcoded (`preflight.rs:353`) — file must be unmodified for 500ms
-2. **Typing indicator:** 1500ms (`preflight.rs:366`) — checks `.agent-doc/typing/<hash>` files written by editor plugins
+1. **Mtime debounce:** 500ms hardcoded (`preflight.rs:353`) — file must be unmodified for 500ms: The editor buffers writes to the disk so we cannot count of mtime being reliably updated.
+2. **Typing indicator:** 1500ms (`preflight.rs:366`) — checks `.agent-doc/typing/<hash>` files written by editor plugins: I don't see the .agent-doc/typing directory.
+
+I'm also concerned about the number of files in .agent-doc.
 
 Your mid-typing trigger likely means:
-- The editor plugin wasn't writing typing indicator files (so the cross-process bridge didn't fire)
+- The editor plugin wasn't writing typing indicator files (so the cross-process bridge didn't fire): It seems so since .agent-doc/typing does not exist.
 - Or you paused >500ms between keystrokes (thinking between words), which the mtime debounce interpreted as "idle"
 
 The 500ms mtime debounce is aggressive for normal typing with think-pauses. The typing indicator is the safeguard, but requires the editor plugin to call `document_changed()` on each keystroke.
 
+Who is reading the .agent-doc/typing files? If it's the FFI plugin, we can keep the last typing change in memory.
+
 **Fix options for debounce:**
-- Increase mtime debounce to 1000-2000ms (simple, covers most typing gaps)
-- Make it configurable via frontmatter: `agent_doc_debounce: 2000`
+- Increase mtime debounce to 1000-2000ms (simple, covers most typing gaps): Yes...and if mtime is not within the the poll period, agent-doc should immediately run the document.
+- Make it configurable via frontmatter: `agent_doc_debounce: 2000`: yes
 - Fix/verify the editor plugin typing indicator bridge
 
 **Verbose logging — current state:**
@@ -364,17 +368,64 @@ Add `tracing` + `tracing-subscriber`:
 - Log rotation to prevent unbounded growth
 - For your dev sessions: `export AGENT_DOC_LOG=debug` in shell profile
 
+Agreed
+
 This would catch the 1-pane bug next time it occurs — the log would show exactly which sync events fired (or didn't) and what layout decisions were made.
 
 Both the debounce tuning and logging are implementation tasks. Should I add them to the pending list and tackle one now?
-<!-- agent:boundary:a344e41e -->
+Yes
+### Re: Debounce root cause, typing bridge, .agent-doc file count (HEAD)
+
+**Root cause confirmed:** `.agent-doc/typing/` directory doesn't exist. The JetBrains plugin FFI (`TypingTracker.kt` → `agent_doc_document_changed()` → `debounce.rs`) writes typing indicator files, but the plugin isn't active/loaded. Without the typing bridge, preflight falls back to mtime-only debounce at 500ms — any pause >500ms triggers the diff.
+
+**Who reads/writes typing files:**
+- **Writer:** JetBrains plugin via FFI → `debounce::document_changed()` → writes Unix timestamp to `.agent-doc/typing/<hash>`
+- **Reader:** CLI preflight (`preflight.rs:366`) — `is_typing_via_file(&file_str, 1500)`
+- **In-memory path already exists** for same-process queries (FFI plugin uses `LAST_CHANGE` HashMap). Disk files are only needed for cross-process (plugin → CLI) communication.
+
+**Can we keep typing state in memory?** Not purely — the CLI and plugin are different processes. Options:
+1. Unix socket IPC (plugin listens, CLI queries) — eliminates disk files
+2. Shared memory segment — faster but more complex
+3. Keep disk files but make them lightweight (current approach, just needs the plugin to actually write them)
+
+**`.agent-doc/` file count — 2,654 files:**
+
+| Dir | Files | Issue |
+|-----|-------|-------|
+| hooks/ | 1,893 | Largest — needs investigation/cleanup |
+| snapshots/ | 287 | One per document — expected |
+| crdt/ | 220 | CRDT state — may need GC |
+| pre-response/ | 86 | Should be cleaned after response |
+| locks/ | 57 | Stale locks? |
+| archives/ | 42 | Compaction archives — expected |
+
+The hooks/ directory having 1,893 files is suspicious. The others could benefit from a GC pass.
+
+**Implementation plan (approved):**
+
+1. **Debounce fix** (highest impact, immediate):
+   - Increase mtime debounce default to 2000ms
+   - Add `agent_doc_debounce` frontmatter field for per-document config
+   - If mtime is already past the debounce period when preflight starts, run immediately (no waiting)
+
+2. **Structured logging** (enables future debugging):
+   - Add `tracing` + `tracing-subscriber` to Cargo.toml
+   - `AGENT_DOC_LOG=debug` env var → `.agent-doc/logs/debug.log`
+   - Instrument preflight, sync, debounce, layout code paths
+
+3. **GC pass** for .agent-doc directories (separate task)
+
+Starting with debounce fix now.
+<!-- agent:boundary:fe9a9102 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] **[active]** Fix debounce: increase mtime to 2000ms + frontmatter config
+- [ ] **[next]** Add structured logging (tracing crate) with AGENT_DOC_LOG env var
 - [ ] Publish tmux-router 0.3.9 to crates.io (awaiting approval)
-- [ ] Fix debounce: increase mtime threshold or verify typing indicator bridge
-- [ ] Add structured logging (tracing crate) with AGENT_DOC_LOG env var
-- [ ] Investigate 1-pane layout bug (needs verbose logging first)
+- [ ] Investigate .agent-doc/hooks/ having 1,893 files
+- [ ] GC pass for .agent-doc/ stale files (locks, pre-response, crdt)
+- [ ] Investigate 1-pane layout bug (needs verbose logging)
 <!-- /agent:pending -->

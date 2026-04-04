@@ -1814,7 +1814,7 @@ You're right. Revised both:
 > What directory convention are you using for agent config? `.agent/`, `.agents/`, `.ai/`? The ecosystem hasn't settled this yet and I'd love to hear what's working for you.
 
 **Blog post** — replaced "livestream: 53% of that skill's instructions were audit procedures" with generic framing: "Some skills saw over 50% of their content moved to on-demand loading — procedures that only matter during specific operations, not on every invocation."
-### Re: Active voice — "identifying and extracting" (HEAD)
+### Re: Active voice — "identifying and extracting"
 
 Updated both to use "By identifying and extracting 12 runbooks, I cut 212 lines..."
 
@@ -1835,11 +1835,21 @@ Updated both to use "By identifying and extracting 12 runbooks, I cut 212 lines.
 > What directory convention are you using for agent config? `.agent/`, `.agents/`, `.ai/`? The ecosystem hasn't settled this yet and I'd love to hear what's working for you.
 
 **Blog post** line 30 also updated to match.
-<!-- agent:boundary:8a5eb363 -->
+publish blog post
+### Re: Blog post published (HEAD)
+
+Committed and pushed through all three repos (briantakita.me → briantakita.me-dev → agent-loop). CI deploy is in progress.
+
+Live at: https://briantakita.me/post/2026-04-03-agent-runbooks-on-demand-procedural-context
+
+Changes deployed:
+- Problem statement: "by identifying and extracting 12 runbooks, I cut 212 lines — a 28% reduction"
+- Real examples: full breakdown (63 lines from instruction file + 149 from skill files)
+- No jargon — generic framing throughout
+<!-- agent:boundary:b0399989 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
 - LinkedIn post: revised draft (active voice), pending your edits + publish
-- Blog post: deploy updated version (changes in briantakita.me-dev working tree)
 - Cleanup: remove stale directories
 <!-- /agent:pending -->

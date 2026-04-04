@@ -2173,7 +2173,7 @@ This means the SKILL.md files should be bundled inside corky (like agent-doc bun
 3. **The current email SKILL.md at `.claude/skills/email/SKILL.md`** — is this already managed by `corky skill install`, or was it manually created?
 
 Let's transfer this task over to tasks/software/corky.md
-### Re: Transfer to tasks/software/corky.md (HEAD)
+### Re: Transfer to tasks/software/corky.md
 
 Agreed — the corky skill architecture work (separate email/linkedin skills, `corky skill install` managing both) belongs in `tasks/software/corky.md`.
 
@@ -2187,11 +2187,36 @@ Agreed — the corky skill architecture work (separate email/linkedin skills, `c
 Open `tasks/software/corky.md` and add this to the exchange when ready.
 
 Meanwhile, the LinkedIn blog teaser draft is still ready to post manually — the architecture improvement doesn't block posting.
-<!-- agent:boundary:554720dc -->
+
+See `### Re: Context savings from skill extraction` in tasks/software/corky.md
+
+Update the blog post and linkedin teaser.
+Are these measurements comparing apples to apples in relation to our other runbook extraction savings?
+### Re: Apples to apples? (HEAD)
+
+**No, they're measuring different things.**
+
+**Runbook extraction** (blog post numbers): 212 lines removed from files that were *always loaded*. Those procedures still exist in `.agent/runbooks/` files but load on demand. Metric: lines cut from persistent context.
+
+**Skill extraction** (corky numbers): A monolithic 695-line SKILL.md split into 3 focused skills (email: 107, linkedin: 58, corky: 71). All lines still exist, but you load 58-107 lines per invocation instead of 695. Metric: lines avoided per invocation by loading only the relevant skill.
+
+Both are on-demand context optimizations, but:
+- Runbook extraction reduces persistent context (always-loaded → on-demand)
+- Skill extraction reduces per-invocation context (one-big-skill → focused-skill-per-task)
+
+**For the blog post**, skill extraction is a complementary technique worth mentioning, but the numbers shouldn't be mixed with the runbook numbers. They'd fit naturally as an extension in the "Nested runbooks: skills with sub-procedures" section or as a new section about skill decomposition.
+
+**For the LinkedIn teaser**, adding skill extraction would muddy a clean message. The teaser already has a tight hook (runbooks, 28% reduction). Adding a second technique dilutes focus.
+
+**My recommendation:**
+- Blog post: Add a brief section on skill decomposition as a second optimization (separate from the runbook numbers)
+- LinkedIn teaser: Keep focused on runbooks only
+<!-- agent:boundary:b9e19348 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn blog teaser: draft ready, post manually (paste from earlier)
+- Blog post: consider adding skill decomposition section (separate from runbook numbers)
+- LinkedIn blog teaser: posted, keep as-is (runbooks only)
 - Corky skill architecture: transferred to tasks/software/corky.md
 - Video: edit out WordPress admin section, then post
 - Second blog post + video: target Wed/Thu Apr 9-10

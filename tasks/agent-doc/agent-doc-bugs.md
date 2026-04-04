@@ -655,7 +655,8 @@ This gives the receiving agent:
 
 Should I implement this as a change to `extract.rs`/`notify.rs`, or do you want to design the annotation format further first?
 go
-### Re: Source annotations implemented for extract/transfer (HEAD)
+tmux crashed. why?
+### Re: Source annotations implemented for extract/transfer
 
 Both `agent-doc extract` and `agent-doc transfer` now wrap content with a source annotation blockquote when appending to the target document.
 
@@ -663,7 +664,7 @@ Both `agent-doc extract` and `agent-doc transfer` now wrap content with a source
 ```markdown
 > **[EXTRACT from tasks/research/on-demand-context.md]** (2026-04-04T07:25:00Z)
 >
-### Re: The transferred content starts here... (HEAD)
+### Re: The transferred content starts here...
 ```
 
 For `transfer`:
@@ -692,7 +693,29 @@ The receiving agent sees the blockquote annotation in the diff, knows where cont
 **Files changed:** `extract.rs` — added `format_source_annotation()`, wrapped content in both `run()` and `transfer()`.
 
 Built, tested (38 pass), installed.
-<!-- agent:boundary:f9b087c4 -->
+### Re: tmux crash investigation (HEAD)
+
+**What happened:** Session 5 ("agent-doc") was destroyed. The tmux server itself is still running (started March 23), so this wasn't a full server crash — it was a session-level crash.
+
+**Current state:**
+- Session 5 (agent-doc) is gone
+- Session 10 was created at 03:24 AM today (new session)
+- Session 10 has: `agent-doc` window (panes %452, %436) + `stash` window (panes %467, %433, %434, %431)
+- Sessions.json registry is empty (all registrations lost)
+- Panes %433 (bugs), %431 (runbooks), %434 (claim-error) are in stash running `claude` or `agent-doc`
+
+**Likely cause:** When a tmux session is destroyed (e.g., last window closed, or explicit `kill-session`), all panes in that session are killed. But the panes survived — they're in session 10's stash. This suggests the session was renamed or recreated, not truly killed.
+
+The most likely trigger: the last-pane guard in sync stashed all visible panes, which closed the agent-doc window (leaving only stash), and tmux automatically destroyed the session when it had no non-stash windows. Or `repair_layout` recreated the session as "10" instead of "5".
+
+**To recover:**
+1. Re-claim the documents to rebuild sessions.json
+2. The panes are alive — they just need re-registration
+
+**With `AGENT_DOC_LOG=debug` enabled, was there a debug log captured?** If not, this is exactly the kind of intermittent issue the tracing instrumentation was designed to catch. Next occurrence should be fully logged.
+
+Would you like me to re-register the panes and rebuild sessions.json?
+<!-- agent:boundary:dbca8596 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -700,4 +723,6 @@ Built, tested (38 pass), installed.
 <!-- agent:pending patch=replace -->
 - [x] All previous items complete
 - [x] Source annotations for extract/transfer
+- [ ] Investigate tmux session 5 destruction (likely sync/stash race)
+- [ ] Re-register panes and rebuild sessions.json
 <!-- /agent:pending -->

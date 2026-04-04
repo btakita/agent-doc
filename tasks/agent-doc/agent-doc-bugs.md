@@ -180,7 +180,7 @@ The domain ontology table in README.md defines terms like Session, Document, Sna
 - **Provisioning** — creating a new pane + starting Claude (what auto_start does)
 
 This would make the naming more intentional. Should I add these to the domain ontology?
-<!-- agent:boundary:a6c641c2 -->
+<!-- agent:boundary:2cc4e55e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

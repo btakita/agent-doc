@@ -1669,7 +1669,34 @@ Yes. I just started the demo.
 ❯ 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   ⏵⏵ bypass permissions on (shift+tab to cycle)
-<!-- agent:boundary:c97ea268 -->
+ ▐▛███▜▌   Claude Code v2.1.89
+▝▜█████▛▘  Opus 4.6 (1M context) · Claude Max
+  ▘▘ ▝▝    ~/work/btakita/agent-loop
+
+● Transcription complete. 401 segments, 2 speakers detected, 160x realtime on the RTX 5090. Let me check the output.
+
+  Read 1 file (ctrl+o to expand)
+
+● The diarization quality is rough — the long segments merge both speakers. This is typical with screen-share
+  recordings where audio channels aren't separated. The content is captured though.
+
+  Read 1 file (ctrl+o to expand)
+
+● Bash(agent-doc commit tasks/professional/bob-remeika.md)
+  ⎿  [perf] commit.staging (hash_object+update-index): 6ms
+     [perf] commit.git_commit: 11ms
+     [main 7bc55d31] agent-doc(bob-remeika): 2026-04-02 12:36:11
+     … +6 lines (ctrl+o to expand)
+
+● Transcription saved to tmp/bob-remeika-call-2026-04-02.txt. Key action: create a Ragie tenant and email Bob the name — that's all he needs to enable Parse for you.
+
+✻ Crunched for 1m 10s
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+<!-- agent:boundary:a8744100 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

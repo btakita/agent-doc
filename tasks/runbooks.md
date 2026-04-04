@@ -67,7 +67,7 @@ Extracting all 7 runbooks now. Each goes under its skill's `runbooks/` directory
 - module-harness/SKILL.md: ~15 lines removed
 
 Total: ~215 lines of procedural content moved to on-demand loading.
-### Re: Done (HEAD)
+### Re: Done
 
 All 10 runbooks created and 4 SKILL.md files trimmed:
 
@@ -90,7 +90,26 @@ All 10 runbooks created and 4 SKILL.md files trimmed:
 - `module-harness/SKILL.md` — ~4 lines removed (audit steps)
 
 Each SKILL.md now has a one-line reference to the runbook. Agents load the runbook only when executing that specific procedure.
-<!-- agent:boundary:7e0603e8 -->
+### Re: Context savings for blog post (HEAD)
+
+Here are the actual measured savings:
+
+| Skill | Before | After | Saved | % Saved |
+|-------|--------|-------|-------|---------|
+| dev | 273 lines | 196 lines | 77 lines | 28% |
+| livestream | 98 lines | 46 lines | 52 lines | 53% |
+| email | 117 lines | 100 lines | 17 lines | 15% |
+| module-harness | 113 lines | 110 lines | 3 lines | 3% |
+| **Total** | 601 lines | 452 lines | 149 lines | **25%** |
+
+**Key insight for the blog post:** The savings compound per-skill. When `/dev release` runs, it loads 196 lines instead of 273 (28% less), and only reads the specific runbook it needs (e.g., `release-rust-maturin.md` at 28 lines). The agent never loads the Python, JS/TS, or library release workflows it doesn't need.
+
+**Before:** Every `/dev` invocation loaded all 4 release workflows, the full checklist, and tag recovery -- even if the agent was just running `/dev status`.
+
+**After:** `/dev status` loads only the trimmed SKILL.md (196 lines). `/dev release` for a Rust+Maturin project reads SKILL.md (196) + the relevant runbook (~30) = 226 lines vs 273 -- and more importantly, loads only the applicable workflow.
+
+The biggest win is **livestream** at 53% -- the audit pattern tables and deny-list are only needed when running `/livestream audit`, not for `/livestream on` (which is the common case).
+<!-- agent:boundary:3b185dd1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Root cause analysis complete — squash triggered cascade; nav-swap is the resilient fix
+Navigation swap deployed — pre-sync stash retrieval bridges stash → swap path
 <!-- /agent:status -->
 
 ## Exchange
@@ -393,7 +393,7 @@ Editor navigates to file B (was viewing file A)
 
 This is the complete spec for the navigation swap feature. Adding to tasks/software/agent-doc.md.
 How did we lose the previously working stash behavior?
-### Re: How stash behavior broke (HEAD)
+### Re: How stash behavior broke
 
 The **git squash** was the trigger that cascaded into the current broken state:
 
@@ -413,7 +413,36 @@ The **git squash** was the trigger that cascaded into the current broken state:
 3. Git squash invalidated snapshot + session state → operational hazard (can't fully prevent, but nav-swap would make recovery automatic)
 
 The nav-swap feature is the real fix — even when state gets corrupted, sync would find the claimed pane in stash and bring it back instead of creating new windows.
-<!-- agent:boundary:e707c17f -->
+
+do
+- [ ] Implement navigation swap: retrieve claimed panes from stash; no-op for non-agent-doc files
+### Re: Navigation swap implemented (HEAD)
+
+The swap infrastructure already existed in tmux-router (swap fast path at `sync.rs:920-959`). The missing piece was a **pre-sync stash retrieval** step — stashed panes were never retrieved before the sync ran, so the swap path couldn't find them.
+
+**Fix added** (`agent-doc/src/sync.rs`, between auto_start and tmux_router::sync):
+
+Before calling `tmux_router::sync`, the new code:
+1. Finds the stash window in the target session
+2. For each desired file with `agent_doc_session` in frontmatter
+3. Looks up the session's pane in `sessions.json`
+4. If the pane is alive AND in the stash window → `join-pane` it into the target window
+5. Updates the registry window field
+
+Once the pane is in the target window, tmux-router's existing swap fast path handles the 1:1 atomic swap (stashing the old pane, keeping the new one).
+
+**What was already working:**
+- Column memory (sync.rs:416-439) — non-agent-doc files keep current pane (no-op)
+- Swap fast path (tmux-router sync.rs:920-959) — atomic 1:1 pane swap
+- Self-healing window recreation (sync.rs:527-559) — recreates deleted windows
+
+**What was missing:**
+- Pre-sync retrieval of stashed panes — the bridge between stash and swap path
+
+**Built, tested (623 pass), installed.** Both symlink and `~/.cargo/bin/agent-doc` updated.
+
+Try navigating between agent-doc files in the editor — the pane should swap atomically without creating new windows.
+<!-- agent:boundary:ec118cdd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -427,5 +456,5 @@ The nav-swap feature is the real fix — even when state gets corrupted, sync wo
 - [x] Remove agent:console from default scaffold (already done)
 - [x] Suppress verbose git status in commit output
 - [x] Fix: window closure — last-pane guard in unmanaged stash path
-- [ ] Implement navigation swap: retrieve claimed panes from stash; no-op for non-agent-doc files
+- [x] Implement navigation swap: pre-sync stash retrieval + existing swap fast path
 <!-- /agent:pending -->

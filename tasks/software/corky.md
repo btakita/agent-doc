@@ -143,7 +143,7 @@ Added reference in `dev/SKILL.md` alongside other runbook links.
 Now documented in two places:
 1. `dev/runbooks/cargo-path-deps.md` — full runbook (agent-loop level)
 2. `rust-package/SKILL.md` conventions — brief reference
-<!-- agent:boundary:8ad221ad -->
+<!-- agent:boundary:eaf95477 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

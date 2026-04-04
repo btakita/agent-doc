@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-All tasks complete — spam cleaned, 3 fixes shipped, history squashed
+Removing console from default scaffold
 <!-- /agent:status -->
 
 ## Exchange
@@ -140,7 +140,7 @@ You can now open `tasks/runbooks.md` in JB and it should show the gutter boundar
 
 do
 - [ ] Squash contaminated git commits (175 commits, pending user confirmation)
-### Re: Git history squashed (HEAD)
+### Re: Git history squashed
 
 **219 commits → 1.** Soft-reset to `origin/main`, then created a single clean commit (`84277428`) with all current task file state.
 
@@ -154,22 +154,43 @@ The squashed commit includes:
 - New files: agent-doc-bugs.md, on-demand-context.md, runbooks.md
 
 Only task/ and .agent-doc/ files were affected. Bug fix source code changes (git.rs, resync.rs, claim.rs) are in the submodule and unaffected by the squash.
-<!-- agent:boundary:dc46a2a4 -->
+I don't want the agent:console element by default.
+The agent:console does not seem to be updated with the streamed console limited to 50 lines.
+### Re: agent:console component issues (HEAD)
+
+Two valid issues:
+
+**1. Console scaffolded by default but unwanted**
+
+The scaffold in `claim.rs:171-173` always includes `## Console` with `&lt;!-- agent:console patch=replace --&gt;`. I'll remove it from the default scaffold — it should be opt-in, not default.
+
+**2. Console component never updated**
+
+The SKILL.md doesn't instruct the agent to write console output to `agent:console`. The component is scaffolded but never receives content. The original intent was to capture a tail of the Claude Code console output, but:
+- The skill has no mechanism to capture its own console output
+- Even if it did, there's no truncation to 50 lines implemented
+- The `<!-- patch:console -->` block is never emitted by the skill
+
+This would require either:
+- The binary capturing console output and writing it to the component (deterministic, belongs in Rust)
+- The skill piping its own stderr to a temp file and then writing the last 50 lines (hacky)
+
+For now, removing console from the default scaffold is the right call. If you want console capture later, it should be a binary feature, not a skill feature.
+<!-- agent:boundary:a45953d6 -->
 <!-- /agent:exchange -->
+
+## Pending / Not Built
+
+<!-- agent:pending patch=replace -->
+- [x] Clean spam from all 24 affected tasks/**/*.md files
+- [x] Squash contaminated git commits (219 → 1)
+- [x] Fix: boundary repositioning strips (HEAD) marker
+- [x] Fix: stashed panes can't return
+- [x] Fix: claim should be atomic
+- [ ] Remove agent:console from default scaffold in claim.rs
+<!-- /agent:pending -->
 
 ## Console
 
 <!-- agent:console patch=replace -->
 <!-- /agent:console -->
-
-## Pending / Not Built
-
-<!-- agent:pending patch=replace -->
-- [x] Clean spam from all 24 affected tasks/**/*.md files (17 files cleaned)
-- [x] Squash contaminated git commits (219 → 1)
-- [x] Fix: boundary repositioning strips (HEAD) marker on concurrent commits
-- [x] Fix: stashed panes can't return — window field points to stash window
-- [x] Fix: claim should be atomic (rollback on pane assignment failure)
-- [x] cargo install --path . (for tmux-spawned sessions)
-- [x] Claim tasks/runbooks.md on new tmux pane %428
-<!-- /agent:pending -->

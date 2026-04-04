@@ -840,7 +840,7 @@ Applied the same pattern across all 13 non-smoke cases:
 3. **Did it NOT do something wrong?** (ignore the change, misinterpret the type, guess at incomplete content)
 
 Full 19-case suite running with tightened rubrics. Will report results when done.
-### Re: Full suite with tightened rubrics (HEAD)
+### Re: Full suite with tightened rubrics
 
 **15/19 passed (78.9%), mean 0.81** — best full-suite result.
 
@@ -880,14 +880,45 @@ Full 19-case suite running with tightened rubrics. Will report results when done
 - `multi-topic-approval-plus-questions` (0.60) — close to threshold
 
 The rubric tightening delivered: 6 cases improved by 0.15+ points. The eval suite is now a meaningful signal — 78.9% with clear pass/fail for each case category.
-<!-- agent:boundary:82621e61 -->
+do
+- [ ] Investigate remaining 4 failures (blockquote, mixed-comment, annotation-truncation, multi-topic-approval)
+### Re: Remaining 4 failures analysis (HEAD)
+
+Investigated each. These are **legitimate model challenges**, not rubric issues:
+
+| Case | Score | Issue |
+|------|-------|-------|
+| blockquote-annotation | 0.30 | Model struggles to interpret `>` blockquote as user preference override. Response model variance — sometimes it handles this well. |
+| mixed-valid-and-comment | 0.30 | Model references HTML comments despite system prompt saying "comments are invisible." The comment-stripping convention is the hardest to teach via prompt. |
+| inline-annotation-with-truncation | 0.40 | Complex multi-behavior case: must process 2 corrections AND detect truncation. Partial credit is reasonable for a hard case. |
+| multi-topic-approval-plus-questions | 0.60 | Close to passing (0.7 threshold). Model addresses all topics but judge wants clearer separation between approval and questions. |
+
+**Verdict:** These 4 represent the legitimate difficulty frontier of the eval suite. No rubric changes needed — the rubrics are already tight and binary.
+
+**What would improve these:**
+- `blockquote-annotation`: Add "blockquotes (`>`) are user annotations" to the system prompt
+- `mixed-valid-and-comment`: Stronger comment-stripping instruction in system prompt
+- `inline-annotation-with-truncation`: Complex case, may always be borderline
+- `multi-topic-approval-plus-questions`: Lower threshold to 0.6 or accept as borderline
+
+**The 78.9% baseline is solid.** These 4 failures are edge cases, not fundamental issues. The eval suite now measures real model capability with minimal noise.
+
+**Session complete summary:**
+- eval-runner: tokio async, `--parallel 8`, `--tag`, `--judge-temperature`
+- 19-case diff-interpretation suite at 78.9% (sonnet + refined prompt)
+- 6-case smoke suite at 100% (1.5 min)
+- 2 agentic cases separated to `evals/agent-doc/agentic/`
+- System prompt refined from 32 lines to 4 discrimination rules
+- All rubrics tightened to binary discrimination pattern
+- Makefile: `eval`, `eval-smoke`, `eval-regression`, `eval-json`
+<!-- agent:boundary:a82b0c2a -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [x] Full suite with tightened rubrics (15/19, 78.9%, mean 0.81)
-- [ ] Investigate remaining 4 failures (blockquote, mixed-comment, annotation-truncation, multi-topic-approval)
+- [x] Investigate remaining 4 failures (legitimate model challenges, no rubric fixes needed)
+- [ ] Add blockquote + comment-stripping hints to system prompt (optional, minor gain)
 - [ ] Design agentic eval fixture format (future — v2)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 <!-- /agent:pending -->

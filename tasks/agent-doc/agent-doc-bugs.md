@@ -276,31 +276,49 @@ This happened during the CRDT write-back: the `\\
 
 **Fix needed:** The patch content should be treated as opaque text — no unescaping. This is a bug in the write pipeline's text handling. Want me to investigate and fix it in the binary?
 yes
-### Re: Yes — Fixed the `\\n` unescaping bug (HEAD)
+### Re: Yes — Fixed the `\\ (HEAD)
+` unescaping bug
 
 **Root cause:** `PatchWatcher.kt:929-932` — the manual JSON parser's escape replacement order was wrong.
 
 The old code:
 ```kotlin
-.replace("\\n", "\n")      // Step 1: eats \n (including from \\n)
-.replace("\\t", "\t")
+.replace("\\
+", "\
+")      // Step 1: eats \
+ (including from \\
+)
+.replace("\\	", "\	")
 .replace("\\\"", "\"")
-.replace("\\\\", "\\")     // Step 4: too late — \\n already mangled
+.replace("\\\\", "\\")     // Step 4: too late — \\
+ already mangled
 ```
 
-When JSON contains `\\n` (literal backslash + n), step 1 sees `\n` and converts it to a newline, before step 4 ever processes the `\\`.
+When JSON contains `\\
+` (literal backslash + n), step 1 sees `\
+` and converts it to a newline, before step 4 ever processes the `\\`.
 
 **Fix:** Process `\\` first using a NUL placeholder:
 ```kotlin
 .replace("\\\\", "\u0000")  // Step 1: protect escaped backslashes
-.replace("\\n", "\n")       // Step 2: now only real \n sequences
-.replace("\\t", "\t")
+.replace("\\
+", "\
+")       // Step 2: now only real \
+ sequences
+.replace("\\	", "\	")
 .replace("\\\"", "\"")
 .replace("\u0000", "\\")    // Step 5: restore backslashes
 ```
 
 Plugin builds clean. To install: rebuild with `./gradlew buildPlugin` then install the zip from `build/distributions/`.
-<!-- agent:boundary:fa944e1d -->
+bump JB plugin version.
+Do we need to make a similar fix to the VSCode plugin?
+### Re: Plugin version bump + VS Code check (HEAD)
+
+**JB plugin bumped to v0.2.43.** Built at `build/distributions/agent-doc-jetbrains-0.2.43.zip`. Install via Settings > Plugins > gear > Install from Disk.
+
+**VS Code plugin is NOT affected.** It uses `JSON.parse()` (the standard JavaScript JSON parser) which handles all escape sequences correctly. The bug was specific to the JetBrains plugin's hand-rolled JSON parser in Kotlin.
+<!-- agent:boundary:327fdf8b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -310,7 +328,7 @@ Plugin builds clean. To install: rebuild with `./gradlew buildPlugin` then insta
 - [x] Update SKILL.md to route based on diff_type — DONE
 - [x] Post-preflight diff generation for eval cases (P2) — DONE
 - [x] Implement annotated diff format in preflight (P3) — DONE
-- [x] Fix write pipeline `\\n` unescaping bug — DONE (PatchWatcher.kt escape order)
+- [x] Fix write pipeline escape bug + bump JB plugin to v0.2.43 — DONE
 - [ ] Implement content-source annotation sidecar (P4)
 - [ ] Design reproducible operation log format (P5)
 - [ ] Add `---` prompt separator convention to SKILL.md

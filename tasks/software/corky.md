@@ -296,7 +296,7 @@ yes
 **Files:** engine.rs (main logic + 6 tests), corky_config.rs, cli.rs, main.rs, mod.rs. 264 tests pass, clippy clean.
 
 Ready to commit and release.
-<!-- agent:boundary:83fac144 -->
+<!-- agent:boundary:07c7ca1d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

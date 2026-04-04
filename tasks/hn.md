@@ -1,8 +1,8 @@
 ---
 agent_doc_session: b8ffc710-b4af-4cb4-947b-32fab6ca3e14
+tmux_session: '23'
 agent_doc_format: template
 agent_doc_write: crdt
-claude_args: --dangerously-skip-permissions
 ---
 
 
@@ -25,7 +25,7 @@ https://news.ycombinator.com/newsguidelines.html#generated
 <!-- agent:exchange -->
 **Context:** Drafting an HN reply to yellowapple re: LLM-assisted writing. User's core argument: objections to LLM-assisted communication stem from protecting the status of relative eloquence.
 
-**Current draft (side-by-side format):**
+**Current draft (side-by-side format):** (HEAD)
 
 > My raw thought: I wonder how many people are really objecting to the loss of exclusivity of their status derived from their relative eloquence in internet forums. When everyone can effectively communicate their ideas, those who had the exclusive skill lose their advantage. Now their core ideas have to improve.
 >

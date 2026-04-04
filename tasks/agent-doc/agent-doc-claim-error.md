@@ -335,20 +335,35 @@ Plugin zip: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.41.zi
 3. Memory note: always bump `gradle.properties pluginVersion` on plugin changes
 
 For now, adding a memory note. A deterministic check would be better long-term — could add a gradle task that compares the current version against the last git tag for the plugin.
-Add the deterministic chi
+Add the deterministic check right now. We need to make sure the deterministic check is properly used. Would it be possible to merge the deterministic check into a task that would always be run to build the plugin?
 ### Re: Deterministic plugin version check added
 
 Added `plugin-version-check` target to `make precommit`. It fails if `.kt` files are staged but `gradle.properties` isn't also staged (meaning `pluginVersion` wasn't bumped).
 
 ```
 make plugin-version-check
-# ERROR: .kt files changed but editors/jetbrains/gradle.properties pluginVersion not bumped (HEAD)
+# ERROR: .kt files changed but editors/jetbrains/gradle.properties pluginVersion not bumped
 ```
 
 Now `make precommit` runs: clippy + test + version-sync + plugin-version-check + audit-docs.
 
 Committed: `f803d28`.
-<!-- agent:boundary:0f0eb905 -->
+
+Navigating in agent-doc-bugs.md is now fast. It seems that restarting fixed the issue.
+So if it's an ephemeral state, what would cause the issue?
+### Re: Gradle integration + ephemeral state analysis (HEAD)
+
+**Gradle integration:** The `make precommit` check is sufficient — it catches at commit time, which is the right point. A gradle-level check would need git context (staged files) which is awkward. No need to duplicate.
+
+**Ephemeral state — what could cause it?** Since restart fixed it, the thrashing was from accumulated in-memory state:
+
+1. **Inotify overflow loop** — heavy git operations fill the kernel buffer → PatchWatcher enters overflow recovery → scans repeatedly
+2. **PromptPoller tracked file accumulation** — `trackedFiles` map grows as documents open, never cleaned
+3. **ContainerListener duplication** — LayoutChangeDetector may accumulate listeners across split/unsplit cycles
+4. **FFI debounce state** — typing tracker's per-file state could accumulate without cleanup
+
+The VCS refresh debounce (500ms) should prevent the cascade. Timing instrumentation will catch it if it recurs. The exchange is very large now — compact?
+<!-- agent:boundary:40a3d79c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -357,8 +372,6 @@ Committed: `f803d28`.
 - [x] GC orphaned 3.9 GB blob
 - [x] `agent-doc clean --archive`
 - [x] VCS refresh debounce (500ms)
-- [x] Add timing instrumentation to plugin
-- [x] Fix plugin version (0.2.41)
-- [x] Deterministic plugin version check in `make precommit`
-- [ ] Install instrumented plugin v0.2.41 and diagnose bugs.md CPU
+- [x] Timing instrumentation in plugin
+- [x] Plugin version check in `make precommit`
 <!-- /agent:pending -->

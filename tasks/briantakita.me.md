@@ -1934,8 +1934,7 @@ See the call transcript in mail/contacts/robert-ross.
 
 Should I post it now instead?
 
-I als
-### Re: Post now vs Monday (HEAD)
+### Re: Post now vs Monday
 
 Given Robert Ross — founder of Dreamable, building agent-native products — likes your activity and you have a call tomorrow... **yes, post it now.**
 
@@ -1949,11 +1948,27 @@ Given Robert Ross — founder of Dreamable, building agent-native products — l
 2. **Wed/Thu April 9-10** — second blog post + video
 
 Want me to format the draft for LinkedIn paste?
-<!-- agent:boundary:a0984f86 -->
+I also have a video creating the agent-runbooks standard. Should that be posted instead?
+### Re: Video vs blog teaser — which to post first? (HEAD)
+
+**Post the video first.**
+
+1. **LinkedIn algorithm favors native video** — 2-3x the reach of text-only posts. If Robert sees one thing before tomorrow's call, make it the highest-engagement format.
+2. **Video shows, text tells.** You creating the agent-runbooks standard is a *demonstration of competence* — more compelling for someone hiring AI agent engineers.
+3. **Blog teaser becomes the follow-up.** Video now, text-based blog teaser Monday/Tuesday. Two posts, two bites at the apple.
+
+**Revised plan:**
+1. **Now** — agent-runbooks video
+2. **Mon/Tue** — runbooks blog teaser (text post)
+3. **Wed/Thu** — second blog post + video
+
+Does the video need editing, or is it ready to upload?
+<!-- agent:boundary:2d78936e -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn post: post NOW (draft ready, format for paste)
+- Video post: upload agent-runbooks video to LinkedIn NOW
+- LinkedIn blog teaser: post Mon/Tue Apr 7-8
 - Second blog post + video: target Wed/Thu Apr 9-10
 - Cleanup: remove stale directories
 <!-- /agent:pending -->

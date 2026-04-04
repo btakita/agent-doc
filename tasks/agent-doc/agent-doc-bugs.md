@@ -138,7 +138,7 @@ Removed `sync_after_claim` from `run_with_tmux()` in route.rs. The JB plugin's s
 634 tests pass. Built, installed. Try switching editor tabs — the glitchiness should be gone.
 
 Still seeing glitches when switching tabs. Why?
-### Re: Found the real double-sync source — fixed (HEAD)
+### Re: Found the real double-sync source — fixed
 
 The previous fix (removing `sync_after_claim` from route.rs) wasn't enough. The ACTUAL second sync came from **main.rs line 745**: after the Route command completes, if `--col` args were provided, it called `sync::run_layout_only()`. This ran with `window=None`, racing with the JB plugin's `agent-doc sync` call (which has the correct `--window`).
 
@@ -151,11 +151,31 @@ Sync #1 had `window=None` and raced with sync #2's stash operations.
 **Fix:** Removed the `sync::run_layout_only` call from the Route command dispatch in main.rs. The JB plugin's `EditorTabSyncListener` handles layout sync authoritatively with the correct `--window` arg. Route now only handles pane resolution (routing the file to a tmux pane) — no layout changes.
 
 634 tests pass. Built, installed. Try switching tabs now.
-<!-- agent:boundary:bb80fb65 -->
+
+I still see unwanted tmux pane switching when navigating between the left editor and the right editor.
+### Re: Panes still bouncing — deeper investigation (HEAD)
+
+The double-sync from route is eliminated. But the JB plugin's `EditorTabSyncListener` still fires sync on every editor navigation (expected — this IS how layout sync works). The problem is:
+
+**Each sync correctly stashes unwanted panes.** But when the NEXT sync fires (on the next navigation), the stashed panes have reappeared in @221. Manual stash testing shows panes stay in stash when idle — they only reappear right before a sync event.
+
+**Current state is stable:**
+- @221 agent-doc: [%452, %431] (correct)
+- 10:stash: [%433, %477, %436, %434, %476] (5 stashed panes)
+
+**The panes reappear when sync fires.** Between the sync log line "repair_layout completed" and "pre-tmux_router::sync: panes=5", the stashed panes have been pulled back into @221. But repair_layout says it skipped (fast path).
+
+**Hypothesis:** The sync code itself (in `sync_with_options` or `tmux_router::sync`) has a step that joins registered panes from stash into the target window BEFORE the reconciler runs. This is the "column memory" or "auto-start" path that retrieves panes for wanted files.
+
+The fix would be: when a pane is in stash and NOT in the desired layout, don't pull it out. Only pull it out when it's actually wanted.
+
+Should I investigate the `sync_with_options` pre-reconcile pane setup to find where stashed panes are being joined before reconciliation?
+<!-- agent:boundary:f2fc4965 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Fix double-sync glitch (removed sync from both route.rs and main.rs Route dispatch)
+- [ ] Find where stashed panes are joined back into agent-doc window before reconcile
+- [ ] Fix: only join stashed panes that are in the desired layout
 <!-- /agent:pending -->

@@ -109,7 +109,7 @@ Here are the actual measured savings:
 **After:** `/dev status` loads only the trimmed SKILL.md (196 lines). `/dev release` for a Rust+Maturin project reads SKILL.md (196) + the relevant runbook (~30) = 226 lines vs 273 -- and more importantly, loads only the applicable workflow.
 
 The biggest win is **livestream** at 53% -- the audit pattern tables and deny-list are only needed when running `/livestream audit`, not for `/livestream on` (which is the common case).
-<!-- agent:boundary:3b185dd1 -->
+<!-- agent:boundary:1a57b39e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -161,7 +161,7 @@ The `agent-runbooks` repo/crate is better suited as:
 - Tooling for runbook validation and discovery
 
 Without overfitting, how can we prevent or at least make less likely, this category of error?
-### Re: Preventing this category of error (HEAD)
+### Re: Preventing this category of error
 
 The error: **suggesting file moves without checking the distribution mechanism.**
 
@@ -178,7 +178,16 @@ This is general enough to apply to:
 - Type definitions (consumed by one package)
 
 Saved as `feedback_distribution_aware_reorg.md` in auto memory.
-<!-- agent:boundary:02e3ea4b -->
+
+Where is `feedback_distribution_aware_reorg.md` saved?
+### Re: Location of feedback_distribution_aware_reorg.md (HEAD)
+
+```
+~/.claude/projects/-home-brian-work-btakita-agent-loop/memory/feedback_distribution_aware_reorg.md
+```
+
+This is Claude Code's project-scoped auto memory for agent-loop. The index file `MEMORY.md` in that same directory is loaded at the start of every conversation. The feedback entry is listed under "Architecture Decisions".
+<!-- agent:boundary:11e23b42 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

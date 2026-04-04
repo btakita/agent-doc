@@ -73,14 +73,46 @@ Implement
 | `validate <file>` | Check runbook format (title, steps, refs) | Medium |
 | `install <skill-dir> --from <template>` | Copy template into skill's runbooks/ | Low |
 ```
-### Re: Implementing agent-runbooks CLI (HEAD)
+### Re: Implementing agent-runbooks CLI
 
 Launching worktree agent to implement all 4 commands in `src/agent-runbooks/`. This is a new Rust binary crate.
-<!-- agent:boundary:aff8556f -->
+### Re: agent-runbooks implemented (HEAD)
+
+All 4 commands implemented in `src/agent-runbooks/` (Rust binary crate). 15 tests passing.
+
+**Commands:**
+- `audit <skill-dir>` -- cross-references SKILL.md runbook refs against actual files, reports missing/orphans
+- `list <skill-dir>` -- lists runbooks with title, line count, ref status (`--json` for machine output)
+- `validate <file>` -- checks format (title, steps section, numbered steps, broken links)
+- `install <skill-dir> --from <template>` -- copies template, optional `--add-ref` to update SKILL.md
+
+**Live test against our skills:**
+```
+$ agent-runbooks audit .claude/skills/dev
+STATUS     PATH                                     TRIGGER
+orphan     runbooks/pre-release-checklist.md        
+orphan     runbooks/release-rust-maturin.md         
+...  (7 orphans -- SKILL.md uses prose refs not trigger format)
+
+$ agent-runbooks list .claude/skills/agent-doc
+FILENAME               TITLE              LINES  REF
+compact-exchange.md    Compact Exchange   26     yes
+cleanup.md             Cleanup Runbook    50     yes
+
+$ agent-runbooks validate .claude/skills/dev/runbooks/release-rust-maturin.md
+OK: no issues found
+```
+
+The audit correctly flags orphans because the dev SKILL.md uses prose references (`See runbooks/...`) rather than the trigger format (`` `phrase` -- runbooks/file.md ``). The SKILL.md files should be updated to use the trigger format for full audit coverage.
+
+Not yet committed to the agent-runbooks submodule -- changes in working tree.
+<!-- agent:boundary:434e03bc -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Implement agent-runbooks: audit, list, validate, install
+- [x] Implement agent-runbooks: audit, list, validate, install (15 tests passing)
+- [ ] Commit agent-runbooks to submodule
+- [ ] Update SKILL.md files to use trigger format for audit coverage
 <!-- /agent:pending -->

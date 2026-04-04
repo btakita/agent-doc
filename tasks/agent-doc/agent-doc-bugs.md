@@ -61,6 +61,7 @@ agent-doc v0.31.6 released to crates.io + GitHub
 - Debug logging now enabled (`AGENT_DOC_LOG=debug` in .env)
 
 **Test suite: 634 tests (193 lib + 403 bin + 38 integration)**
+<!-- agent:boundary:2e2bdf8d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

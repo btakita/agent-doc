@@ -458,7 +458,7 @@ Built the template at `file:///home/brian/work/btakita/agent-loop/tasks/software
 **How it works:** You point it at any agent-doc session (snapshot, git range, or transcript), and the agent populates each component with analysis. It's the skeleton of Rob's Shimmer product.
 
 To test it now: open `tasks/software/session-analyzer.md`, type a session file path in the Input section, and run `/agent-doc`. The agent will analyze that session and fill in the metrics.
-<!-- agent:boundary:ead560d4 -->
+<!-- agent:boundary:3bd7d9ef -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

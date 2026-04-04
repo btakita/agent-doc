@@ -1060,7 +1060,7 @@ Launched: `make eval` (20 cases, sonnet, --parallel 8, refined system prompt). W
 | Pass rate | 42.9% | 85.0% |
 | Mean score | 0.57 | 0.83 |
 | Suite time | 19.5 min | ~10 min |
-<!-- agent:boundary:1f563cf9 -->
+<!-- agent:boundary:22d17bfe -->
 <!-- /agent:exchange -->
 
 ## Pending

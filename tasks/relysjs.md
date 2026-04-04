@@ -1,7 +1,6 @@
 ---
 agent_doc_session: 9ff575de-4c8b-4217-8b36-5287c77af629
 tmux_session: '0'
-agent_doc_mode: template
 ---
 
 Add a static site export feature.
@@ -355,4 +354,3 @@ await static_export_({
 These can't be tested without `bun install` in the consumer projects. Want me to proceed with step 4 (Cloudflare Worker setup), or should we test the static export migrations first?
 
 ## User
-

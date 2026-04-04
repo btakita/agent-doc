@@ -160,7 +160,7 @@ Currently: memory + runbook step. Both rely on me remembering — which failed f
 | `make check` version sync | Catches every time |
 
 Want me to add this to the Makefile?
-<!-- agent:boundary:a76b55f2 -->
+<!-- agent:boundary:ef266a4b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

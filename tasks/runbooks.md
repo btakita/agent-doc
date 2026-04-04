@@ -152,7 +152,7 @@ ok  runbooks/module-harness-audit.md  audit harness
 **15 runbooks, 5 skills, all passing audit.** Zero missing, zero orphans.
 
 **Re: ontology (existence skill):** The existence skill currently has no runbooks. The operations it supports (lookup, search, new, lint, scope) are all single commands -- no multi-step procedures that would benefit from runbook extraction. If ontology authoring workflows become more complex, runbooks could be added later.
-<!-- agent:boundary:1a5486f7 -->
+<!-- agent:boundary:aedeb146 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

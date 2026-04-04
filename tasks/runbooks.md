@@ -271,7 +271,7 @@ Created three corky/email runbooks:
 - **`email/runbooks/enrich-contact.md`** — check/create contact, gather info from conversations/LinkedIn/social, update AGENTS.md, verify claims
 
 All three follow the existing pattern: co-located with the email skill under `runbooks/`, referenced by relative path. The email skill now has 4 runbooks total (including `email-send.md` from earlier).
-<!-- agent:boundary:c2e81b6e -->
+<!-- agent:boundary:4a4b75a4 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

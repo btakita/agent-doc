@@ -2300,7 +2300,7 @@ Staggers content: runbooks teaser (today) → skill encapsulation teaser (Monday
 **If you must post today:** Wait 4-6 hours minimum, ensure first post has engagement. But Monday morning is the stronger play.
 
 Deploy blog post update today regardless, so the new section is live before the sequel.
-<!-- agent:boundary:cb728d7c -->
+<!-- agent:boundary:d64606ba -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

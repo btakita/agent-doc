@@ -187,7 +187,7 @@ Where is `feedback_distribution_aware_reorg.md` saved?
 ```
 
 This is Claude Code's project-scoped auto memory for agent-loop. The index file `MEMORY.md` in that same directory is loaded at the start of every conversation. The feedback entry is listed under "Architecture Decisions".
-<!-- agent:boundary:11e23b42 -->
+<!-- agent:boundary:86118c52 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

@@ -748,7 +748,7 @@ Re-registered 4 panes from process inspection:
 **Tests:** The existing tmux-router test suite (78 tests) covers the last-pane guard and DETACH phase. The specific crash scenario (session auto-destruction from window closure) is hard to test deterministically because it depends on tmux's session auto-destruction behavior. The session health check will detect and log it when it occurs, enabling root cause identification.
 
 Built, tested, installed.
-<!-- agent:boundary:108ec677 -->
+<!-- agent:boundary:4cc11301 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

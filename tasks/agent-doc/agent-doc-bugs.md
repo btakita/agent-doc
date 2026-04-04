@@ -537,7 +537,7 @@ Scans `.agent-doc/` for orphaned files and removes them:
 - Auto-GC on preflight (daily stamp) to prevent re-accumulation
 - Cleanup runbook documenting `.agent-doc/` directory structure
 - The remaining 64 pre-response files are for active documents (will be cleaned by the new `clear_pending` fix going forward)
-<!-- agent:boundary:4fd69da1 -->
+<!-- agent:boundary:1ff7786d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

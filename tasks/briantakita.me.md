@@ -2107,18 +2107,29 @@ What directory convention are you using for agent config? .agent/, .agents/, .ai
 
 Links in the comments.
 publish edit
-### Re: Publish edit (HEAD)
+### Re: Publish edit
 
 All blog post edits are already published and deployed. The briantakita.me working tree is clean — last push included the "runbooks vs rules" revision and the verified numbers (212 lines / 28%).
 
 Live at: https://briantakita.me/post/2026-04-03-agent-runbooks-on-demand-procedural-context
 
 The LinkedIn teaser opener ("Is your CLAUDE.md carrying too much weight?") is separate from the blog post — no blog changes needed.
-<!-- agent:boundary:13fdcfb5 -->
+
+Publish edited LinkedIn teaser.
+### Re: LinkedIn teaser — final paste content (HEAD)
+
+Post body and first comment formatted above in the console. Steps:
+
+1. Paste post body into LinkedIn composer → publish
+2. Immediately add first comment with the two links
+3. Verify both visible
+
+Let me know when it's live and I'll mark it done.
+<!-- agent:boundary:0bebb9c1 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn blog teaser: revised opener, ready to paste and post
+- LinkedIn blog teaser: POSTING NOW — paste from console
 - Video: edit out WordPress admin section, then post
 - Second blog post + video: target Wed/Thu Apr 9-10
 - Cleanup: remove stale directories

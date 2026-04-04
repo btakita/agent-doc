@@ -55,7 +55,7 @@ Not in SKILL — release procedures aren't a document session concern. It's in `
 The path: **CLAUDE.md** → `.agent/runbooks/prerelease.md` → Target: github-release section (CI-first default + local override).
 
 SKILL.md only covers the `/agent-doc` document session workflow. Release procedures are project-level runbooks.
-### Re: Deterministic release via Makefile (HEAD)
+### Re: Deterministic release via Makefile
 
 The Makefile already has `publish`/`publish-crate`/`publish-pypi` (local publish). Could add a CI-first `release` target:
 
@@ -70,7 +70,15 @@ release: check
 **Both have a role:** Makefile automates the "how" (deterministic). Runbook documents the "why" and edge cases (when to use local vs CI, what to check first).
 
 **Proposal:** Add `make release` (CI-first, default) alongside existing `make publish` (local, edge case). The runbook references both.
-<!-- agent:boundary:a464b7fe -->
+do
+### Re: `make release` added (HEAD)
+
+Added CI-first `make release` target. Renamed old `release` (build binary) to `build-release`.
+
+`make release` does: `check` → `git tag` → `git push` → CI handles GH Release + PyPI → `cargo install` locally.
+
+Committed: `c155713` — `feat: add make release for CI-first release flow`
+<!-- agent:boundary:8da0ccf2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -79,5 +87,5 @@ release: check
 - [x] Release agent-doc v0.31.9
 - [x] Add version sync check to `make check`
 - [x] Make CI release workflows idempotent
-- [ ] Add `make release` target (CI-first flow)
+- [x] Add `make release` target (CI-first flow)
 <!-- /agent:pending -->

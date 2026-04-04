@@ -248,18 +248,59 @@ Published to crates.io + GitHub. 4 fixes:
 gh actions errors
 https://github.com/btakita/agent-doc/actions/runs/23975634509/job/69932134722
 https://github.com/btakita/agent-doc/actions/runs/23975634526
-### Re: CI fix — v0.31.8 released (HEAD)
+### Re: CI fix — v0.31.8 released
 
 The CI failure was caused by `path = "../tmux-router"` in Cargo.toml. CI runners don't have the local submodule checkout, so the path dep fails. Since tmux-router 0.3.9 is published on crates.io, removed the path override.
 
 - v0.31.8 published to crates.io + GitHub
 - CI should pass now (check the Actions tab)
 - Parent submodule pointer updated
-<!-- agent:boundary:887e6a36 -->
+
+How can we automate correcting the cargo path for ci vs using the local dev override?
+### Re: Automating cargo path deps for CI vs local dev (HEAD)
+
+Three standard approaches:
+
+**1. `.cargo/config.toml` patch override (recommended)**
+
+Keep `Cargo.toml` clean (crates.io only):
+```toml
+tmux-router = "0.3.9"
+```
+
+Add a local-only `.cargo/config.toml` (gitignored):
+```toml
+[patch.crates-io]
+tmux-router = { path = "../tmux-router" }
+```
+
+This overrides the crates.io dependency with the local path during development. CI doesn't have this file, so it uses crates.io. Add `.cargo/config.toml` to `.gitignore`.
+
+**2. Workspace approach**
+
+If both crates are in the same workspace, Cargo resolves path deps automatically. But agent-doc and tmux-router are in separate repos (submodules), so this doesn't apply directly.
+
+**3. CI-side checkout of tmux-router**
+
+Add a step to CI that clones tmux-router next to agent-doc. But this couples CI to the submodule layout and adds complexity.
+
+**Recommendation: Option 1.** It's the standard Cargo pattern for this exact scenario. The `.cargo/config.toml` file is local-only (gitignored), so CI always uses the published crate.
+
+To set it up:
+```bash
+mkdir -p src/agent-doc/.cargo
+echo '[patch.crates-io]
+tmux-router = { path = "../tmux-router" }
+' > src/agent-doc/.cargo/config.toml
+echo '.cargo/config.toml' >> src/agent-doc/.gitignore
+```
+
+Shall I set this up?
+<!-- agent:boundary:84d9a7ad -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] CI fix (removed path dep on tmux-router)
+- [ ] Set up .cargo/config.toml patch override for tmux-router local dev
 <!-- /agent:pending -->

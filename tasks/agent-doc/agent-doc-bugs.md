@@ -235,7 +235,7 @@ Added `flock` on `.agent-doc/sync.lock` at the start of `run_with_options()`. Wh
 634 tests pass. Built, installed. Try switching tabs — the file lock should eliminate the concurrent sync glitchiness.
 
 release
-### Re: agent-doc v0.31.7 released (HEAD)
+### Re: agent-doc v0.31.7 released
 
 Published to crates.io + GitHub. 4 fixes:
 1. Stash-bounce fix (removed return_stashed_panes_bulk from prune)
@@ -244,11 +244,22 @@ Published to crates.io + GitHub. 4 fixes:
 4. Diagnostic checkpoint logging
 
 634 tests pass. Installed. Parent submodule pointer updated.
-<!-- agent:boundary:08a60bed -->
+
+gh actions errors
+https://github.com/btakita/agent-doc/actions/runs/23975634509/job/69932134722
+https://github.com/btakita/agent-doc/actions/runs/23975634526
+### Re: CI fix — v0.31.8 released (HEAD)
+
+The CI failure was caused by `path = "../tmux-router"` in Cargo.toml. CI runners don't have the local submodule checkout, so the path dep fails. Since tmux-router 0.3.9 is published on crates.io, removed the path override.
+
+- v0.31.8 published to crates.io + GitHub
+- CI should pass now (check the Actions tab)
+- Parent submodule pointer updated
+<!-- agent:boundary:b189eb8c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] All complete. v0.31.7 released.
+- [x] CI fix (removed path dep on tmux-router)
 <!-- /agent:pending -->

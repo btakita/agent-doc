@@ -1811,7 +1811,7 @@ You're right. Revised both:
 > What directory convention are you using for agent config? `.agent/`, `.agents/`, `.ai/`? The ecosystem hasn't settled this yet and I'd love to hear what's working for you.
 
 **Blog post** — replaced "livestream: 53% of that skill's instructions were audit procedures" with generic framing: "Some skills saw over 50% of their content moved to on-demand loading — procedures that only matter during specific operations, not on every invocation."
-<!-- agent:boundary:daed1218 -->
+<!-- agent:boundary:de27f228 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

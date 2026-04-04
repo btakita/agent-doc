@@ -76,7 +76,7 @@ Implement
 ### Re: Implementing agent-runbooks CLI
 
 Launching worktree agent to implement all 4 commands in `src/agent-runbooks/`. This is a new Rust binary crate.
-### Re: agent-runbooks implemented (HEAD)
+### Re: agent-runbooks implemented
 
 All 4 commands implemented in `src/agent-runbooks/` (Rust binary crate). 15 tests passing.
 
@@ -106,13 +106,19 @@ OK: no issues found
 The audit correctly flags orphans because the dev SKILL.md uses prose references (`See runbooks/...`) rather than the trigger format (`` `phrase` -- runbooks/file.md ``). The SKILL.md files should be updated to use the trigger format for full audit coverage.
 
 Not yet committed to the agent-runbooks submodule -- changes in working tree.
-<!-- agent:boundary:cf5d8fd4 -->
+do
+- [ ] Commit agent-runbooks to submodule
+### Re: Committed and pushed (HEAD)
+
+agent-runbooks committed inside the submodule and pushed:
+- `c702cd9` -- feat: implement audit, list, validate, install CLI commands (1,263 lines, 15 tests)
+- Parent pointer updated in agent-loop: `ad9e6c35`
+<!-- agent:boundary:3b7174db -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Implement agent-runbooks: audit, list, validate, install (15 tests passing)
-- [ ] Commit agent-runbooks to submodule
+- [x] Commit agent-runbooks to submodule -- done, pushed
 - [ ] Update SKILL.md files to use trigger format for audit coverage
 <!-- /agent:pending -->

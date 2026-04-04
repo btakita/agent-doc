@@ -146,7 +146,7 @@ Each has focused frontmatter for Claude Code skill matching. Shared conventions 
 **Implementation:** Bundle 3 SKILL.md files via `include_str!`, `corky skill install` writes all 3 + runbooks.
 
 Ready to implement on your go.
-<!-- agent:boundary:b0ea2ce2 -->
+<!-- agent:boundary:9dc23d73 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

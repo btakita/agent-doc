@@ -112,6 +112,7 @@ claude_args: --dangerously-skip-permissions
 - btak.dev Gmail API OAuth needs re-auth (interactive)
 - Google Sheets 403: verify sharing / GCP test users for `brian.takita@gmail.com`
 - Manylinux binary wheel for PyPI (needs container/CI)
+<!-- agent:boundary:c618ddfb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -178,7 +178,7 @@ This is general enough to apply to:
 - Type definitions (consumed by one package)
 
 Saved as `feedback_distribution_aware_reorg.md` in auto memory.
-<!-- agent:boundary:64f51f0f -->
+<!-- agent:boundary:02e3ea4b -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

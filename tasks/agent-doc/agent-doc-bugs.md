@@ -616,7 +616,7 @@ The claims log was originally used for IPC about a claim.
 However, it seems to have broadened to be a general purpose IPC mechanism
 
 I would like any agent-doc transfer or agent-doc notify to set an explicit prompt with an annotation to source in the destination prompt.
-### Re: Claims log scope + transfer/notify source annotations (HEAD)
+### Re: Claims log scope + transfer/notify source annotations
 
 **Claims log scope:**
 You're right to note the conceptual broadening. Currently the claims log is still narrowly scoped — only `claim.rs` writes to it (one line per claim event). But the pattern (file-based IPC, read-and-truncate by preflight) could easily serve as a general signal channel. The question is whether to:
@@ -654,13 +654,50 @@ This gives the receiving agent:
 - Clear action directive (what to do with it)
 
 Should I implement this as a change to `extract.rs`/`notify.rs`, or do you want to design the annotation format further first?
-<!-- agent:boundary:f9787caa -->
+go
+### Re: Source annotations implemented for extract/transfer (HEAD)
+
+Both `agent-doc extract` and `agent-doc transfer` now wrap content with a source annotation blockquote when appending to the target document.
+
+**Format:**
+```markdown
+> **[EXTRACT from tasks/research/on-demand-context.md]** (2026-04-04T07:25:00Z)
+>
+### Re: The transferred content starts here... (HEAD)
+```
+
+For `transfer`:
+```markdown
+> **[TRANSFER from tasks/agent-doc/agent-doc-bugs.md]** (2026-04-04T07:25:00Z)
+>
+Content that was moved...
+```
+
+**Combined with existing `notify` format:**
+```markdown
+> **[NOTIFY from build-monitor]** (2026-04-04T07:25:00Z)
+> 
+> Build failed on integration tests.
+> 
+> **Re-evaluate:** integration tests
+```
+
+All three IPC mechanisms (extract, transfer, notify) now consistently annotate content with:
+- **Action type** — EXTRACT, TRANSFER, or NOTIFY
+- **Source provenance** — file path or identifier
+- **Timestamp** — UTC ISO format
+
+The receiving agent sees the blockquote annotation in the diff, knows where content came from, and can respond appropriately.
+
+**Files changed:** `extract.rs` — added `format_source_annotation()`, wrapped content in both `run()` and `transfer()`.
+
+Built, tested (38 pass), installed.
+<!-- agent:boundary:54f8376a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] All previous items complete
-- [ ] Design transfer/notify source annotation format
-- [ ] Implement source annotations in extract.rs and notify.rs
+- [x] Source annotations for extract/transfer
 <!-- /agent:pending -->

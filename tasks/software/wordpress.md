@@ -91,7 +91,36 @@ For dedicated servers specifically (bare metal, not shared WordPress), pricing s
 ❯ 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   ⏵⏵ bypass permissions on (shift+tab to cycle)
-<!-- agent:boundary:bbefba9b -->
+  - US or Europe data center choice
+  - 24/7/365 WordPress expert support (59-second response guarantee)
+  - 30-day money-back guarantee
+
+  For dedicated servers specifically (bare metal, not shared WordPress), pricing starts at $149/mo.
+
+  Sources:
+  - https://www.liquidweb.com/wordpress-hosting/
+  - https://www.liquidweb.com/wordpress-hosting/managed-wordpress/
+  - https://cybernews.com/best-web-hosting/liquid-web-review/
+
+  Now writing back to the document.
+
+  Read 1 file (ctrl+o to expand)
+
+● Bash(agent-doc commit tasks/software/wordpress.md)
+  ⎿  [perf] commit.staging (hash_object+update-index): 3ms
+     [perf] commit.git_commit: 18ms
+     [main ed0f7114] agent-doc(wordpress): 2026-04-03 12:21:39
+     … +6 lines (ctrl+o to expand)
+
+● Response written and committed. Both questions answered in the document — Admin vs Super Admin roles, and Liquid Web WordPress Dedicated plans/features/pricing.
+
+✻ Baked for 1m 7s
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+<!-- agent:boundary:49b83a7b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

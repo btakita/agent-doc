@@ -113,7 +113,7 @@ do
 agent-runbooks committed inside the submodule and pushed:
 - `c702cd9` -- feat: implement audit, list, validate, install CLI commands (1,263 lines, 15 tests)
 - Parent pointer updated in agent-loop: `ad9e6c35`
-<!-- agent:boundary:3b7174db -->
+<!-- agent:boundary:fc3e2524 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

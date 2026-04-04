@@ -82,7 +82,7 @@ Done. Parent repo now tracks:
 - `src/tmux-router` → v0.3.9 (9c8f13e)
 
 Release?
-### Re: Pushed (HEAD)
+### Re: Pushed
 
 108 commits pushed to `origin/main` (37b6a2a7..0a96c915).
 
@@ -90,11 +90,32 @@ All releases complete:
 - agent-doc v0.31.6 → crates.io + GitHub
 - tmux-router v0.3.9 → crates.io + GitHub  
 - agent-loop → pushed to GitHub (submodule pointers updated)
-<!-- agent:boundary:b6127dd4 -->
+
+When switching the editor to another file...there are many extra swaps + glitchiness.
+Please look through logs to see what is happening.
+### Re: Stash-retrieve-stash cycle causing glitchiness (HEAD)
+
+**Found in sync log.** The pattern:
+
+1. Sync fires with `window=@221`, desired=[%452, %436]
+2. Pre-reconcile sees 6 panes: [%452, %476, %434, %431, %436, %477]
+3. Stashes 4 unwanted panes (%476, %434, %431, %477) — visible pane shuffling
+4. **Immediately** sync fires again — the stashed panes have been rescued back from stash by `repair_layout`
+5. Stashes them again — more visible shuffling
+6. Repeat every ~1 second
+
+**Root cause:** `repair_layout` (Phase 2) rescues panes from stash into the agent-doc window to ensure it exists. But then the reconciler stashes them because they're not in the desired layout. This creates a rescue→stash→rescue→stash loop.
+
+**The panes being cycled:** %434 (claim-error), %431 (runbooks), %476, %477 — these are registered sessions that belong in stash, but `repair_layout` keeps pulling them back.
+
+**Fix:** `repair_layout` should only rescue a pane from stash when the agent-doc window doesn't exist (to recreate it). If the window already has panes, skip the rescue. Currently it rescues panes unconditionally.
+
+This is a tmux-router `sync.rs` fix in the `repair_layout` function. Should I fix it now?
+<!-- agent:boundary:3a53998b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] All complete
+- [ ] Fix repair_layout stash-retrieve-stash cycle (tmux-router sync.rs)
 <!-- /agent:pending -->

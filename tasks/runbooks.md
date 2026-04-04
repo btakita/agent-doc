@@ -461,7 +461,7 @@ agent-doc notify tasks/briantakita.me.md "Runbook extraction reduced SKILL.md by
 ```
 
 Not yet committed or released -- changes are in the agent-doc working tree. Ready for review.
-<!-- agent:boundary:5bb0d712 -->
+<!-- agent:boundary:c3b5f611 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

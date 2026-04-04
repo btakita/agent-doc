@@ -473,7 +473,7 @@ Written to `tasks/agent-doc/agent-doc-bugs.md` claims log:
 - Release per `dev/runbooks/release-rust-maturin.md`
 
 The claim will appear next time the agent-doc-bugs session runs preflight. (Once `agent-doc notify` is released, this transfer would be immediate and visible.)
-<!-- agent:boundary:0dc72b53 -->
+<!-- agent:boundary:8d9b9af6 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

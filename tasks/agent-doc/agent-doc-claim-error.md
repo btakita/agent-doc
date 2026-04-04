@@ -157,7 +157,7 @@ The LOG prefixes are:
 Whichever prefix floods the log is the culprit.
 
 Alternatively: Help → Diagnostic Tools → Freeze → "Capture Thread Dump" while navigating bugs.md. The thread dump will show exactly which thread/method is consuming CPU.
-<!-- agent:boundary:39f7b453 -->
+<!-- agent:boundary:bb0f7174 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

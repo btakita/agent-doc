@@ -2231,10 +2231,10 @@ do
 
 **LinkedIn** — recommend a sequel post rather than editing the existing runbooks post. "Skill encapsulation — packaging binary + instructions + runbooks" as a natural follow-up.
 
-Do both LinkedIn teasers 
+Do both LinkedIn teasers reference the same blog post? Should we have a separate blog post as well?
 
 **Draft blog section ready in console.** Shall I add it to the blog post file? And should LinkedIn be a sequel or fold into existing?
-### Re: Blog post updated — skill encapsulation section added (HEAD)
+### Re: Blog post updated — skill encapsulation section added
 
 Added **"Packaged skills: binary + instructions + runbooks"** section after "Nested runbooks" in the blog post at `src/briantakita.me-dev/app/briantakita.me/post/content/2026-04-03-agent-runbooks-on-demand-procedural-context.md`.
 
@@ -2247,11 +2247,24 @@ Covers:
 LinkedIn teaser stays as-is (runbooks only). Blog post is the comprehensive reference covering both optimizations.
 
 **Next:** Build + deploy to push live.
-<!-- agent:boundary:4d9ce76b -->
+### Re: One blog post or two? Same LinkedIn target? (HEAD)
+
+**One blog post.** The skill encapsulation section flows naturally after "Nested runbooks" — one continuous argument. Splitting would force a click-through for one idea.
+
+**Two LinkedIn posts, same blog link.** Different hooks, same URL:
+
+1. **Posted** (runbooks): "Is your CLAUDE.md carrying too much weight?"
+2. **Sequel** (encapsulation): Different hook about packaging binary + instructions
+
+Each targets a different audience segment. First: people with bloated instruction files. Second: CLI tool builders who want to distribute agent context.
+
+**Draft sequel teaser in console.** Adjust angle or finalize?
+<!-- agent:boundary:923aab89 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Blog post: build + deploy skill encapsulation addition
+- Blog post: skill encapsulation section added, needs build + deploy
+- LinkedIn sequel teaser: draft ready, awaiting approval
 - Corky skill architecture: transferred to tasks/software/corky.md
 - Video: edit out WordPress admin section, then post
 - Second blog post + video: target Wed/Thu Apr 9-10

@@ -90,7 +90,7 @@ All 10 runbooks created and 4 SKILL.md files trimmed:
 - `module-harness/SKILL.md` — ~4 lines removed (audit steps)
 
 Each SKILL.md now has a one-line reference to the runbook. Agents load the runbook only when executing that specific procedure.
-<!-- agent:boundary:a05b7fb9 -->
+<!-- agent:boundary:7e0603e8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

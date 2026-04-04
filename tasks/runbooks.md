@@ -411,7 +411,7 @@ If I ask you to implement:
 - [ ] Feature request: `agent-doc notify` -- blockquote notification + re-evaluation directive
 
 Would you have used a worktree?
-### Re: Would I use a worktree? (HEAD)
+### Re: Would I use a worktree?
 
 **Yes.** For implementing `agent-doc notify` in the `src/agent-doc` submodule:
 
@@ -423,11 +423,20 @@ Would you have used a worktree?
 The worktree agent would: `cd src/agent-doc`, create feature branch, implement `notify` subcommand, `make check`, return with branch + diff.
 
 **When NOT to use a worktree:** Markdown-only changes like the runbook extraction -- safe to edit in-place, no compilation, no running binary risk.
-<!-- agent:boundary:4fc191b8 -->
+go
+- [ ] Feature request: `agent-doc notify` -- blockquote notification + re-evaluation directive
+### Re: Implementing agent-doc notify (HEAD)
+
+Launching worktree agent to implement `agent-doc notify` in `src/agent-doc`. The agent will:
+1. Create feature branch in the submodule
+2. Add `notify` subcommand (append blockquote + snapshot update)
+3. Run `make check`
+4. Return with branch + diff
+<!-- agent:boundary:a735e345 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Feature request: `agent-doc notify` -- blockquote notification + re-evaluation directive (use worktree)
+- [x] Feature request: `agent-doc notify` -- implementing in worktree now
 <!-- /agent:pending -->

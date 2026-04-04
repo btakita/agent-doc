@@ -108,17 +108,55 @@ The audit correctly flags orphans because the dev SKILL.md uses prose references
 Not yet committed to the agent-runbooks submodule -- changes in working tree.
 do
 - [ ] Commit agent-runbooks to submodule
-### Re: Committed and pushed (HEAD)
+### Re: Committed and pushed
 
 agent-runbooks committed inside the submodule and pushed:
 - `c702cd9` -- feat: implement audit, list, validate, install CLI commands (1,263 lines, 15 tests)
 - Parent pointer updated in agent-loop: `ad9e6c35`
-<!-- agent:boundary:fc3e2524 -->
+
+do
+- [ ] Update SKILL.md files to use trigger format for audit coverage
+- Add module-harness
+- Add ontology
+### Re: SKILL.md trigger format updated -- all audits pass (HEAD)
+
+Updated 4 SKILL.md files with `## Runbooks` sections using trigger format:
+
+```
+=== agent-doc === (already had it)
+ok  runbooks/compact-exchange.md    compact exchange
+ok  runbooks/cleanup.md             cleanup
+
+=== dev === (7 runbooks)
+ok  runbooks/pre-release-checklist.md    pre-release checklist
+ok  runbooks/release-rust-maturin.md     release rust+maturin
+ok  runbooks/release-rust-library.md     release rust library
+ok  runbooks/release-python.md           release python
+ok  runbooks/release-js-deploy.md        release js/ts
+ok  runbooks/unpublished-tag-recovery.md unpublished tag recovery
+ok  runbooks/submodule-commit.md         submodule commit
+
+=== email === (4 runbooks)
+ok  runbooks/email-send.md       send email
+ok  runbooks/review-inbox.md     review inbox
+ok  runbooks/draft-reply.md      draft reply
+ok  runbooks/enrich-contact.md   enrich contact
+
+=== livestream === (1 runbook)
+ok  runbooks/livestream-audit.md  audit secrets
+
+=== module-harness === (1 runbook)
+ok  runbooks/module-harness-audit.md  audit harness
+```
+
+**15 runbooks, 5 skills, all passing audit.** Zero missing, zero orphans.
+
+**Re: ontology (existence skill):** The existence skill currently has no runbooks. The operations it supports (lookup, search, new, lint, scope) are all single commands -- no multi-step procedures that would benefit from runbook extraction. If ontology authoring workflows become more complex, runbooks could be added later.
+<!-- agent:boundary:1a5486f7 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Commit agent-runbooks to submodule -- done, pushed
-- [ ] Update SKILL.md files to use trigger format for audit coverage
+All items complete. 5 skills audited, 15 runbooks referenced, zero drift.
 <!-- /agent:pending -->

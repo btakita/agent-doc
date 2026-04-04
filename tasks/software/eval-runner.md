@@ -484,7 +484,8 @@ Running: `--model sonnet --judge-model sonnet --parallel 8`. Will compare agains
 **Saved:** `baselines/sonnet-refined-context-2026-04-04.json`
 do
 - [ ] Investigate remaining 3 approval-pattern failures (approval-to-implement, single-word-approval, multi-item-instruction-list)
-### Re: Approval-pattern failure analysis (HEAD)
+
+### Re: Approval-pattern failure analysis
 
 Looked at the judge reasoning and model responses for all 3 failures. The root cause is **eval design, not model behavior:**
 
@@ -505,15 +506,28 @@ Looked at the judge reasoning and model responses for all 3 failures. The root c
 **Recommendation: Option 1 + 2.** Relax the expected behaviors to test "does the model correctly interpret the approval signal and plan action?" rather than "does it actually execute?" Add mock pending context so it has something concrete to work with.
 
 These are diff-interpretation evals, not agentic execution evals. Testing whether the model recognizes "go" as an approval is the right scope.
-<!-- agent:boundary:d72f85aa -->
+1+2 sound good. 3 would be great with a baseline repo or directory.
+### Re: Cases fixed, eval running (HEAD)
+
+Agreed — options 1+2 implemented. Updated all 3 cases in `cases.yaml`:
+
+**Changes to each case:**
+- **document_context**: Added mock `&lt;!-- agent:pending --&gt;` blocks so the model has concrete items to reference
+- **expected_behavior**: Relaxed from "begins implementation" to "interprets approval and describes what it will do"
+- Key rule: "does NOT ask for clarification" — the core diff-interpretation test
+
+Option 3 (agentic execution with a baseline repo) is a great future direction — would need a fixture directory with mock files for the model to interact with.
+
+Full eval running with refined prompt + fixed cases. Will report results when done.
+<!-- agent:boundary:086eea37 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [x] Investigate remaining 3 approval-pattern failures (eval design issue, not model/prompt)
-- [ ] Fix expected_behavior for approval cases (relax to diff-interpretation scope)
-- [ ] Add mock pending context to approval eval cases
+- [x] Fix expected_behavior for approval cases
+- [x] Add mock pending context to approval eval cases
+- [ ] Full eval run with fixed cases (running)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 - [ ] JSON output format documentation
 <!-- /agent:pending -->

@@ -99,6 +99,38 @@ Or install from the VS Code Marketplace. Add a task with `"command": "agent-doc 
 nnoremap <leader>as :!agent-doc run %<CR>:e<CR>
 ```
 
+## Domain Ontology
+
+agent-doc extends the [existence kernel vocabulary](https://github.com/btakita/existence-lang) with domain-specific terms.
+
+### Document Lifecycle
+
+| Term | Definition |
+|------|-----------|
+| **Session** | A persistent conversation between a user and an agent, identified by UUID. Stored in frontmatter as `agent_doc_session`. |
+| **Document** | A markdown file that serves as the UI for a session. Contains frontmatter, components, and user/agent content. |
+| **Snapshot** | A baseline copy of the document at a known state. Used for diff computation and CRDT merge. |
+| **Component** | A named region in a template document (`<!-- agent:name -->...<!-- /agent:name -->`). Targeted by patch blocks. |
+| **Boundary** | A marker (`<!-- agent:boundary:hash -->`) that separates committed content from uncommitted user edits. |
+| **Exchange** | The shared conversation surface where user and agent write inline. A component with `patch=append`. |
+
+### Pane Lifecycle
+
+| Term | Definition |
+|------|-----------|
+| **Binding** | The document→pane association stored in `sessions.json`. Created by `claim` (explicit) or `auto_start` (automatic). One document per pane. |
+| **Reconciliation** | The process of matching editor layout to tmux layout. Performed by `sync`. Stashes unwanted panes, provisions missing ones. |
+| **Provisioning** | Creating a new tmux pane and starting a Claude session for a document. Performed by `route::auto_start`. The normal path for new documents — sync triggers provisioning when it finds a session UUID with no registered pane. |
+| **Initialization** | Assigning a session UUID, creating a snapshot, and committing to git. Performed by `ensure_initialized()`. Called from claim, preflight, and sync's resolve_file. |
+
+### Integration Layer
+
+| Term | Definition |
+|------|-----------|
+| **Route** | Resolve which tmux pane handles a file. Creates panes if needed (provisioning). |
+| **Sync** | Reconcile editor layout with tmux layout. The primary entrypoint from the JB plugin on every tab switch. |
+| **Claim** | Bind a document to a specific existing pane. Used for manual pane assignment; not needed in normal editor workflow (sync + auto_start handles it). |
+
 ## Security
 
 agent-doc is designed for **single-user, local operation**. All session data (documents, snapshots, exchange history) is stored on the local filesystem and committed to a git repository.

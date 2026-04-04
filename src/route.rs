@@ -515,8 +515,11 @@ pub fn auto_start(
     auto_start_ext(tmux, file, session_id, file_path, context_session, false, false)
 }
 
-/// Auto-start without waiting for Claude or sending commands.
-/// Used by sync when it just needs the pane to exist.
+/// **Provisioning** — create a new tmux pane and start Claude asynchronously.
+///
+/// Called by sync during Reconciliation when a file has a session UUID but no
+/// registered pane. Creates the pane immediately but doesn't wait for Claude
+/// to initialize (async startup).
 pub fn auto_start_no_wait(
     tmux: &Tmux,
     file: &Path,

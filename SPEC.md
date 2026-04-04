@@ -747,6 +747,49 @@ The stash system preserves running Claude sessions when the user switches editor
 3. During `agent-doc commit`: (a) the snapshot is cleaned via `reposition_boundary_to_end()`, and (b) a standalone IPC signal (`try_ipc_reposition_boundary`) sends a lightweight reposition-only patch (no content changes, 500ms timeout). This ensures the boundary is at end-of-exchange immediately after commit, so user text typed before the next write cycle is positioned correctly.
 4. If no plugin is active, both IPC signals are silently skipped — the snapshot still has the correct boundary position
 
+### 8.5 Pane Lifecycle — Binding Invariant
+
+**The editor-selected document drives pane resolution. It either finds an existing pane that already claims that document, or provisions a new one. It NEVER commandeers another document's pane.**
+
+This is the **Binding invariant** — the foundational rule of pane management.
+
+#### Resolution Path
+
+When the user navigates to a document in the editor:
+
+1. **Sync fires** — JB plugin sends `agent-doc sync --col <file1> --col <file2> --focus <focused_file>`
+2. **Initialization** — `ensure_initialized()` runs for each file in `col_args`:
+   - If file has `agent_doc_format` but no `agent_doc_session` → assigns a UUID
+   - If no snapshot exists → creates snapshot + `git add` + `git commit`
+3. **File resolution** — `resolve_file()` reads frontmatter. Files with `agent_doc_session` → `FileResolution::Registered`. Files without → `Unmanaged` (not an agent-doc).
+4. **Reconciliation** — `tmux_router::sync` matches the declared layout to tmux panes:
+   - Pane exists for this session → **focus it** (Binding found)
+   - Pane in stash → **rescue it** (swap-pane back to agent-doc window)
+   - No pane exists → trigger **Provisioning**
+5. **Provisioning** — `route::auto_start_no_wait()` creates a new tmux pane:
+   - Splits alongside an existing pane in the agent-doc window
+   - Registers the session→pane **Binding** in `sessions.json`
+   - Starts Claude asynchronously in the new pane
+
+#### Invariants
+
+| Invariant | Enforcement |
+|-----------|-------------|
+| One document per pane | Registry check in `claim::run()` (line 142-156) |
+| Document drives, pane follows | Sync resolves files first, then matches to panes |
+| Never commandeer another document's pane | `auto_start` creates new panes; `claim` validates pane isn't already bound |
+| Stashed panes stay alive | `join-pane` moves to stash, doesn't kill |
+| Initialization is idempotent | `ensure_initialized()` checks snapshot existence first |
+
+#### Terminology (Domain Ontology)
+
+| Term | Definition | Module |
+|------|-----------|--------|
+| **Binding** | Document→pane association in `sessions.json` | `claim.rs`, `sessions.rs` |
+| **Reconciliation** | Matching editor layout to tmux layout | `sync.rs` |
+| **Provisioning** | Creating a new pane + starting Claude | `route.rs` (`auto_start`) |
+| **Initialization** | Assigning UUID + snapshot + git tracking | `snapshot.rs` (`ensure_initialized`) |
+
 ## 9. Git Integration
 
 - Commit: `git add -f {file}` (bypasses .gitignore) + `git commit -m "agent-doc: {timestamp}" --no-verify`

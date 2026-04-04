@@ -1,6 +1,14 @@
-//! # Module: sync
+//! # Module: sync — Reconciliation
 //!
-//! `agent-doc sync` — mirror a columnar editor layout in tmux panes.
+//! `agent-doc sync` — **reconcile** the editor's columnar layout with tmux panes.
+//!
+//! **Ontology:** Sync performs **Reconciliation** — matching the editor's declared
+//! layout (columns of files) to the tmux pane layout. When a file has a session UUID
+//! but no registered pane, sync triggers **Provisioning** (via `route::auto_start`)
+//! to create a new pane. Files entering the system for the first time go through
+//! **Initialization** (`ensure_initialized`) which assigns a UUID, creates a snapshot,
+//! and commits to git. The result is a **Binding** (document→pane association) stored
+//! in `sessions.json`.
 //!
 //! Usage: `agent-doc sync --col plan.md,corky.md --col agent-doc.md [--window @1] [--focus plan.md]`
 //!
@@ -539,6 +547,15 @@ fn run_with_options(
     let session_files: RefCell<Vec<(String, PathBuf)>> = RefCell::new(Vec::new());
 
     let resolve_file = |path: &Path| -> Option<FileResolution> {
+        // Auto-initialize documents that have agent_doc_format but no session UUID.
+        // This handles files created by skills (e.g., granola import) that didn't
+        // go through claim. ensure_initialized() assigns a UUID and creates the
+        // snapshot + git baseline.
+        if let Err(e) = crate::snapshot::ensure_initialized(path) {
+            eprintln!("[sync] warning: ensure_initialized failed for {}: {}", path.display(), e);
+        }
+
+        // Re-read after potential initialization (UUID may have been assigned)
         let content = std::fs::read_to_string(path).ok()?;
         let (fm, _) = frontmatter::parse(&content).ok()?;
         match fm.session {
@@ -570,8 +587,8 @@ fn run_with_options(
                 })
             }
             None => {
-                // No session UUID → not an agent document. Only `claim` should
-                // generate session UUIDs and add frontmatter.
+                // No session UUID even after ensure_initialized() — file has no
+                // agent_doc_format, so it's genuinely not an agent document.
                 Some(FileResolution::Unmanaged)
             }
         }

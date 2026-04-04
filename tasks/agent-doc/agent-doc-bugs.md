@@ -202,7 +202,7 @@ This creates a **stash-bounce loop**: sync stashes unwanted panes → prune retu
 **Fix:** Removed `return_stashed_panes_bulk()` from the automatic `prune()` path. Active panes now stay in stash until the reconciler explicitly needs them. Manual recovery via `agent-doc resync --fix` is still available.
 
 634 tests pass. Built, installed. Please try switching tabs now — the stash-bounce should be eliminated.
-<!-- agent:boundary:139bad6b -->
+<!-- agent:boundary:472d10d7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

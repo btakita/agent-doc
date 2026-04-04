@@ -216,7 +216,7 @@ agent-runbooks validate runbooks/release-rust-maturin.md \
 ```
 
 It's a lightweight way to ensure runbooks reference valid ontology concepts without requiring a compile-time dependency on existence-lang.
-<!-- agent:boundary:cd23fd0e -->
+<!-- agent:boundary:41c3ba3c -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

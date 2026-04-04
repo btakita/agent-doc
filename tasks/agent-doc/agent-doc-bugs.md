@@ -270,7 +270,7 @@ This happened during the CRDT write-back: the `\\n` sequence in my response was 
 **Root cause:** When `agent-doc write --stream` processes the patch content, it serializes it to JSON for IPC delivery. If the patch content contains `\\n` inside a markdown code fence, the JSON serializer writes it as `\n` (a literal newline in JSON), which then gets inserted as an actual newline in the document.
 
 **Fix needed:** The patch content should be treated as opaque text — no unescaping. This is a bug in the write pipeline's text handling. Want me to investigate and fix it in the binary?
-<!-- agent:boundary:61f8a58f -->
+<!-- agent:boundary:1eb5cc5c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

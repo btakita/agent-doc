@@ -236,7 +236,7 @@ The plugin's PatchWatcher scans documents for `<!-- patch:... -->` patterns. Fin
 **Root fix:** The transfer command should escape `<!-- patch:... -->` markers when writing content into target documents, or the PatchWatcher should only parse patch blocks from `.json` files (not from document content).
 
 Want me to fix bugs.md now and then address the root cause in the transfer command?
-<!-- agent:boundary:4b8446ba -->
+<!-- agent:boundary:b8ee9559 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

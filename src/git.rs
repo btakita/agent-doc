@@ -547,18 +547,18 @@ fn add_head_marker(content: &str, file: &Path) -> String {
         return cleaned;
     }
 
-    // Step 4: Only mark root-level (shallowest) headings
+    // Step 4: Only mark the LAST root-level (shallowest) new heading.
+    // Previous logic marked ALL root-level new headings, causing every h3 to get
+    // (HEAD) when multiple headings were new (e.g., after a transfer).
     let min_level = new_headings.iter().map(|(_, _, level)| *level).min().unwrap();
-    let root_ends: Vec<usize> = new_headings.iter()
+    let last_root = new_headings.iter()
         .filter(|(_, _, level)| *level == min_level)
-        .map(|(_, end, _)| *end)
-        .collect();
+        .last()
+        .unwrap();
 
-    // Step 5: Insert (HEAD) markers in reverse order to preserve offsets
+    // Step 5: Insert (HEAD) marker on the last root-level heading only
     let mut result = cleaned;
-    for pos in root_ends.iter().rev() {
-        result.insert_str(*pos, " (HEAD)");
-    }
+    result.insert_str(last_root.1, " (HEAD)");
     result
 }
 

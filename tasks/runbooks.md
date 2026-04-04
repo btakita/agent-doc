@@ -63,7 +63,7 @@ Yes, configurable. Resolution chain:
 This way projects without `.agent/` still work via the `.claude/skills/` path. A `--dir` flag handles edge cases. Config file (`[runbooks] dir = "..."` in `.agent/config.toml`) can come later if needed.
 
 For v1: walk-up search + `--dir` override. No config file needed yet.
-<!-- agent:boundary:d1321bb2 -->
+<!-- agent:boundary:0b6556c9 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

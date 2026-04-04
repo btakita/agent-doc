@@ -373,7 +373,7 @@ What can we do now?
 4. **Prep call talking points** — Tighten your pitch with specific demos you can show live.
 
 Which of these do you want to start with? I'd suggest #1 (Trieve signup) first since it's a blocker for #2.
-<!-- agent:boundary:a1f2b0a4 -->
+<!-- agent:boundary:edbb78f2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

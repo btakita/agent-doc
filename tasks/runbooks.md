@@ -315,7 +315,7 @@ But it won't appear until the next `/agent-doc tasks/briantakita.me.md` cycle. T
 - The key difference: the notification is immediately visible in the editor, not deferred to the next preflight cycle
 
 The claims log works for session-to-session messaging (async), but for "notify this document about X," writing into the document itself is the right approach. That's a good feature request for agent-doc.
-<!-- agent:boundary:b932f925 -->
+<!-- agent:boundary:ae13592c -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

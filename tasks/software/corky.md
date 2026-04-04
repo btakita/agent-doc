@@ -131,7 +131,7 @@ Add this heuristic as a skill->runbook where appropriate
 > Path dependencies: Use `.cargo/config.toml` `[patch.crates-io]` for local development (gitignored). `Cargo.toml` references crate versions only — CI resolves from crates.io, no cloning needed.
 
 CI template comment also simplified.
-<!-- agent:boundary:3b4bf90a -->
+<!-- agent:boundary:0e6d5dad -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

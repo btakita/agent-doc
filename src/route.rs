@@ -178,14 +178,12 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
         Err(e) => {
             // Clean up orphaned panes created during the failed route attempt.
             // Compare current panes to the snapshot and kill any new ones.
-            if let Some(w) = window_arg.as_deref() {
-                if let Ok(panes_after) = tmux.list_window_panes(w) {
-                    for p in &panes_after {
-                        if !panes_before.contains(p) {
-                            eprintln!("[route] cleaning up orphaned pane {} (created during failed route)", p);
-                            tracing::warn!(pane = %p, "route: killing orphaned pane from failed route");
-                            let _ = tmux.raw_cmd(&["kill-pane", "-t", p]);
-                        }
+            if let Some(w) = window_arg.as_deref() && let Ok(panes_after) = tmux.list_window_panes(w) {
+                for p in &panes_after {
+                    if !panes_before.contains(p) {
+                        eprintln!("[route] cleaning up orphaned pane {} (created during failed route)", p);
+                        tracing::warn!(pane = %p, "route: killing orphaned pane from failed route");
+                        let _ = tmux.raw_cmd(&["kill-pane", "-t", p]);
                     }
                 }
             }
@@ -761,6 +759,7 @@ fn pane_has_prompt(tmux: &Tmux, pane_id: &str) -> bool {
 ///
 /// This ensures pane arrangement stays consistent when a file is reclaimed
 /// to a different pane. Only runs on autoclaim — normal routing skips this.
+#[allow(dead_code)]
 fn sync_after_claim(tmux: &Tmux, pane_id: &str, col_args: &[String]) {
     let window_id = match tmux.pane_window(pane_id) {
         Ok(w) => w,

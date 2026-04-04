@@ -106,6 +106,7 @@ pub fn run(col_args: &[String], window: Option<&str>, focus: Option<&str>) -> Re
 
 /// Run sync without auto-starting sessions. Used when called from route
 /// (route already handled the target file — auto-start would create duplicates).
+#[allow(dead_code)]
 pub fn run_layout_only(col_args: &[String], window: Option<&str>, focus: Option<&str>) -> Result<()> {
     run_with_options(col_args, window, focus, false, &Tmux::default_server())
 }
@@ -813,17 +814,16 @@ fn run_with_options(
             .args(["display-message", "-t", w, "-p", "#{session_name}"])
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            && !session.is_empty()
         {
-            if !session.is_empty() {
-                let session_alive = tmux.cmd()
-                    .args(["has-session", "-t", &session])
-                    .status()
-                    .map(|s| s.success())
-                    .unwrap_or(false);
-                if !session_alive {
-                    tracing::error!(session = %session, "SESSION DESTROYED after sync — tmux session no longer exists");
-                    eprintln!("[sync] CRITICAL: session '{}' was destroyed during sync!", session);
-                }
+            let session_alive = tmux.cmd()
+                .args(["has-session", "-t", &session])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if !session_alive {
+                tracing::error!(session = %session, "SESSION DESTROYED after sync — tmux session no longer exists");
+                eprintln!("[sync] CRITICAL: session '{}' was destroyed during sync!", session);
             }
         }
     }

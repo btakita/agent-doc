@@ -119,10 +119,8 @@ fn walk_for_docs(dir: &Path, hashes: &mut HashSet<String>) -> Result<()> {
 
         if path.is_dir() {
             walk_for_docs(&path, hashes)?;
-        } else if path.extension().is_some_and(|e| e == "md") {
-            if let Ok(hash) = snapshot::doc_hash(&path) {
-                hashes.insert(hash);
-            }
+        } else if path.extension().is_some_and(|e| e == "md") && let Ok(hash) = snapshot::doc_hash(&path) {
+            hashes.insert(hash);
         }
     }
 

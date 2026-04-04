@@ -663,6 +663,7 @@ fn purge_unregistered_stash_panes_bulk(
 /// Bulk variant of `return_stashed_panes` — uses pre-fetched metadata.
 /// Also deregisters stranded panes when no return target is found, preventing
 /// repeated expensive lookups on subsequent cycles.
+#[allow(dead_code)]
 fn return_stashed_panes_bulk(
     tmux: &Tmux,
     windows: &WindowMeta,
@@ -759,6 +760,7 @@ fn return_stashed_panes_bulk(
 
 /// Check if a pane is an idle Claude session by looking for `❯` in the last few lines.
 /// Bulk variant of `find_return_target` — uses pre-fetched metadata instead of subprocess calls.
+#[allow(dead_code)]
 fn find_return_target_bulk(
     entry: &sessions::SessionEntry,
     windows: &WindowMeta,
@@ -809,10 +811,8 @@ fn find_return_target_bulk(
     // window in ANY tmux session. This handles panes that were registered while in the
     // stash window — their `window` field points to the stash, so step 1 can't return them.
     for (window_id, window_name, _session, _) in windows {
-        if !is_stash_window_name(window_name) {
-            if let Some((pid, _)) = panes.iter().find(|(_, (wid, _, _))| wid == window_id) {
-                return Some(pid.clone());
-            }
+        if !is_stash_window_name(window_name) && let Some((pid, _)) = panes.iter().find(|(_, (wid, _, _))| wid == window_id) {
+            return Some(pid.clone());
         }
     }
 

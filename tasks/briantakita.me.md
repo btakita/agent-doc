@@ -2024,7 +2024,7 @@ What directory convention are you using for agent config? .agent/, .agents/, .ai
 
 Copy and paste into LinkedIn. The URLs will auto-link.
 Add a runbook for linkedin posts. I want the drafts pointing to an external link or video to post the links in the first comment.
-### Re: LinkedIn runbook + draft updated (HEAD)
+### Re: LinkedIn runbook + draft updated
 
 Created `.agent/runbooks/linkedin-post.md` — key rule: **no external links in post body**, all links go in the first comment (LinkedIn suppresses reach on posts with outbound URLs).
 
@@ -2046,7 +2046,14 @@ Links in the comments.
 
 Blog post: https://briantakita.me/post/2026-04-03-agent-runbooks-on-demand-procedural-context
 Reference repo: https://github.com/btakita/agent-runbooks
-<!-- agent:boundary:bf860c43 -->
+
+What SKILL.md links to the runbook?
+### Re: Which SKILL.md links to the runbook? (HEAD)
+
+None — and that's correct. The LinkedIn runbook lives in `.agent/runbooks/linkedin-post.md` (project-level), not under any skill's `runbooks/` directory.
+
+It's a cross-cutting procedure like `precommit.md` and `prerelease.md` — referenced when needed in any session, not tied to a specific slash command. No social media skill needed for a posting checklist.
+<!-- agent:boundary:a8719dff -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

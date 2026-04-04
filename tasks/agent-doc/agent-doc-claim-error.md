@@ -127,7 +127,7 @@ docker run --rm \
 ```
 
 Only mounts `agent-doc` + `tmux-router` (the path dependency in `.cargo/config.toml`). Everything else stays inaccessible.
-<!-- agent:boundary:c73316fd -->
+<!-- agent:boundary:c3ae6de5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

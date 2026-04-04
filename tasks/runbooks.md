@@ -316,7 +316,7 @@ But it won't appear until the next `/agent-doc tasks/briantakita.me.md` cycle. T
 The claims log works for session-to-session messaging (async), but for "notify this document about X," writing into the document itself is the right approach. That's a good feature request for agent-doc.
 
 Does agent-doc have a notify command that would make a visible change with the deterministic logic and/or runbook logic that we discussed?
-### Re: Does agent-doc have a notify command? (HEAD)
+### Re: Does agent-doc have a notify command?
 
 **No.** No `notify` command exists. The closest tools:
 
@@ -329,12 +329,36 @@ Does agent-doc have a notify command that would make a visible change with the d
 2. Updates the snapshot (so it commits cleanly)
 3. Is immediately visible in the editor
 
+It should also adjust the current context of the document. Please revise any conclusions that were previous made that would be different due to the notification.
+
 Could be implemented as `agent-doc patch --append` or a dedicated `notify` subcommand. Good candidate for the agent-doc-bugs task.
-<!-- agent:boundary:4c3c70db -->
+### Re: Notify should trigger context re-evaluation (HEAD)
+
+You're right — a notification isn't just "here's new info." It should signal: **revisit conclusions that may be invalidated.**
+
+**Revised `agent-doc notify` spec:**
+1. **Append** the notification to exchange or notifications component
+2. **Tag affected context** — reference which conclusions or sections may need revision
+3. **Signal re-evaluation** — the receiving agent, on next cycle, sees the notification and revisits tagged conclusions
+
+**Example flow:**
+- `tasks/briantakita.me.md` has a pending item: "SKILL.md context is too large"
+- Notification arrives: "runbook extraction reduced SKILL.md by 34% (~2,235t)"
+- Receiving agent re-evaluates: that pending item may be resolved or deprioritized
+
+**Implementation levels:**
+- **v1 (simple):** Append `[NOTIFY from tasks/runbooks.md]: <message>` to the exchange. Agent naturally reads and re-evaluates.
+- **v2 (structured):** `<!-- notify source="..." affects="..." -->` with metadata. Agent knows which sections to re-check.
+- **v3 (active):** Notification includes a directive: "Re-evaluate X in light of Y"
+
+v1 could be done today with `agent-doc write --stream` targeting the other file. The gap is just: no `--append` mode for `agent-doc patch`, and `write` adds `## Assistant` framing that doesn't fit a notification.
+
+Added to the agent-doc-bugs task scope.
+<!-- agent:boundary:feb60ed4 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Feature request: `agent-doc notify <FILE> <message>` — append notification to target document (visible immediately)
+- [ ] Feature request: `agent-doc notify` — append + tag affected context + trigger re-evaluation
 <!-- /agent:pending -->

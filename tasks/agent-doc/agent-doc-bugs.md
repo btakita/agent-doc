@@ -221,23 +221,34 @@ yes
 The response patch was duplicated in this file. Why?
 > IPC timeout caused duplicate write (first via IPC patch, then via disk fallback). CRDT merge included both.
 
-### Re: Sync file lock implemented (HEAD)
+### Re: Sync file lock implemented
 
 Added `flock` on `.agent-doc/sync.lock` at the start of `run_with_options()`. When a second sync arrives while the first is running, it blocks until the first completes. This ensures the second sync sees the correct post-stash state.
 
 634 tests pass. Built, installed.
-### Re: Sync file lock + duplicate response explanation (HEAD)
+### Re: Sync file lock + duplicate response explanation
 
 **File lock implemented:** Added `flock` on `.agent-doc/sync.lock` at the start of `run_with_options()`. When a second sync arrives while the first is running, it blocks until the first completes. This ensures the second sync sees the correct post-stash state instead of mid-transition panes.
 
 **Why the response duplicated:** The first `agent-doc write` attempt used IPC (socket to JB plugin) but timed out after 2 seconds (exit 75). The response was saved as a patch file in `.agent-doc/patches/`. Then the retry with `--force-disk` wrote the same content via CRDT merge. The CRDT merge correctly merged both writes, but since both contained the same content, it appeared duplicated. This is a known edge case when IPC times out and the skill retries with disk write.
 
 634 tests pass. Built, installed. Try switching tabs — the file lock should eliminate the concurrent sync glitchiness.
-<!-- agent:boundary:0e1020b8 -->
+
+release
+### Re: agent-doc v0.31.7 released (HEAD)
+
+Published to crates.io + GitHub. 4 fixes:
+1. Stash-bounce fix (removed return_stashed_panes_bulk from prune)
+2. Sync file lock (flock serializes concurrent syncs)
+3. Route sync removal (JB plugin is sole layout authority)
+4. Diagnostic checkpoint logging
+
+634 tests pass. Installed. Parent submodule pointer updated.
+<!-- agent:boundary:db801cd9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Add file lock to prevent concurrent sync calls
+- [x] All complete. v0.31.7 released.
 <!-- /agent:pending -->

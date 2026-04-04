@@ -381,7 +381,7 @@ Added periodic state logging (~every 60s) for all 4 ephemeral state candidates:
 Plugin v0.2.42. Committed: `3ee90e0`.
 
 If the issue recurs, the `[state]` logs will show which counters are growing unbounded. Install `agent-doc-jetbrains-0.2.42.zip` and enable `#com.github.btakita.agentdoc` debug logging.
-### Re: `(HEAD)` on all h3 headers — boundary reposition bug (HEAD)
+### Re: `(HEAD)` on all h3 headers — boundary reposition bug
 
 Checked `git diff` on bugs.md — the **snapshot** (committed version) has `(HEAD)` appended to ALL `### ` headers:
 - `### Transfer from eval-runner session (2026-04-04) (HEAD)`
@@ -394,7 +394,19 @@ The working file correctly has them without `(HEAD)`.
 This is a bug in `agent-doc commit`'s boundary repositioning — it's adding `(HEAD)` to **every** h3 heading in the snapshot, not just the one immediately after the boundary marker. The correct behavior is: add `(HEAD)` to only the heading right after the boundary, remove it from all others.
 
 This should be fixed in `boundary.rs` — the reposition logic needs to be scoped to only the heading adjacent to the boundary marker.
-<!-- agent:boundary:0d62b504 -->
+
+do
+- [ ] Fix boundary reposition bug: `(HEAD)` added to all h3 headers instead of just the one after boundary
+### Re: Boundary reposition bug fixed (HEAD)
+
+Root cause: `add_head_marker()` in `git.rs` marked ALL root-level new headings with `(HEAD)`. After a transfer (all headings are "new" relative to git HEAD), every h3 got the marker.
+
+Fix: Changed step 4 to mark only the **last** root-level heading instead of all of them. This is the most recent response — the correct visual boundary.
+
+Committed: `308356b`. 38 tests pass. Binary rebuilt and installed.
+
+The bugs.md `(HEAD)` on all headers should stop after the next `agent-doc commit` cycle on that file.
+<!-- agent:boundary:1208a033 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -406,5 +418,5 @@ This should be fixed in `boundary.rs` — the reposition logic needs to be scope
 - [x] Timing instrumentation in plugin
 - [x] Plugin version check in `make precommit`
 - [x] State diagnostics logging
-- [ ] Fix boundary reposition bug: `(HEAD)` added to all h3 headers instead of just the one after boundary
+- [x] Fix boundary reposition bug: only last heading gets `(HEAD)`
 <!-- /agent:pending -->

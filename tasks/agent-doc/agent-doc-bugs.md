@@ -498,7 +498,7 @@ Should add a `cleanup` runbook documenting:
 - Safe manual cleanup commands
 
 Shall I implement the fixes now? Starting with the pre-response bug fix and lock cleanup since those are straightforward.
-### Re: .agent-doc cleanup implemented (HEAD)
+### Re: .agent-doc cleanup implemented
 
 **Three fixes deployed:**
 
@@ -537,7 +537,33 @@ Scans `.agent-doc/` for orphaned files and removes them:
 - Auto-GC on preflight (daily stamp) to prevent re-accumulation
 - Cleanup runbook documenting `.agent-doc/` directory structure
 - The remaining 64 pre-response files are for active documents (will be cleaned by the new `clear_pending` fix going forward)
-<!-- agent:boundary:1ff7786d -->
+do
+- [ ] Auto-GC on preflight (daily timestamp check)
+- [ ] Add cleanup runbook to .claude/skills/agent-doc/runbooks/
+### Re: Auto-GC + cleanup runbook done (HEAD)
+
+**Auto-GC on preflight (done):**
+- Added step 0a to preflight: checks `.agent-doc/gc.stamp` mtime
+- If missing or >24 hours old, runs `gc::run()` automatically
+- Updates stamp after successful GC
+- Zero overhead when stamp is fresh (single `metadata()` call)
+- Runs before layout check so orphaned files are cleaned early
+
+**Cleanup runbook (done):**
+- Created `runbooks/cleanup.md` documenting:
+  - What `agent-doc gc` cleans (table of all directories + rules)
+  - Safe manual cleanup commands
+  - How files accumulate
+  - Guidelines for adding new `.agent-doc/` directories
+- Added trigger to SKILL.md Runbooks section: `cleanup` -- runbooks/cleanup.md
+
+**All files changed:**
+- `preflight.rs` -- auto-GC step 0a with daily stamp
+- `.claude/skills/agent-doc/runbooks/cleanup.md` -- new runbook
+- `.claude/skills/agent-doc/SKILL.md` -- added cleanup runbook trigger
+
+Built, tested, installed.
+<!-- agent:boundary:96ebca49 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -548,8 +574,8 @@ Scans `.agent-doc/` for orphaned files and removes them:
 - [x] Fix pre-response cleanup after write (bug)
 - [x] Fix lock file cleanup in Drop + stale detection
 - [x] Add `agent-doc gc` subcommand for orphaned file cleanup
-- [ ] Auto-GC on preflight (daily timestamp check)
-- [ ] Add cleanup runbook to .claude/skills/agent-doc/runbooks/
+- [x] Auto-GC on preflight (daily timestamp check)
+- [x] Add cleanup runbook to .claude/skills/agent-doc/runbooks/
 - [ ] Publish tmux-router 0.3.9 to crates.io (awaiting approval)
 - [ ] Investigate 1-pane layout bug (verbose logging now available)
 - [ ] Add tracing instrumentation to sync, layout, stash/retrieve code paths

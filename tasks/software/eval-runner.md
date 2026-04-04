@@ -368,7 +368,7 @@ All configurable via env vars: `make eval MODEL=haiku PARALLEL=12`.
 **Failure analysis** (investigating the 5 persistent failures — running in background, will report findings).
 
 **Latency eval support:** Noticed your edits adding `grading: "latency"` with `run_latency_case`. Builds clean — nice addition for benchmarking `agent-doc write` performance directly.
-### Re: Persistent failure analysis (HEAD)
+### Re: Persistent failure analysis
 
 All 5 failures are **agent-doc protocol violations** — the evaluated model lacks SKILL.md context:
 
@@ -391,16 +391,32 @@ Then run: `make eval SYSTEM_PROMPT=evals/agent-doc/diff-interpretation/system-pr
 This mirrors real sessions where the model has SKILL.md loaded. Without it, we're testing generic LLM behavior — not agent-doc skill compliance. The current scores represent "how well does a naked LLM handle agent-doc conventions?" The system-prompt scores would represent "how well does the skill perform end-to-end?"
 
 Both baselines are useful — naked for measuring inherent model capability, with-context for measuring skill+model quality.
-<!-- agent:boundary:7fa18d81 -->
+do
+- [ ] Increase default parallelism to 8 (done in Makefile, test with next run)
+- [ ] Create system prompt file for evals with relevant SKILL.md sections
+- [ ] Re-run sonnet eval with system prompt to measure skill+model quality
+### Re: System prompt + parallel 8 eval running (HEAD)
+
+**Created** `evals/agent-doc/diff-interpretation/system-prompt.md` with the key agent-doc conventions:
+- Comment stripping (preflight behavior)
+- Approval signals ("go", "yes", "do" → pending flush + implement)
+- Boundary markers (`(HEAD)` is mechanical, not a user edit)
+- Pending component protocol (update every response)
+- Multi-item instructions (individual work items + progress updates)
+
+**Makefile updated** — system prompt auto-detected and passed via `$(SYSTEM_PROMPT_FLAG)`. Set `SYSTEM_PROMPT=` (empty) to run without context.
+
+**Eval launched:** `--model sonnet --judge-model sonnet --parallel 8 --system-prompt system-prompt.md`
+
+Saving to `baselines/sonnet-with-context-2026-04-04.json`. Will report results when done.
+<!-- agent:boundary:ee5f2ddb -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [x] Investigate persistent failures — all 5 are agent-doc protocol violations needing SKILL.md context
-- [ ] Create system prompt file for evals with relevant SKILL.md sections
-- [ ] Re-run sonnet eval with system prompt to measure skill+model quality
-- [ ] Increase default parallelism to 8 (done in Makefile, test with next run)
+- [x] Create system prompt file for evals with relevant SKILL.md sections
+- [ ] Re-run sonnet eval with system prompt (running, --parallel 8)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 - [ ] JSON output format documentation
 <!-- /agent:pending -->

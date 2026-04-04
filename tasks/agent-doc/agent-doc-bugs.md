@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Identified SKILL.md gap: no runbook reference section; compact should use `agent-doc compact`
+SKILL.md runbook reference design: inline triggers at decision points
 <!-- /agent:status -->
 
 ## Exchange
@@ -48,7 +48,8 @@ Editor navigates to file B (was viewing file A)
 
 Why did you not use the compact-exchange runbook? Which would have told you to use `agent-doc compact` instead of the Edit tool?
 What is missing from the agent-doc SKILL.md for runbook usage?
-### Re: Compact runbook and SKILL.md gap (HEAD)
+
+### Re: Compact runbook and SKILL.md gap
 
 **Why I didn't use the runbook:** I forgot the compact-exchange runbook existed at `.claude/skills/agent-doc/runbooks/compact-exchange.md`. I went straight to the Edit/Write tool instead of checking runbooks first.
 
@@ -71,7 +72,33 @@ The SKILL.md has no section about runbooks. It should instruct the agent to:
 3. Use `agent-doc compact --message` instead of Edit/Write for exchange compaction
 
 This is a SKILL.md gap — the skill should reference its own runbooks as standard operating procedures.
-<!-- agent:boundary:b2119687 -->
+Should the SKILL.md explicitly reference the runbook for each extracted procedure?
+### Re: Should SKILL.md reference runbooks explicitly?
+
+Yes — and there are two complementary approaches:
+
+**1. Inline trigger references** — at the point in the SKILL.md where the procedure is relevant, add a one-liner:
+
+```markdown
+**When "compact exchange" is requested:** Follow the [compact-exchange runbook](runbooks/compact-exchange.md).
+```
+
+This goes in the workflow section where compaction would naturally be described (e.g., after the write-back section or as a separate "## Operations" section). The agent sees the trigger condition inline and follows the link.
+
+**2. Runbook index section** — a `## Runbooks` section at the end of SKILL.md listing all available runbooks with their trigger conditions:
+
+```markdown
+## Runbooks (HEAD)
+
+| Trigger | Runbook | Description |
+|---------|---------|-------------|
+| "compact exchange" | [compact-exchange](runbooks/compact-exchange.md) | Archive + replace exchange content |
+```
+
+**Recommendation:** Use approach 1 (inline references) as the primary mechanism. The agent encounters the reference at the decision point, not in a disconnected index. If the number of runbooks grows, add approach 2 as a supplementary index.
+
+The key principle: the SKILL.md should never contain the full procedure when a runbook exists — it should delegate with a link. This keeps the SKILL.md focused on the core workflow and avoids duplication.
+<!-- agent:boundary:83798f86 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -87,5 +114,5 @@ This is a SKILL.md gap — the skill should reference its own runbooks as standa
 - [x] Fix: window closure — last-pane guard in unmanaged stash path
 - [x] Navigation swap: cross-session joins + --window authority + path dep
 - [ ] Publish tmux-router 0.3.9 to crates.io (then revert path dep)
-- [ ] Add runbook reference section to SKILL.md
+- [ ] Add runbook references to SKILL.md (inline triggers + optional index)
 <!-- /agent:pending -->

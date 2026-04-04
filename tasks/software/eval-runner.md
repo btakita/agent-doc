@@ -604,7 +604,7 @@ Reasoning:
 4. Best baseline becomes ~16-17/19 (~84-89%) — a clean metric
 
 This gives a tight, reliable eval suite for diff interpretation and a clear roadmap for agentic evals.
-<!-- agent:boundary:2acf1f3d -->
+<!-- agent:boundary:c20759f6 -->
 <!-- /agent:exchange -->
 
 ## Pending

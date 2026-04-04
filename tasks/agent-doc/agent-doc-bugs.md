@@ -172,7 +172,7 @@ The fix would be: when a pane is in stash and NOT in the desired layout, don't p
 
 Should I investigate the `sync_with_options` pre-reconcile pane setup to find where stashed panes are being joined before reconciliation?
 yes
-### Re: Added diagnostic checkpoints — need you to trigger a tab switch (HEAD)
+### Re: Added diagnostic checkpoints — need you to trigger a tab switch
 
 Added 3 checkpoint log lines to `sync_with_options` to pinpoint WHERE stashed panes reappear:
 
@@ -183,12 +183,31 @@ Added 3 checkpoint log lines to `sync_with_options` to pinpoint WHERE stashed pa
 **Next step:** Please switch between your left and right editor tabs to trigger a sync event. Then I'll check the sync log to see at which checkpoint the extra panes appear.
 
 Built, installed.
-<!-- agent:boundary:979d605d -->
+### Re: ROOT CAUSE FOUND — return_stashed_panes_bulk in prune() (HEAD)
+
+**Diagnostic checkpoints revealed:**
+
+```
+checkpoint:post-repair  panes=2 [%452, %431]  ← correct
+checkpoint:post-prune   panes=5 [%452, %431, %434, %436, %476]  ← 3 extra!
+```
+
+The panes reappear during `resync::prune()`, specifically in `return_stashed_panes_bulk()` (resync.rs:192). This function:
+1. Scans stash windows for registered panes running active processes (claude, agent-doc)
+2. Finds their "return target" (the agent-doc window)
+3. Joins them back via `join_pane`
+
+This creates a **stash-bounce loop**: sync stashes unwanted panes → prune returns them → next sync stashes them again → prune returns them → visible glitchiness.
+
+**Fix:** Removed `return_stashed_panes_bulk()` from the automatic `prune()` path. Active panes now stay in stash until the reconciler explicitly needs them. Manual recovery via `agent-doc resync --fix` is still available.
+
+634 tests pass. Built, installed. Please try switching tabs now — the stash-bounce should be eliminated.
+<!-- agent:boundary:139bad6b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Identify checkpoint where stashed panes reappear in agent-doc window
-- [ ] Fix the root cause of pane bouncing
+- [x] Identified stash-bounce root cause (return_stashed_panes_bulk in prune)
+- [x] Fixed: removed from automatic prune path
 <!-- /agent:pending -->

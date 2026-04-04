@@ -416,7 +416,7 @@ The hooks/ directory having 1,893 files is suspicious. The others could benefit 
 3. **GC pass** for .agent-doc directories (separate task)
 
 Starting with debounce fix now.
-<!-- agent:boundary:fe9a9102 -->
+<!-- agent:boundary:cf1e9928 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

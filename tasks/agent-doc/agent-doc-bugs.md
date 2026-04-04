@@ -448,7 +448,7 @@ Starting with debounce fix now.
 ```bash
 export AGENT_DOC_LOG=debug  # add to ~/.zshrc
 ```
-<!-- agent:boundary:2cc814df -->
+<!-- agent:boundary:9c64ac0e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

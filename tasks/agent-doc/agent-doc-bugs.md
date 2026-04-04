@@ -308,7 +308,7 @@ claude_args: --dangerously-skip-permissions
 ```
 
 `agent-doc start` now runs successfully (the session registered to pane %433).
-<!-- agent:boundary:1471cd79 -->
+<!-- agent:boundary:090532f0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

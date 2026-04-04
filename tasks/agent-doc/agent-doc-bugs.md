@@ -162,7 +162,7 @@ Done. Added `snapshot::ensure_initialized(doc)` as a shared function and refacto
 **Sync not included** — sync operates on tmux layout/panes, not individual files. Files enter agent-doc through claim or preflight, both of which now call `ensure_initialized()`.
 
 637 tests pass, clippy clean, release built.
-<!-- agent:boundary:84d96db8 -->
+<!-- agent:boundary:640ece6d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

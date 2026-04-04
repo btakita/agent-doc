@@ -655,7 +655,7 @@ Lower than expected — the previous refined-prompt run got 76.2% (16/21, equiva
 - Identified and moved 2 agentic cases to separate suite
 - Fixed multi-item-instruction-list case (mock pending context)
 - Added Makefile targets (`eval`, `eval-regression`, `eval-json`)
-<!-- agent:boundary:42a203d9 -->
+<!-- agent:boundary:80338056 -->
 <!-- /agent:exchange -->
 
 ## Pending

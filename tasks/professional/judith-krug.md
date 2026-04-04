@@ -798,7 +798,37 @@ These items belong in the EFS task file. Removing from this doc's pending.
 ❯ 
 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   ⏵⏵ bypass permissions on (shift+tab to cycle)
-<!-- agent:boundary:75b56a87 -->
+      467    - [ ] Token-based document upload flow
+      468    - [ ] Notification emails
+      469  - [ ] Discuss Ragie content validation with Bob Remeika (scheduled call)
+      470 +- [ ] Review and send proposal email to Judith from Gmail
+      471  <!-- /agent:pending -->
+
+● Re: Items added to equityfundingsource.md
+
+  Added to tasks/professional/equityfundingsource.md pending list:
+  - "Wire up form submission backend" was already tracked there (with the full Tier 0-3 breakdown)
+  - Added "Review and send proposal email to Judith from Gmail"
+
+  These items belong in the EFS task file since they're about the equityfundingsource project. Removing them from this doc's pending.
+
+  Read 1 file (ctrl+o to expand)
+
+● Bash(agent-doc commit tasks/professional/judith-krug.md)
+  ⎿  [perf] commit.staging (hash_object+update-index): 6ms
+     [perf] commit.git_commit: 11ms
+     [main 24f2706a] agent-doc(judith-krug): 2026-04-02 15:49:02
+     … +6 lines (ctrl+o to expand)
+
+● Done. Items added to tasks/professional/equityfundingsource.md -- the form backend was already tracked there with the full Tier 0-3 breakdown, and I added the proposal email send item.
+
+✻ Cooked for 34s
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+<!-- agent:boundary:bc5167c3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

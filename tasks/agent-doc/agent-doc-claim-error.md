@@ -677,7 +677,7 @@ No Edit tool, no manual archive. The binary handles everything. Updated in:
 - `.claude/skills/agent-doc/runbooks/compact-exchange.md` (installed via `skill install`)
 
 Binary rebuilt and installed.
-<!-- agent:boundary:4b69f477 -->
+<!-- agent:boundary:83ffd08b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

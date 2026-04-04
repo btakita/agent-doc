@@ -313,6 +313,7 @@ commit and push resume repo
 - `data.toml` — title update + CI/CD/Docker/Heroku/observability tags + new skills
 - `profiles/wbd-rust.toml`, `profiles/sw-airlines-python.toml` — new profiles
 - All 5 PDFs rebuilt (default + 4 recruiter-specific)
+<!-- agent:boundary:a66027e4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

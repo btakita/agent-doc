@@ -251,7 +251,7 @@ All 258 tests pass, clippy clean. Not yet committed.
 do
 - Commit runbook extractions to corky submodule
 - Release v0.25.1 (or bump)
-### Re: Released v0.25.1 — Skill runbook extraction (HEAD)
+### Re: Released v0.25.1 — Skill runbook extraction
 
 Published to all targets:
 - [crates.io](https://crates.io/crates/corky/0.25.1)
@@ -260,12 +260,34 @@ Published to all targets:
 - `~/.cargo/bin/corky` installed with CUDA
 
 21% reduction in always-loaded skill context (236→185 lines). 4 new on-demand runbooks.
-<!-- agent:boundary:7e502ff2 -->
+Do we have transcribe + diarization in our corky skill install?
+
+I want to look at the transcript speaker + text confidence. If it drops below a threshold, would it help to transcribe + diarize small audio chunks?
+
+Should this be extracted as a runbook?
+### Re: Transcription confidence & chunking (HEAD)
+
+**Yes** — transcription + diarization is in corky's installed skills. `corky/SKILL.md` references `runbooks/transcription.md` (on-demand).
+
+**Confidence is already tracked.** Each speaker block outputs `**Speaker** (0.85) [00:00 → 01:23]` where `0.85` is the average whisper confidence. Stored in `MergedSegment.confidence`.
+
+**Current adaptive chunking triggers on diarization quality** (>30% unknown speakers), NOT on whisper text confidence. Your idea — re-transcribing low-confidence blocks with smaller windows — would be a separate feature.
+
+**Design sketch:**
+1. After transcription, scan for blocks with avg confidence < threshold (e.g., 0.5)
+2. Re-transcribe those time ranges with 30s windows (more context per segment)
+3. Replace low-confidence blocks with higher-confidence results
+
+**Not a runbook** — this is automated logic inside `engine.rs`, not a human procedure. It would be a code feature like adaptive chunking.
+
+Want me to design and implement confidence-based re-transcription?
+<!-- agent:boundary:7845d304 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- Confidence-based re-transcription (design/implement — awaiting approval)
 - Verify sheet sharing / GCP test users
 - Re-test sheet read
 - Manylinux binary wheel (nice-to-have, needs container/CI)

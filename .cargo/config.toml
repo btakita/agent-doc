@@ -1,2 +1,0 @@
-[patch.crates-io]
-tmux-router = { path = "../tmux-router" }

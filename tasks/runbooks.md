@@ -332,7 +332,7 @@ Does agent-doc have a notify command that would make a visible change with the d
 It should also adjust the current context of the document. Please revise any conclusions that were previous made that would be different due to the notification.
 
 Could be implemented as `agent-doc patch --append` or a dedicated `notify` subcommand. Good candidate for the agent-doc-bugs task.
-### Re: Notify should trigger context re-evaluation (HEAD)
+### Re: Notify should trigger context re-evaluation
 
 You're right — a notification isn't just "here's new info." It should signal: **revisit conclusions that may be invalidated.**
 
@@ -340,6 +340,10 @@ You're right — a notification isn't just "here's new info." It should signal: 
 1. **Append** the notification to exchange or notifications component
 2. **Tag affected context** — reference which conclusions or sections may need revision
 3. **Signal re-evaluation** — the receiving agent, on next cycle, sees the notification and revisits tagged conclusions
+
+We should **Signal re-evaluation** via `agent-doc notify` adding a prompt. Which includes the notification info and to re-evaluate any invalidated conclusions. The prompt should be visible and obvious that it was from the notification.
+
+If we used https://github.com/iainc/Markdown-Annotations, show me an example of how it would look.
 
 **Example flow:**
 - `tasks/briantakita.me.md` has a pending item: "SKILL.md context is too large"
@@ -354,11 +358,47 @@ You're right — a notification isn't just "here's new info." It should signal: 
 v1 could be done today with `agent-doc write --stream` targeting the other file. The gap is just: no `--append` mode for `agent-doc patch`, and `write` adds `## Assistant` framing that doesn't fit a notification.
 
 Added to the agent-doc-bugs task scope.
-<!-- agent:boundary:4fa1b45f -->
+### Re: Markdown Annotations for notifications
+
+Using the [Markdown Annotations spec](https://github.com/iainc/Markdown-Annotations), a notification in `tasks/briantakita.me.md` would look like:
+
+```markdown
+## Exchange (HEAD)
+
+...existing content...
+
+> **[NOTIFY from tasks/runbooks.md]** (2026-04-04 02:24)
+> Runbook extraction reduced SKILL.md context by 34% (~2,235t).
+> 14 runbooks created. Biggest wins: livestream 61%, dev 36%.
+>
+> **Re-evaluate:** Pending items about SKILL.md context size may be resolved.
+
+---
+Annotations: 0,4200 SHA-256 a1b2c3d4
+*tasks/runbooks.md: 3850,350
+...
+```
+
+The `*tasks/runbooks.md: 3850,350` annotation marks the notification as **reference material** from the runbooks session (the `*` prefix means "sourced from another document"). The range `3850,350` points to the notification text's grapheme cluster position.
+
+**Two layers working together:**
+1. **The blockquote** is the visible prompt -- the agent reads it and acts on the re-evaluation directive
+2. **The annotation block** (`---`...`...`) is provenance metadata -- tracks where content came from, enables auditing
+
+**For v1 of `agent-doc notify`**, the blockquote alone is sufficient. The agent naturally reads it on the next cycle and re-evaluates. Markdown Annotations can be added later for provenance tracking if the annotation ecosystem matures.
+
+**Proposed format for `agent-doc notify`:**
+```
+> **[NOTIFY from <source>]** (<timestamp>)
+> <message>
+>
+> **Re-evaluate:** <affected conclusions>
+```
+<!-- agent:boundary:8c7c2e03 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Feature request: `agent-doc notify` — append + tag affected context + trigger re-evaluation
+- [ ] Feature request: `agent-doc notify` — blockquote notification + re-evaluation directive
 <!-- /agent:pending -->

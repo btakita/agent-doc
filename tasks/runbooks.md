@@ -143,7 +143,7 @@ The agent-runbooks submodule was already committed (in `f7034e1e`). Pushed all c
 - Implementation path: start as `agent-doc runbook` subcommand, extract to `agent-runbooks` crate if scope grows
 
 Next step: move the runbooks we created (`.claude/skills/*/runbooks/*.md`) into `src/agent-runbooks/` and update SKILL.md references?
-<!-- agent:boundary:7c5d7d56 -->
+<!-- agent:boundary:3d10f94b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

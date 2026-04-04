@@ -2055,7 +2055,7 @@ None — and that's correct. The LinkedIn runbook lives in `.agent/runbooks/link
 It's a cross-cutting procedure like `precommit.md` and `prerelease.md` — referenced when needed in any session, not tied to a specific slash command. No social media skill needed for a posting checklist.
 
 How do we guarantee that the linkedin-post runbook will be used? We need a reference either from a SKILL.md or from AGENTS.md/CLAUDE.md
-### Re: Runbook discovery guaranteed (HEAD)
+### Re: Runbook discovery guaranteed
 
 Added a `## Runbooks` section to `CLAUDE.md` referencing all three project-level runbooks:
 
@@ -2064,7 +2064,19 @@ Added a `## Runbooks` section to `CLAUDE.md` referencing all three project-level
 - **LinkedIn posts**: `.agent/runbooks/linkedin-post.md`
 
 5 lines of always-on context instead of the full procedures. Exactly the pattern from the blog post — one-line pointers, full procedure on demand.
-<!-- agent:boundary:fff7f96f -->
+
+Should we extract a SKILL.md for these processes instead?
+### Re: SKILL.md vs CLAUDE.md runbook references (HEAD)
+
+No — keep them in CLAUDE.md. The distinction:
+
+- **Skill** = explicit invocation (`/dev release`), complex workflow, own slash command
+- **Runbook in CLAUDE.md** = implicit, fires when the agent encounters the relevant task
+
+Precommit, prerelease, and LinkedIn runbooks are all implicit — they augment existing workflows rather than being standalone commands. Making a `/linkedin` skill would require explicit invocation every time. With the CLAUDE.md reference, any session that involves LinkedIn content naturally discovers and follows the runbook.
+
+Skills are for "do this specific multi-step thing now." Runbook references are for "whenever you're doing X, follow this procedure."
+<!-- agent:boundary:550dea58 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

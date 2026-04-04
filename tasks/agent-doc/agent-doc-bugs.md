@@ -753,7 +753,7 @@ Got a JB error prompt
 ```
 agent-doc route failed (exit 1): [route] target tmux session: 10 tmux tree: 1 (detached, activity=1775145094) @192 "stash" [%13(corky)] 10 (attached, activity=1775288091) @221 "agent-doc" [%475(zsh), %474(zsh), %473(zsh), %452(agent-doc), %436(agent-doc)] @233 "stash" [%433(claude), %434(agent-doc), %431(agent-doc)] 8 (attached, activity=1775282578) @175 "zsh" [%399(zsh), %400(zsh)] [sync:GLOBAL] [sync-start] windows: @192 1:stash (1 panes) @221 10:agent-doc (5 panes) @233 10:stash (3 panes) @175 8:zsh (2 panes) [sync:GLOBAL] [sync-start] panes: %13 @192 1:stash %475 @221 10:agent-doc %474 @221 10:agent-doc %473 @221 10:agent-doc %452 @221 10:agent-doc %436 @221 10:agent-doc %433 @233 10:stash %434 @233 10:stash %431 @233 10:stash %399 @175 8:zsh %400 @175 8:zsh [sync] resolve_file: tasks/agent-doc/agent-doc-bugs.md → Registered (session=1ef5f0e7, registry=no (will auto-start)) [route] layout sync failed: failed to parse .agent-doc/sessions.json Error: failed to parse .agent-doc/sessions.json Caused by: invalid type: map, expected a string at line 3 column 4
 ```
-### Re: Route failure + orphaned shell panes (HEAD)
+### Re: Route failure + orphaned shell panes
 
 **What happened:** Switching the left editor to `tasks/research/on-demand-context.md` triggered `agent-doc route`, which:
 1. Found the document has session UUID `4b05a247` but no registry entry (we rebuilt sessions.json without it)
@@ -783,15 +783,47 @@ tmux kill-pane -t %475
 - The previous agent-doc pane should be stashed, not left visible alongside the new shells
 
 Should I clean up the orphaned panes and fix the route cleanup logic?
-<!-- agent:boundary:7800acbc -->
+yes
+
+`Run Agent Doc` is giving an JB error prompt
+```
+agent-doc route failed (exit 1): [route] target tmux session: 10 tmux tree: 1 (detached, activity=1775145094) @192 "stash" [%13(corky)] 10 (attached, activity=1775288617) @221 "agent-doc" [%475(zsh), %474(zsh), %473(zsh), %452(agent-doc), %436(agent-doc)] @233 "stash" [%433(claude), %434(agent-doc), %431(agent-doc)] 8 (attached, activity=1775282578) @175 "zsh" [%399(zsh), %400(zsh)] [sync:GLOBAL] [sync-start] windows: @192 1:stash (1 panes) @221 10:agent-doc (5 panes) @233 10:stash (3 panes) @175 8:zsh (2 panes) [sync:GLOBAL] [sync-start] panes: %13 @192 1:stash %475 @221 10:agent-doc %474 @221 10:agent-doc %473 @221 10:agent-doc %452 @221 10:agent-doc %436 @221 10:agent-doc %433 @233 10:stash %434 @233 10:stash %431 @233 10:stash %399 @175 8:zsh %400 @175 8:zsh [sync] resolve_file: tasks/agent-doc/agent-doc-bugs.md → Registered (session=1ef5f0e7, registry=no (will auto-start)) [route] layout sync failed: failed to parse .agent-doc/sessions.json Error: failed to parse .agent-doc/sessions.json Caused by: invalid type: map, expected a string at line 3 column 4
+```
+### Re: Fixed registry format + cleaned orphaned panes (HEAD)
+
+**Root cause of route failure:** I wrote `sessions.json` in the wrong format. The registry is a `HashMap<String, RegistryEntry>` (session_id → entry), not an array of objects. My manual reconstruction used `{"sessions": [...]}` which caused the parse error.
+
+**Fixed:**
+1. Rewrote `sessions.json` in correct format: flat map with session UUID keys
+2. Killed orphaned panes %473, %474, %475
+3. Verified with `agent-doc resync` — all 4 sessions have live panes
+
+**Registry format (correct):**
+```json
+{
+  "session-uuid": {
+    "pane": "%452",
+    "pid": 2608840,
+    "cwd": "/home/brian/work/btakita/agent-loop",
+    "started": "2026-04-04T03:24:12Z",
+    "file": "tasks/agent-doc/agent-doc-bugs.md",
+    "window": "@221"
+  }
+}
+```
+
+The JB "Run Agent Doc" action should work now. The route error was entirely caused by the malformed sessions.json — not a code bug.
+
+**Still needed:** Route cleanup on failure (killing panes created during a failed route attempt) is a real gap that should be fixed separately. The 3 orphaned shells were created because route splits a window, then crashes on the registry parse error, leaving the split pane as an empty shell.
+<!-- agent:boundary:fcbc1f68 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] All previous items complete
-- [x] Registry rebuilt + crash logging added
-- [ ] Fix route to clean up panes on failure (rollback on error)
-- [ ] Clean up orphaned panes %473, %474, %475
-- [ ] Investigate why route failed (exit 1) for on-demand-context.md
+- [x] Registry rebuilt (correct HashMap format)
+- [x] Orphaned panes cleaned (%473, %474, %475)
+- [x] Post-sync session health check logging added
+- [ ] Route cleanup on failure (kill panes created during failed route)
+- [ ] Add `export AGENT_DOC_LOG=debug` to ~/.zshrc (user action)
 <!-- /agent:pending -->

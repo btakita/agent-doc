@@ -64,16 +64,34 @@ If the response in corky.md claimed "no cross-file write capability," that was t
 
 **No code change needed.** The transfer and extract commands already write directly to the target document with annotated prompts.
 The transfer from briantakita.me.md to corky.md did not result with writing to the prompt. It was queued...presumably in the claim log...for the next agent-doc run cycle.
-### Re: Why the hallucination happened — skill doesn't use `agent-doc transfer` (HEAD)
+### Re: Why the hallucination happened — skill doesn't use `agent-doc transfer`
 
 The briantakita.me session did the "transfer" manually — it wrote a summary in its own exchange and said "Open tasks/software/corky.md and add this when ready." It never ran `agent-doc transfer`.
 
 **The gap is in the skill, not the binary.** The `agent-doc transfer` CLI command (`extract.rs:148-203`) writes directly to the target document. But SKILL.md doesn't mention `transfer` or `extract` — the skill doesn't know they exist.
 
+We should have agent-doc runbooks that are linked in the agent-doc installable SKILL.md
+
 **The corky session was technically correct** about the *skill's* limitations (it can only `agent-doc write` to its own document), but wrong about the *binary's* capabilities (`agent-doc transfer` can write cross-file).
 
 **Fix:** Add transfer/extract usage to SKILL.md or a runbook so the skill knows to run `agent-doc transfer <SOURCE> <TARGET> <COMPONENT>` instead of manually describing the transfer.
-<!-- agent:boundary:c01d12db -->
+
+go
+- [ ] Document `agent-doc transfer`/`extract` in SKILL.md or runbook
+### Re: Transfer/extract runbook created and linked in SKILL.md (HEAD)
+
+Created `src/agent-doc/runbooks/transfer-extract.md` covering:
+- `agent-doc transfer <SOURCE> <TARGET> <COMPONENT>` — moves entire component content
+- `agent-doc extract <SOURCE> <TARGET>` — moves last `### Re:` entry
+- When to use each, what happens (annotation, snapshot updates for both files)
+- Key point: the binary handles cross-file writes, the skill doesn't need to
+
+Updated:
+- `src/agent-doc/src/skill.rs` — added `transfer-extract.md` to `BUNDLED_RUNBOOKS`
+- `src/agent-doc/SKILL.md` — added Runbooks section linking both runbooks
+
+Binary rebuilt and skill reinstalled. Both runbooks now install via `agent-doc skill install`.
+<!-- agent:boundary:6c1ebfc1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -81,6 +99,6 @@ The briantakita.me session did the "transfer" manually — it wrote a summary in
 <!-- agent:pending patch=replace -->
 - [x] Release v0.31.5
 - [x] Update compact-exchange runbook: note about preserving uncommitted user input
+- [x] Document `agent-doc transfer`/`extract` in SKILL.md or runbook
 - [ ] PyPI publish (needs manylinux Docker build)
-- [ ] Document `agent-doc transfer`/`extract` in SKILL.md or runbook
 <!-- /agent:pending -->

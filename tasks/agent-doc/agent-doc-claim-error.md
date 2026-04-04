@@ -78,7 +78,7 @@ Added CI-first `make release` target. Renamed old `release` (build binary) to `b
 `make release` does: `check` → `git tag` → `git push` → CI handles GH Release + PyPI → `cargo install` locally.
 
 Committed: `c155713` — `feat: add make release for CI-first release flow`
-<!-- agent:boundary:8da0ccf2 -->
+<!-- agent:boundary:ca1e5746 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

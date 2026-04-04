@@ -867,7 +867,7 @@ I added `AGENT_DOC_LOG=debug` to .env
 `AGENT_DOC_LOG=debug` is now active. All sync, route, layout, and debounce operations will be logged to `.agent-doc/logs/debug.log.<date>`. Next time the 1-pane layout bug or session destruction occurs, the log will capture the full decision chain.
 
 All items in this session are complete.
-<!-- agent:boundary:1fd963b7 -->
+<!-- agent:boundary:08a3fe88 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

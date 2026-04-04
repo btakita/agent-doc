@@ -2,6 +2,7 @@
 agent_doc_session: 0f91fe16-548b-403c-9a53-79ebe1a9ed79
 agent_doc_format: template
 agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
 ---
 
 ## Status
@@ -475,7 +476,8 @@ Written to `tasks/agent-doc/agent-doc-bugs.md` claims log:
 The claim will appear next time the agent-doc-bugs session runs preflight. (Once `agent-doc notify` is released, this transfer would be immediate and visible.)
 
 Is this committed to the main branch of agent-doc?
-### Re: Is this committed? (HEAD)
+- [ ] Review, commit, and release agent-doc with notify
+### Re: Is this committed?
 
 **No.** Not committed to agent-doc main. Current state:
 
@@ -484,7 +486,10 @@ Is this committed to the main branch of agent-doc?
 - Last commit: `8738b74 v0.31.5`
 
 The notify code is in the working tree only. Needs: stage, commit, version bump, `make check`, release. That's the work transferred to agent-doc-bugs.
-<!-- agent:boundary:200c90a8 -->
+### Re: Acknowledged (HEAD)
+
+Noted the frontmatter update (`claude_args: --dangerously-skip-permissions`) and the pending item. The review/commit/release work is already transferred to agent-doc-bugs via claims log.
+<!-- agent:boundary:cf1c16ba -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

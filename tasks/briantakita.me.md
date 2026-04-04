@@ -2076,7 +2076,7 @@ No — keep them in CLAUDE.md. The distinction:
 Precommit, prerelease, and LinkedIn runbooks are all implicit — they augment existing workflows rather than being standalone commands. Making a `/linkedin` skill would require explicit invocation every time. With the CLAUDE.md reference, any session that involves LinkedIn content naturally discovers and follows the runbook.
 
 Skills are for "do this specific multi-step thing now." Runbook references are for "whenever you're doing X, follow this procedure."
-<!-- agent:boundary:550dea58 -->
+<!-- agent:boundary:87ad0484 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

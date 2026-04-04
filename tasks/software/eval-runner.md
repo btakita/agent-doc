@@ -219,7 +219,7 @@ Full JSON run in progress (background). Note: haiku is the evaluated model here 
 > - **Removed `tokio`** — main is now synchronous. `reqwest::blocking` for API backend.
 
 Would we want to run the evals async...so we can run more simultaneously? Or are the evals CPU blocking?
-### Re: Async vs parallel for evals (HEAD)
+### Re: Async vs parallel for evals
 
 The evals are **I/O bound, not CPU bound** — each case spends 95%+ of its time waiting for the `claude --print` subprocess to return. The actual Rust work (YAML parsing, string building, JSON output) is negligible.
 
@@ -234,13 +234,32 @@ Parallel execution would give near-linear speedup. With 21 cases at 19.5 min seq
 The only concern is **rate limiting** — Claude Code Max has per-minute limits. Running all 21 simultaneously could hit the ceiling. A bounded pool (`--parallel 4` or `--parallel 8`) gives the best balance.
 
 **Recommendation:** Add `--parallel N` with `std::thread::scope` (no new dependencies). Keep synchronous backend — each thread blocks on its subprocess independently. Skip tokio/async entirely.
-<!-- agent:boundary:ed5ce880 -->
+
+> Skip tokio/async entirely.
+
+Why? Does tokio add too much complexity? I would like this to scale in case rate limits increase...such as in enterprise environments.
+### Re: Why not tokio — reconsidered (HEAD)
+
+Fair pushback. The tokio avoidance was about minimizing dependencies for a ~300 LOC tool, but the complexity delta is actually small:
+
+1. **Compile time** — tokio adds ~5-10s to clean builds
+2. **Async coloring** — `main` becomes `#[tokio::main]`, subprocess calls use `tokio::process::Command`
+3. **Error handling** — slightly more ceremony with async closures
+
+**But the scaling argument wins.** With threads, you're 1:1 OS thread per concurrent case. Fine for 8-21 cases, but at enterprise scale (100+ cases, high rate limits), you burn OS resources unnecessarily. Tokio's task scheduler runs thousands of concurrent cases on a small thread pool.
+
+Practical bonus: the `anthropic-api` backend already depends on `reqwest`. Currently uses `reqwest::blocking` (which internally spins up a hidden tokio runtime). Switching to proper async `reqwest` + tokio is actually *cleaner* — one runtime instead of a hidden one.
+
+**Revised plan:** Re-add tokio. `--parallel N` becomes a tokio semaphore (bounded concurrency) instead of a thread pool. Future-proofs for enterprise scale, large case suites, and streaming response processing.
+
+**Decision: Use tokio for parallelism (2026-04-04).** Async subprocess + semaphore-based concurrency. Scales better than threads for enterprise use cases with high rate limits and large eval suites.
+<!-- agent:boundary:2a30a060 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [ ] Add `--parallel N` flag with `std::thread::scope` for concurrent case execution
+- [ ] Re-add tokio, convert to async with `--parallel N` semaphore-based concurrency
 - [ ] Run with sonnet model for target baseline
 - [ ] Add `make check` integration
 - [ ] JSON output format documentation

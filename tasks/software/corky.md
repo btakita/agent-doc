@@ -248,7 +248,7 @@ report the token savings
 **4 new on-demand runbooks:** gmail-config (28), browser-paste (21), imports (21), transcription (28).
 
 All 258 tests pass, clippy clean. Not yet committed.
-<!-- agent:boundary:23712251 -->
+<!-- agent:boundary:c0c372b0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

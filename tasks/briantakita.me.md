@@ -1711,7 +1711,7 @@ Two runbooks. A mature project with 5-10 runbooks could easily hit 50%+, but we 
 > I've been externalizing step-by-step procedures into **agent runbooks** — plain markdown files that agents load on demand instead of carrying in every interaction. Two runbooks saved 63 lines from my instruction file. Scale that to a dozen procedures and the savings add up fast.
 
 Swapped the vague percentage for a concrete, verifiable number.
-<!-- agent:boundary:80f2ac98 -->
+<!-- agent:boundary:5c28f2dc -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

@@ -50,7 +50,7 @@ This session:
 **Current state:** v0.31.9 released. No pending release (4 infra-only commits since tag). 634 tests pass.
 
 **Test suite: 634 tests (193 lib + 403 bin + 38 integration)**
-<!-- agent:boundary:87ea640d -->
+<!-- agent:boundary:aaee034b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

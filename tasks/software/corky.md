@@ -145,7 +145,7 @@ Now documented in two places:
 2. `rust-package/SKILL.md` conventions — brief reference
 
 Should we have the same convention in agent-doc...and also in agent-loop, agent-kit, and/or instruction-set?
-### Re: Convention across repos (HEAD)
+### Re: Convention across repos
 
 Checked all repos:
 
@@ -157,13 +157,28 @@ Checked all repos:
 | instruction-files | None | N/A | No action needed |
 
 Both repos with cross-crate dependencies already follow the pattern. No further changes needed.
-<!-- agent:boundary:6e6bbe72 -->
+
+gh failures:
+- https://github.com/btakita/corky/actions/runs/23985286793
+- https://github.com/btakita/corky/actions/runs/23985286644
+### Re: CI failures fixed (HEAD)
+
+**Two issues found and fixed:**
+
+1. **Skill test fails in CI** — `SkillConfig::new()` calls `Environment::detect()` which returns `Generic` in CI (no Claude Code env vars). Tests expected `.claude/skills/corky/SKILL.md` but got `AGENTS.md`. Fix: use `SkillConfig::with_environment(..., Environment::ClaudeCode)` to always target Claude Code paths.
+
+2. **CUDA 12.6.3 unavailable** — Jimver/cuda-toolkit action doesn't have 12.6.3. Changed to 12.6.2.
+
+3. **aarch64 cross-compile OpenSSL** — already uses `--features vendored-openssl` in the cross build step, so this should work. The error was because it was trying to build with the native (x86_64) OpenSSL headers.
+
+Committed `4e260a3`, pushed, retagged v0.26.0.
+<!-- agent:boundary:b8338eef -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Monitor PyPI workflow
+- Monitor CI/PyPI workflows after fixes
 - Verify sheet sharing / GCP test users
 - Re-test sheet read
 <!-- /agent:pending -->

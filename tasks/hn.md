@@ -34,4 +34,5 @@ https://news.ycombinator.com/newsguidelines.html#generated
 > Same ideas. Same person. One reads better. Which version do you actually object to?
 
 **Notes:** Closing question is punchy but may read as smug. Could drop it and let the comparison speak for itself. Historical parallel (spell-checkers, grammar tools) available to add if more argument needed.
+<!-- agent:boundary:7164d216 -->
 <!-- /agent:exchange -->

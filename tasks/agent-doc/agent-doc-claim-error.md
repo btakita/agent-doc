@@ -15,7 +15,21 @@ v0.31.5 released. Commit-on-claim, auto-setup, VCS refresh, --diff-only, skill r
 
 <!-- agent:exchange patch=append -->
 *Compacted. agent-doc v0.31.9 released (all targets). `make check` now includes version-sync (Cargo.toml vs pyproject.toml). tmux-router sync.rs debug logging committed, release skipped. Feedback memory: always check git status + git log for submodule state. Memory/runbook layering confirmed.*
-<!-- agent:boundary:9f5a5f4c -->
+
+gh action failures
+- https://github.com/btakita/agent-doc/actions/runs/23982571705
+- https://github.com/btakita/agent-doc/actions/runs/23982606380
+### Re: GitHub Actions failures — both expected (HEAD)
+
+Both are **already-exists conflicts** from publishing manually before CI ran:
+
+1. **Release workflow** (`23982571705`): `a release with the same tag name already exists: v0.31.9` — we created the release via `gh release create` before CI.
+2. **PyPI workflow** (`23982606380`): `Trusted publishing exchange failure` — v0.31.9 was already uploaded to PyPI manually.
+
+**No action needed.** Both artifacts were published successfully. CI fails on the duplicate because we published manually first.
+
+**To prevent:** Either let CI handle the full release (don't publish manually) or add `skip_existing` to the workflows.
+<!-- agent:boundary:73004077 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

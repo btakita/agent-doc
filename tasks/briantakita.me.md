@@ -2151,7 +2151,8 @@ Steps:
 
 Want me to do this now, or post first?
 Do this now so we can test it.
-### Re: Skill architecture discussion — corky-installed skills (HEAD)
+Should we transfer this to tasks/software/corky.md?
+### Re: Skill architecture discussion — corky-installed skills
 
 You raised two good points:
 
@@ -2170,12 +2171,28 @@ This means the SKILL.md files should be bundled inside corky (like agent-doc bun
 2. **Shared runbooks between email and linkedin** — both use corky drafts, both follow "never send without approval." Should there be a shared `corky-common` runbook, or just duplicate the relevant lines?
 
 3. **The current email SKILL.md at `.claude/skills/email/SKILL.md`** — is this already managed by `corky skill install`, or was it manually created?
-<!-- agent:boundary:3b05b459 -->
+
+Let's transfer this task over to tasks/software/corky.md
+### Re: Transfer to tasks/software/corky.md (HEAD)
+
+Agreed — the corky skill architecture work (separate email/linkedin skills, `corky skill install` managing both) belongs in `tasks/software/corky.md`.
+
+**Summary to carry over:**
+- `corky linkedin` already has `draft`, `publish`, `comment` subcommands
+- Need separate LinkedIn SKILL.md (not merged into email)
+- `corky skill install` should manage both email and linkedin skills
+- Shared conventions (never send without approval, links in first comment) via common runbook or duplicated
+- Current `.agent/runbooks/linkedin-post.md` to be replaced by corky-managed skill
+
+Open `tasks/software/corky.md` and add this to the exchange when ready.
+
+Meanwhile, the LinkedIn blog teaser draft is still ready to post manually — the architecture improvement doesn't block posting.
+<!-- agent:boundary:928452df -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn skill architecture: decide on corky-installed skills approach
-- LinkedIn blog teaser: draft ready, post after skill decision
+- LinkedIn blog teaser: draft ready, post manually (paste from earlier)
+- Corky skill architecture: transferred to tasks/software/corky.md
 - Video: edit out WordPress admin section, then post
 - Second blog post + video: target Wed/Thu Apr 9-10
 - Cleanup: remove stale directories

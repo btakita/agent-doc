@@ -2187,7 +2187,7 @@ Agreed — the corky skill architecture work (separate email/linkedin skills, `c
 Open `tasks/software/corky.md` and add this to the exchange when ready.
 
 Meanwhile, the LinkedIn blog teaser draft is still ready to post manually — the architecture improvement doesn't block posting.
-<!-- agent:boundary:b073dd6f -->
+<!-- agent:boundary:554720dc -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

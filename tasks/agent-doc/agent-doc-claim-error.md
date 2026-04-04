@@ -30,7 +30,7 @@ The runbook's step 2 already covers summarizing exchange content (decisions, fac
 This is a documentation-only change to the runbook — adding a note to step 2: "If the exchange contains unanswered user input, note it as an open item in the summary or address it before compacting."
 
 The binary behavior is already correct (archives everything). The skill just needs to be mindful of pending user content.
-<!-- agent:boundary:3a1cb9d1 -->
+<!-- agent:boundary:f478a45f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

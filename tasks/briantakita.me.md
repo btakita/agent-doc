@@ -1998,7 +1998,7 @@ Yes. Blog teaser is ready, video isn't. Post the teaser now — it stands on its
 
 Want me to format the draft as plain text for LinkedIn paste?
 Yes. Do we have a runbook for linkedin posts?
-### Re: LinkedIn paste format + no runbook (HEAD)
+### Re: LinkedIn paste format + no runbook
 
 No LinkedIn posting runbook exists yet.
 
@@ -2023,11 +2023,34 @@ What directory convention are you using for agent config? .agent/, .agents/, .ai
 ---
 
 Copy and paste into LinkedIn. The URLs will auto-link.
-<!-- agent:boundary:4c1e56fc -->
+Add a runbook for linkedin posts. I want the drafts pointing to an external link or video to post the links in the first comment.
+### Re: LinkedIn runbook + draft updated (HEAD)
+
+Created `.agent/runbooks/linkedin-post.md` — key rule: **no external links in post body**, all links go in the first comment (LinkedIn suppresses reach on posts with outbound URLs).
+
+**Updated draft — post body (no links):**
+
+Your CLAUDE.md is bloated. Here's what to do about it.
+
+Every token in your AI instruction file costs you something. Release checklists, deploy procedures, precommit workflows... they're important, but they don't need to occupy context when the agent is writing a utility function.
+
+I've been externalizing step-by-step procedures into agent runbooks — plain markdown files that agents load on demand instead of carrying in every interaction. By identifying and extracting 12 runbooks, I cut 212 lines from my instruction files — a 28% reduction in persistent context.
+
+The pattern works with Claude Code, Cursor, Copilot, Windsurf, Gemini CLI, Aider, and Codex. No special syntax. No vendor lock-in.
+
+What directory convention are you using for agent config? .agent/, .agents/, .ai/? The ecosystem hasn't settled this yet and I'd love to hear what's working for you.
+
+Links in the comments.
+
+**First comment (post immediately after):**
+
+Blog post: https://briantakita.me/post/2026-04-03-agent-runbooks-on-demand-procedural-context
+Reference repo: https://github.com/btakita/agent-runbooks
+<!-- agent:boundary:129d3392 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn blog teaser: formatted for paste, POST NOW
+- LinkedIn blog teaser: draft updated (links in first comment), POST NOW
 - Video: edit out WordPress admin section, then post
 - Second blog post + video: target Wed/Thu Apr 9-10
 - Cleanup: remove stale directories

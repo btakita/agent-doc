@@ -253,7 +253,7 @@ Brian
 **Attach:** `BrianTakita-andrew-curtis.pdf` (from `resume/BrianTakita-andrew-curtis.pdf`)
 
 Short and professional. Adjust or send?
-<!-- agent:boundary:7d43e156 -->
+<!-- agent:boundary:3c39e575 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

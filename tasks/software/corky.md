@@ -100,7 +100,7 @@ claude_args: --dangerously-skip-permissions
 - Manylinux binary wheel for PyPI (needs container/CI)
 do
 - Manylinux binary wheel (nice-to-have, needs container/CI)
-### Re: Manylinux binary wheel — CI fixed (HEAD)
+### Re: Manylinux binary wheel — CI fixed
 
 **Root causes (2):**
 1. CI workflows only cloned `instruction-files` but not `agent-kit` (path dependency added in v0.24.0)
@@ -114,13 +114,30 @@ do
 **PyPI workflow triggered:** https://github.com/btakita/corky/actions/runs/23985173123
 
 This should produce manylinux wheels for x86_64 Linux, macOS (Intel + ARM), and Windows.
-<!-- agent:boundary:47789749 -->
+
+Can we use a local .cargo/config.toml override (see src/agent-doc repo) while keeping references to the crate version in the corky cargo.toml?
+
+Add this heuristic as a skill->runbook where appropriate
+### Re: .cargo/config.toml patch pattern + skill update (HEAD)
+
+**Implemented in corky:**
+- `Cargo.toml` now uses crate-only versions: `agent-kit = "0.3"`, `instruction-files = "0.1"`
+- `.cargo/config.toml` (gitignored) patches to local paths for development
+- CI workflows simplified — no more `git clone` for dependencies
+- Committed `ab8bc20`, pushed, retagged v0.26.0
+- PyPI workflow retriggered: https://github.com/btakita/corky/actions/runs/23985288239
+
+**Skill updated:** `rust-package/SKILL.md` conventions section updated:
+> Path dependencies: Use `.cargo/config.toml` `[patch.crates-io]` for local development (gitignored). `Cargo.toml` references crate versions only — CI resolves from crates.io, no cloning needed.
+
+CI template comment also simplified.
+<!-- agent:boundary:3b4bf90a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Monitor PyPI workflow run
+- Monitor PyPI workflow (should now pass)
 - Verify sheet sharing / GCP test users
 - Re-test sheet read
 <!-- /agent:pending -->

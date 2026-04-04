@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-diff-type classification landed in diff.rs + preflight.rs (9 tests, all passing)
+diff-type classification + SKILL.md routing + runbook all landed
 <!-- /agent:status -->
 
 ## Exchange
@@ -140,7 +140,7 @@ Simple SKILL.md addition. The skill detects `---` on its own line within the exc
 
 Want me to start implementing any of these? I'd suggest starting with diff-type classification since it's highest leverage, or the `---` separator since it's the quickest to land.
 go
-### Re: Go — Diff-type classification implemented (HEAD)
+### Re: Go — Diff-type classification implemented
 
 Implemented P1 (diff-type classification) in `src/agent-doc/src/diff.rs`:
 
@@ -171,14 +171,33 @@ Fields are `skip_serializing_if = "Option::is_none"` — omitted when no diff.
 **Tests:** 9 new tests covering all diff types. All 417 tests pass, clippy clean.
 
 Next steps: the skill can now read `diff_type` from preflight JSON and short-circuit for simple cases. Want me to update the SKILL.md routing logic, or move to P2 (post-preflight eval diffs)?
-<!-- agent:boundary:81f0fbe3 -->
+do:
+- [ ] Update SKILL.md to route based on diff_type
+- Extract runbook
+### Re: Do — SKILL.md routing + runbook (HEAD)
+
+Done. Both items executed:
+
+**1. SKILL.md updated** — added `### 0b. Diff-type routing` section between preflight and respond steps:
+- Routing table mapping each `diff_type` to a response strategy
+- Short-circuit rules: `boundary_artifact` stops, `approval` skips discrimination, `simple_question` answers concisely
+- References the new runbook for details
+
+**2. Runbook extracted** — created `runbooks/diff-type-routing.md`:
+- Full classification table with patterns and examples
+- Routing rules per type with behavioral guidance
+- Precedence order (matches the Rust implementation)
+- Override guidance for ambiguous cases
+
+The skill will now automatically use `diff_type` from preflight to optimize routing. For example, when you type "go", the preflight returns `"diff_type": "approval"` and the skill skips confirmation, going straight to execution.
+<!-- agent:boundary:99e9ee75 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] Implement diff-type classification in preflight (P1) — DONE
-- [ ] Update SKILL.md to route based on diff_type
+- [x] Update SKILL.md to route based on diff_type — DONE
 - [ ] Post-preflight diff generation for eval cases (P2)
 - [ ] Implement annotated diff format in preflight (P3)
 - [ ] Implement content-source annotation sidecar (P4)

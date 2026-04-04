@@ -425,18 +425,48 @@ The worktree agent would: `cd src/agent-doc`, create feature branch, implement `
 **When NOT to use a worktree:** Markdown-only changes like the runbook extraction -- safe to edit in-place, no compilation, no running binary risk.
 go
 - [ ] Feature request: `agent-doc notify` -- blockquote notification + re-evaluation directive
-### Re: Implementing agent-doc notify (HEAD)
+### Re: Implementing agent-doc notify
 
 Launching worktree agent to implement `agent-doc notify` in `src/agent-doc`. The agent will:
 1. Create feature branch in the submodule
 2. Add `notify` subcommand (append blockquote + snapshot update)
 3. Run `make check`
 4. Return with branch + diff
-<!-- agent:boundary:a735e345 -->
+### Re: agent-doc notify implemented (HEAD)
+
+`agent-doc notify` is implemented and passing all 8 tests. Changes in `src/agent-doc/`:
+
+**New file:** `src/notify.rs` (336 lines)
+- `run(file, message, source, affects, commit)` -- main entry point
+- `format_notification()` -- builds blockquote with optional source/affects
+- `find_boundary_position()` -- inserts before boundary marker when present
+- Atomic writes (tempfile + rename), snapshot update, optional git commit
+
+**Modified:** `src/main.rs`
+- Added `Notify` CLI variant: `agent-doc notify <FILE> <MESSAGE> [--source <source>] [--affects <section>] [--no-commit]`
+
+**Usage:**
+```bash
+agent-doc notify tasks/briantakita.me.md "Runbook extraction reduced SKILL.md by 34%" \
+  --source tasks/runbooks.md \
+  --affects "Pending items about SKILL.md context size"
+```
+
+**Output in target document:**
+```
+> **[NOTIFY from tasks/runbooks.md]** (2026-04-04T06:54:16Z)
+> Runbook extraction reduced SKILL.md by 34%
+>
+> **Re-evaluate:** Pending items about SKILL.md context size
+```
+
+Not yet committed or released -- changes are in the agent-doc working tree. Ready for review.
+<!-- agent:boundary:5bb0d712 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Feature request: `agent-doc notify` -- implementing in worktree now
+- [x] Implement `agent-doc notify` -- done, 8 tests passing
+- [ ] Review, commit, and release agent-doc with notify
 <!-- /agent:pending -->

@@ -715,7 +715,7 @@ The most likely trigger: the last-pane guard in sync stashed all visible panes, 
 **With `AGENT_DOC_LOG=debug` enabled, was there a debug log captured?** If not, this is exactly the kind of intermittent issue the tracing instrumentation was designed to catch. Next occurrence should be fully logged.
 
 Would you like me to re-register the panes and rebuild sessions.json?
-<!-- agent:boundary:fce22fed -->
+<!-- agent:boundary:0ecc28fe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

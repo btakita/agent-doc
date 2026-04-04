@@ -454,7 +454,7 @@ Removed: pending component protocol, template mode format instructions, workflow
 The key insight: the prompt should teach **what to ignore** and **what signals mean**, not **how to structure responses**. The model already knows how to respond — it just needs to know which diffs are special.
 
 Running: `--model sonnet --judge-model sonnet --parallel 8`. Will compare against both naked and verbose-context baselines.
-### Re: Refined system prompt results (HEAD)
+### Re: Refined system prompt results
 
 **16/21 passed (76.2%), mean 0.72** — best result yet.
 
@@ -482,14 +482,38 @@ Running: `--model sonnet --judge-model sonnet --parallel 8`. Will compare agains
 **Remaining 3 failures** (approval-to-implement, single-word-approval, multi-item-instruction-list) all involve the "approval → begin work" pattern. The model still struggles to interpret minimal input as "start implementing" rather than requesting clarification. This may need case-level expected_behavior refinement rather than system prompt changes.
 
 **Saved:** `baselines/sonnet-refined-context-2026-04-04.json`
-<!-- agent:boundary:67a9a3dc -->
+do
+- [ ] Investigate remaining 3 approval-pattern failures (approval-to-implement, single-word-approval, multi-item-instruction-list)
+### Re: Approval-pattern failure analysis (HEAD)
+
+Looked at the judge reasoning and model responses for all 3 failures. The root cause is **eval design, not model behavior:**
+
+**What the model does:** Correctly recognizes the approval signal, acknowledges it, then reports it can't implement because it has no filesystem access or pending component to update. Example: "I see you've approved Phase 1... I only have visibility into a small slice of the document."
+
+**What the expected_behavior demands:** "Begins implementation work", "Updates pending component", "Flushes pending update BEFORE generating full response" — all actions requiring agentic context (file access, pending component, codebase).
+
+**The problem:** The eval sends a bare prompt via `claude --print` with no tool access. The model can't "begin implementing" because there's nothing to implement against. It's being asked to role-play implementation without tools — and the judge correctly penalizes it for not actually doing the work.
+
+**Three options to fix:**
+
+1. **Relax expected_behavior** — change from "begins implementation" to "acknowledges approval and describes what it would implement." This tests diff interpretation, not implementation capability. Easiest fix.
+
+2. **Add mock context** — include a `&lt;!-- agent:pending --&gt;` block in `document_context` so the model has something to update. The response would show pending manipulation rather than actual code.
+
+3. **Use `claude` with tools** — switch these cases to use `claude` with `--allowedTools` so the model can actually interact with files. Most realistic but much more complex.
+
+**Recommendation: Option 1 + 2.** Relax the expected behaviors to test "does the model correctly interpret the approval signal and plan action?" rather than "does it actually execute?" Add mock pending context so it has something concrete to work with.
+
+These are diff-interpretation evals, not agentic execution evals. Testing whether the model recognizes "go" as an approval is the right scope.
+<!-- agent:boundary:ea736483 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [x] Refine system prompt (76.2% pass rate, up from 47.6% verbose / 61.9% naked)
-- [ ] Investigate remaining 3 approval-pattern failures (approval-to-implement, single-word-approval, multi-item-instruction-list)
+- [x] Investigate remaining 3 approval-pattern failures (eval design issue, not model/prompt)
+- [ ] Fix expected_behavior for approval cases (relax to diff-interpretation scope)
+- [ ] Add mock pending context to approval eval cases
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 - [ ] JSON output format documentation
 <!-- /agent:pending -->

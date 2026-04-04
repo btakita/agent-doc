@@ -2310,7 +2310,7 @@ Committed and pushed:
 2. `briantakita.me-dev` — submodule pointer updated
 
 CI deploy in progress. Live at: https://briantakita.me/post/2026-04-03-agent-runbooks-on-demand-procedural-context
-<!-- agent:boundary:e90c61a3 -->
+<!-- agent:boundary:1fdf0136 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

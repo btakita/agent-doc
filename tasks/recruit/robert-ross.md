@@ -486,7 +486,7 @@ How can I use
 - ([done]) Build session analyzer template
 
 Can we build a granola-like demo for Rob? Should we have real-time whisper transcription + diarization or should we just use a recording?
-### Re: Granola-like demo for Rob (HEAD)
+### Re: Granola-like demo for Rob
 
 **Yes — and use a recording, not real-time.** Here's why:
 
@@ -496,6 +496,8 @@ Can we build a granola-like demo for Rob? Should we have real-time whisper trans
 |---|---|---|
 | **Recording** (corky transcribe post-hoc) | Reliable, already proven, GPU-accelerated, good diarization | Not "live" |
 | **Real-time whisper** | Impressive demo, matches Build Party's live vision | Latency issues, diarization is harder in real-time, more failure modes |
+
+We may be able to leverage livekit for the whisper transcription + diarization. Any realtime services available?
 
 **For Sunday's call:** Use a recording. You already have the 3h54m transcript working perfectly. Show Rob the pipeline:
 1. Record the call (OBS/Zoom)
@@ -509,7 +511,7 @@ That's the full Shimmer pipeline in 4 steps. Demo it on the existing robert-ross
 
 #### What the demo would look like
 
-1. **Show the Granola notes you scraped** — "Rob, here are your own meeting notes, extracted and version-controlled in markdown"
+1. **Show the Granola notes you scraped** — "Rob, here are your own meeting notes, extracted and version-controlled in markdown": The meeting notes have a prompt with access to Claude Sonnet. Can we use this to interact with the document? How can we take a snapshot of the document, the use agent-doc for inline prompts? Note that granola does not have agent-doc skills. So we may need to embed our skills as needed. See tasks/software/eval-runner.md
 2. **Show the corky transcript** — "And here's the full diarized transcript with speaker labels"
 3. **Show the session analyzer** — "This template auto-segments topics, tracks skills used, and flags recommendations"
 4. **Pitch:** "This is Shimmer's core pipeline. Post-hoc first, real-time later when we integrate with LiveKit agents."
@@ -517,7 +519,43 @@ That's the full Shimmer pipeline in 4 steps. Demo it on the existing robert-ross
 #### "How can I use" (incomplete)
 
 Looks like your input got cut off — "How can I use" what? Let me know and I'll pick it up.
-<!-- agent:boundary:cf22347d -->
+Granola has context not visible on the document. So it would be helpful to prompt using Granola.
+### Re: LiveKit real-time transcription + Granola interaction (HEAD)
+
+#### LiveKit real-time STT — yes, it's built in
+
+LiveKit Agents framework has STT plugins out of the box:
+
+| Provider | Real-time | Diarization | Notes |
+|---|---|---|---|
+| **Deepgram** | Yes, lowest latency | Yes (native) | De facto choice for LiveKit deployments |
+| **AssemblyAI** | Yes | Yes | Good accuracy |
+| **OpenAI Whisper** (API) | Yes | No | Higher latency than Deepgram |
+| **Gladia** | Yes | Yes | Has LiveKit integration |
+
+**Key insight for Rob's stack:** LiveKit gets diarization "for free" architecturally — each participant's audio arrives on a separate track. No algorithmic diarization needed. The Agents framework receives per-participant audio streams, so speaker attribution is inherent.
+
+Pipeline: `VoicePipelineAgent` wires VAD (Silero) → STT (Deepgram) → LLM → TTS automatically. Transcription segments include text, timestamps, and participant identity.
+
+**For Build Party:** Deepgram + LiveKit Agents is the right combo. Real-time transcription during live sessions, speaker labels from track identity, feed into session analyzer post-session.
+
+#### Granola document interaction via agent-doc
+
+Your insight about using Granola's built-in Claude Sonnet prompt as a bridge is interesting. The approach:
+
+1. **Snapshot the Granola document** — scrape the shared link (already proven) into markdown
+2. **Import into agent-doc** — create a template document with the Granola content as a component
+3. **Use agent-doc for inline prompts** — the full agent-doc skill set (template mode, CRDT, patch blocks) works on the imported document
+4. **Skills embedding** — since Granola doesn't have agent-doc skills, we'd embed the relevant skills as system context when prompting. Similar to how eval-runner embeds system prompts for grading.
+
+The eval-runner pattern is relevant here: it takes external content (diffs, documents), builds a prompt with embedded context, and sends it to Claude for structured analysis. Same pattern applies to ingesting Granola docs — take the scraped content, embed it as context in an agent-doc template, and let the session analyzer skills operate on it.
+
+**Practical next step:** Build a `/granola-import` skill that:
+1. Scrapes a Granola shared link
+2. Creates an agent-doc template document with the content
+3. Populates session-metrics, topic-segments from the Granola structure
+4. Makes it available for inline agent-doc interaction
+<!-- agent:boundary:95e710e1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -525,11 +563,12 @@ Looks like your input got cut off — "How can I use" what? Let me know and I'll
 <!-- agent:pending patch=replace -->
 - ([done]) Build session analyzer template
 - **Prep demo for Sunday:** Run session analyzer on robert-ross transcript
+- Build `/granola-import` skill (scrape → agent-doc template)
 - **Sunday Apr 5, 5pm ET:** Follow-up call with Rob (confirm via text)
-- Evaluate Cloudflare Vectorize + Workers AI for session indexing (MVP path)
+- Evaluate Deepgram + LiveKit Agents for real-time STT pipeline
+- Evaluate Cloudflare Vectorize + Workers AI for session indexing
 - Evaluate 3-5 LiveKit GitHub repos for Build Party
 - Get Build Party PRD from Rob
 - Create mermaid diagram for Miguel's LiveKit agent course
 - DocWalk MVP — color-coded markdown viewer
-- Granola import skill (scrape shared links → agent-doc)
 <!-- /agent:pending -->

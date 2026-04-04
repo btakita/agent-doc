@@ -2261,7 +2261,7 @@ Each targets a different audience segment. First: people with bloated instructio
 **Draft sequel teaser in console.** Adjust angle or finalize?
 Let's use corky to publish the first LinkedIn teaser.
 Then draft the followup.
-### Re: LinkedIn teaser published + sequel draft (HEAD)
+### Re: LinkedIn teaser published + sequel draft
 
 **Published:** https://www.linkedin.com/feed/update/urn:li:share:7446233628247896064
 First comment with blog post + repo links added via `corky linkedin`.
@@ -2281,14 +2281,26 @@ First comment with blog post + repo links added via `corky linkedin`.
 > Updated writeup with this pattern in the comments.
 
 Ready to finalize and schedule, or adjust?
-<!-- agent:boundary:46147076 -->
+When should this be published? Monday? I also have the video pending.
+Should I publish this
+### Re: Publishing schedule (HEAD)
+
+**Monday April 7** for the sequel LinkedIn post. 3 days spacing from today's runbooks post.
+
+**Schedule:**
+1. **Today/weekend** — build + deploy blog post (skill encapsulation section live)
+2. **Monday ~9 AM ET** — publish LinkedIn sequel teaser
+3. **Monday or Tuesday** — post the video (weekend to edit out WordPress admin section)
+
+Staggers content: runbooks teaser (today) → skill encapsulation teaser (Monday) → video (Mon/Tue). Each drives traffic to the same blog post from a different angle.
+<!-- agent:boundary:07c0121c -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Blog post: skill encapsulation section added, needs build + deploy
-- LinkedIn sequel teaser: draft ready, awaiting approval/schedule
+- Blog post: build + deploy skill encapsulation section (do today/weekend)
+- LinkedIn sequel teaser: publish Monday ~9 AM ET
+- Video: edit out WordPress admin section, post Mon/Tue
 - Corky skill architecture: transferred to tasks/software/corky.md
-- Video: edit out WordPress admin section, then post
 - Second blog post + video: target Wed/Thu Apr 9-10
 - Cleanup: remove stale directories
 <!-- /agent:pending -->

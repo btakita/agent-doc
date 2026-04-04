@@ -250,7 +250,7 @@ src/corky/
 The email skill's `runbooks/email-send.md` should probably move into corky's runbooks since corky owns the email workflow.
 
 This is a good task for a separate session — the scope is clear (extract workflows → runbooks, update triggers, consolidate email-send).
-<!-- agent:boundary:615642b2 -->
+<!-- agent:boundary:6447e937 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

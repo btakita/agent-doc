@@ -1726,20 +1726,28 @@ Should this be in AGENTS.md<-CLAUDE.md?
 - [x] Release binary built (`make release`)
 
 **PyPI blocker:** maturin builds with `linux_x86_64` tag which PyPI rejects — needs `manylinux` tag. This requires building in a manylinux container or CI.
-### Re: CLAUDE.md for no-hallucination rules (HEAD)
+### Re: CLAUDE.md for no-hallucination rules
 
 Yes — these are cross-cutting agent behavior rules, not session-specific. They belong in the root `CLAUDE.md` under Core Principles. Currently they're only in auto memory (`feedback_no_hallucinate_uncertainty.md`), which means:
 - They load for this project but can be missed (as happened last cycle)
 - Subagents don't see auto memory
 
 Adding to `CLAUDE.md` would enforce across all agents. Want me to add them to `## Core Principles`?
-<!-- agent:boundary:40b5399c -->
+
+Yes
+### Re: Added no-hallucination rule to CLAUDE.md (HEAD)
+
+Added to `## Core Principles` in `CLAUDE.md`:
+
+> **No Confident Hallucination:** If you don't know, say "I don't know." If you speculate, label it as speculation. Never present unverified claims as facts.
+
+Now enforceable across all agents and sessions.
+<!-- agent:boundary:473782c3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Add no-hallucination rules to CLAUDE.md (awaiting approval)
 - PyPI publish v0.24.0 (manylinux container build needed)
 - Run `corky sync` to verify Message-ID extraction live
 - Test threaded reply draft

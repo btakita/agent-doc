@@ -115,7 +115,7 @@ Published to all targets:
 - **Parent submodule**: pointer updated
 
 3 changes: refactored ensure_initialized into 3 functions, renamed auto_start_no_wait → provision_pane, 8 new tests.
-<!-- agent:boundary:9ed2cd83 -->
+<!-- agent:boundary:83591160 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

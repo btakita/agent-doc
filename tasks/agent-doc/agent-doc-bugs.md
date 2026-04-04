@@ -133,7 +133,7 @@ The agent sees the trigger phrase in the user's input, matches it against the ba
 - Single-line format (scannable)
 - Grouped in an `## Operations` section so the agent knows where to look
 - The runbook file contains the full procedure (SKILL.md doesn't duplicate it)
-<!-- agent:boundary:ec22c18d -->
+<!-- agent:boundary:d4d59c0f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

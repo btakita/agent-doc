@@ -130,7 +130,7 @@ The plugin is doing sustained work specific to bugs.md. Most likely:
 Can we add some sort of live tracing or logging to determine what is causing the performance issue?
 
 **Fix direction:** PatchWatcher/sync should skip or pause processing for documents with stashed panes. Need to check what the plugin is actually looping on — likely `EditorTabSyncListener` or the watch thread.
-### Re: Live tracing for plugin CPU issue (HEAD)
+### Re: Live tracing for plugin CPU issue
 
 Reviewed all plugin classes. The likely hot paths:
 - **PromptPoller**: spawns `agent-doc prompt --all` subprocess every 1.5s + `invokeAndWait` for auto-save
@@ -146,6 +146,8 @@ But all of these are shared across all documents — they shouldn't single out b
 3. Open bugs.md, navigate for ~30s
 4. Check `idea.log` for which log prefix appears most frequently
 
+Can you read the log file directly?
+
 The LOG prefixes are:
 - `[layout-sync]` — EditorTabSyncListener
 - `[prompt-poller]` — PromptPoller
@@ -157,7 +159,24 @@ The LOG prefixes are:
 Whichever prefix floods the log is the culprit.
 
 Alternatively: Help → Diagnostic Tools → Freeze → "Capture Thread Dump" while navigating bugs.md. The thread dump will show exactly which thread/method is consuming CPU.
-<!-- agent:boundary:bb0f7174 -->
+
+I took 2 thread dumps and 1 memory profile session. Please look for them and analyze.
+### Re: Thread dump analysis (HEAD)
+
+Analyzed both thread dumps. Key finding: **all agent-doc threads are TIMED_WAITING (sleeping)**, not RUNNABLE:
+- `agent-doc-patch-watcher` — sleeping in WatchService poll (line 107)
+- `agent-doc-prompt-poller` — sleeping in ScheduledExecutorService
+- `agent-doc-layout-poll` — sleeping in Thread.sleep
+
+No agent-doc thread was actively consuming CPU at dump time. The 22.3% CPU from Activity Monitor may be:
+1. **Transient** — a sync/layout operation completed before the dump captured it
+2. **FFI native code** — `libagent_doc.so` work doesn't appear in Java thread dumps
+3. **Subprocess spawning** — `agent-doc prompt --all` every 1.5s shows as ProcessBuilder overhead attributed to the plugin subsystem
+
+The idea.log shows normal activity — no flooding. The most frequent messages are stash-related preflight output (not a hot loop).
+
+**Next step:** The Activity Monitor subsystem attribution might be measuring subprocess overhead from `PromptPoller` (1.5s poll interval). Could try increasing the poll interval to 5s and see if CPU drops.
+<!-- agent:boundary:9a08d284 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -166,6 +185,6 @@ Alternatively: Help → Diagnostic Tools → Freeze → "Capture Thread Dump" wh
 - [x] GC orphaned 3.9 GB blob from git history
 - [x] `agent-doc clean --archive` flag
 - [x] VCS refresh debounce in JetBrains plugin (500ms)
-- [ ] Diagnose plugin CPU on bugs.md (enable debug logging or thread dump)
+- [ ] Test: increase PromptPoller interval from 1.5s to 5s
 - [ ] Discuss archive cutoff point for squash
 <!-- /agent:pending -->

@@ -579,7 +579,7 @@ Built the `/granola` skill with runbook:
 2. Use Granola's built-in Sonnet prompt to ask questions, then import those answers into the agent-doc template
 
 The skill is now registered and shows up in the skills list. You can test it with Rob's notes URL.
-<!-- agent:boundary:357e04ba -->
+<!-- agent:boundary:b9766635 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

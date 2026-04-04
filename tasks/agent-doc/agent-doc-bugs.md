@@ -139,7 +139,7 @@ CLAUDE.md is for **agent instructions** — conventions, rules, and patterns tha
 The memory entry (`feedback_claim_creates_new_pane.md`) already captures the key lesson for future agent sessions. That's the persistent context piece.
 
 Want me to add it to SPEC.md or the sync.rs module doc?
-<!-- agent:boundary:25b19281 -->
+<!-- agent:boundary:fe126be0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

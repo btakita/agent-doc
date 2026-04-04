@@ -1,15 +1,23 @@
-.PHONY: build release test clippy check precommit install install-hooks clean init-python wheel publish publish-crate publish-pypi
+.PHONY: build build-release release test clippy check precommit install install-hooks clean init-python wheel publish publish-crate publish-pypi
 
 # Build debug binary
 build:
 	cargo build
 
 # Build release binary and symlink to .bin/
-release:
+build-release:
 	cargo build --release
 	@mkdir -p .bin
 	@ln -sf ../target/release/agent-doc .bin/agent-doc
 	@echo "Installed .bin/agent-doc -> target/release/agent-doc"
+
+# Release via CI: check, tag, push (CI builds + publishes), install locally
+release: check
+	@version=$$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
+	echo "Releasing v$$version..."; \
+	git tag "v$$version" && git push origin main "v$$version" && \
+	echo "Tag v$$version pushed. CI handles GitHub Release + PyPI."; \
+	cargo install --path .
 
 # Run tests
 test:

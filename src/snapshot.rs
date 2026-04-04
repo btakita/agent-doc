@@ -270,6 +270,75 @@ pub fn resolve(doc: &Path) -> Result<Option<String>> {
 }
 
 // ---------------------------------------------------------------------------
+// Auto-initialization for new documents
+// ---------------------------------------------------------------------------
+
+/// Ensure a document has a snapshot and is tracked by git.
+///
+/// Called from `claim` and `preflight` to guarantee that any file entering
+/// the agent-doc lifecycle has a clean baseline. If a snapshot already exists,
+/// this is a no-op.
+///
+/// Steps when no snapshot exists:
+/// 1. Read file content
+/// 2. Create snapshot with stripped exchange content (user text → diff)
+/// 3. `git add` the file if untracked
+/// 4. `git commit` to establish the baseline
+///
+/// Returns `true` if initialization was performed, `false` if already initialized.
+pub fn ensure_initialized(doc: &Path) -> Result<bool> {
+    let snap = path_for(doc)?;
+    if snap.exists() {
+        return Ok(false);
+    }
+
+    let canonical = std::fs::canonicalize(doc).unwrap_or_else(|_| doc.to_path_buf());
+    let project_root = find_project_root(&canonical)
+        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+
+    eprintln!(
+        "[init] auto-initializing {} (no snapshot found)",
+        doc.display()
+    );
+
+    // Save initial snapshot with stripped exchange content so existing user
+    // text in the exchange becomes a diff on the next run.
+    if let Ok(content) = std::fs::read_to_string(doc) {
+        let snapshot_content = crate::claim::strip_exchange_content(&content);
+        if let Err(e) = save(doc, &snapshot_content) {
+            eprintln!("[init] warning: failed to save initial snapshot: {}", e);
+        }
+    }
+
+    // Stage the file if untracked
+    let is_tracked = std::process::Command::new("git")
+        .args(["ls-files", "--error-unmatch"])
+        .arg(&canonical)
+        .current_dir(&project_root)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+
+    if !is_tracked {
+        eprintln!("[init] file is untracked — staging with git add");
+        let _ = std::process::Command::new("git")
+            .args(["add", "--"])
+            .arg(&canonical)
+            .current_dir(&project_root)
+            .status();
+    }
+
+    // Commit to establish baseline
+    if let Err(e) = crate::git::commit(doc) {
+        eprintln!("[init] warning: failed to commit after init: {}", e);
+    }
+
+    Ok(true)
+}
+
+// ---------------------------------------------------------------------------
 // Internal unlocked helpers (caller must hold SnapshotLock)
 // ---------------------------------------------------------------------------
 

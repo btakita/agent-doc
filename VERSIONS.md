@@ -4,6 +4,15 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.10
+
+- **Auto-init for new documents**: `ensure_initialized()` in `snapshot.rs` — claim and preflight now auto-create snapshot + git baseline for files entering agent-doc. No more untracked files after import.
+- **Cross-process typing detection**: FFI exports `agent_doc_is_typing_via_file` and `agent_doc_await_idle_via_file` for CLI tools running in separate processes. `is_idle` and `await_idle` now bridge to file-based indicator when untracked in-process.
+- **Diff stability fix**: `wait_for_stable_content` counter now tracks consecutive stable reads across outer iterations (was resetting within each pass).
+- **IPC error propagation**: `ipc_socket::send_message` now returns proper errors instead of swallowing connection/timeout failures as `Ok(None)`.
+- **Template patch boundary fix**: Improved boundary marker handling in `apply_patches_with_overrides`.
+- **CI/build**: `make release` target, idempotent release workflows, version-sync check in `make check`.
+
 ## 0.31.9
 
 - **Transfer-extract runbook**: New bundled runbook for cross-file content moves (`agent-doc transfer`/`extract`). Installed via `skill install`.

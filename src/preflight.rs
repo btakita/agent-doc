@@ -303,38 +303,10 @@ pub fn run(file: &Path, diff_only: bool) -> Result<()> {
         false
     });
 
-    // Step 1b: Auto-setup for untracked files.
-    // If the file isn't tracked by git, create an initial snapshot and add it
-    // so the first agent-doc run can detect content as a diff.
-    {
-        let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-        let project_root = snapshot::find_project_root(&canonical)
-            .unwrap_or_else(|| file.parent().unwrap_or(Path::new(".")).to_path_buf());
-        let is_tracked = Command::new("git")
-            .args(["ls-files", "--error-unmatch"])
-            .arg(&canonical)
-            .current_dir(&project_root)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if !is_tracked {
-            eprintln!("[preflight] file is untracked — auto-setup: snapshot + git add");
-            // Save initial snapshot with empty exchange (same as claim)
-            if let Ok(content) = std::fs::read_to_string(file) {
-                let snapshot_content = crate::claim::strip_exchange_content(&content);
-                if let Err(e) = snapshot::save(file, &snapshot_content) {
-                    eprintln!("[preflight] warning: failed to save initial snapshot: {}", e);
-                }
-            }
-            // Stage the file so git::commit can pick it up
-            let _ = Command::new("git")
-                .args(["add", "--"])
-                .arg(&canonical)
-                .current_dir(&project_root)
-                .status();
-        }
+    // Step 1b: Ensure document is initialized (snapshot + git baseline).
+    // If no snapshot exists, creates one and commits the file.
+    if let Err(e) = snapshot::ensure_initialized(file) {
+        eprintln!("[preflight] warning: auto-init failed: {}", e);
     }
 
     // Step 2: Commit previous cycle.

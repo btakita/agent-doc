@@ -299,21 +299,10 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
         &session_id[..8]
     );
 
-    // Initialize snapshot with empty exchange content so existing user text
-    // in the exchange becomes a diff on the next run. Without this, claim
-    // absorbs the user's unresponded prompt into the baseline.
-    if let Ok(content) = std::fs::read_to_string(file) {
-        let snapshot_content = strip_exchange_content(&content);
-        if let Err(e) = crate::snapshot::save(file, &snapshot_content) {
-            eprintln!("warning: failed to save initial snapshot: {}", e);
-        }
-    }
-
-    // Commit the claimed file so the first prompt is recognized as a diff.
-    // Without this, the file is uncommitted and the first agent-doc run
-    // sees no snapshot → no diff → no response.
-    if let Err(e) = crate::git::commit(file) {
-        eprintln!("warning: failed to commit after claim: {}", e);
+    // Ensure the document has a snapshot + git baseline. If already initialized
+    // (snapshot exists), this is a no-op.
+    if let Err(e) = crate::snapshot::ensure_initialized(file) {
+        eprintln!("warning: failed to initialize document: {}", e);
     }
 
     // Lazy-start watch daemon if not running

@@ -90,9 +90,11 @@ pub fn send_message(project_root: &Path, message: &serde_json::Value) -> Result<
     });
 
     match rx.recv_timeout(Duration::from_secs(2)) {
-        Ok((Ok(0), _)) => Ok(None),
+        Ok((Ok(0), _)) => Err(anyhow::anyhow!("IPC ack: plugin closed connection without responding")),
         Ok((Ok(_), line)) => Ok(Some(line.trim().to_string())),
-        _ => Ok(None),
+        Ok((Err(e), _)) => Err(anyhow::anyhow!("IPC ack read error: {}", e)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(anyhow::anyhow!("IPC ack timeout (2s)")),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(anyhow::anyhow!("IPC reader thread disconnected")),
     }
 }
 
@@ -119,10 +121,7 @@ pub fn send_patch(
             eprintln!("[ipc-socket] patch sent, no ack");
             Ok(true)
         }
-        Err(e) => {
-            eprintln!("[ipc-socket] send failed: {}", e);
-            Ok(false)
-        }
+        Err(e) => Err(e),
     }
 }
 
@@ -133,13 +132,7 @@ pub fn send_reposition(project_root: &Path, file: &str) -> Result<bool> {
         "file": file,
     });
 
-    match send_message(project_root, &message) {
-        Ok(_) => Ok(true),
-        Err(e) => {
-            eprintln!("[ipc-socket] reposition failed: {}", e);
-            Ok(false)
-        }
-    }
+    send_message(project_root, &message).map(|_| true)
 }
 
 /// Send a VCS refresh signal.
@@ -148,13 +141,7 @@ pub fn send_vcs_refresh(project_root: &Path) -> Result<bool> {
         "type": "vcs_refresh",
     });
 
-    match send_message(project_root, &message) {
-        Ok(_) => Ok(true),
-        Err(e) => {
-            eprintln!("[ipc-socket] vcs_refresh failed: {}", e);
-            Ok(false)
-        }
-    }
+    send_message(project_root, &message).map(|_| true)
 }
 
 /// Start a socket listener (for use by the FFI library / plugin).
@@ -196,8 +183,12 @@ where
                     {
                         let mut resp = response;
                         resp.push('\n');
-                        let _ = writer_half.write_all(resp.as_bytes());
-                        let _ = writer_half.flush();
+                        if let Err(e) = writer_half.write_all(resp.as_bytes()) {
+                            eprintln!("[ipc-socket] handler write error: {}", e);
+                        }
+                        if let Err(e) = writer_half.flush() {
+                            eprintln!("[ipc-socket] handler flush error: {}", e);
+                        }
                     }
                     line.clear();
                 }

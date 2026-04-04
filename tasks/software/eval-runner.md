@@ -991,7 +991,7 @@ The SKILL stays lean, the runbook provides detailed guidance when needed. The mo
 4. Track content-source annotation as agent-doc feature (separate session)
 
 do all
-### Re: All 4 actions complete (HEAD)
+### Re: All 4 actions complete
 
 **1. Regenerated `mixed-valid-and-comment` diff through preflight**
 Removed HTML comments from the diff — now shows only the non-comment question line, matching what the model actually sees in production. Expected behavior simplified to "responds to the question" (no "ignores comments" check needed since they're already stripped).
@@ -1008,17 +1008,19 @@ At `.claude/skills/agent-doc/runbooks/multi-topic-response.md`. Documents: detec
 Saved Markdown-Annotations reference (iA Writer's spec) to persistent memory. Linked from MEMORY.md under References.
 
 **Suite status:** 20 cases, 6 smoke-tagged. Ready for a baseline run.
-<!-- agent:boundary:091b86c3 -->
+
+do
+- [ ] Run baseline with updated 20-case suite
+### Re: 20-case baseline running (HEAD)
+
+Launched: `make eval` (20 cases, sonnet, --parallel 8, refined system prompt). Will report results when done.
+<!-- agent:boundary:e3f385c2 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [x] Regenerate `mixed-valid-and-comment` case diff through actual preflight
-- [x] Split `inline-annotation-with-truncation` into 2 simpler cases
-- [x] Draft `multi-topic-response` runbook for agent-doc
-- [x] Content-source annotation tracked (Markdown-Annotations reference saved)
-- [ ] Run baseline with updated 20-case suite
+- [ ] Run baseline with updated 20-case suite (running)
 - [ ] Design agentic eval fixture format (future — v2)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 <!-- /agent:pending -->

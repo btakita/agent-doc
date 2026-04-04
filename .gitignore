@@ -11,4 +11,5 @@ tmp/
 
 # Rust
 target/
-.bin/.cargo/config.toml
+.bin/
+.cargo/

@@ -13,6 +13,7 @@ agent_doc_write: crdt
 
 <!-- agent:exchange patch=append -->
 
+<!-- agent:boundary:0daa4edf -->
 <!-- /agent:exchange -->
 
 ## Console (HEAD)

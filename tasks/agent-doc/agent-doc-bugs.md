@@ -198,7 +198,7 @@ Also correct the module-harness in the modules.
 All tests pass, clippy clean.
 
 **Module-harness:** You asked to correct the module-harness in the modules. Should I run `/module-harness` on sync.rs, claim.rs, snapshot.rs, and route.rs to regenerate their spec/contracts/evals sections? Or did you mean something else by "correct the module-harness"?
-<!-- agent:boundary:b906047b -->
+<!-- agent:boundary:a20fc35f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

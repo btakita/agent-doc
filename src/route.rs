@@ -26,7 +26,7 @@
 //! - **`auto_start(tmux, file, session_id, file_path, context_session)`**: Public; spawns a
 //!   new Claude pane and sends `/agent-doc start`. Waits for Claude's idle prompt before
 //!   sending the initial command. Called by `sync.rs` for unresolved files.
-//! - **`auto_start_no_wait(tmux, file, session_id, file_path, context_session, col_args)`**: Like
+//! - **`provision_pane(tmux, file, session_id, file_path, context_session, col_args)`**: Like
 //!   `auto_start` but skips waiting for Claude to be ready. Used by sync when only pane
 //!   existence is needed (Claude will start asynchronously). Computes `split_before` via
 //!   `is_first_column(file, col_args)` so new panes split in the correct direction for
@@ -520,7 +520,7 @@ pub fn auto_start(
 /// Called by sync during Reconciliation when a file has a session UUID but no
 /// registered pane. Creates the pane immediately but doesn't wait for Claude
 /// to initialize (async startup).
-pub fn auto_start_no_wait(
+pub fn provision_pane(
     tmux: &Tmux,
     file: &Path,
     session_id: &str,
@@ -1715,8 +1715,8 @@ mod tests {
     }
 
     #[test]
-    fn auto_start_no_wait_first_col_splits_left() {
-        // Verify that auto_start_no_wait with a file in the first column
+    fn provision_pane_first_col_splits_left() {
+        // Verify that provision_pane with a file in the first column
         // computes split_before=true via is_first_column and places the new
         // pane at the leftmost position in the agent-doc window.
         let iso = IsolatedTmux::new("route-test-auto-start-col-left");
@@ -1740,13 +1740,13 @@ mod tests {
             "tasks/file_b.md".to_string(),
         ];
 
-        // Call auto_start_no_wait with file in the FIRST column
+        // Call provision_pane with file in the FIRST column
         let file_a = Path::new("tasks/file_a.md");
-        let result = auto_start_no_wait(
+        let result = provision_pane(
             &iso, file_a, "session-a", "tasks/file_a.md",
             Some(session), &col_args,
         );
-        assert!(result.is_ok(), "auto_start_no_wait should succeed: {:?}", result.err());
+        assert!(result.is_ok(), "provision_pane should succeed: {:?}", result.err());
 
         // The new pane should be leftmost (split_before=true picks first pane, splits -dbh)
         let after = iso.list_window_panes(&format!("{}:agent-doc", session)).unwrap();
@@ -1763,8 +1763,8 @@ mod tests {
     }
 
     #[test]
-    fn auto_start_no_wait_second_col_splits_right() {
-        // Verify that auto_start_no_wait with a file in the second column
+    fn provision_pane_second_col_splits_right() {
+        // Verify that provision_pane with a file in the second column
         // computes split_before=false via is_first_column and places the new
         // pane at the rightmost position in the agent-doc window.
         let iso = IsolatedTmux::new("route-test-auto-start-col-right");
@@ -1788,13 +1788,13 @@ mod tests {
             "tasks/file_b.md".to_string(),
         ];
 
-        // Call auto_start_no_wait with file in the SECOND column
+        // Call provision_pane with file in the SECOND column
         let file_b = Path::new("tasks/file_b.md");
-        let result = auto_start_no_wait(
+        let result = provision_pane(
             &iso, file_b, "session-b", "tasks/file_b.md",
             Some(session), &col_args,
         );
-        assert!(result.is_ok(), "auto_start_no_wait should succeed: {:?}", result.err());
+        assert!(result.is_ok(), "provision_pane should succeed: {:?}", result.err());
 
         // The new pane should be rightmost (split_before=false picks last pane, splits -dh)
         let after = iso.list_window_panes(&format!("{}:agent-doc", session)).unwrap();

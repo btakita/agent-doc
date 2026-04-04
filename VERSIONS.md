@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.12
+
+- **Refactor `ensure_initialized()`**: Split into 3 focused functions: `ensure_session_uuid()`, `ensure_snapshot()`, `ensure_git_tracked()`. Composite `ensure_initialized()` calls all three.
+- **Rename `auto_start_no_wait()` → `provision_pane()`**: Aligns with domain ontology (Provisioning = creating a new pane + starting Claude).
+- **Tests**: 8 new tests for ensure_session_uuid (3), ensure_snapshot (2), ensure_initialized (1), plus 2 helpers.
+
 ## 0.31.11
 
 - **Sync auto-initialization**: `ensure_initialized()` now called in sync's `resolve_file`. Files with `agent_doc_format` but no session UUID get one assigned automatically on editor navigation. Fixes: files created by skills (granola import) are no longer invisible to sync.

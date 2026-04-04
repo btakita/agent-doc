@@ -587,7 +587,7 @@ The drop from 76.2% to 66.7% is due to run-to-run variance (LLM non-determinism)
 
 What do you recommend? defer to agentic evals?
 - [ ] Decide on approval cases: lower threshold, mark as known limitation, or defer to agentic evals
-### Re: Recommendation on approval cases (HEAD)
+### Re: Recommendation on approval cases
 
 **Defer to agentic evals.** Remove from the diff-interpretation suite, add to future agentic suite.
 
@@ -604,15 +604,26 @@ Reasoning:
 4. Best baseline becomes ~16-17/19 (~84-89%) — a clean metric
 
 This gives a tight, reliable eval suite for diff interpretation and a clear roadmap for agentic evals.
-<!-- agent:boundary:c20759f6 -->
+do
+- [ ] Move 2 approval cases to agentic eval placeholder
+- [ ] Re-run final baseline with 19-case suite
+### Re: Cases moved, final baseline running (HEAD)
+
+Done:
+- **Moved** `approval-to-implement` and `single-word-approval` to `evals/agent-doc/agentic/cases.yaml`
+- **Left comments** in diff-interpretation `cases.yaml` pointing to the new location
+- **Diff-interpretation suite** now has 19 cases (was 21)
+- **Final baseline running:** `--model sonnet --judge-model sonnet --parallel 8 --system-prompt system-prompt.md`
+
+Saving to `baselines/sonnet-19case-2026-04-04.json`. This will be the clean baseline for the 19-case diff-interpretation suite.
+<!-- agent:boundary:5e941970 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [ ] Move 2 approval cases to agentic eval placeholder
-- [ ] Re-run final baseline with 19-case suite
-- [ ] Design agentic eval fixture format (future — v2 eval suite)
+- [x] Move 2 approval cases to agentic eval placeholder
+- [ ] Re-run final baseline with 19-case suite (running)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 - [ ] JSON output format documentation
 <!-- /agent:pending -->

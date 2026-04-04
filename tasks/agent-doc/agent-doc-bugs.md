@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-P1-P3 + JB plugin Gson migration (v0.2.44) shipped
+P1-P4 + JB plugin Gson migration shipped. 434 tests passing.
 <!-- /agent:status -->
 
 ## Exchange
@@ -343,7 +343,7 @@ This handles all JSON escaping correctly (like VS Code's `JSON.parse()`) and eli
 
 **Recommendation:** Replace `extractStringField` with Gson. Zero new deps, correct by construction. Want me to do it?
 Yes
-### Re: Yes — Replaced hand-rolled JSON parser with Gson (HEAD)
+### Re: Yes — Replaced hand-rolled JSON parser with Gson
 
 Done. Replaced all manual JSON parsing in `PatchWatcher.kt` with `com.google.gson.JsonParser`.
 
@@ -361,7 +361,47 @@ Done. Replaced all manual JSON parsing in `PatchWatcher.kt` with `com.google.gso
 **Plugin bumped to v0.2.44.** Install from `build/distributions/agent-doc-jetbrains-0.2.44.zip`.
 
 Builds clean. Zero new dependencies — Gson ships with every IntelliJ installation.
-<!-- agent:boundary:80e70bc4 -->
+
+do
+- [ ] Implement content-source annotation sidecar (P4)
+### Re: Do — Content-source annotation sidecar (P4) implemented (HEAD)
+
+Done. New `annotate.rs` module + CLI command + GC integration.
+
+**New command: `agent-doc annotate <file> [--force] [--history]`**
+
+Generates a JSON sidecar at `.agent-doc/annotations/<hash>.json` mapping each line to its source:
+
+```json
+{
+  "file": "tasks/agent-doc/agent-doc-bugs.md",
+  "doc_hash": "9b6e92d2...",
+  "snapshot_content_hash": "a1b2c3...",
+  "file_content_hash": "d4e5f6...",
+  "lines": [
+    {"line": 1, "source": "agent"},
+    {"line": 2, "source": "agent"},
+    {"line": 3, "source": "user"},
+    {"line": 4, "source": "agent"}
+  ]
+}
+```
+
+**How it works:**
+1. Loads snapshot (baseline from last write) and current file
+2. Diffs with `similar::TextDiff::from_lines()` on raw content (no comment stripping — 1:1 with editor lines)
+3. Maps: `Equal` -> `agent`, `Insert` -> `user`, `Delete` -> skip
+4. Cache: content hashing (SHA256) of both snapshot and file. Skips regeneration if hashes match unless `--force`
+
+**Files changed:**
+- `annotate.rs` — new module (170 lines, 6 tests)
+- `main.rs` — `mod annotate` + `Commands::Annotate` + dispatch
+- `gc.rs` — added `("annotations", vec!["json"])` to cleanup list
+
+**Tests:** 6 new (no_snapshot_all_user, identical_all_agent, user_additions, user_modifications, cache_invalidation, cache_valid_skips). All 434 tests pass, clippy clean.
+
+`--history` flag is wired but deferred (prints path from basic mode). Can add git blame attribution later.
+<!-- agent:boundary:b086f55c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -372,7 +412,7 @@ Builds clean. Zero new dependencies — Gson ships with every IntelliJ installat
 - [x] Post-preflight diff generation for eval cases (P2) — DONE
 - [x] Implement annotated diff format in preflight (P3) — DONE
 - [x] Fix write pipeline escape bug + Gson migration (JB plugin v0.2.44) — DONE
-- [ ] Implement content-source annotation sidecar (P4)
+- [x] Implement content-source annotation sidecar (P4) — DONE
 - [ ] Design reproducible operation log format (P5)
 - [ ] Add `---` prompt separator convention to SKILL.md
 - [ ] Add transfer-source metadata to patch format

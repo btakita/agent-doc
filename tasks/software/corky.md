@@ -116,7 +116,7 @@ claude_args: --dangerously-skip-permissions
 do
 - Push corky license-files fix to origin
 - Re-auth btak.dev Gmail API OAuth (interactive)
-### Re: Push & OAuth (HEAD)
+### Re: Push & OAuth
 
 **Pushed** `3daf664` (license-files fix) to corky origin.
 
@@ -124,14 +124,35 @@ do
 ```
 corky sync account btak.dev
 ```
-<!-- agent:boundary:96fe2b94 -->
+reauthed
+do
+- Corky skill architecture: `corky skill install` for email + linkedin skills
+### Re: Corky skill architecture (HEAD)
+
+**Current state:**
+- `.claude/skills/email/SKILL.md` — manually created (109 lines), covers email drafting
+- `.claude/skills/corky/` — not installed
+- `corky skill install` — bundles one SKILL.md, installs to `.claude/skills/corky/`
+- LinkedIn: `.agent/runbooks/linkedin-post.md` (manual runbook, not skill-managed)
+
+**Proposed design (multi-skill install):**
+`corky skill install` writes 3 SKILL.md files:
+1. `.claude/skills/corky/SKILL.md` — general corky (sync, contacts, docs, cal, transcribe)
+2. `.claude/skills/email/SKILL.md` — email drafting (replaces manual one)
+3. `.claude/skills/linkedin/SKILL.md` — LinkedIn posting via `corky linkedin`
+
+Each has focused frontmatter for Claude Code skill matching. Shared conventions (never send without approval) in each relevant skill.
+
+**Implementation:** Bundle 3 SKILL.md files via `include_str!`, `corky skill install` writes all 3 + runbooks.
+
+Ready to implement on your go.
+<!-- agent:boundary:b0ea2ce2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Re-auth btak.dev Gmail API OAuth (interactive — run `corky sync account btak.dev`)
-- Corky skill architecture: `corky skill install` for email + linkedin skills
+- Corky skill architecture: implement multi-skill install (awaiting approval)
 - Verify sheet sharing / GCP test users
 - Re-test sheet read
 - Manylinux binary wheel (nice-to-have, needs container/CI)

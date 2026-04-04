@@ -804,7 +804,7 @@ The real variance fix is rubric specificity — cases with vague expected behavi
 **Smoke suite working well** — 6 cases in ~1.5 min, fast enough for tight iteration.
 do
 - [ ] Tighten rubrics for flaky cases (inline-colon-annotation, boundary-only-change)
-### Re: Rubrics tightened, results improved (HEAD)
+### Re: Rubrics tightened, results improved
 
 Tightened 3 rubrics — removed overly specific requirements, focused on binary discrimination:
 
@@ -822,14 +822,32 @@ Tightened 3 rubrics — removed overly specific requirements, focused on binary 
 Key improvements with haiku: boundary-only-change 0.67→1.00, single-word-correction 0.65→0.82 (now passes).
 
 **The smoke suite is now a reliable 1.5-min regression gate.** Consistently 6/6 with sonnet judge.
-<!-- agent:boundary:fb80837e -->
+do
+- [ ] Tighten remaining 13 non-smoke case rubrics for full suite stability
+### Re: All 19 rubrics tightened (HEAD)
+
+Applied the same pattern across all 13 non-smoke cases:
+
+**Changes made:**
+- Removed overly specific requirements ("mentions `&lt;!-- agent:name --&gt;` syntax", "uses streaming checkpoints", "queues as pending items")
+- Focused on binary discrimination: does the model understand what the diff represents?
+- Reduced expected_behavior entries from 3-5 to 2-3 per case
+- Kept "does NOT" negative checks — these are the most stable discriminators
+
+**Pattern:** Each rubric now tests:
+1. **Did the model correctly interpret the diff type?** (question, correction, deletion, reorg, partial, approval, etc.)
+2. **Did it respond appropriately?** (answer the question, acknowledge the correction, flag incomplete, etc.)
+3. **Did it NOT do something wrong?** (ignore the change, misinterpret the type, guess at incomplete content)
+
+Full 19-case suite running with tightened rubrics. Will report results when done.
+<!-- agent:boundary:ef485629 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [x] Tighten rubrics for flaky cases
-- [ ] Tighten remaining 13 non-smoke case rubrics for full suite stability
+- [x] Tighten remaining 13 non-smoke case rubrics
+- [ ] Full suite run with tightened rubrics (running)
 - [ ] Design agentic eval fixture format (future — v2)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 <!-- /agent:pending -->

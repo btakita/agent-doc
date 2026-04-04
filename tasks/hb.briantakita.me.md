@@ -1,8 +1,7 @@
 ---
 agent_doc_session: c4d42e23-85d9-4810-b88c-5c21d32e697d
-tmux_session: '0'
-agent_doc_format: template
-agent_doc_write: crdt
+tmux_session: '23'
+agent_doc_mode: template
 ---
 
 

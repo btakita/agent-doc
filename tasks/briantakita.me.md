@@ -2324,7 +2324,7 @@ Each LinkedIn post tells one clean story:
 - **Sequel teaser:** skill decomposition (695 → 58-66 lines per invocation, 4 additional runbooks)
 
 Updating the published post to "16 runbooks" would blur the narrative by mixing two different optimizations.
-<!-- agent:boundary:c6effa2e -->
+<!-- agent:boundary:cb4a2c63 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

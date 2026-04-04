@@ -178,7 +178,7 @@ agent-runbooks validate runbooks/my-runbook.md \
 ```
 
 Parent pointer updated: `290c86cb`.
-<!-- agent:boundary:581d1a3c -->
+<!-- agent:boundary:d7229b01 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

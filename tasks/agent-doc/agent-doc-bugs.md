@@ -207,7 +207,7 @@ This creates a **stash-bounce loop**: sync stashes unwanted panes → prune retu
 **Fix:** Removed `return_stashed_panes_bulk()` from the automatic `prune()` path. Active panes now stay in stash until the reconciler explicitly needs them. Manual recovery via `agent-doc resync --fix` is still available.
 
 634 tests pass. Built, installed. Please try switching tabs now — the stash-bounce should be eliminated.
-### Re: Concurrent sync is the remaining issue (HEAD)
+### Re: Concurrent sync is the remaining issue
 
 The `return_stashed_panes_bulk` fix is deployed and working (no return messages in log). But panes STILL appear in @221 between checkpoints at the same timestamp. This means **another process is moving panes concurrently**.
 
@@ -216,11 +216,28 @@ Syncs fire every 1-2 seconds. While sync #1 stashes panes, sync #2 starts and se
 **Fix:** Add file lock to prevent concurrent sync calls.
 
 Shall I implement this?
-<!-- agent:boundary:3485bed7 -->
+yes
+
+The response patch was duplicated in this file. Why?
+> IPC timeout caused duplicate write (first via IPC patch, then via disk fallback). CRDT merge included both.
+
+### Re: Sync file lock implemented (HEAD)
+
+Added `flock` on `.agent-doc/sync.lock` at the start of `run_with_options()`. When a second sync arrives while the first is running, it blocks until the first completes. This ensures the second sync sees the correct post-stash state.
+
+634 tests pass. Built, installed.
+### Re: Sync file lock + duplicate response explanation (HEAD)
+
+**File lock implemented:** Added `flock` on `.agent-doc/sync.lock` at the start of `run_with_options()`. When a second sync arrives while the first is running, it blocks until the first completes. This ensures the second sync sees the correct post-stash state instead of mid-transition panes.
+
+**Why the response duplicated:** The first `agent-doc write` attempt used IPC (socket to JB plugin) but timed out after 2 seconds (exit 75). The response was saved as a patch file in `.agent-doc/patches/`. Then the retry with `--force-disk` wrote the same content via CRDT merge. The CRDT merge correctly merged both writes, but since both contained the same content, it appeared duplicated. This is a known edge case when IPC times out and the skill retries with disk write.
+
+634 tests pass. Built, installed. Try switching tabs — the file lock should eliminate the concurrent sync glitchiness.
+<!-- agent:boundary:e0102e52 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Add file lock to prevent concurrent sync calls
+- [x] Add file lock to prevent concurrent sync calls
 <!-- /agent:pending -->

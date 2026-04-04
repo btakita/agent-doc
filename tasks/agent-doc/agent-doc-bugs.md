@@ -263,7 +263,7 @@ Added the following decisions from this session to `tasks/runbooks.md`:
 5. Start runbook management as agent-doc subcommand, extract to `agent-runbooks` crate if scope grows
 
 These items are now tracked in `tasks/runbooks.md`. This document's runbook discussion is complete.
-<!-- agent:boundary:a7385fdf -->
+<!-- agent:boundary:352b1eab -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

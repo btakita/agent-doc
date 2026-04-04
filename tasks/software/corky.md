@@ -190,7 +190,7 @@ go
 `corky skill install` now writes all 3 skills + runbooks. 258 tests pass, clippy clean.
 
 Next: commit, update SPEC/VERSIONS, audit docs, release.
-<!-- agent:boundary:84d284e3 -->
+<!-- agent:boundary:035687b8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

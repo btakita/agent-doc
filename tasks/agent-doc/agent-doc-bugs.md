@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Runbook trigger format: backtick-quoted commands with runbook paths
+SKILL.md Operations section added; convention audited; publishing tmux-router next
 <!-- /agent:status -->
 
 ## Exchange
@@ -119,7 +119,7 @@ For guaranteed prompt adherence, the key factors are:
 **Other shortened inline statements that work reliably:**
 
 ```markdown
-## Operations (HEAD)
+## Operations
 
 `compact exchange` runs runbooks/compact-exchange.md
 `transfer session` runs runbooks/transfer-session.md
@@ -133,13 +133,46 @@ The agent sees the trigger phrase in the user's input, matches it against the ba
 - Single-line format (scannable)
 - Grouped in an `## Operations` section so the agent knows where to look
 - The runbook file contains the full procedure (SKILL.md doesn't duplicate it)
-<!-- agent:boundary:d4d59c0f -->
+
+do
+- [ ] Add runbook trigger lines to SKILL.md Operations section
+
+Also ensure that all of the runbooks in agent-loop follow the same convention. Should we have a runbook skill to correctly extract and reference runbooks?
+### Re: SKILL.md runbook triggers + convention audit
+
+**Done:** Added Operations section to agent-doc SKILL.md with:
+```markdown
+## Operations (HEAD)
+- `compact exchange` — runbooks/compact-exchange.md
+```
+
+**Convention audit — all 5 skills with runbooks already reference them, but inconsistently:**
+
+| Skill | Runbooks | Reference Style |
+|-------|----------|-----------------|
+| agent-doc | 1 | `## Operations` with trigger line (just added) |
+| dev | 7 | Bold text: `**Pre-release checklist:** See runbooks/...` |
+| email | 1 | Inline: `See runbooks/email-send.md for full workflow` |
+| livestream | 1 | Inline: `See runbooks/livestream-audit.md for full scan patterns` |
+| module-harness | 1 | Inline: `See runbooks/module-harness-audit.md for the full audit procedure` |
+
+**Should we have a runbook skill?** Not a separate skill — but a convention enforced during `agent-doc skill install`. The convention:
+1. Skills with runbooks MUST have a `## Operations` section
+2. Each runbook gets a trigger line: `` `trigger phrase` — runbooks/filename.md ``
+3. The `skill install` command could auto-generate the Operations section from the runbooks directory
+
+This is a good feature for agent-doc's `skill install` command — scan for runbooks and add them to the Operations section. For now, the convention is documented and agent-doc's SKILL.md follows it.
+
+### Re: tmux-router publish
+
+Starting tmux-router 0.3.9 publish to crates.io.
+<!-- agent:boundary:7bcbe2e9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Navigation swap: cross-session joins + --window authority + path dep
+- [x] Add runbook trigger lines to SKILL.md Operations section
 - [ ] Publish tmux-router 0.3.9 to crates.io (then revert path dep)
-- [ ] Add runbook trigger lines to SKILL.md Operations section
+- [ ] Standardize Operations sections in dev/email/livestream/module-harness skills
 <!-- /agent:pending -->

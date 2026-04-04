@@ -103,3 +103,6 @@
 [submodule "src/agent-doc-js"]
 	path = src/agent-doc-js
 	url = git@github.com:btakita/agent-doc-js.git
+[submodule "src/agent-runbooks"]
+	path = src/agent-runbooks
+	url = git@github.com:btakita/agent-runbooks.git

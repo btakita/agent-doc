@@ -454,7 +454,7 @@ Done. Added `### 0c. Multi-topic prompt separators` section to SKILL.md between 
 - `---` in context lines (existing content, not user additions)
 
 This ties into the existing `multi_topic` diff type which already detects `---` separators in `classify_diff()`.
-<!-- agent:boundary:018b50b0 -->
+<!-- agent:boundary:754fdbfa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

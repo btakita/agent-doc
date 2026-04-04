@@ -32,7 +32,7 @@ claude_args: "--dangerously-skip-permissions"
 - Release checklist now includes `cargo install --path .` as final step
 - VERSIONS.md backfilled through v0.17.28
 - `/dev` skill flagged for future release orchestration
-<!-- agent:boundary:275cba9a -->
+<!-- agent:boundary:9f55e705 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

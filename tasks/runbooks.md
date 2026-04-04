@@ -189,7 +189,7 @@ Where is `feedback_distribution_aware_reorg.md` saved?
 This is Claude Code's project-scoped auto memory for agent-loop. The index file `MEMORY.md` in that same directory is loaded at the start of every conversation. The feedback entry is listed under "Architecture Decisions".
 
 Should this auto-memory be a runbook instead? Does automemory inflate context?
-### Re: Auto memory vs runbooks (HEAD)
+### Re: Auto memory vs runbooks
 
 **No, this should stay as auto memory.** Different purposes:
 
@@ -207,11 +207,37 @@ The "distribution-aware reorg" feedback is a guardrail -- it prevents a mistake 
 **Rule of thumb:**
 - If it's "don't do X" or "always do Y" -> auto memory (always loaded)
 - If it's "step 1, step 2, step 3 to accomplish Z" -> runbook (loaded when doing Z)
-<!-- agent:boundary:2dd483a8 -->
+
+I want to have on-demand context as well. Is auto memory essentially on-demand context? Or would we need another mechanism?
+Would this feedback_distribution_aware_reorg belong in the on-demand context if auto memory is not on-demand?
+### Re: On-demand context vs auto memory (HEAD)
+
+Auto memory is a **hybrid** with two layers:
+1. **MEMORY.md index** (always loaded, ~96 lines) — one-line triggers
+2. **Individual memory files** (on-demand) — read when agent judges the index line relevant
+
+So `feedback_distribution_aware_reorg.md` content is already on-demand. The ~1 line in MEMORY.md is just the trigger.
+
+**For pure on-demand context** (zero always-loaded cost):
+
+| Mechanism | Trigger Cost | Best For |
+|-----------|-------------|----------|
+| Auto memory (MEMORY.md) | ~1 line always | Guardrails, preferences |
+| Runbooks (skill-local) | 0 (skill ref) | Procedures |
+| claude-mem search | 0 | Historical decisions, past work |
+| Hooks (settings.json) | 0 | Automated pattern-based checks |
+
+**Should feedback_distribution_aware_reorg be on-demand?** The tradeoff: with zero always-loaded cost, the agent has to *think to search* for it. The 1-line MEMORY.md entry fires proactively before the mistake. That's worth the cost for guardrails.
+
+**Where on-demand context shines:** knowledge useful *when asked about* rather than *before acting*. "How did we solve X last time" = claude-mem. "Don't do X" = auto memory.
+
+If you want a new mechanism beyond these, the gap would be: **context that's triggered by the *type of work* being done, not by explicit user request or agent search.** For example, "when the agent is about to reorganize files, inject distribution-awareness context." That's a hook-based approach — settings.json could match on `Edit` or `Write` tool calls targeting certain paths and inject a reminder. That would be zero always-loaded cost with automatic triggering.
+<!-- agent:boundary:0cabc919 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Extract corky runbooks: review-inbox, draft-reply, enrich-contact
+- [ ] Explore hook-based on-demand context injection (if desired)
 <!-- /agent:pending -->

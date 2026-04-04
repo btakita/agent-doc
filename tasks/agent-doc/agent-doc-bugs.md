@@ -859,7 +859,7 @@ Plus tracing at warn level for the debug log.
 This prevents the 3-orphaned-shell scenario: when route fails (e.g., malformed registry), any panes it created are cleaned up before the error propagates to JB.
 
 634 tests pass. Built, installed.
-<!-- agent:boundary:e664279f -->
+<!-- agent:boundary:0212a6af -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

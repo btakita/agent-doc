@@ -1876,7 +1876,7 @@ publish
 Blog post updated and deploying. All three repos pushed (briantakita.me → briantakita.me-dev → agent-loop).
 
 Live at: https://briantakita.me/post/2026-04-03-agent-runbooks-on-demand-procedural-context
-<!-- agent:boundary:354fdb2f -->
+<!-- agent:boundary:406d0a2a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

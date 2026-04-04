@@ -837,7 +837,7 @@ That explains the delivery failure — the bounce wasn't just DMARC, it's becaus
 **For corky sync:** The `btak.dev` account in `.corky.toml` won't be able to sync (OAuth and IMAP both require an active account). You may want to temporarily disable it to avoid sync errors. Once the appeal resolves, re-enable it.
 
 Want me to update the Cloudflare routing config? (I'd need access to `src/cloudflare/` or the dashboard.)
-<!-- agent:boundary:1b078f70 -->
+<!-- agent:boundary:60b5c04d -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

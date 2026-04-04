@@ -9,7 +9,7 @@ claude_args: --dangerously-skip-permissions
 # eval-runner
 
 <!-- agent:status -->
-**Status:** First eval run complete (haiku baseline) | **Location:** `src/eval-runner/` | **Tests:** builds clean, 21 cases run
+**Status:** Async tokio + `--parallel N` implemented | **Location:** `src/eval-runner/` | **Tests:** builds clean, 21 cases run (haiku baseline)
 <!-- /agent:status -->
 
 ## Architecture
@@ -238,7 +238,7 @@ The only concern is **rate limiting** — Claude Code Max has per-minute limits.
 > Skip tokio/async entirely.
 
 Why? Does tokio add too much complexity? I would like this to scale in case rate limits increase...such as in enterprise environments.
-### Re: Why not tokio — reconsidered (HEAD)
+### Re: Why not tokio — reconsidered
 
 Fair pushback. The tokio avoidance was about minimizing dependencies for a ~300 LOC tool, but the complexity delta is actually small:
 
@@ -253,13 +253,45 @@ Practical bonus: the `anthropic-api` backend already depends on `reqwest`. Curre
 **Revised plan:** Re-add tokio. `--parallel N` becomes a tokio semaphore (bounded concurrency) instead of a thread pool. Future-proofs for enterprise scale, large case suites, and streaming response processing.
 
 **Decision: Use tokio for parallelism (2026-04-04).** Async subprocess + semaphore-based concurrency. Scales better than threads for enterprise use cases with high rate limits and large eval suites.
-<!-- agent:boundary:e3f93cfe -->
+
+do
+### Re: Tokio conversion implemented
+
+Done. Changes to `src/eval-runner/`:
+
+**Cargo.toml:**
+- Replaced `reqwest` `blocking` feature with async
+- Added `tokio` with `rt-multi-thread`, `macros`, `process`, `sync` features
+
+**main.rs:**
+- `main` → `#[tokio::main] async fn main()`
+- `call_llm`, `call_claude_cli`, `call_anthropic_api` → all async
+- `call_claude_cli` uses `tokio::process::Command` (async subprocess)
+- `call_anthropic_api` uses async `reqwest::Client` (no hidden runtime)
+- Added `--parallel N` flag (default 1, backwards compat)
+- Cases spawn as `tokio::spawn` tasks, bounded by `Arc<Semaphore>`
+- Results collected and sorted by original index for deterministic output
+
+**Usage:**
+```bash
+# Sequential (default, same as before) (HEAD)
+eval-runner run cases.yaml --model haiku
+
+# 4-wide parallel (HEAD)
+eval-runner run cases.yaml --model haiku --parallel 4
+
+# Full concurrency (rate-limit dependent) (HEAD)
+eval-runner run cases.yaml --model haiku --parallel 21
+```
+
+Builds clean. Ready to test with the agent-doc eval cases.
+<!-- agent:boundary:0b93c7c5 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [ ] Re-add tokio, convert to async with `--parallel N` semaphore-based concurrency
+- [x] Re-add tokio, convert to async with `--parallel N` semaphore-based concurrency
 - [ ] Run with sonnet model for target baseline
 - [ ] Add `make check` integration
 - [ ] JSON output format documentation

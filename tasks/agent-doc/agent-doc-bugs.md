@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Navigation swap spec complete — agent-doc files trigger swap, non-agent-doc files are no-op
+Root cause analysis complete — squash triggered cascade; nav-swap is the resilient fix
 <!-- /agent:status -->
 
 ## Exchange
@@ -369,7 +369,7 @@ This preserves agent sessions across navigation — the Claude Code process stay
 
 Make sure we keep the behavior when navigating to an unclaimed file that is not a md file or does not have the agent-doc frontmatter:
 - keep the previous claiming tmux pane open
-### Re: Non-agent-doc file navigation (HEAD)
+### Re: Non-agent-doc file navigation
 
 Correct — the swap should only trigger for agent-doc documents. Updated spec:
 
@@ -392,7 +392,28 @@ Editor navigates to file B (was viewing file A)
 ```
 
 This is the complete spec for the navigation swap feature. Adding to tasks/software/agent-doc.md.
-<!-- agent:boundary:bbbb92d0 -->
+How did we lose the previously working stash behavior?
+### Re: How stash behavior broke (HEAD)
+
+The **git squash** was the trigger that cascaded into the current broken state:
+
+1. **Before squash** — stash/swap worked. `sessions.json` had valid registrations, sync resolved files → panes, layout stayed stable.
+
+2. **Git squash** (219 → 1 commit) — snapshot for this file reset to 682 bytes (frontmatter only). Document was 13,141 bytes. Session associations became stale.
+
+3. **Sync ran with stale state** — files that were "managed" became "unmanaged" from sync's perspective (broken session resolution).
+
+4. **Unmanaged stash path had no last-pane guard** — `sync.rs:687-701` stashed every pane including the last one. Tmux closed the empty window.
+
+5. **Cascade** — once the window closed and panes scattered (wrong sessions, stale registry), each subsequent sync made it worse: new windows, pane migration, duplicated `agent-doc` windows.
+
+**Three contributing bugs:**
+1. Unmanaged-files stash path lacked last-pane guard → **fixed** (sync.rs:687)
+2. No retrieval logic for stashed claimed panes → **spec'd** (nav-swap feature)
+3. Git squash invalidated snapshot + session state → operational hazard (can't fully prevent, but nav-swap would make recovery automatic)
+
+The nav-swap feature is the real fix — even when state gets corrupted, sync would find the claimed pane in stash and bring it back instead of creating new windows.
+<!-- agent:boundary:38dd6727 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

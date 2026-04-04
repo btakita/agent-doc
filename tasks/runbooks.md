@@ -106,7 +106,7 @@ OK: no issues found
 The audit correctly flags orphans because the dev SKILL.md uses prose references (`See runbooks/...`) rather than the trigger format (`` `phrase` -- runbooks/file.md ``). The SKILL.md files should be updated to use the trigger format for full audit coverage.
 
 Not yet committed to the agent-runbooks submodule -- changes in working tree.
-<!-- agent:boundary:434e03bc -->
+<!-- agent:boundary:cf5d8fd4 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

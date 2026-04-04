@@ -329,7 +329,7 @@ is there a pending release
 4. Version-sync check added to `make check`
 
 Cargo.toml is still at 0.31.9. Working tree is clean. No user-facing changes that warrant a release. These infra improvements will ship naturally with the next functional release.
-<!-- agent:boundary:1700d5fe -->
+<!-- agent:boundary:3a67548d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

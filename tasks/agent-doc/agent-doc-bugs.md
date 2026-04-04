@@ -306,7 +306,7 @@ Done. Created `.cargo/config.toml` with `[patch.crates-io]` for tmux-router, add
 - **Publishing**: `cargo publish` ignores `[patch]` sections, uses crates.io
 
 Build and tests pass with the override active. Pushed `.gitignore` update to GitHub.
-<!-- agent:boundary:709e167a -->
+<!-- agent:boundary:aa4684e4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

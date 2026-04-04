@@ -1760,7 +1760,7 @@ Binary wheel still needs manylinux container (glibc 2.43 too new). Source dist i
 - [x] PyPI (source dist)
 - [x] GitHub Release
 - [x] `cargo install --path .`
-<!-- agent:boundary:b0dfe5bb -->
+<!-- agent:boundary:795effc7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -180,14 +180,34 @@ This is general enough to apply to:
 Saved as `feedback_distribution_aware_reorg.md` in auto memory.
 
 Where is `feedback_distribution_aware_reorg.md` saved?
-### Re: Location of feedback_distribution_aware_reorg.md (HEAD)
+### Re: Location of feedback_distribution_aware_reorg.md
 
 ```
 ~/.claude/projects/-home-brian-work-btakita-agent-loop/memory/feedback_distribution_aware_reorg.md
 ```
 
 This is Claude Code's project-scoped auto memory for agent-loop. The index file `MEMORY.md` in that same directory is loaded at the start of every conversation. The feedback entry is listed under "Architecture Decisions".
-<!-- agent:boundary:86118c52 -->
+
+Should this auto-memory be a runbook instead? Does automemory inflate context?
+### Re: Auto memory vs runbooks (HEAD)
+
+**No, this should stay as auto memory.** Different purposes:
+
+| | Auto Memory | Runbook |
+|---|---|---|
+| **When loaded** | Conversation start (always) | On-demand (when executing) |
+| **Purpose** | Behavioral guardrails | Procedural steps |
+| **Context cost** | ~1 line per entry in MEMORY.md index | 0 unless invoked |
+| **Example** | "Don't move co-located files" | "How to release to crates.io" |
+
+**Does auto memory inflate context?** Minimally. Only the `MEMORY.md` index loads at conversation start (~96 lines total). Individual memory files are read on-demand when the agent judges them relevant from the index line.
+
+The "distribution-aware reorg" feedback is a guardrail -- it prevents a mistake *before* it happens. A runbook would require the agent to remember to read it before reorganizing, which defeats the purpose.
+
+**Rule of thumb:**
+- If it's "don't do X" or "always do Y" -> auto memory (always loaded)
+- If it's "step 1, step 2, step 3 to accomplish Z" -> runbook (loaded when doing Z)
+<!-- agent:boundary:a37c8cb8 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

@@ -89,7 +89,7 @@ Sync IS being called, but `robert-ross-granola.md` has no `agent_doc_session` in
 3. Update the granola import runbook to generate a session UUID at creation time
 
 Should I implement all three?
-<!-- agent:boundary:57d5bcdc -->
+<!-- agent:boundary:8b0f5ba9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

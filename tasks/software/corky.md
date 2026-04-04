@@ -77,7 +77,7 @@ claude_args: --dangerously-skip-permissions
 <!-- agent:exchange mode=append -->
 *Compacted. Covers v0.24.0 through v0.26.0.*
 
-### This session (HEAD)
+### This session
 
 **v0.24.0** — Gmail API threading (Message-ID extraction, `thread_id` in draft YAML + API requests), account-based doc auth (`--account` flag), Google Drive upload/Docs read-write/Sheets read, contact delete. Published: crates.io, PyPI (`license-files` fix), GitHub Release.
 
@@ -98,13 +98,29 @@ claude_args: --dangerously-skip-permissions
 - Verify Google Sheets sharing / GCP test users for `brian.takita@gmail.com`
 - Re-test sheet read (403 on last attempt)
 - Manylinux binary wheel for PyPI (needs container/CI)
-<!-- agent:boundary:82a64c6b -->
+do
+- Manylinux binary wheel (nice-to-have, needs container/CI)
+### Re: Manylinux binary wheel — CI fixed (HEAD)
+
+**Root causes (2):**
+1. CI workflows only cloned `instruction-files` but not `agent-kit` (path dependency added in v0.24.0)
+2. `env!("CORKY_DEFAULT_GCP_CLIENT_ID")` fails at compile time without the env var — changed to `option_env!()` with empty string fallback
+
+**Fixes:**
+- All 3 CI workflows (ci, pypi, release) now clone both `instruction-files` and `agent-kit`
+- GCP credentials optional at build time — CI users get empty defaults, auth prompts at runtime if needed
+- Committed `b9b56b9`, pushed, re-tagged v0.26.0
+
+**PyPI workflow triggered:** https://github.com/btakita/corky/actions/runs/23985173123
+
+This should produce manylinux wheels for x86_64 Linux, macOS (Intel + ARM), and Windows.
+<!-- agent:boundary:90ee676e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- Monitor PyPI workflow run
 - Verify sheet sharing / GCP test users
 - Re-test sheet read
-- Manylinux binary wheel (nice-to-have, needs container/CI)
 <!-- /agent:pending -->

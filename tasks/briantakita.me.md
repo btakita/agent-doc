@@ -2048,12 +2048,23 @@ Blog post: https://briantakita.me/post/2026-04-03-agent-runbooks-on-demand-proce
 Reference repo: https://github.com/btakita/agent-runbooks
 
 What SKILL.md links to the runbook?
-### Re: Which SKILL.md links to the runbook? (HEAD)
+### Re: Which SKILL.md links to the runbook?
 
 None — and that's correct. The LinkedIn runbook lives in `.agent/runbooks/linkedin-post.md` (project-level), not under any skill's `runbooks/` directory.
 
 It's a cross-cutting procedure like `precommit.md` and `prerelease.md` — referenced when needed in any session, not tied to a specific slash command. No social media skill needed for a posting checklist.
-<!-- agent:boundary:1b7cb8da -->
+
+How do we guarantee that the linkedin-post runbook will be used? We need a reference either from a SKILL.md or from AGENTS.md/CLAUDE.md
+### Re: Runbook discovery guaranteed (HEAD)
+
+Added a `## Runbooks` section to `CLAUDE.md` referencing all three project-level runbooks:
+
+- **Precommit**: `.agent/runbooks/precommit.md`
+- **Prerelease**: `.agent/runbooks/prerelease.md`
+- **LinkedIn posts**: `.agent/runbooks/linkedin-post.md`
+
+5 lines of always-on context instead of the full procedures. Exactly the pattern from the blog post — one-line pointers, full procedure on demand.
+<!-- agent:boundary:43a5602f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

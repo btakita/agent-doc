@@ -136,7 +136,7 @@ yes
 Removed `sync_after_claim` from `run_with_tmux()` in route.rs. The JB plugin's sync call (with correct `window` and `col_args`) is now the only sync per editor event. No more redundant second sync racing with stash operations.
 
 634 tests pass. Built, installed. Try switching editor tabs — the glitchiness should be gone.
-<!-- agent:boundary:1e1dbb00 -->
+<!-- agent:boundary:db29801c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

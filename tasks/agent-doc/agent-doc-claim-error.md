@@ -56,7 +56,7 @@ JetBrains options:
 - Per-file: right-click gutter → Annotate → uncheck
 - Directory: Settings → Version Control → Directory Mappings (heavy-handed)
 - **Better: throttle VCS refresh in the agent-doc plugin** — the plugin fires `VirtualFileManager.getInstance().asyncRefresh()` on every commit. Could skip or debounce for task documents.
-<!-- agent:boundary:8474bb2e -->
+<!-- agent:boundary:27f38a1d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

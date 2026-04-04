@@ -144,7 +144,7 @@ No PyPI versions were skipped — the gap is a sync issue:
 - Versions 0.31.6-0.31.8 were never published to PyPI — only crates.io + GitHub
 
 The prerelease runbook says "sync pyproject.toml with Cargo.toml" — it should have been bumped at each release regardless of target. Going forward, both files stay in sync on every version bump.
-<!-- agent:boundary:8c4720eb -->
+<!-- agent:boundary:eb4fc3c4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

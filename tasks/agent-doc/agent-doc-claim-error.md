@@ -164,7 +164,7 @@ Updated `.agent/runbooks/prerelease.md` Target: pypi section with:
 - Docker command using `/dev/null` mask for `.cargo/config.toml`
 - Upload command using `pass pypi/publish_token`
 - Security note: never mount the entire workspace
-<!-- agent:boundary:1fddb5d2 -->
+<!-- agent:boundary:f5937922 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

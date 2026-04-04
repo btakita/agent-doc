@@ -912,20 +912,26 @@ Investigated each. These are **legitimate model challenges**, not rubric issues:
 - System prompt refined from 32 lines to 4 discrimination rules
 - All rubrics tightened to binary discrimination pattern
 - Makefile: `eval`, `eval-smoke`, `eval-regression`, `eval-json`
-### Re: Deterministic preprocessing vs LLM interpretation (HEAD)
+### Re: Deterministic preprocessing vs LLM interpretation
 
 These are excellent questions. The core insight: **move what you can to deterministic binary logic, leave only ambiguous interpretation to the LLM.**
 
 #### Blockquote annotations
 Blockquotes (`>`) are ambiguous — they can be user annotations, quotes from elsewhere, or even agent-rendered content. A deterministic spec would be too rigid. **Better approach:** The agent-doc preflight could annotate the diff with metadata: `[user-added-blockquote]` tag in the diff output. This gives the LLM a clear signal without requiring it to infer intent from `>` alone. But honestly, this is rare enough in practice that the current behavior (sometimes handles it, sometimes doesn't) is acceptable.
 
+I do want move in the direction of annotating the source of the content. I want clean separation with user content vs agent content. There will be an editor view that will color the different sources. See tasks/recruit/robert-ross.md and tasks/recruit/robert-ross-granola.md
+
 #### Comment stripping — deterministic preprocessing
 **Yes, this should be deterministic.** And it already is in the real system — `agent-doc preflight` strips comments BEFORE computing the diff. The eval cases include raw diffs with comments still present because they were written before preflight was integrated. The fix: **regenerate eval case diffs through the actual preflight pipeline** so they match what the model sees in production. The `mixed-valid-and-comment` case should have comments already stripped in its diff — then the model would never see them.
 
 This is a significant insight: the eval cases should use **post-preflight diffs**, not raw diffs. That way we're testing the model on exactly what it receives in production.
 
+agreed
+
 #### Inline annotations — deterministic parsing
 A well-defined annotation spec would help, but colon-appended annotations (`line: user feedback`) are informal. Deterministic parsing would require a grammar for detecting them, which is brittle. **Better approach:** The inline-annotation-with-truncation case is inherently complex (3 behaviors in one case). Consider splitting it into 2 cases: one for annotations, one for truncation detection. Simpler cases = more stable scores.
+
+agreed
 
 #### Multi-topic splitting — deterministic chunking
 **This is the most promising candidate for deterministic preprocessing.** The preflight could:
@@ -935,6 +941,8 @@ A well-defined annotation spec would help, but colon-appended annotations (`line
 3. The LLM then processes each chunk with clear boundaries
 
 This would be an `agent-doc` feature, not an eval-runner feature — the preflight output would include structured chunks alongside the raw diff. Multi-topic cases would naturally improve because the model receives pre-parsed input.
+
+The chunking should already occur with the diff. And in my previous prompt in this document, there was a single chunk with 4 prompts on 4 different lines. So it does seem like the model should handle this. Perhaps this should be detailed in a runbook to keep the SKILL lean?
 
 **Summary of the deterministic vs LLM split:**
 
@@ -947,15 +955,46 @@ This would be an `agent-doc` feature, not an eval-runner feature — the preflig
 | Truncation detection | LLM | Keep as LLM — needs contextual judgment |
 
 The biggest wins come from (1) fixing eval cases to use post-preflight diffs and (2) deterministic multi-topic chunking in the preflight pipeline.
-<!-- agent:boundary:993a0701 -->
+### Re: Content source annotation, chunking, and runbooks (HEAD)
+
+#### Source annotation for editor view
+Good direction. Annotating content with its source (user vs agent) at the data layer enables:
+- Editor view coloring (user = green, agent = neutral)
+- Eval cases that test source-awareness ("did the model recognize this as user-authored?")
+- Clean separation for compaction (agent content can be summarized, user content is immutable)
+
+This is an agent-doc feature — the CRDT merge already tracks which side wrote what. Surfacing that in the diff output (e.g., `+[user] I'd rather start with corky`) would make the blockquote case trivial: the model sees `[user]` and knows it's an annotation.
+
+I'll look at `tasks/recruit/robert-ross.md` and `tasks/recruit/robert-ross-granola.md` for the design reference.
+
+#### Post-preflight diffs for eval cases — agreed
+Action item: regenerate the `mixed-valid-and-comment` case diff through actual preflight (comments stripped). The case becomes: "model sees only the non-comment content" — which is what happens in production. This should flip it from FAIL to PASS trivially.
+
+#### Multi-topic chunking — model should handle this
+You're right. The diff already presents changes as a single chunk. When you wrote 4 prompts on 4 lines in a previous cycle, the model handled them fine. The multi-topic-approval case at 0.60 is close to passing — the model does address all items, just not with enough separation for the judge.
+
+**Runbook approach is better than SKILL bloat.** A runbook like `multi-topic-response.md` would document:
+- Process each user item individually
+- Use `### Re:` headers for each topic
+- Don't bundle multiple items into one paragraph
+
+The SKILL stays lean, the runbook provides detailed guidance when needed. The model loads the runbook when it detects multi-topic input.
+
+#### Next actions
+1. Regenerate `mixed-valid-and-comment` diff through preflight
+2. Split `inline-annotation-with-truncation` into 2 cases
+3. Draft `multi-topic-response` runbook (for agent-doc, not eval-runner)
+4. Track content-source annotation as agent-doc feature (separate session)
+<!-- agent:boundary:8482f8fe -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [ ] Regenerate eval case diffs through actual preflight pipeline (post-strip)
-- [ ] Design multi-topic chunking for preflight output
-- [ ] Split inline-annotation-with-truncation into 2 simpler cases
+- [ ] Regenerate `mixed-valid-and-comment` case diff through actual preflight
+- [ ] Split `inline-annotation-with-truncation` into 2 simpler cases
+- [ ] Draft `multi-topic-response` runbook for agent-doc
+- [ ] Content-source annotation feature (agent-doc, separate session)
 - [ ] Design agentic eval fixture format (future — v2)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 <!-- /agent:pending -->

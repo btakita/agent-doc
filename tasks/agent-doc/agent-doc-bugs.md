@@ -467,7 +467,7 @@ Good catch. The `---` separator convention was documented in SKILL.md but the `c
 **Added test:** `classify_multi_topic_with_separator` — contiguous added block with `---` between topics correctly classified as `MultiTopic`.
 
 All 437 tests pass, clippy clean.
-<!-- agent:boundary:d29fb7e8 -->
+<!-- agent:boundary:f30740f4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

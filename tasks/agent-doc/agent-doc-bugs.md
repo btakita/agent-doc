@@ -338,7 +338,7 @@ When you navigate back:
 3. **Pin registered panes** — treat panes in the registry as "pinned" to their window; only explicit user action (or `--force`) can stash them.
 
 Option 1 is the simplest and most correct: claimed panes should never be stashed by sync. The user explicitly claimed them — sync should respect that.
-<!-- agent:boundary:9297fc94 -->
+<!-- agent:boundary:ce3c41b4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

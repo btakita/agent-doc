@@ -14,7 +14,7 @@ agent-doc v0.31.6 released to crates.io + GitHub
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-### Session Summary (compacted 2026-04-04 04:00) (HEAD)
+### Session Summary (compacted 2026-04-04 04:00)
 
 **Release: agent-doc v0.31.6 + tmux-router v0.3.9**
 
@@ -61,12 +61,24 @@ agent-doc v0.31.6 released to crates.io + GitHub
 - Debug logging now enabled (`AGENT_DOC_LOG=debug` in .env)
 
 **Test suite: 634 tests (193 lib + 403 bin + 38 integration)**
-<!-- agent:boundary:2e2bdf8d -->
+
+Release?
+modified:   src/tmux-router (new commits, modified content)
+### Re: Submodule pointer update (HEAD)
+
+Both submodules have new commits that need their parent repo pointers updated:
+
+- `src/tmux-router`: 8da141e → 9c8f13e (v0.3.9 release)
+- `src/agent-doc`: fd69c0c → e145e79 (v0.31.6 release)
+
+Both are already published to crates.io and pushed to GitHub. The parent `agent-loop` repo just needs its submodule pointers committed to track the new versions.
+
+Should I commit the submodule pointer updates?
+<!-- agent:boundary:bd9e1679 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] All items complete
-- [x] agent-doc v0.31.6 released
+- [ ] Commit submodule pointer updates in parent repo (tmux-router + agent-doc)
 <!-- /agent:pending -->

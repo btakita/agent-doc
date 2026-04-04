@@ -7,13 +7,13 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Exchange compacted — session summary preserved
+Identified SKILL.md gap: no runbook reference section; compact should use `agent-doc compact`
 <!-- /agent:status -->
 
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-### Session Summary (compacted 2026-04-04) (HEAD)
+### Session Summary (compacted 2026-04-04)
 
 **Bugs fixed this session:**
 
@@ -45,8 +45,33 @@ Editor navigates to file B (was viewing file A)
 - %433 (bugs) + %431 (runbooks) in 5:agent-doc (correct)
 - %434 (claim-error) + %436 (briantakita.me) displaced in session 3
 - %13 (corky) in 1:stash, %84/%399/%400 shells
-****
-<!-- agent:boundary:39310cca -->
+
+Why did you not use the compact-exchange runbook? Which would have told you to use `agent-doc compact` instead of the Edit tool?
+What is missing from the agent-doc SKILL.md for runbook usage?
+### Re: Compact runbook and SKILL.md gap (HEAD)
+
+**Why I didn't use the runbook:** I forgot the compact-exchange runbook existed at `.claude/skills/agent-doc/runbooks/compact-exchange.md`. I went straight to the Edit/Write tool instead of checking runbooks first.
+
+**What the runbook says I should have done:**
+1. Read exchange content
+2. Summarize (preserve decisions, discoveries, open items)
+3. Run `agent-doc compact <FILE> --message "summary text"`
+   - Archives original to `.agent-doc/archives/`
+   - Replaces exchange with archive pointer + summary
+   - Atomic snapshot update
+4. Commit via `agent-doc commit`
+
+Instead I used `Write` to overwrite the file, then manually updated the snapshot — fragile and loses the archive.
+
+**What's missing from SKILL.md for runbook usage:**
+
+The SKILL.md has no section about runbooks. It should instruct the agent to:
+1. Check `.claude/skills/agent-doc/runbooks/` for relevant runbooks before executing operations like compaction
+2. Specifically mention `compact-exchange.md` when "compact exchange" is requested
+3. Use `agent-doc compact --message` instead of Edit/Write for exchange compaction
+
+This is a SKILL.md gap — the skill should reference its own runbooks as standard operating procedures.
+<!-- agent:boundary:33c1c472 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -62,4 +87,5 @@ Editor navigates to file B (was viewing file A)
 - [x] Fix: window closure — last-pane guard in unmanaged stash path
 - [x] Navigation swap: cross-session joins + --window authority + path dep
 - [ ] Publish tmux-router 0.3.9 to crates.io (then revert path dep)
+- [ ] Add runbook reference section to SKILL.md
 <!-- /agent:pending -->

@@ -1917,7 +1917,7 @@ If sooner: Monday April 7, 9 AM ET works too — slightly lower than Tue-Thu but
 Excited to get it out. Today is Saturday. Sunday is Easter. I have an interview on Monday at 13:30 Eastern.
 Should I get the blog teaser out on Monday morning?
 I have have a video with another blog post in the pipeline.
-### Re: Monday morning timing (HEAD)
+### Re: Monday morning timing
 
 Yes, **Monday April 7, 9 AM ET** works. Your interview is at 1:30 PM — the LinkedIn post goes out 4.5 hours before. If your interviewer checks your profile, the runbooks post is fresh and shows you're actively building and publishing. Good look.
 
@@ -1928,11 +1928,32 @@ Easter Sunday means Monday feeds will be quieter, but developers catching up aft
 **Plan:**
 1. Monday April 7, ~9 AM ET — runbooks LinkedIn teaser
 2. Wed/Thu April 9-10 — second blog post + video
-<!-- agent:boundary:81535db2 -->
+
+I also have a call with robert-ross tomorrow. He really likes my activity.
+See the call transcript in mail/contacts/robert-ross.
+
+Should I post it now instead?
+
+I als
+### Re: Post now vs Monday (HEAD)
+
+Given Robert Ross — founder of Dreamable, building agent-native products — likes your activity and you have a call tomorrow... **yes, post it now.**
+
+1. **Robert is your highest-value audience right now.** Fresh technical post about agent runbooks on your profile before tomorrow's call is worth more than optimizing for general feed engagement.
+2. **He'll see it** regardless of Saturday's lower general engagement — he's already watching your profile.
+3. **Monday interview** — you'll have two fresh posts visible. Shows consistent output.
+4. **Second blog post + video** still available for the Wed/Thu high-engagement slot.
+
+**Revised plan:**
+1. **Now (Saturday April 5)** — runbooks LinkedIn teaser
+2. **Wed/Thu April 9-10** — second blog post + video
+
+Want me to format the draft for LinkedIn paste?
+<!-- agent:boundary:16901604 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn post: schedule for Mon Apr 7 ~9 AM ET (draft ready)
+- LinkedIn post: post NOW (draft ready, format for paste)
 - Second blog post + video: target Wed/Thu Apr 9-10
 - Cleanup: remove stale directories
 <!-- /agent:pending -->

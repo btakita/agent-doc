@@ -24,4 +24,3 @@ multiple criteria
 aiqi
 
 - service contracts cross industry
-

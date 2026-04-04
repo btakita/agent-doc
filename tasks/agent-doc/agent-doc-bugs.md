@@ -68,7 +68,7 @@ This means any file with a session UUID that appears in the editor gets initiali
 Should I implement this?
 yes...and we have another case where the entrypoint should be applied.
 When the JB editor focuses on the file...there is a JB prompt `Sync: --col tasks/agent-doc/agent-doc-bugs.md --col tasks/recruit/robert-ross-granola.md [focus: tasks/recruit/robert-ross-granola.md]`. This should also trigger the entrypoint. Is `agent-doc sync` being called in this case or is the prompt just showing up? I notice that the tmux pane focus does not change.
-### Re: Two issues found — no session UUID + focus broken (HEAD)
+### Re: Two issues found — no session UUID + focus broken
 
 **Sync log reveals the root cause:**
 
@@ -89,13 +89,26 @@ Sync IS being called, but `robert-ross-granola.md` has no `agent_doc_session` in
 3. Update the granola import runbook to generate a session UUID at creation time
 
 Should I implement all three?
-<!-- agent:boundary:8b0f5ba9 -->
+Yes...and when I tried to claim robert-ross-granola.md...it worked this time. Why?
+### Re: All three fixes implemented + why claim worked (HEAD)
+
+**Why claim worked this time:** You used a different pane (%487). The previous attempt was on %483, which was claimed by this agent-doc-bugs file. Claims log: `Claimed robert-ross-granola.md for pane %487`.
+
+**Three fixes implemented:**
+
+1. **`ensure_initialized()` assigns session UUIDs** — if a file has `agent_doc_format` but no `agent_doc_session`, generates and writes a UUID before the snapshot check
+2. **Sync's `resolve_file` calls `ensure_initialized()`** — every file in `col_args` goes through init before frontmatter check. Files with format but no UUID get one assigned.
+3. **Granola import templates include `agent_doc_session`** — updated `SKILL.md` and `runbooks/import.md`
+
+637 tests pass, clippy clean, release built.
+<!-- agent:boundary:c55ed9a8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] ensure_initialized: assign session UUID to template files missing one
-- [ ] Add ensure_initialized to sync's resolve_file (before session check)
-- [ ] Update granola import runbook to generate session UUID
+- [x] ensure_initialized: assign session UUID to template files missing one
+- [x] Add ensure_initialized to sync's resolve_file (before session check)
+- [x] Update granola import runbook to generate session UUID
+- [ ] Release with sync init fix (when ready)
 <!-- /agent:pending -->

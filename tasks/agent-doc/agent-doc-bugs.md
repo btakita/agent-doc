@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-P1-P3 + escape bug fix shipped this cycle
+P1-P3 + JB plugin Gson migration (v0.2.44) shipped
 <!-- /agent:status -->
 
 ## Exchange
@@ -320,7 +320,7 @@ Do we need to make a similar fix to the VSCode plugin?
 **VS Code plugin is NOT affected.** It uses `JSON.parse()` (the standard JavaScript JSON parser) which handles all escape sequences correctly. The bug was specific to the JetBrains plugin's hand-rolled JSON parser in Kotlin.
 
 Does Kotlin have a JS Parser library that we can use?
-### Re: Kotlin JSON parsing options (HEAD)
+### Re: Kotlin JSON parsing options
 
 Yes. The best option for IntelliJ plugins is the platform's **bundled Gson** (`com.google.gson`). It ships with every IntelliJ installation — zero new dependencies.
 
@@ -342,7 +342,26 @@ This handles all JSON escaping correctly (like VS Code's `JSON.parse()`) and eli
 - Keep the hand-rolled parser with the NUL placeholder fix (already working)
 
 **Recommendation:** Replace `extractStringField` with Gson. Zero new deps, correct by construction. Want me to do it?
-<!-- agent:boundary:137c7bf8 -->
+Yes
+### Re: Yes — Replaced hand-rolled JSON parser with Gson (HEAD)
+
+Done. Replaced all manual JSON parsing in `PatchWatcher.kt` with `com.google.gson.JsonParser`.
+
+**What was removed** (~80 lines):
+- `extractStringField` with hand-rolled escape handling
+- `findUnescapedQuote`
+- `findMatchingBracket`
+- `findMatchingBrace`
+
+**What replaced it** (~30 lines):
+- `parsePatchJson` now uses `JsonParser.parseString(json).asJsonObject` and type-safe accessors (`.asString`, `.asBoolean`, `.asJsonArray`)
+- `extractStringField` is now a 5-line function delegating to Gson
+- All JSON escape sequences handled correctly by Gson (no more NUL placeholder hack)
+
+**Plugin bumped to v0.2.44.** Install from `build/distributions/agent-doc-jetbrains-0.2.44.zip`.
+
+Builds clean. Zero new dependencies — Gson ships with every IntelliJ installation.
+<!-- agent:boundary:3a3ead1e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -352,8 +371,7 @@ This handles all JSON escaping correctly (like VS Code's `JSON.parse()`) and eli
 - [x] Update SKILL.md to route based on diff_type — DONE
 - [x] Post-preflight diff generation for eval cases (P2) — DONE
 - [x] Implement annotated diff format in preflight (P3) — DONE
-- [x] Fix write pipeline escape bug + bump JB plugin to v0.2.43 — DONE
-- [ ] Replace hand-rolled JSON parser with Gson in PatchWatcher.kt
+- [x] Fix write pipeline escape bug + Gson migration (JB plugin v0.2.44) — DONE
 - [ ] Implement content-source annotation sidecar (P4)
 - [ ] Design reproducible operation log format (P5)
 - [ ] Add `---` prompt separator convention to SKILL.md

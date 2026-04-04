@@ -74,7 +74,7 @@ Both submodules have new commits that need their parent repo pointers updated:
 Both are already published to crates.io and pushed to GitHub. The parent `agent-loop` repo just needs its submodule pointers committed to track the new versions.
 
 Should I commit the submodule pointer updates?
-<!-- agent:boundary:bd9e1679 -->
+<!-- agent:boundary:658349fb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

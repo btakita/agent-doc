@@ -219,7 +219,7 @@ Skills installed. Claude Code now shows `corky`, `email`, `linkedin` as separate
 Runbooks (459 lines) are on-demand only — never loaded unless the user requests a specific operation.
 
 The biggest win: Claude Code skill matching only loads the *relevant* skill per invocation. A monolithic skill would load all 695 lines for every corky-related task.
-<!-- agent:boundary:5f4636a9 -->
+<!-- agent:boundary:07bee94d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

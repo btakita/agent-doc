@@ -9,7 +9,7 @@ agent_doc_write: crdt
 <!-- agent:status patch=replace -->
 <!-- /agent:status -->
 
-## Exchange
+## Exchange (HEAD)
 
 <!-- agent:exchange patch=append -->
 In AGENTS.md and in the SKILL.md that we control...Please propose any set of instructions that can be extracted as a runbook
@@ -363,7 +363,7 @@ Added to the agent-doc-bugs task scope.
 Using the [Markdown Annotations spec](https://github.com/iainc/Markdown-Annotations), a notification in `tasks/briantakita.me.md` would look like:
 
 ```markdown
-## Exchange (HEAD)
+## Exchange
 
 ...existing content...
 
@@ -394,7 +394,7 @@ The `*tasks/runbooks.md: 3850,350` annotation marks the notification as **refere
 >
 > **Re-evaluate:** <affected conclusions>
 ```
-<!-- agent:boundary:8c7c2e03 -->
+<!-- agent:boundary:49d122f3 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

@@ -28,8 +28,25 @@
 
 use anyhow::{Context, Result};
 use std::path::Path;
+use std::process::Command;
 
 use crate::{component, snapshot, write};
+
+/// Format a source annotation blockquote for transferred/extracted content.
+fn format_source_annotation(source: &Path, action: &str) -> String {
+    let timestamp = Command::new("date")
+        .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    format!(
+        "\n> **[{} from {}]** ({})\n>\n",
+        action.to_uppercase(),
+        source.display(),
+        timestamp,
+    )
+}
 
 /// Extract the last exchange entry from source and append to target.
 ///
@@ -76,7 +93,10 @@ pub fn run(source: &Path, target: &Path, component_name: Option<&str>) -> Result
     write::atomic_write_pub(source, &new_source)?;
     snapshot::save(source, &new_source)?;
 
-    // Append extracted content to target's exchange component
+    // Append extracted content to target's exchange component with source annotation
+    let annotation = format_source_annotation(source, "Extract");
+    let annotated_content = format!("{}{}", annotation, extracted.trim_start());
+
     let target_components = component::parse(&target_content)
         .context("failed to parse components in target")?;
 
@@ -84,10 +104,10 @@ pub fn run(source: &Path, target: &Path, component_name: Option<&str>) -> Result
     let new_target = if let Some(tc) = target_exchange {
         let existing = tc.content(&target_content);
         let appended = format!("{}{}", existing.trim_end(), if existing.trim().is_empty() { "\n" } else { "\n\n" });
-        tc.replace_content(&target_content, &format!("{}{}\n", appended.trim_end(), extracted.trim_end()))
+        tc.replace_content(&target_content, &format!("{}{}\n", appended.trim_end(), annotated_content.trim_end()))
     } else {
         // No matching component in target — append at end
-        format!("{}\n{}\n", target_content.trim_end(), extracted.trim_end())
+        format!("{}\n{}\n", target_content.trim_end(), annotated_content.trim_end())
     };
 
     write::atomic_write_pub(target, &new_target)?;
@@ -156,16 +176,19 @@ pub fn transfer(source: &Path, target: &Path, component_name: &str) -> Result<()
     write::atomic_write_pub(source, &new_source)?;
     snapshot::save(source, &new_source)?;
 
-    // Append to target component (or end of file)
+    // Append to target component (or end of file) with source annotation
+    let annotation = format_source_annotation(source, "Transfer");
+    let annotated_content = format!("{}{}", annotation, content.trim_start());
+
     let target_components = component::parse(&target_content)
         .context("failed to parse components in target")?;
 
     let target_comp = target_components.iter().find(|c| c.name == component_name);
     let new_target = if let Some(tc) = target_comp {
         let existing = tc.content(&target_content);
-        tc.replace_content(&target_content, &format!("{}{}\n", existing, content.trim_end()))
+        tc.replace_content(&target_content, &format!("{}{}\n", existing, annotated_content.trim_end()))
     } else {
-        format!("{}\n{}\n", target_content.trim_end(), content.trim_end())
+        format!("{}\n{}\n", target_content.trim_end(), annotated_content.trim_end())
     };
 
     write::atomic_write_pub(target, &new_target)?;

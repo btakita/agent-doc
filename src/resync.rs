@@ -173,10 +173,12 @@ impl std::fmt::Display for Issue {
 /// Called automatically before route, sync, and claim operations.
 /// Returns the number of registry entries removed.
 pub fn prune() -> Result<usize> {
+    tracing::debug!("resync::prune start");
     let tmux = Tmux::default_server();
     let registry_path = sessions::registry_path();
     let removed = tmux_router::prune(&registry_path, &tmux)?;
     if removed > 0 {
+        tracing::debug!(removed, "resync: pruned stale sessions");
         eprintln!("resync: pruned {} stale session(s)", removed);
     }
 
@@ -802,6 +804,17 @@ fn find_return_target_bulk(
         }
     }
 
+    // 3. Fallback: if original window is stash (or unknown), try the first non-stash
+    // window in ANY tmux session. This handles panes that were registered while in the
+    // stash window — their `window` field points to the stash, so step 1 can't return them.
+    for (window_id, window_name, _session, _) in windows {
+        if !is_stash_window_name(window_name) {
+            if let Some((pid, _)) = panes.iter().find(|(_, (wid, _, _))| wid == window_id) {
+                return Some(pid.clone());
+            }
+        }
+    }
+
     None
 }
 
@@ -956,6 +969,7 @@ fn purge_orphaned_agent_panes_with_registry(tmux: &Tmux, registry: &sessions::Se
 
 /// Detect issues with alive panes: wrong tmux session or wrong process.
 fn detect_issues(tmux: &Tmux) -> Vec<Issue> {
+    tracing::debug!("resync::detect_issues start");
     let registry = match sessions::load() {
         Ok(r) => r,
         Err(e) => {
@@ -1162,6 +1176,7 @@ fn apply_fixes(tmux: &Tmux, issues: &[Issue]) -> Result<usize> {
     if issues.is_empty() {
         return Ok(0);
     }
+    tracing::debug!(issue_count = issues.len(), "resync::apply_fixes");
 
     let registry_path = sessions::registry_path();
     let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;

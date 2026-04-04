@@ -118,6 +118,7 @@ pub fn run(file: &Path, pane: Option<&str>, debounce_ms: u64, col_args: &[String
 }
 
 pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: u64, col_args: &[String]) -> Result<()> {
+    tracing::debug!(file = %file.display(), pane, debounce_ms, cols = ?col_args, "route::run start");
     let _ = resync::prune(); // Clean stale entries before lookup
 
     // Debounce: wait for file mtime to settle before proceeding
@@ -147,16 +148,47 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
     // All paths resolve to a pane_id, then ONE sync call handles layout.
     // This prevents propagation bugs where cross-cutting behavior (sync)
     // is added to one path but missed on others.
+
+    // Snapshot panes before route so we can clean up orphans on failure.
+    let window_arg = col_args.first()
+        .and_then(|_| tmux.cmd()
+            .args(["display-message", "-t", &format!("{}:agent-doc", target_session), "-p", "#{window_id}"])
+            .output().ok())
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    let panes_before: Vec<String> = window_arg.as_deref()
+        .and_then(|w| tmux.list_window_panes(w).ok())
+        .unwrap_or_default();
+
     let pane_id = resolve_or_create_pane(
         tmux, file, pane, col_args,
         &session_id, &file_path, &target_session,
-    )?;
+    );
 
-    // Post-route sync: align tmux layout to editor's col_args.
-    // This is the ONLY place sync runs after route — never in individual paths.
-    sync_after_claim(tmux, &pane_id, col_args);
-
-    Ok(())
+    match pane_id {
+        Ok(ref pid) => {
+            // Post-route sync: align tmux layout to editor's col_args.
+            // This is the ONLY place sync runs after route — never in individual paths.
+            sync_after_claim(tmux, pid, col_args);
+            Ok(())
+        }
+        Err(e) => {
+            // Clean up orphaned panes created during the failed route attempt.
+            // Compare current panes to the snapshot and kill any new ones.
+            if let Some(w) = window_arg.as_deref() {
+                if let Ok(panes_after) = tmux.list_window_panes(w) {
+                    for p in &panes_after {
+                        if !panes_before.contains(p) {
+                            eprintln!("[route] cleaning up orphaned pane {} (created during failed route)", p);
+                            tracing::warn!(pane = %p, "route: killing orphaned pane from failed route");
+                            let _ = tmux.raw_cmd(&["kill-pane", "-t", p]);
+                        }
+                    }
+                }
+            }
+            Err(e)
+        }
+    }
 }
 
 /// Resolve an existing pane or create a new one. Returns the pane ID.
@@ -174,6 +206,12 @@ fn resolve_or_create_pane(
     file_path: &str,
     target_session: &str,
 ) -> Result<String> {
+    tracing::debug!(
+        session_id = &session_id[..8.min(session_id.len())],
+        file = file_path,
+        target_session,
+        "route::resolve_or_create_pane"
+    );
     let registered = sessions::lookup(session_id)?;
 
     // Strategy 1: Alive registered pane in correct session
@@ -258,6 +296,7 @@ fn rescue_from_stash(
         .unwrap_or_default();
 
     if pane_win_name == "stash" || pane_win_name.starts_with("stash-") {
+        tracing::debug!(pane_id, window = %pane_win_name, target_session, "route: rescuing pane from stash");
         eprintln!(
             "[route] Pane {} is in stash window '{}', rescuing to agent-doc window",
             pane_id, pane_win_name
@@ -1764,5 +1803,45 @@ mod tests {
             after.last().unwrap(), new_pane[0],
             "second-column file should produce rightmost pane (split_before=false)"
         );
+    }
+
+    #[test]
+    fn sync_after_claim_handles_malformed_registry() {
+        // When sessions.json is malformed, sync_after_claim should not panic.
+        // It should return early (silently) rather than propagating the error.
+        let iso = IsolatedTmux::new("route-test-malformed-registry");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let session = "test";
+        let pane = iso.new_session(session, tmp.path()).unwrap();
+
+        // Write malformed sessions.json (array format instead of map)
+        let sessions_path = tmp.path().join(".agent-doc");
+        std::fs::create_dir_all(&sessions_path).unwrap();
+        std::fs::write(
+            sessions_path.join("sessions.json"),
+            r#"{"sessions": [{"bad": "format"}]}"#,
+        ).unwrap();
+
+        // sync_after_claim should not panic — it handles errors gracefully
+        // (returns early on load failure)
+        sync_after_claim(&iso, &pane, &[]);
+        // If we reach here without panic, the test passes
+    }
+
+    #[test]
+    fn sync_after_claim_with_empty_col_args_and_no_registry() {
+        // When there's no registry file and no col_args, sync_after_claim
+        // should return early without creating any panes.
+        let iso = IsolatedTmux::new("route-test-no-registry");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let session = "test";
+        let pane = iso.new_session(session, tmp.path()).unwrap();
+        let window = iso.pane_window(&pane).unwrap();
+
+        let before = iso.list_window_panes(&window).unwrap();
+        sync_after_claim(&iso, &pane, &[]);
+        let after = iso.list_window_panes(&window).unwrap();
+
+        assert_eq!(before.len(), after.len(), "no panes should be created when no registry exists");
     }
 }

@@ -220,11 +220,17 @@ pub fn commit(file: &Path) -> Result<()> {
         eprintln!("[perf] commit.git_commit: {}ms", elapsed_commit);
     }
 
-    // Log commit output to stderr (captured from git to avoid stdout pollution)
+    // Log commit result line to stderr (suppress verbose git status output)
     if let Ok(ref o) = commit_output {
         let stdout = String::from_utf8_lossy(&o.stdout);
         for line in stdout.lines() {
-            if !line.trim().is_empty() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            // Only print the commit result line (e.g. "[main abc123] message")
+            // and skip git status output (branch info, file listings, etc.)
+            if trimmed.starts_with('[') && trimmed.contains(']') {
                 eprintln!("{}", line);
             }
         }
@@ -516,6 +522,28 @@ fn add_head_marker(content: &str, file: &Path) -> String {
     };
 
     if new_headings.is_empty() {
+        // No new headings from this commit. Re-apply (HEAD) markers from git HEAD
+        // to prevent concurrent commits from stripping markers placed by a previous commit.
+        // Without this, Session B's preflight commit would overwrite Session A's committed
+        // content (which has HEAD markers) with cleaned content (which doesn't).
+        if let Some(ref head) = head_content {
+            let mut result = cleaned;
+            for line in head.lines() {
+                let trimmed = line.trim_start();
+                if trimmed.ends_with(" (HEAD)") && trimmed.starts_with('#') {
+                    let without_head = &line[..line.len() - 7];
+                    // Find this heading at a line boundary in the result and re-add (HEAD)
+                    let search = format!("\n{}\n", without_head);
+                    if let Some(pos) = result.find(&search) {
+                        let insert_at = pos + 1 + without_head.len();
+                        result.insert_str(insert_at, " (HEAD)");
+                    } else if result.starts_with(&format!("{}\n", without_head)) {
+                        result.insert_str(without_head.len(), " (HEAD)");
+                    }
+                }
+            }
+            return result;
+        }
         return cleaned;
     }
 

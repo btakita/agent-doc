@@ -112,15 +112,10 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
         None
     };
 
-    // Ensure session UUID exists in frontmatter
+    // Read file content and extract/generate session UUID (in memory only — no disk write yet)
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let (updated_content, session_id) = frontmatter::ensure_session(&content)?;
-    if updated_content != content {
-        std::fs::write(file, &updated_content)
-            .with_context(|| format!("failed to write {}", file.display()))?;
-        eprintln!("Generated session UUID: {}", session_id);
-    }
 
     let pane_id = if let Some(p) = pane {
         p.to_string() // Plugin-provided, authoritative
@@ -138,6 +133,34 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
     // tmux_session frontmatter field is deprecated — no longer written on claim.
     // Session targeting now uses current_tmux_session() at route time.
     let tmux = sessions::Tmux::default_server();
+
+    // Validate pane BEFORE any file modifications — atomic claim semantics.
+    // If the pane is already claimed by a different session, bail without orphaning
+    // file changes (UUID, format, scaffolding).
+    let file_str = file.to_string_lossy();
+    {
+        let registry = sessions::load().unwrap_or_default();
+        for (existing_id, entry) in &registry {
+            if entry.pane == pane_id && *existing_id != session_id
+                && tmux.pane_alive(&pane_id)
+            {
+                if !force {
+                    anyhow::bail!(
+                        "pane {} is already claimed by {} (file: {}). Use --force to overwrite.",
+                        pane_id, &existing_id[..8], entry.file
+                    );
+                }
+                eprintln!("warning: overwriting claim on pane {} (was {} → {})", pane_id, &existing_id[..8], &session_id[..8]);
+            }
+        }
+    }
+
+    // Pane validated — now safe to modify files
+    if updated_content != content {
+        std::fs::write(file, &updated_content)
+            .with_context(|| format!("failed to write {}", file.display()))?;
+        eprintln!("Generated session UUID: {}", session_id);
+    }
 
     // Default to template+crdt if neither format nor write_mode nor legacy mode is set
     {
@@ -169,7 +192,7 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
             .unwrap_or(false);
         if resolved.format == frontmatter::AgentDocFormat::Template && !has_components {
             let scaffolded = format!(
-                "{}\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Console\n\n<!-- agent:console patch=replace -->\n<!-- /agent:console -->\n\n## Pending / Not Built\n\n<!-- agent:pending patch=replace -->\n<!-- /agent:pending -->\n",
+                "{}\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Pending / Not Built\n\n<!-- agent:pending patch=replace -->\n<!-- /agent:pending -->\n",
                 content.trim_end()
             );
             std::fs::write(file, &scaffolded)
@@ -189,30 +212,11 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
                 {
                     eprintln!("warning: failed to create .agent-doc dir: {}", e);
                 }
-                let default_config = "[exchange]\nmode = \"append\"\n\n[findings]\nmode = \"append\"\n\n[status]\nmode = \"replace\"\n\n[console]\nmode = \"replace\"\n";
+                let default_config = "[exchange]\nmode = \"append\"\n\n[findings]\nmode = \"append\"\n\n[status]\nmode = \"replace\"\n";
                 match std::fs::write(&components_toml, default_config) {
                     Ok(()) => eprintln!("created {}", components_toml.display()),
                     Err(e) => eprintln!("warning: failed to create components.toml: {}", e),
                 }
-            }
-        }
-    }
-
-    // Check for existing claim on this pane by a different session
-    let file_str = file.to_string_lossy();
-    {
-        let registry = sessions::load().unwrap_or_default();
-        for (existing_id, entry) in &registry {
-            if entry.pane == pane_id && *existing_id != session_id
-                && tmux.pane_alive(&pane_id)
-            {
-                if !force {
-                    anyhow::bail!(
-                        "pane {} is already claimed by {} (file: {}). Use --force to overwrite.",
-                        pane_id, &existing_id[..8], entry.file
-                    );
-                }
-                eprintln!("warning: overwriting claim on pane {} (was {} → {})", pane_id, &existing_id[..8], &session_id[..8]);
             }
         }
     }

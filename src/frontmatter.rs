@@ -250,6 +250,14 @@ pub struct Frontmatter {
     /// Space-separated string (e.g., "--dangerously-skip-permissions").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_args: Option<String>,
+    /// Debounce duration in milliseconds for preflight mtime settling.
+    /// Default: 2000ms. Set to 0 to disable debounce (run immediately).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_debounce"
+    )]
+    pub debounce_ms: Option<u64>,
     /// Linked resources: local file paths or URLs (relative to this document's directory).
     /// Changes in linked docs are surfaced during preflight.
     #[serde(default, skip_serializing_if = "Vec::is_empty", alias = "related_docs")]
@@ -516,6 +524,7 @@ mod tests {
             write_mode: None,
             stream_config: None,
             claude_args: None,
+            debounce_ms: None,
             links: vec![],
         };
         let body = "# Hello\n\nBody text.\n";

@@ -100,6 +100,7 @@ use crate::{frontmatter, resync, route, sessions};
 use tmux_router::FileResolution;
 
 pub fn run(col_args: &[String], window: Option<&str>, focus: Option<&str>) -> Result<()> {
+    tracing::debug!(cols = ?col_args, window, focus, "sync::run start");
     run_with_options(col_args, window, focus, true, &Tmux::default_server())
 }
 
@@ -127,6 +128,7 @@ pub fn run_with_tmux(
 /// Phase 2: Ensure the target window exists — if missing, break a registered
 /// alive pane out of the stash to recreate it.
 pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) -> Result<()> {
+    tracing::debug!(session_name, target_window_name, "sync::repair_layout start");
     // List all windows in the session: window_id, window_name, pane count
     let output = tmux.raw_cmd(&[
         "list-windows",
@@ -396,6 +398,7 @@ fn run_with_options(
     auto_start: bool,
     tmux: &Tmux,
 ) -> Result<()> {
+    tracing::debug!(cols = ?col_args, window, focus, auto_start, "sync::run_with_options start");
     // Check for new build and clear stale caches
     check_build_stamp();
 
@@ -503,9 +506,16 @@ fn run_with_options(
                 // declarative layout flow: navigating to a file in a split should
                 // create a tmux pane regardless of registry state.
                 let has_registry = sessions::lookup(key).ok().flatten().is_some();
+                let registry_str = if has_registry { "yes" } else { "no (will auto-start)" };
+                tracing::debug!(
+                    file = %path.display(),
+                    session = &key[..8.min(key.len())],
+                    registry = registry_str,
+                    "sync resolve_file → Registered"
+                );
                 eprintln!(
                     "[sync] resolve_file: {} → Registered (session={}, registry={})",
-                    path.display(), &key[..8.min(key.len())], if has_registry { "yes" } else { "no (will auto-start)" }
+                    path.display(), &key[..8.min(key.len())], registry_str
                 );
                 session_files
                     .borrow_mut()
@@ -753,6 +763,27 @@ fn run_with_options(
     if let Some(w) = window {
         let pane_count = tmux.list_window_panes(w).map(|p| p.len()).unwrap_or(0);
         sync_log(&format!("post-tmux_router::sync: window={} panes={} file_panes={}", w, pane_count, result.file_panes.len()));
+        tracing::debug!(window = w, pane_count, file_panes = result.file_panes.len(), "post-sync pane count");
+
+        // Session health check: verify the session still exists after sync.
+        // If the session was destroyed (e.g., all windows stashed), log a critical warning.
+        if let Ok(session) = tmux.cmd()
+            .args(["display-message", "-t", w, "-p", "#{session_name}"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        {
+            if !session.is_empty() {
+                let session_alive = tmux.cmd()
+                    .args(["has-session", "-t", &session])
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
+                if !session_alive {
+                    tracing::error!(session = %session, "SESSION DESTROYED after sync — tmux session no longer exists");
+                    eprintln!("[sync] CRITICAL: session '{}' was destroyed during sync!", session);
+                }
+            }
+        }
     }
 
     // Save column layout state: for each column that has an agent doc,

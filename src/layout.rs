@@ -87,6 +87,7 @@ pub fn run(files: &[&Path], split: Split, pane: Option<&str>, window: Option<&st
 }
 
 pub fn run_with_tmux(files: &[&Path], split: Split, pane: Option<&str>, window: Option<&str>, tmux: &Tmux) -> Result<()> {
+    tracing::debug!(file_count = files.len(), split = ?split, window, "layout::run start");
     if files.is_empty() {
         anyhow::bail!("at least one file required");
     }

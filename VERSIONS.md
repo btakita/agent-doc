@@ -4,6 +4,20 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.6
+
+- **Debounce fix**: Default mtime debounce increased from 500ms to 2000ms. Configurable per-document via `agent_doc_debounce` frontmatter field.
+- **Structured logging**: Added `tracing` + `tracing-subscriber` + `tracing-appender`. Set `AGENT_DOC_LOG=debug` to log to `.agent-doc/logs/debug.log.<date>`. Zero overhead when unset.
+- **Pre-response cleanup bug**: `clear_pending()` now deletes pre-response snapshots after successful writes. Previously accumulated indefinitely.
+- **Lock file cleanup bug**: `SnapshotLock::Drop` now deletes the lock file (not just unlocks). CRDT lock acquisition cleans stale locks (>1 hour old).
+- **`agent-doc gc` subcommand**: Garbage-collects orphaned files in `.agent-doc/` directories. Supports `--dry-run` and `--root` flags.
+- **Auto-GC on preflight**: Runs GC once per day via `.agent-doc/gc.stamp` timestamp check.
+- **Cleanup runbook**: New `runbooks/cleanup.md` documenting `.agent-doc/` directory structure and cleanup rules.
+- **Tracing instrumentation**: `tracing::debug!` at key decision points in sync, route, layout, and resync modules.
+- **Source annotations for extract/transfer**: `agent-doc extract` and `agent-doc transfer` now wrap content with `[EXTRACT from ...]` or `[TRANSFER from ...]` blockquote annotations including timestamp.
+- **Post-sync session health check**: After every sync, verifies the tmux session still exists. Logs `CRITICAL` if session was destroyed.
+- **Route cleanup on failure**: When route fails, orphaned panes created during the attempt are killed before the error propagates.
+
 ## 0.31.5
 
 - **Commit on claim**: `agent-doc claim` now commits the file after saving the initial snapshot. Ensures the first prompt appears as a diff against a committed baseline.

@@ -148,6 +148,7 @@ pub fn find_project_root(path: &Path) -> Option<PathBuf> {
 /// guard is dropped.
 pub struct SnapshotLock {
     _file: File,
+    lock_path: PathBuf,
 }
 
 impl SnapshotLock {
@@ -167,13 +168,15 @@ impl SnapshotLock {
             .with_context(|| format!("failed to open snapshot lock {}", lock_path.display()))?;
         file.lock_exclusive()
             .with_context(|| format!("failed to acquire snapshot lock on {}", lock_path.display()))?;
-        Ok(Self { _file: file })
+        Ok(Self { _file: file, lock_path })
     }
 }
 
 impl Drop for SnapshotLock {
     fn drop(&mut self) {
         let _ = self._file.unlock();
+        // Delete the lock file on release to prevent stale lock accumulation.
+        let _ = std::fs::remove_file(&self.lock_path);
     }
 }
 
@@ -406,11 +409,20 @@ pub fn delete_crdt(doc: &Path) -> Result<()> {
 
 /// Acquire an advisory lock for CRDT state operations.
 /// Uses a lock file adjacent to the CRDT state file.
+/// Stale lock files (>1 hour old) are cleaned before acquiring.
 fn acquire_crdt_lock(doc: &Path) -> Result<File> {
     let crdt_path = crdt_path_for(doc)?;
     let lock_path = crdt_path.with_extension("yrs.lock");
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent)?;
+    }
+    // Clean stale lock file (>1 hour old, from crashed processes)
+    if let Ok(meta) = std::fs::metadata(&lock_path) {
+        if let Some(age) = meta.modified().ok().and_then(|t| t.elapsed().ok()) {
+            if age > std::time::Duration::from_secs(3600) {
+                let _ = std::fs::remove_file(&lock_path);
+            }
+        }
     }
     let file = OpenOptions::new()
         .create(true)

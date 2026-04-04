@@ -88,6 +88,11 @@ pub fn clear_pending(file: &Path) -> Result<()> {
     if pending_path.exists() {
         std::fs::remove_file(&pending_path)?;
     }
+    // Also clean up the pre-response snapshot (saved before write for undo support).
+    // Without this, pre-response files accumulate indefinitely after successful writes.
+    if let Err(e) = snapshot::delete_pre_response(file) {
+        eprintln!("[recover] warning: failed to delete pre-response: {}", e);
+    }
     Ok(())
 }
 

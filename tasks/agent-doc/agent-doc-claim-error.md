@@ -422,7 +422,7 @@ It was in the git history. It already happened in the past. Why do it again? Wha
 This creates the 1-line blue gutter that visually separates "agent response" (committed) from "user input" (uncommitted). Without re-adding it each cycle, the boundary disappears.
 
 The bug was marking ALL headings instead of just the last one — not the re-addition itself.
-### Re: Why re-add — the boundary must move (HEAD)
+### Re: Why re-add — the boundary must move
 
 The premise: the blue gutter boundary needs to **move** with each new response to the latest heading.
 
@@ -440,7 +440,22 @@ The cycle exists because the boundary marker must track the **latest response**,
 If the marker never moved, you'd only see the boundary on the first response heading forever. The re-addition is what makes it track the latest response.
 
 The alternative would be a boundary marker that doesn't use git diff at all (e.g., a dedicated gutter annotation from the plugin). But the current approach leverages git's built-in gutter rendering without any custom editor highlighting.
-<!-- agent:boundary:55f27a79 -->
+
+Did this happen when I reopened agent-doc-bugs.md? What triggered this decision point? It seems there is something wrong with the operating assumptions...so we need to correct it. How did this happen? Was it deterministic agent-doc binary code that drove this or SKILL + agent activity that drove this?
+### Re: What triggered it — deterministic binary code (HEAD)
+
+**100% binary code**, not the skill. The sequence:
+
+1. `agent-doc transfer` moved content from eval-runner.md → bugs.md (multiple `### Re:` headings)
+2. Next `agent-doc commit` on bugs.md called `add_head_marker()` in `git.rs`
+3. `add_head_marker()` compared bugs.md content against git HEAD
+4. All transferred headings were "new" (not in HEAD) → classified as new headings
+5. **Bug**: old code marked ALL root-level new headings with `(HEAD)` instead of just the last one
+
+The skill never touches `(HEAD)` markers. The transfer command wrote valid content. The bug was entirely in the commit path's heading classification logic — step 4 of `add_head_marker()`.
+
+**Trigger**: any operation that introduces multiple new `### ` headings at once (transfer, extract, or even a multi-topic response). The fix (marking only the last heading) is already deployed.
+<!-- agent:boundary:371a75e2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

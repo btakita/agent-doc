@@ -175,7 +175,7 @@ During the previous agent-doc run, I saw:
 ```
 
 What are these non-idle tmux panes? I have 2 panes in the current 0:agent-doc tmux window.
-### Re: Non-idle tmux panes in stash window (HEAD)
+### Re: Non-idle tmux panes in stash window
 
 These are **stashed panes from previous sessions** still running in the `stash` window (window 1, 6 panes):
 
@@ -191,7 +191,23 @@ These are **stashed panes from previous sessions** still running in the `stash` 
 Orphaned agent-doc/claude sessions moved to stash but never killed. Preflight warns because they could interfere with session routing.
 
 **To clean up:** `tmux kill-window -t stash` or `agent-doc resync --fix` to clean orphaned sessions.
-<!-- agent:boundary:b799705d -->
+Should agent-doc autokill orphaned windows? What if they are currently running active claude tasks? How can we tell?
+### Re: Should agent-doc autokill orphaned panes? (HEAD)
+
+**No — autokill is too dangerous.** `resync` shows 5 panes in stash that are still registered as active sessions with live processes. They may be mid-task.
+
+**How to tell if a pane is active vs orphaned:**
+- **Process alive:** `pane_current_command` shows `claude`/`agent-doc` — but alive doesn't mean working
+- **Claude status:** No external API to check if claude is generating vs idle at prompt
+- **Age:** Stale heuristic is unreliable — long-running tasks exist
+
+**Current safe approach:**
+- Preflight **warns** about stash panes (informational only)
+- `resync --fix` kills stash panes + deregisters on explicit user request
+- No autokill — user decides when stashed sessions are disposable
+
+The stash window is a parking lot — the user put panes there intentionally. Autokilling defeats the purpose. The warning is the right UX: inform, don't act.
+<!-- agent:boundary:865d11a9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

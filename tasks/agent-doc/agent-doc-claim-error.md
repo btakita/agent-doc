@@ -15,6 +15,7 @@ v0.31.5 released. Commit-on-claim, auto-setup, VCS refresh, --diff-only, skill r
 
 <!-- agent:exchange patch=append -->
 *Compacted. agent-doc v0.31.9 released (all targets). `make check` now includes version-sync (Cargo.toml vs pyproject.toml). tmux-router sync.rs debug logging committed, release skipped. Feedback memory: always check git status + git log for submodule state. Memory/runbook layering confirmed.*
+<!-- agent:boundary:9f5a5f4c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

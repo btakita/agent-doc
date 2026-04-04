@@ -182,7 +182,7 @@ The domain ontology table in README.md defines terms like Session, Document, Sna
 This would make the naming more intentional. Should I add these to the domain ontology?
 yes.
 Also correct the module-harness in the modules.
-### Re: Ontology + module docs updated (HEAD)
+### Re: Ontology + module docs updated
 
 **Domain ontology added to README.md** with three sections:
 - **Document Lifecycle** — Session, Document, Snapshot, Component, Boundary, Exchange
@@ -198,16 +198,34 @@ Also correct the module-harness in the modules.
 All tests pass, clippy clean.
 
 **Module-harness:** You asked to correct the module-harness in the modules. Should I run `/module-harness` on sync.rs, claim.rs, snapshot.rs, and route.rs to regenerate their spec/contracts/evals sections? Or did you mean something else by "correct the module-harness"?
-<!-- agent:boundary:a20fc35f -->
+
+I want to make sure that we understand the design principle that the document selected by the editor drives either finding the current claiming tmux pane or creating a new claiming tmux pane. It should never use another running tmux pane that does not already claim the document.
+### Re: Binding invariant captured (HEAD)
+
+The design principle is now formalized as the **Binding invariant**:
+
+> The editor-selected document drives pane resolution. It either finds an existing pane that already claims that document, or provisions a new one. It NEVER commandeers another document's pane.
+
+**Resolution path:**
+1. Document selected in editor → sync fires
+2. Sync resolves document → session UUID (via `ensure_initialized`)
+3. Registry lookup: pane exists? → **focus it** (Binding found)
+4. No pane? → **provision new one** (auto_start creates pane + Binding)
+5. Never: "take the currently visible pane"
+
+Memory updated from "claim creates new panes" to "Binding invariant" — stronger framing that captures the directional principle (document drives, pane follows).
+
+The module-harness question stands — should I run `/module-harness` on the affected modules to regenerate spec/contracts/evals?
+<!-- agent:boundary:4dd16da2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] ensure_initialized: assign session UUID + sync integration
-- [x] Memory: claim creates new panes (feedback saved)
-- [x] Domain ontology: added Binding, Reconciliation, Provisioning, Initialization to README.md
-- [x] sync.rs, claim.rs, snapshot.rs, route.rs module docs updated with ontology
+- [x] Binding invariant: memory + ontology captured
+- [x] Domain ontology: Binding, Reconciliation, Provisioning, Initialization
+- [x] Module docs: sync, claim, snapshot, route updated with ontology
 - [ ] Module-harness: regenerate spec/contracts/evals for affected modules
 - [ ] Refactor ensure_initialized into 3 focused functions
 - [ ] Rename auto_start_no_wait → create_pane_and_start_async

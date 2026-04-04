@@ -407,7 +407,7 @@ Those numbers in the example were **illustrative placeholders**. The real values
 For agent-doc to generate these, it would use `unicode-segmentation` crate to count grapheme clusters (not bytes) and record the position after appending.
 
 This is a **v2+ concern** -- the blockquote format alone is sufficient for v1. The annotation block adds provenance metadata for auditing but isn't needed for the agent to read and act on the notification.
-<!-- agent:boundary:352adf6f -->
+<!-- agent:boundary:67f4cbc7 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

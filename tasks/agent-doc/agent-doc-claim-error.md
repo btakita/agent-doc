@@ -102,7 +102,7 @@ Claim-error actually has **more** commits (776 vs 208) and is the fast one. File
 - Editor highlighting/inspection overhead
 
 **To diagnose:** In JetBrains: Help → Diagnostic Tools → Activity Monitor, or capture a thread dump while navigating bugs.md. That would show what's actually blocking.
-<!-- agent:boundary:586e71bd -->
+<!-- agent:boundary:500c318e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

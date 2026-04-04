@@ -52,7 +52,7 @@ This session:
 **Test suite: 634 tests (193 lib + 403 bin + 38 integration)**
 
 I tried running `Claim for Tmux Pane` on tasks/recruit/robert-ross-granola.md. This document is meant to communicate with the granola.ai document using the unseen context of the granola document. See tasks/recruit/robert-ross.md for more context.
-### Re: Claim on granola document (HEAD)
+### Re: Claim on granola document
 
 I see the document at `tasks/recruit/robert-ross-granola.md` — it's a well-structured template-mode doc with Granola meeting notes (notes, analysis, action-items, exchange components).
 
@@ -68,11 +68,38 @@ A few questions to understand the issue:
    - Populate the empty `analysis` component with strategic insights
 
 Let me know what went wrong or what you're trying to achieve, and I'll either fix the bug or help set up the workflow.
-<!-- agent:boundary:a73bf710 -->
+
+The claim failed bc the document was already claimed.
+```
+Claim failed (exit 1): Error: pane %483 is already claimed by 1ef5f0e7 (file: tasks/agent-doc/agent-doc-bugs.md). Use --force to overwrite.
+```
+
+Within granola, if I select text, I get a transcript summary popup.
+![img.png](img.png)
+
+Should we note this in the granola skill? Add a runbook?
+### Re: Claim conflict + Granola transcript feature (HEAD)
+
+**Claim issue:** The error is expected — pane %483 is already claimed by session `1ef5f0e7` (this agent-doc-bugs file). A pane can only serve one document at a time. To claim `robert-ross-granola.md`, you'd need to either:
+- Use a different tmux pane (open a new terminal split)
+- Use `--force` to reassign this pane (drops the agent-doc-bugs claim)
+
+This isn't a bug — it's the single-claim-per-pane design working correctly.
+
+**Granola transcript summary popup:** Good catch. The screenshot shows Granola's inline transcript summary feature — when you select text in the shared note, it shows the relevant transcript excerpt with context. This is one of the "hidden context" sources mentioned in the granola skill's "Access Granola's hidden context" section.
+
+**Should we add a runbook?** Yes — a runbook for extracting transcript context via the popup would be useful. Something like:
+- `enrich notes` — `runbooks/enrich-from-transcript.md`
+- Steps: select key claims in the Granola UI, capture the transcript summaries, paste them into the agent-doc's exchange component as additional context for analysis
+
+This would bridge the gap between Granola's hidden context and the agent-doc template. The current skill only scrapes the summary HTML; this runbook would document the manual process for pulling in transcript excerpts.
+
+Want me to create the runbook?
+<!-- agent:boundary:3110e81b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Granola document claim issue — awaiting clarification
+- [ ] Granola enrich-from-transcript runbook — awaiting approval
 <!-- /agent:pending -->

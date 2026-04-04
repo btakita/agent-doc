@@ -34,7 +34,7 @@ Progression:
 - Task assignment locking: flock or claims log?
 - Completion signaling: status component value, or removal from pending?
 - Git conflicts: do parallel agents need isolated branches/worktrees?
-<!-- agent:boundary:d0989227 -->
+<!-- agent:boundary:0647908e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

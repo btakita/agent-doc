@@ -98,6 +98,9 @@ interface AgentDocLib : Library {
     /** Check if the document has been tracked (at least one document_changed call). */
     fun agent_doc_is_tracked(file_path: String): Boolean
 
+    /** Return the number of files tracked in the debounce state. */
+    fun agent_doc_tracked_count(): Int
+
     /** Set response status for a file. Values: "generating", "writing", "routing", "idle". */
     fun agent_doc_set_status(file_path: String, status: String)
 

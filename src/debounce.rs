@@ -92,6 +92,11 @@ pub fn is_tracked(file: &str) -> bool {
     with_state(|map| map.contains_key(&path))
 }
 
+/// Return the number of tracked files in the debounce state.
+pub fn tracked_count() -> usize {
+    with_state(|map| map.len())
+}
+
 /// Block until the document has been idle for `debounce_ms`, or `timeout_ms` expires.
 ///
 /// Returns `true` if idle was reached, `false` if timed out.

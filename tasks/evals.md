@@ -186,7 +186,7 @@ Slight pass rate improvement (+9.5pp) but nearly identical mean scores. Sonnet i
 **Actionable insight:** The 3 zero/near-zero scores (`comment-content-ignored`, `single-word-approval`, `approval-to-implement`) point to the same root issue: the SKILL.md prompt doesn't explicitly teach the agent about comment stripping, single-word approval signals, or the pending protocol. These are high-leverage fixes.
 
 Baseline committed to `evals/agent-doc/diff-interpretation/baselines/sonnet-2026-04-04.json`.
-<!-- agent:boundary:80d447a7 -->
+<!-- agent:boundary:e2d72f34 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

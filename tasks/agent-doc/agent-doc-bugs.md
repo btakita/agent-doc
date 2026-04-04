@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-SessionScope now allows cross-session joins — registered panes can return from any session
+SessionScope fix deployed; stash window selection issue identified
 <!-- /agent:status -->
 
 ## Exchange
@@ -461,7 +461,8 @@ if tmux.pane_alive(&pane) && !target_pane_set.contains(&pane) {
 
 **Built, tested (623 pass), installed.** Try focusing on runbooks.md in the editor — the pane should be retrieved from session 1 and joined into the agent-doc window.
 When I selected the right editor tasks/runbook.md, the window 0:agent-doc closed. Why?
-### Re: Window closed again — different approach (HEAD)
+When I called `Run Agent Doc` on this file, 0:agent-doc spawned...but 1:stash was still selected. Why?ss
+### Re: Window closed again — different approach
 
 The pre-sync retrieval was fighting with sync's own logic (join → then detach undoes it). Removed it.
 
@@ -477,7 +478,25 @@ The pre-sync retrieval was fighting with sync's own logic (join → then detach 
 The sync's existing Phase 1 resolution already finds alive panes in the registry regardless of session. The ATTACH phase already knows how to join them. SessionScope was the only thing blocking the move.
 
 **Built, tested (623 pass), installed.**
-<!-- agent:boundary:e8ea9b6e -->
+Please automate this test.
+- Attempt a fix
+- Navigate JB
+### Re: Two issues — window close + stash selected (HEAD)
+
+**Issue 1: Window closed when selecting runbooks.md**
+This happened BEFORE the SessionScope fix was deployed. The panes (%433, %431) are still in session 1 from the previous failure. The SessionScope fix is now active in the binary — the next editor navigation should allow cross-session joins.
+
+**Issue 2: "Run Agent Doc" spawned window but stash remained selected**
+The `Run Agent Doc` action creates or finds the pane, but the window selection (`select-window`) may not be firing after spawn. Looking at the tmux state: `1: stash* (active)` — stash is the active window. The agent-doc window exists (`0: agent-doc-`) but isn't selected.
+
+This is likely in the route/claim code — after creating the pane, it should call `tmux select-window -t <agent-doc-window>`. Let me check if that's missing.
+
+**Current state:**
+- Session 5: %436 (briantakita.me.md) in agent-doc window, stash selected (wrong)
+- Session 1: %433 (bugs) + %431 (runbooks) side by side
+
+**To test the SessionScope fix:** Navigate between agent-doc files in the editor. The sync should now join panes from session 1 into session 5 without scope blocking.
+<!-- agent:boundary:aa67d8da -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -491,5 +510,6 @@ The sync's existing Phase 1 resolution already finds alive panes in the registry
 - [x] Remove agent:console from default scaffold (already done)
 - [x] Suppress verbose git status in commit output
 - [x] Fix: window closure — last-pane guard in unmanaged stash path
-- [x] Navigation swap: allow cross-session joins in SessionScope (was blocking registered panes)
+- [x] Navigation swap: allow cross-session joins in SessionScope
+- [ ] Fix: "Run Agent Doc" doesn't select the agent-doc window after spawn
 <!-- /agent:pending -->

@@ -249,7 +249,7 @@ Preprocessed diff with source boundaries for the LLM:
 Markers: `[agent]`, `[user+]`, `[user-]`, `[user~]`
 Implementation: `agent-doc annotate-diff` command, included in preflight JSON as `annotated_diff`.
 ```
-### Re: Nested code fences causing JetBrains thrash (HEAD)
+### Re: Nested code fences causing JetBrains thrash
 
 The content has **nested triple-backtick code fences** — a code block containing backticks creates ambiguous fence boundaries for JetBrains' markdown highlighter:
 
@@ -267,7 +267,28 @@ Preprocessed diff with source boundaries for the LLM:
 ```
 
 The agent-doc plugin isn't at fault — this is a JetBrains markdown parser issue with nested/ambiguous fences. The `[agent]` bracket syntax may also trigger link-reference parsing, adding to the overhead.
-<!-- agent:boundary:a021ff4a -->
+No...you don't get it. I added the fencing and escaped the fencing. Please look at the source document. See agent-doc-bugs.md.
+Look at the section 3 and only section 3 starting with `#### 3. Annotated diff format`
+### Re: Read the actual source — no nested fences (HEAD)
+
+I was wrong about nested fences. The actual content in agent-doc-bugs.md (lines 65-72) is a properly formatted code block — no nesting, no ambiguity:
+
+```
+#### 3. Annotated diff format
+Preprocessed diff with source boundaries for the LLM:
+` `` `
+[agent] 1. Window 0 missing — pane at index 2.
+[user+] : Fixed, moved to 0
+` `` `
+Markers: ...
+```
+
+The markdown is valid. This means the thrashing is in the **agent-doc plugin**, not JetBrains markdown rendering. The plugin is doing something with this content that causes sustained CPU usage.
+
+I can't determine what from the code alone — all the regex patterns and document scans look like they should only run on patch events, not continuously. The thread dumps show threads sleeping. The CPU usage is from rapid short-duration operations that complete between sample points.
+
+**Concrete next step:** Add timing instrumentation to each plugin method that touches document content (`repositionBoundaryViaDocument`, `applyPatch`, PromptPoller's `refreshTrackedFiles`). Log elapsed time — if any consistently shows high duration when bugs.md is active, that's the culprit.
+<!-- agent:boundary:8dcb7717 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -276,5 +297,5 @@ The agent-doc plugin isn't at fault — this is a JetBrains markdown parser issu
 - [x] GC orphaned 3.9 GB blob
 - [x] `agent-doc clean --archive`
 - [x] VCS refresh debounce (500ms)
-- [ ] Fix bugs.md: replace nested backtick fences with `~~~`
+- [ ] Add timing instrumentation to plugin for bugs.md CPU diagnosis
 <!-- /agent:pending -->

@@ -276,7 +276,7 @@ This happened during the CRDT write-back: the `\\
 
 **Fix needed:** The patch content should be treated as opaque text — no unescaping. This is a bug in the write pipeline's text handling. Want me to investigate and fix it in the binary?
 yes
-### Re: Yes — Fixed the `\\ (HEAD)
+### Re: Yes — Fixed the `\\
 ` unescaping bug
 
 **Root cause:** `PatchWatcher.kt:929-932` — the manual JSON parser's escape replacement order was wrong.
@@ -313,12 +313,36 @@ When JSON contains `\\
 Plugin builds clean. To install: rebuild with `./gradlew buildPlugin` then install the zip from `build/distributions/`.
 bump JB plugin version.
 Do we need to make a similar fix to the VSCode plugin?
-### Re: Plugin version bump + VS Code check (HEAD)
+### Re: Plugin version bump + VS Code check
 
 **JB plugin bumped to v0.2.43.** Built at `build/distributions/agent-doc-jetbrains-0.2.43.zip`. Install via Settings > Plugins > gear > Install from Disk.
 
 **VS Code plugin is NOT affected.** It uses `JSON.parse()` (the standard JavaScript JSON parser) which handles all escape sequences correctly. The bug was specific to the JetBrains plugin's hand-rolled JSON parser in Kotlin.
-<!-- agent:boundary:aaeba86f -->
+
+Does Kotlin have a JS Parser library that we can use?
+### Re: Kotlin JSON parsing options (HEAD)
+
+Yes. The best option for IntelliJ plugins is the platform's **bundled Gson** (`com.google.gson`). It ships with every IntelliJ installation — zero new dependencies.
+
+The original hand-rolled parser was written to avoid Gson's `ClassNotFoundException`, but that typically happens with wrong classloader context. In a standard plugin action/service, Gson is available:
+
+```kotlin
+import com.google.gson.JsonParser
+
+val root = JsonParser.parseString(raw).asJsonObject
+val component = root.get("component")?.asString
+val content = root.get("content")?.asString
+```
+
+This handles all JSON escaping correctly (like VS Code's `JSON.parse()`) and eliminates the entire class of escaping bugs.
+
+**Other options:**
+- `kotlinx-serialization-json` — official Kotlin library, but adds a dependency
+- `org.json` — also bundled in some IntelliJ builds, simpler API than Gson
+- Keep the hand-rolled parser with the NUL placeholder fix (already working)
+
+**Recommendation:** Replace `extractStringField` with Gson. Zero new deps, correct by construction. Want me to do it?
+<!-- agent:boundary:80fe4f16 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -329,6 +353,7 @@ Do we need to make a similar fix to the VSCode plugin?
 - [x] Post-preflight diff generation for eval cases (P2) — DONE
 - [x] Implement annotated diff format in preflight (P3) — DONE
 - [x] Fix write pipeline escape bug + bump JB plugin to v0.2.43 — DONE
+- [ ] Replace hand-rolled JSON parser with Gson in PatchWatcher.kt
 - [ ] Implement content-source annotation sidecar (P4)
 - [ ] Design reproducible operation log format (P5)
 - [ ] Add `---` prompt separator convention to SKILL.md

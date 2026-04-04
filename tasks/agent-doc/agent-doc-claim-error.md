@@ -440,7 +440,7 @@ The cycle exists because the boundary marker must track the **latest response**,
 If the marker never moved, you'd only see the boundary on the first response heading forever. The re-addition is what makes it track the latest response.
 
 The alternative would be a boundary marker that doesn't use git diff at all (e.g., a dedicated gutter annotation from the plugin). But the current approach leverages git's built-in gutter rendering without any custom editor highlighting.
-<!-- agent:boundary:7b31c6bb -->
+<!-- agent:boundary:55f27a79 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

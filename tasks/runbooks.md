@@ -294,7 +294,7 @@ agent-doc should have a command to notify a document. This is distinct from tran
 **Net effect per skill invocation:** ~2,235t fewer tokens always loaded. A `/dev status` that doesn't need release workflows saves ~1,155t. A `/livestream on` that doesn't need the audit tables saves ~780t.
 
 Notification written to `tasks/briantakita.me.md` claims log. It will appear next time that document session runs preflight.
-<!-- agent:boundary:3a9d630b -->
+<!-- agent:boundary:753bfd56 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

@@ -1856,7 +1856,7 @@ Also, most rules implementations only support eager loading.
 > What differs is the content type. A rule is guidance. A runbook is a checklist. Naming them differently tells the agent (and the human) what to expect when they open the file.
 
 This is a good point.
-### Re: "The loading model is orthogonal" — revised (HEAD)
+### Re: "The loading model is orthogonal" — revised
 
 You're right on both counts. The "orthogonal" framing was technically true but misleading — it implied eagerly-loaded runbooks are reasonable when the whole point is lazy loading. And most rules implementations *are* eager-only (Cursor "Always", Windsurf, Zed).
 
@@ -1869,11 +1869,17 @@ To:
 > In practice, rules are typically always-on — loaded at session start to shape every interaction. Runbooks are the opposite: on-demand procedures loaded only when the agent reaches that specific task. What differs is both the content type and the loading expectation.
 
 This is more honest about how the ecosystem actually works. Ready to commit and push when you say.
-<!-- agent:boundary:8d3cbc5d -->
+
+publish
+### Re: Published (HEAD)
+
+Blog post updated and deploying. All three repos pushed (briantakita.me → briantakita.me-dev → agent-loop).
+
+Live at: https://briantakita.me/post/2026-04-03-agent-runbooks-on-demand-procedural-context
+<!-- agent:boundary:354fdb2f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Blog post: commit + push revised "runbooks vs rules" paragraph
 - LinkedIn post: revised draft (active voice), pending your edits + publish
 - Cleanup: remove stale directories
 <!-- /agent:pending -->

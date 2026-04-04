@@ -115,7 +115,7 @@ This is a tmux-router `sync.rs` fix in the `repair_layout` function. Should I fi
 Yes.
 Add tests.
 Should we add a runbook to Add tests whenever a feature or bug fix is implemented?
-### Re: Root cause found — double sync per editor event (HEAD)
+### Re: Root cause found — double sync per editor event
 
 **The sync log reveals:** Every editor event triggers TWO sync calls within the same second:
 
@@ -130,11 +130,17 @@ The panes %434, %476, %477, %431 keep appearing in @221 between the two sync cal
 **Fix:** Remove the redundant `sync_after_claim` call from `run_with_tmux()`. The JB plugin already triggers sync via the first call with the correct `window` and `col_args`. The second sync is defensive but causes worse problems than it prevents.
 
 Shall I implement this fix?
-<!-- agent:boundary:d3aad76c -->
+yes
+### Re: Double-sync fix applied (HEAD)
+
+Removed `sync_after_claim` from `run_with_tmux()` in route.rs. The JB plugin's sync call (with correct `window` and `col_args`) is now the only sync per editor event. No more redundant second sync racing with stash operations.
+
+634 tests pass. Built, installed. Try switching editor tabs — the glitchiness should be gone.
+<!-- agent:boundary:1e1dbb00 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Remove redundant sync_after_claim from route (eliminate double-sync glitchiness)
+- [x] Remove redundant sync_after_claim (double-sync fix)
 <!-- /agent:pending -->

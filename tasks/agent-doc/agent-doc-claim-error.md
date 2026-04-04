@@ -268,8 +268,8 @@ Preprocessed diff with source boundaries for the LLM:
 
 The agent-doc plugin isn't at fault — this is a JetBrains markdown parser issue with nested/ambiguous fences. The `[agent]` bracket syntax may also trigger link-reference parsing, adding to the overhead.
 No...you don't get it. I added the fencing and escaped the fencing. Please look at the source document. See agent-doc-bugs.md.
-Look at the section 3 and only section 3 starting with `#### 3. Annotated diff format`
-### Re: Read the actual source — no nested fences (HEAD)
+Look at the section 3 and only section 3 starting with `#### 3. Annotated diff format` 
+### Re: Read the actual source — no nested fences
 
 I was wrong about nested fences. The actual content in agent-doc-bugs.md (lines 65-72) is a properly formatted code block — no nesting, no ambiguity:
 
@@ -288,7 +288,20 @@ The markdown is valid. This means the thrashing is in the **agent-doc plugin**, 
 I can't determine what from the code alone — all the regex patterns and document scans look like they should only run on patch events, not continuously. The thread dumps show threads sleeping. The CPU usage is from rapid short-duration operations that complete between sample points.
 
 **Concrete next step:** Add timing instrumentation to each plugin method that touches document content (`repositionBoundaryViaDocument`, `applyPatch`, PromptPoller's `refreshTrackedFiles`). Log elapsed time — if any consistently shows high duration when bugs.md is active, that's the culprit.
-<!-- agent:boundary:591595d3 -->
+
+Thank you. Logging performance is important.
+### Re: Agreed — performance logging as next step (HEAD)
+
+This is a good stopping point for the performance investigation in this session. The diagnosis so far:
+- GC removed 3.9 GB orphaned blob
+- VCS refresh debounce added (500ms)
+- `agent-doc clean --archive` implemented
+- Root cause narrowed to specific content in section 3 of bugs.md causing plugin thrashing
+- Thread dumps inconclusive (threads sleeping at sample time)
+- Need timing instrumentation in plugin methods to catch the hot path
+
+This should be tracked in the **agent-doc-bugs session** (where the bug manifests) rather than here. Transfer the task?
+<!-- agent:boundary:adaf27ef -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -297,5 +310,5 @@ I can't determine what from the code alone — all the regex patterns and docume
 - [x] GC orphaned 3.9 GB blob
 - [x] `agent-doc clean --archive`
 - [x] VCS refresh debounce (500ms)
-- [ ] Add timing instrumentation to plugin for bugs.md CPU diagnosis
+- [ ] Add timing instrumentation to plugin for bugs.md CPU diagnosis (transfer to agent-doc-bugs)
 <!-- /agent:pending -->

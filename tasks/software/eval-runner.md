@@ -1,14 +1,15 @@
 ---
-agent_doc_session:
+agent_doc_session: ac465955-a63f-4ada-8193-ba7b88544ad5
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 ---
 
+
 # eval-runner
 
 <!-- agent:status -->
-**Status:** Scaffolded | **Location:** `src/eval-runner/` | **Tests:** builds clean
+**Status:** First eval run complete (haiku baseline) | **Location:** `src/eval-runner/` | **Tests:** builds clean, 21 cases run
 <!-- /agent:status -->
 
 ## Architecture
@@ -68,50 +69,168 @@ eval-runner run <cases.yaml> [--model <model>] [--judge-model <model>] [--thresh
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-### Context (transferred from tasks/software/agent-doc.md)
+### Compacted Exchange (2026-04-03)
 
-**Origin:** Eval-runner was designed and scaffolded during the agent-doc session on 2026-03-26. The discussion covered:
+**Origin (2026-03-26):** Eval-runner designed and scaffolded during agent-doc session. Evaluated Promptfoo, Inspect AI, DeepEval, Braintrust — chose custom Rust CLI for zero external dependencies. ~300 LOC at `src/eval-runner/`. 21 cases parsed from `evals/agent-doc/diff-interpretation/cases.yaml`. Open items: ANTHROPIC_API_KEY not in `pass`, no end-to-end run, HTML/dashboard deferred.
 
-1. **Motivation:** agent-doc has 21 eval cases in `evals/agent-doc/diff-interpretation/cases.yaml` but no runner. Module-harness holds eval criteria/definitions but shouldn't own execution.
+**Decision: Keep YAML over TOML (2026-04-03).** Eval cases are *data* not *config*. All major eval frameworks use YAML/JSONL — none use TOML. YAML block scalars ideal for diffs/document context.
 
-2. **Design process:** Evaluated Promptfoo, Inspect AI, DeepEval, Braintrust, and custom Rust. Chose custom Rust for zero external dependencies and tight integration with existing YAML format.
+**Decision: Keep YAML over JSONL (2026-04-03).** JSONL requires escaping newlines in multi-line content, making cases unreadable. No streaming benefit — all cases loaded at once. Add `--export-jsonl` later if needed.
 
-3. **Implementation:** ~300 LOC scaffolded at `src/eval-runner/`. Parses all 21 cases. Claude API client for both response generation and LLM-as-judge. ANSI-colored CLI output. JSON output for CI. Regression tracking.
+**Compact behavior discussion (2026-04-03):** Template components with `patch=append` always append via `agent-doc write`. For compaction (content replacement), use Claude's Edit tool directly. Proposed `--patch-mode replace` flag for `agent-doc write` to handle this natively with CRDT safety — tracked in `tasks/agent-doc/agent-doc-patch-mode.md`.
 
-4. **Quantifiable measurements:** 0.0-1.0 continuous score from LLM judge, per-case latency/tokens/cost, aggregate pass rate/mean score/p50/p95 latency, regression detection vs baseline.
+I don't want to use `ANTHROPIC_API_KEY`. I already have a claude code max plan so I want to use those credentials.
+### Re: Claude Code Max credentials
 
-5. **Open items:** ANTHROPIC_API_KEY not yet in `pass`. No end-to-end run completed. HTML/SVG/dashboard output deferred.
+Three options to avoid `ANTHROPIC_API_KEY`:
 
-## User
-### Context (transferred from tasks/software/agent-loop.md, 2026-04-03)
+1. **Shell out to `claude` CLI** — eval-runner calls `claude --print` as subprocess. Auth handled by Max subscription. Simple, works immediately. Per-case spawn overhead negligible vs LLM response time.
+2. **Read Claude Code's OAuth token** — from `~/.claude/`. Direct API calls but undocumented token format, fragile.
+3. **Claude Agent SDK** — official SDK with session auth. Need to check Rust availability.
 
-**YAML vs TOML for eval cases:**
+**Recommendation: Option 1 (`claude` CLI).** Simplest path, zero credential setup. Architecture changes from `reqwest` + API key to `std::process::Command` + `claude --print --model <model>`. Optimize to direct API later if needed.
 
-The question was raised whether to switch from YAML to TOML for eval case definitions.
+Option 1
 
-**TOML pros:** Rust ecosystem alignment, stricter typing, no YAML gotchas (yes/no as booleans).
-**TOML cons:** Multi-line strings more verbose, nested arrays noisier, 30+ cases = longer files.
+https://crates.io/crates/claude-agent-sdk exists but the last release is older than the most recent release of https://github.com/anthropics/claude-agent-sdk-python
+### Re: Option 1 confirmed
 
-**Eval framework ecosystem survey:**
-- OpenAI Evals, Braintrust, promptfoo, Inspect AI, HELM, LangSmith — all use YAML/JSONL
-- No major eval framework uses TOML
-- YAML dominates because: Python-centric tooling, multi-line string handling, HuggingFace dataset standards
+Agreed — `claude` CLI it is. The Rust `claude-agent-sdk` crate on crates.io appears community-maintained and behind the official Python SDK. No official Rust SDK yet. This further validates the CLI approach: `claude --print` is the most stable interface for Max subscriptions. Can swap backend to direct API/SDK later if an official Rust SDK ships.
 
-**Decision: Keep YAML.** Eval cases are *data* not *config*. The data ecosystem is YAML/JSON. Interoperability with other eval tools, datasets, and CI pipelines favors YAML. The YAML gotchas are mitigated by serde_yaml deserializing to typed `String` fields.
-<!-- agent:boundary:3b8d0bd4 -->
+**Decision: Use `claude --print` subprocess calls (2026-04-03).** Authenticated via Claude Code Max. No API key needed. Architecture: `std::process::Command` + `claude --print --model <model>`.
+
+What about **Read Claude Code's OAuth token**? Can it be used in the existing claude session?
+### Re: OAuth token investigation
+
+`~/.claude/.credentials.json` contains OAuth tokens with `user:inference` scope (Max subscription, `default_claude_max_20x` rate limit tier). The access token (`sk-ant-oat01-...`) could theoretically work as a Bearer token against the API, but:
+
+- Token expiration requires refresh logic in eval-runner
+- Undocumented internal format — could break on updates
+- eval-runner runs as a separate process, can't piggyback on the current Claude session
+
+**Verdict: Stick with `claude --print`.** The CLI handles token refresh and auth transparently. Reading `.credentials.json` directly adds fragile refresh complexity for no real benefit. The CLI approach is simpler and officially supported.
+
+Can we get live feedback from `claude --print`? I wonder how long evals will take.
+### Re: Live feedback and timing
+
+Yes — `claude --print --output-format stream-json` gives real-time streaming output. eval-runner can read stdout line-by-line for live progress. With `--include-partial-messages`, you get token-level streaming.
+
+**Live feedback design:**
+- Print case name + "running..." as each case starts
+- Stream token count during response generation (optional)
+- Print score + pass/fail as each case completes
+- Running aggregate stats (pass rate, mean score)
+
+**Time estimate for 21 cases:**
+- 2 LLM calls per case (response + judge) = 42 total calls
+- ~5-15s per call depending on complexity
+- **Sequential: ~3.5-10 minutes** for the full suite
+- **Parallel (future): ~1-2 minutes** with concurrent case execution
+
+Can we support clade CLI, cursor CLI, Anthropic API, and other APIs? Can we also have the model type as a parameter?
+- [ ] Refactor eval-runner to use `claude` CLI instead of direct API calls
+### Re: Multi-backend support
+
+Pluggable backend design with a trait interface:
+
+| Backend | Auth | Flag |
+|---------|------|------|
+| `claude` CLI | Claude Code Max/OAuth | `--backend claude` (default) |
+| Anthropic API | `ANTHROPIC_API_KEY` | `--backend anthropic-api` |
+| Cursor CLI | Cursor subscription | `--backend cursor` |
+| OpenAI-compatible | `OPENAI_API_KEY` / custom base URL | `--backend openai --api-base <url>` |
+
+**Model parameter** already scaffolded in CLI: `--model` and `--judge-model` flags pass through to whichever backend is selected.
+
+**Priority:** (1) `claude` CLI default, (2) Anthropic API for CI/headless, (3) OpenAI-compatible for GPT/Gemini, (4) Cursor CLI if needed.
+
+Continue
+### Re: Implementation complete
+
+Refactored `src/eval-runner/src/main.rs`:
+
+- **Added `--backend` flag** — `claude` (default) or `anthropic-api`
+- **`claude` backend** uses `std::process::Command` + `claude --print --model <model>`. Zero credential setup.
+- **`anthropic-api` backend** preserved for CI/headless use (requires `ANTHROPIC_API_KEY`)
+- **Removed `tokio`** — main is now synchronous. `reqwest::blocking` for API backend.
+- **Simplified `CaseResult`** — dropped per-call token counts (claude CLI doesn't expose them). Kept latency.
+- **Live progress** — prints `[1/21] case-name...` then overwrites with pass/fail result
+- **Model defaults** changed to `sonnet` (alias) — works with `claude --model sonnet`
+
+Builds clean. CLI help shows both backends.
+
+go:
+- [ ] Test with agent-doc diff-interpretation cases end-to-end
+Why a thread pool instead of async tasks? What if we want more concurrency than threads?
+### Re: End-to-end test running
+
+First end-to-end run launched with `--model haiku --judge-model haiku` (faster for validation). Pipeline works! Early results from first 9/21 cases:
+
+| Case | Score | Result | Latency |
+|------|-------|--------|---------|
+| simple-question | 0.95 | PASS | 72.8s (cold start) |
+| incomplete-fragment | 0.65 | FAIL | 13.9s |
+| multi-topic | 0.67 | FAIL | 22.2s |
+| comment-content-ignored | 0.25 | FAIL | 22.6s |
+| blockquote-annotation | 0.55 | FAIL | 38.3s |
+| deletion-of-content | 0.95 | PASS | 14.2s |
+| truncated-sentence | 0.60 | FAIL | 17.1s |
+| structural-reorg | 0.95 | PASS | 15.4s |
+| approval-to-implement | 0.62 | FAIL | 32.9s |
+
+Full JSON run in progress (background). Note: haiku is the evaluated model here — scores will be higher with sonnet/opus. The important thing is the pipeline works end-to-end: YAML parsing -> claude CLI -> judge scoring -> results.
+### Re: Full run complete (haiku baseline) (HEAD)
+
+**Results: 9/21 passed (42.9%), mean score 0.57, total time 19.5 min**
+
+| Case | Score | Result |
+|------|-------|--------|
+| simple-question | 0.67 | FAIL |
+| incomplete-fragment | 0.70 | PASS |
+| multi-topic | 0.78 | PASS |
+| comment-content-ignored | 0.65 | FAIL |
+| blockquote-annotation | 0.58 | FAIL |
+| deletion-of-content | 0.95 | PASS |
+| truncated-sentence | 0.70 | PASS |
+| structural-reorg | 0.95 | PASS |
+| approval-to-implement | 0.35 | FAIL |
+| mixed-valid-and-comment | 0.40 | FAIL |
+| inline-colon-annotation | 0.85 | PASS |
+| boundary-only-change | 0.25 | FAIL |
+| head-label-removal | 0.00 | FAIL |
+| single-word-approval | 0.25 | FAIL |
+| pasted-terminal-output | 0.45 | FAIL |
+| multi-item-instruction-list | 0.25 | FAIL |
+| single-word-correction | 0.72 | PASS |
+| mid-sentence-truncated-real | 0.75 | PASS |
+| inline-annotation-with-truncation | 0.98 | PASS |
+| multi-topic-approval-plus-questions | 0.25 | FAIL |
+| url-reference-question | 0.48 | FAIL |
+
+**Baseline saved:** `evals/agent-doc/diff-interpretation/baselines/haiku-2026-04-03.json`
+
+**Key observations:**
+- Pipeline works end-to-end. All 21 cases ran successfully.
+- Haiku struggles with agent-doc-specific conventions (comment stripping, pending protocol, boundary filtering)
+- Strong on structural understanding (reorg, deletion, annotations)
+- Two outlier latencies: multi-item-instruction-list (362s) and multi-topic-approval (437s) — haiku generated very long responses
+- Next: run with sonnet to establish the target-model baseline
+<!-- agent:boundary:7a360c90 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [ ] Set up ANTHROPIC_API_KEY in `pass` and run full eval suite
-- [ ] Test with agent-doc diff-interpretation cases end-to-end
+- [x] Test with agent-doc diff-interpretation cases end-to-end
+- [x] Save baseline JSON from first run
+- [ ] Run with sonnet model for target baseline
 - [ ] Add `make check` integration
 - [ ] JSON output format documentation
 - [ ] Regression tracking with `--baseline` end-to-end test
+- [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 <!-- /agent:pending -->
 
-## Todo (HEAD)
+## Todo
 
 <!-- agent:todo -->
 - [ ] HTML/SVG report output

@@ -946,28 +946,73 @@ All three features implemented, compiled, tested (38/38 pass), and release binar
 ❯ 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   ⏵⏵ bypass permissions on (shift+tab to cycle)Ross at Dreamable
-<!-- agent:boundary:98d1579e -->
+       #12590           ✅  Committed and pushed credential fallback implementation to version control
+
+     tasks/software/ragie-web-doc.md
+       #12591  2:14 PM  ✅  Ragie Web Demo Documentation Update - Server-Side API Key Architecture
+
+     src/agent-doc-js/setup.sh
+       #12592           🔵  Agent-Doc Credential Flow Architecture
+
+     src/agent-doc-js/worker.js
+       #12593  2:15 PM  🟣  Dual Authentication Support - Session Tokens and API Keys
+
+     src/agent-doc-js/src/app.js
+       #12594           🟣  Client-Side Session Token Detection and Bearer Authentication
+
+     General
+       #12595           ✅  Cloudflare Worker Deployment with Dual Authentication Support
+
+     src/agent-doc-js/worker.js
+       #12596           ✅  Dual Authentication Feature Committed and Pushed to Repository
+
+     src/agent-doc-js
+       #12597           ✅  Parent Repository Submodule Reference Updated
+
+     tasks/recruit/robert-ross.md
+       #12598  2:21 PM  🔵  Email sent via corky but threading issue identified
+
+     #S3646 Email threading fix for Rob Ross recruitment email - created properly threaded draft (Apr 2, 2:23 PM)
+
+     src/corky/src/draft/mod.rs
+       #12599  2:24 PM  🔵  Corky email threading uses in_reply_to directly without Message-ID resolution
+
+     General
+       #12600           🔵  Corky lacks Gmail message query and Message-ID extraction capabilities
+
+     #S3647 Agent-doc session for Robert Ross recruitment outreach and email threading fix (Apr 2, 2:26 PM)
+
+     #S3648 Send threaded email reply to Robert Ross (Dreamable) with correct Message-ID headers (Apr 2, 2:26 PM)
+
+     tasks/recruit/robert-ross.md
+       #12601  2:26 PM  🔴  Fixed email threading and sent properly threaded reply to Rob Ross
+
+     mail/drafts/2026-04-02-re-brian-rob-zoom-2.md
+       #12602  2:27 PM  ✅  Created properly threaded email draft with RFC Message-ID
+       #12603           ✅  Pushed email draft to Gmail for threading verification
+
+     #S3649 Running preflight check on robert-ross.md recruitment task document (Apr 2, 2:29 PM)
+
+     Investigated: Agent-doc preflight examined the robert-ross.md task file, detected layout issues with multiple
+     non-idle agent-doc panes in the stash window, and computed a diff showing recent changes to the document
+
+     Learned: The preflight process successfully identified that the user added feedback to the document about two
+     specific errors: (1) an email was sent directly when the instruction was to save as a draft, and (2) the email did
+     not thread correctly in Gmail despite attempts to fix Message-ID header issues
+
+     Completed: Preflight completed successfully with commit 9690ed21, baseline saved to .agent-doc/baselines/, and
+     unified diff computed showing the user's added feedback about email handling mistakes in the Rob Ross recruitment
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)Ross at Dreamable
+<!-- agent:boundary:91e5270e:agent-doc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] **DONE**: Session lock guard (pane ownership check before writes)
-- [x] **DONE**: `agent-doc rename` command (snapshot migration + registry update)
-- [x] **DONE**: Document linking (related_docs frontmatter + preflight change detection)
-- [ ] Transfer existence topics to tasks/software/existence.md
-- [ ] Add `existence fetch --check` and `existence diff` commands
-- [ ] Refactor chromium-bridge to use agent-kit SkillConfig
-- [ ] Migrate tagpath to bundle SKILL.md and use agent-kit
-- [ ] Upstream git superproject detection into agent-kit
-- [ ] Add agent-kit + SKILL.md to: existence, module-harness, agent-resume, eval-runner
-- [ ] Add per-harness path patterns to agent-kit
-- [ ] Move interface.md to existence-lang/ontology/src/
-- [ ] Add prebuilt binary release workflow to existence-lang/existence
-- [ ] Make btakita/philosophy depend on existence-lang/ontology (via existence fetch)
-- [ ] Author pneuma.md, noumena.md (NULL analogy), phenomena.md in existence-lang/ontology
-- [ ] Create/update precision.md + scope.md in existence-lang/ontology
-- [ ] Update chromium-bridge SKILL.md with CSS :hover limitation
+- Implement agent-doc diff interpretation evals (phase 1)
 <!-- /agent:pending -->
 
 <!-- agent:todo -->

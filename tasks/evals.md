@@ -95,16 +95,26 @@ evals/
 
 Start with **agent-doc diff interpretation** evals — highest-leverage area since it's the core reasoning loop every session depends on. Create 20-30 golden-answer test cases from real session diffs (plenty in git history), then expand with Claude-generated variations.
 Continue
-<!-- agent:boundary:9797482d -->
+### Re: Phase 1 Kickoff (HEAD)
+
+Understood — starting Phase 1 now. First priority is the agent-doc diff interpretation evals since that's the highest-leverage entry point. I'll:
+
+1. Create `evals/` directory structure
+2. Extract 10–15 real diffs from git history (interesting edge cases: multi-topic edits, incomplete fragments, sarcasm)
+3. Write golden-answer test cases (diff → expected intent)
+4. Build minimal eval runner using the Anthropic SDK
+
+Once that's working, we can expand to corky threading and skill adherence.
+<!-- agent:boundary:c07cd469 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Create `evals/` directory structure
-- [ ] Write first 10 agent-doc diff interpretation test cases from real sessions
+- [x] Approve Phase 1 plan
+- [ ] Create `evals/` directory structure with agent-doc/diff-interpretation/
+- [ ] Extract 10-15 real session diffs from git history as test fixtures
+- [ ] Write first 10 diff interpretation test cases (diff input → expected intent)
 - [ ] Build minimal eval runner (Python script using Anthropic SDK)
-- [ ] Establish baseline scores
-- [ ] Expand to corky voice/threading evals
-- [ ] Add CI integration for triggered evals
+- [ ] Run baseline scores for agent-doc diff interpretation
 <!-- /agent:pending -->

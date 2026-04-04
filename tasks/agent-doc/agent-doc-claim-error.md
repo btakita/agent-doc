@@ -30,7 +30,7 @@ Both are **already-exists conflicts** from publishing manually before CI ran:
 
 **To prevent:** Either let CI handle the full release (don't publish manually) or add `skip_existing` to the workflows.
 Let's have GH handle releases by default. But in special cases where we release locally, add `skip_existing`. Add to the relevant runbooks.
-### Re: CI-first releases with skip_existing (HEAD)
+### Re: CI-first releases with skip_existing
 
 Updated both CI workflows and the prerelease runbook:
 
@@ -46,7 +46,15 @@ Committed: `6eedc63` — `fix: make CI release workflows idempotent`
 3. `cargo install --path .` locally for the dev binary
 
 **Local override:** If you publish manually first, CI gracefully skips the duplicate.
-<!-- agent:boundary:44651ad5 -->
+Is the local override in a SKILL->runbook?
+### Re: Local override location (HEAD)
+
+Not in SKILL — release procedures aren't a document session concern. It's in `.agent/runbooks/prerelease.md` (already updated), linked from CLAUDE.md's Runbooks section.
+
+The path: **CLAUDE.md** → `.agent/runbooks/prerelease.md` → Target: github-release section (CI-first default + local override).
+
+SKILL.md only covers the `/agent-doc` document session workflow. Release procedures are project-level runbooks.
+<!-- agent:boundary:253fd503 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

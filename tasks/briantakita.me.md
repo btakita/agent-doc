@@ -1790,7 +1790,10 @@ Please update blog post and linkedin teaser draft.
 > livestream audit procedures
 
 Nobody is going to know what "livestream audit procedures" are.
-### Re: Dropping the livestream jargon (HEAD)
+> Across 12 runbooks
+
+By identifying and extracting 12 runbooks 
+### Re: Dropping the livestream jargon
 
 You're right. Revised both:
 
@@ -1811,11 +1814,32 @@ You're right. Revised both:
 > What directory convention are you using for agent config? `.agent/`, `.agents/`, `.ai/`? The ecosystem hasn't settled this yet and I'd love to hear what's working for you.
 
 **Blog post** — replaced "livestream: 53% of that skill's instructions were audit procedures" with generic framing: "Some skills saw over 50% of their content moved to on-demand loading — procedures that only matter during specific operations, not on every invocation."
-<!-- agent:boundary:de27f228 -->
+### Re: Active voice — "identifying and extracting" (HEAD)
+
+Updated both to use "By identifying and extracting 12 runbooks, I cut 212 lines..."
+
+**LinkedIn teaser:**
+
+> **Your CLAUDE.md is bloated. Here's what to do about it.**
+>
+> Every token in your AI instruction file costs you something. Release checklists, deploy procedures, precommit workflows... they're important, but they don't need to occupy context when the agent is writing a utility function.
+>
+> I've been externalizing step-by-step procedures into **agent runbooks** — plain markdown files that agents load on demand instead of carrying in every interaction. By identifying and extracting 12 runbooks, I cut 212 lines from my instruction files — a 28% reduction in persistent context.
+>
+> The pattern works with Claude Code, Cursor, Copilot, Windsurf, Gemini CLI, Aider, and Codex. No special syntax. No vendor lock-in.
+>
+> Blog post + reference repo:
+> - https://briantakita.me/post/2026-04-03-agent-runbooks-on-demand-procedural-context
+> - https://github.com/btakita/agent-runbooks
+>
+> What directory convention are you using for agent config? `.agent/`, `.agents/`, `.ai/`? The ecosystem hasn't settled this yet and I'd love to hear what's working for you.
+
+**Blog post** line 30 also updated to match.
+<!-- agent:boundary:e78f2459 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn post: revised draft (no jargon), pending your edits + publish
+- LinkedIn post: revised draft (active voice), pending your edits + publish
 - Blog post: deploy updated version (changes in briantakita.me-dev working tree)
 - Cleanup: remove stale directories
 <!-- /agent:pending -->

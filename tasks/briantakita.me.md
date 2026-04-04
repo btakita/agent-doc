@@ -2126,7 +2126,7 @@ Post body and first comment formatted above in the console. Steps:
 
 Let me know when it's live and I'll mark it done.
 the linkedin-post runbook should use corky. Should this runbook be moved into corky with the `corky skill install` SKILL.md?
-### Re: LinkedIn runbook → corky (HEAD)
+### Re: LinkedIn runbook → corky
 
 Yes, corky already has LinkedIn in its architecture (`[profiles.btakita.linkedin]`, `social` module roadmap). And `corky skill install` exists.
 
@@ -2135,11 +2135,27 @@ Yes, corky already has LinkedIn in its architecture (`[profiles.btakita.linkedin
 **For now:** Keep `.agent/runbooks/linkedin-post.md` as-is. When corky gets LinkedIn support, the runbook becomes the spec for the feature — then it gets replaced by `corky linkedin post`.
 
 The runbook pattern working exactly as designed here — lightweight procedure now, productized feature later.
-<!-- agent:boundary:14d710f8 -->
+
+`corky linkedin` is already implemented. If the corky SKILL.md and runbook were moved into corky, would agent-loop **always** use `corky linkedin ...` for these posts?
+### Re: Move runbook into corky — yes (HEAD)
+
+`corky linkedin` already has `draft`, `publish`, and `comment` subcommands — exactly what the runbook describes manually.
+
+Moving the runbook into corky's skill would ensure every LinkedIn post goes through `corky linkedin draft` → `corky linkedin publish` → `corky linkedin comment`. The links-in-first-comment rule gets enforced programmatically instead of relying on manual paste.
+
+Steps:
+1. Move runbook to corky's skill directory (or bundle via `corky skill install`)
+2. Update runbook to use `corky linkedin` commands
+3. Update CLAUDE.md reference
+4. Remove `.agent/runbooks/linkedin-post.md`
+
+Want me to do this now, or post first?
+<!-- agent:boundary:350c3904 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn blog teaser: paste from console and post
+- LinkedIn blog teaser: paste and post (or use corky linkedin)
+- Move linkedin-post runbook into corky skill
 - Video: edit out WordPress admin section, then post
 - Second blog post + video: target Wed/Thu Apr 9-10
 - Cleanup: remove stale directories

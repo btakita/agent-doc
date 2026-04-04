@@ -423,7 +423,7 @@ Would you have used a worktree?
 The worktree agent would: `cd src/agent-doc`, create feature branch, implement `notify` subcommand, `make check`, return with branch + diff.
 
 **When NOT to use a worktree:** Markdown-only changes like the runbook extraction -- safe to edit in-place, no compilation, no running binary risk.
-<!-- agent:boundary:ce273fcc -->
+<!-- agent:boundary:4fc191b8 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

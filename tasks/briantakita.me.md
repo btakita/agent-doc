@@ -1914,7 +1914,7 @@ Saturday 5 AM is one of the worst times — low engagement, post gets buried bef
 **Recommendation: Tuesday April 8, ~9 AM ET.** Gives you peak weekday engagement and time for a final read-through Monday evening.
 
 If sooner: Monday April 7, 9 AM ET works too — slightly lower than Tue-Thu but far better than weekends.
-<!-- agent:boundary:4a16c938 -->
+<!-- agent:boundary:5bc31a88 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

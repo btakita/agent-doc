@@ -2216,7 +2216,11 @@ Update our blog post + linkedin teaser
 
 I also want to present encapsulation and composability.
 Where binary logic and SKILL, runbook logic, rules are packaged together.
-### Re: Blog post + LinkedIn teaser update — skill encapsulation (HEAD)
+
+do
+- Blog post: consider adding skill decomposition section (separate from runbook numbers)
+- LinkedIn blog teaser: posted, keep as-is (runbooks only)
+### Re: Blog post + LinkedIn teaser update — skill encapsulation
 
 **Blog post addition** — new section after "Nested runbooks" called **"Packaged skills: binary + instructions + runbooks"**. Key points:
 
@@ -2227,13 +2231,27 @@ Where binary logic and SKILL, runbook logic, rules are packaged together.
 
 **LinkedIn** — recommend a sequel post rather than editing the existing runbooks post. "Skill encapsulation — packaging binary + instructions + runbooks" as a natural follow-up.
 
+Do both LinkedIn teasers 
+
 **Draft blog section ready in console.** Shall I add it to the blog post file? And should LinkedIn be a sequel or fold into existing?
-<!-- agent:boundary:9921e746 -->
+### Re: Blog post updated — skill encapsulation section added (HEAD)
+
+Added **"Packaged skills: binary + instructions + runbooks"** section after "Nested runbooks" in the blog post at `src/briantakita.me-dev/app/briantakita.me/post/content/2026-04-03-agent-runbooks-on-demand-procedural-context.md`.
+
+Covers:
+- Monolithic vs decomposed comparison (695 lines → 58-66 per invocation, 85-92% less)
+- Per-skill + on-demand runbook loading table
+- Compile-time embedding (`include_str!`) for version-locked agent context
+- Encapsulation principle: binary + skills + runbooks distributed together
+
+LinkedIn teaser stays as-is (runbooks only). Blog post is the comprehensive reference covering both optimizations.
+
+**Next:** Build + deploy to push live.
+<!-- agent:boundary:931aafd7 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Blog post: add skill encapsulation section (draft ready, awaiting approval)
-- LinkedIn: decide sequel vs edit existing teaser
+- Blog post: build + deploy skill encapsulation addition
 - Corky skill architecture: transferred to tasks/software/corky.md
 - Video: edit out WordPress admin section, then post
 - Second blog post + video: target Wed/Thu Apr 9-10

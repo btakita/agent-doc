@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-agent-doc v0.31.10 released to crates.io + GitHub
+agent-doc v0.31.11 released to crates.io + GitHub
 <!-- /agent:status -->
 
 ## Exchange
@@ -35,7 +35,7 @@ agent-doc v0.31.10 released to crates.io + GitHub
 - Module-harness redesign: default=audit, seed=bootstrap from code, apply=spec-first
 - Pane lifecycle spec goes in SPEC.md (user-facing) + sync.rs module doc (developer), not CLAUDE.md
 - Refactoring (ensure_initialized split, auto_start rename) deferred to separate session
-### Re: SPEC.md pane lifecycle written (HEAD)
+### Re: SPEC.md pane lifecycle written
 
 Added section **8.5 Pane Lifecycle — Binding Invariant** to SPEC.md with:
 - The invariant statement (document drives pane resolution)
@@ -44,14 +44,30 @@ Added section **8.5 Pane Lifecycle — Binding Invariant** to SPEC.md with:
 - Domain ontology terminology table (Binding, Reconciliation, Provisioning, Initialization)
 
 All tests pass. Ready to release v0.31.11.
-<!-- agent:boundary:c745408d -->
+do
+- [ ] Module-harness redesign: audit/seed/apply + runbooks (separate session)
+- [ ] Refactor ensure_initialized into 3 focused functions (separate session)
+- [ ] Rename auto_start_no_wait (separate session)
+### Re: v0.31.11 released (HEAD)
+
+Published to all targets:
+- **crates.io**: v0.31.11
+- **GitHub Release**: [v0.31.11](https://github.com/btakita/agent-doc/releases/tag/v0.31.11) with binary
+- **Local binary**: installed
+- **Parent submodule**: pointer updated
+
+4 changes shipped:
+1. Sync auto-initialization (ensure_initialized in resolve_file)
+2. SPEC.md section 8.5 (Binding invariant)
+3. Domain ontology in README.md
+4. Module docs with ontology terms
+<!-- agent:boundary:5187901b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] SPEC.md: pane lifecycle spec written (section 8.5)
-- [ ] Release v0.31.11 with sync init + ontology + SPEC.md
+- [x] Release v0.31.11 — published
 - [ ] Module-harness redesign: audit/seed/apply + runbooks (separate session)
 - [ ] Refactor ensure_initialized into 3 focused functions (separate session)
 - [ ] Rename auto_start_no_wait (separate session)

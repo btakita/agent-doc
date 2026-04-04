@@ -32,7 +32,7 @@ Each `/agent-doc` cycle triggers commit + VCS refresh → JetBrains re-indexes. 
 - `agent-doc clean` could squash old task commits to reduce history depth
 - JetBrains plugin could throttle VCS refresh signals
 - Disable git annotations for `tasks/` directory in IDE settings
-<!-- agent:boundary:4dbe4a05 -->
+<!-- agent:boundary:8f7bcac9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

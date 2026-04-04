@@ -91,7 +91,7 @@ Updated:
 - `src/agent-doc/SKILL.md` — added Runbooks section linking both runbooks
 
 Binary rebuilt and skill reinstalled. Both runbooks now install via `agent-doc skill install`.
-<!-- agent:boundary:6c1ebfc1 -->
+<!-- agent:boundary:93c826ee -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

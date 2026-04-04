@@ -9,7 +9,7 @@ claude_args: --dangerously-skip-permissions
 # eval-runner
 
 <!-- agent:status -->
-**Status:** 19-case suite at 78.9% (15/19) | Smoke 6/6 stable | Mean 0.81 | `src/eval-runner/`
+**Status:** 20-case suite (split + post-preflight fixes) | Smoke 6/6 | Runbook added | `src/eval-runner/`
 <!-- /agent:status -->
 
 ## Architecture
@@ -955,7 +955,7 @@ The chunking should already occur with the diff. And in my previous prompt in th
 | Truncation detection | LLM | Keep as LLM — needs contextual judgment |
 
 The biggest wins come from (1) fixing eval cases to use post-preflight diffs and (2) deterministic multi-topic chunking in the preflight pipeline.
-### Re: Content source annotation, chunking, and runbooks (HEAD)
+### Re: Content source annotation, chunking, and runbooks
 
 #### Source annotation for editor view
 Good direction. Annotating content with its source (user vs agent) at the data layer enables:
@@ -966,6 +966,10 @@ Good direction. Annotating content with its source (user vs agent) at the data l
 This is an agent-doc feature — the CRDT merge already tracks which side wrote what. Surfacing that in the diff output (e.g., `+[user] I'd rather start with corky`) would make the blockquote case trivial: the model sees `[user]` and knows it's an annotation.
 
 I'll look at `tasks/recruit/robert-ross.md` and `tasks/recruit/robert-ross-granola.md` for the design reference.
+
+I see https://github.com/iainc/Markdown-Annotations as prior art. The ia editor color codes the annotations. Perhaps this is a good "standard" to apply in lieu of any other alternatives?
+
+Let's add this insight as a persistent note in the appropriate task or documentation. I don't want to lose the insight when the exchange is compacted.
 
 #### Post-preflight diffs for eval cases — agreed
 Action item: regenerate the `mixed-valid-and-comment` case diff through actual preflight (comments stripped). The case becomes: "model sees only the non-comment content" — which is what happens in production. This should flip it from FAIL to PASS trivially.
@@ -985,16 +989,36 @@ The SKILL stays lean, the runbook provides detailed guidance when needed. The mo
 2. Split `inline-annotation-with-truncation` into 2 cases
 3. Draft `multi-topic-response` runbook (for agent-doc, not eval-runner)
 4. Track content-source annotation as agent-doc feature (separate session)
-<!-- agent:boundary:4442aa19 -->
+
+do all
+### Re: All 4 actions complete (HEAD)
+
+**1. Regenerated `mixed-valid-and-comment` diff through preflight**
+Removed HTML comments from the diff — now shows only the non-comment question line, matching what the model actually sees in production. Expected behavior simplified to "responds to the question" (no "ignores comments" check needed since they're already stripped).
+
+**2. Split `inline-annotation-with-truncation` into 2 cases**
+- `inline-annotation-corrections` — tests colon-appended corrections to numbered list items
+- `truncated-line-no-change` — tests detection of identical-content line (no real change)
+Suite is now 20 cases (19 + 1 from split).
+
+**3. Created `multi-topic-response` runbook**
+At `.claude/skills/agent-doc/runbooks/multi-topic-response.md`. Documents: detection of multi-topic diffs, response pattern (one `### Re:` per topic), checkpoint timing, and when NOT to split.
+
+**4. Content-source annotation tracked**
+Saved Markdown-Annotations reference (iA Writer's spec) to persistent memory. Linked from MEMORY.md under References.
+
+**Suite status:** 20 cases, 6 smoke-tagged. Ready for a baseline run.
+<!-- agent:boundary:d272307e -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [ ] Regenerate `mixed-valid-and-comment` case diff through actual preflight
-- [ ] Split `inline-annotation-with-truncation` into 2 simpler cases
-- [ ] Draft `multi-topic-response` runbook for agent-doc
-- [ ] Content-source annotation feature (agent-doc, separate session)
+- [x] Regenerate `mixed-valid-and-comment` case diff through actual preflight
+- [x] Split `inline-annotation-with-truncation` into 2 simpler cases
+- [x] Draft `multi-topic-response` runbook for agent-doc
+- [x] Content-source annotation tracked (Markdown-Annotations reference saved)
+- [ ] Run baseline with updated 20-case suite
 - [ ] Design agentic eval fixture format (future — v2)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 <!-- /agent:pending -->

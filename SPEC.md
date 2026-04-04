@@ -617,13 +617,13 @@ Diff output now uses a 5-line context radius (unified diff with 5 lines of surro
 
 `agent_doc_is_tracked(path)` — C ABI export for editor plugins. Returns whether the given file path is tracked in `sessions.json` (has a registered session). Plugins use this via JNA/FFI to conditionally show UI elements for tracked documents.
 
-## 7.31 Sync auto_start_no_wait
+## 7.31 Sync provision_pane
 
-The sync path uses `auto_start_no_wait` instead of the standard auto-start. This variant accepts `col_args: &[String]` and computes `split_before` via `is_first_column(file, col_args)`, so new panes split in the correct direction for their column position (left-column files split before, right-column files split after). It does not block waiting for the `❯` prompt to appear (unlike `route` which waits up to 30s), avoiding sync blocking on slow Claude startup when arranging multiple panes. The call site in `sync.rs` passes the `col_args` slice through from the CLI arguments.
+The sync path uses `provision_pane` instead of the standard auto-start. This variant accepts `col_args: &[String]` and computes `split_before` via `is_first_column(file, col_args)`, so new panes split in the correct direction for their column position (left-column files split before, right-column files split after). It does not block waiting for the `❯` prompt to appear (unlike `route` which waits up to 30s), avoiding sync blocking on slow Claude startup when arranging multiple panes. The call site in `sync.rs` passes the `col_args` slice through from the CLI arguments.
 
 ## 7.32 Sync Swap-Pane Atomic Reconcile
 
-The sync path uses swap-pane atomic transitions via tmux-router. When reconciling pane layout, `auto_start_no_wait` spawns sessions without blocking on prompt detection. A `context_session` parameter allows cross-session override — sync knows which session it's managing and passes that context to `auto_start`, which takes priority over the document's `tmux_session` frontmatter field.
+The sync path uses swap-pane atomic transitions via tmux-router. When reconciling pane layout, `provision_pane` spawns sessions without blocking on prompt detection. A `context_session` parameter allows cross-session override — sync knows which session it's managing and passes that context to `auto_start`, which takes priority over the document's `tmux_session` frontmatter field.
 
 ## 7.33 Sync tmux_session Auto-Repair (Deprecated Field)
 
@@ -766,7 +766,7 @@ When the user navigates to a document in the editor:
    - Pane exists for this session → **focus it** (Binding found)
    - Pane in stash → **rescue it** (swap-pane back to agent-doc window)
    - No pane exists → trigger **Provisioning**
-5. **Provisioning** — `route::auto_start_no_wait()` creates a new tmux pane:
+5. **Provisioning** — `route::provision_pane()` creates a new tmux pane:
    - Splits alongside an existing pane in the agent-doc window
    - Registers the session→pane **Binding** in `sessions.json`
    - Starts Claude asynchronously in the new pane

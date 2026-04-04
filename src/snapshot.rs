@@ -289,52 +289,68 @@ pub fn resolve(doc: &Path) -> Result<Option<String>> {
 ///
 /// Returns `true` if any initialization was performed, `false` if already initialized.
 pub fn ensure_initialized(doc: &Path) -> Result<bool> {
-    // First: ensure the file has a session UUID if it has agent_doc_format.
-    // This must happen before the snapshot check because claim (which normally
-    // assigns UUIDs) may not have been called for this file.
-    if let Ok(content) = std::fs::read_to_string(doc)
-        && let Ok((fm, _)) = crate::frontmatter::parse(&content)
-        && fm.format.is_some() && fm.session.is_none()
-    {
-        eprintln!(
-            "[init] assigning session UUID to {} (has format but no session)",
-            doc.display()
-        );
-        if let Ok((updated, session_id)) = crate::frontmatter::ensure_session(&content)
-            && updated != content
-        {
-            if let Err(e) = std::fs::write(doc, &updated) {
-                eprintln!("[init] warning: failed to write session UUID: {}", e);
-            } else {
-                eprintln!("[init] assigned session UUID: {}", session_id);
-            }
-        }
+    let uuid_assigned = ensure_session_uuid(doc)?;
+    let snapshot_created = ensure_snapshot(doc)?;
+    if snapshot_created {
+        ensure_git_tracked(doc)?;
     }
+    Ok(uuid_assigned || snapshot_created)
+}
 
+/// Assign a session UUID to a document that has `agent_doc_format` but no `agent_doc_session`.
+///
+/// Returns `true` if a UUID was assigned, `false` if already present or not applicable.
+pub fn ensure_session_uuid(doc: &Path) -> Result<bool> {
+    let content = match std::fs::read_to_string(doc) {
+        Ok(c) => c,
+        Err(_) => return Ok(false),
+    };
+    let (fm, _) = match crate::frontmatter::parse(&content) {
+        Ok(parsed) => parsed,
+        Err(_) => return Ok(false),
+    };
+    if fm.format.is_none() || fm.session.is_some() {
+        return Ok(false);
+    }
+    eprintln!(
+        "[init] assigning session UUID to {} (has format but no session)",
+        doc.display()
+    );
+    let (updated, session_id) = crate::frontmatter::ensure_session(&content)?;
+    if updated != content {
+        std::fs::write(doc, &updated)?;
+        eprintln!("[init] assigned session UUID: {}", session_id);
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+/// Create an initial snapshot with stripped exchange content if none exists.
+///
+/// Returns `true` if a snapshot was created, `false` if one already existed.
+pub fn ensure_snapshot(doc: &Path) -> Result<bool> {
     let snap = path_for(doc)?;
     if snap.exists() {
         return Ok(false);
     }
+    eprintln!(
+        "[init] creating snapshot for {} (none found)",
+        doc.display()
+    );
+    if let Ok(content) = std::fs::read_to_string(doc) {
+        let snapshot_content = crate::claim::strip_exchange_content(&content);
+        save(doc, &snapshot_content)?;
+    }
+    Ok(true)
+}
 
+/// Stage an untracked file and commit to establish a git baseline.
+pub fn ensure_git_tracked(doc: &Path) -> Result<()> {
     let canonical = std::fs::canonicalize(doc).unwrap_or_else(|_| doc.to_path_buf());
     let project_root = find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
 
-    eprintln!(
-        "[init] auto-initializing {} (no snapshot found)",
-        doc.display()
-    );
-
-    // Save initial snapshot with stripped exchange content so existing user
-    // text in the exchange becomes a diff on the next run.
-    if let Ok(content) = std::fs::read_to_string(doc) {
-        let snapshot_content = crate::claim::strip_exchange_content(&content);
-        if let Err(e) = save(doc, &snapshot_content) {
-            eprintln!("[init] warning: failed to save initial snapshot: {}", e);
-        }
-    }
-
-    // Stage the file if untracked
     let is_tracked = std::process::Command::new("git")
         .args(["ls-files", "--error-unmatch"])
         .arg(&canonical)
@@ -354,12 +370,10 @@ pub fn ensure_initialized(doc: &Path) -> Result<bool> {
             .status();
     }
 
-    // Commit to establish baseline
     if let Err(e) = crate::git::commit(doc) {
         eprintln!("[init] warning: failed to commit after init: {}", e);
     }
-
-    Ok(true)
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -848,5 +862,104 @@ mod tests {
         let resolved = resolve(&doc).unwrap();
         assert_eq!(resolved.as_deref(), Some(snapshot_content),
             "resolve() should always prefer snapshot file when it exists");
+    }
+
+    // -----------------------------------------------------------------------
+    // ensure_session_uuid tests
+    // -----------------------------------------------------------------------
+
+    fn setup_with_frontmatter(content: &str) -> (TempDir, PathBuf) {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, content).unwrap();
+        (dir, doc)
+    }
+
+    #[test]
+    fn ensure_session_uuid_assigns_to_template_without_session() {
+        let (_dir, doc) = setup_with_frontmatter(
+            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n"
+        );
+        let assigned = ensure_session_uuid(&doc).unwrap();
+        assert!(assigned, "should assign UUID to template file without session");
+
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("agent_doc_session:"), "file should have session UUID");
+    }
+
+    #[test]
+    fn ensure_session_uuid_noop_when_session_exists() {
+        let (_dir, doc) = setup_with_frontmatter(
+            "---\nagent_doc_session: existing-uuid\nagent_doc_format: template\n---\n\nBody\n"
+        );
+        let assigned = ensure_session_uuid(&doc).unwrap();
+        assert!(!assigned, "should not reassign when session already exists");
+
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("existing-uuid"), "original UUID preserved");
+    }
+
+    #[test]
+    fn ensure_session_uuid_noop_when_no_format() {
+        let (_dir, doc) = setup_with_frontmatter(
+            "---\ntitle: plain doc\n---\n\nNo agent_doc_format\n"
+        );
+        let assigned = ensure_session_uuid(&doc).unwrap();
+        assert!(!assigned, "should not assign UUID to non-agent-doc files");
+    }
+
+    // -----------------------------------------------------------------------
+    // ensure_snapshot tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ensure_snapshot_creates_when_missing() {
+        let (dir, doc) = setup_with_frontmatter(
+            "---\nagent_doc_session: test-uuid\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append -->\nuser text\n<!-- /agent:exchange -->\n"
+        );
+        // Create .agent-doc dir so snapshot path resolves
+        fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+
+        let created = ensure_snapshot(&doc).unwrap();
+        assert!(created, "should create snapshot when none exists");
+
+        let snap = read_snapshot_directly(dir.path(), &doc);
+        assert!(snap.is_some(), "snapshot file should exist");
+        // Exchange content should be stripped
+        let snap_content = snap.unwrap();
+        assert!(!snap_content.contains("user text"),
+            "snapshot should have stripped exchange content");
+    }
+
+    #[test]
+    fn ensure_snapshot_noop_when_exists() {
+        let (dir, doc) = setup();
+        write_snapshot_directly(dir.path(), &doc, "existing snapshot");
+
+        let created = ensure_snapshot(&doc).unwrap();
+        assert!(!created, "should not recreate when snapshot exists");
+
+        let snap = read_snapshot_directly(dir.path(), &doc).unwrap();
+        assert_eq!(snap, "existing snapshot", "existing snapshot preserved");
+    }
+
+    // -----------------------------------------------------------------------
+    // ensure_initialized composite tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ensure_initialized_assigns_uuid_even_when_snapshot_exists() {
+        let (dir, doc) = setup_with_frontmatter(
+            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\nBody\n"
+        );
+        // Pre-create snapshot so ensure_snapshot is a no-op
+        fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        write_snapshot_directly(dir.path(), &doc, "pre-existing snapshot");
+
+        let initialized = ensure_initialized(&doc).unwrap();
+        assert!(initialized, "should return true when UUID was assigned");
+
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("agent_doc_session:"), "UUID should be assigned");
     }
 }

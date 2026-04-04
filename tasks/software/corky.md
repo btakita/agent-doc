@@ -1775,7 +1775,7 @@ do
 **Threaded reply draft:** Verified working. `corky draft new --in-reply-to "<msg-id>"` correctly sets `in_reply_to` in the draft YAML frontmatter.
 
 **`pyproject.toml` fix:** Committed `license-files = ["LICENSE"]` in corky submodule (`3daf664`). Need to push this to origin.
-<!-- agent:boundary:a847542e -->
+<!-- agent:boundary:d5d68874 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

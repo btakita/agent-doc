@@ -460,7 +460,7 @@ if tmux.pane_alive(&pane) && !target_pane_set.contains(&pane) {
 `tmux join-pane` supports cross-session moves natively — no need for break+move+join workaround.
 
 **Built, tested (623 pass), installed.** Try focusing on runbooks.md in the editor — the pane should be retrieved from session 1 and joined into the agent-doc window.
-<!-- agent:boundary:fddbbf10 -->
+<!-- agent:boundary:887ad3d9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

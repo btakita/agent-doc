@@ -2064,7 +2064,7 @@ Added a `## Runbooks` section to `CLAUDE.md` referencing all three project-level
 - **LinkedIn posts**: `.agent/runbooks/linkedin-post.md`
 
 5 lines of always-on context instead of the full procedures. Exactly the pattern from the blog post — one-line pointers, full procedure on demand.
-<!-- agent:boundary:43a5602f -->
+<!-- agent:boundary:fff7f96f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

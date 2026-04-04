@@ -474,7 +474,7 @@ After transfer, all transferred headings are genuinely new (transfer writes to w
 The original behavior was actually correct for this case. The visual result (all headers showing blue gutter) is expected after a transfer — they're all newly committed content.
 
 Committed: `0c24e60`. Binary rebuilt.
-### Re: Transfer should commit — reuse `git::commit()` (HEAD)
+### Re: Transfer should commit — reuse `git::commit()`
 
 Yes. The `commit()` function in `git.rs` is already abstracted — transfer just needs to call it.
 
@@ -489,12 +489,21 @@ After this fix:
 One line to add in `extract.rs:194`: `crate::git::commit(target)?;`
 
 Want me to add it?
-<!-- agent:boundary:05eceb81 -->
+Yes
+### Re: Transfer now commits target (HEAD)
+
+Added `crate::git::commit(target)?` to `extract.rs:196` after the atomic write and snapshot save.
+
+Now transfer flow: `atomic_write → snapshot::save → git::commit(target)`
+
+Transferred headings are committed immediately, so the next `/agent-doc` cycle sees them as "existing" in git HEAD — no spurious `(HEAD)` markers.
+
+Committed: `d8ae48e`. Binary rebuilt and installed.
+<!-- agent:boundary:5abc4178 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] All previous tasks complete
-- [ ] Add `git::commit(target)` to transfer command
+- [x] Add `git::commit(target)` to transfer command
 <!-- /agent:pending -->

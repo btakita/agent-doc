@@ -206,7 +206,7 @@ How much context savings are we getting from extracting the runbooks?
 3. `chore: gitignore .claude/ directory` (installed output)
 
 **Issue fixed:** `skills/` was gitignored but `include_str!` embeds from git-tracked files. `cargo publish --verify` failed. Un-gitignored `skills/`, added `.claude/` to `.gitignore`.
-### Re: Context savings from skill extraction (HEAD)
+### Re: Context savings from skill extraction
 
 Skills installed. Claude Code now shows `corky`, `email`, `linkedin` as separate skills.
 
@@ -219,12 +219,27 @@ Skills installed. Claude Code now shows `corky`, `email`, `linkedin` as separate
 Runbooks (459 lines) are on-demand only — never loaded unless the user requests a specific operation.
 
 The biggest win: Claude Code skill matching only loads the *relevant* skill per invocation. A monolithic skill would load all 695 lines for every corky-related task.
-<!-- agent:boundary:07bee94d -->
+Can any runbooks be extracted from these skills, to avoid over-eagerly using context tokens?
+### Re: Runbook extraction from skills (HEAD)
+
+**Email skill (107 lines) — two extraction candidates:**
+1. **Gmail Account Configuration** (28 lines) → `runbooks/gmail-config.md` — only needed for account setup/debug, not every email task
+2. **HTML/browser paste workflow** (18 lines) → `runbooks/browser-paste.md` — fallback workflow, rarely used
+
+**Potential savings:** ~46 lines (43% reduction, 107→~61 lines)
+
+**LinkedIn skill (58 lines):** Already lean, nothing worth extracting.
+
+**Corky skill (71 lines):** Import/transcription commands (~15 lines) could move but marginal gain.
+
+Want me to extract the two email runbooks?
+<!-- agent:boundary:24e0cda9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- Extract email Gmail config + browser-paste to runbooks (awaiting approval)
 - Verify sheet sharing / GCP test users
 - Re-test sheet read
 - Manylinux binary wheel (nice-to-have, needs container/CI)

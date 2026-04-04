@@ -127,7 +127,7 @@ Should I add the Pane Lifecycle section to agent-doc's CLAUDE.md?
 Does this belong in SPEC.md instead? Why do we want this in persistent context?
 
 Would a small reference help?
-### Re: SPEC.md is the right place (HEAD)
+### Re: SPEC.md is the right place
 
 CLAUDE.md is for **agent instructions** — conventions, rules, and patterns that shape how the agent writes code. Pane lifecycle is **runtime behavior documentation** — it describes how the system works, not how to develop it.
 
@@ -139,16 +139,39 @@ CLAUDE.md is for **agent instructions** — conventions, rules, and patterns tha
 The memory entry (`feedback_claim_creates_new_pane.md`) already captures the key lesson for future agent sessions. That's the persistent context piece.
 
 Want me to add it to SPEC.md or the sync.rs module doc?
-<!-- agent:boundary:fe126be0 -->
+Both. Ideally this will be deterministic. Perhaps the code needs to be refactored to make this spec clear. Are the abstractions appropriately named to reinforce the spec behavior?
+### Re: Naming audit + spec plan (HEAD)
+
+The audit reveals naming issues that obscure the pane lifecycle:
+
+| Current | Problem | Proposed |
+|---------|---------|----------|
+| `claim::run()` | "claim" implies taking a pane, but it binds an *existing* pane | Keep CLI name, update module doc |
+| `auto_start_no_wait()` | "no_wait" is about Claude startup, not pane creation | `create_pane_and_start_async()` |
+| `ensure_initialized()` | Does 3 things: UUID, snapshot, git | Split into `ensure_session_uuid()` + `ensure_snapshot()` + `ensure_git_tracked()` |
+
+**The fundamental confusion:** `claim` binds a document to an *existing* pane. `auto_start` *creates* a new pane. In normal workflow (editor navigation), `sync` calls `auto_start` — the user never needs to manually claim. "Claim for Tmux Pane" as a JB action name reinforces the wrong mental model.
+
+**Plan:**
+1. Add pane lifecycle to SPEC.md (user-facing behavior)
+2. Update sync.rs module doc (developer reference)
+3. Refactor `ensure_initialized()` into 3 focused functions
+4. Rename `auto_start_no_wait()` → `create_pane_and_start_async()`
+5. Keep `claim` as CLI name (backward compat) but update module doc
+
+Should I implement all 5, or start with spec docs (1-2) and save refactoring for a separate session?
+<!-- agent:boundary:d2208c00 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] ensure_initialized: assign session UUID to template files missing one
-- [x] Add ensure_initialized to sync's resolve_file
-- [x] Update granola import runbook to generate session UUID
+- [x] ensure_initialized: assign session UUID + sync integration
 - [x] Memory: claim creates new panes (feedback saved)
-- [ ] Pane Lifecycle spec — SPEC.md or sync.rs module doc (awaiting preference)
-- [ ] Release with sync init fix
+- [ ] SPEC.md: pane lifecycle documentation
+- [ ] sync.rs module doc: pane lifecycle developer reference
+- [ ] Refactor ensure_initialized into 3 focused functions
+- [ ] Rename auto_start_no_wait → create_pane_and_start_async
+- [ ] Update claim.rs module doc
+- [ ] Release with all changes
 <!-- /agent:pending -->

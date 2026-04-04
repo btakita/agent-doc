@@ -397,7 +397,9 @@ This should be fixed in `boundary.rs` — the reposition logic needs to be scope
 
 do
 - [ ] Fix boundary reposition bug: `(HEAD)` added to all h3 headers instead of just the one after boundary
-### Re: Boundary reposition bug fixed (HEAD)
+
+Why do we even add `(HEAD)` yet again? Was it not already done? Why do it again?
+### Re: Boundary reposition bug fixed
 
 Root cause: `add_head_marker()` in `git.rs` marked ALL root-level new headings with `(HEAD)`. After a transfer (all headings are "new" relative to git HEAD), every h3 got the marker.
 
@@ -406,7 +408,19 @@ Fix: Changed step 4 to mark only the **last** root-level heading instead of all 
 Committed: `308356b`. 38 tests pass. Binary rebuilt and installed.
 
 The bugs.md `(HEAD)` on all headers should stop after the next `agent-doc commit` cycle on that file.
-<!-- agent:boundary:cf8e02d0 -->
+### Re: Why `(HEAD)` is re-added every commit (HEAD)
+
+It's re-added because it only exists in **staged/committed content**, never the working tree:
+
+1. Snapshot + working tree: heading without `(HEAD)`
+2. `agent-doc commit` stages modified content with `(HEAD)` on the latest heading
+3. Git diff: committed has `(HEAD)`, working tree doesn't → **blue gutter** (visual boundary)
+4. After commit: snapshot stripped of `(HEAD)` for clean next cycle
+
+This creates the 1-line blue gutter that visually separates "agent response" (committed) from "user input" (uncommitted). Without re-adding it each cycle, the boundary disappears.
+
+The bug was marking ALL headings instead of just the last one — not the re-addition itself.
+<!-- agent:boundary:9e977ef2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -418,5 +432,5 @@ The bugs.md `(HEAD)` on all headers should stop after the next `agent-doc commit
 - [x] Timing instrumentation in plugin
 - [x] Plugin version check in `make precommit`
 - [x] State diagnostics logging
-- [x] Fix boundary reposition bug: only last heading gets `(HEAD)`
+- [x] Fix boundary reposition bug
 <!-- /agent:pending -->

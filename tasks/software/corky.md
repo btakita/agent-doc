@@ -233,7 +233,7 @@ Can any runbooks be extracted from these skills, to avoid over-eagerly using con
 **Corky skill (71 lines):** Import/transcription commands (~15 lines) could move but marginal gain.
 
 Want me to extract the two email runbooks?
-<!-- agent:boundary:24e0cda9 -->
+<!-- agent:boundary:b1df991f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

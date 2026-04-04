@@ -61,7 +61,7 @@ Published to all targets:
 2. SPEC.md section 8.5 (Binding invariant)
 3. Domain ontology in README.md
 4. Module docs with ontology terms
-<!-- agent:boundary:5187901b -->
+<!-- agent:boundary:ce24fda5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

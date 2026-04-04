@@ -822,7 +822,7 @@ Tightened 3 rubrics — removed overly specific requirements, focused on binary 
 Key improvements with haiku: boundary-only-change 0.67→1.00, single-word-correction 0.65→0.82 (now passes).
 
 **The smoke suite is now a reliable 1.5-min regression gate.** Consistently 6/6 with sonnet judge.
-<!-- agent:boundary:e273fc0e -->
+<!-- agent:boundary:fb80837e -->
 <!-- /agent:exchange -->
 
 ## Pending

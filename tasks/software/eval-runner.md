@@ -584,7 +584,7 @@ The multi-item fix validates the approach: giving the model concrete context (pe
 The drop from 76.2% to 66.7% is due to run-to-run variance (LLM non-determinism) — some previously-passing cases flipped. The fixed multi-item case is a net gain.
 
 **Verdict on the 2 remaining approval cases:** These need option 3 (agentic execution with tools) to truly pass. With `claude --print`, the model can't demonstrate it would proceed — it always hedges on access. For the diff-interpretation eval suite, consider marking them as "known limitation" or lowering their threshold.
-<!-- agent:boundary:e35572de -->
+<!-- agent:boundary:648ecb41 -->
 <!-- /agent:exchange -->
 
 ## Pending

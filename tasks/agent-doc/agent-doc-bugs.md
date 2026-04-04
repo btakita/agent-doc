@@ -30,6 +30,7 @@ agent-doc v0.31.12 released to crates.io + GitHub
 - Module-harness redesign: default=audit, seed=bootstrap, apply=spec-first (SKILL.md updated)
 
 **Test suite: 25 snapshot tests (17 existing + 8 new), 645+ total**
+<!-- agent:boundary:e2f1c757 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

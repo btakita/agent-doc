@@ -104,7 +104,7 @@ This should be part of the agent-doc spec. This misunderstanding seems to repeat
 3. **Granola import templates include `agent_doc_session`** — updated `SKILL.md` and `runbooks/import.md`
 
 637 tests pass, clippy clean, release built.
-### Re: Pane lifecycle spec clarification (HEAD)
+### Re: Pane lifecycle spec clarification
 
 You're right — I was wrong about why claim failed. The expected behavior is:
 
@@ -121,19 +121,34 @@ The "pane already claimed" error should never happen in normal workflow — it w
 
 1. **Memory entry saved** — `feedback_claim_creates_new_pane.md`: claim creates new panes, never reuses existing claimed panes
 2. **The fix already handles this** — `ensure_initialized()` in sync assigns UUIDs, then auto_start creates panes. No manual claim needed.
-3. **Spec clarification needed in CLAUDE.md** — should we add a "Pane Lifecycle" section to `src/agent-doc/CLAUDE.md` documenting when panes are created/stashed/restored? This would be the canonical reference.
+3. **Spec clarification needed in CLAUDE.md** — should we add a "Pane Lifecycle" section to `src/agent-doc/CLAUDE.md` documenting when panes are created/stashed/restored? This would be the canonical reference
 
 Should I add the Pane Lifecycle section to agent-doc's CLAUDE.md?
-<!-- agent:boundary:c6082403 -->
+Does this belong in SPEC.md instead? Why do we want this in persistent context?
+
+Would a small reference help?
+### Re: SPEC.md is the right place (HEAD)
+
+CLAUDE.md is for **agent instructions** — conventions, rules, and patterns that shape how the agent writes code. Pane lifecycle is **runtime behavior documentation** — it describes how the system works, not how to develop it.
+
+**SPEC.md** (or a module-level spec like `sync.rs` module doc) is the right place because:
+- Documents observable behavior for developers and users
+- Doesn't need to be in every agent's context window
+- Reference material, not a rule the agent needs when writing code
+
+The memory entry (`feedback_claim_creates_new_pane.md`) already captures the key lesson for future agent sessions. That's the persistent context piece.
+
+Want me to add it to SPEC.md or the sync.rs module doc?
+<!-- agent:boundary:3a1d689a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] ensure_initialized: assign session UUID to template files missing one
-- [x] Add ensure_initialized to sync's resolve_file (before session check)
+- [x] Add ensure_initialized to sync's resolve_file
 - [x] Update granola import runbook to generate session UUID
 - [x] Memory: claim creates new panes (feedback saved)
-- [ ] Pane Lifecycle spec in agent-doc CLAUDE.md — awaiting approval
+- [ ] Pane Lifecycle spec — SPEC.md or sync.rs module doc (awaiting preference)
 - [ ] Release with sync init fix
 <!-- /agent:pending -->

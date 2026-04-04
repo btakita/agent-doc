@@ -328,7 +328,7 @@ This sounds like the sync/layout correction is event-driven (triggered by editor
 **To investigate:** We'd need to reproduce the exact sequence — which document was active, which was claimed/started, and whether this was after a `start`, `claim`, or editor navigation event. The tmux-router logs (`agent-doc sync --verbose` or the tmux-router debug output) would show whether a sync was attempted and what layout state it saw.
 
 Is this reproducible, or was it a one-time occurrence? If reproducible, the steps to trigger it would help narrow down which code path is missing the layout correction.
-<!-- agent:boundary:9d384526 -->
+<!-- agent:boundary:2999b022 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

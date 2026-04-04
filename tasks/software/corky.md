@@ -1745,7 +1745,8 @@ Now enforceable across all agents and sessions.
 
 do
 - PyPI publish v0.24.0 (manylinux container build needed)
-### Re: PyPI publish v0.24.0 (HEAD)
+
+### Re: PyPI publish v0.24.0
 
 Fixed and published:
 
@@ -1760,14 +1761,28 @@ Binary wheel still needs manylinux container (glibc 2.43 too new). Source dist i
 - [x] PyPI (source dist)
 - [x] GitHub Release
 - [x] `cargo install --path .`
-<!-- agent:boundary:795effc7 -->
+
+do
+- Run `corky sync` to verify Message-ID extraction live
+- Test threaded reply draft
+### Re: Sync & threading verification (HEAD)
+
+**`corky sync`:**
+- Personal account (IMAP): synced successfully, no new messages
+- btak.dev (Gmail API): timed out on OAuth — needs re-auth in browser. Run `! corky sync account btak.dev` to authorize interactively
+- Message-ID extraction is Gmail API-only (not IMAP) — so it requires the btak.dev account
+
+**Threaded reply draft:** Verified working. `corky draft new --in-reply-to "<msg-id>"` correctly sets `in_reply_to` in the draft YAML frontmatter.
+
+**`pyproject.toml` fix:** Committed `license-files = ["LICENSE"]` in corky submodule (`3daf664`). Need to push this to origin.
+<!-- agent:boundary:a847542e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Run `corky sync` to verify Message-ID extraction live
-- Test threaded reply draft
+- Push corky license-files fix to origin
+- Re-auth btak.dev Gmail API OAuth (interactive)
 - Corky skill architecture: `corky skill install` for email + linkedin skills
 - Verify sheet sharing / GCP test users
 - Re-test sheet read

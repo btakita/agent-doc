@@ -1733,7 +1733,7 @@ Yes — these are cross-cutting agent behavior rules, not session-specific. They
 - Subagents don't see auto memory
 
 Adding to `CLAUDE.md` would enforce across all agents. Want me to add them to `## Core Principles`?
-<!-- agent:boundary:08bce2e6 -->
+<!-- agent:boundary:40b5399c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

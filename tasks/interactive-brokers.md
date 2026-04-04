@@ -1,8 +1,10 @@
 ---
-agent_doc_session: 655fad0d-fc98-412e-b951-2956603ad69e
-tmux_session: '0'
+session: 655fad0d-fc98-412e-b951-2956603ad69e
+resume: null
+agent: null
+model: null
+branch: null
 ---
-
 Please summarize key points in mail/topics/interactive-brokers/Zero_Hash_and_Zero_Hash_Liquidity_Services_User_Agreement.pdf
 
 Anything of concern?
@@ -136,4 +138,3 @@ Key terms:
 **Key takeaway:** Your IBKR brokerage assets (stocks, bonds) and crypto are in entirely separate legal regimes. IBKR's SIPC protection does NOT extend to anything in your Zero Hash Account. If Zero Hash fails, IBKR takes no responsibility.
 
 ## User
-

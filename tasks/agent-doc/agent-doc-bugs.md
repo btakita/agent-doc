@@ -240,7 +240,8 @@ Should I proceed with SPEC.md first?
 Yes. We should change the default operation of `/module-harness`. The bootstrap, seed, or from implementation step should be an explicit command. Pick the appropriate command name.
 
 `/module-harness` should also support adding specs. Perhaps my reading the SPEC.md and proposing the correct module spec to add, remove, or transfer to another module.
-### Re: Module-harness command redesign + SPEC.md (HEAD)
+This can be it's own command.
+### Re: Module-harness command redesign + SPEC.md
 
 **Proposed module-harness commands:**
 
@@ -253,7 +254,20 @@ Yes. We should change the default operation of `/module-harness`. The bootstrap,
 Key change: **default is audit (read-only), not generation.** `seed` is explicit.
 
 This is a module-harness skill redesign — tracked separately. Proceeding with SPEC.md for agent-doc now. I'll write the pane lifecycle spec with the Binding invariant as the authoritative source.
-<!-- agent:boundary:65382920 -->
+
+Along with the module-harness skill, extract runbooks for more detail in the instructions...without bloating context.
+### Re: Runbook extraction + proceeding (HEAD)
+
+Your last line was truncated ("extract runbooks for more detail in th..."). I think you mean: extract runbooks from module-harness for detailed procedures (spec writing, seeding, applying). Tracked separately.
+
+Proceeding with SPEC.md now. This session has a large backlog of pending items — should I:
+1. Write SPEC.md + release v0.31.11 (ship the ensure_initialized + sync + ontology changes)
+2. Save the refactoring (ensure_initialized split, auto_start rename) for a fresh session
+
+The code changes (ensure_initialized in sync, UUID assignment, ontology) are ready to ship. The refactoring and module-harness redesign are architectural and benefit from a clean context window.
+
+compact exchange
+<!-- agent:boundary:3f6e38b7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -262,9 +276,9 @@ This is a module-harness skill redesign — tracked separately. Proceeding with 
 - [x] ensure_initialized: assign session UUID + sync integration
 - [x] Binding invariant: memory + ontology captured
 - [x] Domain ontology + module docs updated
-- [ ] **SPEC.md: write pane lifecycle spec** (active)
-- [ ] Module-harness redesign: audit/seed/apply commands (separate task)
-- [ ] Refactor ensure_initialized into 3 focused functions
-- [ ] Rename auto_start_no_wait → create_pane_and_start_async
-- [ ] Release with all changes
+- [ ] **SPEC.md: write pane lifecycle spec** (next)
+- [ ] Release v0.31.11 with sync init + ontology
+- [ ] Module-harness redesign: audit/seed/apply + runbooks (separate session)
+- [ ] Refactor ensure_initialized into 3 focused functions (separate session)
+- [ ] Rename auto_start_no_wait (separate session)
 <!-- /agent:pending -->

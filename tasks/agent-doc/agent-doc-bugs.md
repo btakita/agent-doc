@@ -139,7 +139,7 @@ Implementation: extract the comment-stripping logic into a shared function calla
 Simple SKILL.md addition. The skill detects `---` on its own line within the exchange diff as a topic boundary. Each section between separators becomes a `### Re:` response block.
 
 Want me to start implementing any of these? I'd suggest starting with diff-type classification since it's highest leverage, or the `---` separator since it's the quickest to land.
-<!-- agent:boundary:a098e88d -->
+<!-- agent:boundary:88302ba9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

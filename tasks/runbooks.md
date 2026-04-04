@@ -489,7 +489,7 @@ The notify code is in the working tree only. Needs: stage, commit, version bump,
 ### Re: Acknowledged (HEAD)
 
 Noted the frontmatter update (`claude_args: --dangerously-skip-permissions`) and the pending item. The review/commit/release work is already transferred to agent-doc-bugs via claims log.
-<!-- agent:boundary:cf1c16ba -->
+<!-- agent:boundary:af375df6 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

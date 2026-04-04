@@ -257,7 +257,7 @@ The CI failure was caused by `path = "../tmux-router"` in Cargo.toml. CI runners
 - Parent submodule pointer updated
 
 How can we automate correcting the cargo path for ci vs using the local dev override?
-### Re: Automating cargo path deps for CI vs local dev (HEAD)
+### Re: Automating cargo path deps for CI vs local dev
 
 Three standard approaches:
 
@@ -296,11 +296,21 @@ echo '.cargo/config.toml' >> src/agent-doc/.gitignore
 ```
 
 Shall I set this up?
-<!-- agent:boundary:33c6126d -->
+Yes
+### Re: Cargo patch override set up (HEAD)
+
+Done. Created `.cargo/config.toml` with `[patch.crates-io]` for tmux-router, added to `.gitignore`.
+
+- **Local dev**: uses `../tmux-router` (path override via `.cargo/config.toml`)
+- **CI**: uses crates.io (no config.toml present)
+- **Publishing**: `cargo publish` ignores `[patch]` sections, uses crates.io
+
+Build and tests pass with the override active. Pushed `.gitignore` update to GitHub.
+<!-- agent:boundary:709e167a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Set up .cargo/config.toml patch override for tmux-router local dev
+- [x] Set up .cargo/config.toml patch override
 <!-- /agent:pending -->

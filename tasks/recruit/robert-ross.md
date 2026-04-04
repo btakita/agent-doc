@@ -278,7 +278,7 @@ Transcribed and diarized the 3h54m call recording. Output saved to:
 **Stats:** 1186 lines, 3 speakers identified (Brian, Rob, Miguel), 24 diarization chunks processed with GPU acceleration.
 
 The transcript covers the full call including Rob's intro with Miguel's Spotify/Grabber demo, your technical discussion about Presence/WebRTC/LiveKit, agent-doc demo, Build Party product discussion, and the closing where Rob rated his interest at 8-9/10 and discussed next steps including starting at $100/hr.
-<!-- agent:boundary:862bd0fa -->
+<!-- agent:boundary:d8a6fe9e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -4,6 +4,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.11
+
+- **Sync auto-initialization**: `ensure_initialized()` now called in sync's `resolve_file`. Files with `agent_doc_format` but no session UUID get one assigned automatically on editor navigation. Fixes: files created by skills (granola import) are no longer invisible to sync.
+- **Binding invariant spec**: SPEC.md section 8.5 documents the pane lifecycle invariant — document drives pane resolution, never commandeers another document's pane.
+- **Domain ontology**: README.md now has Document Lifecycle, Pane Lifecycle, and Integration Layer ontology tables (Binding, Reconciliation, Provisioning, Initialization).
+- **Module docs**: sync.rs, claim.rs, snapshot.rs, route.rs updated with ontology terminology.
+
 ## 0.31.10
 
 - **Auto-init for new documents**: `ensure_initialized()` in `snapshot.rs` — claim and preflight now auto-create snapshot + git baseline for files entering agent-doc. No more untracked files after import.

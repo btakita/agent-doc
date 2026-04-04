@@ -273,20 +273,44 @@ pub fn resolve(doc: &Path) -> Result<Option<String>> {
 // Auto-initialization for new documents
 // ---------------------------------------------------------------------------
 
-/// Ensure a document has a snapshot and is tracked by git.
+/// Perform **Initialization** for a document entering the agent-doc lifecycle.
 ///
-/// Called from `claim` and `preflight` to guarantee that any file entering
-/// the agent-doc lifecycle has a clean baseline. If a snapshot already exists,
-/// this is a no-op.
+/// **Ontology:** Initialization ensures a document has all prerequisites for
+/// participation in the pane lifecycle: a session UUID (for Binding/Reconciliation),
+/// a snapshot (for diff computation), and git tracking (for the gutter boundary).
 ///
-/// Steps when no snapshot exists:
-/// 1. Read file content
-/// 2. Create snapshot with stripped exchange content (user text → diff)
-/// 3. `git add` the file if untracked
-/// 4. `git commit` to establish the baseline
+/// Called from `claim`, `preflight`, and `sync`'s `resolve_file` — the three
+/// entrypoints where a file first enters agent-doc's awareness.
 ///
-/// Returns `true` if initialization was performed, `false` if already initialized.
+/// Steps:
+/// 1. **ensure_session_uuid** — if file has `agent_doc_format` but no `agent_doc_session`, generate and write a UUID
+/// 2. **ensure_snapshot** — if no snapshot exists, create one with stripped exchange content
+/// 3. **ensure_git_tracked** — `git add` if untracked, then `git commit` for baseline
+///
+/// Returns `true` if any initialization was performed, `false` if already initialized.
 pub fn ensure_initialized(doc: &Path) -> Result<bool> {
+    // First: ensure the file has a session UUID if it has agent_doc_format.
+    // This must happen before the snapshot check because claim (which normally
+    // assigns UUIDs) may not have been called for this file.
+    if let Ok(content) = std::fs::read_to_string(doc)
+        && let Ok((fm, _)) = crate::frontmatter::parse(&content)
+        && fm.format.is_some() && fm.session.is_none()
+    {
+        eprintln!(
+            "[init] assigning session UUID to {} (has format but no session)",
+            doc.display()
+        );
+        if let Ok((updated, session_id)) = crate::frontmatter::ensure_session(&content)
+            && updated != content
+        {
+            if let Err(e) = std::fs::write(doc, &updated) {
+                eprintln!("[init] warning: failed to write session UUID: {}", e);
+            } else {
+                eprintln!("[init] assigned session UUID: {}", session_id);
+            }
+        }
+    }
+
     let snap = path_for(doc)?;
     if snap.exists() {
         return Ok(false);

@@ -1,6 +1,12 @@
-//! # Module: claim
+//! # Module: claim — Binding (explicit)
 //!
-//! `agent-doc claim` — bind a document to the current (or specified) tmux pane.
+//! `agent-doc claim` — create a **Binding** between a document and an existing tmux pane.
+//!
+//! **Ontology:** Claim creates a **Binding** (document→pane association) by registering
+//! the session→pane mapping in `sessions.json`. Unlike **Provisioning** (which creates
+//! new panes), claim binds to a pane that already exists. In normal editor workflow,
+//! users don't need to call claim — **Reconciliation** (`sync`) + **Provisioning**
+//! (`auto_start`) handle pane creation automatically. Claim is for manual pane assignment.
 //!
 //! Usage: `agent-doc claim <file.md> [--position left|right|top|bottom] [--pane %N] [--window @N]`
 //!

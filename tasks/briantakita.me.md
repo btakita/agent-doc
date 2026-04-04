@@ -1966,7 +1966,7 @@ Does the video need editing, or is it ready to upload?
 
 The video has me navigating to a wordpress admin section. Is this a security risk or does it look bad? It has admin emails in it.
 See ![2026-04-04_10-37.png](../../../../Pictures/agent-loop/2026-04-04_10-37.png)
-### Re: WordPress admin in video — security risk (HEAD)
+### Re: WordPress admin in video — security risk
 
 **Yes, edit this out.** The screenshot shows:
 
@@ -1985,12 +1985,24 @@ Admin emails + confirmed WordPress admin URL = targeted phishing and brute-force
 On the YouTube vs native LinkedIn point: you're right, a YouTube link gets less algorithmic boost than native video. But Robert has already seen your demos — so the video is more about public credibility than impressing him specifically. The blog teaser text post might actually be the stronger play for LinkedIn reach in this case.
 
 **Revised recommendation:** Fix the video first (blur/cut the admin section), then decide posting order. No rush — getting it right matters more than getting it out Saturday vs Monday.
-<!-- agent:boundary:abececfc -->
+
+With that in mind, should I do the blog post teaser first...since it's ready?
+### Re: Post the blog teaser now (HEAD)
+
+Yes. Blog teaser is ready, video isn't. Post the teaser now — it stands on its own without the video. Live on your profile before tomorrow's call with Robert.
+
+**Final plan:**
+1. **Now** — runbooks blog teaser (text post)
+2. **After editing** — agent-runbooks video (blur/cut WordPress admin)
+3. **Wed/Thu** — second blog post + video
+
+Want me to format the draft as plain text for LinkedIn paste?
+<!-- agent:boundary:93b939d2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Video: edit out WordPress admin section before posting
-- LinkedIn blog teaser: draft ready, post after video is clean
+- LinkedIn blog teaser: POST NOW (draft ready)
+- Video: edit out WordPress admin section, then post
 - Second blog post + video: target Wed/Thu Apr 9-10
 - Cleanup: remove stale directories
 <!-- /agent:pending -->

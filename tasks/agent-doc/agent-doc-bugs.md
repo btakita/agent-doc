@@ -200,7 +200,8 @@ All tests pass, clippy clean.
 **Module-harness:** You asked to correct the module-harness in the modules. Should I run `/module-harness` on sync.rs, claim.rs, snapshot.rs, and route.rs to regenerate their spec/contracts/evals sections? Or did you mean something else by "correct the module-harness"?
 
 I want to make sure that we understand the design principle that the document selected by the editor drives either finding the current claiming tmux pane or creating a new claiming tmux pane. It should never use another running tmux pane that does not already claim the document.
-### Re: Binding invariant captured (HEAD)
+
+### Re: Binding invariant captured
 
 The design principle is now formalized as the **Binding invariant**:
 
@@ -216,7 +217,27 @@ The design principle is now formalized as the **Binding invariant**:
 Memory updated from "claim creates new panes" to "Binding invariant" — stronger framing that captures the directional principle (document drives, pane follows).
 
 The module-harness question stands — should I run `/module-harness` on the affected modules to regenerate spec/contracts/evals?
-<!-- agent:boundary:c1cabfea -->
+This principle spec should be in the module-harness and in SPEC.md
+
+Does `/module-harness` run the risk of seeing an incorrect implementation and codifying the incorrect implementation as the spec?
+### Re: Module-harness risk of codifying bugs as spec (HEAD)
+
+**Yes, that's a real risk.** `/module-harness` reads the implementation and generates spec from what the code *does*, not what it *should do*. If the implementation violates an invariant, the spec describes the buggy behavior as correct.
+
+**Example from this session:** Running module-harness on `claim.rs` before understanding the Binding invariant would have generated: "claim binds the document to the current pane" — codifying the exact confusion.
+
+**The right order:**
+1. **Write the spec first** (SPEC.md with Binding invariant + pane lifecycle)
+2. **Then run module-harness** to validate implementation against spec, not derive spec from implementation
+3. Module-harness flags deviations rather than just describing what exists
+
+**Current limitation:** `/module-harness` doesn't take an external spec as input — it reads the code. So the safer path is:
+1. Write SPEC.md first (authoritative)
+2. Manually update module-level docs (already started)
+3. Run module-harness selectively for lower-level details the manual update missed
+
+Should I proceed with SPEC.md first?
+<!-- agent:boundary:a79d9512 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -224,11 +245,10 @@ The module-harness question stands — should I run `/module-harness` on the aff
 <!-- agent:pending patch=replace -->
 - [x] ensure_initialized: assign session UUID + sync integration
 - [x] Binding invariant: memory + ontology captured
-- [x] Domain ontology: Binding, Reconciliation, Provisioning, Initialization
-- [x] Module docs: sync, claim, snapshot, route updated with ontology
-- [ ] Module-harness: regenerate spec/contracts/evals for affected modules
+- [x] Domain ontology + module docs updated
+- [ ] SPEC.md: write pane lifecycle spec (Binding invariant as authoritative source)
+- [ ] Module-harness: run after SPEC.md is written (validate, don't derive)
 - [ ] Refactor ensure_initialized into 3 focused functions
 - [ ] Rename auto_start_no_wait → create_pane_and_start_async
-- [ ] SPEC.md: pane lifecycle user-facing documentation
 - [ ] Release with all changes
 <!-- /agent:pending -->

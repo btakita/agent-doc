@@ -595,7 +595,9 @@ Built, tested, installed.
 
 go
 - [ ] Publish tmux-router 0.3.9 to crates.io (awaiting approval)
-### Re: tmux-router 0.3.9 published (HEAD)
+The claims log was originally used for IPC about a claim.
+However, it seems to have broadened to be a general purpose IPC mechanism
+### Re: tmux-router 0.3.9 published
 
 **Published tmux-router 0.3.9 to crates.io:**
 - Cross-session pane operations (join/swap) allowed with SCOPE_CROSS warning
@@ -609,19 +611,56 @@ go
 - VERSIONS.md updated with changelog
 
 All pending items from this session are now complete.
-<!-- agent:boundary:ced56611 -->
+
+The claims log was originally used for IPC about a claim.
+However, it seems to have broadened to be a general purpose IPC mechanism
+
+I would like any agent-doc transfer or agent-doc notify to set an explicit prompt with an annotation to source in the destination prompt.
+### Re: Claims log scope + transfer/notify source annotations (HEAD)
+
+**Claims log scope:**
+You're right to note the conceptual broadening. Currently the claims log is still narrowly scoped — only `claim.rs` writes to it (one line per claim event). But the pattern (file-based IPC, read-and-truncate by preflight) could easily serve as a general signal channel. The question is whether to:
+1. Keep claims.log narrow and add separate signal files for other events (e.g., `.agent-doc/notifications.log`)
+2. Rename to a general `.agent-doc/events.log` with typed entries
+3. Move all IPC to the existing hook system (hooks/post_write, hooks/post_commit)
+
+The hook system (option 3) already has the infrastructure — typed JSON events, TTL-based GC, poll/listen. Claims log could eventually migrate there.
+
+**Transfer/notify source annotations:**
+Currently `notify` inserts a blockquote `> **[NOTIFY from <source>]**` but `extract`/`transfer` move content without any provenance. Your request:
+
+> agent-doc transfer or agent-doc notify should set an explicit prompt with an annotation to source in the destination prompt
+
+This means when content arrives in a document (via transfer or notify), the destination document's exchange should include:
+1. A clear annotation of where the content came from (source document path)
+2. Context that the receiving agent should act on (e.g., "Re-evaluate the following based on changes in <source>")
+3. The content itself, clearly delimited
+
+**Proposed format for transfer annotations:**
+
+```markdown
+> **[TRANSFER from tasks/research/on-demand-context.md]** (2026-04-04 03:20)
+> 
+> The following was transferred from the source document's exchange:
+> 
+> <transferred content>
+> 
+> **Action:** Review and incorporate the above into this document's context.
+```
+
+This gives the receiving agent:
+- Source provenance (where it came from)
+- Timestamp (when)
+- Clear action directive (what to do with it)
+
+Should I implement this as a change to `extract.rs`/`notify.rs`, or do you want to design the annotation format further first?
+<!-- agent:boundary:e3e6df48 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Fix debounce: increase mtime to 2000ms + frontmatter config
-- [x] Add structured logging (tracing crate) with AGENT_DOC_LOG env var
-- [x] Fix pre-response cleanup after write (bug)
-- [x] Fix lock file cleanup in Drop + stale detection
-- [x] Add `agent-doc gc` subcommand for orphaned file cleanup
-- [x] Auto-GC on preflight (daily timestamp check)
-- [x] Add cleanup runbook to .claude/skills/agent-doc/runbooks/
-- [x] Add tracing instrumentation to sync, layout, stash/retrieve code paths
-- [x] Publish tmux-router 0.3.9 to crates.io
+- [x] All previous items complete
+- [ ] Design transfer/notify source annotation format
+- [ ] Implement source annotations in extract.rs and notify.rs
 <!-- /agent:pending -->

@@ -98,6 +98,7 @@ claude_args: --dangerously-skip-permissions
 - Verify Google Sheets sharing / GCP test users for `brian.takita@gmail.com`
 - Re-test sheet read (403 on last attempt)
 - Manylinux binary wheel for PyPI (needs container/CI)
+<!-- agent:boundary:82a64c6b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -815,7 +815,7 @@ agent-doc route failed (exit 1): [route] target tmux session: 10 tmux tree: 1 (d
 The JB "Run Agent Doc" action should work now. The route error was entirely caused by the malformed sessions.json — not a code bug.
 
 **Still needed:** Route cleanup on failure (killing panes created during a failed route attempt) is a real gap that should be fixed separately. The 3 orphaned shells were created because route splits a window, then crashes on the registry parse error, leaving the split pane as an empty shell.
-<!-- agent:boundary:fcbc1f68 -->
+<!-- agent:boundary:2aab77e9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

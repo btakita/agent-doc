@@ -1713,6 +1713,30 @@ Two runbooks. A mature project with 5-10 runbooks could easily hit 50%+, but we 
 Swapped the vague percentage for a concrete, verifiable number.
 
 I extracted runbooks. Please read tasks/runbooks.md. Calculate values in addition to the 63 lines we are already accounting for to come up with a %.
+### Re: Comprehensive runbook savings calculation
+
+From tasks/runbooks.md, the full extraction was **12 runbooks** across 4 skill files plus the main instruction file:
+
+**Skill file savings (10 runbooks):**
+
+| Skill | Before | After | Saved | % |
+|-------|--------|-------|-------|---|
+| dev | 273 | 196 | 77 | 28% |
+| livestream | 98 | 46 | 52 | 53% |
+| email | 117 | 100 | 17 | 15% |
+| module-harness | 113 | 110 | 3 | 3% |
+| **Subtotal** | **601** | **452** | **149** | **25%** |
+
+**Main instruction file savings (2 runbooks):**
+- precommit: 24 lines
+- prerelease: 39 lines
+- Subtotal: 63 lines
+
+**Combined total: 212 lines saved across 12 runbooks, ~28% reduction in total agent instruction surface.**
+
+For the blog post, you could replace the "Two runbooks saved 63 lines" with something like:
+
+> I've been externalizing step-by-step procedures into **agent runbooks** — plain markdown files that agents load on demand instead of carrying in every interaction. Across 12 runbooks, I saved 212 lines from my instruction files — a 28% reduction in persistent context. The biggest win was livestream audit procedures: 53% of that skill's instructions were procedural bulk that only matters during audits.
 ### Re: Comprehensive runbook savings calculation (HEAD)
 
 From tasks/runbooks.md, the full extraction was **12 runbooks** across 4 skill files plus the main instruction file:
@@ -1737,10 +1761,36 @@ From tasks/runbooks.md, the full extraction was **12 runbooks** across 4 skill f
 For the blog post, you could replace the "Two runbooks saved 63 lines" with something like:
 
 > I've been externalizing step-by-step procedures into **agent runbooks** — plain markdown files that agents load on demand instead of carrying in every interaction. Across 12 runbooks, I saved 212 lines from my instruction files — a 28% reduction in persistent context. The biggest win was livestream audit procedures: 53% of that skill's instructions were procedural bulk that only matters during audits.
-<!-- agent:boundary:e8c2e5b6 -->
+
+Please update blog post and linkedin teaser draft.
+### Re: Blog post + LinkedIn teaser updated (HEAD)
+
+**Blog post changes:**
+
+1. **Problem statement** (line 30): Replaced the hypothetical "60 lines of procedures means 60%" with real numbers: "12 extracted runbooks removed 212 lines — a 28% reduction in persistent context."
+
+2. **Real examples section** (line 105): Expanded from "two runbooks save ~65 lines" to the full breakdown — 63 lines from the main instruction file, plus 149 lines from skill files. Calls out the livestream 53% win as the headline example.
+
+**Revised LinkedIn teaser draft:**
+
+> **Your CLAUDE.md is bloated. Here's what to do about it.**
+>
+> Every token in your AI instruction file costs you something. Release checklists, deploy procedures, precommit workflows... they're important, but they don't need to occupy context when the agent is writing a utility function.
+>
+> I've been externalizing step-by-step procedures into **agent runbooks** — plain markdown files that agents load on demand instead of carrying in every interaction. Across 12 runbooks, I saved 212 lines from my instruction files — a 28% reduction in persistent context. The biggest win was livestream audit procedures: 53% of that skill was procedural bulk that only matters during audits.
+>
+> The pattern works with Claude Code, Cursor, Copilot, Windsurf, Gemini CLI, Aider, and Codex. No special syntax. No vendor lock-in.
+>
+> Blog post + reference repo:
+> - https://briantakita.me/post/2026-04-03-agent-runbooks-on-demand-procedural-context
+> - https://github.com/btakita/agent-runbooks
+>
+> What directory convention are you using for agent config? `.agent/`, `.agents/`, `.ai/`? The ecosystem hasn't settled this yet and I'd love to hear what's working for you.
+<!-- agent:boundary:b07401bd -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn post: revised draft, pending your edits + publish
+- LinkedIn post: revised draft with verified 28%/212-line stats, pending your edits + publish
+- Blog post: deploy updated version (changes in briantakita.me-dev working tree)
 - Cleanup: remove stale directories
 <!-- /agent:pending -->

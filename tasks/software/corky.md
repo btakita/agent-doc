@@ -131,7 +131,7 @@ Add this heuristic as a skill->runbook where appropriate? Likely at the agent-lo
 > Path dependencies: Use `.cargo/config.toml` `[patch.crates-io]` for local development (gitignored). `Cargo.toml` references crate versions only — CI resolves from crates.io, no cloning needed.
 
 CI template comment also simplified.
-### Re: Runbook at agent-loop level (HEAD)
+### Re: Runbook at agent-loop level
 
 Created `dev/runbooks/cargo-path-deps.md` documenting the `.cargo/config.toml` patch pattern:
 - Pattern: `Cargo.toml` uses crate versions, `.cargo/config.toml` (gitignored) patches to local paths
@@ -143,7 +143,21 @@ Added reference in `dev/SKILL.md` alongside other runbook links.
 Now documented in two places:
 1. `dev/runbooks/cargo-path-deps.md` — full runbook (agent-loop level)
 2. `rust-package/SKILL.md` conventions — brief reference
-<!-- agent:boundary:eaf95477 -->
+
+Should we have the same convention in agent-doc...and also in agent-loop, agent-kit, and/or instruction-set?
+### Re: Convention across repos (HEAD)
+
+Checked all repos:
+
+| Repo | Path deps | `.cargo/config.toml` | Status |
+|------|-----------|---------------------|--------|
+| agent-doc | tmux-router | Yes (already) | Already correct |
+| corky | agent-kit, instruction-files | Yes (just fixed) | Done |
+| agent-kit | None | N/A | No action needed |
+| instruction-files | None | N/A | No action needed |
+
+Both repos with cross-crate dependencies already follow the pattern. No further changes needed.
+<!-- agent:boundary:39f935c3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -692,7 +692,7 @@ For the `claude` CLI backend, we'd add `--temperature 0` (or use `--model-params
 **Fixtures won't help with variance** — they test different things (agentic execution vs diff interpretation). The variance is a judge problem, not a case design problem.
 
 In practice, it seems agent-doc responses are reasonably stable. Sometimes it's incorrect, but skills + runbooks seem to help. Would it be useful to somehow also simulate the more "realistic" use cases or should we focus on what we can quickly & reliably measure?
-### Re: Realistic vs measurable (HEAD)
+### Re: Realistic vs measurable
 
 **Focus on what you can quickly and reliably measure.** Here's why:
 
@@ -722,14 +722,43 @@ You're at layers 1-2. Layer 3 (agentic fixtures) would simulate realistic use ca
 Once these are solid, you have a reliable regression gate. Agentic E2E evals are a separate project — valuable for validating skill changes, but not needed for day-to-day "did I break diff interpretation?"
 
 **TL;DR:** The current eval suite tests the right thing at the right layer. Make it reliable (temperature=0, smoke suite) before adding complexity (agentic fixtures).
-<!-- agent:boundary:5e39a85d -->
+
+Ok...let's start with the tight feedback loop. Let's see if we can improve. Hopefully we are measuring something that will improve the overall system.
+### Re: Tight feedback loop implemented
+
+Three changes to reduce variance and speed up iteration:
+
+**1. `--judge-temperature` flag** — pass temperature to the API backend for judge calls. `claude` CLI doesn't support temperature, but the `anthropic-api` backend does. Response model uses default temperature (we want natural variance), judge uses temperature=0 (we want determinism).
+
+**2. `--tag` filter** — cases can have `tags: [smoke]`. Run `--tag smoke` to filter to tagged cases only.
+
+**3. Smoke suite** — 6 most stable cases tagged `smoke`:
+- comment-content-ignored (binary: responds or doesn't)
+- deletion-of-content (clear expected behavior)
+- inline-colon-annotation (unambiguous)
+- boundary-only-change (binary: ignores or doesn't)
+- head-label-removal (binary: ignores or doesn't)
+- single-word-correction (clear expected behavior)
+
+**Usage:**
+```bash
+# Quick smoke check (~2 min) (HEAD)
+make eval-smoke
+
+# Full suite (HEAD)
+make eval
+```
+
+Smoke suite running now — will report timing and results.
+<!-- agent:boundary:bd55e74b -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [ ] Add temperature=0 for judge calls (highest-impact stability fix)
-- [ ] Create smoke suite (5 most stable cases)
+- [x] Add `--judge-temperature` flag for deterministic judging
+- [x] Create smoke suite (6 stable cases, `--tag smoke`)
+- [ ] Smoke suite first run (running)
 - [ ] Tighten binary rubrics for clear-cut cases
 - [ ] Design agentic eval fixture format (future — v2)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing

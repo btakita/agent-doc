@@ -130,7 +130,7 @@ The panes %434, %476, %477, %431 keep appearing in @221 between the two sync cal
 **Fix:** Remove the redundant `sync_after_claim` call from `run_with_tmux()`. The JB plugin already triggers sync via the first call with the correct `window` and `col_args`. The second sync is defensive but causes worse problems than it prevents.
 
 Shall I implement this fix?
-<!-- agent:boundary:3ac46dbb -->
+<!-- agent:boundary:d3aad76c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

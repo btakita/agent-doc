@@ -92,7 +92,7 @@ This pattern already works — CLAUDE.md's Runbooks section links `.agent/runboo
 **When runbook > memory:** 4+ steps, conditional logic, platform branches, specific command syntax with edge cases (compact-exchange, transfer-extract, prerelease).
 
 The pattern of "memory says what, runbook says how" is already working. No new mechanism needed — just use the right layer for the complexity.
-<!-- agent:boundary:9b585e2b -->
+<!-- agent:boundary:7c744908 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

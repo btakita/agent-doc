@@ -517,7 +517,7 @@ That's the full Shimmer pipeline in 4 steps. Demo it on the existing robert-ross
 #### "How can I use" (incomplete)
 
 Looks like your input got cut off — "How can I use" what? Let me know and I'll pick it up.
-<!-- agent:boundary:e54ad9db -->
+<!-- agent:boundary:cf22347d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -111,7 +111,7 @@ Please look through logs to see what is happening.
 **Fix:** `repair_layout` should only rescue a pane from stash when the agent-doc window doesn't exist (to recreate it). If the window already has panes, skip the rescue. Currently it rescues panes unconditionally.
 
 This is a tmux-router `sync.rs` fix in the `repair_layout` function. Should I fix it now?
-<!-- agent:boundary:3a53998b -->
+<!-- agent:boundary:a8d75e63 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

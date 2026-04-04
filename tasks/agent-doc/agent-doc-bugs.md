@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-P1-P5 all shipped. 436 tests passing. Session complete.
+All transfer items shipped (P1-P5 + separator convention). One remaining: transfer-source metadata.
 <!-- /agent:status -->
 
 ## Exchange
@@ -404,7 +404,7 @@ Generates a JSON sidecar at `.agent-doc/annotations/<hash>.json` mapping each li
 
 do
 - [ ] Design reproducible operation log format (P5)
-### Re: Do — Reproducible operation log format (P5) implemented (HEAD)
+### Re: Do — Reproducible operation log format (P5) implemented
 
 Done. Enhanced `ops_log.rs` with structured JSONL cycle logging.
 
@@ -436,7 +436,25 @@ Done. Enhanced `ops_log.rs` with structured JSONL cycle logging.
 **Tests:** 2 new (log_cycle_writes_jsonl, log_cycle_appends_multiple). All 436 tests pass, clippy clean.
 
 Existing `ops.log` text format is preserved alongside — `cycles.jsonl` adds structure without breaking existing debug workflows.
-<!-- agent:boundary:67fd8c04 -->
+do
+- [ ] Add `---` prompt separator convention to SKILL.md
+### Re: Do — `---` prompt separator convention added to SKILL.md (HEAD)
+
+Done. Added `### 0c. Multi-topic prompt separators` section to SKILL.md between diff-type routing and respond steps.
+
+**What it documents:**
+- `---` on its own line in the exchange body splits the diff into separate topics
+- Each topic gets its own `### Re:` header in the response
+- Streaming checkpoints flush between topics
+- Example input/output format
+
+**When NOT to split:**
+- `---` in YAML frontmatter
+- `---` inside code fences
+- `---` in context lines (existing content, not user additions)
+
+This ties into the existing `multi_topic` diff type which already detects `---` separators in `classify_diff()`.
+<!-- agent:boundary:018b50b0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -449,6 +467,6 @@ Existing `ops.log` text format is preserved alongside — `cycles.jsonl` adds st
 - [x] Fix write pipeline escape bug + Gson migration (JB plugin v0.2.44) — DONE
 - [x] Implement content-source annotation sidecar (P4) — DONE
 - [x] Design reproducible operation log format (P5) — DONE
-- [ ] Add `---` prompt separator convention to SKILL.md
+- [x] Add `---` prompt separator convention to SKILL.md — DONE
 - [ ] Add transfer-source metadata to patch format
 <!-- /agent:pending -->

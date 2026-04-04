@@ -106,6 +106,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         while (running) {
             val key = watchService.poll(500, java.util.concurrent.TimeUnit.MILLISECONDS) ?: continue
+            val loopStart = System.nanoTime()
             var overflow = false
             for (event in key.pollEvents()) {
                 if (event.kind() == StandardWatchEventKinds.OVERFLOW) {
@@ -133,6 +134,8 @@ class PatchWatcher(private val project: Project) : Disposable {
                 LOG.info("[patch-watcher] inotify overflow detected, scanning for missed files")
                 processPendingPatches(dir.toFile())
             }
+            val loopMs = (System.nanoTime() - loopStart) / 1_000_000
+            if (loopMs > 50) LOG.info("[perf] watchLoop iteration: ${loopMs}ms")
             if (!key.reset()) break
         }
 
@@ -208,6 +211,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                 lib.agent_doc_await_idle(filePath, 500, 5000)
             }
             ApplicationManager.getApplication().invokeLater {
+                val reposStart = System.nanoTime()
                 val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeLater
                 targetFile.refresh(false, false)
                 val document = FileDocumentManager.getInstance().getDocument(targetFile) ?: return@invokeLater
@@ -222,22 +226,30 @@ class PatchWatcher(private val project: Project) : Disposable {
                     }
                 })
                 FileDocumentManager.getInstance().saveDocument(document)
+                val reposMs = (System.nanoTime() - reposStart) / 1_000_000
+                if (reposMs > 50) LOG.info("[perf] repositionBoundary: ${reposMs}ms $filePath")
             }
         }
     }
 
     private fun processPatchFile(patchFile: File) {
         try {
+            val parseStart = System.nanoTime()
             val json = patchFile.readText()
             val patch = parsePatchJson(json) ?: return
+            val parseMs = (System.nanoTime() - parseStart) / 1_000_000
+            if (parseMs > 10) LOG.info("[perf] processPatchFile parse: ${parseMs}ms ${patchFile.name}")
 
             ApplicationManager.getApplication().invokeLater {
+                val applyStart = System.nanoTime()
                 val applied = try {
                     applyPatch(patch)
                 } catch (e: Exception) {
                     LOG.warn("Failed to apply patch from ${patchFile.name}", e)
                     false
                 }
+                val applyMs = (System.nanoTime() - applyStart) / 1_000_000
+                if (applyMs > 50) LOG.info("[perf] applyPatch: ${applyMs}ms ${patch.file}")
                 if (applied) {
                     patchFile.delete()
                 } else {

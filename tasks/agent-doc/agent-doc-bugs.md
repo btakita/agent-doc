@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Runbook convention discussed; publish awaiting approval; agent-runbooks scoping
+Naming decision: Operations vs Runbooks — recommending Runbooks for consistency
 <!-- /agent:status -->
 
 ## Exchange
@@ -171,7 +171,7 @@ Is there any reason for agent-runbooks to have a deterministic rust binary?
 Starting tmux-router 0.3.9 publish to crates.io.
 
 You should have waited for me to request continuing.
-### Re: agent-runbooks crate + waiting for approval (HEAD)
+### Re: agent-runbooks crate + waiting for approval
 
 **Apologies** — I should not have started the tmux-router publish without explicit approval. The `do` items listed were implementation tasks, but the publish is a release action that needs confirmation before proceeding.
 
@@ -199,14 +199,34 @@ These are simple enough for a shell script or could be a subcommand of an existi
 - It needs to parse runbook frontmatter or validate content structure
 
 **Recommendation:** Start as a subcommand of agent-doc (`agent-doc runbook audit`, `agent-doc runbook install`) rather than a separate crate. Extract to `agent-runbooks` later if the scope grows.
-<!-- agent:boundary:915f14df -->
+
+Since we have an Operations section, should it either be renamed to Runbooks or rename agent-runbooks to agent-operations?
+### Re: Operations vs Runbooks naming (HEAD)
+
+Two options:
+
+| Option | Section name | Crate name | Rationale |
+|--------|-------------|------------|-----------|
+| A | `## Runbooks` | `agent-runbooks` | Consistent naming. The section lists runbooks, so call it Runbooks. |
+| B | `## Operations` | `agent-operations` | "Operations" is the user-facing concept (what you can do). "Runbook" is the implementation detail (how to do it). |
+
+**Recommendation: Option A — `## Runbooks` + `agent-runbooks`.**
+
+Reasons:
+- The section literally lists runbook files — calling it "Runbooks" is direct and unambiguous
+- "Operations" is overloaded (ops, DevOps, database operations, etc.)
+- The trigger format already says `runs runbooks/...` — matching the section name
+- Convention: the files live in `runbooks/`, the section is `## Runbooks`, the crate is `agent-runbooks`
+
+If you agree, I'll rename the section in agent-doc's SKILL.md from `## Operations` to `## Runbooks`.
+<!-- agent:boundary:7916d2c6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] Add runbook trigger lines to SKILL.md Operations section
+- [ ] Rename ## Operations → ## Runbooks in SKILL.md (awaiting approval)
 - [ ] Publish tmux-router 0.3.9 to crates.io (awaiting approval)
-- [ ] Standardize Operations sections in other skills
-- [ ] Decide: agent-runbooks as agent-doc subcommand vs separate crate
+- [ ] Standardize Runbooks sections in other skills
 <!-- /agent:pending -->

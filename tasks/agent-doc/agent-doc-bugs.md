@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-agent-doc v0.31.12 released to crates.io + GitHub
+diff-type classification landed in diff.rs + preflight.rs (9 tests, all passing)
 <!-- /agent:status -->
 
 ## Exchange
@@ -110,7 +110,7 @@ Good batch of designs. Priority ordering:
 6. **Multi-topic response runbook** — already created, just add `---` separator convention.
 
 continue
-### Re: Continue (HEAD)
+### Re: Continue
 
 Continuing from the priority ordering. Here's an implementation plan for the top items:
 
@@ -139,13 +139,46 @@ Implementation: extract the comment-stripping logic into a shared function calla
 Simple SKILL.md addition. The skill detects `---` on its own line within the exchange diff as a topic boundary. Each section between separators becomes a `### Re:` response block.
 
 Want me to start implementing any of these? I'd suggest starting with diff-type classification since it's highest leverage, or the `---` separator since it's the quickest to land.
-<!-- agent:boundary:88302ba9 -->
+go
+### Re: Go — Diff-type classification implemented (HEAD)
+
+Implemented P1 (diff-type classification) in `src/agent-doc/src/diff.rs`:
+
+**New types:**
+- `DiffType` enum: `Approval`, `SimpleQuestion`, `BoundaryArtifact`, `Annotation`, `StructuralChange`, `MultiTopic`, `ContentAddition`
+- `DiffClassification` struct: `diff_type` + `diff_type_reason`
+- `classify_diff(diff_text)` — pure function, no I/O, deterministic
+
+**Classification priority (checked in order):**
+1. `BoundaryArtifact` — only `(HEAD)` or boundary UUID changes (paired line comparison)
+2. `Approval` — single word matching list (go/yes/do/ok/continue/approve/y/yep/yeah/sure/proceed/lgtm)
+3. `SimpleQuestion` — single added line ending with `?`
+4. `Annotation` — paired add/remove where added extends removed (colon-append, >60% common prefix)
+5. `StructuralChange` — only removals, no additions
+6. `MultiTopic` — multiple separated added blocks or `---` separators
+7. `ContentAddition` — default fallback
+
+**Wired into preflight JSON:**
+```json
+{
+  "diff_type": "approval",
+  "diff_type_reason": "single approval word: \"go\""
+}
+```
+
+Fields are `skip_serializing_if = "Option::is_none"` — omitted when no diff.
+
+**Tests:** 9 new tests covering all diff types. All 417 tests pass, clippy clean.
+
+Next steps: the skill can now read `diff_type` from preflight JSON and short-circuit for simple cases. Want me to update the SKILL.md routing logic, or move to P2 (post-preflight eval diffs)?
+<!-- agent:boundary:4ced87cb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Implement diff-type classification in preflight (P1)
+- [x] Implement diff-type classification in preflight (P1) — DONE
+- [ ] Update SKILL.md to route based on diff_type
 - [ ] Post-preflight diff generation for eval cases (P2)
 - [ ] Implement annotated diff format in preflight (P3)
 - [ ] Implement content-source annotation sidecar (P4)

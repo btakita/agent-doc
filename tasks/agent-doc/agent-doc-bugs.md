@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-claude_args explained; unterminated frontmatter was transient (now resolved)
+debounce fix (2000ms default + frontmatter config) and structured logging (tracing crate) implemented
 <!-- /agent:status -->
 
 ## Exchange
@@ -374,7 +374,7 @@ This would catch the 1-pane bug next time it occurs — the log would show exact
 
 Both the debounce tuning and logging are implementation tasks. Should I add them to the pending list and tackle one now?
 Yes
-### Re: Debounce root cause, typing bridge, .agent-doc file count (HEAD)
+### Re: Debounce root cause, typing bridge, .agent-doc file count
 
 **Root cause confirmed:** `.agent-doc/typing/` directory doesn't exist. The JetBrains plugin FFI (`TypingTracker.kt` → `agent_doc_document_changed()` → `debounce.rs`) writes typing indicator files, but the plugin isn't active/loaded. Without the typing bridge, preflight falls back to mtime-only debounce at 500ms — any pause >500ms triggers the diff.
 
@@ -416,16 +416,49 @@ The hooks/ directory having 1,893 files is suspicious. The others could benefit 
 3. **GC pass** for .agent-doc directories (separate task)
 
 Starting with debounce fix now.
-<!-- agent:boundary:cf1e9928 -->
+### Re: Implementation complete — debounce fix + structured logging (HEAD)
+
+**Debounce fix (done):**
+- Default mtime debounce increased from 500ms → 2000ms
+- Configurable via frontmatter: `agent_doc_debounce: 3000` (any ms value, 0 = no debounce)
+- `max_wait` auto-scales when debounce > 3s: `(debounce_ms / 1000) + 1` seconds
+- Parses frontmatter early in preflight (before debounce loop) to read the config
+
+**Structured logging (done):**
+- Added `tracing`, `tracing-subscriber`, `tracing-appender` to Cargo.toml
+- `AGENT_DOC_LOG=debug` env var → logs to `.agent-doc/logs/debug.log.<date>`
+- Zero overhead when unset (init_tracing returns immediately)
+- Preflight debounce instrumented with debug/trace/warn levels:
+  - `debug`: debounce start (config values) and settle (idle time, wait time)
+  - `trace`: each poll iteration (idle_ms, typing_active, elapsed_ms)
+  - `warn`: timeout events (typing still active or mtime not settled)
+
+**Files changed:**
+- `Cargo.toml` — added tracing deps
+- `frontmatter.rs` — added `agent_doc_debounce` field (Option<u64>)
+- `preflight.rs` — reads debounce from frontmatter, 2000ms default, tracing instrumentation
+- `main.rs` — `init_tracing()` function, called before CLI dispatch
+
+**Verified:**
+- 38 tests pass
+- Release build + `cargo install` complete
+- Debug log output confirmed: `debounce_ms=2000`, `idle_ms=352641`, `waited_ms=0`
+
+**To enable verbose logging for your sessions:**
+```bash
+export AGENT_DOC_LOG=debug  # add to ~/.zshrc
+```
+<!-- agent:boundary:2cc814df -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **[active]** Fix debounce: increase mtime to 2000ms + frontmatter config
-- [ ] **[next]** Add structured logging (tracing crate) with AGENT_DOC_LOG env var
+- [x] Fix debounce: increase mtime to 2000ms + frontmatter config
+- [x] Add structured logging (tracing crate) with AGENT_DOC_LOG env var
 - [ ] Publish tmux-router 0.3.9 to crates.io (awaiting approval)
 - [ ] Investigate .agent-doc/hooks/ having 1,893 files
 - [ ] GC pass for .agent-doc/ stale files (locks, pre-response, crdt)
-- [ ] Investigate 1-pane layout bug (needs verbose logging)
+- [ ] Investigate 1-pane layout bug (verbose logging now available)
+- [ ] Add tracing instrumentation to sync, layout, stash/retrieve code paths
 <!-- /agent:pending -->

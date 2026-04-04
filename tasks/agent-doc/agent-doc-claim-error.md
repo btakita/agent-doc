@@ -15,16 +15,29 @@ v0.31.5 released. Commit-on-claim, auto-setup, VCS refresh, --diff-only, skill r
 
 <!-- agent:exchange patch=append -->
 *Compacted. CI workflows idempotent (release.yml --clobber, pypi.yml skip-existing). `make release` added (CI-first: check→tag→push). Prerelease runbook updated. Gitignore fixed (.bin/ .cargo/ separate). All pushed.*
-<!-- agent:boundary:8d2f5e88 -->
+
+The jetbrains editor has performance issues navigating and editing tasks/agent-doc/agent-doc-bugs.md. Please look into why.
+### Re: JetBrains performance with agent-doc-bugs.md (HEAD)
+
+**Not the file** (125 lines / 6.5KB). It's the git repo state:
+
+1. **Orphaned 3.9 GB blob** in git history — cleaned up via `git gc --prune=now --aggressive` (4.2 GB → 2.4 GB, remaining is submodule data)
+2. **7,691 total commits**, 208 for this file — frequent `agent-doc commit` calls
+3. **`git status` ~300ms** — JetBrains runs this + annotations on every VCS refresh signal
+
+Each `/agent-doc` cycle triggers commit + VCS refresh → JetBrains re-indexes. With 7K+ commits, annotation/blame/log operations are heavier.
+
+**Mitigations:**
+- GC done (removed 1.8 GB orphaned blob)
+- `agent-doc clean` could squash old task commits to reduce history depth
+- JetBrains plugin could throttle VCS refresh signals
+- Disable git annotations for `tasks/` directory in IDE settings
+<!-- agent:boundary:4dbe4a05 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Release agent-doc v0.31.9
-- [x] Add version sync check to `make check`
-- [x] Make CI release workflows idempotent
-- [x] Add `make release` target (CI-first flow)
-- [x] Push agent-doc changes to remote
-- [x] Fix gitignore (.bin/ and .cargo/ separate entries)
+- [x] GC orphaned 3.9 GB blob from git history
+- [ ] Consider `agent-doc clean` to squash old task commits
 <!-- /agent:pending -->

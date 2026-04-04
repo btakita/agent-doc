@@ -159,7 +159,7 @@ The `agent-runbooks` repo/crate is better suited as:
 - The implementation of `agent-doc runbook audit/install` subcommand
 - A library of shared/reusable runbook templates (not skill-specific ones)
 - Tooling for runbook validation and discovery
-<!-- agent:boundary:a8dd1d30 -->
+<!-- agent:boundary:c13cb8b3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

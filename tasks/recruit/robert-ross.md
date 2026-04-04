@@ -582,7 +582,7 @@ Built the `/granola` skill with runbook:
 The skill is now registered and shows up in the skills list. You can test it with Rob's notes URL.
 
 Where is the granola agent doc?
-### Re: Transcript link + Granola agent-doc location (HEAD)
+### Re: Transcript link + Granola agent-doc location
 
 #### Transcript link — not directly scrapable
 
@@ -606,7 +606,20 @@ Not created yet — the `/granola` skill and runbook are ready but we haven't ru
 Or I can create it manually right now. The output would be at a path like `tasks/recruit/robert-ross-granola.md` — a template document with Rob's meeting notes as content, ready for inline agent-doc interaction.
 
 Want me to create it now?
-<!-- agent:boundary:77de62f4 -->
+yes
+### Re: Granola agent-doc created (HEAD)
+
+Created at `file:///home/brian/work/btakita/agent-loop/tasks/recruit/robert-ross-granola.md`
+
+**Components:**
+- `&lt;!-- agent:notes --&gt;` — Rob's full structured meeting notes (background, agent-doc, existence lang, fit, products, tools)
+- `&lt;!-- agent:analysis --&gt;` — empty, ready for agent analysis
+- `&lt;!-- agent:action-items --&gt;` — pre-populated from Rob's "Next Steps" (your tasks, Rob's tasks, Miguel's tasks)
+- `&lt;!-- agent:exchange --&gt;` — freeform Q&A about the meeting
+- `&lt;!-- agent:pending --&gt;` — task tracking
+
+You can now open it in your editor and run `/agent-doc tasks/recruit/robert-ross-granola.md` to interact with it. Ask questions about the meeting, request deeper analysis, or cross-reference with the corky transcript.
+<!-- agent:boundary:7f580af3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -614,7 +627,7 @@ Want me to create it now?
 <!-- agent:pending patch=replace -->
 - ([done]) Build session analyzer template
 - ([done]) Build `/granola` skill with import runbook
-- Create Granola agent-doc for Rob's meeting notes
+- ([done]) Create Granola agent-doc for Rob's meeting notes
 - **Prep demo for Sunday:** Run session analyzer on robert-ross transcript
 - **Sunday Apr 5, 5pm ET:** Follow-up call with Rob (confirm via text)
 - Evaluate Deepgram + LiveKit Agents for real-time STT pipeline

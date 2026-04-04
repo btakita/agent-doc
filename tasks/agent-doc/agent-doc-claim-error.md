@@ -267,7 +267,7 @@ Preprocessed diff with source boundaries for the LLM:
 ```
 
 The agent-doc plugin isn't at fault — this is a JetBrains markdown parser issue with nested/ambiguous fences. The `[agent]` bracket syntax may also trigger link-reference parsing, adding to the overhead.
-<!-- agent:boundary:e3e884e9 -->
+<!-- agent:boundary:a021ff4a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

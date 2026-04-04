@@ -214,7 +214,7 @@ component.rs::strip_comments()  ← shared pure function
 ```
 
 All agent-doc tests pass (417). Eval-runner compiles clean.
-<!-- agent:boundary:0808c54b -->
+<!-- agent:boundary:01c6ab5b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

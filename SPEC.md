@@ -816,7 +816,7 @@ When multiple edits occur within the mtime granularity window, route may miss th
 
 **Mitigation:** Route path uses a timeout cap (10× debounce duration) to prevent indefinite hangs. Cross-process typing indicator files provide additional fallback for preflight detection.
 
-**Test coverage:** `rapid_edits_within_mtime_granularity` documents this edge case. See `src/debounce.rs`.
+**Test coverage:** `test_mtime_granularity_100ms_rapid_edits`, `test_mtime_granularity_1s_coarse_system`. See `tests/debounce_gaps_test_plan.rs`.
 
 ### 11.2 Untracked File Edge Case
 
@@ -830,7 +830,7 @@ This means the CLI cannot distinguish:
 
 **Mitigation:** Use `is_tracked(file)` before making assumptions about untracked files. Preflight applies both mtime debounce AND typing indicator debounce (redundant but safe).
 
-**Test coverage:** `is_tracked_distinguishes_untracked_from_idle`, `await_idle_on_untracked_file_returns_immediately`. See `src/debounce.rs`.
+**Test coverage:** `test_untracked_file_is_tracked_returns_false`, `test_tracked_file_is_tracked_returns_true`, `test_untracked_file_is_idle_returns_true`, `test_probe_pattern_untracked_skips_await`. See `tests/debounce_gaps_test_plan.rs`.
 
 ### 11.3 Hash Collision in Typing Indicator Paths
 
@@ -842,7 +842,7 @@ Collision probability: ~1 in 4.3 billion for random inputs. Collision is possibl
 
 **Mitigation:** No action needed. Collisions are rare and self-healing. If deterministic behavior is required, consider switching to SHA256 hashing in future.
 
-**Test coverage:** `hash_collision_handling` documents detection logic. See `src/debounce.rs`.
+**Test coverage:** `test_hash_collision_no_collisions_for_common_paths` (10k paths). `test_hash_collision_cleanup_removes_stale_indicators` blocked pending GC implementation. See `tests/debounce_gaps_test_plan.rs`.
 
 ### 11.4 Reactive Mode Assumes CRDT Merge Convergence
 
@@ -854,7 +854,7 @@ If a CRDT merge produces unexpected results (e.g., text duplication, loss of edi
 
 **Mitigation:** CRDT implementation is battle-tested with golden-answer test cases (20-30 cases per session diff). See `agent-doc eval-runner` for continuous validation.
 
-**Test coverage:** `reactive_mode_requires_zero_debounce` documents the assumption. CRDT correctness is verified via `agent-doc test` suite.
+**Test coverage:** `test_reactive_mode_crdt_merge_failure_handling`, `test_reactive_mode_infinite_loop_prevention` — both blocked pending `crdt::merge` and watch daemon API exposure. See `tests/debounce_gaps_test_plan.rs`.
 
 ### 11.5 Status File Staleness Timeout (30s Hardcoded)
 
@@ -866,7 +866,7 @@ This timeout is hardcoded in `get_status_via_file()` and not configurable.
 
 **Mitigation:** For long-running scenarios, increase the timeout (currently not exposed via config). The binary also sends `set_status()` updates, so well-instrumented operations will keep the timeout alive.
 
-**Test coverage:** `status_file_staleness_timeout`, `status_file_cleared_on_idle` document the behavior. See `src/debounce.rs`.
+**Test coverage:** `test_status_file_staleness_30s_timeout` (29s/30s/31s boundary). `test_status_file_write_includes_current_timestamp` blocked pending `status_file_path` pub exposure. See `tests/debounce_gaps_test_plan.rs`.
 
 ### 11.6 Hardcoded Timing Constants in Preflight
 
@@ -882,7 +882,7 @@ Not configurable per-document; one-size-fits-all fails for slow CI systems or fa
 
 **Mitigation:** Make timing constants configurable via frontmatter (`agent_doc_debounce_ms`, `agent_doc_typing_indicator_ms`). For now, operators can adjust via direct code modification if needed.
 
-**Test coverage:** `timing_constants_are_configurable`, `await_idle_via_file_respects_poll_interval` document current behavior. See `src/debounce.rs`.
+**Test coverage:** `test_timing_constants_are_documented` (code review pass). `test_preflight_timing_1500ms_is_configurable`, `test_preflight_3s_timeout_is_sufficient_for_debounce` blocked pending `preflight::run()` exposure and `agent_doc_debounce_ms` frontmatter wiring. See `tests/debounce_gaps_test_plan.rs`.
 
 ### 11.7 Directory-Walk Double-Pop Bug (Fixed in v0.28)
 

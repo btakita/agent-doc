@@ -13,7 +13,7 @@
 
 #![allow(dead_code)]
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -57,7 +57,6 @@ use std::time::Duration;
 /// - Preflight proceeds before user typing finishes, causing premature agent submit
 ///
 #[test]
-#[ignore] // Not yet implemented
 fn test_mtime_granularity_100ms_rapid_edits() {
     // Setup: Create a document and set up .agent-doc/typing/
     let tmp = tempfile::TempDir::new().unwrap();
@@ -106,7 +105,6 @@ fn test_mtime_granularity_100ms_rapid_edits() {
 /// - Both should still correctly report not idle for 1500ms window
 ///
 #[test]
-#[ignore] // Not yet implemented
 fn test_mtime_granularity_1s_coarse_system() {
     // Setup: Create document in temp dir
     let tmp = tempfile::TempDir::new().unwrap();
@@ -165,7 +163,6 @@ fn test_mtime_granularity_1s_coarse_system() {
 /// - But this is a silent fallback, not explicit error handling
 ///
 #[test]
-#[ignore] // Not yet implemented
 fn test_untracked_file_is_idle_returns_true() {
     // Setup: Fresh state, never call document_changed
     let untracked_file = "/tmp/never-tracked-test.md";
@@ -181,7 +178,6 @@ fn test_untracked_file_is_idle_returns_true() {
 /// - Same as above
 ///
 #[test]
-#[ignore] // Not yet implemented
 fn test_untracked_file_is_tracked_returns_false() {
     let untracked_file = "/tmp/never-tracked-test2.md";
 
@@ -192,7 +188,6 @@ fn test_untracked_file_is_tracked_returns_false() {
 /// Test that is_tracked() correctly returns true after a change.
 ///
 #[test]
-#[ignore] // Not yet implemented
 fn test_tracked_file_is_tracked_returns_true() {
     let tracked_file = "/tmp/just-tracked.md";
     agent_doc::debounce::document_changed(tracked_file);
@@ -209,7 +204,6 @@ fn test_tracked_file_is_tracked_returns_true() {
 /// - For untracked files, never calls await_idle()
 ///
 #[test]
-#[ignore] // Not yet implemented
 fn test_probe_pattern_untracked_skips_await() {
     let untracked = "/tmp/untracked-probe-test.md";
 
@@ -262,7 +256,6 @@ fn test_probe_pattern_untracked_skips_await() {
 /// - Current code has no detection or mitigation
 ///
 #[test]
-#[ignore] // Not yet implemented
 fn test_hash_collision_no_collisions_for_common_paths() {
     let tmp = tempfile::TempDir::new().unwrap();
     std::fs::create_dir_all(tmp.path().join(".agent-doc/typing")).unwrap();
@@ -308,7 +301,7 @@ fn test_hash_collision_no_collisions_for_common_paths() {
 /// - Or: a documented best-practice for cleanup is provided
 ///
 #[test]
-#[ignore] // Not yet implemented
+#[ignore] // Blocked: no cleanup function in debounce.rs; GC for .agent-doc/typing/ not yet implemented
 fn test_hash_collision_cleanup_removes_stale_indicators() {
     let tmp = tempfile::TempDir::new().unwrap();
     let typing_dir = tmp.path().join(".agent-doc/typing");
@@ -366,7 +359,7 @@ fn test_hash_collision_cleanup_removes_stale_indicators() {
 /// - Watch daemon may crash or retry indefinitely
 ///
 #[test]
-#[ignore] // Not yet implemented
+#[ignore] // Blocked: crdt::merge not exposed via pub API; requires pub(crate) or test helper
 fn test_reactive_mode_crdt_merge_failure_handling() {
     // Setup: Create a CRDT-mode document
     let tmp = tempfile::TempDir::new().unwrap();
@@ -419,7 +412,7 @@ Initial content.
 /// - Watch daemon logs loop warnings and halts after max_cycles
 ///
 #[test]
-#[ignore] // Not yet implemented
+#[ignore] // Blocked: requires watch daemon API or cycle counter exposed via pub API
 fn test_reactive_mode_infinite_loop_prevention() {
     // Setup: CRDT-mode document + watch daemon
     let tmp = tempfile::TempDir::new().unwrap();
@@ -479,14 +472,24 @@ Content
 /// - No distinction between "truly idle" and "timed out" status
 ///
 #[test]
-#[ignore] // Not yet implemented
 fn test_status_file_staleness_30s_timeout() {
     let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("staleness-test.md");
+    std::fs::write(&doc, "content").unwrap();
+    let doc_str = doc.to_string_lossy().to_string();
+
+    // Create .agent-doc/status/ so the path-walk finds it
     let status_dir = tmp.path().join(".agent-doc/status");
     std::fs::create_dir_all(&status_dir).unwrap();
 
-    // Helper: write a status file with a specific timestamp
-    fn write_status_at_time(path: &Path, status: &str, ms_ago: u128) {
+    // Compute the status file path the same way debounce.rs does (replicate logic)
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    doc_str.hash(&mut hasher);
+    let hash = hasher.finish();
+    let status_file = status_dir.join(format!("{:016x}", hash));
+
+    fn write_status_at_time(path: &std::path::Path, status: &str, ms_ago: u128) {
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -495,23 +498,21 @@ fn test_status_file_staleness_30s_timeout() {
         std::fs::write(path, format!("{}:{}", status, ts_ms)).unwrap();
     }
 
-    let status_file = status_dir.join("test_hash");
-
-    // Test case 1: 29 seconds old (still busy)
+    // Test case 1: 29 seconds old → still busy
     write_status_at_time(&status_file, "generating", 29_000);
-    let status = agent_doc::debounce::get_status_via_file(status_file.to_string_lossy().as_ref());
+    let status = agent_doc::debounce::get_status_via_file(&doc_str);
     assert_eq!(status, "generating",
         "Status 29s old should still be returned, not timed out");
 
-    // Test case 2: exactly 30 seconds old (timeout)
+    // Test case 2: exactly 30 seconds old → timed out
     write_status_at_time(&status_file, "generating", 30_000);
-    let status = agent_doc::debounce::get_status_via_file(status_file.to_string_lossy().as_ref());
+    let status = agent_doc::debounce::get_status_via_file(&doc_str);
     assert_eq!(status, "idle",
         "Status exactly 30s old should be considered timed out");
 
-    // Test case 3: 31 seconds old (definitely timed out)
+    // Test case 3: 31 seconds old → definitely timed out
     write_status_at_time(&status_file, "generating", 31_000);
-    let status = agent_doc::debounce::get_status_via_file(status_file.to_string_lossy().as_ref());
+    let status = agent_doc::debounce::get_status_via_file(&doc_str);
     assert_eq!(status, "idle",
         "Status 31s old should definitely be timed out");
 }
@@ -522,7 +523,7 @@ fn test_status_file_staleness_30s_timeout() {
 /// - same as above
 ///
 #[test]
-#[ignore] // Not yet implemented
+#[ignore] // Blocked: status_file_path() is private; would need pub(crate) to verify written path
 fn test_status_file_write_includes_current_timestamp() {
     let tmp = tempfile::TempDir::new().unwrap();
     let status_dir = tmp.path().join(".agent-doc/status");
@@ -576,7 +577,7 @@ fn test_status_file_write_includes_current_timestamp() {
 /// - All projects use the same debounce, regardless of build/edit speed
 ///
 #[test]
-#[ignore] // Not yet implemented
+#[ignore] // Blocked: preflight::run() not exposed; requires frontmatter agent_doc_debounce_ms wiring
 fn test_preflight_timing_1500ms_is_configurable() {
     // Setup: Create a document with custom debounce in frontmatter
     let tmp = tempfile::TempDir::new().unwrap();
@@ -636,7 +637,7 @@ Content
 /// - Or: an error is returned with guidance to increase timeout
 ///
 #[test]
-#[ignore] // Not yet implemented
+#[ignore] // Blocked: preflight::run() not exposed; also depends on agent_doc_debounce_ms config
 fn test_preflight_3s_timeout_is_sufficient_for_debounce() {
     // Setup: Document with 2800ms debounce (close to 3s limit)
     let tmp = tempfile::TempDir::new().unwrap();
@@ -672,7 +673,6 @@ Content
 /// - 3000ms preflight timeout is NOT documented (only in preflight.rs comments)
 ///
 #[test]
-#[ignore] // Not yet implemented
 fn test_timing_constants_are_documented() {
     // This is a code review test, not an executable test
     // Verification:

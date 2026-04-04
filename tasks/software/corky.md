@@ -306,7 +306,7 @@ Published to all targets:
 - `~/.cargo/bin/corky` installed with CUDA
 
 SPEC.md updated, transcription runbook updated with `confidence_threshold` config. 264 tests pass.
-<!-- agent:boundary:d5341d2e -->
+<!-- agent:boundary:11325105 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

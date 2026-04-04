@@ -53,7 +53,7 @@ AI agents can assist with interior design in several practical ways, all accessi
 - **Browser-assisted**: The agent can browse furniture sites, compare prices, and take screenshots for you to review
 
 **Getting started**: Describe your space, your style preferences, and your budget. I'll help from there.
-<!-- agent:boundary:7aed7a31 -->
+<!-- agent:boundary:8749f909 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

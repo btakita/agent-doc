@@ -2,6 +2,7 @@
 agent_doc_session: 6cb2a9bf-8521-46d0-8670-e76cf4aeabd4
 agent_doc_format: template
 agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
 ---
 
 ## Status
@@ -556,7 +557,7 @@ The eval-runner pattern is relevant here: it takes external content (diffs, docu
 2. Creates an agent-doc template document with the content
 3. Populates session-metrics, topic-segments from the Granola structure
 4. Makes it available for inline agent-doc interaction
-### Re: Granola skill created (HEAD)
+### Re: Granola skill created
 
 Built the `/granola` skill with runbook:
 
@@ -575,11 +576,37 @@ Built the `/granola` skill with runbook:
 5. Auto-populates action items from "Next Steps" sections
 
 **Re: Granola's hidden context** — you're right that the shared doc is just a summary. Granola's Claude Sonnet has access to the full transcript + audio context. Two ways to leverage this:
-1. If the transcript link is shared (format: `notes.granola.ai/t/<id>`), we scrape that too and include it as a component
+1. If the transcript link is shared (format: `notes.granola.ai/t/<id>`), we scrape that too and include it as a component: Is the transcript link available?
 2. Use Granola's built-in Sonnet prompt to ask questions, then import those answers into the agent-doc template
 
 The skill is now registered and shows up in the skills list. You can test it with Rob's notes URL.
-<!-- agent:boundary:b9766635 -->
+
+Where is the granola agent doc?
+### Re: Transcript link + Granola agent-doc location (HEAD)
+
+#### Transcript link — not directly scrapable
+
+The transcript URL (`notes.granola.ai/t/03f1146c-...`) is not a separate raw transcript page. It's the same document page with Granola's Claude Sonnet chat panel opened (`?utm_content=chat-transcript-panel`). The actual meeting transcript is loaded client-side within the app, not server-rendered in the RSC payload.
+
+**Options to get the raw transcript:**
+1. **Ask Rob to export it** from the Granola Mac app (copy/paste or markdown export)
+2. **Use Granola's chat** — Rob can ask Granola's Sonnet "give me the full raw transcript" and share the result
+3. **We already have it** — the corky transcription of the 3h54m recording (`tmp/robert-ross-call-transcript.md`) IS the transcript, with better diarization than Granola likely provides
+
+Option 3 is the strongest: your corky transcript has speaker labels, timestamps, and confidence scores. Granola's transcript is just its audio capture run through their STT pipeline.
+
+#### Where is the Granola agent-doc?
+
+Not created yet — the `/granola` skill and runbook are ready but we haven't run the import. To create it:
+
+```
+/granola import https://notes.granola.ai/d/e4d8dd00-6468-4a0b-93f1-df1f7d84d956
+```
+
+Or I can create it manually right now. The output would be at a path like `tasks/recruit/robert-ross-granola.md` — a template document with Rob's meeting notes as content, ready for inline agent-doc interaction.
+
+Want me to create it now?
+<!-- agent:boundary:eeafee4f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -587,8 +614,8 @@ The skill is now registered and shows up in the skills list. You can test it wit
 <!-- agent:pending patch=replace -->
 - ([done]) Build session analyzer template
 - ([done]) Build `/granola` skill with import runbook
+- Create Granola agent-doc for Rob's meeting notes
 - **Prep demo for Sunday:** Run session analyzer on robert-ross transcript
-- Test `/granola import` on Rob's notes URL
 - **Sunday Apr 5, 5pm ET:** Follow-up call with Rob (confirm via text)
 - Evaluate Deepgram + LiveKit Agents for real-time STT pipeline
 - Evaluate Cloudflare Vectorize + Workers AI for session indexing

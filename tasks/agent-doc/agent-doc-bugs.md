@@ -540,7 +540,7 @@ Scans `.agent-doc/` for orphaned files and removes them:
 do
 - [ ] Auto-GC on preflight (daily timestamp check)
 - [ ] Add cleanup runbook to .claude/skills/agent-doc/runbooks/
-### Re: Auto-GC + cleanup runbook done (HEAD)
+### Re: Auto-GC + cleanup runbook done
 
 **Auto-GC on preflight (done):**
 - Added step 0a to preflight: checks `.agent-doc/gc.stamp` mtime
@@ -563,7 +563,36 @@ do
 - `.claude/skills/agent-doc/SKILL.md` -- added cleanup runbook trigger
 
 Built, tested, installed.
-<!-- agent:boundary:2f9f44b8 -->
+
+do
+- [ ] Add tracing instrumentation to sync, layout, stash/retrieve code paths
+### Re: Tracing instrumentation added to sync/layout/stash/retrieve (HEAD)
+
+Added `tracing::debug!` at key decision points across 4 modules:
+
+**sync.rs (4 points):**
+- `run()` entry: cols, window, focus args
+- `run_with_options()` entry: full args + auto_start flag
+- `repair_layout()` entry: session + target window names
+- `resolve_file` closure: file resolution result (Registered/Unmanaged, registry presence)
+
+**route.rs (3 points):**
+- `run_with_tmux()` entry: file, pane, debounce, cols
+- `resolve_or_create_pane()` entry: session_id, file, target_session
+- `rescue_from_stash()`: pane rescue from stash window (pane_id, window name, target session)
+
+**layout.rs (1 point):**
+- `run_with_tmux()` entry: file count, split direction, window
+
+**resync.rs (3 points):**
+- `prune()` entry + stale session count
+- `detect_issues()` entry
+- `apply_fixes()`: issue count when applying remediation
+
+With `AGENT_DOC_LOG=debug` in your shell profile, these will log to `.agent-doc/logs/debug.log.<date>` during every sync/route cycle. The next time the 1-pane layout bug occurs, the log will show exactly which sync/route path executed and what pane state it saw.
+
+Built, tested, installed.
+<!-- agent:boundary:9a34dcfa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -576,7 +605,7 @@ Built, tested, installed.
 - [x] Add `agent-doc gc` subcommand for orphaned file cleanup
 - [x] Auto-GC on preflight (daily timestamp check)
 - [x] Add cleanup runbook to .claude/skills/agent-doc/runbooks/
+- [x] Add tracing instrumentation to sync, layout, stash/retrieve code paths
 - [ ] Publish tmux-router 0.3.9 to crates.io (awaiting approval)
 - [ ] Investigate 1-pane layout bug (verbose logging now available)
-- [ ] Add tracing instrumentation to sync, layout, stash/retrieve code paths
 <!-- /agent:pending -->

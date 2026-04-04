@@ -176,7 +176,7 @@ No agent-doc thread was actively consuming CPU at dump time. The 22.3% CPU from 
 The idea.log shows normal activity — no flooding. The most frequent messages are stash-related preflight output (not a hot loop).
 
 **Next step:** The Activity Monitor subsystem attribution might be measuring subprocess overhead from `PromptPoller` (1.5s poll interval). Could try increasing the poll interval to 5s and see if CPU drops.
-<!-- agent:boundary:9a08d284 -->
+<!-- agent:boundary:2ccc97ec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

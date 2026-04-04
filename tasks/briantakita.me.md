@@ -1878,7 +1878,7 @@ Blog post updated and deploying. All three repos pushed (briantakita.me → bria
 Live at: https://briantakita.me/post/2026-04-03-agent-runbooks-on-demand-procedural-context
 
 show draft
-### Re: LinkedIn draft (HEAD)
+### Re: LinkedIn draft
 
 Here's the current draft:
 
@@ -1901,10 +1901,23 @@ What directory convention are you using for agent config? `.agent/`, `.agents/`,
 ---
 
 Edit inline or tell me what to change.
-<!-- agent:boundary:99cd6d87 -->
+
+It is Saturday 5AM Eastern. When should this LinkedIn post go out?
+### Re: Best time to post (HEAD)
+
+For a technical/developer audience on LinkedIn:
+
+**Best window: Tuesday-Thursday, 8-10 AM ET** — peak developer feed activity (morning coffee before deep work).
+
+Saturday 5 AM is one of the worst times — low engagement, post gets buried before Monday.
+
+**Recommendation: Tuesday April 8, ~9 AM ET.** Gives you peak weekday engagement and time for a final read-through Monday evening.
+
+If sooner: Monday April 7, 9 AM ET works too — slightly lower than Tue-Thu but far better than weekends.
+<!-- agent:boundary:4a16c938 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn post: draft shown above, pending your edits + publish
+- LinkedIn post: schedule for Tue Apr 8 ~9 AM ET (draft ready)
 - Cleanup: remove stale directories
 <!-- /agent:pending -->

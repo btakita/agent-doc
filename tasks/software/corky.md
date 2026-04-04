@@ -149,7 +149,7 @@ Each has focused frontmatter for Claude Code skill matching. Shared conventions 
 Ready to implement on your go.
 Are there any generalizable context in email/SKILL.md that should be moved into corky's installable skills?
 Any runbook extractions that should happen?
-### Re: Generalizable context and runbook extractions (HEAD)
+### Re: Generalizable context and runbook extractions
 
 **What moves into corky-managed skills:**
 
@@ -176,13 +176,30 @@ Any runbook extractions that should happen?
 ```
 
 All installed by `corky skill install`. Ready to implement on go.
-<!-- agent:boundary:970498ca -->
+go
+### Re: Multi-skill install implemented (HEAD)
+
+**Created in corky repo:**
+- `skills/email/SKILL.md` + 4 runbooks (email-send, draft-reply, review-inbox, enrich-contact)
+- `skills/linkedin/SKILL.md` + 1 runbook (linkedin-post)
+
+**Modified:**
+- `SKILL.md` — trimmed to general corky commands, added Related Skills section
+- `src/skill.rs` — bundles all 3 skills + 5 runbooks via `include_str!`
+
+`corky skill install` now writes all 3 skills + runbooks. 258 tests pass, clippy clean.
+
+Next: commit, update SPEC/VERSIONS, audit docs, release.
+<!-- agent:boundary:84d284e3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Corky skill architecture: implement multi-skill install (awaiting approval)
+- Commit multi-skill install to corky submodule
+- Update SPEC.md, VERSIONS.md for multi-skill install
+- Audit docs
+- Release (version bump, publish)
 - Verify sheet sharing / GCP test users
 - Re-test sheet read
 - Manylinux binary wheel (nice-to-have, needs container/CI)

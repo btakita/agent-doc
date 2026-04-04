@@ -78,7 +78,7 @@ We should have agent-doc runbooks that are linked in the agent-doc installable S
 
 go
 - [ ] Document `agent-doc transfer`/`extract` in SKILL.md or runbook
-### Re: Transfer/extract runbook created and linked in SKILL.md (HEAD)
+### Re: Transfer/extract runbook created and linked in SKILL.md
 
 Created `src/agent-doc/runbooks/transfer-extract.md` covering:
 - `agent-doc transfer <SOURCE> <TARGET> <COMPONENT>` — moves entire component content
@@ -91,7 +91,23 @@ Updated:
 - `src/agent-doc/SKILL.md` — added Runbooks section linking both runbooks
 
 Binary rebuilt and skill reinstalled. Both runbooks now install via `agent-doc skill install`.
-<!-- agent:boundary:93c826ee -->
+
+do
+- [ ] PyPI publish (needs manylinux Docker build)
+### Re: PyPI publish complete (HEAD)
+
+Built manylinux2014 wheel via Docker container (`ghcr.io/pyo3/maturin`), mounting the agent-loop parent dir to resolve the `tmux-router` path patch in `.cargo/config.toml`.
+
+```
+docker run --rm -v /home/brian/work/btakita/agent-loop:/agent-loop -w /agent-loop/src/agent-doc \
+  ghcr.io/pyo3/maturin build --release --compatibility manylinux2014
+```
+
+Wheel: `agent_doc-0.31.5-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl`
+Uploaded to PyPI successfully.
+
+**Note:** `pyproject.toml` is still at v0.31.5 (matches the crates.io release). The local binary is v0.31.8 (unreleased changes: runbook updates, skill.rs). The PyPI wheel is v0.31.5.
+<!-- agent:boundary:a513adaf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -100,5 +116,5 @@ Binary rebuilt and skill reinstalled. Both runbooks now install via `agent-doc s
 - [x] Release v0.31.5
 - [x] Update compact-exchange runbook: note about preserving uncommitted user input
 - [x] Document `agent-doc transfer`/`extract` in SKILL.md or runbook
-- [ ] PyPI publish (needs manylinux Docker build)
+- [x] PyPI publish (manylinux Docker build)
 <!-- /agent:pending -->

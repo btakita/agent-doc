@@ -606,7 +606,7 @@ Not created yet — the `/granola` skill and runbook are ready but we haven't ru
 Or I can create it manually right now. The output would be at a path like `tasks/recruit/robert-ross-granola.md` — a template document with Rob's meeting notes as content, ready for inline agent-doc interaction.
 
 Want me to create it now?
-<!-- agent:boundary:eeafee4f -->
+<!-- agent:boundary:77de62f4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

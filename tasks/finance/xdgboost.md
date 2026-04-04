@@ -71,7 +71,36 @@ Run:
 ❯  uning. LightGBM and CatBoost are similar gradient
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   ⏵⏵ bypass permissions on (shift+tab to cycle)tegorical
-<!-- agent:boundary:38ca14d0 -->
+   XGBoost... what makes it "extreme" vs. plain gradient boosting).
+  4. Approximate split finding: uses quantile sketches to find optimal split points efficiently on large datasets.
+  5. Sparsity-aware: handles missing values natively by learning optimal default directions at each split.
+  6. System optimizations: cache-aware block structure, out-of-core computation, parallel tree construction.
+
+  Key hyperparameters: learning rate (eta), max depth, number of estimators, subsample ratio, colsample_bytree,
+  reg_alpha/reg_lambda.
+
+  Compared to alternatives: faster than random forests for similar accuracy on structured data, and generally outperforms
+   deep learning on tabular tasks with less tuning. LightGBM and CatBoost are similar gradient boosting libraries with
+  different tradeoffs (LightGBM: leaf-wise growth, faster; CatBoost: better categorical handling).
+
+
+  Read 1 file (ctrl+o to expand)
+
+● Bash(agent-doc commit tasks/finance/xdgboost.md)
+  ⎿  [perf] commit.staging (hash_object+update-index): 5ms
+     [perf] commit.git_commit: 11ms
+     [main 66b2e469] agent-doc(xdgboost): 2026-04-03 12:06:29
+     … +6 lines (ctrl+o to expand)
+
+● Response written and committed. The document now has the XGBoost overview in the exchange component.
+
+✻ Cogitated for 38s
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+<!-- agent:boundary:ec553f0d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

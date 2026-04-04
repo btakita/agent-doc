@@ -44,7 +44,7 @@ Added section **8.5 Pane Lifecycle — Binding Invariant** to SPEC.md with:
 - Domain ontology terminology table (Binding, Reconciliation, Provisioning, Initialization)
 
 All tests pass. Ready to release v0.31.11.
-<!-- agent:boundary:a15e7677 -->
+<!-- agent:boundary:c745408d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

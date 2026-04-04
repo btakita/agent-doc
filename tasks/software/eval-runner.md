@@ -391,7 +391,7 @@ Then run: `make eval SYSTEM_PROMPT=evals/agent-doc/diff-interpretation/system-pr
 This mirrors real sessions where the model has SKILL.md loaded. Without it, we're testing generic LLM behavior — not agent-doc skill compliance. The current scores represent "how well does a naked LLM handle agent-doc conventions?" The system-prompt scores would represent "how well does the skill perform end-to-end?"
 
 Both baselines are useful — naked for measuring inherent model capability, with-context for measuring skill+model quality.
-<!-- agent:boundary:fd64ab20 -->
+<!-- agent:boundary:7fa18d81 -->
 <!-- /agent:exchange -->
 
 ## Pending

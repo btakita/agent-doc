@@ -90,7 +90,7 @@ All releases complete:
 - agent-doc v0.31.6 → crates.io + GitHub
 - tmux-router v0.3.9 → crates.io + GitHub  
 - agent-loop → pushed to GitHub (submodule pointers updated)
-<!-- agent:boundary:8958cec4 -->
+<!-- agent:boundary:b6127dd4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-P1-P3 done: diff-type classification, eval diffs, annotated diff format
+P1-P3 + escape bug fix shipped this cycle
 <!-- /agent:status -->
 
 ## Exchange
@@ -261,16 +261,46 @@ Field is `skip_serializing_if = "Option::is_none"` — omitted when no diff.
 **Tests:** 5 new tests (additions, removals, modifications, context, empty). All 428 tests pass, clippy clean.
 
 The skill can now use `annotated_diff` instead of raw unified diff for better context when responding to user changes.
-### Re: JSON rendering issue (HEAD)
+### Re: JSON rendering issue
 
-The two code blocks show the same JSON but rendered differently. The first (intended) has `\\n` as literal escaped characters in the JSON string. The second (what appeared in the document) shows them as actual line breaks with trailing backslashes.
+The two code blocks show the same JSON but rendered differently. The first (intended) has `\\
+` as literal escaped characters in the JSON string. The second (what appeared in the document) shows them as actual line breaks with trailing backslashes.
 
-This happened during the CRDT write-back: the `\\n` sequence in my response was being unescaped somewhere in the patch application pipeline. The heredoc `<<'RESPONSE'` correctly preserves literal content (no shell expansion), but the IPC patch JSON serialization or the CRDT text insertion may be interpreting `\\n` as a newline.
+This happened during the CRDT write-back: the `\\
+` sequence in my response was being unescaped somewhere in the patch application pipeline. The heredoc `<<'RESPONSE'` correctly preserves literal content (no shell expansion), but the IPC patch JSON serialization or the CRDT text insertion may be interpreting `\\
+` as a newline.
 
-**Root cause:** When `agent-doc write --stream` processes the patch content, it serializes it to JSON for IPC delivery. If the patch content contains `\\n` inside a markdown code fence, the JSON serializer writes it as `\n` (a literal newline in JSON), which then gets inserted as an actual newline in the document.
+**Root cause:** When `agent-doc write --stream` processes the patch content, it serializes it to JSON for IPC delivery. If the patch content contains `\\
+` inside a markdown code fence, the JSON serializer writes it as `\
+` (a literal newline in JSON), which then gets inserted as an actual newline in the document.
 
 **Fix needed:** The patch content should be treated as opaque text — no unescaping. This is a bug in the write pipeline's text handling. Want me to investigate and fix it in the binary?
-<!-- agent:boundary:1eb5cc5c -->
+yes
+### Re: Yes — Fixed the `\\n` unescaping bug (HEAD)
+
+**Root cause:** `PatchWatcher.kt:929-932` — the manual JSON parser's escape replacement order was wrong.
+
+The old code:
+```kotlin
+.replace("\\n", "\n")      // Step 1: eats \n (including from \\n)
+.replace("\\t", "\t")
+.replace("\\\"", "\"")
+.replace("\\\\", "\\")     // Step 4: too late — \\n already mangled
+```
+
+When JSON contains `\\n` (literal backslash + n), step 1 sees `\n` and converts it to a newline, before step 4 ever processes the `\\`.
+
+**Fix:** Process `\\` first using a NUL placeholder:
+```kotlin
+.replace("\\\\", "\u0000")  // Step 1: protect escaped backslashes
+.replace("\\n", "\n")       // Step 2: now only real \n sequences
+.replace("\\t", "\t")
+.replace("\\\"", "\"")
+.replace("\u0000", "\\")    // Step 5: restore backslashes
+```
+
+Plugin builds clean. To install: rebuild with `./gradlew buildPlugin` then install the zip from `build/distributions/`.
+<!-- agent:boundary:6363d266 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -280,7 +310,7 @@ This happened during the CRDT write-back: the `\\n` sequence in my response was 
 - [x] Update SKILL.md to route based on diff_type — DONE
 - [x] Post-preflight diff generation for eval cases (P2) — DONE
 - [x] Implement annotated diff format in preflight (P3) — DONE
-- [ ] Investigate write pipeline `\\n` unescaping bug in code fences
+- [x] Fix write pipeline `\\n` unescaping bug — DONE (PatchWatcher.kt escape order)
 - [ ] Implement content-source annotation sidecar (P4)
 - [ ] Design reproducible operation log format (P5)
 - [ ] Add `---` prompt separator convention to SKILL.md

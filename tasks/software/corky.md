@@ -117,8 +117,8 @@ This should produce manylinux wheels for x86_64 Linux, macOS (Intel + ARM), and 
 
 Can we use a local .cargo/config.toml override (see src/agent-doc repo) while keeping references to the crate version in the corky cargo.toml?
 
-Add this heuristic as a skill->runbook where appropriate
-### Re: .cargo/config.toml patch pattern + skill update (HEAD)
+Add this heuristic as a skill->runbook where appropriate? Likely at the agent-loop level.
+### Re: .cargo/config.toml patch pattern + skill update
 
 **Implemented in corky:**
 - `Cargo.toml` now uses crate-only versions: `agent-kit = "0.3"`, `instruction-files = "0.1"`
@@ -131,13 +131,25 @@ Add this heuristic as a skill->runbook where appropriate
 > Path dependencies: Use `.cargo/config.toml` `[patch.crates-io]` for local development (gitignored). `Cargo.toml` references crate versions only — CI resolves from crates.io, no cloning needed.
 
 CI template comment also simplified.
-<!-- agent:boundary:0e6d5dad -->
+### Re: Runbook at agent-loop level (HEAD)
+
+Created `dev/runbooks/cargo-path-deps.md` documenting the `.cargo/config.toml` patch pattern:
+- Pattern: `Cargo.toml` uses crate versions, `.cargo/config.toml` (gitignored) patches to local paths
+- Why: CI resolves from crates.io, no cloning. `cargo publish` works. Local dev uses sibling checkouts.
+- Existing usage: agent-doc (tmux-router), corky (agent-kit, instruction-files)
+
+Added reference in `dev/SKILL.md` alongside other runbook links.
+
+Now documented in two places:
+1. `dev/runbooks/cargo-path-deps.md` — full runbook (agent-loop level)
+2. `rust-package/SKILL.md` conventions — brief reference
+<!-- agent:boundary:8ad221ad -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Monitor PyPI workflow (should now pass)
+- Monitor PyPI workflow
 - Verify sheet sharing / GCP test users
 - Re-test sheet read
 <!-- /agent:pending -->

@@ -248,7 +248,7 @@ Added 3 items to the agent-doc todo list:
 - Remove `agent:console` from default scaffold
 - Suppress verbose git status in `agent-doc commit` output
 - Prevent window closure when stashing last pane
-<!-- agent:boundary:fd0596bb -->
+<!-- agent:boundary:34094f66 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -105,7 +105,7 @@ Added 8 tests to `snapshot.rs` for the new functions:
 - `assigns_uuid_even_when_snapshot_exists` — UUID assignment happens before snapshot check
 
 All 25 snapshot tests pass (17 existing + 8 new). Full suite passes.
-<!-- agent:boundary:35d00941 -->
+<!-- agent:boundary:6601fcf0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-agent-doc v0.31.11 released to crates.io + GitHub
+agent-doc v0.31.12 released to crates.io + GitHub
 <!-- /agent:status -->
 
 ## Exchange
@@ -88,7 +88,7 @@ do: not sure why you chose to release and none of the items I told you to do.
 
 All tests pass, clippy clean. Feedback saved: "do" means execute all listed items.
 add tests
-### Re: Tests added (HEAD)
+### Re: Tests added
 
 Added 8 tests to `snapshot.rs` for the new functions:
 
@@ -105,14 +105,21 @@ Added 8 tests to `snapshot.rs` for the new functions:
 - `assigns_uuid_even_when_snapshot_exists` — UUID assignment happens before snapshot check
 
 All 25 snapshot tests pass (17 existing + 8 new). Full suite passes.
-<!-- agent:boundary:6601fcf0 -->
+4release
+### Re: v0.31.12 released (HEAD)
+
+Published to all targets:
+- **crates.io**: v0.31.12
+- **GitHub Release**: [v0.31.12](https://github.com/btakita/agent-doc/releases/tag/v0.31.12) with binary
+- **Local binary**: installed
+- **Parent submodule**: pointer updated
+
+3 changes: refactored ensure_initialized into 3 functions, renamed auto_start_no_wait → provision_pane, 8 new tests.
+<!-- agent:boundary:9ed2cd83 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Module-harness redesign: audit/seed/apply
-- [x] Refactor ensure_initialized into 3 focused functions
-- [x] Rename auto_start_no_wait → provision_pane
-- [x] Tests added for new functions (8 tests)
+- [x] All items complete for this session
 <!-- /agent:pending -->

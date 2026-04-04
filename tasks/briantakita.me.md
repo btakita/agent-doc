@@ -2228,7 +2228,7 @@ Where binary logic and SKILL, runbook logic, rules are packaged together.
 **LinkedIn** — recommend a sequel post rather than editing the existing runbooks post. "Skill encapsulation — packaging binary + instructions + runbooks" as a natural follow-up.
 
 **Draft blog section ready in console.** Shall I add it to the blog post file? And should LinkedIn be a sequel or fold into existing?
-<!-- agent:boundary:3ae4f823 -->
+<!-- agent:boundary:9921e746 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

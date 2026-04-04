@@ -14,7 +14,7 @@ agent-doc v0.31.10 released to crates.io + GitHub
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-### Session Summary (compacted 2026-04-04 15:00) (HEAD)
+### Session Summary (compacted 2026-04-04 15:00)
 
 **Releases: agent-doc v0.31.6→v0.31.10 + tmux-router v0.3.9**
 
@@ -49,13 +49,28 @@ This session:
 - v0.31.10: auto-init, cross-process typing, diff stability, IPC errors
 
 **Current state:** v0.31.10 released (crates.io + GitHub + installed). All pending items complete. 637 tests pass.
-<!-- agent:boundary:b4b6f655 -->
+
+What is the path to have robert-ross-granola.md committed? `agent-doc claim` will have an error due to the file already being claimed. `agent-doc sync` does not seem to cause a commit. It probably should.
+### Re: Add `ensure_initialized()` to sync's file resolution (HEAD)
+
+You're right — there's a gap. The path for `robert-ross-granola.md`:
+
+1. Granola skill creates the file — no snapshot, no commit
+2. User opens it in editor — JB plugin fires `route` then `sync`
+3. Neither route nor sync calls `ensure_initialized()`
+4. Claim fails (pane already claimed by another file)
+5. User never runs `/agent-doc` on it — preflight never fires
+
+**Fix:** Add `ensure_initialized()` to sync's `resolve_file` closure. When sync resolves a file from `col_args` and finds `fm.session.is_some()`, call `ensure_initialized()`. This is the broadest net — sync sees ALL files in the editor layout on every tab switch.
+
+This means any file with a session UUID that appears in the editor gets initialized automatically, regardless of whether it was claimed or had `/agent-doc` run on it.
+
+Should I implement this?
+<!-- agent:boundary:6d22e904 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Granola enrich-from-transcript runbook — created
-- [x] Auto-init: `ensure_initialized()` added to claim + preflight
-- [x] Release v0.31.10 — published
+- [ ] Add `ensure_initialized()` to sync's `resolve_file` — awaiting approval
 <!-- /agent:pending -->

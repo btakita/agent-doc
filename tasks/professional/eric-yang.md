@@ -79,7 +79,7 @@ Read and contextualized the full Telegram history (311 messages, Apr 2024 – Ma
 - **Nico** — introduced by Eric (context unclear)
 
 **Relationship Character:** Eric is a connector and mediator who values goodwill over legal leverage. Personally helped Brian financially during transitions. Open to future collaboration but deliberate — won't rush into a venture without conviction.
-<!-- agent:boundary:3a72327b -->
+<!-- agent:boundary:caaddb18 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

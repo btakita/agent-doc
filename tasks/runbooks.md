@@ -49,7 +49,7 @@ Yes -- four commands that belong in the binary:
 `audit` is highest priority -- it catches drift between SKILL.md references and actual runbook files. Could integrate with `make precommit` to prevent broken references.
 
 All are deterministic (fixed inputs -> fixed outputs) and CI-runnable. Could start as `agent-doc runbook audit/list/validate` subcommands, then extract to standalone `agent-runbooks` crate if scope grows.
-<!-- agent:boundary:513f2373 -->
+<!-- agent:boundary:b6dcc8d9 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

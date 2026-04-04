@@ -2135,7 +2135,7 @@ Yes, corky already has LinkedIn in its architecture (`[profiles.btakita.linkedin
 **For now:** Keep `.agent/runbooks/linkedin-post.md` as-is. When corky gets LinkedIn support, the runbook becomes the spec for the feature — then it gets replaced by `corky linkedin post`.
 
 The runbook pattern working exactly as designed here — lightweight procedure now, productized feature later.
-<!-- agent:boundary:565ca895 -->
+<!-- agent:boundary:14d710f8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

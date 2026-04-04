@@ -121,7 +121,7 @@ Added `btakita/agent-runbooks` as a submodule at `src/agent-runbooks/`. Current 
 The submodule is staged but not committed yet. Should I commit it, or do you want to move the runbook files we created into this repo first?
 
 commit and push first.
-### Decisions from agent-doc-bugs session (2026-04-04) (HEAD)
+### Decisions from agent-doc-bugs session (2026-04-04)
 
 **Naming:** Section name is `## Runbooks` (not Operations). Crate name would be `agent-runbooks`.
 
@@ -132,7 +132,7 @@ commit and push first.
 **Implementation:** Start as `agent-doc runbook audit/install` subcommand. Extract to `agent-runbooks` crate if scope grows.
 
 **Applied:** agent-doc SKILL.md now has `## Runbooks` section.
-### Re: Committed and pushed (HEAD)
+### Re: Committed and pushed
 
 The agent-runbooks submodule was already committed (in `f7034e1e`). Pushed all commits to origin.
 
@@ -143,13 +143,27 @@ The agent-runbooks submodule was already committed (in `f7034e1e`). Pushed all c
 - Implementation path: start as `agent-doc runbook` subcommand, extract to `agent-runbooks` crate if scope grows
 
 Next step: move the runbooks we created (`.claude/skills/*/runbooks/*.md`) into `src/agent-runbooks/` and update SKILL.md references?
-<!-- agent:boundary:3d10f94b -->
+
+I don't want to do the following because the skill runbooks are installed via libraries such as agent-doc and corky. Why did you suggest `Move runbooks from `.claude/skills/*/runbooks/` into `src/agent-runbooks/`?
+> - [ ] Move runbooks from `.claude/skills/*/runbooks/` into `src/agent-runbooks/`
+### Re: Why I suggested it (and why you're right not to) (HEAD)
+
+I suggested moving runbooks to `src/agent-runbooks/` thinking of it as a centralized registry. But that's the wrong model.
+
+**Runbooks belong with their skill** because:
+1. `agent-doc skill install` installs SKILL.md + runbooks together
+2. Skills reference runbooks via relative paths (`runbooks/filename.md`)
+3. Moving them to a separate repo would create a cross-repo dependency at install time
+
+The `agent-runbooks` repo/crate is better suited as:
+- The implementation of `agent-doc runbook audit/install` subcommand
+- A library of shared/reusable runbook templates (not skill-specific ones)
+- Tooling for runbook validation and discovery
+<!-- agent:boundary:a8dd1d30 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Move runbooks from `.claude/skills/*/runbooks/` into `src/agent-runbooks/`
-- [ ] Update SKILL.md references to point to new paths
 - [ ] Extract corky runbooks: review-inbox, draft-reply, enrich-contact
 <!-- /agent:pending -->

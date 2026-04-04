@@ -207,6 +207,13 @@ agent_doc_mode: <append | template>  # optional, default: append
 - Contains the full document content after the last submit
 - **IMPORTANT:** Always use absolute paths for snapshot read/write operations. CWD may drift to submodule directories during a session.
 
+## Runbooks
+
+When the user requests one of these operations, read and follow the linked runbook:
+
+- `compact exchange` — [runbooks/compact-exchange.md](runbooks/compact-exchange.md)
+- `transfer` / `extract` — [runbooks/transfer-extract.md](runbooks/transfer-extract.md)
+
 ## Success Criteria
 
 - User sees streaming response in the Claude console

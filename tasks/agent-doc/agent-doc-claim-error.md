@@ -16,8 +16,8 @@ v0.31.5 released. Commit-on-claim, auto-setup, VCS refresh, --diff-only, skill r
 <!-- agent:exchange patch=append -->
 *Compacted. Features: commit-on-claim, auto-setup untracked files, --diff-only flag, skill runbook bundling. Conventions: `.ai/runbooks/` (project root, vendor-neutral), `runbooks/` (skill-scoped). v0.31.5 released (cargo + GitHub). Open: PyPI manylinux build, `.ai/runbooks` blog post.*
 
-Should the `compact exchange` runbook also include summarizing the document in the current uncommitted state?
-### Re: Compact exchange and uncommitted state (HEAD)
+Should the `compact exchange` runbook also include summarizing the document in the current uncommitted state? 
+### Re: Compact exchange and uncommitted state
 
 The runbook's step 2 already covers summarizing exchange content (decisions, facts, open items). The question is whether it should also capture **uncommitted user input** — text written after the last boundary marker that hasn't been responded to yet.
 
@@ -30,13 +30,22 @@ The runbook's step 2 already covers summarizing exchange content (decisions, fac
 This is a documentation-only change to the runbook — adding a note to step 2: "If the exchange contains unanswered user input, note it as an open item in the summary or address it before compacting."
 
 The binary behavior is already correct (archives everything). The skill just needs to be mindful of pending user content.
-<!-- agent:boundary:f478a45f -->
+do
+- [ ] Update compact-exchange runbook: note about preserving uncommitted user input
+### Re: Updated compact-exchange runbook (HEAD)
+
+Updated the source runbook at `src/agent-doc/runbooks/compact-exchange.md` — added a bullet under step 2:
+
+> **Unanswered user input** — if the exchange contains uncommitted questions or instructions that haven't been responded to, note them as open items in the summary (don't silently drop them)
+
+Binary rebuilt (v0.31.8) and skill reinstalled. The bundled runbook and installed copy are both updated.
+<!-- agent:boundary:79ba533c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] Release v0.31.5
+- [x] Update compact-exchange runbook: note about preserving uncommitted user input
 - [ ] PyPI publish (needs manylinux Docker build)
-- [ ] Update compact-exchange runbook: note about preserving uncommitted user input
 <!-- /agent:pending -->

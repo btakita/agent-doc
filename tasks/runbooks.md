@@ -118,7 +118,7 @@ do
 - [ ] Update SKILL.md files to use trigger format for audit coverage
 - Add module-harness
 - Add ontology
-### Re: SKILL.md trigger format updated -- all audits pass (HEAD)
+### Re: SKILL.md trigger format updated -- all audits pass
 
 Updated 4 SKILL.md files with `## Runbooks` sections using trigger format:
 
@@ -152,11 +152,37 @@ ok  runbooks/module-harness-audit.md  audit harness
 **15 runbooks, 5 skills, all passing audit.** Zero missing, zero orphans.
 
 **Re: ontology (existence skill):** The existence skill currently has no runbooks. The operations it supports (lookup, search, new, lint, scope) are all single commands -- no multi-step procedures that would benefit from runbook extraction. If ontology authoring workflows become more complex, runbooks could be added later.
-<!-- agent:boundary:aedeb146 -->
+
+Add to agent-runbooks:
+- module-harness
+- ontology
+- tests
+- SPEC.md
+### Re: agent-runbooks updated with module-harness, ontology, tests, SPEC.md
+
+Committed and pushed `d030dab`:
+
+**New:**
+- `SPEC.md` -- behavioral contract for all 4 commands + format specs
+- Module harness validation: eval snake_case, spec content references (soft warnings)
+- Ontology annotations: `--ontology-dir` flag, `[term:Name]` checking
+- 12 new tests (27 total, all passing)
+
+**Example:**
+```bash
+# Validate with ontology checking (HEAD)
+agent-runbooks validate runbooks/my-runbook.md \
+  --ontology-dir ~/.claude/philosophy/src
+
+# Output: WARN: ontology term 'Scope' not found at ~/.claude/philosophy/src/scope.md (HEAD)
+```
+
+Parent pointer updated: `290c86cb`.
+<!-- agent:boundary:581d1a3c -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-All items complete. 5 skills audited, 15 runbooks referenced, zero drift.
+All items complete.
 <!-- /agent:pending -->

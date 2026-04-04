@@ -1903,7 +1903,7 @@ What directory convention are you using for agent config? `.agent/`, `.agents/`,
 Edit inline or tell me what to change.
 
 It is Saturday 5AM Eastern. When should this LinkedIn post go out?
-### Re: Best time to post (HEAD)
+### Re: Best time to post
 
 For a technical/developer audience on LinkedIn:
 
@@ -1914,10 +1914,25 @@ Saturday 5 AM is one of the worst times — low engagement, post gets buried bef
 **Recommendation: Tuesday April 8, ~9 AM ET.** Gives you peak weekday engagement and time for a final read-through Monday evening.
 
 If sooner: Monday April 7, 9 AM ET works too — slightly lower than Tue-Thu but far better than weekends.
-<!-- agent:boundary:5bc31a88 -->
+Excited to get it out. Today is Saturday. Sunday is Easter. I have an interview on Monday at 13:30 Eastern.
+Should I get the blog teaser out on Monday morning?
+I have have a video with another blog post in the pipeline.
+### Re: Monday morning timing (HEAD)
+
+Yes, **Monday April 7, 9 AM ET** works. Your interview is at 1:30 PM — the LinkedIn post goes out 4.5 hours before. If your interviewer checks your profile, the runbooks post is fresh and shows you're actively building and publishing. Good look.
+
+Easter Sunday means Monday feeds will be quieter, but developers catching up after the holiday weekend will see it.
+
+**For the second blog post + video:** Space them out. If runbooks goes Monday, post the next one **Wednesday or Thursday** — gives each post its own news cycle.
+
+**Plan:**
+1. Monday April 7, ~9 AM ET — runbooks LinkedIn teaser
+2. Wed/Thu April 9-10 — second blog post + video
+<!-- agent:boundary:d9c87f6e -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn post: schedule for Tue Apr 8 ~9 AM ET (draft ready)
+- LinkedIn post: schedule for Mon Apr 7 ~9 AM ET (draft ready)
+- Second blog post + video: target Wed/Thu Apr 9-10
 - Cleanup: remove stale directories
 <!-- /agent:pending -->

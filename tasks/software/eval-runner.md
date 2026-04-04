@@ -1186,7 +1186,7 @@ User saves file
 ```
 
 Each layer is deterministic, testable, and reduces what the LLM needs to interpret.
-<!-- agent:boundary:fc77d6c0 -->
+<!-- agent:boundary:59d15d81 -->
 <!-- /agent:exchange -->
 
 ## Pending

@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Navigation swap VERIFIED — 4-step cycle test passes. Cross-session stash/retrieve works.
+Stash window consumed during sync tests — will auto-recreate on next stash
 <!-- /agent:status -->
 
 ## Exchange
@@ -501,7 +501,7 @@ Please automate this test.
 - The tmux window selection and layout should remain correct
 
 Do this until the software works.
-### Re: Automated test — navigation swap now works (HEAD)
+### Re: Automated test — navigation swap now works
 
 **Root cause found:** agent-doc's `Cargo.toml` used `tmux-router = "0.3.8"` (crates.io), not the local source. My SessionScope changes were never compiled into the binary. Fixed by adding `path = "../tmux-router"` to the dependency.
 
@@ -522,7 +522,22 @@ Final state: both panes side by side in session 5 agent-doc window. All 4 transi
 1. `SessionScope` allows cross-session joins (tmux-router `sync.rs:252-267`)
 2. `--window` is authoritative for `target_session` (tmux-router `sync.rs:740-743`)
 3. `Cargo.toml` path dep ensures local tmux-router is used (`path = "../tmux-router"`)
-<!-- agent:boundary:0610c3a5 -->
+Where is the stash pane?
+### Re: Where is the stash pane? (HEAD)
+
+The stash window is no longer in session 5. During the sync tests, it was consumed when panes were retrieved from it. The only remaining stash is in session 1:
+
+| Session | Window | Panes |
+|---------|--------|-------|
+| 1 | `1:2 stash @192` | 1 pane (%13 corky) |
+| 5 | (none) | stash window absent |
+
+Session 5 has:
+- `0:agent-doc @201` — %433 (bugs) + %431 (runbooks) side by side
+- `2:zsh @200` — %438 (shell)
+
+The stash window in session 5 will be recreated automatically the next time a pane is stashed (via `ensure_stash_window`). It's not needed right now since both agent-doc panes are in the correct window.
+<!-- agent:boundary:64f5cc73 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

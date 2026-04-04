@@ -442,7 +442,7 @@ If the marker never moved, you'd only see the boundary on the first response hea
 The alternative would be a boundary marker that doesn't use git diff at all (e.g., a dedicated gutter annotation from the plugin). But the current approach leverages git's built-in gutter rendering without any custom editor highlighting.
 
 Did this happen when I reopened agent-doc-bugs.md? What triggered this decision point? It seems there is something wrong with the operating assumptions...so we need to correct it. How did this happen? Was it deterministic agent-doc binary code that drove this or SKILL + agent activity that drove this?
-### Re: What triggered it — deterministic binary code (HEAD)
+### Re: What triggered it — deterministic binary code
 
 **100% binary code**, not the skill. The sequence:
 
@@ -455,11 +455,29 @@ Did this happen when I reopened agent-doc-bugs.md? What triggered this decision 
 The skill never touches `(HEAD)` markers. The transfer command wrote valid content. The bug was entirely in the commit path's heading classification logic — step 4 of `add_head_marker()`.
 
 **Trigger**: any operation that introduces multiple new `### ` headings at once (transfer, extract, or even a multi-topic response). The fix (marking only the last heading) is already deployed.
-<!-- agent:boundary:8cab3e6f -->
+
+> marking only the last heading
+
+Sometimes a patch has multiple headings. All of the added headings should have the ` (HEAD)` commit with the removal uncommitted. We need to find a different way for the agent-doc command to only do the steps on the added headers only.
+### Re: Reverted — ALL new headings get `(HEAD)` (HEAD)
+
+You're right. Reverted to marking ALL root-level new headings. My previous fix was too aggressive.
+
+The correct behavior:
+- Headings already in git HEAD → no marker (already committed)
+- Headings NOT in git HEAD → ALL get `(HEAD)` → blue gutter on each
+
+After transfer, all transferred headings are genuinely new (transfer writes to working tree + snapshot but doesn't commit). The first `agent-doc commit` after transfer correctly classifies them all as "new" and marks each with `(HEAD)`.
+
+The original behavior was actually correct for this case. The visual result (all headers showing blue gutter) is expected after a transfer — they're all newly committed content.
+
+Committed: `0c24e60`. Binary rebuilt.
+<!-- agent:boundary:92447a0d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] All session tasks complete
+- [x] Reverted HEAD marker to mark all new headings
 <!-- /agent:pending -->

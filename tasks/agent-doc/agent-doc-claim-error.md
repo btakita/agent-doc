@@ -394,7 +394,7 @@ The working file correctly has them without `(HEAD)`.
 This is a bug in `agent-doc commit`'s boundary repositioning — it's adding `(HEAD)` to **every** h3 heading in the snapshot, not just the one immediately after the boundary marker. The correct behavior is: add `(HEAD)` to only the heading right after the boundary, remove it from all others.
 
 This should be fixed in `boundary.rs` — the reposition logic needs to be scoped to only the heading adjacent to the boundary marker.
-<!-- agent:boundary:8067e2f1 -->
+<!-- agent:boundary:0d62b504 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

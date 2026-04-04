@@ -459,7 +459,9 @@ The skill never touches `(HEAD)` markers. The transfer command wrote valid conte
 > marking only the last heading
 
 Sometimes a patch has multiple headings. All of the added headings should have the ` (HEAD)` commit with the removal uncommitted. We need to find a different way for the agent-doc command to only do the steps on the added headers only.
-### Re: Reverted — ALL new headings get `(HEAD)` (HEAD)
+
+Is there login from the `agent-doc` run step that we can abstract that the transfer command can also use?
+### Re: Reverted — ALL new headings get `(HEAD)`
 
 You're right. Reverted to marking ALL root-level new headings. My previous fix was too aggressive.
 
@@ -472,12 +474,27 @@ After transfer, all transferred headings are genuinely new (transfer writes to w
 The original behavior was actually correct for this case. The visual result (all headers showing blue gutter) is expected after a transfer — they're all newly committed content.
 
 Committed: `0c24e60`. Binary rebuilt.
-<!-- agent:boundary:51e896b7 -->
+### Re: Transfer should commit — reuse `git::commit()` (HEAD)
+
+Yes. The `commit()` function in `git.rs` is already abstracted — transfer just needs to call it.
+
+Current transfer flow: `atomic_write → snapshot::save` (no commit)
+Fixed flow: `atomic_write → snapshot::save → git::commit(target)`
+
+After this fix:
+1. Transfer writes + commits → headings in git HEAD
+2. Next `/agent-doc` cycle → `add_head_marker()` sees transferred headings as "existing" → no `(HEAD)`
+3. Only the agent's NEW response gets `(HEAD)` → single blue gutter
+
+One line to add in `extract.rs:194`: `crate::git::commit(target)?;`
+
+Want me to add it?
+<!-- agent:boundary:7f4b761d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] All session tasks complete
-- [x] Reverted HEAD marker to mark all new headings
+- [x] All previous tasks complete
+- [ ] Add `git::commit(target)` to transfer command
 <!-- /agent:pending -->

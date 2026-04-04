@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Cross-session pane retrieval deployed — panes retrieved from any location, not just stash
+SessionScope now allows cross-session joins — registered panes can return from any session
 <!-- /agent:status -->
 
 ## Exchange
@@ -443,7 +443,7 @@ Once the pane is in the target window, tmux-router's existing swap fast path han
 
 Try navigating between agent-doc files in the editor — the pane should swap atomically without creating new windows.
 Focusing on the right editor, tasks/runbooks.md, does not fix the pane layout. It is still 1 pane. Why?
-### Re: Runbooks pane not retrieved — cross-session fix (HEAD)
+### Re: Runbooks pane not retrieved — cross-session fix
 
 The stash retrieval was too narrow — it only checked the stash window in the target session. Pane %431 (runbooks.md) migrated to **session 1** entirely (`1:0.0`), not the stash.
 
@@ -460,7 +460,24 @@ if tmux.pane_alive(&pane) && !target_pane_set.contains(&pane) {
 `tmux join-pane` supports cross-session moves natively — no need for break+move+join workaround.
 
 **Built, tested (623 pass), installed.** Try focusing on runbooks.md in the editor — the pane should be retrieved from session 1 and joined into the agent-doc window.
-<!-- agent:boundary:887ad3d9 -->
+When I selected the right editor tasks/runbook.md, the window 0:agent-doc closed. Why?
+### Re: Window closed again — different approach (HEAD)
+
+The pre-sync retrieval was fighting with sync's own logic (join → then detach undoes it). Removed it.
+
+**New approach:** Changed `SessionScope` in tmux-router to **allow cross-session joins and swaps** instead of blocking them. The swap fast path and ATTACH phase in sync already know how to join panes from other windows — they were just being blocked by SessionScope when the pane was in a different session.
+
+**Changes:**
+1. `SessionScope::join_pane` — no longer returns `Ok(false)` for cross-session panes. Logs `SCOPE_CROSS` warning and proceeds with the join. `tmux join-pane` handles cross-session moves natively.
+2. `SessionScope::swap_pane` — same change. Cross-session swaps allowed with warning.
+3. **Removed pre-sync retrieval** from agent-doc's sync.rs — it was a workaround that caused more problems.
+
+**Why this is correct:** SessionScope was designed to prevent accidental cross-session interference. But registered panes that drift between sessions during stash/rescue cycles are NOT accidental — they're the exact panes we want. Blocking them leaves orphaned panes that never return.
+
+The sync's existing Phase 1 resolution already finds alive panes in the registry regardless of session. The ATTACH phase already knows how to join them. SessionScope was the only thing blocking the move.
+
+**Built, tested (623 pass), installed.**
+<!-- agent:boundary:50271756 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -474,5 +491,5 @@ if tmux.pane_alive(&pane) && !target_pane_set.contains(&pane) {
 - [x] Remove agent:console from default scaffold (already done)
 - [x] Suppress verbose git status in commit output
 - [x] Fix: window closure — last-pane guard in unmanaged stash path
-- [x] Navigation swap: broadened to retrieve panes from any location (not just stash)
+- [x] Navigation swap: allow cross-session joins in SessionScope (was blocking registered panes)
 <!-- /agent:pending -->

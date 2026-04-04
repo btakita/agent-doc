@@ -2066,7 +2066,7 @@ Added a `## Runbooks` section to `CLAUDE.md` referencing all three project-level
 5 lines of always-on context instead of the full procedures. Exactly the pattern from the blog post — one-line pointers, full procedure on demand.
 
 Should we extract a SKILL.md for these processes instead?
-### Re: SKILL.md vs CLAUDE.md runbook references (HEAD)
+### Re: SKILL.md vs CLAUDE.md runbook references
 
 No — keep them in CLAUDE.md. The distinction:
 
@@ -2076,11 +2076,20 @@ No — keep them in CLAUDE.md. The distinction:
 Precommit, prerelease, and LinkedIn runbooks are all implicit — they augment existing workflows rather than being standalone commands. Making a `/linkedin` skill would require explicit invocation every time. With the CLAUDE.md reference, any session that involves LinkedIn content naturally discovers and follows the runbook.
 
 Skills are for "do this specific multi-step thing now." Runbook references are for "whenever you're doing X, follow this procedure."
-<!-- agent:boundary:87ad0484 -->
+
+post LinkedIn blog teaser
+### Re: LinkedIn blog teaser — ready to paste (HEAD)
+
+Chrome not running with remote debugging — paste manually. Content is formatted above in the console (no markdown, links in first comment per runbook).
+
+1. Copy post body → paste into LinkedIn composer → publish
+2. Immediately add first comment with the two links
+3. Verify both visible
+<!-- agent:boundary:8f0bd0ab -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn blog teaser: draft updated (links in first comment), POST NOW
+- LinkedIn blog teaser: POSTING NOW (paste manually)
 - Video: edit out WordPress admin section, then post
 - Second blog post + video: target Wed/Thu Apr 9-10
 - Cleanup: remove stale directories

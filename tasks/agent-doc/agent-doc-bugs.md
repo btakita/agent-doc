@@ -199,7 +199,7 @@ These are simple enough for a shell script or could be a subcommand of an existi
 - It needs to parse runbook frontmatter or validate content structure
 
 **Recommendation:** Start as a subcommand of agent-doc (`agent-doc runbook audit`, `agent-doc runbook install`) rather than a separate crate. Extract to `agent-runbooks` later if the scope grows.
-<!-- agent:boundary:ce00d168 -->
+<!-- agent:boundary:915f14df -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -802,7 +802,7 @@ Ran smoke suite back-to-back with same response model (sonnet):
 The real variance fix is rubric specificity — cases with vague expected behaviors fluctuate most. Tightening to binary yes/no checks would stabilize both judges.
 
 **Smoke suite working well** — 6 cases in ~1.5 min, fast enough for tight iteration.
-<!-- agent:boundary:cf3154b0 -->
+<!-- agent:boundary:a7a30785 -->
 <!-- /agent:exchange -->
 
 ## Pending

@@ -1193,7 +1193,7 @@ User saves file
 ```
 
 Each layer is deterministic, testable, and reduces what the LLM needs to interpret.
-### Re: Audit logging, replay, and author annotations (HEAD)
+### Re: Audit logging, replay, and author annotations
 
 #### Classification audit logging
 
@@ -1267,16 +1267,58 @@ The annotations live in a sidecar file (`.agent-doc/annotations/<hash>.json`) wi
 
 **Recommendation: Option C.** It keeps the markdown pristine (no annotation noise), the editor view renders colors from the sidecar, and the annotations don't interfere with diff computation or CRDT merging. The sidecar is computed from the CRDT state — it's derived data, not stored.
 
+I like option C. But What happens when the annotation file is out of sync from the markdown? Can we deterministically recover relative to the current git revision + diff?
+
 This aligns with the iA philosophy of separating content from metadata while keeping author attribution available for rendering.
-<!-- agent:boundary:38aa2292 -->
+### Re: Annotation sync and deterministic recovery (HEAD)
+
+**Yes — the annotations can always be deterministically reconstructed.** The key insight: annotations are *derived data*, not source of truth.
+
+**The source of truth chain:**
+1. **Snapshot** = document state after last agent response (committed)
+2. **Working file** = current document state (may have user edits)
+3. **Git diff** between snapshot and working file = what the user changed
+
+Everything in the snapshot is `[agent]` (or `[user]` from prior cycles — the snapshot records the merged state). Everything in the working file's diff hunks that's `+` is `[user]`. This is deterministic.
+
+**Recovery when annotation file is out of sync:**
+
+```
+agent-doc annotate <file>
+```
+
+This command:
+1. Reads the snapshot (last committed agent state)
+2. Reads the current file
+3. Computes character-level diff
+4. For each character range: if it exists in the snapshot → `agent`, if it's new → `user`
+5. Writes the sidecar annotation file
+
+**The annotation file is disposable.** Delete it, regenerate it, it's always the same for a given (snapshot, file) pair. No sync problem because there's no state to get out of sync — it's a pure function of two inputs.
+
+**When does it need regeneration?**
+- After `agent-doc write` (new agent content) → regenerated automatically
+- After user edits (new user content) → regenerated on-demand by editor plugin
+- After `agent-doc commit` (snapshot updates) → regenerated automatically
+
+**The editor plugin** calls `agent-doc annotate` after each save and reads the sidecar for coloring. If the sidecar is missing or stale, the editor shows a "recalculating..." state and triggers regeneration. No data loss possible — the markdown is always the source of truth.
+
+**For multi-cycle history** (who wrote what across many cycles), the annotation extends to use git blame:
+```
+agent-doc annotate --history <file>
+```
+This walks git history to attribute each line to the commit that introduced it, then maps commits to `agent` or `user` based on whether `agent-doc commit` or a manual commit created them.
+
+**TL;DR:** The sidecar is a cache, not state. It can always be reconstructed from (snapshot + current file) for current-cycle attribution, or from git blame for full history. No sync problem.
+<!-- agent:boundary:f80e647e -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
+- [ ] Design `agent-doc annotate` command spec (sidecar format + regeneration)
 - [ ] Design classification audit log format for preflight
-- [ ] Design replay log format (commit-referenced, not content-inline)
-- [ ] Design sidecar annotation layer for source attribution (Option C)
+- [ ] Design replay log format (commit-referenced)
 - [ ] Fix structural-reorg eval case with full document context
 - [ ] Design agentic eval fixture format (future — v2)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing

@@ -111,7 +111,7 @@ Here are the actual measured savings:
 The biggest win is **livestream** at 53% -- the audit pattern tables and deny-list are only needed when running `/livestream audit`, not for `/livestream on` (which is the common case).
 
 Add btakita/agent-runbooks repo as a submodule to agent-loop
-### Re: agent-runbooks submodule added (HEAD)
+### Re: agent-runbooks submodule added
 
 Added `btakita/agent-runbooks` as a submodule at `src/agent-runbooks/`. Current contents:
 - `examples/` directory
@@ -119,12 +119,37 @@ Added `btakita/agent-runbooks` as a submodule at `src/agent-runbooks/`. Current 
 - `README.md`
 
 The submodule is staged but not committed yet. Should I commit it, or do you want to move the runbook files we created into this repo first?
-<!-- agent:boundary:610f8375 -->
+
+commit and push first.
+### Decisions from agent-doc-bugs session (2026-04-04) (HEAD)
+
+**Naming:** Section name is `## Runbooks` (not Operations). Crate name would be `agent-runbooks`.
+
+**Trigger format:** `` `trigger phrase` — runbooks/filename.md `` (backtick-quoted, relative path)
+
+**Corky extraction candidates:** review-inbox, draft-reply, enrich-contact. Email skill's `email-send.md` should consolidate into corky.
+
+**Implementation:** Start as `agent-doc runbook audit/install` subcommand. Extract to `agent-runbooks` crate if scope grows.
+
+**Applied:** agent-doc SKILL.md now has `## Runbooks` section.
+### Re: Committed and pushed (HEAD)
+
+The agent-runbooks submodule was already committed (in `f7034e1e`). Pushed all commits to origin.
+
+**Decisions recorded from agent-doc-bugs session:**
+- Section name: `## Runbooks` (applied to agent-doc SKILL.md)
+- Trigger format: `` `trigger phrase` — runbooks/filename.md ``
+- Corky extraction candidates: review-inbox, draft-reply, enrich-contact
+- Implementation path: start as `agent-doc runbook` subcommand, extract to `agent-runbooks` crate if scope grows
+
+Next step: move the runbooks we created (`.claude/skills/*/runbooks/*.md`) into `src/agent-runbooks/` and update SKILL.md references?
+<!-- agent:boundary:7c5d7d56 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Decide: move runbooks from `.claude/skills/*/runbooks/` into `src/agent-runbooks/`?
-- [ ] Commit submodule addition
+- [ ] Move runbooks from `.claude/skills/*/runbooks/` into `src/agent-runbooks/`
+- [ ] Update SKILL.md references to point to new paths
+- [ ] Extract corky runbooks: review-inbox, draft-reply, enrich-contact
 <!-- /agent:pending -->

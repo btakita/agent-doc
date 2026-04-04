@@ -662,7 +662,7 @@ This is not statistically significant
 Let's add multiple runs. If **any** of the runs score low...that is a problem. We need to find solutions. The issue is how can we tell if we are improving?
 Given the suite takes a long time, it is difficult to tell. What do you suggest?
 Faster eval suite or do you think the fixtures will shake out this std deviation?
-### Re: Eval variance and improvement detection (HEAD)
+### Re: Eval variance and improvement detection
 
 You're right — with this variance, you can't tell signal from noise. Multi-run averaging helps but doesn't fix the root cause. Here's what I'd suggest:
 
@@ -690,16 +690,48 @@ For the `claude` CLI backend, we'd add `--temperature 0` (or use `--model-params
 **Smoke suite** is the answer to "takes too long" — tag the 5-7 cases that are always stable (deletion-of-content, comment-content-ignored, boundary-only-change, head-label-removal, single-word-correction) and run those in ~2 min for quick checks. Full suite for releases.
 
 **Fixtures won't help with variance** — they test different things (agentic execution vs diff interpretation). The variance is a judge problem, not a case design problem.
-<!-- agent:boundary:807b04bf -->
+
+In practice, it seems agent-doc responses are reasonably stable. Sometimes it's incorrect, but skills + runbooks seem to help. Would it be useful to somehow also simulate the more "realistic" use cases or should we focus on what we can quickly & reliably measure?
+### Re: Realistic vs measurable (HEAD)
+
+**Focus on what you can quickly and reliably measure.** Here's why:
+
+Real agent-doc sessions are more stable because they have:
+- Full SKILL.md (not a 4-line summary)
+- Conversation history (prior exchanges inform the next response)
+- Tool access (can read files, check state)
+- JetBrains plugin feedback loop (gutter, boundary markers)
+- User corrections in real-time
+
+The diff-interpretation eval intentionally strips this to isolate one question: "given just a diff and context, does the model understand what changed?" This is the foundational capability — if it fails here, skills/runbooks are compensating, not the model understanding.
+
+**Practical recommendation:**
+
+| Layer | What to Test | Method | Speed |
+|-------|-------------|--------|-------|
+| **Unit** | Diff interpretation (current 19 cases) | `claude --print` + judge | ~10 min |
+| **Integration** | SKILL.md compliance | `claude --print` + system prompt + judge | ~10 min |
+| **E2E** | Full session behavior | Agentic fixtures with tools | ~30+ min |
+
+You're at layers 1-2. Layer 3 (agentic fixtures) would simulate realistic use cases but is 3-5x slower and harder to judge. **The ROI of tightening layers 1-2 is much higher right now:**
+
+1. **Temperature=0 judge** — stabilizes existing scores (1 hour of work)
+2. **Smoke suite** — 5 stable cases for quick regression (30 min)
+3. **Binary rubrics** for clear-cut cases — eliminates borderline scoring
+
+Once these are solid, you have a reliable regression gate. Agentic E2E evals are a separate project — valuable for validating skill changes, but not needed for day-to-day "did I break diff interpretation?"
+
+**TL;DR:** The current eval suite tests the right thing at the right layer. Make it reliable (temperature=0, smoke suite) before adding complexity (agentic fixtures).
+<!-- agent:boundary:b299aa89 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [ ] Add `--judge-temperature 0` to reduce judge non-determinism
-- [ ] Create smoke suite (5-7 most stable cases) for quick regression checks
-- [ ] Tighten rubrics for borderline cases (structural-reorg, url-reference-question, etc.)
-- [ ] Design agentic eval fixture format (future — v2 eval suite)
+- [ ] Add temperature=0 for judge calls (highest-impact stability fix)
+- [ ] Create smoke suite (5 most stable cases)
+- [ ] Tighten binary rubrics for clear-cut cases
+- [ ] Design agentic eval fixture format (future — v2)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 <!-- /agent:pending -->
 

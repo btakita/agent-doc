@@ -191,7 +191,8 @@ go
 
 Next: commit, update SPEC/VERSIONS, audit docs, release.
 go
-### Re: Released v0.25.0 — Multi-skill install (HEAD)
+How much context savings are we getting from extracting the runbooks?
+### Re: Released v0.25.0 — Multi-skill install
 
 **Published:**
 - [crates.io](https://crates.io/crates/corky/0.25.0)
@@ -205,13 +206,25 @@ go
 3. `chore: gitignore .claude/ directory` (installed output)
 
 **Issue fixed:** `skills/` was gitignored but `include_str!` embeds from git-tracked files. `cargo publish --verify` failed. Un-gitignored `skills/`, added `.claude/` to `.gitignore`.
-<!-- agent:boundary:d2cc861b -->
+### Re: Context savings from skill extraction (HEAD)
+
+Skills installed. Claude Code now shows `corky`, `email`, `linkedin` as separate skills.
+
+| Invocation | Lines loaded | vs monolithic (695) | Savings |
+|-----------|-------------|---------------------|---------|
+| `/email` | 107 | 85% less | ~588 lines |
+| `/linkedin` | 58 | 92% less | ~637 lines |
+| `/corky` | 71 | 90% less | ~624 lines |
+
+Runbooks (459 lines) are on-demand only — never loaded unless the user requests a specific operation.
+
+The biggest win: Claude Code skill matching only loads the *relevant* skill per invocation. A monolithic skill would load all 695 lines for every corky-related task.
+<!-- agent:boundary:5f4636a9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Run `corky skill install` to install the new skills locally
 - Verify sheet sharing / GCP test users
 - Re-test sheet read
 - Manylinux binary wheel (nice-to-have, needs container/CI)

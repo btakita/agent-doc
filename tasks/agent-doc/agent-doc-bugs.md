@@ -367,7 +367,7 @@ Add `tracing` + `tracing-subscriber`:
 This would catch the 1-pane bug next time it occurs — the log would show exactly which sync events fired (or didn't) and what layout decisions were made.
 
 Both the debounce tuning and logging are implementation tasks. Should I add them to the pending list and tackle one now?
-<!-- agent:boundary:fdba9aff -->
+<!-- agent:boundary:a344e41e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

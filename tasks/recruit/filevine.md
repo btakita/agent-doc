@@ -13,22 +13,8 @@ Interview prep PDF generated at file:///tmp/filevine-interview-prep.pdf
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-     General
-       #12744            🔵  Researched Reel Weeds company and product catalog
-       #12745  12:41 PM  🔵  Completed deep-dive research across Reel Weeds website sections
-
-
-     Access 207k tokens of past research & decisions for just 17,673t. Use the claude-mem skill to access memories by
-     ID.
-
-     View Observations Live @ http://localhost:37777
-
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ 
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)                                                                /buddy
-  ⏵⏵ bypass permissions on (shift+tab to cycle)                                                    ◐ medium · /effort
-  ⏵⏵ bypass permissions on (shift+tab to cycle)
+Give me a 1 page pdf prep for filevine interview.
+filevine.com
 ### Re: Interview prep PDF (HEAD)
 
 Created a 1-page interview prep PDF at `file:///tmp/filevine-interview-prep.pdf`
@@ -42,7 +28,36 @@ Created a 1-page interview prep PDF at `file:///tmp/filevine-interview-prep.pdf`
 - Questions to ask (AI team structure, migration path, doc processing at scale, culture post-Series E)
 - Competitors (Clio, MyCase, Smokeball, NetDocuments)
 - Watch for: Glassdoor 2.8/5, intense performance culture
-<!-- agent:boundary:7e987fe5 -->
+     60658 bytes written to file /tmp/filevine-interview-prep.pdf
+
+● File is smaller (60K vs 69K) - the headers should be gone now.
+
+  Read 1 file (ctrl+o to expand)
+
+● Clean 1-page PDF. Now let me write the response to the document and commit.
+
+  Read 1 file (ctrl+o to expand)
+
+● Bash(agent-doc commit tasks/recruit/filevine.md)
+  ⎿  [perf] commit.staging (hash_object+update-index): 4ms
+     [perf] commit.git_commit: 11ms
+     [main 2e9f9a17] agent-doc(filevine): 2026-04-03 13:01:22
+     … +7 lines (ctrl+o to expand)
+
+● Interview prep PDF ready at file:///tmp/filevine-interview-prep.pdf. Key highlights:
+
+  - $3B valuation (Series E Sep 2025), ~800 employees, 6K customers
+  - Stack overlaps well: React, Svelte, Next.js, TypeScript, Node.js, PostgreSQL, Go
+  - Heavy AI investment (AIBlocks, RAG, agentic workflows) -- aligns with your agent tooling work
+  - Watch for: Glassdoor 2.8/5, intense performance culture -- ask about sustainable pace
+
+✻ Cooked for 2m 56s
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+<!-- agent:boundary:190b8da0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -78,7 +78,7 @@ Within granola, if I select text, I get a transcript summary popup.
 ![img.png](img.png)
 
 Should we note this in the granola skill? Add a runbook?
-### Re: Claim conflict + Granola transcript feature (HEAD)
+### Re: Claim conflict + Granola transcript feature
 
 **Claim issue:** The error is expected — pane %483 is already claimed by session `1ef5f0e7` (this agent-doc-bugs file). A pane can only serve one document at a time. To claim `robert-ross-granola.md`, you'd need to either:
 - Use a different tmux pane (open a new terminal split)
@@ -95,11 +95,28 @@ This isn't a bug — it's the single-claim-per-pane design working correctly.
 This would bridge the gap between Granola's hidden context and the agent-doc template. The current skill only scrapes the summary HTML; this runbook would document the manual process for pulling in transcript excerpts.
 
 Want me to create the runbook?
-<!-- agent:boundary:82f1fb87 -->
+Yes
+I also want to note that when robert-ross-granola.md was created, it was not committed to git. Why not?
+### Re: Runbook created + why the granola doc wasn't committed (HEAD)
+
+**Runbook created:** `.claude/skills/granola/runbooks/enrich-from-transcript.md` — documents the manual workflow for extracting Granola's hidden transcript context via the text-selection popup and adding it to the agent-doc exchange. Also updated `SKILL.md` with the runbook index.
+
+**Why robert-ross-granola.md wasn't committed:** The file is untracked in git (never committed). The import runbook's step 5 says to run `agent-doc commit <output-path>`, but the `/granola import` skill execution likely didn't call it. Two possible causes:
+
+1. **The granola skill doesn't auto-commit** — the import runbook describes the step but the skill's actual execution may have stopped after creating the file
+2. **No snapshot exists** — `agent-doc commit` requires a snapshot to diff against. If the file was created outside of `agent-doc write`, there's no snapshot, so `agent-doc commit` would need to do an initial commit (add + snapshot creation)
+
+**Fix options:**
+- The granola import workflow should call `git add <file> && agent-doc commit <file>` after creating the template
+- Or: add an `agent-doc init <file>` command that creates the initial snapshot + git commit for newly created documents
+
+Which approach do you prefer?
+<!-- agent:boundary:4035c75b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Granola enrich-from-transcript runbook — awaiting approval
+- [x] Granola enrich-from-transcript runbook — created
+- [ ] Granola import: auto-commit after creating template — awaiting decision
 <!-- /agent:pending -->

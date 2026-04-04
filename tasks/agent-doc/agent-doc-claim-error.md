@@ -148,7 +148,7 @@ The prerelease runbook says "sync pyproject.toml with Cargo.toml" — it should 
 > Going forward, both files stay in sync on every version bump.
 
 How are you ensuring this?
-### Re: How am I ensuring pyproject.toml sync? (HEAD)
+### Re: How am I ensuring pyproject.toml sync?
 
 Currently: memory + runbook step. Both rely on me remembering — which failed for v0.31.6-0.31.8.
 
@@ -160,12 +160,25 @@ Currently: memory + runbook step. Both rely on me remembering — which failed f
 | `make check` version sync | Catches every time |
 
 Want me to add this to the Makefile?
-<!-- agent:boundary:ef266a4b -->
+yes...is this `make check` in agent-doc?
+### Re: Version sync check added to `make check`
+
+Yes, in agent-doc's Makefile. Added a `version-sync` target that compares Cargo.toml and pyproject.toml versions, fails if they differ. It's now part of `make check` (clippy + test + version-sync).
+
+```
+make version-sync   # silent if matched
+# ERROR: version mismatch — Cargo.toml=0.31.9 pyproject.toml=0.31.0  (if mismatched) (HEAD)
+```
+
+Committed: `4e554d4` — `feat: add version-sync check to make check`
+
+Now `make check` (which the prerelease runbook runs first) will catch any Cargo/pyproject version drift automatically.
+<!-- agent:boundary:ba9047c2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] Release agent-doc v0.31.9
-- [ ] Add version sync check to `make check` (Cargo.toml vs pyproject.toml)
+- [x] Add version sync check to `make check`
 <!-- /agent:pending -->

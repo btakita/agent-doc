@@ -45,7 +45,9 @@ Editor navigates to file B (was viewing file A)
 - %433 (bugs) + %431 (runbooks) in 5:agent-doc (correct)
 - %434 (claim-error) + %436 (briantakita.me) displaced in session 3
 - %13 (corky) in 1:stash, %84/%399/%400 shells
-****<!-- /agent:exchange -->
+****
+<!-- agent:boundary:39310cca -->
+<!-- /agent:exchange -->
 
 ## Pending / Not Built
 

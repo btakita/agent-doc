@@ -724,5 +724,5 @@ Added the adaptive chunked diarization algorithm to `tasks/software/corky.md`:
   - `corky transcribe --resolve-unknown` — LLM-based speaker attribution
 
 The algorithm documents exactly what we did here: progressive splitting + contextual inference for the remaining Unknown segments.
-<!-- agent:boundary:a7415878 -->
+<!-- agent:boundary:853d4f13 -->
 <!-- /agent:exchange -->

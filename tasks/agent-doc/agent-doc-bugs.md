@@ -456,7 +456,7 @@ Done. Added `### 0c. Multi-topic prompt separators` section to SKILL.md between 
 This ties into the existing `multi_topic` diff type which already detects `---` separators in `classify_diff()`.
 
 did you add tests?
-### Re: Tests for `---` separator (HEAD)
+### Re: Tests for `---` separator
 
 Good catch. The `---` separator convention was documented in SKILL.md but the `classify_diff` code had a bug: it only checked for `---` separators when `added_block_count >= 2`, which missed the common case of `---` inside a single contiguous added block.
 
@@ -467,19 +467,43 @@ Good catch. The `---` separator convention was documented in SKILL.md but the `c
 **Added test:** `classify_multi_topic_with_separator` — contiguous added block with `---` between topics correctly classified as `MultiTopic`.
 
 All 437 tests pass, clippy clean.
-<!-- agent:boundary:f30740f4 -->
+
+Are all edge cases tested?
+### Re: Edge case test audit (HEAD)
+
+Audited and added 3 missing edge case tests:
+
+1. **`classify_approval_in_sentence_is_content`** — "let's go ahead and implement" should NOT be `Approval` (it's a sentence, not a single approval word). Passes correctly — the classifier checks `added_content.len() == 1` so multi-word lines are never classified as approvals.
+
+2. **`classify_single_separator_not_multi_topic`** — a lone `+---` with no content on either side should NOT be `MultiTopic`. Passes correctly — the section count is 0 (empty sections filtered out).
+
+3. **`classify_question_mark_in_multiline_is_content`** — multi-line addition where the last line ends with `?` should NOT be `SimpleQuestion`. Passes correctly — `SimpleQuestion` requires exactly 1 added line.
+
+**Test count: 13 classify tests** (was 10, +3 edge cases). All 440 tests pass, clippy clean.
+
+**Coverage summary:**
+| Type | Positive test | Negative/edge test |
+|------|--------------|-------------------|
+| Approval | `classify_approval`, `_case_insensitive` | `_in_sentence_is_content` |
+| SimpleQuestion | `classify_simple_question` | `_question_mark_in_multiline` |
+| BoundaryArtifact | `_boundary_artifact`, `_boundary_uuid` | — |
+| Annotation | `classify_annotation` | — |
+| StructuralChange | `classify_structural_change` | — |
+| MultiTopic | `_multi_topic`, `_with_separator` | `_single_separator_not_multi` |
+| ContentAddition | `classify_content_addition` | (fallback for all negative cases) |
+<!-- agent:boundary:1c80de13 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Implement diff-type classification in preflight (P1) — DONE
+- [x] Implement diff-type classification in preflight (P1) — DONE (13 tests)
 - [x] Update SKILL.md to route based on diff_type — DONE
 - [x] Post-preflight diff generation for eval cases (P2) — DONE
-- [x] Implement annotated diff format in preflight (P3) — DONE
+- [x] Implement annotated diff format in preflight (P3) — DONE (5 tests)
 - [x] Fix write pipeline escape bug + Gson migration (JB plugin v0.2.44) — DONE
-- [x] Implement content-source annotation sidecar (P4) — DONE
-- [x] Design reproducible operation log format (P5) — DONE
-- [x] Add `---` prompt separator convention to SKILL.md + fix detection bug — DONE
+- [x] Implement content-source annotation sidecar (P4) — DONE (6 tests)
+- [x] Design reproducible operation log format (P5) — DONE (2 tests)
+- [x] Add `---` prompt separator convention + fix + edge case tests — DONE
 - [ ] Add transfer-source metadata to patch format
 <!-- /agent:pending -->

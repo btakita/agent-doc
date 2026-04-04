@@ -92,7 +92,12 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           tag="${GITHUB_REF#refs/tags/}"
-          gh release create "$tag" \
-            --title "agent-doc $tag" \
-            --generate-notes \
-            artifacts/*
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists — uploading assets only"
+            gh release upload "$tag" artifacts/* --clobber
+          else
+            gh release create "$tag" \
+              --title "agent-doc $tag" \
+              --generate-notes \
+              artifacts/*
+          fi

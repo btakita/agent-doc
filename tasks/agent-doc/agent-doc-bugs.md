@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Session complete. All bugs fixed, features implemented, logging enabled.
+agent-doc v0.31.6 released to crates.io + GitHub
 <!-- /agent:status -->
 
 ## Exchange
@@ -862,16 +862,41 @@ This prevents the 3-orphaned-shell scenario: when route fails (e.g., malformed r
 
 I added `AGENT_DOC_LOG=debug` to .env
 > - [ ] Add `export AGENT_DOC_LOG=debug` to ~/.zshrc (user action)
-### Re: Debug logging enabled (HEAD)
+
+### Re: Debug logging enabled
 
 `AGENT_DOC_LOG=debug` is now active. All sync, route, layout, and debounce operations will be logged to `.agent-doc/logs/debug.log.<date>`. Next time the 1-pane layout bug or session destruction occurs, the log will capture the full decision chain.
 
 All items in this session are complete.
-<!-- agent:boundary:08a3fe88 -->
+
+release
+### Re: agent-doc v0.31.6 released (HEAD)
+
+**Published:**
+- crates.io: agent-doc v0.31.6
+- GitHub: tagged v0.31.6, pushed to main
+- Binary: installed to ~/.cargo/bin/agent-doc
+
+**11 changes in this release:**
+1. Debounce fix (2000ms default + frontmatter config)
+2. Structured logging (tracing crate)
+3. Pre-response cleanup bug fix
+4. Lock file cleanup bug fix
+5. `agent-doc gc` subcommand
+6. Auto-GC on preflight
+7. Cleanup runbook
+8. Tracing instrumentation (sync/route/layout/resync)
+9. Source annotations for extract/transfer
+10. Post-sync session health check
+11. Route cleanup on failure
+
+634 tests pass. 18 files changed, 1,207 insertions, 65 deletions.
+<!-- agent:boundary:385d6185 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] All items complete
+- [x] agent-doc v0.31.6 released
 <!-- /agent:pending -->

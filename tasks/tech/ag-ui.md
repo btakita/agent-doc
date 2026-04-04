@@ -217,7 +217,7 @@ They serve different layers — it's not actually RFC 6902 doing this, it's the 
 In practice, when using SSE they'll always match. But they exist at different abstraction levels — one is "how the transport delivers it" and the other is "what the protocol says it is."
 
 My examples showed both because that's what the wire format looks like with SSE transport. If AG-UI were running over WebSocket, you'd only see the JSON `{ "type": "STATE_DELTA", ... }` without the `event:` line.
-<!-- agent:boundary:45ae454b -->
+<!-- agent:boundary:57dec8b2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

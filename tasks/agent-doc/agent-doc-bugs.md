@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-debounce fix (2000ms default + frontmatter config) and structured logging (tracing crate) implemented
+GC implemented: 1,659 files cleaned (62% reduction). Pre-response + lock cleanup bugs fixed.
 <!-- /agent:status -->
 
 ## Exchange
@@ -451,7 +451,7 @@ export AGENT_DOC_LOG=debug  # add to ~/.zshrc
 I'm concerned about the explosion of files in the /home/brian/work/btakita/agent-loop/.agent-doc/* directories.
 Please analyze which files are not being cleaned up. Make a plan to auto-cleanup the files.
 Add some on-demand context, like a runbook, or something else, for .agent-doc directory additions to autoclean if an unbounded amount of files will be created.
-### Re: .agent-doc file bloat analysis + cleanup plan (HEAD)
+### Re: .agent-doc file bloat analysis + cleanup plan
 
 **Root cause:** Hash-based file keying with no deletion handler. When documents are renamed, `rename.rs` migrates state. When documents are deleted, nothing cleans up — files accumulate forever.
 
@@ -498,7 +498,46 @@ Should add a `cleanup` runbook documenting:
 - Safe manual cleanup commands
 
 Shall I implement the fixes now? Starting with the pre-response bug fix and lock cleanup since those are straightforward.
-<!-- agent:boundary:9bf7ebec -->
+### Re: .agent-doc cleanup implemented (HEAD)
+
+**Three fixes deployed:**
+
+**1. Pre-response cleanup (bug fix):**
+Added `snapshot::delete_pre_response()` call inside `recover::clear_pending()`. Since all 10 write paths call `clear_pending()`, this single change ensures pre-response files are cleaned after every successful write. No more accumulation.
+
+**2. Lock file cleanup (bug fix):**
+- `SnapshotLock::Drop` now deletes the lock file (not just unlocks). Stored `lock_path` in the struct.
+- CRDT lock acquisition (`acquire_crdt_lock`) detects stale locks (>1 hour old) and removes them before acquiring.
+
+**3. `agent-doc gc` subcommand (new):**
+Scans `.agent-doc/` for orphaned files and removes them:
+- **Snapshots/CRDT/pre-response/baselines**: cross-references file hashes against existing documents; removes unmatched.
+- **Locks**: removes all stale locks (>1 hour old).
+- **Hooks**: removes old event files (>24 hours old).
+- Supports `--dry-run` and `--root` flags.
+
+**Results of first GC run:**
+
+| Dir | Before | After | Removed |
+|-----|--------|-------|---------|
+| hooks/ | 1,935 | 676 | 1,270 old events |
+| snapshots/ | 287 | 111 | 176 orphaned |
+| crdt/ | 220 | 86 | 134 orphaned + locks |
+| pre-response/ | 86 | 64 | 22 orphaned |
+| locks/ | 57 | 0 | 57 stale |
+| **Total** | **2,654** | **1,040** | **1,659 (62%)** |
+
+**Files changed:**
+- `gc.rs` -- new module (GC subcommand)
+- `main.rs` -- added `Gc` subcommand + `mod gc`
+- `recover.rs` -- `clear_pending()` now also deletes pre-response
+- `snapshot.rs` -- `SnapshotLock` deletes file on drop; CRDT lock cleans stale locks
+
+**Still needed:**
+- Auto-GC on preflight (daily stamp) to prevent re-accumulation
+- Cleanup runbook documenting `.agent-doc/` directory structure
+- The remaining 64 pre-response files are for active documents (will be cleaned by the new `clear_pending` fix going forward)
+<!-- agent:boundary:4fd69da1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -506,11 +545,10 @@ Shall I implement the fixes now? Starting with the pre-response bug fix and lock
 <!-- agent:pending patch=replace -->
 - [x] Fix debounce: increase mtime to 2000ms + frontmatter config
 - [x] Add structured logging (tracing crate) with AGENT_DOC_LOG env var
-- [ ] **[active]** Fix pre-response cleanup after write (bug, 2 lines)
-- [ ] **[active]** Fix lock file cleanup in Drop + stale detection
-- [ ] Add `agent-doc gc` subcommand for orphaned file cleanup
+- [x] Fix pre-response cleanup after write (bug)
+- [x] Fix lock file cleanup in Drop + stale detection
+- [x] Add `agent-doc gc` subcommand for orphaned file cleanup
 - [ ] Auto-GC on preflight (daily timestamp check)
-- [ ] Hook auto-GC (auto-invoke after commit/preflight)
 - [ ] Add cleanup runbook to .claude/skills/agent-doc/runbooks/
 - [ ] Publish tmux-router 0.3.9 to crates.io (awaiting approval)
 - [ ] Investigate 1-pane layout bug (verbose logging now available)

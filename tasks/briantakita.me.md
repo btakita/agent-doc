@@ -2211,7 +2211,7 @@ Both are on-demand context optimizations, but:
 **My recommendation:**
 - Blog post: Add a brief section on skill decomposition as a second optimization (separate from the runbook numbers)
 - LinkedIn teaser: Keep focused on runbooks only
-<!-- agent:boundary:9f0b1d64 -->
+<!-- agent:boundary:9344bbe1 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

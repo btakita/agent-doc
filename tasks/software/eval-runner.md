@@ -730,6 +730,8 @@ Three changes to reduce variance and speed up iteration:
 
 **1. `--judge-temperature` flag** — pass temperature to the API backend for judge calls. `claude` CLI doesn't support temperature, but the `anthropic-api` backend does. Response model uses default temperature (we want natural variance), judge uses temperature=0 (we want determinism).
 
+Would a different model for judge be effective? Perhaps a local model? Do we need a frontier model to be the judge or would a simpler model be almost or just as effective?
+
 **2. `--tag` filter** — cases can have `tags: [smoke]`. Run `--tag smoke` to filter to tagged cases only.
 
 **3. Smoke suite** — 6 most stable cases tagged `smoke`:
@@ -742,23 +744,49 @@ Three changes to reduce variance and speed up iteration:
 
 **Usage:**
 ```bash
-# Quick smoke check (~2 min) (HEAD)
+# Quick smoke check (~2 min)
 make eval-smoke
 
-# Full suite (HEAD)
+# Full suite
 make eval
 ```
 
 Smoke suite running now — will report timing and results.
-<!-- agent:boundary:774f45fc -->
+### Re: Judge model choice (HEAD)
+
+**A simpler model works well for judging — you don't need frontier for this.**
+
+The judge's job is straightforward: compare a response against a checklist of expected behaviors. This is closer to classification than generation. Research from eval frameworks confirms this:
+
+| Judge Model | Pros | Cons |
+|-------------|------|------|
+| **Haiku** | Fast, cheap, low variance | Might miss nuance in complex cases |
+| **Sonnet** | Good balance | Current default, proven |
+| **Local (llama 3, etc.)** | Free, fast, fully deterministic | Needs GPU, setup overhead |
+| **Frontier (Opus)** | Best nuance understanding | Expensive, overkill for most cases |
+
+**Recommendation: Use haiku as judge.** The expected behaviors are written as explicit yes/no checks ("does NOT respond to comment", "acknowledges approval"). Haiku can evaluate these reliably. Reserve sonnet/opus for the response model where nuance matters.
+
+**Already supported:** `--judge-model haiku` works today. No code changes needed.
+
+**Local models:** Would need a new backend (`ollama`, `llama.cpp`). Great for fully deterministic judging but adds setup complexity. Worth it if you're running evals frequently — zero API cost and instant judging. Could be a future `--backend ollama` addition.
+
+**Quick test:** Run the smoke suite with `--judge-model haiku` to compare:
+```bash
+make eval-smoke JUDGE_MODEL=haiku
+```
+
+If haiku judging produces similar scores to sonnet judging, that's your answer — use haiku for speed and cost, save sonnet for the response model.
+
+**Smoke suite results (first run):** 5/6 passed (83.3%), 1.8 min. The `inline-colon-annotation` flickered (0.20 vs usual 0.95) — this is the judge variance we're trying to eliminate.
+<!-- agent:boundary:f6e4e941 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [x] Add `--judge-temperature` flag for deterministic judging
-- [x] Create smoke suite (6 stable cases, `--tag smoke`)
-- [ ] Smoke suite first run (running)
+- [x] Smoke suite first run (5/6 passed, 83.3%, ~1.8 min)
+- [ ] Test haiku as judge model (`make eval-smoke JUDGE_MODEL=haiku`)
 - [ ] Tighten binary rubrics for clear-cut cases
 - [ ] Design agentic eval fixture format (future — v2)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing

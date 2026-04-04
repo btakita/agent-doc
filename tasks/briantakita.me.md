@@ -2106,7 +2106,7 @@ The pattern works with Claude Code, Cursor, Copilot, Windsurf, Gemini CLI, Aider
 What directory convention are you using for agent config? .agent/, .agents/, .ai/? The ecosystem hasn't settled this yet and I'd love to hear what's working for you.
 
 Links in the comments.
-<!-- agent:boundary:29815950 -->
+<!-- agent:boundary:4b522538 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

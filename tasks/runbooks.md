@@ -13,7 +13,7 @@ claude_args: --dangerously-skip-permissions
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-## Session Summary (HEAD)
+## Session Summary
 
 **Runbook extraction session** (2026-04-04)
 
@@ -33,7 +33,23 @@ claude_args: --dangerously-skip-permissions
 
 ### Transferred to agent-doc-bugs
 - Review, commit, and release agent-doc with notify subcommand
-<!-- agent:boundary:0fb3f3c3 -->
+
+Is there any deterministic cli functionality that should be added to agent-runbooks?
+### Re: Deterministic CLI for agent-runbooks (HEAD)
+
+Yes -- four commands that belong in the binary:
+
+| Command | Purpose | Priority |
+|---------|---------|----------|
+| `audit <skill-dir>` | Validate SKILL.md runbook refs exist, find orphans | High |
+| `list <skill-dir>` | List runbooks with metadata (name, trigger, lines) | Medium |
+| `validate <file>` | Check runbook format (title, steps, refs) | Medium |
+| `install <skill-dir> --from <template>` | Copy template into skill's runbooks/ | Low |
+
+`audit` is highest priority -- it catches drift between SKILL.md references and actual runbook files. Could integrate with `make precommit` to prevent broken references.
+
+All are deterministic (fixed inputs -> fixed outputs) and CI-runnable. Could start as `agent-doc runbook audit/list/validate` subcommands, then extract to standalone `agent-runbooks` crate if scope grows.
+<!-- agent:boundary:513f2373 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

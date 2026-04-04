@@ -1724,7 +1724,7 @@ go
 - [x] Release binary built (`make release`)
 
 **PyPI blocker:** maturin builds with `linux_x86_64` tag which PyPI rejects — needs `manylinux` tag. This requires building in a manylinux container or CI.
-<!-- agent:boundary:cd3f1439 -->
+<!-- agent:boundary:229e3ff3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

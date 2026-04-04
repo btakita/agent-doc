@@ -66,7 +66,7 @@ You're right. I only ran `git log v0.3.9..HEAD` (no committed changes since tag)
 How can we fix this for next time? SKILL + runbook?
 
 **Pending for tmux-router:** Commit the sync.rs debug logging, decide if it warrants a release (v0.3.10) or can wait.
-### Re: Preventing missed working tree changes (HEAD)
+### Re: Preventing missed working tree changes
 
 Not a SKILL or runbook issue — this was a general workflow mistake. The fix is a **feedback memory** so I always check both committed and uncommitted state when assessing submodules.
 
@@ -74,7 +74,25 @@ Added to auto memory (`feedback_check_working_tree.md`):
 > When assessing submodule release status, always run `git status` + `git diff` alongside `git log`. Never say "no changes" based on commit history alone.
 
 Also updated the prerelease runbook — but the real fix is the memory, since the mistake happens at the "check status" phase before any release workflow starts.
-<!-- agent:boundary:004693c2 -->
+
+I wonder if we should have a detailed runbook that is called from memory or the CLAUDE.md.
+### Re: Runbooks referenced from memory/CLAUDE.md (HEAD)
+
+This pattern already works — CLAUDE.md's Runbooks section links `.agent/runbooks/*.md` as on-demand procedures. Memory could do the same for edge cases.
+
+**The layered approach already in place:**
+
+| Layer | Cost | Best for |
+|-------|------|----------|
+| CLAUDE.md / Memory | Always in context | Short rules (1-2 lines) |
+| Runbook (linked) | On-demand | Multi-step procedures (4+ steps) |
+
+**For "check submodule status":** The memory entry is sufficient — 2 commands. A runbook would be overkill.
+
+**When runbook > memory:** 4+ steps, conditional logic, platform branches, specific command syntax with edge cases (compact-exchange, transfer-extract, prerelease).
+
+The pattern of "memory says what, runbook says how" is already working. No new mechanism needed — just use the right layer for the complexity.
+<!-- agent:boundary:9b585e2b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

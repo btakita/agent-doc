@@ -137,7 +137,7 @@ Note: the updated binary is already active via the `.bin/agent-doc` symlink poin
 - Git committed
 
 You can now open `tasks/runbooks.md` in JB and it should show the gutter boundary. Use "Claim for Tmux Pane" from runbooks.md and it will re-claim the same session (no conflict).
-<!-- agent:boundary:300a6e43 -->
+<!-- agent:boundary:264ad5f3 -->
 <!-- /agent:exchange -->
 
 ## Console

@@ -351,7 +351,7 @@ Committed: `f803d28`.
 
 Navigating in agent-doc-bugs.md is now fast. It seems that restarting fixed the issue.
 So if it's an ephemeral state, what would cause the issue?
-### Re: Gradle integration + ephemeral state analysis (HEAD)
+### Re: Gradle integration + ephemeral state analysis
 
 **Gradle integration:** The `make precommit` check is sufficient — it catches at commit time, which is the right point. A gradle-level check would need git context (staged files) which is awkward. No need to duplicate.
 
@@ -363,7 +363,22 @@ So if it's an ephemeral state, what would cause the issue?
 4. **FFI debounce state** — typing tracker's per-file state could accumulate without cleanup
 
 The VCS refresh debounce (500ms) should prevent the cascade. Timing instrumentation will catch it if it recurs. The exchange is very large now — compact?
-<!-- agent:boundary:ef479629 -->
+Not yet. Please add logging so we can see exactly which of the possibilities has caused the performance issue.
+### Re: State diagnostics logging added (HEAD)
+
+Added periodic state logging (~every 60s) for all 4 ephemeral state candidates:
+
+| Candidate | Log line | What it tracks |
+|-----------|----------|----------------|
+| Inotify overflow | `[patch-watcher] inotify overflow detected` | Already existed |
+| PromptPoller accumulation | `[state] prompt-poller: trackedFiles=N ffiTracked=M keys=[...]` | Tracked file count + FFI debounce count |
+| ContainerListener duplication | `[state] layout-detector: listeners=N containerEvents=M` | Listener count + event count |
+| FFI debounce state | `ffiTracked=N` in prompt-poller state log | Debounce map size via new `agent_doc_tracked_count()` FFI |
+
+Plugin v0.2.42. Committed: `3ee90e0`.
+
+If the issue recurs, the `[state]` logs will show which counters are growing unbounded. Install `agent-doc-jetbrains-0.2.42.zip` and enable `#com.github.btakita.agentdoc` debug logging.
+<!-- agent:boundary:fae0efc6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -374,4 +389,5 @@ The VCS refresh debounce (500ms) should prevent the cascade. Timing instrumentat
 - [x] VCS refresh debounce (500ms)
 - [x] Timing instrumentation in plugin
 - [x] Plugin version check in `make precommit`
+- [x] State diagnostics logging for all 4 ephemeral candidates
 <!-- /agent:pending -->

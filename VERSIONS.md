@@ -4,6 +4,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.9
+
+- **Transfer-extract runbook**: New bundled runbook for cross-file content moves (`agent-doc transfer`/`extract`). Installed via `skill install`.
+- **Compact-exchange runbook update**: Added note about preserving unanswered user input during compaction.
+- **SKILL.md Runbooks section**: Added runbook links to SKILL.md so the skill knows about transfer/extract/compact procedures.
+- **Housekeeping**: Gitignore `.cargo/config.toml`, resolve clippy warnings, remove accidentally committed files.
+
 ## 0.31.8
 
 - **CI fix**: Removed `path = "../tmux-router"` override from Cargo.toml. CI runners don't have the local submodule; uses crates.io dependency exclusively.

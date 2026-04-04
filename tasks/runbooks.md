@@ -259,7 +259,7 @@ contexts/
 **Recommendation:** Option 3 for now. Guardrails need proactive triggering (auto memory). Everything else is on-demand contexts. If hooks mature enough to inject guardrails automatically, migrate then.
 
 The naming: `contexts/` is the right generic term. `runbooks/` stays as a subdirectory for procedural contexts. This aligns with the `agent-runbooks` crate name too -- it could become `agent-contexts` if scope grows, but starting with runbooks is fine since they're the most common type.
-<!-- agent:boundary:0831e1e1 -->
+<!-- agent:boundary:091859fa -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

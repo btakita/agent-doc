@@ -13,7 +13,7 @@ agent_doc_write: crdt
 
 <!-- agent:exchange patch=append -->
 In AGENTS.md and in the SKILL.md that we control...Please propose any set of instructions that can be extracted as a runbook
-### Re: Extractable runbook procedures (HEAD)
+### Re: Extractable runbook procedures
 
 After reviewing all SKILL.md files and CLAUDE.md, here are procedures that are currently inline but would benefit from extraction as standalone runbooks (following the `compact-exchange.md` pattern):
 
@@ -52,10 +52,38 @@ The tag-delete → re-tag → force-push procedure for recovering from failed pu
 - Items 1, 4, 5, and 7 are the highest-value extractions — they're referenced frequently and easy to get wrong
 - Items 2 and 3 are medium-value — used less often but complex enough to benefit from standalone docs
 - Item 6 is lower-value — the module-harness binary already encodes most of the logic
-<!-- agent:boundary:5c0c0d5e -->
+
+Do whatever will save on context size for all agent runs.
+### Re: Context-saving runbook extraction (HEAD)
+
+Extracting all 7 runbooks now. Each goes under its skill's `runbooks/` directory. The SKILL.md files will be trimmed to reference the runbook path instead of inlining the procedure.
+
+**Estimated context savings per agent run:**
+- dev/SKILL.md: ~120 lines removed (release workflows + checklist + tag recovery)
+- livestream/SKILL.md: ~50 lines removed (audit procedure + pattern tables)
+- email/SKILL.md: ~25 lines removed (send workflow)
+- CLAUDE.md submodule rules: ~5 lines (small but frequently loaded)
+- module-harness/SKILL.md: ~15 lines removed
+
+Total: ~215 lines of procedural content moved to on-demand loading.
+<!-- agent:boundary:fdc6b4e8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Create `dev/runbooks/release-rust-maturin.md`
+- [ ] Create `dev/runbooks/release-rust-library.md`
+- [ ] Create `dev/runbooks/release-python.md`
+- [ ] Create `dev/runbooks/release-js-deploy.md`
+- [ ] Create `dev/runbooks/pre-release-checklist.md`
+- [ ] Create `dev/runbooks/unpublished-tag-recovery.md`
+- [ ] Create `email/runbooks/email-send.md`
+- [ ] Create `livestream/runbooks/livestream-audit.md`
+- [ ] Create `runbooks/submodule-commit.md` (cross-cutting, lives at workspace root)
+- [ ] Create `module-harness/runbooks/module-harness-audit.md`
+- [ ] Trim dev/SKILL.md to reference runbooks
+- [ ] Trim email/SKILL.md to reference runbooks
+- [ ] Trim livestream/SKILL.md to reference runbooks
+- [ ] Trim module-harness/SKILL.md to reference runbooks
 <!-- /agent:pending -->

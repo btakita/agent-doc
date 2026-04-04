@@ -95,7 +95,7 @@ This isn't a bug — it's the single-claim-per-pane design working correctly.
 This would bridge the gap between Granola's hidden context and the agent-doc template. The current skill only scrapes the summary HTML; this runbook would document the manual process for pulling in transcript excerpts.
 
 Want me to create the runbook?
-<!-- agent:boundary:3110e81b -->
+<!-- agent:boundary:82f1fb87 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

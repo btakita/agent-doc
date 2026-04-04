@@ -310,7 +310,7 @@ if remaining <= 1 {
 ```
 
 **Built, tested (623 pass across all suites), installed.** Both symlink and `~/.cargo/bin/agent-doc` updated.
-<!-- agent:boundary:760b1e64 -->
+<!-- agent:boundary:4b4f75d7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -88,7 +88,7 @@ Pushed 3 commits to agent-doc remote (`43c0995..c155713`):
 3. `make release` CI-first flow
 
 Parent submodule pointer updated.
-<!-- agent:boundary:dd6e4e4b -->
+<!-- agent:boundary:6b3c6c3d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

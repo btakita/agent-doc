@@ -234,7 +234,7 @@ So `feedback_distribution_aware_reorg.md` content is already on-demand. The ~1 l
 If you want a new mechanism beyond these, the gap would be: **context that's triggered by the *type of work* being done, not by explicit user request or agent search.** For example, "when the agent is about to reorganize files, inject distribution-awareness context." That's a hook-based approach — settings.json could match on `Edit` or `Write` tool calls targeting certain paths and inject a reminder. That would be zero always-loaded cost with automatic triggering.
 
 What if we have contexts as a more generic sibling to runbooks? Technically, a context could be a runbook, but runbooks is a more specific name.
-### Re: Contexts as generic sibling to runbooks (HEAD)
+### Re: Contexts as generic sibling to runbooks
 
 Yes -- a **context** is any on-demand document a skill loads when relevant. A runbook is a *type* of context (procedural steps).
 
@@ -259,12 +259,23 @@ contexts/
 **Recommendation:** Option 3 for now. Guardrails need proactive triggering (auto memory). Everything else is on-demand contexts. If hooks mature enough to inject guardrails automatically, migrate then.
 
 The naming: `contexts/` is the right generic term. `runbooks/` stays as a subdirectory for procedural contexts. This aligns with the `agent-runbooks` crate name too -- it could become `agent-contexts` if scope grows, but starting with runbooks is fine since they're the most common type.
-<!-- agent:boundary:091859fa -->
+
+do
+> - [ ] Extract corky runbooks: review-inbox, draft-reply, enrich-contact
+### Re: Corky runbooks extracted (HEAD)
+
+Created three corky/email runbooks:
+
+- **`email/runbooks/review-inbox.md`** — sync, list recent, check contacts, triage (needs reply / needs action / informational)
+- **`email/runbooks/draft-reply.md`** — find thread, extract threading info, check contact, create draft, push to drafts, wait for approval
+- **`email/runbooks/enrich-contact.md`** — check/create contact, gather info from conversations/LinkedIn/social, update AGENTS.md, verify claims
+
+All three follow the existing pattern: co-located with the email skill under `runbooks/`, referenced by relative path. The email skill now has 4 runbooks total (including `email-send.md` from earlier).
+<!-- agent:boundary:c2e81b6e -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Extract corky runbooks: review-inbox, draft-reply, enrich-contact
-- [ ] Design `contexts/` directory structure for skills
+All items complete.
 <!-- /agent:pending -->

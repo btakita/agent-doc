@@ -70,7 +70,7 @@ release: check
 **Both have a role:** Makefile automates the "how" (deterministic). Runbook documents the "why" and edge cases (when to use local vs CI, what to check first).
 
 **Proposal:** Add `make release` (CI-first, default) alongside existing `make publish` (local, edge case). The runbook references both.
-<!-- agent:boundary:52a5a604 -->
+<!-- agent:boundary:a464b7fe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

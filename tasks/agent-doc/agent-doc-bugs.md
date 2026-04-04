@@ -296,7 +296,7 @@ echo '.cargo/config.toml' >> src/agent-doc/.gitignore
 ```
 
 Shall I set this up?
-<!-- agent:boundary:84d9a7ad -->
+<!-- agent:boundary:33c6126d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

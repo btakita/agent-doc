@@ -936,7 +936,7 @@ Example: `tasks/file.md` (depth 1) → failed to find `.agent-doc/` → indicato
 **SPEC.md updated:** Added §11.7 documenting the double-pop bug (fixed) and §11.8 updated recommendations (added stale indicator cleanup).
 
 **Audit (`make check`):** 637 tests pass, clippy clean, version-sync clean.
-<!-- agent:boundary:4086684d -->
+<!-- agent:boundary:fb02190b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

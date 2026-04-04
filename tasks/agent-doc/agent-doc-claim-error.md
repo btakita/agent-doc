@@ -107,7 +107,7 @@ Wheel: `agent_doc-0.31.5-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
 Uploaded to PyPI successfully.
 
 **Note:** `pyproject.toml` is still at v0.31.5 (matches the crates.io release). The local binary is v0.31.8 (unreleased changes: runbook updates, skill.rs). The PyPI wheel is v0.31.5.
-<!-- agent:boundary:a513adaf -->
+<!-- agent:boundary:9afd793d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

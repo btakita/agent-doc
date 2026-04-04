@@ -35,7 +35,7 @@ claude_args: --dangerously-skip-permissions
 - Review, commit, and release agent-doc with notify subcommand
 
 Is there any deterministic cli functionality that should be added to agent-runbooks?
-### Re: Deterministic CLI for agent-runbooks (HEAD)
+### Re: Deterministic CLI for agent-runbooks
 
 Yes -- four commands that belong in the binary:
 
@@ -49,7 +49,21 @@ Yes -- four commands that belong in the binary:
 `audit` is highest priority -- it catches drift between SKILL.md references and actual runbook files. Could integrate with `make precommit` to prevent broken references.
 
 All are deterministic (fixed inputs -> fixed outputs) and CI-runnable. Could start as `agent-doc runbook audit/list/validate` subcommands, then extract to standalone `agent-runbooks` crate if scope grows.
-<!-- agent:boundary:b6dcc8d9 -->
+
+Should we make the project directory configurable? It will default to `.agent/runbooks`. We can't guarantee that `.agent/` is present.
+### Re: Configurable project directory (HEAD)
+
+Yes, configurable. Resolution chain:
+
+1. `--dir <path>` CLI flag (explicit)
+2. Walk up from CWD for `.agent/runbooks/` (project-local)
+3. Walk up for `.claude/skills/*/runbooks/` (skill-local, current pattern)
+4. Fallback: error
+
+This way projects without `.agent/` still work via the `.claude/skills/` path. A `--dir` flag handles edge cases. Config file (`[runbooks] dir = "..."` in `.agent/config.toml`) can come later if needed.
+
+For v1: walk-up search + `--dir` override. No config file needed yet.
+<!-- agent:boundary:d1321bb2 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

@@ -225,7 +225,7 @@ Still slow
 3. If boundary markers are the trigger, consider a format that doesn't use HTML comments (e.g., `[//]: # (boundary:hash)`)
 
 Something about the `#### 3. Annotated diff format` section in agent-doc-bugs.md is slow. The Plugin Agent Doc thrashes.
-### Re: Root cause — `<!-- patch:exchange -->` inside committed content (HEAD)
+### Re: Root cause — `<!-- patch:exchange -->` inside committed content
 
 Line 96 of agent-doc-bugs.md has a `<!-- patch:exchange transfer-source="..." -->` marker **inside the exchange content**. This was written by the transfer command.
 
@@ -236,7 +236,38 @@ The plugin's PatchWatcher scans documents for `<!-- patch:... -->` patterns. Fin
 **Root fix:** The transfer command should escape `<!-- patch:... -->` markers when writing content into target documents, or the PatchWatcher should only parse patch blocks from `.json` files (not from document content).
 
 Want me to fix bugs.md now and then address the root cause in the transfer command?
-<!-- agent:boundary:b8ee9559 -->
+
+Removing the patch did not make the thrashing stop. If I remove everything below section 2, then the performance is fine. If I include section 3, plugin thrashes. I isolated this content to cause plugin thrashing.
+
+```
+#### 3. Annotated diff format
+Preprocessed diff with source boundaries for the LLM:
+\`\`\`
+[agent] 1. Window 0 missing — pane at index 2.
+[user+] : Fixed, moved to 0
+\`\`\`
+Markers: `[agent]`, `[user+]`, `[user-]`, `[user~]`
+Implementation: `agent-doc annotate-diff` command, included in preflight JSON as `annotated_diff`.
+```
+### Re: Nested code fences causing JetBrains thrash (HEAD)
+
+The content has **nested triple-backtick code fences** — a code block containing backticks creates ambiguous fence boundaries for JetBrains' markdown highlighter:
+
+The outer ` ``` ` opens, then the inner ` ``` ` confuses the parser about where the code block ends. JetBrains re-parses repeatedly trying to resolve the ambiguity.
+
+**Fix for bugs.md:** Use `~~~` for the inner code block instead of backticks. This gives unambiguous fence boundaries:
+
+```
+#### 3. Annotated diff format
+Preprocessed diff with source boundaries for the LLM:
+~~~
+[agent] 1. Window 0 missing — pane at index 2.
+[user+] : Fixed, moved to 0
+~~~
+```
+
+The agent-doc plugin isn't at fault — this is a JetBrains markdown parser issue with nested/ambiguous fences. The `[agent]` bracket syntax may also trigger link-reference parsing, adding to the overhead.
+<!-- agent:boundary:e3e884e9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -245,7 +276,5 @@ Want me to fix bugs.md now and then address the root cause in the transfer comma
 - [x] GC orphaned 3.9 GB blob
 - [x] `agent-doc clean --archive`
 - [x] VCS refresh debounce (500ms)
-- [ ] Fix bugs.md: escape/remove `<!-- patch:exchange -->` on line 96
-- [ ] Fix transfer command: escape patch markers in transferred content
-- [ ] Discuss archive cutoff point for squash
+- [ ] Fix bugs.md: replace nested backtick fences with `~~~`
 <!-- /agent:pending -->

@@ -89,10 +89,13 @@ Sync IS being called, but `robert-ross-granola.md` has no `agent_doc_session` in
 3. Update the granola import runbook to generate a session UUID at creation time
 
 Should I implement all three?
-Yes...and when I tried to claim robert-ross-granola.md...it worked this time. Why?
-### Re: All three fixes implemented + why claim worked (HEAD)
+Yes...and when I tried to claim robert-ross-granola.md...it worked this time. Why? 
+### Re: All three fixes implemented + why claim worked
 
 **Why claim worked this time:** You used a different pane (%487). The previous attempt was on %483, which was claimed by this agent-doc-bugs file. Claims log: `Claimed robert-ross-granola.md for pane %487`.
+
+The current tmux pane should not matter. If the selected editor document is unclaimed, the previous claimed document's tmux pane will be visible. Claiming the unclaimed document should split a new tmux pane and stash the other tmux pane.
+This should be part of the agent-doc spec. This misunderstanding seems to repeat. What do we need to do to make this spec clear?
 
 **Three fixes implemented:**
 
@@ -101,7 +104,27 @@ Yes...and when I tried to claim robert-ross-granola.md...it worked this time. Wh
 3. **Granola import templates include `agent_doc_session`** — updated `SKILL.md` and `runbooks/import.md`
 
 637 tests pass, clippy clean, release built.
-<!-- agent:boundary:b20ee7fc -->
+### Re: Pane lifecycle spec clarification (HEAD)
+
+You're right — I was wrong about why claim failed. The expected behavior is:
+
+**When the user navigates to an unclaimed document:**
+1. The JB plugin fires sync with the file in `col_args`
+2. Sync sees the file has a session UUID (now assigned by `ensure_initialized()`)
+3. No registered pane exists for this session → auto_start kicks in
+4. Auto_start creates a **new tmux pane** and starts a Claude session
+5. Previous pane gets stashed
+
+The "pane already claimed" error should never happen in normal workflow — it was a symptom of the missing UUID (sync dropped the file → no auto_start → user manually tried claim on the wrong pane).
+
+**To prevent this misunderstanding from repeating:**
+
+1. **Memory entry saved** — `feedback_claim_creates_new_pane.md`: claim creates new panes, never reuses existing claimed panes
+2. **The fix already handles this** — `ensure_initialized()` in sync assigns UUIDs, then auto_start creates panes. No manual claim needed.
+3. **Spec clarification needed in CLAUDE.md** — should we add a "Pane Lifecycle" section to `src/agent-doc/CLAUDE.md` documenting when panes are created/stashed/restored? This would be the canonical reference.
+
+Should I add the Pane Lifecycle section to agent-doc's CLAUDE.md?
+<!-- agent:boundary:b3a33af4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -110,5 +133,7 @@ Yes...and when I tried to claim robert-ross-granola.md...it worked this time. Wh
 - [x] ensure_initialized: assign session UUID to template files missing one
 - [x] Add ensure_initialized to sync's resolve_file (before session check)
 - [x] Update granola import runbook to generate session UUID
-- [ ] Release with sync init fix (when ready)
+- [x] Memory: claim creates new panes (feedback saved)
+- [ ] Pane Lifecycle spec in agent-doc CLAUDE.md — awaiting approval
+- [ ] Release with sync init fix
 <!-- /agent:pending -->

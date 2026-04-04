@@ -1949,7 +1949,7 @@ Given Robert Ross — founder of Dreamable, building agent-native products — l
 2. **Wed/Thu April 9-10** — second blog post + video
 
 Want me to format the draft for LinkedIn paste?
-<!-- agent:boundary:16901604 -->
+<!-- agent:boundary:a0984f86 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

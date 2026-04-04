@@ -482,7 +482,7 @@ Running: `--model sonnet --judge-model sonnet --parallel 8`. Will compare agains
 **Remaining 3 failures** (approval-to-implement, single-word-approval, multi-item-instruction-list) all involve the "approval → begin work" pattern. The model still struggles to interpret minimal input as "start implementing" rather than requesting clarification. This may need case-level expected_behavior refinement rather than system prompt changes.
 
 **Saved:** `baselines/sonnet-refined-context-2026-04-04.json`
-<!-- agent:boundary:20e4c801 -->
+<!-- agent:boundary:67a9a3dc -->
 <!-- /agent:exchange -->
 
 ## Pending

@@ -477,7 +477,7 @@ The pre-sync retrieval was fighting with sync's own logic (join → then detach 
 The sync's existing Phase 1 resolution already finds alive panes in the registry regardless of session. The ATTACH phase already knows how to join them. SessionScope was the only thing blocking the move.
 
 **Built, tested (623 pass), installed.**
-<!-- agent:boundary:50271756 -->
+<!-- agent:boundary:e8ea9b6e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -186,10 +186,11 @@ pub fn prune() -> Result<usize> {
     let windows = fetch_all_window_metadata(&tmux);
     let panes = fetch_all_pane_metadata(&tmux);
 
-    // Return active panes from stash, then purge idle stash panes.
-    // SAFETY: Only touch stash windows here. Never purge non-stash agent panes
-    // in the automatic path — that can kill active sessions in other windows.
-    return_stashed_panes_bulk(&tmux, &windows, &panes);
+    // Purge idle stash panes (but do NOT return active panes from stash).
+    // return_stashed_panes_bulk was removed from the automatic prune path because
+    // it caused a stash-bounce loop: sync stashes unwanted panes → prune returns them
+    // → next sync stashes them again. Active panes should stay in stash until the
+    // reconciler explicitly needs them. Use `agent-doc resync --fix` for manual recovery.
     purge_stash_windows_bulk(&tmux, &windows, &panes);
     purge_unregistered_stash_panes_bulk(&tmux, &windows, &panes);
     Ok(removed)

@@ -166,10 +166,13 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
     );
 
     match pane_id {
-        Ok(ref pid) => {
-            // Post-route sync: align tmux layout to editor's col_args.
-            // This is the ONLY place sync runs after route — never in individual paths.
-            sync_after_claim(tmux, pid, col_args);
+        Ok(ref _pid) => {
+            // NOTE: sync_after_claim was removed here to eliminate the double-sync
+            // glitch. The JB plugin already triggers sync with the correct window
+            // and col_args via the route call. A second sync (with window=None)
+            // races with the first sync's stash operations, causing panes to
+            // bounce between stash and agent-doc window visibly.
+            // The JB plugin's sync call is authoritative — no defensive re-sync needed.
             Ok(())
         }
         Err(e) => {

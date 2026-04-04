@@ -737,16 +737,13 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Commands::Start { file } => start::run(&file),
-        Commands::Route { file, pane, cols, focus, debounce } => {
-            let result = route::run(&file, pane.as_deref(), debounce, &cols);
-            // If layout columns provided, sync tmux layout after routing (no auto-start —
-            // route already handled the target file, auto-start would create duplicates)
-            if !cols.is_empty()
-                && let Err(e) = sync::run_layout_only(&cols, None, focus.as_deref())
-            {
-                eprintln!("[route] layout sync failed: {}", e);
-            }
-            result
+        Commands::Route { file, pane, cols, focus: _focus, debounce } => {
+            // NOTE: sync::run_layout_only was previously called here after route when
+            // --col args were provided. Removed because the JB plugin calls `agent-doc sync`
+            // separately with the correct --window arg. Running sync from both route AND
+            // the plugin created a double-sync glitch (panes bouncing between stash and
+            // agent-doc window). The plugin's sync is authoritative for layout.
+            route::run(&file, pane.as_deref(), debounce, &cols)
         }
         Commands::Prompt { file, answer, all } => {
             if all {

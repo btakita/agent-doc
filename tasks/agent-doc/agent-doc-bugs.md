@@ -219,7 +219,7 @@ Reasons:
 - Convention: the files live in `runbooks/`, the section is `## Runbooks`, the crate is `agent-runbooks`
 
 If you agree, I'll rename the section in agent-doc's SKILL.md from `## Operations` to `## Runbooks`.
-<!-- agent:boundary:7916d2c6 -->
+<!-- agent:boundary:2a884c1c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

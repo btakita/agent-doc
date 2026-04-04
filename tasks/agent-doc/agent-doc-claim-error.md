@@ -321,7 +321,7 @@ Committed: `3490314`. Plugin builds clean.
 **To use:** Install the updated plugin zip, enable `#com.github.btakita.agentdoc` in Debug Log Settings, open bugs.md, and check idea.log for `[perf]` lines. The breakdown will show which method is consuming CPU.
 
 Plugin zip: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0.zip`
-<!-- agent:boundary:a19da9d4 -->
+<!-- agent:boundary:3044b73e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

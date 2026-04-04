@@ -51,7 +51,7 @@ Yes -- four commands that belong in the binary:
 All are deterministic (fixed inputs -> fixed outputs) and CI-runnable. Could start as `agent-doc runbook audit/list/validate` subcommands, then extract to standalone `agent-runbooks` crate if scope grows.
 
 Should we make the project directory configurable? It will default to `.agent/runbooks`. We can't guarantee that `.agent/` is present.
-### Re: Configurable project directory (HEAD)
+### Re: Configurable project directory
 
 Yes, configurable. Resolution chain:
 
@@ -63,11 +63,24 @@ Yes, configurable. Resolution chain:
 This way projects without `.agent/` still work via the `.claude/skills/` path. A `--dir` flag handles edge cases. Config file (`[runbooks] dir = "..."` in `.agent/config.toml`) can come later if needed.
 
 For v1: walk-up search + `--dir` override. No config file needed yet.
-<!-- agent:boundary:0b6556c9 -->
+
+Implement
+```
+| Command | Purpose | Priority |
+|---------|---------|----------|
+| `audit <skill-dir>` | Validate SKILL.md runbook refs exist, find orphans | High |
+| `list <skill-dir>` | List runbooks with metadata (name, trigger, lines) | Medium |
+| `validate <file>` | Check runbook format (title, steps, refs) | Medium |
+| `install <skill-dir> --from <template>` | Copy template into skill's runbooks/ | Low |
+```
+### Re: Implementing agent-runbooks CLI (HEAD)
+
+Launching worktree agent to implement all 4 commands in `src/agent-runbooks/`. This is a new Rust binary crate.
+<!-- agent:boundary:aff8556f -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-All runbooks session items complete. Remaining work transferred to agent-doc-bugs.
+- [ ] Implement agent-runbooks: audit, list, validate, install
 <!-- /agent:pending -->

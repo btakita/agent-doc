@@ -1869,7 +1869,7 @@ To:
 > In practice, rules are typically always-on — loaded at session start to shape every interaction. Runbooks are the opposite: on-demand procedures loaded only when the agent reaches that specific task. What differs is both the content type and the loading expectation.
 
 This is more honest about how the ecosystem actually works. Ready to commit and push when you say.
-<!-- agent:boundary:64f5750f -->
+<!-- agent:boundary:8d3cbc5d -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

@@ -1985,7 +1985,7 @@ Admin emails + confirmed WordPress admin URL = targeted phishing and brute-force
 On the YouTube vs native LinkedIn point: you're right, a YouTube link gets less algorithmic boost than native video. But Robert has already seen your demos — so the video is more about public credibility than impressing him specifically. The blog teaser text post might actually be the stronger play for LinkedIn reach in this case.
 
 **Revised recommendation:** Fix the video first (blur/cut the admin section), then decide posting order. No rush — getting it right matters more than getting it out Saturday vs Monday.
-<!-- agent:boundary:4468c2ab -->
+<!-- agent:boundary:abececfc -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

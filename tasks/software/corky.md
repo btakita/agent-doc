@@ -205,7 +205,7 @@ go
 3. `chore: gitignore .claude/ directory` (installed output)
 
 **Issue fixed:** `skills/` was gitignored but `include_str!` embeds from git-tracked files. `cargo publish --verify` failed. Un-gitignored `skills/`, added `.claude/` to `.gitignore`.
-<!-- agent:boundary:de922787 -->
+<!-- agent:boundary:d2cc861b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

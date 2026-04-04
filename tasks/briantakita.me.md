@@ -2247,7 +2247,7 @@ Covers:
 LinkedIn teaser stays as-is (runbooks only). Blog post is the comprehensive reference covering both optimizations.
 
 **Next:** Build + deploy to push live.
-<!-- agent:boundary:931aafd7 -->
+<!-- agent:boundary:4d9ce76b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

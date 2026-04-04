@@ -496,7 +496,7 @@ This is likely in the route/claim code — after creating the pane, it should ca
 - Session 1: %433 (bugs) + %431 (runbooks) side by side
 
 **To test the SessionScope fix:** Navigate between agent-doc files in the editor. The sync should now join panes from session 1 into session 5 without scope blocking.
-<!-- agent:boundary:aa67d8da -->
+<!-- agent:boundary:bc480ca7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

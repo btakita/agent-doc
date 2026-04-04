@@ -417,12 +417,11 @@ fn acquire_crdt_lock(doc: &Path) -> Result<File> {
         std::fs::create_dir_all(parent)?;
     }
     // Clean stale lock file (>1 hour old, from crashed processes)
-    if let Ok(meta) = std::fs::metadata(&lock_path) {
-        if let Some(age) = meta.modified().ok().and_then(|t| t.elapsed().ok()) {
-            if age > std::time::Duration::from_secs(3600) {
-                let _ = std::fs::remove_file(&lock_path);
-            }
-        }
+    if let Ok(meta) = std::fs::metadata(&lock_path)
+        && let Some(age) = meta.modified().ok().and_then(|t| t.elapsed().ok())
+        && age > std::time::Duration::from_secs(3600)
+    {
+        let _ = std::fs::remove_file(&lock_path);
     }
     let file = OpenOptions::new()
         .create(true)

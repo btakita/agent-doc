@@ -41,7 +41,7 @@ That screenshot shows Google Play **Payment methods** — it confirms your Visa-
 **Next step:** Click the **Subscriptions** tab (right next to "Payment methods" in your screenshot). That will show whether Google One is active, expired, or cancelled.
 
 Or go directly to **[one.google.com](https://one.google.com/)** — it'll immediately show your storage plan status.
-<!-- agent:boundary:4f272d97 -->
+<!-- agent:boundary:335432d8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

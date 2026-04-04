@@ -366,7 +366,7 @@ Your spec clarifies the design — it's a **swap**, not "don't stash." Stashing 
 4. Only create a new pane/session if no claimed pane exists anywhere
 
 This preserves agent sessions across navigation — the Claude Code process stays alive in the stashed pane, and swap-back is instant (no cold start).
-<!-- agent:boundary:31d537ca -->
+<!-- agent:boundary:8ef2eeb6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

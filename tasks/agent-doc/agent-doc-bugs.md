@@ -49,6 +49,7 @@ This session:
 - v0.31.10: auto-init, cross-process typing, diff stability, IPC errors
 
 **Current state:** v0.31.10 released (crates.io + GitHub + installed). All pending items complete. 637 tests pass.
+<!-- agent:boundary:b4b6f655 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -64,7 +64,7 @@ You're right. I only ran `git log v0.3.9..HEAD` (no committed changes since tag)
 **Why I got it wrong:** Checked committed history but not the working tree. Should have run both `git log` and `git status`.
 
 **Pending for tmux-router:** Commit the sync.rs debug logging, decide if it warrants a release (v0.3.10) or can wait.
-<!-- agent:boundary:5992713d -->
+<!-- agent:boundary:fbab23ec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -282,7 +282,7 @@ Should this be extracted as a runbook?
 
 Want me to design and implement confidence-based re-transcription?
 yes
-### Re: Confidence-based re-transcription — implemented (HEAD)
+### Re: Confidence-based re-transcription — implemented
 
 **How it works:**
 1. After whisper + diarization merge, scans for contiguous low-confidence blocks (< 0.4 threshold)
@@ -296,13 +296,22 @@ yes
 **Files:** engine.rs (main logic + 6 tests), corky_config.rs, cli.rs, main.rs, mod.rs. 264 tests pass, clippy clean.
 
 Ready to commit and release.
-<!-- agent:boundary:c661738f -->
+do
+### Re: Released v0.26.0 — Confidence-based re-transcription (HEAD)
+
+Published to all targets:
+- [crates.io](https://crates.io/crates/corky/0.26.0)
+- [PyPI](https://pypi.org/project/corky/0.26.0/)
+- [GitHub Release](https://github.com/btakita/corky/releases/tag/v0.26.0)
+- `~/.cargo/bin/corky` installed with CUDA
+
+SPEC.md updated, transcription runbook updated with `confidence_threshold` config. 264 tests pass.
+<!-- agent:boundary:d5341d2e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Commit confidence re-transcription + release
 - Verify sheet sharing / GCP test users
 - Re-test sheet read
 - Manylinux binary wheel (nice-to-have, needs container/CI)

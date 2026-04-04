@@ -46,7 +46,7 @@ Committed: `6eedc63` — `fix: make CI release workflows idempotent`
 3. `cargo install --path .` locally for the dev binary
 
 **Local override:** If you publish manually first, CI gracefully skips the duplicate.
-<!-- agent:boundary:fd25d665 -->
+<!-- agent:boundary:44651ad5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

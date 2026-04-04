@@ -108,7 +108,7 @@ Good batch of designs. Priority ordering:
 4. **Content-source annotation sidecar** — enables editor coloring. "Cache, not state" design is right. Can land independently.
 5. **Reproducible operation logs** — important for debugging but lower urgency than diff pipeline.
 6. **Multi-topic response runbook** — already created, just add `---` separator convention.
-<!-- agent:boundary:f99b5b9f -->
+<!-- agent:boundary:d8bac15a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

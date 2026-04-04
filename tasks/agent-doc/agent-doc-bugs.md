@@ -14,7 +14,7 @@ agent-doc v0.31.12 released to crates.io + GitHub
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-### Session Summary (compacted 2026-04-04 16:29) (HEAD)
+### Session Summary (compacted 2026-04-04 16:29)
 
 **Releases: agent-doc v0.31.6→v0.31.12 + tmux-router v0.3.9**
 
@@ -28,13 +28,97 @@ agent-doc v0.31.12 released to crates.io + GitHub
 - Domain ontology: Binding, Reconciliation, Provisioning, Initialization (README.md + module docs)
 - Spec-first workflow: SPEC.md before module-harness (avoid codifying bugs as spec)
 - Module-harness redesign: default=audit, seed=bootstrap, apply=spec-first (SKILL.md updated)
+- **Test suite: 25 snapshot tests (17 existing + 8 new), 645+ total**
 
-**Test suite: 25 snapshot tests (17 existing + 8 new), 645+ total**
-<!-- agent:boundary:e2f1c757 -->
+There should be a way for the user to break up prompts even within a continuous diff. I'll see if `---` works. Perhaps we can add to the SKILL.md.
+
+---
+
+The agent-doc transfer source document path should be recorded in the patch. So the agent can read the transfer source for additional context if necessary.
+
+---
+
+### Transfer from eval-runner session (2026-04-04) (HEAD)
+
+**Context:** During eval-runner development, several agent-doc feature designs emerged from analyzing eval failures and discussing deterministic preprocessing.
+
+#### 1. Diff-type classification in preflight
+Deterministic regex/heuristic classification of user diffs before the LLM sees them:
+- `SimpleQuestion` — single added line ending with `?`
+- `Approval` — single word matching approval list ("go", "yes", "do")
+- `Annotation` — edits within agent content (colon-appended, inline)
+- `StructuralChange` — deletions, reorgs, moves
+- `MultiTopic` — multiple distinct items
+- `BoundaryArtifact` — `(HEAD)`, boundary UUID changes
+- `CommentOnly` — already handled (stripped)
+
+Preflight JSON would include `"diff_type": "simple_question"` + `"diff_type_reason"`. Skill routes based on type, skipping discrimination rules for simple cases.
+
+#### 2. Content-source annotation (sidecar approach)
+Separate annotation layer at `.agent-doc/annotations/<hash>.json` with character-level source ranges. Markdown stays pristine. Editor reads sidecar for coloring (user=green, agent=neutral).
+
+- Sidecar is a **cache, not state** — always reconstructable from (snapshot + current file)
+- `agent-doc annotate <file>` — generates/regenerates the sidecar
+- `agent-doc annotate --history <file>` — uses git blame for full history attribution
+- Prior art: https://github.com/iainc/Markdown-Annotations (iA Writer)
+
+#### 3. Annotated diff format
+Preprocessed diff with source boundaries for the LLM:
+```
+[agent] 1. Window 0 missing — pane at index 2.
+[user+] : Fixed, moved to 0
+```
+Markers: `[agent]`, `[user+]`, `[user-]`, `[user~]`
+Implementation: `agent-doc annotate-diff` command, included in preflight JSON as `annotated_diff`.
+
+#### 4. Reproducible operation logs
+Every agent-doc cycle produces a log entry referencing git state (not inline content):
+- Commit hash + snapshot hash = enough to reconstruct any cycle
+- `agent-doc replay --from <commit>` for deterministic replay
+- Logs should be parseable + agent-executable for playback
+
+#### 5. Multi-topic response runbook
+Created at `.claude/skills/agent-doc/runbooks/multi-topic-response.md`. Documents detection, response pattern (`### Re:` per topic), checkpoint timing, and when NOT to split.
+
+#### 6. Post-preflight eval diffs
+Eval cases should use post-preflight diffs (comments already stripped) to match what the model actually sees in production. Validated: `mixed-valid-and-comment` case went from 0.30 to 0.90 after this fix.
+### Re: Prompt separators with `---` (HEAD)
+
+Good idea. `---` (horizontal rule) is a natural markdown separator. The skill could detect `---` in the diff as a topic boundary and treat each section as a separate prompt. Works well with multi-topic response pattern (`### Re:` per section). Worth adding to SKILL.md under "Multi-topic prompts."
+
+One consideration: `---` in YAML frontmatter context means something different. Only treat `---` as a prompt separator in the exchange body, not at the document top.
+
+### Re: Transfer source path in patch (HEAD)
+
+Agreed. Recording the source document path lets the receiving agent read the source for context. Could be a patch metadata field:
+
+```markdown
+<!-- patch:exchange transfer-source="tasks/software/eval-runner.md" -->
+```
+
+The binary would preserve this in component metadata, and the skill would check for it during preflight.
+
+### Re: Transfer from eval-runner session (HEAD)
+
+Good batch of designs. Priority ordering:
+
+1. **Diff-type classification** — highest leverage. Simplifies skill routing, reduces token waste on simple approvals/questions.
+2. **Post-preflight eval diffs** — quick win, already validated (0.30→0.90). Should land with or before diff-type classification.
+3. **Annotated diff format** — natural extension of diff-type. `[agent]`/`[user+]` markers give the LLM better change context.
+4. **Content-source annotation sidecar** — enables editor coloring. "Cache, not state" design is right. Can land independently.
+5. **Reproducible operation logs** — important for debugging but lower urgency than diff pipeline.
+6. **Multi-topic response runbook** — already created, just add `---` separator convention.
+<!-- agent:boundary:f99b5b9f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] All items complete for this session
+- [ ] Implement diff-type classification in preflight (P1)
+- [ ] Post-preflight diff generation for eval cases (P2)
+- [ ] Implement annotated diff format in preflight (P3)
+- [ ] Implement content-source annotation sidecar (P4)
+- [ ] Design reproducible operation log format (P5)
+- [ ] Add `---` prompt separator convention to SKILL.md
+- [ ] Add transfer-source metadata to patch format
 <!-- /agent:pending -->

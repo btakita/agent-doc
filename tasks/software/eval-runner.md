@@ -1102,7 +1102,7 @@ Please propose ideas.
 1. `simple-question` — add "For straightforward questions, respond directly" to system prompt
 2. `structural-reorg` — enrich document_context with full document showing Phase 4's original position
 3. `inline-annotation-corrections` — enrich document_context to explain the annotation pattern
-### Re: Preprocessing pipeline proposals (HEAD)
+### Re: Preprocessing pipeline proposals
 
 #### Simple-question detection — deterministic classification
 
@@ -1124,6 +1124,8 @@ The preflight JSON output would include `"diff_type": "simple_question"`. The sk
 
 **Implementation:** Add `agent-doc classify` command or include classification in the preflight JSON. The classification is regex/heuristic-based — no LLM needed. Single added line ending in `?` → `SimpleQuestion`. Single word matching approval list → `Approval`. Only `+`/`-` on boundary lines → `BoundaryArtifact`.
 
+We need to be able to audit the classification. So we can iterate on the deterministic design. Please log. It may even be useful to lightweight annotate the response patch.
+
 #### Structural-reorg — full document context + git tools
 
 **Recommendation: Both.** Layer them:
@@ -1135,6 +1137,8 @@ The preflight JSON output would include `"diff_type": "simple_question"`. The sk
 3. **Git tools for advanced cases** — for the agentic eval suite (future), the model could run `git diff --stat` to see file-level changes or `git log -1 --format=%B` for commit context. But for diff-interpretation evals, the document context is sufficient.
 
 **No new command needed** — the data is already in the preflight output. Just fix the eval case to include it.
+
+We should be able to reproduce the operations from the logs. I don't want the logs to be bloated, so hopefully we can use git commit hashes, small diffs, and instructions that can be parsed and played back. The logged instructions should match something that can be deterministically parsed...and an agent can interperet to reliably execute.
 
 #### Inline annotations — preprocessed annotation format
 
@@ -1165,6 +1169,9 @@ Or using a cleaner format:
 
 This is the **content-source annotation** feature we discussed earlier. The iA Writer Markdown-Annotations spec is relevant here — but our use case is more specific (agent vs user, not author vs editor).
 
+See https://github.com/iainc/Markdown-Annotations?tab=readme-ov-file#author-annotations
+How would that look?
+
 **Implementation path:**
 1. `agent-doc annotate-diff` command — takes raw diff + snapshot, outputs annotated diff
 2. Preflight includes `annotated_diff` alongside the raw `diff` in JSON output
@@ -1186,14 +1193,90 @@ User saves file
 ```
 
 Each layer is deterministic, testable, and reduces what the LLM needs to interpret.
-<!-- agent:boundary:59d15d81 -->
+### Re: Audit logging, replay, and author annotations (HEAD)
+
+#### Classification audit logging
+
+Agreed — every classification decision should be logged for iteration. The preflight JSON would include:
+
+```json
+{
+  "diff_type": "simple_question",
+  "diff_type_reason": "single added line ending with '?'",
+  "diff_type_confidence": "high"
+}
+```
+
+The response patch could carry a lightweight annotation:
+```markdown
+&lt;!-- agent:meta diff_type="simple_question" --&gt;
+```
+
+This is invisible to the user but auditable. The eval suite can assert on `diff_type` directly — deterministic classification is testable without LLM judging.
+
+#### Reproducible operation logs
+
+The vision: every agent-doc cycle produces a log entry that can be replayed deterministically.
+
+```json
+{
+  "timestamp": "2026-04-04T16:15:27-04:00",
+  "commit": "47106105",
+  "file": "tasks/software/eval-runner.md",
+  "snapshot_hash": "8568cde6...",
+  "diff_type": "simple_question",
+  "diff_lines": 3,
+  "response_origin": "skill",
+  "response_bytes": 1247
+}
+```
+
+For replay: `agent-doc replay --from <commit>` checks out the snapshot, applies the user diff, runs classification, and re-generates the response. The log + git history form a complete audit trail.
+
+Key design principle: **logs reference git state, not inline content.** The commit hash + snapshot hash is enough to reconstruct any cycle. No bloat from storing diffs inline — they're in git.
+
+#### Author annotations (iA style)
+
+The iA Markdown-Annotations author format uses:
+
+```markdown
+{author} This text was written by the named author.
+```
+
+Applied to agent-doc with source boundaries:
+
+```markdown
+{agent} 1. Window 0 missing — pane at index 2.{/agent}{user}: Fixed, moved to 0{/user}
+```
+
+**But this is verbose for raw markdown viewing.** A cleaner approach for agent-doc:
+
+**Option A — Inline markers (iA-inspired):**
+```markdown
+1. Window 0 missing — pane at index 2.{user: Fixed, moved to 0}
+```
+
+**Option B — Line-level metadata (HTML comment):**
+```markdown
+1. Window 0 missing — pane at index 2.: Fixed, moved to 0
+<!-- source: agent[..41] user[42..] -->
+```
+
+**Option C — Separate annotation layer (non-inline):**
+The annotations live in a sidecar file (`.agent-doc/annotations/<hash>.json`) with character-level source ranges. The markdown stays clean. The editor reads the sidecar for coloring.
+
+**Recommendation: Option C.** It keeps the markdown pristine (no annotation noise), the editor view renders colors from the sidecar, and the annotations don't interfere with diff computation or CRDT merging. The sidecar is computed from the CRDT state — it's derived data, not stored.
+
+This aligns with the iA philosophy of separating content from metadata while keeping author attribution available for rendering.
+<!-- agent:boundary:b321262b -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [ ] Implement `diff_type` classification in agent-doc preflight (agent-doc session)
-- [ ] Implement annotated diff with source boundaries (agent-doc session)
+- [ ] Design classification audit log format for preflight
+- [ ] Design replay log format (commit-referenced, not content-inline)
+- [ ] Design sidecar annotation layer for source attribution (Option C)
 - [ ] Fix structural-reorg eval case with full document context
 - [ ] Design agentic eval fixture format (future — v2)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing

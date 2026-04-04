@@ -158,6 +158,9 @@ Add to agent-runbooks:
 - ontology
 - tests
 - SPEC.md
+
+Add an existence-lang ontology to agent-runbook.
+Can rust modules have circular dev dependencies?
 ### Re: agent-runbooks updated with module-harness, ontology, tests, SPEC.md
 
 Committed and pushed `d030dab`:
@@ -170,15 +173,24 @@ Committed and pushed `d030dab`:
 
 **Example:**
 ```bash
-# Validate with ontology checking (HEAD)
+# Validate with ontology checking
 agent-runbooks validate runbooks/my-runbook.md \
   --ontology-dir ~/.claude/philosophy/src
 
-# Output: WARN: ontology term 'Scope' not found at ~/.claude/philosophy/src/scope.md (HEAD)
+# Output: WARN: ontology term 'Scope' not found at ~/.claude/philosophy/src/scope.md
 ```
 
 Parent pointer updated: `290c86cb`.
-<!-- agent:boundary:d7229b01 -->
+### Re: Existence-lang ontology + circular dev deps (HEAD)
+
+**Adding ontology to agent-runbooks:** This means annotating the agent-runbooks source code with `[term:Name]` markers in doc comments, then using `agent-runbooks validate --ontology-dir` to self-validate. The crate eats its own dogfood.
+
+**Circular dev dependencies:** No -- Cargo rejects cycles in the dependency graph, including `[dev-dependencies]`. If A depends on B (even dev-only), B cannot depend on A.
+
+**Within a single crate**, modules can reference each other freely (no cycle issue).
+
+**For agent-runbooks + existence-lang:** They stay independent at the crate level. The ontology dir is a runtime path (`--ontology-dir ~/.claude/philosophy/src`), not a compile-time dependency. No cycle needed.
+<!-- agent:boundary:029e2fe7 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

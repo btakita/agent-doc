@@ -116,19 +116,48 @@ On this file I see Agent Doc taking up much less processing:
   1.6  <Activity Monitor>
   0.9  <JIT compiler>
 ```
-### Re: Agent Doc plugin consuming 22.3% CPU on bugs.md (HEAD)
+### Re: Agent Doc plugin consuming 22.3% CPU on bugs.md
 
 The Activity Monitor confirms it — **the plugin itself** is the bottleneck:
 - bugs.md: **22.3% CPU** from `com.github.btakita.agentdoc`, 160.6% total
 - claim-error.md: not listed (< 1%), 10.5% total
 
 The plugin is doing sustained work specific to bugs.md. Most likely:
-1. **Stashed pane %483** for bugs.md may cause the sync reconciler to retry repeatedly
+1. **Stashed pane %483** for bugs.md may cause the sync reconciler to retry repeatedly: When agent-doc-bugs is selected, the pane is not stash. Other panes are stashed however. It seems likely that thet cause stems from agent-doc-bugs.md itself...since other agent documents don't have the performance issue.
 2. **PatchWatcher** processing events for a document whose pane is stashed
 3. The VCS refresh debounce helps but doesn't address the root cause — the plugin shouldn't be doing continuous work for stashed sessions
 
+Can we add some sort of live tracing or logging to determine what is causing the performance issue?
+
 **Fix direction:** PatchWatcher/sync should skip or pause processing for documents with stashed panes. Need to check what the plugin is actually looping on — likely `EditorTabSyncListener` or the watch thread.
-<!-- agent:boundary:f1431eeb -->
+### Re: Live tracing for plugin CPU issue (HEAD)
+
+Reviewed all plugin classes. The likely hot paths:
+- **PromptPoller**: spawns `agent-doc prompt --all` subprocess every 1.5s + `invokeAndWait` for auto-save
+- **PatchWatcher**: 500ms poll on `.agent-doc/patches/` directory
+- **LayoutChangeDetector**: 5s fallback poll + ContainerListener + debounced sync
+- **TypingTracker**: FFI call on every document change event
+
+But all of these are shared across all documents — they shouldn't single out bugs.md.
+
+**For live tracing:** Enable debug logging in JetBrains:
+1. Help → Diagnostic Tools → Debug Log Settings
+2. Add: `#com.github.btakita.agentdoc`
+3. Open bugs.md, navigate for ~30s
+4. Check `idea.log` for which log prefix appears most frequently
+
+The LOG prefixes are:
+- `[layout-sync]` — EditorTabSyncListener
+- `[prompt-poller]` — PromptPoller
+- `[patch-watcher]` — PatchWatcher
+- `[vcs]` — VCS refresh
+- `[native]` / `[fallback]` — TypingTracker
+- `[socket]` — IPC
+
+Whichever prefix floods the log is the culprit.
+
+Alternatively: Help → Diagnostic Tools → Freeze → "Capture Thread Dump" while navigating bugs.md. The thread dump will show exactly which thread/method is consuming CPU.
+<!-- agent:boundary:39f7b453 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -137,6 +166,6 @@ The plugin is doing sustained work specific to bugs.md. Most likely:
 - [x] GC orphaned 3.9 GB blob from git history
 - [x] `agent-doc clean --archive` flag
 - [x] VCS refresh debounce in JetBrains plugin (500ms)
-- [ ] Fix plugin CPU usage for stashed sessions (22.3% on bugs.md)
+- [ ] Diagnose plugin CPU on bugs.md (enable debug logging or thread dump)
 - [ ] Discuss archive cutoff point for squash
 <!-- /agent:pending -->

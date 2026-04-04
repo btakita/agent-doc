@@ -121,7 +121,7 @@ I believe we have several entrypoints to associate a *.md file with agent-doc. A
 init would be ok as a command if you think it is useful. However, in practice, we already call one of entrypoint commands already.
 
 Which approach do you prefer?
-### Re: Auto-init in existing entrypoints (HEAD)
+### Re: Auto-init in existing entrypoints
 
 You're right — `agent-doc init` as a standalone command is unnecessary overhead. The init logic should live in the existing entrypoints since they're already called when a file first enters the agent-doc lifecycle.
 
@@ -144,12 +144,31 @@ This would be called from:
 - `sync` — before layout operations
 
 Should I implement this in `src/agent-doc`? It's a ~50-line change across 3 entrypoints plus a shared `ensure_initialized()` function.
-<!-- agent:boundary:21f3def7 -->
+yes
+### Re: `ensure_initialized()` implemented (HEAD)
+
+Done. Added `snapshot::ensure_initialized(doc)` as a shared function and refactored both entrypoints:
+
+**`snapshot.rs`** — new `ensure_initialized()` function:
+- Checks if snapshot exists (no-op if yes)
+- Reads file, strips exchange content, saves snapshot
+- `git add` if untracked
+- `git commit` for baseline
+
+**`claim.rs`** — replaced 10 lines of inline init logic with `snapshot::ensure_initialized(file)`
+
+**`preflight.rs`** — replaced 20 lines of inline init logic with `snapshot::ensure_initialized(file)`
+
+**Sync not included** — sync operates on tmux layout/panes, not individual files. Files enter agent-doc through claim or preflight, both of which now call `ensure_initialized()`.
+
+637 tests pass, clippy clean, release built.
+<!-- agent:boundary:84d96db8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] Granola enrich-from-transcript runbook — created
-- [ ] Auto-init: add `ensure_initialized()` to claim/preflight/sync entrypoints — awaiting approval
+- [x] Auto-init: `ensure_initialized()` added to claim + preflight
+- [ ] Release v0.31.10 with ensure_initialized (when ready)
 <!-- /agent:pending -->

@@ -1014,7 +1014,7 @@ do
 ### Re: 20-case baseline running
 
 Launched: `make eval` (20 cases, sonnet, --parallel 8, refined system prompt). Will report results when done.
-### Re: 20-case baseline — new best (HEAD)
+### Re: 20-case baseline — new best
 
 **17/20 passed (85.0%), mean 0.83**
 
@@ -1052,6 +1052,8 @@ Launched: `make eval` (20 cases, sonnet, --parallel 8, refined system prompt). W
 - `structural-reorg` (0.10) — response model over-explained the reorg
 - `inline-annotation-corrections` (0.20) — new case, needs rubric calibration
 
+How can we fix these remaining failures?
+
 **Progress from session start to end:**
 
 | Metric | Start (haiku) | Now (sonnet+refined) |
@@ -1060,13 +1062,46 @@ Launched: `make eval` (20 cases, sonnet, --parallel 8, refined system prompt). W
 | Pass rate | 42.9% | 85.0% |
 | Mean score | 0.57 | 0.83 |
 | Suite time | 19.5 min | ~10 min |
-<!-- agent:boundary:22d17bfe -->
+### Re: Fixing the 3 remaining failures (HEAD)
+
+Each has a different root cause:
+
+#### `simple-question` (0.60) — system prompt interference
+The model responds to the question but the system prompt's discrimination rules ("comments are invisible", "approvals mean proceed") add overhead that makes the response less focused. The judge sees a response that answers the question but also includes unnecessary caveats about agent-doc conventions.
+
+**Fix:** This is the system prompt's cost — it helps 5+ cases but slightly hurts simple ones. Accept 0.60 as the floor for simple questions with context, or **add the question cases to the system prompt**: "For straightforward questions, respond directly without applying special rules."
+
+#### `structural-reorg` (0.10) — model doesn't recognize move vs new content
+The diff shows Phase 4 appearing between Phase 1 and Phase 2. The model sees new lines (`+`) and treats them as new content, not recognizing they were moved from elsewhere. The diff format itself doesn't distinguish "moved from line X" vs "newly written."
+
+**Fix:** This is a fundamental diff limitation — unified diffs don't encode moves. Two options:
+1. **Enhance document_context** — include the full document showing Phase 4 already exists elsewhere, making the move obvious
+2. **Lower expectations** — "acknowledges the reorganization or asks about the change" instead of requiring it to know it was moved
+
+Option 2 is more honest — without seeing the full document, the model can't know Phase 4 was moved vs written fresh.
+
+#### `inline-annotation-corrections` (0.20) — hard pattern detection
+The colon-appended pattern (`line.: correction`) is subtle. The model sees the full line (agent content + user addition) and doesn't isolate the user's appended text. This is the hardest diff-interpretation pattern because the user edited *within* agent content.
+
+**Fix:** Two approaches:
+1. **Better document_context** — explicitly state "The agent wrote numbered items. The user appended corrections after a colon on each line."
+2. **System prompt hint** — add "When a line is modified to append text after a colon (`:`), the appended text is a user correction"
+
+Option 1 is better — it gives the model the context without adding another rule to the system prompt.
+
+**Concrete changes to make:**
+1. `simple-question` — add "For straightforward questions, respond directly" to system prompt
+2. `structural-reorg` — enrich document_context with full document showing Phase 4's original position
+3. `inline-annotation-corrections` — enrich document_context to explain the annotation pattern
+<!-- agent:boundary:1f7c00f3 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [x] Run baseline with updated 20-case suite (17/20, 85.0%)
+- [ ] Enrich document_context for structural-reorg and inline-annotation-corrections
+- [ ] Add "respond directly to questions" hint to system prompt
+- [ ] Re-run baseline after fixes
 - [ ] Design agentic eval fixture format (future — v2)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 <!-- /agent:pending -->

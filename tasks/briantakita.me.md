@@ -1713,7 +1713,7 @@ Two runbooks. A mature project with 5-10 runbooks could easily hit 50%+, but we 
 Swapped the vague percentage for a concrete, verifiable number.
 
 I extracted runbooks. Please read tasks/runbooks.md. Calculate values in addition to the 63 lines we are already accounting for to come up with a %.
-### Re: Comprehensive runbook savings calculation
+### Re: Comprehensive runbook savings calculation (HEAD)
 
 From tasks/runbooks.md, the full extraction was **12 runbooks** across 4 skill files plus the main instruction file:
 
@@ -1737,7 +1737,7 @@ From tasks/runbooks.md, the full extraction was **12 runbooks** across 4 skill f
 For the blog post, you could replace the "Two runbooks saved 63 lines" with something like:
 
 > I've been externalizing step-by-step procedures into **agent runbooks** — plain markdown files that agents load on demand instead of carrying in every interaction. Across 12 runbooks, I saved 212 lines from my instruction files — a 28% reduction in persistent context. The biggest win was livestream audit procedures: 53% of that skill's instructions were procedural bulk that only matters during audits.
-### Re: Comprehensive runbook savings calculation (HEAD)
+### Re: Comprehensive runbook savings calculation
 
 From tasks/runbooks.md, the full extraction was **12 runbooks** across 4 skill files plus the main instruction file:
 
@@ -1786,7 +1786,7 @@ Please update blog post and linkedin teaser draft.
 > - https://github.com/btakita/agent-runbooks
 >
 > What directory convention are you using for agent config? `.agent/`, `.agents/`, `.ai/`? The ecosystem hasn't settled this yet and I'd love to hear what's working for you.
-<!-- agent:boundary:b07401bd -->
+<!-- agent:boundary:50633c72 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

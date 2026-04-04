@@ -1987,7 +1987,7 @@ On the YouTube vs native LinkedIn point: you're right, a YouTube link gets less 
 **Revised recommendation:** Fix the video first (blur/cut the admin section), then decide posting order. No rush — getting it right matters more than getting it out Saturday vs Monday.
 
 With that in mind, should I do the blog post teaser first...since it's ready?
-### Re: Post the blog teaser now (HEAD)
+### Re: Post the blog teaser now
 
 Yes. Blog teaser is ready, video isn't. Post the teaser now — it stands on its own without the video. Live on your profile before tomorrow's call with Robert.
 
@@ -1997,11 +1997,37 @@ Yes. Blog teaser is ready, video isn't. Post the teaser now — it stands on its
 3. **Wed/Thu** — second blog post + video
 
 Want me to format the draft as plain text for LinkedIn paste?
-<!-- agent:boundary:4cc02252 -->
+Yes. Do we have a runbook for linkedin posts?
+### Re: LinkedIn paste format + no runbook (HEAD)
+
+No LinkedIn posting runbook exists yet.
+
+Here's the draft as plain text (LinkedIn doesn't render markdown bold — stripped formatting):
+
+---
+
+Your CLAUDE.md is bloated. Here's what to do about it.
+
+Every token in your AI instruction file costs you something. Release checklists, deploy procedures, precommit workflows... they're important, but they don't need to occupy context when the agent is writing a utility function.
+
+I've been externalizing step-by-step procedures into agent runbooks — plain markdown files that agents load on demand instead of carrying in every interaction. By identifying and extracting 12 runbooks, I cut 212 lines from my instruction files — a 28% reduction in persistent context.
+
+The pattern works with Claude Code, Cursor, Copilot, Windsurf, Gemini CLI, Aider, and Codex. No special syntax. No vendor lock-in.
+
+Blog post + reference repo:
+https://briantakita.me/post/2026-04-03-agent-runbooks-on-demand-procedural-context
+https://github.com/btakita/agent-runbooks
+
+What directory convention are you using for agent config? .agent/, .agents/, .ai/? The ecosystem hasn't settled this yet and I'd love to hear what's working for you.
+
+---
+
+Copy and paste into LinkedIn. The URLs will auto-link.
+<!-- agent:boundary:af3b547f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn blog teaser: POST NOW (draft ready)
+- LinkedIn blog teaser: formatted for paste, POST NOW
 - Video: edit out WordPress admin section, then post
 - Second blog post + video: target Wed/Thu Apr 9-10
 - Cleanup: remove stale directories

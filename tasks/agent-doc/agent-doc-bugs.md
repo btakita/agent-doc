@@ -783,7 +783,7 @@ tmux kill-pane -t %475
 - The previous agent-doc pane should be stashed, not left visible alongside the new shells
 
 Should I clean up the orphaned panes and fix the route cleanup logic?
-<!-- agent:boundary:bf46b91a -->
+<!-- agent:boundary:7800acbc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

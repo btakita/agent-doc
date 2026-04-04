@@ -392,7 +392,7 @@ Editor navigates to file B (was viewing file A)
 ```
 
 This is the complete spec for the navigation swap feature. Adding to tasks/software/agent-doc.md.
-<!-- agent:boundary:5421fc72 -->
+<!-- agent:boundary:bbbb92d0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

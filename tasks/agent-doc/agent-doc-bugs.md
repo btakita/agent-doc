@@ -416,7 +416,7 @@ The hooks/ directory having 1,893 files is suspicious. The others could benefit 
 3. **GC pass** for .agent-doc directories (separate task)
 
 Starting with debounce fix now.
-### Re: Implementation complete — debounce fix + structured logging (HEAD)
+### Re: Implementation complete — debounce fix + structured logging
 
 **Debounce fix (done):**
 - Default mtime debounce increased from 500ms → 2000ms
@@ -448,7 +448,57 @@ Starting with debounce fix now.
 ```bash
 export AGENT_DOC_LOG=debug  # add to ~/.zshrc
 ```
-<!-- agent:boundary:9c64ac0e -->
+I'm concerned about the explosion of files in the /home/brian/work/btakita/agent-loop/.agent-doc/* directories.
+Please analyze which files are not being cleaned up. Make a plan to auto-cleanup the files.
+Add some on-demand context, like a runbook, or something else, for .agent-doc directory additions to autoclean if an unbounded amount of files will be created.
+### Re: .agent-doc file bloat analysis + cleanup plan (HEAD)
+
+**Root cause:** Hash-based file keying with no deletion handler. When documents are renamed, `rename.rs` migrates state. When documents are deleted, nothing cleans up — files accumulate forever.
+
+**Breakdown by directory:**
+
+| Dir | Files | Expected | Orphaned | Root Cause |
+|-----|-------|----------|----------|------------|
+| **hooks/** | 1,935 | ~0 | ~1,935 | GC exists but never auto-invoked. `poll()` removes expired events, but `gc()` requires manual `agent-doc hook gc`. Hook files from Apr 1-4 never cleaned. |
+| **snapshots/** | 287 | ~141 | ~146 | `delete()` only called by `reset` command. Deleted documents leave orphaned snapshots forever. |
+| **crdt/** | 220 | ~50 | ~170 | `delete_crdt()` only called by `reset`. `.yrs.lock` files accumulate (Drop only unlocks, doesn't delete file). |
+| **pre-response/** | 86 | ~4 | ~82 | `delete_pre_response()` exists but only called by `undo`. Write paths (write.rs:410, 484) never clean up after successful write. **Bug.** |
+| **locks/** | 57 | 0 | 57 | Drop impl unlocks but doesn't delete file. No stale detection. All 57 are abandoned from crashes. |
+
+**Fix plan (ordered by impact):**
+
+1. **pre-response cleanup** (bug fix, 2 lines):
+   - Add `snapshot::delete_pre_response(file)?;` after successful write in `write.rs:410` and `write.rs:484`
+   - Prevents 82+ files accumulating per project
+
+2. **Lock file cleanup** (bug fix):
+   - Delete lock file in `SnapshotLock::Drop` (not just unlock)
+   - Add mtime-based stale detection: lock files >1 hour old are dead (crashed process)
+   - Clean stale locks on next `acquire()`
+
+3. **`agent-doc gc` subcommand** (new feature):
+   - Scan all `.agent-doc/` dirs for hashes
+   - Cross-reference against existing documents
+   - Delete orphaned files (snapshots, crdt, pre-response, locks, baselines)
+   - Optional `--dry-run` flag
+
+4. **Auto-GC on preflight** (preventive):
+   - Run lightweight GC check during preflight (once per day, timestamp in `.agent-doc/gc.stamp`)
+   - Only deletes files for documents confirmed deleted (not just renamed)
+
+5. **Hook auto-GC** (fix existing mechanism):
+   - Call `hook gc` automatically after `preflight` or `commit` (low overhead)
+   - Or reduce hook TTL so `poll()` cleans them faster
+
+**On-demand context (runbook):**
+Should add a `cleanup` runbook documenting:
+- When to run `agent-doc gc`
+- What each directory contains
+- How to identify orphaned files
+- Safe manual cleanup commands
+
+Shall I implement the fixes now? Starting with the pre-response bug fix and lock cleanup since those are straightforward.
+<!-- agent:boundary:9bf7ebec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -456,9 +506,13 @@ export AGENT_DOC_LOG=debug  # add to ~/.zshrc
 <!-- agent:pending patch=replace -->
 - [x] Fix debounce: increase mtime to 2000ms + frontmatter config
 - [x] Add structured logging (tracing crate) with AGENT_DOC_LOG env var
+- [ ] **[active]** Fix pre-response cleanup after write (bug, 2 lines)
+- [ ] **[active]** Fix lock file cleanup in Drop + stale detection
+- [ ] Add `agent-doc gc` subcommand for orphaned file cleanup
+- [ ] Auto-GC on preflight (daily timestamp check)
+- [ ] Hook auto-GC (auto-invoke after commit/preflight)
+- [ ] Add cleanup runbook to .claude/skills/agent-doc/runbooks/
 - [ ] Publish tmux-router 0.3.9 to crates.io (awaiting approval)
-- [ ] Investigate .agent-doc/hooks/ having 1,893 files
-- [ ] GC pass for .agent-doc/ stale files (locks, pre-response, crdt)
 - [ ] Investigate 1-pane layout bug (verbose logging now available)
 - [ ] Add tracing instrumentation to sync, layout, stash/retrieve code paths
 <!-- /agent:pending -->

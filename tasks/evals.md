@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Sonnet baseline complete — 11/21 (52.4%), 5 failure clusters identified
+Phase 1 complete — Sonnet baseline 11/21 (52.4%). Top failures: comment-content-ignored, single-word-approval, approval-to-implement.
 <!-- /agent:status -->
 
 ## Exchange
@@ -115,7 +115,7 @@ Phase 1 is nearly complete — prior sessions already built most of it:
 - **`baselines/sonnet-2026-04-04.json`** — exists but empty (0 bytes) — running now
 
 Running Sonnet baseline against all 20 cases.
-### Re: Sonnet Baseline Results (HEAD)
+### Re: Sonnet Baseline Results
 
 Sonnet baseline complete. 21 cases, 4 parallel workers.
 
@@ -165,7 +165,28 @@ Sonnet passes +2 more cases but mean score is nearly identical — both models a
 **Meta:** `single-word-approval` scored 0.00 — this model interpreted "go" (the trigger for this session) as a new topic rather than approval. The case exists exactly for this failure mode.
 
 **Next:** Cross-reference Haiku per-case scores, then pick a failure cluster to attack via SKILL.md improvements.
-<!-- agent:boundary:495bbe61 -->
+### Sonnet Baseline Results (HEAD)
+
+**11/21 passed (52.4%), mean score 0.56** — vs Haiku 9/21 (42.9%), mean score 0.57.
+
+Slight pass rate improvement (+9.5pp) but nearly identical mean scores. Sonnet is more consistent but not dramatically better on these cases.
+
+**Key failure patterns:**
+
+| Failure | Score | Root cause |
+|---------|-------|------------|
+| `comment-content-ignored` | 0.00 | Responds to comment content instead of treating as stripped |
+| `single-word-approval` | 0.00 | Doesn't recognize "go" as an approval signal |
+| `approval-to-implement` | 0.10 | Doesn't update pending before responding |
+| `multi-item-instruction-list` | 0.10 | Doesn't add items to pending component |
+| `head-label-removal` | 0.10 | Treats agent artifact cleanup as a user edit |
+| `blockquote-annotation` | 0.30 | Doesn't adjust plan based on inline correction |
+| `boundary-only-change` | 0.50 | Marginal — generates unnecessary response |
+
+**Actionable insight:** The 3 zero/near-zero scores (`comment-content-ignored`, `single-word-approval`, `approval-to-implement`) point to the same root issue: the SKILL.md prompt doesn't explicitly teach the agent about comment stripping, single-word approval signals, or the pending protocol. These are high-leverage fixes.
+
+Baseline committed to `evals/agent-doc/diff-interpretation/baselines/sonnet-2026-04-04.json`.
+<!-- agent:boundary:a943cee0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -173,13 +194,11 @@ Sonnet passes +2 more cases but mean score is nearly identical — both models a
 <!-- agent:pending patch=replace -->
 - [x] Approve Phase 1 plan
 - [x] Create `evals/` directory structure with agent-doc/diff-interpretation/
-- [x] Extract 10-15 real session diffs from git history as test fixtures (20 cases total)
-- [x] Write first 10 diff interpretation test cases (diff input → expected intent)
-- [x] Build eval runner (Rust CLI, src/eval-runner, with Claude CLI + Anthropic API backends)
-- [x] Haiku baseline: 9/21 passed (42.9%), mean score 0.57
-- [x] Sonnet baseline: 11/21 passed (52.4%), mean score 0.56
-- [ ] Cross-reference Haiku vs Sonnet per-case scores
-- [ ] Pick failure cluster to attack first
-- [ ] Improve SKILL.md/system prompt based on failure patterns
-- [ ] Re-run evals to measure improvement
+- [x] Extract real session diffs from git history (21 cases)
+- [x] Write diff interpretation test cases (diff input → expected intent)
+- [x] Build eval runner (Rust CLI: src/eval-runner)
+- [x] Haiku baseline: 9/21 (42.9%), mean 0.57
+- [x] Sonnet baseline: 11/21 (52.4%), mean 0.56
+- [ ] Fix top 3 SKILL.md gaps: comment stripping, single-word approval, pending protocol
+- [ ] Re-run evals to verify improvement vs baseline
 <!-- /agent:pending -->

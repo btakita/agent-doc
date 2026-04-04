@@ -342,7 +342,8 @@ do
 - [ ] Add `make check` integration
 - [ ] Regression tracking with `--baseline` end-to-end test
 - [ ] Investigate persistent failures — add SKILL.md context to eval prompts
-### Re: Parallelism, Makefile, and failure analysis (HEAD)
+
+### Re: Parallelism, Makefile, and failure analysis
 
 **Parallelism:** Recommend `--parallel 8`. The sonnet run at `--parallel 4` took 12.4 min; at 8-wide that should drop to ~6 min. Going to 12 risks rate limit contention. Updated the Makefile default to 8.
 
@@ -367,15 +368,38 @@ All configurable via env vars: `make eval MODEL=haiku PARALLEL=12`.
 **Failure analysis** (investigating the 5 persistent failures — running in background, will report findings).
 
 **Latency eval support:** Noticed your edits adding `grading: "latency"` with `run_latency_case`. Builds clean — nice addition for benchmarking `agent-doc write` performance directly.
-<!-- agent:boundary:2a734391 -->
+### Re: Persistent failure analysis (HEAD)
+
+All 5 failures are **agent-doc protocol violations** — the evaluated model lacks SKILL.md context:
+
+| Case | Convention | Why Generic LLM Fails |
+|------|-----------|----------------------|
+| comment-content-ignored | Preflight strips HTML comments before diff | Treats `<!-- TODO -->` as content to respond to |
+| approval-to-implement | "Yes, implement" triggers pending flush BEFORE response | Just confirms and responds normally |
+| head-label-removal | `(HEAD)` removal is boundary cleanup, not user edit | Sees heading change, generates response |
+| single-word-approval | "go" is approval signal → pending flush + implement | Treats as incomplete input |
+| multi-item-instruction-list | Checklist → individual pending items + streaming checkpoints | Bundles into one response |
+
+**Fix:** Create a system prompt file with the relevant SKILL.md sections:
+- Comment stripping (preflight behavior)
+- Pending protocol (flush before response on approval)
+- Boundary marker cleanup (ignore `(HEAD)` changes)
+- Streaming checkpoints (multi-item work)
+
+Then run: `make eval SYSTEM_PROMPT=evals/agent-doc/diff-interpretation/system-prompt.md`
+
+This mirrors real sessions where the model has SKILL.md loaded. Without it, we're testing generic LLM behavior — not agent-doc skill compliance. The current scores represent "how well does a naked LLM handle agent-doc conventions?" The system-prompt scores would represent "how well does the skill perform end-to-end?"
+
+Both baselines are useful — naked for measuring inherent model capability, with-context for measuring skill+model quality.
+<!-- agent:boundary:fd64ab20 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [x] Add `make check` integration (eval, eval-regression, eval-json targets)
-- [x] Regression tracking with `--baseline` end-to-end test (via `make eval-regression`)
-- [ ] Investigate persistent failures — add SKILL.md context to eval prompts (analysis running)
+- [x] Investigate persistent failures — all 5 are agent-doc protocol violations needing SKILL.md context
+- [ ] Create system prompt file for evals with relevant SKILL.md sections
+- [ ] Re-run sonnet eval with system prompt to measure skill+model quality
 - [ ] Increase default parallelism to 8 (done in Makefile, test with next run)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 - [ ] JSON output format documentation

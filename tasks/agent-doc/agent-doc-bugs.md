@@ -308,7 +308,7 @@ Done. Created `.cargo/config.toml` with `[patch.crates-io]` for tmux-router, add
 Build and tests pass with the override active. Pushed `.gitignore` update to GitHub.
 gh actions failure
 https://github.com/btakita/agent-doc/actions/runs/2398150167
-### Re: Clippy fixes pushed (HEAD)
+### Re: Clippy fixes pushed
 
 Fixed all 10 clippy errors:
 - 4 unused functions: added `#[allow(dead_code)]` (may be needed later or by tests)
@@ -317,11 +317,24 @@ Fixed all 10 clippy errors:
 Also fixed an accidental commit of `.cargo/config.toml` and `.bin/agent-doc` — removed from git, already in `.gitignore`.
 
 CI should pass now. Two commits pushed.
-<!-- agent:boundary:8fef6e6c -->
+
+is there a pending release
+### Re: No pending release needed (HEAD)
+
+4 commits since v0.31.9, but they're all CI/build infrastructure — no functional code changes:
+
+1. `.gitignore` fix (`.bin/`, `.cargo/` separated)
+2. `make release` target for CI-first release flow
+3. CI release workflows made idempotent
+4. Version-sync check added to `make check`
+
+Cargo.toml is still at 0.31.9. Working tree is clean. No user-facing changes that warrant a release. These infra improvements will ship naturally with the next functional release.
+<!-- agent:boundary:1700d5fe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] Clippy fixes pushed
+- [x] No pending release (infra-only changes since v0.31.9)
 <!-- /agent:pending -->

@@ -190,7 +190,7 @@ Parent pointer updated: `290c86cb`.
 **Within a single crate**, modules can reference each other freely (no cycle issue).
 
 **For agent-runbooks + existence-lang:** They stay independent at the crate level. The ontology dir is a runtime path (`--ontology-dir ~/.claude/philosophy/src`), not a compile-time dependency. No cycle needed.
-<!-- agent:boundary:029e2fe7 -->
+<!-- agent:boundary:8afff1c5 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

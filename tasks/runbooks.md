@@ -208,15 +208,39 @@ What does --ontology-dir in the agent-runbooks project?
 agent-runbooks validate runbooks/release-rust-maturin.md \
   --ontology-dir ~/.claude/philosophy/src
 
-# If the runbook contains [term:Domain] and [term:System]: (HEAD)
-# - Checks ~/.claude/philosophy/src/domain.md exists -> ok (HEAD)
-# - Checks ~/.claude/philosophy/src/system.md exists -> ok (HEAD)
-# If it contains [term:Nonexistent]: (HEAD)
-# - WARN: ontology term 'Nonexistent' not found (HEAD)
+# If the runbook contains [term:Domain] and [term:System]:
+# - Checks ~/.claude/philosophy/src/domain.md exists -> ok
+# - Checks ~/.claude/philosophy/src/system.md exists -> ok
+# If it contains [term:Nonexistent]:
+# - WARN: ontology term 'Nonexistent' not found
 ```
 
 It's a lightweight way to ensure runbooks reference valid ontology concepts without requiring a compile-time dependency on existence-lang.
-<!-- agent:boundary:41c3ba3c -->
+
+There's no need for `--ontology-dir`
+
+I wanted to add an agent-runbooks/ontology/ directory with an ontology of the relevant topics.
+### Re: ontology/ directory added (HEAD)
+
+Created `src/agent-runbooks/ontology/` with 7 domain term definitions:
+
+| Term | Description |
+|------|-------------|
+| `runbook.md` | Procedural document with ordered steps, on-demand loading |
+| `skill.md` | Named capability with SKILL.md, owns runbooks |
+| `context.md` | Generic on-demand document (runbooks, refs, guardrails) |
+| `audit.md` | Deterministic validation for reference drift |
+| `guardrail.md` | Always-loaded behavioral rule (auto memory) |
+| `trigger.md` | Phrase/pattern that activates a runbook |
+| `notification.md` | Cross-document message with re-evaluation directive |
+
+Each term uses `[term:Name]` cross-references. The validate command can self-check these against the ontology dir:
+```bash
+agent-runbooks validate ontology/runbook.md --ontology-dir ontology/
+```
+
+Committed `0398848`, pushed, parent pointer updated.
+<!-- agent:boundary:eb78999f -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

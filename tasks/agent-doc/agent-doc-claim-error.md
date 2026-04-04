@@ -455,7 +455,7 @@ Did this happen when I reopened agent-doc-bugs.md? What triggered this decision 
 The skill never touches `(HEAD)` markers. The transfer command wrote valid content. The bug was entirely in the commit path's heading classification logic — step 4 of `add_head_marker()`.
 
 **Trigger**: any operation that introduces multiple new `### ` headings at once (transfer, extract, or even a multi-topic response). The fix (marking only the last heading) is already deployed.
-<!-- agent:boundary:371a75e2 -->
+<!-- agent:boundary:8cab3e6f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

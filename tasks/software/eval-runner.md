@@ -179,7 +179,7 @@ First end-to-end run launched with `--model haiku --judge-model haiku` (faster f
 | approval-to-implement | 0.62 | FAIL | 32.9s |
 
 Full JSON run in progress (background). Note: haiku is the evaluated model here — scores will be higher with sonnet/opus. The important thing is the pipeline works end-to-end: YAML parsing -> claude CLI -> judge scoring -> results.
-### Re: Full run complete (haiku baseline) (HEAD)
+### Re: Full run complete (haiku baseline)
 
 **Results: 9/21 passed (42.9%), mean score 0.57, total time 19.5 min**
 
@@ -215,14 +215,32 @@ Full JSON run in progress (background). Note: haiku is the evaluated model here 
 - Strong on structural understanding (reorg, deletion, annotations)
 - Two outlier latencies: multi-item-instruction-list (362s) and multi-topic-approval (437s) — haiku generated very long responses
 - Next: run with sonnet to establish the target-model baseline
-<!-- agent:boundary:b6b0c9e7 -->
+
+> - **Removed `tokio`** — main is now synchronous. `reqwest::blocking` for API backend.
+
+Would we want to run the evals async...so we can run more simultaneously? Or are the evals CPU blocking?
+### Re: Async vs parallel for evals (HEAD)
+
+The evals are **I/O bound, not CPU bound** — each case spends 95%+ of its time waiting for the `claude --print` subprocess to return. The actual Rust work (YAML parsing, string building, JSON output) is negligible.
+
+Parallel execution would give near-linear speedup. With 21 cases at 19.5 min sequential (~56s avg), running 4-wide cuts to ~5 min; 8-wide to ~2.5 min.
+
+**Re-adding tokio isn't necessary.** Since the backend is `std::process::Command` (subprocess spawning), a simple thread pool works:
+
+- `std::thread::scope` — spawn N cases concurrently, each blocks on its own subprocess
+- Add `--parallel N` flag (default 1 for backwards compat)
+- Thread overhead is trivial for 21 threads — no async runtime needed
+
+The only concern is **rate limiting** — Claude Code Max has per-minute limits. Running all 21 simultaneously could hit the ceiling. A bounded pool (`--parallel 4` or `--parallel 8`) gives the best balance.
+
+**Recommendation:** Add `--parallel N` with `std::thread::scope` (no new dependencies). Keep synchronous backend — each thread blocks on its subprocess independently. Skip tokio/async entirely.
+<!-- agent:boundary:02c47b34 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [x] Test with agent-doc diff-interpretation cases end-to-end
-- [x] Save baseline JSON from first run
+- [ ] Add `--parallel N` flag with `std::thread::scope` for concurrent case execution
 - [ ] Run with sonnet model for target baseline
 - [ ] Add `make check` integration
 - [ ] JSON output format documentation

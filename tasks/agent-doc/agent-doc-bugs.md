@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-P1 (diff-type) + P2 (eval diffs) + SKILL.md routing all landed
+P1-P3 done: diff-type classification, eval diffs, annotated diff format
 <!-- /agent:status -->
 
 ## Exchange
@@ -191,8 +191,8 @@ Done. Both items executed:
 
 The skill will now automatically use `diff_type` from preflight to optimize routing. For example, when you type "go", the preflight returns `"diff_type": "approval"` and the skill skips confirmation, going straight to execution.
 do
-- [ ] Post-preflight diff generation for eval cases (P2)
-### Re: Do — Post-preflight eval diffs (P2) implemented (HEAD)
+- [ ] Post-preflight diff generation for eval cases (P2)**+**
+### Re: Do — Post-preflight eval diffs (P2) implemented
 
 Done. Eval diffs now match production behavior.
 
@@ -214,7 +214,44 @@ component.rs::strip_comments()  ← shared pure function
 ```
 
 All agent-doc tests pass (417). Eval-runner compiles clean.
-<!-- agent:boundary:01c6ab5b -->
+
+do
+- [ ] Implement annotated diff format in preflight (P3)
+### Re: Do — Annotated diff format (P3) implemented (HEAD)
+
+Done. The preflight JSON now includes `annotated_diff` with content-source markers.
+
+**New function: `annotate_diff(diff_text)` in `diff.rs`**
+
+Transforms unified diffs into annotated format:
+```
+[agent] context line from snapshot
+[user+] new line added by user
+[user-] line removed by user
+[user~] The fix is deployed: confirmed in prod
+```
+
+**Marker types:**
+- `[agent]` — context lines (unchanged content from agent/snapshot)
+- `[user+]` — lines added by the user
+- `[user-]` — lines removed by the user
+- `[user~]` — lines modified by the user (paired add/remove with >60% common prefix)
+
+**Modification detection:** Buffered removes are paired with subsequent adds. If they share >60% common prefix (same as the annotation classifier), they're emitted as `[user~]` instead of separate `[user-]`/`[user+]` pairs.
+
+**Wired into preflight JSON:**
+```json
+{
+  "annotated_diff": "[agent] context\n[user+] new question here?\n[agent] more context"
+}
+```
+
+Field is `skip_serializing_if = "Option::is_none"` — omitted when no diff.
+
+**Tests:** 5 new tests (additions, removals, modifications, context, empty). All 428 tests pass, clippy clean.
+
+The skill can now use `annotated_diff` instead of raw unified diff for better context when responding to user changes.
+<!-- agent:boundary:35f1c8b2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -223,7 +260,7 @@ All agent-doc tests pass (417). Eval-runner compiles clean.
 - [x] Implement diff-type classification in preflight (P1) — DONE
 - [x] Update SKILL.md to route based on diff_type — DONE
 - [x] Post-preflight diff generation for eval cases (P2) — DONE
-- [ ] Implement annotated diff format in preflight (P3)
+- [x] Implement annotated diff format in preflight (P3) — DONE
 - [ ] Implement content-source annotation sidecar (P4)
 - [ ] Design reproducible operation log format (P5)
 - [ ] Add `---` prompt separator convention to SKILL.md

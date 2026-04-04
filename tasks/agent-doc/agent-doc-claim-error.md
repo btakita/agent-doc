@@ -119,7 +119,7 @@ The `.gitignore` had `.bin/.cargo/config.toml` on one line — a merge of two en
 - **`.cargo/`** — now gitignored (local dev config override)
 
 Working tree is clean. Pushed fix + updated parent submodule pointer.
-<!-- agent:boundary:bfb89c58 -->
+<!-- agent:boundary:38dd4918 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

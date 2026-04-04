@@ -752,7 +752,7 @@ make eval
 ```
 
 Smoke suite running now — will report timing and results.
-### Re: Judge model choice (HEAD)
+### Re: Judge model choice
 
 **A simpler model works well for judging — you don't need frontier for this.**
 
@@ -779,15 +779,37 @@ make eval-smoke JUDGE_MODEL=haiku
 If haiku judging produces similar scores to sonnet judging, that's your answer — use haiku for speed and cost, save sonnet for the response model.
 
 **Smoke suite results (first run):** 5/6 passed (83.3%), 1.8 min. The `inline-colon-annotation` flickered (0.20 vs usual 0.95) — this is the judge variance we're trying to eliminate.
-<!-- agent:boundary:44da0f53 -->
+
+do
+- [ ] Test haiku as judge model (`make eval-smoke JUDGE_MODEL=haiku`)
+### Re: Haiku vs sonnet judge comparison (HEAD)
+
+Ran smoke suite back-to-back with same response model (sonnet):
+
+| Judge | Pass | Rate | Mean | Notes |
+|-------|------|------|------|-------|
+| Sonnet | 6/6 | 100% | 0.97 | All cases pass cleanly |
+| Haiku | 4/6 | 66.7% | 0.83 | Stricter — boundary-only-change 0.67, single-word-correction 0.65 |
+
+**Observations:**
+- Haiku is **stricter** — scores ~0.15 lower across the board
+- The 0.7 threshold is calibrated for sonnet judging. With haiku, either lower the threshold to 0.6 or accept more failures
+- Sonnet judge hit 6/6 this run (vs 5/6 last time) — variance is more manageable with the smoke suite
+- Both judges agree on the ranking
+
+**Recommendation:** Stick with **sonnet as judge** for now. Scores are more generous but pass/fail signal is cleaner. If switching to haiku, recalibrate threshold to 0.6.
+
+The real variance fix is rubric specificity — cases with vague expected behaviors fluctuate most. Tightening to binary yes/no checks would stabilize both judges.
+
+**Smoke suite working well** — 6 cases in ~1.5 min, fast enough for tight iteration.
+<!-- agent:boundary:cf3154b0 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [x] Smoke suite first run (5/6 passed, 83.3%, ~1.8 min)
-- [ ] Test haiku as judge model (`make eval-smoke JUDGE_MODEL=haiku`)
-- [ ] Tighten binary rubrics for clear-cut cases
+- [x] Test haiku as judge (stricter, needs threshold recalibration)
+- [ ] Tighten rubrics for flaky cases (inline-colon-annotation, boundary-only-change)
 - [ ] Design agentic eval fixture format (future — v2)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 <!-- /agent:pending -->

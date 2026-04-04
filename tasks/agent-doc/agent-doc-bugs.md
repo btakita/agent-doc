@@ -119,7 +119,7 @@ For guaranteed prompt adherence, the key factors are:
 **Other shortened inline statements that work reliably:**
 
 ```markdown
-## Operations
+## Operations (HEAD)
 
 `compact exchange` runs runbooks/compact-exchange.md
 `transfer session` runs runbooks/transfer-session.md
@@ -142,7 +142,7 @@ Also ensure that all of the runbooks in agent-loop follow the same convention. S
 
 **Done:** Added Operations section to agent-doc SKILL.md with:
 ```markdown
-## Operations (HEAD)
+## Operations
 - `compact exchange` — runbooks/compact-exchange.md
 ```
 
@@ -166,7 +166,7 @@ This is a good feature for agent-doc's `skill install` command — scan for runb
 ### Re: tmux-router publish
 
 Starting tmux-router 0.3.9 publish to crates.io.
-<!-- agent:boundary:7bcbe2e9 -->
+<!-- agent:boundary:6837098a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

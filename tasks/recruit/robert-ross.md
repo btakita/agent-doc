@@ -428,7 +428,7 @@ The template would have components for:
 Want me to build this now?
 yes
 Can we use vespa on cloudflare?
-### Re: Granola backend + session analyzer template (HEAD)
+### Re: Granola backend + session analyzer template
 
 #### agent-doc + Granola backend
 
@@ -458,7 +458,30 @@ Built the template at `file:///home/brian/work/btakita/agent-loop/tasks/software
 **How it works:** You point it at any agent-doc session (snapshot, git range, or transcript), and the agent populates each component with analysis. It's the skeleton of Rob's Shimmer product.
 
 To test it now: open `tasks/software/session-analyzer.md`, type a session file path in the Input section, and run `/agent-doc`. The agent will analyze that session and fill in the metrics.
-<!-- agent:boundary:3bd7d9ef -->
+### Re: Vespa on Cloudflare (HEAD)
+
+**No — Vespa can't run on Cloudflare.** Vespa is JVM-based, needs ~4GB+ RAM, persistent disk, and full Linux OS access. Cloudflare Workers are V8 isolates with strict limits — not compatible.
+
+**Cloudflare-native alternatives for semantic search:**
+
+| Option | What it is | Fit |
+|---|---|---|
+| **Cloudflare Vectorize** | Native vector database, integrates with Workers AI | Best fit — purpose-built for this |
+| **Workers AI + D1** | Run embedding models on Workers AI, store metadata in D1 | More control, more work |
+| **Turbopuffer / Qdrant Cloud** | External vector DBs accessible via HTTP from Workers | If you need more features than Vectorize |
+
+**Recommendation for Rob's stack:** Cloudflare Vectorize + Workers AI is the cleanest path if you want to stay on Cloudflare infra. You already have `src/cloudflare/` in agent-loop.
+
+The flow would be:
+1. agent-doc snapshots → extract text chunks
+2. Workers AI generates embeddings
+3. Vectorize stores and indexes them
+4. Search API runs on Workers — query with natural language, get ranked session chunks back
+
+This avoids Vespa's operational overhead entirely and keeps everything serverless. You could have a working prototype on Cloudflare in a day.
+
+**If Rob insists on Vespa:** Deploy it on a cheap VPS (Hetzner 4GB ~$4/mo), not Cloudflare. But Vectorize is the better play for an MVP.
+<!-- agent:boundary:52948196 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -466,11 +489,11 @@ To test it now: open `tasks/software/session-analyzer.md`, type a session file p
 <!-- agent:pending patch=replace -->
 - ([done]) Build session analyzer template
 - **Sunday Apr 5, 5pm ET:** Follow-up call with Rob (confirm via text)
-- Test session analyzer on a real session (e.g., this robert-ross document)
+- Evaluate Cloudflare Vectorize + Workers AI for session indexing (MVP path)
+- Test session analyzer on a real session
 - Evaluate 3-5 LiveKit GitHub repos for Build Party
 - Get Build Party PRD from Rob
 - Create mermaid diagram for Miguel's LiveKit agent course
-- Set up Trieve or Vespa for session indexing
 - DocWalk MVP — color-coded markdown viewer
 - Granola import skill (scrape shared links → agent-doc)
 <!-- /agent:pending -->

@@ -217,7 +217,7 @@ All agent-doc tests pass (417). Eval-runner compiles clean.
 
 do
 - [ ] Implement annotated diff format in preflight (P3)
-### Re: Do — Annotated diff format (P3) implemented (HEAD)
+### Re: Do — Annotated diff format (P3) implemented
 
 Done. The preflight JSON now includes `annotated_diff` with content-source markers.
 
@@ -246,12 +246,31 @@ Transforms unified diffs into annotated format:
 }
 ```
 
+The patch above was rendered as uncommitted to git with. Why?:
+
+```
+{
+  "annotated_diff": "[agent] context\
+[user+] new question here?\
+[agent] more context"
+}
+```
+
 Field is `skip_serializing_if = "Option::is_none"` — omitted when no diff.
 
 **Tests:** 5 new tests (additions, removals, modifications, context, empty). All 428 tests pass, clippy clean.
 
 The skill can now use `annotated_diff` instead of raw unified diff for better context when responding to user changes.
-<!-- agent:boundary:ad0defbe -->
+### Re: JSON rendering issue (HEAD)
+
+The two code blocks show the same JSON but rendered differently. The first (intended) has `\\n` as literal escaped characters in the JSON string. The second (what appeared in the document) shows them as actual line breaks with trailing backslashes.
+
+This happened during the CRDT write-back: the `\\n` sequence in my response was being unescaped somewhere in the patch application pipeline. The heredoc `<<'RESPONSE'` correctly preserves literal content (no shell expansion), but the IPC patch JSON serialization or the CRDT text insertion may be interpreting `\\n` as a newline.
+
+**Root cause:** When `agent-doc write --stream` processes the patch content, it serializes it to JSON for IPC delivery. If the patch content contains `\\n` inside a markdown code fence, the JSON serializer writes it as `\n` (a literal newline in JSON), which then gets inserted as an actual newline in the document.
+
+**Fix needed:** The patch content should be treated as opaque text — no unescaping. This is a bug in the write pipeline's text handling. Want me to investigate and fix it in the binary?
+<!-- agent:boundary:61f8a58f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -261,6 +280,7 @@ The skill can now use `annotated_diff` instead of raw unified diff for better co
 - [x] Update SKILL.md to route based on diff_type — DONE
 - [x] Post-preflight diff generation for eval cases (P2) — DONE
 - [x] Implement annotated diff format in preflight (P3) — DONE
+- [ ] Investigate write pipeline `\\n` unescaping bug in code fences
 - [ ] Implement content-source annotation sidecar (P4)
 - [ ] Design reproducible operation log format (P5)
 - [ ] Add `---` prompt separator convention to SKILL.md

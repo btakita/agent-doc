@@ -1742,7 +1742,7 @@ Added to `## Core Principles` in `CLAUDE.md`:
 > **No Confident Hallucination:** If you don't know, say "I don't know." If you speculate, label it as speculation. Never present unverified claims as facts.
 
 Now enforceable across all agents and sessions.
-<!-- agent:boundary:473782c3 -->
+<!-- agent:boundary:89fecc6b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

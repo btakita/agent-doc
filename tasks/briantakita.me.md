@@ -2085,7 +2085,7 @@ Chrome not running with remote debugging — paste manually. Content is formatte
 1. Copy post body → paste into LinkedIn composer → publish
 2. Immediately add first comment with the two links
 3. Verify both visible
-<!-- agent:boundary:8f0bd0ab -->
+<!-- agent:boundary:e614fbd9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

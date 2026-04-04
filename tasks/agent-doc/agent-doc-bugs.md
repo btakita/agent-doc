@@ -401,7 +401,7 @@ Generates a JSON sidecar at `.agent-doc/annotations/<hash>.json` mapping each li
 **Tests:** 6 new (no_snapshot_all_user, identical_all_agent, user_additions, user_modifications, cache_invalidation, cache_valid_skips). All 434 tests pass, clippy clean.
 
 `--history` flag is wired but deferred (prints path from basic mode). Can add git blame attribution later.
-<!-- agent:boundary:b086f55c -->
+<!-- agent:boundary:edde535c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -133,7 +133,7 @@ Yes...are we using prompt caching and is this included in the list?
 | 2 | Auto-compaction | Prevent context bloat over sessions | Not started |
 | 3 | SKILL.md audit | Reduce first-call + cache size | Not started |
 | 4 | Model tiering | Use haiku for routine ops | Not started |
-<!-- agent:boundary:50794250 -->
+<!-- agent:boundary:63838201 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

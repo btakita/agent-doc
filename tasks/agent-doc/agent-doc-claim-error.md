@@ -39,7 +39,7 @@ Updated the source runbook at `src/agent-doc/runbooks/compact-exchange.md` — a
 > **Unanswered user input** — if the exchange contains uncommitted questions or instructions that haven't been responded to, note them as open items in the summary (don't silently drop them)
 
 Binary rebuilt (v0.31.8) and skill reinstalled. The bundled runbook and installed copy are both updated.
-<!-- agent:boundary:79ba533c -->
+<!-- agent:boundary:eaafe236 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

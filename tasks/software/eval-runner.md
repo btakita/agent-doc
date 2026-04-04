@@ -562,7 +562,7 @@ claude --allowedTools "Read,Edit,Write,Bash" \
 This is significantly more complex (each fixture is a mini project, judging is multi-dimensional), but it's the only way to truly test agentic execution. Good candidate for a v2 eval suite after the diff-interpretation evals stabilize.
 
 **For now:** The diff-interpretation evals (current 21 cases) test signal recognition. The agentic fixtures would test end-to-end execution. Both are valuable at different layers.
-### Re: Fixed cases eval results (HEAD)
+### Re: Fixed cases eval results
 
 **14/21 passed (66.7%), mean 0.66**
 
@@ -584,14 +584,34 @@ The multi-item fix validates the approach: giving the model concrete context (pe
 The drop from 76.2% to 66.7% is due to run-to-run variance (LLM non-determinism) — some previously-passing cases flipped. The fixed multi-item case is a net gain.
 
 **Verdict on the 2 remaining approval cases:** These need option 3 (agentic execution with tools) to truly pass. With `claude --print`, the model can't demonstrate it would proceed — it always hedges on access. For the diff-interpretation eval suite, consider marking them as "known limitation" or lowering their threshold.
-<!-- agent:boundary:8e45afe5 -->
+
+What do you recommend? defer to agentic evals?
+- [ ] Decide on approval cases: lower threshold, mark as known limitation, or defer to agentic evals
+### Re: Recommendation on approval cases (HEAD)
+
+**Defer to agentic evals.** Remove from the diff-interpretation suite, add to future agentic suite.
+
+Reasoning:
+- The diff-interpretation suite tests "does the model understand the diff?" For 19/21 cases, text response demonstrates understanding. For approval signals, correct understanding means **acting** — can't demonstrate through text alone.
+- Lowered thresholds create noise — scores flicker based on how artfully the model role-plays implementation.
+- "Known limitation" markers clutter results and make the pass rate misleading.
+- These cases have a natural home in the agentic fixture suite (option 3) where they can be properly tested.
+
+**Concrete action:**
+1. Move `approval-to-implement` and `single-word-approval` to `evals/agent-doc/agentic/cases.yaml` (new file, placeholder for when fixtures are built)
+2. Keep them commented out / in a separate file so they're not lost
+3. The diff-interpretation suite becomes 19 cases, all testable via `claude --print`
+4. Best baseline becomes ~16-17/19 (~84-89%) — a clean metric
+
+This gives a tight, reliable eval suite for diff interpretation and a clear roadmap for agentic evals.
+<!-- agent:boundary:2acf1f3d -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [x] Full eval run with fixed cases (14/21, multi-item now passes)
-- [ ] Decide on approval cases: lower threshold, mark as known limitation, or defer to agentic evals
+- [ ] Move 2 approval cases to agentic eval placeholder
+- [ ] Re-run final baseline with 19-case suite
 - [ ] Design agentic eval fixture format (future — v2 eval suite)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 - [ ] JSON output format documentation

@@ -285,7 +285,7 @@ What do you suggest?
 I think figuring out how to align Claude + other harness context across different platforms would be huge.
 agent-doc can also help with interactively modifying the context.
 agent-doc works on markdown for token savings. But interfaces for other presentation formats can be used.
-### Re: Delivering value with current efforts (HEAD)
+### Re: Delivering value with current efforts
 
 After reviewing the full 3h54m transcript, here's where your existing work maps directly to what Rob is building:
 
@@ -347,15 +347,42 @@ This maps perfectly to what Rob called "cross-session intelligence" and "second 
 3. **Day 4-5:** DocWalk MVP — color-coded markdown viewer that distinguishes user/agent turns, topics, skills used
 
 This gives Rob something tangible to demo immediately, all built on your existing stack.
-<!-- agent:boundary:5e636bc3 -->
+
+What can we do now?
+- Trieve/Vespa account?
+### Re: What we can do now (HEAD)
+
+#### Trieve vs Vespa — quick assessment
+
+**Trieve** was acquired by Mintlify (July 2025). The API is still available with a free tier (1,000 chunks, 1,000 searches/mo). Fast to set up — sign up at dashboard.trieve.ai, create a dataset, POST markdown chunks. Zero infrastructure.
+
+**Vespa** is Apache 2.0, self-hosted or cloud. More powerful but significantly more setup (application packages, schemas, bring your own embeddings). Cloud has no permanent free tier (~$100/mo minimum).
+
+**For Rob's context:** He mentioned both Core and Vespa on the call. Core is what he's currently using (YC company, memory across apps). Vespa is what he wants to move to (Apache license, better cross-session capabilities).
+
+**Recommendation:** Start with Trieve tonight (free, instant). It proves the concept. If Rob prefers Vespa for production, you can migrate later — the ingestion pipeline is the same (markdown → chunks → index).
+
+#### What we can do right now
+
+1. **Sign up for Trieve** — Go to dashboard.trieve.ai, create an account and dataset. Get an API key. (5 min)
+
+2. **Index your agent-doc snapshots** — I can write a script that walks `.agent-doc/snapshots/`, parses frontmatter, and POSTs each snapshot as a chunk to Trieve. This gives you a working demo of cross-session search for tomorrow's call. (15 min)
+
+3. **Build a session analyzer template** — Create a new agent-doc template document with components like `&lt;!-- agent:session-metrics --&gt;`, `&lt;!-- agent:topic-segments --&gt;`, `&lt;!-- agent:subagent-decisions --&gt;`. This is the DocWalk skeleton. (10 min)
+
+4. **Prep call talking points** — Tighten your pitch with specific demos you can show live.
+
+Which of these do you want to start with? I'd suggest #1 (Trieve signup) first since it's a blocker for #2.
+<!-- agent:boundary:a1f2b0a4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Call with Rob tomorrow — prep concrete deliverables pitch
+- **NOW:** Sign up for Trieve (dashboard.trieve.ai) — get API key
+- **NOW:** Index agent-doc snapshots into Trieve (script)
+- **NOW:** Build session analyzer template (agent-doc)
+- Call with Rob tomorrow — demo Trieve search + session analyzer prototype
 - Review Build Party + Shimmer PRDs (ask Rob for access)
-- Trieve/Vespa setup for session indexing (Day 1-2 deliverable)
-- Session analyzer prototype via agent-doc (Day 3)
 - DocWalk MVP — color-coded markdown viewer (Day 4-5)
 <!-- /agent:pending -->

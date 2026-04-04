@@ -146,7 +146,7 @@ Next step: move the runbooks we created (`.claude/skills/*/runbooks/*.md`) into 
 
 I don't want to do the following because the skill runbooks are installed via libraries such as agent-doc and corky. Why did you suggest `Move runbooks from `.claude/skills/*/runbooks/` into `src/agent-runbooks/`?
 > - [ ] Move runbooks from `.claude/skills/*/runbooks/` into `src/agent-runbooks/`
-### Re: Why I suggested it (and why you're right not to) (HEAD)
+### Re: Why I suggested it (and why you're right not to)
 
 I suggested moving runbooks to `src/agent-runbooks/` thinking of it as a centralized registry. But that's the wrong model.
 
@@ -159,8 +159,27 @@ The `agent-runbooks` repo/crate is better suited as:
 - The implementation of `agent-doc runbook audit/install` subcommand
 - A library of shared/reusable runbook templates (not skill-specific ones)
 - Tooling for runbook validation and discovery
-<!-- agent:boundary:c13cb8b3 -->
-<!-- /agent:exchange -->
+
+Without overfitting, how can we prevent or at least make less likely, this category of error?
+### Re: Preventing this category of error (HEAD)
+
+The error: **suggesting file moves without checking the distribution mechanism.**
+
+General principle (saved to auto memory):
+
+> Before suggesting file reorganization, check: how are these files delivered to their consumers? If files are installed/distributed as a unit (skill install, cargo publish, npm pack), they must stay co-located. Centralization only works when the consumer can resolve cross-boundary references at runtime.
+
+Lightweight self-check: *"If I move this file, does the install/deploy path still work without adding new dependencies or cross-repo references?"*
+
+This is general enough to apply to:
+- Skill runbooks (installed via `agent-doc skill install`)
+- Test fixtures (shipped with their package)
+- Config templates (deployed with their tool)
+- Type definitions (consumed by one package)
+
+Saved as `feedback_distribution_aware_reorg.md` in auto memory.
+<!-- agent:boundary:64f51f0f -->
+<!-- /agent:exchange -->a
 
 ## Pending / Not Built
 

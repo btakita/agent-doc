@@ -578,7 +578,7 @@ All panes are accounted for — 8 panes across 4 sessions:
 The panes that were stashed during sync tests (%434, %436) ended up in session 3's zsh window because the stash operations during testing moved them across sessions. %13 (corky) stayed in session 1's stash.
 
 The key panes (%433 bugs, %431 runbooks) are correctly in session 5's agent-doc window. The other agent-doc panes (%434 claim-error, %436 briantakita.me) are alive but displaced in session 3 — they can be retrieved when needed via the cross-session join.
-<!-- agent:boundary:01fa053f -->
+<!-- agent:boundary:16d3bd9b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

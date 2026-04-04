@@ -424,7 +424,7 @@ The template would have components for:
 - `&lt;!-- agent:recommendations --&gt;` — subagent suggestions, context warnings
 
 Want me to build this now?
-<!-- agent:boundary:9a21e8b2 -->
+<!-- agent:boundary:77d0f1cd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

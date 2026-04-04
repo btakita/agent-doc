@@ -15,6 +15,7 @@ Steps to compact an agent-doc exchange component when it grows too large.
    - Decisions made (with rationale)
    - Key facts and discoveries
    - Open items and pending work
+   - **Unanswered user input** — if the exchange contains uncommitted questions or instructions that haven't been responded to, note them as open items in the summary (don't silently drop them)
    - Discard verbose back-and-forth, code snippets already committed, exploratory dead-ends
 
 3. **Run `agent-doc compact <FILE>`**

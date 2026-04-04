@@ -40,6 +40,7 @@ const BUNDLED_SKILL: &str = include_str!("../SKILL.md");
 /// Bundled runbooks installed alongside the skill.
 const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
     ("compact-exchange.md", include_str!("../runbooks/compact-exchange.md")),
+    ("transfer-extract.md", include_str!("../runbooks/transfer-extract.md")),
 ];
 
 /// Current binary version (from Cargo.toml).

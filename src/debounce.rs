@@ -63,7 +63,9 @@ pub fn document_changed(file: &str) {
         map.insert(path.clone(), Instant::now());
     });
     // Write cross-process typing indicator (best-effort, never block)
-    let _ = write_typing_indicator(file);
+    if let Err(e) = write_typing_indicator(file) {
+        eprintln!("[debounce] typing indicator write failed for {:?}: {}", file, e);
+    }
 }
 
 /// Check if the document has been idle (no changes) for at least `debounce_ms`.
@@ -136,10 +138,10 @@ fn typing_indicator_path(file: &str) -> PathBuf {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     file.hash(&mut hasher);
     let hash = hasher.finish();
-    // Walk up to find .agent-doc/ directory
+    // Walk up to find .agent-doc/ directory (one pop per level, no skip)
     let mut dir = PathBuf::from(file);
+    dir.pop(); // Start from file's parent
     loop {
-        dir.pop();
         if dir.join(".agent-doc").is_dir() {
             return dir.join(TYPING_DIR).join(format!("{:016x}", hash));
         }
@@ -289,8 +291,8 @@ fn status_file_path(file: &str) -> PathBuf {
     file.hash(&mut hasher);
     let hash = hasher.finish();
     let mut dir = PathBuf::from(file);
+    dir.pop(); // Start from file's parent
     loop {
-        dir.pop();
         if dir.join(".agent-doc").is_dir() {
             return dir.join(STATUS_DIR).join(format!("{:016x}", hash));
         }
@@ -584,5 +586,65 @@ mod tests {
 
         // Should wait at least the debounce time (allowing some jitter)
         assert!(elapsed >= 100);
+    }
+
+    // ── GAP 7: Directory-walk bug (depth-1) ──
+    // typing_indicator_path and status_file_path had a double-pop bug:
+    // each loop iteration popped twice, skipping every other directory level.
+    // Files at depth 1 from the project root (e.g. tasks/file.md) failed to
+    // find .agent-doc/ and fell back to the wrong path.
+
+    #[test]
+    fn typing_indicator_found_for_file_one_level_deep() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // .agent-doc at project root
+        let agent_doc_dir = tmp.path().join(".agent-doc").join("typing");
+        std::fs::create_dir_all(&agent_doc_dir).unwrap();
+        // File one level deep (tasks/file.md pattern)
+        let subdir = tmp.path().join("tasks");
+        std::fs::create_dir_all(&subdir).unwrap();
+        let doc = subdir.join("test-depth1.md");
+        std::fs::write(&doc, "test").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        document_changed(&doc_str);
+
+        // Should find .agent-doc/ at project root, not fall back to wrong path
+        assert!(is_typing_via_file(&doc_str, 2000));
+    }
+
+    #[test]
+    fn typing_indicator_found_for_file_two_levels_deep() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = tmp.path().join(".agent-doc").join("typing");
+        std::fs::create_dir_all(&agent_doc_dir).unwrap();
+        // File two levels deep (tasks/software/file.md pattern)
+        let subdir = tmp.path().join("tasks").join("software");
+        std::fs::create_dir_all(&subdir).unwrap();
+        let doc = subdir.join("test-depth2.md");
+        std::fs::write(&doc, "test").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        document_changed(&doc_str);
+
+        assert!(is_typing_via_file(&doc_str, 2000));
+    }
+
+    #[test]
+    fn status_found_for_file_one_level_deep() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = tmp.path().join(".agent-doc").join("status");
+        std::fs::create_dir_all(&agent_doc_dir).unwrap();
+        let subdir = tmp.path().join("tasks");
+        std::fs::create_dir_all(&subdir).unwrap();
+        let doc = subdir.join("test-status-depth1.md");
+        std::fs::write(&doc, "test").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        set_status(&doc_str, "generating");
+
+        // get_status uses in-process map (always works), but cross-process file check
+        // must find .agent-doc at project root
+        assert_eq!(get_status_via_file(&doc_str), "generating");
     }
 }

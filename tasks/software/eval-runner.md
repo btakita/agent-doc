@@ -690,7 +690,7 @@ For the `claude` CLI backend, we'd add `--temperature 0` (or use `--model-params
 **Smoke suite** is the answer to "takes too long" — tag the 5-7 cases that are always stable (deletion-of-content, comment-content-ignored, boundary-only-change, head-label-removal, single-word-correction) and run those in ~2 min for quick checks. Full suite for releases.
 
 **Fixtures won't help with variance** — they test different things (agentic execution vs diff interpretation). The variance is a judge problem, not a case design problem.
-<!-- agent:boundary:8a6163a6 -->
+<!-- agent:boundary:807b04bf -->
 <!-- /agent:exchange -->
 
 ## Pending

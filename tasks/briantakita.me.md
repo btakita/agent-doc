@@ -2293,7 +2293,7 @@ Should I publish this
 3. **Monday or Tuesday** — post the video (weekend to edit out WordPress admin section)
 
 Staggers content: runbooks teaser (today) → skill encapsulation teaser (Monday) → video (Mon/Tue). Each drives traffic to the same blog post from a different angle.
-<!-- agent:boundary:07c0121c -->
+<!-- agent:boundary:8936b7dd -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

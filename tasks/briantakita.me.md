@@ -2303,14 +2303,28 @@ Deploy blog post update today regardless, so the new section is live before the 
 
 do
 - Blog post: build + deploy skill encapsulation section (do today)
-### Re: Blog post deployed (HEAD)
+
+### Re: Blog post deployed
 
 Committed and pushed:
 1. `briantakita.me` — skill encapsulation section added
 2. `briantakita.me-dev` — submodule pointer updated
 
 CI deploy in progress. Live at: https://briantakita.me/post/2026-04-03-agent-runbooks-on-demand-procedural-context
-<!-- agent:boundary:1fdf0136 -->
+
+Is the published linkedin teaser up to date with the latest corky.md savings?
+### Re: Is the published teaser up to date? (HEAD)
+
+**Yes, the published numbers are correct.** 12 runbooks / 212 lines / 28% = the original runbook extraction from CLAUDE.md and pre-existing SKILL.md files.
+
+The corky work added 4 new runbooks from the newly split skills (total now 16). But those belong to the skill decomposition story — the skills they came from didn't exist before the split.
+
+Each LinkedIn post tells one clean story:
+- **Published teaser:** runbook extraction (12 runbooks, 212 lines, 28%)
+- **Sequel teaser:** skill decomposition (695 → 58-66 lines per invocation, 4 additional runbooks)
+
+Updating the published post to "16 runbooks" would blur the narrative by mixing two different optimizations.
+<!-- agent:boundary:9f6200f3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

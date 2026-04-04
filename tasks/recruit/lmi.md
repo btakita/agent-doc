@@ -1007,7 +1007,37 @@ Subject: Re: Interview Follow-up — agent-doc & Interactive Document Generation
 ❯ 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   ⏵⏵ bypass permissions on (shift+tab to cycle)
-<!-- agent:boundary:a07c5f55 -->
+
+     tmp/bob-remeika-call-structure.md
+       #12572  11:13 AM  ✅  Call structure document created for Ragie CEO meeting
+
+     tmp/bob-remeika-call-structure.html
+       #12573            ✅  PDF call structure generated for Bob Remeika meeting
+
+     tasks/professional/bob-remeika.md
+       #12574  11:24 AM  ✅  Added one-page summary constraint to Bob Remeika call structure document
+
+     tmp/bob-remeika-call-structure.md
+       #12575            🔄  Condensed Bob Remeika call structure into one-page table format
+
+     tasks/professional/bob-remeika.md
+       #12576  11:26 AM  🟣  Generated call structure PDF for Bob Remeika meeting
+
+     #S3639 Generate call preparation PDF for Bob Remeika meeting with structured agenda blocks (Apr 2, 11:26 AM)
+
+     tmp/bob-remeika-call-structure.md
+       #12577  11:26 AM  🔄  Restructured call document from table to hierarchical format with compact CSS
+
+
+     Access 237k tokens of past research & decisions for just 17,953t. Use the claude-mem skill to access memories by ID.
+
+     View Observations Live @ http://localhost:37777
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+<!-- agent:boundary:ef5e2435 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

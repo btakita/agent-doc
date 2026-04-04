@@ -156,7 +156,7 @@ docker run --rm \
 The `/dev/null` bind mount masks the local `.cargo/config.toml`, forcing crates.io resolution. No tmux-router mount needed. Only `src/agent-doc` is exposed to the container.
 
 Should we add this as a runbook linked from the appropriate SKILL.md?
-### Re: PyPI publish runbook placement (HEAD)
+### Re: PyPI publish runbook placement
 
 No — this belongs in the **prerelease runbook** (`.agent/runbooks/prerelease.md`), not in agent-doc's SKILL.md. PyPI publishing is a release operation, not a document session operation.
 
@@ -164,7 +164,34 @@ Updated `.agent/runbooks/prerelease.md` Target: pypi section with:
 - Docker command using `/dev/null` mask for `.cargo/config.toml`
 - Upload command using `pass pypi/publish_token`
 - Security note: never mount the entire workspace
-<!-- agent:boundary:f5937922 -->
+
+During the previous agent-doc run, I saw:
+```
+● Bash(cd /home/brian/work/btakita/agent-loop && agent-doc preflight tasks/agent-doc/agent-doc-claim-error.md 2>&1)
+  ⎿  [preflight] step 0: layout check
+     [preflight] layout issue: stash window 'stash' has non-idle pane %433 running 'claude'
+     [preflight] layout issue: stash window 'stash' has non-idle pane %477 running 'agent-doc'
+     … +115 lines (ctrl+o to expand)
+```
+
+What are these non-idle tmux panes? I have 2 panes in the current 0:agent-doc tmux window.
+### Re: Non-idle tmux panes in stash window (HEAD)
+
+These are **stashed panes from previous sessions** still running in the `stash` window (window 1, 6 panes):
+
+| Pane | Process | Title |
+|------|---------|-------|
+| %433 | claude | Claude Code |
+| %477 | agent-doc | Claude Code |
+| %452 | agent-doc | Debug uncommitted response patch |
+| %431 | agent-doc | Claude Code |
+| %436 | agent-doc | Claude Code |
+| %476 | agent-doc | Claude Code |
+
+Orphaned agent-doc/claude sessions moved to stash but never killed. Preflight warns because they could interfere with session routing.
+
+**To clean up:** `tmux kill-window -t stash` or `agent-doc resync --fix` to clean orphaned sessions.
+<!-- agent:boundary:ad9d42e5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

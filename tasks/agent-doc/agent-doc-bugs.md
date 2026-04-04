@@ -789,7 +789,7 @@ yes
 ```
 agent-doc route failed (exit 1): [route] target tmux session: 10 tmux tree: 1 (detached, activity=1775145094) @192 "stash" [%13(corky)] 10 (attached, activity=1775288617) @221 "agent-doc" [%475(zsh), %474(zsh), %473(zsh), %452(agent-doc), %436(agent-doc)] @233 "stash" [%433(claude), %434(agent-doc), %431(agent-doc)] 8 (attached, activity=1775282578) @175 "zsh" [%399(zsh), %400(zsh)] [sync:GLOBAL] [sync-start] windows: @192 1:stash (1 panes) @221 10:agent-doc (5 panes) @233 10:stash (3 panes) @175 8:zsh (2 panes) [sync:GLOBAL] [sync-start] panes: %13 @192 1:stash %475 @221 10:agent-doc %474 @221 10:agent-doc %473 @221 10:agent-doc %452 @221 10:agent-doc %436 @221 10:agent-doc %433 @233 10:stash %434 @233 10:stash %431 @233 10:stash %399 @175 8:zsh %400 @175 8:zsh [sync] resolve_file: tasks/agent-doc/agent-doc-bugs.md → Registered (session=1ef5f0e7, registry=no (will auto-start)) [route] layout sync failed: failed to parse .agent-doc/sessions.json Error: failed to parse .agent-doc/sessions.json Caused by: invalid type: map, expected a string at line 3 column 4
 ```
-### Re: Fixed registry format + cleaned orphaned panes (HEAD)
+### Re: Fixed registry format + cleaned orphaned panes
 
 **Root cause of route failure:** I wrote `sessions.json` in the wrong format. The registry is a `HashMap<String, RegistryEntry>` (session_id → entry), not an array of objects. My manual reconstruction used `{"sessions": [...]}` which caused the parse error.
 
@@ -815,15 +815,35 @@ agent-doc route failed (exit 1): [route] target tmux session: 10 tmux tree: 1 (d
 The JB "Run Agent Doc" action should work now. The route error was entirely caused by the malformed sessions.json — not a code bug.
 
 **Still needed:** Route cleanup on failure (killing panes created during a failed route attempt) is a real gap that should be fixed separately. The 3 orphaned shells were created because route splits a window, then crashes on the registry parse error, leaving the split pane as an empty shell.
-<!-- agent:boundary:2aab77e9 -->
+
+Add tests
+### Re: Tests added (HEAD)
+
+**New tests in route.rs:**
+
+1. **`sync_after_claim_handles_malformed_registry`** — writes malformed sessions.json (array format instead of map), calls `sync_after_claim`, verifies it handles the error gracefully without panicking. This directly tests the scenario that caused the JB error.
+
+2. **`sync_after_claim_with_empty_col_args_and_no_registry`** — no registry file and no col_args, verifies no panes are created and no panic occurs.
+
+**Existing test that also covers this area:**
+- `sync_after_claim_prefers_col_args_over_registry` — verifies col_args take priority over registry discovery
+
+**GC test (already existed):**
+- `gc_removes_orphaned_snapshots` — verifies orphaned snapshots are cleaned while valid ones are kept
+
+**Full test suite: 634 tests pass** (193 lib + 403 bin + 38 integration).
+
+Built, installed.
+<!-- agent:boundary:f953ac21 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] Registry rebuilt (correct HashMap format)
-- [x] Orphaned panes cleaned (%473, %474, %475)
+- [x] Orphaned panes cleaned
 - [x] Post-sync session health check logging added
+- [x] Tests added for malformed registry + sync cleanup
 - [ ] Route cleanup on failure (kill panes created during failed route)
 - [ ] Add `export AGENT_DOC_LOG=debug` to ~/.zshrc (user action)
 <!-- /agent:pending -->

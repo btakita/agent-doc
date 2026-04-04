@@ -235,7 +235,7 @@ Can any runbooks be extracted from these skills, to avoid over-eagerly using con
 Want me to extract the two email runbooks?
 yes...also extract corky runbooks
 report the token savings
-### Re: Runbook extraction — done (HEAD)
+### Re: Runbook extraction — done
 
 **Savings: 236 → 185 lines always-loaded (21% reduction)**
 
@@ -248,14 +248,24 @@ report the token savings
 **4 new on-demand runbooks:** gmail-config (28), browser-paste (21), imports (21), transcription (28).
 
 All 258 tests pass, clippy clean. Not yet committed.
-<!-- agent:boundary:c0c372b0 -->
+do
+- Commit runbook extractions to corky submodule
+- Release v0.25.1 (or bump)
+### Re: Released v0.25.1 — Skill runbook extraction (HEAD)
+
+Published to all targets:
+- [crates.io](https://crates.io/crates/corky/0.25.1)
+- [PyPI](https://pypi.org/project/corky/0.25.1/)
+- [GitHub Release](https://github.com/btakita/corky/releases/tag/v0.25.1)
+- `~/.cargo/bin/corky` installed with CUDA
+
+21% reduction in always-loaded skill context (236→185 lines). 4 new on-demand runbooks.
+<!-- agent:boundary:a7a4f426 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Commit runbook extractions to corky submodule
-- Release v0.25.1 (or bump)
 - Verify sheet sharing / GCP test users
 - Re-test sheet read
 - Manylinux binary wheel (nice-to-have, needs container/CI)

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-P1-P4 + JB plugin Gson migration shipped. 434 tests passing.
+P1-P5 all shipped. 436 tests passing. Session complete.
 <!-- /agent:status -->
 
 ## Exchange
@@ -364,7 +364,7 @@ Builds clean. Zero new dependencies — Gson ships with every IntelliJ installat
 
 do
 - [ ] Implement content-source annotation sidecar (P4)
-### Re: Do — Content-source annotation sidecar (P4) implemented (HEAD)
+### Re: Do — Content-source annotation sidecar (P4) implemented
 
 Done. New `annotate.rs` module + CLI command + GC integration.
 
@@ -401,7 +401,42 @@ Generates a JSON sidecar at `.agent-doc/annotations/<hash>.json` mapping each li
 **Tests:** 6 new (no_snapshot_all_user, identical_all_agent, user_additions, user_modifications, cache_invalidation, cache_valid_skips). All 434 tests pass, clippy clean.
 
 `--history` flag is wired but deferred (prints path from basic mode). Can add git blame attribution later.
-<!-- agent:boundary:edde535c -->
+
+do
+- [ ] Design reproducible operation log format (P5)
+### Re: Do — Reproducible operation log format (P5) implemented (HEAD)
+
+Done. Enhanced `ops_log.rs` with structured JSONL cycle logging.
+
+**New: `.agent-doc/logs/cycles.jsonl`** — newline-delimited JSON with git state references:
+
+```jsonl
+{"op":"write_inline","file":"tasks/design.md","timestamp":"1743804561","commit_hash":"a1b2c3d4","snapshot_hash":"e5f6...","file_hash":"7890..."}
+{"op":"commit","file":"tasks/design.md","timestamp":"1743804562","commit_hash":"d4e5f6a7"}
+```
+
+**Each entry records:**
+- `op` — operation type (`write_inline`, `write_template`, `write_stream`, `commit`)
+- `file` — document path (relative to project root)
+- `timestamp` — Unix epoch seconds
+- `commit_hash` — git HEAD hash for the file at that point
+- `snapshot_hash` — SHA256 of snapshot content (what the agent wrote)
+- `file_hash` — SHA256 of the file content (includes user edits)
+
+**Commit + snapshot hash = enough to reconstruct any cycle.** A future `agent-doc replay --from <commit>` can:
+1. Checkout the commit
+2. Extract snapshot from `.agent-doc/snapshots/`
+3. Diff to see what the user changed
+4. Re-run the agent response
+
+**Wired into all write paths:**
+- `write.rs` — `write_inline`, `write_template`, `write_stream` (after `snapshot::save`)
+- `git.rs` — `commit` (after successful git commit)
+
+**Tests:** 2 new (log_cycle_writes_jsonl, log_cycle_appends_multiple). All 436 tests pass, clippy clean.
+
+Existing `ops.log` text format is preserved alongside — `cycles.jsonl` adds structure without breaking existing debug workflows.
+<!-- agent:boundary:bf42fa82 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -413,7 +448,7 @@ Generates a JSON sidecar at `.agent-doc/annotations/<hash>.json` mapping each li
 - [x] Implement annotated diff format in preflight (P3) — DONE
 - [x] Fix write pipeline escape bug + Gson migration (JB plugin v0.2.44) — DONE
 - [x] Implement content-source annotation sidecar (P4) — DONE
-- [ ] Design reproducible operation log format (P5)
+- [x] Design reproducible operation log format (P5) — DONE
 - [ ] Add `---` prompt separator convention to SKILL.md
 - [ ] Add transfer-source metadata to patch format
 <!-- /agent:pending -->

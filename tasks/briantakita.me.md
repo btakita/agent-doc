@@ -2282,8 +2282,8 @@ First comment with blog post + repo links added via `corky linkedin`.
 
 Ready to finalize and schedule, or adjust?
 When should this be published? Monday? I also have the video pending.
-Should I publish this
-### Re: Publishing schedule (HEAD)
+Should I publish the followup this evening?
+### Re: Publishing schedule
 
 **Monday April 7** for the sequel LinkedIn post. 3 days spacing from today's runbooks post.
 
@@ -2293,12 +2293,19 @@ Should I publish this
 3. **Monday or Tuesday** — post the video (weekend to edit out WordPress admin section)
 
 Staggers content: runbooks teaser (today) → skill encapsulation teaser (Monday) → video (Mon/Tue). Each drives traffic to the same blog post from a different angle.
-<!-- agent:boundary:8936b7dd -->
+### Re: Publish follow-up this evening? (HEAD)
+
+**Recommend waiting.** Two posts same day compete in the algorithm. The runbooks post just went live — needs 24-48 hours for its engagement wave. Posting tonight splits attention and reduces reach on both.
+
+**If you must post today:** Wait 4-6 hours minimum, ensure first post has engagement. But Monday morning is the stronger play.
+
+Deploy blog post update today regardless, so the new section is live before the sequel.
+<!-- agent:boundary:cb728d7c -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Blog post: build + deploy skill encapsulation section (do today/weekend)
-- LinkedIn sequel teaser: publish Monday ~9 AM ET
+- Blog post: build + deploy skill encapsulation section (do today)
+- LinkedIn sequel teaser: publish Monday ~9 AM ET (not tonight)
 - Video: edit out WordPress admin section, post Mon/Tue
 - Corky skill architecture: transferred to tasks/software/corky.md
 - Second blog post + video: target Wed/Thu Apr 9-10

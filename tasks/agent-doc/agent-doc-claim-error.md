@@ -73,7 +73,7 @@ The briantakita.me session did the "transfer" manually — it wrote a summary in
 **The corky session was technically correct** about the *skill's* limitations (it can only `agent-doc write` to its own document), but wrong about the *binary's* capabilities (`agent-doc transfer` can write cross-file).
 
 **Fix:** Add transfer/extract usage to SKILL.md or a runbook so the skill knows to run `agent-doc transfer <SOURCE> <TARGET> <COMPONENT>` instead of manually describing the transfer.
-<!-- agent:boundary:653c0bb1 -->
+<!-- agent:boundary:c01d12db -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

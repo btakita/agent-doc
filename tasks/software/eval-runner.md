@@ -1268,7 +1268,7 @@ The annotations live in a sidecar file (`.agent-doc/annotations/<hash>.json`) wi
 **Recommendation: Option C.** It keeps the markdown pristine (no annotation noise), the editor view renders colors from the sidecar, and the annotations don't interfere with diff computation or CRDT merging. The sidecar is computed from the CRDT state — it's derived data, not stored.
 
 This aligns with the iA philosophy of separating content from metadata while keeping author attribution available for rendering.
-<!-- agent:boundary:b321262b -->
+<!-- agent:boundary:38aa2292 -->
 <!-- /agent:exchange -->
 
 ## Pending

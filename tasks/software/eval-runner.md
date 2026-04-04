@@ -880,7 +880,7 @@ Full 19-case suite running with tightened rubrics. Will report results when done
 - `multi-topic-approval-plus-questions` (0.60) — close to threshold
 
 The rubric tightening delivered: 6 cases improved by 0.15+ points. The eval suite is now a meaningful signal — 78.9% with clear pass/fail for each case category.
-<!-- agent:boundary:5a045271 -->
+<!-- agent:boundary:82621e61 -->
 <!-- /agent:exchange -->
 
 ## Pending

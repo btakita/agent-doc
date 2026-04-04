@@ -253,7 +253,7 @@ Yes. We should change the default operation of `/module-harness`. The bootstrap,
 Key change: **default is audit (read-only), not generation.** `seed` is explicit.
 
 This is a module-harness skill redesign — tracked separately. Proceeding with SPEC.md for agent-doc now. I'll write the pane lifecycle spec with the Binding invariant as the authoritative source.
-<!-- agent:boundary:424d55a1 -->
+<!-- agent:boundary:65382920 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

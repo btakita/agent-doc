@@ -1835,7 +1835,7 @@ Updated both to use "By identifying and extracting 12 runbooks, I cut 212 lines.
 > What directory convention are you using for agent config? `.agent/`, `.agents/`, `.ai/`? The ecosystem hasn't settled this yet and I'd love to hear what's working for you.
 
 **Blog post** line 30 also updated to match.
-<!-- agent:boundary:e78f2459 -->
+<!-- agent:boundary:8a5eb363 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

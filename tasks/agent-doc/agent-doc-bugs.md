@@ -50,8 +50,8 @@ This session:
 
 **Current state:** v0.31.10 released (crates.io + GitHub + installed). All pending items complete. 637 tests pass.
 
-What is the path to have robert-ross-granola.md committed? `agent-doc claim` will have an error due to the file already being claimed. `agent-doc sync` does not seem to cause a commit. It probably should.
-### Re: Add `ensure_initialized()` to sync's file resolution (HEAD)
+What is the path to have robert-ross-granola.md committed? `agent-doc claim` will have an error due to the file already being claimed. `agent-doc sync` does not seem to cause a commit. It probably should use the same entrypoint path.
+### Re: Add `ensure_initialized()` to sync's file resolution
 
 You're right — there's a gap. The path for `robert-ross-granola.md`:
 
@@ -66,11 +66,36 @@ You're right — there's a gap. The path for `robert-ross-granola.md`:
 This means any file with a session UUID that appears in the editor gets initialized automatically, regardless of whether it was claimed or had `/agent-doc` run on it.
 
 Should I implement this?
-<!-- agent:boundary:3e976b80 -->
+yes...and we have another case where the entrypoint should be applied.
+When the JB editor focuses on the file...there is a JB prompt `Sync: --col tasks/agent-doc/agent-doc-bugs.md --col tasks/recruit/robert-ross-granola.md [focus: tasks/recruit/robert-ross-granola.md]`. This should also trigger the entrypoint. Is `agent-doc sync` being called in this case or is the prompt just showing up? I notice that the tmux pane focus does not change.
+### Re: Two issues found — no session UUID + focus broken (HEAD)
+
+**Sync log reveals the root cause:**
+
+```
+col_args=["tasks/agent-doc/agent-doc-bugs.md", "tasks/recruit/robert-ross-granola.md"]
+column 1 has no agent doc, substituting remembered: tasks/software/corky.md
+```
+
+Sync IS being called, but `robert-ross-granola.md` has no `agent_doc_session` in its frontmatter — only `agent_doc_format: template` and `agent_doc_write: crdt`. Sync checks `fm.session.is_some()` and silently drops the file, replacing it with the column memory fallback (corky.md).
+
+**Issue 1: No session UUID** — The granola import created a template doc without a session UUID. Sync treats it as non-agent-doc.
+
+**Issue 2: Focus doesn't change** — The file is dropped from the layout, so the `focus` parameter has no matching pane.
+
+**Fix plan:**
+1. `ensure_initialized()` — if the file has `agent_doc_format` but no `agent_doc_session`, generate and write a UUID
+2. Add `ensure_initialized()` to sync's `resolve_file` — call BEFORE checking `fm.session`, so the UUID gets assigned first
+3. Update the granola import runbook to generate a session UUID at creation time
+
+Should I implement all three?
+<!-- agent:boundary:57d5bcdc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Add `ensure_initialized()` to sync's `resolve_file` — awaiting approval
+- [ ] ensure_initialized: assign session UUID to template files missing one
+- [ ] Add ensure_initialized to sync's resolve_file (before session check)
+- [ ] Update granola import runbook to generate session UUID
 <!-- /agent:pending -->

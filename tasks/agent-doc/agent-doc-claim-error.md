@@ -60,7 +60,10 @@ JetBrains options:
 do
 - [ ] Archive history + squash old task commits: add an agent-doc command
 - [ ] Throttle VCS refresh in JetBrains plugin for task documents
-### Re: Both implemented (HEAD)
+Implement the feature to archive to a revision or date. Don't do it yet. I want to discuss the cutoff point.
+
+Navigating this file is fast. Navigating agent-doc-bugs.md is slow. Why?
+### Re: Both implemented
 
 **1. `agent-doc clean --archive`** (`clean.rs` + `main.rs`):
 - New `--archive` flag creates `archive/pre-squash-<unix_timestamp>` tag before squashing
@@ -73,7 +76,33 @@ do
 - Reduces JetBrains re-indexing overhead from rapid agent-doc commits
 
 Committed: `f5be407`. All tests pass, plugin builds clean.
-<!-- agent:boundary:60f1d955 -->
+### Re: Archive-to-revision — noted, not implementing yet (HEAD)
+
+Will discuss cutoff point before implementing. The `--archive` flag is ready for when we decide.
+
+### Re: Why agent-doc-bugs.md is slow but this file is fast (HEAD)
+
+I can't pinpoint it from the CLI — the measurable metrics are similar:
+
+| Metric | claim-error.md | bugs.md |
+|--------|---------------|---------|
+| Lines | 88 | 125 |
+| Bytes | 3.9 KB | 6.5 KB |
+| Commits | 776 | 208 |
+| CRDT | 3.8 KB | 6.5 KB |
+| git blame | 65ms | 11ms |
+| Components | 7 | 8 |
+
+Claim-error actually has **more** commits (776 vs 208) and is the fast one. File size difference is negligible. Git operations are fast for both.
+
+**Possible causes I can't measure from CLI:**
+- Markdown preview rendering (bugs.md has code blocks/tables)
+- Plugin per-file state (stashed pane %483 still registered for bugs.md)
+- JetBrains VCS annotation cache state for that specific file
+- Editor highlighting/inspection overhead
+
+**To diagnose:** In JetBrains: Help → Diagnostic Tools → Activity Monitor, or capture a thread dump while navigating bugs.md. That would show what's actually blocking.
+<!-- agent:boundary:de423c8e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -82,4 +111,6 @@ Committed: `f5be407`. All tests pass, plugin builds clean.
 - [x] GC orphaned 3.9 GB blob from git history
 - [x] `agent-doc clean --archive` flag
 - [x] VCS refresh debounce in JetBrains plugin (500ms)
+- [ ] Discuss archive cutoff point for squash
+- [ ] Diagnose agent-doc-bugs.md JetBrains slowness (need IDE profiler)
 <!-- /agent:pending -->

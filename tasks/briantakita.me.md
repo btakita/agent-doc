@@ -2078,18 +2078,39 @@ Precommit, prerelease, and LinkedIn runbooks are all implicit — they augment e
 Skills are for "do this specific multi-step thing now." Runbook references are for "whenever you're doing X, follow this procedure."
 
 post LinkedIn blog teaser
-### Re: LinkedIn blog teaser — ready to paste (HEAD)
+### Re: LinkedIn blog teaser — ready to paste
 
 Chrome not running with remote debugging — paste manually. Content is formatted above in the console (no markdown, links in first comment per runbook).
 
 1. Copy post body → paste into LinkedIn composer → publish
 2. Immediately add first comment with the two links
 3. Verify both visible
-<!-- agent:boundary:e614fbd9 -->
+
+> Your CLAUDE.md is bloated. Here's what to do about it.
+
+Should we be less presumptious? The reader may already use a similar solution. Let's tone this down a bit.
+### Re: Less presumptuous opener (HEAD)
+
+Revised: "Your CLAUDE.md is bloated. Here's what to do about it." → "Is your CLAUDE.md carrying too much weight?"
+
+Question instead of accusation — invites reflection rather than defensiveness. Full revised post body:
+
+Is your CLAUDE.md carrying too much weight?
+
+Every token in your AI instruction file costs you something. Release checklists, deploy procedures, precommit workflows... they're important, but they don't need to occupy context when the agent is writing a utility function.
+
+I've been externalizing step-by-step procedures into agent runbooks — plain markdown files that agents load on demand instead of carrying in every interaction. By identifying and extracting 12 runbooks, I cut 212 lines from my instruction files — a 28% reduction in persistent context.
+
+The pattern works with Claude Code, Cursor, Copilot, Windsurf, Gemini CLI, Aider, and Codex. No special syntax. No vendor lock-in.
+
+What directory convention are you using for agent config? .agent/, .agents/, .ai/? The ecosystem hasn't settled this yet and I'd love to hear what's working for you.
+
+Links in the comments.
+<!-- agent:boundary:29815950 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn blog teaser: POSTING NOW (paste manually)
+- LinkedIn blog teaser: revised opener, ready to paste
 - Video: edit out WordPress admin section, then post
 - Second blog post + video: target Wed/Thu Apr 9-10
 - Cleanup: remove stale directories

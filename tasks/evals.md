@@ -186,6 +186,36 @@ Slight pass rate improvement (+9.5pp) but nearly identical mean scores. Sonnet i
 **Actionable insight:** The 3 zero/near-zero scores (`comment-content-ignored`, `single-word-approval`, `approval-to-implement`) point to the same root issue: the SKILL.md prompt doesn't explicitly teach the agent about comment stripping, single-word approval signals, or the pending protocol. These are high-leverage fixes.
 
 Baseline committed to `evals/agent-doc/diff-interpretation/baselines/sonnet-2026-04-04.json`.
+### Re: Phase 1 Complete
+
+Sonnet baseline run complete and saved to `evals/agent-doc/diff-interpretation/baselines/sonnet-2026-04-04.json`.
+
+**Actual results (file was 0 bytes — prior entry in exchange was not persisted):**
+
+| Model | Passed | Pass Rate | Mean Score |
+|-------|--------|-----------|------------|
+| haiku-2026-04-03 | 9/21 | 42.9% | 0.57 |
+| sonnet-2026-04-04 | 8/21 | 38.1% | 0.49 |
+
+Sonnet scored *lower* than Haiku this run — slightly surprising. Key failures:
+
+| Case | Score | Failure mode |
+|------|-------|--------------|
+| `approval-to-implement` | 0.00 | Still planning instead of executing after "yes, implement" |
+| `single-word-approval` | 0.00 | "go" not recognized as approval signal |
+| `comment-content-ignored` | 0.00 | Responded to HTML comment content |
+| `head-label-removal` | 0.10 | Responded to agent artifact cleanup (should be silent) |
+| `multi-item-instruction-list` | 0.10 | Asked questions instead of executing checklist |
+| `simple-question` | 0.10 | Deflected with "I don't have docs" |
+| `blockquote-annotation` | 0.10 | Saw permission issue, missed the actual intent |
+
+**Phase 1 is now complete.** All artifacts exist:
+- `evals/agent-doc/diff-interpretation/cases.yaml` (21 cases)
+- `evals/agent-doc/diff-interpretation/baselines/haiku-2026-04-03.json`
+- `evals/agent-doc/diff-interpretation/baselines/sonnet-2026-04-04.json`
+- `src/eval-runner/` (Rust CLI)
+
+Next: attack the top failure clusters — comment stripping, approval signals, pending protocol.
 ### Re: Phase 1 Complete (HEAD)
 
 Sonnet baseline run complete and saved to `evals/agent-doc/diff-interpretation/baselines/sonnet-2026-04-04.json`.
@@ -216,7 +246,37 @@ Sonnet scored *lower* than Haiku this run — slightly surprising. Key failures:
 - `src/eval-runner/` (Rust CLI)
 
 Next: attack the top failure clusters — comment stripping, approval signals, pending protocol.
-<!-- agent:boundary:75df2f50 -->
+<!-- patch:exchange patch=append -->
+### Re: Yes + debounce gaps + tests + SPEC.md + audit (HEAD)
+
+**Golden test cases:** 21 cases already exist in `evals/agent-doc/diff-interpretation/cases.yaml` — within the 20-30 target range. ✓
+
+**Debounce gaps (SPEC.md §11):** 6 known gaps:
+
+| Gap | Risk | Criticality |
+|-----|------|-------------|
+| §11.1 Mtime granularity | HFS+ 1s resolution misses rapid cross-process edits | Medium |
+| §11.2 Untracked file edge | `await_idle` on never-seen file returns true (silent fallback) | Low |
+| §11.3 Hash collision | `DefaultHasher` not collision-resistant for typing indicators | Low |
+| §11.4 Reactive CRDT | Corrupted CRDT → silent data loss; non-idempotent merge → infinite loop | **Critical** |
+| §11.5 Status staleness | Crashed agent leaves 30s stale status blocking operations | High |
+| §11.6 Timing constants | Preflight 1500ms hardcoded — no per-document override | Medium |
+
+**Tests (`tests/debounce_gaps_test_plan.rs`):** 9/15 enabled and passing:
+- ✅ Gap 1 (mtime): both tests — `is_idle` uses `Instant`, immune to filesystem granularity
+- ✅ Gap 2 (untracked): all 4 tests — `is_tracked()` API verified
+- ✅ Gap 3 (hash collision): 10k-path collision check — 0 collisions
+- ✅ Gap 5 (staleness): 29s/30s/31s boundary tests pass (fixed path bug in original plan)
+- ✅ Gap 6 test 3: timing constants documented (code review gate)
+- 🚫 6 tests remain `#[ignore]` — blocked with explicit reason comments (need `crdt::merge` pub, `preflight::run` pub, GC implementation)
+
+**SPEC.md §11:** Test coverage references updated to actual test names and file location.
+
+**Audit (`make precommit`):** 4 pre-existing issues:
+- `SKILL.md`, `CLAUDE.md`, `README.md` older than `src/ffi.rs` — stale doc signal
+- `CLAUDE.md:22-35` large table (warning)
+<!-- /patch:exchange -->
+<!-- agent:boundary:e2330fbf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

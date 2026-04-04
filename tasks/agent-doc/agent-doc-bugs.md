@@ -817,7 +817,10 @@ The JB "Run Agent Doc" action should work now. The route error was entirely caus
 **Still needed:** Route cleanup on failure (killing panes created during a failed route attempt) is a real gap that should be fixed separately. The 3 orphaned shells were created because route splits a window, then crashes on the registry parse error, leaving the split pane as an empty shell.
 
 Add tests
-### Re: Tests added (HEAD)
+
+do
+- [ ] Route cleanup on failure (kill panes created during failed route)
+### Re: Tests added
 
 **New tests in route.rs:**
 
@@ -834,7 +837,29 @@ Add tests
 **Full test suite: 634 tests pass** (193 lib + 403 bin + 38 integration).
 
 Built, installed.
-<!-- agent:boundary:cb4fd1cc -->
+
+do
+- [ ] Route cleanup on failure (kill panes created during failed route)
+### Re: Route cleanup on failure implemented (HEAD)
+
+**What changed:** `run_with_tmux()` in route.rs now snapshots the panes in the agent-doc window before attempting to resolve/create a pane. If `resolve_or_create_pane` fails, it compares the current panes against the snapshot and kills any new ones that were created during the failed attempt.
+
+**How it works:**
+1. Before route: snapshot all panes in `{session}:agent-doc` window
+2. Try `resolve_or_create_pane` (may split-window for auto-start)
+3. On success: proceed with `sync_after_claim` as before
+4. On error: diff current panes vs snapshot, kill any new panes, then propagate the error
+
+**Log output on cleanup:**
+```
+[route] cleaning up orphaned pane %476 (created during failed route)
+```
+Plus tracing at warn level for the debug log.
+
+This prevents the 3-orphaned-shell scenario: when route fails (e.g., malformed registry), any panes it created are cleaned up before the error propagates to JB.
+
+634 tests pass. Built, installed.
+<!-- agent:boundary:e664279f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -844,6 +869,6 @@ Built, installed.
 - [x] Orphaned panes cleaned
 - [x] Post-sync session health check logging added
 - [x] Tests added for malformed registry + sync cleanup
-- [ ] Route cleanup on failure (kill panes created during failed route)
+- [x] Route cleanup on failure (kill panes created during failed route)
 - [ ] Add `export AGENT_DOC_LOG=debug` to ~/.zshrc (user action)
 <!-- /agent:pending -->

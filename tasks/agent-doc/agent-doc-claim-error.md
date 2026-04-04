@@ -173,7 +173,7 @@ make version-sync   # silent if matched
 Committed: `4e554d4` — `feat: add version-sync check to make check`
 
 Now `make check` (which the prerelease runbook runs first) will catch any Cargo/pyproject version drift automatically.
-<!-- agent:boundary:ba9047c2 -->
+<!-- agent:boundary:d38bee47 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

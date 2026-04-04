@@ -262,7 +262,8 @@ The naming: `contexts/` is the right generic term. `runbooks/` stays as a subdir
 
 do
 > - [ ] Extract corky runbooks: review-inbox, draft-reply, enrich-contact
-### Re: Corky runbooks extracted (HEAD)
+
+### Re: Corky runbooks extracted
 
 Created three corky/email runbooks:
 
@@ -271,7 +272,29 @@ Created three corky/email runbooks:
 - **`email/runbooks/enrich-contact.md`** — check/create contact, gather info from conversations/LinkedIn/social, update AGENTS.md, verify claims
 
 All three follow the existing pattern: co-located with the email skill under `runbooks/`, referenced by relative path. The email skill now has 4 runbooks total (including `email-send.md` from earlier).
-<!-- agent:boundary:4a4b75a4 -->
+I don't want to create a context/ directory. Will create scoped domains of context all within the .agent directory.
+> - [ ] Design `contexts/` directory structure for skills
+Please measure the token savings and notify tasks/briantakita.me.md
+
+agent-doc should have a command to notify a document. This is distinct from transferring to the document. notifying a document should update the document with the new information. Any conclusions that were made with the older set of
+### Re: Token savings measured and notification sent (HEAD)
+
+**Token savings (4 chars/token estimate):**
+
+| Skill | Before | After | Saved |
+|-------|--------|-------|-------|
+| dev/SKILL.md | ~3,132t | ~1,977t | ~1,155t (36%) |
+| email/SKILL.md | ~1,133t | ~878t | ~255t (22%) |
+| livestream/SKILL.md | ~1,262t | ~482t | ~780t (61%) |
+| module-harness/SKILL.md | ~909t | ~864t | ~45t (4%) |
+| **Total** | ~6,436t | ~4,201t | **~2,235t (34%)** |
+
+**On-demand runbooks:** 14 files, ~3,002t total (loaded only when executing specific procedures)
+
+**Net effect per skill invocation:** ~2,235t fewer tokens always loaded. A `/dev status` that doesn't need release workflows saves ~1,155t. A `/livestream on` that doesn't need the audit tables saves ~780t.
+
+Notification written to `tasks/briantakita.me.md` claims log. It will appear next time that document session runs preflight.
+<!-- agent:boundary:3a9d630b -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

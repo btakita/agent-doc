@@ -253,7 +253,7 @@ Practical bonus: the `anthropic-api` backend already depends on `reqwest`. Curre
 **Revised plan:** Re-add tokio. `--parallel N` becomes a tokio semaphore (bounded concurrency) instead of a thread pool. Future-proofs for enterprise scale, large case suites, and streaming response processing.
 
 **Decision: Use tokio for parallelism (2026-04-04).** Async subprocess + semaphore-based concurrency. Scales better than threads for enterprise use cases with high rate limits and large eval suites.
-<!-- agent:boundary:2a30a060 -->
+<!-- agent:boundary:e3f93cfe -->
 <!-- /agent:exchange -->
 
 ## Pending

@@ -472,7 +472,7 @@ After transfer, all transferred headings are genuinely new (transfer writes to w
 The original behavior was actually correct for this case. The visual result (all headers showing blue gutter) is expected after a transfer — they're all newly committed content.
 
 Committed: `0c24e60`. Binary rebuilt.
-<!-- agent:boundary:92447a0d -->
+<!-- agent:boundary:51e896b7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

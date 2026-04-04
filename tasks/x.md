@@ -8,7 +8,7 @@ agent_doc_write: crdt
 <!-- agent:exchange patch=append -->
 I want to delete controversial tweets from my x.com profile.
 
-**Options for bulk tweet management:**
+**Options for bulk tweet management:** (HEAD)
 
 1. **X's built-in tools** — Go to Settings > Your Account > Download an archive of your data. This gives you a `tweets.js` file with all your tweets. We can parse it, filter by keywords/topics, and generate a list of tweet IDs to delete.
 
@@ -19,7 +19,7 @@ I want to delete controversial tweets from my x.com profile.
    - Filters tweets by keywords, date range, or sentiment
    - Deletes matching tweets via the API
 
-**Recommended workflow:**
+**Recommended workflow:** (HEAD)
 1. Download your tweet archive from X settings
 2. Define what "controversial" means for your case (keywords, topics, date ranges)
 3. Review the filtered list before any deletion

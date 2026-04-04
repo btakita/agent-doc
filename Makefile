@@ -36,11 +36,20 @@ version-sync:
 		exit 1; \
 	fi
 
+# Check plugin version was bumped if .kt files changed
+plugin-version-check:
+	@if git diff --cached --name-only 2>/dev/null | grep -q '\.kt$$'; then \
+		if ! git diff --cached --name-only 2>/dev/null | grep -q 'gradle.properties'; then \
+			echo "ERROR: .kt files changed but editors/jetbrains/gradle.properties pluginVersion not bumped"; \
+			exit 1; \
+		fi; \
+	fi
+
 # clippy + test + version sync
 check: clippy test version-sync
 
-# Pre-commit: clippy + test + audit-docs
-precommit: check
+# Pre-commit: clippy + test + audit-docs + plugin version check
+precommit: check plugin-version-check
 	cargo run --quiet -- audit-docs
 
 # Install to ~/.cargo/bin

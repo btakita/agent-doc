@@ -654,7 +654,7 @@ This gives the receiving agent:
 - Clear action directive (what to do with it)
 
 Should I implement this as a change to `extract.rs`/`notify.rs`, or do you want to design the annotation format further first?
-<!-- agent:boundary:e3e6df48 -->
+<!-- agent:boundary:f9787caa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

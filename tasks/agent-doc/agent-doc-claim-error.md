@@ -288,7 +288,7 @@ The markdown is valid. This means the thrashing is in the **agent-doc plugin**, 
 I can't determine what from the code alone — all the regex patterns and document scans look like they should only run on patch events, not continuously. The thread dumps show threads sleeping. The CPU usage is from rapid short-duration operations that complete between sample points.
 
 **Concrete next step:** Add timing instrumentation to each plugin method that touches document content (`repositionBoundaryViaDocument`, `applyPatch`, PromptPoller's `refreshTrackedFiles`). Log elapsed time — if any consistently shows high duration when bugs.md is active, that's the culprit.
-<!-- agent:boundary:8dcb7717 -->
+<!-- agent:boundary:591595d3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -413,7 +413,7 @@ The **git squash** was the trigger that cascaded into the current broken state:
 3. Git squash invalidated snapshot + session state → operational hazard (can't fully prevent, but nav-swap would make recovery automatic)
 
 The nav-swap feature is the real fix — even when state gets corrupted, sync would find the claimed pane in stash and bring it back instead of creating new windows.
-<!-- agent:boundary:38dd6727 -->
+<!-- agent:boundary:e707c17f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

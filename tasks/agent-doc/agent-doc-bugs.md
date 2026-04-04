@@ -38,7 +38,7 @@ The agent-doc transfer source document path should be recorded in the patch. So 
 
 ---
 
-### Transfer from eval-runner session (2026-04-04) (HEAD)
+### Transfer from eval-runner session (2026-04-04)
 
 **Context:** During eval-runner development, several agent-doc feature designs emerged from analyzing eval failures and discussing deterministic preprocessing.
 
@@ -82,13 +82,13 @@ Created at `.claude/skills/agent-doc/runbooks/multi-topic-response.md`. Document
 
 #### 6. Post-preflight eval diffs
 Eval cases should use post-preflight diffs (comments already stripped) to match what the model actually sees in production. Validated: `mixed-valid-and-comment` case went from 0.30 to 0.90 after this fix.
-### Re: Prompt separators with `---` (HEAD)
+### Re: Prompt separators with `---`
 
 Good idea. `---` (horizontal rule) is a natural markdown separator. The skill could detect `---` in the diff as a topic boundary and treat each section as a separate prompt. Works well with multi-topic response pattern (`### Re:` per section). Worth adding to SKILL.md under "Multi-topic prompts."
 
 One consideration: `---` in YAML frontmatter context means something different. Only treat `---` as a prompt separator in the exchange body, not at the document top.
 
-### Re: Transfer source path in patch (HEAD)
+### Re: Transfer source path in patch
 
 Agreed. Recording the source document path lets the receiving agent read the source for context. Could be a patch metadata field:
 
@@ -98,7 +98,7 @@ Agreed. Recording the source document path lets the receiving agent read the sou
 
 The binary would preserve this in component metadata, and the skill would check for it during preflight.
 
-### Re: Transfer from eval-runner session (HEAD)
+### Re: Transfer from eval-runner session
 
 Good batch of designs. Priority ordering:
 
@@ -108,7 +108,38 @@ Good batch of designs. Priority ordering:
 4. **Content-source annotation sidecar** — enables editor coloring. "Cache, not state" design is right. Can land independently.
 5. **Reproducible operation logs** — important for debugging but lower urgency than diff pipeline.
 6. **Multi-topic response runbook** — already created, just add `---` separator convention.
-<!-- agent:boundary:d8bac15a -->
+
+continue
+### Re: Continue (HEAD)
+
+Continuing from the priority ordering. Here's an implementation plan for the top items:
+
+**1. Diff-type classification (P1)**
+
+The implementation path:
+- Add a `classify_diff` function in `src/agent-doc/src/diff.rs` (or new `classify.rs` module)
+- Regex-based heuristics on the unified diff output:
+  - Single `+` line ending with `?` → `SimpleQuestion`
+  - Single `+` line matching `/^(go|yes|do|ok|continue|approved?)$/i` → `Approval`
+  - Changes within agent content lines (`:` appended, inline edits) → `Annotation`
+  - Only `-` lines or reordered hunks → `StructuralChange`
+  - Multiple unrelated `+` blocks separated by context → `MultiTopic`
+  - Only `(HEAD)` or boundary UUID changes → `BoundaryArtifact`
+- Add `"diff_type"` and `"diff_type_reason"` to preflight JSON output
+- Skill reads `diff_type` and short-circuits for simple cases (approvals skip discrimination, questions get direct answers)
+
+**2. Post-preflight eval diffs (P2)**
+
+Quick win — the eval harness should run preflight's comment-stripping logic before computing diffs. This way eval diffs match production diffs exactly. Already validated with the mixed-valid-and-comment case (0.30→0.90).
+
+Implementation: extract the comment-stripping logic into a shared function callable from both preflight and the eval harness.
+
+**3. `---` separator convention**
+
+Simple SKILL.md addition. The skill detects `---` on its own line within the exchange diff as a topic boundary. Each section between separators becomes a `### Re:` response block.
+
+Want me to start implementing any of these? I'd suggest starting with diff-type classification since it's highest leverage, or the `---` separator since it's the quickest to land.
+<!-- agent:boundary:a098e88d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

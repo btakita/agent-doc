@@ -98,7 +98,7 @@ This goes in the workflow section where compaction would naturally be described 
 **Recommendation:** Use approach 1 (inline references) as the primary mechanism. The agent encounters the reference at the decision point, not in a disconnected index. If the number of runbooks grows, add approach 2 as a supplementary index.
 
 The key principle: the SKILL.md should never contain the full procedure when a runbook exists — it should delegate with a link. This keeps the SKILL.md focused on the core workflow and avoids duplication.
-<!-- agent:boundary:83798f86 -->
+<!-- agent:boundary:f42dad14 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

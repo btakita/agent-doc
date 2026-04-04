@@ -255,7 +255,7 @@ The CI failure was caused by `path = "../tmux-router"` in Cargo.toml. CI runners
 - v0.31.8 published to crates.io + GitHub
 - CI should pass now (check the Actions tab)
 - Parent submodule pointer updated
-<!-- agent:boundary:b189eb8c -->
+<!-- agent:boundary:887e6a36 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

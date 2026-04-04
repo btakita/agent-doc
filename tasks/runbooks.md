@@ -396,7 +396,7 @@ What is the notification text's grapheme cluster position?
 >
 > **Re-evaluate:** <affected conclusions>
 ```
-### Re: Grapheme cluster position (HEAD)
+### Re: Grapheme cluster position
 
 `3850,350` means: start at grapheme cluster index 3850, span 350 clusters. A grapheme cluster is one visible character (handles multi-byte Unicode, emoji, combining marks).
 
@@ -407,11 +407,27 @@ Those numbers in the example were **illustrative placeholders**. The real values
 For agent-doc to generate these, it would use `unicode-segmentation` crate to count grapheme clusters (not bytes) and record the position after appending.
 
 This is a **v2+ concern** -- the blockquote format alone is sufficient for v1. The annotation block adds provenance metadata for auditing but isn't needed for the agent to read and act on the notification.
-<!-- agent:boundary:67f4cbc7 -->
+If I ask you to implement:
+- [ ] Feature request: `agent-doc notify` -- blockquote notification + re-evaluation directive
+
+Would you have used a worktree?
+### Re: Would I use a worktree? (HEAD)
+
+**Yes.** For implementing `agent-doc notify` in the `src/agent-doc` submodule:
+
+1. **Submodule has its own git repo** -- changes commit inside the submodule
+2. **Rust compilation + testing** shouldn't block the main session
+3. **Running binary risk** -- agent-doc is actively used by this session
+4. **Clean PR workflow** -- isolated branch, main stays clean
+
+The worktree agent would: `cd src/agent-doc`, create feature branch, implement `notify` subcommand, `make check`, return with branch + diff.
+
+**When NOT to use a worktree:** Markdown-only changes like the runbook extraction -- safe to edit in-place, no compilation, no running binary risk.
+<!-- agent:boundary:ce273fcc -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Feature request: `agent-doc notify` -- blockquote notification + re-evaluation directive
+- [ ] Feature request: `agent-doc notify` -- blockquote notification + re-evaluation directive (use worktree)
 <!-- /agent:pending -->

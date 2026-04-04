@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Navigation swap deployed — pre-sync stash retrieval bridges stash → swap path
+Cross-session pane retrieval deployed — panes retrieved from any location, not just stash
 <!-- /agent:status -->
 
 ## Exchange
@@ -416,7 +416,7 @@ The nav-swap feature is the real fix — even when state gets corrupted, sync wo
 
 do
 - [ ] Implement navigation swap: retrieve claimed panes from stash; no-op for non-agent-doc files
-### Re: Navigation swap implemented (HEAD)
+### Re: Navigation swap implemented
 
 The swap infrastructure already existed in tmux-router (swap fast path at `sync.rs:920-959`). The missing piece was a **pre-sync stash retrieval** step — stashed panes were never retrieved before the sync ran, so the swap path couldn't find them.
 
@@ -442,7 +442,25 @@ Once the pane is in the target window, tmux-router's existing swap fast path han
 **Built, tested (623 pass), installed.** Both symlink and `~/.cargo/bin/agent-doc` updated.
 
 Try navigating between agent-doc files in the editor — the pane should swap atomically without creating new windows.
-<!-- agent:boundary:5c5636d2 -->
+Focusing on the right editor, tasks/runbooks.md, does not fix the pane layout. It is still 1 pane. Why?
+### Re: Runbooks pane not retrieved — cross-session fix (HEAD)
+
+The stash retrieval was too narrow — it only checked the stash window in the target session. Pane %431 (runbooks.md) migrated to **session 1** entirely (`1:0.0`), not the stash.
+
+**Fix:** Broadened the pre-sync retrieval to check if the registered pane is alive but **anywhere outside the target window** — not just in stash. If the pane is in a different session, a different window, or in stash, it gets joined back:
+
+```rust
+// Before: only checked stash_panes.contains(&pane)
+// After: checks !target_pane_set.contains(&pane) — any pane outside target window
+if tmux.pane_alive(&pane) && !target_pane_set.contains(&pane) {
+    tmux.join_pane(&pane, target, "-dh")  // cross-session join works
+}
+```
+
+`tmux join-pane` supports cross-session moves natively — no need for break+move+join workaround.
+
+**Built, tested (623 pass), installed.** Try focusing on runbooks.md in the editor — the pane should be retrieved from session 1 and joined into the agent-doc window.
+<!-- agent:boundary:fddbbf10 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -456,5 +474,5 @@ Try navigating between agent-doc files in the editor — the pane should swap at
 - [x] Remove agent:console from default scaffold (already done)
 - [x] Suppress verbose git status in commit output
 - [x] Fix: window closure — last-pane guard in unmanaged stash path
-- [x] Implement navigation swap: pre-sync stash retrieval + existing swap fast path
+- [x] Navigation swap: broadened to retrieve panes from any location (not just stash)
 <!-- /agent:pending -->

@@ -1713,7 +1713,7 @@ Two runbooks. A mature project with 5-10 runbooks could easily hit 50%+, but we 
 Swapped the vague percentage for a concrete, verifiable number.
 
 I extracted runbooks. Please read tasks/runbooks.md. Calculate values in addition to the 63 lines we are already accounting for to come up with a %.
-### Re: Comprehensive runbook savings calculation (HEAD)
+### Re: Comprehensive runbook savings calculation
 
 From tasks/runbooks.md, the full extraction was **12 runbooks** across 4 skill files plus the main instruction file:
 
@@ -1763,7 +1763,7 @@ For the blog post, you could replace the "Two runbooks saved 63 lines" with some
 > I've been externalizing step-by-step procedures into **agent runbooks** — plain markdown files that agents load on demand instead of carrying in every interaction. Across 12 runbooks, I saved 212 lines from my instruction files — a 28% reduction in persistent context. The biggest win was livestream audit procedures: 53% of that skill's instructions were procedural bulk that only matters during audits.
 
 Please update blog post and linkedin teaser draft.
-### Re: Blog post + LinkedIn teaser updated (HEAD)
+### Re: Blog post + LinkedIn teaser updated
 
 **Blog post changes:**
 
@@ -1786,11 +1786,36 @@ Please update blog post and linkedin teaser draft.
 > - https://github.com/btakita/agent-runbooks
 >
 > What directory convention are you using for agent config? `.agent/`, `.agents/`, `.ai/`? The ecosystem hasn't settled this yet and I'd love to hear what's working for you.
-<!-- agent:boundary:50633c72 -->
+
+> livestream audit procedures
+
+Nobody is going to know what "livestream audit procedures" are.
+### Re: Dropping the livestream jargon (HEAD)
+
+You're right. Revised both:
+
+**LinkedIn teaser** — dropped the livestream detail entirely. The hook is now just the clean numbers:
+
+> **Your CLAUDE.md is bloated. Here's what to do about it.**
+>
+> Every token in your AI instruction file costs you something. Release checklists, deploy procedures, precommit workflows... they're important, but they don't need to occupy context when the agent is writing a utility function.
+>
+> I've been externalizing step-by-step procedures into **agent runbooks** — plain markdown files that agents load on demand instead of carrying in every interaction. Across 12 runbooks, I cut 212 lines from my instruction files — a 28% reduction in persistent context.
+>
+> The pattern works with Claude Code, Cursor, Copilot, Windsurf, Gemini CLI, Aider, and Codex. No special syntax. No vendor lock-in.
+>
+> Blog post + reference repo:
+> - https://briantakita.me/post/2026-04-03-agent-runbooks-on-demand-procedural-context
+> - https://github.com/btakita/agent-runbooks
+>
+> What directory convention are you using for agent config? `.agent/`, `.agents/`, `.ai/`? The ecosystem hasn't settled this yet and I'd love to hear what's working for you.
+
+**Blog post** — replaced "livestream: 53% of that skill's instructions were audit procedures" with generic framing: "Some skills saw over 50% of their content moved to on-demand loading — procedures that only matter during specific operations, not on every invocation."
+<!-- agent:boundary:daed1218 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn post: revised draft with verified 28%/212-line stats, pending your edits + publish
+- LinkedIn post: revised draft (no jargon), pending your edits + publish
 - Blog post: deploy updated version (changes in briantakita.me-dev working tree)
 - Cleanup: remove stale directories
 <!-- /agent:pending -->

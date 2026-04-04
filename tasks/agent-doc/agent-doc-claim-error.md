@@ -73,7 +73,7 @@ do
 - Reduces JetBrains re-indexing overhead from rapid agent-doc commits
 
 Committed: `f5be407`. All tests pass, plugin builds clean.
-<!-- agent:boundary:fce8c57c -->
+<!-- agent:boundary:60f1d955 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

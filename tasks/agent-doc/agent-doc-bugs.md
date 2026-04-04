@@ -592,7 +592,7 @@ Added `tracing::debug!` at key decision points across 4 modules:
 With `AGENT_DOC_LOG=debug` in your shell profile, these will log to `.agent-doc/logs/debug.log.<date>` during every sync/route cycle. The next time the 1-pane layout bug occurs, the log will show exactly which sync/route path executed and what pane state it saw.
 
 Built, tested, installed.
-<!-- agent:boundary:9a34dcfa -->
+<!-- agent:boundary:b556de8d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

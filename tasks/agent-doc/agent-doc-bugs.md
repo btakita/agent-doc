@@ -361,7 +361,7 @@ Done. Replaced all manual JSON parsing in `PatchWatcher.kt` with `com.google.gso
 **Plugin bumped to v0.2.44.** Install from `build/distributions/agent-doc-jetbrains-0.2.44.zip`.
 
 Builds clean. Zero new dependencies — Gson ships with every IntelliJ installation.
-<!-- agent:boundary:3a3ead1e -->
+<!-- agent:boundary:80e70bc4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -301,7 +301,7 @@ This is a good stopping point for the performance investigation in this session.
 - Need timing instrumentation in plugin methods to catch the hot path
 
 This should be tracked in the **agent-doc-bugs session** (where the bug manifests) rather than here. Transfer the task?
-<!-- agent:boundary:adaf27ef -->
+<!-- agent:boundary:da5c2911 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

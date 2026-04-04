@@ -55,7 +55,7 @@ index 9eadcc8..a3d55c0 100644
 Plus 3 committed-but-unreleased housekeeping commits (gitignore, clippy, remove accidental files).
 
 **To release agent-doc:** Commit the submodule changes, bump version, follow `.agent/runbooks/prerelease.md`.
-### Re: tmux-router correction — missed working tree changes (HEAD)
+### Re: tmux-router correction — missed working tree changes
 
 You're right. I only ran `git log v0.3.9..HEAD` (no committed changes since tag) but missed `git diff` / `git status` which shows uncommitted modifications to `src/sync.rs`:
 - Added `[sync] stashing unmanaged panes` log line with window/panes/session context
@@ -63,8 +63,18 @@ You're right. I only ran `git log v0.3.9..HEAD` (no committed changes since tag)
 
 **Why I got it wrong:** Checked committed history but not the working tree. Should have run both `git log` and `git status`.
 
+How can we fix this for next time? SKILL + runbook?
+
 **Pending for tmux-router:** Commit the sync.rs debug logging, decide if it warrants a release (v0.3.10) or can wait.
-<!-- agent:boundary:fbab23ec -->
+### Re: Preventing missed working tree changes (HEAD)
+
+Not a SKILL or runbook issue — this was a general workflow mistake. The fix is a **feedback memory** so I always check both committed and uncommitted state when assessing submodules.
+
+Added to auto memory (`feedback_check_working_tree.md`):
+> When assessing submodule release status, always run `git status` + `git diff` alongside `git log`. Never say "no changes" based on commit history alone.
+
+Also updated the prerelease runbook — but the real fix is the memory, since the mistake happens at the "check status" phase before any release workflow starts.
+<!-- agent:boundary:e809402e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

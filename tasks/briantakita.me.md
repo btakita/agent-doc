@@ -1846,7 +1846,7 @@ Changes deployed:
 - Problem statement: "by identifying and extracting 12 runbooks, I cut 212 lines — a 28% reduction"
 - Real examples: full breakdown (63 lines from instruction file + 149 from skill files)
 - No jargon — generic framing throughout
-<!-- agent:boundary:b0399989 -->
+<!-- agent:boundary:5f27bc92 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

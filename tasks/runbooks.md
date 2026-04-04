@@ -298,8 +298,7 @@ agent-doc should have a command to notify a document. This is distinct from tran
 What you mention in this document makes sense. You seem to follow the same definition that I have with document notification.
 But I don't see any changes to `tasks/briantakita.me.md` that would indicate you actually notified the document of context savings from corky's runbook extractions.
 
-Does agent-d
-### Re: Notification visibility (HEAD)
+### Re: Notification visibility
 
 You're right — the notification I sent is invisible until the briantakita.me session runs preflight. I wrote to the **claims log** (`.agent-doc/claims/<hash>.log`), which is a message queue consumed by `agent-doc preflight`. The content is there:
 
@@ -315,11 +314,27 @@ But it won't appear until the next `/agent-doc tasks/briantakita.me.md` cycle. T
 - The key difference: the notification is immediately visible in the editor, not deferred to the next preflight cycle
 
 The claims log works for session-to-session messaging (async), but for "notify this document about X," writing into the document itself is the right approach. That's a good feature request for agent-doc.
-<!-- agent:boundary:ae13592c -->
+
+Does agent-doc have a notify command that would make a visible change with the deterministic logic and/or runbook logic that we discussed?
+### Re: Does agent-doc have a notify command? (HEAD)
+
+**No.** No `notify` command exists. The closest tools:
+
+- **`agent-doc patch <FILE> <COMPONENT>`** — replaces component content (not append)
+- **Claims log** — async queue, consumed on next preflight (not visible in editor)
+- **`agent-doc write`** — appends to exchange, but designed for the responding agent's own session
+
+**What's needed:** `agent-doc notify <FILE> <message>` that:
+1. Appends to a notifications component or exchange (not replace)
+2. Updates the snapshot (so it commits cleanly)
+3. Is immediately visible in the editor
+
+Could be implemented as `agent-doc patch --append` or a dedicated `notify` subcommand. Good candidate for the agent-doc-bugs task.
+<!-- agent:boundary:a59ea7f3 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Feature request: `agent-doc notify <FILE> <message>` — write notification into target document
+- [ ] Feature request: `agent-doc notify <FILE> <message>` — append notification to target document (visible immediately)
 <!-- /agent:pending -->

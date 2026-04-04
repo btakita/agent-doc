@@ -131,16 +131,31 @@ The panes %434, %476, %477, %431 keep appearing in @221 between the two sync cal
 
 Shall I implement this fix?
 yes
-### Re: Double-sync fix applied (HEAD)
+### Re: Double-sync fix applied
 
 Removed `sync_after_claim` from `run_with_tmux()` in route.rs. The JB plugin's sync call (with correct `window` and `col_args`) is now the only sync per editor event. No more redundant second sync racing with stash operations.
 
 634 tests pass. Built, installed. Try switching editor tabs — the glitchiness should be gone.
-<!-- agent:boundary:db29801c -->
+
+Still seeing glitches when switching tabs. Why?
+### Re: Found the real double-sync source — fixed (HEAD)
+
+The previous fix (removing `sync_after_claim` from route.rs) wasn't enough. The ACTUAL second sync came from **main.rs line 745**: after the Route command completes, if `--col` args were provided, it called `sync::run_layout_only()`. This ran with `window=None`, racing with the JB plugin's `agent-doc sync` call (which has the correct `--window`).
+
+**The JB plugin's tab-switch flow was:**
+1. `agent-doc route <file> --col ...` → route resolves pane + `sync::run_layout_only()` in main.rs (sync #1, `window=None`)
+2. `agent-doc sync --col ... --focus ... --window @221` → full sync from EditorTabSyncListener (sync #2, `window=Some`)
+
+Sync #1 had `window=None` and raced with sync #2's stash operations.
+
+**Fix:** Removed the `sync::run_layout_only` call from the Route command dispatch in main.rs. The JB plugin's `EditorTabSyncListener` handles layout sync authoritatively with the correct `--window` arg. Route now only handles pane resolution (routing the file to a tmux pane) — no layout changes.
+
+634 tests pass. Built, installed. Try switching tabs now.
+<!-- agent:boundary:5048b0f4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Remove redundant sync_after_claim (double-sync fix)
+- [x] Fix double-sync glitch (removed sync from both route.rs and main.rs Route dispatch)
 <!-- /agent:pending -->

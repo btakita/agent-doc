@@ -2170,7 +2170,7 @@ This means the SKILL.md files should be bundled inside corky (like agent-doc bun
 2. **Shared runbooks between email and linkedin** — both use corky drafts, both follow "never send without approval." Should there be a shared `corky-common` runbook, or just duplicate the relevant lines?
 
 3. **The current email SKILL.md at `.claude/skills/email/SKILL.md`** — is this already managed by `corky skill install`, or was it manually created?
-<!-- agent:boundary:813d8e45 -->
+<!-- agent:boundary:3b05b459 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

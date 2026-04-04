@@ -464,7 +464,7 @@ Not yet committed or released -- changes are in the agent-doc working tree. Read
 
 Please transfer to tasks/agent-doc/agent-doc-bugs.md
 - [ ] Review, commit, and release agent-doc with notify
-### Re: Transferred to agent-doc-bugs (HEAD)
+### Re: Transferred to agent-doc-bugs
 
 Written to `tasks/agent-doc/agent-doc-bugs.md` claims log:
 - Review, commit, and release agent-doc with `notify` subcommand
@@ -473,7 +473,18 @@ Written to `tasks/agent-doc/agent-doc-bugs.md` claims log:
 - Release per `dev/runbooks/release-rust-maturin.md`
 
 The claim will appear next time the agent-doc-bugs session runs preflight. (Once `agent-doc notify` is released, this transfer would be immediate and visible.)
-<!-- agent:boundary:8d9b9af6 -->
+
+Is this committed to the main branch of agent-doc?
+### Re: Is this committed? (HEAD)
+
+**No.** Not committed to agent-doc main. Current state:
+
+- `src/notify.rs` — untracked (`??`)
+- `src/main.rs` — modified, unstaged (` M`)
+- Last commit: `8738b74 v0.31.5`
+
+The notify code is in the working tree only. Needs: stage, commit, version bump, `make check`, release. That's the work transferred to agent-doc-bugs.
+<!-- agent:boundary:4f886f83 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

@@ -378,7 +378,7 @@ Added periodic state logging (~every 60s) for all 4 ephemeral state candidates:
 Plugin v0.2.42. Committed: `3ee90e0`.
 
 If the issue recurs, the `[state]` logs will show which counters are growing unbounded. Install `agent-doc-jetbrains-0.2.42.zip` and enable `#com.github.btakita.agentdoc` debug logging.
-<!-- agent:boundary:fae0efc6 -->
+<!-- agent:boundary:22c17b3a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -136,7 +136,7 @@ It's already inside `src/agent-doc/.cargo/config.toml` (the submodule). The path
 **Keep as-is.** The file serves local development (testing unreleased tmux-router changes). For Docker builds, the selective mount approach (agent-doc + tmux-router) handles it correctly. Moving or removing it would break local dev without improving Docker builds.
 
 The pattern is: `.cargo/config.toml` for local dev, selective Docker mounts for CI/release.
-<!-- agent:boundary:8720c060 -->
+<!-- agent:boundary:718aaf67 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

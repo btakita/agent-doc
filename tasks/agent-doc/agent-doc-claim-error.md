@@ -192,7 +192,7 @@ Orphaned agent-doc/claude sessions moved to stash but never killed. Preflight wa
 
 **To clean up:** `tmux kill-window -t stash` or `agent-doc resync --fix` to clean orphaned sessions.
 Should agent-doc autokill orphaned windows? What if they are currently running active claude tasks? How can we tell?
-### Re: Should agent-doc autokill orphaned panes? (HEAD)
+### Re: Should agent-doc autokill orphaned panes?
 
 **No — autokill is too dangerous.** `resync` shows 5 panes in stash that are still registered as active sessions with live processes. They may be mid-task.
 
@@ -207,7 +207,14 @@ Should agent-doc autokill orphaned windows? What if they are currently running a
 - No autokill — user decides when stashed sessions are disposable
 
 The stash window is a parking lot — the user put panes there intentionally. Autokilling defeats the purpose. The warning is the right UX: inform, don't act.
-<!-- agent:boundary:290c664f -->
+Should we make a runbook for this workflow?
+kill orphaned panes
+### Re: Orphaned panes cleaned up (HEAD)
+
+Ran `agent-doc resync --fix` — deregistered 5 stash sessions, purged 6 orphaned panes. The stash window auto-closed. Only `0:agent-doc` (2 panes) remains.
+
+**Runbook:** Not needed as a separate file. The existing `cleanup` runbook covers file GC; `resync --fix` is the one-liner for tmux cleanup. Could add a note to the cleanup runbook mentioning `resync --fix` for completeness.
+<!-- agent:boundary:abca0b41 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

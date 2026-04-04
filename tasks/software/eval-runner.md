@@ -985,7 +985,7 @@ The SKILL stays lean, the runbook provides detailed guidance when needed. The mo
 2. Split `inline-annotation-with-truncation` into 2 cases
 3. Draft `multi-topic-response` runbook (for agent-doc, not eval-runner)
 4. Track content-source annotation as agent-doc feature (separate session)
-<!-- agent:boundary:8482f8fe -->
+<!-- agent:boundary:4442aa19 -->
 <!-- /agent:exchange -->
 
 ## Pending

@@ -47,5 +47,6 @@ agent_doc_write: crdt
 **Release decision:** Changes are docs-only. v0.1.1 is already published. crates.io serves the README from the last published version, so users see the v0.1.1 README until a new publish. If you want the updated README on crates.io, we'd need v0.1.2. Otherwise these changes are available on GitHub immediately.
 
 **Blog post API discrepancy:** The blog post shows a different API pattern (`Cell::new()`, `Slot::new()`, callable `counter(&ctx)` syntax) that doesn't exist in the current implementation. The current API uses `ctx.cell()`, `ctx.slot()`, `ctx.get_cell()`, `ctx.set_cell()`. Want me to either update the blog post to match the actual API, or implement the blog post's API in the library?
+<!-- agent:boundary:1b6173d1 -->
 <!-- /agent:exchange -->
  

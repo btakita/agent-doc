@@ -95,7 +95,7 @@ evals/
 
 Start with **agent-doc diff interpretation** evals — highest-leverage area since it's the core reasoning loop every session depends on. Create 20-30 golden-answer test cases from real session diffs (plenty in git history), then expand with Claude-generated variations.
 Continue
-### Re: Phase 1 Kickoff (HEAD)
+### Re: Phase 1 Kickoff
 
 Understood — starting Phase 1 now. First priority is the agent-doc diff interpretation evals since that's the highest-leverage entry point. I'll:
 
@@ -105,16 +105,27 @@ Understood — starting Phase 1 now. First priority is the agent-doc diff interp
 4. Build minimal eval runner using the Anthropic SDK
 
 Once that's working, we can expand to corky threading and skill adherence.
-<!-- agent:boundary:c07cd469 -->
+### Re: Phase 1 Status (HEAD)
+
+Phase 1 is nearly complete — prior sessions already built most of it:
+
+- **`evals/agent-doc/diff-interpretation/`** — directory exists with `cases.yaml` (20 cases, includes real git history diffs) and `baselines/` directory
+- **`src/eval-runner/`** — Rust eval runner built with Claude CLI + Anthropic API backends, LLM-as-judge scoring, parallel execution, regression detection
+- **`baselines/haiku-2026-04-03.json`** — Haiku baseline complete: 9/21 passed (42.9%), mean score 0.57
+- **`baselines/sonnet-2026-04-04.json`** — exists but empty (0 bytes) — running now
+
+Running Sonnet baseline against all 20 cases.
+<!-- agent:boundary:4a75b3d3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] Approve Phase 1 plan
-- [ ] Create `evals/` directory structure with agent-doc/diff-interpretation/
-- [ ] Extract 10-15 real session diffs from git history as test fixtures
-- [ ] Write first 10 diff interpretation test cases (diff input → expected intent)
-- [ ] Build minimal eval runner (Python script using Anthropic SDK)
-- [ ] Run baseline scores for agent-doc diff interpretation
+- [x] Create `evals/` directory structure with agent-doc/diff-interpretation/
+- [x] Extract 10-15 real session diffs from git history as test fixtures (20 cases total)
+- [x] Write first 10 diff interpretation test cases (diff input → expected intent)
+- [x] Build eval runner (Rust CLI, src/eval-runner, with Claude CLI + Anthropic API backends)
+- [x] Haiku baseline: 9/21 passed (42.9%), mean score 0.57
+- [ ] Run Sonnet baseline (sonnet-2026-04-04.json is empty — in progress)
 <!-- /agent:pending -->

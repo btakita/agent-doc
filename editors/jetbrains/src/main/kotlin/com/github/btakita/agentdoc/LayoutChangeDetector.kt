@@ -27,6 +27,8 @@ class LayoutChangeDetector(private val project: Project) {
     private val fallbackSyncing = AtomicBoolean(false)
     private val fallbackGeneration = java.util.concurrent.atomic.AtomicLong(0)
     private var pollThread: Thread? = null
+    private val listenerCount = java.util.concurrent.atomic.AtomicInteger(0)
+    private val containerEventCount = java.util.concurrent.atomic.AtomicLong(0)
 
     fun start() {
         // Attach ContainerListener to the splitters root (delayed — splitters may not exist yet)
@@ -65,20 +67,24 @@ class LayoutChangeDetector(private val project: Project) {
 
     private val containerListener = object : ContainerListener {
         override fun componentAdded(e: ContainerEvent) {
+            val count = containerEventCount.incrementAndGet()
             // Also listen on newly added containers
             val child = e.child
             if (child is Container) {
                 addRecursiveContainerListener(child)
             }
+            if (count % 100 == 0L) LOG.info("[state] containerEvents=$count listeners=${listenerCount.get()}")
             scheduleSync("containerAdd")
         }
         override fun componentRemoved(e: ContainerEvent) {
+            containerEventCount.incrementAndGet()
             scheduleSync("containerRemove")
         }
     }
 
     private fun addRecursiveContainerListener(container: Container) {
         container.addContainerListener(containerListener)
+        listenerCount.incrementAndGet()
         for (child in container.components) {
             if (child is Container) {
                 addRecursiveContainerListener(child)
@@ -88,11 +94,16 @@ class LayoutChangeDetector(private val project: Project) {
 
     private fun startFallbackPoll() {
         pollThread = Thread({
+            var pollCount = 0L
             while (!disposed.get()) {
                 try {
                     Thread.sleep(POLL_INTERVAL_MS)
                     if (!disposed.get()) {
                         checkAndSync("poll")
+                        pollCount++
+                        if (pollCount % 12 == 0L) { // ~every 60s at 5s interval
+                            LOG.info("[state] layout-detector: listeners=${listenerCount.get()} containerEvents=${containerEventCount.get()}")
+                        }
                     }
                 } catch (_: InterruptedException) {
                     break

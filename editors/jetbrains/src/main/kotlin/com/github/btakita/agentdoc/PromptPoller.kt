@@ -29,6 +29,8 @@ class PromptPoller(private val project: Project) : Disposable {
 
     /** The currently displayed prompt (to avoid re-showing the same one). */
     @Volatile private var currentPromptKey: String? = null
+    /** Cycle counter for periodic state logging. */
+    private var cycleCount = 0L
 
     /** All active prompt keys from the last poll, for stable queue ordering. */
     @Volatile private var activePromptQueue: List<String> = emptyList()
@@ -96,7 +98,12 @@ class PromptPoller(private val project: Project) : Disposable {
 
                 handlePollResults(entries, basePath)
                 val totalMs = (System.nanoTime() - cycleStart) / 1_000_000
-                if (totalMs > 200) LOG.info("[perf] prompt-poller cycle: ${totalMs}ms (save=${saveMs}ms refresh=${refreshMs}ms poll=${pollMs}ms)")
+                if (totalMs > 200) LOG.info("[perf] prompt-poller cycle: ${totalMs}ms (save=${saveMs}ms refresh=${refreshMs}ms poll=${pollMs}ms tracked=${trackedFiles.size})")
+                cycleCount++
+                if (cycleCount % 40 == 0L) { // ~every 60s at 1.5s interval
+                    val ffiTracked = AgentDocLib.get()?.agent_doc_tracked_count() ?: -1
+                    LOG.info("[state] prompt-poller: trackedFiles=${trackedFiles.size} ffiTracked=$ffiTracked keys=[${trackedFiles.keys.joinToString(", ")}]")
+                }
             } catch (e: Exception) {
                 LOG.warn("[prompt-poller] poll error: ${e.message}")
             }

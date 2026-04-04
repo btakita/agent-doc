@@ -539,6 +539,13 @@ pub unsafe extern "C" fn agent_doc_is_tracked(file_path: *const c_char) -> bool 
     crate::debounce::is_tracked(path)
 }
 
+/// Return the number of files tracked in the debounce state.
+/// Used by IDE plugins for state diagnostics.
+#[unsafe(no_mangle)]
+pub extern "C" fn agent_doc_tracked_count() -> u32 {
+    crate::debounce::tracked_count() as u32
+}
+
 /// Non-blocking idle check — returns `true` if no `document_changed` event
 /// within `debounce_ms`.
 ///

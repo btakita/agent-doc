@@ -911,7 +911,7 @@ Investigated each. These are **legitimate model challenges**, not rubric issues:
 - System prompt refined from 32 lines to 4 discrimination rules
 - All rubrics tightened to binary discrimination pattern
 - Makefile: `eval`, `eval-smoke`, `eval-regression`, `eval-json`
-<!-- agent:boundary:a82b0c2a -->
+<!-- agent:boundary:ffa8cd07 -->
 <!-- /agent:exchange -->
 
 ## Pending

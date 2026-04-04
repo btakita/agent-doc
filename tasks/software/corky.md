@@ -127,7 +127,8 @@ corky sync account btak.dev
 reauthed
 do
 - Corky skill architecture: `corky skill install` for email + linkedin skills
-### Re: Corky skill architecture (HEAD)
+ 
+### Re: Corky skill architecture
 
 **Current state:**
 - `.claude/skills/email/SKILL.md` — manually created (109 lines), covers email drafting
@@ -146,7 +147,36 @@ Each has focused frontmatter for Claude Code skill matching. Shared conventions 
 **Implementation:** Bundle 3 SKILL.md files via `include_str!`, `corky skill install` writes all 3 + runbooks.
 
 Ready to implement on your go.
-<!-- agent:boundary:9dc23d73 -->
+Are there any generalizable context in email/SKILL.md that should be moved into corky's installable skills?
+Any runbook extractions that should happen?
+### Re: Generalizable context and runbook extractions (HEAD)
+
+**What moves into corky-managed skills:**
+
+| Content | From | To |
+|---------|------|-----|
+| "Never send without approval" | email/SKILL.md | Shared convention in both email + linkedin skills |
+| `file:///` protocol paths | email/SKILL.md | Shared convention |
+| Verify facts vs contact file | email/SKILL.md | Shared convention |
+| Secret handling (`pass`) | email/SKILL.md | Already in CLAUDE.md — remove from skill |
+| LinkedIn post runbook | `.agent/runbooks/linkedin-post.md` | `linkedin/runbooks/linkedin-post.md` |
+
+**What stays put:**
+- Account config (btak.dev, personal, proton) — email-specific
+- Draft/threading workflow — email-specific
+- HTML/browser paste — email delivery path
+- All 4 email runbooks — email-specific
+
+**Proposed installed structure:**
+```
+.claude/skills/
+├── corky/SKILL.md           # general: sync, contacts, docs, cal, transcribe, search
+├── email/SKILL.md + runbooks/  # email drafting (replaces manual)
+└── linkedin/SKILL.md + runbooks/  # linkedin posting (new)
+```
+
+All installed by `corky skill install`. Ready to implement on go.
+<!-- agent:boundary:8d16432a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

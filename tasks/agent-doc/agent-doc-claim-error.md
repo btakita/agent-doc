@@ -408,9 +408,11 @@ Fix: Changed step 4 to mark only the **last** root-level heading instead of all 
 Committed: `308356b`. 38 tests pass. Binary rebuilt and installed.
 
 The bugs.md `(HEAD)` on all headers should stop after the next `agent-doc commit` cycle on that file.
-### Re: Why `(HEAD)` is re-added every commit (HEAD)
+### Re: Why `(HEAD)` is re-added every commit
 
 It's re-added because it only exists in **staged/committed content**, never the working tree:
+
+It was in the git history. It already happened in the past. Why do it again? What premise do you have to apply this design decision?
 
 1. Snapshot + working tree: heading without `(HEAD)`
 2. `agent-doc commit` stages modified content with `(HEAD)` on the latest heading
@@ -420,17 +422,29 @@ It's re-added because it only exists in **staged/committed content**, never the 
 This creates the 1-line blue gutter that visually separates "agent response" (committed) from "user input" (uncommitted). Without re-adding it each cycle, the boundary disappears.
 
 The bug was marking ALL headings instead of just the last one — not the re-addition itself.
-<!-- agent:boundary:1be03e8e -->
+### Re: Why re-add — the boundary must move (HEAD)
+
+The premise: the blue gutter boundary needs to **move** with each new response to the latest heading.
+
+Without the add/strip cycle:
+- Cycle 1: Commit `### Re: First (HEAD)` → gutter on "First"
+- Cycle 2: Agent writes `### Re: Second` → committed content still has `(HEAD)` on "First"
+- User sees gutter on "First" forever — not on "Second" (the latest)
+
+The cycle exists because the boundary marker must track the **latest response**, which changes every cycle:
+1. Strip old `(HEAD)` → clean slate
+2. Re-add `(HEAD)` on the **new** last heading → gutter moves to latest response
+3. Commit → gutter visible
+4. Strip from snapshot → working tree clean for next cycle
+
+If the marker never moved, you'd only see the boundary on the first response heading forever. The re-addition is what makes it track the latest response.
+
+The alternative would be a boundary marker that doesn't use git diff at all (e.g., a dedicated gutter annotation from the plugin). But the current approach leverages git's built-in gutter rendering without any custom editor highlighting.
+<!-- agent:boundary:7b31c6bb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] GC orphaned 3.9 GB blob
-- [x] `agent-doc clean --archive`
-- [x] VCS refresh debounce (500ms)
-- [x] Timing instrumentation in plugin
-- [x] Plugin version check in `make precommit`
-- [x] State diagnostics logging
-- [x] Fix boundary reposition bug
+- [x] All session tasks complete
 <!-- /agent:pending -->

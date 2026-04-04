@@ -19,7 +19,7 @@ v0.31.5 released. Commit-on-claim, auto-setup, VCS refresh, --diff-only, skill r
 gh action failures
 - https://github.com/btakita/agent-doc/actions/runs/23982571705
 - https://github.com/btakita/agent-doc/actions/runs/23982606380
-### Re: GitHub Actions failures — both expected (HEAD)
+### Re: GitHub Actions failures — both expected
 
 Both are **already-exists conflicts** from publishing manually before CI ran:
 
@@ -29,7 +29,24 @@ Both are **already-exists conflicts** from publishing manually before CI ran:
 **No action needed.** Both artifacts were published successfully. CI fails on the duplicate because we published manually first.
 
 **To prevent:** Either let CI handle the full release (don't publish manually) or add `skip_existing` to the workflows.
-<!-- agent:boundary:3b219f41 -->
+Let's have GH handle releases by default. But in special cases where we release locally, add `skip_existing`. Add to the relevant runbooks.
+### Re: CI-first releases with skip_existing (HEAD)
+
+Updated both CI workflows and the prerelease runbook:
+
+**release.yml** — checks if release exists first, uploads assets with `--clobber` if it does
+**pypi.yml** — added `skip-existing: true` to PyPI publish step
+**prerelease runbook** — updated github-release section: CI handles releases by default (push tag), local release is the edge case
+
+Committed: `6eedc63` — `fix: make CI release workflows idempotent`
+
+**New default flow:**
+1. Bump version, commit, tag, push tag
+2. CI builds cross-platform binaries + creates GitHub release + publishes to PyPI
+3. `cargo install --path .` locally for the dev binary
+
+**Local override:** If you publish manually first, CI gracefully skips the duplicate.
+<!-- agent:boundary:fd25d665 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -37,4 +54,5 @@ Both are **already-exists conflicts** from publishing manually before CI ran:
 <!-- agent:pending patch=replace -->
 - [x] Release agent-doc v0.31.9
 - [x] Add version sync check to `make check`
+- [x] Make CI release workflows idempotent
 <!-- /agent:pending -->

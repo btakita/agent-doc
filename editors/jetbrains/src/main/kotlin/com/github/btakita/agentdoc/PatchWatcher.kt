@@ -10,6 +10,7 @@ import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vcs.changes.VcsDirtyScopeManager
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.util.Alarm
 import java.io.File
 import java.nio.file.FileSystems
 import java.nio.file.Path
@@ -735,22 +736,28 @@ class PatchWatcher(private val project: Project) : Disposable {
         return ranges
     }
 
+    /** Debounce window for VCS refresh signals (ms). Multiple commits within this window coalesce into one refresh. */
+    private val vcsRefreshAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
+    private val VCS_REFRESH_DEBOUNCE_MS = 500
+
     /**
-     * Trigger a VCS refresh so git gutter updates after an external commit.
+     * Trigger a debounced VCS refresh so git gutter updates after an external commit.
      * Called when `agent-doc commit` writes a `vcs-refresh.signal` file.
+     * Multiple signals within 500ms coalesce into a single refresh.
      */
     private fun refreshVcs() {
-        ApplicationManager.getApplication().invokeLater {
+        vcsRefreshAlarm.cancelAllRequests()
+        vcsRefreshAlarm.addRequest({
             try {
                 // Refresh VFS first so IntelliJ sees the new git state on disk
                 LocalFileSystem.getInstance().refresh(true)
                 // Then mark VCS dirty to re-compute git gutter annotations
                 VcsDirtyScopeManager.getInstance(project).markEverythingDirty()
-                LOG.info("[vcs] Triggered VFS + VCS refresh after external commit")
+                LOG.info("[vcs] Triggered VFS + VCS refresh after external commit (debounced)")
             } catch (e: Exception) {
                 LOG.warn("[vcs] Failed to refresh VCS state", e)
             }
-        }
+        }, VCS_REFRESH_DEBOUNCE_MS)
     }
 
     /**

@@ -64,7 +64,7 @@ agent-doc v0.31.6 released to crates.io + GitHub
 
 Release?
 modified:   src/tmux-router (new commits, modified content)
-### Re: Submodule pointer update (HEAD)
+### Re: Submodule pointer update
 
 Both submodules have new commits that need their parent repo pointers updated:
 
@@ -74,11 +74,17 @@ Both submodules have new commits that need their parent repo pointers updated:
 Both are already published to crates.io and pushed to GitHub. The parent `agent-loop` repo just needs its submodule pointers committed to track the new versions.
 
 Should I commit the submodule pointer updates?
-<!-- agent:boundary:658349fb -->
+yes
+### Re: Submodule pointers committed (HEAD)
+
+Done. Parent repo now tracks:
+- `src/agent-doc` → v0.31.6 (e145e79)
+- `src/tmux-router` → v0.3.9 (9c8f13e)
+<!-- agent:boundary:f04fda02 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Commit submodule pointer updates in parent repo (tmux-router + agent-doc)
+- [x] Submodule pointer updates committed
 <!-- /agent:pending -->

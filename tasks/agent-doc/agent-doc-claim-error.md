@@ -348,7 +348,7 @@ make plugin-version-check
 Now `make precommit` runs: clippy + test + version-sync + plugin-version-check + audit-docs.
 
 Committed: `f803d28`.
-<!-- agent:boundary:f802d2c4 -->
+<!-- agent:boundary:0f0eb905 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

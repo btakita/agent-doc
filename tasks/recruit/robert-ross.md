@@ -520,7 +520,8 @@ That's the full Shimmer pipeline in 4 steps. Demo it on the existing robert-ross
 
 Looks like your input got cut off — "How can I use" what? Let me know and I'll pick it up.
 Granola has context not visible on the document. So it would be helpful to prompt using Granola.
-### Re: LiveKit real-time transcription + Granola interaction (HEAD)
+Let's add a granola skill with runbooks
+### Re: LiveKit real-time transcription + Granola interaction
 
 #### LiveKit real-time STT — yes, it's built in
 
@@ -555,15 +556,39 @@ The eval-runner pattern is relevant here: it takes external content (diffs, docu
 2. Creates an agent-doc template document with the content
 3. Populates session-metrics, topic-segments from the Granola structure
 4. Makes it available for inline agent-doc interaction
-<!-- agent:boundary:49ec2a7a -->
+### Re: Granola skill created (HEAD)
+
+Built the `/granola` skill with runbook:
+
+**Skill:** `.claude/skills/granola/SKILL.md`
+**Runbook:** `.claude/skills/granola/runbooks/import.md`
+
+**Usage:**
+- `/granola <URL>` — scrape and display a Granola shared note
+- `/granola import <URL> --output <path>` — scrape and create an agent-doc template document
+
+**What it does:**
+1. Scrapes the RSC payload from the shared link (proven method from earlier)
+2. Extracts metadata (title, creator, date, attendees)
+3. Checks for transcript link (`notes.granola.ai/t/<id>`)
+4. Creates an agent-doc template with components: notes, analysis, action-items, exchange
+5. Auto-populates action items from "Next Steps" sections
+
+**Re: Granola's hidden context** — you're right that the shared doc is just a summary. Granola's Claude Sonnet has access to the full transcript + audio context. Two ways to leverage this:
+1. If the transcript link is shared (format: `notes.granola.ai/t/<id>`), we scrape that too and include it as a component
+2. Use Granola's built-in Sonnet prompt to ask questions, then import those answers into the agent-doc template
+
+The skill is now registered and shows up in the skills list. You can test it with Rob's notes URL.
+<!-- agent:boundary:baab7122 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - ([done]) Build session analyzer template
+- ([done]) Build `/granola` skill with import runbook
 - **Prep demo for Sunday:** Run session analyzer on robert-ross transcript
-- Build `/granola-import` skill (scrape → agent-doc template)
+- Test `/granola import` on Rob's notes URL
 - **Sunday Apr 5, 5pm ET:** Follow-up call with Rob (confirm via text)
 - Evaluate Deepgram + LiveKit Agents for real-time STT pipeline
 - Evaluate Cloudflare Vectorize + Workers AI for session indexing

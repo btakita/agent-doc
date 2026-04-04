@@ -303,8 +303,8 @@ This is a good stopping point for the performance investigation in this session.
 This should be tracked in the **agent-doc-bugs session** (where the bug manifests) rather than here. Transfer the task?
 
 No thank you...agent-doc-bugs is extremely slow. I would rather fix it here.
-Unless it would help to diagnose the bug by having is occur.
-### Re: Performance timing instrumentation added (HEAD)
+Unless it would help to diagnose the bug by having it occur.
+### Re: Performance timing instrumentation added
 
 Added `[perf]` logging to all plugin hot paths in PatchWatcher.kt and PromptPoller.kt:
 
@@ -321,7 +321,21 @@ Committed: `3490314`. Plugin builds clean.
 **To use:** Install the updated plugin zip, enable `#com.github.btakita.agentdoc` in Debug Log Settings, open bugs.md, and check idea.log for `[perf]` lines. The breakdown will show which method is consuming CPU.
 
 Plugin zip: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0.zip`
-<!-- agent:boundary:3044b73e -->
+The plugin version is incorrect. Please increment. Why did you get the incorrect version? Do we need to add a SKILL -> runbook?
+Or is there deterministic development code that should be used?
+### Re: Plugin version fix + deterministic versioning (HEAD)
+
+**Why wrong:** I referenced "0.1.0" from stale context. Actual version is `0.2.40` in `gradle.properties`. Bumped to **0.2.41**, rebuilt.
+
+Plugin zip: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.41.zip`
+
+**Deterministic versioning:** The plugin doesn't have a `make check` equivalent. Options:
+1. Gradle task to verify version bumped when `.kt` files change
+2. Add `pluginVersion` check to agent-doc's `make precommit`
+3. Memory note: always bump `gradle.properties pluginVersion` on plugin changes
+
+For now, adding a memory note. A deterministic check would be better long-term — could add a gradle task that compares the current version against the last git tag for the plugin.
+<!-- agent:boundary:b59b8d89 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -331,5 +345,6 @@ Plugin zip: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0.zip
 - [x] `agent-doc clean --archive`
 - [x] VCS refresh debounce (500ms)
 - [x] Add timing instrumentation to plugin
-- [ ] Install instrumented plugin and diagnose bugs.md CPU
+- [x] Fix plugin version (0.2.40 → 0.2.41)
+- [ ] Install instrumented plugin v0.2.41 and diagnose bugs.md CPU
 <!-- /agent:pending -->

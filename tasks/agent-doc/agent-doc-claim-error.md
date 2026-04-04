@@ -71,14 +71,24 @@ release: check
 
 **Proposal:** Add `make release` (CI-first, default) alongside existing `make publish` (local, edge case). The runbook references both.
 do
-### Re: `make release` added (HEAD)
+### Re: `make release` added
 
 Added CI-first `make release` target. Renamed old `release` (build binary) to `build-release`.
 
 `make release` does: `check` → `git tag` → `git push` → CI handles GH Release + PyPI → `cargo install` locally.
 
 Committed: `c155713` — `feat: add make release for CI-first release flow`
-<!-- agent:boundary:ca1e5746 -->
+
+push
+### Re: Pushed (HEAD)
+
+Pushed 3 commits to agent-doc remote (`43c0995..c155713`):
+1. `version-sync check` in make check
+2. `CI release workflows idempotent` (release.yml + pypi.yml)
+3. `make release` CI-first flow
+
+Parent submodule pointer updated.
+<!-- agent:boundary:dd6e4e4b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -88,4 +98,5 @@ Committed: `c155713` — `feat: add make release for CI-first release flow`
 - [x] Add version sync check to `make check`
 - [x] Make CI release workflows idempotent
 - [x] Add `make release` target (CI-first flow)
+- [x] Push agent-doc changes to remote
 <!-- /agent:pending -->

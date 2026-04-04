@@ -32,7 +32,7 @@ any pending releases for?
 Plus 3 committed-but-unreleased housekeeping commits (gitignore, clippy, remove accidental files).
 
 **To release agent-doc:** Commit the submodule changes, bump version, follow `.agent/runbooks/prerelease.md`.
-<!-- agent:boundary:c26ad416 -->
+<!-- agent:boundary:e4403bd2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -178,7 +178,7 @@ Published to all targets:
 4. IPC error propagation
 5. Template boundary fix
 6. CI/build improvements
-<!-- agent:boundary:3821528d -->
+<!-- agent:boundary:1c4bd6fc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

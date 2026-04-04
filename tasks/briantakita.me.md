@@ -2137,7 +2137,7 @@ Yes, corky already has LinkedIn in its architecture (`[profiles.btakita.linkedin
 The runbook pattern working exactly as designed here — lightweight procedure now, productized feature later.
 
 `corky linkedin` is already implemented. If the corky SKILL.md and runbook were moved into corky, would agent-loop **always** use `corky linkedin ...` for these posts?
-### Re: Move runbook into corky — yes (HEAD)
+### Re: Move runbook into corky — yes
 
 `corky linkedin` already has `draft`, `publish`, and `comment` subcommands — exactly what the runbook describes manually.
 
@@ -2150,12 +2150,32 @@ Steps:
 4. Remove `.agent/runbooks/linkedin-post.md`
 
 Want me to do this now, or post first?
-<!-- agent:boundary:35d06dad -->
+Do this now so we can test it.
+### Re: Skill architecture discussion — corky-installed skills (HEAD)
+
+You raised two good points:
+
+1. **Email and LinkedIn should be separate skills** — not merged into one
+2. **Corky should install these skills** via `corky skill install` — not manually created
+
+This means the SKILL.md files should be bundled inside corky (like agent-doc bundles its own SKILL.md via `agent-doc skill install`). When you run `corky skill install`, it would install:
+
+- `.claude/skills/email/SKILL.md` — email-focused (already exists, but should be corky-managed)
+- `.claude/skills/linkedin/SKILL.md` — LinkedIn posting via `corky linkedin`
+
+**Questions to resolve:**
+
+1. **Does `corky skill install` already install the email SKILL.md?** If so, should it also install a separate linkedin SKILL.md?
+
+2. **Shared runbooks between email and linkedin** — both use corky drafts, both follow "never send without approval." Should there be a shared `corky-common` runbook, or just duplicate the relevant lines?
+
+3. **The current email SKILL.md at `.claude/skills/email/SKILL.md`** — is this already managed by `corky skill install`, or was it manually created?
+<!-- agent:boundary:813d8e45 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- LinkedIn blog teaser: paste and post (or use corky linkedin)
-- Move linkedin-post runbook into corky skill
+- LinkedIn skill architecture: decide on corky-installed skills approach
+- LinkedIn blog teaser: draft ready, post after skill decision
 - Video: edit out WordPress admin section, then post
 - Second blog post + video: target Wed/Thu Apr 9-10
 - Cleanup: remove stale directories

@@ -779,7 +779,7 @@ make eval-smoke JUDGE_MODEL=haiku
 If haiku judging produces similar scores to sonnet judging, that's your answer — use haiku for speed and cost, save sonnet for the response model.
 
 **Smoke suite results (first run):** 5/6 passed (83.3%), 1.8 min. The `inline-colon-annotation` flickered (0.20 vs usual 0.95) — this is the judge variance we're trying to eliminate.
-<!-- agent:boundary:f6e4e941 -->
+<!-- agent:boundary:44da0f53 -->
 <!-- /agent:exchange -->
 
 ## Pending

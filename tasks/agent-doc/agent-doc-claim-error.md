@@ -32,14 +32,36 @@ This is a documentation-only change to the runbook — adding a note to step 2: 
 The binary behavior is already correct (archives everything). The skill just needs to be mindful of pending user content.
 do
 - [ ] Update compact-exchange runbook: note about preserving uncommitted user input
-### Re: Updated compact-exchange runbook (HEAD)
+### Re: Updated compact-exchange runbook
 
 Updated the source runbook at `src/agent-doc/runbooks/compact-exchange.md` — added a bullet under step 2:
 
 > **Unanswered user input** — if the exchange contains uncommitted questions or instructions that haven't been responded to, note them as open items in the summary (don't silently drop them)
 
 Binary rebuilt (v0.31.8) and skill reinstalled. The bundled runbook and installed copy are both updated.
-<!-- agent:boundary:eaafe236 -->
+
+I transferred a task from tasks/briantakita.me.md to tasks/software/corky.md
+The `agent-doc transfer` should have written a prompt of the transfer into tasks/software/corky.md
+The response patch in tasks/software/corky.md claims:
+> agent-doc has no cross-file write capability — each session only manages its own document. This is a current limitation.
+
+Is this true? If it is, we should have a transfer and extract directly write to the target document with the annotated prompt.
+### Re: `agent-doc transfer` does write to the target document (HEAD)
+
+The claim is **incorrect**. Looking at `src/agent-doc/src/extract.rs:148-203`, `agent-doc transfer` absolutely writes to the target document:
+
+1. Reads source component content (line 169)
+2. Clears source component (lines 175-177)
+3. Formats a source annotation: `*Transfer from <source>*` (lines 180-181)
+4. Finds the matching component in the target, appends the annotated content (lines 183-192)
+5. Atomic writes + snapshot saves for both files (lines 176-177, 194-195)
+
+So when you ran `agent-doc transfer`, it should have written the transferred content into corky.md's exchange component with an annotation.
+
+If the response in corky.md claimed "no cross-file write capability," that was the skill/LLM hallucinating — the binary handled the transfer correctly. The LLM in the corky session may have responded to the transferred content without realizing the binary already wrote it.
+
+**No code change needed.** The transfer and extract commands already write directly to the target document with annotated prompts.
+<!-- agent:boundary:2a54e41a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

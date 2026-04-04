@@ -1702,7 +1702,7 @@ agent-doc has no cross-file write capability — each session only manages its o
 - [ ] `cargo install --path .`
 
 Ready to continue the release (sync test, publish) or pivot to the skill architecture task?
-<!-- agent:boundary:160d21ce -->
+<!-- agent:boundary:53cb859f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

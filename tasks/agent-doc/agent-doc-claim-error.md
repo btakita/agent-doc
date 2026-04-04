@@ -129,14 +129,32 @@ docker run --rm \
 Only mounts `agent-doc` + `tmux-router` (the path dependency in `.cargo/config.toml`). Everything else stays inaccessible.
 
 Should we put `.cargo/config.toml` into src/agent-doc?
-### Re: `.cargo/config.toml` placement (HEAD)
+### Re: `.cargo/config.toml` placement
 
 It's already inside `src/agent-doc/.cargo/config.toml` (the submodule). The path patch (`../tmux-router`) resolves relative to agent-loop's `src/` directory — works for local dev.
 
 **Keep as-is.** The file serves local development (testing unreleased tmux-router changes). For Docker builds, the selective mount approach (agent-doc + tmux-router) handles it correctly. Moving or removing it would break local dev without improving Docker builds.
 
 The pattern is: `.cargo/config.toml` for local dev, selective Docker mounts for CI/release.
-<!-- agent:boundary:718aaf67 -->
+
+Why do we need this specific docker configuration. Does ci not build from the crates version of tmux-router?
+### Re: CI uses crates.io tmux-router — Docker doesn't need mount (HEAD)
+
+`.cargo/config.toml` is **not tracked** in the agent-doc git repo — it's a local-only dev override. CI builds use the crates.io version of tmux-router.
+
+The Docker build only needed the tmux-router mount because we mounted the agent-doc directory from the local filesystem (which includes the untracked `.cargo/config.toml`). Without that file, Docker resolves tmux-router from crates.io.
+
+**Simpler Docker approach — mask the local config:**
+```
+docker run --rm \
+  -v .../src/agent-doc:/io \
+  -w /io \
+  -v /dev/null:/io/.cargo/config.toml:ro \
+  ghcr.io/pyo3/maturin build --release --compatibility manylinux2014
+```
+
+The `/dev/null` bind mount masks the local `.cargo/config.toml`, forcing crates.io resolution. No tmux-router mount needed. Only `src/agent-doc` is exposed to the container.
+<!-- agent:boundary:6b0101b3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

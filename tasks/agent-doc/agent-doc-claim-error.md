@@ -363,7 +363,7 @@ So if it's an ephemeral state, what would cause the issue?
 4. **FFI debounce state** — typing tracker's per-file state could accumulate without cleanup
 
 The VCS refresh debounce (500ms) should prevent the cascade. Timing instrumentation will catch it if it recurs. The exchange is very large now — compact?
-<!-- agent:boundary:40a3d79c -->
+<!-- agent:boundary:ef479629 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

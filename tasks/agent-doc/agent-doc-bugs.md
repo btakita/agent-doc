@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-diff-type classification + SKILL.md routing + runbook all landed
+P1 (diff-type) + P2 (eval diffs) + SKILL.md routing all landed
 <!-- /agent:status -->
 
 ## Exchange
@@ -174,7 +174,7 @@ Next steps: the skill can now read `diff_type` from preflight JSON and short-cir
 do:
 - [ ] Update SKILL.md to route based on diff_type
 - Extract runbook
-### Re: Do — SKILL.md routing + runbook (HEAD)
+### Re: Do — SKILL.md routing + runbook
 
 Done. Both items executed:
 
@@ -190,7 +190,31 @@ Done. Both items executed:
 - Override guidance for ambiguous cases
 
 The skill will now automatically use `diff_type` from preflight to optimize routing. For example, when you type "go", the preflight returns `"diff_type": "approval"` and the skill skips confirmation, going straight to execution.
-<!-- agent:boundary:d725f069 -->
+do
+- [ ] Post-preflight diff generation for eval cases (P2)
+### Re: Do — Post-preflight eval diffs (P2) implemented (HEAD)
+
+Done. Eval diffs now match production behavior.
+
+**What changed:**
+
+1. **Moved `strip_comments` to `component.rs`** — shared by both binary (`diff.rs` delegates) and library consumers. No code duplication.
+
+2. **Added `agent-doc` as eval-runner dependency** — `eval-runner` now imports `agent_doc::component::strip_comments`.
+
+3. **Added `strip_diff_comments()` in eval-runner** — reconstructs both sides of a unified diff, strips comments from each, then recomputes the diff. Returns `None` when the diff was entirely comments (matching production's "no changes" behavior).
+
+4. **Wired into `run_case()`** — every eval case diff is preprocessed before the LLM sees it. Comment-only diffs show `"(no changes after comment stripping)"` in the prompt.
+
+**Architecture:**
+```
+component.rs::strip_comments()  ← shared pure function
+    ├─ diff.rs::strip_comments()     ← binary delegates here
+    └─ eval-runner::strip_diff_comments()  ← reconstructs + re-diffs
+```
+
+All agent-doc tests pass (417). Eval-runner compiles clean.
+<!-- agent:boundary:0808c54b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -198,7 +222,7 @@ The skill will now automatically use `diff_type` from preflight to optimize rout
 <!-- agent:pending patch=replace -->
 - [x] Implement diff-type classification in preflight (P1) — DONE
 - [x] Update SKILL.md to route based on diff_type — DONE
-- [ ] Post-preflight diff generation for eval cases (P2)
+- [x] Post-preflight diff generation for eval cases (P2) — DONE
 - [ ] Implement annotated diff format in preflight (P3)
 - [ ] Implement content-source annotation sidecar (P4)
 - [ ] Design reproducible operation log format (P5)

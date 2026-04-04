@@ -87,7 +87,7 @@ do: not sure why you chose to release and none of the items I told you to do.
 - VERSIONS.md historical references left as-is
 
 All tests pass, clippy clean. Feedback saved: "do" means execute all listed items.
-<!-- agent:boundary:87a8f920 -->
+<!-- agent:boundary:6274301f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -290,7 +290,7 @@ I can't determine what from the code alone — all the regex patterns and docume
 **Concrete next step:** Add timing instrumentation to each plugin method that touches document content (`repositionBoundaryViaDocument`, `applyPatch`, PromptPoller's `refreshTrackedFiles`). Log elapsed time — if any consistently shows high duration when bugs.md is active, that's the culprit.
 
 Thank you. Logging performance is important.
-### Re: Agreed — performance logging as next step (HEAD)
+### Re: Agreed — performance logging as next step
 
 This is a good stopping point for the performance investigation in this session. The diagnosis so far:
 - GC removed 3.9 GB orphaned blob
@@ -301,7 +301,27 @@ This is a good stopping point for the performance investigation in this session.
 - Need timing instrumentation in plugin methods to catch the hot path
 
 This should be tracked in the **agent-doc-bugs session** (where the bug manifests) rather than here. Transfer the task?
-<!-- agent:boundary:da5c2911 -->
+
+No thank you...agent-doc-bugs is extremely slow. I would rather fix it here.
+Unless it would help to diagnose the bug by having is occur.
+### Re: Performance timing instrumentation added (HEAD)
+
+Added `[perf]` logging to all plugin hot paths in PatchWatcher.kt and PromptPoller.kt:
+
+| Log prefix | Threshold | What it measures |
+|-----------|-----------|------------------|
+| `[perf] watchLoop iteration` | >50ms | Full watch cycle |
+| `[perf] processPatchFile parse` | >10ms | JSON read + parse |
+| `[perf] applyPatch` | >50ms | Document API patch |
+| `[perf] repositionBoundary` | >50ms | Boundary reposition |
+| `[perf] prompt-poller cycle` | >200ms | Full poll cycle (save+refresh+poll breakdown) |
+
+Committed: `3490314`. Plugin builds clean.
+
+**To use:** Install the updated plugin zip, enable `#com.github.btakita.agentdoc` in Debug Log Settings, open bugs.md, and check idea.log for `[perf]` lines. The breakdown will show which method is consuming CPU.
+
+Plugin zip: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0.zip`
+<!-- agent:boundary:a19da9d4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -310,5 +330,6 @@ This should be tracked in the **agent-doc-bugs session** (where the bug manifest
 - [x] GC orphaned 3.9 GB blob
 - [x] `agent-doc clean --archive`
 - [x] VCS refresh debounce (500ms)
-- [ ] Add timing instrumentation to plugin for bugs.md CPU diagnosis (transfer to agent-doc-bugs)
+- [x] Add timing instrumentation to plugin
+- [ ] Install instrumented plugin and diagnose bugs.md CPU
 <!-- /agent:pending -->

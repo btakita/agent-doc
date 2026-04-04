@@ -438,7 +438,7 @@ Done. Enhanced `ops_log.rs` with structured JSONL cycle logging.
 Existing `ops.log` text format is preserved alongside — `cycles.jsonl` adds structure without breaking existing debug workflows.
 do
 - [ ] Add `---` prompt separator convention to SKILL.md
-### Re: Do — `---` prompt separator convention added to SKILL.md (HEAD)
+### Re: Do — `---` prompt separator convention added to SKILL.md
 
 Done. Added `### 0c. Multi-topic prompt separators` section to SKILL.md between diff-type routing and respond steps.
 
@@ -454,7 +454,20 @@ Done. Added `### 0c. Multi-topic prompt separators` section to SKILL.md between 
 - `---` in context lines (existing content, not user additions)
 
 This ties into the existing `multi_topic` diff type which already detects `---` separators in `classify_diff()`.
-<!-- agent:boundary:754fdbfa -->
+
+did you add tests?
+### Re: Tests for `---` separator (HEAD)
+
+Good catch. The `---` separator convention was documented in SKILL.md but the `classify_diff` code had a bug: it only checked for `---` separators when `added_block_count >= 2`, which missed the common case of `---` inside a single contiguous added block.
+
+**Fixed:** Split the multi-topic detection into two independent checks:
+1. `---` separator within added content (any block count) -> count sections between `---`
+2. Multiple separated added blocks (no `---` needed) -> count distinct blocks
+
+**Added test:** `classify_multi_topic_with_separator` — contiguous added block with `---` between topics correctly classified as `MultiTopic`.
+
+All 437 tests pass, clippy clean.
+<!-- agent:boundary:d29fb7e8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -467,6 +480,6 @@ This ties into the existing `multi_topic` diff type which already detects `---` 
 - [x] Fix write pipeline escape bug + Gson migration (JB plugin v0.2.44) — DONE
 - [x] Implement content-source annotation sidecar (P4) — DONE
 - [x] Design reproducible operation log format (P5) — DONE
-- [x] Add `---` prompt separator convention to SKILL.md — DONE
+- [x] Add `---` prompt separator convention to SKILL.md + fix detection bug — DONE
 - [ ] Add transfer-source metadata to patch format
 <!-- /agent:pending -->

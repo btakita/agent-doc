@@ -323,7 +323,7 @@ Committed: `3490314`. Plugin builds clean.
 Plugin zip: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.1.0.zip`
 The plugin version is incorrect. Please increment. Why did you get the incorrect version? Do we need to add a SKILL -> runbook?
 Or is there deterministic development code that should be used?
-### Re: Plugin version fix + deterministic versioning (HEAD)
+### Re: Plugin version fix + deterministic versioning
 
 **Why wrong:** I referenced "0.1.0" from stale context. Actual version is `0.2.40` in `gradle.properties`. Bumped to **0.2.41**, rebuilt.
 
@@ -335,7 +335,20 @@ Plugin zip: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.41.zi
 3. Memory note: always bump `gradle.properties pluginVersion` on plugin changes
 
 For now, adding a memory note. A deterministic check would be better long-term — could add a gradle task that compares the current version against the last git tag for the plugin.
-<!-- agent:boundary:fd54d655 -->
+Add the deterministic chi
+### Re: Deterministic plugin version check added
+
+Added `plugin-version-check` target to `make precommit`. It fails if `.kt` files are staged but `gradle.properties` isn't also staged (meaning `pluginVersion` wasn't bumped).
+
+```
+make plugin-version-check
+# ERROR: .kt files changed but editors/jetbrains/gradle.properties pluginVersion not bumped (HEAD)
+```
+
+Now `make precommit` runs: clippy + test + version-sync + plugin-version-check + audit-docs.
+
+Committed: `f803d28`.
+<!-- agent:boundary:f802d2c4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -345,6 +358,7 @@ For now, adding a memory note. A deterministic check would be better long-term �
 - [x] `agent-doc clean --archive`
 - [x] VCS refresh debounce (500ms)
 - [x] Add timing instrumentation to plugin
-- [x] Fix plugin version (0.2.40 → 0.2.41)
+- [x] Fix plugin version (0.2.41)
+- [x] Deterministic plugin version check in `make precommit`
 - [ ] Install instrumented plugin v0.2.41 and diagnose bugs.md CPU
 <!-- /agent:pending -->

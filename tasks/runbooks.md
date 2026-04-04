@@ -181,7 +181,7 @@ agent-runbooks validate runbooks/my-runbook.md \
 ```
 
 Parent pointer updated: `290c86cb`.
-### Re: Existence-lang ontology + circular dev deps (HEAD)
+### Re: Existence-lang ontology + circular dev deps
 
 **Adding ontology to agent-runbooks:** This means annotating the agent-runbooks source code with `[term:Name]` markers in doc comments, then using `agent-runbooks validate --ontology-dir` to self-validate. The crate eats its own dogfood.
 
@@ -190,7 +190,33 @@ Parent pointer updated: `290c86cb`.
 **Within a single crate**, modules can reference each other freely (no cycle issue).
 
 **For agent-runbooks + existence-lang:** They stay independent at the crate level. The ontology dir is a runtime path (`--ontology-dir ~/.claude/philosophy/src`), not a compile-time dependency. No cycle needed.
-<!-- agent:boundary:8afff1c5 -->
+
+What does --ontology-dir in the agent-runbooks project?
+### Re: What --ontology-dir does
+
+`--ontology-dir` is an optional flag on the `validate` command. When provided, it enables **ontology term checking**:
+
+1. Scans the runbook content for `[term:Name]` annotations (regex: `\[term:([A-Za-z_-]+)\]`)
+2. For each unique term found, checks that `<ontology-dir>/<name-lowercase>.md` exists
+3. Missing terms produce warnings (soft validation, don't affect exit code)
+4. Duplicate terms are warned only once
+
+**Without `--ontology-dir`:** Term annotations are silently ignored. No errors, no warnings.
+
+**Example:**
+```bash
+agent-runbooks validate runbooks/release-rust-maturin.md \
+  --ontology-dir ~/.claude/philosophy/src
+
+# If the runbook contains [term:Domain] and [term:System]: (HEAD)
+# - Checks ~/.claude/philosophy/src/domain.md exists -> ok (HEAD)
+# - Checks ~/.claude/philosophy/src/system.md exists -> ok (HEAD)
+# If it contains [term:Nonexistent]: (HEAD)
+# - WARN: ontology term 'Nonexistent' not found (HEAD)
+```
+
+It's a lightweight way to ensure runbooks reference valid ontology concepts without requiring a compile-time dependency on existence-lang.
+<!-- agent:boundary:cd23fd0e -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

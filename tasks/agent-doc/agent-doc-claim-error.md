@@ -76,11 +76,11 @@ Navigating this file is fast. Navigating agent-doc-bugs.md is slow. Why?
 - Reduces JetBrains re-indexing overhead from rapid agent-doc commits
 
 Committed: `f5be407`. All tests pass, plugin builds clean.
-### Re: Archive-to-revision — noted, not implementing yet (HEAD)
+### Re: Archive-to-revision — noted, not implementing yet
 
 Will discuss cutoff point before implementing. The `--archive` flag is ready for when we decide.
 
-### Re: Why agent-doc-bugs.md is slow but this file is fast (HEAD)
+### Re: Why agent-doc-bugs.md is slow but this file is fast
 
 I can't pinpoint it from the CLI — the measurable metrics are similar:
 
@@ -102,7 +102,33 @@ Claim-error actually has **more** commits (776 vs 208) and is the fast one. File
 - Editor highlighting/inspection overhead
 
 **To diagnose:** In JetBrains: Help → Diagnostic Tools → Activity Monitor, or capture a thread dump while navigating bugs.md. That would show what's actually blocking.
-<!-- agent:boundary:500c318e -->
+
+On agent-doc-bugs.md I saw:
+![img_1.png](img_1.png)
+
+On this file I see Agent Doc taking up much less processing:
+```
+ %CPU  Subsystem
+
+ 10.5  <Process total CPU usage>
+  3.4  <unidentified: DefaultDispatcher-worker->
+  2.2  <unidentified: UI thread>
+  1.6  <Activity Monitor>
+  0.9  <JIT compiler>
+```
+### Re: Agent Doc plugin consuming 22.3% CPU on bugs.md (HEAD)
+
+The Activity Monitor confirms it — **the plugin itself** is the bottleneck:
+- bugs.md: **22.3% CPU** from `com.github.btakita.agentdoc`, 160.6% total
+- claim-error.md: not listed (< 1%), 10.5% total
+
+The plugin is doing sustained work specific to bugs.md. Most likely:
+1. **Stashed pane %483** for bugs.md may cause the sync reconciler to retry repeatedly
+2. **PatchWatcher** processing events for a document whose pane is stashed
+3. The VCS refresh debounce helps but doesn't address the root cause — the plugin shouldn't be doing continuous work for stashed sessions
+
+**Fix direction:** PatchWatcher/sync should skip or pause processing for documents with stashed panes. Need to check what the plugin is actually looping on — likely `EditorTabSyncListener` or the watch thread.
+<!-- agent:boundary:0961dbc4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -111,6 +137,6 @@ Claim-error actually has **more** commits (776 vs 208) and is the fast one. File
 - [x] GC orphaned 3.9 GB blob from git history
 - [x] `agent-doc clean --archive` flag
 - [x] VCS refresh debounce in JetBrains plugin (500ms)
+- [ ] Fix plugin CPU usage for stashed sessions (22.3% on bugs.md)
 - [ ] Discuss archive cutoff point for squash
-- [ ] Diagnose agent-doc-bugs.md JetBrains slowness (need IDE profiler)
 <!-- /agent:pending -->

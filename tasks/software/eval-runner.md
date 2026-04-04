@@ -9,7 +9,7 @@ claude_args: --dangerously-skip-permissions
 # eval-runner
 
 <!-- agent:status -->
-**Status:** Sonnet baseline complete (12/21, 57.1%) | **Location:** `src/eval-runner/` | **Parallel:** tokio + semaphore working
+**Status:** 3 baselines complete (haiku 42.9%, sonnet-naked 57.1%, sonnet-with-context 47.6%) | **Location:** `src/eval-runner/` | **Parallel:** 8-wide working
 <!-- /agent:status -->
 
 ## Architecture
@@ -395,7 +395,8 @@ do
 - [ ] Increase default parallelism to 8 (done in Makefile, test with next run)
 - [ ] Create system prompt file for evals with relevant SKILL.md sections
 - [ ] Re-run sonnet eval with system prompt to measure skill+model quality
-### Re: System prompt + parallel 8 eval running (HEAD)
+
+### Re: System prompt + parallel 8 eval running
 
 **Created** `evals/agent-doc/diff-interpretation/system-prompt.md` with the key agent-doc conventions:
 - Comment stripping (preflight behavior)
@@ -409,14 +410,41 @@ do
 **Eval launched:** `--model sonnet --judge-model sonnet --parallel 8 --system-prompt system-prompt.md`
 
 Saving to `baselines/sonnet-with-context-2026-04-04.json`. Will report results when done.
-<!-- agent:boundary:6462445d -->
+How many sonnet evals will run? What will be the estimated token cost?
+### Re: Sonnet with context results (HEAD)
+
+**Results: 10/21 passed (47.6%), mean score 0.63** (vs naked: 12/21 at 57.1%, mean 0.56)
+
+**Previously persistent failures — all improved:**
+
+| Case | With Context | Naked | Delta |
+|------|-------------|-------|-------|
+| comment-content-ignored | 0.50 | 0.00 | +0.50 |
+| head-label-removal | 0.50 | 0.10 | +0.40 |
+| single-word-approval | 0.50 | 0.05 | +0.45 |
+| multi-item-instruction-list | 0.55 | 0.10 | +0.45 |
+| approval-to-implement | 0.10 | 0.10 | +0.00 |
+
+4 of 5 showed major improvement. Still below 0.7 threshold though — the model understands the conventions partially but doesn't fully comply.
+
+**But regressions elsewhere:**
+- structural-reorg: 0.90 → 0.30 (-0.60)
+- url-reference-question: 0.85 → 0.10 (-0.60)
+- multi-topic: 0.90 → 0.70 (-0.20)
+
+The system prompt is over-constraining — the model tries to apply agent-doc protocols even when a straightforward response would score better. The prompt needs tuning: less prescriptive on workflow mechanics, more focused on the specific conventions the naked model misses.
+
+**Mean score did improve** (0.56 → 0.63) — the context helps overall understanding. But pass rate dropped because the regressions pushed previously-passing cases below threshold.
+
+**Next steps:** Refine the system prompt to be less prescriptive. Focus on "don't respond to comments" and "treat single words as approvals" without adding workflow overhead that hurts simple cases.
+<!-- agent:boundary:546e97a2 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [x] Create system prompt file for evals with relevant SKILL.md sections
-- [ ] Re-run sonnet eval with system prompt (running, --parallel 8)
+- [x] Re-run sonnet eval with system prompt (10/21, 47.6% — context helps failures but causes regressions)
+- [ ] Refine system prompt — less prescriptive, focus on specific conventions
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 - [ ] JSON output format documentation
 <!-- /agent:pending -->

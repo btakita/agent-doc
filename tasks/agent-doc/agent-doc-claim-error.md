@@ -40,7 +40,7 @@ I would want to archive the repo with the old history. Are there options to do t
 > - Disable git annotations for `tasks/` directory in IDE settings
 
 Wa can do this.
-### Re: Archiving history before squash (HEAD)
+### Re: Archiving history before squash
 
 Options:
 1. **Archive branch**: `git branch archive/pre-squash` → preserves full history, push to remote for backup
@@ -50,19 +50,36 @@ Options:
 
 **Recommended:** Tag pre-squash + squash. Tag costs nothing, preserves full history if needed.
 
-### Re: Disabling git annotations for tasks/ (HEAD)
+### Re: Disabling git annotations for tasks/
 
 JetBrains options:
 - Per-file: right-click gutter → Annotate → uncheck
 - Directory: Settings → Version Control → Directory Mappings (heavy-handed)
 - **Better: throttle VCS refresh in the agent-doc plugin** — the plugin fires `VirtualFileManager.getInstance().asyncRefresh()` on every commit. Could skip or debounce for task documents.
-<!-- agent:boundary:a90e857b -->
+
+do
+- [ ] Archive history + squash old task commits: add an agent-doc command
+- [ ] Throttle VCS refresh in JetBrains plugin for task documents
+### Re: Both implemented (HEAD)
+
+**1. `agent-doc clean --archive`** (`clean.rs` + `main.rs`):
+- New `--archive` flag creates `archive/pre-squash-<unix_timestamp>` tag before squashing
+- Usage: `agent-doc clean tasks/agent-doc/agent-doc-bugs.md --archive`
+- Tag preserves full history; squash reduces commit count
+
+**2. VCS refresh debounce** (`PatchWatcher.kt`):
+- Added `Alarm`-based 500ms debounce window
+- Multiple `vcs-refresh.signal` events within 500ms coalesce into one VFS+VCS refresh
+- Reduces JetBrains re-indexing overhead from rapid agent-doc commits
+
+Committed: `f5be407`. All tests pass, plugin builds clean.
+<!-- agent:boundary:fce8c57c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] GC orphaned 3.9 GB blob from git history
-- [ ] Archive history + squash old task commits
-- [ ] Throttle VCS refresh in JetBrains plugin for task documents
+- [x] `agent-doc clean --archive` flag
+- [x] VCS refresh debounce in JetBrains plugin (500ms)
 <!-- /agent:pending -->

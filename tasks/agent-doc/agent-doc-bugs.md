@@ -436,7 +436,7 @@ Done. Enhanced `ops_log.rs` with structured JSONL cycle logging.
 **Tests:** 2 new (log_cycle_writes_jsonl, log_cycle_appends_multiple). All 436 tests pass, clippy clean.
 
 Existing `ops.log` text format is preserved alongside — `cycles.jsonl` adds structure without breaking existing debug workflows.
-<!-- agent:boundary:bf42fa82 -->
+<!-- agent:boundary:67fd8c04 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

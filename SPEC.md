@@ -884,7 +884,21 @@ Not configurable per-document; one-size-fits-all fails for slow CI systems or fa
 
 **Test coverage:** `timing_constants_are_configurable`, `await_idle_via_file_respects_poll_interval` document current behavior. See `src/debounce.rs`.
 
-### 11.7 Recommended Improvements
+### 11.7 Directory-Walk Double-Pop Bug (Fixed in v0.28)
+
+**Gap (now fixed):** `typing_indicator_path()` and `status_file_path()` contained a double-pop bug: each loop iteration called `dir.pop()` twice — once unconditionally at the top of the loop, and once at the bottom to advance to the next level. This caused every other directory level to be skipped when walking up to find `.agent-doc/`.
+
+Files at **odd depths** from the project root (1, 3, 5 levels) failed to find `.agent-doc/` and fell back to writing indicators in the file's immediate parent directory instead. For example, a file at `tasks/file.md` (1 level deep) would fail while `tasks/software/file.md` (2 levels deep) succeeded.
+
+**Root cause:** The loop's end-of-iteration `pop()` double-counted the level already consumed by the next iteration's leading `pop()`.
+
+**Fix:** Pop the file component once before entering the loop, then pop exactly once per iteration. This ensures every directory level is checked.
+
+**Impact:** Cross-process typing detection and status files were silently written to wrong paths for single-level-deep documents. Indicators were effectively lost from the plugin's perspective, causing premature debounce expiry.
+
+**Test coverage:** `typing_indicator_found_for_file_one_level_deep`, `typing_indicator_found_for_file_two_levels_deep`, `status_found_for_file_one_level_deep`. See `src/debounce.rs`.
+
+### 11.8 Recommended Improvements
 
 1. **Expose timing constants to frontmatter** — Allow per-document control via:
    ```yaml
@@ -900,3 +914,5 @@ Not configurable per-document; one-size-fits-all fails for slow CI systems or fa
 4. **Mtime fallback in route path** — If mtime-detected change is stale (>1s), also check cross-process typing indicator as fallback.
 
 5. **CRDT merge monitoring** — Log merge conflicts and convergence issues to `.agent-doc/logs/merge.log` for operator visibility.
+
+6. **Stale typing indicator cleanup** — Old `.agent-doc/typing/` files are never deleted. Add a GC step (e.g., in `agent-doc gc` or on preflight) to remove indicators older than a configurable threshold (default 1h).

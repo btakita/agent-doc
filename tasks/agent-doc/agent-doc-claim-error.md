@@ -154,7 +154,7 @@ docker run --rm \
 ```
 
 The `/dev/null` bind mount masks the local `.cargo/config.toml`, forcing crates.io resolution. No tmux-router mount needed. Only `src/agent-doc` is exposed to the container.
-<!-- agent:boundary:6b0101b3 -->
+<!-- agent:boundary:3228835f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

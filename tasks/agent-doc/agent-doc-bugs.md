@@ -317,7 +317,7 @@ Fixed all 10 clippy errors:
 Also fixed an accidental commit of `.cargo/config.toml` and `.bin/agent-doc` — removed from git, already in `.gitignore`.
 
 CI should pass now. Two commits pushed.
-<!-- agent:boundary:a89393c0 -->
+<!-- agent:boundary:8fef6e6c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

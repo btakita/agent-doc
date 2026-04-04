@@ -261,6 +261,34 @@ pub fn run(file: &Path, diff_only: bool) -> Result<()> {
         anyhow::bail!("file not found: {}", file.display());
     }
 
+    // Step 0a: Auto-GC (at most once per day).
+    // Checks .agent-doc/gc.stamp — if missing or >24 hours old, runs lightweight GC.
+    {
+        let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+        if let Some(root) = snapshot::find_project_root(&canonical) {
+            let stamp = root.join(".agent-doc/gc.stamp");
+            let needs_gc = match std::fs::metadata(&stamp) {
+                Ok(meta) => meta.modified().ok()
+                    .and_then(|t| t.elapsed().ok())
+                    .map(|age| age > std::time::Duration::from_secs(86400))
+                    .unwrap_or(true),
+                Err(_) => true,
+            };
+            if needs_gc {
+                eprintln!("[preflight] step 0a: auto-gc");
+                match crate::gc::run(Some(&root), false) {
+                    Ok(result) => {
+                        if result.deleted > 0 {
+                            eprintln!("[preflight] gc: {} files cleaned", result.deleted);
+                        }
+                        let _ = std::fs::write(&stamp, "");
+                    }
+                    Err(e) => eprintln!("[preflight] gc warning: {}", e),
+                }
+            }
+        }
+    }
+
     // Step 0: Check tmux layout health.
     eprintln!("[preflight] step 0: layout check");
     let layout_issues = check_layout();
@@ -349,12 +377,20 @@ pub fn run(file: &Path, diff_only: bool) -> Result<()> {
     // Step 3b: Wait for file to settle (mtime + typing indicator debounce).
     // Check both file mtime (disk-level) and cross-process typing indicator
     // (buffer-level) to avoid picking up mid-typing edits.
+    // Default: 2000ms (configurable via `agent_doc_debounce` frontmatter field).
     {
-        let debounce = std::time::Duration::from_millis(500);
-        let max_wait = std::time::Duration::from_secs(3);
+        let debounce_ms = std::fs::read_to_string(file)
+            .ok()
+            .and_then(|content| {
+                frontmatter::parse(&content).ok().and_then(|(fm, _)| fm.debounce_ms)
+            })
+            .unwrap_or(2000);
+        let debounce = std::time::Duration::from_millis(debounce_ms);
+        let max_wait = std::time::Duration::from_secs(if debounce_ms > 3000 { (debounce_ms / 1000) + 1 } else { 3 });
         let poll = std::time::Duration::from_millis(100);
         let start = std::time::Instant::now();
         let file_str = file.to_string_lossy();
+        tracing::debug!(debounce_ms, file = %file.display(), "preflight debounce starting");
 
         loop {
             let idle_for = std::fs::metadata(file)
@@ -364,14 +400,27 @@ pub fn run(file: &Path, diff_only: bool) -> Result<()> {
                 .unwrap_or(debounce);
 
             let typing_active = agent_doc::debounce::is_typing_via_file(&file_str, 1500);
+            tracing::trace!(
+                idle_ms = idle_for.as_millis() as u64,
+                typing_active,
+                elapsed_ms = start.elapsed().as_millis() as u64,
+                "preflight debounce poll"
+            );
 
             if idle_for >= debounce && !typing_active {
+                tracing::debug!(
+                    idle_ms = idle_for.as_millis() as u64,
+                    waited_ms = start.elapsed().as_millis() as u64,
+                    "preflight debounce settled"
+                );
                 break;
             }
             if start.elapsed() >= max_wait {
                 if typing_active {
+                    tracing::warn!(waited_ms = start.elapsed().as_millis() as u64, "preflight debounce timeout (typing still active)");
                     eprintln!("[preflight] typing indicator active but timeout after {:.1}s — proceeding", start.elapsed().as_secs_f64());
                 } else {
+                    tracing::warn!(waited_ms = start.elapsed().as_millis() as u64, "preflight debounce timeout (mtime not settled)");
                     eprintln!("[preflight] mtime debounce timeout after {:.1}s — proceeding", start.elapsed().as_secs_f64());
                 }
                 break;

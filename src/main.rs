@@ -50,6 +50,7 @@ mod commands;
 mod compact;
 mod config;
 mod convert;
+mod gc;
 mod parallel;
 mod preflight;
 mod dedupe;
@@ -64,6 +65,7 @@ mod init;
 mod install;
 mod layout;
 mod mode;
+mod notify;
 mod outline;
 mod patch;
 mod plugin;
@@ -197,6 +199,15 @@ enum Commands {
         /// Project root directory (auto-detected if omitted)
         #[arg(long)]
         root: Option<PathBuf>,
+    },
+    /// Garbage-collect orphaned files in .agent-doc/
+    Gc {
+        /// Project root directory (auto-detected if omitted)
+        #[arg(long)]
+        root: Option<PathBuf>,
+        /// Show what would be deleted without deleting
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Start Claude in a tmux pane and register the session
     Start {
@@ -511,6 +522,22 @@ enum Commands {
         #[arg(long)]
         component: Option<String>,
     },
+    /// Append a blockquote notification to a document's exchange component
+    Notify {
+        /// Path to the document
+        file: PathBuf,
+        /// Notification message
+        message: String,
+        /// Source document or session
+        #[arg(long)]
+        source: Option<String>,
+        /// Sections affected (for re-evaluation directive)
+        #[arg(long)]
+        affects: Option<String>,
+        /// Skip git commit after notification
+        #[arg(long)]
+        no_commit: bool,
+    },
     /// Print the path to the shared library (libagent_doc.so/dylib/dll)
     LibPath,
     /// List all available commands as JSON (for editor plugin autocomplete)
@@ -615,7 +642,61 @@ enum SkillCommands {
     Check,
 }
 
+/// Initialize structured logging. When `AGENT_DOC_LOG` is set (e.g., "debug"),
+/// logs are written to `.agent-doc/logs/debug.log`. When unset, this is a no-op.
+fn init_tracing() {
+    let filter = match std::env::var("AGENT_DOC_LOG") {
+        Ok(val) => val,
+        Err(_) => return, // No logging configured — zero overhead
+    };
+
+    // Find .agent-doc/logs/ directory (walk up from CWD)
+    let log_dir = {
+        let mut dir = std::env::current_dir().unwrap_or_default();
+        loop {
+            let candidate = dir.join(".agent-doc/logs");
+            if candidate.is_dir() {
+                break Some(candidate);
+            }
+            if !dir.pop() {
+                break None;
+            }
+        }
+    };
+
+    let Some(log_dir) = log_dir else {
+        eprintln!("[tracing] AGENT_DOC_LOG set but no .agent-doc/logs/ found — logging disabled");
+        return;
+    };
+
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "debug.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+    // Leak the guard so it lives for the program lifetime
+    std::mem::forget(_guard);
+
+    use tracing_subscriber::EnvFilter;
+    let env_filter = EnvFilter::try_new(&filter)
+        .unwrap_or_else(|_| EnvFilter::new("debug"));
+
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_writer(non_blocking)
+        .with_ansi(false)
+        .with_target(true)
+        .with_thread_ids(true)
+        .init();
+
+    tracing::debug!("agent-doc tracing initialized (filter: {})", filter);
+}
+
 fn main() -> anyhow::Result<()> {
+    // Initialize structured logging via AGENT_DOC_LOG env var.
+    // Examples: AGENT_DOC_LOG=debug, AGENT_DOC_LOG=agent_doc::preflight=debug
+    // When set, logs to .agent-doc/logs/debug.log (auto-rotated).
+    // When unset, no file logging (zero overhead).
+    init_tracing();
+
     let cli = Cli::parse();
 
     // Warn about newer versions on startup, but skip if running the upgrade command itself.
@@ -648,6 +729,13 @@ fn main() -> anyhow::Result<()> {
         Commands::Reset { file } => reset::run(&file),
         Commands::Clean { file } => clean::run(&file),
         Commands::AuditDocs { root } => audit_docs::run(root.as_deref()),
+        Commands::Gc { root, dry_run } => {
+            let result = gc::run(root.as_deref(), dry_run)?;
+            if dry_run {
+                eprintln!("[gc] Dry run: {} files would be deleted, {} kept", result.deleted, result.skipped);
+            }
+            Ok(())
+        }
         Commands::Start { file } => start::run(&file),
         Commands::Route { file, pane, cols, focus, debounce } => {
             let result = route::run(&file, pane.as_deref(), debounce, &cols);
@@ -836,6 +924,9 @@ fn main() -> anyhow::Result<()> {
                 timeout_secs: timeout,
                 dry_run,
             })
+        }
+        Commands::Notify { file, message, source, affects, no_commit } => {
+            notify::run(&file, &message, source.as_deref(), affects.as_deref(), !no_commit)
         }
         Commands::Boundary { file, component } => boundary::run(&file, component.as_deref()),
         Commands::Terminal { file, session } => terminal::run(&file, session.as_deref()),

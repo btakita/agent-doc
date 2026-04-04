@@ -207,7 +207,7 @@ The "distribution-aware reorg" feedback is a guardrail -- it prevents a mistake 
 **Rule of thumb:**
 - If it's "don't do X" or "always do Y" -> auto memory (always loaded)
 - If it's "step 1, step 2, step 3 to accomplish Z" -> runbook (loaded when doing Z)
-<!-- agent:boundary:a37c8cb8 -->
+<!-- agent:boundary:2dd483a8 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

@@ -170,7 +170,7 @@ The double-sync from route is eliminated. But the JB plugin's `EditorTabSyncList
 The fix would be: when a pane is in stash and NOT in the desired layout, don't pull it out. Only pull it out when it's actually wanted.
 
 Should I investigate the `sync_with_options` pre-reconcile pane setup to find where stashed panes are being joined before reconciliation?
-<!-- agent:boundary:f2fc4965 -->
+<!-- agent:boundary:1e8c09a6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

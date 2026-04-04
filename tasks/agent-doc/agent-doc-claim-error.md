@@ -95,12 +95,34 @@ The pattern of "memory says what, runbook says how" is already working. No new m
 do
 - [ ] Commit tmux-router sync.rs debug logging changes
 - [ ] Commit agent-doc submodule changes (runbook updates, skill.rs)
-### Re: Submodule changes committed (HEAD)
+### Re: Submodule changes committed
 
 1. **tmux-router** (`d2219eb`): stash debug logging with window/pane/session context
 2. **agent-doc** (`72adf58`): transfer-extract runbook + compact-exchange update + skill.rs bundling + SKILL.md Runbooks section
 3. **agent-loop** (`0ff07ae1`): updated both submodule pointers
-<!-- agent:boundary:4575be7d -->
+
+do
+- [ ] Release tmux-router (if warranted — only debug logging)
+n
+### Re: agent-doc v0.31.9 released, tmux-router skipped (HEAD)
+
+**tmux-router:** Release skipped — debug logging only, not user-facing.
+
+**agent-doc v0.31.9 released** (following `.agent/runbooks/prerelease.md`):
+
+| Step | Status |
+|------|--------|
+| `make check` | 38 tests pass |
+| Version bump (Cargo.toml + pyproject.toml) | 0.31.9 |
+| VERSIONS.md | Updated |
+| `cargo publish` | crates.io |
+| PyPI (Docker + `/dev/null` mask) | Uploaded |
+| GitHub Release | https://github.com/btakita/agent-doc/releases/tag/v0.31.9 |
+| `cargo install --path .` | v0.31.9 in ~/.cargo/bin |
+| Parent submodule pointer | Updated |
+
+The `/dev/null` config mask worked perfectly — no tmux-router mount needed.
+<!-- agent:boundary:523b2a2a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -108,6 +130,5 @@ do
 <!-- agent:pending patch=replace -->
 - [x] Commit tmux-router sync.rs debug logging changes
 - [x] Commit agent-doc submodule changes (runbook updates, skill.rs)
-- [ ] Release agent-doc (version TBD)
-- [ ] Release tmux-router (if warranted — only debug logging)
+- [x] Release agent-doc v0.31.9
 <!-- /agent:pending -->

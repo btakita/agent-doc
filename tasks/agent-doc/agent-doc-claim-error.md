@@ -15,6 +15,7 @@ v0.31.5 released. Commit-on-claim, auto-setup, VCS refresh, --diff-only, skill r
 
 <!-- agent:exchange patch=append -->
 *Compacted. Features: commit-on-claim, auto-setup untracked files, --diff-only flag, skill runbook bundling. Conventions: `.ai/runbooks/` (project root, vendor-neutral), `runbooks/` (skill-scoped). v0.31.5 released (cargo + GitHub). Open: PyPI manylinux build, `.ai/runbooks` blog post.*
+<!-- agent:boundary:a4e6c722 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

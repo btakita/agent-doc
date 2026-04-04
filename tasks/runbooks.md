@@ -354,7 +354,7 @@ You're right — a notification isn't just "here's new info." It should signal: 
 v1 could be done today with `agent-doc write --stream` targeting the other file. The gap is just: no `--append` mode for `agent-doc patch`, and `write` adds `## Assistant` framing that doesn't fit a notification.
 
 Added to the agent-doc-bugs task scope.
-<!-- agent:boundary:feb60ed4 -->
+<!-- agent:boundary:4fa1b45f -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

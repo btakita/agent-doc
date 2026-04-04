@@ -437,7 +437,7 @@ The system prompt is over-constraining — the model tries to apply agent-doc pr
 **Mean score did improve** (0.56 → 0.63) — the context helps overall understanding. But pass rate dropped because the regressions pushed previously-passing cases below threshold.
 
 **Next steps:** Refine the system prompt to be less prescriptive. Focus on "don't respond to comments" and "treat single words as approvals" without adding workflow overhead that hurts simple cases.
-<!-- agent:boundary:546e97a2 -->
+<!-- agent:boundary:6b0ddcad -->
 <!-- /agent:exchange -->
 
 ## Pending

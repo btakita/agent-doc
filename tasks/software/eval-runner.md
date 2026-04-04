@@ -507,7 +507,7 @@ Looked at the judge reasoning and model responses for all 3 failures. The root c
 
 These are diff-interpretation evals, not agentic execution evals. Testing whether the model recognizes "go" as an approval is the right scope.
 1+2 sound good. 3 would be great with a baseline repo or directory.
-### Re: Cases fixed, eval running (HEAD)
+### Re: Cases fixed, eval running
 
 Agreed — options 1+2 implemented. Updated all 3 cases in `cases.yaml`:
 
@@ -519,15 +519,57 @@ Agreed — options 1+2 implemented. Updated all 3 cases in `cases.yaml`:
 Option 3 (agentic execution with a baseline repo) is a great future direction — would need a fixture directory with mock files for the model to interact with.
 
 Full eval running with refined prompt + fixed cases. Will report results when done.
-<!-- agent:boundary:ae5062ba -->
+
+What would these fixtures look like?
+### Re: Fixture design for agentic evals (HEAD)
+
+A fixture is a self-contained directory per case — a mini project with everything the model needs:
+
+```
+evals/agent-doc/agentic/fixtures/
+├── approval-to-implement/
+│   ├── plan.md              # Session doc (frontmatter, pending, exchange)
+│   ├── .agent-doc/
+│   │   └── snapshots/       # Pre-computed snapshot (drives the diff)
+│   └── src/
+│       └── main.rs          # Mock code to implement against
+├── single-word-approval/
+│   └── ...
+└── multi-item-checklist/
+    └── ...
+```
+
+**Each fixture provides:**
+1. **Session document** — complete with frontmatter, `&lt;!-- agent:pending --&gt;`, exchange history
+2. **Snapshot** — so `agent-doc preflight` produces the correct diff
+3. **Mock source files** — minimal code the model can read/edit to "implement"
+4. **CLAUDE.md** — scoped instructions for the fixture
+
+**Eval execution** changes from `claude --print` to:
+```bash
+cd fixtures/approval-to-implement
+claude --allowedTools "Read,Edit,Write,Bash" \
+  --system-prompt system-prompt.md \
+  --print "Run /agent-doc plan.md"
+```
+
+**Judging** shifts from response text to **file diff**:
+- Did the model edit the right files?
+- Did the pending component get updated?
+- Did the session document get a response appended?
+- Were the code changes correct/reasonable?
+
+This is significantly more complex (each fixture is a mini project, judging is multi-dimensional), but it's the only way to truly test agentic execution. Good candidate for a v2 eval suite after the diff-interpretation evals stabilize.
+
+**For now:** The diff-interpretation evals (current 21 cases) test signal recognition. The agentic fixtures would test end-to-end execution. Both are valuable at different layers.
+<!-- agent:boundary:728f9e3d -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [x] Fix expected_behavior for approval cases
-- [x] Add mock pending context to approval eval cases
 - [ ] Full eval run with fixed cases (running)
+- [ ] Design agentic eval fixture format (future — v2 eval suite)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 - [ ] JSON output format documentation
 <!-- /agent:pending -->

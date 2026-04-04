@@ -262,6 +262,10 @@ pub fn wait_for_stable_content(doc: &Path, previous: &str) -> Result<String> {
     const STABLE_CHECKS_REQUIRED: u32 = 3; // require 3 consecutive stable reads
 
     let mut current = std::fs::read_to_string(doc)?;
+    // Track consecutive stable reads across outer iterations — content changes anywhere
+    // (even between outer iterations) must reset the counter so 3 truly consecutive
+    // stable reads are always required, not just 3 within a single outer pass.
+    let mut stable_count = 0u32;
 
     for attempt in 0..MAX_RECHECKS {
         let last_added = extract_last_added_line(&strip_comments(previous), &strip_comments(&current));
@@ -275,19 +279,14 @@ pub fn wait_for_stable_content(doc: &Path, previous: &str) -> Result<String> {
                 MAX_RECHECKS,
                 truncate_for_log(line, 60)
             );
-            // Require multiple consecutive stable reads to account for
-            // editor buffer→flush delays (auto-save may take 1-2s)
-            let mut stable_count = 0u32;
-            for _check in 0..STABLE_CHECKS_REQUIRED {
-                std::thread::sleep(std::time::Duration::from_millis(RECHECK_DELAY_MS));
-                let refreshed = std::fs::read_to_string(doc)?;
-                if refreshed == current {
-                    stable_count += 1;
-                } else {
-                    current = refreshed;
-                    stable_count = 0;
-                    break;
-                }
+            // Sleep then re-read; count consecutive identical reads across all iterations.
+            std::thread::sleep(std::time::Duration::from_millis(RECHECK_DELAY_MS));
+            let refreshed = std::fs::read_to_string(doc)?;
+            if refreshed == current {
+                stable_count += 1;
+            } else {
+                current = refreshed;
+                stable_count = 0;
             }
             if stable_count >= STABLE_CHECKS_REQUIRED {
                 eprintln!("[diff] Content stable after {} consecutive checks", STABLE_CHECKS_REQUIRED);

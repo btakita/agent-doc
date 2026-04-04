@@ -29,6 +29,11 @@
 //!   (e.g. boundary repositioning) while the user is actively typing.
 //! - `agent_doc_await_idle(file_path, debounce_ms, timeout_ms)`: blocks until the document has been
 //!   idle for `debounce_ms`, or `timeout_ms` expires.  Returns `true` on idle, `false` on timeout.
+//! - `agent_doc_is_typing_via_file(file_path, debounce_ms)`: cross-process check — reads the
+//!   file-based typing indicator written by `document_changed`; `true` if updated within
+//!   `debounce_ms`.  For CLI tools running in a separate process from the editor plugin.
+//! - `agent_doc_await_idle_via_file(file_path, debounce_ms, timeout_ms)`: blocking variant of
+//!   `is_typing_via_file`; polls until idle or `timeout_ms` expires.
 //! - `agent_doc_free_string(ptr)` / `agent_doc_free_state(ptr, len)`: free memory returned by any
 //!   `agent_doc_*` function.  Must be called for every non-null pointer.
 //!
@@ -555,7 +560,17 @@ pub unsafe extern "C" fn agent_doc_is_idle(
         Ok(s) => s,
         Err(_) => return true, // Invalid path — don't block callers
     };
-    crate::debounce::is_idle(path, debounce_ms as u64)
+    let in_process_idle = crate::debounce::is_idle(path, debounce_ms as u64);
+    if !in_process_idle {
+        return false;
+    }
+    // In-process says idle. If the file was never tracked in this process (e.g., after
+    // plugin restart), also check the file-based indicator so cross-process typing state
+    // from another plugin instance isn't silently lost.
+    if !crate::debounce::is_tracked(path) {
+        return !crate::debounce::is_typing_via_file(path, debounce_ms as u64);
+    }
+    true
 }
 
 /// Block until the document has been idle for `debounce_ms`, or `timeout_ms` expires.
@@ -576,7 +591,63 @@ pub unsafe extern "C" fn agent_doc_await_idle(
         Ok(s) => s,
         Err(_) => return true, // Invalid path — don't block
     };
+    // When the file is untracked in-process (e.g., after plugin restart), bridge to
+    // file-based indicator so cross-process typing state isn't silently ignored.
+    if !crate::debounce::is_tracked(path) {
+        return crate::debounce::await_idle_via_file(
+            path,
+            debounce_ms as u64,
+            timeout_ms as u64,
+        );
+    }
     crate::debounce::await_idle(path, debounce_ms as u64, timeout_ms as u64)
+}
+
+/// Check if a plugin in another process has typed recently (cross-process).
+///
+/// Reads the file-based typing indicator written by `agent_doc_document_changed`.
+/// Returns `true` if the indicator exists and was updated within `debounce_ms`.
+/// Returns `false` if no indicator file exists (plugin not active or no edits).
+///
+/// This is the cross-process complement to `agent_doc_is_idle`, which only
+/// works within the same process. Use this from CLI tools that run separately
+/// from the editor plugin.
+///
+/// # Safety
+///
+/// `file_path` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_is_typing_via_file(
+    file_path: *const c_char,
+    debounce_ms: i64,
+) -> bool {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    crate::debounce::is_typing_via_file(path, debounce_ms as u64)
+}
+
+/// Block until the file-based typing indicator shows idle, or timeout expires.
+///
+/// Used by CLI tools to wait for an editor plugin (separate process) to stop
+/// typing before running an agent. Returns `true` if idle was reached, `false`
+/// if `timeout_ms` expired first.
+///
+/// # Safety
+///
+/// `file_path` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_await_idle_via_file(
+    file_path: *const c_char,
+    debounce_ms: i64,
+    timeout_ms: i64,
+) -> bool {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return true, // Invalid path — don't block
+    };
+    crate::debounce::await_idle_via_file(path, debounce_ms as u64, timeout_ms as u64)
 }
 
 /// Set the response status for a file (Option B: in-process).
@@ -741,7 +812,11 @@ pub unsafe extern "C" fn agent_doc_stop_ipc_listener(
         Err(_) => return,
     };
     let sock = crate::ipc_socket::socket_path(std::path::Path::new(root_str));
-    let _ = std::fs::remove_file(&sock);
+    if let Err(e) = std::fs::remove_file(&sock)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        eprintln!("[ffi] failed to remove socket {:?}: {}", sock, e);
+    }
 }
 
 /// Get the agent-doc library version.

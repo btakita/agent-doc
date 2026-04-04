@@ -348,9 +348,13 @@ pub fn apply_patches_with_overrides(
 
     // Post-patch: apply max_lines trimming to components that have it configured.
     // Precedence: inline attr > components.toml > unlimited (0).
+    // Re-parse after each replacement (offsets change) and iterate up to 3 times
+    // until stable — trimming one component cannot grow another, so 2 passes suffice
+    // in practice; the third is a safety bound.
     {
         let max_lines_configs = load_max_lines_configs(file);
-        if let Ok(components) = component::parse(&result) {
+        'stability: for _ in 0..3 {
+            let Ok(components) = component::parse(&result) else { break };
             for comp in &components {
                 let max_lines = comp
                     .attrs
@@ -364,9 +368,12 @@ pub fn apply_patches_with_overrides(
                     if trimmed.len() != content.len() {
                         let trimmed = format!("{}\n", trimmed.trim_end());
                         result = comp.replace_content(&result, &trimmed);
+                        // Re-parse from scratch — offsets are now stale.
+                        continue 'stability;
                     }
                 }
             }
+            break; // No component needed trimming — stable.
         }
     }
 

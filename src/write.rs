@@ -1258,8 +1258,12 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
             eprintln!("[commit] IPC reposition boundary signal sent");
             true
         }
-        _ => {
-            eprintln!("[commit] IPC reposition failed (non-fatal)");
+        Ok(false) => {
+            eprintln!("[commit] IPC reposition: no ack (non-fatal)");
+            false
+        }
+        Err(e) => {
+            eprintln!("[commit] IPC reposition failed (non-fatal): {}", e);
             false
         }
     }

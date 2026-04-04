@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Sync too aggressive — stashes claimed panes on editor navigation; needs claimed-pane guard
+Designed navigation swap spec — stash is correct, but retrieval from stash is missing
 <!-- /agent:status -->
 
 ## Exchange
@@ -310,7 +310,7 @@ if remaining <= 1 {
 
 **Built, tested (623 pass across all suites), installed.** Both symlink and `~/.cargo/bin/agent-doc` updated.
 I called `Run Agent Doc` from the JB Plugin, a new 3:agent-doc window was created and selected. Now the tmux session has 3 windows. Why?
-### Re: Pane loss on editor navigation — deeper issue (HEAD)
+### Re: Pane loss on editor navigation — deeper issue
 
 My earlier fix only covered ONE stash path (the "all unmanaged" path at sync.rs:687). But the **detach path** (sync.rs:1027-1061) is the main culprit during navigation:
 
@@ -332,13 +332,41 @@ When you navigate back:
 
 **Root cause:** Sync is too aggressive. Brief editor navigation (switching tabs) triggers full pane teardown/rebuild. Stashing should have a grace period or a "pinned" concept for claimed panes.
 
+When the editor navigates to a different file in the pane:
+- If the claiming tmux pane exists for the file
+  - Move the claiming tmux pane to the left pane creating a temporary 3 pane layout
+  - Move the tmux pane claiming the file the editor navigated away from to the stash pane
+- Else the claiming tmux pane does not exists for the file
+  - Split the left pane to create a new pane that claims the agent document with a new agent harness (Claude) session
+  - Move the tmux pane claiming the file the editor navigated away from to the stash pane
+
 **Possible fixes:**
 1. **Don't stash claimed panes** — if a pane has a session in `sessions.json`, never stash it on navigation events. Only stash truly orphaned panes.
 2. **Debounce stash** — don't stash immediately on file change; wait for a settle period (e.g., 2s) to handle tab-switching without pane churn.
 3. **Pin registered panes** — treat panes in the registry as "pinned" to their window; only explicit user action (or `--force`) can stash them.
 
 Option 1 is the simplest and most correct: claimed panes should never be stashed by sync. The user explicitly claimed them — sync should respect that.
-<!-- agent:boundary:114df50e -->
+### Re: Navigation swap behavior (HEAD)
+
+Your spec clarifies the design — it's a **swap**, not "don't stash." Stashing the old pane IS correct. The bug is that **stashed panes are never retrieved** — sync creates new windows instead of finding the existing claimed pane in stash.
+
+**Desired flow (when editor navigates from file A → file B):**
+
+| Condition | Action |
+|-----------|--------|
+| File B has claimed pane (in stash or elsewhere) | Unstash/move B's pane into visible window, stash A's pane |
+| File B has no claimed pane | Split to create new pane + claim B, stash A's pane |
+
+**Where the fix goes:** The sync reconcile logic where it resolves files to panes. Currently, `resolve_panes()` only looks for panes in the target window. It needs to also check `sessions.json` for claimed panes in stash and retrieve them via `join-pane`.
+
+**Implementation plan:**
+1. In `resolve_files_to_panes()` (or equivalent), after checking the target window's panes
+2. If file has `agent_doc_session` in frontmatter, look it up in `sessions.json`
+3. If the registered pane exists and is in the stash window, retrieve it with `tmux join-pane`
+4. Only create a new pane/session if no claimed pane exists anywhere
+
+This preserves agent sessions across navigation — the Claude Code process stays alive in the stashed pane, and swap-back is instant (no cold start).
+<!-- agent:boundary:31d537ca -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -352,5 +380,5 @@ Option 1 is the simplest and most correct: claimed panes should never be stashed
 - [x] Remove agent:console from default scaffold (already done)
 - [x] Suppress verbose git status in commit output
 - [x] Fix: window closure — last-pane guard in unmanaged stash path
-- [ ] Fix: sync stashes claimed panes on editor navigation — needs "don't stash claimed" guard
+- [ ] Implement navigation swap: retrieve claimed panes from stash instead of creating new ones
 <!-- /agent:pending -->

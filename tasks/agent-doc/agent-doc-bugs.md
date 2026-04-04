@@ -563,7 +563,7 @@ do
 - `.claude/skills/agent-doc/SKILL.md` -- added cleanup runbook trigger
 
 Built, tested, installed.
-<!-- agent:boundary:96ebca49 -->
+<!-- agent:boundary:2f9f44b8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

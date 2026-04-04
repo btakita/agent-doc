@@ -160,7 +160,7 @@ The audit reveals naming issues that obscure the pane lifecycle:
 5. Keep `claim` as CLI name (backward compat) but update module doc
 
 Should I implement all 5, or start with spec docs (1-2) and save refactoring for a separate session?
-<!-- agent:boundary:d2208c00 -->
+<!-- agent:boundary:1405afc5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

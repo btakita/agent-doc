@@ -161,7 +161,7 @@ Whichever prefix floods the log is the culprit.
 Alternatively: Help → Diagnostic Tools → Freeze → "Capture Thread Dump" while navigating bugs.md. The thread dump will show exactly which thread/method is consuming CPU.
 
 I took 2 thread dumps and 1 memory profile session. Please look for them and analyze.
-### Re: Thread dump analysis (HEAD)
+### Re: Thread dump analysis
 
 Analyzed both thread dumps. Key finding: **all agent-doc threads are TIMED_WAITING (sleeping)**, not RUNNABLE:
 - `agent-doc-patch-watcher` — sleeping in WatchService poll (line 107)
@@ -176,15 +176,61 @@ No agent-doc thread was actively consuming CPU at dump time. The 22.3% CPU from 
 The idea.log shows normal activity — no flooding. The most frequent messages are stash-related preflight output (not a hot loop).
 
 **Next step:** The Activity Monitor subsystem attribution might be measuring subprocess overhead from `PromptPoller` (1.5s poll interval). Could try increasing the poll interval to 5s and see if CPU drops.
-<!-- agent:boundary:2ccc97ec -->
+
+Could there be multiple processes running? Or something slow with the markdown processing?
+
+There is something very slow caused by this markdown...when I remove this content downward from agent-doc-bugs, performance improves:
+```
+### Re: Transfer from eval-runner session
+
+Good batch of designs. Priority ordering:
+
+1. **Diff-type classification** — highest leverage. Simplifies skill routing, reduces token waste on simple approvals/questions.
+2. **Post-preflight eval diffs** — quick win, already validated (0.30→0.90). Should land with or before diff-type classification.
+3. **Annotated diff format** — natural extension of diff-type. `[agent]`/`[user+]` markers give the LLM better change context.
+4. **Content-source annotation sidecar** — enables editor coloring. "Cache, not state" design is right. Can land independently.
+5. **Reproducible operation logs** — important for debugging but lower urgency than diff pipeline.
+6. **Multi-topic response runbook** — already created, just add `---` separator convention.
+The jetbrains editor has performance issues navigating and editing this document. Please look into why.
+<!-- agent:boundary:d7cbc450 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] GC orphaned 3.9 GB blob from git history
-- [x] `agent-doc clean --archive` flag
-- [x] VCS refresh debounce in JetBrains plugin (500ms)
-- [ ] Test: increase PromptPoller interval from 1.5s to 5s
+- [ ] Implement diff-type classification in preflight (P1)
+- [ ] Post-preflight diff generation for eval cases (P2)
+- [ ] Implement annotated diff format in preflight (P3)
+- [ ] Implement content-source annotation sidecar (P4)
+- [ ] Design reproducible operation log format (P5)
+- [ ] Add `---` prompt separator convention to SKILL.md
+- [ ] Add transfer-source metadata to patch format
+<!-- /agent:pending -->
+```
+### Re: Markdown content causing JetBrains slowness
+
+This is a **JetBrains markdown rendering issue**, not the plugin threads. The content you identified has:
+- Nested `<!-- agent:... -->` HTML comment markers
+- `<!-- agent:boundary:hash -->` lines
+- Multiple component blocks (`exchange`, `pending`)
+
+JetBrains' markdown highlighter may be doing expensive parsing on these HTML comment blocks. The boundary marker's `:hash` suffix could be particularly problematic.
+
+**Quick test:** Remove just the `<!-- agent:boundary:d7cbc450 -->` line — if performance improves, it's the boundary marker.
+
+**Mitigations:**
+1. Compact exchange (less content for parser)
+2. Disable markdown preview for tasks/ files
+3. If boundary markers are the trigger, consider a format that doesn't use HTML comments (e.g., `[//]: # (boundary:hash)`)
+<!-- agent:boundary:1ea68d98 -->
+<!-- /agent:exchange -->
+
+## Pending / Not Built (HEAD)
+
+<!-- agent:pending patch=replace -->
+- [x] GC orphaned 3.9 GB blob
+- [x] `agent-doc clean --archive`
+- [x] VCS refresh debounce (500ms)
+- [ ] Test: is `<!-- agent:boundary:hash -->` the JetBrains markdown perf trigger?
 - [ ] Discuss archive cutoff point for squash
 <!-- /agent:pending -->

@@ -194,6 +194,11 @@ pub fn transfer(source: &Path, target: &Path, component_name: &str) -> Result<()
     write::atomic_write_pub(target, &new_target)?;
     snapshot::save(target, &new_target)?;
 
+    // Commit the target so transferred headings are in git HEAD.
+    // Without this, the next agent-doc commit classifies all transferred
+    // headings as "new" and marks each with (HEAD).
+    crate::git::commit(target)?;
+
     eprintln!(
         "[transfer] Moved component '{}' from {} → {}",
         component_name, source.display(), target.display()

@@ -255,7 +255,7 @@ Removed `ontology/notification.md` -- that's agent-doc's domain, not agent-runbo
 - `trigger.md` -- activation phrase
 
 Committed `6b999ea`, pushed, parent pointer updated.
-<!-- agent:boundary:959f7133 -->
+<!-- agent:boundary:64e5632c -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

@@ -15,6 +15,7 @@ v0.31.5 released. Commit-on-claim, auto-setup, VCS refresh, --diff-only, skill r
 
 <!-- agent:exchange patch=append -->
 *Compacted. CI workflows idempotent (release.yml --clobber, pypi.yml skip-existing). `make release` added (CI-first: check→tag→push). Prerelease runbook updated. Gitignore fixed (.bin/ .cargo/ separate). All pushed.*
+<!-- agent:boundary:930e73cc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -162,7 +162,7 @@ The audit reveals naming issues that obscure the pane lifecycle:
 5. Keep `claim` as CLI name (backward compat) but update module doc
 
 Should I implement all 5, or start with spec docs (1-2) and save refactoring for a separate session?
-### Re: Ontology usage in planning (HEAD)
+### Re: Ontology usage in planning
 
 Honest answer: **no, I didn't reference the domain ontology during this session's planning.** The `ensure_initialized()` design, sync integration, and naming audit used informal domain reasoning, not formal ontology terms.
 
@@ -180,7 +180,25 @@ The domain ontology table in README.md defines terms like Session, Document, Sna
 - **Provisioning** — creating a new pane + starting Claude (what auto_start does)
 
 This would make the naming more intentional. Should I add these to the domain ontology?
-<!-- agent:boundary:6fa24b51 -->
+yes.
+Also correct the module-harness in the modules.
+### Re: Ontology + module docs updated (HEAD)
+
+**Domain ontology added to README.md** with three sections:
+- **Document Lifecycle** — Session, Document, Snapshot, Component, Boundary, Exchange
+- **Pane Lifecycle** — Binding, Reconciliation, Provisioning, Initialization
+- **Integration Layer** — Route, Sync, Claim
+
+**Module docs updated with ontology terms:**
+- `sync.rs` — renamed to "sync — Reconciliation", added ontology paragraph explaining the Reconciliation → Provisioning → Initialization → Binding flow
+- `claim.rs` — renamed to "claim — Binding (explicit)", clarified that claim binds existing panes while Provisioning creates new ones
+- `snapshot.rs` — `ensure_initialized()` doc now names the three sub-steps (ensure_session_uuid, ensure_snapshot, ensure_git_tracked) with ontology context
+- `route.rs` — `auto_start_no_wait()` doc renamed to "Provisioning" with ontology context
+
+All tests pass, clippy clean.
+
+**Module-harness:** You asked to correct the module-harness in the modules. Should I run `/module-harness` on sync.rs, claim.rs, snapshot.rs, and route.rs to regenerate their spec/contracts/evals sections? Or did you mean something else by "correct the module-harness"?
+<!-- agent:boundary:b906047b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -188,10 +206,11 @@ This would make the naming more intentional. Should I add these to the domain on
 <!-- agent:pending patch=replace -->
 - [x] ensure_initialized: assign session UUID + sync integration
 - [x] Memory: claim creates new panes (feedback saved)
-- [ ] SPEC.md: pane lifecycle documentation
-- [ ] sync.rs module doc: pane lifecycle developer reference
+- [x] Domain ontology: added Binding, Reconciliation, Provisioning, Initialization to README.md
+- [x] sync.rs, claim.rs, snapshot.rs, route.rs module docs updated with ontology
+- [ ] Module-harness: regenerate spec/contracts/evals for affected modules
 - [ ] Refactor ensure_initialized into 3 focused functions
 - [ ] Rename auto_start_no_wait → create_pane_and_start_async
-- [ ] Domain ontology: add pane lifecycle entities (Binding, Reconciliation, Provisioning)
+- [ ] SPEC.md: pane lifecycle user-facing documentation
 - [ ] Release with all changes
 <!-- /agent:pending -->

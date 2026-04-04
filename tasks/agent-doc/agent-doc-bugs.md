@@ -75,16 +75,26 @@ Both are already published to crates.io and pushed to GitHub. The parent `agent-
 
 Should I commit the submodule pointer updates?
 yes
-### Re: Submodule pointers committed (HEAD)
+### Re: Submodule pointers committed
 
 Done. Parent repo now tracks:
 - `src/agent-doc` → v0.31.6 (e145e79)
 - `src/tmux-router` → v0.3.9 (9c8f13e)
-<!-- agent:boundary:d4429e8e -->
+
+Release?
+### Re: Pushed (HEAD)
+
+108 commits pushed to `origin/main` (37b6a2a7..0a96c915).
+
+All releases complete:
+- agent-doc v0.31.6 → crates.io + GitHub
+- tmux-router v0.3.9 → crates.io + GitHub  
+- agent-loop → pushed to GitHub (submodule pointers updated)
+<!-- agent:boundary:8958cec4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Submodule pointer updates committed
+- [x] All complete
 <!-- /agent:pending -->

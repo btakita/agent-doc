@@ -151,7 +151,7 @@ Sync #1 had `window=None` and raced with sync #2's stash operations.
 **Fix:** Removed the `sync::run_layout_only` call from the Route command dispatch in main.rs. The JB plugin's `EditorTabSyncListener` handles layout sync authoritatively with the correct `--window` arg. Route now only handles pane resolution (routing the file to a tmux pane) — no layout changes.
 
 634 tests pass. Built, installed. Try switching tabs now.
-<!-- agent:boundary:5048b0f4 -->
+<!-- agent:boundary:bb80fb65 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

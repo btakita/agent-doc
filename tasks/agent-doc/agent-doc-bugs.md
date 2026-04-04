@@ -216,7 +216,7 @@ The design principle is now formalized as the **Binding invariant**:
 Memory updated from "claim creates new panes" to "Binding invariant" — stronger framing that captures the directional principle (document drives, pane follows).
 
 The module-harness question stands — should I run `/module-harness` on the affected modules to regenerate spec/contracts/evals?
-<!-- agent:boundary:4dd16da2 -->
+<!-- agent:boundary:c1cabfea -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

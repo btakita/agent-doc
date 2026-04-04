@@ -234,7 +234,7 @@ Parallel execution would give near-linear speedup. With 21 cases at 19.5 min seq
 The only concern is **rate limiting** — Claude Code Max has per-minute limits. Running all 21 simultaneously could hit the ceiling. A bounded pool (`--parallel 4` or `--parallel 8`) gives the best balance.
 
 **Recommendation:** Add `--parallel N` with `std::thread::scope` (no new dependencies). Keep synchronous backend — each thread blocks on its subprocess independently. Skip tokio/async entirely.
-<!-- agent:boundary:02c47b34 -->
+<!-- agent:boundary:ed5ce880 -->
 <!-- /agent:exchange -->
 
 ## Pending

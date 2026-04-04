@@ -74,7 +74,7 @@ Added to auto memory (`feedback_check_working_tree.md`):
 > When assessing submodule release status, always run `git status` + `git diff` alongside `git log`. Never say "no changes" based on commit history alone.
 
 Also updated the prerelease runbook — but the real fix is the memory, since the mistake happens at the "check status" phase before any release workflow starts.
-<!-- agent:boundary:e809402e -->
+<!-- agent:boundary:004693c2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

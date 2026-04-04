@@ -1062,7 +1062,7 @@ How can we fix these remaining failures?
 | Pass rate | 42.9% | 85.0% |
 | Mean score | 0.57 | 0.83 |
 | Suite time | 19.5 min | ~10 min |
-### Re: Fixing the 3 remaining failures (HEAD)
+### Re: Fixing the 3 remaining failures
 
 Each has a different root cause:
 
@@ -1070,6 +1070,8 @@ Each has a different root cause:
 The model responds to the question but the system prompt's discrimination rules ("comments are invisible", "approvals mean proceed") add overhead that makes the response less focused. The judge sees a response that answers the question but also includes unnecessary caveats about agent-doc conventions.
 
 **Fix:** This is the system prompt's cost — it helps 5+ cases but slightly hurts simple ones. Accept 0.60 as the floor for simple questions with context, or **add the question cases to the system prompt**: "For straightforward questions, respond directly without applying special rules."
+
+Can we deterministically or have a separate agentic pass to distinguish simple-question & similar constructs that are best for simple processing without agent-doc's system prompt overhead?
 
 #### `structural-reorg` (0.10) — model doesn't recognize move vs new content
 The diff shows Phase 4 appearing between Phase 1 and Phase 2. The model sees new lines (`+`) and treats them as new content, not recognizing they were moved from elsewhere. The diff format itself doesn't distinguish "moved from line X" vs "newly written."
@@ -1080,6 +1082,10 @@ The diff shows Phase 4 appearing between Phase 1 and Phase 2. The model sees new
 
 Option 2 is more honest — without seeing the full document, the model can't know Phase 4 was moved vs written fresh.
 
+The full document should be in the context with the diffs. We can add a agent-doc command to assist with this process.
+We can also have the agent use git, diff, and ready file tools? Or we can add a agent-doc command to assist with this process.
+What do you recommend?
+
 #### `inline-annotation-corrections` (0.20) — hard pattern detection
 The colon-appended pattern (`line.: correction`) is subtle. The model sees the full line (agent content + user addition) and doesn't isolate the user's appended text. This is the hardest diff-interpretation pattern because the user edited *within* agent content.
 
@@ -1089,19 +1095,106 @@ The colon-appended pattern (`line.: correction`) is subtle. The model sees the f
 
 Option 1 is better — it gives the model the context without adding another rule to the system prompt.
 
+While it is better to be terse with annotations for viewing the raw markdown...we can have a markdown viewer that renders the annotations in a format that is less verbose and color codes the annotated text. If more verbosity help with distinguishing between chunks, particularly on the same line...and if agent-doc command were to preprocess the annotations...would bring more accuracy to the eval, then we should strongly consider it.
+Please propose ideas.
+
 **Concrete changes to make:**
 1. `simple-question` — add "For straightforward questions, respond directly" to system prompt
 2. `structural-reorg` — enrich document_context with full document showing Phase 4's original position
 3. `inline-annotation-corrections` — enrich document_context to explain the annotation pattern
-<!-- agent:boundary:7d7f864c -->
+### Re: Preprocessing pipeline proposals (HEAD)
+
+#### Simple-question detection — deterministic classification
+
+Yes. The preflight could classify the diff into categories before the LLM sees it:
+
+```rust
+enum DiffType {
+    SimpleQuestion,      // Single line, ends with `?`, no special markers
+    Approval,            // "go", "yes", "do", "continue"
+    Annotation,          // Edits within agent content (colon-appended, inline)
+    StructuralChange,    // Deletions, reorgs, moves
+    MultiTopic,          // Multiple distinct items
+    BoundaryArtifact,    // (HEAD), boundary UUID changes
+    CommentOnly,         // Already handled — stripped
+}
+```
+
+The preflight JSON output would include `"diff_type": "simple_question"`. The skill then skips the discrimination rules for simple questions and responds directly. This keeps the system prompt lean and avoids the overhead for ~50% of real-world cycles.
+
+**Implementation:** Add `agent-doc classify` command or include classification in the preflight JSON. The classification is regex/heuristic-based — no LLM needed. Single added line ending in `?` → `SimpleQuestion`. Single word matching approval list → `Approval`. Only `+`/`-` on boundary lines → `BoundaryArtifact`.
+
+#### Structural-reorg — full document context + git tools
+
+**Recommendation: Both.** Layer them:
+
+1. **Include full document in eval cases** — the `document_context` field already exists for this. For the `structural-reorg` case, the context should include the complete document with Phase 4 in its original position. The model then sees both the diff (Phase 4 appearing at new position) and the full doc (Phase 4 already exists at old position) and can deduce the move.
+
+2. **`agent-doc` already provides the full document** — the preflight JSON includes a `document` field with the complete HEAD content. The skill passes this to the model. The eval cases should mirror this by providing realistic `document_context`.
+
+3. **Git tools for advanced cases** — for the agentic eval suite (future), the model could run `git diff --stat` to see file-level changes or `git log -1 --format=%B` for commit context. But for diff-interpretation evals, the document context is sufficient.
+
+**No new command needed** — the data is already in the preflight output. Just fix the eval case to include it.
+
+#### Inline annotations — preprocessed annotation format
+
+Here's the proposal: `agent-doc` preprocesses the diff to annotate source boundaries:
+
+**Raw diff (what git produces):**
+```
+-1. Window 0 missing — pane at index 2.
++1. Window 0 missing — pane at index 2.: Fixed, moved to 0
+```
+
+**Annotated diff (what the model sees):**
+```
+1. Window 0 missing — pane at index 2.[user-appended]: Fixed, moved to 0
+```
+
+Or using a cleaner format:
+```
+[agent] 1. Window 0 missing — pane at index 2.
+[user+] : Fixed, moved to 0
+```
+
+**The annotation format could be:**
+- `[agent]` — content from agent's last response (in snapshot)
+- `[user+]` — content the user added
+- `[user-]` — content the user deleted
+- `[user~]` — content the user modified
+
+This is the **content-source annotation** feature we discussed earlier. The iA Writer Markdown-Annotations spec is relevant here — but our use case is more specific (agent vs user, not author vs editor).
+
+**Implementation path:**
+1. `agent-doc annotate-diff` command — takes raw diff + snapshot, outputs annotated diff
+2. Preflight includes `annotated_diff` alongside the raw `diff` in JSON output
+3. Skill uses `annotated_diff` when available, falls back to raw `diff`
+4. Eval cases use annotated diffs for cases that benefit from source attribution
+
+This is a significant agent-doc feature — probably a separate session to implement. But it would make ALL the hard cases trivial: the model sees `[user+]` and knows exactly what the user wrote.
+
+**Summary of the preprocessing pipeline vision:**
+
+```
+User saves file
+    → preflight strips comments (already done)
+    → preflight computes diff (already done)
+    → preflight classifies diff type (NEW)
+    → preflight annotates source boundaries (NEW)
+    → skill receives: { diff_type, annotated_diff, raw_diff, document }
+    → skill routes: simple_question → direct response, approval → pending flush, etc.
+```
+
+Each layer is deterministic, testable, and reduces what the LLM needs to interpret.
+<!-- agent:boundary:fc77d6c0 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [ ] Enrich document_context for structural-reorg and inline-annotation-corrections
-- [ ] Add "respond directly to questions" hint to system prompt
-- [ ] Re-run baseline after fixes
+- [ ] Implement `diff_type` classification in agent-doc preflight (agent-doc session)
+- [ ] Implement annotated diff with source boundaries (agent-doc session)
+- [ ] Fix structural-reorg eval case with full document context
 - [ ] Design agentic eval fixture format (future — v2)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 <!-- /agent:pending -->

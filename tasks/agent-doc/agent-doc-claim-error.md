@@ -61,7 +61,7 @@ So when you ran `agent-doc transfer`, it should have written the transferred con
 If the response in corky.md claimed "no cross-file write capability," that was the skill/LLM hallucinating — the binary handled the transfer correctly. The LLM in the corky session may have responded to the transferred content without realizing the binary already wrote it.
 
 **No code change needed.** The transfer and extract commands already write directly to the target document with annotated prompts.
-<!-- agent:boundary:2a54e41a -->
+<!-- agent:boundary:0a5415ef -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

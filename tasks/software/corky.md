@@ -1709,11 +1709,13 @@ We should have 2 rules.
 Ready to continue the release (sync test, publish) or pivot to the skill architecture task?
 go
 - [ ] Run `corky sync` to verify Message-ID extraction live
-### Re: Hallucination acknowledgment & release (HEAD)
+### Re: Hallucination acknowledgment & release
 
 **On the hallucination:** You're right. `agent-doc transfer` writes directly to the target document (`extract.rs:148-203`). I stated "agent-doc has no cross-file write capability" without verifying — confidently wrong. I already have a memory rule for this (feedback_no_hallucinate_uncertainty.md) but failed to apply it. Two rules reinforced:
 1. If I don't know, say so
 2. If I speculate, label it as speculation
+
+Should this be in AGENTS.md<-CLAUDE.md?
 
 **v0.24.0 release:**
 - [x] Push to origin — done (4 commits)
@@ -1724,12 +1726,20 @@ go
 - [x] Release binary built (`make release`)
 
 **PyPI blocker:** maturin builds with `linux_x86_64` tag which PyPI rejects — needs `manylinux` tag. This requires building in a manylinux container or CI.
-<!-- agent:boundary:89e7d49d -->
+### Re: CLAUDE.md for no-hallucination rules (HEAD)
+
+Yes — these are cross-cutting agent behavior rules, not session-specific. They belong in the root `CLAUDE.md` under Core Principles. Currently they're only in auto memory (`feedback_no_hallucinate_uncertainty.md`), which means:
+- They load for this project but can be missed (as happened last cycle)
+- Subagents don't see auto memory
+
+Adding to `CLAUDE.md` would enforce across all agents. Want me to add them to `## Core Principles`?
+<!-- agent:boundary:08bce2e6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- Add no-hallucination rules to CLAUDE.md (awaiting approval)
 - PyPI publish v0.24.0 (manylinux container build needed)
 - Run `corky sync` to verify Message-ID extraction live
 - Test threaded reply draft

@@ -220,7 +220,7 @@ The module-harness question stands — should I run `/module-harness` on the aff
 This principle spec should be in the module-harness and in SPEC.md
 
 Does `/module-harness` run the risk of seeing an incorrect implementation and codifying the incorrect implementation as the spec?
-### Re: Module-harness risk of codifying bugs as spec (HEAD)
+### Re: Module-harness risk of codifying bugs as spec
 
 **Yes, that's a real risk.** `/module-harness` reads the implementation and generates spec from what the code *does*, not what it *should do*. If the implementation violates an invariant, the spec describes the buggy behavior as correct.
 
@@ -237,7 +237,23 @@ Does `/module-harness` run the risk of seeing an incorrect implementation and co
 3. Run module-harness selectively for lower-level details the manual update missed
 
 Should I proceed with SPEC.md first?
-<!-- agent:boundary:c23e8fba -->
+Yes. We should change the default operation of `/module-harness`. The bootstrap, seed, or from implementation step should be an explicit command. Pick the appropriate command name.
+
+`/module-harness` should also support adding specs. Perhaps my reading the SPEC.md and proposing the correct module spec to add, remove, or transfer to another module.
+### Re: Module-harness command redesign + SPEC.md (HEAD)
+
+**Proposed module-harness commands:**
+
+| Command | Purpose |
+|---------|---------|
+| `/module-harness` (default) | **Audit** — read module doc + SPEC.md, flag deviations. Does NOT generate from implementation. |
+| `/module-harness seed <module>` | **Seed** — bootstrap spec from implementation. Explicit opt-in to "derive from code." For modules with no existing spec. |
+| `/module-harness apply <module>` | **Apply** — read SPEC.md, propose module-level spec additions/removals/transfers. Spec-first workflow. |
+
+Key change: **default is audit (read-only), not generation.** `seed` is explicit.
+
+This is a module-harness skill redesign — tracked separately. Proceeding with SPEC.md for agent-doc now. I'll write the pane lifecycle spec with the Binding invariant as the authoritative source.
+<!-- agent:boundary:424d55a1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -246,8 +262,8 @@ Should I proceed with SPEC.md first?
 - [x] ensure_initialized: assign session UUID + sync integration
 - [x] Binding invariant: memory + ontology captured
 - [x] Domain ontology + module docs updated
-- [ ] SPEC.md: write pane lifecycle spec (Binding invariant as authoritative source)
-- [ ] Module-harness: run after SPEC.md is written (validate, don't derive)
+- [ ] **SPEC.md: write pane lifecycle spec** (active)
+- [ ] Module-harness redesign: audit/seed/apply commands (separate task)
 - [ ] Refactor ensure_initialized into 3 focused functions
 - [ ] Rename auto_start_no_wait → create_pane_and_start_async
 - [ ] Release with all changes

@@ -337,7 +337,7 @@ Output saving to `evals/agent-doc/diff-interpretation/baselines/sonnet-2026-04-0
 **Parallel concurrency validated** — the `--parallel 4` semaphore kept 4 cases running simultaneously throughout. Wall clock time cut by ~60% vs what sequential sonnet would have been.
 
 **Persistent failures** (both models): comment-content-ignored, approval-to-implement, head-label-removal, single-word-approval, multi-item-instruction-list. These are agent-doc-specific conventions that require SKILL.md context in the eval prompt.
-<!-- agent:boundary:6536ce82 -->
+<!-- agent:boundary:ea60142e -->
 <!-- /agent:exchange -->
 
 ## Pending

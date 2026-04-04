@@ -110,7 +110,7 @@ Uploaded to PyPI successfully.
 
 I do not want to mount the entire agent-loop directory. There are sensitive file in there. We should add this fact to the AGENTS.md
 Is there any cleanup needed from any security lapse?
-### Re: Docker mount security (HEAD)
+### Re: Docker mount security
 
 **No security lapse occurred:** The container (`ghcr.io/pyo3/maturin`) only ran `cargo build` — no network during build, and the PyPI upload ran locally outside Docker. The container was `--rm` so it's gone. But the principle is wrong.
 
@@ -127,7 +127,16 @@ docker run --rm \
 ```
 
 Only mounts `agent-doc` + `tmux-router` (the path dependency in `.cargo/config.toml`). Everything else stays inaccessible.
-<!-- agent:boundary:c3ae6de5 -->
+
+Should we put `.cargo/config.toml` into src/agent-doc?
+### Re: `.cargo/config.toml` placement (HEAD)
+
+It's already inside `src/agent-doc/.cargo/config.toml` (the submodule). The path patch (`../tmux-router`) resolves relative to agent-loop's `src/` directory — works for local dev.
+
+**Keep as-is.** The file serves local development (testing unreleased tmux-router changes). For Docker builds, the selective mount approach (agent-doc + tmux-router) handles it correctly. Moving or removing it would break local dev without improving Docker builds.
+
+The pattern is: `.cargo/config.toml` for local dev, selective Docker mounts for CI/release.
+<!-- agent:boundary:8720c060 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

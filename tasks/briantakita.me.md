@@ -2247,7 +2247,7 @@ Covers:
 LinkedIn teaser stays as-is (runbooks only). Blog post is the comprehensive reference covering both optimizations.
 
 **Next:** Build + deploy to push live.
-### Re: One blog post or two? Same LinkedIn target? (HEAD)
+### Re: One blog post or two? Same LinkedIn target?
 
 **One blog post.** The skill encapsulation section flows naturally after "Nested runbooks" — one continuous argument. Splitting would force a click-through for one idea.
 
@@ -2259,12 +2259,34 @@ LinkedIn teaser stays as-is (runbooks only). Blog post is the comprehensive refe
 Each targets a different audience segment. First: people with bloated instruction files. Second: CLI tool builders who want to distribute agent context.
 
 **Draft sequel teaser in console.** Adjust angle or finalize?
-<!-- agent:boundary:92dcb91d -->
+Let's use corky to publish the first LinkedIn teaser.
+Then draft the followup.
+### Re: LinkedIn teaser published + sequel draft (HEAD)
+
+**Published:** https://www.linkedin.com/feed/update/urn:li:share:7446233628247896064
+First comment with blog post + repo links added via `corky linkedin`.
+
+**Sequel teaser draft (skill encapsulation angle):**
+
+> Your CLI tool has a SKILL.md problem.
+>
+> The binary knows what it can do. The agent instructions describe what it can do. But they version independently, so they drift apart.
+>
+> I started bundling agent instructions inside the binary itself. Compile-time embedding, one install command. The tool writes its own SKILL.md files and runbooks. No manual setup, no version mismatch.
+>
+> One tool went from 695 lines loaded on every invocation to 58-66 lines per task. The rest loads on demand only when that specific sub-task fires.
+>
+> Binary logic + skill instructions + procedural runbooks, packaged and distributed together. The agent loads only the slice it needs.
+>
+> Updated writeup with this pattern in the comments.
+
+Ready to finalize and schedule, or adjust?
+<!-- agent:boundary:a2acf466 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
 - Blog post: skill encapsulation section added, needs build + deploy
-- LinkedIn sequel teaser: draft ready, awaiting approval
+- LinkedIn sequel teaser: draft ready, awaiting approval/schedule
 - Corky skill architecture: transferred to tasks/software/corky.md
 - Video: edit out WordPress admin section, then post
 - Second blog post + video: target Wed/Thu Apr 9-10

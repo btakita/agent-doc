@@ -1901,7 +1901,7 @@ What directory convention are you using for agent config? `.agent/`, `.agents/`,
 ---
 
 Edit inline or tell me what to change.
-<!-- agent:boundary:bd3f5d7c -->
+<!-- agent:boundary:99cd6d87 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

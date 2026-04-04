@@ -432,7 +432,7 @@ Launching worktree agent to implement `agent-doc notify` in `src/agent-doc`. The
 2. Add `notify` subcommand (append blockquote + snapshot update)
 3. Run `make check`
 4. Return with branch + diff
-### Re: agent-doc notify implemented (HEAD)
+### Re: agent-doc notify implemented
 
 `agent-doc notify` is implemented and passing all 8 tests. Changes in `src/agent-doc/`:
 
@@ -461,12 +461,23 @@ agent-doc notify tasks/briantakita.me.md "Runbook extraction reduced SKILL.md by
 ```
 
 Not yet committed or released -- changes are in the agent-doc working tree. Ready for review.
-<!-- agent:boundary:c3b5f611 -->
+
+Please transfer to tasks/agent-doc/agent-doc-bugs.md
+- [ ] Review, commit, and release agent-doc with notify
+### Re: Transferred to agent-doc-bugs (HEAD)
+
+Written to `tasks/agent-doc/agent-doc-bugs.md` claims log:
+- Review, commit, and release agent-doc with `notify` subcommand
+- Implementation complete in working tree (src/notify.rs + main.rs)
+- 8 tests passing
+- Release per `dev/runbooks/release-rust-maturin.md`
+
+The claim will appear next time the agent-doc-bugs session runs preflight. (Once `agent-doc notify` is released, this transfer would be immediate and visible.)
+<!-- agent:boundary:0dc72b53 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Implement `agent-doc notify` -- done, 8 tests passing
-- [ ] Review, commit, and release agent-doc with notify
+All runbooks session items complete. Remaining work transferred to agent-doc-bugs.
 <!-- /agent:pending -->

@@ -722,7 +722,7 @@ You're at layers 1-2. Layer 3 (agentic fixtures) would simulate realistic use ca
 Once these are solid, you have a reliable regression gate. Agentic E2E evals are a separate project — valuable for validating skill changes, but not needed for day-to-day "did I break diff interpretation?"
 
 **TL;DR:** The current eval suite tests the right thing at the right layer. Make it reliable (temperature=0, smoke suite) before adding complexity (agentic fixtures).
-<!-- agent:boundary:b299aa89 -->
+<!-- agent:boundary:5e39a85d -->
 <!-- /agent:exchange -->
 
 ## Pending

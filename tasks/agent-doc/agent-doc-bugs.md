@@ -267,7 +267,7 @@ Proceeding with SPEC.md now. This session has a large backlog of pending items â
 The code changes (ensure_initialized in sync, UUID assignment, ontology) are ready to ship. The refactoring and module-harness redesign are architectural and benefit from a clean context window.
 
 compact exchange
-<!-- agent:boundary:403fb1a8 -->
+<!-- agent:boundary:95da9e4d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

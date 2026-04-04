@@ -177,7 +177,7 @@ Any runbook extractions that should happen?
 
 All installed by `corky skill install`. Ready to implement on go.
 go
-### Re: Multi-skill install implemented (HEAD)
+### Re: Multi-skill install implemented
 
 **Created in corky repo:**
 - `skills/email/SKILL.md` + 4 runbooks (email-send, draft-reply, review-inbox, enrich-contact)
@@ -190,16 +190,28 @@ go
 `corky skill install` now writes all 3 skills + runbooks. 258 tests pass, clippy clean.
 
 Next: commit, update SPEC/VERSIONS, audit docs, release.
-<!-- agent:boundary:035687b8 -->
+go
+### Re: Released v0.25.0 — Multi-skill install (HEAD)
+
+**Published:**
+- [crates.io](https://crates.io/crates/corky/0.25.0)
+- [PyPI](https://pypi.org/project/corky/0.25.0/)
+- [GitHub Release](https://github.com/btakita/corky/releases/tag/v0.25.0)
+- `~/.cargo/bin/corky` installed with CUDA
+
+**3 commits:**
+1. `feat: multi-skill install (email, linkedin, corky) v0.25.0`
+2. `fix: track skills/ directory for crate packaging` (include_str! needs git-tracked files)
+3. `chore: gitignore .claude/ directory` (installed output)
+
+**Issue fixed:** `skills/` was gitignored but `include_str!` embeds from git-tracked files. `cargo publish --verify` failed. Un-gitignored `skills/`, added `.claude/` to `.gitignore`.
+<!-- agent:boundary:de922787 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Commit multi-skill install to corky submodule
-- Update SPEC.md, VERSIONS.md for multi-skill install
-- Audit docs
-- Release (version bump, publish)
+- Run `corky skill install` to install the new skills locally
 - Verify sheet sharing / GCP test users
 - Re-test sheet read
 - Manylinux binary wheel (nice-to-have, needs container/CI)

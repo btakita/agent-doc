@@ -19,8 +19,17 @@ test:
 clippy:
 	cargo clippy -- -D warnings
 
-# clippy + test
-check: clippy test
+# Verify Cargo.toml and pyproject.toml versions match
+version-sync:
+	@cargo_ver=$$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
+	pypi_ver=$$(grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
+	if [ "$$cargo_ver" != "$$pypi_ver" ]; then \
+		echo "ERROR: version mismatch — Cargo.toml=$$cargo_ver pyproject.toml=$$pypi_ver"; \
+		exit 1; \
+	fi
+
+# clippy + test + version sync
+check: clippy test version-sync
 
 # Pre-commit: clippy + test + audit-docs
 precommit: check

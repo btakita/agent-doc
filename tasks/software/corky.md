@@ -281,7 +281,7 @@ Should this be extracted as a runbook?
 **Not a runbook** — this is automated logic inside `engine.rs`, not a human procedure. It would be a code feature like adaptive chunking.
 
 Want me to design and implement confidence-based re-transcription?
-<!-- agent:boundary:7845d304 -->
+<!-- agent:boundary:afd88b1c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

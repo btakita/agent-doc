@@ -71,7 +71,7 @@ The SKILL.md has no section about runbooks. It should instruct the agent to:
 3. Use `agent-doc compact --message` instead of Edit/Write for exchange compaction
 
 This is a SKILL.md gap — the skill should reference its own runbooks as standard operating procedures.
-<!-- agent:boundary:33c1c472 -->
+<!-- agent:boundary:b2119687 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -2053,7 +2053,7 @@ What SKILL.md links to the runbook?
 None — and that's correct. The LinkedIn runbook lives in `.agent/runbooks/linkedin-post.md` (project-level), not under any skill's `runbooks/` directory.
 
 It's a cross-cutting procedure like `precommit.md` and `prerelease.md` — referenced when needed in any session, not tied to a specific slash command. No social media skill needed for a posting checklist.
-<!-- agent:boundary:a8719dff -->
+<!-- agent:boundary:1b7cb8da -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

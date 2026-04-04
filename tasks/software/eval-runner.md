@@ -882,7 +882,8 @@ Full 19-case suite running with tightened rubrics. Will report results when done
 The rubric tightening delivered: 6 cases improved by 0.15+ points. The eval suite is now a meaningful signal — 78.9% with clear pass/fail for each case category.
 do
 - [ ] Investigate remaining 4 failures (blockquote, mixed-comment, annotation-truncation, multi-topic-approval)
-### Re: Remaining 4 failures analysis (HEAD)
+
+### Re: Remaining 4 failures analysis
 
 Investigated each. These are **legitimate model challenges**, not rubric issues:
 
@@ -896,10 +897,10 @@ Investigated each. These are **legitimate model challenges**, not rubric issues:
 **Verdict:** These 4 represent the legitimate difficulty frontier of the eval suite. No rubric changes needed — the rubrics are already tight and binary.
 
 **What would improve these:**
-- `blockquote-annotation`: Add "blockquotes (`>`) are user annotations" to the system prompt
-- `mixed-valid-and-comment`: Stronger comment-stripping instruction in system prompt
-- `inline-annotation-with-truncation`: Complex case, may always be borderline
-- `multi-topic-approval-plus-questions`: Lower threshold to 0.6 or accept as borderline
+- `blockquote-annotation`: Add "blockquotes (`>`) are user annotations" to the system prompt: sometimes these are just quotes. The agent can also render `>`. Would annotations help?
+- `mixed-valid-and-comment`: Stronger comment-stripping instruction in system prompt: should we have a deterministic preprocess command that **always** runs?
+- `inline-annotation-with-truncation`: Complex case, may always be borderline: How so? Do we need a well defined annotation spec? Should the annotation parsing be in deterministic binary logic?
+- `multi-topic-approval-plus-questions`: Lower threshold to 0.6 or accept as borderline: I notice that some prompt are missed when multiple promps are submitted. Should we take a deterministic pass to split up the different uncommitted chunks? Different sentences as well? Or do you think the model will handle this better...with a good prompt?
 
 **The 78.9% baseline is solid.** These 4 failures are edge cases, not fundamental issues. The eval suite now measures real model capability with minimal noise.
 
@@ -911,14 +912,50 @@ Investigated each. These are **legitimate model challenges**, not rubric issues:
 - System prompt refined from 32 lines to 4 discrimination rules
 - All rubrics tightened to binary discrimination pattern
 - Makefile: `eval`, `eval-smoke`, `eval-regression`, `eval-json`
-<!-- agent:boundary:ffa8cd07 -->
+### Re: Deterministic preprocessing vs LLM interpretation (HEAD)
+
+These are excellent questions. The core insight: **move what you can to deterministic binary logic, leave only ambiguous interpretation to the LLM.**
+
+#### Blockquote annotations
+Blockquotes (`>`) are ambiguous — they can be user annotations, quotes from elsewhere, or even agent-rendered content. A deterministic spec would be too rigid. **Better approach:** The agent-doc preflight could annotate the diff with metadata: `[user-added-blockquote]` tag in the diff output. This gives the LLM a clear signal without requiring it to infer intent from `>` alone. But honestly, this is rare enough in practice that the current behavior (sometimes handles it, sometimes doesn't) is acceptable.
+
+#### Comment stripping — deterministic preprocessing
+**Yes, this should be deterministic.** And it already is in the real system — `agent-doc preflight` strips comments BEFORE computing the diff. The eval cases include raw diffs with comments still present because they were written before preflight was integrated. The fix: **regenerate eval case diffs through the actual preflight pipeline** so they match what the model sees in production. The `mixed-valid-and-comment` case should have comments already stripped in its diff — then the model would never see them.
+
+This is a significant insight: the eval cases should use **post-preflight diffs**, not raw diffs. That way we're testing the model on exactly what it receives in production.
+
+#### Inline annotations — deterministic parsing
+A well-defined annotation spec would help, but colon-appended annotations (`line: user feedback`) are informal. Deterministic parsing would require a grammar for detecting them, which is brittle. **Better approach:** The inline-annotation-with-truncation case is inherently complex (3 behaviors in one case). Consider splitting it into 2 cases: one for annotations, one for truncation detection. Simpler cases = more stable scores.
+
+#### Multi-topic splitting — deterministic chunking
+**This is the most promising candidate for deterministic preprocessing.** The preflight could:
+
+1. Split the diff into semantic chunks (by blank lines, headings, or list items)
+2. Present each chunk as a separate prompt segment: `[chunk 1: approval] [chunk 2: question] [chunk 3: instruction]`
+3. The LLM then processes each chunk with clear boundaries
+
+This would be an `agent-doc` feature, not an eval-runner feature — the preflight output would include structured chunks alongside the raw diff. Multi-topic cases would naturally improve because the model receives pre-parsed input.
+
+**Summary of the deterministic vs LLM split:**
+
+| Behavior | Current | Recommendation |
+|----------|---------|---------------|
+| Comment stripping | Deterministic (preflight) | Already solved — fix eval cases to use post-preflight diffs |
+| Blockquote detection | LLM | Keep as LLM — too ambiguous for a spec |
+| Annotation parsing | LLM | Keep as LLM — informal syntax, no grammar |
+| Multi-topic chunking | LLM | **Move to deterministic** — split by semantic boundaries in preflight |
+| Truncation detection | LLM | Keep as LLM — needs contextual judgment |
+
+The biggest wins come from (1) fixing eval cases to use post-preflight diffs and (2) deterministic multi-topic chunking in the preflight pipeline.
+<!-- agent:boundary:a7a62dcc -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [x] Investigate remaining 4 failures (legitimate model challenges, no rubric fixes needed)
-- [ ] Add blockquote + comment-stripping hints to system prompt (optional, minor gain)
+- [ ] Regenerate eval case diffs through actual preflight pipeline (post-strip)
+- [ ] Design multi-topic chunking for preflight output
+- [ ] Split inline-annotation-with-truncation into 2 simpler cases
 - [ ] Design agentic eval fixture format (future — v2)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 <!-- /agent:pending -->

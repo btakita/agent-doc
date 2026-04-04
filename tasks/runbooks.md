@@ -220,7 +220,7 @@ It's a lightweight way to ensure runbooks reference valid ontology concepts with
 There's no need for `--ontology-dir`
 
 I wanted to add an agent-runbooks/ontology/ directory with an ontology of the relevant topics.
-### Re: ontology/ directory added (HEAD)
+### Re: ontology/ directory added
 
 Created `src/agent-runbooks/ontology/` with 7 domain term definitions:
 
@@ -240,7 +240,22 @@ agent-runbooks validate ontology/runbook.md --ontology-dir ontology/
 ```
 
 Committed `0398848`, pushed, parent pointer updated.
-<!-- agent:boundary:aa34bc16 -->
+
+The following is talking about agent-doc...the ontology should be focused on agent-runbooks:
+- agent-runbooks/ontology/notification.md
+### Re: Removed notification.md from ontology (HEAD)
+
+Removed `ontology/notification.md` -- that's agent-doc's domain, not agent-runbooks'. The ontology now has 6 terms focused on agent-runbooks' concerns:
+
+- `runbook.md` -- procedural document
+- `skill.md` -- capability that owns runbooks
+- `context.md` -- generic on-demand document
+- `audit.md` -- deterministic validation
+- `guardrail.md` -- always-loaded behavioral rule
+- `trigger.md` -- activation phrase
+
+Committed `6b999ea`, pushed, parent pointer updated.
+<!-- agent:boundary:959f7133 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

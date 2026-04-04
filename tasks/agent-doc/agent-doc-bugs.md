@@ -190,7 +190,7 @@ Done. Both items executed:
 - Override guidance for ambiguous cases
 
 The skill will now automatically use `diff_type` from preflight to optimize routing. For example, when you type "go", the preflight returns `"diff_type": "approval"` and the skill skips confirmation, going straight to execution.
-<!-- agent:boundary:99e9ee75 -->
+<!-- agent:boundary:d725f069 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

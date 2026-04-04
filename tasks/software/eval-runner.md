@@ -616,7 +616,7 @@ Done:
 - **Final baseline running:** `--model sonnet --judge-model sonnet --parallel 8 --system-prompt system-prompt.md`
 
 Saving to `baselines/sonnet-19case-2026-04-04.json`. This will be the clean baseline for the 19-case diff-interpretation suite.
-### Re: 19-case baseline results (HEAD)
+### Re: 19-case baseline results
 
 **11/19 passed (57.9%), mean 0.69, total 9.3 min**
 
@@ -655,17 +655,52 @@ Lower than expected — the previous refined-prompt run got 76.2% (16/21, equiva
 - Identified and moved 2 agentic cases to separate suite
 - Fixed multi-item-instruction-list case (mock pending context)
 - Added Makefile targets (`eval`, `eval-regression`, `eval-json`)
-<!-- agent:boundary:80338056 -->
+
+This is not statistically significant
+- [ ] Add multi-run averaging (run 3x, take median) to reduce LLM non-determinism
+
+Let's add multiple runs. If **any** of the runs score low...that is a problem. We need to find solutions. The issue is how can we tell if we are improving?
+Given the suite takes a long time, it is difficult to tell. What do you suggest?
+Faster eval suite or do you think the fixtures will shake out this std deviation?
+### Re: Eval variance and improvement detection (HEAD)
+
+You're right — with this variance, you can't tell signal from noise. Multi-run averaging helps but doesn't fix the root cause. Here's what I'd suggest:
+
+**Root causes of variance (in order of impact):**
+
+1. **Judge non-determinism** — the LLM judge scores the same response differently each run. This is the biggest source of noise. The response model's variance is what we *want* to measure; the judge's variance is pure noise.
+
+2. **Vague rubrics** — "Responds with instructions for adding components" can score anywhere from 0.5-1.0. The judge has too much latitude.
+
+3. **Borderline cases** — scores near 0.7 threshold flip pass/fail on noise alone.
+
+**Fixes (most effective first):**
+
+| Fix | Effort | Impact | Time to Run |
+|-----|--------|--------|-------------|
+| **Temperature=0 for judge** | Add `--judge-temperature 0` flag | Eliminates judge variance | Same |
+| **Binary rubrics** | Rewrite expected_behavior as yes/no checks | Reduces scoring ambiguity | Same |
+| **Smoke suite** | Tag 5-7 most stable cases | Quick regression check | ~2-3 min |
+| **Multi-run median** | Add `--runs N` flag | Averages out remaining noise | 3x time |
+
+**My recommendation:** Start with temperature=0 for the judge. This is the highest-impact, lowest-effort fix. If that stabilizes scores, you may not need multi-run at all.
+
+For the `claude` CLI backend, we'd add `--temperature 0` (or use `--model-params` if available) to the judge call. For the API backend, it's just a parameter.
+
+**Smoke suite** is the answer to "takes too long" — tag the 5-7 cases that are always stable (deletion-of-content, comment-content-ignored, boundary-only-change, head-label-removal, single-word-correction) and run those in ~2 min for quick checks. Full suite for releases.
+
+**Fixtures won't help with variance** — they test different things (agentic execution vs diff interpretation). The variance is a judge problem, not a case design problem.
+<!-- agent:boundary:8a6163a6 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [x] Re-run final baseline with 19-case suite (11/19, 57.9% — variance issue)
-- [ ] Add multi-run averaging (run 3x, take median) to reduce LLM non-determinism
+- [ ] Add `--judge-temperature 0` to reduce judge non-determinism
+- [ ] Create smoke suite (5-7 most stable cases) for quick regression checks
+- [ ] Tighten rubrics for borderline cases (structural-reorg, url-reference-question, etc.)
 - [ ] Design agentic eval fixture format (future — v2 eval suite)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
-- [ ] JSON output format documentation
 <!-- /agent:pending -->
 
 ## Todo

@@ -191,7 +191,7 @@ These are **stashed panes from previous sessions** still running in the `stash` 
 Orphaned agent-doc/claude sessions moved to stash but never killed. Preflight warns because they could interfere with session routing.
 
 **To clean up:** `tmux kill-window -t stash` or `agent-doc resync --fix` to clean orphaned sessions.
-<!-- agent:boundary:ad9d42e5 -->
+<!-- agent:boundary:b799705d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

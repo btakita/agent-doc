@@ -214,7 +214,7 @@ kill orphaned panes
 Ran `agent-doc resync --fix` — deregistered 5 stash sessions, purged 6 orphaned panes. The stash window auto-closed. Only `0:agent-doc` (2 panes) remains.
 
 **Runbook:** Not needed as a separate file. The existing `cleanup` runbook covers file GC; `resync --fix` is the one-liner for tmux cleanup. Could add a note to the cleanup runbook mentioning `resync --fix` for completeness.
-<!-- agent:boundary:abca0b41 -->
+<!-- agent:boundary:18288db1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

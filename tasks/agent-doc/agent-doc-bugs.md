@@ -154,7 +154,7 @@ The squashed commit includes:
 - New files: agent-doc-bugs.md, on-demand-context.md, runbooks.md
 
 Only task/ and .agent-doc/ files were affected. Bug fix source code changes (git.rs, resync.rs, claim.rs) are in the submodule and unaffected by the squash.
-<!-- agent:boundary:51489b15 -->
+<!-- agent:boundary:dc46a2a4 -->
 <!-- /agent:exchange -->
 
 ## Console

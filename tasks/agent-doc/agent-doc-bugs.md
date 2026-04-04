@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Naming decision: Operations vs Runbooks — recommending Runbooks for consistency
+Renamed to Runbooks; corky has 3 extractable workflows for runbooks/
 <!-- /agent:status -->
 
 ## Exchange
@@ -201,7 +201,7 @@ These are simple enough for a shell script or could be a subcommand of an existi
 **Recommendation:** Start as a subcommand of agent-doc (`agent-doc runbook audit`, `agent-doc runbook install`) rather than a separate crate. Extract to `agent-runbooks` later if the scope grows.
 
 Since we have an Operations section, should it either be renamed to Runbooks or rename agent-runbooks to agent-operations?
-### Re: Operations vs Runbooks naming (HEAD)
+### Re: Operations vs Runbooks naming
 
 Two options:
 
@@ -219,14 +219,45 @@ Reasons:
 - Convention: the files live in `runbooks/`, the section is `## Runbooks`, the crate is `agent-runbooks`
 
 If you agree, I'll rename the section in agent-doc's SKILL.md from `## Operations` to `## Runbooks`.
-<!-- agent:boundary:2a884c1c -->
+Agreed
+
+Re: agent-runbooks...we do have several runbooks in this project. Does corky have SKILL.md runbooks that can be extracted?
+### Re: Renamed + corky runbook candidates (HEAD)
+
+**Done:** Renamed `## Operations` → `## Runbooks` in agent-doc SKILL.md.
+
+**Corky SKILL.md analysis:** Yes, corky has 4 inline workflows (lines 58-81) that are extraction candidates:
+
+| Workflow | Lines | Extract? |
+|----------|-------|----------|
+| Review inbox | 4 steps | Yes — `corky unanswered` + prioritization + wait |
+| Draft a reply | 4 steps | Yes — thread reading + voice matching + iteration |
+| Check schedule | 3 steps | Maybe — very short, could stay inline |
+| Enrich contact | 4 steps | Yes — web research + multi-section update |
+
+Corky doesn't have a `runbooks/` directory yet. The email skill already has `runbooks/email-send.md` which overlaps with "Draft a reply."
+
+**Extraction would look like:**
+```
+src/corky/
+├── SKILL.md          # Triggers only: `review inbox` runs runbooks/review-inbox.md
+├── runbooks/
+│   ├── review-inbox.md
+│   ├── draft-reply.md
+│   └── enrich-contact.md
+```
+
+The email skill's `runbooks/email-send.md` should probably move into corky's runbooks since corky owns the email workflow.
+
+This is a good task for a separate session — the scope is clear (extract workflows → runbooks, update triggers, consolidate email-send).
+<!-- agent:boundary:615642b2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Add runbook trigger lines to SKILL.md Operations section
-- [ ] Rename ## Operations → ## Runbooks in SKILL.md (awaiting approval)
+- [x] Rename ## Operations → ## Runbooks in SKILL.md
 - [ ] Publish tmux-router 0.3.9 to crates.io (awaiting approval)
-- [ ] Standardize Runbooks sections in other skills
+- [ ] Extract corky workflows to runbooks/ (separate session)
+- [ ] Consolidate email skill runbook into corky
 <!-- /agent:pending -->

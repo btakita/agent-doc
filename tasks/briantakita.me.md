@@ -2293,19 +2293,28 @@ Should I publish the followup this evening?
 3. **Monday or Tuesday** — post the video (weekend to edit out WordPress admin section)
 
 Staggers content: runbooks teaser (today) → skill encapsulation teaser (Monday) → video (Mon/Tue). Each drives traffic to the same blog post from a different angle.
-### Re: Publish follow-up this evening? (HEAD)
+### Re: Publish follow-up this evening?
 
 **Recommend waiting.** Two posts same day compete in the algorithm. The runbooks post just went live — needs 24-48 hours for its engagement wave. Posting tonight splits attention and reduces reach on both.
 
 **If you must post today:** Wait 4-6 hours minimum, ensure first post has engagement. But Monday morning is the stronger play.
 
 Deploy blog post update today regardless, so the new section is live before the sequel.
-<!-- agent:boundary:d64606ba -->
+
+do
+- Blog post: build + deploy skill encapsulation section (do today)
+### Re: Blog post deployed (HEAD)
+
+Committed and pushed:
+1. `briantakita.me` — skill encapsulation section added
+2. `briantakita.me-dev` — submodule pointer updated
+
+CI deploy in progress. Live at: https://briantakita.me/post/2026-04-03-agent-runbooks-on-demand-procedural-context
+<!-- agent:boundary:e90c61a3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- Blog post: build + deploy skill encapsulation section (do today)
-- LinkedIn sequel teaser: publish Monday ~9 AM ET (not tonight)
+- LinkedIn sequel teaser: publish Monday ~9 AM ET
 - Video: edit out WordPress admin section, post Mon/Tue
 - Corky skill architecture: transferred to tasks/software/corky.md
 - Second blog post + video: target Wed/Thu Apr 9-10

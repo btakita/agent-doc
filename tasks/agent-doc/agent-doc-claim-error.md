@@ -47,14 +47,30 @@ Committed: `6eedc63` — `fix: make CI release workflows idempotent`
 
 **Local override:** If you publish manually first, CI gracefully skips the duplicate.
 Is the local override in a SKILL->runbook?
-### Re: Local override location (HEAD)
+or is it deterministic binary/makefile?
+### Re: Local override location
 
 Not in SKILL — release procedures aren't a document session concern. It's in `.agent/runbooks/prerelease.md` (already updated), linked from CLAUDE.md's Runbooks section.
 
 The path: **CLAUDE.md** → `.agent/runbooks/prerelease.md` → Target: github-release section (CI-first default + local override).
 
 SKILL.md only covers the `/agent-doc` document session workflow. Release procedures are project-level runbooks.
-<!-- agent:boundary:70660d0e -->
+### Re: Deterministic release via Makefile (HEAD)
+
+The Makefile already has `publish`/`publish-crate`/`publish-pypi` (local publish). Could add a CI-first `release` target:
+
+```makefile
+release: check
+	@version=$$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
+	git tag "v$$version" && git push origin main "v$$version"
+	@echo "Tag pushed. CI handles GitHub Release + PyPI."
+	cargo install --path .
+```
+
+**Both have a role:** Makefile automates the "how" (deterministic). Runbook documents the "why" and edge cases (when to use local vs CI, what to check first).
+
+**Proposal:** Add `make release` (CI-first, default) alongside existing `make publish` (local, edge case). The runbook references both.
+<!-- agent:boundary:52a5a604 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -63,4 +79,5 @@ SKILL.md only covers the `/agent-doc` document session workflow. Release procedu
 - [x] Release agent-doc v0.31.9
 - [x] Add version sync check to `make check`
 - [x] Make CI release workflows idempotent
+- [ ] Add `make release` target (CI-first flow)
 <!-- /agent:pending -->

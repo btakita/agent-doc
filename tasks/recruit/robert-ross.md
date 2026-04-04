@@ -381,7 +381,9 @@ I'm not able to connect to dashboard.trieve.ai. Please try on your end.
 
 Is this independent of Trieve?
 - **NOW:** Build session analyzer template (agent-doc)
-### Re: Granola notes, Linux, Trieve, and next steps (HEAD)
+
+Can we have agent-doc interact directly with a granola backend?
+### Re: Granola notes, Linux, Trieve, and next steps
 
 #### Granola meeting notes — extracted
 
@@ -424,17 +426,51 @@ The template would have components for:
 - `&lt;!-- agent:recommendations --&gt;` — subagent suggestions, context warnings
 
 Want me to build this now?
-<!-- agent:boundary:77d0f1cd -->
+yes
+Can we use vespa on cloudflare?
+### Re: Granola backend + session analyzer template (HEAD)
+
+#### agent-doc + Granola backend
+
+Not directly — Granola has **no public API**. But there are viable integration paths:
+
+1. **Scrape shared links** (what I just did) — Granola embeds full structured notes in the Next.js RSC payload. A script can extract these into markdown. This could be an agent-doc skill: `/granola-import <url>` → parses and creates a session document.
+
+2. **Google Docs bridge** — Granola has a native Google Docs integration. Rob pushes notes → Google Docs API → agent-doc ingests. This is the cleanest automated path.
+
+3. **Build our own meeting notes** — Rob said on the call he wants Granola-like functionality built into Build Party. Your corky transcribe + diarization already does the audio-to-text part. Add topic segmentation + structured summary, and you've replicated the Granola output format.
+
+**Best play for Rob:** "I can build a Granola-to-agent-doc pipeline that scrapes your shared notes into searchable, version-controlled markdown. Or better yet, corky already does transcription + diarization — we can generate Granola-quality meeting notes natively."
+
+#### Session analyzer template — created
+
+Built the template at `file:///home/brian/work/btakita/agent-loop/tasks/software/session-analyzer.md`
+
+**Components:**
+- `&lt;!-- agent:input --&gt;` — provide a session file path, git range, or transcript
+- `&lt;!-- agent:session-metrics --&gt;` — token usage, duration, topic count, turn count
+- `&lt;!-- agent:topic-segments --&gt;` — auto-segmented conversation topics with timestamps
+- `&lt;!-- agent:skill-usage --&gt;` — skills, tools, and subagents invoked
+- `&lt;!-- agent:recommendations --&gt;` — context warnings, subagent suggestions, workflow improvements
+- `&lt;!-- agent:exchange --&gt;` — freeform Q&A about the session
+- `&lt;!-- agent:pending --&gt;` — task tracking
+
+**How it works:** You point it at any agent-doc session (snapshot, git range, or transcript), and the agent populates each component with analysis. It's the skeleton of Rob's Shimmer product.
+
+To test it now: open `tasks/software/session-analyzer.md`, type a session file path in the Input section, and run `/agent-doc`. The agent will analyze that session and fill in the metrics.
+<!-- agent:boundary:ead560d4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **NOW:** Build session analyzer template (agent-doc) — ready to start
+- ([done]) Build session analyzer template
 - **Sunday Apr 5, 5pm ET:** Follow-up call with Rob (confirm via text)
+- Test session analyzer on a real session (e.g., this robert-ross document)
 - Evaluate 3-5 LiveKit GitHub repos for Build Party
 - Get Build Party PRD from Rob
 - Create mermaid diagram for Miguel's LiveKit agent course
 - Set up Trieve or Vespa for session indexing
 - DocWalk MVP — color-coded markdown viewer
+- Granola import skill (scrape shared links → agent-doc)
 <!-- /agent:pending -->

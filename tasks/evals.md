@@ -115,7 +115,7 @@ Phase 1 is nearly complete — prior sessions already built most of it:
 - **`baselines/sonnet-2026-04-04.json`** — exists but empty (0 bytes) — running now
 
 Running Sonnet baseline against all 20 cases.
-<!-- agent:boundary:4a75b3d3 -->
+<!-- agent:boundary:4fd5b6b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -215,7 +215,7 @@ Full JSON run in progress (background). Note: haiku is the evaluated model here 
 - Strong on structural understanding (reorg, deletion, annotations)
 - Two outlier latencies: multi-item-instruction-list (362s) and multi-topic-approval (437s) — haiku generated very long responses
 - Next: run with sonnet to establish the target-model baseline
-<!-- agent:boundary:7a360c90 -->
+<!-- agent:boundary:b6b0c9e7 -->
 <!-- /agent:exchange -->
 
 ## Pending

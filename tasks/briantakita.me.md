@@ -1737,7 +1737,7 @@ From tasks/runbooks.md, the full extraction was **12 runbooks** across 4 skill f
 For the blog post, you could replace the "Two runbooks saved 63 lines" with something like:
 
 > I've been externalizing step-by-step procedures into **agent runbooks** — plain markdown files that agents load on demand instead of carrying in every interaction. Across 12 runbooks, I saved 212 lines from my instruction files — a 28% reduction in persistent context. The biggest win was livestream audit procedures: 53% of that skill's instructions were procedural bulk that only matters during audits.
-<!-- agent:boundary:ef1ac503 -->
+<!-- agent:boundary:8893bb2a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

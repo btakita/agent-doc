@@ -2259,7 +2259,7 @@ LinkedIn teaser stays as-is (runbooks only). Blog post is the comprehensive refe
 Each targets a different audience segment. First: people with bloated instruction files. Second: CLI tool builders who want to distribute agent context.
 
 **Draft sequel teaser in console.** Adjust angle or finalize?
-<!-- agent:boundary:923aab89 -->
+<!-- agent:boundary:92dcb91d -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

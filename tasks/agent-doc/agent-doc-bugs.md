@@ -140,7 +140,9 @@ The memory entry (`feedback_claim_creates_new_pane.md`) already captures the key
 
 Want me to add it to SPEC.md or the sync.rs module doc?
 Both. Ideally this will be deterministic. Perhaps the code needs to be refactored to make this spec clear. Are the abstractions appropriately named to reinforce the spec behavior?
-### Re: Naming audit + spec plan (HEAD)
+
+Do we need to audit the ontology as well. Is the ontology actually referenced at all during planning and design phases?
+### Re: Naming audit + spec plan
 
 The audit reveals naming issues that obscure the pane lifecycle:
 
@@ -160,7 +162,25 @@ The audit reveals naming issues that obscure the pane lifecycle:
 5. Keep `claim` as CLI name (backward compat) but update module doc
 
 Should I implement all 5, or start with spec docs (1-2) and save refactoring for a separate session?
-<!-- agent:boundary:1405afc5 -->
+### Re: Ontology usage in planning (HEAD)
+
+Honest answer: **no, I didn't reference the domain ontology during this session's planning.** The `ensure_initialized()` design, sync integration, and naming audit used informal domain reasoning, not formal ontology terms.
+
+**Where ontology COULD have helped:**
+- "claim" vs "auto_start" confusion → different **Perspectives** on the same **Entity** (document-pane binding). The naming audit was an informal ontology audit.
+- `ensure_initialized()` doing 3 things → mixing **Scopes** (UUID assignment ≠ snapshot management)
+
+**But in practice:** the problems were concrete enough to reason about directly. The ontology is more useful for architectural decisions at higher resolution — "what IS a session?" vs "should this function be split?"
+
+The domain ontology table in README.md defines terms like Session, Document, Snapshot, Component, Boundary. These map to modules cleanly. But the *pane lifecycle* concepts (claim, route, sync, auto_start) aren't in the ontology — they're emergent from the tmux integration, which is why their naming drifted.
+
+**Recommendation:** Add pane lifecycle entities to the domain ontology:
+- **Binding** — the document→pane association (what claim creates)
+- **Reconciliation** — the process of matching editor layout to tmux layout (what sync does)
+- **Provisioning** — creating a new pane + starting Claude (what auto_start does)
+
+This would make the naming more intentional. Should I add these to the domain ontology?
+<!-- agent:boundary:a6c641c2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -172,6 +192,6 @@ Should I implement all 5, or start with spec docs (1-2) and save refactoring for
 - [ ] sync.rs module doc: pane lifecycle developer reference
 - [ ] Refactor ensure_initialized into 3 focused functions
 - [ ] Rename auto_start_no_wait → create_pane_and_start_async
-- [ ] Update claim.rs module doc
+- [ ] Domain ontology: add pane lifecycle entities (Binding, Reconciliation, Provisioning)
 - [ ] Release with all changes
 <!-- /agent:pending -->

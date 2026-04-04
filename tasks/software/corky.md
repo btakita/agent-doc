@@ -1735,23 +1735,41 @@ Yes — these are cross-cutting agent behavior rules, not session-specific. They
 Adding to `CLAUDE.md` would enforce across all agents. Want me to add them to `## Core Principles`?
 
 Yes
-### Re: Added no-hallucination rule to CLAUDE.md (HEAD)
+### Re: Added no-hallucination rule to CLAUDE.md
 
 Added to `## Core Principles` in `CLAUDE.md`:
 
 > **No Confident Hallucination:** If you don't know, say "I don't know." If you speculate, label it as speculation. Never present unverified claims as facts.
 
 Now enforceable across all agents and sessions.
-<!-- agent:boundary:89fecc6b -->
+
+do
+- PyPI publish v0.24.0 (manylinux container build needed)
+### Re: PyPI publish v0.24.0 (HEAD)
+
+Fixed and published:
+
+1. **Root cause**: maturin packages path deps as siblings, creating nested sdist. LICENSE was at `corky-0.24.0/corky/LICENSE` instead of root.
+2. **Fix**: Added `license-files = ["LICENSE"]` to `pyproject.toml` — committed as `3daf664`.
+3. **Published**: https://pypi.org/project/corky/0.24.0/ (source dist via twine)
+
+Binary wheel still needs manylinux container (glibc 2.43 too new). Source dist is sufficient for `pip install corky`.
+
+**v0.24.0 release complete:**
+- [x] crates.io
+- [x] PyPI (source dist)
+- [x] GitHub Release
+- [x] `cargo install --path .`
+<!-- agent:boundary:b0dfe5bb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- PyPI publish v0.24.0 (manylinux container build needed)
 - Run `corky sync` to verify Message-ID extraction live
 - Test threaded reply draft
 - Corky skill architecture: `corky skill install` for email + linkedin skills
 - Verify sheet sharing / GCP test users
 - Re-test sheet read
+- Manylinux binary wheel (nice-to-have, needs container/CI)
 <!-- /agent:pending -->

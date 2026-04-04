@@ -251,7 +251,7 @@ Field is `skip_serializing_if = "Option::is_none"` — omitted when no diff.
 **Tests:** 5 new tests (additions, removals, modifications, context, empty). All 428 tests pass, clippy clean.
 
 The skill can now use `annotated_diff` instead of raw unified diff for better context when responding to user changes.
-<!-- agent:boundary:35f1c8b2 -->
+<!-- agent:boundary:ad0defbe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

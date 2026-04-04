@@ -2046,7 +2046,7 @@ Links in the comments.
 
 Blog post: https://briantakita.me/post/2026-04-03-agent-runbooks-on-demand-procedural-context
 Reference repo: https://github.com/btakita/agent-runbooks
-<!-- agent:boundary:129d3392 -->
+<!-- agent:boundary:bf860c43 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

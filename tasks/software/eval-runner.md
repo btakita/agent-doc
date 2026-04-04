@@ -285,7 +285,7 @@ eval-runner run cases.yaml --model haiku --parallel 21
 ```
 
 Builds clean. Ready to test with the agent-doc eval cases.
-<!-- agent:boundary:0b93c7c5 -->
+<!-- agent:boundary:5f8975c2 -->
 <!-- /agent:exchange -->
 
 ## Pending

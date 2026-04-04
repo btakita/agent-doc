@@ -157,7 +157,7 @@ Checked all repos:
 | instruction-files | None | N/A | No action needed |
 
 Both repos with cross-crate dependencies already follow the pattern. No further changes needed.
-<!-- agent:boundary:39f935c3 -->
+<!-- agent:boundary:6e6bbe72 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

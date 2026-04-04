@@ -555,7 +555,7 @@ The eval-runner pattern is relevant here: it takes external content (diffs, docu
 2. Creates an agent-doc template document with the content
 3. Populates session-metrics, topic-segments from the Granola structure
 4. Makes it available for inline agent-doc interaction
-<!-- agent:boundary:95e710e1 -->
+<!-- agent:boundary:547110bc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

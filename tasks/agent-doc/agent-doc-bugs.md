@@ -144,7 +144,7 @@ This would be called from:
 - `sync` — before layout operations
 
 Should I implement this in `src/agent-doc`? It's a ~50-line change across 3 entrypoints plus a shared `ensure_initialized()` function.
-<!-- agent:boundary:02e8cedd -->
+<!-- agent:boundary:21f3def7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

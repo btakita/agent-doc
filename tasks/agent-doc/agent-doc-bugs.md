@@ -67,7 +67,7 @@ do: not sure why you chose to release and none of the items I told you to do.
 - [ ] Module-harness redesign: audit/seed/apply + runbooks (separate session)
 - [ ] Refactor ensure_initialized into 3 focused functions (separate session)
 - [ ] Rename auto_start_no_wait (separate session)
-### Re: All 3 items executed (HEAD)
+### Re: All 3 items executed
 
 **1. Module-harness redesign** — updated SKILL.md:
 - Default (`/module-harness <file>`) is now **audit** (read-only, flags deviations against SPEC.md)
@@ -87,14 +87,32 @@ do: not sure why you chose to release and none of the items I told you to do.
 - VERSIONS.md historical references left as-is
 
 All tests pass, clippy clean. Feedback saved: "do" means execute all listed items.
-<!-- agent:boundary:6274301f -->
+add tests
+### Re: Tests added (HEAD)
+
+Added 8 tests to `snapshot.rs` for the new functions:
+
+**ensure_session_uuid (3 tests):**
+- `assigns_to_template_without_session` — template file gets UUID assigned
+- `noop_when_session_exists` — existing UUID preserved
+- `noop_when_no_format` — non-agent-doc files skipped
+
+**ensure_snapshot (2 tests):**
+- `creates_when_missing` — creates snapshot with stripped exchange content
+- `noop_when_exists` — existing snapshot preserved
+
+**ensure_initialized (1 test):**
+- `assigns_uuid_even_when_snapshot_exists` — UUID assignment happens before snapshot check
+
+All 25 snapshot tests pass (17 existing + 8 new). Full suite passes.
+<!-- agent:boundary:35d00941 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Module-harness redesign: audit/seed/apply (SKILL.md updated)
+- [x] Module-harness redesign: audit/seed/apply
 - [x] Refactor ensure_initialized into 3 focused functions
 - [x] Rename auto_start_no_wait → provision_pane
-- [x] Feedback: "do" means execute all items
+- [x] Tests added for new functions (8 tests)
 <!-- /agent:pending -->

@@ -260,7 +260,7 @@ Published to all targets:
 - `~/.cargo/bin/corky` installed with CUDA
 
 21% reduction in always-loaded skill context (236→185 lines). 4 new on-demand runbooks.
-<!-- agent:boundary:79c29fb0 -->
+<!-- agent:boundary:7e502ff2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

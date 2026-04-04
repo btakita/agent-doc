@@ -66,5 +66,5 @@ Implement. Add to spec.
 - `SPEC.md` — added §7.21 documenting `agent-doc write` command behavior including the exchange replace-mode override
 
 **Tests:** 333 pass (312 unit + 21 CLI), 0 failures. The existing `flush_cumulative_does_not_duplicate` test confirms no regression.
-<!-- agent:boundary:a6457f90 -->
+<!-- agent:boundary:cee11f69 -->
 <!-- /agent:exchange -->

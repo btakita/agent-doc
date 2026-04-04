@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-All sessions alive — windows closed when panes moved during sync tests
+8 panes accounted for — %433+%431 in session 5, displaced panes in session 3
 <!-- /agent:status -->
 
 ## Exchange
@@ -539,7 +539,7 @@ Session 5 has:
 The stash window in session 5 will be recreated automatically the next time a pane is stashed (via `ensure_stash_window`). It's not needed right now since both agent-doc panes are in the correct window.
 
 What happened to the other tmux sessions? Were they closed?
-### Re: Missing tmux sessions/windows (HEAD)
+### Re: Missing tmux sessions/windows
 
 The sessions are still alive but lost windows during the sync tests. When panes are moved out via `join-pane`, tmux closes the now-empty source window.
 
@@ -558,7 +558,27 @@ The sessions are still alive but lost windows during the sync tests. When panes 
 - Session 5's `zsh` window (%438) and `stash` window (%428, %437) were consumed during the manual fixes and sync test runs
 
 The sessions themselves are fine — they just have fewer windows. No data was lost; the Claude Code processes in %433 and %431 are still running.
-<!-- agent:boundary:84a06f0f -->
+
+I mean what happened to the other tmux panes?
+### Re: What happened to the other tmux panes? (HEAD)
+
+All panes are accounted for — 8 panes across 4 sessions:
+
+| Pane | Session:Window | Process | Original Role |
+|------|---------------|---------|---------------|
+| %433 | **5:agent-doc** | claude | agent-doc-bugs.md (active) |
+| %431 | **5:agent-doc** | agent-doc | runbooks.md (active) |
+| %13 | 1:stash | corky | Corky background process |
+| %84 | 3:zsh | zsh | Shell |
+| %434 | 3:zsh | agent-doc | claim-error.md (was stashed, landed in session 3) |
+| %436 | 3:zsh | agent-doc | briantakita.me.md (was stashed, landed in session 3) |
+| %399 | 8:zsh | zsh | Shell |
+| %400 | 8:zsh | zsh | Shell |
+
+The panes that were stashed during sync tests (%434, %436) ended up in session 3's zsh window because the stash operations during testing moved them across sessions. %13 (corky) stayed in session 1's stash.
+
+The key panes (%433 bugs, %431 runbooks) are correctly in session 5's agent-doc window. The other agent-doc panes (%434 claim-error, %436 briantakita.me) are alive but displaced in session 3 — they can be retrieved when needed via the cross-session join.
+<!-- agent:boundary:01fa053f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

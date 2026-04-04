@@ -80,7 +80,7 @@ yes
 Done. Parent repo now tracks:
 - `src/agent-doc` → v0.31.6 (e145e79)
 - `src/tmux-router` → v0.3.9 (9c8f13e)
-<!-- agent:boundary:f04fda02 -->
+<!-- agent:boundary:d4429e8e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

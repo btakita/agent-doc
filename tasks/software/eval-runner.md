@@ -411,7 +411,7 @@ do
 
 Saving to `baselines/sonnet-with-context-2026-04-04.json`. Will report results when done.
 How many sonnet evals will run? What will be the estimated token cost?
-### Re: Sonnet with context results (HEAD)
+### Re: Sonnet with context results
 
 **Results: 10/21 passed (47.6%), mean score 0.63** (vs naked: 12/21 at 57.1%, mean 0.56)
 
@@ -437,14 +437,30 @@ The system prompt is over-constraining — the model tries to apply agent-doc pr
 **Mean score did improve** (0.56 → 0.63) — the context helps overall understanding. But pass rate dropped because the regressions pushed previously-passing cases below threshold.
 
 **Next steps:** Refine the system prompt to be less prescriptive. Focus on "don't respond to comments" and "treat single words as approvals" without adding workflow overhead that hurts simple cases.
-<!-- agent:boundary:6b0ddcad -->
+
+do
+- [ ] Refine system prompt — less prescriptive, focus on specific conventions
+### Re: Refined system prompt (HEAD)
+
+Rewrote the system prompt from 32 lines of prescriptive protocol to 4 concise discrimination rules:
+
+1. **HTML comments are invisible** — don't respond to comment-only diffs
+2. **`(HEAD)` labels are mechanical** — ignore boundary cleanup
+3. **Short approvals mean "proceed"** — don't ask for clarification
+4. **Checklists are work items** — treat each as separate task
+
+Removed: pending component protocol, template mode format instructions, workflow sequencing. These were causing the model to over-apply agent-doc mechanics to simple cases.
+
+The key insight: the prompt should teach **what to ignore** and **what signals mean**, not **how to structure responses**. The model already knows how to respond — it just needs to know which diffs are special.
+
+Running: `--model sonnet --judge-model sonnet --parallel 8`. Will compare against both naked and verbose-context baselines.
+<!-- agent:boundary:6f4aad34 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [x] Re-run sonnet eval with system prompt (10/21, 47.6% — context helps failures but causes regressions)
-- [ ] Refine system prompt — less prescriptive, focus on specific conventions
+- [ ] Refined system prompt eval running (--parallel 8)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 - [ ] JSON output format documentation
 <!-- /agent:pending -->

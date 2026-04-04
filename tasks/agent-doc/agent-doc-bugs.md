@@ -101,7 +101,7 @@ Yes...and when I tried to claim robert-ross-granola.md...it worked this time. Wh
 3. **Granola import templates include `agent_doc_session`** — updated `SKILL.md` and `runbooks/import.md`
 
 637 tests pass, clippy clean, release built.
-<!-- agent:boundary:c55ed9a8 -->
+<!-- agent:boundary:b20ee7fc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

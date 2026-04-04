@@ -15,6 +15,7 @@ v0.31.5 released. Commit-on-claim, auto-setup, VCS refresh, --diff-only, skill r
 
 <!-- agent:exchange patch=append -->
 *Compacted. Runbook updates: compact-exchange (unanswered input note), transfer-extract (new, bundled). v0.31.5 PyPI published (manylinux Docker). Security: Docker mount rule in CLAUDE.md, mask `.cargo/config.toml` with `/dev/null`. Prerelease runbook updated with PyPI Docker build. Stash panes cleaned via `resync --fix`. No autokill — warn only.*
+<!-- agent:boundary:ba8069ba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

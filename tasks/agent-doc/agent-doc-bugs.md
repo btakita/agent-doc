@@ -176,7 +176,7 @@ This would require either:
 - The skill piping its own stderr to a temp file and then writing the last 50 lines (hacky)
 
 For now, removing console from the default scaffold is the right call. If you want console capture later, it should be a binary feature, not a skill feature.
-<!-- agent:boundary:a45953d6 -->
+<!-- agent:boundary:021cc172 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

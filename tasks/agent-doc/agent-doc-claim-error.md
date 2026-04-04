@@ -364,7 +364,10 @@ So if it's an ephemeral state, what would cause the issue?
 
 The VCS refresh debounce (500ms) should prevent the cascade. Timing instrumentation will catch it if it recurs. The exchange is very large now — compact?
 Not yet. Please add logging so we can see exactly which of the possibilities has caused the performance issue.
-### Re: State diagnostics logging added (HEAD)
+One thing to note. Look at the uncommitted text in agent-doc-bugs.md. **All** of the headers has uncommitted changes...each removing the ` (HEAD)` suffix. Why?
+
+All of the h3 `### ` headers...to be precise.
+### Re: State diagnostics logging added
 
 Added periodic state logging (~every 60s) for all 4 ephemeral state candidates:
 
@@ -378,7 +381,20 @@ Added periodic state logging (~every 60s) for all 4 ephemeral state candidates:
 Plugin v0.2.42. Committed: `3ee90e0`.
 
 If the issue recurs, the `[state]` logs will show which counters are growing unbounded. Install `agent-doc-jetbrains-0.2.42.zip` and enable `#com.github.btakita.agentdoc` debug logging.
-<!-- agent:boundary:22c17b3a -->
+### Re: `(HEAD)` on all h3 headers — boundary reposition bug (HEAD)
+
+Checked `git diff` on bugs.md — the **snapshot** (committed version) has `(HEAD)` appended to ALL `### ` headers:
+- `### Transfer from eval-runner session (2026-04-04) (HEAD)`
+- `### Re: Prompt separators with `---` (HEAD)`
+- `### Re: Transfer source path in patch (HEAD)`
+- `### Re: Transfer from eval-runner session (HEAD)`
+
+The working file correctly has them without `(HEAD)`.
+
+This is a bug in `agent-doc commit`'s boundary repositioning — it's adding `(HEAD)` to **every** h3 heading in the snapshot, not just the one immediately after the boundary marker. The correct behavior is: add `(HEAD)` to only the heading right after the boundary, remove it from all others.
+
+This should be fixed in `boundary.rs` — the reposition logic needs to be scoped to only the heading adjacent to the boundary marker.
+<!-- agent:boundary:dd2359f9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -389,5 +405,6 @@ If the issue recurs, the `[state]` logs will show which counters are growing unb
 - [x] VCS refresh debounce (500ms)
 - [x] Timing instrumentation in plugin
 - [x] Plugin version check in `make precommit`
-- [x] State diagnostics logging for all 4 ephemeral candidates
+- [x] State diagnostics logging
+- [ ] Fix boundary reposition bug: `(HEAD)` added to all h3 headers instead of just the one after boundary
 <!-- /agent:pending -->

@@ -522,7 +522,7 @@ Final state: both panes side by side in session 5 agent-doc window. All 4 transi
 1. `SessionScope` allows cross-session joins (tmux-router `sync.rs:252-267`)
 2. `--window` is authoritative for `target_session` (tmux-router `sync.rs:740-743`)
 3. `Cargo.toml` path dep ensures local tmux-router is used (`path = "../tmux-router"`)
-<!-- agent:boundary:9f9a875a -->
+<!-- agent:boundary:0610c3a5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

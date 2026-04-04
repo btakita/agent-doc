@@ -1008,7 +1008,7 @@ At `.claude/skills/agent-doc/runbooks/multi-topic-response.md`. Documents: detec
 Saved Markdown-Annotations reference (iA Writer's spec) to persistent memory. Linked from MEMORY.md under References.
 
 **Suite status:** 20 cases, 6 smoke-tagged. Ready for a baseline run.
-<!-- agent:boundary:d272307e -->
+<!-- agent:boundary:091b86c3 -->
 <!-- /agent:exchange -->
 
 ## Pending

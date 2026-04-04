@@ -100,7 +100,7 @@ do
 1. **tmux-router** (`d2219eb`): stash debug logging with window/pane/session context
 2. **agent-doc** (`72adf58`): transfer-extract runbook + compact-exchange update + skill.rs bundling + SKILL.md Runbooks section
 3. **agent-loop** (`0ff07ae1`): updated both submodule pointers
-<!-- agent:boundary:3d4bed57 -->
+<!-- agent:boundary:4575be7d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

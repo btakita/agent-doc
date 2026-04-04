@@ -484,7 +484,7 @@ Is this committed to the main branch of agent-doc?
 - Last commit: `8738b74 v0.31.5`
 
 The notify code is in the working tree only. Needs: stage, commit, version bump, `make check`, release. That's the work transferred to agent-doc-bugs.
-<!-- agent:boundary:4f886f83 -->
+<!-- agent:boundary:200c90a8 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

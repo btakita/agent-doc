@@ -318,7 +318,7 @@ Do we need to make a similar fix to the VSCode plugin?
 **JB plugin bumped to v0.2.43.** Built at `build/distributions/agent-doc-jetbrains-0.2.43.zip`. Install via Settings > Plugins > gear > Install from Disk.
 
 **VS Code plugin is NOT affected.** It uses `JSON.parse()` (the standard JavaScript JSON parser) which handles all escape sequences correctly. The bug was specific to the JetBrains plugin's hand-rolled JSON parser in Kotlin.
-<!-- agent:boundary:327fdf8b -->
+<!-- agent:boundary:aaeba86f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

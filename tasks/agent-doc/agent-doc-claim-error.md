@@ -499,7 +499,7 @@ Now transfer flow: `atomic_write → snapshot::save → git::commit(target)`
 Transferred headings are committed immediately, so the next `/agent-doc` cycle sees them as "existing" in git HEAD — no spurious `(HEAD)` markers.
 
 Committed: `d8ae48e`. Binary rebuilt and installed.
-<!-- agent:boundary:5abc4178 -->
+<!-- agent:boundary:42854c7a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

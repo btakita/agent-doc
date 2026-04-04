@@ -52,7 +52,7 @@ The tag-delete → re-tag → force-push procedure for recovering from failed pu
 - Items 1, 4, 5, and 7 are the highest-value extractions — they're referenced frequently and easy to get wrong
 - Items 2 and 3 are medium-value — used less often but complex enough to benefit from standalone docs
 - Item 6 is lower-value — the module-harness binary already encodes most of the logic
-<!-- agent:boundary:211d395c -->
+<!-- agent:boundary:5c0c0d5e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

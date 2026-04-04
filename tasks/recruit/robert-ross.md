@@ -458,7 +458,7 @@ Built the template at `file:///home/brian/work/btakita/agent-loop/tasks/software
 **How it works:** You point it at any agent-doc session (snapshot, git range, or transcript), and the agent populates each component with analysis. It's the skeleton of Rob's Shimmer product.
 
 To test it now: open `tasks/software/session-analyzer.md`, type a session file path in the Input section, and run `/agent-doc`. The agent will analyze that session and fill in the metrics.
-### Re: Vespa on Cloudflare (HEAD)
+### Re: Vespa on Cloudflare
 
 **No — Vespa can't run on Cloudflare.** Vespa is JVM-based, needs ~4GB+ RAM, persistent disk, and full Linux OS access. Cloudflare Workers are V8 isolates with strict limits — not compatible.
 
@@ -481,16 +481,52 @@ The flow would be:
 This avoids Vespa's operational overhead entirely and keeps everything serverless. You could have a working prototype on Cloudflare in a day.
 
 **If Rob insists on Vespa:** Deploy it on a cheap VPS (Hetzner 4GB ~$4/mo), not Cloudflare. But Vectorize is the better play for an MVP.
-<!-- agent:boundary:b79f84ba -->
+
+How can I use
+- ([done]) Build session analyzer template
+
+Can we build a granola-like demo for Rob? Should we have real-time whisper transcription + diarization or should we just use a recording?
+### Re: Granola-like demo for Rob (HEAD)
+
+**Yes — and use a recording, not real-time.** Here's why:
+
+#### Recording vs real-time for the demo
+
+| Approach | Pros | Cons |
+|---|---|---|
+| **Recording** (corky transcribe post-hoc) | Reliable, already proven, GPU-accelerated, good diarization | Not "live" |
+| **Real-time whisper** | Impressive demo, matches Build Party's live vision | Latency issues, diarization is harder in real-time, more failure modes |
+
+**For Sunday's call:** Use a recording. You already have the 3h54m transcript working perfectly. Show Rob the pipeline:
+1. Record the call (OBS/Zoom)
+2. `corky transcribe --diarize --speakers "Brian,Rob"` → structured markdown with speaker labels
+3. Feed into session analyzer template → auto-populated metrics, topics, skill usage
+4. Index into Cloudflare Vectorize → searchable across sessions
+
+That's the full Shimmer pipeline in 4 steps. Demo it on the existing robert-ross transcript.
+
+**Real-time whisper for later:** Real-time transcription is a Build Party feature (live sessions need it). But it's a separate engineering effort — whisper streaming, VAD (voice activity detection), real-time diarization. LiveKit actually has agent infrastructure for this. Save it for after you've proven the post-hoc pipeline works.
+
+#### What the demo would look like
+
+1. **Show the Granola notes you scraped** — "Rob, here are your own meeting notes, extracted and version-controlled in markdown"
+2. **Show the corky transcript** — "And here's the full diarized transcript with speaker labels"
+3. **Show the session analyzer** — "This template auto-segments topics, tracks skills used, and flags recommendations"
+4. **Pitch:** "This is Shimmer's core pipeline. Post-hoc first, real-time later when we integrate with LiveKit agents."
+
+#### "How can I use" (incomplete)
+
+Looks like your input got cut off — "How can I use" what? Let me know and I'll pick it up.
+<!-- agent:boundary:e54ad9db -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - ([done]) Build session analyzer template
+- **Prep demo for Sunday:** Run session analyzer on robert-ross transcript
 - **Sunday Apr 5, 5pm ET:** Follow-up call with Rob (confirm via text)
 - Evaluate Cloudflare Vectorize + Workers AI for session indexing (MVP path)
-- Test session analyzer on a real session
 - Evaluate 3-5 LiveKit GitHub repos for Build Party
 - Get Build Party PRD from Rob
 - Create mermaid diagram for Miguel's LiveKit agent course

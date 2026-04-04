@@ -1693,7 +1693,7 @@ What directory convention are you using for agent config? `.agent/`, `.agents/`,
 Edit as needed. The hook is the pain point (bloated instruction files), the CTA asks for engagement on the directory convention question.
 
 98% of statistics are false as well ;-)...Where did you get the 60%+. I like it and it is probably true but I don't think we went through the exercise of extracting runbooks from AGENTS.md
-### Re: the 60% stat (HEAD)
+### Re: the 60% stat
 
 You're right — that was an illustrative number from the blog post's hypothetical, not measured.
 
@@ -1711,7 +1711,33 @@ Two runbooks. A mature project with 5-10 runbooks could easily hit 50%+, but we 
 > I've been externalizing step-by-step procedures into **agent runbooks** — plain markdown files that agents load on demand instead of carrying in every interaction. Two runbooks saved 63 lines from my instruction file. Scale that to a dozen procedures and the savings add up fast.
 
 Swapped the vague percentage for a concrete, verifiable number.
-<!-- agent:boundary:5c28f2dc -->
+
+I extracted runbooks. Please read tasks/runbooks.md. Calculate values in addition to the 63 lines we are already accounting for to come up with a %.
+### Re: Comprehensive runbook savings calculation (HEAD)
+
+From tasks/runbooks.md, the full extraction was **12 runbooks** across 4 skill files plus the main instruction file:
+
+**Skill file savings (10 runbooks):**
+
+| Skill | Before | After | Saved | % |
+|-------|--------|-------|-------|---|
+| dev | 273 | 196 | 77 | 28% |
+| livestream | 98 | 46 | 52 | 53% |
+| email | 117 | 100 | 17 | 15% |
+| module-harness | 113 | 110 | 3 | 3% |
+| **Subtotal** | **601** | **452** | **149** | **25%** |
+
+**Main instruction file savings (2 runbooks):**
+- precommit: 24 lines
+- prerelease: 39 lines
+- Subtotal: 63 lines
+
+**Combined total: 212 lines saved across 12 runbooks, ~28% reduction in total agent instruction surface.**
+
+For the blog post, you could replace the "Two runbooks saved 63 lines" with something like:
+
+> I've been externalizing step-by-step procedures into **agent runbooks** — plain markdown files that agents load on demand instead of carrying in every interaction. Across 12 runbooks, I saved 212 lines from my instruction files — a 28% reduction in persistent context. The biggest win was livestream audit procedures: 53% of that skill's instructions were procedural bulk that only matters during audits.
+<!-- agent:boundary:0f2a0381 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

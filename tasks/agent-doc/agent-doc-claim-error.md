@@ -80,7 +80,25 @@ Added CI-first `make release` target. Renamed old `release` (build binary) to `b
 Committed: `c155713` — `feat: add make release for CI-first release flow`
 
 push
-### Re: Pushed (HEAD)
+
+Why do we have unstaged changes?
+```
+~/work/btakita/agent-loop/src/agent-doc main ⇡3 !1 ?2                                                                                                                                                                                 12:34:26
+❯ gs
+On branch main
+Your branch is up to date with 'origin/main'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   Cargo.lock
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	.bin/
+	.cargo/
+```
+### Re: Pushed
 
 Pushed 3 commits to agent-doc remote (`43c0995..c155713`):
 1. `version-sync check` in make check
@@ -88,7 +106,20 @@ Pushed 3 commits to agent-doc remote (`43c0995..c155713`):
 3. `make release` CI-first flow
 
 Parent submodule pointer updated.
-<!-- agent:boundary:6b3c6c3d -->
+### Re: Unstaged changes — gitignore bug + Cargo.lock (HEAD)
+
+The `.gitignore` had `.bin/.cargo/config.toml` on one line — a merge of two entries that should have been separate. Fixed to:
+```
+.bin/
+.cargo/
+```
+
+- **Cargo.lock** — updated during `cargo install` (v0.31.9 release). Committed.
+- **`.bin/`** — now gitignored (release binary symlink dir)
+- **`.cargo/`** — now gitignored (local dev config override)
+
+Working tree is clean. Pushed fix + updated parent submodule pointer.
+<!-- agent:boundary:bfb89c58 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -99,4 +130,5 @@ Parent submodule pointer updated.
 - [x] Make CI release workflows idempotent
 - [x] Add `make release` target (CI-first flow)
 - [x] Push agent-doc changes to remote
+- [x] Fix gitignore (.bin/ and .cargo/ separate entries)
 <!-- /agent:pending -->

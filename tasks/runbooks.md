@@ -210,7 +210,7 @@ The "distribution-aware reorg" feedback is a guardrail -- it prevents a mistake 
 
 I want to have on-demand context as well. Is auto memory essentially on-demand context? Or would we need another mechanism?
 Would this feedback_distribution_aware_reorg belong in the on-demand context if auto memory is not on-demand?
-### Re: On-demand context vs auto memory (HEAD)
+### Re: On-demand context vs auto memory
 
 Auto memory is a **hybrid** with two layers:
 1. **MEMORY.md index** (always loaded, ~96 lines) — one-line triggers
@@ -232,12 +232,39 @@ So `feedback_distribution_aware_reorg.md` content is already on-demand. The ~1 l
 **Where on-demand context shines:** knowledge useful *when asked about* rather than *before acting*. "How did we solve X last time" = claude-mem. "Don't do X" = auto memory.
 
 If you want a new mechanism beyond these, the gap would be: **context that's triggered by the *type of work* being done, not by explicit user request or agent search.** For example, "when the agent is about to reorganize files, inject distribution-awareness context." That's a hook-based approach — settings.json could match on `Edit` or `Write` tool calls targeting certain paths and inject a reminder. That would be zero always-loaded cost with automatic triggering.
-<!-- agent:boundary:088f2a43 -->
+
+What if we have contexts as a more generic sibling to runbooks? Technically, a context could be a runbook, but runbooks is a more specific name.
+### Re: Contexts as generic sibling to runbooks (HEAD)
+
+Yes -- a **context** is any on-demand document a skill loads when relevant. A runbook is a *type* of context (procedural steps).
+
+```
+contexts/
+  ├── runbooks/       # "how to do X" (procedural)
+  ├── references/     # "what X is" (factual)
+  └── guardrails/     # "don't do X" (behavioral)
+```
+
+**What this buys:**
+- Unified directory for all on-demand skill knowledge
+- `feedback_distribution_aware_reorg.md` could live as `contexts/guardrails/distribution-aware-reorg.md` instead of auto memory
+- SKILL.md section becomes `## Contexts` with subsections, or keeps `## Runbooks` as a subset
+
+**The triggering problem for guardrails:** Runbooks and references have natural triggers (user says "release" or agent needs config). Guardrails need to fire *before* the mistake. Options:
+
+1. **SKILL.md trigger lines** in a `## Guardrails` section -- loaded with the skill, ~1 line each
+2. **Hook injection** -- settings.json fires on tool patterns, zero always-loaded cost
+3. **Keep hybrid** -- guardrails in auto memory (1 line), runbooks/references as contexts
+
+**Recommendation:** Option 3 for now. Guardrails need proactive triggering (auto memory). Everything else is on-demand contexts. If hooks mature enough to inject guardrails automatically, migrate then.
+
+The naming: `contexts/` is the right generic term. `runbooks/` stays as a subdirectory for procedural contexts. This aligns with the `agent-runbooks` crate name too -- it could become `agent-contexts` if scope grows, but starting with runbooks is fine since they're the most common type.
+<!-- agent:boundary:0831e1e1 -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Extract corky runbooks: review-inbox, draft-reply, enrich-contact
-- [ ] Explore hook-based on-demand context injection (if desired)
+- [ ] Design `contexts/` directory structure for skills
 <!-- /agent:pending -->

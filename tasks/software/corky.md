@@ -265,7 +265,7 @@ Do we have transcribe + diarization in our corky skill install?
 I want to look at the transcript speaker + text confidence. If it drops below a threshold, would it help to transcribe + diarize small audio chunks?
 
 Should this be extracted as a runbook?
-### Re: Transcription confidence & chunking (HEAD)
+### Re: Transcription confidence & chunking
 
 **Yes** — transcription + diarization is in corky's installed skills. `corky/SKILL.md` references `runbooks/transcription.md` (on-demand).
 
@@ -281,13 +281,28 @@ Should this be extracted as a runbook?
 **Not a runbook** — this is automated logic inside `engine.rs`, not a human procedure. It would be a code feature like adaptive chunking.
 
 Want me to design and implement confidence-based re-transcription?
-<!-- agent:boundary:afd88b1c -->
+yes
+### Re: Confidence-based re-transcription — implemented (HEAD)
+
+**How it works:**
+1. After whisper + diarization merge, scans for contiguous low-confidence blocks (< 0.4 threshold)
+2. Re-transcribes those time ranges with fresh whisper pass (±2s padding for context)
+3. Replaces originals only if re-transcription has higher avg confidence
+4. Speaker labels preserved via temporal proximity matching
+
+**Config:** `[transcription] confidence_threshold = 0.4`
+**Opt-out:** `--no-confidence-retranscribe`
+
+**Files:** engine.rs (main logic + 6 tests), corky_config.rs, cli.rs, main.rs, mod.rs. 264 tests pass, clippy clean.
+
+Ready to commit and release.
+<!-- agent:boundary:83fac144 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Confidence-based re-transcription (design/implement — awaiting approval)
+- Commit confidence re-transcription + release
 - Verify sheet sharing / GCP test users
 - Re-test sheet read
 - Manylinux binary wheel (nice-to-have, needs container/CI)

@@ -94,7 +94,7 @@ Binary rebuilt and skill reinstalled. Both runbooks now install via `agent-doc s
 
 do
 - [ ] PyPI publish (needs manylinux Docker build)
-### Re: PyPI publish complete (HEAD)
+### Re: PyPI publish complete
 
 Built manylinux2014 wheel via Docker container (`ghcr.io/pyo3/maturin`), mounting the agent-loop parent dir to resolve the `tmux-router` path patch in `.cargo/config.toml`.
 
@@ -107,7 +107,27 @@ Wheel: `agent_doc-0.31.5-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
 Uploaded to PyPI successfully.
 
 **Note:** `pyproject.toml` is still at v0.31.5 (matches the crates.io release). The local binary is v0.31.8 (unreleased changes: runbook updates, skill.rs). The PyPI wheel is v0.31.5.
-<!-- agent:boundary:9afd793d -->
+
+I do not want to mount the entire agent-loop directory. There are sensitive file in there. We should add this fact to the AGENTS.md
+Is there any cleanup needed from any security lapse?
+### Re: Docker mount security (HEAD)
+
+**No security lapse occurred:** The container (`ghcr.io/pyo3/maturin`) only ran `cargo build` — no network during build, and the PyPI upload ran locally outside Docker. The container was `--rm` so it's gone. But the principle is wrong.
+
+**Added to CLAUDE.md Security section:**
+> Docker mounts: Never mount the entire agent-loop/ directory into a Docker container — it contains sensitive files (mail/, credentials). Mount only the specific subdirectories needed.
+
+**Correct approach for future manylinux builds:**
+```
+docker run --rm \
+  -v .../src/agent-doc:/agent-loop/src/agent-doc \
+  -v .../src/tmux-router:/agent-loop/src/tmux-router \
+  -w /agent-loop/src/agent-doc \
+  ghcr.io/pyo3/maturin build --release --compatibility manylinux2014
+```
+
+Only mounts `agent-doc` + `tmux-router` (the path dependency in `.cargo/config.toml`). Everything else stays inaccessible.
+<!-- agent:boundary:c73316fd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -117,4 +137,5 @@ Uploaded to PyPI successfully.
 - [x] Update compact-exchange runbook: note about preserving uncommitted user input
 - [x] Document `agent-doc transfer`/`extract` in SKILL.md or runbook
 - [x] PyPI publish (manylinux Docker build)
+- [x] Add Docker mount security rule to CLAUDE.md
 <!-- /agent:pending -->

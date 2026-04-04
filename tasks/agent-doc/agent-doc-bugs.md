@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-All fixes installed + runbooks.md claimed on %428
+All tasks complete — spam cleaned, 3 fixes shipped, history squashed
 <!-- /agent:status -->
 
 ## Exchange
@@ -125,7 +125,7 @@ tasks/runbooks.md is completely unclaimed. I want a new tmux pane to claim the f
 If you want to force-claim %417 for a different file: use `agent-doc claim <file> --force`.
 
 Note: the updated binary is already active via the `.bin/agent-doc` symlink pointing to `target/release/agent-doc`. `cargo install` is only needed for the `~/.cargo/bin/` copy used by tmux-spawned sessions.
-### Re: Install + claim runbooks.md (HEAD)
+### Re: Install + claim runbooks.md
 
 **Binary installed:** `cargo install --path .` completed — `~/.cargo/bin/agent-doc` now has all 3 fixes.
 
@@ -137,7 +137,24 @@ Note: the updated binary is already active via the `.bin/agent-doc` symlink poin
 - Git committed
 
 You can now open `tasks/runbooks.md` in JB and it should show the gutter boundary. Use "Claim for Tmux Pane" from runbooks.md and it will re-claim the same session (no conflict).
-<!-- agent:boundary:264ad5f3 -->
+
+do
+- [ ] Squash contaminated git commits (175 commits, pending user confirmation)
+### Re: Git history squashed (HEAD)
+
+**219 commits → 1.** Soft-reset to `origin/main`, then created a single clean commit (`84277428`) with all current task file state.
+
+The squashed commit includes:
+- All cleaned task files (spam removed)
+- agent-doc-bugs investigation and responses
+- ron-berkes transcriptions
+- eval-runner sessions
+- briantakita.me updates
+- claim-error debugging
+- New files: agent-doc-bugs.md, on-demand-context.md, runbooks.md
+
+Only task/ and .agent-doc/ files were affected. Bug fix source code changes (git.rs, resync.rs, claim.rs) are in the submodule and unaffected by the squash.
+<!-- agent:boundary:51489b15 -->
 <!-- /agent:exchange -->
 
 ## Console
@@ -149,7 +166,7 @@ You can now open `tasks/runbooks.md` in JB and it should show the gutter boundar
 
 <!-- agent:pending patch=replace -->
 - [x] Clean spam from all 24 affected tasks/**/*.md files (17 files cleaned)
-- [ ] Squash contaminated git commits (175 commits, pending user confirmation)
+- [x] Squash contaminated git commits (219 → 1)
 - [x] Fix: boundary repositioning strips (HEAD) marker on concurrent commits
 - [x] Fix: stashed panes can't return — window field points to stash window
 - [x] Fix: claim should be atomic (rollback on pane assignment failure)

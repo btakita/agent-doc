@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-SKILL.md runbook reference design: inline triggers at decision points
+Runbook trigger format: backtick-quoted commands with runbook paths
 <!-- /agent:status -->
 
 ## Exchange
@@ -88,7 +88,7 @@ This goes in the workflow section where compaction would naturally be described 
 **2. Runbook index section** — a `## Runbooks` section at the end of SKILL.md listing all available runbooks with their trigger conditions:
 
 ```markdown
-## Runbooks (HEAD)
+## Runbooks
 
 | Trigger | Runbook | Description |
 |---------|---------|-------------|
@@ -98,21 +98,48 @@ This goes in the workflow section where compaction would naturally be described 
 **Recommendation:** Use approach 1 (inline references) as the primary mechanism. The agent encounters the reference at the decision point, not in a disconnected index. If the number of runbooks grows, add approach 2 as a supplementary index.
 
 The key principle: the SKILL.md should never contain the full procedure when a runbook exists — it should delegate with a link. This keeps the SKILL.md focused on the core workflow and avoids duplication.
-<!-- agent:boundary:f42dad14 -->
+Could we shorten the inline statement to be something like with a guaranteed prompt adherence? Are there other shortened inline statements that will be correctly run by the agent?
+> `compact exchange` command runs runbooks/compact-exchange.md
+### Re: Shortened inline runbook triggers
+
+The format you proposed is great:
+> `compact exchange` command runs runbooks/compact-exchange.md
+
+This is concise and unambiguous. The pattern is:
+
+```
+`<trigger phrase>` command runs runbooks/<runbook-file>.md
+```
+
+For guaranteed prompt adherence, the key factors are:
+1. **Backtick quoting** — makes the trigger phrase visually distinct and exact-matchable
+2. **"runs runbooks/"** — tells the agent to read and execute the runbook file
+3. **Relative path** — runbooks are relative to the SKILL.md's directory
+
+**Other shortened inline statements that work reliably:**
+
+```markdown
+## Operations (HEAD)
+
+`compact exchange` runs runbooks/compact-exchange.md
+`transfer session` runs runbooks/transfer-session.md
+`reset document` runs runbooks/reset-document.md
+```
+
+The agent sees the trigger phrase in the user's input, matches it against the backtick-quoted commands in the skill, reads the linked runbook, and follows its steps.
+
+**What improves adherence:**
+- Exact trigger phrase in backticks (no ambiguity)
+- Single-line format (scannable)
+- Grouped in an `## Operations` section so the agent knows where to look
+- The runbook file contains the full procedure (SKILL.md doesn't duplicate it)
+<!-- agent:boundary:ec22c18d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Clean spam from all 24 affected tasks/**/*.md files
-- [x] Squash contaminated git commits (219 → 1)
-- [x] Fix: boundary repositioning strips (HEAD) marker
-- [x] Fix: stashed panes can't return
-- [x] Fix: claim should be atomic
-- [x] Remove agent:console from default scaffold (already done)
-- [x] Suppress verbose git status in commit output
-- [x] Fix: window closure — last-pane guard in unmanaged stash path
 - [x] Navigation swap: cross-session joins + --window authority + path dep
 - [ ] Publish tmux-router 0.3.9 to crates.io (then revert path dep)
-- [ ] Add runbook references to SKILL.md (inline triggers + optional index)
+- [ ] Add runbook trigger lines to SKILL.md Operations section
 <!-- /agent:pending -->

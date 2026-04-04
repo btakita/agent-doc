@@ -491,7 +491,7 @@ Audited and added 3 missing edge case tests:
 | StructuralChange | `classify_structural_change` | — |
 | MultiTopic | `_multi_topic`, `_with_separator` | `_single_separator_not_multi` |
 | ContentAddition | `classify_content_addition` | (fallback for all negative cases) |
-<!-- agent:boundary:1c80de13 -->
+<!-- agent:boundary:bf33fe86 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -350,7 +350,7 @@ This gives Rob something tangible to demo immediately, all built on your existin
 
 What can we do now?
 - Trieve/Vespa account?
-### Re: What we can do now (HEAD)
+### Re: What we can do now
 
 #### Trieve vs Vespa — quick assessment
 
@@ -373,16 +373,68 @@ What can we do now?
 4. **Prep call talking points** — Tighten your pitch with specific demos you can show live.
 
 Which of these do you want to start with? I'd suggest #1 (Trieve signup) first since it's a blocker for #2.
-<!-- agent:boundary:edbb78f2 -->
+
+Granola Meeting notes: https://notes.granola.ai/d/e4d8dd00-6468-4a0b-93f1-df1f7d84d956
+How can I use the granola app on arch linux? Can we have MCP interaction?
+
+I'm not able to connect to dashboard.trieve.ai. Please try on your end.
+
+Is this independent of Trieve?
+- **NOW:** Build session analyzer template (agent-doc)
+### Re: Granola notes, Linux, Trieve, and next steps (HEAD)
+
+#### Granola meeting notes — extracted
+
+Scraped Rob's Granola notes and saved to `file:///home/brian/work/btakita/agent-loop/tmp/granola-brian-rob-meeting-notes.md`
+
+Key takeaways from Rob's notes that weren't obvious from the transcript:
+- **Rob's read:** "strongest candidate conversation to date; wants to move to a short paid engagement"
+- **Explicit next steps Rob assigned you:**
+  1. Shimmer: skeleton app to parse Claude Code sessions, set up Trieve + Cor.e or Vespa, surface sessions/outputs to Rob in near-real-time
+  2. Build Party: evaluate 3-5 GitHub repos (LiveKit streaming starter + Discord alternatives built on LiveKit); read Build Party PRD; make a recommendation
+  3. Create a mermaid diagram for building a course (Miguel's LiveKit agent course)
+- **Sunday 5pm ET call** (Apr 5) — Rob will text to confirm. Easter may shift timing.
+- **Rate:** ~$100/hr starting point
+
+#### Granola on Arch Linux
+
+**No Linux client.** Granola is Mac-only — it hooks into macOS system audio for meeting capture. No web editor, no Electron build. Won't run on Arch.
+
+**No official API or MCP server.** The shared link is a read-only web view. However:
+- I was able to scrape the HTML and extract the full structured notes (done above)
+- **Workaround for ongoing access:** Ask Rob to push Granola notes to Google Docs (Granola has a native integration). Google Docs has an API you can access programmatically.
+- Or: scrape the shared links like I just did — the content is embedded in the Next.js RSC payload.
+
+#### Trieve dashboard
+
+I got HTTP 200 from `dashboard.trieve.ai` on my end. It may be a DNS or network issue on yours. Try:
+- Different browser / incognito
+- `curl -sI https://dashboard.trieve.ai` to check if it resolves
+
+Note: Trieve was acquired by Mintlify. The service may be deprioritized. If it's unreliable, that's actually an argument for Vespa (self-hosted, Apache 2.0, no vendor risk).
+
+#### Session analyzer template — yes, independent of Trieve
+
+Building the session analyzer template is 100% independent of any search backend. It's pure agent-doc. I can create it right now.
+
+The template would have components for:
+- `&lt;!-- agent:session-metrics --&gt;` — token usage, duration, topic count
+- `&lt;!-- agent:topic-segments --&gt;` — auto-segmented conversation topics
+- `&lt;!-- agent:skill-usage --&gt;` — which skills/tools were invoked
+- `&lt;!-- agent:recommendations --&gt;` — subagent suggestions, context warnings
+
+Want me to build this now?
+<!-- agent:boundary:9a21e8b2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **NOW:** Sign up for Trieve (dashboard.trieve.ai) — get API key
-- **NOW:** Index agent-doc snapshots into Trieve (script)
-- **NOW:** Build session analyzer template (agent-doc)
-- Call with Rob tomorrow — demo Trieve search + session analyzer prototype
-- Review Build Party + Shimmer PRDs (ask Rob for access)
-- DocWalk MVP — color-coded markdown viewer (Day 4-5)
+- **NOW:** Build session analyzer template (agent-doc) — ready to start
+- **Sunday Apr 5, 5pm ET:** Follow-up call with Rob (confirm via text)
+- Evaluate 3-5 LiveKit GitHub repos for Build Party
+- Get Build Party PRD from Rob
+- Create mermaid diagram for Miguel's LiveKit agent course
+- Set up Trieve or Vespa for session indexing
+- DocWalk MVP — color-coded markdown viewer
 <!-- /agent:pending -->

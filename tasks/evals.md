@@ -165,7 +165,7 @@ Sonnet passes +2 more cases but mean score is nearly identical — both models a
 **Meta:** `single-word-approval` scored 0.00 — this model interpreted "go" (the trigger for this session) as a new topic rather than approval. The case exists exactly for this failure mode.
 
 **Next:** Cross-reference Haiku per-case scores, then pick a failure cluster to attack via SKILL.md improvements.
-### Sonnet Baseline Results (HEAD)
+### Sonnet Baseline Results
 
 **11/21 passed (52.4%), mean score 0.56** — vs Haiku 9/21 (42.9%), mean score 0.57.
 
@@ -186,7 +186,37 @@ Slight pass rate improvement (+9.5pp) but nearly identical mean scores. Sonnet i
 **Actionable insight:** The 3 zero/near-zero scores (`comment-content-ignored`, `single-word-approval`, `approval-to-implement`) point to the same root issue: the SKILL.md prompt doesn't explicitly teach the agent about comment stripping, single-word approval signals, or the pending protocol. These are high-leverage fixes.
 
 Baseline committed to `evals/agent-doc/diff-interpretation/baselines/sonnet-2026-04-04.json`.
-<!-- agent:boundary:e2d72f34 -->
+### Re: Phase 1 Complete (HEAD)
+
+Sonnet baseline run complete and saved to `evals/agent-doc/diff-interpretation/baselines/sonnet-2026-04-04.json`.
+
+**Actual results (file was 0 bytes — prior entry in exchange was not persisted):**
+
+| Model | Passed | Pass Rate | Mean Score |
+|-------|--------|-----------|------------|
+| haiku-2026-04-03 | 9/21 | 42.9% | 0.57 |
+| sonnet-2026-04-04 | 8/21 | 38.1% | 0.49 |
+
+Sonnet scored *lower* than Haiku this run — slightly surprising. Key failures:
+
+| Case | Score | Failure mode |
+|------|-------|--------------|
+| `approval-to-implement` | 0.00 | Still planning instead of executing after "yes, implement" |
+| `single-word-approval` | 0.00 | "go" not recognized as approval signal |
+| `comment-content-ignored` | 0.00 | Responded to HTML comment content |
+| `head-label-removal` | 0.10 | Responded to agent artifact cleanup (should be silent) |
+| `multi-item-instruction-list` | 0.10 | Asked questions instead of executing checklist |
+| `simple-question` | 0.10 | Deflected with "I don't have docs" |
+| `blockquote-annotation` | 0.10 | Saw permission issue, missed the actual intent |
+
+**Phase 1 is now complete.** All artifacts exist:
+- `evals/agent-doc/diff-interpretation/cases.yaml` (21 cases)
+- `evals/agent-doc/diff-interpretation/baselines/haiku-2026-04-03.json`
+- `evals/agent-doc/diff-interpretation/baselines/sonnet-2026-04-04.json`
+- `src/eval-runner/` (Rust CLI)
+
+Next: attack the top failure clusters — comment stripping, approval signals, pending protocol.
+<!-- agent:boundary:75df2f50 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

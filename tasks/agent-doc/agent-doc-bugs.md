@@ -233,7 +233,7 @@ Added `flock` on `.agent-doc/sync.lock` at the start of `run_with_options()`. Wh
 **Why the response duplicated:** The first `agent-doc write` attempt used IPC (socket to JB plugin) but timed out after 2 seconds (exit 75). The response was saved as a patch file in `.agent-doc/patches/`. Then the retry with `--force-disk` wrote the same content via CRDT merge. The CRDT merge correctly merged both writes, but since both contained the same content, it appeared duplicated. This is a known edge case when IPC times out and the skill retries with disk write.
 
 634 tests pass. Built, installed. Try switching tabs — the file lock should eliminate the concurrent sync glitchiness.
-<!-- agent:boundary:e0102e52 -->
+<!-- agent:boundary:0e1020b8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

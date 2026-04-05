@@ -651,8 +651,7 @@ The traceable chain is now complete:
 CLAUDE.md already references README.md for the full ontology, so no additional update needed there.
 
 Should the module-harness reference the annotation from the ontology?
-Add to module-harness skill
-### Re: Module-harness and ontology annotations (HEAD)
+### Re: Module-harness and ontology annotations
 
 Yes, it would make sense. The module-harness generates spec/contracts/evals per module. If the module's domain ontology defines terms like `Directive`, `Annotation`, `Cycle`, the module-harness could:
 
@@ -667,7 +666,23 @@ The connection is natural: the domain ontology defines *what concepts exist*, th
 However, this would be a module-harness feature enhancement, not something to add right now. The current session's ontology work (directive node + README.md Interaction Model) stands on its own. The module-harness integration could be a future task.
 
 Want me to add it to the pending list?
-<!-- agent:boundary:4bd40b58 -->
+
+Add to module-harness skill -> runbook to reference ontology nodes for definition of terms.
+### Re: Module-harness ontology runbook added (HEAD)
+
+Done. Created `runbooks/ontology-references.md` in the module-harness skill and wired it into SKILL.md.
+
+**Runbook contents:**
+- **When to apply:** during `apply`, `audit`, and `seed` operations
+- **How to reference:** examples showing ontology term links in Spec and Contracts sections
+- **Ontology sources (priority order):** project domain ontology > existence kernel > SPEC.md
+- **Audit checklist:** terms match ontology, links correct, no exclusive labels (Universal Applicability)
+- **Example:** `diff.rs` spec should reference Directive, Annotation, Cycle, Signal
+
+**SKILL.md updated:** added `ontology references` runbook to the Runbooks section.
+
+The module-harness will now check for ontology cross-references during audits and include them when generating/applying specs.
+<!-- agent:boundary:1423df9d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -679,6 +694,6 @@ Want me to add it to the pending list?
 - [x] Edge case + integration tests — DONE (447 total)
 - [x] Process discipline updates — DONE
 - [x] Directive ontology node + README.md Interaction Model — DONE
-- [ ] Module-harness ontology cross-references (future)
+- [x] Module-harness ontology runbook — DONE
 - [ ] Add transfer-source metadata to patch format
 <!-- /agent:pending -->

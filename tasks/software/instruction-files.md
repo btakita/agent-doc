@@ -286,7 +286,7 @@ release
 Re-tagged and pushed v0.2.0. Build should succeed now.
 
 All `curl | sh` installers are live for the 4 completed repos.
-<!-- agent:boundary:45e4006c -->
+<!-- agent:boundary:8156141d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

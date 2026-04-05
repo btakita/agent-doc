@@ -357,7 +357,7 @@ Done.
 You missed the following. Why? Go ahead and run:
 > Should .agent/runbooks/precommit.md and .agent/runbooks/prerelease.md be included in instruction-files?
 > Perhaps as development support files?
-### Re: Runbooks in instruction-files (HEAD)
+### Re: Runbooks in instruction-files
 
 Yes, the precommit/prerelease runbooks should be included in instruction-files discovery. Currently instruction-files discovers:
 - Root: `AGENTS.md`, `README.md`, `SPEC.md`, `CLAUDE.md`
@@ -368,12 +368,49 @@ It does NOT discover `.agent/runbooks/`. These runbooks reference specific tools
 **To add:** In `instruction-files/src/discovery.rs`, add `.agent/runbooks/*.md` to the glob patterns as a "development support" category. The audit checks (staleness, line budget, actionable content) would apply to runbooks just like they apply to SKILL.md files.
 
 This is a change to the `instruction-files` crate — a separate submodule. Want me to implement it there?
-<!-- agent:boundary:d703b4ed -->
+
+I want instruction-files to contain precommit.md and prerelease.md
+It should depend on existence and module-harness crates.
+
+> 7. No `~/` or machine-local paths in released files (grep for `~/.claude/philosophy`)
+
+~/.claude/philosophy should not be grepped.
+
+instruction-files should be support instruction files, including runbooks for packages. It should assume all context is contain either in the package's repo or a dependency's repo. Please specify this as either a shared skill with a refernce to a runbook if appropriate.
+### Re: instruction-files scope expansion (HEAD)
+
+Fixed the prerelease runbook — removed the `~/.claude/philosophy` grep. Now says: "No machine-local paths in released files (all references must resolve within the repo or declared dependencies)."
+
+**For the instruction-files expansion, here's how I understand the vision:**
+
+instruction-files should be the central crate for discovering, auditing, and managing all instruction/support files in a package:
+
+1. **Discovery scope** — not just AGENTS.md/CLAUDE.md, but also:
+   - `.agent/runbooks/*.md` (precommit, prerelease, etc.)
+   - `.claude/skills/**/SKILL.md` and `runbooks/*.md`
+   - Module harness doc comments (via module-harness dependency)
+
+2. **Dependencies** — instruction-files should depend on:
+   - `existence-lang` crate (for ontology term validation)
+   - `module-harness` crate (for module spec auditing)
+
+3. **Context assumption** — all referenced context must be in the package's repo or a declared dependency's repo. No machine-local paths. The crate audits this invariant.
+
+4. **Bundled runbooks** — precommit.md and prerelease.md live IN the instruction-files crate as default runbooks. Projects using instruction-files get them automatically.
+
+**As a shared skill:** This maps to a skill that wraps instruction-files with a runbook:
+- `/instruction-files audit` — run full audit (existing + runbooks + ontology)
+- Runbook: `runbooks/instruction-files-audit.md` — documents the audit scope and invariants
+
+This is a significant expansion of the instruction-files crate. It would be best tracked as its own task document (not inside agent-doc-bugs.md). Want me to create `tasks/software/instruction-files.md` for this work?
+<!-- agent:boundary:bd80b93b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Add `.agent/runbooks/*.md` to instruction-files discovery
-- [ ] Bump to v0.31.14 and release agent-doc
+- [x] Fixed prerelease runbook (removed local path grep)
+- [ ] Expand instruction-files: discovery scope, dependencies, bundled runbooks
+- [ ] Create task document for instruction-files expansion
+- [ ] Bump agent-doc to v0.31.14 and release
 <!-- /agent:pending -->

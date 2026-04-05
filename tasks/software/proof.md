@@ -127,7 +127,7 @@ The key architectural guarantee: Proof only receives what Claude explicitly send
 **Key difference in philosophy:** Proof comments are a collaboration tool — agents read and respond to them. agent-doc comments are a privacy tool — they're explicitly excluded from the diff so users can keep private notes the agent never sees.
 
 For integration, Proof's anchored comments could serve as the "public discussion" layer while agent-doc's inline comments remain the "private scratchpad." This would give users both modes in one workflow.
-<!-- agent:boundary:7788f44c -->
+<!-- agent:boundary:9b02e67e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

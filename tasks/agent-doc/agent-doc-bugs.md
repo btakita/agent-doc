@@ -71,7 +71,7 @@ Added 5 new pending items from the exchange discussion to `tasks/software/instru
 
 Total: 11 pending items in instruction-files.md now. Committed.
 When tasks/software/proof.md was claimed, the initial template was not committed. Why?
-### Re: proof.md template not committed (HEAD)
+### Re: proof.md template not committed
 
 The committed version (commit `75124382`) only has `agent_doc_session:` — the bare frontmatter from the old `ensure_initialized()` before the scaffold fix.
 
@@ -80,12 +80,18 @@ The current file has the full template (different UUID `23463bb9` — recreated 
 **The fix:** After auto-scaffolding in `resolve_file`, sync should explicitly call `git::commit()` to commit the scaffolded content. The scaffold is a significant change (empty file → full template) that should be committed immediately.
 
 This is another case where the binary needs to enforce the invariant: scaffolded files should be committed. Want me to fix it?
-<!-- agent:boundary:fc62cda9 -->
+yes
+### Re: Fixed — sync now commits after scaffolding (HEAD)
+
+Added `git::commit(path)` call immediately after writing the scaffold in `resolve_file`. This handles the case where the file was previously tracked with bare frontmatter — git sees the scaffold as a modification (not untracked), so `ensure_git_tracked()` skips it. The explicit commit ensures the full template is in HEAD.
+
+458 tests pass, clippy clean. Binary installed.
+<!-- agent:boundary:1a4b206e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Fix sync auto-scaffold: commit after scaffolding
+- [x] Fix sync: commit after scaffolding — DONE
 - [ ] Bump agent-doc to v0.31.14 and release
 <!-- /agent:pending -->

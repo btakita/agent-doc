@@ -415,7 +415,7 @@ Created `tasks/software/instruction-files.md` with the full scope:
 - Shared skill + runbook
 
 Transfer context from this session included. Ready to work on when you navigate to it.
-<!-- agent:boundary:792cbf5d -->
+<!-- agent:boundary:aa9edef0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

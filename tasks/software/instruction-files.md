@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Binary distribution deployed across all 5 repos. 5-platform cross-compilation ready.
+Install scripts deployed. Waiting for first release tags to enable binary downloads.
 <!-- /agent:status -->
 
 ## Exchange
@@ -165,7 +165,7 @@ We should support binary install for all of the packages:
 - **agent-memories**
 - **skill-harness**
 - **instruction-files**
-### Re: Binary install + Option D (HEAD)
+### Re: Binary install + Option D
 
 **Binary install:** Done. All 5 repos now have cross-compilation release workflows:
 - 5-platform matrix: linux x86_64, linux aarch64 (via cross), macOS x86_64, macOS aarch64, Windows x86_64
@@ -183,7 +183,32 @@ Users install via:
 **Option D recommendation:** Yes, I recommend it as a future phase. The `.agent/skills.toml` manifest is language-agnostic — it describes what skills a project needs. Any tool (Rust binary, shell script, or agent reading the file directly) can consume it. The binary tools (agent-rules, skill-harness, etc.) make it automatic; without them, an agent can still read the manifest and manually copy files.
 
 Implementation sequence: Option C (done) -> binary distribution (done) -> Option D manifest format (next).
-<!-- agent:boundary:70d292b3 -->
+Please add a install.sh script for all of the packages. To support `curl ... | sh`.
+Update install documentation.
+### Re: Install scripts
+
+Done. All 5 repos now have `install.sh` and updated install documentation.
+
+**install.sh** (each repo):
+- Auto-detects OS (linux/macOS) and architecture (x86_64/aarch64)
+- Downloads latest release binary from GitHub Releases
+- Installs to `~/.local/bin` (or `INSTALL_DIR` env var)
+- Warns if not in PATH
+
+**Usage:**
+```bash
+# Any repo (HEAD)
+curl -fsSL https://raw.githubusercontent.com/btakita/agent-rules/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/btakita/agent-runbooks/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/btakita/agent-memories/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/btakita/skill-harness/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/btakita/instruction-files/main/install.sh | sh
+```
+
+**README install sections** updated with three options: curl installer, `cargo install`, from source.
+
+Note: the install scripts will start working once the first release with binaries is pushed (the cross-compilation workflow triggers on `v*` tags).
+<!-- agent:boundary:568ff1ae -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -191,5 +216,7 @@ Implementation sequence: Option C (done) -> binary distribution (done) -> Option
 <!-- agent:pending patch=replace -->
 - [x] Implement init() pattern (Option C)
 - [x] Cross-compiled binary distribution for all repos
+- [x] Install scripts (curl | sh) for all repos
 - [ ] Implement .agent/skills.toml manifest (Option D)
+- [ ] Push first release tags to trigger binary builds
 <!-- /agent:pending -->

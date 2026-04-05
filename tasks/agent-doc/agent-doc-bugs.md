@@ -259,7 +259,9 @@ Is this fix installed?
 `Claim for Tmux Pane` on proof.md still results in an error `Claim failed (exit 1): Error: pane %491 is already claimed by 1ef5f0e7 (file: tasks/agent-doc/agent-doc-bugs.md). Use --force to overwrite.`
 
 Why?
-### Re: Fix wasn't installed (HEAD)
+
+
+### Re: Fix wasn't installed
 
 The fix was in the working tree but the running binary was still v0.31.13 (the earlier release). Just rebuilt and installed:
 
@@ -273,12 +275,54 @@ The binary now has both fixes:
 - **sync.rs**: auto-scaffold empty .md files
 
 Try "Claim for Tmux Pane" or "Sync Tmux Layout" on proof.md again — it should work now.
-<!-- agent:boundary:b15334a9 -->
+
+I tried `Sync Tmux Layout` then `Claim for Tmux Pane`.
+
+`Claim for Tmux Pane` got an error
+```
+[claim] pane %491 is already claimed by 1ef5f0e7 (file: tasks/agent-doc/agent-doc-bugs.md); provisioning a new pane
+[route] split-window -dh alongside registered pane %488 in session '10' → new pane %499
+[tmux] select_pane %499 → session:window 10:0
+[route] Started Claude for /home/brian/work/btakita/agent-loop/tasks/software/proof.md in pane %499 (session b2d0bf60)
+[route] skip_wait=true — pane created, Claude starting (sync path)
+```
+
+`Sync Tmux Layout` resulted in a bare bones fontmatter with **only** `agent_doc_session:`. Why?
+It should have resulted in populating proof.md with the full default template with includes an agent:exchange and a agent:pending elements
+### Re: Scaffold ordering bug fixed + reinstalled (HEAD)
+
+Two issues found and fixed:
+
+**1. Scaffold ordering bug (root cause of proof.md getting bare frontmatter)**
+
+The scaffold check ran AFTER `ensure_initialized()`. The sequence was:
+1. `ensure_initialized()` — wrote minimal `agent_doc_session:` frontmatter to empty file
+2. Scaffold check — saw `fm.session.is_some()` and skipped (file no longer "empty")
+3. Result: bare frontmatter with no format, no components
+
+**Fix:** Moved scaffold check BEFORE `ensure_initialized()`. New sequence:
+1. Check if file is empty `.md` — scaffold full template with session UUID + format + components
+2. `ensure_initialized()` — creates snapshot + git baseline (file now has full template)
+3. Resolve — file has session UUID → `Registered`
+
+**2. Claim "error" was actually success**
+
+The claim output you saw:
+```
+[claim] pane %491 is already claimed by 1ef5f0e7; provisioning a new pane
+[route] Started Claude for proof.md in pane %499 (session b2d0bf60)
+```
+
+This is the correct behavior — claim detected the occupied pane and provisioned a new one. The JB plugin displayed it as an error because the message went to stderr. The provisioning succeeded (pane %499 was created and Claude started).
+
+**Rebuilt and installed.** Try deleting proof.md, recreating it as empty, then "Sync Tmux Layout" — it should now get the full template with exchange + pending components.
+<!-- agent:boundary:b392e9bd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] All binary fixes installed and running
-- [ ] Bump to v0.31.14 and release when ready
+- [x] Fix scaffold ordering (before ensure_initialized) — DONE
+- [x] Binary reinstalled — DONE
+- [ ] Bump to v0.31.14 and release
 <!-- /agent:pending -->

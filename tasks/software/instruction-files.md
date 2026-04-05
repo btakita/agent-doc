@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-19/27 items complete. Phase 1 redistribution done: shared primitives in agent-kit, instruction-files slimmed by 594 lines.
+19/27 items complete. Phases 2+3 subagents in progress. Domain logic moving to domain crates.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1457,7 +1457,7 @@ The gap: none of these are structured, validated, or portable. agent-memories ma
 The "library with memories" pattern is really "codebase with documented agent experience." Every codebase accumulates this — we're just giving it a format.
 
 Starting the redistribution refactor now. I'll move shared primitives to agent-kit first, then redistribute domain logic.
-### Re: Redistribution progress (HEAD)
+### Re: Redistribution progress
 
 **Phase 1 complete: shared primitives moved to agent-kit.**
 
@@ -1484,7 +1484,18 @@ instruction-files public API unchanged — existing consumers (agent-doc, corky)
 - Phase 4: Add instruction-files CLI
 
 These can happen in a future session. The foundation is set.
-<!-- agent:boundary:7b8cdc41 -->
+do
+- [ ] Move domain logic from instruction-files to agent-rules (actionable, tree_paths)
+- [ ] Move init_runbooks from instruction-files to agent-runbooks
+### Re: do (phases 2 + 3) (HEAD)
+
+Two subagents launched in parallel:
+
+1. **Phase 2** — Moving `check_actionable`, `check_tree_paths`, `extract_tree_paths` + all helpers to agent-rules
+2. **Phase 3** — Moving `init_runbooks`, bundled precommit.md/prerelease.md to agent-runbooks
+
+Both update instruction-files with re-exports for backward compatibility. Will report results when complete.
+<!-- agent:boundary:1116d4ff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1508,9 +1519,9 @@ These can happen in a future session. The foundation is set.
 - [x] Add Cargo.toml + CLI to agent-memories
 - [x] Add Environment path methods for rules/runbooks/memories/skills dirs
 - [x] Rename btakita/agent-skills to btakita/skill-harness
-- [x] Move shared audit primitives to agent-kit (context_invariant, line_budget, staleness, discovery)
-- [ ] Move domain logic from instruction-files to agent-rules (actionable, tree_paths)
-- [ ] Move init_runbooks from instruction-files to agent-runbooks
+- [x] Move shared audit primitives to agent-kit
+- [ ] Move domain logic to agent-rules (subagent in progress)
+- [ ] Move init_runbooks to agent-runbooks (subagent in progress)
 - [ ] Add instruction-files CLI (orchestrator)
 - [ ] Add Spec/Contracts/Evals markdown convention to all repos
 - [ ] Add self-skill to skill-harness

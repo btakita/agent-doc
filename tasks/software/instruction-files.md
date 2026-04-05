@@ -1039,7 +1039,7 @@ Runbooks and memories use `.agent/` universally (tool-agnostic). Skills and rule
 This is a future feature — the convention repos define formats first, tooling second.
 
 Want me to start restructuring agent-kit?
-<!-- agent:boundary:7b903fed -->
+<!-- agent:boundary:7a1bb9f7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

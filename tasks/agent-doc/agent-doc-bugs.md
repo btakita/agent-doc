@@ -165,7 +165,7 @@ The claim action should never be needed for this flow — sync handles the entir
 I was wrong to call the error "correct." It's a violation of the invariant I helped write. I should have recognized the pattern from the Binding invariant spec (8.5) instead of rationalizing the current broken behavior.
 
 How do we make sure you don't make the mistake again. A machine-local memory is not sufficient...because this repo can be cloned...on an environment that does not have the memory. I want to make sure what we have committed into the agent-doc repo or it's dependencies will ensure this spec is correctly followed.
-### Re: Making the fix durable — beyond machine-local memory (HEAD)
+### Re: Making the fix durable — beyond machine-local memory
 
 You're right. Memory is local and ephemeral. The fix must be in the committed codebase. Three layers of defense, all in the repo:
 
@@ -173,7 +173,11 @@ You're right. Memory is local and ephemeral. The fix must be in the committed co
 
 Change `claim.rs` so that when the target pane is occupied by a different document, it **provisions a new pane** instead of erroring. The Binding invariant is enforced by code, not by agent judgment.
 
+Yes...please correct this. Also ensure the module-spec is correct.
+
 Similarly, change `sync.rs::resolve_file()` so that empty `.md` files in the editor layout are auto-initialized. No agent decision needed — the binary handles it.
+
+Yes...
 
 This is the most durable fix. Any agent calling `agent-doc claim` or `agent-doc sync` gets correct behavior regardless of what instructions they've read.
 
@@ -182,6 +186,8 @@ This is the most durable fix. Any agent calling `agent-doc claim` or `agent-doc 
 SPEC.md 8.5 step 2 should explicitly say: "Empty or frontmatter-less `.md` files in the editor layout are initialized by sync before resolution." And the claim section (7.10) should say: "When target pane is occupied, provision a new pane (do not error)."
 
 Any agent reading the SPEC gets the correct mental model.
+
+Yes.
 
 **3. Fix the module harness (enforced by tests)**
 
@@ -201,7 +207,23 @@ These tests make regression impossible — CI catches violations.
 **Priority: binary fix > tests > SPEC update.** The binary fix makes it impossible to get wrong. Tests catch regressions. SPEC documents intent for future development. All three should ship together.
 
 Want me to implement these fixes?
-<!-- agent:boundary:baeec0b8 -->
+
+Yes.
+
+Add a skill -> runbook that ensures that commited code alone will ensure library/cli directives are followed. We need this to work on cloned repos.
+### Re: Implementing all three layers + enforcement runbook (HEAD)
+
+Acknowledged. Executing all items with full process rigor:
+
+1. **Fix claim.rs** — occupied pane -> provision new pane
+2. **Fix sync.rs** — auto-init empty .md files in editor layout
+3. **Tests** — claim-on-occupied, sync-empty-file
+4. **SPEC.md** — update steps 2 and 7.10
+5. **Module harness** — update claim.rs and sync.rs specs
+6. **New runbook** — "code-enforced directives" ensuring committed code alone enforces invariants on cloned repos
+
+Starting with plan mode for the binary changes, then implementing with tests.
+<!-- agent:boundary:fb0bee55 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -209,6 +231,8 @@ Want me to implement these fixes?
 <!-- agent:pending patch=replace -->
 - [ ] Fix claim.rs: occupied pane -> provision new pane (not error)
 - [ ] Fix sync.rs: auto-init empty .md files in editor layout
-- [ ] Add tests: claim-on-occupied-pane, sync-empty-file
-- [ ] Update SPEC.md: steps 2 and 7.10
+- [ ] Add tests for both fixes
+- [ ] Update SPEC.md steps 2 and 7.10
+- [ ] Update module harness specs for claim.rs and sync.rs
+- [ ] Create runbook: code-enforced directives for cloned repos
 <!-- /agent:pending -->

@@ -611,7 +611,7 @@ The memory format has more structure (type, scope, why, how) while CLAUDE.md is 
 
 This design discussion should transfer to the instruction-files task document. Want me to do that?
 Yes
-<!-- agent:boundary:372c6203 -->
+<!-- agent:boundary:bc2f9430 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

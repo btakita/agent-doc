@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Connected to Proof doc `mu0anyag`. Bidirectional editing confirmed — responded to user's Proof edit via edit/v2 API.
+Proof integration: Option 1 (remote surface) selected. Clarified filesystem isolation and comment model differences.
 <!-- /agent:status -->
 
 ## Exchange
@@ -64,17 +64,24 @@ The two systems are complementary but architecturally different:
 
 1. **Proof as a remote surface for agent-doc sessions** — agent-doc could sync its exchange component to a Proof doc, giving collaborators a live view with provenance tracking. The edit/v2 API maps well to agent-doc's patch blocks.
 
+I prefer Option 1 to option 2.
+
 2. **Proof as an input source** — agent-doc could watch a Proof doc's event queue (`/events/pending`) and treat edits as user input, responding via the ops API.
 
 3. **Bridge skill** — a `/proof` Claude Code skill that creates Proof docs from local markdown, syncs bidirectionally, and lets agent-doc sessions be shared without exposing the local filesystem.
 
+Explain...Does this mean the other options would allow the proof editor to access the local file system?
+> lets agent-doc sessions be shared without exposing the local filesystem
+
 4. **Comment threading** — Proof's anchored comments could enrich agent-doc's annotation model, which currently uses inline markdown comments.
+
+Compare Proof's anchored comments with agent-docs's inline markdown comments
 
 The API is well-designed — token auth, CRDT-aware mutations with base tokens, idempotency support. The `edit/v2` endpoint with block references is particularly clean for programmatic editing.
 
 What direction interests you most?
 update from proof
-### Re: "update from proof" (HEAD)
+### Re: "update from proof"
 
 I saw you wrote "Tell me about proof." in the Proof document. I responded there directly via the edit/v2 API — you should see my response with purple provenance gutter in the Proof editor.
 
@@ -91,13 +98,43 @@ This validates integration angle #2 (Proof as input source) — the manual bridg
 - Each block is `{"markdown": "..."}` — Proof handles parsing into its internal format
 - Presence API requires `X-Agent-Id` header
 - Provenance is automatic — the `by: "ai:claude-agent-doc"` attribution flows through
-<!-- agent:boundary:4dfdf3ba -->
+### Re: Option 1 preferred over Option 2 (HEAD)
+
+Noted. Option 1 (Proof as a remote surface) makes more sense as the primary direction — agent-doc stays the source of truth while Proof provides a shareable view with provenance. Option 2 (Proof as input source) is still useful as a complement but secondary.
+
+### Re: Filesystem exposure clarification (HEAD)
+
+No — none of the options expose your local filesystem to Proof. The distinction is about **what gets shared**:
+
+- **Options 1, 2, 4** — the agent (Claude) acts as an intermediary. It reads local files via agent-doc and writes to Proof via API. Proof never sees your filesystem. The content flows through Claude's API calls.
+- **Option 3 (Bridge skill)** — same pattern, just more automated. The phrase "without exposing the local filesystem" was emphasizing that the skill would selectively sync content rather than mounting or linking files. It was poorly worded — all options keep Proof sandboxed to its cloud API. The local filesystem is never accessible to Proof in any option.
+
+The key architectural guarantee: Proof only receives what Claude explicitly sends via HTTP. There's no filesystem mount, no file path sharing, no direct access.
+
+### Re: Anchored comments vs inline markdown comments (HEAD)
+
+| | Proof (anchored) | agent-doc (inline markdown) |
+|---|---|---|
+| **Anchor mechanism** | Quote-based text matching — `{"anchor": {"quote": "target text"}}` | Position-based — comments sit between content lines |
+| **Persistence** | Stored in `marks` metadata, separate from content | Embedded in the markdown file itself |
+| **Threading** | Native — `comment.add` creates thread, `comment.reply` adds to it via `markId` | No threading — comments are flat `[//]: #` or `<!-- -->` blocks |
+| **Resolution** | `comment.resolve` / `comment.unresolve` API ops | Manual deletion by the user |
+| **Visibility** | Rendered as sidebar annotations in Proof UI | Stripped by agent-doc's diff engine — invisible to the agent unless explicitly read |
+| **Authorship** | `by: "ai:agent-name"` or `by: "human:Name"` | No attribution — all comments look the same |
+| **Drift resilience** | Quote anchors can break if text is heavily edited | Position-based, so they survive in-place edits but can be displaced by insertions |
+| **Agent interaction** | Agent can read all marks, reply, resolve | Agent explicitly ignores comments (by design — comments are user scratchpad) |
+
+**Key difference in philosophy:** Proof comments are a collaboration tool — agents read and respond to them. agent-doc comments are a privacy tool — they're explicitly excluded from the diff so users can keep private notes the agent never sees.
+
+For integration, Proof's anchored comments could serve as the "public discussion" layer while agent-doc's inline comments remain the "private scratchpad." This would give users both modes in one workflow.
+<!-- agent:boundary:7788f44c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Proof integration direction TBD (awaiting user preference)
-- Validated: manual bridge (Proof as input source) works end-to-end
-- Next: automate event polling? build bridge skill? deeper edit/v2 testing?
+- **Active:** Option 1 — Proof as remote surface for agent-doc sessions (user preferred)
+- Design: agent-doc sync → Proof edit/v2 with provenance tracking
+- Complement: Proof comments as public discussion + agent-doc comments as private scratchpad
+- Next step: prototype the sync mechanism (agent-doc exchange → Proof blocks)
 <!-- /agent:pending -->

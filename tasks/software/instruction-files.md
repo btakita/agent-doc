@@ -1297,7 +1297,7 @@ The ecosystem is now:
 | `agent-memories` | `agent-memories` | Validate/manage memories |
 | `skill-harness` | `skill-harness` | Skill lifecycle (install/audit/eval/sync) |
 | `instruction-files` | `instruction-files` | Audit engine for all formats |
-<!-- agent:boundary:b0207f4d -->
+<!-- agent:boundary:7df1e33e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

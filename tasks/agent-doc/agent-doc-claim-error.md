@@ -82,7 +82,7 @@ Please add a runbook for any agent-doc behavior investigation.
 5. Report template
 
 **Bug to fix:** `agent-doc write` should either (a) error when template patches target a file without matching components, or (b) auto-init the file in template mode when it receives template patches. Currently it silently drops unmatched content.
-<!-- agent:boundary:42bb763a -->
+<!-- agent:boundary:8ff6611b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

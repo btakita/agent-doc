@@ -673,7 +673,7 @@ All 3 implemented. Clippy clean, 57 tests pass (6 new).
 do
 - [ ] agent-memories spec: committed memory format (type, scope, why, how to apply)
 - [ ] agent-runbooks spec: runbook format (checklist, prerequisites, verification)
-### Re: do (2 specs) (HEAD)
+### Re: do (2 specs)
 
 Both specs created in `src/instruction-files/spec/`.
 
@@ -696,7 +696,26 @@ Both specs created in `src/instruction-files/spec/`.
 - Relationship diagram showing how runbooks complement declarative rules
 
 README updated to link both specs from the Architecture section.
-<!-- agent:boundary:42091b73 -->
+
+Why do we have these specs in the instruction-files repo?
+- agent-runbooks
+- agent-memories
+### Re: Why specs live in instruction-files (HEAD)
+
+instruction-files is the **audit engine** for all agent configuration files. The specs belong here because instruction-files needs to know their format in order to validate them.
+
+The relationship:
+
+1. **instruction-files discovers** `.agent/memories/*.md` and `.agent/runbooks/*.md` (via the glob patterns we added)
+2. **instruction-files validates** them against the spec rules (frontmatter present, required sections exist, no machine-local paths, etc.)
+3. **The specs are the contract** between file authors and the validation code
+
+If the specs lived elsewhere, instruction-files would either need to import them (circular dependency risk) or duplicate the rules. Co-locating spec + validator keeps the source of truth in one place.
+
+Think of it like a schema living next to the parser: JSON Schema lives in the JSON tooling ecosystem, not in each application that produces JSON.
+
+Other tools (agent-doc, corky, Claude Code itself) **produce** files in these formats. instruction-files **validates** them. The specs document what "valid" means.
+<!-- agent:boundary:47b879a6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

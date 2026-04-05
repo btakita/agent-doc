@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-27/27 original items complete. CI/Release workflows deployed. Ready to publish to crates.io.
+Complete. 6 crates published to crates.io, CI/CD deployed, 177 tests across ecosystem.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1638,7 +1638,7 @@ Will wire up modules and report results when complete. These are the final 3 ite
 The full ecosystem is built, tested, and deployed.
 
 Use gh actions on each of the repos to deploy to crates, npm, pypi.
-### Re: GitHub Actions CI/Release (HEAD)
+### Re: GitHub Actions CI/Release
 
 Done. All 5 repos now have CI + Release workflows (agent-kit already had them):
 
@@ -1656,13 +1656,31 @@ To publish, push a version tag: `git tag v0.1.0 && git push origin v0.1.0`
 Each repo needs a `CARGO_REGISTRY_TOKEN` secret configured in GitHub Settings > Secrets. This is the same token used for agent-kit.
 
 **Note on npm/pypi:** These are all Rust crates — npm/pypi don't apply. If you want npm/pypi binaries later, we'd add cross-compilation + binary distribution (like agent-doc does with maturin for PyPI).
-<!-- agent:boundary:28027fdb -->
+
+do
+- [ ] Configure CARGO_REGISTRY_TOKEN secret on each GitHub repo
+- [ ] Publish initial versions to crates.io (v0.1.0 tags)
+### Re: Publish to crates.io (HEAD)
+
+All 6 crates published successfully:
+
+| Crate | Version | crates.io |
+|-------|---------|-----------|
+| agent-kit | 0.4.0 | Published (bumped from 0.3.2, adds audit_common) |
+| agent-rules | 0.1.0 | Published |
+| agent-runbooks | 0.1.0 | Published |
+| agent-memories | 0.1.0 | Published |
+| skill-harness | 0.1.0 | Published |
+| instruction-files | 0.2.0 | Published (bumped from 0.1.5, uses crates.io deps) |
+
+Publish order respected dependency chain: agent-runbooks + agent-memories (no deps) -> agent-kit (already published) -> agent-rules + skill-harness (dep on agent-kit) -> instruction-files (deps on all).
+
+Path dependencies replaced with crates.io versions. `CARGO_REGISTRY_TOKEN` secrets configured on all 5 repos. CI + Release workflows will handle future releases via version tags.
+<!-- agent:boundary:548bc857 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-All 27 original items complete. New:
-- [ ] Configure CARGO_REGISTRY_TOKEN secret on each GitHub repo
-- [ ] Publish initial versions to crates.io (v0.1.0 tags)
+All items complete.
 <!-- /agent:pending -->

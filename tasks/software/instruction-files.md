@@ -1521,7 +1521,7 @@ All redistribution done.
 | **Total** | **153** | |
 
 instruction-files is now a thin orchestrator — all validation logic lives in domain crates, all shared primitives live in agent-kit. Public API unchanged for existing consumers.
-<!-- agent:boundary:933ad99c -->
+<!-- agent:boundary:1649d7fc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

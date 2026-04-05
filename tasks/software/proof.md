@@ -91,7 +91,7 @@ This validates integration angle #2 (Proof as input source) — the manual bridg
 - Each block is `{"markdown": "..."}` — Proof handles parsing into its internal format
 - Presence API requires `X-Agent-Id` header
 - Provenance is automatic — the `by: "ai:claude-agent-doc"` attribution flows through
-<!-- agent:boundary:082b60bf -->
+<!-- agent:boundary:4dfdf3ba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

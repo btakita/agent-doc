@@ -81,17 +81,31 @@ The current file has the full template (different UUID `23463bb9` — recreated 
 
 This is another case where the binary needs to enforce the invariant: scaffolded files should be committed. Want me to fix it?
 yes
-### Re: Fixed — sync now commits after scaffolding (HEAD)
+### Re: Fixed — sync now commits after scaffolding
 
 Added `git::commit(path)` call immediately after writing the scaffold in `resolve_file`. This handles the case where the file was previously tracked with bare frontmatter — git sees the scaffold as a modification (not untracked), so `ensure_git_tracked()` skips it. The explicit commit ensures the full template is in HEAD.
 
 458 tests pass, clippy clean. Binary installed.
-<!-- agent:boundary:68596674 -->
+
+When I emptied proof.md and ran `Sync Tmux Layout`, the base template populated the file but it also was not committed. Why?
+### Re: Scaffold commit failed — snapshot ordering bug (HEAD)
+
+Found it in ops.log: `commit_failed file=tasks/software/proof.md exit_code=1` with `drift_warning snap_len=64 file_len=346`.
+
+**Root cause:** `git::commit()` uses the snapshot to determine what to stage. The snapshot hadn't been updated to the scaffolded content yet — it still had the old bare frontmatter (64 bytes). The commit saw a mismatch (file=346 vs snap=64) and failed.
+
+**Fix:** Added `snapshot::save(path, &scaffold)` BEFORE `git::commit(path)` in the scaffold block. The sequence is now:
+1. Write scaffold to file
+2. Save scaffold as snapshot
+3. Commit (snapshot matches file — no drift)
+
+458 tests pass, clippy clean. Binary installed. Try emptying proof.md and running "Sync Tmux Layout" again.
+<!-- agent:boundary:3d91640d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Fix sync: commit after scaffolding — DONE
+- [x] Fix sync scaffold commit (snapshot before commit) — DONE
 - [ ] Bump agent-doc to v0.31.14 and release
 <!-- /agent:pending -->

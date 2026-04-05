@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-21/27 items complete. Full redistribution done. 153 tests across 6 crates. instruction-files is now a thin orchestrator.
+22/27 items complete. instruction-files CLI shipped. 5 remaining items are deeper integrations.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1495,7 +1495,7 @@ Two subagents launched in parallel:
 2. **Phase 3** — Moving `init_runbooks`, bundled precommit.md/prerelease.md to agent-runbooks
 
 Both update instruction-files with re-exports for backward compatibility. Will report results when complete.
-### Re: Phases 2+3 complete (HEAD)
+### Re: Phases 2+3 complete
 
 All redistribution done.
 
@@ -1521,7 +1521,25 @@ All redistribution done.
 | **Total** | **153** | |
 
 instruction-files is now a thin orchestrator — all validation logic lives in domain crates, all shared primitives live in agent-kit. Public API unchanged for existing consumers.
-<!-- agent:boundary:1649d7fc -->
+
+do
+- [ ] Add instruction-files CLI (orchestrator)
+### Re: instruction-files CLI (HEAD)
+
+Done. instruction-files is now both a library and a CLI:
+
+```
+$ instruction-files --help
+Audit and validate AI agent instruction files
+
+Commands:
+  audit  Run the full audit suite across all discovered instruction files
+  init   Initialize .agent/runbooks/ with bundled defaults
+  list   List all discovered instruction files
+```
+
+`instruction-files audit` runs the full orchestrated audit — calls into agent-kit (context_invariant, staleness, line_budget), agent-rules (actionable, tree_paths), and agent-runbooks (init_runbooks). 23 tests, clippy clean, pushed.
+<!-- agent:boundary:c487b71f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1548,7 +1566,7 @@ instruction-files is now a thin orchestrator — all validation logic lives in d
 - [x] Move shared audit primitives to agent-kit
 - [x] Move domain logic to agent-rules (actionable, tree_paths)
 - [x] Move init_runbooks to agent-runbooks
-- [ ] Add instruction-files CLI (orchestrator)
+- [x] Add instruction-files CLI (orchestrator)
 - [ ] Add Spec/Contracts/Evals markdown convention to all repos
 - [ ] Add self-skill to skill-harness
 - [ ] Committed memory write capability

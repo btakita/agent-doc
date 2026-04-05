@@ -48,7 +48,7 @@ agent-doc v0.31.14 released to crates.io + GitHub
 
 I did a transfer from tasks/recruit/robert-ross-granola.md to tasks/software/granola.md
 The file was created with a template. But it was not committed. Why?
-### Re: granola.md not committed after transfer (HEAD)
+### Re: granola.md not committed after transfer
 
 The file has `agent_doc_session: null` and custom content ("Granola Adapter") — this wasn't created by sync's auto-scaffold (which generates a UUID). It appears the transfer was done by the skill (via Write tool) rather than `agent-doc transfer` CLI command.
 
@@ -63,11 +63,36 @@ agent-doc commit tasks/software/granola.md  # commit to git
 But `agent-doc init` only works for non-existent files. Since the file exists with content, I'll commit it directly:
 
 Let me commit it now.
-<!-- agent:boundary:b1343373 -->
+
+Should `agent-doc init` work on created files? What about `agent-doc claim` or `agent-doc sync`?
+### Re: Should init/claim/sync handle existing files? (HEAD)
+
+Current behavior:
+
+| Command | Empty file | File with content, no UUID | File with UUID |
+|---------|-----------|---------------------------|----------------|
+| `init` | Creates new (works) | **Bails** ("file already exists") | Bails |
+| `claim` | Scaffolds + UUID (works) | Assigns UUID + scaffolds components (works) | Updates registry (works) |
+| `sync` | Auto-scaffolds (v0.31.14) | **Treats as Unmanaged** | Resolves as Registered (works) |
+
+**The gap:** Both `init` and `sync` fail for "file with content but no UUID." This is granola.md's exact scenario — meaningful content, template frontmatter, but `agent_doc_session: null`.
+
+**What should happen:**
+- **`init`**: Should work on existing files that have no UUID. Instead of bailing, detect "file exists but has no session UUID" and assign one. The `--force` flag could override for full re-scaffold.
+- **`sync`**: Should handle files with frontmatter but no UUID (not just empty files). The condition should be `fm.session.is_none()` regardless of whether content exists.
+- **`claim`**: Already handles this correctly.
+
+The fix for `sync` is straightforward: after the empty-file scaffold block, add a check for files with `agent_doc_format` but `agent_doc_session: null` — assign UUID and commit. This is what `ensure_initialized()` already does, but it only runs when `fm.format.is_some()` AND the file is non-empty.
+
+Actually, looking again: `ensure_session_uuid()` (called by `ensure_initialized()`) checks `fm.format.is_none()` and returns early. For granola.md which has `agent_doc_format: template` but `agent_doc_session: null`, `ensure_session_uuid` SHOULD assign a UUID. Let me verify — I don't know why it didn't.
+
+I should investigate this rather than speculate. Want me to dig into why `ensure_session_uuid` didn't fire for granola.md?
+<!-- agent:boundary:7637c6cc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Commit tasks/software/granola.md
+- [ ] Investigate why ensure_session_uuid didn't assign UUID to granola.md
+- [ ] Fix init to work on existing files with no UUID
 <!-- /agent:pending -->

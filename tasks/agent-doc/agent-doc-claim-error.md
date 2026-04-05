@@ -115,7 +115,7 @@ Built, tested (all 697 pass), and installed:
 - `cargo install --path .` — updated `~/.cargo/bin/agent-doc`
 
 Ready for testing. Try transferring to a non-existent target file.
-<!-- agent:boundary:90555fd2 -->
+<!-- agent:boundary:2c4e2b72 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

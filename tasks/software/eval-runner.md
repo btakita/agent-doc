@@ -1421,7 +1421,7 @@ Tmpdir copy ensures case isolation. Git init needed because `agent-doc preflight
 #### Fixture provisioning command
 
 ```bash
-# Create a fixture from an existing session document (HEAD)
+# Create a fixture from an existing session document
 agent-doc fixture create \
   --source tasks/software/eval-runner.md \
   --at-commit abc123 \
@@ -1445,14 +1445,39 @@ Extracts document state + snapshot at a given commit into a self-contained fixtu
 - **Fixture size** — target <10 files, <1KB each. Model only needs enough to demonstrate understanding + action.
 - **Determinism** — agentic responses are less deterministic. Multi-run median scoring even more important.
 - **Cost** — each agentic case is a full Claude session (~30s, ~5K tokens). 10-case suite at `--parallel 4` ≈ 5min.
-<!-- agent:boundary:77814804 -->
+
+continue
+### Re: OpenAI-compatible backend implemented
+
+Added `--backend open-ai` to eval-runner. Uses the OpenAI Chat Completions API format, which is supported by GPT, Gemini, Groq, ollama, and most LLM providers.
+
+**Changes to `src/eval-runner/src/main.rs`:**
+- New `OpenAi` variant in `Backend` enum
+- New `--base-url` flag (default: `https://api.openai.com/v1`) for custom endpoints
+- `call_openai_api()` implementation — standard chat completions format with system message support and temperature control
+- `call_llm()` routes to the new backend, `base_url` threaded through all call sites
+
+**Usage examples:**
+```bash
+# GPT-4o (HEAD)
+OPENAI_API_KEY="$(pass openai/api_key)" eval-runner run cases.yaml --backend open-ai --model gpt-4o
+
+# Gemini via OpenAI compat (HEAD)
+OPENAI_API_KEY="$(pass google/gemini_key)" eval-runner run cases.yaml --backend open-ai --model gemini-2.0-flash --base-url https://generativelanguage.googleapis.com/v1beta/openai
+
+# Local ollama (HEAD)
+OPENAI_API_KEY=unused eval-runner run cases.yaml --backend open-ai --model llama3 --base-url http://localhost:11434/v1
+```
+
+Builds clean, no new dependencies needed (`reqwest` already present).
+<!-- agent:boundary:f4b4bc9e -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
 - [x] Design agentic eval fixture format (future — v2)
-- [ ] Add OpenAI-compatible backend for GPT/Gemini testing
+- [x] Add OpenAI-compatible backend for GPT/Gemini testing
 <!-- /agent:pending -->
 
 ## Todo

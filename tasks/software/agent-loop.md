@@ -110,7 +110,7 @@ Fail cases that exceed token/latency budgets (currently only LLM-as-judge scorin
 8. **Preflight caching** — cache document hash to skip diff when unchanged
 
 Yes...are we using prompt caching and is this included in the list?
-### Re: Prompt caching (HEAD)
+### Re: Prompt caching
 
 **Yes — Claude Code uses prompt caching automatically.** Cached tokens cost ~90% less (0.30/MTok vs 3.00/MTok for Sonnet). System prompt, CLAUDE.md, and conversation prefix are cached between turns in the same session.
 
@@ -133,14 +133,65 @@ Yes...are we using prompt caching and is this included in the list?
 | 2 | Auto-compaction | Prevent context bloat over sessions | Not started |
 | 3 | SKILL.md audit | Reduce first-call + cache size | Not started |
 | 4 | Model tiering | Use haiku for routine ops | Not started |
-<!-- agent:boundary:4169a6c0 -->
-<!-- /agent:exchange -->
 
-<!-- agent:pending patch=replace -->
+do
 - [ ] Add `cache_control` breakpoints to eval-runner API client
 - [ ] Extend eval-runner with token/latency budget constraints
 - [ ] Create `evals/general/token-efficiency/cases.yaml` with baseline cases
 - [ ] Implement `--diff-only` preflight mode in agent-doc
 - [ ] Add auto-compaction threshold to agent-doc exchange components
 - [ ] Audit SKILL.md files for redundant instructions
+### Re: Execute optimization tasks (HEAD)
+
+All 6 items done. Summary:
+
+**1. `cache_control` breakpoints in eval-runner** ([done])
+- Restructured `call_anthropic_api()` to send system prompt as a structured content block with `cache_control: {"type": "ephemeral"}`
+- Added `Usage` response parsing: extracts `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`
+- Logs cache hit/miss stats to stderr per API call
+- Added `input_tokens`/`output_tokens` fields to `CaseResult` (serialized in JSON output)
+
+**2. Token/latency budget constraints** ([done])
+- Added `max_input_tokens`, `max_output_tokens`, `max_latency_ms` optional fields to `EvalCase`
+- Budget violations checked after judge scoring in `run_case()`
+- Violations append to reasoning string and force `passed = false` regardless of judge score
+- Latency cases already had `threshold_ms`; new fields are for LLM-rubric cases
+
+**3. `evals/general/token-efficiency/cases.yaml`** ([done])
+- 5 baseline cases: `simple-question-concise`, `approval-minimal-response`, `single-line-edit-response`, `multi-topic-structured`, `no-changes-fast-exit`
+- Each has `max_output_tokens` budget constraints (100-800 tokens depending on complexity)
+- Tagged `[token-efficiency]` with 2 smoke cases
+
+**4. `--diff-only` preflight mode** ([done] -- already existed)
+- Flag `--diff-only` already implemented in agent-doc v0.31.14
+- Omits `document` field from preflight JSON, reducing tokens on subsequent cycles
+- SKILL.md already references it in the optimization table
+
+**5. Auto-compaction threshold** ([done])
+- Added `agent_doc_auto_compact` frontmatter field (line count)
+- Checked in preflight step 2c: parses exchange component, counts lines, runs `compact::run()` if exceeded
+- Only applies to template-mode documents with an `exchange` component
+- Usage: `agent_doc_auto_compact: 200` (compact when exchange > 200 lines)
+- All 38 agent-doc tests pass
+
+**6. SKILL.md audit** ([done] -- findings documented)
+- Total: 14 SKILL.md files, ~1,858 lines / ~7,400 tokens
+- High redundancy: agent-doc (284 lines), dev (210), existence (180)
+- Medium: browser+chromium-bridge overlap (314 combined), module-harness (142)
+- Low: corky, email, linkedin, livestream, testing
+- **Estimated savings: ~1,350 tokens (24%)** via runbook extraction, deduplication, and consolidation
+- Recommended next steps: reduce agent-doc SKILL.md first (highest impact), then consolidate browser/chromium-bridge
+<!-- agent:boundary:7c4376ea -->
+<!-- /agent:exchange -->
+
+<!-- agent:pending patch=replace -->
+- [x] Add `cache_control` breakpoints to eval-runner API client
+- [x] Extend eval-runner with token/latency budget constraints
+- [x] Create `evals/general/token-efficiency/cases.yaml` with baseline cases
+- [x] Implement `--diff-only` preflight mode in agent-doc
+- [x] Add auto-compaction threshold to agent-doc exchange components
+- [x] Audit SKILL.md files for redundant instructions
+- [ ] Apply SKILL.md reductions (agent-doc first, then browser/chromium-bridge)
+- [ ] Run token-efficiency evals against baseline to establish metrics
+- [ ] Test auto-compact threshold on a real session document
 <!-- /agent:pending -->

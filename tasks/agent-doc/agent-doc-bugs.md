@@ -405,7 +405,7 @@ instruction-files should be the central crate for discovering, auditing, and man
 
 This is a significant expansion of the instruction-files crate. It would be best tracked as its own task document (not inside agent-doc-bugs.md). Want me to create `tasks/software/instruction-files.md` for this work?
 yes
-### Re: Task document created (HEAD)
+### Re: Task document created
 
 Created `tasks/software/instruction-files.md` with the full scope:
 - Discovery expansion (runbooks, skill runbooks, module harness)
@@ -415,12 +415,22 @@ Created `tasks/software/instruction-files.md` with the full scope:
 - Shared skill + runbook
 
 Transfer context from this session included. Ready to work on when you navigate to it.
-<!-- agent:boundary:aa9edef0 -->
+ 
+You transferred to tasks/software/instruction-files.md...but the file was not committed. Why?
+### Re: File wasn't committed (HEAD)
+
+Because `agent-doc commit` only stages the snapshot for the current document (agent-doc-bugs.md). New files created outside the agent-doc write pipeline need a separate `git add` + `git commit`.
+
+Just committed it: `git add tasks/software/instruction-files.md && git commit` -> `0a53d4f9`.
+
+This is a gap in the transfer workflow — when creating a new task document via transfer, the file should be committed as part of the transfer operation. Currently the SKILL.md transfer runbook doesn't include a commit step for the target file.
+<!-- agent:boundary:f072c613 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] instruction-files task document created
+- [x] instruction-files.md committed
+- [ ] Transfer runbook: add commit step for new target files
 - [ ] Bump agent-doc to v0.31.14 and release
 <!-- /agent:pending -->

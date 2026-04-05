@@ -208,7 +208,7 @@ curl -fsSL https://raw.githubusercontent.com/btakita/instruction-files/main/inst
 **README install sections** updated with three options: curl installer, `cargo install`, from source.
 
 Note: the install scripts will start working once the first release with binaries is pushed (the cross-compilation workflow triggers on `v*` tags).
-<!-- agent:boundary:1df10cde -->
+<!-- agent:boundary:74b6e18b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

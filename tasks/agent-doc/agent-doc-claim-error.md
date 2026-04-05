@@ -34,7 +34,7 @@ So when you transferred to `tasks/dreamable/build-party.md`, either:
 2. The file existed but was a bare file without template components — transfer appended content to EOF without wrapping it in `&lt;!-- agent:exchange --&gt;` tags
 
 The fix would be: if the target doesn't exist, auto-create it via `init_file()` before proceeding with the transfer. This would give it proper frontmatter and component structure.
-<!-- agent:boundary:72b2c2a9 -->
+<!-- agent:boundary:5070c4f6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

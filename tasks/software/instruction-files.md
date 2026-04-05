@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Option C implemented. init() provides transitive skill + runbook installation for Rust consumers.
+Option C complete. Option D deferred — needs cross-platform distribution strategy.
 <!-- /agent:status -->
 
 ## Exchange
@@ -115,7 +115,7 @@ Option A is also supported by agent-doc...correct?
 
 Do Option C. Would Option D be for non-rust projects and monorepos?
 Can Option D be support when Option C is done.
-### Re: Option A + C + D (HEAD)
+### Re: Option A + C + D
 
 **Option A:** Yes, agent-doc already uses this. `agent-doc skill install` bundles SKILL.md via `include_str!` and installs it. Corky does the same. Options A and C are complementary — A is the "binary handles its own skill" pattern, C is the "library provides init for consumers" pattern.
 
@@ -140,12 +140,29 @@ pub fn init(root: &Path) -> Result<()> {
 CLI: `instruction-files init` now installs both skills and runbooks. Pushed.
 
 **Option D:** Yes, for non-Rust projects and monorepos. `.agent/skills.toml` would be a declarative manifest that `skill-harness sync` reads. Can be added on top of Option C — they serve different audiences (Rust library consumers vs project-level management). Ready to implement whenever needed.
-<!-- agent:boundary:59dc0613 -->
+
+I'm not sure how Option D will be implemented. If someone does not have Rust, they will need to use a `curl | sh` installer.
+### Re: Option D distribution without Rust (HEAD)
+
+Right. For non-Rust users, the distribution options are:
+
+1. **`cargo install`** — requires Rust toolchain, but works for anyone who has it
+2. **`cargo binstall`** — downloads prebuilt binaries from GitHub Releases (no compile needed, just needs `cargo-binstall`)
+3. **GitHub Releases with cross-compiled binaries** — `curl | sh` installer that downloads the right binary for the platform. This is what tools like `rg`, `fd`, `bat` do.
+4. **npm wrapper** — publish a thin npm package that downloads the binary on `postinstall`. Users run `npx skill-harness sync`.
+5. **Homebrew tap** — `brew install btakita/tap/skill-harness`
+
+The most practical path: add cross-compilation to the Release workflow (GitHub Actions matrix for linux-x86_64, linux-aarch64, macos-x86_64, macos-aarch64, windows-x86_64), then provide a `curl` installer script. This is the same pattern agent-doc uses.
+
+But honestly, Option D might not need its own binary. The `.agent/skills.toml` manifest could be consumed by any agent that reads files — Claude Code, Cursor, etc. The agent itself runs `skill-harness sync` (if Rust is available) or manually copies files based on the manifest. The manifest is the portable part; the tooling is optional.
+
+This is a future concern — Option C covers the immediate need for Rust consumers.
+<!-- agent:boundary:1b65115e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] Implement init() pattern (Option C) for transitive skill installation
-- [ ] Implement .agent/skills.toml manifest (Option D) for non-Rust projects
+- [ ] Implement .agent/skills.toml manifest (Option D) — future, needs distribution strategy
 <!-- /agent:pending -->

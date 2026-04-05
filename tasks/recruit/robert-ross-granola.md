@@ -109,6 +109,7 @@ agent_doc_write: crdt
 
 <!-- agent:exchange patch=append -->
 
+<!-- agent:boundary:ae8f3e50 -->
 <!-- /agent:exchange -->
 
 ## Pending (HEAD)

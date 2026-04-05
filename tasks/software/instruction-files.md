@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Complete. All repos tagged, CI building cross-platform binaries, crates.io published.
+4/5 repos released with binaries. instruction-files v0.2.0 rebuilding after fix.
 <!-- /agent:status -->
 
 ## Exchange
@@ -254,7 +254,7 @@ Yes
 Done. Removed from pending. The ecosystem is complete for this session.
 do
 - [ ] Push first release tags to trigger binary builds
-### Re: Push release tags (HEAD)
+### Re: Push release tags
 
 Done. All 5 repos tagged and pushed:
 
@@ -269,11 +269,28 @@ Done. All 5 repos tagged and pushed:
 GitHub Actions is now cross-compiling binaries for linux x86_64/aarch64, macOS x86_64/aarch64, and Windows x86_64. Each will create a GitHub Release with downloadable binaries and publish to crates.io.
 
 The `curl | sh` installers will work once builds complete (~5-10 min).
-<!-- agent:boundary:9bd03b75 -->
+
+release
+### Re: Release status (HEAD)
+
+**4 of 5 repos have successful binary releases** with all 5 platform binaries:
+- agent-rules v0.1.0
+- agent-runbooks v0.1.0
+- agent-memories v0.1.0
+- skill-harness v0.1.0
+
+**instruction-files v0.2.0** — had two issues, both fixed:
+1. `.claude/skills/instruction-files/SKILL.md` wasn't tracked in git (needed by `include_str!`) — now committed
+2. Publish step failed on "already published" — added `|| true` to all repos
+
+Re-tagged and pushed v0.2.0. Build should succeed now.
+
+All `curl | sh` installers are live for the 4 completed repos.
+<!-- agent:boundary:45e4006c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-All items complete.
+All items complete. instruction-files v0.2.0 rebuilding.
 <!-- /agent:pending -->

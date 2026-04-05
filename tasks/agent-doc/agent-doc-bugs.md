@@ -469,7 +469,7 @@ Good catch. The `---` separator convention was documented in SKILL.md but the `c
 All 437 tests pass, clippy clean.
 
 Are all edge cases tested?
-### Re: Edge case test audit (HEAD)
+### Re: Edge case test audit
 
 Audited and added 3 missing edge case tests:
 
@@ -491,12 +491,8 @@ Audited and added 3 missing edge case tests:
 | StructuralChange | `classify_structural_change` | — |
 | MultiTopic | `_multi_topic`, `_with_separator` | `_single_separator_not_multi` |
 | ContentAddition | `classify_content_addition` | (fallback for all negative cases) |
-<!-- agent:boundary:bf33fe86 -->
-<!-- /agent:exchange -->
 
-## Pending / Not Built
-
-<!-- agent:pending patch=replace -->
+Add missing tests for these done tasks:
 - [x] Implement diff-type classification in preflight (P1) — DONE (13 tests)
 - [x] Update SKILL.md to route based on diff_type — DONE
 - [x] Post-preflight diff generation for eval cases (P2) — DONE
@@ -504,6 +500,36 @@ Audited and added 3 missing edge case tests:
 - [x] Fix write pipeline escape bug + Gson migration (JB plugin v0.2.44) — DONE
 - [x] Implement content-source annotation sidecar (P4) — DONE (6 tests)
 - [x] Design reproducible operation log format (P5) — DONE (2 tests)
-- [x] Add `---` prompt separator convention + fix + edge case tests — DONE
+### Re: Missing tests added (HEAD)
+
+Audited all features and added 7 tests across 2 files:
+
+**`preflight.rs` (+4 tests):**
+- `preflight_output_includes_diff_type_when_set` — verifies `diff_type` and `diff_type_reason` serialize correctly in JSON
+- `preflight_output_omits_diff_type_when_none` — verifies `diff_type`/`diff_type_reason` omitted when `None`
+- `preflight_output_includes_annotated_diff_when_set` — verifies `annotated_diff` serializes correctly
+- `preflight_output_omits_annotated_diff_when_none` — verifies omission when `None`
+
+**`component.rs` (+3 tests):**
+- `strip_comments_removes_html_comment` — direct test of the moved `strip_comments` function
+- `strip_comments_preserves_agent_markers` — agent markers survive stripping
+- `strip_comments_removes_link_ref` — `[//]: # (...)` comments removed
+
+**Test gaps that don't need tests:**
+- **SKILL.md routing** — documentation only, no code to test
+- **JB plugin Gson** — Kotlin plugin has no unit test infrastructure; verified by build
+- **P2 eval-runner `strip_diff_comments`** — eval-runner doesn't have a test harness. The shared `strip_comments` function is tested in both `component.rs` (direct) and `diff.rs` (transitive). The eval-runner-specific `strip_diff_comments` wrapper is simple composition.
+
+**Total: 447 tests passing, clippy clean.**
+<!-- agent:boundary:598bf008 -->
+<!-- /agent:exchange -->
+
+## Pending / Not Built
+
+<!-- agent:pending patch=replace -->
+- [x] All P1-P5 features — DONE
+- [x] SKILL.md routing + separator convention — DONE
+- [x] JB plugin escape fix + Gson migration (v0.2.44) — DONE
+- [x] Edge case + integration tests — DONE (447 total)
 - [ ] Add transfer-source metadata to patch format
 <!-- /agent:pending -->

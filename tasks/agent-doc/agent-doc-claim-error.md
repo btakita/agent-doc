@@ -59,7 +59,7 @@ Please add a runbook for any agent-doc behavior investigation.
 - look at the agent-doc logs
 - look at the git logs
 - look at the affected files
-### Re: Investigation results (HEAD)
+### Re: Investigation results
 
 **ops.log timeline (timestamps are epoch):**
 
@@ -82,13 +82,35 @@ Please add a runbook for any agent-doc behavior investigation.
 5. Report template
 
 **Bug to fix:** `agent-doc write` should either (a) error when template patches target a file without matching components, or (b) auto-init the file in template mode when it receives template patches. Currently it silently drops unmatched content.
-<!-- agent:boundary:8ff6611b -->
+
+do
+- [ ] Fix: `agent-doc write` silently drops template patches when target has no components
+- [ ] Fix: transfer/write should auto-init target in template mode if it doesn't exist
+### Re: Both fixes implemented (HEAD)
+
+**Fix 1: `transfer()` auto-inits target** (`extract.rs`)
+- When target doesn't exist, auto-creates it matching source format (template or inline)
+- Reads source frontmatter to detect template mode; creates parent dirs if needed
+- Generates fresh UUID session, copies agent name from source
+- Logs: `[transfer] Auto-created <path> (template|inline)`
+
+**Fix 2: Write warns on no-component targets** (`write.rs`)
+- `run_stream`: After parsing patches, if no patch blocks found but unmatched content exists, checks whether file has template components. If none: warns with actionable message (`agent-doc init --mode template`)
+- `try_ipc`: After `build_ipc_patches_json`, if `ipc_patches` is empty but unmatched content is non-empty, emits WARNING + ops.log entry (`ipc_unmatched_content_dropped`)
+- Also improved ops.log to include `ipc_patches` count (synthesized patches) alongside original `patches` count
+
+**Verification:** `make check` passes — all 697 tests + clippy clean.
+
+**Files changed:**
+- `src/agent-doc/src/extract.rs` — auto-init in `transfer()`, updated module spec + contracts
+- `src/agent-doc/src/write.rs` — warnings in `run_stream` and `try_ipc`, improved logging
+<!-- agent:boundary:004fdad5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] Add `git::commit(target)` to transfer command
-- [ ] Fix: `agent-doc write` silently drops template patches when target has no components
-- [ ] Fix: transfer/write should auto-init target in template mode if it doesn't exist
+- [x] Fix: `agent-doc write` silently drops template patches when target has no components
+- [x] Fix: transfer/write should auto-init target in template mode if it doesn't exist
 <!-- /agent:pending -->

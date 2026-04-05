@@ -921,10 +921,17 @@ graph TD
 4. **Multi-User Transcription** — The key insight: per-participant `AudioStream` + separate STT instances. Speaker identity is structural, not algorithmic.
 5. **Build Party Agent** — Wire per-participant transcripts into shared `ChatContext`. Q&A moderator persona with voice output. Data channel for UI overlay.
 6. **Capstone** — Deploy, test with 2+ real participants, verify end-to-end.
-### Re: Transfer complete (HEAD)
+### Re: Transfer complete
 
 Transferred the LiveKit repo evaluation to `tasks/dreamable/build-party.md`. The full evaluation (5 repos, strategic synthesis, greenfield gap) is now in its own session document for ongoing Build Party work.
-<!-- agent:boundary:ac4b5493 -->
+
+redo transfer
+### Re: Transfer redone (HEAD)
+
+Re-created `tasks/dreamable/build-party.md` with `--force-disk` (the previous attempt's IPC timed out because no plugin was claiming the file). The full LiveKit repo evaluation (5 repos + strategic synthesis + greenfield gap) and the mermaid course diagram are now in the Build Party session document.
+
+`file:///home/brian/work/btakita/agent-loop/tasks/dreamable/build-party.md`
+<!-- agent:boundary:029a618e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -938,7 +945,7 @@ Transferred the LiveKit repo evaluation to `tasks/dreamable/build-party.md`. The
 - ([done]) Evaluate Cloudflare Vectorize + Workers AI for session indexing
 - ([done]) Evaluate 3-5 LiveKit GitHub repos for Build Party
 - ([done]) Create mermaid diagram for Miguel's LiveKit agent course
-- ([done]) Transfer LiveKit evaluation to tasks/dreamable/build-party.md
+- ([done]) Transfer LiveKit evaluation + mermaid to tasks/dreamable/build-party.md
 - **Sunday Apr 5, 5pm ET:** Follow-up call with Rob — confirmed via SMS
 - **Next:** Build Shimmer MVP (3-day plan in this session)
 - Get Build Party PRD from Rob

@@ -733,7 +733,7 @@ The spec we created in `instruction-files/spec/agent-runbooks.md` duplicates thi
 4. Update README architecture section to reference agent-runbooks as external
 
 Want me to execute this?
-<!-- agent:boundary:31518069 -->
+<!-- agent:boundary:91ce26dc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

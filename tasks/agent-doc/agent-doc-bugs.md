@@ -118,16 +118,26 @@ You're right. I should have fixed the pipeline, not manually committed the file.
 
 These are committed to the repo — any agent reading the runbooks gets the right behavior on any clone.
 Does the skill reference the runbooks?
-### Re: Skill references runbooks (HEAD)
+### Re: Skill references runbooks
 
 Yes — SKILL.md lists both runbooks in the Runbooks section (line 274-276). But the "NEVER use Write tool" rule is only read when the user requests a transfer. During normal operations, the skill doesn't proactively check the transfer runbook.
 
 The rule should be more prominent. It belongs in the SKILL.md core principles or workflow section, not just buried in a runbook that's only read on-demand.
-<!-- agent:boundary:cb7b9df1 -->
+
+do
+- [ ] Add "never use Write tool for session documents" to SKILL.md core section
+### Re: Added to SKILL.md core principles (HEAD)
+
+Done. Added as the 5th core principle:
+
+> **Use the pipeline, not ad-hoc tools** — never use the Write tool or Edit tool to create session documents. Use `agent-doc init` for new files, `agent-doc transfer` for moving content. The Write tool bypasses UUID assignment, snapshot creation, and git commit.
+
+This is now visible on every skill invocation — not buried in a runbook. Links to the transfer-extract runbook for details.
+<!-- agent:boundary:67998903 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Add "never use Write tool for session documents" to SKILL.md core section
+All items complete.
 <!-- /agent:pending -->

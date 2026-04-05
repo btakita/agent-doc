@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-22/27 items complete. instruction-files CLI shipped. 5 remaining items are deeper integrations.
+22/27 items complete. Spec/Contracts/Evals subagents running across all 5 repos.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1524,7 +1524,8 @@ instruction-files is now a thin orchestrator — all validation logic lives in d
 
 do
 - [ ] Add instruction-files CLI (orchestrator)
-### Re: instruction-files CLI (HEAD)
+
+### Re: instruction-files CLI
 
 Done. instruction-files is now both a library and a CLI:
 
@@ -1539,7 +1540,24 @@ Commands:
 ```
 
 `instruction-files audit` runs the full orchestrated audit — calls into agent-kit (context_invariant, staleness, line_budget), agent-rules (actionable, tree_paths), and agent-runbooks (init_runbooks). 23 tests, clippy clean, pushed.
-<!-- agent:boundary:e85cd25d -->
+do
+- [ ] Add Spec/Contracts/Evals markdown convention to all repos
+### Re: Spec/Contracts/Evals convention (HEAD)
+
+5 subagents launched in parallel — one per repo:
+
+1. **agent-kit** — SPEC.md (detect, audit_common, hooks) + contracts + evals/
+2. **agent-rules** — contracts + evals added to existing SPEC.md
+3. **agent-memories** — contracts + evals added to existing SPEC.md
+4. **skill-harness** — contracts + evals added to existing SPEC.md
+5. **agent-runbooks** — contracts + evals added to existing SPEC.md
+
+Each gets:
+- `## Agentic Contracts` — what the agent promises when using this crate
+- `## Evals` or `evals/` directory — test cases for verifying agent behavior
+
+Will report results when all complete.
+<!-- agent:boundary:820437a3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1567,7 +1585,7 @@ Commands:
 - [x] Move domain logic to agent-rules (actionable, tree_paths)
 - [x] Move init_runbooks to agent-runbooks
 - [x] Add instruction-files CLI (orchestrator)
-- [ ] Add Spec/Contracts/Evals markdown convention to all repos
+- [ ] Add Spec/Contracts/Evals convention (5 subagents in progress)
 - [ ] Add self-skill to skill-harness
 - [ ] Committed memory write capability
 - [ ] Ontology validation integration

@@ -4,6 +4,15 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.14
+
+- **Binding invariant enforcement (claim.rs):** When target pane is already claimed by another document, `claim` now provisions a new pane instead of erroring. Enforces SPEC §8.5: "never commandeer another document's pane."
+- **Sync auto-scaffold (sync.rs):** Empty `.md` files in editor layout are automatically scaffolded with template frontmatter + status/exchange/pending components. Scaffold is saved as snapshot and committed to git immediately.
+- **Transfer pending merge (extract.rs):** `agent-doc transfer` now automatically transfers the `pending` component alongside the named component. Source pending is cleared after merge.
+- **SPEC.md updates:** §7.10 (claim provisions on occupied pane), §8.5 (empty file auto-scaffold in initialization step).
+- **Tests:** 6 sync scaffold tests (positive + negative), 2 pending merge tests. 458 total.
+- **Runbook:** `code-enforced-directives.md` — behavioral invariants enforced by binary, not agent instructions.
+
 ## 0.31.13
 
 - **Diff-type classification (P1)**: `classify_diff()` classifies user diffs into 7 types (Approval, SimpleQuestion, BoundaryArtifact, Annotation, StructuralChange, MultiTopic, ContentAddition). Wired into preflight JSON as `diff_type` + `diff_type_reason`. 13 tests.

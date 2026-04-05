@@ -50,9 +50,10 @@
 //! ## Agentic Contracts
 //! - Claim is idempotent for an already-claimed live pane: re-claiming updates the
 //!   registry entry and refocuses the pane without side-effects.
-//! - **Registry protection:** If the target pane is already claimed by a different
-//!   session and the pane is alive, claim refuses unless `--force` is passed. This
-//!   prevents silent corruption when position detection falls back to the wrong pane.
+//! - **Binding invariant enforcement:** If the target pane is already claimed by a
+//!   different session and the pane is alive, claim provisions a new pane for this
+//!   document instead of erroring (SPEC §8.5: "never commandeer another document's
+//!   pane"). Use `--force` to explicitly overwrite the existing claim.
 //! - Stale claims (dead pane) are cleaned before the new claim is written; the
 //!   caller never observes a registry with two entries for the same file.
 //! - `agent_doc_format` and `agent_doc_write` are only set when ALL three of
@@ -92,7 +93,7 @@ use anyhow::{Context, Result};
 use std::io::Write;
 use std::path::Path;
 
-use crate::{frontmatter, resync, sessions};
+use crate::{frontmatter, resync, route, sessions};
 
 pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Option<&str>, force: bool) -> Result<()> {
     let _ = resync::prune(); // Clean stale entries before window resolution
@@ -140,9 +141,9 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
     // Session targeting now uses current_tmux_session() at route time.
     let tmux = sessions::Tmux::default_server();
 
-    // Validate pane BEFORE any file modifications — atomic claim semantics.
-    // If the pane is already claimed by a different session, bail without orphaning
-    // file changes (UUID, format, scaffolding).
+    // Check if pane is already claimed by a different session.
+    // Per the Binding invariant (SPEC §8.5): "document drives pane resolution —
+    // find existing OR provision new, NEVER commandeer another document's pane."
     let file_str = file.to_string_lossy();
     {
         let registry = sessions::load().unwrap_or_default();
@@ -150,13 +151,18 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
             if entry.pane == pane_id && *existing_id != session_id
                 && tmux.pane_alive(&pane_id)
             {
-                if !force {
-                    anyhow::bail!(
-                        "pane {} is already claimed by {} (file: {}). Use --force to overwrite.",
+                if force {
+                    eprintln!("warning: overwriting claim on pane {} (was {} → {})", pane_id, &existing_id[..8], &session_id[..8]);
+                } else {
+                    // Pane is occupied — provision a new pane instead of erroring.
+                    // This enforces the Binding invariant: never commandeer.
+                    eprintln!(
+                        "[claim] pane {} is already claimed by {} (file: {}); provisioning a new pane",
                         pane_id, &existing_id[..8], entry.file
                     );
+                    route::provision_pane(&tmux, file, &session_id, &file_str, None, &[])?;
+                    return Ok(());
                 }
-                eprintln!("warning: overwriting claim on pane {} (was {} → {})", pane_id, &existing_id[..8], &session_id[..8]);
             }
         }
     }

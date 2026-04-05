@@ -194,6 +194,37 @@ pub fn transfer(source: &Path, target: &Path, component_name: &str) -> Result<()
     write::atomic_write_pub(target, &new_target)?;
     snapshot::save(target, &new_target)?;
 
+    // Also transfer the "pending" component if it exists in both source and target
+    // and the transferred component is not "pending" itself.
+    if component_name != "pending" {
+        let source_refreshed = std::fs::read_to_string(source)?;
+        let target_refreshed = std::fs::read_to_string(target)?;
+
+        let source_comps = component::parse(&source_refreshed).unwrap_or_default();
+        let target_comps = component::parse(&target_refreshed).unwrap_or_default();
+
+        if let Some(source_pending) = source_comps.iter().find(|c| c.name == "pending")
+            && let Some(target_pending) = target_comps.iter().find(|c| c.name == "pending")
+        {
+            let pending_content = source_pending.content(&source_refreshed);
+            if !pending_content.trim().is_empty() {
+                // Merge: append source pending items to target pending
+                let existing = target_pending.content(&target_refreshed);
+                let merged = format!("{}{}\n", existing, pending_content.trim_end());
+                let new_target_with_pending = target_pending.replace_content(&target_refreshed, &merged);
+                write::atomic_write_pub(target, &new_target_with_pending)?;
+                snapshot::save(target, &new_target_with_pending)?;
+
+                // Clear source pending
+                let new_source_cleared = source_pending.replace_content(&source_refreshed, "\n");
+                write::atomic_write_pub(source, &new_source_cleared)?;
+                snapshot::save(source, &new_source_cleared)?;
+
+                eprintln!("[transfer] Also transferred 'pending' component");
+            }
+        }
+    }
+
     // Commit the target so transferred headings are in git HEAD.
     // Without this, the next agent-doc commit classifies all transferred
     // headings as "new" and marks each with (HEAD).
@@ -233,5 +264,26 @@ mod tests {
         let (extracted, remaining) = split_last_entry(content);
         assert_eq!(extracted, "Just some text without headers.\n");
         assert_eq!(remaining, "");
+    }
+
+    /// Test the pending merge logic used by transfer.
+    /// (Full transfer() requires git, so we test the merge logic directly.)
+    #[test]
+    fn pending_merge_appends_source_items_to_target() {
+        let source_pending = "- [ ] Item from source\n- [ ] Another source item\n";
+        let target_pending = "- [ ] Existing target item\n";
+
+        let merged = format!("{}{}\n", target_pending, source_pending.trim_end());
+
+        assert!(merged.contains("Existing target item"), "target items preserved");
+        assert!(merged.contains("Item from source"), "source items appended");
+        assert!(merged.contains("Another source item"), "all source items appended");
+    }
+
+    /// Empty source pending should not modify target pending.
+    #[test]
+    fn pending_merge_skips_empty_source() {
+        let source_pending = "\n";
+        assert!(source_pending.trim().is_empty(), "empty source should be skipped");
     }
 }

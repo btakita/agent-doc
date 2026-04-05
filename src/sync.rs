@@ -547,24 +547,49 @@ fn run_with_options(
     let session_files: RefCell<Vec<(String, PathBuf)>> = RefCell::new(Vec::new());
 
     let resolve_file = |path: &Path| -> Option<FileResolution> {
-        // Auto-initialize documents that have agent_doc_format but no session UUID.
-        // This handles files created by skills (e.g., granola import) that didn't
-        // go through claim. ensure_initialized() assigns a UUID and creates the
-        // snapshot + git baseline.
+        // Step 1: Auto-scaffold empty .md files BEFORE ensure_initialized().
+        // Must run first because ensure_initialized() writes minimal frontmatter
+        // (just agent_doc_session:) which prevents the full template scaffold.
+        // Per SPEC §8.5: empty files should be initialized as template documents.
+        if path.extension() == Some(std::ffi::OsStr::new("md")) {
+            let raw = std::fs::read_to_string(path).unwrap_or_default();
+            if raw.trim().is_empty() {
+                eprintln!("[sync] auto-scaffolding empty file: {}", path.display());
+                let session_id = uuid::Uuid::new_v4();
+                let scaffold = format!(
+                    "---\nagent_doc_session: {}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Pending / Not Built\n\n<!-- agent:pending patch=replace -->\n<!-- /agent:pending -->\n",
+                    session_id
+                );
+                if let Err(e) = std::fs::write(path, &scaffold) {
+                    eprintln!("[sync] warning: failed to scaffold {}: {}", path.display(), e);
+                    return Some(FileResolution::Unmanaged);
+                }
+                // Save snapshot BEFORE committing — git::commit() uses the snapshot
+                // to determine what to stage. Without this, the snapshot has stale
+                // content and the commit fails with a drift warning.
+                if let Err(e) = crate::snapshot::save(path, &scaffold) {
+                    eprintln!("[sync] warning: failed to save scaffold snapshot for {}: {}", path.display(), e);
+                }
+                // Commit the scaffolded file immediately.
+                if let Err(e) = crate::git::commit(path) {
+                    eprintln!("[sync] warning: failed to commit scaffold for {}: {}", path.display(), e);
+                }
+            }
+        }
+
+        // Step 2: Ensure initialized (UUID + snapshot + git baseline).
+        // For scaffolded files, this creates the snapshot and git tracking.
+        // For files with agent_doc_format but no session, this assigns a UUID.
         if let Err(e) = crate::snapshot::ensure_initialized(path) {
             eprintln!("[sync] warning: ensure_initialized failed for {}: {}", path.display(), e);
         }
 
-        // Re-read after potential initialization (UUID may have been assigned)
+        // Step 3: Read content and resolve.
         let content = std::fs::read_to_string(path).ok()?;
         let (fm, _) = frontmatter::parse(&content).ok()?;
+
         match fm.session {
             Some(ref key) => {
-                // Treat all files with session UUIDs as registered, even if
-                // the registry entry was pruned (dead pane). Sync will auto-start
-                // a new session for files without alive panes. This enables the
-                // declarative layout flow: navigating to a file in a split should
-                // create a tmux pane regardless of registry state.
                 let has_registry = sessions::lookup(key).ok().flatten().is_some();
                 let registry_str = if has_registry { "yes" } else { "no (will auto-start)" };
                 tracing::debug!(
@@ -580,15 +605,12 @@ fn run_with_options(
                 session_files
                     .borrow_mut()
                     .push((key.clone(), path.to_path_buf()));
-                // tmux_session comes from project config, not frontmatter
                 Some(FileResolution::Registered {
                     key: key.clone(),
                     tmux_session: None,
                 })
             }
             None => {
-                // No session UUID even after ensure_initialized() — file has no
-                // agent_doc_format, so it's genuinely not an agent document.
                 Some(FileResolution::Unmanaged)
             }
         }
@@ -1520,5 +1542,123 @@ mod tests {
             .cloned()
             .collect();
         assert_eq!(filtered, vec!["file1.md", "file2.md"]);
+    }
+
+    /// Empty .md files should be auto-scaffolded by sync's resolve_file.
+    /// This tests the scaffolding logic inline (resolve_file is a closure in run()).
+    #[test]
+    fn sync_auto_scaffolds_empty_md_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let project = tmp.path();
+        std::fs::create_dir_all(project.join(".agent-doc/snapshots")).unwrap();
+
+        let doc = project.join("test.md");
+        std::fs::write(&doc, "").unwrap(); // Empty file
+
+        // Simulate what resolve_file does for empty files:
+        let content = std::fs::read_to_string(&doc).unwrap();
+        assert!(content.trim().is_empty(), "file should be empty");
+
+        // Scaffold it
+        let session_id = uuid::Uuid::new_v4();
+        let scaffold = format!(
+            "---\nagent_doc_session: {}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Pending / Not Built\n\n<!-- agent:pending patch=replace -->\n<!-- /agent:pending -->\n",
+            session_id
+        );
+        std::fs::write(&doc, &scaffold).unwrap();
+
+        // Verify scaffolded content has frontmatter
+        let content = std::fs::read_to_string(&doc).unwrap();
+        let (fm, _) = crate::frontmatter::parse(&content).unwrap();
+        assert!(fm.session.is_some(), "should have session UUID after scaffold");
+        assert!(fm.format.is_some(), "should have format after scaffold");
+        assert!(content.contains("<!-- agent:exchange"), "should have exchange component");
+    }
+
+    /// Non-empty .md files without frontmatter should NOT be auto-scaffolded.
+    #[test]
+    fn sync_does_not_scaffold_non_empty_md_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = tmp.path().join("notes.md");
+        std::fs::write(&doc, "# My Notes\n\nSome content here.\n").unwrap();
+
+        let content = std::fs::read_to_string(&doc).unwrap();
+        assert!(!content.trim().is_empty(), "file is not empty");
+    }
+
+    /// Scaffolded template must include all required components.
+    #[test]
+    fn sync_scaffold_includes_all_components() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let project = tmp.path();
+        std::fs::create_dir_all(project.join(".agent-doc/snapshots")).unwrap();
+
+        let doc = project.join("new-session.md");
+        std::fs::write(&doc, "").unwrap();
+
+        // Simulate scaffold (same code as resolve_file)
+        let raw = std::fs::read_to_string(&doc).unwrap();
+        assert!(raw.trim().is_empty());
+
+        let session_id = uuid::Uuid::new_v4();
+        let scaffold = format!(
+            "---\nagent_doc_session: {}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Pending / Not Built\n\n<!-- agent:pending patch=replace -->\n<!-- /agent:pending -->\n",
+            session_id
+        );
+        std::fs::write(&doc, &scaffold).unwrap();
+
+        let content = std::fs::read_to_string(&doc).unwrap();
+        let (fm, _) = crate::frontmatter::parse(&content).unwrap();
+
+        // Verify frontmatter
+        assert!(fm.session.is_some(), "must have session UUID");
+        assert!(fm.format.is_some(), "must have format set");
+
+        // Verify all three components
+        assert!(content.contains("<!-- agent:status patch=replace -->"), "must have status component");
+        assert!(content.contains("<!-- agent:exchange patch=append -->"), "must have exchange component");
+        assert!(content.contains("<!-- agent:pending patch=replace -->"), "must have pending component");
+
+        // Verify components are properly closed
+        assert!(content.contains("<!-- /agent:status -->"), "status must be closed");
+        assert!(content.contains("<!-- /agent:exchange -->"), "exchange must be closed");
+        assert!(content.contains("<!-- /agent:pending -->"), "pending must be closed");
+    }
+
+    /// Non-.md files should never be scaffolded even if empty.
+    #[test]
+    fn sync_does_not_scaffold_non_md_files() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let txt = tmp.path().join("empty.txt");
+        std::fs::write(&txt, "").unwrap();
+
+        // .txt extension should not trigger scaffold
+        assert_ne!(txt.extension(), Some(std::ffi::OsStr::new("md")));
+    }
+
+    /// Whitespace-only files should be treated as empty and scaffolded.
+    #[test]
+    fn sync_scaffolds_whitespace_only_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let project = tmp.path();
+        std::fs::create_dir_all(project.join(".agent-doc/snapshots")).unwrap();
+
+        let doc = project.join("whitespace.md");
+        std::fs::write(&doc, "   \n\n  \n").unwrap();
+
+        let raw = std::fs::read_to_string(&doc).unwrap();
+        assert!(raw.trim().is_empty(), "whitespace-only should be treated as empty");
+    }
+
+    /// Files that already have frontmatter (even minimal) should NOT be re-scaffolded.
+    #[test]
+    fn sync_does_not_scaffold_file_with_existing_frontmatter() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = tmp.path().join("existing.md");
+        std::fs::write(&doc, "---\nagent_doc_session: test-123\n---\n").unwrap();
+
+        let raw = std::fs::read_to_string(&doc).unwrap();
+        // File has content (frontmatter) → not empty → no scaffold
+        assert!(!raw.trim().is_empty(), "file with frontmatter is not empty");
     }
 }

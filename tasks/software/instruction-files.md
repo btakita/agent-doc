@@ -770,7 +770,7 @@ Noted — added to the pending list. Neither agent-runbooks nor agent-memories a
 agent-runbooks has a `Cargo.toml` (it's a Rust crate with CLI). agent-memories is currently spec-only (no Cargo.toml). To add it as a Rust dependency, it would need a lib crate — likely a parser/validator for the memory format.
 
 Want me to scaffold a Rust lib crate in agent-memories? Or should these stay as spec-only repos that instruction-files validates against by implementing the checks directly?
-<!-- agent:boundary:7db36ab8 -->
+<!-- agent:boundary:958a5f6b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

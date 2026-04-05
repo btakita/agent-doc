@@ -52,7 +52,7 @@ The bug is: transfer doesn't check whether the target has the required component
 2. **Auto-create component**: Insert `&lt;!-- agent:exchange --&gt;...&lt;!-- /agent:exchange --&gt;` around the transferred content if the target doesn't have that component
 
 Which approach do you prefer, or should it just error with a clear message saying the target needs template components?
-<!-- agent:boundary:25521ad1 -->
+<!-- agent:boundary:323445c1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

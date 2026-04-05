@@ -443,7 +443,7 @@ The runbook already documents the right workflow. The skill should use `agent-do
 
 Why did you not follow the steps?
 Do not add anything to memory. instructions-files should discourage adding to memory. We should instead rely on committing to the any context, skill, or runbooks in the library or dependencies.
-### Re: Why I didn't follow the transfer steps (HEAD)
+### Re: Why I didn't follow the transfer steps
 
 I didn't use `agent-doc transfer` because I was creating a new task document from scratch, not transferring content from an existing document. The transfer command moves content between existing documents. For creating a brand new file, I should have used `agent-doc init` to scaffold it, then committed it.
 
@@ -452,12 +452,41 @@ But the deeper issue you're pointing out: I reached for the `Write` tool (ad-hoc
 **On memory vs committed context:** Understood. The principle from the code-enforced-directives runbook applies here too: behavioral patterns should be committed to skills/runbooks/context in the repo, not stored in machine-local memory. Memory is ephemeral and non-portable. A new agent on a cloned repo should get the right behavior from the committed files alone.
 
 This means: instead of saving "use agent-doc transfer not Write tool" as a memory, the SKILL.md or a runbook should explicitly say "when creating new task documents, use `agent-doc init`, not manual file creation." The instruction lives in the committed skill, not in memory.
-<!-- agent:boundary:307a10c6 -->
+
+I want to also make or use a memory library that work with committing files to a library or it's dependencies. Are there any tools available or should we add to instruction-files or consolidate agent-runbooks into agent-memories?
+### Re: Committed memory library (HEAD)
+
+**What exists today:**
+
+| Tool | Storage | Portable? | Purpose |
+|------|---------|-----------|---------|
+| Claude Code auto memory | `~/.claude/projects/*/memory/` | No (machine-local) | Session-to-session patterns |
+| claude-mem MCP | SQLite database | No (machine-local) | Cross-session search |
+| CLAUDE.md / AGENTS.md | Committed to repo | Yes | Agent instructions |
+| `.agent/runbooks/` | Committed to repo | Yes | Process checklists |
+| `.claude/skills/` | Committed to repo | Yes | Skill definitions + runbooks |
+| SPEC.md | Committed to repo | Yes | Authoritative invariants |
+| Module harness | Committed to repo | Yes | Per-module specs |
+
+**The gap:** There's no tool that takes a "lesson learned" (what auto memory captures) and commits it to the right place in the repo. Today I manually decide: "should this go in memory, CLAUDE.md, a runbook, or the SPEC?" Often I default to memory because it's easiest, even when it should be committed.
+
+**Options:**
+
+1. **Extend instruction-files** — add a `learn` command that takes a lesson and routes it to the right committed file (runbook, CLAUDE.md, SPEC.md) based on category. instruction-files already knows the file structure.
+
+2. **New `agent-memories` crate** — a dedicated tool for converting ephemeral lessons into committed context. Commands like `agent-memories commit "use agent-doc init for new files" --target runbook:transfer-extract`. Depends on instruction-files for file discovery.
+
+3. **Consolidate into instruction-files** — since instruction-files already discovers and audits all instruction files, adding a "write/update" capability is natural. It becomes the read+write tool for all committed agent context.
+
+**My recommendation:** Option 3 (consolidate into instruction-files). It already has discovery. Adding write capability (route lessons to the right file) makes it the single tool for committed agent context. Keeps the dependency tree simple.
+
+This is a design decision for the instruction-files task document. Want me to add it there?
+<!-- agent:boundary:ffb28f6e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Add "use agent-doc init for new files" guidance to SKILL.md or transfer runbook
+- [ ] Add committed-memory capability to instruction-files task scope
 - [ ] Bump agent-doc to v0.31.14 and release
 <!-- /agent:pending -->

@@ -840,28 +840,44 @@ Lets do the following:
 
 **Post-MVP:** Durable Object WebSocket for sub-second real-time, topic auto-segmentation, git commit history integration.
 
-Look at latest robert-ross-sms messages.
-I don't want the NDA to be overreaching. I'm already working on collaborative tooling.
-Do NDAs also have non-competes?
-Need to be able to carve out ways for me to work on my existing projects.
-I also want the ability to open source low level primitives or at least use cross project.
-<!-- agent:boundary:5363e784 -->
+redo:
+> Look at latest robert-ross-sms messages.
+> I don't want the NDA to be overreaching. I'm already working on collaborative tooling.
+> Do NDAs also have non-competes?
+> Need to be able to carve out ways for me to work on my existing projects.
+> I also want the ability to open source low level primitives or at least use cross project.
+
+### Re: Latest SMS messages (HEAD)
+
+Rob's latest message asks if you're open to a standard NDA so they can "make more progress." He's framing it as routine.
+
+### Re: NDA concerns (HEAD)
+
+Here's my analysis of your points:
+
+**NDA overreach:** Standard NDAs typically just cover confidential information disclosure. Key things to watch for:
+- Overly broad definition of "Confidential Information" (e.g., anything discussed, not just marked confidential)
+- Duration (1-2 years is standard; indefinite is aggressive)
+- Residuals clause absence (you should be able to use general knowledge/skills gained)
+
+**Non-competes:** NDAs and non-competes are separate agreements. A pure NDA should NOT contain non-compete language. If Rob's "standard NDA" includes non-compete clauses, that's a red flag... push back or strike it. California generally doesn't enforce non-competes anyway (Cal. Bus. & Prof. Code 16600), but best to not sign one regardless.
+
+**Carve-outs for existing projects:** You should explicitly carve out:
+- agent-doc, agent-loop, ctx-core, rappstack, and all existing open-source work
+- Any pre-existing IP you bring to the table
+- Your right to continue consulting/contracting independently
+
+**Open-sourcing low-level primitives:** This is a negotiation point for the employment agreement (separate from NDA). In the NDA phase, make sure nothing you disclose about your existing tools gets claimed as Dreamable confidential info. Add a clause like: "Information that was already known to the receiving party or independently developed shall not be considered Confidential Information."
+
+**Suggested reply to Rob:** Accept the NDA in principle but ask to review it first. Something like: "Happy to sign an NDA... please send it over and I'll review. I do have existing open-source projects I'll want to make sure are carved out."
+<!-- agent:boundary:60105def -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- ([done]) Build session analyzer template
-- ([done]) Build `/granola` skill with import runbook
-- ([done]) Create Granola agent-doc for Rob's meeting notes
-- ([done]) Prep demo for Sunday: Run session analyzer on robert-ross transcript
-- ([done]) Evaluate Deepgram + LiveKit Agents for real-time STT pipeline
-- ([done]) Evaluate Cloudflare Vectorize + Workers AI for session indexing
-- ([done]) Evaluate 3-5 LiveKit GitHub repos for Build Party
-- ([done]) Create mermaid diagram for Miguel's LiveKit agent course
-- ([done]) Transfer LiveKit evaluation + mermaid to tasks/dreamable/build-party.md
-- **Sunday Apr 5, 5pm ET:** Follow-up call with Rob — confirmed via SMS
-- **Next:** Build Shimmer MVP (3-day plan in this session)
-- Get Build Party PRD from Rob
-- DocWalk MVP — color-coded markdown viewer
+- [ ] Reply to Rob's NDA text — accept in principle, request to review first
+- [ ] Review NDA when received — check for non-compete, IP assignment, overreach
+- [ ] Prepare list of existing projects/IP for carve-out exhibit
+- [ ] Draft employment agreement negotiation points (open-source primitives, independent work)
 <!-- /agent:pending -->

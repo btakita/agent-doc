@@ -1332,7 +1332,7 @@ This keeps the harness pattern consistent across the ecosystem while each repo o
 The alternative is simpler: each repo just has `SPEC.md`, `## Agentic Contracts`, and `evals/` as markdown conventions (no shared Rust trait), validated by `module-harness audit`. This is what we do today for module-harness — it works with any language because it's markdown, not code.
 
 **Recommendation:** Start with the markdown convention (SPEC.md + Contracts section + evals/) across all repos. The shared Rust trait can come later if the pattern proves valuable enough to formalize in code.
-<!-- agent:boundary:b1a17444 -->
+<!-- agent:boundary:025afb16 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

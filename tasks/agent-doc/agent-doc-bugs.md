@@ -106,7 +106,7 @@ So: the code works, the pipeline works. The only failure mode is creating files 
 On the worktree question: the sync fix for null sessions is already handled by `ensure_initialized()`. The empty-file scaffold was the gap that v0.31.14 fixed. No additional code changes needed for the null-session case.
 
 But it did not work. You had to explicitly commit the file. I did not ask you to btw. Reason why I don't ask you to is b/c I want our software + agentic process to fix the problem. Not manually intervene to fix the problem. Please add this heuristic to the appropriate place.
-### Re: Fix the process, don't manually intervene (HEAD)
+### Re: Fix the process, don't manually intervene
 
 You're right. I should have fixed the pipeline, not manually committed the file. Added the heuristic to two committed locations:
 
@@ -117,11 +117,17 @@ You're right. I should have fixed the pipeline, not manually committed the file.
 > **NEVER use the Write tool to create session documents.** Use `agent-doc init` for new files or `agent-doc transfer` for moving content. The Write tool bypasses the pipeline (UUID, snapshot, git commit).
 
 These are committed to the repo — any agent reading the runbooks gets the right behavior on any clone.
-<!-- agent:boundary:49050097 -->
+Does the skill reference the runbooks?
+### Re: Skill references runbooks (HEAD)
+
+Yes — SKILL.md lists both runbooks in the Runbooks section (line 274-276). But the "NEVER use Write tool" rule is only read when the user requests a transfer. During normal operations, the skill doesn't proactively check the transfer runbook.
+
+The rule should be more prominent. It belongs in the SKILL.md core principles or workflow section, not just buried in a runbook that's only read on-demand.
+<!-- agent:boundary:0d88758e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Added anti-manual-intervention heuristic to runbooks — DONE
+- [ ] Add "never use Write tool for session documents" to SKILL.md core section
 <!-- /agent:pending -->

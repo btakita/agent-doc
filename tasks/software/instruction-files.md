@@ -248,7 +248,7 @@ This reads `.agent/skills.toml` and installs each skill to the detected environm
 **My take:** Park it. The Agent Skills Standard is actively evolving — they may define a manifest format that becomes the cross-tool standard. Building our own risks divergence. Option C (init functions) and Option A (CLI install) cover real needs today. When a manifest format emerges from the standard, we adapt.
 
 Remove from pending?
-<!-- agent:boundary:b7bc0920 -->
+<!-- agent:boundary:1a7ff10f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

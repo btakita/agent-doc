@@ -1095,7 +1095,7 @@ agent-kit (detect + hooks, zero upstream deps)
 ```
 
 No cycles. agent-kit is the leaf dependency.
-<!-- agent:boundary:8da04467 -->
+<!-- agent:boundary:3014cc9e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

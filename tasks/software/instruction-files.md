@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Option C complete. Option D deferred — needs cross-platform distribution strategy.
+Binary distribution deployed across all 5 repos. 5-platform cross-compilation ready.
 <!-- /agent:status -->
 
 ## Exchange
@@ -142,7 +142,7 @@ CLI: `instruction-files init` now installs both skills and runbooks. Pushed.
 **Option D:** Yes, for non-Rust projects and monorepos. `.agent/skills.toml` would be a declarative manifest that `skill-harness sync` reads. Can be added on top of Option C — they serve different audiences (Rust library consumers vs project-level management). Ready to implement whenever needed.
 
 I'm not sure how Option D will be implemented. If someone does not have Rust, they will need to use a `curl | sh` installer.
-### Re: Option D distribution without Rust (HEAD)
+### Re: Option D distribution without Rust
 
 Right. For non-Rust users, the distribution options are:
 
@@ -157,12 +157,39 @@ The most practical path: add cross-compilation to the Release workflow (GitHub A
 But honestly, Option D might not need its own binary. The `.agent/skills.toml` manifest could be consumed by any agent that reads files — Claude Code, Cursor, etc. The agent itself runs `skill-harness sync` (if Rust is available) or manually copies files based on the manifest. The manifest is the portable part; the tooling is optional.
 
 This is a future concern — Option C covers the immediate need for Rust consumers.
-<!-- agent:boundary:de500948 -->
+
+Do you recommend Option D.
+We should support binary install for all of the packages:
+- **agent-rules**
+- **agent-runbooks**
+- **agent-memories**
+- **skill-harness**
+- **instruction-files**
+### Re: Binary install + Option D (HEAD)
+
+**Binary install:** Done. All 5 repos now have cross-compilation release workflows:
+- 5-platform matrix: linux x86_64, linux aarch64 (via cross), macOS x86_64, macOS aarch64, Windows x86_64
+- GitHub Release with prebuilt binaries (tar.gz for Unix, zip for Windows)
+- crates.io publish on the same tag
+
+To release: `git tag v0.1.0 && git push origin v0.1.0` — CI builds binaries for all platforms, creates GitHub Release, and publishes to crates.io.
+
+Users install via:
+- `cargo install agent-rules` (Rust users)
+- `cargo binstall agent-rules` (prebuilt binary download)
+- Download from GitHub Releases (no Rust needed)
+- `curl -fsSL https://github.com/btakita/agent-rules/releases/latest/download/agent-rules-x86_64-unknown-linux-gnu.tar.gz | tar xz` (direct)
+
+**Option D recommendation:** Yes, I recommend it as a future phase. The `.agent/skills.toml` manifest is language-agnostic — it describes what skills a project needs. Any tool (Rust binary, shell script, or agent reading the file directly) can consume it. The binary tools (agent-rules, skill-harness, etc.) make it automatic; without them, an agent can still read the manifest and manually copy files.
+
+Implementation sequence: Option C (done) -> binary distribution (done) -> Option D manifest format (next).
+<!-- agent:boundary:295a4415 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Implement init() pattern (Option C) for transitive skill installation
-- [ ] Implement .agent/skills.toml manifest (Option D) — future, needs distribution strategy
+- [x] Implement init() pattern (Option C)
+- [x] Cross-compiled binary distribution for all repos
+- [ ] Implement .agent/skills.toml manifest (Option D)
 <!-- /agent:pending -->

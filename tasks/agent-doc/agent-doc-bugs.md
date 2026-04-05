@@ -149,7 +149,7 @@ Your suggested format works well — brief prohibition + runbook reference:
 This saves context while ensuring the rule is visible. The detail (why, what to use instead) lives in the runbook. The core principle is the trigger: "I'm about to use Write tool for a .md file — wait, core principle says don't."
 
 Let me update it.
-<!-- agent:boundary:b1090874 -->
+<!-- agent:boundary:de8618cd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

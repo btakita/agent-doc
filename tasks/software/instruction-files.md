@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-11/18 items complete. Specs in canonical repos. Remaining: validation code, integrations, cross-tool alignment.
+11/19 items complete. Specs in canonical repos. Remaining: validation code, integrations, cross-tool alignment.
 <!-- /agent:status -->
 
 ## Exchange
@@ -740,7 +740,7 @@ Like in agent-runbooks README.md, create a agent-memories README.md.
 Move the agent-memories spec into agent-memories/SPEC.md
 A reason agent-memories is to ensure that the memories are committable into the library repo.
 And will be clonable.
-### Re: Action plan + Create agent-memories repo (HEAD)
+### Re: Action plan + Create agent-memories repo
 
 All done.
 
@@ -760,7 +760,17 @@ All done.
 - No more local `spec/` references
 
 instruction-files still builds clean: 57 tests pass, clippy clean.
-<!-- agent:boundary:aa565d58 -->
+### Re: Add agent-memories as optional dependency (HEAD)
+
+Noted — added to the pending list. Neither agent-runbooks nor agent-memories are on crates.io yet (they're convention repos, not Rust crates), so the "optional dependency" items would either mean:
+
+1. **Path dependencies** for local validation during development
+2. **Publishing to crates.io** first, then adding as proper optional deps
+
+agent-runbooks has a `Cargo.toml` (it's a Rust crate with CLI). agent-memories is currently spec-only (no Cargo.toml). To add it as a Rust dependency, it would need a lib crate — likely a parser/validator for the memory format.
+
+Want me to scaffold a Rust lib crate in agent-memories? Or should these stay as spec-only repos that instruction-files validates against by implementing the checks directly?
+<!-- agent:boundary:7db36ab8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -778,6 +788,7 @@ instruction-files still builds clean: 57 tests pass, clippy clean.
 - [x] Remove duplicate agent-runbooks spec (use agent-runbooks repo's SPEC.md)
 - [x] Create btakita/agent-memories repo + submodule
 - [ ] Add agent-runbooks as optional dependency
+- [ ] Add agent-memories as optional dependency
 - [ ] Committed memory write capability (route lessons to right file)
 - [ ] Compare/align with Cursor Rules, Windsurf Rules, .agents spec
 - [ ] Ontology validation integration (use `existence` crate to validate terms)

@@ -797,7 +797,7 @@ Lets do the following:
 1. Shimmer: skeleton app to parse Claude Code sessions, set up Trieve + Cor.e or Vespa, surface sessions/outputs to Rob in near-real-time
 2. Build Party: evaluate 3-5 GitHub repos (LiveKit streaming starter + Discord alternatives built on LiveKit); read Build Party PRD; make a recommendation
 3. Create a mermaid diagram for building a course (Miguel's LiveKit agent course)
-### Re: Shimmer skeleton app architecture (HEAD)
+### Re: Shimmer skeleton app architecture
 
 **Location:** `src/cloudflare/workers/shimmer/` — inside existing cloudflare monorepo, same bun workspace.
 
@@ -838,7 +838,7 @@ Lets do the following:
 
 ---
 
-### Re: Build Party — LiveKit repo evaluation (5 repos) (HEAD)
+### Re: Build Party — LiveKit repo evaluation (5 repos)
 
 | Repo | Stars | Category | Build Party Relevance |
 |------|-------|----------|----------------------|
@@ -859,9 +859,10 @@ Lets do the following:
 
 **Greenfield gap:** No open-source LiveKit project combines a shared code editor with a LiveKit room. Co-build rooms need CodeMirror/Monaco + Yjs/CRDT sync alongside LiveKit. Genuinely new.
 
+Transfer the livekit repo evaluation to tasks/dreamable/build-party.md 
 ---
 
-### Re: Mermaid diagram — Miguel's LiveKit agent course (HEAD)
+### Re: Mermaid diagram — Miguel's LiveKit agent course
 
 ```mermaid
 graph TD
@@ -920,7 +921,10 @@ graph TD
 4. **Multi-User Transcription** — The key insight: per-participant `AudioStream` + separate STT instances. Speaker identity is structural, not algorithmic.
 5. **Build Party Agent** — Wire per-participant transcripts into shared `ChatContext`. Q&A moderator persona with voice output. Data channel for UI overlay.
 6. **Capstone** — Deploy, test with 2+ real participants, verify end-to-end.
-<!-- agent:boundary:56940d28 -->
+### Re: Transfer complete (HEAD)
+
+Transferred the LiveKit repo evaluation to `tasks/dreamable/build-party.md`. The full evaluation (5 repos, strategic synthesis, greenfield gap) is now in its own session document for ongoing Build Party work.
+<!-- agent:boundary:7eacaa79 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -934,8 +938,9 @@ graph TD
 - ([done]) Evaluate Cloudflare Vectorize + Workers AI for session indexing
 - ([done]) Evaluate 3-5 LiveKit GitHub repos for Build Party
 - ([done]) Create mermaid diagram for Miguel's LiveKit agent course
+- ([done]) Transfer LiveKit evaluation to tasks/dreamable/build-party.md
 - **Sunday Apr 5, 5pm ET:** Follow-up call with Rob — confirmed via SMS
-- **Next:** Build Shimmer MVP (3-day plan above)
+- **Next:** Build Shimmer MVP (3-day plan in this session)
 - Get Build Party PRD from Rob
 - DocWalk MVP — color-coded markdown viewer
 <!-- /agent:pending -->

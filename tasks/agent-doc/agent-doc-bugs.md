@@ -440,7 +440,7 @@ The `git::commit()` function includes `git add` as part of staging (falls back t
 **My mistake:** I didn't use `agent-doc transfer`. I manually created the file with the `Write` tool, which bypasses the agent-doc pipeline entirely. The transfer runbook and binary are already correct — no changes needed.
 
 The runbook already documents the right workflow. The skill should use `agent-doc transfer` (or `agent-doc extract`) rather than manually creating files. No runbook update needed — the gap was in my execution, not the tooling.
-<!-- agent:boundary:9cd77113 -->
+<!-- agent:boundary:9a45b76b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

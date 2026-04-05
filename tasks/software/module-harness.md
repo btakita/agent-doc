@@ -351,7 +351,19 @@ I suspect that we don't need to release...just commit and push?
 - **In tests**: `use existence::commands::lint` to programmatically validate ontology nodes
 - **In CI**: `existence lint ontology/` catches broken links, missing sections, missing titles
 - **For consumers**: any crate can now `use existence::{config, markdown, commands}` for ontology tooling
-<!-- agent:boundary:396f2f9d -->
+
+We currently have .claude/skills/module-harness/runbooks/ontology-references.md. This should be in module-harness itself.
+### Re: Move ontology-references runbook to module-harness (HEAD)
+
+Done. Moved `.claude/skills/module-harness/runbooks/ontology-references.md` into `src/module-harness/runbooks/ontology-references.md`.
+
+**Changes:**
+1. Created `src/module-harness/runbooks/ontology-references.md` — the runbook now lives in the module-harness repo itself
+2. Updated SKILL.md to reference the new location (`src/module-harness/runbooks/...`)
+3. Removed the old skill-local copy and its now-empty `runbooks/` directory
+
+This way the runbook ships with the module-harness crate and is available to anyone using it, not just agent-loop skill users.
+<!-- agent:boundary:1b1e48d3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -361,4 +373,5 @@ I suspect that we don't need to release...just commit and push?
 - ([done]) Add existence as dev-dependency in module-harness
 - ([done]) Add ontology lint step to CI
 - ([done]) Publish module-harness v0.2.0
+- ([done]) Move ontology-references runbook from skill to module-harness submodule
 <!-- /agent:pending -->

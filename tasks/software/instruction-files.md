@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-7/13 items complete. Core audit suite done. Remaining: spec definitions, feature integrations, cross-tool alignment.
+9/15 items complete. Specs defined. Remaining: validation code, write capability, cross-tool alignment.
 <!-- /agent:status -->
 
 ## Exchange
@@ -648,7 +648,8 @@ do
 - [ ] Add context invariant audit (no machine-local paths)
 - [ ] Create shared skill + runbook
 - [ ] Architecture: instruction-files depends on agent-runbooks + agent-memories specs
-### Re: do (3 items) (HEAD)
+
+### Re: do (3 items)
 
 All 3 implemented. Clippy clean, 57 tests pass (6 new).
 
@@ -668,7 +669,34 @@ All 3 implemented. Clippy clean, 57 tests pass (6 new).
 - Future specs section: agent-runbooks and agent-memories format specs that instruction-files will validate
 - Updated discovery section to include runbook patterns
 - Added context invariant to the checks table
-<!-- agent:boundary:f72a8431 -->
+
+do
+- [ ] agent-memories spec: committed memory format (type, scope, why, how to apply)
+- [ ] agent-runbooks spec: runbook format (checklist, prerequisites, verification)
+### Re: do (2 specs) (HEAD)
+
+Both specs created in `src/instruction-files/spec/`.
+
+**1. agent-memories spec** (`spec/agent-memories.md`):
+- File location: `.agent/memories/*.md`
+- YAML frontmatter: `name`, `description`, `type` (required), `scope` (optional)
+- Four types: `user`, `feedback`, `project`, `reference`
+- Body structure: feedback/project types use `**Why:**` + `**How to apply:**` pattern
+- Optional `MEMORY.md` index (one-line entries, <150 chars)
+- Validation rules: frontmatter required, valid type, non-empty body, no machine-local paths, unique names
+- Comparison table: how memories relate to Cursor Rules, Windsurf Rules, CLAUDE.md
+
+**2. agent-runbooks spec** (`spec/agent-runbooks.md`):
+- File location: `.agent/runbooks/*.md`, `.claude/skills/**/runbooks/*.md`
+- Required sections: H1 title + checklist (`## Checklist`/`## Procedure`/`## Steps`)
+- Optional sections: Prerequisites, Verification, Troubleshooting
+- Step format: numbered list, bold name, imperative voice, concrete commands
+- Conventions: imperative voice, no machine-local paths, idempotent, progressive
+- Validation rules: H1 required, checklist section required, non-empty, context invariant
+- Relationship diagram showing how runbooks complement declarative rules
+
+README updated to link both specs from the Architecture section.
+<!-- agent:boundary:3199f2fa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -681,10 +709,12 @@ All 3 implemented. Clippy clean, 57 tests pass (6 new).
 - [x] Add context invariant audit (no machine-local paths)
 - [x] Create shared skill + runbook
 - [x] Architecture: instruction-files depends on agent-runbooks + agent-memories specs
-- [ ] agent-memories spec: committed memory format (type, scope, why, how to apply)
-- [ ] agent-runbooks spec: runbook format (checklist, prerequisites, verification)
+- [x] agent-memories spec: committed memory format (type, scope, why, how to apply)
+- [x] agent-runbooks spec: runbook format (checklist, prerequisites, verification)
 - [ ] Committed memory write capability (route lessons to right file)
 - [ ] Compare/align with Cursor Rules, Windsurf Rules, .agents spec
 - [ ] Ontology validation integration (use `existence` crate to validate terms in instruction files)
 - [ ] Spec audit integration (use `module-harness` to audit module specs)
+- [ ] Validate agent-memories frontmatter (name, type, non-empty body)
+- [ ] Validate agent-runbooks structure (H1, checklist section, imperative steps)
 <!-- /agent:pending -->

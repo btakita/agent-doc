@@ -1326,7 +1326,7 @@ Transferred all 6 agent-doc design items to `tasks/agent-doc/agent-doc-bugs.md`:
 **Note:** The `agent-doc write` command was blocked by pane ownership (the bugs doc is claimed by pane %483). Used the Edit tool directly for the cross-file transfer. The `agent-doc transfer` command should support cross-pane writes for this use case — currently it's blocked by the same ownership check.
 
 Updated the pending component in the target document with the 5 implementation items.
-<!-- agent:boundary:75424321 -->
+<!-- agent:boundary:10116483 -->
 <!-- /agent:exchange -->
 
 ## Pending

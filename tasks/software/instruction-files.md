@@ -1484,7 +1484,7 @@ instruction-files public API unchanged — existing consumers (agent-doc, corky)
 - Phase 4: Add instruction-files CLI
 
 These can happen in a future session. The foundation is set.
-<!-- agent:boundary:080173bc -->
+<!-- agent:boundary:7b8cdc41 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

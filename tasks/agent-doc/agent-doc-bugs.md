@@ -521,7 +521,7 @@ Audited all features and added 7 tests across 2 files:
 - **P2 eval-runner `strip_diff_comments`** — eval-runner doesn't have a test harness. The shared `strip_comments` function is tested in both `component.rs` (direct) and `diff.rs` (transitive). The eval-runner-specific `strip_diff_comments` wrapper is simple composition.
 
 **Total: 447 tests passing, clippy clean.**
-<!-- agent:boundary:598bf008 -->
+<!-- agent:boundary:04180a47 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

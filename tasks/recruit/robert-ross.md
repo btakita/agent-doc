@@ -774,7 +774,8 @@ do
 
 explain
 - Evaluate 3-5 LiveKit GitHub repos for Build Party
-### Re: Evaluate 3-5 LiveKit GitHub repos — explained (HEAD)
+
+### Re: Evaluate 3-5 LiveKit GitHub repos — explained
 
 This task comes from Rob's Granola meeting notes. He assigned Brian:
 
@@ -791,7 +792,135 @@ This task comes from Rob's Granola meeting notes. He assigned Brian:
 **Blocker:** Rob said he'd share the Build Party PRD — that provides the feature spec to evaluate repos against. Without it, evaluation is based on the product description from the call (watch party, pre/post-party, co-build rooms, Code Karaoke, agent personas).
 
 **Can we do it now?** Partially — we can identify and evaluate repos based on what we know from the call. The PRD would refine criteria. Want me to run the evaluation now with what we have, or wait for the PRD?
-<!-- agent:boundary:1ba5b919 -->
+
+Lets do the following:
+1. Shimmer: skeleton app to parse Claude Code sessions, set up Trieve + Cor.e or Vespa, surface sessions/outputs to Rob in near-real-time
+2. Build Party: evaluate 3-5 GitHub repos (LiveKit streaming starter + Discord alternatives built on LiveKit); read Build Party PRD; make a recommendation
+3. Create a mermaid diagram for building a course (Miguel's LiveKit agent course)
+### Re: Shimmer skeleton app architecture (HEAD)
+
+**Location:** `src/cloudflare/workers/shimmer/` — inside existing cloudflare monorepo, same bun workspace.
+
+**Architecture:** 100% Cloudflare edge. No external services.
+
+| Layer | Choice |
+|-------|--------|
+| Runtime | Workers (JS/ESM) |
+| Embeddings | Workers AI bge-base-en-v1.5 |
+| Vector store | Vectorize (768 dims, cosine) |
+| Metadata DB | D1 (SQLite) |
+| Content cache | KV (snapshots by SHA) |
+| Auth | Cloudflare Access (OTP) |
+
+**MVP scope (3-day build):**
+
+**Day 1 — Infrastructure + Ingest:**
+- Create `shimmer/` with wrangler.toml, D1 migration, Vectorize index, KV namespace
+- `chunker.js` — parse snapshots into section chunks (max 400 tokens)
+- `embedder.js` — batch BGE embedding via Workers AI
+- `ingest.js` — POST endpoint: chunk → embed → Vectorize upsert + D1 insert
+- `bin/shimmer-watch` — inotifywait loop POSTing new snapshots
+
+**Day 2 — Search + Session API:**
+- `GET /search?q=...` — embed query → Vectorize ANN → resolve chunks from D1
+- `GET /sessions` — list sessions sorted by updated_at
+- `GET /sessions/:id` — full session content from KV
+
+**Day 3 — Viewer + Auth:**
+- Single HTML page served from Worker: session list (left), markdown viewer (center), search bar (top)
+- Polling every 30s for updates
+- Cloudflare Access policy for Rob's email
+- Backfill existing snapshots via `bin/shimmer-backfill`
+
+**Result:** Rob opens a URL, sees Brian's active sessions, clicks one, reads the snapshot, searches across all sessions. Updates within 30s of agent-doc commit.
+
+**Post-MVP:** Durable Object WebSocket for sub-second real-time, topic auto-segmentation, git commit history integration.
+
+---
+
+### Re: Build Party — LiveKit repo evaluation (5 repos) (HEAD)
+
+| Repo | Stars | Category | Build Party Relevance |
+|------|-------|----------|----------------------|
+| [livekit-examples/livestream](https://github.com/livekit-examples/livestream) | 246 | Streaming starter | **High** — Watch Party shell, stage-summon, OBS ingress |
+| [livekit/agents](https://github.com/livekit/agents) | 9,935 | Agent framework | **Very High** — Nova/Echo/Flare personas |
+| [python-agents-examples](https://github.com/livekit-examples/python-agents-examples) | 262 | Agent examples | **High** — 70+ examples: content filter, RAG, multi-agent |
+| [dev-day-demos](https://github.com/livekit-examples/dev-day-demos) | 9 | Multi-agent demos | **High** — Silent moderation agent = Echo blueprint |
+| [AOSSIE-Org/Resonate](https://github.com/AOSSIE-Org/Resonate) | 337 | Discord alternative | **Medium** — Room browsing, scheduling, role-based mod |
+
+**Strategic synthesis:**
+
+1. **Start with `livestream`** — gives Watch Party shell with stage-summon UX, OBS ingress, sub-100ms WebRTC
+2. **Wire `agents` on top** — three agents in one room (validated by `model-battleground` demo):
+   - **Nova** = RAG voice agent + LLM content filter + Q&A queue
+   - **Echo** = silent observer emitting `highlight.detected` RPCs (from `call-moderation` pattern)
+   - **Flare** = Echo event consumer + LiveKit Egress API clip trigger
+3. **Community layer** from Resonate — room browsing, scheduling, role-based permissions (needs re-implementation in Next.js)
+
+**Greenfield gap:** No open-source LiveKit project combines a shared code editor with a LiveKit room. Co-build rooms need CodeMirror/Monaco + Yjs/CRDT sync alongside LiveKit. Genuinely new.
+
+---
+
+### Re: Mermaid diagram — Miguel's LiveKit agent course (HEAD)
+
+```mermaid
+graph TD
+    PRE["Prerequisites"]
+
+    subgraph PRE_ITEMS["Setup"]
+        P1["Python 3.12+, uv, livekit-agents 1.4+"]
+        P2["Accounts: LiveKit Cloud, Deepgram"]
+        P3["Env: LIVEKIT_URL, API keys, DEEPGRAM_API_KEY"]
+    end
+
+    subgraph MOD1["Module 1: LiveKit Fundamentals"]
+        M1A["Rooms, Participants, Tracks"]
+        M1B["Events: track_subscribed, track_muted"]
+        M1C["Lab: Connect to room, log track events"]
+    end
+
+    subgraph MOD2["Module 2: Agent Framework"]
+        M2A["Worker/Job model, JobContext"]
+        M2B["Agent class, AgentSession, VAD (Silero)"]
+        M2C["Lab: Echo agent — repeat speech via TTS"]
+    end
+
+    subgraph MOD3["Module 3: STT with Deepgram"]
+        M3A["deepgram.STT(model='nova-3')"]
+        M3B["VAD + turn detection pipeline"]
+        M3C["Lab: Full voice loop — speak → transcribe → LLM → TTS"]
+    end
+
+    subgraph MOD4["Module 4: Multi-User Transcription"]
+        M4A["Per-participant AudioStream + STT"]
+        M4B["Transcripts keyed by participant.identity"]
+        M4C["Lab: 2-person room with labeled transcripts"]
+    end
+
+    subgraph MOD5["Module 5: Build Party Agent (Nova)"]
+        M5A["Shared ChatContext from all speakers"]
+        M5B["Q&A moderator persona + data channel output"]
+        M5C["Lab: Agent answers questions from any participant"]
+    end
+
+    subgraph CAP["Capstone: Deploy + Test"]
+        C1["Run worker against LiveKit Cloud"]
+        C2["Join as 2+ participants via Playground"]
+        C3["Verify: labeled transcripts + agent responses"]
+    end
+
+    PRE --> PRE_ITEMS --> MOD1 --> MOD2 --> MOD3 --> MOD4 --> MOD5 --> CAP
+```
+
+**Module descriptions:**
+
+1. **Fundamentals** — Rooms are containers, participants are members, tracks are audio/video streams. Wire up `track_subscribed` events to understand when audio becomes available.
+2. **Agent Framework** — `livekit-agents` wraps RTC into a Worker/Job model. Build a minimal Agent with system prompt, VAD, and TTS.
+3. **STT with Deepgram** — `deepgram.STT(model="nova-3")` feeds transcripts into the AgentSession turn pipeline. Understand VAD + turn detection interaction.
+4. **Multi-User Transcription** — The key insight: per-participant `AudioStream` + separate STT instances. Speaker identity is structural, not algorithmic.
+5. **Build Party Agent** — Wire per-participant transcripts into shared `ChatContext`. Q&A moderator persona with voice output. Data channel for UI overlay.
+6. **Capstone** — Deploy, test with 2+ real participants, verify end-to-end.
+<!-- agent:boundary:59d415e2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -803,9 +932,10 @@ This task comes from Rob's Granola meeting notes. He assigned Brian:
 - ([done]) Prep demo for Sunday: Run session analyzer on robert-ross transcript
 - ([done]) Evaluate Deepgram + LiveKit Agents for real-time STT pipeline
 - ([done]) Evaluate Cloudflare Vectorize + Workers AI for session indexing
+- ([done]) Evaluate 3-5 LiveKit GitHub repos for Build Party
+- ([done]) Create mermaid diagram for Miguel's LiveKit agent course
 - **Sunday Apr 5, 5pm ET:** Follow-up call with Rob — confirmed via SMS
-- Evaluate 3-5 LiveKit GitHub repos for Build Party (partially blocked on PRD)
+- **Next:** Build Shimmer MVP (3-day plan above)
 - Get Build Party PRD from Rob
-- Create mermaid diagram for Miguel's LiveKit agent course
 - DocWalk MVP — color-coded markdown viewer
 <!-- /agent:pending -->

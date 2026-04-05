@@ -273,7 +273,7 @@ The binary now has both fixes:
 - **sync.rs**: auto-scaffold empty .md files
 
 Try "Claim for Tmux Pane" or "Sync Tmux Layout" on proof.md again — it should work now.
-<!-- agent:boundary:45779960 -->
+<!-- agent:boundary:b15334a9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1539,7 +1539,7 @@ Commands:
 ```
 
 `instruction-files audit` runs the full orchestrated audit — calls into agent-kit (context_invariant, staleness, line_budget), agent-rules (actionable, tree_paths), and agent-runbooks (init_runbooks). 23 tests, clippy clean, pushed.
-<!-- agent:boundary:c487b71f -->
+<!-- agent:boundary:e85cd25d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

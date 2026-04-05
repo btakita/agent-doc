@@ -454,7 +454,7 @@ But the deeper issue you're pointing out: I reached for the `Write` tool (ad-hoc
 This means: instead of saving "use agent-doc transfer not Write tool" as a memory, the SKILL.md or a runbook should explicitly say "when creating new task documents, use `agent-doc init`, not manual file creation." The instruction lives in the committed skill, not in memory.
 
 I want to also make or use a memory library that work with committing files to a library or it's dependencies. Are there any tools available or should we add to instruction-files or consolidate agent-runbooks into agent-memories?
-### Re: Committed memory library (HEAD)
+### Re: Committed memory library
 
 **What exists today:**
 
@@ -481,12 +481,57 @@ I want to also make or use a memory library that work with committing files to a
 **My recommendation:** Option 3 (consolidate into instruction-files). It already has discovery. Adding write capability (route lessons to the right file) makes it the single tool for committed agent context. Keeps the dependency tree simple.
 
 This is a design decision for the instruction-files task document. Want me to add it there?
-<!-- agent:boundary:e64b7506 -->
+We also have agent-runbooks. If we follow the pattern, we can create agent-memories...where agent-memories can serve as a de-facto spec.
+However, we may want to consolidate agent-runbooks and agent-memories into a single repo + spec.
+Should instruction-files be separate because these are broader instruction files for libraries? It could also contain memories and runbooks. However, I would like a place for the runbooks and memories spec.
+### Re: Architecture — memories, runbooks, instruction-files (HEAD)
+
+The naming suggests a layered architecture:
+
+| Layer | Scope | Examples |
+|-------|-------|---------|
+| **instruction-files** | Broad: any file that instructs agents | CLAUDE.md, AGENTS.md, SPEC.md, SKILL.md |
+| **agent-runbooks** | Process: step-by-step procedures | precommit.md, prerelease.md, transfer-extract.md |
+| **agent-memories** | Lessons: patterns learned from experience | "use agent-doc init not Write tool", "approval != skip processes" |
+
+**The question: one repo or three?**
+
+**Case for consolidation (one repo):** Memories, runbooks, and instruction files are all "things an agent reads to behave correctly." The spec for how to write/read them is shared. Discovery is shared. Auditing is shared. Having one crate (`instruction-files`) that handles all three reduces duplication.
+
+**Case for separation:** The spec for memories is different from runbooks. Memories have: category (feedback/project/user/reference), staleness, deduplication, routing rules. Runbooks have: checklists, prerequisites, verification steps. These are distinct formats that benefit from distinct specs.
+
+**Proposed structure:**
+
+```
+instruction-files/          ← crate: discovery + audit + write for all instruction files
+  SPEC.md                   ← spec for the crate itself
+  src/
+    discovery.rs            ← find all instruction files (CLAUDE.md, runbooks, memories)
+    audit.rs                ← validate consistency, staleness, portability
+    write.rs                ← route new content to the right file
+    types.rs                ← InstructionFile, Runbook, Memory types
+
+agent-runbooks/             ← spec repo: defines the runbook format
+  SPEC.md                   ← what a runbook is, required sections, checklist format
+  defaults/                 ��� bundled default runbooks
+    precommit.md
+    prerelease.md
+
+agent-memories/             ← spec repo: defines the committed memory format
+  SPEC.md                   ← what a memory is, categories, routing rules, dedup
+  defaults/                 ← bundled default memories (if any)
+```
+
+instruction-files depends on agent-runbooks + agent-memories for their specs. The specs define the format; instruction-files implements the tooling.
+
+This keeps the specs focused while the tooling is consolidated. Does this separation feel right, or would you prefer everything in one repo?
+<!-- agent:boundary:4b89304d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Add committed-memory capability to instruction-files task scope
+- [ ] Decide architecture: instruction-files + agent-runbooks + agent-memories repos
+- [ ] Transfer design discussion to tasks/software/instruction-files.md
 - [ ] Bump agent-doc to v0.31.14 and release
 <!-- /agent:pending -->

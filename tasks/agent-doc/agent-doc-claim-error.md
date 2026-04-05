@@ -116,14 +116,44 @@ Built, tested (all 697 pass), and installed:
 
 Ready for testing. Try transferring to a non-existent target file.
 release
-### Re: v0.31.15 released (HEAD)
+### Re: v0.31.15 released
 
 Published to all targets:
 - **crates.io:** `cargo publish` — agent-doc v0.31.15
 - **PyPI:** manylinux2014 wheel uploaded
 - **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.31.15
 - **Binary:** `cargo install --path .` — `~/.cargo/bin/agent-doc` updated
-<!-- agent:boundary:7fb7b19c -->
+
+I moved tasks/recruit/robert-ross.md to tasks/dreamable/robert-ross.md
+I'm getting externally saved file messages with the last character I typed being removed.
+It seems there are multiple sessions claiming the document.
+What is going on? Look at agent-doc and git logs.
+### Re: Snapshot/file mismatch causing externally-saved + char removal (HEAD)
+
+**Not multiple sessions.** Session registry shows one session: `6cb2a9bf` on pane `%511` → `tasks/dreamable/robert-ross.md`. No duplicate claims.
+
+**Root cause: snapshot is 1.2KB but file is 53KB.**
+
+ops.log timeline:
+1. File moved from `tasks/recruit/robert-ross.md` to `tasks/dreamable/robert-ross.md` (53KB content)
+2. Auto-init created a 1.2KB snapshot for the new path
+3. Commit saw 52KB drift (`snap_len=1198 file_len=53218`), committed the full file
+4. Re-saved snapshot as 1.2KB (only the boundary-repositioned committed content)
+5. Next cycle: snapshot still 1.2KB vs 53KB file → massive drift again → repeat
+
+This drift loop causes:
+- **"Externally saved" dialogs**: Every commit rewrites the file (boundary repositioning) → editor detects external modification
+- **Last character removed**: The boundary reposition rewrites the file on disk while you're typing. The editor's file watcher picks up the rewrite, and if your keystroke races with the rewrite, it gets lost.
+
+**Fix:** Re-sync the snapshot to match the full file content:
+```bash
+agent-doc commit tasks/dreamable/robert-ross.md
+```
+This should stabilize once the snapshot matches the file. If it persists, manually reset:
+```bash
+cp tasks/dreamable/robert-ross.md .agent-doc/snapshots/$(python3 -c "import hashlib; print(hashlib.sha256(b'tasks/dreamable/robert-ross.md').hexdigest())").md
+```
+<!-- agent:boundary:9598f6cb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -133,4 +163,5 @@ Published to all targets:
 - [x] Fix: `agent-doc write` silently drops template patches when target has no components
 - [x] Fix: transfer/write should auto-init target in template mode if it doesn't exist
 - [x] Release v0.31.15
+- [ ] Fix: file move creates snapshot/file mismatch (snapshot too small after rename)
 <!-- /agent:pending -->

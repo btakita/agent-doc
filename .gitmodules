@@ -106,3 +106,6 @@
 [submodule "src/agent-runbooks"]
 	path = src/agent-runbooks
 	url = git@github.com:btakita/agent-runbooks.git
+[submodule "src/agent-memories"]
+	path = src/agent-memories
+	url = git@github.com:btakita/agent-memories.git

@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-9/17 items complete. Discovered agent-runbooks repo already has canonical SPEC.md — need to deduplicate.
+11/18 items complete. Specs in canonical repos. Remaining: validation code, integrations, cross-tool alignment.
 <!-- /agent:status -->
 
 ## Exchange
@@ -718,13 +718,14 @@ Other tools (agent-doc, corky, Claude Code itself) **produce** files in these fo
 
 Should the agent-runbooks spec belong in the agent-runbooks repo?
 Should the agent-memories spec belong in the agent-memories repo?
-### Re: Should specs belong in their own repos? (HEAD)
+### Re: Should specs belong in their own repos?
 
 **Yes, for agent-runbooks.** The `src/agent-runbooks` repo already exists with its own `SPEC.md` that's more detailed than what we wrote in instruction-files — it defines CLI commands (`audit`, `list`, `validate`, `install`), the runbook format, SKILL.md reference format, module-harness integration, and ontology annotations.
 
 The spec we created in `instruction-files/spec/agent-runbooks.md` duplicates this. It should be removed, and instruction-files should reference the agent-runbooks crate's spec instead.
 
 **For agent-memories: no repo exists yet.** The spec can stay in instruction-files for now as the canonical definition. When/if an `agent-memories` crate is created (to handle write capability, routing lessons to files), the spec should move there and instruction-files would reference it.
+
 
 **Action plan:**
 1. Delete `instruction-files/spec/agent-runbooks.md` (duplicates agent-runbooks SPEC.md)
@@ -733,7 +734,33 @@ The spec we created in `instruction-files/spec/agent-runbooks.md` duplicates thi
 4. Update README architecture section to reference agent-runbooks as external
 
 Want me to execute this?
-<!-- agent:boundary:91ce26dc -->
+
+Create the btakita/agent-memories repo. Add a git submodule in agent-loop.
+Like in agent-runbooks README.md, create a agent-memories README.md.
+Move the agent-memories spec into agent-memories/SPEC.md
+A reason agent-memories is to ensure that the memories are committable into the library repo.
+And will be clonable.
+### Re: Action plan + Create agent-memories repo (HEAD)
+
+All done.
+
+**1. Created `btakita/agent-memories` repo** (https://github.com/btakita/agent-memories):
+- `README.md` — modeled after agent-runbooks: problem statement, convention, memory types, design principles, cross-harness compatibility table
+- `SPEC.md` — moved from `instruction-files/spec/agent-memories.md` (canonical spec now lives here)
+- `LICENSE` — CC0 1.0 (public domain, matching agent-runbooks)
+- Pushed to GitHub, added as git submodule in agent-loop at `src/agent-memories`
+
+**2. Removed duplicate specs from instruction-files:**
+- Deleted `spec/agent-runbooks.md` (canonical is `src/agent-runbooks/SPEC.md`)
+- Deleted `spec/agent-memories.md` (canonical is now `src/agent-memories/SPEC.md`)
+- Removed empty `spec/` directory
+
+**3. Updated instruction-files README:**
+- Architecture section now references companion specs as external repos with GitHub links
+- No more local `spec/` references
+
+instruction-files still builds clean: 57 tests pass, clippy clean.
+<!-- agent:boundary:16291147 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -748,7 +775,8 @@ Want me to execute this?
 - [x] Architecture: instruction-files depends on agent-runbooks + agent-memories specs
 - [x] agent-memories spec: committed memory format (type, scope, why, how to apply)
 - [x] agent-runbooks spec: runbook format (checklist, prerequisites, verification)
-- [ ] Remove duplicate agent-runbooks spec (use agent-runbooks repo's SPEC.md)
+- [x] Remove duplicate agent-runbooks spec (use agent-runbooks repo's SPEC.md)
+- [x] Create btakita/agent-memories repo + submodule
 - [ ] Add agent-runbooks as optional dependency
 - [ ] Committed memory write capability (route lessons to right file)
 - [ ] Compare/align with Cursor Rules, Windsurf Rules, .agents spec

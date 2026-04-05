@@ -208,7 +208,7 @@ Each skill follows the same contract:
 3. Create frontmatter and component structure automatically
 
 This is exactly what was done manually to create this file — automating that first step is the prototype.
-<!-- agent:boundary:8697e99c -->
+<!-- agent:boundary:dced58c3 -->
 <!-- /agent:exchange -->
 
 ## Pending

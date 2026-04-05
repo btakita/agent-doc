@@ -153,7 +153,7 @@ This should stabilize once the snapshot matches the file. If it persists, manual
 ```bash
 cp tasks/dreamable/robert-ross.md .agent-doc/snapshots/$(python3 -c "import hashlib; print(hashlib.sha256(b'tasks/dreamable/robert-ross.md').hexdigest())").md
 ```
-<!-- agent:boundary:9598f6cb -->
+<!-- agent:boundary:5a40faf6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

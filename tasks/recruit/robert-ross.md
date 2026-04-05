@@ -699,7 +699,7 @@ Ran the session analyzer on both the 3h54m call transcript and this agent-doc se
 do
 - Evaluate Deepgram + LiveKit Agents for real-time STT pipeline
 - Evaluate Cloudflare Vectorize + Workers AI for session indexing
-### Re: Deepgram + LiveKit Agents — real-time STT evaluation (HEAD)
+### Re: Deepgram + LiveKit Agents — real-time STT evaluation
 
 **Key finding:** LiveKit's per-participant audio tracks mean diarization is structurally free — no Deepgram add-on needed.
 
@@ -731,7 +731,7 @@ do
 
 ---
 
-### Re: Cloudflare Vectorize + Workers AI — session indexing evaluation (HEAD)
+### Re: Cloudflare Vectorize + Workers AI — session indexing evaluation
 
 **Key finding:** GA, cheap (<$5/mo for Shimmer at scale), zero external dependencies with existing Cloudflare stack.
 
@@ -771,7 +771,27 @@ do
 | Stack fit | Native | External | External | External |
 
 **Verdict:** Cloudflare Vectorize + Workers AI is the right call for Shimmer MVP. Cheap, serverless, native to existing stack. If hybrid search becomes critical, pair with D1 FTS or evaluate Turbopuffer later.
-<!-- agent:boundary:c004e82b -->
+
+explain
+- Evaluate 3-5 LiveKit GitHub repos for Build Party
+### Re: Evaluate 3-5 LiveKit GitHub repos — explained (HEAD)
+
+This task comes from Rob's Granola meeting notes. He assigned Brian:
+
+> "Evaluate 3-5 GitHub repos (LiveKit streaming starter + Discord alternatives built on LiveKit); read Build Party PRD; make a recommendation"
+
+**What Rob wants:** Build Party is a live agentic platform for AI builder communities built on LiveKit. He needs you to evaluate existing open-source LiveKit projects as foundations or reference implementations:
+
+1. **LiveKit streaming starter kits** — reference apps for streaming/broadcasting (watch parties, co-build rooms)
+2. **Discord alternatives built on LiveKit** — community platforms using LiveKit for real-time audio/video
+3. **LiveKit Agents examples** — agent framework examples for STT, moderation, interactive AI participants (Nova/Echo/Flare)
+
+**The deliverable:** Short evaluation of 3-5 repos covering: what it does, tech stack, what's reusable for Build Party, what's missing.
+
+**Blocker:** Rob said he'd share the Build Party PRD — that provides the feature spec to evaluate repos against. Without it, evaluation is based on the product description from the call (watch party, pre/post-party, co-build rooms, Code Karaoke, agent personas).
+
+**Can we do it now?** Partially — we can identify and evaluate repos based on what we know from the call. The PRD would refine criteria. Want me to run the evaluation now with what we have, or wait for the PRD?
+<!-- agent:boundary:d58e079a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -784,7 +804,7 @@ do
 - ([done]) Evaluate Deepgram + LiveKit Agents for real-time STT pipeline
 - ([done]) Evaluate Cloudflare Vectorize + Workers AI for session indexing
 - **Sunday Apr 5, 5pm ET:** Follow-up call with Rob — confirmed via SMS
-- Evaluate 3-5 LiveKit GitHub repos for Build Party
+- Evaluate 3-5 LiveKit GitHub repos for Build Party (partially blocked on PRD)
 - Get Build Party PRD from Rob
 - Create mermaid diagram for Miguel's LiveKit agent course
 - DocWalk MVP — color-coded markdown viewer

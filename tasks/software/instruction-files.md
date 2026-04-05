@@ -925,7 +925,7 @@ The word "skills" carries specific baggage from Claude Code. Alternatives:
 **My recommendation: `agent-skills`** — despite the Claude Code association, it's the most intuitive term. The README can explicitly frame it as cross-tool. "Skills" communicates the right thing: a capability that an agent can learn and apply in specific contexts.
 
 The agent-runbooks README already established the pattern of framing a Claude Code concept as cross-tool (runbooks existed in Claude Code's SKILL.md convention first). Same approach works here.
-<!-- agent:boundary:1889520b -->
+<!-- agent:boundary:11f372fe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

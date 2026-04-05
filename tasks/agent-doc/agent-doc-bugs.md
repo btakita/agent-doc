@@ -548,7 +548,7 @@ I ran `make check` (step 1 — clippy + tests) after each implementation. But I 
 2. **Saved a feedback memory** — `feedback_precommit_testing.md` so this pattern doesn't repeat in future sessions.
 
 3. **Added to MEMORY.md** — "Testing Discipline" section referencing the feedback.
-<!-- agent:boundary:f08283ea -->
+<!-- agent:boundary:e9789c74 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

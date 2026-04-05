@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-19/27 items complete. Phases 2+3 subagents in progress. Domain logic moving to domain crates.
+21/27 items complete. Full redistribution done. 153 tests across 6 crates. instruction-files is now a thin orchestrator.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1487,7 +1487,7 @@ These can happen in a future session. The foundation is set.
 do
 - [ ] Move domain logic from instruction-files to agent-rules (actionable, tree_paths)
 - [ ] Move init_runbooks from instruction-files to agent-runbooks
-### Re: do (phases 2 + 3) (HEAD)
+### Re: do (phases 2 + 3)
 
 Two subagents launched in parallel:
 
@@ -1495,7 +1495,33 @@ Two subagents launched in parallel:
 2. **Phase 3** — Moving `init_runbooks`, bundled precommit.md/prerelease.md to agent-runbooks
 
 Both update instruction-files with re-exports for backward compatibility. Will report results when complete.
-<!-- agent:boundary:1116d4ff -->
+### Re: Phases 2+3 complete (HEAD)
+
+All redistribution done.
+
+**Phase 2 — agent-rules** (check_actionable, check_tree_paths, extract_tree_paths + all helpers):
+- Moved to agent-rules with full test suite
+- instruction-files re-exports via `pub use agent_rules::{check_actionable, check_tree_paths};`
+
+**Phase 3 — agent-runbooks** (init_runbooks, bundled precommit.md/prerelease.md):
+- Moved to agent-runbooks/src/init.rs with `include_str!` paths updated
+- instruction-files re-exports via `pub use agent_runbooks as runbooks;`
+- Also fixed pre-existing clippy warnings in agent-runbooks main.rs
+
+**Final test counts across ecosystem:**
+
+| Crate | Tests | Role |
+|-------|-------|------|
+| agent-kit | 43 | Shared primitives (detect + audit_common + hooks) |
+| agent-rules | 37 | Rules validation (actionable + tree_paths + CLI) |
+| agent-runbooks | 30 | Runbook validation + init_runbooks + CLI |
+| agent-memories | 11 | Memory validation + frontmatter parsing + CLI |
+| skill-harness | 9 | Skill lifecycle (install/check/uninstall) |
+| instruction-files | 23 | Orchestrator (re-exports + integration tests) |
+| **Total** | **153** | |
+
+instruction-files is now a thin orchestrator — all validation logic lives in domain crates, all shared primitives live in agent-kit. Public API unchanged for existing consumers.
+<!-- agent:boundary:933ad99c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1520,8 +1546,8 @@ Both update instruction-files with re-exports for backward compatibility. Will r
 - [x] Add Environment path methods for rules/runbooks/memories/skills dirs
 - [x] Rename btakita/agent-skills to btakita/skill-harness
 - [x] Move shared audit primitives to agent-kit
-- [ ] Move domain logic to agent-rules (subagent in progress)
-- [ ] Move init_runbooks to agent-runbooks (subagent in progress)
+- [x] Move domain logic to agent-rules (actionable, tree_paths)
+- [x] Move init_runbooks to agent-runbooks
 - [ ] Add instruction-files CLI (orchestrator)
 - [ ] Add Spec/Contracts/Evals markdown convention to all repos
 - [ ] Add self-skill to skill-harness

@@ -845,13 +845,13 @@ redo:
 > I don't want the NDA to be overreaching. I'm already working on collaborative tooling.
 > Do NDAs also have non-competes?
 > Need to be able to carve out ways for me to work on my existing projects.
-> I also want the ability to open source low level primitives or at least use cross project.
+> I also want the ability to open source low level primitives or at least use cross project. 
 
-### Re: Latest SMS messages (HEAD)
+### Re: Latest SMS messages
 
 Rob's latest message asks if you're open to a standard NDA so they can "make more progress." He's framing it as routine.
 
-### Re: NDA concerns (HEAD)
+### Re: NDA concerns
 
 Here's my analysis of your points:
 
@@ -870,13 +870,33 @@ Here's my analysis of your points:
 **Open-sourcing low-level primitives:** This is a negotiation point for the employment agreement (separate from NDA). In the NDA phase, make sure nothing you disclose about your existing tools gets claimed as Dreamable confidential info. Add a clause like: "Information that was already known to the receiving party or independently developed shall not be considered Confidential Information."
 
 **Suggested reply to Rob:** Accept the NDA in principle but ask to review it first. Something like: "Happy to sign an NDA... please send it over and I'll review. I do have existing open-source projects I'll want to make sure are carved out."
-<!-- agent:boundary:12bd8a3f -->
+
+Should I mention anything about independent work?
+
+### Re: Should you mention independent work? (HEAD)
+
+Yes, but keep it light at this stage. The NDA text is the right moment to raise it... not before. When Rob sends the NDA:
+
+1. **Review it first** before signing
+2. **If it's truly just an NDA** (mutual confidentiality, no IP assignment, no non-compete), you can sign with minor asks:
+   - Add a carve-out exhibit listing your existing projects
+   - Confirm the "prior knowledge" / "independent development" exclusion exists
+3. **If it contains IP assignment or non-compete clauses**, that's employment agreement territory and you should negotiate separately
+
+For the text reply to Rob, keep it simple and don't front-load the independent work concern:
+
+> "Sure, happy to review an NDA. Send it over!"
+
+Then when you read it, raise specifics. Mentioning "independent work" upfront before seeing the document could signal you're worried about competing, which isn't the framing you want. You want to frame it as: "I have existing open-source projects that predate this relationship"... that's a standard carve-out, not a red flag.
+
+If he asks on the call, you can say naturally: "I maintain several open-source projects I'll want to make sure are carved out, which is pretty standard."
+<!-- agent:boundary:c57ef983 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Reply to Rob's NDA text — accept in principle, request to review first
+- [ ] Reply to Rob's NDA text — short and positive, request to review
 - [ ] Review NDA when received — check for non-compete, IP assignment, overreach
 - [ ] Prepare list of existing projects/IP for carve-out exhibit
 - [ ] Draft employment agreement negotiation points (open-source primitives, independent work)

@@ -87,7 +87,7 @@ The fix for `sync` is straightforward: after the empty-file scaffold block, add 
 Actually, looking again: `ensure_session_uuid()` (called by `ensure_initialized()`) checks `fm.format.is_none()` and returns early. For granola.md which has `agent_doc_format: template` but `agent_doc_session: null`, `ensure_session_uuid` SHOULD assign a UUID. Let me verify — I don't know why it didn't.
 
 I should investigate this rather than speculate. Want me to dig into why `ensure_session_uuid` didn't fire for granola.md?
-<!-- agent:boundary:7637c6cc -->
+<!-- agent:boundary:328557c2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

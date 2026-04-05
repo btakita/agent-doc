@@ -262,6 +262,15 @@ pub struct Frontmatter {
     /// Changes in linked docs are surfaced during preflight.
     #[serde(default, skip_serializing_if = "Vec::is_empty", alias = "related_docs")]
     pub links: Vec<String>,
+    /// Auto-compact threshold: line count for the exchange component.
+    /// When the exchange component exceeds this many lines, preflight automatically
+    /// runs compact before computing the diff. Set to 0 or omit to disable.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_auto_compact"
+    )]
+    pub auto_compact: Option<usize>,
 }
 
 impl Frontmatter {
@@ -526,6 +535,7 @@ mod tests {
             claude_args: None,
             debounce_ms: None,
             links: vec![],
+            auto_compact: None,
         };
         let body = "# Hello\n\nBody text.\n";
         let written = write(&fm, body).unwrap();

@@ -649,7 +649,7 @@ The traceable chain is now complete:
 5. **Runbook**: `runbooks/diff-type-routing.md` (detailed routing rules)
 
 CLAUDE.md already references README.md for the full ontology, so no additional update needed there.
-<!-- agent:boundary:2c4f8f72 -->
+<!-- agent:boundary:fa839a32 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

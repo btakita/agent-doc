@@ -73,7 +73,7 @@ The two systems are complementary but architecturally different:
 The API is well-designed — token auth, CRDT-aware mutations with base tokens, idempotency support. The `edit/v2` endpoint with block references is particularly clean for programmatic editing.
 
 What direction interests you most?
-<!-- agent:boundary:d1301e19 -->
+<!-- agent:boundary:c095367d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

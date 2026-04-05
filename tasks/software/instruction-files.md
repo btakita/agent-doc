@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-12/21 items complete. agent-rules done. Discussing cross-harness skill format and naming.
+12/21 items complete. agent-skills subagent in progress. Full convention ecosystem taking shape.
 <!-- /agent:status -->
 
 ## Exchange
@@ -859,7 +859,7 @@ agent-skills (bundle format + activation)
 Want me to create it?
 
 Are there alternative names that would be better?
-### Re: Cross-harness skills in other tools (HEAD)
+### Re: Cross-harness skills in other tools
 
 Here's how the skill pattern maps to each tool:
 
@@ -908,7 +908,7 @@ Each tool maps this to its native format:
 - Windsurf: generate rule file from SKILL.md
 - Codex/Gemini/Aider: reference SKILL.md via their import mechanism
 
-### Re: Alternative names (HEAD)
+### Re: Alternative names
 
 The word "skills" carries specific baggage from Claude Code. Alternatives:
 
@@ -925,7 +925,24 @@ The word "skills" carries specific baggage from Claude Code. Alternatives:
 **My recommendation: `agent-skills`** — despite the Claude Code association, it's the most intuitive term. The README can explicitly frame it as cross-tool. "Skills" communicates the right thing: a capability that an agent can learn and apply in specific contexts.
 
 The agent-runbooks README already established the pattern of framing a Claude Code concept as cross-tool (runbooks existed in Claude Code's SKILL.md convention first). Same approach works here.
-<!-- agent:boundary:11f372fe -->
+
+Create btakita/agent-skills repo following the same conventions as agent-runbooks, agent-memories, agent-rules
+### Re: Create agent-skills (HEAD)
+
+Subagent launched to create `btakita/agent-skills` with README, SPEC.md, LICENSE, GitHub repo, and submodule — following the same conventions as agent-runbooks, agent-memories, agent-rules.
+
+The full ecosystem is now:
+
+```
+instruction-files (validation engine)
+├── agent-rules    — prescribed policy (CLAUDE.md, .cursorrules, AGENTS.md)
+├── agent-runbooks — on-demand procedures
+├── agent-memories — learned lessons from sessions
+└── agent-skills   — contextually-activated instruction bundles
+```
+
+Each repo is CC0 licensed, cross-tool by design, and defines a convention that instruction-files validates.
+<!-- agent:boundary:aa79d4b3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -943,7 +960,7 @@ The agent-runbooks README already established the pattern of framing a Claude Co
 - [x] Remove duplicate agent-runbooks spec (use agent-runbooks repo's SPEC.md)
 - [x] Create btakita/agent-memories repo + submodule
 - [x] Create btakita/agent-rules repo + submodule
-- [ ] Create btakita/agent-skills repo (cross-tool skill convention)
+- [ ] Create btakita/agent-skills repo (subagent in progress)
 - [ ] Add agent-runbooks as optional dependency
 - [ ] Add agent-memories as optional dependency
 - [ ] Committed memory write capability (route lessons to right file)

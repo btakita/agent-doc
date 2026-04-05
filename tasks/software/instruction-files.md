@@ -1273,7 +1273,7 @@ Yes, it maps well. Here's the parallel:
 This makes `skill-harness` the full lifecycle tool: author, validate, install, test, manage. The name "harness" captures all of it — it's the test harness, the installation harness, and the runtime harness for skills.
 
 Want me to rename and restructure?
-<!-- agent:boundary:0398dd96 -->
+<!-- agent:boundary:e6d2e285 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

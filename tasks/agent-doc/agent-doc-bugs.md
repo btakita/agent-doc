@@ -760,7 +760,7 @@ The `transfer-source` attribute is preserved in `PatchBlock.attrs` and accessibl
 - `parse_patch_with_multiple_attrs` — verifies multiple key=value pairs
 
 **All 450 tests pass, clippy clean.**
-<!-- agent:boundary:543b782c -->
+<!-- agent:boundary:a12ee41c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

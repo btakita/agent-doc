@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Exchange transferred to instruction-files task. v0.31.14 pending release.
+agent-doc v0.31.14 released to crates.io + GitHub
 <!-- /agent:status -->
 
 ## Exchange
@@ -88,7 +88,7 @@ Added `git::commit(path)` call immediately after writing the scaffold in `resolv
 458 tests pass, clippy clean. Binary installed.
 
 When I emptied proof.md and ran `Sync Tmux Layout`, the base template populated the file but it also was not committed. Why?
-### Re: Scaffold commit failed — snapshot ordering bug (HEAD)
+### Re: Scaffold commit failed — snapshot ordering bug
 
 Found it in ops.log: `commit_failed file=tasks/software/proof.md exit_code=1` with `drift_warning snap_len=64 file_len=346`.
 
@@ -100,12 +100,27 @@ Found it in ops.log: `commit_failed file=tasks/software/proof.md exit_code=1` wi
 3. Commit (snapshot matches file — no drift)
 
 458 tests pass, clippy clean. Binary installed. Try emptying proof.md and running "Sync Tmux Layout" again.
-<!-- agent:boundary:ebdc7e50 -->
+release
+### Re: Release — agent-doc v0.31.14 (HEAD)
+
+Released:
+
+- **crates.io**: Published agent-doc v0.31.14
+- **GitHub**: https://github.com/btakita/agent-doc/releases/tag/v0.31.14
+- **Binary**: installed to ~/.cargo/bin (v0.31.14)
+- **Version sync**: Cargo.toml + pyproject.toml both at 0.31.14
+
+**v0.31.14 changes:**
+- Binding invariant enforcement: claim provisions new pane when occupied
+- Sync auto-scaffold: empty .md files get full template + snapshot + commit
+- Transfer pending merge: pending component transferred alongside exchange
+- SPEC.md §7.10 + §8.5 updated
+- 458 tests, code-enforced-directives runbook
+<!-- agent:boundary:7c8aa869 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Fix sync scaffold commit (snapshot before commit) — DONE
-- [ ] Bump agent-doc to v0.31.14 and release
+All items complete. v0.31.14 released.
 <!-- /agent:pending -->

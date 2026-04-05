@@ -424,7 +424,7 @@ Because `agent-doc commit` only stages the snapshot for the current document (ag
 Just committed it: `git add tasks/software/instruction-files.md && git commit` -> `0a53d4f9`.
 
 This is a gap in the transfer workflow — when creating a new task document via transfer, the file should be committed as part of the transfer operation. Currently the SKILL.md transfer runbook doesn't include a commit step for the target file.
-<!-- agent:boundary:f072c613 -->
+<!-- agent:boundary:4223541e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

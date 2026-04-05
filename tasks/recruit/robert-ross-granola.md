@@ -117,8 +117,7 @@ Allow for free form agent harness interaction within a variety of web interfaces
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-
-### Re: Granola <-> agent-doc bidirectional (HEAD)
+### Re: Granola <-> agent-doc bidirectional
 
 Yes — a bidirectional Granola integration is feasible. The approach:
 
@@ -130,7 +129,7 @@ Yes — a bidirectional Granola integration is feasible. The approach:
 
 The most immediate win: automate the ingest side (Granola → agent-doc) so meeting notes flow into template documents without manual copy-paste. The push-back can start as a browser-paste workflow and graduate to API when Granola exposes write endpoints.
 
-### Re: Agent-docs as universal artifact interface (HEAD)
+### Re: Agent-docs as universal artifact interface
 
 This is the right framing. Agent-doc's core primitive — named components with CRDT merge, patch blocks, and git-backed history — is already source-agnostic. The document template is the universal interface; the *adapter* is what varies per source.
 
@@ -153,7 +152,7 @@ The economic advantage: you build the agent harness interaction *once* in agent-
 
 For Build Party specifically, this means attendees could interact with agents through Build Party's UI while the agent harness runs agent-doc underneath — the Build Party adapter translates between LiveKit room events and agent-doc patches.
 
-### Re: Build Party — expanded vision (HEAD)
+### Re: Build Party — expanded vision
 
 Your annotations sharpen the pitch significantly:
 
@@ -165,7 +164,7 @@ Your annotations sharpen the pitch significantly:
 - Collaborative hackathons + security concerns → the sandbox model addresses this, but needs a spec for what "sandboxed agent harness" means in a LiveKit room context (per-participant isolation? shared workspace with access controls?)
 - Courses to learn LiveKit within a sandboxed harness → this is a strong go-to-market: LiveKit itself as the first "course provider" on Build Party
 
-### Re: Shimmer — daily blog posts & Cor.e/Trieve (HEAD)
+### Re: Shimmer — daily blog posts & Cor.e/Trieve
 
 **Daily blog posts from work activity**: This is a compelling Shimmer feature — automated daily digests synthesized from git commits, Claude Code sessions, and connected services. The pipeline:
 
@@ -179,14 +178,45 @@ This transforms Shimmer from a session viewer into an *activity narrator* — mu
 - **Cor.e** — persistent memory MCP server. Stores cross-session context as structured observations. Rob and Miguel share a login, meaning they share a memory space. Think of it as the "long-term memory" layer that persists between Claude Code sessions.
 - **Trieve** — semantic + full-text hybrid search engine. Was acquired by **Mintlify** (the docs platform). Mintlify uses Trieve to power intelligent documentation search. In Shimmer's context, Trieve would index session content and make it searchable with natural language queries ("when did we discuss the auth middleware rewrite?" → finds the relevant session).
 - **Vespa** — the Apache-licensed alternative to Cor.e for the memory layer, with better cross-session capability. The choice between Cor.e and Vespa likely comes down to hosted-vs-self-hosted and how much cross-session intelligence Shimmer needs.
-<!-- agent:boundary:4b01c384 -->
+Where would this logic live? Note I'm also looking at an adapter with proof...see tasks/software/proof.md
+- Prototype Granola → agent-doc ingest adapter (automate meeting note hydration)
+### Re: Where the adapter logic lives + Proof as prior art (HEAD)
+
+The Proof integration (tasks/software/proof.md) already answered this — the same architecture applies to all adapters.
+
+**Each adapter is a Claude Code skill**, not agent-doc core. From the Proof session's conclusion:
+
+> agent-doc is a Rust binary focused on local document lifecycle. Adding HTTP client code, auth, and cloud sync would bloat its single responsibility.
+
+The adapter layer is a family of skills:
+
+| Skill | Source | Pattern |
+|---|---|---|
+| `/proof` | Proof editor | `sync`/`poll`/`link` — designed, not yet built |
+| `/granola` | Granola notes | `ingest`/`push`/`link` — to be designed |
+| `/shimmer` | Shimmer sessions | `import`/`export` — future |
+| `/buildparty` | Build Party rooms | LiveKit events → patches — future |
+
+Each skill follows the same contract:
+1. Calls `agent-doc preflight` and `agent-doc write --stream` for the local side
+2. Handles source-specific API calls (Proof REST API, Granola URLs, LiveKit events)
+3. Stores link metadata in `.agent-doc/<source>-links.toml`
+
+**The Granola ingest adapter** is the simplest starting point — read-only (Granola → agent-doc), no write-back initially. `/granola ingest <url>` would:
+1. Fetch shared note content from the Granola URL
+2. Hydrate into an agent-doc template (`&lt;!-- agent:notes --&gt;` component)
+3. Create frontmatter and component structure automatically
+
+This is exactly what was done manually to create this file — automating that first step is the prototype.
+<!-- agent:boundary:8697e99c -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending patch=replace -->
-- Prototype Granola → agent-doc ingest adapter (automate meeting note hydration)
-- Spec the universal adapter architecture (ingest/respond/sync interface)
+- Prototype `/granola` Claude Code skill (ingest command first)
+- Design `/proof` skill implementation (sync/poll/link — architecture done, needs code)
+- Spec shared adapter contract (preflight + write + source-links.toml pattern)
 - Define "sandboxed agent harness" for Build Party LiveKit room context
 - Explore Shimmer daily digest pipeline (git + sessions + services → blog post)
 <!-- /agent:pending -->

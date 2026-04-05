@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-9/15 items complete. Specs defined. Remaining: validation code, write capability, cross-tool alignment.
+9/17 items complete. Discovered agent-runbooks repo already has canonical SPEC.md — need to deduplicate.
 <!-- /agent:status -->
 
 ## Exchange
@@ -700,7 +700,7 @@ README updated to link both specs from the Architecture section.
 Why do we have these specs in the instruction-files repo?
 - agent-runbooks
 - agent-memories
-### Re: Why specs live in instruction-files (HEAD)
+### Re: Why specs live in instruction-files
 
 instruction-files is the **audit engine** for all agent configuration files. The specs belong here because instruction-files needs to know their format in order to validate them.
 
@@ -715,7 +715,25 @@ If the specs lived elsewhere, instruction-files would either need to import them
 Think of it like a schema living next to the parser: JSON Schema lives in the JSON tooling ecosystem, not in each application that produces JSON.
 
 Other tools (agent-doc, corky, Claude Code itself) **produce** files in these formats. instruction-files **validates** them. The specs document what "valid" means.
-<!-- agent:boundary:7bbf9272 -->
+
+Should the agent-runbooks spec belong in the agent-runbooks repo?
+Should the agent-memories spec belong in the agent-memories repo?
+### Re: Should specs belong in their own repos? (HEAD)
+
+**Yes, for agent-runbooks.** The `src/agent-runbooks` repo already exists with its own `SPEC.md` that's more detailed than what we wrote in instruction-files — it defines CLI commands (`audit`, `list`, `validate`, `install`), the runbook format, SKILL.md reference format, module-harness integration, and ontology annotations.
+
+The spec we created in `instruction-files/spec/agent-runbooks.md` duplicates this. It should be removed, and instruction-files should reference the agent-runbooks crate's spec instead.
+
+**For agent-memories: no repo exists yet.** The spec can stay in instruction-files for now as the canonical definition. When/if an `agent-memories` crate is created (to handle write capability, routing lessons to files), the spec should move there and instruction-files would reference it.
+
+**Action plan:**
+1. Delete `instruction-files/spec/agent-runbooks.md` (duplicates agent-runbooks SPEC.md)
+2. Add `agent-runbooks` as an optional dependency for runbook validation
+3. Keep `instruction-files/spec/agent-memories.md` as canonical until an agent-memories crate exists
+4. Update README architecture section to reference agent-runbooks as external
+
+Want me to execute this?
+<!-- agent:boundary:31518069 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -730,10 +748,12 @@ Other tools (agent-doc, corky, Claude Code itself) **produce** files in these fo
 - [x] Architecture: instruction-files depends on agent-runbooks + agent-memories specs
 - [x] agent-memories spec: committed memory format (type, scope, why, how to apply)
 - [x] agent-runbooks spec: runbook format (checklist, prerequisites, verification)
+- [ ] Remove duplicate agent-runbooks spec (use agent-runbooks repo's SPEC.md)
+- [ ] Add agent-runbooks as optional dependency
 - [ ] Committed memory write capability (route lessons to right file)
 - [ ] Compare/align with Cursor Rules, Windsurf Rules, .agents spec
-- [ ] Ontology validation integration (use `existence` crate to validate terms in instruction files)
+- [ ] Ontology validation integration (use `existence` crate to validate terms)
 - [ ] Spec audit integration (use `module-harness` to audit module specs)
 - [ ] Validate agent-memories frontmatter (name, type, non-empty body)
-- [ ] Validate agent-runbooks structure (H1, checklist section, imperative steps)
+- [ ] Validate agent-runbooks structure (delegate to agent-runbooks crate)
 <!-- /agent:pending -->

@@ -578,7 +578,7 @@ Yes
 Architecture discussion transferred to `tasks/software/instruction-files.md` via `agent-doc transfer`. This document's exchange is now clean for new agent-doc bug reports.
 
 **Session shipped:** agent-doc v0.31.13 (released) + v0.31.14 changes (claim fix, sync auto-scaffold, 456 tests).
-<!-- agent:boundary:dadbc0d7 -->
+<!-- agent:boundary:b1665cfc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Ecosystem complete. Install infrastructure ready. skills.toml parked — waiting for Agent Skills Standard to define manifest format.
+Ecosystem complete. One remaining action: push v0.1.0 tags to trigger first binary releases.
 <!-- /agent:status -->
 
 ## Exchange
@@ -211,7 +211,7 @@ Note: the install scripts will start working once the first release with binarie
 
 Should this be supported? How would a project use this?
 > - [ ] Implement .agent/skills.toml manifest (Option D)
-### Re: Should .agent/skills.toml be supported? (HEAD)
+### Re: Should .agent/skills.toml be supported?
 
 **Use case:** A project maintainer wants to declare "this project uses these skills" so any contributor (or agent) can set up the correct instruction files automatically.
 
@@ -248,7 +248,11 @@ This reads `.agent/skills.toml` and installs each skill to the detected environm
 **My take:** Park it. The Agent Skills Standard is actively evolving — they may define a manifest format that becomes the cross-tool standard. Building our own risks divergence. Option C (init functions) and Option A (CLI install) cover real needs today. When a manifest format emerges from the standard, we adapt.
 
 Remove from pending?
-<!-- agent:boundary:1a7ff10f -->
+Yes
+### Re: Remove skills.toml from pending (HEAD)
+
+Done. Removed from pending. The ecosystem is complete for this session.
+<!-- agent:boundary:32145630 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

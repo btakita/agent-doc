@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-24/27 items complete. Final 3 subagents running. Full ecosystem completion imminent.
+27/27 complete. Full ecosystem built: 6 crates, 177 tests, 5 GitHub repos created.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1591,7 +1591,7 @@ do
 - [ ] Committed memory write capability
 - [ ] Ontology validation integration
 - [ ] Spec audit integration
-### Re: do (final 3 items) (HEAD)
+### Re: do (final 3 items)
 
 3 subagents launched in parallel:
 
@@ -1600,7 +1600,43 @@ do
 3. **Spec audit** — Adding `check_spec()` to instruction-files (behind `spec-audit` feature)
 
 Will wire up modules and report results when complete. These are the final 3 items.
-<!-- agent:boundary:b104b390 -->
+### Re: Final 3 items — all complete (HEAD)
+
+**27/27 items done.**
+
+**1. Committed memory write** — agent-memories now has `write_memory()` + `agent-memories write` CLI:
+- Generates filename from type prefix + name slug (e.g., `feedback_use_agent_doc_init.md`)
+- Checks for duplicates before writing
+- Writes proper YAML frontmatter + body
+- 15 tests pass, pushed
+
+**2. Ontology validation** — instruction-files `check_ontology_terms()` behind `ontology` feature:
+- Scans for `[term:Name]` annotations via regex
+- Verifies each term has a `.md` file in ontology directory
+- Case-insensitive lookup, graceful when ontology_dir missing
+- CLI: `instruction-files audit --ontology-dir <path>`
+- 5 tests, pushed
+
+**3. Spec audit** — instruction-files `check_spec()` behind `spec-audit` feature:
+- Validates SPEC.md files for H1 title, Agentic Contracts, Evals sections
+- Self-contained `SpecIssue` type
+- 5 tests, pushed
+- Wired into lib.rs
+
+**Final test counts:**
+
+| Crate | Tests |
+|-------|-------|
+| agent-kit | 53 |
+| agent-rules | 37 |
+| agent-runbooks | 30 |
+| agent-memories | 15 |
+| skill-harness | 9 |
+| instruction-files | 33 (with all features) |
+| **Total** | **177** |
+
+The full ecosystem is built, tested, and deployed.
+<!-- agent:boundary:14f5a98f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1630,7 +1666,7 @@ Will wire up modules and report results when complete. These are the final 3 ite
 - [x] Add instruction-files CLI (orchestrator)
 - [x] Add Spec/Contracts/Evals convention to all repos
 - [x] Add self-skill to skill-harness
-- [ ] Committed memory write capability (subagent in progress)
-- [ ] Ontology validation integration (subagent in progress)
-- [ ] Spec audit integration (subagent in progress)
+- [x] Committed memory write capability
+- [x] Ontology validation integration
+- [x] Spec audit integration
 <!-- /agent:pending -->

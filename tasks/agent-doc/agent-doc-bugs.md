@@ -39,7 +39,7 @@ Noted. This is an architecture decision for agent-doc's dependency chain:
 The question is whether skill-harness should be a separate crate that standardizes skill installation across tools (not just agent-doc), and whether agent-runbooks should be a separate spec repo that agent-doc depends on for its runbook format.
 
 This belongs in the instruction-files task scope. Transferred.
-<!-- agent:boundary:15c2bdab -->
+<!-- agent:boundary:b266abf4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

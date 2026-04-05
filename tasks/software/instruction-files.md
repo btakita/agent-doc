@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Ecosystem complete. Discussing skill installation design for dependent libraries.
+Option C implemented. init() provides transitive skill + runbook installation for Rust consumers.
 <!-- /agent:status -->
 
 ## Exchange
@@ -53,8 +53,8 @@ All 6 crates published. CI + Release GitHub Actions on all repos. CARGO_REGISTRY
 #### Open Items
 None from this session. Future work: deeper ontology/spec integration, cross-tool portability testing, memory write integration with Claude Code auto-memory.
 
-How does instruction-files support dependent libraries installing it's skills?
-### Re: How does instruction-files support dependent libraries installing skills? (HEAD)
+How does instruction-files support dependent libraries installing it's skills? 
+### Re: How does instruction-files support dependent libraries installing skills?
 
 Currently it doesn't — there's a gap. Here's the current state and the design space:
 
@@ -85,7 +85,7 @@ A `skill-harness install-deps` command walks the dependency tree and installs sk
 **Pro:** Automatic. **Con:** Cargo metadata is stringly-typed, no standard.
 
 #### Option C: Post-install hook via `init()`
-Each crate provides an `init()` function that installs its skills:
+Each crate provides an `init()` function that installs its skills:e
 ```rust
 // In instruction-files lib.rs
 pub fn init(root: &Path) -> Result<()> {
@@ -111,12 +111,41 @@ email = { source = "local", path = ".agent/skills/email" }
 **My recommendation:** Start with **Option C** (init function) for Rust crate consumers, and **Option D** (skills.toml manifest) for project-level management. Option C is what agent-doc already does. Option D is what's needed for cross-tool portability.
 
 Want me to implement one of these?
-<!-- agent:boundary:abf8bac0 -->
+Option A is also supported by agent-doc...correct?
+
+Do Option C. Would Option D be for non-rust projects and monorepos?
+Can Option D be support when Option C is done.
+### Re: Option A + C + D (HEAD)
+
+**Option A:** Yes, agent-doc already uses this. `agent-doc skill install` bundles SKILL.md via `include_str!` and installs it. Corky does the same. Options A and C are complementary — A is the "binary handles its own skill" pattern, C is the "library provides init for consumers" pattern.
+
+**Option C implemented.** `instruction_files::init(root)` now:
+1. Installs the bundled SKILL.md to the environment-specific path (uses `agent_kit::detect::Environment` for path resolution)
+2. Scaffolds `.agent/runbooks/` with default precommit/prerelease templates
+3. Never overwrites existing files
+4. Returns paths of files written
+
+Consumers wire it into their own init:
+```rust
+// In agent-doc's init
+pub fn init(root: &Path) -> Result<()> {
+    // Install agent-doc's own skill
+    install_own_skill(root)?;
+    // Transitively install instruction-files' skill + runbooks
+    instruction_files::init(root)?;
+    Ok(())
+}
+```
+
+CLI: `instruction-files init` now installs both skills and runbooks. Pushed.
+
+**Option D:** Yes, for non-Rust projects and monorepos. `.agent/skills.toml` would be a declarative manifest that `skill-harness sync` reads. Can be added on top of Option C — they serve different audiences (Rust library consumers vs project-level management). Ready to implement whenever needed.
+<!-- agent:boundary:ab5cc53e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Design skill installation for dependent libraries
-- [ ] Implement init() pattern or skills.toml manifest
+- [x] Implement init() pattern (Option C) for transitive skill installation
+- [ ] Implement .agent/skills.toml manifest (Option D) for non-Rust projects
 <!-- /agent:pending -->

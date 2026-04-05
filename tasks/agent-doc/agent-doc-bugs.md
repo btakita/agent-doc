@@ -667,7 +667,7 @@ The connection is natural: the domain ontology defines *what concepts exist*, th
 However, this would be a module-harness feature enhancement, not something to add right now. The current session's ontology work (directive node + README.md Interaction Model) stands on its own. The module-harness integration could be a future task.
 
 Want me to add it to the pending list?
-<!-- agent:boundary:4282f68c -->
+<!-- agent:boundary:4b34222c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

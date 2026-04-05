@@ -70,7 +70,7 @@ Added 5 new pending items from the exchange discussion to `tasks/software/instru
 - Compare/align with Cursor Rules, Windsurf Rules, .agents spec
 
 Total: 11 pending items in instruction-files.md now. Committed.
-<!-- agent:boundary:260e48f3 -->
+<!-- agent:boundary:d642e32c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

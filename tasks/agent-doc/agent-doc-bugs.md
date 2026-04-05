@@ -126,18 +126,34 @@ The rule should be more prominent. It belongs in the SKILL.md core principles or
 
 do
 - [ ] Add "never use Write tool for session documents" to SKILL.md core section
-### Re: Added to SKILL.md core principles (HEAD)
+### Re: Added to SKILL.md core principles
 
 Done. Added as the 5th core principle:
 
 > **Use the pipeline, not ad-hoc tools** — never use the Write tool or Edit tool to create session documents. Use `agent-doc init` for new files, `agent-doc transfer` for moving content. The Write tool bypasses UUID assignment, snapshot creation, and git commit.
 
 This is now visible on every skill invocation — not buried in a runbook. Links to the transfer-extract runbook for details.
-<!-- agent:boundary:c99aa856 -->
+Can we refer to a runbook to save on context? Will the runbook be guaranteed to run?
+
+Would something like this work?
+
+> Never use the Write tool or Edit tool to create session documents. Use the ... runbook
+### Re: Briefer core principle + runbook guarantee (HEAD)
+
+The runbook is NOT guaranteed to run — it's only read when the user explicitly requests "transfer" or "extract". Core principles are always loaded because they're at the top of SKILL.md.
+
+Your suggested format works well — brief prohibition + runbook reference:
+
+> **Use the pipeline, not ad-hoc tools** — never use the Write tool or Edit tool to create session documents. See [transfer-extract runbook](runbooks/transfer-extract.md).
+
+This saves context while ensuring the rule is visible. The detail (why, what to use instead) lives in the runbook. The core principle is the trigger: "I'm about to use Write tool for a .md file — wait, core principle says don't."
+
+Let me update it.
+<!-- agent:boundary:b1090874 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-All items complete.
+- [ ] Shorten SKILL.md core principle to reference runbook
 <!-- /agent:pending -->

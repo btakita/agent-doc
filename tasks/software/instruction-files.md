@@ -807,7 +807,7 @@ But agent-skills is less cross-tool than the others. Runbooks, memories, and rul
 2. Hold on **agent-skills** — wait to see if the skill pattern generalizes beyond Claude Code before creating a convention repo
 
 Want me to create agent-rules?
-<!-- agent:boundary:221f724e -->
+<!-- agent:boundary:c02aca3b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

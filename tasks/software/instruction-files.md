@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-18/23 items complete. Discovered official Agent Skills Standard — need to rename our repo to avoid conflict.
+18/24 items complete. Discussing agent-skills rename. Govcraft crate is community, not official Anthropic.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1123,13 +1123,17 @@ Design rationale: Runbooks and memories are tool-agnostic (`.agent/` universally
 Looks like there is already an agent-skills crate https://crates.io/crates/agent-skills
 It does follow the agent skills standard...https://agentskills.io
 Should we rename our agent-skills to something else?
-### Re: agent-skills name conflict (HEAD)
+### Re: agent-skills name conflict
 
 **Yes, we must rename.** The Agent Skills Standard (agentskills.io) is much bigger than I realized — it's the official cross-tool standard created by Anthropic and adopted by:
 
 - Claude Code, Cursor, GitHub Copilot, VS Code, Gemini CLI, OpenCode, Codex, Junie (JetBrains), Goose, Roo Code, Amp, Kiro, Factory, Mistral Vibe, Spring AI, Snowflake, Databricks, and many more
 
 There's already an official `agent-skills` crate (v0.2.0) and `agent-skills-cli` (v0.4.4) on crates.io, plus a reference library at github.com/agentskills/agentskills.
+
+I don't think the `agent-skills` is official. It's repo is https://github.com/Govcraft/agent-skills
+
+The readme says it's implements the spec. Please review this repo.
 
 **Our options:**
 
@@ -1150,7 +1154,68 @@ There's already an official `agent-skills` crate (v0.2.0) and `agent-skills-cli`
 Or simply fold the manage.rs functionality back into agent-kit (since it's small) and archive the standalone repo.
 
 What do you prefer?
-<!-- agent:boundary:aa1f4369 -->
+
+Let's figure out exactly what this repo and cli tool will do. Would it also contain it's own skill to manage other the skills in the environment? Perhaps agent-skill-tree, agent-skill-env, agent-skill-kit, agent-skill-hub, agent-skill-install, agent-skill-bundles, agent-skill-libs, ...
+### Re: Govcraft/agent-skills review (HEAD)
+
+You're right — it's **not official Anthropic code**. It's by Govcraft (12 stars, created Jan 2026), though its README claims "Anthropic's official Rust implementation." The actual official repo is `agentskills/agentskills` (the spec + reference SDK, maintained by Anthropic). The Govcraft crate is a community implementation that took the `agent-skills` name on crates.io.
+
+Regardless, the name `agent-skills` on crates.io is taken, and the `agentskills.io` standard owns the conceptual namespace.
+
+### Re: What should this repo do + naming (HEAD)
+
+Let me think about what our tool actually does that the official ecosystem doesn't:
+
+**What we have (manage.rs):**
+1. Install a bundled SKILL.md to the right environment-specific path
+2. Check if installed skill is up-to-date
+3. Uninstall a skill
+4. List installed skills
+5. Environment-aware path resolution (Claude Code -> `.claude/skills/`, Cursor -> `.cursor/rules/`, etc.)
+
+**What the official `agent-skills` crate does:**
+- Parse SKILL.md files (frontmatter + body)
+- Validate skill directories
+
+**The gap:** The official crate parses/validates. Our tool **manages the lifecycle** — install, sync, update across environments. This is a package-manager-like concern.
+
+**Scope definition:**
+
+| Capability | Description |
+|------------|------------|
+| **Install** | Copy/symlink a skill from source to target environment |
+| **Sync** | Keep skills in sync across multiple environments (Claude Code + Cursor + ...) |
+| **Update** | Detect outdated skills and update them |
+| **Uninstall** | Remove a skill from an environment |
+| **List** | Show installed skills per environment |
+| **Self-skill** | Bundle its own SKILL.md for managing skills from within an agent session |
+
+**Yes, it should contain its own skill** — a meta-skill that lets an agent manage other skills during a session. "Install the email skill" -> the agent uses the skill-manager's SKILL.md to know how.
+
+**Naming analysis:**
+
+| Name | Fits scope? | Available on crates.io? |
+|------|------------|------------------------|
+| `skill-sync` | Sync emphasis, but also installs | Likely yes |
+| `agent-skill-kit` | Toolkit feel, matches agent-kit pattern | Likely yes |
+| `skillset` | Clean, short | **Taken** (0.1.0) |
+| `skill-install` | Too narrow (also uninstalls, syncs) | Likely yes |
+| `agent-skill-env` | Environment-specific focus | Likely yes |
+| `skill-harness` | Matches module-harness pattern | Likely yes |
+
+**My pick: `skill-harness`**
+
+Reasoning:
+- Matches the existing `module-harness` naming convention in our ecosystem
+- "Harness" conveys lifecycle management (install, test, uninstall) not just a single operation
+- Distinct from the official `agent-skills` namespace
+- Short, memorable, searchable
+- Can contain its own SKILL.md for meta-management
+
+Runner-up: `agent-skill-kit` (matches agent-kit naming).
+
+What's your preference?
+<!-- agent:boundary:432b339e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1174,7 +1239,8 @@ What do you prefer?
 - [x] Add Cargo.toml + CLI to agent-rules
 - [x] Add Cargo.toml + CLI to agent-memories
 - [x] Add Environment path methods for rules/runbooks/memories/skills dirs
-- [ ] Rename btakita/agent-skills (conflicts with official Agent Skills Standard)
+- [ ] Rename btakita/agent-skills to skill-harness (or chosen name)
+- [ ] Add self-skill (SKILL.md for meta-management)
 - [ ] Committed memory write capability (route lessons to right file)
 - [ ] Compare/align with Cursor Rules, Windsurf Rules, .agents spec
 - [ ] Ontology validation integration (use `existence` crate to validate terms)

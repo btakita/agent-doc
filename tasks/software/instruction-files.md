@@ -183,7 +183,7 @@ Users install via:
 **Option D recommendation:** Yes, I recommend it as a future phase. The `.agent/skills.toml` manifest is language-agnostic — it describes what skills a project needs. Any tool (Rust binary, shell script, or agent reading the file directly) can consume it. The binary tools (agent-rules, skill-harness, etc.) make it automatic; without them, an agent can still read the manifest and manually copy files.
 
 Implementation sequence: Option C (done) -> binary distribution (done) -> Option D manifest format (next).
-<!-- agent:boundary:8c0bdb1a -->
+<!-- agent:boundary:70d292b3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

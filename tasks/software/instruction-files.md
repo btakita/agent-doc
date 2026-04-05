@@ -760,7 +760,7 @@ All done.
 - No more local `spec/` references
 
 instruction-files still builds clean: 57 tests pass, clippy clean.
-<!-- agent:boundary:16291147 -->
+<!-- agent:boundary:aa565d58 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

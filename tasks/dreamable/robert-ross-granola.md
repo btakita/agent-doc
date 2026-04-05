@@ -211,7 +211,7 @@ Each skill follows the same contract:
 This is exactly what was done manually to create this file — automating that first step is the prototype.
 
 Let's transfer all the skill + binary stuff over to tasks/software/granola.md
-### Re: Transfer to tasks/software/granola.md (HEAD)
+### Re: Transfer to tasks/software/granola.md
 
 Created `tasks/software/granola.md` with:
 - Universal adapter architecture (skill-per-source pattern)
@@ -222,7 +222,7 @@ Created `tasks/software/granola.md` with:
 This doc stays focused on the meeting notes and Rob relationship. Software implementation moves to the granola.md session.
 
 Related sessions: tasks/software/proof.md (Proof adapter), tasks/software/granola.md (Granola adapter)
-<!-- agent:boundary:1683e4f1 -->
+<!-- agent:boundary:64f05de2 -->
 <!-- /agent:exchange -->
 
 ## Pending

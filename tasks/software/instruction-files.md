@@ -1150,7 +1150,7 @@ There's already an official `agent-skills` crate (v0.2.0) and `agent-skills-cli`
 Or simply fold the manage.rs functionality back into agent-kit (since it's small) and archive the standalone repo.
 
 What do you prefer?
-<!-- agent:boundary:7571687f -->
+<!-- agent:boundary:aa1f4369 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

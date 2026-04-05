@@ -8,13 +8,13 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-4/5 repos released with binaries. instruction-files v0.2.0 rebuilding after fix.
+Complete. All 6 repos released with cross-platform binaries on GitHub + crates.io.
 <!-- /agent:status -->
 
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-### Session Summary (post-compact #2) (HEAD)
+### Session Summary (post-compact #2)
 
 **Phase: Skill installation design + CI/CD + release**
 
@@ -44,11 +44,23 @@ agent_doc_write: crdt
 
 #### Status
 All items complete. Ecosystem fully built, tested, published, and released.
-<!-- agent:boundary:3725a9ce -->
+
+Is v0.2.0 released?
+### Re: v0.2.0 release (HEAD)
+
+Yes. instruction-files v0.2.0 is released with all 5 platform binaries:
+- `instruction-files-x86_64-unknown-linux-gnu.tar.gz`
+- `instruction-files-aarch64-unknown-linux-gnu.tar.gz`
+- `instruction-files-x86_64-apple-darwin.tar.gz`
+- `instruction-files-aarch64-apple-darwin.tar.gz`
+- `instruction-files-x86_64-pc-windows-msvc.zip`
+
+All 6 repos now have successful GitHub Releases with cross-platform binaries.
+<!-- agent:boundary:68966eb1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-All items complete. instruction-files v0.2.0 rebuilding.
+All items complete.
 <!-- /agent:pending -->

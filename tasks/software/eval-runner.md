@@ -1445,7 +1445,7 @@ Extracts document state + snapshot at a given commit into a self-contained fixtu
 - **Fixture size** — target <10 files, <1KB each. Model only needs enough to demonstrate understanding + action.
 - **Determinism** — agentic responses are less deterministic. Multi-run median scoring even more important.
 - **Cost** — each agentic case is a full Claude session (~30s, ~5K tokens). 10-case suite at `--parallel 4` ≈ 5min.
-<!-- agent:boundary:e03652c2 -->
+<!-- agent:boundary:77814804 -->
 <!-- /agent:exchange -->
 
 ## Pending

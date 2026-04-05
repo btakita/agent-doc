@@ -11,6 +11,8 @@ agent_doc_write: crdt
 **Author:** Robert Ross (via Granola)
 **Source:** [Granola shared note](https://notes.granola.ai/d/e4d8dd00-6468-4a0b-93f1-df1f7d84d956)
 
+Can we make this bidirectional (granola <-> agent-doc) in any way?
+
 ## Notes
 
 <!-- agent:notes patch=replace -->
@@ -35,6 +37,13 @@ agent_doc_write: crdt
 - Open source (MIT license); currently single-user/local; web version in early exploration
   - Prompt injection risk identified as blocker for multi-user collaboration
 
+> - Vision: any AI-generated artifact becomes interactive and annotatable inline
+
+Can we use agent-docs to economically provide the interface for any AI-generated artifact to interact with the agent harness?
+
+We are starting with Granola in this example. But we can expand to other areas such as Figma Jam, Build Party, Shimmer.
+Allow for free form agent harness interaction within a variety of web interfaces.
+
 ### Existence Lang — Brian's Philosophy Framework
 
 - Ontology system developed in 2015; has a Rust crate and binary
@@ -54,14 +63,14 @@ agent_doc_write: crdt
 ### Products Covered (Rob's Pitch)
 
 **Build Party:** live infrastructure for AI builder communities
-- Watch party, pre/post-party, co-build rooms, competitions (vibe coding hackathons), courseware
-- Built on LiveKit; targeting tool providers (e.g., LiveKit) as first strategic partners
+- Watch party, pre/post-party, co-build rooms, competitions (vibe coding hackathons), courseware: Livekit-enable components that bring interactivity to a variety of events. Polls, agent harness interactions, deep bi-directional surveys, hackathons (collaborative? security concerns?), courses to learn Livekit and other technologies within a sandboxed agent harness
+- Built on LiveKit; targeting tool providers (e.g., LiveKit) as first strategic partners: bidirectional a/v interactions with other humans and agents. interactive design + coding sessions. collaborative high-trust work environments...if we provide a sandbox, then it safely protects against malicious prompts.
 - LiveKit raised $100M in Jan 2026; Neil Dwyer (built LiveKit agent framework) is an advisor
 
 **Shimmer:** developer sidekick/helper app
 - View, back up, and semantically search Claude Code sessions and assets
-- Share sessions with collaborators (e.g., Rob seeing Miguel's daily output)
-- Memory layer via Cor.e or Vespa; semantic search via Trieve (acquired by Mintlify)
+- Share sessions with collaborators (e.g., Rob seeing Miguel's daily output): how can we have daily blog posts for interesting topics from all work activity...including git commits, claude sessions, other connected services.
+- Memory layer via Cor.e or Vespa; semantic search via Trieve (acquired by Mintlify): Describe Cor.e and how Mintlify integrates Trieve
 - Later: session scoring, improvement suggestions, cross-session intelligence
 
 ### Tools & Services Discussed
@@ -109,10 +118,75 @@ agent_doc_write: crdt
 
 <!-- agent:exchange patch=append -->
 
-<!-- agent:boundary:ae8f3e50 -->
+### Re: Granola <-> agent-doc bidirectional (HEAD)
+
+Yes — a bidirectional Granola integration is feasible. The approach:
+
+**Granola → agent-doc (ingest):** Granola exposes shared notes via URL (like the one in this doc). A `corky` adapter or standalone script could poll/webhook Granola notes and hydrate them into agent-doc template documents — exactly what was done manually to create this file.
+
+**agent-doc → Granola (push back):** This is harder since Granola's API surface for *writing* is limited. Two pragmatic paths:
+1. **Browser automation** — use the chromium-bridge MCP to paste agent-doc output back into the Granola note
+2. **Shared link as read-only mirror** — generate a rendered HTML/markdown view of the agent-doc exchange that Granola users can reference (like a companion artifact)
+
+The most immediate win: automate the ingest side (Granola → agent-doc) so meeting notes flow into template documents without manual copy-paste. The push-back can start as a browser-paste workflow and graduate to API when Granola exposes write endpoints.
+
+### Re: Agent-docs as universal artifact interface (HEAD)
+
+This is the right framing. Agent-doc's core primitive — named components with CRDT merge, patch blocks, and git-backed history — is already source-agnostic. The document template is the universal interface; the *adapter* is what varies per source.
+
+Architecture for multi-source agent-doc:
+
+```
+[Granola] ──adapter──┐
+[Figma Jam] ─adapter──┤
+[Build Party] ─adapter─┼──→ agent-doc template ──→ agent harness (Claude Code / tmux)
+[Shimmer] ──adapter───┤                              │
+[Any web UI] ─adapter─┘                              └──→ patch response ──→ adapters ──→ sources
+```
+
+Each adapter handles:
+1. **Ingest**: Transform source artifacts into `&lt;!-- agent:notes --&gt;` component content
+2. **Respond**: Route `<!-- patch:* -->` blocks back to the source format
+3. **Sync**: Bidirectional conflict resolution (agent-doc's CRDT handles the doc side; adapter handles source-side merging)
+
+The economic advantage: you build the agent harness interaction *once* in agent-doc, then each new source only requires a thin adapter. The harness (diff routing, template patching, git history, session analysis) is shared infrastructure.
+
+For Build Party specifically, this means attendees could interact with agents through Build Party's UI while the agent harness runs agent-doc underneath — the Build Party adapter translates between LiveKit room events and agent-doc patches.
+
+### Re: Build Party — expanded vision (HEAD)
+
+Your annotations sharpen the pitch significantly:
+
+**LiveKit-enabled interactive components**: Polls, agent harness interactions, deep surveys, and hackathons as *composable primitives* that event organizers assemble. The sandboxed agent harness is the key differentiator — it enables collaborative coding without prompt injection risk (the same blocker agent-doc identified for multi-user).
+
+**Sandbox as trust layer**: "If we provide a sandbox, then it safely protects against malicious prompts" — this maps directly to the prompt injection problem. The sandbox boundary means untrusted participants can interact with agents without compromising the session. This is a concrete product feature, not just infrastructure.
+
+**Open questions from your annotations:**
+- Collaborative hackathons + security concerns → the sandbox model addresses this, but needs a spec for what "sandboxed agent harness" means in a LiveKit room context (per-participant isolation? shared workspace with access controls?)
+- Courses to learn LiveKit within a sandboxed harness → this is a strong go-to-market: LiveKit itself as the first "course provider" on Build Party
+
+### Re: Shimmer — daily blog posts & Cor.e/Trieve (HEAD)
+
+**Daily blog posts from work activity**: This is a compelling Shimmer feature — automated daily digests synthesized from git commits, Claude Code sessions, and connected services. The pipeline:
+
+1. **Collect**: git log, Claude session exports, calendar events, Slack activity
+2. **Synthesize**: Agent summarizes themes, decisions, blockers — similar to how Brian's blog post analyzed 24hrs of agent-doc themes
+3. **Publish**: Push to a blog/feed that collaborators subscribe to (Rob seeing Miguel's daily output becomes *reading Miguel's daily post*)
+
+This transforms Shimmer from a session viewer into an *activity narrator* — much higher value.
+
+**Cor.e and Mintlify/Trieve:**
+- **Cor.e** — persistent memory MCP server. Stores cross-session context as structured observations. Rob and Miguel share a login, meaning they share a memory space. Think of it as the "long-term memory" layer that persists between Claude Code sessions.
+- **Trieve** — semantic + full-text hybrid search engine. Was acquired by **Mintlify** (the docs platform). Mintlify uses Trieve to power intelligent documentation search. In Shimmer's context, Trieve would index session content and make it searchable with natural language queries ("when did we discuss the auth middleware rewrite?" → finds the relevant session).
+- **Vespa** — the Apache-licensed alternative to Cor.e for the memory layer, with better cross-session capability. The choice between Cor.e and Vespa likely comes down to hosted-vs-self-hosted and how much cross-session intelligence Shimmer needs.
+<!-- agent:boundary:d44a0095 -->
 <!-- /agent:exchange -->
 
-## Pending (HEAD)
+## Pending
 
 <!-- agent:pending patch=replace -->
+- Prototype Granola → agent-doc ingest adapter (automate meeting note hydration)
+- Spec the universal adapter architecture (ingest/respond/sync interface)
+- Define "sandboxed agent harness" for Build Party LiveKit room context
+- Explore Shimmer daily digest pipeline (git + sessions + services → blog post)
 <!-- /agent:pending -->

@@ -452,7 +452,7 @@ But the deeper issue you're pointing out: I reached for the `Write` tool (ad-hoc
 **On memory vs committed context:** Understood. The principle from the code-enforced-directives runbook applies here too: behavioral patterns should be committed to skills/runbooks/context in the repo, not stored in machine-local memory. Memory is ephemeral and non-portable. A new agent on a cloned repo should get the right behavior from the committed files alone.
 
 This means: instead of saving "use agent-doc transfer not Write tool" as a memory, the SKILL.md or a runbook should explicitly say "when creating new task documents, use `agent-doc init`, not manual file creation." The instruction lives in the committed skill, not in memory.
-<!-- agent:boundary:9b5830a2 -->
+<!-- agent:boundary:307a10c6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

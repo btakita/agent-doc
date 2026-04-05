@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-13/22 items complete. Hooks stay in agent-kit. Starting restructure.
+15/22 items complete. agent-kit restructured, agent-skills CLI shipped. agent-rules + agent-memories subagents building CLIs.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1041,7 +1041,7 @@ This is a future feature — the convention repos define formats first, tooling 
 Want me to start restructuring agent-kit?
 
 Yes. Would all of the agent-* repos benefit from hooks?
-### Re: Would all agent-* repos benefit from hooks? (HEAD)
+### Re: Would all agent-* repos benefit from hooks?
 
 **No — hooks are session coordination infrastructure, not something the convention repos need.**
 
@@ -1062,7 +1062,40 @@ Looking at the hook types: `pre_write`, `post_write`, `post_commit`, `claim`, `l
 If agent-memories or agent-skills ever need event notification (e.g., "memory written" → "MEMORY.md index updated"), they'd depend on agent-kit's hooks feature. But that's a future concern.
 
 Starting the restructuring now.
-<!-- agent:boundary:d5d8a501 -->
+do
+- [ ] Restructure agent-kit: move skill.rs to agent-skills, flip instruction-files dependency
+- [ ] Add Cargo.toml + CLI binary to agent-rules, agent-memories, agent-skills
+### Re: do (restructure + CLI binaries) (HEAD)
+
+**1. agent-kit restructured:**
+- Removed `skill` module from `lib.rs` (detect + hooks remain)
+- Updated doc comment to note skill management moved to agent-skills
+- 14 tests pass, clippy clean
+- Pushed to origin
+
+**2. agent-skills: Rust crate with CLI created:**
+- `manage.rs` — `SkillConfig` (install/check/uninstall) with pluggable path resolver
+- `main.rs` — CLI: `install`, `check`, `uninstall`, `list` commands
+- `lib.rs` — re-exports manage module + Environment when `detect` feature enabled
+- Key improvement over agent-kit's skill.rs: path resolution is a `Box<dyn Fn>` instead of coupled to `Environment` — works standalone or with agent-kit
+- `skill_for_environment()` factory uses agent-kit detection when `detect` feature enabled
+- `SkillConfig::generic()` factory for tool-agnostic `.agent/skills/` paths
+- 9 tests pass, clippy clean, pushed
+
+**3. agent-rules + agent-memories: subagents creating CLIs** (in progress)
+
+The dependency graph is now clean:
+```
+agent-kit (detect + hooks, zero upstream deps)
+    ^
+    |--- agent-skills (manage.rs + CLI, optional agent-kit dep)
+    |--- agent-rules (validation + CLI, subagent building)
+    |--- agent-memories (validation + CLI, subagent building)
+    |--- instruction-files (audit engine)
+```
+
+No cycles. agent-kit is the leaf dependency.
+<!-- agent:boundary:8da04467 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1081,13 +1114,13 @@ Starting the restructuring now.
 - [x] Create btakita/agent-memories repo + submodule
 - [x] Create btakita/agent-rules repo + submodule
 - [x] Create btakita/agent-skills repo + submodule
-- [ ] Restructure agent-kit: move skill.rs to agent-skills, flip instruction-files dependency
-- [ ] Add Cargo.toml + CLI binary to agent-rules, agent-memories, agent-skills
+- [x] Restructure agent-kit: remove skill.rs (moved to agent-skills)
+- [x] Add Cargo.toml + CLI to agent-skills
+- [ ] Add Cargo.toml + CLI to agent-rules (subagent in progress)
+- [ ] Add Cargo.toml + CLI to agent-memories (subagent in progress)
 - [ ] Add Environment path methods for rules/runbooks/memories dirs
 - [ ] Committed memory write capability (route lessons to right file)
 - [ ] Compare/align with Cursor Rules, Windsurf Rules, .agents spec
 - [ ] Ontology validation integration (use `existence` crate to validate terms)
 - [ ] Spec audit integration (use `module-harness` to audit module specs)
-- [ ] Validate agent-memories frontmatter (name, type, non-empty body)
-- [ ] Validate agent-runbooks structure (delegate to agent-runbooks crate)
 <!-- /agent:pending -->

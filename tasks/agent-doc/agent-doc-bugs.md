@@ -525,7 +525,7 @@ agent-memories/             ← spec repo: defines the committed memory format
 instruction-files depends on agent-runbooks + agent-memories for their specs. The specs define the format; instruction-files implements the tooling.
 
 This keeps the specs focused while the tooling is consolidated. Does this separation feel right, or would you prefer everything in one repo?
-<!-- agent:boundary:4b89304d -->
+<!-- agent:boundary:dee69076 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

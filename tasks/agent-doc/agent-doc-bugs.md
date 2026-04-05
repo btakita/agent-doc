@@ -682,7 +682,7 @@ Done. Created `runbooks/ontology-references.md` in the module-harness skill and 
 **SKILL.md updated:** added `ontology references` runbook to the Runbooks section.
 
 The module-harness will now check for ontology cross-references during audits and include them when generating/applying specs.
-<!-- agent:boundary:1423df9d -->
+<!-- agent:boundary:b69bc711 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

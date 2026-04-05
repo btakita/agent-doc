@@ -1062,7 +1062,7 @@ Looking at the hook types: `pre_write`, `post_write`, `post_commit`, `claim`, `l
 If agent-memories or agent-skills ever need event notification (e.g., "memory written" → "MEMORY.md index updated"), they'd depend on agent-kit's hooks feature. But that's a future concern.
 
 Starting the restructuring now.
-<!-- agent:boundary:32695946 -->
+<!-- agent:boundary:d5d8a501 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -57,7 +57,7 @@ To make this generic, a `skill-harness` crate (or extending instruction-files) w
 - A check command that verifies installed skill matches source
 
 This is new functionality for the instruction-files expansion. Added to the task.
-<!-- agent:boundary:f9f7fdf0 -->
+<!-- agent:boundary:9834081e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

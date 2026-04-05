@@ -58,7 +58,7 @@ Done. `agent-doc transfer` now automatically transfers the pending component alo
 - Skips if source pending is empty
 
 **Tests:** 2 new tests. 458 total, all passing, clippy clean. Binary installed.
-<!-- agent:boundary:93514e9a -->
+<!-- agent:boundary:7657ea9e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -696,7 +696,7 @@ Both specs created in `src/instruction-files/spec/`.
 - Relationship diagram showing how runbooks complement declarative rules
 
 README updated to link both specs from the Architecture section.
-<!-- agent:boundary:3199f2fa -->
+<!-- agent:boundary:42091b73 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

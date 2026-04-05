@@ -104,7 +104,7 @@ Yes.
 So: the code works, the pipeline works. The only failure mode is creating files outside the pipeline. The fix is behavioral (use `agent-doc init/transfer`) not code.
 
 On the worktree question: the sync fix for null sessions is already handled by `ensure_initialized()`. The empty-file scaffold was the gap that v0.31.14 fixed. No additional code changes needed for the null-session case.
-<!-- agent:boundary:db9842cf -->
+<!-- agent:boundary:d1c48008 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

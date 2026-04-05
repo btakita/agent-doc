@@ -125,7 +125,7 @@ No ops.log entry for proof.md because the claim validation happens *before* any 
 **Root cause:** The missing step is that sync treats files without `agent_doc_format` frontmatter as non-session files. The fix is straightforward: in `resolve_file()`, if a `.md` file has no frontmatter but is in the editor layout, init it.
 
 Want me to implement the sync auto-init? This would be the v0.31.14 feature.
-<!-- agent:boundary:3a58f268 -->
+<!-- agent:boundary:5c5a22ba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

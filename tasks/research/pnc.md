@@ -12,6 +12,8 @@ agent_doc_write: crdt
 ## Exchange (HEAD)
 
 <!-- agent:exchange patch=append -->
+
+<!-- agent:boundary:ecab2eb9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built (HEAD)

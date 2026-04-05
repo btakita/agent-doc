@@ -644,7 +644,7 @@ Let me know which you prefer or if you want a different tone.
 
 do
 - **Prep demo for Sunday:** Run session analyzer on robert-ross transcript
-### Re: Session analyzer — robert-ross transcript (HEAD)
+### Re: Session analyzer — robert-ross transcript
 
 Ran the session analyzer on both the 3h54m call transcript and this agent-doc session (72 commits, 22 exchanges).
 
@@ -695,7 +695,83 @@ Ran the session analyzer on both the 3h54m call transcript and this agent-doc se
 - **Show Core/Vespa + Shimmer skeleton plan** — arrive with an architecture sketch
 - **Demo subagent usage live** — Rob probed this twice, didn't get a concrete demo last time
 - **Address metrics vs. intangibles** — Brian's 8-9 rating caveat; position session analysis as qualitative-first
-<!-- agent:boundary:08773798 -->
+
+do
+- Evaluate Deepgram + LiveKit Agents for real-time STT pipeline
+- Evaluate Cloudflare Vectorize + Workers AI for session indexing
+### Re: Deepgram + LiveKit Agents — real-time STT evaluation (HEAD)
+
+**Key finding:** LiveKit's per-participant audio tracks mean diarization is structurally free — no Deepgram add-on needed.
+
+| Metric | Value |
+|--------|-------|
+| Model | Deepgram Nova-3 |
+| Latency | <300ms streaming |
+| Price | $0.0077/min |
+| Free credit | $200 (no CC, no expiry) = ~433 hours |
+| LiveKit plugin | Native first-party |
+| Demo cost | 2hr/10 participants = ~$1.54 |
+
+**How it works:** Each LiveKit participant has their own audio track. You run one `AgentSession` per participant — transcripts carry participant identity. No algorithmic diarization needed. Working example: `multi-user-transcriber.py` in official LiveKit agents repo.
+
+**Setup:** `uv add "livekit-agents[deepgram,silero]~=1.4"` + env vars (`DEEPGRAM_API_KEY`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`).
+
+**Known issue:** [livekit/agents#3657](https://github.com/livekit/agents/issues/3657) — transcription text streams may only emit for one participant. Test with 2+ before demo.
+
+**Alternatives:**
+
+| Provider | Latency | Diarization | LiveKit Plugin | Price/min |
+|----------|---------|-------------|----------------|-----------|
+| Deepgram Nova-3 | <300ms | Add-on (unnecessary with LiveKit) | Native | $0.0077 |
+| Gladia Solaria-1 | ~103ms | Bundled | Community | ~$0.01 |
+| AssemblyAI | Moderate | Add-on | Community | ~$0.0065 |
+| OpenAI Realtime | <300ms | No | Plugin | $0.06 |
+
+**Verdict:** Deepgram + LiveKit is the right choice for Build Party. Native plugin, cheapest at scale, and LiveKit's architecture eliminates the hardest part (diarization).
+
+---
+
+### Re: Cloudflare Vectorize + Workers AI — session indexing evaluation (HEAD)
+
+**Key finding:** GA, cheap (<$5/mo for Shimmer at scale), zero external dependencies with existing Cloudflare stack.
+
+| Limit | Free | Paid ($5/mo base) |
+|-------|------|-------------------|
+| Queried dims/mo | 30M | 50M included |
+| Stored dims/mo | 5M | 10M included |
+| Max vectors/index | 10M | 10M |
+| Max dimensions | 1,536 | 1,536 |
+
+**Embedding model:** `@cf/baai/bge-base-en-v1.5` — 768 dims, 512 token input limit, $0.067/1M tokens.
+
+**Shimmer cost estimate (5K sessions, 100K vectors):**
+
+| Component | Cost |
+|-----------|------|
+| Workers AI embedding (one-time) | ~$1.34 |
+| Vectorize storage | ~$0.33/mo |
+| Workers Paid plan | $5/mo base |
+| **Total** | **~$5/mo** |
+
+**Integration pattern:** Wrangler bindings for `VECTORIZE` + `AI`. Ingest: snapshot markdown → chunk at ~400 tokens → embed → upsert. Search: query → embed → vector search with metadata filtering.
+
+**Gaps:**
+- No hybrid search (need D1 FTS for exact-string matching alongside)
+- 512-token input limit on bge-base (chunking required)
+- Metadata index limited to 64 bytes per field
+- topK capped at 50 with metadata
+
+**Comparison:**
+
+| | Vectorize | Turbopuffer | Qdrant Cloud | Pinecone |
+|---|---|---|---|---|
+| Free tier | Yes | No | 1GB | 2GB |
+| Min paid | $5/mo | $64/mo | Pay-per-use | $50/mo |
+| Hybrid search | No | Yes | Yes | Yes |
+| Stack fit | Native | External | External | External |
+
+**Verdict:** Cloudflare Vectorize + Workers AI is the right call for Shimmer MVP. Cheap, serverless, native to existing stack. If hybrid search becomes critical, pair with D1 FTS or evaluate Turbopuffer later.
+<!-- agent:boundary:25446fa1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -704,10 +780,10 @@ Ran the session analyzer on both the 3h54m call transcript and this agent-doc se
 - ([done]) Build session analyzer template
 - ([done]) Build `/granola` skill with import runbook
 - ([done]) Create Granola agent-doc for Rob's meeting notes
-- ([done]) **Prep demo for Sunday:** Run session analyzer on robert-ross transcript
+- ([done]) Prep demo for Sunday: Run session analyzer on robert-ross transcript
+- ([done]) Evaluate Deepgram + LiveKit Agents for real-time STT pipeline
+- ([done]) Evaluate Cloudflare Vectorize + Workers AI for session indexing
 - **Sunday Apr 5, 5pm ET:** Follow-up call with Rob — confirmed via SMS
-- Evaluate Deepgram + LiveKit Agents for real-time STT pipeline
-- Evaluate Cloudflare Vectorize + Workers AI for session indexing
 - Evaluate 3-5 LiveKit GitHub repos for Build Party
 - Get Build Party PRD from Rob
 - Create mermaid diagram for Miguel's LiveKit agent course

@@ -104,7 +104,7 @@ do
 **Files changed:**
 - `src/agent-doc/src/extract.rs` — auto-init in `transfer()`, updated module spec + contracts
 - `src/agent-doc/src/write.rs` — warnings in `run_stream` and `try_ipc`, improved logging
-<!-- agent:boundary:004fdad5 -->
+<!-- agent:boundary:92b02917 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

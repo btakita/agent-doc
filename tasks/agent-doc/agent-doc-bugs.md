@@ -427,7 +427,7 @@ This is a gap in the transfer workflow — when creating a new task document via
 
 Does `agent-doc transfer` sufficiently perform the correct steps? Do we just need a skill -> runbook?
 > - [ ] Transfer runbook: add commit step for new target files
-### Re: Does agent-doc transfer commit correctly? (HEAD)
+### Re: Does agent-doc transfer commit correctly?
 
 Yes, `agent-doc transfer` already handles this correctly. Looking at `extract.rs:194-200`:
 
@@ -440,12 +440,24 @@ The `git::commit()` function includes `git add` as part of staging (falls back t
 **My mistake:** I didn't use `agent-doc transfer`. I manually created the file with the `Write` tool, which bypasses the agent-doc pipeline entirely. The transfer runbook and binary are already correct — no changes needed.
 
 The runbook already documents the right workflow. The skill should use `agent-doc transfer` (or `agent-doc extract`) rather than manually creating files. No runbook update needed — the gap was in my execution, not the tooling.
-<!-- agent:boundary:9a45b76b -->
+
+Why did you not follow the steps?
+Do not add anything to memory. instructions-files should discourage adding to memory. We should instead rely on committing to the any context, skill, or runbooks in the library or dependencies.
+### Re: Why I didn't follow the transfer steps (HEAD)
+
+I didn't use `agent-doc transfer` because I was creating a new task document from scratch, not transferring content from an existing document. The transfer command moves content between existing documents. For creating a brand new file, I should have used `agent-doc init` to scaffold it, then committed it.
+
+But the deeper issue you're pointing out: I reached for the `Write` tool (ad-hoc file creation) instead of using the established agent-doc pipeline (`init` -> `commit`). The tooling exists and I bypassed it.
+
+**On memory vs committed context:** Understood. The principle from the code-enforced-directives runbook applies here too: behavioral patterns should be committed to skills/runbooks/context in the repo, not stored in machine-local memory. Memory is ephemeral and non-portable. A new agent on a cloned repo should get the right behavior from the committed files alone.
+
+This means: instead of saving "use agent-doc transfer not Write tool" as a memory, the SKILL.md or a runbook should explicitly say "when creating new task documents, use `agent-doc init`, not manual file creation." The instruction lives in the committed skill, not in memory.
+<!-- agent:boundary:9b5830a2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Transfer workflow verified — binary already commits target files
+- [ ] Add "use agent-doc init for new files" guidance to SKILL.md or transfer runbook
 - [ ] Bump agent-doc to v0.31.14 and release
 <!-- /agent:pending -->

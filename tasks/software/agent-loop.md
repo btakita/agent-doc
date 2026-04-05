@@ -184,7 +184,7 @@ All 6 items done. Summary:
 do
 - [ ] Apply SKILL.md reductions (agent-doc first, then browser/chromium-bridge)
 - [ ] Run token-efficiency evals against baseline to establish metrics
-### Re: SKILL.md reductions + eval baseline (HEAD)
+### Re: SKILL.md reductions + eval baseline
 
 **SKILL.md reductions applied:**
 
@@ -212,13 +212,32 @@ Key changes:
 Results saved to `evals/general/token-efficiency/baselines/sonnet-2026-04-05.json`.
 
 One failure: `approval-minimal-response` -- model doesn't know the "do" convention without system prompt context (expected). Token counts not available via Claude CLI backend; need `ANTHROPIC_API_KEY` in pass store for the anthropic-api backend to get `cache_control` metrics.
-<!-- agent:boundary:9cd7b16b -->
+
+I don't have any budget for anthropic api. Can we use claude code instead?
+> - [ ] Add ANTHROPIC_API_KEY to pass store to enable token-count evals
+### Re: Using Claude Code CLI for token-count evals (HEAD)
+
+Yes -- the Claude CLI `--output-format json` already includes full usage data. Updated eval-runner's `call_claude_cli()` to parse the JSON output instead of text, extracting:
+- `input_tokens`, `output_tokens`
+- `cache_creation_input_tokens`, `cache_read_input_tokens`
+
+No Anthropic API key needed. Smoke test results with token counts:
+
+| Case | Score | Output Tokens | Budget | Status |
+|------|-------|--------------|--------|--------|
+| `simple-question-concise` | 0.60 | 376 | max 300 | EXCEEDED |
+| `no-changes-fast-exit` | 0.95 | 61 | max 100 | PASS |
+
+Cache stats visible in stderr (e.g., `read=11163 created=12443 uncached=3`).
+
+The `simple-question-concise` case now correctly catches verbose responses via the `max_output_tokens: 300` budget constraint -- the model used 376 tokens (25% over budget). This is exactly the kind of efficiency regression the eval is designed to catch.
+
+Removing the ANTHROPIC_API_KEY pending item since it's no longer needed.
+<!-- agent:boundary:994f4b90 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Apply SKILL.md reductions (agent-doc first, then browser/chromium-bridge)
-- [x] Run token-efficiency evals against baseline to establish metrics
-- [ ] Add ANTHROPIC_API_KEY to pass store to enable token-count evals
 - [ ] Test auto-compact threshold on a real session document
 - [ ] Add system prompt to token-efficiency evals for approval case
+- [ ] Tune token budgets based on baseline (simple-question needs tighter prompt or higher budget)
 <!-- /agent:pending -->

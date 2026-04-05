@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-27/27 complete. Full ecosystem built: 6 crates, 177 tests, 5 GitHub repos created.
+27/27 original items complete. CI/Release workflows deployed. Ready to publish to crates.io.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1600,7 +1600,7 @@ do
 3. **Spec audit** — Adding `check_spec()` to instruction-files (behind `spec-audit` feature)
 
 Will wire up modules and report results when complete. These are the final 3 items.
-### Re: Final 3 items — all complete (HEAD)
+### Re: Final 3 items — all complete
 
 **27/27 items done.**
 
@@ -1636,37 +1636,33 @@ Will wire up modules and report results when complete. These are the final 3 ite
 | **Total** | **177** |
 
 The full ecosystem is built, tested, and deployed.
-<!-- agent:boundary:db0c5686 -->
+
+Use gh actions on each of the repos to deploy to crates, npm, pypi.
+### Re: GitHub Actions CI/Release (HEAD)
+
+Done. All 5 repos now have CI + Release workflows (agent-kit already had them):
+
+**ci.yml** (on push/PR to main):
+- `cargo clippy -- -D warnings`
+- `cargo test`
+
+**release.yml** (on version tag `v*`):
+- `cargo clippy --all-features -- -D warnings`
+- `cargo test --all-features`
+- `cargo publish` to crates.io (uses `CARGO_REGISTRY_TOKEN` secret)
+
+To publish, push a version tag: `git tag v0.1.0 && git push origin v0.1.0`
+
+Each repo needs a `CARGO_REGISTRY_TOKEN` secret configured in GitHub Settings > Secrets. This is the same token used for agent-kit.
+
+**Note on npm/pypi:** These are all Rust crates — npm/pypi don't apply. If you want npm/pypi binaries later, we'd add cross-compilation + binary distribution (like agent-doc does with maturin for PyPI).
+<!-- agent:boundary:a771adbb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Add `.agent/runbooks/*.md` to discovery glob patterns
-- [x] Bundle default precommit.md and prerelease.md
-- [x] Add existence-lang dependency for ontology validation
-- [x] Add module-harness dependency for spec auditing
-- [x] Add context invariant audit (no machine-local paths)
-- [x] Create shared skill + runbook
-- [x] Architecture: instruction-files depends on agent-runbooks + agent-memories specs
-- [x] agent-memories spec: committed memory format (type, scope, why, how to apply)
-- [x] agent-runbooks spec: runbook format (checklist, prerequisites, verification)
-- [x] Remove duplicate agent-runbooks spec (use agent-runbooks repo's SPEC.md)
-- [x] Create btakita/agent-memories repo + submodule
-- [x] Create btakita/agent-rules repo + submodule
-- [x] Restructure agent-kit: remove skill.rs (moved to skill-harness)
-- [x] Add Cargo.toml + CLI to skill-harness
-- [x] Add Cargo.toml + CLI to agent-rules
-- [x] Add Cargo.toml + CLI to agent-memories
-- [x] Add Environment path methods for rules/runbooks/memories/skills dirs
-- [x] Rename btakita/agent-skills to btakita/skill-harness
-- [x] Move shared audit primitives to agent-kit
-- [x] Move domain logic to agent-rules (actionable, tree_paths)
-- [x] Move init_runbooks to agent-runbooks
-- [x] Add instruction-files CLI (orchestrator)
-- [x] Add Spec/Contracts/Evals convention to all repos
-- [x] Add self-skill to skill-harness
-- [x] Committed memory write capability
-- [x] Ontology validation integration
-- [x] Spec audit integration
+All 27 original items complete. New:
+- [ ] Configure CARGO_REGISTRY_TOKEN secret on each GitHub repo
+- [ ] Publish initial versions to crates.io (v0.1.0 tags)
 <!-- /agent:pending -->

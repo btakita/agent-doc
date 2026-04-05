@@ -567,7 +567,7 @@ You're right. I've updated all relevant files to codify this:
 > When receiving an approval signal: execute the approved work, follow ALL applicable runbooks, add tests as part of implementation, run `make check` before marking done. Never interpret "do" as permission to cut corners.
 
 **5. MEMORY.md** — added "Process Discipline" section above "Testing Discipline".
-<!-- agent:boundary:f549662b -->
+<!-- agent:boundary:db2cef77 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

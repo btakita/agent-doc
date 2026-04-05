@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-18/22 items complete. Full ecosystem built and tested. Remaining: memory write, cross-tool alignment, ontology + spec integrations.
+18/23 items complete. Discovered official Agent Skills Standard — need to rename our repo to avoid conflict.
 <!-- /agent:status -->
 
 ## Exchange
@@ -649,7 +649,7 @@ do
 - [ ] Create shared skill + runbook
 - [ ] Architecture: instruction-files depends on agent-runbooks + agent-memories specs
 
-### Re: do (3 items) (HEAD)
+### Re: do (3 items)
 
 All 3 implemented. Clippy clean, 57 tests pass (6 new).
 
@@ -1119,7 +1119,38 @@ All 3 complete.
 Design rationale: Runbooks and memories are tool-agnostic (`.agent/` universally). Skills and rules map to tool-specific directories where they exist (Cursor has `.cursor/rules/`, Claude Code has `.claude/skills/`).
 
 19 tests pass (14 existing + 5 new), clippy clean, pushed.
-<!-- agent:boundary:5d3309cc -->
+
+Looks like there is already an agent-skills crate https://crates.io/crates/agent-skills
+It does follow the agent skills standard...https://agentskills.io
+Should we rename our agent-skills to something else?
+### Re: agent-skills name conflict (HEAD)
+
+**Yes, we must rename.** The Agent Skills Standard (agentskills.io) is much bigger than I realized — it's the official cross-tool standard created by Anthropic and adopted by:
+
+- Claude Code, Cursor, GitHub Copilot, VS Code, Gemini CLI, OpenCode, Codex, Junie (JetBrains), Goose, Roo Code, Amp, Kiro, Factory, Mistral Vibe, Spring AI, Snowflake, Databricks, and many more
+
+There's already an official `agent-skills` crate (v0.2.0) and `agent-skills-cli` (v0.4.4) on crates.io, plus a reference library at github.com/agentskills/agentskills.
+
+**Our options:**
+
+| Name | Meaning | Conflict risk |
+|------|---------|--------------|
+| `skill-manager` | Manages skill installation | Low — descriptive |
+| `skill-sync` | Syncs skills across environments | Low |
+| `agent-skill-kit` | Toolkit for working with agent skills | Low |
+| `skill-install` | Installs skills to environments | Low |
+
+**But actually:** Given that the Agent Skills Standard already exists and our `agent-skills` repo's `manage.rs` is fundamentally about installing SKILL.md files into environment-specific directories — this functionality should probably just use the **official `agent-skills` crate** as a dependency rather than reinventing it.
+
+**Recommended path:**
+1. Rename `btakita/agent-skills` to `btakita/skill-sync` (or similar) — the narrow scope of "sync skills across environments"
+2. Depend on the official `agent-skills` crate for parsing/validation
+3. Our value-add: the `Environment`-aware path resolution + cross-environment install/uninstall (which the official crate doesn't do)
+
+Or simply fold the manage.rs functionality back into agent-kit (since it's small) and archive the standalone repo.
+
+What do you prefer?
+<!-- agent:boundary:7571687f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1143,6 +1174,7 @@ Design rationale: Runbooks and memories are tool-agnostic (`.agent/` universally
 - [x] Add Cargo.toml + CLI to agent-rules
 - [x] Add Cargo.toml + CLI to agent-memories
 - [x] Add Environment path methods for rules/runbooks/memories/skills dirs
+- [ ] Rename btakita/agent-skills (conflicts with official Agent Skills Standard)
 - [ ] Committed memory write capability (route lessons to right file)
 - [ ] Compare/align with Cursor Rules, Windsurf Rules, .agents spec
 - [ ] Ontology validation integration (use `existence` crate to validate terms)

@@ -154,6 +154,23 @@ pub fn commit(file: &Path) -> Result<()> {
                 "drift_warning file={} drift={} snap_len={} file_len={}",
                 file.display(), drift, snap_len, file_len
             ));
+
+            // Extreme drift (file >5x snapshot): likely a file move/rename where
+            // the snapshot is from auto-init but the file has full content from
+            // the old path. Re-sync snapshot from file content so the commit
+            // stages everything and the drift loop stops.
+            if file_len > snap_len * 5 {
+                eprintln!(
+                    "[commit] Extreme drift detected ({}x) — re-syncing snapshot from file content (likely file move)",
+                    file_len / snap_len.max(1)
+                );
+                crate::ops_log::log_op(file, &format!(
+                    "snapshot_resync file={} old_snap_len={} new_snap_len={}",
+                    file.display(), snap_len, file_len
+                ));
+                crate::snapshot::save(file, &file_content)?;
+                snapshot_content = Some(file_content.clone());
+            }
         }
     }
 

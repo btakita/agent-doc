@@ -123,7 +123,7 @@ Does the skill reference the runbooks?
 Yes — SKILL.md lists both runbooks in the Runbooks section (line 274-276). But the "NEVER use Write tool" rule is only read when the user requests a transfer. During normal operations, the skill doesn't proactively check the transfer runbook.
 
 The rule should be more prominent. It belongs in the SKILL.md core principles or workflow section, not just buried in a runbook that's only read on-demand.
-<!-- agent:boundary:0d88758e -->
+<!-- agent:boundary:cb7b9df1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

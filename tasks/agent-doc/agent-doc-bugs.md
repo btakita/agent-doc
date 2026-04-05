@@ -46,7 +46,7 @@ The current split is correct per the binary/skill responsibility table:
 Adding pending transfer to the binary keeps it deterministic. No LLM judgment needed — just merge the pending lists.
 
 This is a v0.31.14 feature for the agent-doc binary. Want me to implement it?
-<!-- agent:boundary:d4c7fa8e -->
+<!-- agent:boundary:2a33d693 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

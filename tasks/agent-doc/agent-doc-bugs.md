@@ -569,7 +569,7 @@ You're right. I've updated all relevant files to codify this:
 > When receiving an approval signal: execute the approved work, follow ALL applicable runbooks, add tests as part of implementation, run `make check` before marking done. Never interpret "do" as permission to cut corners.
 
 **5. MEMORY.md** — added "Process Discipline" section above "Testing Discipline".
-### Re: Ontology for `do` and `go` (HEAD)
+### Re: Ontology for `do` and `go`
 
 **Proposal: New node `directive.md` in the Existence kernel** (`~/.claude/philosophy/src/`)
 
@@ -600,7 +600,35 @@ A **Directive** is a [Signal](./signal.md) that authorizes and requests action f
 **Alternative:** If you prefer fewer kernel nodes, this could be a section within `signal.md` instead of a standalone node.
 
 Which approach do you prefer? I can create the node and wire it into the agent-doc domain ontology.
-<!-- agent:boundary:f92e1679 -->
+Directive is fine.
+
+How would directive be referenced by an agent-doc context?
+### Re: Directive node created + agent-doc reference (HEAD)
+
+**Created `~/.claude/philosophy/src/directive.md`** following the SPEC.md template (Ontology/Axiology/Epistemology sections).
+
+**How directive is referenced in agent-doc context:**
+
+The agent-doc domain ontology (in `README.md`) would add a new section alongside Document Lifecycle, Pane Lifecycle, and Integration Layer:
+
+### Interaction Model (HEAD)
+
+| Term | Definition |
+|------|-----------|
+| **Directive** | A [signal](signal.md) that authorizes and requests action. In agent-doc, user inputs like "do", "go", "yes" are directives. Classified by `DiffType::Approval` in preflight. The directive's brevity is independent of the expected execution thoroughness. |
+| **Cycle** | One round-trip: user edits -> preflight -> agent response -> write-back -> commit. Logged in `cycles.jsonl`. |
+| **Diff** | The user's changes since the last snapshot. Classified by `classify_diff()` into a `DiffType` for routing. |
+
+The **Directive** term connects the kernel ontology to agent-doc's diff-type classification:
+- Kernel: `directive.md` defines what a directive IS (authorization + quality expectation)
+- Agent-doc domain overlay: maps specific words ("do", "go") to `DiffType::Approval`
+- SKILL.md: defines routing behavior (skip confirmation, maintain rigor)
+- Runbook: `diff-type-routing.md` documents the full behavioral contract
+
+This creates a traceable chain: **ontology definition -> domain mapping -> binary classification -> skill routing -> behavioral contract**.
+
+Want me to add this Interaction Model section to `README.md`?
+<!-- agent:boundary:f1702761 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -611,6 +639,7 @@ Which approach do you prefer? I can create the node and wire it into the agent-d
 - [x] JB plugin escape fix + Gson migration (v0.2.44) — DONE
 - [x] Edge case + integration tests — DONE (447 total)
 - [x] Process discipline updates — DONE
-- [ ] Create `directive.md` ontology node (pending user direction)
+- [x] Create `directive.md` kernel node — DONE
+- [ ] Add Interaction Model section to agent-doc README.md domain ontology
 - [ ] Add transfer-source metadata to patch format
 <!-- /agent:pending -->

@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-11/19 items complete. Specs in canonical repos. Remaining: validation code, integrations, cross-tool alignment.
+11/20 items complete. Ecosystem shape emerging: agent-rules + agent-runbooks + agent-memories as cross-tool convention repos, instruction-files as the validation engine.
 <!-- /agent:status -->
 
 ## Exchange
@@ -760,7 +760,7 @@ All done.
 - No more local `spec/` references
 
 instruction-files still builds clean: 57 tests pass, clippy clean.
-### Re: Add agent-memories as optional dependency (HEAD)
+### Re: Add agent-memories as optional dependency
 
 Noted — added to the pending list. Neither agent-runbooks nor agent-memories are on crates.io yet (they're convention repos, not Rust crates), so the "optional dependency" items would either mean:
 
@@ -770,7 +770,44 @@ Noted — added to the pending list. Neither agent-runbooks nor agent-memories a
 agent-runbooks has a `Cargo.toml` (it's a Rust crate with CLI). agent-memories is currently spec-only (no Cargo.toml). To add it as a Rust dependency, it would need a lib crate — likely a parser/validator for the memory format.
 
 Want me to scaffold a Rust lib crate in agent-memories? Or should these stay as spec-only repos that instruction-files validates against by implementing the checks directly?
-<!-- agent:boundary:958a5f6b -->
+
+Should we also create a agent-skills and agent-rules repo?
+If we create agent-skills, it would depend on:
+- agent-rules
+- agent-runbooks
+- agent-memories?
+### Re: agent-skills and agent-rules repos (HEAD)
+
+**agent-rules: Yes, this makes sense.** Rules (CLAUDE.md, `.cursorrules`, `.windsurfrules`, AGENTS.md) are the third content type alongside runbooks and memories:
+
+| Repo | Content type | Example |
+|------|-------------|---------|
+| agent-runbooks | Procedures | "Step 1: run tests, Step 2: verify..." |
+| agent-memories | Learned lessons | "Never mock the DB — we got burned" |
+| **agent-rules** | Prescribed policy | "Use snake_case for Python functions" |
+
+agent-rules would define the convention for instruction file format, directory hierarchy, and cross-tool compatibility (CLAUDE.md vs `.cursorrules` vs AGENTS.md). The existing cross-harness compatibility tables in agent-runbooks and agent-memories would reference agent-rules as the canonical comparison.
+
+**agent-skills: Maybe, but it's different.** Skills are a Claude Code-specific concept (`.claude/skills/`). An agent-skills repo would be either:
+- A **convention spec** (like agent-runbooks) — defining skill file format, discovery, runbook integration
+- A **registry/toolkit** — shared skills that any project can install
+
+The dependency chain you sketched makes sense for the convention spec:
+```
+agent-skills (skill format + discovery)
+├── agent-rules (instruction file format — skills reference rules)
+├── agent-runbooks (runbook format — skills contain runbooks)
+└── agent-memories (memory format — skills can generate memories)
+```
+
+But agent-skills is less cross-tool than the others. Runbooks, memories, and rules work with Cursor, Windsurf, Copilot, etc. Skills are Claude Code-specific (though the pattern could generalize).
+
+**Recommendation:**
+1. Create **agent-rules** — high value, cross-tool, fills the obvious gap
+2. Hold on **agent-skills** — wait to see if the skill pattern generalizes beyond Claude Code before creating a convention repo
+
+Want me to create agent-rules?
+<!-- agent:boundary:221f724e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -787,6 +824,7 @@ Want me to scaffold a Rust lib crate in agent-memories? Or should these stay as 
 - [x] agent-runbooks spec: runbook format (checklist, prerequisites, verification)
 - [x] Remove duplicate agent-runbooks spec (use agent-runbooks repo's SPEC.md)
 - [x] Create btakita/agent-memories repo + submodule
+- [ ] Create btakita/agent-rules repo (instruction file format convention)
 - [ ] Add agent-runbooks as optional dependency
 - [ ] Add agent-memories as optional dependency
 - [ ] Committed memory write capability (route lessons to right file)

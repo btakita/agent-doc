@@ -123,7 +123,7 @@ Published to all targets:
 - **PyPI:** manylinux2014 wheel uploaded
 - **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.31.15
 - **Binary:** `cargo install --path .` — `~/.cargo/bin/agent-doc` updated
-<!-- agent:boundary:7c599520 -->
+<!-- agent:boundary:7fb7b19c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

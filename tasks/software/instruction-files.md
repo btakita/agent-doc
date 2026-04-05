@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Install scripts deployed. Waiting for first release tags to enable binary downloads.
+Ecosystem complete. Install infrastructure ready. skills.toml parked — waiting for Agent Skills Standard to define manifest format.
 <!-- /agent:status -->
 
 ## Exchange
@@ -197,7 +197,7 @@ Done. All 5 repos now have `install.sh` and updated install documentation.
 
 **Usage:**
 ```bash
-# Any repo (HEAD)
+# Any repo
 curl -fsSL https://raw.githubusercontent.com/btakita/agent-rules/main/install.sh | sh
 curl -fsSL https://raw.githubusercontent.com/btakita/agent-runbooks/main/install.sh | sh
 curl -fsSL https://raw.githubusercontent.com/btakita/agent-memories/main/install.sh | sh
@@ -208,7 +208,47 @@ curl -fsSL https://raw.githubusercontent.com/btakita/instruction-files/main/inst
 **README install sections** updated with three options: curl installer, `cargo install`, from source.
 
 Note: the install scripts will start working once the first release with binaries is pushed (the cross-compilation workflow triggers on `v*` tags).
-<!-- agent:boundary:74b6e18b -->
+
+Should this be supported? How would a project use this?
+> - [ ] Implement .agent/skills.toml manifest (Option D)
+### Re: Should .agent/skills.toml be supported? (HEAD)
+
+**Use case:** A project maintainer wants to declare "this project uses these skills" so any contributor (or agent) can set up the correct instruction files automatically.
+
+**How a project would use it:**
+
+1. **Author** creates `.agent/skills.toml`:
+```toml
+[skills]
+agent-doc = { source = "github", repo = "btakita/agent-doc", skill = "agent-doc" }
+email = { source = "local", path = ".agent/skills/email" }
+instruction-files = { source = "crate", name = "instruction-files" }
+```
+
+2. **Contributor** clones the project and runs:
+```bash
+skill-harness sync
+```
+This reads `.agent/skills.toml` and installs each skill to the detected environment (Claude Code -> `.claude/skills/`, Cursor -> `.cursor/rules/`, etc.).
+
+3. **CI** runs `skill-harness check` to verify all declared skills are installed and up to date.
+
+**But here's the question:** Is this solving a real problem today, or is it premature?
+
+**Arguments for:**
+- Monorepos with many skills need a manifest
+- Onboarding new contributors is easier ("run one command")
+- Declarative > imperative for project config
+
+**Arguments against:**
+- Most projects have 1-3 skills — `skill-harness install` is fine
+- The Agent Skills Standard (agentskills.io) might define their own manifest format
+- Adding a new file format creates maintenance burden
+
+**My take:** Park it. The Agent Skills Standard is actively evolving — they may define a manifest format that becomes the cross-tool standard. Building our own risks divergence. Option C (init functions) and Option A (CLI install) cover real needs today. When a manifest format emerges from the standard, we adapt.
+
+Remove from pending?
+<!-- agent:boundary:96fa43b6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -217,6 +257,5 @@ Note: the install scripts will start working once the first release with binarie
 - [x] Implement init() pattern (Option C)
 - [x] Cross-compiled binary distribution for all repos
 - [x] Install scripts (curl | sh) for all repos
-- [ ] Implement .agent/skills.toml manifest (Option D)
 - [ ] Push first release tags to trigger binary builds
 <!-- /agent:pending -->

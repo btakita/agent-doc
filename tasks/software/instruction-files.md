@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-18/24 items complete. Discussing agent-skills rename. Govcraft crate is community, not official Anthropic.
+18/25 items complete. skill-harness design with Spec/Contracts/Evals paralleling module-harness.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1156,13 +1156,13 @@ Or simply fold the manage.rs functionality back into agent-kit (since it's small
 What do you prefer?
 
 Let's figure out exactly what this repo and cli tool will do. Would it also contain it's own skill to manage other the skills in the environment? Perhaps agent-skill-tree, agent-skill-env, agent-skill-kit, agent-skill-hub, agent-skill-install, agent-skill-bundles, agent-skill-libs, ...
-### Re: Govcraft/agent-skills review (HEAD)
+### Re: Govcraft/agent-skills review
 
 You're right — it's **not official Anthropic code**. It's by Govcraft (12 stars, created Jan 2026), though its README claims "Anthropic's official Rust implementation." The actual official repo is `agentskills/agentskills` (the spec + reference SDK, maintained by Anthropic). The Govcraft crate is a community implementation that took the `agent-skills` name on crates.io.
 
 Regardless, the name `agent-skills` on crates.io is taken, and the `agentskills.io` standard owns the conceptual namespace.
 
-### Re: What should this repo do + naming (HEAD)
+### Re: What should this repo do + naming
 
 Let me think about what our tool actually does that the official ecosystem doesn't:
 
@@ -1215,7 +1215,65 @@ Reasoning:
 Runner-up: `agent-skill-kit` (matches agent-kit naming).
 
 What's your preference?
-<!-- agent:boundary:155891b2 -->
+
+skill-harness has a good ring to it. The reason why we chose module-harness was because it includes the Spec, Agentic Contracts, and Evals.
+Would this skill package be roughly equivalent? I suppose it could also include Spec, Agentic Contracts, and Evals along with install and other binary commands.
+### Re: skill-harness with Spec/Contracts/Evals (HEAD)
+
+Yes, it maps well. Here's the parallel:
+
+| module-harness | skill-harness |
+|---------------|--------------|
+| **Spec** — module's behavioral contract | **Spec** — skill's expected behavior (what it does, when it activates, what it produces) |
+| **Agentic Contracts** — what the agent promises when working with this module | **Agentic Contracts** — what the agent promises when using this skill (e.g., "always follow the runbook", "commit after changes") |
+| **Evals** — tests that verify the module harness is correct | **Evals** — tests that verify a skill works correctly (e.g., "does the email skill produce valid drafts?") |
+| `module-harness audit` — validate harness docs | `skill-harness audit` — validate skill structure (SKILL.md, runbooks, contracts) |
+
+**skill-harness would provide:**
+
+1. **Spec** (`SPEC.md` or `## Spec` in SKILL.md)
+   - What the skill does
+   - Activation triggers (globs, description match)
+   - Expected inputs/outputs
+   - Dependencies (other skills, tools, env vars)
+
+2. **Agentic Contracts** (`## Agentic Contracts` in SKILL.md)
+   - Promises the agent makes when using this skill
+   - Pre-conditions (what must be true before the skill runs)
+   - Post-conditions (what must be true after)
+   - Invariants (what must always hold)
+
+3. **Evals** (`evals/` directory or `## Evals` section)
+   - Test cases for skill behavior
+   - Input/expected-output pairs
+   - Validation criteria
+
+4. **CLI commands:**
+   - `skill-harness install <skill>` — install to environment
+   - `skill-harness audit <skill>` — validate structure + contracts
+   - `skill-harness check <skill>` — verify installed version
+   - `skill-harness eval <skill>` — run evals
+   - `skill-harness list` — list installed skills
+   - `skill-harness uninstall <skill>` — remove
+
+**Example skill structure:**
+```
+.agent/skills/email/
+├── SKILL.md            # instructions + spec + contracts
+├── runbooks/
+│   ├── draft-email.md
+│   └── send-email.md
+├── evals/
+│   ├── draft_produces_valid_html.md
+│   └── reply_preserves_thread.md
+└── examples/
+    └── sample-draft.md
+```
+
+This makes `skill-harness` the full lifecycle tool: author, validate, install, test, manage. The name "harness" captures all of it — it's the test harness, the installation harness, and the runtime harness for skills.
+
+Want me to rename and restructure?
+<!-- agent:boundary:0398dd96 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1239,7 +1297,8 @@ What's your preference?
 - [x] Add Cargo.toml + CLI to agent-rules
 - [x] Add Cargo.toml + CLI to agent-memories
 - [x] Add Environment path methods for rules/runbooks/memories/skills dirs
-- [ ] Rename btakita/agent-skills to skill-harness (or chosen name)
+- [ ] Rename btakita/agent-skills to btakita/skill-harness
+- [ ] Add Spec/Agentic Contracts/Evals structure to skill-harness
 - [ ] Add self-skill (SKILL.md for meta-management)
 - [ ] Committed memory write capability (route lessons to right file)
 - [ ] Compare/align with Cursor Rules, Windsurf Rules, .agents spec

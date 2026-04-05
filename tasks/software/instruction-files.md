@@ -1364,7 +1364,7 @@ Let me think about what CLI operations each content type actually needs:
 The CLIs we already built (agent-rules, agent-memories, skill-harness) are fine as-is. The question is whether to invest more in them or keep them thin and let instruction-files be the comprehensive audit tool.
 
 I'd keep them thin: each CLI does its domain-specific operations (validate format, list items, manage lifecycle). instruction-files does the cross-cutting audit (staleness, line budget, context invariant).
-<!-- agent:boundary:37b768fc -->
+<!-- agent:boundary:fceae77c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

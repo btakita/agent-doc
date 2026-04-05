@@ -86,13 +86,13 @@ Please add a runbook for any agent-doc behavior investigation.
 do
 - [ ] Fix: `agent-doc write` silently drops template patches when target has no components
 - [ ] Fix: transfer/write should auto-init target in template mode if it doesn't exist
-### Re: Both fixes implemented (HEAD)
+### Re: Both fixes implemented
 
 **Fix 1: `transfer()` auto-inits target** (`extract.rs`)
-- When target doesn't exist, auto-creates it matching source format (template or inline)
+- When target doesn't exist, auto-creates it matching source format (template or inline): we should default to template format
 - Reads source frontmatter to detect template mode; creates parent dirs if needed
 - Generates fresh UUID session, copies agent name from source
-- Logs: `[transfer] Auto-created <path> (template|inline)`
+- Logs: `[transfer] Auto-created <path> (template|inline)`: template is the default
 
 **Fix 2: Write warns on no-component targets** (`write.rs`)
 - `run_stream`: After parsing patches, if no patch blocks found but unmatched content exists, checks whether file has template components. If none: warns with actionable message (`agent-doc init --mode template`)
@@ -104,7 +104,18 @@ do
 **Files changed:**
 - `src/agent-doc/src/extract.rs` — auto-init in `transfer()`, updated module spec + contracts
 - `src/agent-doc/src/write.rs` — warnings in `run_stream` and `try_ipc`, improved logging
-<!-- agent:boundary:92b02917 -->
+
+build and install for testing
+### Re: Default to template + built and installed (HEAD)
+
+Updated `transfer()` to always default to template format when auto-creating target (removed source-format matching logic). Simplified the code — no more `is_template` detection.
+
+Built, tested (all 697 pass), and installed:
+- `cargo build --release` — release binary at `src/agent-doc/target/release/agent-doc`
+- `cargo install --path .` — updated `~/.cargo/bin/agent-doc`
+
+Ready for testing. Try transferring to a non-existent target file.
+<!-- agent:boundary:90555fd2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

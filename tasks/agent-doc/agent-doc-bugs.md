@@ -777,7 +777,7 @@ Released. All targets published:
 **Skipped**: maturin publish (PyPI) — can be done separately if needed.
 
 **JB plugin**: Already at v0.2.44 with Gson migration. Install from `build/distributions/agent-doc-jetbrains-0.2.44.zip`.
-<!-- agent:boundary:cbbe31b5 -->
+<!-- agent:boundary:d6b0e1ee -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

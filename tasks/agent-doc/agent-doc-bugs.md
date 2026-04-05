@@ -704,7 +704,7 @@ Good catch. Fixed both the runbook and the README.md.
 2. **`README.md`** — removed `~/.claude/` links from the Interaction Model table. Directive and Signal terms are now defined inline without external links.
 
 The rule: `~/.claude/philosophy/` is for agent context (CLAUDE.md, skills). Source code and project docs use project-local references only.
-<!-- agent:boundary:5920b762 -->
+<!-- agent:boundary:992df916 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

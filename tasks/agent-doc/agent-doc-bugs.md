@@ -116,7 +116,7 @@ Released:
 - Transfer pending merge: pending component transferred alongside exchange
 - SPEC.md §7.10 + §8.5 updated
 - 458 tests, code-enforced-directives runbook
-<!-- agent:boundary:7c8aa869 -->
+<!-- agent:boundary:ab17634d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

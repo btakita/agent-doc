@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-22/27 items complete. Spec/Contracts/Evals subagents running across all 5 repos.
+23/27 items complete. Spec/Contracts/Evals convention deployed across all 5 repos. 4 items remaining.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1542,7 +1542,8 @@ Commands:
 `instruction-files audit` runs the full orchestrated audit — calls into agent-kit (context_invariant, staleness, line_budget), agent-rules (actionable, tree_paths), and agent-runbooks (init_runbooks). 23 tests, clippy clean, pushed.
 do
 - [ ] Add Spec/Contracts/Evals markdown convention to all repos
-### Re: Spec/Contracts/Evals convention (HEAD)
+
+### Re: Spec/Contracts/Evals convention
 
 5 subagents launched in parallel — one per repo:
 
@@ -1557,7 +1558,23 @@ Each gets:
 - `## Evals` or `evals/` directory — test cases for verifying agent behavior
 
 Will report results when all complete.
-<!-- agent:boundary:820437a3 -->
+### Re: Spec/Contracts/Evals — all 5 repos done (HEAD)
+
+All pushed.
+
+| Repo | SPEC.md | Contracts | Evals |
+|------|---------|-----------|-------|
+| agent-kit | Created (detect, audit_common, hooks) | 3 subsystems | 3 evals (10 cases each) |
+| agent-rules | Updated | Validation, application, authoring | 3 evals (actionable, tree_paths, portability) |
+| agent-runbooks | Updated | Following, validating, scaffolding | 3 evals + README |
+| agent-memories | Updated | Saving, reading, managing index | 4 evals (frontmatter, classification, duplicates, staleness) |
+| skill-harness | Updated | Install, check, uninstall | 3 evals (idempotent, path resolution, cleanup) |
+
+The harness pattern is now consistent across the entire ecosystem. Each SPEC.md has:
+1. **Spec** — what the crate does and its format
+2. **Agentic Contracts** — what the agent promises when using it
+3. **Evals** — test cases for verifying agent behavior
+<!-- agent:boundary:d71a8487 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1585,7 +1602,7 @@ Will report results when all complete.
 - [x] Move domain logic to agent-rules (actionable, tree_paths)
 - [x] Move init_runbooks to agent-runbooks
 - [x] Add instruction-files CLI (orchestrator)
-- [ ] Add Spec/Contracts/Evals convention (5 subagents in progress)
+- [x] Add Spec/Contracts/Evals convention to all repos
 - [ ] Add self-skill to skill-harness
 - [ ] Committed memory write capability
 - [ ] Ontology validation integration

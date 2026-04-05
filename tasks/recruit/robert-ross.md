@@ -695,7 +695,7 @@ Ran the session analyzer on both the 3h54m call transcript and this agent-doc se
 - **Show Core/Vespa + Shimmer skeleton plan** — arrive with an architecture sketch
 - **Demo subagent usage live** — Rob probed this twice, didn't get a concrete demo last time
 - **Address metrics vs. intangibles** — Brian's 8-9 rating caveat; position session analysis as qualitative-first
-<!-- agent:boundary:1c4a384f -->
+<!-- agent:boundary:08773798 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -25,6 +25,7 @@ agent-doc v0.31.14 released to crates.io + GitHub
 **Architecture transferred:** instruction-files expansion (11 items) to tasks/software/instruction-files.md.
 
 **Key lesson:** Don't manually fix pipeline issues. Fix the software.
+<!-- agent:boundary:2b620062 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

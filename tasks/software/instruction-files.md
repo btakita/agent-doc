@@ -643,7 +643,7 @@ instruction-files = { version = "0.1.5", features = ["ontology", "spec-audit"] }
 ```
 
 Also fixed 8 pre-existing `collapsible_if` clippy warnings in `audit.rs` (collapsed nested if-let chains using Rust 2024 let-chains).
-<!-- agent:boundary:28c5a41d -->
+<!-- agent:boundary:627e0d89 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

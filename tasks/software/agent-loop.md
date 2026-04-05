@@ -233,7 +233,7 @@ Cache stats visible in stderr (e.g., `read=11163 created=12443 uncached=3`).
 The `simple-question-concise` case now correctly catches verbose responses via the `max_output_tokens: 300` budget constraint -- the model used 376 tokens (25% over budget). This is exactly the kind of efficiency regression the eval is designed to catch.
 
 Removing the ANTHROPIC_API_KEY pending item since it's no longer needed.
-<!-- agent:boundary:994f4b90 -->
+<!-- agent:boundary:b0a15d51 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

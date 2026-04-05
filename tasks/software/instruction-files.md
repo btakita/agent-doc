@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-4/11 items complete. Runbook discovery, bundled defaults, and optional dependencies landed.
+7/13 items complete. Core audit suite done. Remaining: spec definitions, feature integrations, cross-tool alignment.
 <!-- /agent:status -->
 
 ## Exchange
@@ -617,7 +617,7 @@ do
 - [ ] Bundle default precommit.md and prerelease.md
 - [ ] Add existence-lang dependency for ontology validation
 - [ ] Add module-harness dependency for spec auditing
-### Re: do (4 items) (HEAD)
+### Re: do (4 items)
 
 All 4 implemented. Clippy clean, 51 tests pass (including 3 new ones).
 
@@ -643,7 +643,32 @@ instruction-files = { version = "0.1.5", features = ["ontology", "spec-audit"] }
 ```
 
 Also fixed 8 pre-existing `collapsible_if` clippy warnings in `audit.rs` (collapsed nested if-let chains using Rust 2024 let-chains).
-<!-- agent:boundary:627e0d89 -->
+
+do
+- [ ] Add context invariant audit (no machine-local paths)
+- [ ] Create shared skill + runbook
+- [ ] Architecture: instruction-files depends on agent-runbooks + agent-memories specs
+### Re: do (3 items) (HEAD)
+
+All 3 implemented. Clippy clean, 57 tests pass (6 new).
+
+**1. Context invariant audit** — New `check_context_invariant()` in `audit.rs`:
+- Regex scans for `~/`, `/home/<user>/`, `/Users/<user>/`, `/root/`, `/tmp/`, `C:\Users\`
+- Skips content inside code fences (examples are fine, prose references are not)
+- Wired into the `run()` pipeline alongside existing checks
+- 6 tests: flags tilde, absolute home, macOS Users paths; skips code fences, clean files, non-agent files
+
+**2. Shared skill + runbook** — Created `.claude/skills/instruction-files/`:
+- `SKILL.md` — documents `/instruction-files audit` and `/instruction-files init` invocations, all check types, discovery patterns
+- `runbooks/instruction-files-audit.md` — step-by-step audit procedure with checklist and resolution table
+
+**3. Architecture documentation** — Added to `README.md`:
+- Dependency tree diagram showing `existence` (ontology) and `module-harness` (spec-audit) as optional features
+- Bundled runbooks design (include_str! + init_runbooks)
+- Future specs section: agent-runbooks and agent-memories format specs that instruction-files will validate
+- Updated discovery section to include runbook patterns
+- Added context invariant to the checks table
+<!-- agent:boundary:bcc093c1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -653,9 +678,9 @@ Also fixed 8 pre-existing `collapsible_if` clippy warnings in `audit.rs` (collap
 - [x] Bundle default precommit.md and prerelease.md
 - [x] Add existence-lang dependency for ontology validation
 - [x] Add module-harness dependency for spec auditing
-- [ ] Add context invariant audit (no machine-local paths)
-- [ ] Create shared skill + runbook
-- [ ] Architecture: instruction-files depends on agent-runbooks + agent-memories specs
+- [x] Add context invariant audit (no machine-local paths)
+- [x] Create shared skill + runbook
+- [x] Architecture: instruction-files depends on agent-runbooks + agent-memories specs
 - [ ] agent-memories spec: committed memory format (type, scope, why, how to apply)
 - [ ] agent-runbooks spec: runbook format (checklist, prerequisites, verification)
 - [ ] Committed memory write capability (route lessons to right file)

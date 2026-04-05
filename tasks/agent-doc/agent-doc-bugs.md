@@ -725,7 +725,7 @@ Fixed. Removed all 3 occurrences from the ontology-references runbook and 1 from
 - `grep -r '~/.claude/philosophy' .claude/skills/module-harness/runbooks/` — no matches
 
 Only remaining references are in `chromium-bridge/CLAUDE.md` (different submodule, not part of this session).
-<!-- agent:boundary:3ac038bd -->
+<!-- agent:boundary:b7adcc7b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

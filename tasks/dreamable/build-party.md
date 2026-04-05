@@ -32,52 +32,132 @@ agent: claude
 
 **Greenfield gap:** Co-build rooms (shared code editor + LiveKit room) are genuinely new.
 
-### Mermaid diagram — Miguel's LiveKit agent course
+Look at tasks/dreamable/robert-ross.md and tasks/dreamable/robert-ross-granola.md
+Investigate these repos in more detail. To see what is possible in for Dreamable features.
+Should we build the livekit apps + libraries in rust or python?
+We may be able to share libraries with Flutter using FFI for mobile + deskto apps.
+Web a
+### Re: Deep repo investigation for Dreamable features (HEAD)
 
-```mermaid
-graph TD
-    PRE["Prerequisites"]
-    subgraph PRE_ITEMS["Setup"]
-        P1["Python 3.12+, uv, livekit-agents 1.4+"]
-        P2["Accounts: LiveKit Cloud, Deepgram"]
-        P3["Env: LIVEKIT_URL, API keys, DEEPGRAM_API_KEY"]
-    end
-    subgraph MOD1["Module 1: LiveKit Fundamentals"]
-        M1A["Rooms, Participants, Tracks"]
-        M1B["Events: track_subscribed, track_muted"]
-        M1C["Lab: Connect to room, log track events"]
-    end
-    subgraph MOD2["Module 2: Agent Framework"]
-        M2A["Worker/Job model, JobContext"]
-        M2B["Agent class, AgentSession, VAD"]
-        M2C["Lab: Echo agent via TTS"]
-    end
-    subgraph MOD3["Module 3: STT with Deepgram"]
-        M3A["deepgram.STT model nova-3"]
-        M3B["VAD + turn detection pipeline"]
-        M3C["Lab: Full voice loop"]
-    end
-    subgraph MOD4["Module 4: Multi-User Transcription"]
-        M4A["Per-participant AudioStream + STT"]
-        M4B["Transcripts keyed by identity"]
-        M4C["Lab: 2-person room labeled transcripts"]
-    end
-    subgraph MOD5["Module 5: Build Party Agent Nova"]
-        M5A["Shared ChatContext from all speakers"]
-        M5B["Q&A moderator + data channel"]
-        M5C["Lab: Agent answers any participant"]
-    end
-    subgraph CAP["Capstone: Deploy + Test"]
-        C1["Run worker against LiveKit Cloud"]
-        C2["Join as 2+ participants"]
-        C3["Verify labeled transcripts + responses"]
-    end
-    PRE --> PRE_ITEMS --> MOD1 --> MOD2 --> MOD3 --> MOD4 --> MOD5 --> CAP
-```
+Investigated all 5 repos. Here's the detailed breakdown:
 
-transfer mermaid diagram into build-party-course-diagram.md
-### Re: transfer mermaid diagram (HEAD)
+---
 
-Done. Created `tasks/dreamable/build-party-course-diagram.md` with the full mermaid diagram for Miguel's LiveKit agent course.
-<!-- agent:boundary:6cff56c5 -->
+#### 1. livekit-examples/livestream (246 stars) — Reference Only
+
+**Tech:** Next.js 14, TypeScript, `livekit-client` v1.x, `@livekit/components-react`. Vercel-deployable monolith.
+
+**What it has:** WebRTC streaming, OBS ingress (WHIP protocol), stage management (X Spaces style), browser broadcast, text chat, emoji reactions.
+
+**What it's missing:** No auth, no database, no multi-room, no agent integration, no recording, no moderation tools, no courseware. Dependencies are stale (pinned to v1.x when v2 is current). Effectively dormant — last meaningful commit April 2024.
+
+**Verdict:** Borrow UX patterns (stage-summon, OBS ingress flow) but don't fork. Build Party should use LiveKit SDKs v2 directly.
+
+---
+
+#### 2. livekit/agents (9,935 stars) — Core Infrastructure ✓
+
+**Latest:** v1.5.1 (2026-03-23). Python-first, 65+ plugins.
+
+**Architecture:** `Agent` (instructions + tools) → `AgentSession` (manages STT/LLM/TTS pipeline) → `AgentServer` (dispatches jobs). Agents join rooms as server-side participants.
+
+**Key v1.5 features:**
+- Adaptive interruption handling (ML-based, 86% precision)
+- Dynamic endpointing (adapts silence thresholds)
+- Session usage tracking (per-model token/cost)
+- MCPToolset support
+- Action-aware context summarization
+
+**Multi-agent:** Two patterns — (a) sequential handoff within one session (agent returns next agent from a tool call), (b) multiple independent AgentSessions in the same room via dispatch API.
+
+**STT providers:** Deepgram, AssemblyAI, Google Chirp 3, Whisper, Soniox, Gladia, Speechmatics. TTS: Cartesia, ElevenLabs, Google, OpenAI, xAI Grok.
+
+**RPC + Data Channels:** Built-in. `room.local_participant.perform_rpc()` and data channel publishing for custom events.
+
+**Fit for Build Party personas:**
+
+| Persona | Status | Notes |
+|---|---|---|
+| **Nova** (RAG voice + Q&A) | Ready | VoicePipelineAgent + function tools for RAG. Q&A queue is custom logic on top. |
+| **Echo** (silent observer) | Feasible | Create minimal AgentSession with STT only (no LLM/TTS). Process transcripts in callbacks. Emit RPCs. |
+| **Flare** (clip trigger) | Feasible | Subscribe to Echo's RPCs via data channels. Call Egress API (separate service, use `livekit-api` SDK). |
+
+**Gap:** No built-in "passive listener" agent archetype, no first-class content filtering (use guardrails wrapper), Egress is a separate service not part of agents framework.
+
+---
+
+#### 3. python-agents-examples (262 stars) — Pattern Library ✓
+
+**Scale:** 70+ examples in two tiers — 50+ single-concept demos + 20+ production-style apps with frontends.
+
+**Directly relevant examples:**
+- `simple_content_filter` + `llm_powered_content_filter` — **Nova's moderation layer**
+- `agent_transfer`, `medical_office_triage`, `personal_shopper` — **Multi-agent coordination patterns**
+- `doheny-surf-desk` — **Background observer agent** (silent monitoring, exactly Echo's pattern)
+- `rpc_agent` — **CRUD state management via RPC** (Flare's event handling)
+- `label_messages`, `state_tracking`, `conversation_monitoring` — **Non-speaking event listeners**
+
+**Missing:** No Egress/clipping examples, no dedicated RAG example (wire into tool_calling pattern yourself).
+
+**Quality:** Well-structured with YAML frontmatter, difficulty ratings, `console` mode for quick testing. Solid starting points, not production-ready.
+
+---
+
+#### 4. dev-day-demos (9 stars) — Echo Blueprint ✓✓
+
+**This is the most directly useful repo for Build Party.** 7 demos, the key one being:
+
+**`call-moderation/moderation-agent`** — Near-exact reference for Echo:
+- **No TTS** — overrides `tts_node()` to no-op (agent never speaks)
+- **Selective subscription** — `set_subscribed()` filtering by participant kind/identity
+- **LLM-powered detection** — monitors transcripts against guidelines, calls `report_guideline_violation(category, description, severity)` via function tool
+- **Emits RPCs** — `perform_rpc(method="moderation.show_violation", payload=...)` to non-agent participants
+- **Frontend** renders violations as real-time safety banners
+
+**Other gems:**
+- `model-battleground` — 3 agents in one room, dispatched programmatically (multi-agent coordination)
+- `call-queue` — call center with post-call survey agents (Q&A queue pattern)
+- Agent Dispatch API usage — `api.agent_dispatch.create_dispatch()` with metadata
+
+**Architecture patterns to adopt:**
+- `function_tool()` decorator for LLM-triggered actions
+- `ModerationUserdata` via `RunContext` for clean state
+- Selective track subscription filtering
+- Dispatch-with-metadata for spawning configured agents
+
+---
+
+#### 5. AOSSIE-Org/Resonate (337 stars) — Community Features Reference
+
+**Tech:** Flutter/Dart mobile app, Appwrite backend, LiveKit for audio. GPL-3.0. GSoC project.
+
+**Useful patterns for Build Party:**
+- **Room lifecycle** — create, browse active, schedule upcoming rooms with subscriber notifications
+- **Social layer** — following system, friends with voice calls, pair chat (random matching), profiles, notifications
+- **In-room features** — chat, speaker promotion (listener → speaker), user reporting
+
+**Limitations:** Mobile only (no web), tightly coupled to Appwrite, basic roles (creator/speaker/listener — no granular moderation), no screen sharing, no concept of "builder streams" or project showcases.
+
+**Verdict:** Design reference for room discovery, scheduling, and social features. Reimplement on a web stack with richer roles.
+
+---
+
+### Synthesis: Build Party Implementation Path (HEAD)
+
+**Priority order:**
+1. **dev-day-demos `call-moderation`** → Fork the silent moderation agent as Echo's starting point
+2. **livekit/agents** → Nova on VoicePipelineAgent + content filter examples from python-agents-examples
+3. **Egress API** (docs, not in any example repo) → Flare's clip trigger
+4. **livestream** → Borrow stage-summon UX patterns, rebuild on LiveKit SDK v2
+5. **Resonate** → Design reference for room browsing, scheduling, social features
+
+**Greenfield work required:**
+- Q&A queue moderation (Nova) — no existing implementation
+- Egress clip triggering from RPC events (Flare) — no examples exist
+- Co-build rooms (shared editor + LiveKit) — genuinely new, no prior art in these repos
+- Courseware system (slides, code sandboxes, progress tracking) — not covered anywhere
+- Web-based room discovery + scheduling (Resonate is mobile-only)
+
+**Biggest finding:** The `call-moderation` demo in dev-day-demos is a near-production blueprint for Echo. The silent observer + LLM classification + RPC emission pattern is exactly what Build Party needs, with real code to start from.
+<!-- agent:boundary:42c40fde -->
 <!-- /agent:exchange -->

@@ -920,7 +920,7 @@ graph TD
 4. **Multi-User Transcription** — The key insight: per-participant `AudioStream` + separate STT instances. Speaker identity is structural, not algorithmic.
 5. **Build Party Agent** — Wire per-participant transcripts into shared `ChatContext`. Q&A moderator persona with voice output. Data channel for UI overlay.
 6. **Capstone** — Deploy, test with 2+ real participants, verify end-to-end.
-<!-- agent:boundary:59d415e2 -->
+<!-- agent:boundary:56940d28 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

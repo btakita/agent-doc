@@ -99,7 +99,7 @@ Checked the logs: no proof.md entries in ops.log. The "Claim for Tmux Pane" erro
 This is a feature enhancement for the sync reconciler. Want me to implement it? It would affect `sync.rs` and potentially `autoclaim.rs`.
 
 Alternatively, the simpler path: the JB plugin's "Claim for Tmux Pane" action could detect empty files and run `agent-doc init` before claiming. This keeps the change in the plugin layer.
-<!-- agent:boundary:4bcfde03 -->
+<!-- agent:boundary:e48fec8c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

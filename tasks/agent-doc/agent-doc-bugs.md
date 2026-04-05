@@ -550,7 +550,9 @@ I ran `make check` (step 1 — clippy + tests) after each implementation. But I 
 3. **Added to MEMORY.md** — "Testing Discipline" section referencing the feedback.
 
 You also seem to think `do` or `go` means move quickly. I'm counting on you to be through with your processes that we have defined. Please update the relevant AGENTS/CLAUDE, skills, and/or runbooks to rigorously follow any SKILLS and runbooks that we have defined.
-### Re: Process discipline — approval != skip processes (HEAD)
+
+Let's add `do` and `go` to the relevant ontology/ontologies. Propose which ontology makes sense, especially in the case of human-agent interaction.
+### Re: Process discipline — approval != skip processes
 
 You're right. I've updated all relevant files to codify this:
 
@@ -567,7 +569,38 @@ You're right. I've updated all relevant files to codify this:
 > When receiving an approval signal: execute the approved work, follow ALL applicable runbooks, add tests as part of implementation, run `make check` before marking done. Never interpret "do" as permission to cut corners.
 
 **5. MEMORY.md** — added "Process Discipline" section above "Testing Discipline".
-<!-- agent:boundary:db2cef77 -->
+### Re: Ontology for `do` and `go` (HEAD)
+
+**Proposal: New node `directive.md` in the Existence kernel** (`~/.claude/philosophy/src/`)
+
+A **Directive** is a [Signal](./signal.md) that authorizes and requests action from a receiving [Entity](./entity.md).
+
+**Why a new node (not just extending `signal.md`):**
+- Directives have a distinct ontological role: they don't just convey information — they authorize action
+- They carry an implicit quality contract: the brevity of the signal is independent of the thoroughness expected
+- This distinction matters for human-agent interaction where "go" (1 word) can authorize hours of work
+
+**Ontology section:**
+> A directive is a signal that conveys authorization and intent for the receiver to act. The directive's resolution (brevity) is independent of the action's resolution (thoroughness). A one-word directive can authorize arbitrarily complex work.
+
+**Axiology section:**
+> Directives carry two dimensions: (1) what to execute (authorization scope), and (2) how to execute (quality expectation). The quality expectation is always maximal unless explicitly reduced. Brevity signals trust, not reduced rigor.
+
+**Epistemology section:**
+> In human-agent interaction: "do", "go", "yes", "continue", "proceed" are directive signals. They authorize execution of the preceding proposal at full quality. Cultural pattern: short directives in high-trust relationships (military commands, pair programming, surgical teams).
+
+**Domain overlay for agent-doc:**
+| Directive | Meaning | Maps to |
+|-----------|---------|---------|
+| `do` | Execute the preceding proposal | `DiffType::Approval` |
+| `go` | Execute (synonym of `do`) | `DiffType::Approval` |
+| `yes` | Affirm the preceding question | `DiffType::Approval` |
+| `continue` | Resume interrupted work | `DiffType::Approval` |
+
+**Alternative:** If you prefer fewer kernel nodes, this could be a section within `signal.md` instead of a standalone node.
+
+Which approach do you prefer? I can create the node and wire it into the agent-doc domain ontology.
+<!-- agent:boundary:45310134 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -577,6 +610,7 @@ You're right. I've updated all relevant files to codify this:
 - [x] SKILL.md routing + separator convention — DONE
 - [x] JB plugin escape fix + Gson migration (v0.2.44) — DONE
 - [x] Edge case + integration tests — DONE (447 total)
-- [x] Process discipline updates (CLAUDE.md, SKILL.md, runbooks, memory) — DONE
+- [x] Process discipline updates — DONE
+- [ ] Create `directive.md` ontology node (pending user direction)
 - [ ] Add transfer-source metadata to patch format
 <!-- /agent:pending -->

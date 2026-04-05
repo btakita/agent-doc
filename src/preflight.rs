@@ -126,6 +126,15 @@ pub struct PreflightOutput {
     /// Saved after step 2 (commit + boundary reposition) so it matches the snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline_file: Option<String>,
+    /// Classification of the diff for skill routing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_type: Option<String>,
+    /// Reason for the diff classification.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_type_reason: Option<String>,
+    /// Annotated diff with content-source markers (`[agent]`, `[user+]`, `[user-]`, `[user~]`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotated_diff: Option<String>,
 }
 
 /// Shells considered idle (not actively running a meaningful process).
@@ -413,6 +422,12 @@ pub fn run(file: &Path, diff_only: bool) -> Result<()> {
     let diff_result = diff::compute(file)?;
     let no_changes = diff_result.is_none();
 
+    // Step 4b: Classify the diff for skill routing.
+    let classification = diff_result.as_ref().map(|d| diff::classify_diff(d));
+
+    // Step 4c: Annotate the diff with content-source markers.
+    let annotated_diff = diff_result.as_ref().and_then(|d| diff::annotate_diff(d));
+
     // Step 5: Read document HEAD from disk (skip if --diff-only).
     let document = if diff_only {
         eprintln!("[preflight] step 5: skipped (--diff-only)");
@@ -433,6 +448,12 @@ pub fn run(file: &Path, diff_only: bool) -> Result<()> {
         document,
         linked_changes,
         baseline_file,
+        diff_type: classification
+            .as_ref()
+            .and_then(|c| serde_json::to_value(&c.diff_type).ok())
+            .and_then(|v| v.as_str().map(|s| s.to_string())),
+        diff_type_reason: classification.map(|c| c.diff_type_reason),
+        annotated_diff,
     };
 
     let json = serde_json::to_string_pretty(&output)
@@ -845,6 +866,9 @@ mod tests {
             document: "# Doc\n".to_string(),
             linked_changes: vec![],
             baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -869,6 +893,9 @@ mod tests {
             document: "content".to_string(),
             linked_changes: vec![],
             baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -903,6 +930,9 @@ mod tests {
             document: "content".to_string(),
             linked_changes: vec![],
             baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -992,6 +1022,9 @@ mod tests {
             document: "content".to_string(),
             linked_changes: vec![],
             baseline_file: Some("/tmp/baseline.md".to_string()),
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1010,9 +1043,98 @@ mod tests {
             document: "content".to_string(),
             linked_changes: vec![],
             baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(parsed.get("baseline_file").is_none(), "baseline_file should be omitted when None");
+    }
+
+    #[test]
+    fn preflight_output_includes_diff_type_when_set() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: true,
+            claims: vec![],
+            diff: Some("+go\n".to_string()),
+            no_changes: false,
+            document: "content".to_string(),
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: Some("approval".to_string()),
+            diff_type_reason: Some("single approval word: \"go\"".to_string()),
+            annotated_diff: None,
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["diff_type"], "approval");
+        assert!(parsed["diff_type_reason"].as_str().unwrap().contains("go"));
+    }
+
+    #[test]
+    fn preflight_output_omits_diff_type_when_none() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: None,
+            no_changes: true,
+            document: "content".to_string(),
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.get("diff_type").is_none(), "diff_type should be omitted when None");
+        assert!(parsed.get("diff_type_reason").is_none(), "diff_type_reason should be omitted when None");
+    }
+
+    #[test]
+    fn preflight_output_includes_annotated_diff_when_set() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: true,
+            claims: vec![],
+            diff: Some("+line\n".to_string()),
+            no_changes: false,
+            document: "content".to_string(),
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: Some("[user+] line".to_string()),
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["annotated_diff"], "[user+] line");
+    }
+
+    #[test]
+    fn preflight_output_omits_annotated_diff_when_none() {
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: None,
+            no_changes: true,
+            document: "content".to_string(),
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.get("annotated_diff").is_none(), "annotated_diff should be omitted when None");
     }
 }

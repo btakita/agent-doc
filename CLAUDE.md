@@ -220,4 +220,4 @@ subsequent merges. Compacted via `agent-doc compact` to GC tombstones.
 
 ## Domain Ontology
 
-agent-doc extends the existence kernel vocabulary (defined in `~/.claude/philosophy/src/`) with domain-specific terms. See the full ontology table in [README.md](README.md#domain-ontology).
+agent-doc extends the existence kernel vocabulary with domain-specific terms. See the full ontology table in [README.md](README.md#domain-ontology).

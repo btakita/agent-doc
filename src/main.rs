@@ -41,6 +41,7 @@
 //! - dispatch_lib_path_missing: library absent → exits with code 1
 
 mod agent;
+mod annotate;
 mod audit_docs;
 mod autoclaim;
 mod boundary;
@@ -478,6 +479,17 @@ enum Commands {
     Autoclaim,
     /// Check for updates and upgrade to the latest version.
     Upgrade,
+    /// Generate content-source annotation sidecar for a document
+    Annotate {
+        /// Path to the session document
+        file: PathBuf,
+        /// Force regeneration even if cache is valid
+        #[arg(long)]
+        force: bool,
+        /// Use git blame for full history attribution
+        #[arg(long)]
+        history: bool,
+    },
     /// Undo the last agent response (restore pre-response state)
     Undo {
         /// Path to the session document
@@ -898,6 +910,7 @@ fn main() -> anyhow::Result<()> {
             convert::run(&file, mode.as_ref(), agent_doc_format, agent_doc_write)
         }
         Commands::Mode { file, set } => mode::run(&file, set.as_deref()),
+        Commands::Annotate { file, force, history } => annotate::run(&file, force, history),
         Commands::Undo { file } => undo::run(&file),
         Commands::Extract { source, target, component } => extract::run(&source, &target, component.as_deref()),
         Commands::Transfer { source, target, component } => extract::transfer(&source, &target, &component),

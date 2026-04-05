@@ -872,103 +872,45 @@ data class ComponentPatch(
 )
 
 /**
- * Hand-written JSON parser for IPC patch files.
- * Avoids Gson dependency — Gson causes ClassNotFoundException at runtime
- * in some IntelliJ builds (see SlashCommandCompletionContributor removal).
+ * Parse IPC patch JSON using Gson (bundled with IntelliJ Platform).
+ * Gson handles all JSON escape sequences correctly, eliminating the
+ * class of bugs from hand-rolled parsing (e.g., \\n unescape order).
  */
 fun parsePatchJson(json: String): IpcPatch? {
     try {
-        val file = extractStringField(json, "file") ?: return null
-        val unmatched = extractStringField(json, "unmatched") ?: ""
-        val frontmatter = extractStringField(json, "frontmatter")
-        val fullContent = extractStringField(json, "fullContent")
+        val root = com.google.gson.JsonParser.parseString(json).asJsonObject
 
-        // Parse patches array
-        val patchesStart = json.indexOf("\"patches\"")
-        if (patchesStart < 0) return null
-        val arrayStart = json.indexOf('[', patchesStart)
-        if (arrayStart < 0) return null
-        val arrayEnd = findMatchingBracket(json, arrayStart) ?: return null
-        val patchesJson = json.substring(arrayStart + 1, arrayEnd)
+        val file = root.get("file")?.asString ?: return null
+        val unmatched = root.get("unmatched")?.asString ?: ""
+        val frontmatter = root.get("frontmatter")?.asString
+        val fullContent = root.get("fullContent")?.asString
 
         val patches = mutableListOf<ComponentPatch>()
-        var pos = 0
-        while (pos < patchesJson.length) {
-            val objStart = patchesJson.indexOf('{', pos)
-            if (objStart < 0) break
-            val objEnd = findMatchingBrace(patchesJson, objStart) ?: break
-            val objJson = patchesJson.substring(objStart, objEnd + 1)
-
-            val component = extractStringField(objJson, "component")
-            val content = extractStringField(objJson, "content")
-            val boundaryId = extractStringField(objJson, "boundary_id")
-            val ensureBoundary = objJson.contains("\"ensure_boundary\"") && objJson.contains("true")
-            if (component != null && content != null) {
-                patches.add(ComponentPatch(component, content, boundaryId, ensureBoundary))
-            }
-            pos = objEnd + 1
+        val patchesArray = root.getAsJsonArray("patches") ?: return null
+        for (elem in patchesArray) {
+            val obj = elem.asJsonObject
+            val component = obj.get("component")?.asString ?: continue
+            val content = obj.get("content")?.asString ?: continue
+            val boundaryId = obj.get("boundary_id")?.asString
+            val ensureBoundary = obj.get("ensure_boundary")?.asBoolean ?: false
+            patches.add(ComponentPatch(component, content, boundaryId, ensureBoundary))
         }
 
-        val repositionBoundary = json.contains("\"reposition_boundary\"") && json.contains("true")
+        val repositionBoundary = root.get("reposition_boundary")?.asBoolean ?: false
         return IpcPatch(file, patches, unmatched, frontmatter, fullContent, repositionBoundary)
     } catch (e: Exception) {
         return null
     }
 }
 
+/**
+ * Extract a string field from a JSON object string using Gson.
+ * Used by handleSocketMessage for lightweight field extraction.
+ */
 private fun extractStringField(json: String, field: String): String? {
-    val key = "\"$field\""
-    val keyIdx = json.indexOf(key)
-    if (keyIdx < 0) return null
-    val colonIdx = json.indexOf(':', keyIdx + key.length)
-    if (colonIdx < 0) return null
-    val valueStart = json.indexOf('"', colonIdx + 1)
-    if (valueStart < 0) return null
-    val valueEnd = findUnescapedQuote(json, valueStart + 1) ?: return null
-    return json.substring(valueStart + 1, valueEnd)
-        .replace("\\n", "\n")
-        .replace("\\t", "\t")
-        .replace("\\\"", "\"")
-        .replace("\\\\", "\\")
-}
-
-private fun findUnescapedQuote(s: String, start: Int): Int? {
-    var i = start
-    while (i < s.length) {
-        if (s[i] == '"' && (i == 0 || s[i - 1] != '\\')) return i
-        i++
+    return try {
+        com.google.gson.JsonParser.parseString(json).asJsonObject.get(field)?.asString
+    } catch (e: Exception) {
+        null
     }
-    return null
-}
-
-private fun findMatchingBracket(s: String, start: Int): Int? {
-    var depth = 0
-    var inString = false
-    var i = start
-    while (i < s.length) {
-        val c = s[i]
-        if (c == '"' && (i == 0 || s[i - 1] != '\\')) inString = !inString
-        if (!inString) {
-            if (c == '[') depth++
-            if (c == ']') { depth--; if (depth == 0) return i }
-        }
-        i++
-    }
-    return null
-}
-
-private fun findMatchingBrace(s: String, start: Int): Int? {
-    var depth = 0
-    var inString = false
-    var i = start
-    while (i < s.length) {
-        val c = s[i]
-        if (c == '"' && (i == 0 || s[i - 1] != '\\')) inString = !inString
-        if (!inString) {
-            if (c == '{') depth++
-            if (c == '}') { depth--; if (depth == 0) return i }
-        }
-        i++
-    }
-    return null
 }

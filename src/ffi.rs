@@ -194,10 +194,7 @@ pub unsafe extern "C" fn agent_doc_apply_patch(
     };
 
     // Build a patch block and apply it
-    let patch = template::PatchBlock {
-        name: name.to_string(),
-        content: patch_content.to_string(),
-    };
+    let patch = template::PatchBlock::new(name, patch_content);
 
     // Use mode overrides to force the specified mode
     let mut overrides = std::collections::HashMap::new();
@@ -282,10 +279,7 @@ pub unsafe extern "C" fn agent_doc_apply_patch_with_caret(
     }
 
     // Fall back to normal apply_patch behavior
-    let patch = template::PatchBlock {
-        name: name.to_string(),
-        content: patch_content.to_string(),
-    };
+    let patch = template::PatchBlock::new(name, patch_content);
     let mut overrides = std::collections::HashMap::new();
     overrides.insert(name.to_string(), mode_str.to_string());
     let dummy_path = std::path::Path::new("/dev/null");
@@ -360,10 +354,7 @@ pub unsafe extern "C" fn agent_doc_apply_patch_with_boundary(
     }
 
     // Fall back to normal apply_patch behavior
-    let patch = template::PatchBlock {
-        name: name.to_string(),
-        content: patch_content.to_string(),
-    };
+    let patch = template::PatchBlock::new(name, patch_content);
     let mut overrides = std::collections::HashMap::new();
     overrides.insert(name.to_string(), mode_str.to_string());
     let dummy_path = std::path::Path::new("/dev/null");

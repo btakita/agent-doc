@@ -239,6 +239,7 @@ pub fn commit(file: &Path) -> Result<()> {
     // Log commit result
     match &commit_status {
         Ok(s) if s.success() => {
+            crate::ops_log::log_cycle(file, "commit", None, None);
             crate::ops_log::log_op(file, &format!("commit_success file={}", file.display()));
             // Fire post_commit hook for cross-session coordination
             let session_id = crate::frontmatter::read_session_id(file).unwrap_or_default();

@@ -4,6 +4,19 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.13
+
+- **Diff-type classification (P1)**: `classify_diff()` classifies user diffs into 7 types (Approval, SimpleQuestion, BoundaryArtifact, Annotation, StructuralChange, MultiTopic, ContentAddition). Wired into preflight JSON as `diff_type` + `diff_type_reason`. 13 tests.
+- **Annotated diff format (P3)**: `annotate_diff()` transforms unified diffs into `[agent]`/`[user+]`/`[user-]`/`[user~]` format. Wired into preflight JSON as `annotated_diff`. 5 tests.
+- **Content-source annotation sidecar (P4)**: New `agent-doc annotate` command generates `.agent-doc/annotations/<hash>.json` mapping each line to agent/user source. SHA256 cache invalidation. GC integration. 6 tests.
+- **Reproducible operation logs (P5)**: New `.agent-doc/logs/cycles.jsonl` with structured JSONL entries (op, file, timestamp, commit_hash, snapshot_hash, file_hash). Wired into all write paths + git commit. 2 tests.
+- **Post-preflight eval diffs (P2)**: Moved `strip_comments` to `component.rs` (shared between binary and eval-runner). eval-runner preprocesses diffs with comment stripping.
+- **Transfer-source metadata**: `PatchBlock` now supports `attrs` field. `<!-- patch:name key=value -->` attributes parsed and preserved. 3 tests.
+- **JB plugin Gson migration**: Replaced hand-rolled JSON parser with `com.google.gson.JsonParser`. Fixes `\\n` unescape ordering bug. Plugin v0.2.44.
+- **SKILL.md enhancements**: Diff-type routing (0b), multi-topic `---` separators (0c), process discipline clarification.
+- **Domain ontology**: Interaction Model section in README.md (Directive, Cycle, Diff, Annotation). `directive.md` kernel node.
+- **Module-harness**: New `ontology-references` runbook for cross-referencing domain ontology in module specs.
+
 ## 0.31.12
 
 - **Refactor `ensure_initialized()`**: Split into 3 focused functions: `ensure_session_uuid()`, `ensure_snapshot()`, `ensure_git_tracked()`. Composite `ensure_initialized()` calls all three.

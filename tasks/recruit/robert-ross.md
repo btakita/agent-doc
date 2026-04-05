@@ -771,7 +771,7 @@ do
 | Stack fit | Native | External | External | External |
 
 **Verdict:** Cloudflare Vectorize + Workers AI is the right call for Shimmer MVP. Cheap, serverless, native to existing stack. If hybrid search becomes critical, pair with D1 FTS or evaluate Turbopuffer later.
-<!-- agent:boundary:25446fa1 -->
+<!-- agent:boundary:c004e82b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

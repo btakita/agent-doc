@@ -481,7 +481,7 @@ I want to also make or use a memory library that work with committing files to a
 **My recommendation:** Option 3 (consolidate into instruction-files). It already has discovery. Adding write capability (route lessons to the right file) makes it the single tool for committed agent context. Keeps the dependency tree simple.
 
 This is a design decision for the instruction-files task document. Want me to add it there?
-<!-- agent:boundary:ffb28f6e -->
+<!-- agent:boundary:e64b7506 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

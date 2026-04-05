@@ -628,7 +628,7 @@ The **Directive** term connects the kernel ontology to agent-doc's diff-type cla
 This creates a traceable chain: **ontology definition -> domain mapping -> binary classification -> skill routing -> behavioral contract**.
 
 Want me to add this Interaction Model section to `README.md`?
-<!-- agent:boundary:9562dd93 -->
+<!-- agent:boundary:2b8b0828 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

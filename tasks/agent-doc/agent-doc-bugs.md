@@ -100,7 +100,7 @@ Found it in ops.log: `commit_failed file=tasks/software/proof.md exit_code=1` wi
 3. Commit (snapshot matches file — no drift)
 
 458 tests pass, clippy clean. Binary installed. Try emptying proof.md and running "Sync Tmux Layout" again.
-<!-- agent:boundary:3d91640d -->
+<!-- agent:boundary:ebdc7e50 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

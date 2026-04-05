@@ -600,7 +600,7 @@ A **Directive** is a [Signal](./signal.md) that authorizes and requests action f
 **Alternative:** If you prefer fewer kernel nodes, this could be a section within `signal.md` instead of a standalone node.
 
 Which approach do you prefer? I can create the node and wire it into the agent-doc domain ontology.
-<!-- agent:boundary:4fb7ea8d -->
+<!-- agent:boundary:f92e1679 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

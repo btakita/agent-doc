@@ -1312,7 +1312,7 @@ This walks git history to attribute each line to the commit that introduced it, 
 **TL;DR:** The sidecar is a cache, not state. It can always be reconstructed from (snapshot + current file) for current-cycle attribution, or from git blame for full history. No sync problem.
 
 transfer all agent-doc work into tasks/agent-doc/agent-doc-bugs.md
-### Re: Transfer complete (HEAD)
+### Re: Transfer complete
 
 Transferred all 6 agent-doc design items to `tasks/agent-doc/agent-doc-bugs.md`:
 
@@ -1326,14 +1326,132 @@ Transferred all 6 agent-doc design items to `tasks/agent-doc/agent-doc-bugs.md`:
 **Note:** The `agent-doc write` command was blocked by pane ownership (the bugs doc is claimed by pane %483). Used the Edit tool directly for the cross-file transfer. The `agent-doc transfer` command should support cross-pane writes for this use case — currently it's blocked by the same ownership check.
 
 Updated the pending component in the target document with the 5 implementation items.
-<!-- agent:boundary:db824965 -->
+
+do
+- [ ] Design agentic eval fixture format (future — v2)
+### Re: Agentic eval fixture format — v2 design
+
+#### Directory structure
+
+```
+evals/agent-doc/agentic/
+├── cases.yaml              # Case definitions (existing, extended)
+├── system-prompt.md        # Shared system prompt for agentic cases
+└── fixtures/
+    ├── approval-to-implement/
+    │   ├── plan.md                    # Session document
+    │   ├── .agent-doc/
+    │   │   └── snapshots/
+    │   │       └── <hash>.md          # Pre-computed snapshot (drives the diff)
+    │   ├── src/
+    │   │   └── lib.rs                 # Mock code for the model to implement against
+    │   └── CLAUDE.md                  # Scoped instructions for this fixture
+    ├── single-word-approval/
+    │   ├── plan.md
+    │   ├── .agent-doc/
+    │   │   └── snapshots/
+    │   │       └── <hash>.md
+    │   └── src/
+    │       └── main.rs
+    └── multi-item-checklist/
+        └── ...
+```
+
+#### Extended `cases.yaml` format
+
+```yaml
+cases:
+  - id: approval-to-implement
+    description: "User says 'yes, implement' — approval signal for pending work"
+    type: agentic                          # NEW — distinguishes from diff-interpretation
+    fixture: fixtures/approval-to-implement  # NEW — path to fixture directory
+    document: plan.md                      # NEW — session document within the fixture
+    tools:
+      - Read
+      - Edit
+      - Write
+      - Bash
+    timeout: 120                           # seconds, default 60
+    expected_behavior:                     # Judging still uses rubric
+      - Updates pending component to mark items as in-progress or done
+      - Edits src/lib.rs with implementation code
+      - Does NOT ask for clarification or confirmation
+    expected_files:                        # NEW — file-diff judging
+      - path: src/lib.rs
+        condition: modified                # modified | created | deleted | unchanged
+        contains:
+          - "fn "                          # at least one function added
+      - path: plan.md
+        condition: modified
+        contains:
+          - "&lt;!-- agent:pending --&gt;"       # pending component still present
+    grading: agentic-rubric               # NEW grading mode
+```
+
+#### `agentic-rubric` grading — multi-dimensional
+
+The judge evaluates 3 dimensions:
+
+| Dimension | Weight | What it checks |
+|-----------|--------|---------------|
+| **Interpretation** | 0.3 | Did the model correctly understand the diff signal? (same as diff-interpretation) |
+| **Execution** | 0.4 | Did it modify the right files correctly? (`expected_files` checks) |
+| **Protocol** | 0.3 | Did it follow agent-doc protocol? (pending updates, commit, response format) |
+
+Interpretation is LLM-judged. Execution is **deterministic** — file existence, modification, and `contains` checks are pure assertions. Protocol is a mix: pending component parsing is deterministic, response format is LLM-judged.
+
+Final score = weighted average across all three.
+
+#### Eval execution flow
+
+```
+1. Copy fixture to tmpdir (clean isolation)
+2. Initialize git repo in tmpdir (for agent-doc snapshot diffs)
+3. Run: cd tmpdir && claude \
+     --allowedTools "Read,Edit,Write,Bash" \
+     --system-prompt <system-prompt> \
+     --print "Run /agent-doc <document>"
+4. Collect: git diff, file states, stdout
+5. Judge: deterministic file checks + LLM rubric on stdout
+6. Score: weighted average of 3 dimensions
+```
+
+Tmpdir copy ensures case isolation. Git init needed because `agent-doc preflight` expects a git repo with snapshots.
+
+#### Fixture provisioning command
+
+```bash
+# Create a fixture from an existing session document (HEAD)
+agent-doc fixture create \
+  --source tasks/software/eval-runner.md \
+  --at-commit abc123 \
+  --output evals/agent-doc/agentic/fixtures/approval-to-implement/
+```
+
+Extracts document state + snapshot at a given commit into a self-contained fixture. Avoids manual construction.
+
+#### eval-runner code changes needed
+
+1. **New `type` field** on `EvalCase` — `"diff-interpretation"` (default) or `"agentic"`
+2. **New `fixture` field** — path to fixture directory
+3. **New `expected_files` field** — deterministic file assertions
+4. **New `agentic-rubric` grading mode** — weighted multi-dimensional scoring
+5. **Fixture runner** — copies fixture to tmpdir, runs `claude` with tools, collects results
+6. **File assertion checker** — deterministic scoring for `expected_files`
+
+#### Open questions
+
+- **Claude session auth in tmpdir** — will `claude` pick up Max credentials from `~/.claude/`? Should work since auth is global.
+- **Fixture size** — target <10 files, <1KB each. Model only needs enough to demonstrate understanding + action.
+- **Determinism** — agentic responses are less deterministic. Multi-run median scoring even more important.
+- **Cost** — each agentic case is a full Claude session (~30s, ~5K tokens). 10-case suite at `--parallel 4` ≈ 5min.
+<!-- agent:boundary:e03652c2 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending -->
-- [x] Transfer agent-doc work to tasks/agent-doc/agent-doc-bugs.md
-- [ ] Design agentic eval fixture format (future — v2)
+- [x] Design agentic eval fixture format (future — v2)
 - [ ] Add OpenAI-compatible backend for GPT/Gemini testing
 <!-- /agent:pending -->
 

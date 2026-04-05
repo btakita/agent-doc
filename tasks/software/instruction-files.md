@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-13/22 items complete. Full ecosystem created. Architecture designed for agent-kit as minimal core with domain repos shipping CLIs.
+13/22 items complete. Hooks stay in agent-kit. Starting restructure.
 <!-- /agent:status -->
 
 ## Exchange
@@ -968,7 +968,7 @@ Instruction Audit would live in instruction-files
 > Instruction Audit (audit feature) — Validate instruction files via instruction-files crate
 
 agent-rules, agent-runbooks, agent-memories, agent-skills would all depend on agent-kit for at least environment detection.
-### Re: Architecture — agent-kit as shared foundation (HEAD)
+### Re: Architecture — agent-kit as shared foundation
 
 Good thinking. Looking at agent-kit's current code, here's the natural decomposition:
 
@@ -1039,7 +1039,30 @@ Runbooks and memories use `.agent/` universally (tool-agnostic). Skills and rule
 This is a future feature — the convention repos define formats first, tooling second.
 
 Want me to start restructuring agent-kit?
-<!-- agent:boundary:7a1bb9f7 -->
+
+Yes. Would all of the agent-* repos benefit from hooks?
+### Re: Would all agent-* repos benefit from hooks? (HEAD)
+
+**No — hooks are session coordination infrastructure, not something the convention repos need.**
+
+Looking at the hook types: `pre_write`, `post_write`, `post_commit`, `claim`, `layout_change` — these are all about coordinating concurrent agent sessions operating on documents. That's agent-doc territory, not convention-repo territory.
+
+| Repo | Needs hooks? | Why / Why not |
+|------|-------------|---------------|
+| agent-doc | **Yes** | Multi-session coordination (the primary consumer) |
+| agent-kit | **Provides** | Hooks live here as shared infrastructure |
+| agent-rules | No | Validates files — no concurrent sessions |
+| agent-runbooks | No | Audits/validates — no concurrent sessions |
+| agent-memories | Maybe later | Could notify when a memory is written, but not needed for validation CLI |
+| agent-skills | Maybe later | Could notify on install/uninstall, but not core |
+| instruction-files | No | Pure audit library — stateless |
+
+**Hooks stay in agent-kit** as the infrastructure layer. The convention repos are primarily validation CLIs — they run, check files, and exit. No long-running sessions, no coordination needed.
+
+If agent-memories or agent-skills ever need event notification (e.g., "memory written" → "MEMORY.md index updated"), they'd depend on agent-kit's hooks feature. But that's a future concern.
+
+Starting the restructuring now.
+<!-- agent:boundary:32695946 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

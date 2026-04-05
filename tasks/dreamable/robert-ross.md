@@ -844,8 +844,8 @@ Look at latest robert-ross-sms messages.
 I don't want the NDA to be overreaching. I'm already working on collaborative tooling.
 Do NDAs also have non-competes?
 Need to be able to carve out ways for me to work on my existing projects.
-I also want the ability to open source low level primitives or at least use cross project. 
-<!-- agent:boundary:097845ff -->
+I also want the ability to open source low level primitives or at least use cross project.
+<!-- agent:boundary:9bca2e45 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

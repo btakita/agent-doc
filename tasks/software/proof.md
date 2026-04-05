@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Connected to Proof doc `mu0anyag`. Comment posted. Investigating integration paths.
+Connected to Proof doc `mu0anyag`. Bidirectional editing confirmed — responded to user's Proof edit via edit/v2 API.
 <!-- /agent:status -->
 
 ## Exchange
@@ -37,7 +37,7 @@ https://proofeditor.ai/d/mu0anyag?token=7e6e9d3d-87c8-4e05-bf4d-89e7c029ea77
    POST https://proofeditor.ai/api/bridge/report_bug
    Include a short summary, free-form context, and raw evidence like request/response pairs or request IDs.
    Optional reference code: https://github.com/EveryInc/proof-sdk
-### Re: Proof Investigation (HEAD)
+### Re: Proof Investigation
 
 **Proof** is a collaborative document editor by [Every](https://every.to) designed for human-AI co-authoring. Key features:
 
@@ -48,7 +48,7 @@ https://proofeditor.ai/d/mu0anyag?token=7e6e9d3d-87c8-4e05-bf4d-89e7c029ea77
 
 I've successfully joined the document at `mu0anyag` and left a comment confirming my presence. You should see "Claude (agent-doc)" in the presence list.
 
-### Re: agent-doc Integration Possibilities (HEAD)
+### Re: agent-doc Integration Possibilities
 
 The two systems are complementary but architecturally different:
 
@@ -73,12 +73,31 @@ The two systems are complementary but architecturally different:
 The API is well-designed — token auth, CRDT-aware mutations with base tokens, idempotency support. The `edit/v2` endpoint with block references is particularly clean for programmatic editing.
 
 What direction interests you most?
-<!-- agent:boundary:c095367d -->
+update from proof
+### Re: "update from proof" (HEAD)
+
+I saw you wrote "Tell me about proof." in the Proof document. I responded there directly via the edit/v2 API — you should see my response with purple provenance gutter in the Proof editor.
+
+The round-trip worked:
+1. You wrote in Proof ("Tell me about proof.")
+2. You signaled agent-doc with "update from proof"
+3. I read the Proof doc state, saw your question, and responded via edit/v2
+4. Provenance marks confirm authorship: `human:Brian` for your text, `ai:claude-agent-doc` for mine
+
+This validates integration angle #2 (Proof as input source) — the manual bridge works. An automated version would poll `/events/pending` or `/queue/pending` and route changes back through agent-doc's diff pipeline.
+
+**API learnings from this round-trip:**
+- `edit/v2` uses `operations` array (not `ops`), with `blocks` array per operation
+- Each block is `{"markdown": "..."}` — Proof handles parsing into its internal format
+- Presence API requires `X-Agent-Id` header
+- Provenance is automatic — the `by: "ai:claude-agent-doc"` attribution flows through
+<!-- agent:boundary:082b60bf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - Proof integration direction TBD (awaiting user preference)
-- Potential: bridge skill, remote surface sync, event-driven input, comment enrichment
+- Validated: manual bridge (Proof as input source) works end-to-end
+- Next: automate event polling? build bridge skill? deeper edit/v2 testing?
 <!-- /agent:pending -->

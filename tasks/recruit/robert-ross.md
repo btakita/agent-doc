@@ -621,7 +621,7 @@ Created at `file:///home/brian/work/btakita/agent-loop/tasks/recruit/robert-ross
 You can now open it in your editor and run `/agent-doc tasks/recruit/robert-ross-granola.md` to interact with it. Ask questions about the meeting, request deeper analysis, or cross-reference with the corky transcript.
 
 Read the sms transcript. Please help me draft a good response.
-### Re: SMS response to Rob (HEAD)
+### Re: SMS response to Rob
 
 **SMS transcript context:** Rob's last message confirms the 5pm ET Zoom call today (Sunday Apr 5): "Hi Brian, looking forward to our 5pmET zoom today."
 
@@ -641,7 +641,61 @@ Read the sms transcript. Please help me draft a good response.
 > Likewise, Rob. See you at 5!
 
 Let me know which you prefer or if you want a different tone.
-<!-- agent:boundary:71753d87 -->
+
+do
+- **Prep demo for Sunday:** Run session analyzer on robert-ross transcript
+### Re: Session analyzer — robert-ross transcript (HEAD)
+
+Ran the session analyzer on both the 3h54m call transcript and this agent-doc session (72 commits, 22 exchanges).
+
+#### Call Transcript Metrics
+
+| Metric | Value |
+|--------|-------|
+| Duration | ~3h 54m |
+| Speakers | 3 (Rob, Brian, Miguel) |
+| Turn count | ~200+ |
+| Major topics | 8 |
+
+#### Topic Phases
+
+1. **Intro/Warm-up** (0:00–0:22) — Miguel's Grabber demo, Presence/WebRTC background
+2. **Claude Code Assessment** (0:22–0:45) — Subagent philosophy, live agent-doc demo
+3. **Rob's Vision** (1:00–1:50) — Build Party, agentic learning platform, Figma MCP, Code Karaoke
+4. **Shimmer/Session Analyzer** (1:50–2:35) — Session viewer, BlobScore, Core/Vespa memory
+5. **Deep agent-doc Demo** (2:27–3:15) — CRDT, tmux-router, JetBrains plugin for Miguel
+6. **Closing** (3:15–3:54) — 8-9/10 mutual rating, $100/hr starting point
+
+#### Rob's Highest-Signal Quotes
+
+- "The guy scored at the top of the list on both the AI and the RTC stuff."
+- "I really like the agent doc... that's your IP. It's open source?"
+- "I don't normally like, usually when I have this feeling, it works out."
+- "Set up Trieve and either Core or Vespa... those are like one day each."
+
+#### agent-doc Session Analysis (this document)
+
+- **22 exchanges** spanning Apr 1–5
+- **Tools used:** corky (email + transcription), Gmail API, granola skill, PDF generation, web scraping, LinkedIn, Trieve/Vespa/Vectorize evaluation
+- **Self-extending:** Created `/granola` skill and session-analyzer template within the session itself
+
+#### Demo Highlights for Sunday 5pm
+
+1. **Live screenshare moment** — Rob watched agent-doc explain itself to him
+2. **CRDT merge** — Brian editing while agent responds, no conflicts
+3. **3h54m transcription in one command** via corky
+4. **72 commits of orchestration** visible in git history
+5. **Granola scraping + skill creation** built on the fly
+6. **Alignment table** mapping Rob's pain points → Brian's existing tools
+
+#### Recommendations for Sunday Call
+
+- **Lead with agent-doc demo** — Rob said he'd research it; show him the polished version
+- **Frame agent-doc as Shimmer's foundation** — session sharing, visual output, search all extend from agent-doc
+- **Show Core/Vespa + Shimmer skeleton plan** — arrive with an architecture sketch
+- **Demo subagent usage live** — Rob probed this twice, didn't get a concrete demo last time
+- **Address metrics vs. intangibles** — Brian's 8-9 rating caveat; position session analysis as qualitative-first
+<!-- agent:boundary:1c4a384f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -650,7 +704,7 @@ Let me know which you prefer or if you want a different tone.
 - ([done]) Build session analyzer template
 - ([done]) Build `/granola` skill with import runbook
 - ([done]) Create Granola agent-doc for Rob's meeting notes
-- **Prep demo for Sunday:** Run session analyzer on robert-ross transcript
+- ([done]) **Prep demo for Sunday:** Run session analyzer on robert-ross transcript
 - **Sunday Apr 5, 5pm ET:** Follow-up call with Rob — confirmed via SMS
 - Evaluate Deepgram + LiveKit Agents for real-time STT pipeline
 - Evaluate Cloudflare Vectorize + Workers AI for session indexing

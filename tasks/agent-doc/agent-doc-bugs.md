@@ -138,7 +138,7 @@ Can we refer to a runbook to save on context? Will the runbook be guaranteed to 
 Would something like this work?
 
 > Never use the Write tool or Edit tool to create session documents. Use the ... runbook
-### Re: Briefer core principle + runbook guarantee (HEAD)
+### Re: Briefer core principle + runbook guarantee
 
 The runbook is NOT guaranteed to run — it's only read when the user explicitly requests "transfer" or "extract". Core principles are always loaded because they're at the top of SKILL.md.
 
@@ -149,11 +149,21 @@ Your suggested format works well — brief prohibition + runbook reference:
 This saves context while ensuring the rule is visible. The detail (why, what to use instead) lives in the runbook. The core principle is the trigger: "I'm about to use Write tool for a .md file — wait, core principle says don't."
 
 Let me update it.
-<!-- agent:boundary:de8618cd -->
+
+do
+- [ ] Shorten SKILL.md core principle to reference runbook
+### Re: Already done (HEAD)
+
+The SKILL.md core principle was already shortened in the previous cycle. It now reads:
+
+> **Use the pipeline, not ad-hoc tools** — never use the Write tool or Edit tool to create session documents. See [transfer-extract runbook](runbooks/transfer-extract.md).
+
+One line, references the runbook for detail. No further changes needed.
+<!-- agent:boundary:8d411706 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Shorten SKILL.md core principle to reference runbook
+All items complete. SKILL.md core principle already shortened.
 <!-- /agent:pending -->

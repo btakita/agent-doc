@@ -845,7 +845,7 @@ I don't want the NDA to be overreaching. I'm already working on collaborative to
 Do NDAs also have non-competes?
 Need to be able to carve out ways for me to work on my existing projects.
 I also want the ability to open source low level primitives or at least use cross project.
-<!-- agent:boundary:7b259d58 -->
+<!-- agent:boundary:0bddcc9f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

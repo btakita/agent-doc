@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-All items complete. 450 tests passing. Session done.
+agent-doc v0.31.13 released to crates.io + GitHub
 <!-- /agent:status -->
 
 ## Exchange
@@ -733,7 +733,7 @@ Verified: `grep -r '~/.claude/philosophy' src/` — no matches across entire src
 do
 - [ ] Add transfer-source metadata to patch format
 ontology-reference.md **still** has a references to `~/.claude/philosophy`...Why?
-### Re: Transfer-source metadata to patch format — implemented (HEAD)
+### Re: Transfer-source metadata to patch format — implemented
 
 Done. The last pending item is complete.
 
@@ -760,18 +760,28 @@ The `transfer-source` attribute is preserved in `PatchBlock.attrs` and accessibl
 - `parse_patch_with_multiple_attrs` — verifies multiple key=value pairs
 
 **All 450 tests pass, clippy clean.**
-<!-- agent:boundary:a12ee41c -->
+release
+### Re: Release — agent-doc v0.31.13 (HEAD)
+
+Released. All targets published:
+
+- **crates.io**: `cargo publish` -> Published agent-doc v0.31.13
+- **GitHub Release**: https://github.com/btakita/agent-doc/releases/tag/v0.31.13
+- **Release binary**: `cargo build --release` -> `.bin/agent-doc` symlink updated
+- **~/.cargo/bin**: `cargo install --path .` -> v0.31.13 installed
+
+**Version sync**: Cargo.toml + pyproject.toml both at 0.31.13. VERSIONS.md updated with full changelog.
+
+**Commit**: `a21ccc0` — 20 files changed, 1365 insertions, 204 deletions.
+
+**Skipped**: maturin publish (PyPI) — can be done separately if needed.
+
+**JB plugin**: Already at v0.2.44 with Gson migration. Install from `build/distributions/agent-doc-jetbrains-0.2.44.zip`.
+<!-- agent:boundary:cbbe31b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] All P1-P5 features — DONE
-- [x] SKILL.md routing + separator convention — DONE
-- [x] JB plugin escape fix + Gson migration (v0.2.44) — DONE
-- [x] Edge case + integration tests — DONE (450 total)
-- [x] Process discipline updates — DONE
-- [x] Directive ontology + Interaction Model + portability fixes — DONE
-- [x] Module-harness ontology runbook — DONE
-- [x] Transfer-source metadata to patch format — DONE
+All items complete. v0.31.13 released.
 <!-- /agent:pending -->

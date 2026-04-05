@@ -853,7 +853,7 @@ agent-skills (bundle format + activation)
 ```
 
 Want me to create it?
-<!-- agent:boundary:31ca384c -->
+<!-- agent:boundary:6de18e3f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

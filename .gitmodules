@@ -109,3 +109,6 @@
 [submodule "src/agent-memories"]
 	path = src/agent-memories
 	url = git@github.com:btakita/agent-memories.git
+[submodule "src/agent-rules"]
+	path = src/agent-rules
+	url = git@github.com:btakita/agent-rules.git

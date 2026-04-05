@@ -316,7 +316,7 @@ The claim output you saw:
 This is the correct behavior — claim detected the occupied pane and provisioned a new one. The JB plugin displayed it as an error because the message went to stderr. The provisioning succeeded (pane %499 was created and Claude started).
 
 **Rebuilt and installed.** Try deleting proof.md, recreating it as empty, then "Sync Tmux Layout" — it should now get the full template with exchange + pending components.
-<!-- agent:boundary:b392e9bd -->
+<!-- agent:boundary:75a7e567 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

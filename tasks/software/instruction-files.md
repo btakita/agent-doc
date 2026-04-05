@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-18/24 items complete. Renamed to skill-harness. Ecosystem clean — no naming conflicts.
+18/24 items complete. Harness pattern (Spec/Contracts/Evals) applies to all content types. Start with markdown convention, formalize in code later.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1274,7 +1274,7 @@ This makes `skill-harness` the full lifecycle tool: author, validate, install, t
 
 Want me to rename and restructure?
 yes
-### Re: Rename and restructure (HEAD)
+### Re: Rename and restructure
 
 Done. `btakita/agent-skills` renamed to `btakita/skill-harness`.
 
@@ -1297,7 +1297,42 @@ The ecosystem is now:
 | `agent-memories` | `agent-memories` | Validate/manage memories |
 | `skill-harness` | `skill-harness` | Skill lifecycle (install/audit/eval/sync) |
 | `instruction-files` | `instruction-files` | Audit engine for all formats |
-<!-- agent:boundary:7df1e33e -->
+
+Could rules, runbooks, memories all have evals, contracts, and specs as well?
+### Re: Evals, contracts, and specs for rules/runbooks/memories (HEAD)
+
+Yes. The harness pattern (Spec + Agentic Contracts + Evals) applies to every content type, not just skills and modules.
+
+| Content type | Spec (what it is) | Contracts (what the agent promises) | Evals (how to verify) |
+|-------------|-------------------|-----------------------------------|-----------------------|
+| **Rules** | Format, required sections, actionable content criteria | "I will follow all rules in scope", "I won't add rules without asking" | Does the agent obey constraints? Does it flag violations? |
+| **Runbooks** | Step structure, required H1 + checklist, imperative voice | "I will follow every step in order", "I won't skip verification steps" | Did the agent execute all steps? Did it verify each? |
+| **Memories** | Frontmatter format, types, body structure | "I will save corrections as feedback memories", "I won't duplicate" | Are memories well-formed? Do they capture the right type? |
+| **Skills** | SKILL.md format, activation triggers, directory structure | "I will load skills on trigger", "I will follow skill runbooks" | Does the skill activate correctly? Does it produce expected output? |
+
+This suggests the harness pattern should be a **shared trait**, not duplicated per repo. The natural home is `module-harness` (or a generalized `harness-core`):
+
+```rust
+trait Harness {
+    fn spec(&self) -> &Spec;
+    fn contracts(&self) -> &[Contract];
+    fn evals(&self) -> &[Eval];
+    fn audit(&self) -> Vec<Issue>;
+}
+```
+
+Each repo implements `Harness` for its content type:
+- `agent-rules` implements `Harness` for rule files
+- `agent-runbooks` implements `Harness` for runbooks
+- `agent-memories` implements `Harness` for memories
+- `skill-harness` implements `Harness` for skills
+
+This keeps the harness pattern consistent across the ecosystem while each repo owns its domain-specific validation logic.
+
+The alternative is simpler: each repo just has `SPEC.md`, `## Agentic Contracts`, and `evals/` as markdown conventions (no shared Rust trait), validated by `module-harness audit`. This is what we do today for module-harness — it works with any language because it's markdown, not code.
+
+**Recommendation:** Start with the markdown convention (SPEC.md + Contracts section + evals/) across all repos. The shared Rust trait can come later if the pattern proves valuable enough to formalize in code.
+<!-- agent:boundary:b1a17444 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1321,8 +1356,8 @@ The ecosystem is now:
 - [x] Add Cargo.toml + CLI to agent-memories
 - [x] Add Environment path methods for rules/runbooks/memories/skills dirs
 - [x] Rename btakita/agent-skills to btakita/skill-harness
-- [ ] Add Spec/Agentic Contracts/Evals structure to skill-harness
-- [ ] Add self-skill (SKILL.md for meta-management)
+- [ ] Add Spec/Contracts/Evals markdown convention to all repos
+- [ ] Add self-skill to skill-harness (SKILL.md for meta-management)
 - [ ] Committed memory write capability (route lessons to right file)
 - [ ] Compare/align with Cursor Rules, Windsurf Rules, .agents spec
 - [ ] Ontology validation integration (use `existence` crate to validate terms)

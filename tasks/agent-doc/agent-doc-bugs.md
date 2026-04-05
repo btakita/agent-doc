@@ -85,7 +85,7 @@ Without frontmatter, sync sees it as a plain file and won't provision a pane.
 - Or add frontmatter manually, then run `/agent-doc tasks/software/proof.md` from a new Claude session — sync will auto-provision a pane
 
 The sync output you saw (`--col bugs.md --col proof.md`) was correct — it detected both files in the editor split. But since proof.md had no session UUID, sync couldn't provision a pane for it. Once proof.md has frontmatter, sync will create the 2-column layout automatically on the next tab switch.
-### Re: Sync should auto-init empty files (HEAD)
+### Re: Sync should auto-init empty files
 
 Checked the logs: no proof.md entries in ops.log. The "Claim for Tmux Pane" error came from the JB plugin action (manual), not from sync. Sync saw the file in the editor split but couldn't provision because it had no session UUID.
 
@@ -99,11 +99,38 @@ Checked the logs: no proof.md entries in ops.log. The "Claim for Tmux Pane" erro
 This is a feature enhancement for the sync reconciler. Want me to implement it? It would affect `sync.rs` and potentially `autoclaim.rs`.
 
 Alternatively, the simpler path: the JB plugin's "Claim for Tmux Pane" action could detect empty files and run `agent-doc init` before claiming. This keeps the change in the plugin layer.
-<!-- agent:boundary:d5389b03 -->
+
+Why did `Claim for Tmux Pane` have an error if we don't have an entry for proof.md in the ops.log?
+
+We need to make this process robust. New files need to be properly claimed with the default template written to it.
+### Re: Claim error diagnosis + robust new file handling (HEAD)
+
+**Why the error happened:** The JB plugin's "Claim for Tmux Pane" action sends the *currently focused tmux pane* as the target. When you had proof.md open in the editor, the focused tmux pane was %491 (running the bugs session). So the claim tried to bind proof.md to pane %491, which is already claimed by agent-doc-bugs.md. The claim correctly refused to prevent corruption.
+
+No ops.log entry for proof.md because the claim validation happens *before* any file modifications (atomic semantics — claim.rs:144). The error bailed before writing anything.
+
+**The robust fix needs two changes:**
+
+1. **Sync auto-init** (`sync.rs`): When sync encounters an empty or frontmatter-less `.md` file in the editor layout, it should:
+   - Run `agent-doc init <file>` to scaffold template + UUID
+   - Then proceed with normal provisioning (create new pane, start Claude)
+   - This is the primary path — sync is the entrypoint from the editor
+
+2. **Plugin claim action** (`PatchWatcher.kt` or plugin actions): When "Claim for Tmux Pane" is triggered on an empty file:
+   - Detect empty/no-frontmatter file
+   - Run `agent-doc init` first
+   - Then run `agent-doc claim` with a *new* pane (not the current one)
+   - Or better: redirect to sync which handles the full lifecycle
+
+**Root cause:** The missing step is that sync treats files without `agent_doc_format` frontmatter as non-session files. The fix is straightforward: in `resolve_file()`, if a `.md` file has no frontmatter but is in the editor layout, init it.
+
+Want me to implement the sync auto-init? This would be the v0.31.14 feature.
+<!-- agent:boundary:3a58f268 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Sync auto-init for empty .md files in session directories
+- [ ] Sync auto-init for empty/frontmatter-less .md files in editor layout
+- [ ] Plugin claim action: detect empty files, redirect to init+sync flow
 <!-- /agent:pending -->

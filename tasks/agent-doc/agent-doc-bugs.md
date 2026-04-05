@@ -80,7 +80,7 @@ The current file has the full template (different UUID `23463bb9` — recreated 
 **The fix:** After auto-scaffolding in `resolve_file`, sync should explicitly call `git::commit()` to commit the scaffolded content. The scaffold is a significant change (empty file → full template) that should be committed immediately.
 
 This is another case where the binary needs to enforce the invariant: scaffolded files should be committed. Want me to fix it?
-<!-- agent:boundary:693a0850 -->
+<!-- agent:boundary:fc62cda9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

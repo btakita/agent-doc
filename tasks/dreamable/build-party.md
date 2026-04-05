@@ -79,5 +79,5 @@ transfer mermaid diagram into build-party-course-diagram.md
 ### Re: transfer mermaid diagram (HEAD)
 
 Done. Created `tasks/dreamable/build-party-course-diagram.md` with the full mermaid diagram for Miguel's LiveKit agent course.
-<!-- agent:boundary:6dcaf928 -->
+<!-- agent:boundary:6cff56c5 -->
 <!-- /agent:exchange -->

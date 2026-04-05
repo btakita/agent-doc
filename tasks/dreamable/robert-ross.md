@@ -870,7 +870,7 @@ Here's my analysis of your points:
 **Open-sourcing low-level primitives:** This is a negotiation point for the employment agreement (separate from NDA). In the NDA phase, make sure nothing you disclose about your existing tools gets claimed as Dreamable confidential info. Add a clause like: "Information that was already known to the receiving party or independently developed shall not be considered Confidential Information."
 
 **Suggested reply to Rob:** Accept the NDA in principle but ask to review it first. Something like: "Happy to sign an NDA... please send it over and I'll review. I do have existing open-source projects I'll want to make sure are carved out."
-<!-- agent:boundary:60105def -->
+<!-- agent:boundary:12bd8a3f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

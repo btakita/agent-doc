@@ -1656,7 +1656,7 @@ To publish, push a version tag: `git tag v0.1.0 && git push origin v0.1.0`
 Each repo needs a `CARGO_REGISTRY_TOKEN` secret configured in GitHub Settings > Secrets. This is the same token used for agent-kit.
 
 **Note on npm/pypi:** These are all Rust crates — npm/pypi don't apply. If you want npm/pypi binaries later, we'd add cross-compilation + binary distribution (like agent-doc does with maturin for PyPI).
-<!-- agent:boundary:a771adbb -->
+<!-- agent:boundary:28027fdb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

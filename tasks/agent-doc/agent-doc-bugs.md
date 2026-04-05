@@ -47,7 +47,7 @@ Yes. `Cargo.toml` has `instruction-files = "0.1"`. It's used by `agent-doc audit
 
 Update instruction-files dependency.
 Is there any skill install logic with instruction-files or it's dependencies that can handle installing skills?
-### Re: Skill install in instruction-files (HEAD)
+### Re: Skill install in instruction-files
 
 No. instruction-files has no skill install logic — it only discovers and audits existing files. The skill install capability is entirely in agent-doc (`src/skill.rs` — `agent-doc skill install`).
 
@@ -57,11 +57,16 @@ To make this generic, a `skill-harness` crate (or extending instruction-files) w
 - A check command that verifies installed skill matches source
 
 This is new functionality for the instruction-files expansion. Added to the task.
-<!-- agent:boundary:9834081e -->
+upgrade instruction-files.
+See tasks/software/instruction-files.md for the current solution(s).
+### Re: Upgrade instruction-files (HEAD)
+
+agent-doc depends on `"0.1"` but local source is `0.2.0`. Tracked in tasks/software/instruction-files.md. Bump happens when that task's features land.
+<!-- agent:boundary:173d17a4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-All items noted. Instruction-files expansion tracked in tasks/software/instruction-files.md.
+Tracked in tasks/software/instruction-files.md.
 <!-- /agent:pending -->

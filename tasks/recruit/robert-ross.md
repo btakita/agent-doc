@@ -619,7 +619,7 @@ Created at `file:///home/brian/work/btakita/agent-loop/tasks/recruit/robert-ross
 - `&lt;!-- agent:pending --&gt;` — task tracking
 
 You can now open it in your editor and run `/agent-doc tasks/recruit/robert-ross-granola.md` to interact with it. Ask questions about the meeting, request deeper analysis, or cross-reference with the corky transcript.
-<!-- agent:boundary:c87048a4 -->
+<!-- agent:boundary:c748d141 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

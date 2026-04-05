@@ -158,14 +158,23 @@ I also deleted some content...which is why there is a mismatch.
 
 do
 - [ ] Fix: file move creates snapshot/file mismatch (snapshot too small after rename)
-### Re: v0.31.16 — extreme drift re-sync (HEAD)
+### Re: v0.31.16 — extreme drift re-sync
 
 Fixed the snapshot/file mismatch after file move. In `git.rs commit()`, when file is >5x larger than snapshot (extreme drift typical of rename/move), the snapshot is automatically re-synced from file content before staging. This breaks the drift loop.
 
 Published v0.31.16 to all targets (crates.io, PyPI, GitHub Release, binary installed).
 
 The fix is active now — next `agent-doc commit` on `tasks/dreamable/robert-ross.md` should re-sync the snapshot and stop the "externally saved" dialogs.
-<!-- agent:boundary:f1cbbb85 -->
+
+release
+### Re: Already released (HEAD)
+
+v0.31.16 was already published in the previous cycle — all targets are live:
+- crates.io: https://crates.io/crates/agent-doc/0.31.16
+- PyPI: agent-doc 0.31.16
+- GitHub: https://github.com/btakita/agent-doc/releases/tag/v0.31.16
+- Binary: `~/.cargo/bin/agent-doc` at v0.31.16
+<!-- agent:boundary:072eec22 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

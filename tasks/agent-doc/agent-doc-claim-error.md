@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.31.5 released. Commit-on-claim, auto-setup, VCS refresh, --diff-only, skill runbooks, .ai/runbooks convention.
+v0.31.15 released. Transfer auto-init (template default), write silent-drop warnings, investigate-behavior runbook.
 <!-- /agent:status -->
 
 ## Exchange
@@ -106,7 +106,7 @@ do
 - `src/agent-doc/src/write.rs` — warnings in `run_stream` and `try_ipc`, improved logging
 
 build and install for testing
-### Re: Default to template + built and installed (HEAD)
+### Re: Default to template + built and installed
 
 Updated `transfer()` to always default to template format when auto-creating target (removed source-format matching logic). Simplified the code — no more `is_template` detection.
 
@@ -115,7 +115,15 @@ Built, tested (all 697 pass), and installed:
 - `cargo install --path .` — updated `~/.cargo/bin/agent-doc`
 
 Ready for testing. Try transferring to a non-existent target file.
-<!-- agent:boundary:2c4e2b72 -->
+release
+### Re: v0.31.15 released (HEAD)
+
+Published to all targets:
+- **crates.io:** `cargo publish` — agent-doc v0.31.15
+- **PyPI:** manylinux2014 wheel uploaded
+- **GitHub Release:** https://github.com/btakita/agent-doc/releases/tag/v0.31.15
+- **Binary:** `cargo install --path .` — `~/.cargo/bin/agent-doc` updated
+<!-- agent:boundary:7c599520 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -124,4 +132,5 @@ Ready for testing. Try transferring to a non-existent target file.
 - [x] Add `git::commit(target)` to transfer command
 - [x] Fix: `agent-doc write` silently drops template patches when target has no components
 - [x] Fix: transfer/write should auto-init target in template mode if it doesn't exist
+- [x] Release v0.31.15
 <!-- /agent:pending -->

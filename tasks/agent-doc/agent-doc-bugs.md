@@ -368,7 +368,7 @@ It does NOT discover `.agent/runbooks/`. These runbooks reference specific tools
 **To add:** In `instruction-files/src/discovery.rs`, add `.agent/runbooks/*.md` to the glob patterns as a "development support" category. The audit checks (staleness, line budget, actionable content) would apply to runbooks just like they apply to SKILL.md files.
 
 This is a change to the `instruction-files` crate — a separate submodule. Want me to implement it there?
-<!-- agent:boundary:65059b02 -->
+<!-- agent:boundary:d703b4ed -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

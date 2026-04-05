@@ -159,5 +159,5 @@ Investigated all 5 repos. Here's the detailed breakdown:
 - Web-based room discovery + scheduling (Resonate is mobile-only)
 
 **Biggest finding:** The `call-moderation` demo in dev-day-demos is a near-production blueprint for Echo. The silent observer + LLM classification + RPC emission pattern is exactly what Build Party needs, with real code to start from.
-<!-- agent:boundary:f74a0cd3 -->
+<!-- agent:boundary:d445a6bc -->
 <!-- /agent:exchange -->

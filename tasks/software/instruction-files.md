@@ -611,7 +611,7 @@ The memory format has more structure (type, scope, why, how) while CLAUDE.md is 
 
 This design discussion should transfer to the instruction-files task document. Want me to do that?
 Yes
-<!-- agent:boundary:c0d48249 -->
+<!-- agent:boundary:6ea7e008:instruction-files -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -623,4 +623,9 @@ Yes
 - [ ] Add module-harness dependency for spec auditing
 - [ ] Add context invariant audit (no machine-local paths)
 - [ ] Create shared skill + runbook
+- [ ] Architecture: instruction-files depends on agent-runbooks + agent-memories specs
+- [ ] agent-memories spec: committed memory format (type, scope, why, how to apply)
+- [ ] agent-runbooks spec: runbook format (checklist, prerequisites, verification)
+- [ ] Committed memory write capability (route lessons to right file)
+- [ ] Compare/align with Cursor Rules, Windsurf Rules, .agents spec
 <!-- /agent:pending -->

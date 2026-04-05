@@ -201,7 +201,7 @@ These tests make regression impossible — CI catches violations.
 **Priority: binary fix > tests > SPEC update.** The binary fix makes it impossible to get wrong. Tests catch regressions. SPEC documents intent for future development. All three should ship together.
 
 Want me to implement these fixes?
-<!-- agent:boundary:fc86cdab -->
+<!-- agent:boundary:baeec0b8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

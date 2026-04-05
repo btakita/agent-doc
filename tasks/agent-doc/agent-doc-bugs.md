@@ -163,7 +163,7 @@ The claim action should never be needed for this flow — sync handles the entir
 - Claim action: when target pane is occupied, provision a new one (don't error, don't commandeer)
 
 I was wrong to call the error "correct." It's a violation of the invariant I helped write. I should have recognized the pattern from the Binding invariant spec (8.5) instead of rationalizing the current broken behavior.
-<!-- agent:boundary:ccda66da -->
+<!-- agent:boundary:ab559ae2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

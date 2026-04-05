@@ -59,7 +59,7 @@ Done. `agent-doc transfer` now automatically transfers the pending component alo
 
 **Tests:** 2 new tests. 458 total, all passing, clippy clean. Binary installed.
 Please add any pending items that should have been transferred to tasks/software/instruction-files.md
-### Re: Pending items transferred to instruction-files.md (HEAD)
+### Re: Pending items transferred to instruction-files.md
 
 Added 5 new pending items from the exchange discussion to `tasks/software/instruction-files.md`:
 
@@ -70,12 +70,22 @@ Added 5 new pending items from the exchange discussion to `tasks/software/instru
 - Compare/align with Cursor Rules, Windsurf Rules, .agents spec
 
 Total: 11 pending items in instruction-files.md now. Committed.
-<!-- agent:boundary:d642e32c -->
+When tasks/software/proof.md was claimed, the initial template was not committed. Why?
+### Re: proof.md template not committed (HEAD)
+
+The committed version (commit `75124382`) only has `agent_doc_session:` — the bare frontmatter from the old `ensure_initialized()` before the scaffold fix.
+
+The current file has the full template (different UUID `23463bb9` — recreated after the fix), but sync's auto-scaffold didn't commit it. The issue: sync calls `ensure_initialized()` after scaffolding, which creates the snapshot and calls `ensure_git_tracked()`. But `ensure_git_tracked()` only commits if the file is untracked. Since the old bare version was already tracked (committed as `dc697b65`), git sees the new content as a modification, not an untracked file — so `ensure_git_tracked()` skips the commit.
+
+**The fix:** After auto-scaffolding in `resolve_file`, sync should explicitly call `git::commit()` to commit the scaffolded content. The scaffold is a significant change (empty file → full template) that should be committed immediately.
+
+This is another case where the binary needs to enforce the invariant: scaffolded files should be committed. Want me to fix it?
+<!-- agent:boundary:693a0850 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Pending items transferred to instruction-files.md — DONE
+- [ ] Fix sync auto-scaffold: commit after scaffolding
 - [ ] Bump agent-doc to v0.31.14 and release
 <!-- /agent:pending -->

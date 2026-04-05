@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-11/21 items complete. agent-rules subagent in progress. Discussing agent-skills as cross-tool pattern.
+12/21 items complete. agent-rules done. Discussing cross-harness skill format and naming.
 <!-- /agent:status -->
 
 ## Exchange
@@ -809,7 +809,11 @@ But agent-skills is less cross-tool than the others. Runbooks, memories, and rul
 Want me to create agent-rules?
 
 Yes...in a subagent. Let's continue discussing agent-skills.
-### Re: agent-rules + agent-skills discussion (HEAD)
+
+Both agent-doc and corky have installable SKILLS.md. If we can have a cross harness implementation of skills, that abstraction would work well.
+
+What would skills look like in codex, copilot, pi, opencode, and editors such as cursor, windsurf, zed?
+### Re: agent-rules + agent-skills discussion
 
 **agent-rules:** Subagent is creating the repo now (GitHub + submodule + README + SPEC.md + LICENSE, modeled after agent-runbooks/agent-memories).
 
@@ -853,7 +857,75 @@ agent-skills (bundle format + activation)
 ```
 
 Want me to create it?
-<!-- agent:boundary:6de18e3f -->
+
+Are there alternative names that would be better?
+### Re: Cross-harness skills in other tools (HEAD)
+
+Here's how the skill pattern maps to each tool:
+
+#### CLI tools
+
+| Tool | Activation mechanism | Skill equivalent | Install story |
+|------|---------------------|------------------|---------------|
+| **Claude Code** | `.claude/skills/*/SKILL.md` | Native skills with runbooks | `agent-doc skill install` |
+| **Codex (OpenAI)** | Per-directory `AGENTS.md` + file reads | Nested AGENTS.md = scoped skill | Copy directory into project |
+| **Gemini CLI** | `GEMINI.md` + `@file.md` imports | Import chain = composable skills | Add `@skill/SKILL.md` to GEMINI.md |
+| **Aider** | `CONVENTIONS.md` + `--read` flag | Read-files = on-demand skill load | Add to `.aider.conf.yml` read list |
+| **OpenCode** | `AGENTS.md` (follows AGENTS.md spec) | Same as Codex pattern | Copy + reference |
+| **pi** | Not yet documented | TBD | TBD |
+
+#### Editor-integrated tools
+
+| Tool | Activation mechanism | Skill equivalent | Install story |
+|------|---------------------|------------------|---------------|
+| **Cursor** | `.cursor/rules/*.mdc` with `description` + `globs` | Each `.mdc` file IS a skill (metadata + content + activation) |  Create `.mdc` file |
+| **Windsurf** | `.windsurf/rules/*.md` with triggers | Similar to Cursor — rule files with activation metadata | Create rule file |
+| **Zed** | `.zed/rules/*.md` (proposed) + assistant panel | Early stage — likely to follow Cursor/Windsurf pattern | TBD |
+
+**Key observation:** Cursor's `.mdc` format is already very close to a skill:
+```yaml
+---
+description: "Activate when working with database migrations"
+globs: ["**/migrations/**"]
+alwaysApply: false
+---
+<rule content>
+```
+
+This has: activation trigger (globs/description), scoped content, and install semantics (drop file in directory). The missing pieces vs Claude Code skills are: runbook subdirectories and the `## Runbooks` convention.
+
+**The portable skill format would be:**
+```
+.agent/skills/<skill-name>/
+├── SKILL.md           # or AGENTS.md — the instruction content
+├── runbooks/          # on-demand procedures
+└── examples/          # reference material (optional)
+```
+
+Each tool maps this to its native format:
+- Claude Code: symlink/copy to `.claude/skills/`
+- Cursor: generate `.mdc` from SKILL.md frontmatter
+- Windsurf: generate rule file from SKILL.md
+- Codex/Gemini/Aider: reference SKILL.md via their import mechanism
+
+### Re: Alternative names (HEAD)
+
+The word "skills" carries specific baggage from Claude Code. Alternatives:
+
+| Name | Pros | Cons |
+|------|------|------|
+| **agent-skills** | Matches Claude Code term, intuitive | Feels Claude-specific |
+| **agent-modules** | Language-neutral, implies composability | Overloaded term (Rust modules, Node modules) |
+| **agent-packs** | Clear "installable bundle" semantics | Novel term, no existing convention |
+| **agent-plugins** | Widely understood, cross-ecosystem | Implies runtime extension, not just config |
+| **agent-kits** | Friendly, implies a collection of tools | Could conflict with agent-kit repo |
+| **agent-profiles** | Implies a configuration set | Too passive, doesn't convey activation |
+| **agent-contexts** | Matches "contextually-activated" framing | Overloaded term |
+
+**My recommendation: `agent-skills`** — despite the Claude Code association, it's the most intuitive term. The README can explicitly frame it as cross-tool. "Skills" communicates the right thing: a capability that an agent can learn and apply in specific contexts.
+
+The agent-runbooks README already established the pattern of framing a Claude Code concept as cross-tool (runbooks existed in Claude Code's SKILL.md convention first). Same approach works here.
+<!-- agent:boundary:1889520b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -870,8 +942,8 @@ Want me to create it?
 - [x] agent-runbooks spec: runbook format (checklist, prerequisites, verification)
 - [x] Remove duplicate agent-runbooks spec (use agent-runbooks repo's SPEC.md)
 - [x] Create btakita/agent-memories repo + submodule
-- [ ] Create btakita/agent-rules repo (subagent in progress)
-- [ ] Create btakita/agent-skills repo (contextually-activated instruction bundles)
+- [x] Create btakita/agent-rules repo + submodule
+- [ ] Create btakita/agent-skills repo (cross-tool skill convention)
 - [ ] Add agent-runbooks as optional dependency
 - [ ] Add agent-memories as optional dependency
 - [ ] Committed memory write capability (route lessons to right file)

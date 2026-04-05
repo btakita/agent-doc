@@ -523,7 +523,7 @@ Audited all features and added 7 tests across 2 files:
 **Total: 447 tests passing, clippy clean.**
 
 Was the precommit runbook, which include adding tests, called? Why were tests not added. Please emphasize adding detailed edge case testing in the runbook.
-### Re: Precommit runbook and testing discipline (HEAD)
+### Re: Precommit runbook and testing discipline
 
 **Honest answer: No, I did not follow the precommit runbook step 2 consistently.**
 
@@ -548,7 +548,26 @@ I ran `make check` (step 1 — clippy + tests) after each implementation. But I 
 2. **Saved a feedback memory** — `feedback_precommit_testing.md` so this pattern doesn't repeat in future sessions.
 
 3. **Added to MEMORY.md** — "Testing Discipline" section referencing the feedback.
-<!-- agent:boundary:e9789c74 -->
+
+You also seem to think `do` or `go` means move quickly. I'm counting on you to be through with your processes that we have defined. Please update the relevant AGENTS/CLAUDE, skills, and/or runbooks to rigorously follow any SKILLS and runbooks that we have defined.
+### Re: Process discipline — approval != skip processes (HEAD)
+
+You're right. I've updated all relevant files to codify this:
+
+**1. `CLAUDE.md` (root)** — added to "Verification Before Done":
+> **Follow all runbooks and checklists rigorously.** "Approval" signals like "do", "go", "yes" mean "execute with full quality processes" — NOT "move fast and skip steps." Every runbook step applies regardless of how the task was initiated.
+
+**2. `SKILL.md` (agent-doc)** — added after short-circuit rules:
+> **IMPORTANT:** "Approval" routing means skip the confirmation prompt — NOT skip quality processes. All runbooks (precommit testing, verification, etc.) still apply in full.
+
+**3. `runbooks/diff-type-routing.md`** — added to `approval` section:
+> **"Approval" means skip the confirmation, NOT skip quality processes.** All runbooks still apply: precommit (tests, edge cases, clippy), verification before done, plan mode for non-trivial tasks.
+
+**4. Feedback memory** — `feedback_approval_not_skip_processes.md`:
+> When receiving an approval signal: execute the approved work, follow ALL applicable runbooks, add tests as part of implementation, run `make check` before marking done. Never interpret "do" as permission to cut corners.
+
+**5. MEMORY.md** — added "Process Discipline" section above "Testing Discipline".
+<!-- agent:boundary:f549662b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -558,6 +577,6 @@ I ran `make check` (step 1 — clippy + tests) after each implementation. But I 
 - [x] SKILL.md routing + separator convention — DONE
 - [x] JB plugin escape fix + Gson migration (v0.2.44) — DONE
 - [x] Edge case + integration tests — DONE (447 total)
-- [x] Precommit runbook updated with testing emphasis — DONE
+- [x] Process discipline updates (CLAUDE.md, SKILL.md, runbooks, memory) — DONE
 - [ ] Add transfer-source metadata to patch format
 <!-- /agent:pending -->

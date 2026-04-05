@@ -250,7 +250,7 @@ pub fn is_agent_marker(comment_text: &str) -> bool {
 ///
 /// Given the text after `agent:NAME `, parses space-separated `key=value` pairs.
 /// Values are unquoted (no quote support needed for simple mode values).
-fn parse_attrs(attr_text: &str) -> HashMap<String, String> {
+pub fn parse_attrs(attr_text: &str) -> HashMap<String, String> {
     let mut attrs = HashMap::new();
     for token in attr_text.split_whitespace() {
         if let Some((key, value)) = token.split_once('=')
@@ -412,6 +412,108 @@ pub(crate) fn find_comment_end(bytes: &[u8], start: usize) -> Option<usize> {
     while i + 3 <= len {
         if &bytes[i..i + 3] == b"-->" {
             return Some(i + 3);
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Strip comments from document content for diff comparison.
+///
+/// Removes:
+/// - HTML comments `<!-- ... -->` (single and multiline) — EXCEPT agent range markers
+/// - Link reference comments `[//]: # (...)`
+///
+/// Skips `<!--` sequences inside fenced code blocks and inline backtick spans
+/// to prevent code examples containing `<!--` from being misinterpreted as
+/// comment starts.
+///
+/// This function is the shared implementation used by both `diff::compute` (binary)
+/// and external crates like `eval-runner`.
+pub fn strip_comments(content: &str) -> String {
+    let code_ranges = find_code_ranges(content);
+    let in_code = |pos: usize| code_ranges.iter().any(|&(start, end)| pos >= start && pos < end);
+
+    let mut result = String::with_capacity(content.len());
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut pos = 0;
+
+    while pos < len {
+        // Check for link reference comment: `[//]: # (...)`
+        if bytes[pos] == b'['
+            && !in_code(pos)
+            && is_line_start_at(bytes, pos)
+            && let Some(end) = match_link_ref_comment_at(bytes, pos)
+        {
+            pos = end;
+            continue;
+        }
+
+        // Check for HTML comment: `<!-- ... -->`
+        if pos + 4 <= len
+            && &bytes[pos..pos + 4] == b"<!--"
+            && !in_code(pos)
+            && let Some((end, inner)) = match_html_comment_at(content, pos)
+        {
+            if is_agent_marker(inner) {
+                // Preserve agent markers — copy them through
+                result.push_str(&content[pos..end]);
+                pos = end;
+            } else {
+                // Strip the comment (and trailing newline if on its own line)
+                let mut skip_to = end;
+                if is_line_start_at(bytes, pos) && skip_to < len && bytes[skip_to] == b'\n' {
+                    skip_to += 1;
+                }
+                pos = skip_to;
+            }
+            continue;
+        }
+
+        result.push(content[pos..].chars().next().unwrap());
+        pos += content[pos..].chars().next().unwrap().len_utf8();
+    }
+
+    result
+}
+
+/// True if `pos` is at the start of a line (pos == 0 or bytes[pos-1] == '\n').
+fn is_line_start_at(bytes: &[u8], pos: usize) -> bool {
+    pos == 0 || bytes[pos - 1] == b'\n'
+}
+
+/// Match `[//]: # (...)` starting at `pos`. Returns byte offset past the line end.
+fn match_link_ref_comment_at(bytes: &[u8], pos: usize) -> Option<usize> {
+    let prefix = b"[//]: # (";
+    let len = bytes.len();
+    if pos + prefix.len() > len || &bytes[pos..pos + prefix.len()] != prefix {
+        return None;
+    }
+    let mut i = pos + prefix.len();
+    while i < len && bytes[i] != b')' && bytes[i] != b'\n' {
+        i += 1;
+    }
+    if i < len && bytes[i] == b')' {
+        i += 1;
+        if i < len && bytes[i] == b'\n' {
+            i += 1;
+        }
+        Some(i)
+    } else {
+        None
+    }
+}
+
+/// Match `<!-- ... -->` starting at `pos`. Returns (end_offset, inner_text).
+fn match_html_comment_at(content: &str, pos: usize) -> Option<(usize, &str)> {
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut i = pos + 4;
+    while i + 3 <= len {
+        if &bytes[i..i + 3] == b"-->" {
+            let inner = &content[pos + 4..i];
+            return Some((i + 3, inner));
         }
         i += 1;
     }
@@ -966,5 +1068,27 @@ actual content
         // Original marker should be consumed, but a NEW boundary re-inserted
         assert!(!result.contains(&format!("agent:boundary:{boundary_id}")));
         assert!(result.contains("agent:boundary:"));
+    }
+
+    // --- strip_comments tests (moved from diff.rs) ---
+
+    #[test]
+    fn strip_comments_removes_html_comment() {
+        let result = strip_comments("before\n<!-- a comment -->\nafter\n");
+        assert_eq!(result, "before\nafter\n");
+    }
+
+    #[test]
+    fn strip_comments_preserves_agent_markers() {
+        let input = "text\n<!-- agent:status -->\ncontent\n<!-- /agent:status -->\n";
+        let result = strip_comments(input);
+        assert!(result.contains("<!-- agent:status -->"));
+        assert!(result.contains("<!-- /agent:status -->"));
+    }
+
+    #[test]
+    fn strip_comments_removes_link_ref() {
+        let result = strip_comments("[//]: # (hidden note)\nvisible\n");
+        assert_eq!(result, "visible\n");
     }
 }

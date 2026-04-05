@@ -87,6 +87,20 @@ use crate::component::{self, find_comment_end, Component};
 pub struct PatchBlock {
     pub name: String,
     pub content: String,
+    /// Attributes from the patch marker (e.g., `transfer-source="path"`).
+    #[allow(dead_code)]
+    pub attrs: std::collections::HashMap<String, String>,
+}
+
+impl PatchBlock {
+    /// Create a PatchBlock with no attributes.
+    pub fn new(name: impl Into<String>, content: impl Into<String>) -> Self {
+        PatchBlock {
+            name: name.into(),
+            content: content.into(),
+            attrs: std::collections::HashMap::new(),
+        }
+    }
 }
 
 /// Template info output for plugins.
@@ -152,12 +166,21 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
         let inner = &response[marker_start + 4..close - 3];
         let trimmed = inner.trim();
 
-        if let Some(name) = trimmed.strip_prefix("patch:") {
-            let name = name.trim();
-            if name.is_empty() || name.starts_with('/') {
+        if let Some(rest) = trimmed.strip_prefix("patch:") {
+            let rest = rest.trim();
+            if rest.is_empty() || rest.starts_with('/') {
                 pos = close;
                 continue;
             }
+
+            // Split name from attributes: "exchange transfer-source=path" -> ("exchange", attrs)
+            let (name, attrs) = if let Some(space_idx) = rest.find(char::is_whitespace) {
+                let name = &rest[..space_idx];
+                let attr_text = rest[space_idx..].trim();
+                (name, component::parse_attrs(attr_text))
+            } else {
+                (rest, std::collections::HashMap::new())
+            };
 
             // Consume trailing newline after opening marker
             let mut content_start = close;
@@ -182,6 +205,7 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
                 patches.push(PatchBlock {
                     name: name.to_string(),
                     content: content.to_string(),
+                    attrs,
                 });
 
                 let mut end = close_pos + close_marker.len();
@@ -694,6 +718,7 @@ All green.
         let patches = vec![PatchBlock {
             name: "status".to_string(),
             content: "new\n".to_string(),
+            attrs: Default::default(),
         }];
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
         assert!(result.contains("new\n"));
@@ -738,6 +763,7 @@ All green.
         let patches = vec![PatchBlock {
             name: "nonexistent".to_string(),
             content: "overflow data\n".to_string(),
+            attrs: Default::default(),
         }];
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
         // Missing component content should be routed to exchange
@@ -755,6 +781,7 @@ All green.
         let patches = vec![PatchBlock {
             name: "nonexistent".to_string(),
             content: "overflow data\n".to_string(),
+            attrs: Default::default(),
         }];
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
         // Should auto-create exchange component
@@ -929,6 +956,7 @@ All systems go.
         let patches = vec![PatchBlock {
             name: "status".to_string(),
             content: "new\n".to_string(),
+            attrs: Default::default(),
         }];
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
         // Inline replace should win over config append
@@ -947,6 +975,7 @@ All systems go.
         let patches = vec![PatchBlock {
             name: "exchange".to_string(),
             content: "new\n".to_string(),
+            attrs: Default::default(),
         }];
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
         assert!(result.contains("new\n"));
@@ -968,6 +997,7 @@ All systems go.
         let patches = vec![PatchBlock {
             name: "status".to_string(),
             content: "new\n".to_string(),
+            attrs: Default::default(),
         }];
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
         // Config says append, so both old and new should be present
@@ -986,6 +1016,7 @@ All systems go.
         let patches = vec![PatchBlock {
             name: "exchange".to_string(),
             content: "new\n".to_string(),
+            attrs: Default::default(),
         }];
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
         // exchange defaults to append
@@ -1008,6 +1039,7 @@ All systems go.
         let patches = vec![PatchBlock {
             name: "status".to_string(),
             content: "new\n".to_string(),
+            attrs: Default::default(),
         }];
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
         assert!(result.contains("new\n"));
@@ -1025,6 +1057,7 @@ All systems go.
         let patches = vec![PatchBlock {
             name: "exchange".to_string(),
             content: "new\n".to_string(),
+            attrs: Default::default(),
         }];
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
         assert!(result.contains("new\n"));
@@ -1046,6 +1079,7 @@ All systems go.
         let patches = vec![PatchBlock {
             name: "status".to_string(),
             content: "new\n".to_string(),
+            attrs: Default::default(),
         }];
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
         assert!(result.contains("old\n"));
@@ -1063,6 +1097,7 @@ All systems go.
         let patches = vec![PatchBlock {
             name: "exchange".to_string(),
             content: "new\n".to_string(),
+            attrs: Default::default(),
         }];
         let mut overrides = std::collections::HashMap::new();
         overrides.insert("exchange".to_string(), "replace".to_string());
@@ -1098,6 +1133,7 @@ real status content
         let patches = vec![PatchBlock {
             name: "status".to_string(),
             content: "patched status\n".to_string(),
+            attrs: Default::default(),
         }];
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
 
@@ -1160,6 +1196,7 @@ real status content
         let patches = vec![PatchBlock {
             name: "exchange".to_string(),
             content: "### Re: Response\n\nResponse content.\n".to_string(),
+            attrs: Default::default(),
         }];
 
         let result = apply_patches(doc, &patches, "", &file).unwrap();
@@ -1278,6 +1315,7 @@ Some content.
         let patches = vec![PatchBlock {
             name: "log".to_string(),
             content: "line1\nline2\nline3\nline4\nline5\n".to_string(),
+            attrs: Default::default(),
         }];
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
         assert!(!result.contains("line1"));
@@ -1297,6 +1335,7 @@ Some content.
         let patches = vec![PatchBlock {
             name: "log".to_string(),
             content: "line1\nline2\n".to_string(),
+            attrs: Default::default(),
         }];
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
         assert!(result.contains("line1"));
@@ -1318,6 +1357,7 @@ Some content.
         let patches = vec![PatchBlock {
             name: "log".to_string(),
             content: "a\nb\nc\nd\n".to_string(),
+            attrs: Default::default(),
         }];
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
         assert!(!result.contains("\na\n"));
@@ -1341,11 +1381,44 @@ Some content.
         let patches = vec![PatchBlock {
             name: "log".to_string(),
             content: "a\nb\nc\nd\n".to_string(),
+            attrs: Default::default(),
         }];
         let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
         // Inline max_lines=3 should win over toml max_lines=1
         assert!(result.contains("b"));
         assert!(result.contains("c"));
         assert!(result.contains("d"));
+    }
+
+    #[test]
+    fn parse_patch_with_transfer_source_attr() {
+        let response = "<!-- patch:exchange transfer-source=\"tasks/eval-runner.md\" -->\nTransferred content.\n<!-- /patch:exchange -->\n";
+        let (patches, unmatched) = parse_patches(response).unwrap();
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0].name, "exchange");
+        assert_eq!(patches[0].content, "Transferred content.\n");
+        assert_eq!(
+            patches[0].attrs.get("transfer-source"),
+            Some(&"\"tasks/eval-runner.md\"".to_string())
+        );
+        assert!(unmatched.is_empty());
+    }
+
+    #[test]
+    fn parse_patch_without_attrs() {
+        let response = "<!-- patch:exchange -->\nContent.\n<!-- /patch:exchange -->\n";
+        let (patches, _) = parse_patches(response).unwrap();
+        assert_eq!(patches.len(), 1);
+        assert!(patches[0].attrs.is_empty());
+    }
+
+    #[test]
+    fn parse_patch_with_multiple_attrs() {
+        let response = "<!-- patch:output mode=replace max_lines=50 -->\nContent.\n<!-- /patch:output -->\n";
+        let (patches, _) = parse_patches(response).unwrap();
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0].name, "output");
+        assert_eq!(patches[0].attrs.get("mode"), Some(&"replace".to_string()));
+        assert_eq!(patches[0].attrs.get("max_lines"), Some(&"50".to_string()));
     }
 }

@@ -3,6 +3,8 @@
 //! ## Spec
 //! - Exposes the public API surface consumed by the CLI binary, FFI layer, and editor plugins.
 //! - Re-exports: `component`, `crdt`, `debounce`, `ffi`, `frontmatter`, `merge`, `template`.
+//! - `component::strip_comments(content)` is the shared entry point for comment stripping,
+//!   usable by both the binary (`diff::compute`) and external crates (`eval-runner`).
 //! - Provides two boundary-ID utilities used across all write paths:
 //!   - `new_boundary_id()` — 8-hex-char UUID v4 prefix (length controlled by `BOUNDARY_ID_LEN`).
 //!   - `new_boundary_id_with_summary(summary)` — same ID optionally suffixed with a 3-word,

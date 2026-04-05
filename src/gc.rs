@@ -53,6 +53,7 @@ pub fn run(root: Option<&Path>, dry_run: bool) -> Result<GcResult> {
         ("crdt", vec!["yrs"]),
         ("pre-response", vec!["md"]),
         ("baselines", vec!["md"]),
+        ("annotations", vec!["json"]),
     ] {
         let dir = agent_doc_dir.join(dir_name);
         if !dir.is_dir() {

@@ -399,6 +399,7 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
     // If the user edited during response generation, final_content includes their
     // edits via merge. Saving content_ours ensures the next diff detects those edits.
     snapshot::save(file, &content_ours)?;
+    crate::ops_log::log_cycle(file, "write_inline", Some(&content_ours), Some(&final_content));
     crate::ops_log::log_op(file, &format!(
         "write_inline_done file={} snap_len={}",
         file.display(), content_ours.len()
@@ -485,6 +486,7 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
 
     // Save snapshot as content_ours (baseline + response), not final_content
     snapshot::save(file, &content_ours)?;
+    crate::ops_log::log_cycle(file, "write_template", Some(&content_ours), Some(&final_content));
     crate::ops_log::log_op(file, &format!(
         "write_template_done file={} snap_len={} patches={}",
         file.display(), content_ours.len(), patches.len()
@@ -769,6 +771,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     // Using content_ours would lose user edits from the merge, causing
     // the next merge cycle to re-insert them as duplicates.
     snapshot::save_crdt(file, &crdt_state)?;
+    crate::ops_log::log_cycle(file, "write_stream", Some(&content_ours), Some(&final_content));
     crate::ops_log::log_op(file, &format!(
         "write_stream_done file={} snap_len={}",
         file.display(), content_ours.len()
@@ -1825,10 +1828,7 @@ mod tests {
         let doc = dir.path().join("test.md");
         fs::write(&doc, "---\nsession: test\n---\n\n<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n").unwrap();
 
-        let patch = crate::template::PatchBlock {
-            name: "exchange".to_string(),
-            content: "new content".to_string(),
-        };
+        let patch = crate::template::PatchBlock::new("exchange", "new content");
 
         // This will timeout after 2s — patch file is written but never consumed
         let result = try_ipc(&doc, &[patch], "", None, None, None).unwrap();
@@ -1855,10 +1855,7 @@ mod tests {
         let doc = dir.path().join("test.md");
         fs::write(&doc, "---\nsession: test\n---\n\n<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n").unwrap();
 
-        let patch = crate::template::PatchBlock {
-            name: "exchange".to_string(),
-            content: "new content".to_string(),
-        };
+        let patch = crate::template::PatchBlock::new("exchange", "new content");
 
         // Spawn "plugin" thread that watches for patch files, writes content, then deletes
         let patches_dir = agent_doc_dir.join("patches");
@@ -1996,10 +1993,7 @@ mod tests {
         let original = "---\nsession: test\n---\n\n<!-- agent:exchange -->\noriginal content\n<!-- agent:boundary:test-boundary-123 -->\n<!-- /agent:exchange -->\n";
         fs::write(&doc, original).unwrap();
 
-        let patch = crate::template::PatchBlock {
-            name: "exchange".to_string(),
-            content: "agent response content".to_string(),
-        };
+        let patch = crate::template::PatchBlock::new("exchange", "agent response content");
 
         // content_ours = baseline with patches applied (what the snapshot should contain)
         let content_ours = "---\nsession: test\n---\n\n<!-- agent:exchange -->\nagent response content\n<!-- /agent:exchange -->\n";

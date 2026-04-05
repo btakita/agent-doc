@@ -20,6 +20,15 @@
 //! - `run(file, wait)` is the CLI entry point for the `diff` subcommand. When `wait`
 //!   is `true` it runs truncation detection first, then calls `compute` and prints
 //!   the result to stdout.
+//! - `annotate_diff(diff_text)` transforms a unified diff into an annotated format
+//!   with content-source markers: `[agent]`, `[user+]`, `[user-]`, `[user~]`.
+//!   Returns `None` if the diff is empty. Pure function, no I/O.
+//! - `classify_diff(diff_text)` classifies a unified diff into a `DiffType` with a
+//!   human-readable reason string. Types: `Approval` (single word: go/yes/do/ok/continue),
+//!   `SimpleQuestion` (single added line ending with `?`), `BoundaryArtifact` (only
+//!   `(HEAD)` or boundary UUID changes), `Annotation` (edits within agent content),
+//!   `StructuralChange` (only deletions/reorgs), `MultiTopic` (multiple unrelated
+//!   added blocks), `ContentAddition` (general new content).
 //!
 //! ## Agentic Contracts
 //! - Comment stripping is idempotent: calling `strip_comments` twice yields the same
@@ -37,6 +46,8 @@
 //!   are always treated as truncated — the stability check confirms completion.
 //! - Callers of `compute` can assume: `Some(diff)` → there is user-visible content
 //!   to respond to; `None` → skip the response cycle.
+//! - `classify_diff` is pure and deterministic: same diff text always yields the same
+//!   `DiffType` and reason. It operates only on the diff string, never reads files.
 //!
 //! ## Evals
 //! - `strip_html_comment`: `"before\n<!-- a comment -->\nafter\n"` → `"before\nafter\n"`
@@ -57,114 +68,135 @@
 //! - `not_truncated_single_word_command`: bare word like `"release"` → `looks_truncated` returns `false`
 //! - `truncated_single_chars`: single characters like `"A"`, `"S"`, `"1"` → `looks_truncated` returns `true` (stability check required)
 //! - `wait_for_stable_content_returns_immediately_when_complete`: already-complete content → returns in < 500 ms
+//! - `annotate_diff_additions`: added lines get `[user+]` markers
+//! - `annotate_diff_removals`: removed lines get `[user-]` markers
+//! - `annotate_diff_modifications`: paired add/remove with similar content get `[user~]` markers
+//! - `annotate_diff_context`: context lines get `[agent]` markers
+//! - `annotate_diff_empty`: empty diff returns `None`
+//! - `classify_approval`: single added word "go" → `DiffType::Approval`
+//! - `classify_approval_case_insensitive`: "Yes" → `DiffType::Approval`
+//! - `classify_simple_question`: single added line "what is X?" → `DiffType::SimpleQuestion`
+//! - `classify_boundary_artifact`: only `(HEAD)` marker change → `DiffType::BoundaryArtifact`
+//! - `classify_boundary_uuid`: only boundary UUID change → `DiffType::BoundaryArtifact`
+//! - `classify_structural_change`: only deletions → `DiffType::StructuralChange`
+//! - `classify_multi_topic`: multiple separated added blocks → `DiffType::MultiTopic`
+//! - `classify_content_addition`: general new content → `DiffType::ContentAddition`
+//! - `classify_annotation`: colon-appended edit to agent line → `DiffType::Annotation`
 
 use anyhow::Result;
+use serde::Serialize;
 use similar::{ChangeTag, TextDiff};
 use std::path::Path;
 
 use crate::{component, snapshot};
 
+/// Classification of a user diff for skill routing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiffType {
+    /// Single word matching approval list (go, yes, do, ok, continue, approve, approved).
+    Approval,
+    /// Single added line ending with `?`.
+    SimpleQuestion,
+    /// Only `(HEAD)` marker or boundary UUID changes.
+    BoundaryArtifact,
+    /// Edits within agent content (colon-appended, inline modifications).
+    Annotation,
+    /// Only deletions or reordered hunks, no additions.
+    StructuralChange,
+    /// Multiple unrelated added blocks separated by context lines.
+    MultiTopic,
+    /// General new content (default when no specific pattern matches).
+    ContentAddition,
+}
+
+/// Result of classifying a unified diff.
+#[derive(Debug, Clone, Serialize)]
+pub struct DiffClassification {
+    pub diff_type: DiffType,
+    pub diff_type_reason: String,
+}
+
 /// Strip comments from document content for diff comparison.
 ///
-/// Removes:
-/// - HTML comments `<!-- ... -->` (single and multiline) — EXCEPT agent range markers
-/// - Link reference comments `[//]: # (...)`
-///
-/// Skips `<!--` sequences inside fenced code blocks and inline backtick spans
-/// to prevent code examples containing `<!--` from being misinterpreted as
-/// comment starts.
+/// Delegates to `component::strip_comments` — the shared implementation
+/// available to both the binary and external crates.
 pub fn strip_comments(content: &str) -> String {
-    let code_ranges = component::find_code_ranges(content);
-    let in_code = |pos: usize| code_ranges.iter().any(|&(start, end)| pos >= start && pos < end);
+    component::strip_comments(content)
+}
 
-    let mut result = String::with_capacity(content.len());
-    let bytes = content.as_bytes();
-    let len = bytes.len();
-    let mut pos = 0;
+/// Annotate a unified diff with content-source markers.
+///
+/// Transforms a standard unified diff into a human-readable annotated format
+/// that shows the source of each line:
+/// - `[agent]` — context lines (unchanged content from agent)
+/// - `[user+]` — lines added by the user
+/// - `[user-]` — lines removed by the user
+/// - `[user~]` — lines modified by the user (paired add/remove with >60% common prefix)
+///
+/// Returns the annotated diff as a string, or `None` if the diff is empty.
+pub fn annotate_diff(diff_text: &str) -> Option<String> {
+    let mut result = Vec::new();
+    let mut pending_removes: Vec<String> = Vec::new();
 
-    while pos < len {
-        // Check for link reference comment: `[//]: # (...)`
-        if bytes[pos] == b'['
-            && !in_code(pos)
-            && is_line_start(bytes, pos)
-            && let Some(end) = match_link_ref_comment(bytes, pos)
-        {
-            pos = end;
+    for line in diff_text.lines() {
+        // Skip unified diff headers
+        if line.starts_with("--- ") || line.starts_with("+++ ") {
+            continue;
+        }
+        if line.starts_with("@@ ") {
+            // Flush pending removes before a new hunk
+            flush_removes(&mut pending_removes, &mut result);
             continue;
         }
 
-        // Check for HTML comment: `<!-- ... -->`
-        if pos + 4 <= len
-            && &bytes[pos..pos + 4] == b"<!--"
-            && !in_code(pos)
-            && let Some((end, inner)) = match_html_comment(content, pos)
-        {
-            if component::is_agent_marker(inner) {
-                // Preserve agent markers — copy them through
-                result.push_str(&content[pos..end]);
-                pos = end;
-            } else {
-                // Strip the comment (and trailing newline if on its own line)
-                let mut skip_to = end;
-                if is_line_start(bytes, pos) && skip_to < len && bytes[skip_to] == b'\n' {
-                    skip_to += 1;
+        if let Some(content) = line.strip_prefix('+') {
+            // Check if this pairs with a pending remove (modification)
+            if let Some(removed) = pending_removes.pop() {
+                let common = common_prefix_len(content, &removed);
+                let min_len = content.len().min(removed.len());
+                if min_len >= 3 && common > min_len * 6 / 10 {
+                    // Modified line — show the new version
+                    result.push(format!("[user~] {}", content));
+                } else {
+                    // Not similar enough — emit remove then add
+                    result.push(format!("[user-] {}", removed));
+                    result.push(format!("[user+] {}", content));
                 }
-                pos = skip_to;
+            } else {
+                result.push(format!("[user+] {}", content));
             }
-            continue;
+        } else if let Some(content) = line.strip_prefix('-') {
+            // Buffer removes to check for paired modifications
+            pending_removes.push(content.to_string());
+        } else if let Some(content) = line.strip_prefix(' ') {
+            flush_removes(&mut pending_removes, &mut result);
+            result.push(format!("[agent] {}", content));
+        } else if !line.is_empty() {
+            flush_removes(&mut pending_removes, &mut result);
+            result.push(format!("[agent] {}", line));
         }
-
-        result.push(content[pos..].chars().next().unwrap());
-        pos += content[pos..].chars().next().unwrap().len_utf8();
     }
 
-    result
-}
+    flush_removes(&mut pending_removes, &mut result);
 
-/// True if `pos` is at the start of a line (pos == 0 or bytes[pos-1] == '\n').
-fn is_line_start(bytes: &[u8], pos: usize) -> bool {
-    pos == 0 || bytes[pos - 1] == b'\n'
-}
-
-/// Match `[//]: # (...)` starting at `pos`. Returns byte offset past the line end.
-fn match_link_ref_comment(bytes: &[u8], pos: usize) -> Option<usize> {
-    let prefix = b"[//]: # (";
-    let len = bytes.len();
-    if pos + prefix.len() > len {
-        return None;
-    }
-    if &bytes[pos..pos + prefix.len()] != prefix {
-        return None;
-    }
-    // Find closing `)` then end of line
-    let mut i = pos + prefix.len();
-    while i < len && bytes[i] != b')' && bytes[i] != b'\n' {
-        i += 1;
-    }
-    if i < len && bytes[i] == b')' {
-        i += 1; // past `)`
-        if i < len && bytes[i] == b'\n' {
-            i += 1; // consume newline
-        }
-        Some(i)
-    } else {
+    if result.is_empty() {
         None
+    } else {
+        Some(result.join("\n"))
     }
 }
 
-/// Match `<!-- ... -->` starting at `pos`. Returns (end_offset, inner_text).
-fn match_html_comment(content: &str, pos: usize) -> Option<(usize, &str)> {
-    let bytes = content.as_bytes();
-    let len = bytes.len();
-    let mut i = pos + 4; // past `<!--`
-    while i + 3 <= len {
-        if &bytes[i..i + 3] == b"-->" {
-            let inner = &content[pos + 4..i];
-            return Some((i + 3, inner));
-        }
-        i += 1;
+/// Flush buffered remove lines as `[user-]`.
+fn flush_removes(pending: &mut Vec<String>, result: &mut Vec<String>) {
+    for removed in pending.drain(..) {
+        result.push(format!("[user-] {}", removed));
     }
-    None
+}
+
+/// Count characters of common prefix between two strings.
+fn common_prefix_len(a: &str, b: &str) -> usize {
+    a.chars().zip(b.chars()).take_while(|(x, y)| x == y).count()
 }
 
 /// Compute a unified diff between the snapshot and the current document.
@@ -467,6 +499,212 @@ pub fn is_stale_snapshot(snapshot_content: &str, document_content: &str) -> bool
 ///
 /// When `wait` is true, reads the file and snapshot, runs truncation
 /// detection via `wait_for_stable_content()`, then outputs the diff.
+/// Approval words (case-insensitive).
+const APPROVAL_WORDS: &[&str] = &[
+    "go", "yes", "do", "ok", "continue", "approve", "approved", "y", "yep", "yeah", "sure",
+    "proceed", "lgtm",
+];
+
+/// Classify a unified diff into a `DiffType` with a human-readable reason.
+///
+/// Operates purely on the diff text — no file I/O.
+pub fn classify_diff(diff_text: &str) -> DiffClassification {
+    // Parse added and removed lines from the unified diff, skipping headers.
+    let mut added: Vec<String> = Vec::new();
+    let mut removed: Vec<String> = Vec::new();
+    let mut added_block_count = 0usize;
+    let mut in_added_block = false;
+
+    for line in diff_text.lines() {
+        // Skip unified diff headers
+        if line.starts_with("--- ") || line.starts_with("+++ ") || line.starts_with("@@ ") {
+            in_added_block = false;
+            continue;
+        }
+        if let Some(content) = line.strip_prefix('+') {
+            added.push(content.to_string());
+            if !in_added_block {
+                added_block_count += 1;
+                in_added_block = true;
+            }
+        } else if let Some(content) = line.strip_prefix('-') {
+            removed.push(content.to_string());
+            in_added_block = false;
+        } else {
+            // Context line
+            in_added_block = false;
+        }
+    }
+
+    // Filter out empty/whitespace-only lines for classification purposes.
+    let added_content: Vec<&str> = added
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let removed_content: Vec<&str> = removed
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    // 1. BoundaryArtifact: only (HEAD) or boundary UUID changes
+    if is_boundary_artifact(&added_content, &removed_content) {
+        return DiffClassification {
+            diff_type: DiffType::BoundaryArtifact,
+            diff_type_reason: "only boundary marker or (HEAD) changes".into(),
+        };
+    }
+
+    // 2. Approval: single non-empty added word matching approval list, no removals
+    if added_content.len() == 1 && removed_content.is_empty() {
+        let word = added_content[0].to_lowercase();
+        // Strip trailing punctuation for matching
+        let word_clean = word.trim_end_matches(|c: char| c.is_ascii_punctuation());
+        if APPROVAL_WORDS.contains(&word_clean) {
+            return DiffClassification {
+                diff_type: DiffType::Approval,
+                diff_type_reason: format!("single approval word: \"{}\"", added_content[0]),
+            };
+        }
+    }
+
+    // 3. SimpleQuestion: single added line ending with `?`, no removals
+    if added_content.len() == 1 && removed_content.is_empty() && added_content[0].ends_with('?')
+    {
+        return DiffClassification {
+            diff_type: DiffType::SimpleQuestion,
+            diff_type_reason: format!(
+                "single question: \"{}\"",
+                truncate_for_reason(added_content[0])
+            ),
+        };
+    }
+
+    // 4. Annotation: modifications to existing lines (added + removed with similar content)
+    if !added_content.is_empty()
+        && !removed_content.is_empty()
+        && is_annotation(&added_content, &removed_content)
+    {
+        return DiffClassification {
+            diff_type: DiffType::Annotation,
+            diff_type_reason: "inline edit to existing content".into(),
+        };
+    }
+
+    // 5. StructuralChange: only removals, no additions
+    if added_content.is_empty() && !removed_content.is_empty() {
+        return DiffClassification {
+            diff_type: DiffType::StructuralChange,
+            diff_type_reason: format!("{} lines removed, no additions", removed_content.len()),
+        };
+    }
+
+    // 6. MultiTopic: multiple separated added blocks or --- separators
+    let has_separator = added.iter().any(|l| l.trim() == "---");
+    if has_separator && added_content.len() >= 2 {
+        let section_count = added_content
+            .split(|l| *l == "---")
+            .filter(|s| !s.is_empty())
+            .count();
+        if section_count >= 2 {
+            return DiffClassification {
+                diff_type: DiffType::MultiTopic,
+                diff_type_reason: format!("{} topics separated by ---", section_count),
+            };
+        }
+    }
+    if added_block_count >= 2 && added_content.len() >= 2 {
+        return DiffClassification {
+            diff_type: DiffType::MultiTopic,
+            diff_type_reason: format!("{} distinct added blocks", added_block_count),
+        };
+    }
+
+    // 7. Default: ContentAddition
+    DiffClassification {
+        diff_type: DiffType::ContentAddition,
+        diff_type_reason: format!(
+            "{} lines added{}",
+            added_content.len(),
+            if !removed_content.is_empty() {
+                format!(", {} removed", removed_content.len())
+            } else {
+                String::new()
+            }
+        ),
+    }
+}
+
+/// Check if the diff contains only boundary-related changes.
+fn is_boundary_artifact(added: &[&str], removed: &[&str]) -> bool {
+    let is_boundary_line = |line: &str| -> bool {
+        // (HEAD) markers
+        line.contains("(HEAD)")
+            // Boundary UUIDs: <!-- agent:boundary:XXXX -->
+            || line.contains("agent:boundary:")
+            // Empty lines that accompany boundary changes
+            || line.is_empty()
+    };
+    // Must have at least one change
+    if added.is_empty() && removed.is_empty() {
+        return false;
+    }
+    // Direct check: all lines are boundary-related
+    if added.iter().all(|l| is_boundary_line(l)) && removed.iter().all(|l| is_boundary_line(l)) {
+        return true;
+    }
+    // Paired check: added/removed pairs differ only by (HEAD) or boundary UUID
+    if added.len() == removed.len() {
+        return added.iter().zip(removed.iter()).all(|(a, r)| {
+            let a_clean = a.replace("(HEAD)", "").trim().to_string();
+            let r_clean = r.replace("(HEAD)", "").trim().to_string();
+            if a_clean == r_clean {
+                return true;
+            }
+            // Both are boundary markers with different UUIDs
+            a.contains("agent:boundary:") && r.contains("agent:boundary:")
+        });
+    }
+    false
+}
+
+/// Check if the diff looks like an annotation (inline edits to existing content).
+///
+/// Heuristic: each removed line has a corresponding added line that starts with
+/// the same prefix (the added line extends the removed one, e.g., colon-appended).
+fn is_annotation(added: &[&str], removed: &[&str]) -> bool {
+    if added.len() != removed.len() {
+        return false;
+    }
+    added.iter().zip(removed.iter()).all(|(a, r)| {
+        // Added line starts with the removed line content (colon-append, extension)
+        a.starts_with(r)
+            // Or the lines share a significant common prefix (>60% of the shorter line)
+            || {
+                let min_len = a.len().min(r.len());
+                if min_len < 3 {
+                    return false;
+                }
+                let common = a
+                    .chars()
+                    .zip(r.chars())
+                    .take_while(|(a, b)| a == b)
+                    .count();
+                common > min_len * 6 / 10
+            }
+    })
+}
+
+/// Truncate a string for use in reason messages.
+fn truncate_for_reason(s: &str) -> &str {
+    if s.len() <= 80 {
+        s
+    } else {
+        &s[..80]
+    }
+}
+
 /// This exposes the Rust truncation detection to external callers
 /// (e.g., the Claude Code skill) before they compute their own diff.
 pub fn run(file: &Path, wait: bool) -> Result<()> {
@@ -920,5 +1158,160 @@ Please fix the bug.\n\
         assert_eq!(result, content);
         // Should return almost immediately (no recheck needed)
         assert!(elapsed.as_millis() < 500, "should not delay for complete content");
+    }
+
+    // --- classify_diff tests ---
+
+    fn make_diff(added: &[&str], removed: &[&str]) -> String {
+        let mut lines = vec!["--- snapshot", "+++ document", "@@ -1,5 +1,5 @@"];
+        for r in removed {
+            lines.push(&r);
+        }
+        lines.push(" context line");
+        for a in added {
+            lines.push(&a);
+        }
+        lines.join("\n")
+    }
+
+    #[test]
+    fn classify_approval() {
+        let diff = make_diff(&["+go"], &[]);
+        let c = classify_diff(&diff);
+        assert_eq!(c.diff_type, DiffType::Approval);
+        assert!(c.diff_type_reason.contains("go"));
+    }
+
+    #[test]
+    fn classify_approval_case_insensitive() {
+        let diff = make_diff(&["+Yes"], &[]);
+        let c = classify_diff(&diff);
+        assert_eq!(c.diff_type, DiffType::Approval);
+    }
+
+    #[test]
+    fn classify_simple_question() {
+        let diff = make_diff(&["+what is the release process?"], &[]);
+        let c = classify_diff(&diff);
+        assert_eq!(c.diff_type, DiffType::SimpleQuestion);
+    }
+
+    #[test]
+    fn classify_boundary_artifact() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,3 @@\n-### Re: Something (HEAD)\n+### Re: Something\n";
+        let c = classify_diff(diff);
+        assert_eq!(c.diff_type, DiffType::BoundaryArtifact);
+    }
+
+    #[test]
+    fn classify_boundary_uuid() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,3 @@\n-<!-- agent:boundary:abc123 -->\n+<!-- agent:boundary:def456 -->\n";
+        let c = classify_diff(diff);
+        assert_eq!(c.diff_type, DiffType::BoundaryArtifact);
+    }
+
+    #[test]
+    fn classify_structural_change() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,5 +1,3 @@\n context\n-removed line one\n-removed line two\n context\n";
+        let c = classify_diff(diff);
+        assert_eq!(c.diff_type, DiffType::StructuralChange);
+    }
+
+    #[test]
+    fn classify_multi_topic() {
+        // Two added blocks separated by context
+        let diff = "--- snapshot\n+++ document\n@@ -1,5 +1,7 @@\n context\n+first topic\n context middle\n+second topic\n context end\n";
+        let c = classify_diff(&diff);
+        assert_eq!(c.diff_type, DiffType::MultiTopic);
+    }
+
+    #[test]
+    fn classify_multi_topic_with_separator() {
+        // Contiguous added block with --- separator — still detected as multi-topic
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,6 @@\n context\n+question one?\n+---\n+do something else\n context end\n";
+        let c = classify_diff(diff);
+        assert_eq!(c.diff_type, DiffType::MultiTopic);
+    }
+
+    #[test]
+    fn classify_content_addition() {
+        let diff = make_diff(&["+implement the feature using Rust"], &[]);
+        let c = classify_diff(&diff);
+        assert_eq!(c.diff_type, DiffType::ContentAddition);
+    }
+
+    #[test]
+    fn classify_annotation() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,3 @@\n context\n-The fix is deployed\n+The fix is deployed: confirmed working in prod\n context\n";
+        let c = classify_diff(diff);
+        assert_eq!(c.diff_type, DiffType::Annotation);
+    }
+
+    #[test]
+    fn classify_approval_in_sentence_is_content() {
+        // "go" inside a longer sentence should NOT be classified as Approval
+        let diff = make_diff(&["+let's go ahead and implement the feature"], &[]);
+        let c = classify_diff(&diff);
+        assert_eq!(c.diff_type, DiffType::ContentAddition);
+    }
+
+    #[test]
+    fn classify_single_separator_not_multi_topic() {
+        // Single --- with no content on either side is not multi-topic
+        let diff = make_diff(&["+---"], &[]);
+        let c = classify_diff(&diff);
+        // Only 1 section (the --- itself is filtered as empty), not multi-topic
+        assert_ne!(c.diff_type, DiffType::MultiTopic);
+    }
+
+    #[test]
+    fn classify_question_mark_in_multiline_is_content() {
+        // Question mark at end of a multi-line addition is content, not simple question
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,5 @@\n context\n+first line of paragraph\n+is this a question?\n context\n";
+        let c = classify_diff(diff);
+        // Two added lines = multi-topic (two blocks is actually one contiguous block)
+        // The key point: it should NOT be SimpleQuestion (that requires exactly 1 added line)
+        assert_ne!(c.diff_type, DiffType::SimpleQuestion);
+    }
+
+    // --- annotate_diff tests ---
+
+    #[test]
+    fn annotate_diff_additions() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,4 @@\n context line\n+new user line\n more context\n";
+        let annotated = annotate_diff(diff).unwrap();
+        assert!(annotated.contains("[user+] new user line"));
+        assert!(annotated.contains("[agent] context line"));
+    }
+
+    #[test]
+    fn annotate_diff_removals() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,2 @@\n context\n-removed line\n context\n";
+        let annotated = annotate_diff(diff).unwrap();
+        assert!(annotated.contains("[user-] removed line"));
+    }
+
+    #[test]
+    fn annotate_diff_modifications() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,3 @@\n context\n-The fix is deployed\n+The fix is deployed: confirmed in prod\n context\n";
+        let annotated = annotate_diff(diff).unwrap();
+        assert!(annotated.contains("[user~] The fix is deployed: confirmed in prod"));
+        // Should NOT have separate [user-] and [user+] for the paired lines
+        assert!(!annotated.contains("[user-] The fix is deployed"));
+    }
+
+    #[test]
+    fn annotate_diff_context() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,4 @@\n line one\n line two\n+added\n line three\n";
+        let annotated = annotate_diff(diff).unwrap();
+        assert!(annotated.contains("[agent] line one"));
+        assert!(annotated.contains("[agent] line two"));
+        assert!(annotated.contains("[agent] line three"));
+    }
+
+    #[test]
+    fn annotate_diff_empty() {
+        let diff = "--- snapshot\n+++ document\n";
+        assert!(annotate_diff(diff).is_none());
     }
 }

@@ -1574,7 +1574,7 @@ The harness pattern is now consistent across the entire ecosystem. Each SPEC.md 
 1. **Spec** — what the crate does and its format
 2. **Agentic Contracts** — what the agent promises when using it
 3. **Evals** — test cases for verifying agent behavior
-<!-- agent:boundary:d71a8487 -->
+<!-- agent:boundary:b0d23ace -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

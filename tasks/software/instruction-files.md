@@ -1676,7 +1676,7 @@ All 6 crates published successfully:
 Publish order respected dependency chain: agent-runbooks + agent-memories (no deps) -> agent-kit (already published) -> agent-rules + skill-harness (dep on agent-kit) -> instruction-files (deps on all).
 
 Path dependencies replaced with crates.io versions. `CARGO_REGISTRY_TOKEN` secrets configured on all 5 repos. CI + Release workflows will handle future releases via version tags.
-<!-- agent:boundary:548bc857 -->
+<!-- agent:boundary:e0b286b7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

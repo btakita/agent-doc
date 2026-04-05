@@ -45,6 +45,7 @@ agent-doc v0.31.14 released to crates.io + GitHub
 - Committed context > machine-local memory
 
 **Test suite: 458 tests, all passing, clippy clean.**
+<!-- agent:boundary:5d8c635f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

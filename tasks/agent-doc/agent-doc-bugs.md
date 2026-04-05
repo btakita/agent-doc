@@ -335,7 +335,7 @@ Added 4 new tests (6 total for scaffold):
 **All 456 tests pass, clippy clean.**
 
 proof.md confirmed scaffolded correctly with full template.
-<!-- agent:boundary:f47aa7e6 -->
+<!-- agent:boundary:cf803414 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

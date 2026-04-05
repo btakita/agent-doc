@@ -289,7 +289,7 @@ I tried `Sync Tmux Layout` then `Claim for Tmux Pane`.
 
 `Sync Tmux Layout` resulted in a bare bones fontmatter with **only** `agent_doc_session:`. Why?
 It should have resulted in populating proof.md with the full default template with includes an agent:exchange and a agent:pending elements
-### Re: Scaffold ordering bug fixed + reinstalled (HEAD)
+### Re: Scaffold ordering bug fixed + reinstalled
 
 Two issues found and fixed:
 
@@ -316,13 +316,32 @@ The claim output you saw:
 This is the correct behavior — claim detected the occupied pane and provisioned a new one. The JB plugin displayed it as an error because the message went to stderr. The provisioning succeeded (pane %499 was created and Claude started).
 
 **Rebuilt and installed.** Try deleting proof.md, recreating it as empty, then "Sync Tmux Layout" — it should now get the full template with exchange + pending components.
-<!-- agent:boundary:75a7e567 -->
+
+Add tests
+### Re: Tests added for scaffold behavior (HEAD)
+
+Added 4 new tests (6 total for scaffold):
+
+**Positive tests:**
+- `sync_auto_scaffolds_empty_md_file` — empty file gets full template
+- `sync_scaffold_includes_all_components` — verifies status, exchange, pending present and closed
+- `sync_scaffolds_whitespace_only_file` — whitespace-only treated as empty
+
+**Negative tests:**
+- `sync_does_not_scaffold_non_empty_md_file` — content files untouched
+- `sync_does_not_scaffold_non_md_files` — non-.md extensions ignored
+- `sync_does_not_scaffold_file_with_existing_frontmatter` — existing frontmatter preserved
+
+**All 456 tests pass, clippy clean.**
+
+proof.md confirmed scaffolded correctly with full template.
+<!-- agent:boundary:f47aa7e6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Fix scaffold ordering (before ensure_initialized) — DONE
-- [x] Binary reinstalled — DONE
+- [x] Scaffold ordering fix + binary installed — DONE
+- [x] Tests (6 scaffold tests: 3 positive + 3 negative) — DONE
 - [ ] Bump to v0.31.14 and release
 <!-- /agent:pending -->

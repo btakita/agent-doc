@@ -86,7 +86,7 @@ yes
 Added `git::commit(path)` call immediately after writing the scaffold in `resolve_file`. This handles the case where the file was previously tracked with bare frontmatter — git sees the scaffold as a modification (not untracked), so `ensure_git_tracked()` skips it. The explicit commit ensures the full template is in HEAD.
 
 458 tests pass, clippy clean. Binary installed.
-<!-- agent:boundary:1a4b206e -->
+<!-- agent:boundary:68596674 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -111,7 +111,7 @@ email = { source = "local", path = ".agent/skills/email" }
 **My recommendation:** Start with **Option C** (init function) for Rust crate consumers, and **Option D** (skills.toml manifest) for project-level management. Option C is what agent-doc already does. Option D is what's needed for cross-tool portability.
 
 Want me to implement one of these?
-<!-- agent:boundary:1b1f9dcc -->
+<!-- agent:boundary:abf8bac0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

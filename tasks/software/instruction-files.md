@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-18/25 items complete. skill-harness design with Spec/Contracts/Evals paralleling module-harness.
+18/24 items complete. Renamed to skill-harness. Ecosystem clean — no naming conflicts.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1218,7 +1218,7 @@ What's your preference?
 
 skill-harness has a good ring to it. The reason why we chose module-harness was because it includes the Spec, Agentic Contracts, and Evals.
 Would this skill package be roughly equivalent? I suppose it could also include Spec, Agentic Contracts, and Evals along with install and other binary commands.
-### Re: skill-harness with Spec/Contracts/Evals (HEAD)
+### Re: skill-harness with Spec/Contracts/Evals
 
 Yes, it maps well. Here's the parallel:
 
@@ -1273,7 +1273,31 @@ Yes, it maps well. Here's the parallel:
 This makes `skill-harness` the full lifecycle tool: author, validate, install, test, manage. The name "harness" captures all of it — it's the test harness, the installation harness, and the runtime harness for skills.
 
 Want me to rename and restructure?
-<!-- agent:boundary:e6d2e285 -->
+yes
+### Re: Rename and restructure (HEAD)
+
+Done. `btakita/agent-skills` renamed to `btakita/skill-harness`.
+
+**Changes:**
+- GitHub repo renamed via `gh repo rename`
+- Submodule: removed `src/agent-skills`, added `src/skill-harness` (fresh clone)
+- `Cargo.toml`: package name `skill-harness`, updated description + repo URL
+- `main.rs`: crate references `skill_harness::`, CLI name `skill-harness`
+- `README.md`: title "Skill Harness", references agentskills.io standard
+- `instruction-files/README.md`: updated companion spec link
+- 9 tests pass, clippy clean, pushed
+
+The ecosystem is now:
+
+| Repo | Crate name | Role |
+|------|-----------|------|
+| `agent-kit` | `agent-kit` | Environment detection + hooks |
+| `agent-rules` | `agent-rules` | Validate instruction file policy |
+| `agent-runbooks` | `agent-runbooks` | Validate/manage runbooks |
+| `agent-memories` | `agent-memories` | Validate/manage memories |
+| `skill-harness` | `skill-harness` | Skill lifecycle (install/audit/eval/sync) |
+| `instruction-files` | `instruction-files` | Audit engine for all formats |
+<!-- agent:boundary:b0207f4d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1291,13 +1315,12 @@ Want me to rename and restructure?
 - [x] Remove duplicate agent-runbooks spec (use agent-runbooks repo's SPEC.md)
 - [x] Create btakita/agent-memories repo + submodule
 - [x] Create btakita/agent-rules repo + submodule
-- [x] Create btakita/agent-skills repo + submodule
-- [x] Restructure agent-kit: remove skill.rs (moved to agent-skills)
-- [x] Add Cargo.toml + CLI to agent-skills
+- [x] Restructure agent-kit: remove skill.rs (moved to skill-harness)
+- [x] Add Cargo.toml + CLI to skill-harness
 - [x] Add Cargo.toml + CLI to agent-rules
 - [x] Add Cargo.toml + CLI to agent-memories
 - [x] Add Environment path methods for rules/runbooks/memories/skills dirs
-- [ ] Rename btakita/agent-skills to btakita/skill-harness
+- [x] Rename btakita/agent-skills to btakita/skill-harness
 - [ ] Add Spec/Agentic Contracts/Evals structure to skill-harness
 - [ ] Add self-skill (SKILL.md for meta-management)
 - [ ] Committed memory write capability (route lessons to right file)

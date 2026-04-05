@@ -59,14 +59,20 @@ To make this generic, a `skill-harness` crate (or extending instruction-files) w
 This is new functionality for the instruction-files expansion. Added to the task.
 upgrade instruction-files.
 See tasks/software/instruction-files.md for the current solution(s).
-### Re: Upgrade instruction-files (HEAD)
+### Re: Upgrade instruction-files
 
 agent-doc depends on `"0.1"` but local source is `0.2.0`. Tracked in tasks/software/instruction-files.md. Bump happens when that task's features land.
-<!-- agent:boundary:64b22fda -->
+
+Anything remaining from updates to tasks/software/instruction-files.md.
+agent-doc should use instruction-files 0.2
+### Re: Bumped instruction-files to 0.2 (HEAD)
+
+Done. `Cargo.toml`: `"0.1"` -> `"0.2"`. Fixed 4 clippy collapsible-if warnings in preflight.rs. 458 tests pass, clippy clean.
+<!-- agent:boundary:8efd3ec2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-Tracked in tasks/software/instruction-files.md.
+instruction-files 0.2 in use. Remaining expansion tracked in tasks/software/instruction-files.md.
 <!-- /agent:pending -->

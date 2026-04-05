@@ -180,7 +180,8 @@ This transforms Shimmer from a session viewer into an *activity narrator* — mu
 - **Vespa** — the Apache-licensed alternative to Cor.e for the memory layer, with better cross-session capability. The choice between Cor.e and Vespa likely comes down to hosted-vs-self-hosted and how much cross-session intelligence Shimmer needs.
 Where would this logic live? Note I'm also looking at an adapter with proof...see tasks/software/proof.md
 - Prototype Granola → agent-doc ingest adapter (automate meeting note hydration)
-### Re: Where the adapter logic lives + Proof as prior art (HEAD)
+
+### Re: Where the adapter logic lives + Proof as prior art
 
 The Proof integration (tasks/software/proof.md) already answered this — the same architecture applies to all adapters.
 
@@ -208,15 +209,27 @@ Each skill follows the same contract:
 3. Create frontmatter and component structure automatically
 
 This is exactly what was done manually to create this file — automating that first step is the prototype.
-<!-- agent:boundary:dced58c3 -->
+
+Let's transfer all the skill + binary stuff over to tasks/software/granola.md
+### Re: Transfer to tasks/software/granola.md (HEAD)
+
+Created `tasks/software/granola.md` with:
+- Universal adapter architecture (skill-per-source pattern)
+- `/granola` skill design (ingest/push/link commands)
+- Ingest pipeline spec (fetch → hydrate → template)
+- Push-back options (browser automation → API)
+
+This doc stays focused on the meeting notes and Rob relationship. Software implementation moves to the granola.md session.
+
+Related sessions: tasks/software/proof.md (Proof adapter), tasks/software/granola.md (Granola adapter)
+<!-- agent:boundary:1683e4f1 -->
 <!-- /agent:exchange -->
 
 ## Pending
 
 <!-- agent:pending patch=replace -->
-- Prototype `/granola` Claude Code skill (ingest command first)
-- Design `/proof` skill implementation (sync/poll/link — architecture done, needs code)
-- Spec shared adapter contract (preflight + write + source-links.toml pattern)
+- Prepare for Sunday follow-up call (5pm ET / 2pm PT, Apr 5)
 - Define "sandboxed agent harness" for Build Party LiveKit room context
 - Explore Shimmer daily digest pipeline (git + sessions + services → blog post)
+- See tasks/software/granola.md for adapter implementation work
 <!-- /agent:pending -->

@@ -22,7 +22,7 @@ Architecture discussion transferred to `tasks/software/instruction-files.md` via
 **Session shipped:** agent-doc v0.31.13 (released) + v0.31.14 changes (claim fix, sync auto-scaffold, 456 tests).
 When we transferred to tasks/software/instruction-files.md, we should also add to the agent:pending
 Can this be deterministic + agentic?
-### Re: Transfer should update pending + can it be deterministic? (HEAD)
+### Re: Transfer should update pending + can it be deterministic?
 
 **1. Transfer should update pending in the target**
 
@@ -46,12 +46,24 @@ The current split is correct per the binary/skill responsibility table:
 Adding pending transfer to the binary keeps it deterministic. No LLM judgment needed — just merge the pending lists.
 
 This is a v0.31.14 feature for the agent-doc binary. Want me to implement it?
-<!-- agent:boundary:2a33d693 -->
+yes
+### Re: Pending transfer implemented (HEAD)
+
+Done. `agent-doc transfer` now automatically transfers the pending component alongside the named component.
+
+**What changed in `extract.rs`:**
+- After transferring the named component, checks if both source and target have a `pending` component
+- If source pending is non-empty: merges into target pending, then clears source
+- Skips if transferred component IS "pending" (no double-transfer)
+- Skips if source pending is empty
+
+**Tests:** 2 new tests. 458 total, all passing, clippy clean. Binary installed.
+<!-- agent:boundary:93514e9a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] agent-doc transfer: also transfer/merge pending component
+- [x] Transfer also moves pending — DONE
 - [ ] Bump agent-doc to v0.31.14 and release
 <!-- /agent:pending -->

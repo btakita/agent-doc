@@ -14,7 +14,7 @@ agent-doc v0.31.14 released to crates.io + GitHub
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-### Session Summary (compacted 2026-04-05 00:48) (HEAD)
+### Session Summary (compacted 2026-04-05 00:48)
 
 **Releases: agent-doc v0.31.13 + v0.31.14**
 
@@ -45,11 +45,29 @@ agent-doc v0.31.14 released to crates.io + GitHub
 - Committed context > machine-local memory
 
 **Test suite: 458 tests, all passing, clippy clean.**
-<!-- agent:boundary:5d8c635f -->
+
+I did a transfer from tasks/recruit/robert-ross-granola.md to tasks/software/granola.md
+The file was created with a template. But it was not committed. Why?
+### Re: granola.md not committed after transfer (HEAD)
+
+The file has `agent_doc_session: null` and custom content ("Granola Adapter") — this wasn't created by sync's auto-scaffold (which generates a UUID). It appears the transfer was done by the skill (via Write tool) rather than `agent-doc transfer` CLI command.
+
+Same issue as instruction-files.md: when the skill creates a new target file manually instead of using `agent-doc transfer`, the file bypasses the agent-doc pipeline and doesn't get committed.
+
+**Immediate fix:**
+```bash
+agent-doc init tasks/software/granola.md  # assign UUID + snapshot
+agent-doc commit tasks/software/granola.md  # commit to git
+```
+
+But `agent-doc init` only works for non-existent files. Since the file exists with content, I'll commit it directly:
+
+Let me commit it now.
+<!-- agent:boundary:a32252d4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-All items complete. v0.31.14 released.
+- [ ] Commit tasks/software/granola.md
 <!-- /agent:pending -->

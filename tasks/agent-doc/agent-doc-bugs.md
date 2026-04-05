@@ -62,7 +62,7 @@ See tasks/software/instruction-files.md for the current solution(s).
 ### Re: Upgrade instruction-files (HEAD)
 
 agent-doc depends on `"0.1"` but local source is `0.2.0`. Tracked in tasks/software/instruction-files.md. Bump happens when that task's features land.
-<!-- agent:boundary:173d17a4 -->
+<!-- agent:boundary:64b22fda -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

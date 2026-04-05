@@ -403,7 +403,7 @@ instruction-files should be the central crate for discovering, auditing, and man
 - Runbook: `runbooks/instruction-files-audit.md` — documents the audit scope and invariants
 
 This is a significant expansion of the instruction-files crate. It would be best tracked as its own task document (not inside agent-doc-bugs.md). Want me to create `tasks/software/instruction-files.md` for this work?
-<!-- agent:boundary:bd80b93b -->
+<!-- agent:boundary:88018d17 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

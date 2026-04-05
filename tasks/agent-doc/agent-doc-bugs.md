@@ -159,7 +159,7 @@ The SKILL.md core principle was already shortened in the previous cycle. It now 
 > **Use the pipeline, not ad-hoc tools** — never use the Write tool or Edit tool to create session documents. See [transfer-extract runbook](runbooks/transfer-extract.md).
 
 One line, references the runbook for detail. No further changes needed.
-<!-- agent:boundary:8d411706 -->
+<!-- agent:boundary:c53f0fc1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

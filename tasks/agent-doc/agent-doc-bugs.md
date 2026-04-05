@@ -133,7 +133,7 @@ No ops.log entry for proof.md because the claim validation happens *before* any 
 **Root cause:** The missing step is that sync treats files without `agent_doc_format` frontmatter as non-session files. The fix is straightforward: in `resolve_file()`, if a `.md` file has no frontmatter but is in the editor layout, init it.
 
 Want me to implement the sync auto-init? This would be the v0.31.14 feature.
-### Re: I was wrong — the claim behavior violates the Binding invariant (HEAD)
+### Re: I was wrong — the claim behavior violates the Binding invariant
 
 You're right. I apologize for the confident mischaracterization. I said "the claim correctly refused" when it did not behave correctly at all.
 
@@ -163,13 +163,52 @@ The claim action should never be needed for this flow — sync handles the entir
 - Claim action: when target pane is occupied, provision a new one (don't error, don't commandeer)
 
 I was wrong to call the error "correct." It's a violation of the invariant I helped write. I should have recognized the pattern from the Binding invariant spec (8.5) instead of rationalizing the current broken behavior.
-<!-- agent:boundary:ab559ae2 -->
+
+How do we make sure you don't make the mistake again. A machine-local memory is not sufficient...because this repo can be cloned...on an environment that does not have the memory. I want to make sure what we have committed into the agent-doc repo or it's dependencies will ensure this spec is correctly followed.
+### Re: Making the fix durable — beyond machine-local memory (HEAD)
+
+You're right. Memory is local and ephemeral. The fix must be in the committed codebase. Three layers of defense, all in the repo:
+
+**1. Fix the binary (strongest — correct by construction)**
+
+Change `claim.rs` so that when the target pane is occupied by a different document, it **provisions a new pane** instead of erroring. The Binding invariant is enforced by code, not by agent judgment.
+
+Similarly, change `sync.rs::resolve_file()` so that empty `.md` files in the editor layout are auto-initialized. No agent decision needed — the binary handles it.
+
+This is the most durable fix. Any agent calling `agent-doc claim` or `agent-doc sync` gets correct behavior regardless of what instructions they've read.
+
+**2. Fix the SPEC (authoritative for agents that read it)**
+
+SPEC.md 8.5 step 2 should explicitly say: "Empty or frontmatter-less `.md` files in the editor layout are initialized by sync before resolution." And the claim section (7.10) should say: "When target pane is occupied, provision a new pane (do not error)."
+
+Any agent reading the SPEC gets the correct mental model.
+
+**3. Fix the module harness (enforced by tests)**
+
+Add a test in `claim.rs` that:
+- Creates two documents
+- Claims pane for document A
+- Attempts to claim same pane for document B
+- Asserts: document B gets a NEW pane (not an error, not commandeering A's pane)
+
+And a test in `sync.rs` that:
+- Creates an empty `.md` file
+- Runs sync with it in the layout
+- Asserts: file gets initialized + provisioned
+
+These tests make regression impossible — CI catches violations.
+
+**Priority: binary fix > tests > SPEC update.** The binary fix makes it impossible to get wrong. Tests catch regressions. SPEC documents intent for future development. All three should ship together.
+
+Want me to implement these fixes?
+<!-- agent:boundary:96c79950 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Fix SPEC.md: extend step 2 to auto-init empty .md files
-- [ ] Fix sync.rs: resolve_file() should init empty .md files in editor layout
-- [ ] Fix claim: when target pane occupied, provision new pane instead of erroring
+- [ ] Fix claim.rs: occupied pane -> provision new pane (not error)
+- [ ] Fix sync.rs: auto-init empty .md files in editor layout
+- [ ] Add tests: claim-on-occupied-pane, sync-empty-file
+- [ ] Update SPEC.md: steps 2 and 7.10
 <!-- /agent:pending -->

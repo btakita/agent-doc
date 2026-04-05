@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-All transfer items shipped (P1-P5 + separator convention). One remaining: transfer-source metadata.
+All features + ontology shipped. 447 tests. One remaining: transfer-source metadata.
 <!-- /agent:status -->
 
 ## Exchange
@@ -603,7 +603,7 @@ Which approach do you prefer? I can create the node and wire it into the agent-d
 Directive is fine.
 
 How would directive be referenced by an agent-doc context?
-### Re: Directive node created + agent-doc reference (HEAD)
+### Re: Directive node created + agent-doc reference
 
 **Created `~/.claude/philosophy/src/directive.md`** following the SPEC.md template (Ontology/Axiology/Epistemology sections).
 
@@ -611,7 +611,7 @@ How would directive be referenced by an agent-doc context?
 
 The agent-doc domain ontology (in `README.md`) would add a new section alongside Document Lifecycle, Pane Lifecycle, and Integration Layer:
 
-### Interaction Model (HEAD)
+### Interaction Model
 
 | Term | Definition |
 |------|-----------|
@@ -628,7 +628,28 @@ The **Directive** term connects the kernel ontology to agent-doc's diff-type cla
 This creates a traceable chain: **ontology definition -> domain mapping -> binary classification -> skill routing -> behavioral contract**.
 
 Want me to add this Interaction Model section to `README.md`?
-<!-- agent:boundary:2b8b0828 -->
+
+Yes
+### Re: Yes — Interaction Model added to README.md (HEAD)
+
+Done. Added `### Interaction Model` section to the agent-doc domain ontology in `README.md`, after Integration Layer and before Security:
+
+| Term | Definition |
+|------|-----------|
+| **Directive** | Links to kernel node. Classified as `DiffType::Approval`. Brevity independent of quality expectation. |
+| **Cycle** | One round-trip logged in `cycles.jsonl`. |
+| **Diff** | User changes since snapshot. Classified by `classify_diff()`. |
+| **Annotation** | User edit to agent content. Classified as `DiffType::Annotation`. |
+
+The traceable chain is now complete:
+1. **Kernel**: `~/.claude/philosophy/src/directive.md` (what a directive IS)
+2. **Domain overlay**: `README.md#interaction-model` (how it applies to agent-doc)
+3. **Binary**: `diff.rs::classify_diff()` -> `DiffType::Approval`
+4. **Skill**: SKILL.md `### 0b. Diff-type routing` (behavioral contract)
+5. **Runbook**: `runbooks/diff-type-routing.md` (detailed routing rules)
+
+CLAUDE.md already references README.md for the full ontology, so no additional update needed there.
+<!-- agent:boundary:2c4f8f72 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -639,7 +660,6 @@ Want me to add this Interaction Model section to `README.md`?
 - [x] JB plugin escape fix + Gson migration (v0.2.44) — DONE
 - [x] Edge case + integration tests — DONE (447 total)
 - [x] Process discipline updates — DONE
-- [x] Create `directive.md` kernel node — DONE
-- [ ] Add Interaction Model section to agent-doc README.md domain ontology
+- [x] Directive ontology node + README.md Interaction Model — DONE
 - [ ] Add transfer-source metadata to patch format
 <!-- /agent:pending -->

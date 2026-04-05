@@ -133,7 +133,7 @@ Done. Added as the 5th core principle:
 > **Use the pipeline, not ad-hoc tools** — never use the Write tool or Edit tool to create session documents. Use `agent-doc init` for new files, `agent-doc transfer` for moving content. The Write tool bypasses UUID assignment, snapshot creation, and git commit.
 
 This is now visible on every skill invocation — not buried in a runbook. Links to the transfer-extract runbook for details.
-<!-- agent:boundary:67998903 -->
+<!-- agent:boundary:c99aa856 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

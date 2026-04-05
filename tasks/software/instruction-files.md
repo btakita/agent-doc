@@ -715,7 +715,7 @@ If the specs lived elsewhere, instruction-files would either need to import them
 Think of it like a schema living next to the parser: JSON Schema lives in the JSON tooling ecosystem, not in each application that produces JSON.
 
 Other tools (agent-doc, corky, Claude Code itself) **produce** files in these formats. instruction-files **validates** them. The specs document what "valid" means.
-<!-- agent:boundary:47b879a6 -->
+<!-- agent:boundary:7bbf9272 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -484,7 +484,7 @@ This is a design decision for the instruction-files task document. Want me to ad
 We also have agent-runbooks. If we follow the pattern, we can create agent-memories...where agent-memories can serve as a de-facto spec.
 However, we may want to consolidate agent-runbooks and agent-memories into a single repo + spec.
 Should instruction-files be separate because these are broader instruction files for libraries? It could also contain memories and runbooks. However, I would like a place for the runbooks and memories spec.
-### Re: Architecture — memories, runbooks, instruction-files (HEAD)
+### Re: Architecture — memories, runbooks, instruction-files
 
 The naming suggests a layered architecture:
 
@@ -525,13 +525,59 @@ agent-memories/             ← spec repo: defines the committed memory format
 instruction-files depends on agent-runbooks + agent-memories for their specs. The specs define the format; instruction-files implements the tooling.
 
 This keeps the specs focused while the tooling is consolidated. Does this separation feel right, or would you prefer everything in one repo?
-<!-- agent:boundary:dee69076 -->
+It does. And instruction-files should depend on agent-memories and agent-runbooks.
+
+Compare agent-memories to rules...used by various editors and .agent(s) specs.
+### Re: agent-memories vs rules (HEAD)
+
+**Comparison with existing "rules" systems:**
+
+| System | Format | Scope | Discovery | Portable? |
+|--------|--------|-------|-----------|-----------|
+| **Cursor Rules** (`.cursorrules`) | Markdown file | Project-wide | Single file at root | Yes (committed) |
+| **Windsurf Rules** (`.windsurfrules`) | Markdown file | Project-wide | Single file at root | Yes (committed) |
+| **Claude Code** (`CLAUDE.md`) | Markdown file | Per-directory (hierarchical) | Walk up directory tree | Yes (committed) |
+| **`.agents` spec** | YAML/MD files | Per-agent configuration | `.agents/` directory | Yes (committed) |
+| **Claude auto memory** | Markdown + YAML frontmatter | Per-project, per-user | `~/.claude/projects/*/memory/` | No (machine-local) |
+| **agent-memories** (proposed) | Markdown with frontmatter | Per-project (committed) | `.agent/memories/` or similar | Yes (committed) |
+
+**Key differences between agent-memories and rules:**
+
+- **Rules** (Cursor, Windsurf, CLAUDE.md) are *prescriptive*: "always do X, never do Y." Written by the developer upfront.
+- **Memories** are *learned*: "last time we tried X, it caused Y." Captured from experience during sessions.
+
+**But they converge:** A mature memory ("always use agent-doc init, not Write tool") IS a rule. The distinction is the origin (prescribed vs learned), not the final form.
+
+**Proposed agent-memories format** (committed, portable):
+
+```markdown
+---
+name: use-agent-doc-init
+type: feedback
+scope: agent-doc
+---
+
+Use `agent-doc init` for new session documents, not manual file creation with Write tool.
+
+**Why:** Manual creation bypasses the agent-doc pipeline (init -> snapshot -> git baseline -> commit). Files created with Write are untracked until manually committed.
+
+**How to apply:** When creating a new task/session document, run `agent-doc init <path>` instead of writing the file directly.
+```
+
+**vs CLAUDE.md rule:**
+```markdown
+- When creating new session documents, use `agent-doc init`, not manual file creation
+```
+
+The memory format has more structure (type, scope, why, how) while CLAUDE.md is terse. agent-memories could be the *source* that generates CLAUDE.md entries — or they could coexist, with memories being the detailed version and CLAUDE.md being the summary.
+
+This design discussion should transfer to the instruction-files task document. Want me to do that?
+<!-- agent:boundary:3d27f5ef -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Decide architecture: instruction-files + agent-runbooks + agent-memories repos
-- [ ] Transfer design discussion to tasks/software/instruction-files.md
+- [ ] Transfer architecture discussion to tasks/software/instruction-files.md
 - [ ] Bump agent-doc to v0.31.14 and release
 <!-- /agent:pending -->

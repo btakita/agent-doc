@@ -1,13 +1,14 @@
 ---
-agent_doc_session: null
+agent_doc_session: 3b9e6000-115c-4beb-a64d-0300306c97f0
 agent_doc_format: template
 agent_doc_write: crdt
 ---
 
+
 ## Status
 
 <!-- agent:status patch=replace -->
-Task created. Scope defined.
+4/11 items complete. Runbook discovery, bundled defaults, and optional dependencies landed.
 <!-- /agent:status -->
 
 ## Exchange
@@ -52,7 +53,7 @@ Task created. Scope defined.
 
 > **[TRANSFER from tasks/agent-doc/agent-doc-bugs.md]** (2026-04-05T02:01:00Z)
 >
-### Session Summary (compacted 2026-04-04 20:41) (HEAD)
+### Session Summary (compacted 2026-04-04 20:41)
 
 **Releases: agent-doc v0.31.6→v0.31.13 + tmux-router v0.3.9 + JB plugin v0.2.44**
 
@@ -98,7 +99,7 @@ Claim failed (exit 1): Error: pane %491 is already claimed by 1ef5f0e7 (file: ta
 I tried `Sync Tmux Layout` and saw the JB prompt `Sync: --col tasks/agent-doc/agent-doc-bugs.md --col tasks/software/proof.md [focus: tasks/software/proof.md]`.
 
 But none of these created the layout.
-### Re: Layout issues with proof.md (HEAD)
+### Re: Layout issues with proof.md
 
 Two issues:
 
@@ -123,7 +124,7 @@ Without frontmatter, sync sees it as a plain file and won't provision a pane.
 - Or add frontmatter manually, then run `/agent-doc tasks/software/proof.md` from a new Claude session — sync will auto-provision a pane
 
 The sync output you saw (`--col bugs.md --col proof.md`) was correct — it detected both files in the editor split. But since proof.md had no session UUID, sync couldn't provision a pane for it. Once proof.md has frontmatter, sync will create the 2-column layout automatically on the next tab switch.
-### Re: Sync should auto-init empty files (HEAD)
+### Re: Sync should auto-init empty files
 
 Checked the logs: no proof.md entries in ops.log. The "Claim for Tmux Pane" error came from the JB plugin action (manual), not from sync. Sync saw the file in the editor split but couldn't provision because it had no session UUID.
 
@@ -141,7 +142,7 @@ Alternatively, the simpler path: the JB plugin's "Claim for Tmux Pane" action co
 Why did `Claim for Tmux Pane` have an error if we don't have an entry for proof.md in the ops.log?
 
 We need to make this process robust. New files need to be properly claimed with the default template written to it.
-### Re: Claim error diagnosis + robust new file handling (HEAD)
+### Re: Claim error diagnosis + robust new file handling
 
 **Why the error happened:** The JB plugin's "Claim for Tmux Pane" action sends the *currently focused tmux pane* as the target. When you had proof.md open in the editor, the focused tmux pane was %491 (running the bugs session). So the claim tried to bind proof.md to pane %491, which is already claimed by agent-doc-bugs.md. The claim correctly refused to prevent corruption.
 
@@ -171,7 +172,7 @@ No ops.log entry for proof.md because the claim validation happens *before* any 
 **Root cause:** The missing step is that sync treats files without `agent_doc_format` frontmatter as non-session files. The fix is straightforward: in `resolve_file()`, if a `.md` file has no frontmatter but is in the editor layout, init it.
 
 Want me to implement the sync auto-init? This would be the v0.31.14 feature.
-### Re: I was wrong — the claim behavior violates the Binding invariant (HEAD)
+### Re: I was wrong — the claim behavior violates the Binding invariant
 
 You're right. I apologize for the confident mischaracterization. I said "the claim correctly refused" when it did not behave correctly at all.
 
@@ -203,7 +204,7 @@ The claim action should never be needed for this flow — sync handles the entir
 I was wrong to call the error "correct." It's a violation of the invariant I helped write. I should have recognized the pattern from the Binding invariant spec (8.5) instead of rationalizing the current broken behavior.
 
 How do we make sure you don't make the mistake again. A machine-local memory is not sufficient...because this repo can be cloned...on an environment that does not have the memory. I want to make sure what we have committed into the agent-doc repo or it's dependencies will ensure this spec is correctly followed.
-### Re: Making the fix durable — beyond machine-local memory (HEAD)
+### Re: Making the fix durable — beyond machine-local memory
 
 You're right. Memory is local and ephemeral. The fix must be in the committed codebase. Three layers of defense, all in the repo:
 
@@ -249,7 +250,7 @@ Want me to implement these fixes?
 Yes.
 
 Add a skill -> runbook that ensures that commited code alone will ensure library/cli directives are followed. We need this to work on cloned repos.
-### Re: Implementing all three layers + enforcement runbook (HEAD)
+### Re: Implementing all three layers + enforcement runbook
 
 Acknowledged. Executing all items with full process rigor:
 
@@ -261,7 +262,7 @@ Acknowledged. Executing all items with full process rigor:
 6. **New runbook** — "code-enforced directives" ensuring committed code alone enforces invariants on cloned repos
 
 Starting with plan mode for the binary changes, then implementing with tests.
-### Re: All three layers implemented (HEAD)
+### Re: All three layers implemented
 
 Done. Binary fixes + SPEC + tests + runbook — all committed to the repo.
 
@@ -299,7 +300,7 @@ Is this fix installed?
 Why?
 
 
-### Re: Fix wasn't installed (HEAD)
+### Re: Fix wasn't installed
 
 The fix was in the working tree but the running binary was still v0.31.13 (the earlier release). Just rebuilt and installed:
 
@@ -327,7 +328,7 @@ I tried `Sync Tmux Layout` then `Claim for Tmux Pane`.
 
 `Sync Tmux Layout` resulted in a bare bones fontmatter with **only** `agent_doc_session:`. Why?
 It should have resulted in populating proof.md with the full default template with includes an agent:exchange and a agent:pending elements
-### Re: Scaffold ordering bug fixed + reinstalled (HEAD)
+### Re: Scaffold ordering bug fixed + reinstalled
 
 Two issues found and fixed:
 
@@ -357,7 +358,7 @@ This is the correct behavior — claim detected the occupied pane and provisione
 
 Add tests
 
-### Re: Tests added for scaffold behavior (HEAD)
+### Re: Tests added for scaffold behavior
 
 Added 4 new tests (6 total for scaffold):
 
@@ -378,7 +379,7 @@ proof.md confirmed scaffolded correctly with full template.
 .agent/runbooks/precommit.md and .agent/runbooks/prerelease.md should also include changes to existence-lang ontology...which serves as a reference for module-harness.
 Should .agent/runbooks/precommit.md and .agent/runbooks/prerelease.md be included in instruction-files?
 Perhaps as development support files?
-### Re: Ontology steps added to precommit + prerelease runbooks (HEAD)
+### Re: Ontology steps added to precommit + prerelease runbooks
 
 Done.
 
@@ -395,7 +396,7 @@ Done.
 You missed the following. Why? Go ahead and run:
 > Should .agent/runbooks/precommit.md and .agent/runbooks/prerelease.md be included in instruction-files?
 > Perhaps as development support files?
-### Re: Runbooks in instruction-files (HEAD)
+### Re: Runbooks in instruction-files
 
 Yes, the precommit/prerelease runbooks should be included in instruction-files discovery. Currently instruction-files discovers:
 - Root: `AGENTS.md`, `README.md`, `SPEC.md`, `CLAUDE.md`
@@ -416,7 +417,7 @@ It should depend on existence and module-harness crates.
 
 instruction-files should be support instruction files, including runbooks for packages. It should assume all context is contain either in the package's repo or a dependency's repo. Please specify this as either a shared skill with a reference to a runbook if appropriate.
 
-### Re: instruction-files scope expansion (HEAD)
+### Re: instruction-files scope expansion
 
 Fixed the prerelease runbook — removed the `~/.claude/philosophy` grep. Now says: "No machine-local paths in released files (all references must resolve within the repo or declared dependencies)."
 
@@ -443,7 +444,7 @@ instruction-files should be the central crate for discovering, auditing, and man
 
 This is a significant expansion of the instruction-files crate. It would be best tracked as its own task document (not inside agent-doc-bugs.md). Want me to create `tasks/software/instruction-files.md` for this work?
 yes
-### Re: Task document created (HEAD)
+### Re: Task document created
 
 Created `tasks/software/instruction-files.md` with the full scope:
 - Discovery expansion (runbooks, skill runbooks, module harness)
@@ -455,7 +456,7 @@ Created `tasks/software/instruction-files.md` with the full scope:
 Transfer context from this session included. Ready to work on when you navigate to it.
  
 You transferred to tasks/software/instruction-files.md...but the file was not committed. Why?
-### Re: File wasn't committed (HEAD)
+### Re: File wasn't committed
 
 Because `agent-doc commit` only stages the snapshot for the current document (agent-doc-bugs.md). New files created outside the agent-doc write pipeline need a separate `git add` + `git commit`.
 
@@ -465,7 +466,7 @@ This is a gap in the transfer workflow — when creating a new task document via
 
 Does `agent-doc transfer` sufficiently perform the correct steps? Do we just need a skill -> runbook?
 > - [ ] Transfer runbook: add commit step for new target files
-### Re: Does agent-doc transfer commit correctly? (HEAD)
+### Re: Does agent-doc transfer commit correctly?
 
 Yes, `agent-doc transfer` already handles this correctly. Looking at `extract.rs:194-200`:
 
@@ -481,7 +482,7 @@ The runbook already documents the right workflow. The skill should use `agent-do
 
 Why did you not follow the steps?
 Do not add anything to memory. instructions-files should discourage adding to memory. We should instead rely on committing to the any context, skill, or runbooks in the library or dependencies.
-### Re: Why I didn't follow the transfer steps (HEAD)
+### Re: Why I didn't follow the transfer steps
 
 I didn't use `agent-doc transfer` because I was creating a new task document from scratch, not transferring content from an existing document. The transfer command moves content between existing documents. For creating a brand new file, I should have used `agent-doc init` to scaffold it, then committed it.
 
@@ -492,7 +493,7 @@ But the deeper issue you're pointing out: I reached for the `Write` tool (ad-hoc
 This means: instead of saving "use agent-doc transfer not Write tool" as a memory, the SKILL.md or a runbook should explicitly say "when creating new task documents, use `agent-doc init`, not manual file creation." The instruction lives in the committed skill, not in memory.
 
 I want to also make or use a memory library that work with committing files to a library or it's dependencies. Are there any tools available or should we add to instruction-files or consolidate agent-runbooks into agent-memories?
-### Re: Committed memory library (HEAD)
+### Re: Committed memory library
 
 **What exists today:**
 
@@ -522,7 +523,7 @@ This is a design decision for the instruction-files task document. Want me to ad
 We also have agent-runbooks. If we follow the pattern, we can create agent-memories...where agent-memories can serve as a de-facto spec.
 However, we may want to consolidate agent-runbooks and agent-memories into a single repo + spec.
 Should instruction-files be separate because these are broader instruction files for libraries? It could also contain memories and runbooks. However, I would like a place for the runbooks and memories spec.
-### Re: Architecture — memories, runbooks, instruction-files (HEAD)
+### Re: Architecture — memories, runbooks, instruction-files
 
 The naming suggests a layered architecture:
 
@@ -566,7 +567,7 @@ This keeps the specs focused while the tooling is consolidated. Does this separa
 It does. And instruction-files should depend on agent-memories and agent-runbooks.
 
 Compare agent-memories to rules...used by various editors and .agent(s) specs.
-### Re: agent-memories vs rules (HEAD)
+### Re: agent-memories vs rules
 
 **Comparison with existing "rules" systems:**
 
@@ -611,16 +612,47 @@ The memory format has more structure (type, scope, why, how) while CLAUDE.md is 
 
 This design discussion should transfer to the instruction-files task document. Want me to do that?
 Yes
-<!-- agent:boundary:4d2869f1 -->
+do
+- [ ] Add `.agent/runbooks/*.md` to discovery glob patterns
+- [ ] Bundle default precommit.md and prerelease.md
+- [ ] Add existence-lang dependency for ontology validation
+- [ ] Add module-harness dependency for spec auditing
+### Re: do (4 items) (HEAD)
+
+All 4 implemented. Clippy clean, 51 tests pass (including 3 new ones).
+
+**1. `.agent/runbooks/*.md` discovery** — Added two glob patterns to `find_instruction_files()`:
+- `.agent/runbooks/*.md` — project-level runbooks
+- `.claude/skills/**/runbooks/*.md` — skill-specific runbooks
+
+New test `find_instruction_files_discovers_runbooks` covers both patterns.
+
+**2. Bundle default precommit.md and prerelease.md** — New `runbooks` module with:
+- `runbooks/precommit.md` and `runbooks/prerelease.md` embedded via `include_str!`
+- `init_runbooks(root)` writes defaults to `.agent/runbooks/` (never overwrites existing files)
+- `pub use init_runbooks` exported from `lib.rs`
+- Generic versions (not agent-loop-specific) suitable for any Rust/JS/Python project
+
+**3. existence-lang dependency** — Added `existence = { version = "0.4", optional = true }` behind `ontology` feature flag.
+
+**4. module-harness dependency** — Added `module-harness = { version = "0.2", optional = true }` behind `spec-audit` feature flag.
+
+Both dependencies are optional to keep the default build lightweight. Projects opt in via:
+```toml
+instruction-files = { version = "0.1.5", features = ["ontology", "spec-audit"] }
+```
+
+Also fixed 8 pre-existing `collapsible_if` clippy warnings in `audit.rs` (collapsed nested if-let chains using Rust 2024 let-chains).
+<!-- agent:boundary:e691af1b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Add `.agent/runbooks/*.md` to discovery glob patterns
-- [ ] Bundle default precommit.md and prerelease.md
-- [ ] Add existence-lang dependency for ontology validation
-- [ ] Add module-harness dependency for spec auditing
+- [x] Add `.agent/runbooks/*.md` to discovery glob patterns
+- [x] Bundle default precommit.md and prerelease.md
+- [x] Add existence-lang dependency for ontology validation
+- [x] Add module-harness dependency for spec auditing
 - [ ] Add context invariant audit (no machine-local paths)
 - [ ] Create shared skill + runbook
 - [ ] Architecture: instruction-files depends on agent-runbooks + agent-memories specs
@@ -628,4 +660,6 @@ Yes
 - [ ] agent-runbooks spec: runbook format (checklist, prerequisites, verification)
 - [ ] Committed memory write capability (route lessons to right file)
 - [ ] Compare/align with Cursor Rules, Windsurf Rules, .agents spec
+- [ ] Ontology validation integration (use `existence` crate to validate terms in instruction files)
+- [ ] Spec audit integration (use `module-harness` to audit module specs)
 <!-- /agent:pending -->

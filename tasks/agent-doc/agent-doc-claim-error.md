@@ -165,7 +165,7 @@ Fixed the snapshot/file mismatch after file move. In `git.rs commit()`, when fil
 Published v0.31.16 to all targets (crates.io, PyPI, GitHub Release, binary installed).
 
 The fix is active now — next `agent-doc commit` on `tasks/dreamable/robert-ross.md` should re-sync the snapshot and stop the "externally saved" dialogs.
-<!-- agent:boundary:c02dc020 -->
+<!-- agent:boundary:f1cbbb85 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -42,7 +42,7 @@ I set `agent_doc_auto_compact: 250` on this document as a safety net rather than
    - `no-changes-fast-exit`: kept at 100 (model uses ~50-61)
 
 3. **Remaining issue:** `simple-question-concise` scores low (0.3) because the model adds `### Re:` headers and subsections even for single questions. The system prompt encourages this. The eval's `expected_behavior` and system prompt conflict -- need to add "for single questions, omit the `### Re:` header" to system prompt or adjust the eval expectations.
-<!-- agent:boundary:17a77b25 -->
+<!-- agent:boundary:eb17a0c1 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

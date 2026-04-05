@@ -32,7 +32,7 @@ agent: claude
 
 **Greenfield gap:** Co-build rooms (shared code editor + LiveKit room) are genuinely new.
 
-### Mermaid diagram — Miguel's LiveKit agent course (HEAD)
+### Mermaid diagram — Miguel's LiveKit agent course
 
 ```mermaid
 graph TD
@@ -74,5 +74,10 @@ graph TD
     end
     PRE --> PRE_ITEMS --> MOD1 --> MOD2 --> MOD3 --> MOD4 --> MOD5 --> CAP
 ```
-<!-- agent:boundary:44cc8444 -->
+
+transfer mermaid diagram into build-party-course-diagram.md
+### Re: transfer mermaid diagram (HEAD)
+
+Done. Created `tasks/dreamable/build-party-course-diagram.md` with the full mermaid diagram for Miguel's LiveKit agent course.
+<!-- agent:boundary:6dcaf928 -->
 <!-- /agent:exchange -->

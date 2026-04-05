@@ -63,7 +63,7 @@ agent-doc commit tasks/software/granola.md  # commit to git
 But `agent-doc init` only works for non-existent files. Since the file exists with content, I'll commit it directly:
 
 Let me commit it now.
-<!-- agent:boundary:a32252d4 -->
+<!-- agent:boundary:b1343373 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

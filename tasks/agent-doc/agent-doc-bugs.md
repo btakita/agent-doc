@@ -117,7 +117,7 @@ You're right. I should have fixed the pipeline, not manually committed the file.
 > **NEVER use the Write tool to create session documents.** Use `agent-doc init` for new files or `agent-doc transfer` for moving content. The Write tool bypasses the pipeline (UUID, snapshot, git commit).
 
 These are committed to the repo — any agent reading the runbooks gets the right behavior on any clone.
-<!-- agent:boundary:4b15e253 -->
+<!-- agent:boundary:49050097 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

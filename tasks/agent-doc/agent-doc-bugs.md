@@ -572,7 +572,7 @@ Use `agent-doc init` for new session documents, not manual file creation with Wr
 The memory format has more structure (type, scope, why, how) while CLAUDE.md is terse. agent-memories could be the *source* that generates CLAUDE.md entries — or they could coexist, with memories being the detailed version and CLAUDE.md being the summary.
 
 This design discussion should transfer to the instruction-files task document. Want me to do that?
-<!-- agent:boundary:3d27f5ef -->
+<!-- agent:boundary:4613af08 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

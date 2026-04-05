@@ -791,7 +791,7 @@ This task comes from Rob's Granola meeting notes. He assigned Brian:
 **Blocker:** Rob said he'd share the Build Party PRD — that provides the feature spec to evaluate repos against. Without it, evaluation is based on the product description from the call (watch party, pre/post-party, co-build rooms, Code Karaoke, agent personas).
 
 **Can we do it now?** Partially — we can identify and evaluate repos based on what we know from the call. The PRD would refine criteria. Want me to run the evaluation now with what we have, or wait for the PRD?
-<!-- agent:boundary:d58e079a -->
+<!-- agent:boundary:1ba5b919 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

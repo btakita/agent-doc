@@ -179,7 +179,7 @@ This transforms Shimmer from a session viewer into an *activity narrator* — mu
 - **Cor.e** — persistent memory MCP server. Stores cross-session context as structured observations. Rob and Miguel share a login, meaning they share a memory space. Think of it as the "long-term memory" layer that persists between Claude Code sessions.
 - **Trieve** — semantic + full-text hybrid search engine. Was acquired by **Mintlify** (the docs platform). Mintlify uses Trieve to power intelligent documentation search. In Shimmer's context, Trieve would index session content and make it searchable with natural language queries ("when did we discuss the auth middleware rewrite?" → finds the relevant session).
 - **Vespa** — the Apache-licensed alternative to Cor.e for the memory layer, with better cross-session capability. The choice between Cor.e and Vespa likely comes down to hosted-vs-self-hosted and how much cross-session intelligence Shimmer needs.
-<!-- agent:boundary:d44a0095 -->
+<!-- agent:boundary:4b01c384 -->
 <!-- /agent:exchange -->
 
 ## Pending

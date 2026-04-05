@@ -254,7 +254,7 @@ Done. Binary fixes + SPEC + tests + runbook — all committed to the repo.
 - Checklist for new invariants
 
 **All 452 tests pass, clippy clean.**
-<!-- agent:boundary:55280724 -->
+<!-- agent:boundary:c575946a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

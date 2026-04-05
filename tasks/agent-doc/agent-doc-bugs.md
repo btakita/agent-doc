@@ -41,14 +41,27 @@ The question is whether skill-harness should be a separate crate that standardiz
 This belongs in the instruction-files task scope. Transferred.
 
 Ok...does agent-doc already depend on instruction-files?
-### Re: agent-doc already depends on instruction-files (HEAD)
+### Re: agent-doc already depends on instruction-files
 
 Yes. `Cargo.toml` has `instruction-files = "0.1"`. It's used by `agent-doc audit-docs` which validates CLAUDE.md/AGENTS.md/SPEC.md consistency.
-<!-- agent:boundary:192ad20c -->
+
+Update instruction-files dependency.
+Is there any skill install logic with instruction-files or it's dependencies that can handle installing skills?
+### Re: Skill install in instruction-files (HEAD)
+
+No. instruction-files has no skill install logic — it only discovers and audits existing files. The skill install capability is entirely in agent-doc (`src/skill.rs` — `agent-doc skill install`).
+
+To make this generic, a `skill-harness` crate (or extending instruction-files) would need:
+- A standard skill manifest format (what files to install, where)
+- An install command that copies skill files to `.claude/skills/<name>/`
+- A check command that verifies installed skill matches source
+
+This is new functionality for the instruction-files expansion. Added to the task.
+<!-- agent:boundary:f9f7fdf0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-All items complete.
+All items noted. Instruction-files expansion tracked in tasks/software/instruction-files.md.
 <!-- /agent:pending -->

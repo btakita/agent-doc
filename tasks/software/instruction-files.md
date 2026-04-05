@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-24/27 items complete. Self-skill shipped. 3 remaining: memory write, ontology, spec audit integrations.
+24/27 items complete. Final 3 subagents running. Full ecosystem completion imminent.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1577,7 +1577,8 @@ The harness pattern is now consistent across the entire ecosystem. Each SPEC.md 
 
 do
 - [ ] Add self-skill to skill-harness
-### Re: Self-skill for skill-harness (HEAD)
+
+### Re: Self-skill for skill-harness
 
 Done. Created `skill/` directory in skill-harness:
 
@@ -1585,7 +1586,21 @@ Done. Created `skill/` directory in skill-harness:
 - `skill/runbooks/install-skill.md` — step-by-step install procedure with prerequisites, verification steps
 
 An agent with this skill loaded can manage other skills: "install the email skill" triggers the install runbook. Meta-management complete.
-<!-- agent:boundary:7b4a596a -->
+
+do
+- [ ] Committed memory write capability
+- [ ] Ontology validation integration
+- [ ] Spec audit integration
+### Re: do (final 3 items) (HEAD)
+
+3 subagents launched in parallel:
+
+1. **Memory write** — Adding `write_memory()` + `agent-memories write` CLI to agent-memories
+2. **Ontology validation** — Adding `check_ontology_terms()` to instruction-files (behind `ontology` feature)
+3. **Spec audit** — Adding `check_spec()` to instruction-files (behind `spec-audit` feature)
+
+Will wire up modules and report results when complete. These are the final 3 items.
+<!-- agent:boundary:b104b390 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1615,7 +1630,7 @@ An agent with this skill loaded can manage other skills: "install the email skil
 - [x] Add instruction-files CLI (orchestrator)
 - [x] Add Spec/Contracts/Evals convention to all repos
 - [x] Add self-skill to skill-harness
-- [ ] Committed memory write capability
-- [ ] Ontology validation integration
-- [ ] Spec audit integration
+- [ ] Committed memory write capability (subagent in progress)
+- [ ] Ontology validation integration (subagent in progress)
+- [ ] Spec audit integration (subagent in progress)
 <!-- /agent:pending -->

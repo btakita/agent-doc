@@ -1585,7 +1585,7 @@ Done. Created `skill/` directory in skill-harness:
 - `skill/runbooks/install-skill.md` — step-by-step install procedure with prerequisites, verification steps
 
 An agent with this skill loaded can manage other skills: "install the email skill" triggers the install runbook. Meta-management complete.
-<!-- agent:boundary:b147e140 -->
+<!-- agent:boundary:7b4a596a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -140,7 +140,7 @@ pub fn init(root: &Path) -> Result<()> {
 CLI: `instruction-files init` now installs both skills and runbooks. Pushed.
 
 **Option D:** Yes, for non-Rust projects and monorepos. `.agent/skills.toml` would be a declarative manifest that `skill-harness sync` reads. Can be added on top of Option C — they serve different audiences (Rust library consumers vs project-level management). Ready to implement whenever needed.
-<!-- agent:boundary:ab5cc53e -->
+<!-- agent:boundary:59dc0613 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

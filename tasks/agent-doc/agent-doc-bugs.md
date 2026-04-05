@@ -668,9 +668,15 @@ However, this would be a module-harness feature enhancement, not something to ad
 Want me to add it to the pending list?
 
 Add to module-harness skill -> runbook to reference ontology nodes for definition of terms.
-### Re: Module-harness ontology runbook added (HEAD)
+### Re: Module-harness ontology runbook added
 
 Done. Created `runbooks/ontology-references.md` in the module-harness skill and wired it into SKILL.md.
+
+> //!   including [Directives](~/.claude/philosophy/src/directive.md) (approval signals).
+
+This is source code that can be cloned into multiple environments...most of which do not have `~/.claude/philosophy/` defined.
+Please only reference ontology that is defined within the project or within a project or dev dependency.
+Please also verify that the ontology node exists in audits and in general usage.
 
 **Runbook contents:**
 - **When to apply:** during `apply`, `audit`, and `seed` operations
@@ -682,7 +688,23 @@ Done. Created `runbooks/ontology-references.md` in the module-harness skill and 
 **SKILL.md updated:** added `ontology references` runbook to the Runbooks section.
 
 The module-harness will now check for ontology cross-references during audits and include them when generating/applying specs.
-<!-- agent:boundary:000537d7 -->
+### Re: Ontology references must be project-local (HEAD)
+
+Good catch. Fixed both the runbook and the README.md.
+
+**Changes:**
+
+1. **`runbooks/ontology-references.md`** — rewrote with explicit portability rules:
+   - "Only reference ontology defined within the project or its dependencies"
+   - "Do NOT link to `~/.claude/philosophy/src/*.md` in source code (not portable)"
+   - Ontology sources: project README.md > SPEC.md > kernel (by name only, not linked)
+   - Audit checklist: "All links resolve within the project tree"
+   - Examples updated to use `README.md#interaction-model` instead of `~/` paths
+
+2. **`README.md`** — removed `~/.claude/` links from the Interaction Model table. Directive and Signal terms are now defined inline without external links.
+
+The rule: `~/.claude/philosophy/` is for agent context (CLAUDE.md, skills). Source code and project docs use project-local references only.
+<!-- agent:boundary:5920b762 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -694,6 +716,6 @@ The module-harness will now check for ontology cross-references during audits an
 - [x] Edge case + integration tests — DONE (447 total)
 - [x] Process discipline updates — DONE
 - [x] Directive ontology node + README.md Interaction Model — DONE
-- [x] Module-harness ontology runbook — DONE
+- [x] Module-harness ontology runbook (project-local only) — DONE
 - [ ] Add transfer-source metadata to patch format
 <!-- /agent:pending -->

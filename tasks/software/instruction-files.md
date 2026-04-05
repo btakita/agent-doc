@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-18/27 items complete. Starting redistribution refactor: shared primitives -> agent-kit, domain logic -> domain crates.
+19/27 items complete. Phase 1 redistribution done: shared primitives in agent-kit, instruction-files slimmed by 594 lines.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1441,7 +1441,7 @@ This is a significant refactor. Want me to execute it, or should we park it and 
 yes
 
 agent-memories is interesting because we typically don't see libraries with memories. But it could work...
-### Re: agent-memories as a library (HEAD)
+### Re: agent-memories as a library
 
 You're right that committed project memories are novel. But the pattern already exists in a few forms:
 
@@ -1457,7 +1457,34 @@ The gap: none of these are structured, validated, or portable. agent-memories ma
 The "library with memories" pattern is really "codebase with documented agent experience." Every codebase accumulates this — we're just giving it a format.
 
 Starting the redistribution refactor now. I'll move shared primitives to agent-kit first, then redistribute domain logic.
-<!-- agent:boundary:14ed0880 -->
+### Re: Redistribution progress (HEAD)
+
+**Phase 1 complete: shared primitives moved to agent-kit.**
+
+- agent-kit: +718 lines, 43 tests (19 detect + 4 hooks + 20 audit_common)
+- instruction-files: -594 lines, 32 tests (domain-specific only)
+
+What moved to `agent_kit::audit_common`:
+- `AuditConfig`, `Issue`, `is_agent_file` (types)
+- `find_root`, `find_instruction_files` (discovery)
+- `check_context_invariant`, `check_staleness`, `check_line_budget` (cross-cutting checks)
+- `LINE_BUDGET` constant
+
+What stays in instruction-files:
+- `check_actionable` (rules-specific: imperative verbs, informational headings, code blocks, tables, link lists)
+- `check_tree_paths` / `extract_tree_paths` (rules-specific: Project Structure blocks)
+- `init_runbooks` / bundled runbooks (runbook-specific)
+- `run()` orchestrator function
+
+instruction-files public API unchanged — existing consumers (agent-doc, corky) import the same symbols via re-exports.
+
+**Next phases (not yet started):**
+- Phase 2: Move `check_actionable` + `check_tree_paths` to agent-rules
+- Phase 3: Move `init_runbooks` to agent-runbooks  
+- Phase 4: Add instruction-files CLI
+
+These can happen in a future session. The foundation is set.
+<!-- agent:boundary:080173bc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1481,7 +1508,7 @@ Starting the redistribution refactor now. I'll move shared primitives to agent-k
 - [x] Add Cargo.toml + CLI to agent-memories
 - [x] Add Environment path methods for rules/runbooks/memories/skills dirs
 - [x] Rename btakita/agent-skills to btakita/skill-harness
-- [ ] Move shared audit primitives to agent-kit (context_invariant, line_budget, staleness, discovery)
+- [x] Move shared audit primitives to agent-kit (context_invariant, line_budget, staleness, discovery)
 - [ ] Move domain logic from instruction-files to agent-rules (actionable, tree_paths)
 - [ ] Move init_runbooks from instruction-files to agent-runbooks
 - [ ] Add instruction-files CLI (orchestrator)

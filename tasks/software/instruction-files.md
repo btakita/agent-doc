@@ -269,7 +269,7 @@ Done. All 5 repos tagged and pushed:
 GitHub Actions is now cross-compiling binaries for linux x86_64/aarch64, macOS x86_64/aarch64, and Windows x86_64. Each will create a GitHub Release with downloadable binaries and publish to crates.io.
 
 The `curl | sh` installers will work once builds complete (~5-10 min).
-<!-- agent:boundary:75797cf5 -->
+<!-- agent:boundary:9bd03b75 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

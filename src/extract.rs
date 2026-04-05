@@ -7,14 +7,15 @@
 //!   `### Re:` header; if absent, the entire component content is treated as a single entry.
 //! - `transfer(source, target, component_name)`: moves the entire named component content from
 //!   `source` to `target`, clearing the source component and appending to the target component (or
-//!   end of file if the target has no matching component).
+//!   end of file if the target has no matching component).  If `target` does not exist, it is
+//!   auto-created matching the source format (template or inline).
 //! - Both operations write atomically via `write::atomic_write_pub` and persist a snapshot after
 //!   each file mutation.
 //! - `split_last_entry` is private; it splits on the last `### Re:` header position.
 //!
 //! ## Agentic Contracts
-//! - Callers receive `Err` if either file does not exist, the named component is absent, or the
-//!   component is empty.
+//! - Callers receive `Err` if the source file does not exist, the named component is absent, or the
+//!   component is empty.  If the target does not exist, it is auto-created.
 //! - After `run` returns `Ok`, the last `### Re:` block has been removed from `source` and
 //!   appended to `target`; no other content is modified.
 //! - After `transfer` returns `Ok`, the named component in `source` is cleared (single newline)
@@ -30,7 +31,7 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
 
-use crate::{component, snapshot, write};
+use crate::{component, frontmatter, snapshot, write};
 
 /// Format a source annotation blockquote for transferred/extracted content.
 fn format_source_annotation(source: &Path, action: &str) -> String {
@@ -149,8 +150,34 @@ pub fn transfer(source: &Path, target: &Path, component_name: &str) -> Result<()
     if !source.exists() {
         anyhow::bail!("source file not found: {}", source.display());
     }
+    // Auto-init target if it doesn't exist (always template mode)
     if !target.exists() {
-        anyhow::bail!("target file not found: {}", target.display());
+        let source_content = std::fs::read_to_string(source)
+            .with_context(|| format!("failed to read {}", source.display()))?;
+
+        let title = target
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Untitled Session");
+        let session_id = uuid::Uuid::new_v4();
+        let agent = frontmatter::parse(&source_content)
+            .ok()
+            .and_then(|(fm, _)| fm.agent.clone())
+            .unwrap_or_else(|| "claude".to_string());
+
+        let target_content = format!(
+            "---\nagent_doc_session: {}\nagent: {}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n# {}\n\n## Exchange\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+            session_id, agent, title
+        );
+
+        if let Some(parent) = target.parent()
+            && !parent.exists()
+        {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(target, &target_content)?;
+        snapshot::save(target, &target_content)?;
+        eprintln!("[transfer] Auto-created {} (template)", target.display());
     }
 
     let source_content = std::fs::read_to_string(source)

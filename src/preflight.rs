@@ -351,6 +351,29 @@ pub fn run(file: &Path, diff_only: bool) -> Result<()> {
         }
     };
 
+    // Step 2c: Auto-compact if exchange component exceeds threshold.
+    {
+        if let Ok(content) = std::fs::read_to_string(file)
+            && let Ok((fm, _)) = frontmatter::parse(&content)
+            && let Some(threshold) = fm.auto_compact
+            && threshold > 0
+            && fm.resolve_mode().is_template()
+            && let Some(comp) = crate::component::parse(&content).ok().and_then(|comps| comps.into_iter().find(|c| c.name == "exchange"))
+        {
+                                let comp_content = &content[comp.open_end..comp.close_start];
+                                let line_count = comp_content.lines().count();
+                                if line_count > threshold {
+                                    eprintln!(
+                                        "[preflight] step 2c: auto-compact (exchange={} lines > threshold={})",
+                                        line_count, threshold
+                                    );
+                                    if let Err(e) = crate::compact::run(file, 0, Some("exchange"), None) {
+                                        eprintln!("[preflight] auto-compact warning: {}", e);
+                                    }
+                }
+        }
+    }
+
     // Step 3: Read and truncate the claims log.
     eprintln!("[preflight] step 3: claims");
     let claims = read_and_truncate_claims(file);

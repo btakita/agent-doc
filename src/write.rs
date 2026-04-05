@@ -546,6 +546,21 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
         anyhow::bail!("no patch blocks or content found in response");
     }
 
+    // Warn when patches target a file with no template components
+    if patches.is_empty() && !unmatched.trim().is_empty() {
+        let current = std::fs::read_to_string(file)
+            .with_context(|| format!("failed to read {}", file.display()))?;
+        let comps = crate::component::parse(&current).unwrap_or_default();
+        if comps.is_empty() {
+            eprintln!(
+                "[write] WARNING: {} bytes of content but file has no template components — \
+                 content may not be applied correctly. Consider running `agent-doc init` \
+                 with --mode template first.",
+                unmatched.trim().len()
+            );
+        }
+    }
+
     // Save pre-response snapshot for undo (before IPC or disk write)
     {
         let pre_content = std::fs::read_to_string(file)
@@ -1166,9 +1181,23 @@ pub fn try_ipc(
 
     // Log IPC write details for debugging cross-contamination
     crate::ops_log::log_op(file, &format!(
-        "ipc_write_attempt file={} hash={} patches={} unmatched_len={}",
-        file.display(), hash, patches.len(), unmatched.trim().len()
+        "ipc_write_attempt file={} hash={} patches={} ipc_patches={} unmatched_len={}",
+        file.display(), hash, patches.len(), ipc_patches.len(), unmatched.trim().len()
     ));
+
+    // Warn when unmatched content exists but no IPC patches were synthesized —
+    // this means content will be silently dropped by the plugin
+    if ipc_patches.is_empty() && !unmatched.trim().is_empty() {
+        eprintln!(
+            "[write] WARNING: {} bytes of unmatched content with no IPC patches — content will be dropped. \
+             Does the target file have template components (<!-- agent:exchange -->)?",
+            unmatched.trim().len()
+        );
+        crate::ops_log::log_op(file, &format!(
+            "ipc_unmatched_content_dropped file={} unmatched_len={}",
+            file.display(), unmatched.trim().len()
+        ));
+    }
 
     write_ipc_and_poll(&patch_file, &ipc_payload, file, patches.len(), content_ours)
 }

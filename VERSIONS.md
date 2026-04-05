@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.15
+
+- **Transfer auto-init (extract.rs):** `agent-doc transfer` auto-creates the target file in template mode if it doesn't exist. Creates parent dirs, generates UUID session, copies agent name from source. Always defaults to template format.
+- **Write silent-drop warnings (write.rs):** `run_stream` warns when file has no template components but receives unmatched content. `try_ipc` logs `ipc_unmatched_content_dropped` to ops.log. Improved ops.log to include `ipc_patches` count alongside original `patches` count.
+- **Investigation runbook:** New `runbooks/investigate-behavior.md` for debugging agent-doc behavior (ops.log, git history, affected files, common failure patterns).
+
 ## 0.31.14
 
 - **Binding invariant enforcement (claim.rs):** When target pane is already claimed by another document, `claim` now provisions a new pane instead of erroring. Enforces SPEC §8.5: "never commandeer another document's pane."

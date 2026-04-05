@@ -340,7 +340,7 @@ proof.md confirmed scaffolded correctly with full template.
 .agent/runbooks/precommit.md and .agent/runbooks/prerelease.md should also include changes to existence-lang ontology...which serves as a reference for module-harness.
 Should .agent/runbooks/precommit.md and .agent/runbooks/prerelease.md be included in instruction-files?
 Perhaps as development support files?
-### Re: Ontology steps added to precommit + prerelease runbooks (HEAD)
+### Re: Ontology steps added to precommit + prerelease runbooks
 
 Done.
 
@@ -353,12 +353,27 @@ Done.
 **`.agent/runbooks/prerelease.md`** — added to Common section:
 - Step 5: verify new domain terms are in README.md + existence-lang kernel
 - Step 7: grep for `~/.claude/philosophy` in released files (portability check)
-<!-- agent:boundary:e90c1698 -->
+
+You missed the following. Why? Go ahead and run:
+> Should .agent/runbooks/precommit.md and .agent/runbooks/prerelease.md be included in instruction-files?
+> Perhaps as development support files?
+### Re: Runbooks in instruction-files (HEAD)
+
+Yes, the precommit/prerelease runbooks should be included in instruction-files discovery. Currently instruction-files discovers:
+- Root: `AGENTS.md`, `README.md`, `SPEC.md`, `CLAUDE.md`
+- Glob: `.claude/**/SKILL.md`, `.agents/**/AGENTS.md`, `src/**/AGENTS.md`
+
+It does NOT discover `.agent/runbooks/`. These runbooks reference specific tools, paths, and processes that can go stale (e.g., `module-harness audit`, `make check`, ontology paths). Auditing them catches drift.
+
+**To add:** In `instruction-files/src/discovery.rs`, add `.agent/runbooks/*.md` to the glob patterns as a "development support" category. The audit checks (staleness, line budget, actionable content) would apply to runbooks just like they apply to SKILL.md files.
+
+This is a change to the `instruction-files` crate — a separate submodule. Want me to implement it there?
+<!-- agent:boundary:65059b02 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Ontology steps in precommit + prerelease runbooks — DONE
-- [ ] Bump to v0.31.14 and release
+- [ ] Add `.agent/runbooks/*.md` to instruction-files discovery
+- [ ] Bump to v0.31.14 and release agent-doc
 <!-- /agent:pending -->

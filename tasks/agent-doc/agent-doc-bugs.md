@@ -14,7 +14,7 @@ agent-doc v0.31.13 released to crates.io + GitHub
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-### Session Summary (compacted 2026-04-04 20:41) (HEAD)
+### Session Summary (compacted 2026-04-04 20:41)
 
 **Releases: agent-doc v0.31.6→v0.31.13 + tmux-router v0.3.9 + JB plugin v0.2.44**
 
@@ -50,7 +50,39 @@ agent-doc v0.31.13 released to crates.io + GitHub
 - Feedback memories: `feedback_precommit_testing.md`, `feedback_approval_not_skip_processes.md`
 
 **Test suite: 450 tests, all passing, clippy clean.**
-<!-- agent:boundary:abcf00c6 -->
+
+I created tasks/software/proof.md. I'm unable to get the agent-doc element layout.
+I tried `Claim for Tmux Pane` but got an error. Why?
+```
+Claim failed (exit 1): Error: pane %491 is already claimed by 1ef5f0e7 (file: tasks/agent-doc/agent-doc-bugs.md). Use --force to overwrite.
+```
+
+I tried `Sync Tmux Layout` and saw the JB prompt `Sync: --col tasks/agent-doc/agent-doc-bugs.md --col tasks/software/proof.md [focus: tasks/software/proof.md]`.
+
+But none of these created the layout.
+### Re: Layout issues with proof.md (HEAD)
+
+Two issues:
+
+**1. Claim error** — "pane %491 is already claimed" means you tried to claim the *current* pane (which runs this bugs session) for a different document. Each document needs its own pane. Claim is for assigning an *existing unused* pane to a document.
+
+**2. File is empty** — `tasks/software/proof.md` is 0 bytes. agent-doc needs frontmatter to recognize a file as a session document:
+
+```yaml
+---
+agent_doc_format: template
+agent_doc_write: crdt
+---
+```
+
+Without frontmatter, sync sees it as a plain file and won't provision a pane.
+
+**Fix:** Either:
+- Run `agent-doc init tasks/software/proof.md` to scaffold frontmatter + components
+- Or add frontmatter manually, then run `/agent-doc tasks/software/proof.md` from a new Claude session — sync will auto-provision a pane
+
+The sync output you saw (`--col bugs.md --col proof.md`) was correct — it detected both files in the editor split. But since proof.md had no session UUID, sync couldn't provision a pane for it. Once proof.md has frontmatter, sync will create the 2-column layout automatically on the next tab switch.
+<!-- agent:boundary:5b0cf949 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

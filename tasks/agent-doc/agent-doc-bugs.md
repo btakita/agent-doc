@@ -318,7 +318,8 @@ This is the correct behavior — claim detected the occupied pane and provisione
 **Rebuilt and installed.** Try deleting proof.md, recreating it as empty, then "Sync Tmux Layout" — it should now get the full template with exchange + pending components.
 
 Add tests
-### Re: Tests added for scaffold behavior (HEAD)
+
+### Re: Tests added for scaffold behavior
 
 Added 4 new tests (6 total for scaffold):
 
@@ -335,13 +336,29 @@ Added 4 new tests (6 total for scaffold):
 **All 456 tests pass, clippy clean.**
 
 proof.md confirmed scaffolded correctly with full template.
-<!-- agent:boundary:cf803414 -->
+
+.agent/runbooks/precommit.md and .agent/runbooks/prerelease.md should also include changes to existence-lang ontology...which serves as a reference for module-harness.
+Should .agent/runbooks/precommit.md and .agent/runbooks/prerelease.md be included in instruction-files?
+Perhaps as development support files?
+### Re: Ontology steps added to precommit + prerelease runbooks (HEAD)
+
+Done.
+
+**`.agent/runbooks/precommit.md`** — added step 4 "Update ontology":
+- Add/update terms in existence-lang kernel
+- Update project domain ontology in README.md
+- Ensure module-harness ontology references are project-local
+- Links to the ontology-references runbook
+
+**`.agent/runbooks/prerelease.md`** — added to Common section:
+- Step 5: verify new domain terms are in README.md + existence-lang kernel
+- Step 7: grep for `~/.claude/philosophy` in released files (portability check)
+<!-- agent:boundary:7dcdb96c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Scaffold ordering fix + binary installed — DONE
-- [x] Tests (6 scaffold tests: 3 positive + 3 negative) — DONE
+- [x] Ontology steps in precommit + prerelease runbooks — DONE
 - [ ] Bump to v0.31.14 and release
 <!-- /agent:pending -->

@@ -376,8 +376,9 @@ It should depend on existence and module-harness crates.
 
 ~/.claude/philosophy should not be grepped.
 
-instruction-files should be support instruction files, including runbooks for packages. It should assume all context is contain either in the package's repo or a dependency's repo. Please specify this as either a shared skill with a refernce to a runbook if appropriate.
-### Re: instruction-files scope expansion (HEAD)
+instruction-files should be support instruction files, including runbooks for packages. It should assume all context is contain either in the package's repo or a dependency's repo. Please specify this as either a shared skill with a reference to a runbook if appropriate.
+
+### Re: instruction-files scope expansion
 
 Fixed the prerelease runbook — removed the `~/.claude/philosophy` grep. Now says: "No machine-local paths in released files (all references must resolve within the repo or declared dependencies)."
 
@@ -403,14 +404,23 @@ instruction-files should be the central crate for discovering, auditing, and man
 - Runbook: `runbooks/instruction-files-audit.md` — documents the audit scope and invariants
 
 This is a significant expansion of the instruction-files crate. It would be best tracked as its own task document (not inside agent-doc-bugs.md). Want me to create `tasks/software/instruction-files.md` for this work?
-<!-- agent:boundary:88018d17 -->
+yes
+### Re: Task document created (HEAD)
+
+Created `tasks/software/instruction-files.md` with the full scope:
+- Discovery expansion (runbooks, skill runbooks, module harness)
+- Bundled default runbooks (precommit, prerelease)
+- Dependencies (existence-lang, module-harness)
+- Context invariant (repo-local only, no machine paths)
+- Shared skill + runbook
+
+Transfer context from this session included. Ready to work on when you navigate to it.
+<!-- agent:boundary:792cbf5d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Fixed prerelease runbook (removed local path grep)
-- [ ] Expand instruction-files: discovery scope, dependencies, bundled runbooks
-- [ ] Create task document for instruction-files expansion
+- [x] instruction-files task document created
 - [ ] Bump agent-doc to v0.31.14 and release
 <!-- /agent:pending -->

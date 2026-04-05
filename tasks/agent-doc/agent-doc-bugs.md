@@ -47,7 +47,7 @@ Adding pending transfer to the binary keeps it deterministic. No LLM judgment ne
 
 This is a v0.31.14 feature for the agent-doc binary. Want me to implement it?
 yes
-### Re: Pending transfer implemented (HEAD)
+### Re: Pending transfer implemented
 
 Done. `agent-doc transfer` now automatically transfers the pending component alongside the named component.
 
@@ -58,12 +58,24 @@ Done. `agent-doc transfer` now automatically transfers the pending component alo
 - Skips if source pending is empty
 
 **Tests:** 2 new tests. 458 total, all passing, clippy clean. Binary installed.
-<!-- agent:boundary:7657ea9e -->
+Please add any pending items that should have been transferred to tasks/software/instruction-files.md
+### Re: Pending items transferred to instruction-files.md (HEAD)
+
+Added 5 new pending items from the exchange discussion to `tasks/software/instruction-files.md`:
+
+- Architecture: instruction-files depends on agent-runbooks + agent-memories specs
+- agent-memories spec: committed memory format (type, scope, why, how to apply)
+- agent-runbooks spec: runbook format (checklist, prerequisites, verification)
+- Committed memory write capability (route lessons to right file)
+- Compare/align with Cursor Rules, Windsurf Rules, .agents spec
+
+Total: 11 pending items in instruction-files.md now. Committed.
+<!-- agent:boundary:260e48f3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Transfer also moves pending — DONE
+- [x] Pending items transferred to instruction-files.md — DONE
 - [ ] Bump agent-doc to v0.31.14 and release
 <!-- /agent:pending -->

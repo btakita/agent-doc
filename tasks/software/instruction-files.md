@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-15/22 items complete. agent-kit restructured, agent-skills CLI shipped. agent-rules + agent-memories subagents building CLIs.
+18/22 items complete. Full ecosystem built and tested. Remaining: memory write, cross-tool alignment, ontology + spec integrations.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1065,7 +1065,7 @@ Starting the restructuring now.
 do
 - [ ] Restructure agent-kit: move skill.rs to agent-skills, flip instruction-files dependency
 - [ ] Add Cargo.toml + CLI binary to agent-rules, agent-memories, agent-skills
-### Re: do (restructure + CLI binaries) (HEAD)
+### Re: do (restructure + CLI binaries)
 
 **1. agent-kit restructured:**
 - Removed `skill` module from `lib.rs` (detect + hooks remain)
@@ -1095,7 +1095,31 @@ agent-kit (detect + hooks, zero upstream deps)
 ```
 
 No cycles. agent-kit is the leaf dependency.
-<!-- agent:boundary:3014cc9e -->
+do
+- [ ] Add Cargo.toml + CLI to agent-rules (subagent in progress)
+- [ ] Add Cargo.toml + CLI to agent-memories (subagent in progress)
+- [ ] Add Environment path methods for rules/runbooks/memories dirs
+### Re: do (3 items) (HEAD)
+
+All 3 complete.
+
+**1. agent-rules CLI** — Already done by subagent (8 tests, `validate` + `lint` commands, pushed).
+
+**2. agent-memories CLI** — Already done by subagent (11 tests, `validate` + `list` commands, `parse_frontmatter()` + `MemoryType` enum, pushed).
+
+**3. Environment path methods** — Added to agent-kit `detect.rs`:
+
+| Method | Cursor | Claude Code | Generic |
+|--------|--------|-------------|---------|
+| `rules_dir()` | `.cursor/rules/` | `.agent/rules/` | `.agent/rules/` |
+| `runbooks_dir()` | `.agent/runbooks/` | `.agent/runbooks/` | `.agent/runbooks/` |
+| `memories_dir()` | `.agent/memories/` | `.agent/memories/` | `.agent/memories/` |
+| `skills_dir()` | `.cursor/rules/` | `.claude/skills/` | `.agent/skills/` |
+
+Design rationale: Runbooks and memories are tool-agnostic (`.agent/` universally). Skills and rules map to tool-specific directories where they exist (Cursor has `.cursor/rules/`, Claude Code has `.claude/skills/`).
+
+19 tests pass (14 existing + 5 new), clippy clean, pushed.
+<!-- agent:boundary:6ad1edba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1116,9 +1140,9 @@ No cycles. agent-kit is the leaf dependency.
 - [x] Create btakita/agent-skills repo + submodule
 - [x] Restructure agent-kit: remove skill.rs (moved to agent-skills)
 - [x] Add Cargo.toml + CLI to agent-skills
-- [ ] Add Cargo.toml + CLI to agent-rules (subagent in progress)
-- [ ] Add Cargo.toml + CLI to agent-memories (subagent in progress)
-- [ ] Add Environment path methods for rules/runbooks/memories dirs
+- [x] Add Cargo.toml + CLI to agent-rules
+- [x] Add Cargo.toml + CLI to agent-memories
+- [x] Add Environment path methods for rules/runbooks/memories/skills dirs
 - [ ] Committed memory write capability (route lessons to right file)
 - [ ] Compare/align with Cursor Rules, Windsurf Rules, .agents spec
 - [ ] Ontology validation integration (use `existence` crate to validate terms)

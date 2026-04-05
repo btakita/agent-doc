@@ -28,7 +28,7 @@ agent-doc v0.31.14 released to crates.io + GitHub
 
 agent-doc should depend on skill-harness and agent-runbooks for propagating it's skills.
 skill-harness should have mechanism to install skills. `agent-doc skill install` should install the agent-doc skill.
-### Re: skill-harness dependency (HEAD)
+### Re: skill-harness dependency
 
 Noted. This is an architecture decision for agent-doc's dependency chain:
 
@@ -39,11 +39,16 @@ Noted. This is an architecture decision for agent-doc's dependency chain:
 The question is whether skill-harness should be a separate crate that standardizes skill installation across tools (not just agent-doc), and whether agent-runbooks should be a separate spec repo that agent-doc depends on for its runbook format.
 
 This belongs in the instruction-files task scope. Transferred.
-<!-- agent:boundary:b266abf4 -->
+
+Ok...does agent-doc already depend on instruction-files?
+### Re: agent-doc already depends on instruction-files (HEAD)
+
+Yes. `Cargo.toml` has `instruction-files = "0.1"`. It's used by `agent-doc audit-docs` which validates CLAUDE.md/AGENTS.md/SPEC.md consistency.
+<!-- agent:boundary:3fa6ebb8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Transfer skill-harness + agent-runbooks dependency design to instruction-files task
+All items complete.
 <!-- /agent:pending -->

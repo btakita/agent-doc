@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-18/24 items complete. CLI strategy: thin domain CLIs + instruction-files as comprehensive audit engine.
+18/26 items complete. Architecture redesign: instruction-files becomes orchestrator, domain crates own their validation.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1334,7 +1334,7 @@ The alternative is simpler: each repo just has `SPEC.md`, `## Agentic Contracts`
 **Recommendation:** Start with the markdown convention (SPEC.md + Contracts section + evals/) across all repos. The shared Rust trait can come later if the pattern proves valuable enough to formalize in code.
 
 The reason to make this rust would be for the CLI. Would rules, runbooks, memories, skills all have a CLI? Perhaps to add, list, remove, etc?
-### Re: Do all content types need a CLI? (HEAD)
+### Re: Do all content types need a CLI?
 
 Let me think about what CLI operations each content type actually needs:
 
@@ -1361,10 +1361,84 @@ Let me think about what CLI operations each content type actually needs:
 
 **Verdict:** agent-rules could arguably be library-only since instruction-files already does most of the validation. But having `agent-rules lint` as a standalone command has value for CI pipelines that want to validate rules without pulling in the full instruction-files audit.
 
+Should we move logic from instruction-files into agent-rules?
+
 The CLIs we already built (agent-rules, agent-memories, skill-harness) are fine as-is. The question is whether to invest more in them or keep them thin and let instruction-files be the comprehensive audit tool.
 
+I think they all should have their own audit tooling. This could live in agent-kit.
+
 I'd keep them thin: each CLI does its domain-specific operations (validate format, list items, manage lifecycle). instruction-files does the cross-cutting audit (staleness, line budget, context invariant).
-<!-- agent:boundary:fceae77c -->
+
+If instruction-files is used. But instruction-files should be cross-cutting and use the tools of its dependencies.
+
+Would this mean instruction-files should have a cli?
+### Re: Move logic from instruction-files into agent-rules?
+
+Yes. The current design has instruction-files doing domain-specific validation (actionable content, context invariant) that really belongs in the domain repos. Here's the redistribution:
+
+| Check | Current home | Should live in |
+|-------|-------------|---------------|
+| `check_actionable` | instruction-files | **agent-rules** (rules-specific) |
+| `check_context_invariant` | instruction-files | **agent-kit** (shared, all content types need it) |
+| `check_tree_paths` | instruction-files | **agent-rules** (rules-specific: Project Structure blocks) |
+| `check_line_budget` | instruction-files | **agent-kit** (shared, applies to all instruction files) |
+| `check_staleness` | instruction-files | **agent-kit** (shared, applies to all instruction files) |
+| `find_instruction_files` | instruction-files | **agent-kit** (discovery is cross-cutting) |
+| `find_root` | instruction-files | **agent-kit** (already has detect.rs) |
+| `init_runbooks` | instruction-files | **agent-runbooks** (runbook-specific) |
+
+After redistribution, instruction-files becomes a thin orchestrator that calls into the domain crates.
+
+### Re: Each repo should have its own audit tooling in agent-kit
+
+Makes sense. agent-kit provides the shared audit primitives:
+- `check_context_invariant` (no machine-local paths)
+- `check_line_budget` (combined line count)
+- `check_staleness` (doc vs source freshness)
+- `find_root` / `find_instruction_files` (discovery)
+
+Each domain crate adds its own:
+- agent-rules: `check_actionable`, `check_tree_paths`
+- agent-runbooks: `validate_structure` (H1 + checklist)
+- agent-memories: `validate_frontmatter` (name, type, body)
+- skill-harness: `validate_skill_dir` (SKILL.md + runbooks refs)
+
+### Re: Should instruction-files have a CLI?
+
+**Yes.** instruction-files becomes the unified audit CLI that runs all checks across all content types:
+
+```bash
+# Run everything (HEAD)
+instruction-files audit
+
+# Run specific checks (HEAD)
+instruction-files audit --rules      # agent-rules checks only
+instruction-files audit --runbooks   # agent-runbooks checks only
+instruction-files audit --memories   # agent-memories checks only
+instruction-files audit --skills     # skill-harness checks only
+```
+
+This is the `make check` equivalent for instruction files. The domain CLIs (`agent-rules lint`, `agent-memories validate`) are for targeted use. `instruction-files audit` is the comprehensive sweep.
+
+**Revised architecture:**
+
+```
+agent-kit (shared primitives: detect, context_invariant, line_budget, staleness, discovery)
+    ^
+    |--- agent-rules (rules validation + CLI)
+    |--- agent-runbooks (runbook validation + CLI)
+    |--- agent-memories (memory validation + CLI)
+    |--- skill-harness (skill lifecycle + CLI)
+    ^
+    |
+instruction-files (orchestrator CLI: runs all domain checks)
+    depends on: agent-kit, agent-rules, agent-runbooks, agent-memories, skill-harness
+```
+
+instruction-files flips from being the validation engine itself to being the **orchestrator** that calls into domain crates. Each domain crate owns its validation logic. instruction-files coordinates them.
+
+This is a significant refactor. Want me to execute it, or should we park it and focus on the remaining pending items first?
+<!-- agent:boundary:fa64de63 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1388,10 +1462,12 @@ I'd keep them thin: each CLI does its domain-specific operations (validate forma
 - [x] Add Cargo.toml + CLI to agent-memories
 - [x] Add Environment path methods for rules/runbooks/memories/skills dirs
 - [x] Rename btakita/agent-skills to btakita/skill-harness
+- [ ] Redistribute validation logic (instruction-files -> domain crates + agent-kit)
+- [ ] Add instruction-files CLI (orchestrator for all domain checks)
+- [ ] Move shared audit primitives to agent-kit (context_invariant, line_budget, staleness)
 - [ ] Add Spec/Contracts/Evals markdown convention to all repos
 - [ ] Add self-skill to skill-harness (SKILL.md for meta-management)
 - [ ] Committed memory write capability (route lessons to right file)
-- [ ] Compare/align with Cursor Rules, Windsurf Rules, .agents spec
 - [ ] Ontology validation integration (use `existence` crate to validate terms)
 - [ ] Spec audit integration (use `module-harness` to audit module specs)
 <!-- /agent:pending -->

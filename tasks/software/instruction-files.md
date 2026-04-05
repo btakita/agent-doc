@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-18/26 items complete. Architecture redesign: instruction-files becomes orchestrator, domain crates own their validation.
+18/27 items complete. Starting redistribution refactor: shared primitives -> agent-kit, domain logic -> domain crates.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1408,10 +1408,10 @@ Each domain crate adds its own:
 **Yes.** instruction-files becomes the unified audit CLI that runs all checks across all content types:
 
 ```bash
-# Run everything (HEAD)
+# Run everything
 instruction-files audit
 
-# Run specific checks (HEAD)
+# Run specific checks
 instruction-files audit --rules      # agent-rules checks only
 instruction-files audit --runbooks   # agent-runbooks checks only
 instruction-files audit --memories   # agent-memories checks only
@@ -1438,7 +1438,26 @@ instruction-files (orchestrator CLI: runs all domain checks)
 instruction-files flips from being the validation engine itself to being the **orchestrator** that calls into domain crates. Each domain crate owns its validation logic. instruction-files coordinates them.
 
 This is a significant refactor. Want me to execute it, or should we park it and focus on the remaining pending items first?
-<!-- agent:boundary:3c76700f -->
+yes
+
+agent-memories is interesting because we typically don't see libraries with memories. But it could work...
+### Re: agent-memories as a library (HEAD)
+
+You're right that committed project memories are novel. But the pattern already exists in a few forms:
+
+- **Claude Code auto memory** (`~/.claude/projects/*/memory/`) — machine-local, not committed
+- **Cursor's `.cursor/rules/` with learned patterns** — effectively memories in rule format
+- **`.lessons-learned.md`** files in some enterprise repos — hand-maintained project memory
+
+The gap: none of these are structured, validated, or portable. agent-memories makes the implicit explicit:
+- A library (like an investment advisory library) doesn't have memories today — but once an AI agent works on it repeatedly, it accumulates knowledge ("this codebase uses a custom allocator, don't use Vec::new in hot paths")
+- That knowledge currently lives in the developer's head or in machine-local Claude Code memory
+- agent-memories commits it to the repo so any agent (or developer) can benefit
+
+The "library with memories" pattern is really "codebase with documented agent experience." Every codebase accumulates this — we're just giving it a format.
+
+Starting the redistribution refactor now. I'll move shared primitives to agent-kit first, then redistribute domain logic.
+<!-- agent:boundary:14ed0880 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1462,12 +1481,13 @@ This is a significant refactor. Want me to execute it, or should we park it and 
 - [x] Add Cargo.toml + CLI to agent-memories
 - [x] Add Environment path methods for rules/runbooks/memories/skills dirs
 - [x] Rename btakita/agent-skills to btakita/skill-harness
-- [ ] Redistribute validation logic (instruction-files -> domain crates + agent-kit)
-- [ ] Add instruction-files CLI (orchestrator for all domain checks)
-- [ ] Move shared audit primitives to agent-kit (context_invariant, line_budget, staleness)
+- [ ] Move shared audit primitives to agent-kit (context_invariant, line_budget, staleness, discovery)
+- [ ] Move domain logic from instruction-files to agent-rules (actionable, tree_paths)
+- [ ] Move init_runbooks from instruction-files to agent-runbooks
+- [ ] Add instruction-files CLI (orchestrator)
 - [ ] Add Spec/Contracts/Evals markdown convention to all repos
-- [ ] Add self-skill to skill-harness (SKILL.md for meta-management)
-- [ ] Committed memory write capability (route lessons to right file)
-- [ ] Ontology validation integration (use `existence` crate to validate terms)
-- [ ] Spec audit integration (use `module-harness` to audit module specs)
+- [ ] Add self-skill to skill-harness
+- [ ] Committed memory write capability
+- [ ] Ontology validation integration
+- [ ] Spec audit integration
 <!-- /agent:pending -->

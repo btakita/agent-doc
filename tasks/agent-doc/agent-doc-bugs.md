@@ -82,7 +82,7 @@ Without frontmatter, sync sees it as a plain file and won't provision a pane.
 - Or add frontmatter manually, then run `/agent-doc tasks/software/proof.md` from a new Claude session — sync will auto-provision a pane
 
 The sync output you saw (`--col bugs.md --col proof.md`) was correct — it detected both files in the editor split. But since proof.md had no session UUID, sync couldn't provision a pane for it. Once proof.md has frontmatter, sync will create the 2-column layout automatically on the next tab switch.
-<!-- agent:boundary:a5844d72 -->
+<!-- agent:boundary:5da5326a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

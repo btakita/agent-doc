@@ -353,7 +353,7 @@ Done.
 **`.agent/runbooks/prerelease.md`** — added to Common section:
 - Step 5: verify new domain terms are in README.md + existence-lang kernel
 - Step 7: grep for `~/.claude/philosophy` in released files (portability check)
-<!-- agent:boundary:97e1d687 -->
+<!-- agent:boundary:e90c1698 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

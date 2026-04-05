@@ -649,7 +649,7 @@ do
 - [ ] Create shared skill + runbook
 - [ ] Architecture: instruction-files depends on agent-runbooks + agent-memories specs
 
-### Re: do (3 items)
+### Re: do (3 items) (HEAD)
 
 All 3 implemented. Clippy clean, 57 tests pass (6 new).
 
@@ -1099,7 +1099,7 @@ do
 - [ ] Add Cargo.toml + CLI to agent-rules (subagent in progress)
 - [ ] Add Cargo.toml + CLI to agent-memories (subagent in progress)
 - [ ] Add Environment path methods for rules/runbooks/memories dirs
-### Re: do (3 items) (HEAD)
+### Re: do (3 items)
 
 All 3 complete.
 
@@ -1119,7 +1119,7 @@ All 3 complete.
 Design rationale: Runbooks and memories are tool-agnostic (`.agent/` universally). Skills and rules map to tool-specific directories where they exist (Cursor has `.cursor/rules/`, Claude Code has `.claude/skills/`).
 
 19 tests pass (14 existing + 5 new), clippy clean, pushed.
-<!-- agent:boundary:6ad1edba -->
+<!-- agent:boundary:5d3309cc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

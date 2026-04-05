@@ -44,7 +44,7 @@ Ok...does agent-doc already depend on instruction-files?
 ### Re: agent-doc already depends on instruction-files (HEAD)
 
 Yes. `Cargo.toml` has `instruction-files = "0.1"`. It's used by `agent-doc audit-docs` which validates CLAUDE.md/AGENTS.md/SPEC.md consistency.
-<!-- agent:boundary:3fa6ebb8 -->
+<!-- agent:boundary:192ad20c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

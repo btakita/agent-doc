@@ -141,7 +141,7 @@ do
 - [ ] Implement `--diff-only` preflight mode in agent-doc
 - [ ] Add auto-compaction threshold to agent-doc exchange components
 - [ ] Audit SKILL.md files for redundant instructions
-### Re: Execute optimization tasks (HEAD)
+### Re: Execute optimization tasks
 
 All 6 items done. Summary:
 
@@ -181,17 +181,44 @@ All 6 items done. Summary:
 - Low: corky, email, linkedin, livestream, testing
 - **Estimated savings: ~1,350 tokens (24%)** via runbook extraction, deduplication, and consolidation
 - Recommended next steps: reduce agent-doc SKILL.md first (highest impact), then consolidate browser/chromium-bridge
-<!-- agent:boundary:978d63e1 -->
+do
+- [ ] Apply SKILL.md reductions (agent-doc first, then browser/chromium-bridge)
+- [ ] Run token-efficiency evals against baseline to establish metrics
+### Re: SKILL.md reductions + eval baseline (HEAD)
+
+**SKILL.md reductions applied:**
+
+| File | Before | After | Reduction |
+|------|--------|-------|-----------|
+| agent-doc | 284 | 132 | 54% |
+| browser | 150 | 41 | 73% |
+| chromium-bridge | 166 | 53 | 68% |
+| **Total** | **600** | **226** | **62%** |
+
+Key changes:
+- agent-doc: consolidated preflight/routing into tables, merged append/template write-back into single pipe command, removed duplicate baseline instructions, condensed document format section
+- browser: removed all examples duplicating chromium-bridge, kept only MCP fallback table + safety + config
+- chromium-bridge: removed "Common Patterns" section (duplicated individual commands), condensed chatbox formatting to one example + selector table
+
+**Token-efficiency eval baseline (sonnet via Claude CLI):**
+
+| Metric | Value |
+|--------|-------|
+| Pass rate | 4/5 (80%) |
+| Mean score | 0.74 |
+| P50 latency | 33.9s |
+| P95 latency | 70.0s |
+
+Results saved to `evals/general/token-efficiency/baselines/sonnet-2026-04-05.json`.
+
+One failure: `approval-minimal-response` -- model doesn't know the "do" convention without system prompt context (expected). Token counts not available via Claude CLI backend; need `ANTHROPIC_API_KEY` in pass store for the anthropic-api backend to get `cache_control` metrics.
+<!-- agent:boundary:24448400 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Add `cache_control` breakpoints to eval-runner API client
-- [x] Extend eval-runner with token/latency budget constraints
-- [x] Create `evals/general/token-efficiency/cases.yaml` with baseline cases
-- [x] Implement `--diff-only` preflight mode in agent-doc
-- [x] Add auto-compaction threshold to agent-doc exchange components
-- [x] Audit SKILL.md files for redundant instructions
-- [ ] Apply SKILL.md reductions (agent-doc first, then browser/chromium-bridge)
-- [ ] Run token-efficiency evals against baseline to establish metrics
+- [x] Apply SKILL.md reductions (agent-doc first, then browser/chromium-bridge)
+- [x] Run token-efficiency evals against baseline to establish metrics
+- [ ] Add ANTHROPIC_API_KEY to pass store to enable token-count evals
 - [ ] Test auto-compact threshold on a real session document
+- [ ] Add system prompt to token-efficiency evals for approval case
 <!-- /agent:pending -->

@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-18/24 items complete. Harness pattern (Spec/Contracts/Evals) applies to all content types. Start with markdown convention, formalize in code later.
+18/24 items complete. CLI strategy: thin domain CLIs + instruction-files as comprehensive audit engine.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1299,7 +1299,7 @@ The ecosystem is now:
 | `instruction-files` | `instruction-files` | Audit engine for all formats |
 
 Could rules, runbooks, memories all have evals, contracts, and specs as well?
-### Re: Evals, contracts, and specs for rules/runbooks/memories (HEAD)
+### Re: Evals, contracts, and specs for rules/runbooks/memories
 
 Yes. The harness pattern (Spec + Agentic Contracts + Evals) applies to every content type, not just skills and modules.
 
@@ -1332,7 +1332,39 @@ This keeps the harness pattern consistent across the ecosystem while each repo o
 The alternative is simpler: each repo just has `SPEC.md`, `## Agentic Contracts`, and `evals/` as markdown conventions (no shared Rust trait), validated by `module-harness audit`. This is what we do today for module-harness — it works with any language because it's markdown, not code.
 
 **Recommendation:** Start with the markdown convention (SPEC.md + Contracts section + evals/) across all repos. The shared Rust trait can come later if the pattern proves valuable enough to formalize in code.
-<!-- agent:boundary:025afb16 -->
+
+The reason to make this rust would be for the CLI. Would rules, runbooks, memories, skills all have a CLI? Perhaps to add, list, remove, etc?
+### Re: Do all content types need a CLI? (HEAD)
+
+Let me think about what CLI operations each content type actually needs:
+
+| Operation | Rules | Runbooks | Memories | Skills |
+|-----------|-------|----------|----------|--------|
+| **validate** | Yes — lint for actionable content, line budget | Yes — check structure, steps | Yes — check frontmatter, types | Yes — check SKILL.md, runbooks ref |
+| **list** | Maybe — list all rule files | Yes — list runbooks | Yes — list memories by type | Yes — list installed skills |
+| **add/create** | No — rules are hand-written | Maybe — scaffold from template | Yes — `agent-memories write` to route a lesson | Yes — install from source |
+| **remove** | No — rules are hand-written | No — runbooks are hand-written | Maybe — archive stale memories | Yes — uninstall a skill |
+| **audit** | Yes — check all rules in scope | Yes — cross-ref SKILL.md references | Yes — check uniqueness, freshness | Yes — verify installed skills |
+
+**The pattern:** Rules and runbooks are primarily **authored by humans** and **validated by machines**. Memories are **authored by machines** and **managed by both**. Skills are **authored by humans** and **installed/managed by machines**.
+
+**Who actually needs a CLI binary?**
+
+| Repo | CLI needed? | Why |
+|------|------------|-----|
+| `agent-rules` | **Marginal** — `instruction-files` already validates rules. `agent-rules validate` is a thin wrapper. Could be a library only. |
+| `agent-runbooks` | **Yes** — `audit`, `validate`, `install` are distinct from instruction-files. Already has a CLI. |
+| `agent-memories` | **Yes** — `write` (routing lessons to files) is a unique capability. `validate` + `list` are useful. |
+| `skill-harness` | **Yes** — `install`/`uninstall`/`check`/`list` are core operations. |
+| `instruction-files` | **Library only** — consumed by other CLIs. |
+| `agent-kit` | **Library only** — environment detection consumed by other crates. |
+
+**Verdict:** agent-rules could arguably be library-only since instruction-files already does most of the validation. But having `agent-rules lint` as a standalone command has value for CI pipelines that want to validate rules without pulling in the full instruction-files audit.
+
+The CLIs we already built (agent-rules, agent-memories, skill-harness) are fine as-is. The question is whether to invest more in them or keep them thin and let instruction-files be the comprehensive audit tool.
+
+I'd keep them thin: each CLI does its domain-specific operations (validate format, list items, manage lifecycle). instruction-files does the cross-cutting audit (staleness, line budget, context invariant).
+<!-- agent:boundary:37b768fc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

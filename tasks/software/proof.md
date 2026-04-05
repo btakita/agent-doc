@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Proof integration: Option 1 (remote surface) selected. Clarified filesystem isolation and comment model differences.
+Proof integration: Recommended Claude Code skill (`/proof`) over agent-doc core. Designed comment overlay mechanism.
 <!-- /agent:status -->
 
 ## Exchange
@@ -98,11 +98,13 @@ This validates integration angle #2 (Proof as input source) — the manual bridg
 - Each block is `{"markdown": "..."}` — Proof handles parsing into its internal format
 - Presence API requires `X-Agent-Id` header
 - Provenance is automatic — the `by: "ai:claude-agent-doc"` attribution flows through
-### Re: Option 1 preferred over Option 2 (HEAD)
+### Re: Option 1 preferred over Option 2
 
 Noted. Option 1 (Proof as a remote surface) makes more sense as the primary direction — agent-doc stays the source of truth while Proof provides a shareable view with provenance. Option 2 (Proof as input source) is still useful as a complement but secondary.
 
-### Re: Filesystem exposure clarification (HEAD)
+Yes...so how do you recommend we package this? Should this be part of agent-doc or a plugin to agent-doc?
+
+### Re: Filesystem exposure clarification
 
 No — none of the options expose your local filesystem to Proof. The distinction is about **what gets shared**:
 
@@ -111,7 +113,7 @@ No — none of the options expose your local filesystem to Proof. The distinctio
 
 The key architectural guarantee: Proof only receives what Claude explicitly sends via HTTP. There's no filesystem mount, no file path sharing, no direct access.
 
-### Re: Anchored comments vs inline markdown comments (HEAD)
+### Re: Anchored comments vs inline markdown comments
 
 | | Proof (anchored) | agent-doc (inline markdown) |
 |---|---|---|
@@ -127,14 +129,76 @@ The key architectural guarantee: Proof only receives what Claude explicitly send
 **Key difference in philosophy:** Proof comments are a collaboration tool — agents read and respond to them. agent-doc comments are a privacy tool — they're explicitly excluded from the diff so users can keep private notes the agent never sees.
 
 For integration, Proof's anchored comments could serve as the "public discussion" layer while agent-doc's inline comments remain the "private scratchpad." This would give users both modes in one workflow.
-<!-- agent:boundary:9b02e67e -->
+How would proof comments be overlaid in this agent doc?
+### Re: Packaging — agent-doc core vs plugin (HEAD)
+
+I'd recommend a **Claude Code skill** (not baked into agent-doc core). Here's why:
+
+**Why a skill, not agent-doc core:**
+- agent-doc is a Rust binary focused on local document lifecycle (snapshots, diffs, CRDT writes, git integration). Adding HTTP client code, Proof auth, and cloud sync would bloat its single responsibility.
+- The sync logic is inherently agent-mediated — Claude reads the local doc and writes to Proof's API. agent-doc doesn't need to know about Proof; Claude does.
+- A skill can evolve independently of agent-doc releases. Proof's API could change without requiring a new agent-doc binary.
+
+**What the `/proof` skill would do:**
+1. `proof sync <file>` — push current agent-doc exchange to a Proof doc (create or update)
+2. `proof poll <file>` — check for Proof edits since last sync, inject into agent-doc exchange
+3. `proof link <file> <slug>` — associate a local file with a Proof doc (stored in `.agent-doc/proof-links.toml`)
+4. `proof unlink <file>` — remove the association
+
+**What stays in agent-doc:**
+- Nothing changes. agent-doc continues doing local snapshots, diffs, CRDT writes, git commits.
+- The skill calls `agent-doc write` and `agent-doc preflight` just like the current `/agent-doc` skill does.
+
+**What the skill needs from agent-doc (already exists):**
+- `agent-doc preflight` — get current doc state and diff
+- `agent-doc write --stream` — write back merged content
+- Snapshot files — to track what's been synced
+
+This is essentially the same pattern as the `/agent-doc` skill itself — a Claude Code skill that orchestrates agent-doc CLI commands with external service calls.
+
+### Re: Proof comment overlay in agent-doc (HEAD)
+
+The overlay would work through the **sync skill**, not by modifying agent-doc's format. Here's the concrete mechanism:
+
+**On `proof sync` (push to Proof):**
+- Skill reads the agent-doc exchange component
+- Maps agent-doc content blocks to Proof blocks via `edit/v2`
+- Proof comments stay in Proof's `marks` metadata — they don't exist locally
+
+**On `proof poll` (pull from Proof):**
+- Skill reads `GET /api/agent/<slug>/state` and checks `marks` for new/updated comments
+- New Proof comments get injected into the agent-doc exchange as a special annotation block:
+
+```markdown
+> **[Proof comment by Brian on "target text"]:**
+> This needs more detail about error handling.
+> 
+> **[Reply by Claude]:**
+> Added error handling section below.
+```
+
+- These annotations appear in the agent-doc diff on the next `/agent-doc` cycle, so Claude can respond to them
+- The skill tracks which Proof `markId`s have been synced to avoid duplicates (stored in `.agent-doc/proof-links.toml`)
+
+**On agent-doc response:**
+- If Claude's response addresses a Proof comment, the skill can call `comment.reply` or `comment.resolve` on the Proof side
+
+**What this looks like in practice:**
+1. Collaborator comments on text in Proof UI
+2. You run `/proof poll proof.md` — comment appears as annotation in your local doc
+3. You run `/agent-doc proof.md` — Claude sees the annotation, responds
+4. You run `/proof sync proof.md` — response + comment reply pushed to Proof
+
+The key design choice: Proof comments are **transient imports** in agent-doc, not permanent storage. The source of truth for comments stays in Proof's marks system. The local annotations are just a bridge for the agent-doc diff cycle.
+<!-- agent:boundary:bd8c62a0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Active:** Option 1 — Proof as remote surface for agent-doc sessions (user preferred)
-- Design: agent-doc sync → Proof edit/v2 with provenance tracking
-- Complement: Proof comments as public discussion + agent-doc comments as private scratchpad
-- Next step: prototype the sync mechanism (agent-doc exchange → Proof blocks)
+- **Active:** Design `/proof` Claude Code skill for Option 1 (remote surface)
+- Skill commands: `sync`, `poll`, `link`, `unlink`
+- Comment overlay: transient imports from Proof marks → agent-doc annotations
+- Config storage: `.agent-doc/proof-links.toml`
+- Next step: prototype `/proof` skill SKILL.md and implement `proof sync`
 <!-- /agent:pending -->

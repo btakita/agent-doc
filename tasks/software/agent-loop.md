@@ -181,7 +181,7 @@ All 6 items done. Summary:
 - Low: corky, email, linkedin, livestream, testing
 - **Estimated savings: ~1,350 tokens (24%)** via runbook extraction, deduplication, and consolidation
 - Recommended next steps: reduce agent-doc SKILL.md first (highest impact), then consolidate browser/chromium-bridge
-<!-- agent:boundary:7c4376ea -->
+<!-- agent:boundary:978d63e1 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

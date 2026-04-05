@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-23/27 items complete. Spec/Contracts/Evals convention deployed across all 5 repos. 4 items remaining.
+24/27 items complete. Self-skill shipped. 3 remaining: memory write, ontology, spec audit integrations.
 <!-- /agent:status -->
 
 ## Exchange
@@ -1558,7 +1558,7 @@ Each gets:
 - `## Evals` or `evals/` directory — test cases for verifying agent behavior
 
 Will report results when all complete.
-### Re: Spec/Contracts/Evals — all 5 repos done (HEAD)
+### Re: Spec/Contracts/Evals — all 5 repos done
 
 All pushed.
 
@@ -1574,7 +1574,18 @@ The harness pattern is now consistent across the entire ecosystem. Each SPEC.md 
 1. **Spec** — what the crate does and its format
 2. **Agentic Contracts** — what the agent promises when using it
 3. **Evals** — test cases for verifying agent behavior
-<!-- agent:boundary:b0d23ace -->
+
+do
+- [ ] Add self-skill to skill-harness
+### Re: Self-skill for skill-harness (HEAD)
+
+Done. Created `skill/` directory in skill-harness:
+
+- `skill/SKILL.md` — instructions for using skill-harness from within an agent session (install, check, uninstall, list commands with environment detection)
+- `skill/runbooks/install-skill.md` — step-by-step install procedure with prerequisites, verification steps
+
+An agent with this skill loaded can manage other skills: "install the email skill" triggers the install runbook. Meta-management complete.
+<!-- agent:boundary:b147e140 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1603,7 +1614,7 @@ The harness pattern is now consistent across the entire ecosystem. Each SPEC.md 
 - [x] Move init_runbooks to agent-runbooks
 - [x] Add instruction-files CLI (orchestrator)
 - [x] Add Spec/Contracts/Evals convention to all repos
-- [ ] Add self-skill to skill-harness
+- [x] Add self-skill to skill-harness
 - [ ] Committed memory write capability
 - [ ] Ontology validation integration
 - [ ] Spec audit integration

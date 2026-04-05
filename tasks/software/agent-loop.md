@@ -212,7 +212,7 @@ Key changes:
 Results saved to `evals/general/token-efficiency/baselines/sonnet-2026-04-05.json`.
 
 One failure: `approval-minimal-response` -- model doesn't know the "do" convention without system prompt context (expected). Token counts not available via Claude CLI backend; need `ANTHROPIC_API_KEY` in pass store for the anthropic-api backend to get `cache_control` metrics.
-<!-- agent:boundary:24448400 -->
+<!-- agent:boundary:9cd7b16b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

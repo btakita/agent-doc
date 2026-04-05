@@ -668,7 +668,7 @@ All 3 implemented. Clippy clean, 57 tests pass (6 new).
 - Future specs section: agent-runbooks and agent-memories format specs that instruction-files will validate
 - Updated discovery section to include runbook patterns
 - Added context invariant to the checks table
-<!-- agent:boundary:bcc093c1 -->
+<!-- agent:boundary:f72a8431 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

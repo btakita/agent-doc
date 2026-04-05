@@ -8,7 +8,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-12/21 items complete. agent-skills subagent in progress. Full convention ecosystem taking shape.
+13/22 items complete. Full ecosystem created. Architecture designed for agent-kit as minimal core with domain repos shipping CLIs.
 <!-- /agent:status -->
 
 ## Exchange
@@ -927,7 +927,7 @@ The word "skills" carries specific baggage from Claude Code. Alternatives:
 The agent-runbooks README already established the pattern of framing a Claude Code concept as cross-tool (runbooks existed in Claude Code's SKILL.md convention first). Same approach works here.
 
 Create btakita/agent-skills repo following the same conventions as agent-runbooks, agent-memories, agent-rules
-### Re: Create agent-skills (HEAD)
+### Re: Create agent-skills
 
 Subagent launched to create `btakita/agent-skills` with README, SPEC.md, LICENSE, GitHub repo, and submodule — following the same conventions as agent-runbooks, agent-memories, agent-rules.
 
@@ -942,7 +942,104 @@ instruction-files (validation engine)
 ```
 
 Each repo is CC0 licensed, cross-tool by design, and defines a convention that instruction-files validates.
-<!-- agent:boundary:2e880458 -->
+
+I want all of these repos to have a deterministic rust binary. This implies there should be shared library.
+Could agent-kit be that shared library?
+Currently agent-kit has instruction-files as a dependency.
+Could we break the cycle and make agent-kit the dependency of the rest of the agent-* repos?
+
+Skill Management would move into agent-skills
+> Skill Management — Install, check, and uninstall SKILL.md files for agent environments
+
+Environment Detection would remain in agent-kit 
+> - Environment Detection — Auto-detect Claude Code, OpenCode, Codex, or generic environments
+
+The environment detection can also manage the directory to install the files in. It could default to `.agent/` or `.claude/` or manage symlinks from `.agent/` across multiple harness configs.
+
+Should Hook System remain in agent-kit or should there be an agent-hooks repo?
+> - Hook System (hooks feature) — File-based event coordination between multiple agent sessions
+>   - HookRegistry — fire/poll/gc events in .agent-doc/hooks/ directories
+>   - HookTransport trait — abstract delivery (file, Unix socket, chain)
+>   - FileTransport — JSON file events, always available
+>   - SocketTransport — Unix domain socket delivery with ack protocol
+>   - ChainTransport — try transports in order until one succeeds
+
+Instruction Audit would live in instruction-files
+> Instruction Audit (audit feature) — Validate instruction files via instruction-files crate
+
+agent-rules, agent-runbooks, agent-memories, agent-skills would all depend on agent-kit for at least environment detection.
+### Re: Architecture — agent-kit as shared foundation (HEAD)
+
+Good thinking. Looking at agent-kit's current code, here's the natural decomposition:
+
+#### Current agent-kit modules
+
+| Module | Current location | Proposed home |
+|--------|-----------------|---------------|
+| `detect.rs` (Environment enum, auto-detect) | agent-kit | **agent-kit** (stays — this is the core) |
+| `skill.rs` (install/check/uninstall) | agent-kit | **agent-skills** (move — skill management belongs with skill spec) |
+| `audit.rs` (instruction-files wrapper) | agent-kit | **instruction-files** (already there, agent-kit just re-exports) |
+| `hooks.rs` (event coordination) | agent-kit | **agent-kit** or **agent-hooks** (discussed below) |
+
+#### Dependency graph (proposed)
+
+```
+agent-kit (core: Environment detection + path resolution)
+    ^
+    |--- agent-rules (prescribed policy + validation CLI)
+    |--- agent-runbooks (procedures + validation CLI)
+    |--- agent-memories (learned lessons + validation CLI)
+    |--- agent-skills (bundles + install/check/uninstall CLI)
+    |--- instruction-files (audit engine, validates all formats)
+```
+
+**agent-kit becomes minimal:** Just `detect.rs` (Environment enum, auto-detect, path resolution) and possibly hooks. Everything else lives in the domain-specific repos.
+
+**Breaking the cycle:** Currently agent-kit depends on instruction-files. If we flip it so instruction-files depends on agent-kit (for Environment detection), and agent-kit has zero dependencies on the others, the cycle breaks cleanly.
+
+#### Hooks: agent-kit or agent-hooks?
+
+**Keep in agent-kit.** Hooks are infrastructure — they're the event bus between agent sessions, not a content type. The four convention repos (rules, runbooks, memories, skills) are all content-type specs. Hooks are a coordination mechanism, like detect is a detection mechanism. Both are plumbing.
+
+If hooks grow significantly (more transports, complex routing), they could split. But the current `HookRegistry` + 3 transports is small enough to stay.
+
+#### What each repo ships as a binary
+
+| Repo | Binary | Does what |
+|------|--------|-----------|
+| agent-rules | `agent-rules` | `validate`, `lint` instruction files against rules spec |
+| agent-runbooks | `agent-runbooks` | `audit`, `list`, `validate`, `install` runbooks |
+| agent-memories | `agent-memories` | `validate`, `list`, `write` (route lessons to files) |
+| agent-skills | `agent-skills` | `install`, `check`, `uninstall`, `list` skills |
+| instruction-files | (library only) | No binary — consumed by others |
+| agent-kit | (library only) | No binary — consumed by others |
+
+#### Environment-aware directory management
+
+agent-kit's `Environment` already has `skill_rel_path()` and `all_skill_rel_paths()`. This extends naturally:
+
+```rust
+impl Environment {
+    fn rules_dir(&self) -> PathBuf { ... }     // .claude/ or .cursor/rules/ etc.
+    fn runbooks_dir(&self) -> PathBuf { ... }   // .agent/runbooks/ everywhere
+    fn memories_dir(&self) -> PathBuf { ... }   // .agent/memories/ everywhere
+    fn skills_dir(&self) -> PathBuf { ... }     // .claude/skills/ or .agent/skills/
+}
+```
+
+Runbooks and memories use `.agent/` universally (tool-agnostic). Skills and rules map to tool-specific directories.
+
+**Symlink management:** For projects that use multiple tools, agent-kit could manage symlinks:
+```
+.agent/skills/email/SKILL.md (canonical)
+.claude/skills/email/SKILL.md -> ../../.agent/skills/email/SKILL.md
+.cursor/rules/email.md (generated from SKILL.md)
+```
+
+This is a future feature — the convention repos define formats first, tooling second.
+
+Want me to start restructuring agent-kit?
+<!-- agent:boundary:7b903fed -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -960,9 +1057,10 @@ Each repo is CC0 licensed, cross-tool by design, and defines a convention that i
 - [x] Remove duplicate agent-runbooks spec (use agent-runbooks repo's SPEC.md)
 - [x] Create btakita/agent-memories repo + submodule
 - [x] Create btakita/agent-rules repo + submodule
-- [ ] Create btakita/agent-skills repo (subagent in progress)
-- [ ] Add agent-runbooks as optional dependency
-- [ ] Add agent-memories as optional dependency
+- [x] Create btakita/agent-skills repo + submodule
+- [ ] Restructure agent-kit: move skill.rs to agent-skills, flip instruction-files dependency
+- [ ] Add Cargo.toml + CLI binary to agent-rules, agent-memories, agent-skills
+- [ ] Add Environment path methods for rules/runbooks/memories dirs
 - [ ] Committed memory write capability (route lessons to right file)
 - [ ] Compare/align with Cursor Rules, Windsurf Rules, .agents spec
 - [ ] Ontology validation integration (use `existence` crate to validate terms)

@@ -265,7 +265,7 @@ Two modes:
 
 Unlike `start`, does not launch Claude — the caller is already inside a Claude session. `--position` is used by the JetBrains plugin to map editor split positions to tmux panes.
 
-**Registry protection:** If the target pane is already claimed by a different session (and the pane is alive), `claim` refuses with an error. Use `--force` to overwrite an existing claim. This prevents silent corruption when position detection falls back to the wrong pane.
+**Binding invariant enforcement:** If the target pane is already claimed by a different session (and the pane is alive), `claim` provisions a new pane for this document instead of erroring. This enforces the Binding invariant (§8.5): "never commandeer another document's pane." Use `--force` to explicitly overwrite the existing claim (discouraged — breaks the Binding invariant unless the old document is abandoned).
 
 **Default components on claim:** For new template documents, `agent-doc claim` scaffolds `<!-- agent:status patch=replace -->` and `<!-- agent:exchange patch=append -->` components by default.
 
@@ -759,9 +759,10 @@ When the user navigates to a document in the editor:
 
 1. **Sync fires** — JB plugin sends `agent-doc sync --col <file1> --col <file2> --focus <focused_file>`
 2. **Initialization** — `ensure_initialized()` runs for each file in `col_args`:
+   - If file is empty (no frontmatter, no content) → auto-scaffold as template with frontmatter + exchange component
    - If file has `agent_doc_format` but no `agent_doc_session` → assigns a UUID
    - If no snapshot exists → creates snapshot + `git add` + `git commit`
-3. **File resolution** — `resolve_file()` reads frontmatter. Files with `agent_doc_session` → `FileResolution::Registered`. Files without → `Unmanaged` (not an agent-doc).
+3. **File resolution** — `resolve_file()` reads frontmatter. Files with `agent_doc_session` → `FileResolution::Registered`. Non-`.md` files or files with content but no frontmatter → `Unmanaged`.
 4. **Reconciliation** — `tmux_router::sync` matches the declared layout to tmux panes:
    - Pane exists for this session → **focus it** (Binding found)
    - Pane in stash → **rescue it** (swap-pane back to agent-doc window)

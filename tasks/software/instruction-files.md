@@ -1438,7 +1438,7 @@ instruction-files (orchestrator CLI: runs all domain checks)
 instruction-files flips from being the validation engine itself to being the **orchestrator** that calls into domain crates. Each domain crate owns its validation logic. instruction-files coordinates them.
 
 This is a significant refactor. Want me to execute it, or should we park it and focus on the remaining pending items first?
-<!-- agent:boundary:fa64de63 -->
+<!-- agent:boundary:3c76700f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

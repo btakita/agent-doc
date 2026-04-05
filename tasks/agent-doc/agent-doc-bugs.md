@@ -729,7 +729,7 @@ Please fix in chromium-bridge
 Done. `src/chromium-bridge/CLAUDE.md:31` — changed from path reference to "Extends the existence kernel vocabulary with domain-specific terms."
 
 Verified: `grep -r '~/.claude/philosophy' src/` — no matches across entire src tree. All released files are clean.
-<!-- agent:boundary:981e9e93 -->
+<!-- agent:boundary:745ea2f5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

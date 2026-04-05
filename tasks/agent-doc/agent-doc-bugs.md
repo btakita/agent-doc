@@ -417,20 +417,35 @@ Created `tasks/software/instruction-files.md` with the full scope:
 Transfer context from this session included. Ready to work on when you navigate to it.
  
 You transferred to tasks/software/instruction-files.md...but the file was not committed. Why?
-### Re: File wasn't committed (HEAD)
+### Re: File wasn't committed
 
 Because `agent-doc commit` only stages the snapshot for the current document (agent-doc-bugs.md). New files created outside the agent-doc write pipeline need a separate `git add` + `git commit`.
 
 Just committed it: `git add tasks/software/instruction-files.md && git commit` -> `0a53d4f9`.
 
 This is a gap in the transfer workflow — when creating a new task document via transfer, the file should be committed as part of the transfer operation. Currently the SKILL.md transfer runbook doesn't include a commit step for the target file.
-<!-- agent:boundary:4223541e -->
+
+Does `agent-doc transfer` sufficiently perform the correct steps? Do we just need a skill -> runbook?
+> - [ ] Transfer runbook: add commit step for new target files
+### Re: Does agent-doc transfer commit correctly? (HEAD)
+
+Yes, `agent-doc transfer` already handles this correctly. Looking at `extract.rs:194-200`:
+
+1. `atomic_write_pub(target, &new_target)` — writes the target file
+2. `snapshot::save(target, &new_target)` — saves snapshot
+3. `git::commit(target)` — stages (`git add`) and commits the target
+
+The `git::commit()` function includes `git add` as part of staging (falls back to `git add -f` when needed). So both new and existing target files get committed.
+
+**My mistake:** I didn't use `agent-doc transfer`. I manually created the file with the `Write` tool, which bypasses the agent-doc pipeline entirely. The transfer runbook and binary are already correct — no changes needed.
+
+The runbook already documents the right workflow. The skill should use `agent-doc transfer` (or `agent-doc extract`) rather than manually creating files. No runbook update needed — the gap was in my execution, not the tooling.
+<!-- agent:boundary:9cd77113 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] instruction-files.md committed
-- [ ] Transfer runbook: add commit step for new target files
+- [x] Transfer workflow verified — binary already commits target files
 - [ ] Bump agent-doc to v0.31.14 and release
 <!-- /agent:pending -->

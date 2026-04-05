@@ -157,7 +157,7 @@ The most practical path: add cross-compilation to the Release workflow (GitHub A
 But honestly, Option D might not need its own binary. The `.agent/skills.toml` manifest could be consumed by any agent that reads files — Claude Code, Cursor, etc. The agent itself runs `skill-harness sync` (if Rust is available) or manually copies files based on the manifest. The manifest is the portable part; the tooling is optional.
 
 This is a future concern — Option C covers the immediate need for Rust consumers.
-<!-- agent:boundary:1b65115e -->
+<!-- agent:boundary:de500948 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

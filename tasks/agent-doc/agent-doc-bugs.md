@@ -223,7 +223,7 @@ Acknowledged. Executing all items with full process rigor:
 6. **New runbook** — "code-enforced directives" ensuring committed code alone enforces invariants on cloned repos
 
 Starting with plan mode for the binary changes, then implementing with tests.
-### Re: All three layers implemented (HEAD)
+### Re: All three layers implemented
 
 Done. Binary fixes + SPEC + tests + runbook — all committed to the repo.
 
@@ -254,15 +254,31 @@ Done. Binary fixes + SPEC + tests + runbook — all committed to the repo.
 - Checklist for new invariants
 
 **All 452 tests pass, clippy clean.**
-<!-- agent:boundary:c575946a -->
+
+Is this fix installed?
+`Claim for Tmux Pane` on proof.md still results in an error `Claim failed (exit 1): Error: pane %491 is already claimed by 1ef5f0e7 (file: tasks/agent-doc/agent-doc-bugs.md). Use --force to overwrite.`
+
+Why?
+### Re: Fix wasn't installed (HEAD)
+
+The fix was in the working tree but the running binary was still v0.31.13 (the earlier release). Just rebuilt and installed:
+
+```
+cargo install --path .
+→ Replaced agent-doc v0.31.13 (with fix)
+```
+
+The binary now has both fixes:
+- **claim.rs**: provision new pane when occupied (instead of erroring)
+- **sync.rs**: auto-scaffold empty .md files
+
+Try "Claim for Tmux Pane" or "Sync Tmux Layout" on proof.md again — it should work now.
+<!-- agent:boundary:45779960 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Fix claim.rs: occupied pane -> provision new pane — DONE
-- [x] Fix sync.rs: auto-init empty .md files — DONE
-- [x] Tests for both fixes — DONE
-- [x] SPEC.md updates (§7.10, §8.5) — DONE
-- [x] Code-enforced directives runbook — DONE
+- [x] All binary fixes installed and running
+- [ ] Bump to v0.31.14 and release when ready
 <!-- /agent:pending -->

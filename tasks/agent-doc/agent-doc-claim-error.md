@@ -174,7 +174,7 @@ v0.31.16 was already published in the previous cycle — all targets are live:
 - PyPI: agent-doc 0.31.16
 - GitHub: https://github.com/btakita/agent-doc/releases/tag/v0.31.16
 - Binary: `~/.cargo/bin/agent-doc` at v0.31.16
-<!-- agent:boundary:072eec22 -->
+<!-- agent:boundary:b4cb27d4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.31.15 released. Transfer auto-init (template default), write silent-drop warnings, investigate-behavior runbook.
+v0.31.16 released. Extreme drift snapshot re-sync after file move/rename.
 <!-- /agent:status -->
 
 ## Exchange
@@ -128,7 +128,7 @@ I moved tasks/recruit/robert-ross.md to tasks/dreamable/robert-ross.md
 I'm getting externally saved file messages with the last character I typed being removed.
 It seems there are multiple sessions claiming the document.
 What is going on? Look at agent-doc and git logs.
-### Re: Snapshot/file mismatch causing externally-saved + char removal (HEAD)
+### Re: Snapshot/file mismatch causing externally-saved + char removal
 
 **Not multiple sessions.** Session registry shows one session: `6cb2a9bf` on pane `%511` → `tasks/dreamable/robert-ross.md`. No duplicate claims.
 
@@ -153,7 +153,19 @@ This should stabilize once the snapshot matches the file. If it persists, manual
 ```bash
 cp tasks/dreamable/robert-ross.md .agent-doc/snapshots/$(python3 -c "import hashlib; print(hashlib.sha256(b'tasks/dreamable/robert-ross.md').hexdigest())").md
 ```
-<!-- agent:boundary:5a40faf6 -->
+
+I also deleted some content...which is why there is a mismatch.
+
+do
+- [ ] Fix: file move creates snapshot/file mismatch (snapshot too small after rename)
+### Re: v0.31.16 — extreme drift re-sync (HEAD)
+
+Fixed the snapshot/file mismatch after file move. In `git.rs commit()`, when file is >5x larger than snapshot (extreme drift typical of rename/move), the snapshot is automatically re-synced from file content before staging. This breaks the drift loop.
+
+Published v0.31.16 to all targets (crates.io, PyPI, GitHub Release, binary installed).
+
+The fix is active now — next `agent-doc commit` on `tasks/dreamable/robert-ross.md` should re-sync the snapshot and stop the "externally saved" dialogs.
+<!-- agent:boundary:c02dc020 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -163,5 +175,6 @@ cp tasks/dreamable/robert-ross.md .agent-doc/snapshots/$(python3 -c "import hash
 - [x] Fix: `agent-doc write` silently drops template patches when target has no components
 - [x] Fix: transfer/write should auto-init target in template mode if it doesn't exist
 - [x] Release v0.31.15
-- [ ] Fix: file move creates snapshot/file mismatch (snapshot too small after rename)
+- [x] Fix: file move creates snapshot/file mismatch (snapshot too small after rename)
+- [x] Release v0.31.16
 <!-- /agent:pending -->

@@ -167,14 +167,27 @@ Published v0.31.16 to all targets (crates.io, PyPI, GitHub Release, binary insta
 The fix is active now — next `agent-doc commit` on `tasks/dreamable/robert-ross.md` should re-sync the snapshot and stop the "externally saved" dialogs.
 
 release
-### Re: Already released (HEAD)
+### Re: Already released
 
 v0.31.16 was already published in the previous cycle — all targets are live:
 - crates.io: https://crates.io/crates/agent-doc/0.31.16
 - PyPI: agent-doc 0.31.16
 - GitHub: https://github.com/btakita/agent-doc/releases/tag/v0.31.16
 - Binary: `~/.cargo/bin/agent-doc` at v0.31.16
-<!-- agent:boundary:b4cb27d4 -->
+
+In tasks/dreamable/robert-ross.md: All of the h3 `### ` have uncommitted text removing the ` (HEAD)` suffix. Why? Much of these headers were older.
+### Re: Stale (HEAD) markers after file move (HEAD)
+
+**Root cause:** `add_head_marker` in `git.rs` has a "preserve markers from HEAD" path (line 542-563). When no new headings exist, it re-applies ALL `(HEAD)` markers from the committed version. After the file move + drift re-sync, the committed version had 34 stale `(HEAD)` markers baked in — and they kept getting re-applied every cycle.
+
+**Fix:** Added a safety check — only re-apply markers if HEAD has ≤3 `(HEAD)` markers. If more, skip re-application and log: `[commit] Skipping (HEAD) re-application — N markers in HEAD (stale, likely from file move)`.
+
+**Verified:** Rebuilt and installed. Ran `agent-doc commit tasks/dreamable/robert-ross.md`:
+```
+[commit] Skipping (HEAD) re-application — 34 markers in HEAD (stale, likely from file move)
+```
+Committed version now has 0 `(HEAD)` markers. The 34 stale uncommitted diffs should be gone.
+<!-- agent:boundary:bc14ca78 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -186,4 +199,5 @@ v0.31.16 was already published in the previous cycle — all targets are live:
 - [x] Release v0.31.15
 - [x] Fix: file move creates snapshot/file mismatch (snapshot too small after rename)
 - [x] Release v0.31.16
+- [x] Fix: stale (HEAD) markers after file move (add_head_marker re-application guard)
 <!-- /agent:pending -->

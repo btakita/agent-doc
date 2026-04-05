@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-Binding invariant enforced by code. 452 tests.
+Exchange transferred to instruction-files task. v0.31.14 pending release.
 <!-- /agent:status -->
 
 ## Exchange
@@ -528,7 +528,7 @@ This keeps the specs focused while the tooling is consolidated. Does this separa
 It does. And instruction-files should depend on agent-memories and agent-runbooks.
 
 Compare agent-memories to rules...used by various editors and .agent(s) specs.
-### Re: agent-memories vs rules (HEAD)
+### Re: agent-memories vs rules
 
 **Comparison with existing "rules" systems:**
 
@@ -572,12 +572,17 @@ Use `agent-doc init` for new session documents, not manual file creation with Wr
 The memory format has more structure (type, scope, why, how) while CLAUDE.md is terse. agent-memories could be the *source* that generates CLAUDE.md entries — or they could coexist, with memories being the detailed version and CLAUDE.md being the summary.
 
 This design discussion should transfer to the instruction-files task document. Want me to do that?
-<!-- agent:boundary:4613af08 -->
+Yes
+### Exchange transferred (HEAD)
+
+Architecture discussion transferred to `tasks/software/instruction-files.md` via `agent-doc transfer`. This document's exchange is now clean for new agent-doc bug reports.
+
+**Session shipped:** agent-doc v0.31.13 (released) + v0.31.14 changes (claim fix, sync auto-scaffold, 456 tests).
+<!-- agent:boundary:67d07daa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Transfer architecture discussion to tasks/software/instruction-files.md
 - [ ] Bump agent-doc to v0.31.14 and release
 <!-- /agent:pending -->

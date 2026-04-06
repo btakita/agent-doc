@@ -599,7 +599,7 @@ The NEW 0.2.46 plugin (my build) adds socket-delivery cleanup so the file watche
 do
 - [ ] Fix `processPendingPatches()` to skip patch files whose content is already in the document (startup dedup guard)
 - [ ] Add cleanup of `.agent-doc/patches/<hash>.json` to the repair/dedup workflow
-### Re: startup dedup guard + dedupe patch cleanup (HEAD)
+### Re: startup dedup guard + dedupe patch cleanup
 
 Both done. 202 tests pass, Kotlin compiles clean.
 
@@ -629,11 +629,21 @@ Log:
 Updated the spec comment in the module doc to document the new behavior.
 
 Plugin rebuilt at 0.2.46.
-<!-- agent:boundary:6ffc461e -->
+The plugin version should be bumped. Please add to SKILL->runbook
+### Re: plugin version bump + runbook (HEAD)
+
+Bumped to **0.2.47**. `gradle.properties` updated, plugin rebuilt: `agent-doc-jetbrains-0.2.47.zip`.
+
+Added "When to bump the plugin version" section to `runbooks/plugin-install.md`:
+> Any PR or committed change to `editors/jetbrains/` → bump `pluginVersion`.
+
+**Install:**
+Settings → Plugins → gear → "Install Plugin from Disk..." → `agent-doc-jetbrains-0.2.47.zip` → Restart
+<!-- agent:boundary:7dec7dd2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Install updated 0.2.46 plugin with startup dedup guard
+- [ ] Install 0.2.47 (startup dedup guard + stale patch cleanup on dedup)
 <!-- /agent:pending -->

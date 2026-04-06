@@ -137,7 +137,7 @@ Asking for signoff on every new open-source project would be burdensome and unsu
 
 **Suggested conversation with Rob:**
 *"I regularly create and publish open-source libraries as part of my professional practice. I'd like to add a carve-out that preserves my rights to general-purpose open-source work done on my own time. This doesn't affect Dreamable — you'd still have full rights to everything I build specifically for Dreamable, and you can freely use any of my open-source libraries under their published licenses."*
-<!-- agent:boundary:4abbfc64 -->
+<!-- agent:boundary:8554083a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

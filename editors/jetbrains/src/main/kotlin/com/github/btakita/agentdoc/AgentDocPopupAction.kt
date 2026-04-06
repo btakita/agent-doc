@@ -17,6 +17,8 @@ class AgentDocPopupAction : AnAction() {
             add(ActionManager.getInstance().getAction("AgentDoc.Claim"))
             addSeparator()
             add(ActionManager.getInstance().getAction("AgentDoc.SyncLayout"))
+            addSeparator()
+            add(ActionManager.getInstance().getAction("AgentDoc.RefreshEnvironment"))
         }
 
         val popup = JBPopupFactory.getInstance()

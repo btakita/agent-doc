@@ -74,6 +74,10 @@ class SlashCommandCompletionContributor : CompletionContributor() {
         @Volatile
         private var cachedCommands: List<CommandInfo>? = null
 
+        fun clearCache() {
+            cachedCommands = null
+        }
+
         fun getCommands(project: com.intellij.openapi.project.Project): List<CommandInfo> {
             cachedCommands?.let { return it }
 

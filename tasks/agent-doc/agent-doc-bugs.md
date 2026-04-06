@@ -206,14 +206,24 @@ Step 4d calls `parse_slash_commands` on the diff and populates the field. `skip_
 After preflight, if `slash_commands` is non-empty, the skill executes each via the `Skill` tool before generating the response. Built-ins like `/clear` that can't be routed through `Skill` are noted in the console.
 
 All 711 tests pass, clippy clean, binary installed.
-### Re: duplicate — root cause and fix (HEAD)
+I see `### Re: duplicate — root cause and fix` duplicated. Is this due to the update not being installed yet? Will it work once installed? 
+### Re: duplicate — root cause and fix
 
 **Why it happened:** The write used the boundary-synthesis path (IPC output showed `0 components` — no named component patch was matched). The boundary-synthesis + CRDT append created a duplicate entry. This is the known CRDT duplicate bug tracked in `tasks/agent-doc/agent-doc-crdt-duplicate-bug.md`.
 
 **Why one copy was uncommitted:** After the IPC write, `agent-doc commit` repositioned the boundary marker. The duplicate ended up inserted before the user's question in the exchange, landing in the uncommitted (green gutter) region.
 
 **Fixed:** Ran `agent-doc dedupe` — removed 1192 bytes of duplicate content.
-<!-- agent:boundary:eb0d4561 -->
+### Re: duplicate — still happening, root fix (HEAD)
+
+**Not an update issue** — the bug reproduces on the current binary. It will keep happening until the write path is corrected.
+
+**Root cause (confirmed):** The skill sends raw content to `agent-doc write --stream`. Since there's no `<!-- patch:exchange -->` wrapper, the write falls back to boundary-synthesis (`0 components`). That path has a CRDT duplicate bug.
+
+**Fix applied now:** This response is wrapped in `<!-- patch:exchange -->` — it targets the named component directly, bypassing boundary-synthesis entirely.
+
+**SKILL.md will be updated** to require `<!-- patch:exchange -->` wrapping for all template-mode exchange responses. That's the permanent fix; no binary change needed.
+<!-- agent:boundary:086fc7e2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

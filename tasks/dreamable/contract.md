@@ -225,7 +225,7 @@ Date: _______________
 - Send this alongside a brief email explaining the rationale
 
 Please draft an email to robert-ross with the proposed amendments. Also send Exhibit A in the email.
-### Re: Email draft (HEAD)
+### Re: Email draft
 
 Email drafted at `mail/drafts/2026-04-06-proposed-addendum-to-consulting-agreement-prior-inventions-i.md`.
 
@@ -235,7 +235,29 @@ Includes:
 - Professional, direct tone matching Rob's communication style
 
 Ready to push to Gmail Drafts on your approval.
-<!-- agent:boundary:b85ac10d -->
+
+Please explain. I don't know what this means exactly. Liability for what?
+> 3. **Section 16 (Liability):** The current cap is set at $0.00... I'd like to adjust this to fees paid in the prior 12 months, which is standard for consulting agreements.
+### Re: What §16 liability means (HEAD)
+
+**In plain terms:** "Liability" here means the maximum amount of money Dreamable would owe you if they do something wrong under this contract.
+
+**Examples of what could go wrong:**
+- Dreamable doesn't pay you for work you've completed
+- Dreamable breaches the contract (e.g., terminates without the required 2 weeks' notice)
+- Dreamable causes you damages through their actions (e.g., misrepresents something that costs you money)
+
+**What the current contract says:** Dreamable's total liability to you is capped at **$0.00**. That means even if they owe you $20,000 in unpaid invoices, technically the contract says their maximum liability is zero. It's essentially saying "we're never liable for anything."
+
+**Why this matters practically:**
+- If Dreamable stops paying you, you'd have a hard time recovering fees in arbitration because the contract literally caps their obligation at $0
+- It's likely a template oversight (many boilerplate contracts have a fill-in-the-blank liability cap that defaults to $0), not necessarily bad faith
+- But it should still be fixed before signing
+
+**What the amendment proposes:** Cap liability at the total fees paid to you in the prior 12 months. So if you've been paid $50,000 over the past year, that's the maximum you could recover. This is the standard approach for consulting agreements — it's fair to both sides.
+
+**Bottom line:** It's your payment protection. Without fixing this, you have no contractual recourse if Dreamable doesn't pay you.
+<!-- agent:boundary:f12facd6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -163,7 +163,7 @@ build/distributions/agent-doc-jetbrains-0.2.45-signed.zip
 3. Restart IDE
 
 I don't see any `/codex` autocompletes in the agent document.
-### Re: `/codex` not in autocomplete — root cause and fix (HEAD)
+### Re: `/codex` not in autocomplete — root cause and fix
 
 **Root cause:** `commands.rs` had a **static** command list. The codex commands live at `~/.claude/plugins/marketplaces/openai-codex/plugins/codex/commands/*.md` — a plugin location that the static list never scanned.
 
@@ -177,10 +177,38 @@ Verified — `agent-doc commands` now returns all 7 codex commands:
 `/codex:setup`, `/codex:rescue`, `/codex:review`, `/codex:result`, `/codex:status`, `/codex:cancel`, `/codex:adversarial-review`
 
 **Also:** rebuilt and reinstalled the binary. The agent-doc JB plugin calls `agent-doc commands` on first autocomplete in each session — after using `Refresh Agent Doc Environment` (`Ctrl+Shift+Alt+R`) to clear the cache, `/codex:*` commands will appear.
-<!-- agent:boundary:cb340148 -->
+
+Please add a feature to parse the diff and run claude commands when the line starts with `/`. So if we call `/clear` the `/clear` command on the clause session will be directly run.
+
+Make sure to guard against code fencing and other cases where the `/` should not be interpreted as a raw agent harness command.
+### Re: slash commands from diff (HEAD)
+
+Implemented. Here's what changed:
+
+**`diff.rs` — `parse_slash_commands(diff: &str) -> Vec<String>`**
+
+Parses user-added lines in a unified diff for slash commands, with these guards:
+- **Code fences** — tracks ``` and ~~~ opening/closing across all lines; skips any added line inside a fence
+- **Blockquotes** — lines starting with `>` are excluded
+- **Non-added lines** — only `+`-prefixed lines (not `+++` headers) are inspected
+- **Pattern** — must start with `/` immediately followed by an ASCII letter (excludes `/ `, `//comments`, `<!--` etc.)
+
+8 new unit tests, all passing.
+
+**`preflight.rs` — `slash_commands` field in `PreflightOutput`**
+
+Step 4d calls `parse_slash_commands` on the diff and populates the field. `skip_serializing_if = "Vec::is_empty"` so it's absent from JSON when there are no commands.
+
+**`SKILL.md` — step 0b**
+
+After preflight, if `slash_commands` is non-empty, the skill executes each via the `Skill` tool before generating the response. Built-ins like `/clear` that can't be routed through `Skill` are noted in the console.
+
+All 711 tests pass, clippy clean, binary installed.
+<!-- agent:boundary:31bd1276 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+
 <!-- /agent:pending -->

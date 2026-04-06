@@ -85,7 +85,7 @@ Use chromium-bridge
 - **§13 Attorney's fees** — each party bears own costs, which is fine, but combined with $0 liability cap means you have no recourse.
 
 **Recommendation:** Negotiate §16 (liability cap) and clarify IP carve-outs for your existing open-source projects before signing.
-### Re: Side projects and IP risk (HEAD)
+### Re: Side projects and IP risk
 
 **Short answer:** Yes, there is real risk under §6-7 as written, but the Apache2/MIT licensing provides some protection.
 
@@ -104,7 +104,40 @@ Use chromium-bridge
 3. **Clarify "proposed business"** — ask Rob to narrow §6 to "actual" business or at least define what's in scope.
 
 Without these protections, continuing to develop your open-source projects during the engagement creates a gray area that could be exploited.
-<!-- agent:boundary:f6b89764 -->
+
+I also have been creating open source "primitive" libraries. For example, yesterday, I created:
+- skill-harness
+- agent-memories
+- agent-rules
+
+How can I preserve my rights to create similar libraries containing such primitives. Should I communicate whenever I create an open source project for signoff?
+### Re: Protecting rights to new primitive libraries (HEAD)
+
+**The practical approach — blanket carve-out, not per-project signoff:**
+
+Asking for signoff on every new open-source project would be burdensome and unsustainable. Instead, negotiate a **categorical carve-out** in the contract. Here's what to propose:
+
+**Add to the agreement (or as an addendum):**
+
+> *"Notwithstanding Sections 6 and 7, Consultant retains all rights to:*
+> *(a) Prior Inventions listed in Exhibit A and all modifications, enhancements, and derivative works thereof;*
+> *(b) Any general-purpose, open-source software libraries, tools, frameworks, or specifications created by Consultant on Consultant's own time and not using Company confidential information, even if such works could be used in connection with Company's business, provided they are published under an OSI-approved open-source license (e.g., MIT, Apache-2.0);*
+> *(c) Consultant's pre-existing methodologies, know-how, and general programming techniques."*
+
+**Why this works:**
+- It carves out **categories** (general-purpose, open-source, OSI-licensed) rather than requiring you to name every project
+- skill-harness, agent-memories, agent-rules — these are clearly general-purpose primitives, not Dreamable-specific IP
+- The key distinction is: **general-purpose tooling** (yours) vs **Dreamable-specific product code** (theirs)
+- Publishing under MIT/Apache-2.0 is the bright line — it proves the work wasn't meant to be proprietary
+
+**What NOT to do:**
+- Don't rely on informal verbal agreement — if it's not in the contract, it doesn't exist
+- Don't ask for per-project signoff — it creates a paper trail that implies they have authority over your side work
+- Don't assume the current contract protects you just because you publish open-source — §6-7 as written would still assign your rights even for openly published code
+
+**Suggested conversation with Rob:**
+*"I regularly create and publish open-source libraries as part of my professional practice. I'd like to add a carve-out that preserves my rights to general-purpose open-source work done on my own time. This doesn't affect Dreamable — you'd still have full rights to everything I build specifically for Dreamable, and you can freely use any of my open-source libraries under their published licenses."*
+<!-- agent:boundary:4abbfc64 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

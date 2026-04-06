@@ -11,7 +11,7 @@ agent_doc_write: crdt
 
 ## Exchange
 
-<!-- agent:exchange patch=append -->
+<!-- agent:exchange patch=append --9
 
 > **[EXTRACT from tasks/dreamable/robert-ross.md]** (2026-04-06T20:37:31Z)
 >
@@ -184,7 +184,7 @@ It maps directly to the harness components: Foundation Setup (do you have the ra
 **Closest analog:** GitHub's internal research on Copilot adoption showed that developer-level configuration quality (which files to include in context, which to exclude) was the single largest predictor of suggestion acceptance rate — not model capability. Same principle: harness → outcome.
 
 Add git@github.com:ClaudeScore/SessionShare.git as a submodule
-### Re: SessionShare submodule (HEAD)
+### Re: SessionShare submodule
 
 Added `git@github.com:ClaudeScore/SessionShare.git` as `src/session-share`.
 
@@ -198,7 +198,7 @@ Staged but not yet committed — commit the parent repo when ready:
 ```bash
 git commit src/session-share .gitmodules -m "Add ClaudeScore/SessionShare submodule"
 ```
-<!-- agent:boundary:48c75d8d -->
+<!-- agent:boundary:fec771ba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -630,7 +630,9 @@ Updated the spec comment in the module doc to document the new behavior.
 
 Plugin rebuilt at 0.2.46.
 The plugin version should be bumped. Please add to SKILL->runbook
-### Re: plugin version bump + runbook (HEAD)
+
+Please clean up duplicate patch and make sure it won't happen again. Please fix any agent-doc binary or ffi plugin logic that would have caused the duplicate patch. Look in logs.
+### Re: plugin version bump + runbook
 
 Bumped to **0.2.47**. `gradle.properties` updated, plugin rebuilt: `agent-doc-jetbrains-0.2.47.zip`.
 
@@ -639,11 +641,37 @@ Added "When to bump the plugin version" section to `runbooks/plugin-install.md`:
 
 **Install:**
 Settings → Plugins → gear → "Install Plugin from Disk..." → `agent-doc-jetbrains-0.2.47.zip` → Restart
-<!-- agent:boundary:b87ccb81 -->
+### Re: dedup guard fix + claudescore repair #2 (HEAD)
+
+**Root cause identified:** The boundary-ID dedup guard in 0.2.47 was wrong.
+
+When a patch is applied, its `boundary_id` marker is **consumed** (replaced with content + new boundary). So the check `doc.contains(<!-- agent:boundary:X -->)` returns `false` for BOTH "not yet applied" AND "already applied after a new cycle" — the guard always fell through.
+
+#### Fix: snapshot timestamp comparison
+
+Snapshot is saved by the binary after every successful IPC write. If snapshot mtime > patch file mtime, the patch was applied in a previous cycle → stale.
+
+Walks up from the document to find `.agent-doc/` (same logic as `find_project_root` in Rust), then compares `snapshots/<hash>.md` mtime against the patch file mtime.
+
+Log on detection:
+```
+[patch-watcher] dedup: snapshot newer than patch file, deleting stale: <hash>.json
+```
+
+#### claudescore.md repair #2
+
+Removed duplicate "Re: Rob Ross'" block again. The user content added between the first and second occurrence (target audience / chromium-bridge questions, 8 lines) was also lost to another stale patch re-apply. Committed and pushed to SessionShare: `02094a1`.
+
+Plugin rebuilt: **0.2.48** (`agent-doc-jetbrains-0.2.48.zip`).
+
+**Install to activate the fix:**
+Settings → Plugins → gear → "Install Plugin from Disk..." → `agent-doc-jetbrains-0.2.48.zip` → Restart
+<!-- agent:boundary:70e37de7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Install 0.2.47 (startup dedup guard + stale patch cleanup on dedup)
+- [ ] Install 0.2.48 (snapshot-timestamp dedup guard — correct approach)
+- [ ] Re-enter lost claudescore.md content (target audience / feasibility / chromium-bridge questions)
 <!-- /agent:pending -->

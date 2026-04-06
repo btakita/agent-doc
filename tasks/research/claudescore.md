@@ -182,7 +182,7 @@ It maps directly to the harness components: Foundation Setup (do you have the ra
 **Gap in the literature:** There is no published RCT specifically on Claude Code harness design (CLAUDE.md quality vs. none, hooks vs. no hooks). ClaudeScore is essentially building that study retroactively by collecting scored session data. The platform's scoring methodology will be the first large-scale empirical dataset on this.
 
 **Closest analog:** GitHub's internal research on Copilot adoption showed that developer-level configuration quality (which files to include in context, which to exclude) was the single largest predictor of suggestion acceptance rate — not model capability. Same principle: harness → outcome.
-<!-- agent:boundary:0af16316 -->
+<!-- agent:boundary:dafe731f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

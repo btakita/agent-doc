@@ -85,7 +85,7 @@ Use chromium-bridge
 - **§13 Attorney's fees** — each party bears own costs, which is fine, but combined with $0 liability cap means you have no recourse.
 
 **Recommendation:** Negotiate §16 (liability cap) and clarify IP carve-outs for your existing open-source projects before signing.
-<!-- agent:boundary:c7f82bd8 -->
+<!-- agent:boundary:d61fea19 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

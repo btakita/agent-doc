@@ -197,7 +197,8 @@ pre-build = ["apt-get update && apt-get install -y libssl-dev pkg-config"]
 All 10 skill tests pass, including new assertion for transitive `instruction-files/SKILL.md` installation.
 
 Ready to commit and push + retag v0.26.0?
-<!-- agent:boundary:c1c77168 -->
+Committed `780fd1e`, pushed, retagged v0.26.0. Release workflow triggered.
+<!-- agent:boundary:f3e82bc4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -206,7 +207,7 @@ Ready to commit and push + retag v0.26.0?
 - [x] Fix CI aarch64 cross-compile (Cross.toml)
 - [x] Upgrade agent-kit 0.3→0.4, instruction-files 0.1→0.2
 - [x] Transitive SKILL installation via instruction_files::init()
-- [ ] Commit, push, retag v0.26.0
+- [x] Commit, push, retag v0.26.0
 - [ ] Monitor CI after retag
 - [ ] Verify sheet sharing / GCP test users
 - [ ] Re-test sheet read

@@ -916,7 +916,7 @@ Please look in https://github.com/BeOnAuto/claude-auto
 Local repo is /home/brian/work/dreamable/claude-auto
 
 Tell me how it works.
-### Re: claude-auto (HEAD)
+### Re: claude-auto
 
 **claude-auto** is a Claude Code plugin that enforces the **Ketchup Technique** — a TDD/TCR discipline for AI-assisted coding. It wraps Claude Code's hook system to automate quality gates, inject context reminders, and protect files.
 
@@ -964,7 +964,12 @@ Configure via `/claude-auto:config set <key> <value>` inside Claude Code.
 Or local dev: `claude --plugin-dir /path/to/claude-auto`
 
 The Ketchup loop it enforces: write one failing test → write minimal passing code → `test && commit || revert` → repeat.
-<!-- agent:boundary:90e234d0 -->
+
+transfer claude-audio research to tasks/research/claudescore.md
+### Re: transfer claude-auto research (HEAD)
+
+Extracted `### Re: claude-auto` → `tasks/research/claudescore.md`.
+<!-- agent:boundary:00664f2e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

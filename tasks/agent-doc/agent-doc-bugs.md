@@ -204,7 +204,7 @@ Step 4d calls `parse_slash_commands` on the diff and populates the field. `skip_
 After preflight, if `slash_commands` is non-empty, the skill executes each via the `Skill` tool before generating the response. Built-ins like `/clear` that can't be routed through `Skill` are noted in the console.
 
 All 711 tests pass, clippy clean, binary installed.
-<!-- agent:boundary:31bd1276 -->
+<!-- agent:boundary:e0feb32c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

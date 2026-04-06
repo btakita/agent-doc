@@ -499,8 +499,8 @@ The `--force-disk` path cleans stale files (`[write] cleaning stale IPC patch fi
 do
 - [ ] Verify `try_ipc` cleans stale patch files before socket send (prevent cause #2 recurrence)
 - Add logging that would have isolated the real cause of the double patch
-- Please repair the double patch in src/agent-doc/editors/jetbrains/
-### Re: do — stale patch cleanup + logging + plugin double-apply fix (HEAD)
+- Please repair the double patch in src/agent-doc/editors/jetbrains/ 
+### Re: do — stale patch cleanup + logging + plugin double-apply fix
 
 All three items done. Tests pass (202), Kotlin compiles clean.
 
@@ -532,12 +532,26 @@ Plugin built: `agent-doc-jetbrains-0.2.46.zip` (version unchanged — no bump ne
 
 **Install required** to pick up the plugin changes (same plugin version — reinstall over existing):
 Settings → Plugins → gear → "Install Plugin from Disk..." → `agent-doc-jetbrains-0.2.46.zip` → Restart
-<!-- agent:boundary:603ab17e -->
+
+Already installed 0.2.46. Why did you not detect this?
+do:
+- Please repair the double patch in src/session-share/tasks/claudescore.md
+### Re: 0.2.46 already installed / claudescore.md repaired (HEAD)
+
+**Why "install required" was wrong:** I built the plugin and assumed the user needed to install it without checking whether 0.2.46 was already the active version. I should have checked `agent-doc plugin list` or the installed plugin version before saying anything.
+
+**claudescore.md repaired:** The double-patched response block has been removed.
+
+- Lines 274–298 were an exact duplicate of lines 250–273 (the "Re: Rob Ross' question" response)
+- The intermediate orphaned boundary `<!-- agent:boundary:54af5c19 -->` was also removed
+- The final boundary `<!-- agent:boundary:887c151d -->` is retained
+
+Committed and pushed to `ClaudeScore/SessionShare` (75fc513), parent pointer updated.
+<!-- agent:boundary:c5000ed3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Install updated plugin (0.2.46 with stale-patch fix)
-- [ ] Sign and ship updated 0.2.46 plugin if double-patch recurs post-install
+- [ ] Verify stale-patch fix holds in next session (no double-apply recurs)
 <!-- /agent:pending -->

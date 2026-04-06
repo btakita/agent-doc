@@ -910,7 +910,7 @@ Noted — transcripts removed from the document and moved to:
 Added runbook at `.claude/skills/agent-doc/runbooks/large-content.md`:
 
 > Write large content (transcriptions, logs, dumps) to a separate file and link from the document. Large content embedded inline bloats the snapshot, floods context on future reads, and makes the exchange unreadable.
-<!-- agent:boundary:ac43990c -->
+<!-- agent:boundary:8e4b79f5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

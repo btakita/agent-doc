@@ -20,43 +20,12 @@ Operational task document for agent-loop workspace management.
 - Nested submodule fixes (ctx-core-dev/lib/relysjs, rappstack-dev/lib/ui--server--blog)
 
 <!-- agent:exchange patch=append -->
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca3007b9c6c5bc21d81a0b9ff27f894487e97141f4cdafe2a9d12a4a19b1-20260405-190537.md`*
-
-I don't think I'm going to use aggressive auto compact too much. I would want more control.
-However, a partial auto compact may be good. Where the current active topics are kept while anything before the current active topics are compacted. 
-### Re: Auto-compact control + partial compaction + eval tuning
-
-**Auto-compact feedback noted.** The current implementation is all-or-nothing (compacts entire exchange component). A partial compact that preserves active topics while archiving older content would be more useful. That's a feature for `compact.rs` -- detect topic boundaries (e.g. `### Re:` headers with their preceding user prompts) and only archive exchanges before the last N topics. Not implemented yet, added to pending.
-
-I set `agent_doc_auto_compact: 250` on this document as a safety net rather than an aggressive threshold. It'll only trigger when the exchange grows past ~250 lines.
-
-**Eval tuning results (all 3 tasks done):**
-
-1. **System prompt added** -- `evals/general/token-efficiency/system-prompt.md` explains the "do" convention, conciseness expectation, and `### Re:` headers. The `approval-minimal-response` case went from 0.0 to 0.85 score.
-
-2. **Budgets tuned:**
-   - `simple-question-concise`: 300 -> 400 (model uses ~340-376)
-   - `approval-minimal-response`: 500 -> 600 (model uses ~541)
-   - `multi-topic-structured`: 800 -> 1200 (3 topics at ~330 each)
-   - `single-line-edit-response`: kept at 200 (model uses ~31)
-   - `no-changes-fast-exit`: kept at 100 (model uses ~50-61)
-
-3. **Remaining issue:** `simple-question-concise` scores low (0.3) because the model adds `### Re:` headers and subsections even for single questions. The system prompt encourages this. The eval's `expected_behavior` and system prompt conflict -- need to add "for single questions, omit the `### Re:` header" to system prompt or adjust the eval expectations.
-
-do **Remaining issue:**
-### Re: Fix simple-question-concise eval (HEAD)
-
-Fixed the system prompt to clarify headers are multi-topic only:
-```
-- For single-topic responses: answer directly without headers.
-- For multi-topic responses: use ### Re: headers per topic.
-```
-
-Results: `simple-question-concise` went from 0.3 to 0.7 (now passing). Both smoke cases pass (2/2, mean score 0.85).
-<!-- agent:boundary:9d66d3ad -->
+**Decisions/outcomes:**
+- Auto-compact: user wants more control; aggressive auto-compact unwanted. Partial auto-compact (keep active topics, archive older) preferred but not yet implemented. `agent_doc_auto_compact: 250` set as safety net.
+- Eval tuning (all done): system prompt added explaining do/conciseness/### Re: header conventions; token budgets tuned per case; `simple-question-concise` fixed (0.3→0.7) by clarifying headers are multi-topic only.
+- Partial compact feature was considered but dropped from pending by user.
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [x] Fix simple-question-concise eval (system prompt vs expected_behavior conflict)
-- [ ] Implement partial compact (keep last N topics, archive older)
 <!-- /agent:pending -->

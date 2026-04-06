@@ -172,7 +172,7 @@ gh failures:
 3. **aarch64 cross-compile OpenSSL** — already uses `--features vendored-openssl` in the cross build step, so this should work. The error was because it was trying to build with the native (x86_64) OpenSSL headers.
 
 Committed `4e260a3`, pushed, retagged v0.26.0.
-<!-- agent:boundary:b8338eef -->
+<!-- agent:boundary:d20e3606 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

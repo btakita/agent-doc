@@ -138,6 +138,13 @@ interface AgentDocLib : Library {
         fun invoke(message: Pointer): Boolean
     }
 
+    /**
+     * Text-based CRDT 3-way merge. All three params are plain text (not CRDT state bytes).
+     * Returns merged text (conflict-free); falls back to `ours` on error.
+     * Caller must free result with [agent_doc_free_string].
+     */
+    fun agent_doc_merge_crdt(base: String, ours: String, theirs: String): Pointer?
+
     /** Get the library version (e.g. "0.26.1"). Caller must free result. */
     fun agent_doc_version(): Pointer?
 
@@ -299,6 +306,21 @@ object NativePatching {
     fun isIdle(filePath: String, debounceMs: Long): Boolean {
         val lib = AgentDocLib.get() ?: return true // No FFI — assume idle (don't block)
         return lib.agent_doc_is_idle(filePath, debounceMs)
+    }
+
+    /**
+     * CRDT 3-way merge from plain text.
+     * Returns the conflict-free merged text, or null if FFI is unavailable.
+     * Never returns null on merge conflict — CRDT is always conflict-free.
+     */
+    fun mergeCrdt(base: String, ours: String, theirs: String): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val ptr = lib.agent_doc_merge_crdt(base, ours, theirs)
+        try {
+            return ptr?.getString(0)
+        } finally {
+            lib.agent_doc_free_string(ptr)
+        }
     }
 
     /**

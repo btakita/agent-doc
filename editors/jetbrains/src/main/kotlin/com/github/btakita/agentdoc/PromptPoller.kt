@@ -156,14 +156,29 @@ class PromptPoller(private val project: Project) : Disposable {
 
     /**
      * Merge user's unsaved editor edits with external disk changes (Claude's response).
-     * Falls back to plain reload if no unsaved changes or merge fails.
+     *
+     * Task 1 (PromptPoller fires during IPC write): PatchWatcher writes via Document API
+     * then calls saveDocument(), changing the VFS modificationStamp. PromptPoller detects
+     * this and calls mergeOrReload. When the doc has no unsaved changes and already matches
+     * disk (normal after PatchWatcher), skip the reload — reloadFiles() would be a no-op
+     * but triggers unnecessary IDE notifications.
+     *
+     * Task 2 (merge failure): preserve editor content instead of discarding via reloadFiles().
+     *
+     * Task 3 (FFI CRDT merge): use agent_doc_merge_crdt (conflict-free) with git merge-file
+     * as fallback when FFI is unavailable.
      */
     private fun mergeOrReload(tracked: TrackedFile) {
         val fdm = FileDocumentManager.getInstance()
         val doc = fdm.getDocument(tracked.file) ?: return
 
         if (!fdm.isDocumentUnsaved(doc)) {
-            fdm.reloadFiles(tracked.file)
+            // Task 1: doc is in sync with disk (e.g. PatchWatcher saved via Document API).
+            // Only reload when doc content differs from disk (true external write bypassing Document API).
+            val diskContent = String(tracked.file.contentsToByteArray(), Charsets.UTF_8)
+            if (doc.text != diskContent) {
+                fdm.reloadFiles(tracked.file)
+            }
             return
         }
 
@@ -172,20 +187,24 @@ class PromptPoller(private val project: Project) : Disposable {
         if (editorContent == diskContent) return
 
         val base = tracked.lastSavedContent ?: editorContent
-        val merged = gitMergeFile(base, diskContent, editorContent)
+        // Task 3: prefer FFI CRDT merge (conflict-free); fall back to git merge-file
+        val merged = NativePatching.mergeCrdt(base, diskContent, editorContent)
+            ?: gitMergeFile(base, diskContent, editorContent)
         if (merged != null) {
             ApplicationManager.getApplication().runWriteAction {
                 doc.setText(merged)
             }
             tracked.lastSavedContent = merged
         } else {
-            fdm.reloadFiles(tracked.file)
-            TerminalUtil.notifyInfo(project, "File modified externally — your unsaved edits may need to be re-applied.")
+            // Task 2: preserve editor content on merge failure — don't discard user edits
+            TerminalUtil.notifyInfo(project, "Merge conflict with external write — editor content preserved.")
+            tracked.lastSavedContent = editorContent  // reset base to avoid repeat merge attempts
         }
     }
 
     /**
      * 3-way merge via `git merge-file`. Returns merged content or null on conflict.
+     * Used as fallback when FFI is unavailable.
      */
     private fun gitMergeFile(base: String, ours: String, theirs: String): String? {
         try {

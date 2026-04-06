@@ -430,6 +430,45 @@ pub unsafe extern "C" fn agent_doc_crdt_merge(
     }
 }
 
+/// Text-based CRDT 3-way merge. Simpler interface than [`agent_doc_crdt_merge`].
+///
+/// All three parameters are plain UTF-8 text (not CRDT state bytes).
+/// Returns the conflict-free merged text. On any error, falls back to `ours`.
+///
+/// Intended for editor plugin use (replaces `git merge-file` in `PromptPoller`).
+///
+/// # Safety
+///
+/// `base`, `ours`, and `theirs` must be valid, NUL-terminated UTF-8.
+/// The caller must free the returned pointer with [`agent_doc_free_string`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_merge_crdt(
+    base: *const c_char,
+    ours: *const c_char,
+    theirs: *const c_char,
+) -> *mut c_char {
+    let base_str = match unsafe { CStr::from_ptr(base) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return CString::new("").unwrap_or_default().into_raw(),
+    };
+    let ours_str = match unsafe { CStr::from_ptr(ours) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return CString::new("").unwrap_or_default().into_raw(),
+    };
+    let theirs_str = match unsafe { CStr::from_ptr(theirs) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return CString::new("").unwrap_or_default().into_raw(),
+    };
+
+    // Encode base text as CRDT state for proper 3-way merge
+    let base_doc = crdt::CrdtDoc::from_text(base_str);
+    let base_state = base_doc.encode_state();
+
+    let merged = crdt::merge(Some(&base_state), ours_str, theirs_str)
+        .unwrap_or_else(|_| ours_str.to_string());
+    CString::new(merged).unwrap_or_default().into_raw()
+}
+
 /// Merge YAML key/value pairs into a document's frontmatter.
 ///
 /// `yaml_fields` is a YAML string of fields to merge (additive — never removes keys).

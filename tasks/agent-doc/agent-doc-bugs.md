@@ -225,7 +225,7 @@ agent-doc compact tasks/foo.md --keep 0
 Updated `compact-exchange.md` runbook with full/partial compact sections.
 
 4 new tests: `parse_topic_sections_basic`, `parse_topic_sections_keep_threshold`, `parse_topic_sections_strips_boundary_marker`, `parse_topic_sections_no_re_headings`. 462 tests pass, clippy clean. Release binary built.
-<!-- agent:boundary:d647e388 -->
+<!-- agent:boundary:5a4ef8b8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

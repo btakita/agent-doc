@@ -274,7 +274,7 @@ let effective_unmatched = if patches.is_empty() && !ipc_patches_json.is_empty() 
 38 tests pass, clippy clean, binary installed.
 add tests
 release
-### Re: tests + release — done (HEAD)
+### Re: tests + release — done
 
 **3 new tests added (`write.rs`):**
 
@@ -289,10 +289,46 @@ All 38 tests pass (including 3 new unit tests + CLI integration tests).
 - GitHub: https://github.com/btakita/agent-doc/releases/tag/v0.31.17 (binary attached)
 - PyPI: skipped — needs manylinux Docker build (linux_x86_64 wheel rejected)
 - Binary installed: `~/.cargo/bin/agent-doc` → v0.31.17
-<!-- agent:boundary:5b6d3756 -->
+
+src/session-share/tasks/claudescore.md has multiple external edits. I lost some characters typed. Why?
+### Re: `claudescore.md` external edits + character loss (HEAD)
+
+Found the exact cause in `PromptPoller.kt`:
+
+```kotlin
+val merged = gitMergeFile(base, diskContent, editorContent)
+if (merged != null) {
+    doc.setText(merged)       // merge OK — user edits preserved
+} else {
+    fdm.reloadFiles(tracked.file)  // ← merge FAILED → user edits LOST
+    TerminalUtil.notifyInfo(project, "File modified externally — your unsaved edits may need to be re-applied.")
+}
+```
+
+`PromptPoller` fires when the .md file changes on disk AND the editor has unsaved edits. It runs a 3-way `git merge-file` to reconcile them. When the merge fails (conflict), it falls back to `reloadFiles()` — which discards the editor buffer. The notification is the only warning, but the content is already gone.
+
+**Why the merge fails:** both the disk write (IPC patch inserting at boundary) and the editor edits (user typing) modified the same region — the area around the boundary marker. `git merge-file` sees a conflict and returns null.
+
+**Two bugs:**
+1. **Silent data loss** — `reloadFiles()` discards unsaved edits without showing a conflict view. Should preserve editor content when merge fails.
+2. **PromptPoller firing at all** — `PatchWatcher` handles IPC writes via Document API (no disk write, no external notification). `PromptPoller` should only fire when there's a disk-based write outside PatchWatcher's control. If both are active simultaneously, they conflict.
+
+**Fix for PromptPoller (immediate):** preserve editor content on merge failure instead of discarding:
+```kotlin
+} else {
+    // Merge failed — preserve user's edits, don't discard
+    TerminalUtil.notifyWarning(project,
+        "Merge conflict with external write — editor content preserved.")
+    tracked.lastSavedContent = editorContent  // reset base to avoid repeat
+}
+```
+
+Want me to implement this?
+<!-- agent:boundary:074e9164 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] **PromptPoller merge failure** — preserve editor content when `gitMergeFile` returns null; current behavior calls `reloadFiles()` which silently discards unsaved keystrokes
 <!-- /agent:pending -->

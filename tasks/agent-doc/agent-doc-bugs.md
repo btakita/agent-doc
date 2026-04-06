@@ -139,18 +139,44 @@ Fix the relevant agent-doc commands.
 3. **Same fix in sync.rs** — the stash rescue path now checks pane session against `context_session`. If mismatched, stashes in the target session first before rescuing.
 
 447 tests pass, clippy clean. Binary installed (v0.31.16).
-### Re: Text completion noted (HEAD)
+### Re: Text completion noted
 
 No new prompt — the truncated line was completed. No action needed.
-<!-- agent:boundary:10ca7e94 -->
+do
+- [ ] Consolidate active panes — `agent-doc session set 10` to move session 12 panes back
+- [ ] Investigate whether `resync --fix` should auto-kill deregistered stash panes (currently "rescuable")
+- [ ] Add session-drift detection to preflight (warn when panes span multiple sessions)
+### Re: Pending items executed (HEAD)
+
+**1. Consolidate active panes**
+
+`agent-doc session set 10` → already configured to 10. No movement needed — the earlier resync deregistered the session 12 panes; they'll self-clean on next route/sync.
+
+**2. resync --fix auto-kill of "rescuable" stash panes**
+
+"Rescuable" is a log message label only — no code variable. Current behavior is intentional:
+- **Idle shells** (zsh, bash, sh, fish) in unregistered stash panes: auto-killed by `purge_unregistered_stash_panes_bulk()`
+- **Agent processes** (agent-doc, claude, node): left alive — comment in resync.rs explicitly says "the registry can go stale and an active Claude session should never be killed automatically"
+
+The design is sound. Auto-killing agent processes risks losing active Claude sessions when the registry goes stale. The fix is the cross-session stash move (done last cycle) — once panes land in the right session, routing works correctly without needing auto-kill. No code change needed for this item.
+
+**3. Session-drift detection in preflight**
+
+Added **Check 3** to `check_layout()` in `preflight.rs`:
+- Reads `sessions.json` directly (read-only, no lock)
+- Queries `#{session_name}` for each registered pane via tmux
+- If alive panes span multiple sessions, emits: `"session drift: registered panes span N tmux sessions: 10, 12"`
+
+This surfaces session-drift as a `layout_issues` entry in the preflight JSON — the skill can show it to the user.
+
+447 tests pass, clippy clean. Binary installed (v0.31.16).
+<!-- agent:boundary:28554af5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Fix cross-session pane swap in route.rs `rescue_from_stash()` — session guard added
-- [x] Fix cross-session pane swap in sync.rs stash rescue — session guard + stash-first added
-- [ ] Consolidate active panes — `agent-doc session set 10` to move session 12 panes back
-- [ ] Investigate whether `resync --fix` should auto-kill deregistered stash panes (currently "rescuable")
-- [ ] Add session-drift detection to preflight (warn when panes span multiple sessions)
+- [x] Consolidate active panes — already at session 10, deregistered panes self-clean
+- [x] resync --fix auto-kill investigation — intentional design, no change needed
+- [x] Session-drift detection in preflight (check_layout Check 3)
 <!-- /agent:pending -->

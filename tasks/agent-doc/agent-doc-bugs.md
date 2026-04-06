@@ -73,7 +73,7 @@ touch ~/.claude/skills/.reload && rm ~/.claude/skills/.reload
 
 Want me to add "refresh skills autocomplete" as a pending task for the JB plugin?
 Is there a way to tell of there is a new skill installed. Such as a claude hook?
-### Re: detecting new skills via hook (HEAD)
+### Re: detecting new skills via hook
 
 Yes — Claude Code supports `PostToolUse` hooks. We can use a sentinel file contract:
 
@@ -94,11 +94,22 @@ Or simpler — just always touch it on any `Write` and let the JB plugin debounc
 **JB plugin side**: register a `VirtualFileListener` (or `BulkFileListener`) on `~/.claude/.skills-updated`. When mtime changes, invalidate the skill completion cache and re-scan `.claude/skills/`.
 
 This is a clean two-part contract with no restart required. Want me to add both pieces as pending tasks?
-<!-- agent:boundary:1f989bd4 -->
+
+Can we have general `Refresh Agent Doc Enviornment` command that has a menu item in the Agent Doc prompt (Alt+Shift)?
+### Re: Refresh Agent Doc Environment command (HEAD)
+
+Yes — a good generalization. `Refresh Agent Doc Environment` in the Alt+Shift menu would bundle:
+
+1. **Skills refresh** — touch `~/.claude/.skills-updated` to signal Claude Code extension to rescan
+2. **Config reload** — re-read `.agent-doc/components.toml` and frontmatter
+3. **Claim re-registration** — re-assert the document→pane binding if registry drifted
+
+Single `AnAction` registered in the JB plugin, available in the Alt+Shift context menu and as a standalone keymap action. Added to pending.
+<!-- agent:boundary:7538995d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **JB plugin: skill cache invalidation via sentinel file** — PostToolUse hook touches `~/.claude/.skills-updated`; plugin watches via VirtualFileListener and reloads completions
+- [ ] **JB plugin: `Refresh Agent Doc Environment` action (Alt+Shift menu)** — touches `~/.claude/.skills-updated`, reloads `.agent-doc/components.toml`, re-registers claim; replaces narrower skill-cache-only task
 <!-- /agent:pending -->

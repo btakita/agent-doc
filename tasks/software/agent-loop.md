@@ -52,8 +52,8 @@ For Qwen3-Coder-Next 80B you'll also need enough VRAM — 80B at fp16 is ~160GB,
 ```bash
 vllm serve44 Qwen/Qwen3-Coder-Next-80B --tensor-parallel-size 2
 ```
-I have a 5090 and a large amount of available RAM. What would be the best local coding model for me to run?
-### Re: Typo fix + best model for RTX 5090 (HEAD)
+I have a 5090 and a large amount of available RAM. What would be the best local coding model for me to run? 
+### Re: Typo fix + best model for RTX 5090
 
 Looks like `vllm serve44` is a typo — should be `vllm serve`.
 
@@ -75,12 +75,64 @@ Looks like `vllm serve44` is a typo — should be `vllm serve`.
 **Recommendation:** Start with `Qwen2.5-Coder-32B-AWQ` on vllm for speed. If quality ceiling isn't enough, switch to `Qwen2.5-Coder-72B-Q4` via ollama with partial offload.
 
 > Knowledge cutoff is Aug 2025 — "Qwen3-Coder-Next" may have released after that. Check HuggingFace for latest Qwen3-Coder variants; the 32B or 14B version would be the right size target.
-<!-- agent:boundary:70e3ff9f -->
+
+Show me the 2 vllm commands.
+Also show me how to integrate both with claude code
+### Re: vllm commands + Claude Code integration
+
+#### The 2 vllm serve commands
+
+**Option 1 — Qwen2.5-Coder-32B-AWQ (fits fully in 32GB VRAM, fast):**
+```bash
+vllm serve Qwen/Qwen2.5-Coder-32B-Instruct-AWQ \
+  --host 0.0.0.0 --port 8000 \
+  --dtype auto
+```
+
+**Option 2 — Qwen2.5-Coder-72B-AWQ (offloads overflow to RAM, slower):**
+```bash
+vllm serve Qwen/Qwen2.5-Coder-72B-Instruct-AWQ \
+  --host 0.0.0.0 --port 8000 \
+  --dtype auto \
+  --cpu-offload-gb 20
+```
+`--cpu-offload-gb 20` pushes ~20GB of weights to CPU RAM so the rest fits in VRAM.
+
+#### Claude Code integration
+
+Claude Code speaks Anthropic protocol; vllm speaks OpenAI protocol. Use **LiteLLM** as a translation proxy:
+
+```bash
+pip install litellm[proxy]
+
+# Start proxy (translates Anthropic → OpenAI for vllm) (HEAD)
+litellm --model openai/Qwen2.5-Coder-32B-Instruct-AWQ \
+  --api_base http://localhost:8000/v1 \
+  --port 4000
+```
+
+Then run Claude Code against the proxy:
+```bash
+ANTHROPIC_BASE_URL=http://localhost:4000 \
+ANTHROPIC_API_KEY=fake \
+claude --model Qwen2.5-Coder-32B-Instruct-AWQ
+```
+
+Or add to your shell profile / `.env`:
+```bash
+export ANTHROPIC_BASE_URL=http://localhost:4000
+export ANTHROPIC_API_KEY=fake
+```
+
+Then `claude` will use the local model by default. Swap back to Anthropic by unsetting those vars.
+<!-- agent:boundary:4e318f45 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Fix Python version for vllm: run `mise use python@3.12` in agent-loop root
-- [ ] Install vllm: `uv pip install vllm` in a 3.12 venv
-- [ ] Try `Qwen2.5-Coder-32B-AWQ` on vllm (fits 32GB VRAM)
-- [ ] If quality insufficient: set up `Qwen2.5-Coder-72B-Q4` via ollama with GPU offload
+- [x] Fix Python version for vllm: `mise use python@3.12`
+- [x] Install vllm: `uv pip install vllm`
+- [ ] Download + serve `Qwen2.5-Coder-32B-Instruct-AWQ` via vllm
+- [ ] Install litellm proxy: `pip install litellm[proxy]`
+- [ ] Run litellm proxy pointing at vllm
+- [ ] Test `claude` against local model via `ANTHROPIC_BASE_URL`
 <!-- /agent:pending -->

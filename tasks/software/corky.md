@@ -175,7 +175,7 @@ Committed `4e260a3`, pushed, retagged v0.26.0.
 fix https://github.com/btakita/corky/actions/runs/23985562273
 
 upgrade instruction-files and other dependencies. Use updates to dependencies relating to SKILL installation.
-### Re: CI fix + dependency upgrade (HEAD)
+### Re: CI fix + dependency upgrade
 
 **CI fix (aarch64 cross-compile OpenSSL):**
 The `cross` container lacks host-arch (x86_64) `libssl-dev`, causing `openssl-sys` build failure for host dependencies. Created `Cross.toml`:
@@ -198,7 +198,41 @@ All 10 skill tests pass, including new assertion for transitive `instruction-fil
 
 Ready to commit and push + retag v0.26.0?
 Committed `780fd1e`, pushed, retagged v0.26.0. Release workflow triggered.
-<!-- agent:boundary:dc622b94 -->
+
+Fix ci error https://github.com/btakita/corky/actions/runs/24020633436/job/70048693016#step:4:669:
+```
+error[E0425]: cannot find function `init` in crate `instruction_files`
+   --> src/skill.rs:163:42
+    |
+163 |     let dep_written = instruction_files::init(dep_root)?;
+    |                                          ^^^^ not found in `instruction_files`
+    |
+help: consider importing this function
+    |
+ 11 + use ort::init;
+    |
+help: if you import `init`, refer to it directly
+    |
+163 -     let dep_written = instruction_files::init(dep_root)?;
+163 +     let dep_written = init(dep_root)?;
+    |
+
+For more information about this error, try `rustc --explain E0425`.
+error: could not compile `corky` (lib) due to 1 previous error
+Error: Process completed with exit code 101.
+```
+### Re: CI fix — `instruction_files::init` not in published 0.2.0 (HEAD)
+
+**Root cause:** `init()` was committed to the local `instruction-files` repo (`102dcc3`) but `0.2.0` was already published to crates.io *without* it. CI resolves from crates.io, so `init` didn't exist there.
+
+**Fix:**
+1. Bumped `instruction-files` to `0.2.1`, published to crates.io
+2. Updated corky `Cargo.toml`: `instruction-files = "0.2.1"`
+3. Verified `cargo build` succeeds locally
+4. Committed, retagged `v0.26.0` on corky, tagged `v0.2.1` on instruction-files, pushed both
+
+CI should now resolve `instruction-files 0.2.1` from crates.io and find `init()`.
+<!-- agent:boundary:102b2ef5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

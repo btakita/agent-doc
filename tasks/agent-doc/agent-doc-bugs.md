@@ -81,7 +81,7 @@ The sync auto-scaffold (v0.31.14) handles empty files by writing the FULL templa
 **The fix:** `ensure_session_uuid()` should also set `agent_doc_format: template` and `agent_doc_write: crdt` when creating frontmatter for an empty file. Or better: claim should use the same scaffold logic as sync for empty files — write the full template in one step, not UUID-first then scaffold-later.
 
 This is the same pattern as the sync scaffold ordering bug (v0.31.14). The fix needs to be in `claim.rs` — when the file is empty, write the full template (like sync does) before proceeding.
-<!-- agent:boundary:a7dbe7f8 -->
+<!-- agent:boundary:b824df42 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

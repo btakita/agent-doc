@@ -119,6 +119,24 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
         None
     };
 
+    // Auto-scaffold empty files with full template BEFORE ensure_session.
+    // ensure_session only writes agent_doc_session — it doesn't set agent_doc_format
+    // or add components. Empty files need the full template in one step.
+    {
+        let raw = std::fs::read_to_string(file).unwrap_or_default();
+        if raw.trim().is_empty() && file.extension() == Some(std::ffi::OsStr::new("md")) {
+            eprintln!("[claim] auto-scaffolding empty file: {}", file.display());
+            let session_id = uuid::Uuid::new_v4();
+            let scaffold = format!(
+                "---\nagent_doc_session: {}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Pending / Not Built\n\n<!-- agent:pending patch=replace -->\n<!-- /agent:pending -->\n",
+                session_id
+            );
+            std::fs::write(file, &scaffold)?;
+            crate::snapshot::save(file, &scaffold)?;
+            crate::git::commit(file).ok(); // best-effort commit
+        }
+    }
+
     // Read file content and extract/generate session UUID (in memory only — no disk write yet)
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;

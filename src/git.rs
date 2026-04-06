@@ -544,23 +544,37 @@ fn add_head_marker(content: &str, file: &Path) -> String {
         // to prevent concurrent commits from stripping markers placed by a previous commit.
         // Without this, Session B's preflight commit would overwrite Session A's committed
         // content (which has HEAD markers) with cleaned content (which doesn't).
+        //
+        // Safety: only re-apply if HEAD has a reasonable number of markers (≤3).
+        // After a file move/rename, HEAD may have many stale (HEAD) markers baked in
+        // from the old path — re-applying all of them creates permanent uncommitted diffs.
         if let Some(ref head) = head_content {
-            let mut result = cleaned;
-            for line in head.lines() {
-                let trimmed = line.trim_start();
-                if trimmed.ends_with(" (HEAD)") && trimmed.starts_with('#') {
-                    let without_head = &line[..line.len() - 7];
-                    // Find this heading at a line boundary in the result and re-add (HEAD)
-                    let search = format!("\n{}\n", without_head);
-                    if let Some(pos) = result.find(&search) {
-                        let insert_at = pos + 1 + without_head.len();
-                        result.insert_str(insert_at, " (HEAD)");
-                    } else if result.starts_with(&format!("{}\n", without_head)) {
-                        result.insert_str(without_head.len(), " (HEAD)");
+            let head_marker_count = head.lines()
+                .filter(|l| l.trim_start().ends_with(" (HEAD)") && l.trim_start().starts_with('#'))
+                .count();
+            if head_marker_count <= 3 {
+                let mut result = cleaned;
+                for line in head.lines() {
+                    let trimmed = line.trim_start();
+                    if trimmed.ends_with(" (HEAD)") && trimmed.starts_with('#') {
+                        let without_head = &line[..line.len() - 7];
+                        // Find this heading at a line boundary in the result and re-add (HEAD)
+                        let search = format!("\n{}\n", without_head);
+                        if let Some(pos) = result.find(&search) {
+                            let insert_at = pos + 1 + without_head.len();
+                            result.insert_str(insert_at, " (HEAD)");
+                        } else if result.starts_with(&format!("{}\n", without_head)) {
+                            result.insert_str(without_head.len(), " (HEAD)");
+                        }
                     }
                 }
+                return result;
+            } else {
+                eprintln!(
+                    "[commit] Skipping (HEAD) re-application — {} markers in HEAD (stale, likely from file move)",
+                    head_marker_count
+                );
             }
-            return result;
         }
         return cleaned;
     }

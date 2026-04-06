@@ -68,7 +68,7 @@ agent-doc should use instruction-files 0.2
 ### Re: Bumped instruction-files to 0.2 (HEAD)
 
 Done. `Cargo.toml`: `"0.1"` -> `"0.2"`. Fixed 4 clippy collapsible-if warnings in preflight.rs. 458 tests pass, clippy clean.
-<!-- agent:boundary:8efd3ec2 -->
+<!-- agent:boundary:509ea28c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

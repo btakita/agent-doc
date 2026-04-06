@@ -155,7 +155,7 @@ These are designed to run via the claude-auto PreToolUse hook on `git commit`, r
 - `new-tool-adoption.md` is intentionally permissive — it rewards tooling investment but never blocks
 - Validators are diff-analyzable (no session history required) — they work as standalone commit-time gates
 - The format is intentionally compatible with the claude-auto batching mechanism: `claude -p --no-session-persistence --agent validator <prompt> --output-format json`
-### Re: Meta-analysis of harness design and outcomes (HEAD)
+### Re: Meta-analysis of harness design and outcomes
 
 The most directly relevant empirical data:
 
@@ -182,7 +182,23 @@ It maps directly to the harness components: Foundation Setup (do you have the ra
 **Gap in the literature:** There is no published RCT specifically on Claude Code harness design (CLAUDE.md quality vs. none, hooks vs. no hooks). ClaudeScore is essentially building that study retroactively by collecting scored session data. The platform's scoring methodology will be the first large-scale empirical dataset on this.
 
 **Closest analog:** GitHub's internal research on Copilot adoption showed that developer-level configuration quality (which files to include in context, which to exclude) was the single largest predictor of suggestion acceptance rate — not model capability. Same principle: harness → outcome.
-<!-- agent:boundary:dafe731f -->
+
+Add git@github.com:ClaudeScore/SessionShare.git as a submodule
+### Re: SessionShare submodule (HEAD)
+
+Added `git@github.com:ClaudeScore/SessionShare.git` as `src/session-share`.
+
+```
+A  src/session-share
+M  .gitmodules
+```
+
+Staged but not yet committed — commit the parent repo when ready:
+
+```bash
+git commit src/session-share .gitmodules -m "Add ClaudeScore/SessionShare submodule"
+```
+<!-- agent:boundary:48c75d8d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

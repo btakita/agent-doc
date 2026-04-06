@@ -146,7 +146,7 @@ do
 - [ ] Consolidate active panes — `agent-doc session set 10` to move session 12 panes back
 - [ ] Investigate whether `resync --fix` should auto-kill deregistered stash panes (currently "rescuable")
 - [ ] Add session-drift detection to preflight (warn when panes span multiple sessions)
-### Re: Pending items executed (HEAD)
+### Re: Pending items executed
 
 **1. Consolidate active panes**
 
@@ -170,13 +170,33 @@ Added **Check 3** to `check_layout()` in `preflight.rs`:
 This surfaces session-drift as a `layout_issues` entry in the preflight JSON — the skill can show it to the user.
 
 447 tests pass, clippy clean. Binary installed (v0.31.16).
-<!-- agent:boundary:998f49e1 -->
+audit docs
+### Re: audit docs (HEAD)
+
+Ran `agent-doc audit-docs` from `src/agent-doc/`. Found 5 issues initially:
+
+**Errors (stale files — older than `src/preflight.rs`):**
+- `SPEC.md` — missing `layout_issues` in preflight JSON schema
+- `CLAUDE.md` — preflight.rs module description lacked "layout check"
+- `README.md` — no `layout_issues` or session-drift in domain ontology
+- `.claude/skills/agent-doc/SKILL.md` (in-repo) — JSON schema missing `layout_issues`
+
+**Fixes applied:**
+- **SPEC.md §7.26** — added `layout_issues: []` to the JSON schema, plus a "Step 0" entry documenting the three `check_layout()` checks (window 0, non-idle stash panes, session-drift)
+- **CLAUDE.md** — updated `preflight.rs` module comment: `"Pre-agent checks: layout check, recover, commit, claims, diff, document read → JSON"`
+- **README.md** — added two domain ontology rows: `Layout check` and `Session drift`
+- **SKILL.md** — added `layout_issues` to the JSON schema + a bullet: "Print any `layout_issues` entries to the console as warnings"
+
+**Remaining (advisory `⚠` only):**
+- CLAUDE.md:22-35 — Binary/Agent responsibility table is 13 rows (advisory: consider moving to README.md)
+- SKILL.md:47-57 — Large code block without imperative context (advisory)
+
+Re-ran audit: 2 advisory warnings only. 458 tests pass, clippy clean.
+<!-- agent:boundary:ecc93e03 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Consolidate active panes — already at session 10, deregistered panes self-clean
-- [x] resync --fix auto-kill investigation — intentional design, no change needed
-- [x] Session-drift detection in preflight (check_layout Check 3)
+- [x] audit docs
 <!-- /agent:pending -->

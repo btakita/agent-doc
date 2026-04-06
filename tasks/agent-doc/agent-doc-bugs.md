@@ -272,7 +272,7 @@ let effective_unmatched = if patches.is_empty() && !ipc_patches_json.is_empty() 
 **3. SKILL.md demoted** — "ALWAYS use `<!-- patch:exchange -->`" → "preferred, not required; both paths are now correct."
 
 38 tests pass, clippy clean, binary installed.
-<!-- agent:boundary:b18182d9 -->
+<!-- agent:boundary:510c61ec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

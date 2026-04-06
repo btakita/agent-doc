@@ -232,7 +232,7 @@ Error: Process completed with exit code 101.
 4. Committed, retagged `v0.26.0` on corky, tagged `v0.2.1` on instruction-files, pushed both
 
 CI should now resolve `instruction-files 0.2.1` from crates.io and find `init()`.
-<!-- agent:boundary:102b2ef5 -->
+<!-- agent:boundary:b335298e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

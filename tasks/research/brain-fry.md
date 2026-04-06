@@ -60,7 +60,7 @@ AI reduces burnout when it automates tedious work (emotional relief), but create
 #### Relevance to Our Work
 
 This directly informs how we design agent-doc sessions and multi-agent workflows. The "3 simultaneous tools" threshold and the distinction between automation-relief vs. oversight-burden are practical design constraints. The finding that manager support (-15% fatigue) vs. self-directed learning (+5% fatigue) also suggests that good tooling documentation and guided workflows matter more than just shipping capabilities.
-<!-- agent:boundary:df00a725 -->
+<!-- agent:boundary:1cca1406 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

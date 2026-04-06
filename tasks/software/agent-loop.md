@@ -53,7 +53,7 @@ Fixed the system prompt to clarify headers are multi-topic only:
 ```
 
 Results: `simple-question-concise` went from 0.3 to 0.7 (now passing). Both smoke cases pass (2/2, mean score 0.85).
-<!-- agent:boundary:86f68d73 -->
+<!-- agent:boundary:9d66d3ad -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

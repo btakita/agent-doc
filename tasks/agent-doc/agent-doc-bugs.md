@@ -108,7 +108,7 @@ The stash window in session 12 (21 panes) accumulated dead/inactive sessions tha
 
 Want me to run `agent-doc resync --fix` to clean this up?
 yes
-### Re: Resync complete — stash cleaned, active panes split across sessions (HEAD)
+### Re: Resync complete — stash cleaned, active panes split across sessions
 
 `agent-doc resync --fix` results:
 - **Deregistered** 20 stash panes (orphaned sessions in stash window)
@@ -122,12 +122,31 @@ However, active panes are still split across two tmux sessions:
 The 21 stash panes were left alive (not killed) — resync marks running `agent-doc` processes as "rescuable." They'll clean up on next resync or when processes exit.
 
 **Root cause:** A `session set` or new tmux session creation provisioned panes in session 12 while agent-doc was active there. When focus returned to session 10, the stash window and its panes stayed in 12. Resync deregisters orphans but doesn't move active panes across sessions — that would require `agent-doc session set 10` to consolidate.
-<!-- agent:boundary:0bc14bd8 -->
+
+I notice that we are swapping with a pane in tmux window 12. Why? We should not swap with a tmux pane in another tmux session. If a claiming tmux pane is in the wrong tmux session, we should move the tmux pane back into the stash window in the correct tmux session.
+
+Fix
+### Re: Cross-session pane swap fix (HEAD)
+
+**Bug:** `rescue_from_stash()` used `swap-pane` without checking the pane's session. When a pane was in session 12's stash, swapping with session 10's agent-doc pane moved the session 10 pane INTO session 12 — the opposite of the intended behavior.
+
+**Fix (route.rs + sync.rs):**
+
+1. **Session guard in `rescue_from_stash()`** — checks `#{session_name}` before attempting rescue. If the pane is not in the target session, skips rescue entirely (logs a warning).
+
+2. **Wrong-session branch in `resolve_or_create_pane()`** — instead of calling `rescue_from_stash()` directly on a foreign-session pane, first calls `tmux.stash_pane(pane, target_session)` to move the pane into the target session's stash window, THEN calls `rescue_from_stash()` to swap it into the agent-doc window. The stash move uses `join-pane` (not `swap-pane`), so no session 10 pane gets displaced.
+
+3. **Same fix in sync.rs** — the stash rescue path now checks pane session against `context_session`. If mismatched, stashes in the target session first before rescuing.
+
+447 tests pass, clippy clean. Binary installed (v0.31.16).
+<!-- agent:boundary:321b2ed7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [x] Fix cross-session pane swap in route.rs `rescue_from_stash()` — session guard added
+- [x] Fix cross-session pane swap in sync.rs stash rescue — session guard + stash-first added
 - [ ] Consolidate active panes — `agent-doc session set 10` to move session 12 panes back
 - [ ] Investigate whether `resync --fix` should auto-kill deregistered stash panes (currently "rescuable")
 - [ ] Add session-drift detection to preflight (warn when panes span multiple sessions)

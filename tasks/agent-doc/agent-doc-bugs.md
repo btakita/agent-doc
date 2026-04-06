@@ -243,7 +243,7 @@ Defense-in-depth: before appending to a component, the binary checks if the cont
 1. Fix the boundary-synthesis CRDT bug in the binary (root cause)
 2. Add write-time dedup as defense-in-depth
 3. Demote the SKILL.md `<!-- patch:exchange -->` instruction from "required for correctness" to "preferred formatting"
-<!-- agent:boundary:0a6a3a30 -->
+<!-- agent:boundary:db0b3178 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

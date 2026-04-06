@@ -97,7 +97,7 @@ Already published to crates.io (from earlier release). Committed the claim auto-
 - crates.io: v0.31.16 (already published)
 - GitHub: tag force-updated to include claim fix
 - Binary: v0.31.16 installed
-<!-- agent:boundary:79cee506 -->
+<!-- agent:boundary:06466163 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

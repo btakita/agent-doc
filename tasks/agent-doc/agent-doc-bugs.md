@@ -33,7 +33,8 @@ agent-doc v0.31.16 — active
 **Partial compact (--keep N)** — added to agent-doc compact: keeps last N ### Re: sections, archives older; parse_topic_sections() helper; run_component_compact_partial(); 4 new tests; 462 tests pass, clippy clean, release binary built.
 
 I just installed codex but I don't see `/codex` in autocomplete.
-### Re: `/codex` not in autocomplete (HEAD)
+I don't see `/codex` in JB plugin autocomplete.
+### Re: `/codex` not in autocomplete
 
 Claude Code slash commands come from two sources:
 1. **Built-in commands** (e.g., `/help`, `/compact`, `/clear`)
@@ -44,7 +45,14 @@ Installing the Codex CLI (OpenAI's tool) doesn't automatically register a `/code
 If you want `/codex` available as a Claude Code slash command, you'd need to create a skill at `.claude/skills/codex/SKILL.md` that defines its behavior.
 
 Is the goal to use Codex from within Claude Code sessions, or were you expecting it to auto-register from the install?
-<!-- agent:boundary:fb987b6e -->
+### Re: `/codex` in JB plugin autocomplete (HEAD)
+
+Same root cause — the JetBrains Claude Code extension reads slash commands from `.claude/skills/<name>/SKILL.md`, the same source as the terminal autocomplete. There's no path-scanning in either interface.
+
+To get `/codex` showing in autocomplete (both terminal and JB plugin), create `.claude/skills/codex/SKILL.md`. The skill file triggers autocomplete registration.
+
+Do you want me to scaffold a basic `/codex` skill that wraps the Codex CLI?
+<!-- agent:boundary:96661aae -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

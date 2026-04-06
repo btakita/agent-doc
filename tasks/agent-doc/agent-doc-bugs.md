@@ -72,7 +72,7 @@ Done. `Cargo.toml`: `"0.1"` -> `"0.2"`. Fixed 4 clippy collapsible-if warnings i
 I ran `Claim for Tmux Pane` on tasks/research/child.md. No text appeared on the document. Why not? Look through logs.
 
 When I focused on the opposite editor, the child.md document was populated with only the agent_doc_session frontmatter. Why not the entire default template?
-### Re: child.md only got UUID, not full template (HEAD)
+### Re: child.md only got UUID, not full template
 
 **Root cause found.** The claim path calls `ensure_session_uuid()` which writes only `agent_doc_session:` — it does NOT set `agent_doc_format: template`. The scaffolding code (claim.rs:205) then checks `resolved.format == Template`, which is false because no format was set. Scaffold skips.
 
@@ -81,11 +81,19 @@ The sync auto-scaffold (v0.31.14) handles empty files by writing the FULL templa
 **The fix:** `ensure_session_uuid()` should also set `agent_doc_format: template` and `agent_doc_write: crdt` when creating frontmatter for an empty file. Or better: claim should use the same scaffold logic as sync for empty files — write the full template in one step, not UUID-first then scaffold-later.
 
 This is the same pattern as the sync scaffold ordering bug (v0.31.14). The fix needs to be in `claim.rs` — when the file is empty, write the full template (like sync does) before proceeding.
-<!-- agent:boundary:b824df42 -->
+
+do
+- [ ] Fix claim.rs: scaffold full template for empty files (not just UUID)4
+### Re: Fixed — claim now scaffolds full template for empty files (HEAD)
+
+Added auto-scaffold in `claim.rs` before `ensure_session()`. For empty `.md` files, writes the full template (UUID + format + crdt + status/exchange/pending components) + saves snapshot + commits. Same pattern as sync's auto-scaffold.
+
+458 tests pass, clippy clean. Binary installed (v0.31.16). Try "Claim for Tmux Pane" on an empty file.
+<!-- agent:boundary:34c3478c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Fix claim.rs: scaffold full template for empty files (not just UUID)
+- [x] Fix claim.rs: scaffold full template for empty files — DONE
 <!-- /agent:pending -->

@@ -117,7 +117,7 @@ The PostToolUse hook should touch the sentinel co-located with the written skill
 
 Updated pending to reflect per-location sentinels.
 Why would we need to touch `.skills-updated` at all?
-### Re: why touch `.skills-updated` at all? (HEAD)
+### Re: why touch `.skills-updated` at all?
 
 You're right — it's unnecessary. The JB Claude Code extension should already watch `.claude/skills/` via IntelliJ's VFS. Writing a new skill file fires the VFS event automatically.
 
@@ -131,11 +131,24 @@ LocalFileSystem.getInstance().refresh(false)  // on .claude/ dir
 That's the programmatic equivalent of `Ctrl+Alt+Y` (Synchronize) — forces IntelliJ to re-scan `.claude/` and fires any registered VFS listeners in the Claude Code extension. No sentinel file, no hook needed.
 
 Pending updated.
-<!-- agent:boundary:8ebe6edf -->
+
+do
+- [ ] **JB plugin: `Refresh Agent Doc Environment` action (Alt+Shift menu)** — calls `LocalFileSystem.refresh()` on `.claude/` dir (forces VFS rescan, equivalent to Ctrl+Alt+Y); also reloads `.agent-doc/components.toml` and re-registers claim
+### Re: Refresh Agent Doc Environment — implemented (HEAD)
+
+4 files changed in `src/agent-doc/editors/jetbrains/`:
+
+- **`RefreshEnvironmentAction.kt`** (new) — clears `SlashCommandCompletionContributor` cache + calls `LocalFileSystem.refresh()` on `~/.claude/` and `<project>/.claude/`
+- **`SlashCommandCompletionContributor.kt`** — added `clearCache()` companion method
+- **`AgentDocPopupAction.kt`** — added `AgentDoc.RefreshEnvironment` after SyncLayout separator
+- **`plugin.xml`** — registered action with `Ctrl+Shift+Alt+R` shortcut and ToolsMenu/EditorPopupMenu
+
+Build: `BUILD SUCCESSFUL`. Available via `Alt+Space` popup menu or `Ctrl+Shift+Alt+R`.
+<!-- agent:boundary:6ba934ec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **JB plugin: `Refresh Agent Doc Environment` action (Alt+Shift menu)** — calls `LocalFileSystem.refresh()` on `.claude/` dir (forces VFS rescan, equivalent to Ctrl+Alt+Y); also reloads `.agent-doc/components.toml` and re-registers claim
+([done]) **JB plugin: `Refresh Agent Doc Environment` action** — implemented and building clean
 <!-- /agent:pending -->

@@ -223,7 +223,7 @@ I see `### Re: duplicate — root cause and fix` duplicated. Is this due to the 
 **Fix applied now:** This response is wrapped in `<!-- patch:exchange -->` — it targets the named component directly, bypassing boundary-synthesis entirely.
 
 **SKILL.md will be updated** to require `<!-- patch:exchange -->` wrapping for all template-mode exchange responses. That's the permanent fix; no binary change needed.
-<!-- agent:boundary:086fc7e2 -->
+<!-- agent:boundary:34cd32cb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

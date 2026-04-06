@@ -494,7 +494,7 @@ If the previous cycle's IPC write timed out (exit 75), it left a `.json` file in
 The `--force-disk` path cleans stale files (`[write] cleaning stale IPC patch file to prevent double-write`). But the normal socket path may not. Worth checking whether `try_ipc` cleans stale patch files before sending.
 
 **Which was it?** Given the timing (claudescore.md issues reported before v0.31.17 was installed), cause #1 is the primary culprit. After v0.31.17 + plugin 0.2.46, both should be resolved. If double patches continue after install, cause #2 needs patching in `write.rs`.
-<!-- agent:boundary:1b61b50c -->
+<!-- agent:boundary:8ed58f43 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

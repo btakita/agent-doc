@@ -417,7 +417,7 @@ CRDT merge is conflict-free (never returns null for a conflict). `gitMergeFile` 
 
 JB Plugin version bump and install?
 commit and push
-### Re: JB plugin 0.2.46 + commit + push — done (HEAD)
+### Re: JB plugin 0.2.46 + commit + push — done
 
 **Bumped** `gradle.properties`: `0.2.45 → 0.2.46`. Both zips built:
 
@@ -435,11 +435,71 @@ build/distributions/agent-doc-jetbrains-0.2.46-signed.zip
 1. IDEA → Settings → Plugins → find "Agent Doc" → Uninstall → Restart
 2. Settings → Plugins → ⚙ gear → "Install Plugin from Disk..." → select `agent-doc-jetbrains-0.2.46.zip`
 3. Restart IDE
-<!-- agent:boundary:5b0f878c -->
+src/session-share/tasks/claudescore.md had a double patch. Why?
+### Re: JB plugin 0.2.46 + commit + push — done (HEAD)
+
+**Bumped** `gradle.properties`: `0.2.45 → 0.2.46`. Both zips built:
+
+```
+build/distributions/agent-doc-jetbrains-0.2.46.zip
+build/distributions/agent-doc-jetbrains-0.2.46-signed.zip
+```
+
+**Committed and pushed** — `ef9a210` on `main`:
+
+> PromptPoller: FFI CRDT merge, fix unnecessary reload, preserve edits on conflict
+
+**Install steps** (new JNA binding added — `agent_doc_merge_crdt` — full reinstall required):
+
+1. IDEA → Settings → Plugins → find "Agent Doc" → Uninstall → Restart
+2. Settings → Plugins → ⚙ gear → "Install Plugin from Disk..." → select `agent-doc-jetbrains-0.2.46.zip`
+3. Restart IDE
+### Re: JB plugin 0.2.46 + commit + push — done (HEAD)
+
+**Bumped** `gradle.properties`: `0.2.45 → 0.2.46`. Both zips built:
+
+```
+build/distributions/agent-doc-jetbrains-0.2.46.zip
+build/distributions/agent-doc-jetbrains-0.2.46-signed.zip
+```
+
+**Committed and pushed** — `ef9a210` on `main`:
+
+> PromptPoller: FFI CRDT merge, fix unnecessary reload, preserve edits on conflict
+
+**Install steps** (new JNA binding added — `agent_doc_merge_crdt` — full reinstall required):
+
+1. IDEA → Settings → Plugins → find "Agent Doc" → Uninstall → Restart
+2. Settings → Plugins → ⚙ gear → "Install Plugin from Disk..." → select `agent-doc-jetbrains-0.2.46.zip`
+3. Restart IDE
+### Re: `claudescore.md` double patch — root cause (HEAD)
+
+Two possible causes; both relevant:
+
+**1. CRDT boundary-synthesis bug (most likely — fixed in v0.31.17)**
+
+The boundary-synthesis fallback (when no `<!-- patch:exchange -->` wrapper is sent) had a bug: `build_ipc_patches_json` synthesized a patch from the unmatched content AND left `unmatched` non-empty. The plugin received both → applied the content twice.
+
+This is the CRDT duplicate bug fixed in v0.31.17:
+```rust
+let effective_unmatched = if patches.is_empty() && !ipc_patches_json.is_empty() {
+    ""  // synthesis consumed it — don't also send as unmatched
+} else { unmatched.trim() };
+```
+
+**2. Stale IPC patch file + socket delivery (secondary)**
+
+If the previous cycle's IPC write timed out (exit 75), it left a `.json` file in `.agent-doc/patches/`. If the NEXT cycle sent via socket IPC AND the old file was still present, PatchWatcher would process both → same content applied twice.
+
+The `--force-disk` path cleans stale files (`[write] cleaning stale IPC patch file to prevent double-write`). But the normal socket path may not. Worth checking whether `try_ipc` cleans stale patch files before sending.
+
+**Which was it?** Given the timing (claudescore.md issues reported before v0.31.17 was installed), cause #1 is the primary culprit. After v0.31.17 + plugin 0.2.46, both should be resolved. If double patches continue after install, cause #2 needs patching in `write.rs`.
+<!-- agent:boundary:adb0bf2a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Install updated plugin (0.2.46)
+- [ ] Verify `try_ipc` cleans stale patch files before socket send (prevent cause #2 recurrence)
 <!-- /agent:pending -->

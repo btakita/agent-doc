@@ -161,7 +161,7 @@ Both repos with cross-crate dependencies already follow the pattern. No further 
 gh failures:
 - https://github.com/btakita/corky/actions/runs/23985286793
 - https://github.com/btakita/corky/actions/runs/23985286644
-### Re: CI failures fixed (HEAD)
+### Re: CI failures fixed
 
 **Two issues found and fixed:**
 
@@ -172,13 +172,42 @@ gh failures:
 3. **aarch64 cross-compile OpenSSL** — already uses `--features vendored-openssl` in the cross build step, so this should work. The error was because it was trying to build with the native (x86_64) OpenSSL headers.
 
 Committed `4e260a3`, pushed, retagged v0.26.0.
-<!-- agent:boundary:d20e3606 -->
+fix https://github.com/btakita/corky/actions/runs/23985562273
+
+upgrade instruction-files and other dependencies. Use updates to dependencies relating to SKILL installation.
+### Re: CI fix + dependency upgrade (HEAD)
+
+**CI fix (aarch64 cross-compile OpenSSL):**
+The `cross` container lacks host-arch (x86_64) `libssl-dev`, causing `openssl-sys` build failure for host dependencies. Created `Cross.toml`:
+```toml
+[target.aarch64-unknown-linux-gnu]
+pre-build = ["apt-get update && apt-get install -y libssl-dev pkg-config"]
+```
+
+**Dependency upgrades:**
+- `agent-kit` 0.3 → 0.4, `instruction-files` 0.1 → 0.2
+- `agent_kit::skill::SkillConfig` was removed in v0.4.0 (moved to separate crate, not published). Inlined the install/check logic in `skill.rs` using `agent_kit::detect::Environment` directly.
+- `corky skill install` now calls `instruction_files::init()` for transitive SKILL installation — installs `instruction-files/SKILL.md` + default runbooks alongside corky's own skills.
+
+**Changes:**
+- `Cross.toml` — new, pre-installs host OpenSSL in cross container
+- `Cargo.toml` — bumped agent-kit 0.4, instruction-files 0.2
+- `src/skill.rs` — replaced `SkillConfig` with inline logic + `instruction_files::init()` call
+
+All 10 skill tests pass, including new assertion for transitive `instruction-files/SKILL.md` installation.
+
+Ready to commit and push + retag v0.26.0?
+<!-- agent:boundary:c1c77168 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- Monitor CI/PyPI workflows after fixes
-- Verify sheet sharing / GCP test users
-- Re-test sheet read
+- [x] Fix CI aarch64 cross-compile (Cross.toml)
+- [x] Upgrade agent-kit 0.3→0.4, instruction-files 0.1→0.2
+- [x] Transitive SKILL installation via instruction_files::init()
+- [ ] Commit, push, retag v0.26.0
+- [ ] Monitor CI after retag
+- [ ] Verify sheet sharing / GCP test users
+- [ ] Re-test sheet read
 <!-- /agent:pending -->

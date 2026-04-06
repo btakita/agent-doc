@@ -223,7 +223,7 @@ Date: _______________
 - The Exhibit A lists your key active projects explicitly, then uses a blanket clause for "all other repositories" to catch everything
 - The open-source carve-out (2b) covers *future* projects categorically — no need to update Exhibit A every time you create a new library
 - Send this alongside a brief email explaining the rationale
-<!-- agent:boundary:3f5b13cf -->
+<!-- agent:boundary:f8933272 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

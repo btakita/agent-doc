@@ -65,14 +65,27 @@ agent-doc depends on `"0.1"` but local source is `0.2.0`. Tracked in tasks/softw
 
 Anything remaining from updates to tasks/software/instruction-files.md.
 agent-doc should use instruction-files 0.2
-### Re: Bumped instruction-files to 0.2 (HEAD)
+### Re: Bumped instruction-files to 0.2
 
 Done. `Cargo.toml`: `"0.1"` -> `"0.2"`. Fixed 4 clippy collapsible-if warnings in preflight.rs. 458 tests pass, clippy clean.
-<!-- agent:boundary:509ea28c -->
+
+I ran `Claim for Tmux Pane` on tasks/research/child.md. No text appeared on the document. Why not? Look through logs.
+
+When I focused on the opposite editor, the child.md document was populated with only the agent_doc_session frontmatter. Why not the entire default template?
+### Re: child.md only got UUID, not full template (HEAD)
+
+**Root cause found.** The claim path calls `ensure_session_uuid()` which writes only `agent_doc_session:` — it does NOT set `agent_doc_format: template`. The scaffolding code (claim.rs:205) then checks `resolved.format == Template`, which is false because no format was set. Scaffold skips.
+
+The sync auto-scaffold (v0.31.14) handles empty files by writing the FULL template (UUID + format + components) in one step. But claim takes a different path: it calls `ensure_session_uuid()` first (minimal frontmatter), then tries to scaffold (but format is missing).
+
+**The fix:** `ensure_session_uuid()` should also set `agent_doc_format: template` and `agent_doc_write: crdt` when creating frontmatter for an empty file. Or better: claim should use the same scaffold logic as sync for empty files — write the full template in one step, not UUID-first then scaffold-later.
+
+This is the same pattern as the sync scaffold ordering bug (v0.31.14). The fix needs to be in `claim.rs` — when the file is empty, write the full template (like sync does) before proceeding.
+<!-- agent:boundary:a7dbe7f8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-instruction-files 0.2 in use. Remaining expansion tracked in tasks/software/instruction-files.md.
+- [ ] Fix claim.rs: scaffold full template for empty files (not just UUID)
 <!-- /agent:pending -->

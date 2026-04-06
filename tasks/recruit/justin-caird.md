@@ -961,12 +961,26 @@ Context that should ease the concern:
 4. Have it ready to share screen during the Monday interview
 
 The complexity concern is valid but manageable. You won't know until you see it, and 5 days is generous for what's designed as a live interview exercise.
-<!-- agent:boundary:e8fc9caf -->
+
+Today is my first day at Dreamable.
+Please draft a linkedin to send to Justin to cancel the call today.
+Congrats on the first day at Dreamable!
+
+Here's a LinkedIn message to cancel with Justin:
+
+---
+
+> Hi Justin — I wanted to reach out before our call today. I actually accepted an offer and today is my first day at a new company, so I need to cancel and step out of the process. I apologize for the short notice. I appreciate you reaching out and wish you and the ECI team the best in building out the AI group.
+
+---
+
+Short, professional, no awkward explanation needed.
+<!-- agent:boundary:754319f6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->
-- [ ] **Reply to Justin on LinkedIn** with preferred time from updated slots (Mon 4/6 or Thu 4/9)
-- [ ] Watch for markdown exercise email from Justin (expected April 1 morning)
-- [ ] When exercise arrives: assess scope, complete with agent-doc, consider YouTube recording
-- [ ] Prepare for first-round interview (possibly VP of Engineering, discussion format, 60-90 min)
+- [x] ~~Reply to Justin on LinkedIn~~ — sending cancellation (first day at Dreamable)
+- [x] ~~Watch for markdown exercise email~~ — no longer relevant
+- [x] ~~Complete markdown exercise~~ — no longer relevant
+- [x] ~~Prepare for first-round interview~~ — no longer relevant
 <!-- /agent:pending -->

@@ -28,7 +28,7 @@ Operational task document for agent-loop workspace management.
 Setup pyproject.toml
 I want to have vllm as a dependency.
 My goal is to run Qwen3-Coder-Next (80B) on vllm to avoid running out of claude tokens over the next couple of days
-### Re: Setup pyproject.toml with vllm (HEAD)
+### Re: Setup pyproject.toml with vllm
 
 `pyproject.toml` was empty — populated it with `vllm` as a dependency:
 
@@ -50,13 +50,37 @@ To use vllm, either:
 
 For Qwen3-Coder-Next 80B you'll also need enough VRAM — 80B at fp16 is ~160GB, so either 2× H100 or use quantization (e.g. AWQ/GPTQ ~40–80GB). Run with:
 ```bash
-vllm serve Qwen/Qwen3-Coder-Next-80B --tensor-parallel-size 2
+vllm serve44 Qwen/Qwen3-Coder-Next-80B --tensor-parallel-size 2
 ```
-<!-- agent:boundary:efc28728 -->
+I have a 5090 and a large amount of available RAM. What would be the best local coding model for me to run?
+### Re: Typo fix + best model for RTX 5090 (HEAD)
+
+Looks like `vllm serve44` is a typo — should be `vllm serve`.
+
+**RTX 5090 has 32GB VRAM.** Qwen3-Coder-Next 80B needs ~45GB at Q4 — won't fit in vllm (GPU-only, no CPU offload).
+
+#### Best options
+
+**vllm (pure GPU, fast inference):**
+- `Qwen2.5-Coder-32B-AWQ` — ~18GB, fits with headroom, excellent coding quality
+- Any 32B model at AWQ/Q4 precision works well
+
+**70B+ with large RAM (llama.cpp / ollama — partial GPU offload):**
+- `Qwen2.5-Coder-72B-Q4` — ~40GB total; put ~32GB layers on GPU, rest in RAM
+- Slower tokens/sec but higher quality; ollama handles offload automatically:
+  ```bash
+  ollama run qwen2.5-coder:72b
+  ```
+
+**Recommendation:** Start with `Qwen2.5-Coder-32B-AWQ` on vllm for speed. If quality ceiling isn't enough, switch to `Qwen2.5-Coder-72B-Q4` via ollama with partial offload.
+
+> Knowledge cutoff is Aug 2025 — "Qwen3-Coder-Next" may have released after that. Check HuggingFace for latest Qwen3-Coder variants; the 32B or 14B version would be the right size target.
+<!-- agent:boundary:713056e2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [ ] Fix Python version for vllm: run `mise use python@3.12` in agent-loop root
 - [ ] Install vllm: `uv pip install vllm` in a 3.12 venv
-- [ ] Serve Qwen3-Coder-Next-80B via vllm
+- [ ] Try `Qwen2.5-Coder-32B-AWQ` on vllm (fits 32GB VRAM)
+- [ ] If quality insufficient: set up `Qwen2.5-Coder-72B-Q4` via ollama with GPU offload
 <!-- /agent:pending -->

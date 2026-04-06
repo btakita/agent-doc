@@ -171,7 +171,7 @@ This surfaces session-drift as a `layout_issues` entry in the preflight JSON —
 
 447 tests pass, clippy clean. Binary installed (v0.31.16).
 audit docs
-### Re: audit docs (HEAD)
+### Re: audit docs
 
 Ran `agent-doc audit-docs` from `src/agent-doc/`. Found 5 issues initially:
 
@@ -192,11 +192,43 @@ Ran `agent-doc audit-docs` from `src/agent-doc/`. Found 5 issues initially:
 - SKILL.md:47-57 — Large code block without imperative context (advisory)
 
 Re-ran audit: 2 advisory warnings only. 458 tests pass, clippy clean.
-<!-- agent:boundary:628c06fc -->
+
+do
+- [ ] Implement partial compact (keep last N topics, archive older)
+### Re: Implement partial compact (keep last N topics, archive older)
+
+Done. Added `--keep N` support to `agent-doc compact` in template mode.
+
+**What changed:**
+
+- `compact.rs` — `run()` now takes `keep: Option<usize>`:
+  - Template mode + `None` → full compact (archive all, same as before)
+  - Template mode + `Some(N)` → partial compact (keep last N `### Re:` sections)
+  - Inline mode + `None` → default keep=2 (same as before)
+- Added `parse_topic_sections(content) → (preamble, Vec<String>)` — splits exchange content by `### Re:` headings, strips boundary markers from the last section
+- Added `run_component_compact_partial()` — archives older topics + rebuilds component with archive pointer + preamble (or `--message`) + kept sections
+- `preflight.rs` — fixed call site: `compact::run(file, None, ...)` (full compact for auto-compact)
+- `main.rs` — `--keep` changed from `usize` (default 2) to `Option<usize>` (no default); help text updated
+
+**Usage:**
+```
+# Keep last 3 topics, archive older, replace preamble with new summary (HEAD)
+agent-doc compact tasks/foo.md --keep 3 --message "Session summary: ..."
+
+# Full compact (archive all) — unchanged behavior (HEAD)
+agent-doc compact tasks/foo.md
+
+# Archive all explicitly (HEAD)
+agent-doc compact tasks/foo.md --keep 0
+```
+
+Updated `compact-exchange.md` runbook with full/partial compact sections.
+
+4 new tests: `parse_topic_sections_basic`, `parse_topic_sections_keep_threshold`, `parse_topic_sections_strips_boundary_marker`, `parse_topic_sections_no_re_headings`. 462 tests pass, clippy clean. Release binary built.
+<!-- agent:boundary:d647e388 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] audit docs
 <!-- /agent:pending -->

@@ -181,7 +181,9 @@ Verified — `agent-doc commands` now returns all 7 codex commands:
 Please add a feature to parse the diff and run claude commands when the line starts with `/`. So if we call `/clear` the `/clear` command on the clause session will be directly run.
 
 Make sure to guard against code fencing and other cases where the `/` should not be interpreted as a raw agent harness command.
-### Re: slash commands from diff (HEAD)
+The `### Re: slash commands from diff` was duplicated. One copy is uncommitted. Why?
+
+### Re: slash commands from diff
 
 Implemented. Here's what changed:
 
@@ -204,7 +206,14 @@ Step 4d calls `parse_slash_commands` on the diff and populates the field. `skip_
 After preflight, if `slash_commands` is non-empty, the skill executes each via the `Skill` tool before generating the response. Built-ins like `/clear` that can't be routed through `Skill` are noted in the console.
 
 All 711 tests pass, clippy clean, binary installed.
-<!-- agent:boundary:e0feb32c -->
+### Re: duplicate — root cause and fix (HEAD)
+
+**Why it happened:** The write used the boundary-synthesis path (IPC output showed `0 components` — no named component patch was matched). The boundary-synthesis + CRDT append created a duplicate entry. This is the known CRDT duplicate bug tracked in `tasks/agent-doc/agent-doc-crdt-duplicate-bug.md`.
+
+**Why one copy was uncommitted:** After the IPC write, `agent-doc commit` repositioned the boundary marker. The duplicate ended up inserted before the user's question in the exchange, landing in the uncommitted (green gutter) region.
+
+**Fixed:** Ran `agent-doc dedupe` — removed 1192 bytes of duplicate content.
+<!-- agent:boundary:0985000b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

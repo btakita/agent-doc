@@ -144,7 +144,7 @@ do
 - **`plugin.xml`** — registered action with `Ctrl+Shift+Alt+R` shortcut and ToolsMenu/EditorPopupMenu
 
 Build: `BUILD SUCCESSFUL`. Available via `Alt+Space` popup menu or `Ctrl+Shift+Alt+R`.
-<!-- agent:boundary:6ba934ec -->
+<!-- agent:boundary:ca0a9518 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -94,7 +94,7 @@ Or simpler — just always touch it on any `Write` and let the JB plugin debounc
 **JB plugin side**: register a `VirtualFileListener` (or `BulkFileListener`) on `~/.claude/.skills-updated`. When mtime changes, invalidate the skill completion cache and re-scan `.claude/skills/`.
 
 This is a clean two-part contract with no restart required. Want me to add both pieces as pending tasks?
-<!-- agent:boundary:cba61c56 -->
+<!-- agent:boundary:1f989bd4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

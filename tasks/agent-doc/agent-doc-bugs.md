@@ -131,7 +131,7 @@ LocalFileSystem.getInstance().refresh(false)  // on .claude/ dir
 That's the programmatic equivalent of `Ctrl+Alt+Y` (Synchronize) — forces IntelliJ to re-scan `.claude/` and fires any registered VFS listeners in the Claude Code extension. No sentinel file, no hook needed.
 
 Pending updated.
-<!-- agent:boundary:34d4d9c6 -->
+<!-- agent:boundary:8ebe6edf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

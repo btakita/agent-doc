@@ -964,7 +964,7 @@ Configure via `/claude-auto:config set <key> <value>` inside Claude Code.
 Or local dev: `claude --plugin-dir /path/to/claude-auto`
 
 The Ketchup loop it enforces: write one failing test → write minimal passing code → `test && commit || revert` → repeat.
-<!-- agent:boundary:93ffd625 -->
+<!-- agent:boundary:90e234d0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

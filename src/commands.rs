@@ -2,11 +2,18 @@
 //!
 //! ## Spec
 //! - Enumerates all commands available in the agent-doc ecosystem: agent-doc CLI subcommands,
-//!   Claude Code built-in slash commands, and installed skill commands (`/existence`, `/tagpath`).
+//!   Claude Code built-in slash commands, installed skill commands, and installed plugin commands.
 //! - Each entry carries a `name` (slash-prefixed), `args` (synopsis), and `description`.
 //! - `run()` serializes the full list to pretty-printed JSON on stdout; consumed by editor plugins
 //!   for autocomplete popups.
-//! - All entries are static; no filesystem or process inspection occurs at runtime.
+//! - Static base list (agent-doc CLI + Claude Code built-ins) is extended with dynamically
+//!   discovered plugin commands from `~/.claude/plugins/marketplaces/*/plugins/*/commands/*.md`.
+//!
+//! ## Plugin Command Discovery
+//! - Scans `~/.claude/plugins/marketplaces/<MARKETPLACE>/plugins/<NAMESPACE>/commands/*.md`
+//! - Each `.md` file may have YAML frontmatter with `description:` and `argument-hint:` fields
+//! - Command name: `/<NAMESPACE>:<stem>` (e.g. `/codex:setup`, `/codex:rescue`)
+//! - Files with empty descriptions are skipped
 //!
 //! ## Agentic Contracts
 //! - `run() -> anyhow::Result<()>` — always succeeds unless JSON serialization panics (it won't);
@@ -31,7 +38,7 @@ pub struct CommandInfo {
     pub description: String,
 }
 
-/// Return all known commands: agent-doc CLI + Claude Code built-in + installed skills.
+/// Return all known commands: agent-doc CLI + Claude Code built-in + installed skills + plugins.
 pub fn run() -> anyhow::Result<()> {
     let commands = all_commands();
     println!("{}", serde_json::to_string_pretty(&commands)?);
@@ -108,7 +115,7 @@ fn all_commands() -> Vec<CommandInfo> {
     cmds.push(cmd("/hooks", "", "Show configured hooks"));
     cmds.push(cmd("/btw", "<MESSAGE>", "Quick side question without interrupting"));
 
-    // --- Other installed skills (from .claude/skills/) ---
+    // --- Static project skills (fallback for well-known skills) ---
     cmds.push(cmd("/existence", "lookup|search|new|lint|scope [ARGS]", "Query and manage ontology terms"));
     cmds.push(cmd("/existence lookup", "<TERM>", "Read a term's full definition"));
     cmds.push(cmd("/existence search", "<QUERY>", "Search terms by relevance"));
@@ -123,7 +130,121 @@ fn all_commands() -> Vec<CommandInfo> {
     cmds.push(cmd("/tagpath lint", "[PATH]", "Validate naming against .naming.toml rules"));
     cmds.push(cmd("/tagpath extract", "<PATH>", "Extract identifiers from files"));
 
+    // --- Dynamic: plugin commands from ~/.claude/plugins/marketplaces/ ---
+    let static_names: std::collections::HashSet<String> =
+        cmds.iter().map(|c| c.name.clone()).collect();
+    let mut plugin_cmds = discover_plugin_commands();
+    plugin_cmds.retain(|c| !static_names.contains(&c.name));
+    cmds.extend(plugin_cmds);
+
     cmds
+}
+
+/// Scan `~/.claude/plugins/marketplaces/<MARKETPLACE>/plugins/<NAMESPACE>/commands/*.md`
+/// and return one `CommandInfo` per `.md` file with a non-empty `description` frontmatter field.
+/// Command names follow the pattern `/<NAMESPACE>:<stem>`.
+fn discover_plugin_commands() -> Vec<CommandInfo> {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let mut cmds = Vec::new();
+
+    let home = std::env::var("HOME").unwrap_or_default();
+    if home.is_empty() {
+        return cmds;
+    }
+    let marketplaces_dir = PathBuf::from(&home).join(".claude/plugins/marketplaces");
+    if !marketplaces_dir.is_dir() {
+        return cmds;
+    }
+
+    let Ok(marketplace_entries) = fs::read_dir(&marketplaces_dir) else {
+        return cmds;
+    };
+
+    for marketplace_entry in marketplace_entries.flatten() {
+        let marketplace_path = marketplace_entry.path();
+        if !marketplace_path.is_dir() {
+            continue;
+        }
+        let plugins_dir = marketplace_path.join("plugins");
+        if !plugins_dir.is_dir() {
+            continue;
+        }
+        let Ok(plugin_entries) = fs::read_dir(&plugins_dir) else {
+            continue;
+        };
+        for plugin_entry in plugin_entries.flatten() {
+            let plugin_path = plugin_entry.path();
+            if !plugin_path.is_dir() {
+                continue;
+            }
+            let namespace = plugin_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if namespace.is_empty() || namespace.starts_with('.') {
+                continue;
+            }
+            let commands_dir = plugin_path.join("commands");
+            if !commands_dir.is_dir() {
+                continue;
+            }
+            let Ok(cmd_entries) = fs::read_dir(&commands_dir) else {
+                continue;
+            };
+            let mut plugin_cmds: Vec<CommandInfo> = cmd_entries
+                .flatten()
+                .filter_map(|entry| {
+                    let path = entry.path();
+                    if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                        return None;
+                    }
+                    let stem = path.file_stem()?.to_string_lossy().to_string();
+                    if stem.is_empty() || stem.starts_with('.') {
+                        return None;
+                    }
+                    let content = fs::read_to_string(&path).unwrap_or_default();
+                    let (description, args) = parse_command_frontmatter(&content);
+                    if description.is_empty() {
+                        return None;
+                    }
+                    Some(CommandInfo {
+                        name: format!("/{namespace}:{stem}"),
+                        args,
+                        description,
+                    })
+                })
+                .collect();
+            plugin_cmds.sort_by(|a, b| a.name.cmp(&b.name));
+            cmds.extend(plugin_cmds);
+        }
+    }
+
+    cmds
+}
+
+/// Parse `description:` and `argument-hint:` from a YAML frontmatter block.
+/// Returns `(description, args)`.
+fn parse_command_frontmatter(content: &str) -> (String, String) {
+    let mut description = String::new();
+    let mut args = String::new();
+
+    let Some(rest) = content.strip_prefix("---") else {
+        return (description, args);
+    };
+    let end = rest.find("\n---").unwrap_or(rest.len());
+    let frontmatter = &rest[..end];
+
+    for line in frontmatter.lines() {
+        if let Some(val) = line.strip_prefix("description:") {
+            description = val.trim().trim_matches('"').trim_matches('\'').to_string();
+        } else if let Some(val) = line.strip_prefix("argument-hint:") {
+            args = val.trim().trim_matches('"').trim_matches('\'').to_string();
+        }
+    }
+
+    (description, args)
 }
 
 fn cmd(name: &str, args: &str, description: &str) -> CommandInfo {
@@ -160,5 +281,27 @@ mod tests {
         assert!(json.contains("/agent-doc"));
         assert!(json.contains("/help"));
         assert!(json.contains("/existence"));
+    }
+
+    #[test]
+    fn parse_command_frontmatter_extracts_description_and_args() {
+        let content = r#"---
+description: Check whether the local Codex CLI is ready
+argument-hint: '[--enable-review-gate|--disable-review-gate]'
+allowed-tools: Bash(node:*)
+---
+
+Body text here.
+"#;
+        let (desc, args) = parse_command_frontmatter(content);
+        assert_eq!(desc, "Check whether the local Codex CLI is ready");
+        assert_eq!(args, "[--enable-review-gate|--disable-review-gate]");
+    }
+
+    #[test]
+    fn parse_command_frontmatter_handles_missing_fields() {
+        let (desc, args) = parse_command_frontmatter("no frontmatter here");
+        assert!(desc.is_empty());
+        assert!(args.is_empty());
     }
 }

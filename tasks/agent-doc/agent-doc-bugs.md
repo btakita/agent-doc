@@ -359,7 +359,7 @@ VFS external change detected              VFS external change detected
 3. Long-term: add `ffi::agent_doc_merge_crdt()` for the edge case where a disk write diverges and needs CRDT-aware merge
 
 **Pending update:** the `PromptPoller merge failure` item should be re-scoped — the fix isn't just "preserve editor content on failure," it's "ensure PromptPoller never fires during a normal agent write cycle."
-<!-- agent:boundary:745c34aa -->
+<!-- agent:boundary:7a70abeb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -639,7 +639,7 @@ Added "When to bump the plugin version" section to `runbooks/plugin-install.md`:
 
 **Install:**
 Settings → Plugins → gear → "Install Plugin from Disk..." → `agent-doc-jetbrains-0.2.47.zip` → Restart
-<!-- agent:boundary:7dec7dd2 -->
+<!-- agent:boundary:b87ccb81 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

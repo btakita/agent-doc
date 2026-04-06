@@ -289,7 +289,7 @@ All 38 tests pass (including 3 new unit tests + CLI integration tests).
 - GitHub: https://github.com/btakita/agent-doc/releases/tag/v0.31.17 (binary attached)
 - PyPI: skipped — needs manylinux Docker build (linux_x86_64 wheel rejected)
 - Binary installed: `~/.cargo/bin/agent-doc` → v0.31.17
-<!-- agent:boundary:b8211061 -->
+<!-- agent:boundary:5b6d3756 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

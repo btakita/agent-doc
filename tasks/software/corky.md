@@ -221,6 +221,17 @@ For more information about this error, try `rustc --explain E0425`.
 error: could not compile `corky` (lib) due to 1 previous error
 Error: Process completed with exit code 101.
 ```
+### Re: CI fix — `instruction_files::init` not in published 0.2.0
+
+**Root cause:** `init()` was committed to the local `instruction-files` repo (`102dcc3`) but `0.2.0` was already published to crates.io *without* it. CI resolves from crates.io, so `init` didn't exist there.
+
+**Fix:**
+1. Bumped `instruction-files` to `0.2.1`, published to crates.io
+2. Updated corky `Cargo.toml`: `instruction-files = "0.2.1"`
+3. Verified `cargo build` succeeds locally
+4. Committed, retagged `v0.26.0` on corky, tagged `v0.2.1` on instruction-files, pushed both
+
+CI should now resolve `instruction-files 0.2.1` from crates.io and find `init()`.
 ### Re: CI fix — `instruction_files::init` not in published 0.2.0 (HEAD)
 
 **Root cause:** `init()` was committed to the local `instruction-files` repo (`102dcc3`) but `0.2.0` was already published to crates.io *without* it. CI resolves from crates.io, so `init` didn't exist there.
@@ -232,7 +243,51 @@ Error: Process completed with exit code 101.
 4. Committed, retagged `v0.26.0` on corky, tagged `v0.2.1` on instruction-files, pushed both
 
 CI should now resolve `instruction-files 0.2.1` from crates.io and find `init()`.
-<!-- agent:boundary:b335298e -->
+
+Fix ci error https://github.com/btakita/corky/actions/runs/24021314691/job/70050622113#step:5:652
+```
+failures:
+
+---- skill::tests::install_creates_all_files stdout ----
+Installed skill v0.26.0 → /tmp/.tmpaIVNVS/.claude/skills/corky/SKILL.md
+Installed 2 dependency file(s) (instruction-files).
+  wrote /tmp/.tmpaIVNVS/.claude/skills/email/SKILL.md
+  wrote /tmp/.tmpaIVNVS/.claude/skills/email/runbooks/email-send.md
+  wrote /tmp/.tmpaIVNVS/.claude/skills/email/runbooks/review-inbox.md
+  wrote /tmp/.tmpaIVNVS/.claude/skills/email/runbooks/draft-reply.md
+  wrote /tmp/.tmpaIVNVS/.claude/skills/email/runbooks/enrich-contact.md
+  wrote /tmp/.tmpaIVNVS/.claude/skills/email/runbooks/gmail-config.md
+  wrote /tmp/.tmpaIVNVS/.claude/skills/email/runbooks/browser-paste.md
+  wrote /tmp/.tmpaIVNVS/.claude/skills/linkedin/SKILL.md
+  wrote /tmp/.tmpaIVNVS/.claude/skills/linkedin/runbooks/linkedin-post.md
+  wrote /tmp/.tmpaIVNVS/.claude/skills/corky/runbooks/imports.md
+  wrote /tmp/.tmpaIVNVS/.claude/skills/corky/runbooks/transcription.md
+Installed 11 file(s), 0 already up to date.
+
+thread 'skill::tests::install_creates_all_files' (12187) panicked at src/skill.rs:280:9:
+assertion failed: dir.path().join(".claude/skills/instruction-files/SKILL.md").exists()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    skill::tests::install_creates_all_files
+
+test result: FAILED. 263 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.91s
+
+error: test failed, to rerun pass `--lib`
+Error: Process completed with exit code 101.
+```
+### Re: CI fix — `install_creates_all_files` SKILL.md assertion (HEAD)
+
+**Root cause:** `instruction_files::init()` called `Environment::detect()` which returns `Generic` in CI (no Claude Code env vars). `Generic` maps to `AGENTS.md`, not `.claude/skills/instruction-files/SKILL.md` — so the assertion failed.
+
+**Fix:** Changed `init()` to always use `Environment::ClaudeCode` — SKILL installation is inherently Claude Code, so runtime detection is wrong here.
+
+**Changes:**
+- `instruction-files/src/lib.rs` — `Environment::detect()` → `Environment::ClaudeCode`
+- Bumped to 0.2.2, published to crates.io, tagged v0.2.2, pushed
+- Updated corky `Cargo.toml`: `instruction-files = "0.2.2"`, committed, pushed, retagged v0.26.0
+<!-- agent:boundary:0e357f0e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -242,6 +297,8 @@ CI should now resolve `instruction-files 0.2.1` from crates.io and find `init()`
 - [x] Upgrade agent-kit 0.3→0.4, instruction-files 0.1→0.2
 - [x] Transitive SKILL installation via instruction_files::init()
 - [x] Commit, push, retag v0.26.0
+- [x] instruction-files 0.2.2 (always ClaudeCode env in init()) — published, v0.2.2 tagged
+- [x] corky bumped to instruction-files 0.2.2, retagged v0.26.0
 - [ ] Monitor CI after retag
 - [ ] Verify sheet sharing / GCP test users
 - [ ] Re-test sheet read

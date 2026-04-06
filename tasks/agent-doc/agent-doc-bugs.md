@@ -291,7 +291,7 @@ All 38 tests pass (including 3 new unit tests + CLI integration tests).
 - Binary installed: `~/.cargo/bin/agent-doc` → v0.31.17
 
 src/session-share/tasks/claudescore.md has multiple external edits. I lost some characters typed. Why?
-### Re: `claudescore.md` external edits + character loss (HEAD)
+### Re: `claudescore.md` external edits + character loss
 
 Found the exact cause in `PromptPoller.kt`:
 
@@ -324,11 +324,48 @@ if (merged != null) {
 ```
 
 Want me to implement this?
-<!-- agent:boundary:e52c1b1e -->
+Why are we doing a 3 way merge?
+Why not CRDT?
+Why is the JB Plugin doing so much of the lifting. Can the FFI plugin get more involved?
+### Re: 3-way merge vs CRDT + JB Plugin lifting (HEAD)
+
+**Why 3-way merge (not CRDT)?**
+
+`PromptPoller` predates CRDT. It was written when the disk-write path was primary — agent writes to disk, IntelliJ detects the change via VFS, `PromptPoller` reconciles the user's unsaved edits using `git merge-file`. `crdt.rs` lives in the Rust binary but the plugin has no FFI call to reach it.
+
+**Why not CRDT in-plugin?**
+
+The answer isn't "swap git merge for CRDT in-plugin." It's to not need `PromptPoller` at all.
+
+**JB Plugin doing too much — FFI architecture**
+
+`PromptPoller` violates the FFI-first principle from CLAUDE.md: *"business logic belongs in the shared FFI library, not duplicated across plugins."* The right architecture:
+
+```
+PromptPoller (now)                     →  Target
+────────────────────────────────          ──────────────────────
+VFS external change detected              VFS external change detected
+↓ git merge-file (in-plugin)              ↓ ffi::agent_doc_merge_crdt(file)
+↓ Document.setText(merged)                ↓ Document API write
+↓ reloadFiles() on conflict              ↓ (CRDT = no conflict possible)
+```
+
+**But the real target: remove PromptPoller entirely.**
+
+`PromptPoller` only exists because the binary sometimes writes to disk directly. If the binary exclusively uses IPC (PatchWatcher → Document API) when an IDE connection is active, there are no external disk writes for `PromptPoller` to reconcile. The right fix chain:
+
+1. Binary never falls back to disk writes when socket IPC is active (already true for the socket path — socket failure falls back to file-based IPC, which PatchWatcher handles)
+2. `PromptPoller` handles only true external disk writes (rare/manual edits) — no longer triggered by the normal agent write cycle
+3. Long-term: add `ffi::agent_doc_merge_crdt()` for the edge case where a disk write diverges and needs CRDT-aware merge
+
+**Pending update:** the `PromptPoller merge failure` item should be re-scoped — the fix isn't just "preserve editor content on failure," it's "ensure PromptPoller never fires during a normal agent write cycle."
+<!-- agent:boundary:745c34aa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **PromptPoller merge failure** — preserve editor content when `gitMergeFile` returns null; current behavior calls `reloadFiles()` which silently discards unsaved keystrokes
+- [ ] **PromptPoller: verify it never fires during IPC write cycle** — `PatchWatcher` uses Document API (no disk write, no VFS external change); confirm `PromptPoller` is not triggered. If it is, identify why disk is being written during the IPC path.
+- [ ] **PromptPoller merge failure** — as fallback: preserve editor content when `gitMergeFile` returns null; don't call `reloadFiles()`
+- [ ] **FFI: `agent_doc_merge_crdt()`** — CRDT-aware merge via FFI for edge cases where disk diverges; replaces git merge-file in plugin
 <!-- /agent:pending -->

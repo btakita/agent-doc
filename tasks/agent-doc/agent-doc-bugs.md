@@ -134,7 +134,7 @@ Pending updated.
 
 do
 - [ ] **JB plugin: `Refresh Agent Doc Environment` action (Alt+Shift menu)** — calls `LocalFileSystem.refresh()` on `.claude/` dir (forces VFS rescan, equivalent to Ctrl+Alt+Y); also reloads `.agent-doc/components.toml` and re-registers claim
-### Re: Refresh Agent Doc Environment — implemented (HEAD)
+### Re: Refresh Agent Doc Environment — implemented
 
 4 files changed in `src/agent-doc/editors/jetbrains/`:
 
@@ -144,11 +144,27 @@ do
 - **`plugin.xml`** — registered action with `Ctrl+Shift+Alt+R` shortcut and ToolsMenu/EditorPopupMenu
 
 Build: `BUILD SUCCESSFUL`. Available via `Alt+Space` popup menu or `Ctrl+Shift+Alt+R`.
-<!-- agent:boundary:ca0a9518 -->
+Do we need to bump the JB plugin version? Do I need to install the latest plugin?
+### Re: version bump + install (HEAD)
+
+Yes and yes.
+
+**Bumped** `gradle.properties`: `0.2.44 → 0.2.45`. Both zips built:
+
+```
+build/distributions/agent-doc-jetbrains-0.2.45.zip
+build/distributions/agent-doc-jetbrains-0.2.45-signed.zip
+```
+
+**Install steps** (new class added — `RefreshEnvironmentAction` — so full reinstall required):
+
+1. IDEA → Settings → Plugins → find "Agent Doc" → Uninstall → Restart
+2. Settings → Plugins → ⚙ gear → "Install Plugin from Disk..." → select `agent-doc-jetbrains-0.2.45.zip`
+3. Restart IDE
+<!-- agent:boundary:97094f21 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-([done]) **JB plugin: `Refresh Agent Doc Environment` action** — implemented and building clean
 <!-- /agent:pending -->

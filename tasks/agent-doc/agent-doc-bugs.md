@@ -177,7 +177,7 @@ Verified — `agent-doc commands` now returns all 7 codex commands:
 `/codex:setup`, `/codex:rescue`, `/codex:review`, `/codex:result`, `/codex:status`, `/codex:cancel`, `/codex:adversarial-review`
 
 **Also:** rebuilt and reinstalled the binary. The agent-doc JB plugin calls `agent-doc commands` on first autocomplete in each session — after using `Refresh Agent Doc Environment` (`Ctrl+Shift+Alt+R`) to clear the cache, `/codex:*` commands will appear.
-<!-- agent:boundary:dc1c99d5 -->
+<!-- agent:boundary:cb340148 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -65,7 +65,7 @@ Or local dev: `claude --plugin-dir /path/to/claude-auto`
 The Ketchup loop it enforces: write one failing test → write minimal passing code → `test && commit || revert` → repeat.
 
 transfer claude-audio research to tasks/research/claudescore.md
-<!-- agent:boundary:919f8620 -->
+<!-- agent:boundary:41c57090 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

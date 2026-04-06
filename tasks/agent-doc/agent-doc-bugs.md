@@ -61,7 +61,7 @@ CLI picks up new skill files immediately (scans `.claude/skills/` on each invoca
 
 If it still doesn't appear after restart, check whether the plugin shows the skill in a non-agent-doc context (e.g., typing `/` in a regular chat panel). That would confirm it's a skill-discovery timing issue vs. a context-specific suppression.
 Can we have a quick dirty check that runs before autocomplete? If not, can we add a refresh autocomplete in the Agent Doc command menu?
-### Re: quick check before autocomplete / refresh command (HEAD)
+### Re: quick check before autocomplete / refresh command
 
 **Quick dirty check (mtime scan):** The autocomplete is provided by Anthropic's JB Claude Code extension — we don't control its cache invalidation. However, IntelliJ's VFS watches the filesystem. If the extension uses `VirtualFileListener`, touching the skills directory might trigger a rescan without a restart. Worth testing:
 
@@ -72,10 +72,33 @@ touch ~/.claude/skills/.reload && rm ~/.claude/skills/.reload
 **Refresh in Agent Doc command menu:** This is in our control. We can add an `AnAction` to agent-doc's JB plugin that touches `.claude/skills/` to fire a VFS event (best case), with a fallback notification if the extension doesn't respond to it.
 
 Want me to add "refresh skills autocomplete" as a pending task for the JB plugin?
-<!-- agent:boundary:289b0cb1 -->
+Is there a way to tell of there is a new skill installed. Such as a claude hook?
+### Re: detecting new skills via hook (HEAD)
+
+Yes — Claude Code supports `PostToolUse` hooks. We can use a sentinel file contract:
+
+**Hook side** (`.claude/settings.json`):
+```json
+{
+  "hooks": {
+    "PostToolUse": [{
+      "matcher": "Write",
+      "command": "grep -q '\\.claude/skills/' <<< \"$CLAUDE_TOOL_INPUT\" && touch ~/.claude/.skills-updated || true"
+    }]
+  }
+}
+```
+
+Or simpler — just always touch it on any `Write` and let the JB plugin debounce.
+
+**JB plugin side**: register a `VirtualFileListener` (or `BulkFileListener`) on `~/.claude/.skills-updated`. When mtime changes, invalidate the skill completion cache and re-scan `.claude/skills/`.
+
+This is a clean two-part contract with no restart required. Want me to add both pieces as pending tasks?
+<!-- agent:boundary:cba61c56 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] **JB plugin: skill cache invalidation via sentinel file** — PostToolUse hook touches `~/.claude/.skills-updated`; plugin watches via VirtualFileListener and reloads completions
 <!-- /agent:pending -->

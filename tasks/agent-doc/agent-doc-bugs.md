@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-agent-doc v0.31.14 released to crates.io + GitHub
+agent-doc v0.31.16 — active
 <!-- /agent:status -->
 
 ## Exchange
@@ -31,11 +31,23 @@ agent-doc v0.31.14 released to crates.io + GitHub
 **audit-docs** — added layout_issues to SPEC.md §7.26, CLAUDE.md, README.md, SKILL.md.
 
 **Partial compact (--keep N)** — added to agent-doc compact: keeps last N ### Re: sections, archives older; parse_topic_sections() helper; run_component_compact_partial(); 4 new tests; 462 tests pass, clippy clean, release binary built.
-<!-- agent:boundary:5cb5f9c4 -->
+
+I just installed codex but I don't see `/codex` in autocomplete.
+### Re: `/codex` not in autocomplete (HEAD)
+
+Claude Code slash commands come from two sources:
+1. **Built-in commands** (e.g., `/help`, `/compact`, `/clear`)
+2. **Skills** — markdown files in `.claude/skills/<name>/SKILL.md`
+
+Installing the Codex CLI (OpenAI's tool) doesn't automatically register a `/codex` skill in Claude Code. The two are separate systems — Claude Code doesn't scan `$PATH` for external CLIs and add them as slash commands.
+
+If you want `/codex` available as a Claude Code slash command, you'd need to create a skill at `.claude/skills/codex/SKILL.md` that defines its behavior.
+
+Is the goal to use Codex from within Claude Code sessions, or were you expecting it to auto-register from the install?
+<!-- agent:boundary:fbd8f48f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-
 <!-- /agent:pending -->

@@ -122,7 +122,7 @@ However, active panes are still split across two tmux sessions:
 The 21 stash panes were left alive (not killed) — resync marks running `agent-doc` processes as "rescuable." They'll clean up on next resync or when processes exit.
 
 **Root cause:** A `session set` or new tmux session creation provisioned panes in session 12 while agent-doc was active there. When focus returned to session 10, the stash window and its panes stayed in 12. Resync deregisters orphans but doesn't move active panes across sessions — that would require `agent-doc session set 10` to consolidate.
-<!-- agent:boundary:0bf43d7e -->
+<!-- agent:boundary:0bc14bd8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

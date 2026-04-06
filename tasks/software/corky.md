@@ -221,7 +221,7 @@ For more information about this error, try `rustc --explain E0425`.
 error: could not compile `corky` (lib) due to 1 previous error
 Error: Process completed with exit code 101.
 ```
-### Re: CI fix — `instruction_files::init` not in published 0.2.0 (HEAD)
+### Re: CI fix — `instruction_files::init` not in published 0.2.0
 
 **Root cause:** `init()` was committed to the local `instruction-files` repo (`102dcc3`) but `0.2.0` was already published to crates.io *without* it. CI resolves from crates.io, so `init` didn't exist there.
 
@@ -277,7 +277,7 @@ test result: FAILED. 263 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
 error: test failed, to rerun pass `--lib`
 Error: Process completed with exit code 101.
 ```
-### Re: CI fix — `install_creates_all_files` SKILL.md assertion (HEAD)
+### Re: CI fix — `install_creates_all_files` SKILL.md assertion
 
 **Root cause:** `instruction_files::init()` called `Environment::detect()` which returns `Generic` in CI (no Claude Code env vars). `Generic` maps to `AGENTS.md`, not `.claude/skills/instruction-files/SKILL.md` — so the assertion failed.
 
@@ -287,7 +287,36 @@ Error: Process completed with exit code 101.
 - `instruction-files/src/lib.rs` — `Environment::detect()` → `Environment::ClaudeCode`
 - Bumped to 0.2.2, published to crates.io, tagged v0.2.2, pushed
 - Updated corky `Cargo.toml`: `instruction-files = "0.2.2"`, committed, pushed, retagged v0.26.0
-<!-- agent:boundary:34cae786 -->
+
+Fix https://github.com/btakita/corky/actions/runs/24021664203/job/70051620000
+```
+  --- stderr
+
+  thread 'main' (895) panicked at /cargo/registry/src/index.crates.io-1949cf8c6b5b557f/openssl-sys-0.9.112/build/main.rs:460:5:
+
+
+  This crate is only compatible with OpenSSL (version 1.1.0, 1.1.1, or 3.x), or LibreSSL 3.5.0
+  through 4.2.x, but a different version of OpenSSL was found. The build is now aborting
+  due to this version mismatch.
+
+
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+warning: build failed, waiting for other jobs to finish...
+Error: Process completed with exit code 101.
+```
+### Re: OpenSSL version mismatch — vendored-openssl for Linux CI (HEAD)
+
+**Root cause:** `native-tls` on Linux links against system OpenSSL via `openssl-sys`. On ubuntu-latest, the system OpenSSL version is incompatible with `openssl-sys 0.9.112` (likely OpenSSL 3.5.x, released 2025, not yet recognized).
+
+**Fix:** Add `vendored-openssl` feature to all Linux native builds in CI:
+- `release.yml`: x86_64-unknown-linux-gnu → `features: vendored-openssl`
+- `release.yml`: CUDA build → `features: transcribe-cuda,vendored-openssl`
+- `ci.yml`: `cargo clippy/test --features vendored-openssl`
+
+(pypi.yml already used vendored-openssl — no change needed there.)
+
+Committed `bac9854`, pushed, retagged v0.26.0.
+<!-- agent:boundary:72dc2aca -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

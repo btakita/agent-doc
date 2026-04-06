@@ -24,9 +24,39 @@ Operational task document for agent-loop workspace management.
 - Auto-compact: user wants more control; aggressive auto-compact unwanted. Partial auto-compact (keep active topics, archive older) preferred but not yet implemented. `agent_doc_auto_compact: 250` set as safety net.
 - Eval tuning (all done): system prompt added explaining do/conciseness/### Re: header conventions; token budgets tuned per case; `simple-question-concise` fixed (0.3→0.7) by clarifying headers are multi-topic only.
 - Partial compact feature was considered but dropped from pending by user.
-<!-- agent:boundary:bb7a3e75 -->
+
+Setup pyproject.toml
+I want to have vllm as a dependency.
+My goal is to run Qwen3-Coder-Next (80B) on vllm to avoid running out of claude tokens over the next couple of days
+### Re: Setup pyproject.toml with vllm (HEAD)
+
+`pyproject.toml` was empty — populated it with `vllm` as a dependency:
+
+```toml
+[project]
+name = "agent-loop"
+version = "0.1.0"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "vllm",
+]
+```
+
+**Python version issue:** vllm requires Python 3.9–3.12. The project's `.mise.toml` pins Python 3.14 (too new). You have 3.12.12 available via mise.
+
+To use vllm, either:
+1. Override Python for this project: `mise use python@3.12` (updates `.mise.toml`)
+2. Or create a separate venv with 3.12: `mise exec python@3.12 -- uv venv .venv && source .venv/bin/activate && uv pip install vllm`
+
+For Qwen3-Coder-Next 80B you'll also need enough VRAM — 80B at fp16 is ~160GB, so either 2× H100 or use quantization (e.g. AWQ/GPTQ ~40–80GB). Run with:
+```bash
+vllm serve Qwen/Qwen3-Coder-Next-80B --tensor-parallel-size 2
+```
+<!-- agent:boundary:bd39af7f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Fix simple-question-concise eval (system prompt vs expected_behavior conflict)
+- [ ] Fix Python version for vllm: run `mise use python@3.12` in agent-loop root
+- [ ] Install vllm: `uv pip install vllm` in a 3.12 venv
+- [ ] Serve Qwen3-Coder-Next-80B via vllm
 <!-- /agent:pending -->

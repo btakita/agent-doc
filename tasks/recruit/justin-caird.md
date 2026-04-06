@@ -961,7 +961,7 @@ Context that should ease the concern:
 4. Have it ready to share screen during the Monday interview
 
 The complexity concern is valid but manageable. You won't know until you see it, and 5 days is generous for what's designed as a live interview exercise.
-<!-- agent:boundary:a6542422 -->
+<!-- agent:boundary:e8fc9caf -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

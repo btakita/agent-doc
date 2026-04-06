@@ -198,7 +198,7 @@ All 10 skill tests pass, including new assertion for transitive `instruction-fil
 
 Ready to commit and push + retag v0.26.0?
 Committed `780fd1e`, pushed, retagged v0.26.0. Release workflow triggered.
-<!-- agent:boundary:f3e82bc4 -->
+<!-- agent:boundary:dc622b94 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

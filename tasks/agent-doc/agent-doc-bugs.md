@@ -192,7 +192,7 @@ Ran `agent-doc audit-docs` from `src/agent-doc/`. Found 5 issues initially:
 - SKILL.md:47-57 — Large code block without imperative context (advisory)
 
 Re-ran audit: 2 advisory warnings only. 458 tests pass, clippy clean.
-<!-- agent:boundary:ecc93e03 -->
+<!-- agent:boundary:628c06fc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

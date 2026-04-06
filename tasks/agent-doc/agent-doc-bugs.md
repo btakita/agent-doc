@@ -53,14 +53,26 @@ To get `/codex` showing in autocomplete (both terminal and JB plugin), create `.
 
 Do you want me to scaffold a basic `/codex` skill that wraps the Codex CLI?
 No. I just ran `/codex:setup`. `/codex` autocomplete is available in the claude cli. But not in the JB editor with the agent document.
-### Re: `/codex` not in JB plugin after `/codex:setup` (HEAD)
+### Re: `/codex` not in JB plugin after `/codex:setup`
 
 CLI picks up new skill files immediately (scans `.claude/skills/` on each invocation). The JB plugin is stateful — it caches the skill list at startup and doesn't hot-reload.
 
 **Fix:** Restart the IDE. The extension re-scans `.claude/skills/` on launch.
 
 If it still doesn't appear after restart, check whether the plugin shows the skill in a non-agent-doc context (e.g., typing `/` in a regular chat panel). That would confirm it's a skill-discovery timing issue vs. a context-specific suppression.
-<!-- agent:boundary:809ad0eb -->
+Can we have a quick dirty check that runs before autocomplete? If not, can we add a refresh autocomplete in the Agent Doc command menu?
+### Re: quick check before autocomplete / refresh command (HEAD)
+
+**Quick dirty check (mtime scan):** The autocomplete is provided by Anthropic's JB Claude Code extension — we don't control its cache invalidation. However, IntelliJ's VFS watches the filesystem. If the extension uses `VirtualFileListener`, touching the skills directory might trigger a rescan without a restart. Worth testing:
+
+```sh
+touch ~/.claude/skills/.reload && rm ~/.claude/skills/.reload
+```
+
+**Refresh in Agent Doc command menu:** This is in our control. We can add an `AnAction` to agent-doc's JB plugin that touches `.claude/skills/` to fire a VFS event (best case), with a fallback notification if the extension doesn't respond to it.
+
+Want me to add "refresh skills autocomplete" as a pending task for the JB plugin?
+<!-- agent:boundary:84da1573 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

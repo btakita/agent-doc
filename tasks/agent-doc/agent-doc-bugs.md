@@ -417,7 +417,7 @@ CRDT merge is conflict-free (never returns null for a conflict). `gitMergeFile` 
 
 JB Plugin version bump and install?
 commit and push
-### Re: JB plugin 0.2.46 + commit + push — done
+### Re: JB plugin 0.2.46 + commit + push — done (HEAD)
 
 **Bumped** `gradle.properties`: `0.2.45 → 0.2.46`. Both zips built:
 
@@ -454,7 +454,7 @@ build/distributions/agent-doc-jetbrains-0.2.46-signed.zip
 1. IDEA → Settings → Plugins → find "Agent Doc" → Uninstall → Restart
 2. Settings → Plugins → ⚙ gear → "Install Plugin from Disk..." → select `agent-doc-jetbrains-0.2.46.zip`
 3. Restart IDE
-### Re: JB plugin 0.2.46 + commit + push — done (HEAD)
+### Re: JB plugin 0.2.46 + commit + push — done
 
 **Bumped** `gradle.properties`: `0.2.45 → 0.2.46`. Both zips built:
 
@@ -494,7 +494,7 @@ If the previous cycle's IPC write timed out (exit 75), it left a `.json` file in
 The `--force-disk` path cleans stale files (`[write] cleaning stale IPC patch file to prevent double-write`). But the normal socket path may not. Worth checking whether `try_ipc` cleans stale patch files before sending.
 
 **Which was it?** Given the timing (claudescore.md issues reported before v0.31.17 was installed), cause #1 is the primary culprit. After v0.31.17 + plugin 0.2.46, both should be resolved. If double patches continue after install, cause #2 needs patching in `write.rs`.
-<!-- agent:boundary:adb0bf2a -->
+<!-- agent:boundary:1b61b50c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

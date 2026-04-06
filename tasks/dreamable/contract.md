@@ -104,7 +104,7 @@ Use chromium-bridge
 3. **Clarify "proposed business"** — ask Rob to narrow §6 to "actual" business or at least define what's in scope.
 
 Without these protections, continuing to develop your open-source projects during the engagement creates a gray area that could be exploited.
-<!-- agent:boundary:026c6928 -->
+<!-- agent:boundary:f6b89764 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

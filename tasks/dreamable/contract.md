@@ -280,7 +280,7 @@ In Exhibit A, I also need to include open source work for any organizations that
 - rr
 - tag-vector
 - wanimato
-### Re: GitHub organizations added to Exhibit A (HEAD)
+### Re: GitHub organizations added to Exhibit A
 
 Updated the email draft to include all 21 GitHub organizations you listed. The Exhibit A now covers:
 
@@ -291,7 +291,14 @@ Updated the email draft to include all 21 GitHub organizations you listed. The E
 The blanket language ("owned by or administered by Consultant") covers all repos in those orgs without listing each one individually.
 
 Email draft updated at `mail/drafts/2026-04-06-proposed-addendum-to-consulting-agreement-prior-inventions-i.md`. Ready to push to Gmail Drafts on your approval.
-<!-- agent:boundary:98f9a4cd -->
+
+Please send email
+### Re: Email pushed (HEAD)
+
+Email pushed to Gmail Drafts. Open your Gmail drafts to review and send to rob@dreamable.com.
+
+Subject: *Proposed Addendum to Consulting Agreement — Prior Inventions & IP Carve-Out*
+<!-- agent:boundary:0704143f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

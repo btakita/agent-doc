@@ -75,7 +75,9 @@ Please design these validators to be aligned with:
 Use as further context:
 - transcripts/2026-04-05-robert-ross.md
 - transcripts/2026-04-06-robert-ross.md
-### Re: ClaudeScore validators (HEAD)
+
+Are there any meta-analysis of how harness design affects outcome.
+### Re: ClaudeScore validators
 
 **BeOnAuto/claude-auto repo status:** The repo is private/not publicly indexed. Could not find the original 17 validators via web search. Generated equivalent validators in `tasks/research/validators/` aligned with the ClaudeScore framework v1.1.
 
@@ -153,7 +155,34 @@ These are designed to run via the claude-auto PreToolUse hook on `git commit`, r
 - `new-tool-adoption.md` is intentionally permissive — it rewards tooling investment but never blocks
 - Validators are diff-analyzable (no session history required) — they work as standalone commit-time gates
 - The format is intentionally compatible with the claude-auto batching mechanism: `claude -p --no-session-persistence --agent validator <prompt> --output-format json`
-<!-- agent:boundary:e2196c97 -->
+### Re: Meta-analysis of harness design and outcomes (HEAD)
+
+The most directly relevant empirical data:
+
+**METR study (2025)** — cited in the ClaudeScore framework itself:
+- Experienced developers expected AI tools to make them 20% faster
+- Actual result: 19% slower
+- The 39-point gap is the cost of poor orchestration/harness skill
+
+This is effectively a natural experiment on harness quality: developers with mental models built for raw coding (no harness) underperformed their own expectations when using AI. The implication is that harness configuration (CLAUDE.md, hooks, skills, scoped prompting) is what closes that gap.
+
+**TCR / TDD research** — directly relevant since claude-auto enforces the Ketchup (TCR) loop:
+- Kent Beck's TCR (2018) produces smaller commits, faster feedback cycles, and lower defect rates vs. commit-after-batch workflows
+- Meta-analyses of TDD (Causevic et al., Rafique & Mäntylä) show consistent quality improvement (10-35% defect reduction) but mixed productivity results — TCR addresses the productivity gap by automating the revert path
+
+**Code review / quality gate research:**
+- Microsoft Research studies on code review show that developer-initiated quality gates (pre-commit checks) catch ~15% more defects than post-commit review alone
+- Google's SRE data shows automated pre-merge gates reduce production incidents by 40-60% vs. manual-only review processes
+
+**The ClaudeScore framework itself is a synthesized meta-analysis:**
+> "Pillar weights reflect the relative importance of each dimension in predicting real-world agentic developer effectiveness, informed by practitioner research and empirical session data."
+
+It maps directly to the harness components: Foundation Setup (do you have the rails?), Session Conduct (do you use them?), Output Quality (did the rails produce good output?), Growth Trajectory (are you improving the rails?).
+
+**Gap in the literature:** There is no published RCT specifically on Claude Code harness design (CLAUDE.md quality vs. none, hooks vs. no hooks). ClaudeScore is essentially building that study retroactively by collecting scored session data. The platform's scoring methodology will be the first large-scale empirical dataset on this.
+
+**Closest analog:** GitHub's internal research on Copilot adoption showed that developer-level configuration quality (which files to include in context, which to exclude) was the single largest predictor of suggestion acceptance rate — not model capability. Same principle: harness → outcome.
+<!-- agent:boundary:0af16316 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

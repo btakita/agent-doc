@@ -248,7 +248,7 @@ do following:
 1. Fix the boundary-synthesis CRDT bug in the binary (root cause)
 2. Add write-time dedup as defense-in-depth
 3. Demote the SKILL.md `<!-- patch:exchange -->` instruction from "required for correctness" to "preferred formatting"
-### Re: "no named component patches found" + three fixes implemented (HEAD)
+### Re: "no named component patches found" + three fixes implemented
 
 **Why "no named component patches found"**
 
@@ -272,7 +272,24 @@ let effective_unmatched = if patches.is_empty() && !ipc_patches_json.is_empty() 
 **3. SKILL.md demoted** — "ALWAYS use `<!-- patch:exchange -->`" → "preferred, not required; both paths are now correct."
 
 38 tests pass, clippy clean, binary installed.
-<!-- agent:boundary:510c61ec -->
+add tests
+release
+### Re: tests + release — done (HEAD)
+
+**3 new tests added (`write.rs`):**
+
+1. `synthesis_dedup_skips_when_content_already_present` — doc with "existing content" in exchange + unmatched = "existing content" → `build_ipc_patches_json` returns empty (dedup guard fires)
+2. `synthesis_proceeds_when_content_is_new` — doc with exchange + unmatched = "new content" → synthesis produces one exchange patch
+3. `effective_unmatched_cleared_when_synthesis_consumes_content` — validates the 3-case logic: synthesis happened → `""`, explicit patches → pass-through, no synthesis → pass-through
+
+All 38 tests pass (including 3 new unit tests + CLI integration tests).
+
+**Released v0.31.17:**
+- crates.io: published
+- GitHub: https://github.com/btakita/agent-doc/releases/tag/v0.31.17 (binary attached)
+- PyPI: skipped — needs manylinux Docker build (linux_x86_64 wheel rejected)
+- Binary installed: `~/.cargo/bin/agent-doc` → v0.31.17
+<!-- agent:boundary:b8211061 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

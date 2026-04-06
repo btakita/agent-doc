@@ -89,7 +89,7 @@ do
 Added auto-scaffold in `claim.rs` before `ensure_session()`. For empty `.md` files, writes the full template (UUID + format + crdt + status/exchange/pending components) + saves snapshot + commits. Same pattern as sync's auto-scaffold.
 
 458 tests pass, clippy clean. Binary installed (v0.31.16). Try "Claim for Tmux Pane" on an empty file.
-<!-- agent:boundary:34c3478c -->
+<!-- agent:boundary:7f5c86f4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

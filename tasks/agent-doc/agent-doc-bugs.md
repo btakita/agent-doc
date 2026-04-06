@@ -414,7 +414,7 @@ val merged = NativePatching.mergeCrdt(base, diskContent, editorContent)
 CRDT merge is conflict-free (never returns null for a conflict). `gitMergeFile` is retained as fallback for when FFI is unavailable.
 
 465 tests pass, clippy clean. JB plugin: `BUILD SUCCESSFUL`.
-<!-- agent:boundary:7e5ba606 -->
+<!-- agent:boundary:c8de40b9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

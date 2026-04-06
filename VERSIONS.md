@@ -7,6 +7,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 ## 0.31.16
 
 - **Extreme drift snapshot re-sync (git.rs):** When `commit()` detects file is >5x larger than snapshot (typical of file move/rename), automatically re-syncs snapshot from file content. Prevents the drift loop that caused "externally saved" dialogs and lost keystrokes after renaming files.
+- **Claim auto-scaffold (claim.rs):** Empty `.md` files get the full template (UUID + format + crdt + components) when claimed. Previously only wrote `agent_doc_session`, causing scaffolding to skip (no format detected).
 
 ## 0.31.15
 

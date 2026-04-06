@@ -589,18 +589,51 @@ Or compute it:
 
 ```bash
 agent-doc preflight src/session-share/tasks/claudescore.md 2>&1 | grep 'snapshot='
-# → hash is the filename without .md (HEAD)
+# → hash is the filename without .md
 ```
 
 **I should have done this during the repair.** That's the lesson — when manually editing a document to undo a double-patch, also check and clear the corresponding patch file.
 
 The NEW 0.2.46 plugin (my build) adds socket-delivery cleanup so the file watcher can't apply a file after socket delivers. But `processPendingPatches()` at startup still processes whatever files exist — it doesn't know whether those files are stale. The startup scan should also cross-check against snapshot content before applying. That's a follow-up fix.
-<!-- agent:boundary:7c3f9b48 -->
+
+do
+- [ ] Fix `processPendingPatches()` to skip patch files whose content is already in the document (startup dedup guard)
+- [ ] Add cleanup of `.agent-doc/patches/<hash>.json` to the repair/dedup workflow
+### Re: startup dedup guard + dedupe patch cleanup (HEAD)
+
+Both done. 202 tests pass, Kotlin compiles clean.
+
+#### 1. `PatchWatcher.kt` — startup dedup guard in `processPatchFile`
+
+Before applying a patch from a file, checks if any `boundary_id` in the patch already appears in the document. If found, the patch was already applied — deletes the stale file and skips.
+
+Added `isPatchAlreadyApplied(patch: IpcPatch)` to the companion object:
+- Filters to patches with non-null `boundaryId`
+- Reads `patch.file` from disk
+- Returns `true` if `<!-- agent:boundary:<id> -->` is found in the document
+
+Fires the log:
+```
+[patch-watcher] dedup: boundary_id already in doc, deleting stale patch file: <hash>.json
+```
+
+#### 2. `dedupe.rs` — clean patch file after dedup
+
+After successfully removing duplicate blocks and updating the snapshot, `run()` now also deletes `.agent-doc/patches/<hash>.json` using `snapshot::find_project_root` + `snapshot::doc_hash`. Prevents the plugin from re-applying removed content on next startup.
+
+Log:
+```
+[dedupe] cleaning stale patch file: .agent-doc/patches/<hash>.json
+```
+
+Updated the spec comment in the module doc to document the new behavior.
+
+Plugin rebuilt at 0.2.46.
+<!-- agent:boundary:4f5b38d1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Fix `processPendingPatches()` to skip patch files whose content is already in the document (startup dedup guard)
-- [ ] Add cleanup of `.agent-doc/patches/<hash>.json` to the repair/dedup workflow
+- [ ] Install updated 0.2.46 plugin with startup dedup guard
 <!-- /agent:pending -->

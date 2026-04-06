@@ -60,7 +60,7 @@ CLI picks up new skill files immediately (scans `.claude/skills/` on each invoca
 **Fix:** Restart the IDE. The extension re-scans `.claude/skills/` on launch.
 
 If it still doesn't appear after restart, check whether the plugin shows the skill in a non-agent-doc context (e.g., typing `/` in a regular chat panel). That would confirm it's a skill-discovery timing issue vs. a context-specific suppression.
-<!-- agent:boundary:50539057 -->
+<!-- agent:boundary:809ad0eb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

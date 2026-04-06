@@ -116,7 +116,7 @@ Good distinction. Skills live in two places:
 The PostToolUse hook should touch the sentinel co-located with the written skill file — the hook has the file path to determine which. The JB plugin watches both locations; a project skill install only signals that project's sentinel, not all open projects.
 
 Updated pending to reflect per-location sentinels.
-<!-- agent:boundary:139e8175 -->
+<!-- agent:boundary:49f18ce8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

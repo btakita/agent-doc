@@ -51,7 +51,8 @@ The command outputs JSON to stdout:
   "claims": [],
   "diff": "unified diff text or null",
   "no_changes": false,
-  "document": "full document content"
+  "document": "full document content",
+  "slash_commands": []
 }
 ```
 
@@ -60,6 +61,18 @@ The command outputs JSON to stdout:
 - The `document` field contains the full HEAD content (no separate `Read` needed)
 - The `diff` field contains the user's changes since the last snapshot
 - **Do NOT read the snapshot file directly** — the preflight output provides everything needed
+
+### 0b. Execute slash commands (if any)
+
+If preflight returns a non-empty `slash_commands` array, execute each command **before** generating your response.
+
+For each command in `slash_commands`:
+- Use the `Skill` tool with the command name (strip the leading `/`) and any arguments
+- Log each executed command to the console: `Running: /command args`
+- Example: `/agent-doc ./plan.md` → `Skill { skill: "agent-doc", args: "./plan.md" }`
+- For built-in commands that cannot be invoked via `Skill` (e.g. `/clear`, `/compact`), note them in the console and skip
+
+**Guards:** `parse_slash_commands` already filtered out code-fenced lines, blockquotes, and non-added lines — trust the output. Do not re-validate.
 
 ### 1. Respond (with streaming checkpoints for template mode)
 
@@ -94,6 +107,8 @@ When responding to a document with multiple user questions/topics, flush partial
 **When to checkpoint:** After each `### Re:` section, after completing a code implementation summary, or after any response block that takes >15s to generate. Skip checkpoints for short single-topic responses.
 
 **All writes use `--stream` (CRDT merge)** — this eliminates merge conflicts when the user edits the document during response generation.
+
+**Preferred: wrap exchange responses in `<!-- patch:exchange -->`:** For template-mode documents, wrapping responses in `<!-- patch:exchange -->` targets the component directly and is the cleanest path. Raw (unwrapped) content goes through boundary-synthesis, which is also correct — the binary deduplicates and clears `unmatched` when synthesis occurs. Both paths are valid; explicit wrapping is preferred for clarity.
 
 ### 1b. Update pending (template mode)
 

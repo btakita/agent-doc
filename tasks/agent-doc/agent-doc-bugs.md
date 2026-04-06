@@ -125,8 +125,8 @@ The 21 stash panes were left alive (not killed) — resync marks running `agent-
 
 I notice that we are swapping with a pane in tmux window 12. Why? We should not swap with a tmux pane in another tmux session. If a claiming tmux pane is in the wrong tmux session, we should move the tmux pane back into the stash window in the correct tmux session.
 
-Fix
-### Re: Cross-session pane swap fix (HEAD)
+Fix the relevant agent-doc commands.
+### Re: Cross-session pane swap fix
 
 **Bug:** `rescue_from_stash()` used `swap-pane` without checking the pane's session. When a pane was in session 12's stash, swapping with session 10's agent-doc pane moved the session 10 pane INTO session 12 — the opposite of the intended behavior.
 
@@ -139,7 +139,10 @@ Fix
 3. **Same fix in sync.rs** — the stash rescue path now checks pane session against `context_session`. If mismatched, stashes in the target session first before rescuing.
 
 447 tests pass, clippy clean. Binary installed (v0.31.16).
-<!-- agent:boundary:910abb92 -->
+### Re: Text completion noted (HEAD)
+
+No new prompt — the truncated line was completed. No action needed.
+<!-- agent:boundary:dcfdc4a5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

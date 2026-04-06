@@ -142,7 +142,7 @@ Fix the relevant agent-doc commands.
 ### Re: Text completion noted (HEAD)
 
 No new prompt — the truncated line was completed. No action needed.
-<!-- agent:boundary:dcfdc4a5 -->
+<!-- agent:boundary:10ca7e94 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

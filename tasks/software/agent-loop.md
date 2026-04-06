@@ -52,7 +52,7 @@ For Qwen3-Coder-Next 80B you'll also need enough VRAM — 80B at fp16 is ~160GB,
 ```bash
 vllm serve Qwen/Qwen3-Coder-Next-80B --tensor-parallel-size 2
 ```
-<!-- agent:boundary:bd39af7f -->
+<!-- agent:boundary:efc28728 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

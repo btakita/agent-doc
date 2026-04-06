@@ -170,7 +170,7 @@ Added **Check 3** to `check_layout()` in `preflight.rs`:
 This surfaces session-drift as a `layout_issues` entry in the preflight JSON — the skill can show it to the user.
 
 447 tests pass, clippy clean. Binary installed (v0.31.16).
-<!-- agent:boundary:41d26c98 -->
+<!-- agent:boundary:998f49e1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

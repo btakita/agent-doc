@@ -107,7 +107,7 @@ This likely happened when a session switch occurred — `agent-doc session set` 
 The stash window in session 12 (21 panes) accumulated dead/inactive sessions that weren't cleaned up. `agent-doc resync --fix` should move live panes to the correct session and clean up dead ones.
 
 Want me to run `agent-doc resync --fix` to clean this up?
-<!-- agent:boundary:35d0b4b4 -->
+<!-- agent:boundary:f641d9bd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

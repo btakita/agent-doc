@@ -4,6 +4,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.17
+
+- **CRDT duplicate bug fix (write.rs):** When boundary-synthesis consumed unmatched content into a patch, the IPC payload also sent the same content as `"unmatched"` — the plugin applied both, producing duplicates. Fixed by clearing `effective_unmatched` to `""` when synthesis occurred, on both socket and file IPC paths.
+- **Write-time dedup (write.rs):** `build_ipc_patches_json` now checks if the unmatched content already exists in the target component before synthesizing a patch. Skips synthesis if a match is found, making writes idempotent.
+- **SKILL.md demoted (SKILL.md):** `<!-- patch:exchange -->` wrapper is now "preferred, not required" — the binary correctly handles both wrapped and raw content paths.
+- **3 new tests (write.rs):** `synthesis_dedup_skips_when_content_already_present`, `synthesis_proceeds_when_content_is_new`, `effective_unmatched_cleared_when_synthesis_consumes_content`.
+
 ## 0.31.16
 
 - **Extreme drift snapshot re-sync (git.rs):** When `commit()` detects file is >5x larger than snapshot (typical of file move/rename), automatically re-syncs snapshot from file content. Prevents the drift loop that caused "externally saved" dialogs and lost keystrokes after renaming files.

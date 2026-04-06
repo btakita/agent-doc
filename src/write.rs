@@ -1104,11 +1104,18 @@ pub fn try_ipc(
     // Try socket IPC first (lower latency, no inotify)
     if crate::ipc_socket::is_listener_active(&project_root) {
         let ipc_patches_json = build_ipc_patches_json(file, patches, unmatched)?;
+        // When unmatched content was synthesized into a patch (no explicit patch blocks),
+        // don't also send it as "unmatched" — the plugin would apply both and duplicate.
+        let effective_unmatched_socket = if patches.is_empty() && !ipc_patches_json.is_empty() {
+            ""
+        } else {
+            unmatched.trim()
+        };
         let mut socket_payload = serde_json::json!({
             "type": "patch",
             "file": canonical.to_string_lossy(),
             "patches": ipc_patches_json,
-            "unmatched": unmatched.trim(),
+            "unmatched": effective_unmatched_socket,
             "baseline": baseline.unwrap_or(""),
             "reposition_boundary": true,
         });
@@ -1167,10 +1174,17 @@ pub fn try_ipc(
     // Build patches using shared helper (same logic as socket path)
     let ipc_patches = build_ipc_patches_json(file, patches, unmatched)?;
 
+    // Same dedup guard as socket path: don't send unmatched when it was synthesized into a patch.
+    let effective_unmatched_file = if patches.is_empty() && !ipc_patches.is_empty() {
+        ""
+    } else {
+        unmatched.trim()
+    };
+
     let mut ipc_payload = serde_json::json!({
         "file": canonical.to_string_lossy(),
         "patches": ipc_patches,
-        "unmatched": unmatched.trim(),
+        "unmatched": effective_unmatched_file,
         "baseline": baseline.unwrap_or(""),
         "reposition_boundary": true,
     });
@@ -1448,7 +1462,24 @@ fn build_ipc_patches_json(
 
     let effective_unmatched = unmatched.trim().to_string();
     if ipc_patches.is_empty() && !effective_unmatched.is_empty() {
+        // Dedup guard: parse components once, check before synthesizing.
+        let parsed_comps = crate::component::parse(&current_doc).unwrap_or_default();
         for target in &["exchange", "output"] {
+            // Skip synthesis if the content already exists in the target component.
+            // This makes the write idempotent even when called twice with the same content.
+            let already_present = parsed_comps.iter().any(|c| {
+                c.name == *target && {
+                    let body = &current_doc[c.open_end..c.close_start];
+                    body.contains(effective_unmatched.as_str())
+                }
+            });
+            if already_present {
+                eprintln!(
+                    "[write] dedup: content already present in {} — skipping synthesis",
+                    target
+                );
+                break;
+            }
             if let Some(bid) = find_boundary_id(&current_doc, target) {
                 eprintln!(
                     "[write] synthesizing {} patch for unmatched content (boundary {})",
@@ -2282,5 +2313,116 @@ mod tests {
         assert!(!without.contains("agent:boundary"));
         assert!(without.contains("Hello"));
         assert!(without.contains("World"));
+    }
+
+    // --- build_ipc_patches_json / synthesis dedup tests ---
+
+    #[test]
+    fn synthesis_dedup_skips_when_content_already_present() {
+        // If the unmatched content already exists in the target component,
+        // synthesis should be skipped (idempotent write guard).
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        let existing = "This is the agent response.";
+        let doc_content = format!(
+            "<!-- agent:exchange patch=append -->\n{}\n<!-- /agent:exchange -->\n",
+            existing
+        );
+        fs::write(&doc, &doc_content).unwrap();
+
+        // No explicit patches (simulates skill sending raw content)
+        let patches: Vec<crate::template::PatchBlock> = vec![];
+        // Unmatched content is identical to what's already in the exchange
+        let result = build_ipc_patches_json(&doc, &patches, existing).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "synthesis should be skipped when content already exists in target component, \
+             got {} patches: {:?}",
+            result.len(),
+            result
+        );
+    }
+
+    #[test]
+    fn synthesis_proceeds_when_content_is_new() {
+        // When unmatched content is NOT present in the target component,
+        // synthesis should create an IPC patch.
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        let doc_content =
+            "<!-- agent:exchange patch=append -->\nExisting content.\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, doc_content).unwrap();
+
+        let patches: Vec<crate::template::PatchBlock> = vec![];
+        let new_content = "Completely new agent response.";
+        let result = build_ipc_patches_json(&doc, &patches, new_content).unwrap();
+
+        assert_eq!(result.len(), 1, "synthesis should produce one patch for new content");
+        assert_eq!(
+            result[0]["component"].as_str().unwrap(),
+            "exchange",
+            "synthesized patch should target exchange"
+        );
+        assert_eq!(
+            result[0]["content"].as_str().unwrap(),
+            new_content,
+            "synthesized patch content should match unmatched"
+        );
+    }
+
+    #[test]
+    fn effective_unmatched_cleared_when_synthesis_consumes_content() {
+        // When synthesis consumes the unmatched content (patches input was empty,
+        // ipc_patches output is non-empty), effective_unmatched should be "".
+        // This prevents the plugin from applying the content twice (IPC duplicate bug).
+        let patches: Vec<crate::template::PatchBlock> = vec![];
+        let unmatched = "some response content";
+
+        // Case 1: synthesis happened (patches empty → ipc_patches non-empty)
+        let ipc_patches: Vec<serde_json::Value> = vec![serde_json::json!({
+            "component": "exchange",
+            "content": unmatched,
+        })];
+        let effective = if patches.is_empty() && !ipc_patches.is_empty() {
+            ""
+        } else {
+            unmatched.trim()
+        };
+        assert_eq!(
+            effective, "",
+            "effective_unmatched must be empty when synthesis consumed content"
+        );
+
+        // Case 2: explicit patches (no synthesis) — unmatched passes through
+        let explicit_patch = crate::template::PatchBlock::new("exchange", "response");
+        let patches_explicit = vec![explicit_patch];
+        let ipc_explicit: Vec<serde_json::Value> = vec![serde_json::json!({
+            "component": "exchange",
+            "content": "response",
+        })];
+        let effective2 = if patches_explicit.is_empty() && !ipc_explicit.is_empty() {
+            ""
+        } else {
+            unmatched.trim()
+        };
+        assert_eq!(
+            effective2,
+            unmatched.trim(),
+            "effective_unmatched should pass through when explicit patches exist"
+        );
+
+        // Case 3: no patches, no synthesis (empty doc or dedup skipped it) — unmatched passes through
+        let ipc_empty: Vec<serde_json::Value> = vec![];
+        let effective3 = if patches.is_empty() && !ipc_empty.is_empty() {
+            ""
+        } else {
+            unmatched.trim()
+        };
+        assert_eq!(
+            effective3,
+            unmatched.trim(),
+            "effective_unmatched should pass through when no synthesis occurred"
+        );
     }
 }

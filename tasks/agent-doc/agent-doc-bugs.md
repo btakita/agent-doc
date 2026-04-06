@@ -45,14 +45,22 @@ Installing the Codex CLI (OpenAI's tool) doesn't automatically register a `/code
 If you want `/codex` available as a Claude Code slash command, you'd need to create a skill at `.claude/skills/codex/SKILL.md` that defines its behavior.
 
 Is the goal to use Codex from within Claude Code sessions, or were you expecting it to auto-register from the install?
-### Re: `/codex` in JB plugin autocomplete (HEAD)
+### Re: `/codex` in JB plugin autocomplete
 
 Same root cause — the JetBrains Claude Code extension reads slash commands from `.claude/skills/<name>/SKILL.md`, the same source as the terminal autocomplete. There's no path-scanning in either interface.
 
 To get `/codex` showing in autocomplete (both terminal and JB plugin), create `.claude/skills/codex/SKILL.md`. The skill file triggers autocomplete registration.
 
 Do you want me to scaffold a basic `/codex` skill that wraps the Codex CLI?
-<!-- agent:boundary:03aa50b9 -->
+No. I just ran `/codex:setup`. `/codex` autocomplete is available in the claude cli. But not in the JB editor with the agent document.
+### Re: `/codex` not in JB plugin after `/codex:setup` (HEAD)
+
+CLI picks up new skill files immediately (scans `.claude/skills/` on each invocation). The JB plugin is stateful — it caches the skill list at startup and doesn't hot-reload.
+
+**Fix:** Restart the IDE. The extension re-scans `.claude/skills/` on launch.
+
+If it still doesn't appear after restart, check whether the plugin shows the skill in a non-agent-doc context (e.g., typing `/` in a regular chat panel). That would confirm it's a skill-discovery timing issue vs. a context-specific suppression.
+<!-- agent:boundary:50539057 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

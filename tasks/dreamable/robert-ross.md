@@ -900,7 +900,8 @@ Please transcribe + diarize
 
 You should have written the transcripts to a separate file. Not this agent doc.
 Please add to the SKILL->runbook to do so next time.
-### Re: transcripts to separate files (HEAD)
+
+### Re: transcripts to separate files
 
 Noted — transcripts removed from the document and moved to:
 
@@ -910,7 +911,60 @@ Noted — transcripts removed from the document and moved to:
 Added runbook at `.claude/skills/agent-doc/runbooks/large-content.md`:
 
 > Write large content (transcriptions, logs, dumps) to a separate file and link from the document. Large content embedded inline bloats the snapshot, floods context on future reads, and makes the exchange unreadable.
-<!-- agent:boundary:8e4b79f5 -->
+
+Please look in https://github.com/BeOnAuto/claude-auto
+Local repo is /home/brian/work/dreamable/claude-auto
+
+Tell me how it works.
+### Re: claude-auto (HEAD)
+
+**claude-auto** is a Claude Code plugin that enforces the **Ketchup Technique** — a TDD/TCR discipline for AI-assisted coding. It wraps Claude Code's hook system to automate quality gates, inject context reminders, and protect files.
+
+#### How it works
+
+Four hook integration points (defined in `hooks/hooks.json`):
+
+| Hook | Trigger | What it does |
+|------|---------|--------------|
+| **SessionStart** | Session opens | Injects context reminders as `<system-reminder>` |
+| **PreToolUse** | Before Edit/Write/Bash | Validates commits, enforces deny-list |
+| **UserPromptSubmit** | User submits prompt | Injects task-aware reminders |
+| **Stop** | Session ends | Auto-continue decision |
+
+#### Commit validation (the core feature)
+
+When Claude runs `git commit`, the PreToolUse hook intercepts it:
+
+1. Gets staged diff + files + commit message
+2. Loads validators from `validators/*.md` — each is a markdown file with YAML frontmatter that tells Claude what to check (no comments, tests required, TCR workflow, etc.)
+3. **Batches 3 validators per Claude CLI call**: `claude -p --no-session-persistence --agent validator <prompt> --output-format json`
+4. Each validator returns `{"decision":"ACK"}` or `{"decision":"NACK","reason":"..."}`
+5. Any NACK blocks the commit. Message can include `[appeal: reason]` to trigger a reconsideration pass.
+
+#### Reminders
+
+Similar pattern — `reminders/*.md` files with YAML frontmatter specifying `when: hook: SessionStart|UserPromptSubmit` and a priority. The loader filters and sorts them, then returns content as `additionalContext` which Claude Code wraps in `<system-reminder>`.
+
+#### Configuration
+
+Stored in `.claude-auto/.claude.hooks.json`. Key settings:
+- `autoContinue.mode`: `smart|non-stop|off`
+- `validateCommit.mode`: `strict|warn|off`
+- `denyList`: glob patterns for protected files
+
+Configure via `/claude-auto:config set <key> <value>` inside Claude Code.
+
+#### Install
+
+```bash
+/plugin marketplace add BeOnAuto/auto-plugins
+/plugin install claude-auto
+```
+
+Or local dev: `claude --plugin-dir /path/to/claude-auto`
+
+The Ketchup loop it enforces: write one failing test → write minimal passing code → `test && commit || revert` → repeat.
+<!-- agent:boundary:93ffd625 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

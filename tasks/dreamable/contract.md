@@ -111,7 +111,7 @@ I also have been creating open source "primitive" libraries. For example, yester
 - agent-rules
 
 How can I preserve my rights to create similar libraries containing such primitives. Should I communicate whenever I create an open source project for signoff?
-### Re: Protecting rights to new primitive libraries (HEAD)
+### Re: Protecting rights to new primitive libraries
 
 **The practical approach — blanket carve-out, not per-project signoff:**
 
@@ -137,7 +137,93 @@ Asking for signoff on every new open-source project would be burdensome and unsu
 
 **Suggested conversation with Rob:**
 *"I regularly create and publish open-source libraries as part of my professional practice. I'd like to add a carve-out that preserves my rights to general-purpose open-source work done on my own time. This doesn't affect Dreamable — you'd still have full rights to everything I build specifically for Dreamable, and you can freely use any of my open-source libraries under their published licenses."*
-<!-- agent:boundary:8554083a -->
+
+How can I propose these amendment? By email?
+
+Please create an amendment based on https://github.com/btakita
+Should I also include my private repositories?
+### Re: Proposing the amendment and Exhibit A (HEAD)
+
+**How to propose:** Yes, email is the right channel. Send it to Rob before signing. Frame it as: "Before I sign, I'd like to propose one addendum — here's the language." Keep it professional and brief. This is standard practice for contractors with active side projects.
+
+**Private repositories:** Yes, absolutely include them. Private repos are *more* vulnerable than public ones — with public repos you at least have a timestamped publication trail proving independent creation. Private repos have no such defense. List them by category (e.g., "all private repositories under github.com/btakita") without needing to name each one.
+
+---
+
+**Draft Amendment / Exhibit A:**
+
+---
+
+**ADDENDUM TO 2026 DREAMABLE CONSULTING AGREEMENT**
+
+*This Addendum is entered into as of April 5, 2026, by and between Dreamable, Inc. ("Company") and Brian Takita ("Consultant") and amends the Dreamable Consulting Agreement dated April 5, 2026 (the "Agreement").*
+
+**1. Exhibit A — Prior Inventions**
+
+Consultant has the following Prior Inventions, including all repositories (public and private) owned by Consultant on GitHub (github.com/btakita) as of the Effective Date, and specifically including but not limited to:
+
+- **agent-doc** — Interactive document session CLI tool (Rust)
+- **agent-kit** — Toolkit for CLI tools integrating with AI agent loops (Rust)
+- **agent-memories** — Convention for externalizing learned lessons from AI agents
+- **agent-rules** — Convention for prescribed policy in AI agent instruction files
+- **agent-runbooks** — Convention for externalizing step-by-step procedures from AI agents
+- **skill-harness** — Agent skill harness framework
+- **module-harness** — Language-agnostic module-level harness context management
+- **corky** — Correspondence kit (Rust)
+- **instruction-files** — Shared audit crate
+- **chromium-bridge** — Chromium browser bridge
+- **eval-runner** — Evaluation runner
+- **tagpath** — Tag-based identifier parser
+- **tmux-router** — Tmux routing tool
+- **lazily-rs** — Lazy evaluation library (Rust)
+- **lazily-py** — Lazy evaluation library (Python)
+- **ctx-core** / **rappstack** — Context and application framework ecosystem
+- **briantakita.me-dev** — Personal website
+- **philosophy** — Existence Lang ontology
+- **python-intentions** — JetBrains plugin
+- **All other repositories** (public and private) under github.com/btakita existing as of the Effective Date
+
+**2. Section 6 Amendment — Open-Source Carve-Out**
+
+The following is added to Section 6 of the Agreement:
+
+*"Notwithstanding anything in Sections 6 and 7 to the contrary, Consultant retains all rights, title, and interest in and to:*
+
+*(a) All Prior Inventions listed in Exhibit A and any modifications, enhancements, updates, or derivative works thereof;*
+
+*(b) Any general-purpose, open-source software libraries, tools, frameworks, specifications, or conventions created by Consultant on Consultant's own time and without use of Company confidential information, even if such works could be used in connection with Company's business, provided they are published under an OSI-approved open-source license (e.g., MIT, Apache-2.0);*
+
+*(c) Consultant's pre-existing methodologies, know-how, professional techniques, and general programming knowledge.*
+
+*For avoidance of doubt, Company receives a nonexclusive, royalty-free, perpetual license to use any such works under their published open-source license terms."*
+
+**3. Section 16 Amendment — Liability**
+
+Section 16 is amended to read: *"Company's aggregate liability, whether to Consultant or to third parties caused hereunder, shall not exceed the total fees paid to Consultant under this Agreement in the twelve (12) months preceding the claim."*
+
+**4. Conflict.** In the event of any conflict between this Addendum and the Agreement, this Addendum shall control.
+
+**5. Remainder.** All other terms and conditions of the Agreement remain in full force and effect.
+
+---
+
+*Dreamable, Inc.*
+Name: _______________
+Title: _______________
+Date: _______________
+
+*Consultant*
+Name: Brian Takita
+Date: _______________
+
+---
+
+**Notes on the draft:**
+- I included a §16 fix (liability cap changed to 12 months of fees) since that was the other major issue
+- The Exhibit A lists your key active projects explicitly, then uses a blanket clause for "all other repositories" to catch everything
+- The open-source carve-out (2b) covers *future* projects categorically — no need to update Exhibit A every time you create a new library
+- Send this alongside a brief email explaining the rationale
+<!-- agent:boundary:3f5b13cf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

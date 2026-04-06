@@ -25,7 +25,7 @@ I'm unable to fetch the contract content from that SignRequest link. It's a Java
 3. **Use the browser tool** — I can open the link in Chromium if you'd like me to try that route
 
 Which approach works best?
-<!-- agent:boundary:650c61a7 -->
+<!-- agent:boundary:0bc5deb9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

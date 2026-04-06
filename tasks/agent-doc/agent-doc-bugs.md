@@ -595,7 +595,7 @@ agent-doc preflight src/session-share/tasks/claudescore.md 2>&1 | grep 'snapshot
 **I should have done this during the repair.** That's the lesson — when manually editing a document to undo a double-patch, also check and clear the corresponding patch file.
 
 The NEW 0.2.46 plugin (my build) adds socket-delivery cleanup so the file watcher can't apply a file after socket delivers. But `processPendingPatches()` at startup still processes whatever files exist — it doesn't know whether those files are stale. The startup scan should also cross-check against snapshot content before applying. That's a follow-up fix.
-<!-- agent:boundary:d35bd91f -->
+<!-- agent:boundary:7c3f9b48 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

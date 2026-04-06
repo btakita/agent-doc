@@ -536,9 +536,11 @@ Settings → Plugins → gear → "Install Plugin from Disk..." → `agent-doc-j
 Already installed 0.2.46. Why did you not detect this?
 do:
 - Please repair the double patch in src/session-share/tasks/claudescore.md
-### Re: 0.2.46 already installed / claudescore.md repaired (HEAD)
+### Re: 0.2.46 already installed / claudescore.md repaired
 
 **Why "install required" was wrong:** I built the plugin and assumed the user needed to install it without checking whether 0.2.46 was already the active version. I should have checked `agent-doc plugin list` or the installed plugin version before saying anything.
+
+You should have checked "the installed plugin version". Please add to SKILL->runbook
 
 **claudescore.md repaired:** The double-patched response block has been removed.
 
@@ -547,11 +549,58 @@ do:
 - The final boundary `<!-- agent:boundary:887c151d -->` is retained
 
 Committed and pushed to `ClaudeScore/SessionShare` (75fc513), parent pointer updated.
-<!-- agent:boundary:50d1c92f -->
+
+In src/session-share/tasks/claudescore.md, I asked:
+```
+The target audience is the claude code community at large. Most will not be using agent-doc or tools that we are building.
+If we were to build a claude code plugin, how can we measure the harness and success? Most importantly, what does success vs failure look like?
+
+Please use chromium-bridge to look at and export the conversation in https://dreamableteam.slack.com/archives/C0AR4RJR6US
+Use as context for the feasibility discussion.
+
+First Principle: The outcome should drive whether or not the agent activity was successful or unsuccessful. How can we quantify what is success and failure?
+How can we find causal relationships between the harness architecture, context, prompt activity with success and failure?
+```
+
+When I ran `Claim for Tmux Pane`, the previous response patch was duplicated into the document. Why?
+### Re: plugin-install runbook + claim duplication explained
+
+Added `runbooks/plugin-install.md` — covers checking installed version with `agent-doc plugin list` before suggesting install. Linked from SKILL.md § Runbooks.
+
+---
+
+### Re: why claim caused another double-patch
+
+When you ran "Claim for Tmux Pane", the plugin restarted its `PatchWatcher`. On startup, `PatchWatcher.start()` calls `processPendingPatches(patchesDir)`, which scans `.agent-doc/patches/` and applies any `.json` files it finds.
+
+There was still a stale `.json` patch file in `.agent-doc/patches/` for `claudescore.md` — left over from the original double-patch cycle. My repair removed the duplicate content from the document, but did NOT delete the stale patch file. When claim triggered plugin restart → `processPendingPatches()` found it → applied it again → third copy of the response.
+
+**Why the file survived:**
+
+The fix I added (`try_ipc` cleans stale files before socket send) runs at write time. But the stale file from the original buggy cycle was never cleaned up after the fact. The repair only fixed the document, not the patch directory.
+
+**The gap:** `agent-doc repair` (manual repair path) doesn't clean `.agent-doc/patches/`. Any time a document is repaired by hand, the stale patch file must also be deleted:
+
+```bash
+rm .agent-doc/patches/<hash>.json  # hash = sha256 of canonical doc path
+```
+
+Or compute it:
+
+```bash
+agent-doc preflight src/session-share/tasks/claudescore.md 2>&1 | grep 'snapshot='
+# → hash is the filename without .md (HEAD)
+```
+
+**I should have done this during the repair.** That's the lesson — when manually editing a document to undo a double-patch, also check and clear the corresponding patch file.
+
+The NEW 0.2.46 plugin (my build) adds socket-delivery cleanup so the file watcher can't apply a file after socket delivers. But `processPendingPatches()` at startup still processes whatever files exist — it doesn't know whether those files are stale. The startup scan should also cross-check against snapshot content before applying. That's a follow-up fix.
+<!-- agent:boundary:d35bd91f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Verify stale-patch fix holds in next session (no double-apply recurs)
+- [ ] Fix `processPendingPatches()` to skip patch files whose content is already in the document (startup dedup guard)
+- [ ] Add cleanup of `.agent-doc/patches/<hash>.json` to the repair/dedup workflow
 <!-- /agent:pending -->

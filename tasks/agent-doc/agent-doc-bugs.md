@@ -90,18 +90,28 @@ Added auto-scaffold in `claim.rs` before `ensure_session()`. For empty `.md` fil
 
 458 tests pass, clippy clean. Binary installed (v0.31.16). Try "Claim for Tmux Pane" on an empty file.
 release
-### Re: Release v0.31.16 (HEAD)
+### Re: Release v0.31.16
 
 Already published to crates.io (from earlier release). Committed the claim auto-scaffold fix, updated VERSIONS.md, moved tag to include the fix. Pushed to GitHub.
 
 - crates.io: v0.31.16 (already published)
 - GitHub: tag force-updated to include claim fix
 - Binary: v0.31.16 installed
-<!-- agent:boundary:06466163 -->
+An agent-doc tmux window somehome ended up in tmux session 12. How did this happen?
+### Re: agent-doc window in session 12 (HEAD)
+
+The configured session is `10` (`agent-doc session` returns 10). But session 12 has a window with 2 active agent-doc panes (window 0) and a stash window with 21 panes (window 1).
+
+This likely happened when a session switch occurred — `agent-doc session set` moves the agent-doc window between sessions, but if a new session was created (12) and panes were provisioned there before the window was moved back, the panes end up in the wrong session.
+
+The stash window in session 12 (21 panes) accumulated dead/inactive sessions that weren't cleaned up. `agent-doc resync --fix` should move live panes to the correct session and clean up dead ones.
+
+Want me to run `agent-doc resync --fix` to clean this up?
+<!-- agent:boundary:35d0b4b4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-v0.31.16 released with claim auto-scaffold fix.
+- [ ] Investigate session leak — how agent-doc window ended up in session 12
 <!-- /agent:pending -->

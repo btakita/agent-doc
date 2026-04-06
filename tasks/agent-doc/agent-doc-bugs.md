@@ -214,7 +214,7 @@ I see `### Re: duplicate — root cause and fix` duplicated. Is this due to the 
 **Why one copy was uncommitted:** After the IPC write, `agent-doc commit` repositioned the boundary marker. The duplicate ended up inserted before the user's question in the exchange, landing in the uncommitted (green gutter) region.
 
 **Fixed:** Ran `agent-doc dedupe` — removed 1192 bytes of duplicate content.
-### Re: duplicate — still happening, root fix (HEAD)
+### Re: duplicate — still happening, root fix
 
 **Not an update issue** — the bug reproduces on the current binary. It will keep happening until the write path is corrected.
 
@@ -223,7 +223,27 @@ I see `### Re: duplicate — root cause and fix` duplicated. Is this due to the 
 **Fix applied now:** This response is wrapped in `<!-- patch:exchange -->` — it targets the named component directly, bypassing boundary-synthesis entirely.
 
 **SKILL.md will be updated** to require `<!-- patch:exchange -->` wrapping for all template-mode exchange responses. That's the permanent fix; no binary change needed.
-<!-- agent:boundary:34cd32cb -->
+
+Why is SKILL.md involved in triggering the issue. Should the p5ch be an entirely deterministic operation? What about deduping patches?
+### Re: SKILL.md involvement, determinism, deduplication (HEAD)
+
+**Why SKILL.md is involved (and why it shouldn't be)**
+
+The current fix is a workaround, not a root fix. The write operation has a bug in its **boundary-synthesis path** — the fallback when no named component patches are found. SKILL.md instructs Claude to always wrap in `<!-- patch:exchange -->` to avoid that buggy path. But correctness depending on Claude following instructions is non-deterministic.
+
+**Should patch be deterministic?**
+
+Yes. `agent-doc write --stream` should be correct regardless of how content arrives — raw or wrapped. No buggy fallback paths should exist. A SKILL.md instruction shouldn't be the difference between "works" and "produces duplicates."
+
+**Deduping patches**
+
+Defense-in-depth: before appending to a component, the binary checks if the content is already present (exact or near-exact match on the last N bytes). If so, skip. Makes the operation idempotent even if called twice.
+
+**Right fix order:**
+1. Fix the boundary-synthesis CRDT bug in the binary (root cause)
+2. Add write-time dedup as defense-in-depth
+3. Demote the SKILL.md `<!-- patch:exchange -->` instruction from "required for correctness" to "preferred formatting"
+<!-- agent:boundary:0a6a3a30 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

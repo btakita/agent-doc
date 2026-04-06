@@ -225,11 +225,15 @@ I see `### Re: duplicate — root cause and fix` duplicated. Is this due to the 
 **SKILL.md will be updated** to require `<!-- patch:exchange -->` wrapping for all template-mode exchange responses. That's the permanent fix; no binary change needed.
 
 Why is SKILL.md involved in triggering the issue. Should the p5ch be an entirely deterministic operation? What about deduping patches?
-### Re: SKILL.md involvement, determinism, deduplication (HEAD)
+### Re: SKILL.md involvement, determinism, deduplication
 
 **Why SKILL.md is involved (and why it shouldn't be)**
 
 The current fix is a workaround, not a root fix. The write operation has a bug in its **boundary-synthesis path** — the fallback when no named component patches are found. SKILL.md instructs Claude to always wrap in `<!-- patch:exchange -->` to avoid that buggy path. But correctness depending on Claude following instructions is non-deterministic.
+
+> no named component patches are found
+
+Why was no component patches found? What does that mean in this case?
 
 **Should patch be deterministic?**
 
@@ -239,15 +243,39 @@ Yes. `agent-doc write --stream` should be correct regardless of how content arri
 
 Defense-in-depth: before appending to a component, the binary checks if the content is already present (exact or near-exact match on the last N bytes). If so, skip. Makes the operation idempotent even if called twice.
 
+do following:
 **Right fix order:**
 1. Fix the boundary-synthesis CRDT bug in the binary (root cause)
 2. Add write-time dedup as defense-in-depth
 3. Demote the SKILL.md `<!-- patch:exchange -->` instruction from "required for correctness" to "preferred formatting"
-<!-- agent:boundary:db0b3178 -->
+### Re: "no named component patches found" + three fixes implemented (HEAD)
+
+**Why "no named component patches found"**
+
+`parse_patch_blocks()` scans the skill's response for `<!-- patch:name -->...<!-- /patch:name -->` blocks. When the skill sends raw text without any such wrappers, it finds zero matches — `patches` is empty, and the entire response goes into `unmatched`. The IPC path enters the boundary-synthesis fallback: synthesizes a patch from the unmatched content using the exchange boundary ID.
+
+The bug: the IPC payload sent BOTH the synthesized patch AND `"unmatched": <same content>` separately. The plugin applied both → duplicate.
+
+**Fixes implemented (`write.rs` + `SKILL.md`)**
+
+**1. Root bug fixed** — after `build_ipc_patches_json`, both socket and file IPC paths now compute `effective_unmatched`:
+```rust
+let effective_unmatched = if patches.is_empty() && !ipc_patches_json.is_empty() {
+    ""  // synthesis consumed it — don't also send as unmatched
+} else {
+    unmatched.trim()
+};
+```
+
+**2. Write-time dedup** — in `build_ipc_patches_json`, before synthesizing, check if content already exists in the target component (makes writes idempotent).
+
+**3. SKILL.md demoted** — "ALWAYS use `<!-- patch:exchange -->`" → "preferred, not required; both paths are now correct."
+
+38 tests pass, clippy clean, binary installed.
+<!-- agent:boundary:b18182d9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-
 <!-- /agent:pending -->

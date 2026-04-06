@@ -52,7 +52,7 @@ Same root cause — the JetBrains Claude Code extension reads slash commands fro
 To get `/codex` showing in autocomplete (both terminal and JB plugin), create `.claude/skills/codex/SKILL.md`. The skill file triggers autocomplete registration.
 
 Do you want me to scaffold a basic `/codex` skill that wraps the Codex CLI?
-<!-- agent:boundary:96661aae -->
+<!-- agent:boundary:03aa50b9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

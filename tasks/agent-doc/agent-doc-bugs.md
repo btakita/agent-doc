@@ -96,20 +96,31 @@ Or simpler — just always touch it on any `Write` and let the JB plugin debounc
 This is a clean two-part contract with no restart required. Want me to add both pieces as pending tasks?
 
 Can we have general `Refresh Agent Doc Enviornment` command that has a menu item in the Agent Doc prompt (Alt+Shift)?
-### Re: Refresh Agent Doc Environment command (HEAD)
+### Re: Refresh Agent Doc Environment command
 
 Yes — a good generalization. `Refresh Agent Doc Environment` in the Alt+Shift menu would bundle:
 
-1. **Skills refresh** — touch `~/.claude/.skills-updated` to signal Claude Code extension to rescan
+1. **Skills refresh** — touch `~/.claude/.skills-updated` to signal Claude Code extension to rescan: Should this be per project instead?
 2. **Config reload** — re-read `.agent-doc/components.toml` and frontmatter
 3. **Claim re-registration** — re-assert the document→pane binding if registry drifted
 
 Single `AnAction` registered in the JB plugin, available in the Alt+Shift context menu and as a standalone keymap action. Added to pending.
-<!-- agent:boundary:3920075b -->
+Why would we need t
+### Re: per-project vs global skills sentinel (HEAD)
+
+Good distinction. Skills live in two places:
+
+- **Global**: `~/.claude/skills/` → sentinel: `~/.claude/.skills-updated`
+- **Project**: `<root>/.claude/skills/` → sentinel: `<root>/.claude/.skills-updated`
+
+The PostToolUse hook should touch the sentinel co-located with the written skill file — the hook has the file path to determine which. The JB plugin watches both locations; a project skill install only signals that project's sentinel, not all open projects.
+
+Updated pending to reflect per-location sentinels.
+<!-- agent:boundary:139e8175 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **JB plugin: `Refresh Agent Doc Environment` action (Alt+Shift menu)** — touches `~/.claude/.skills-updated`, reloads `.agent-doc/components.toml`, re-registers claim; replaces narrower skill-cache-only task
+- [ ] **JB plugin: `Refresh Agent Doc Environment` action (Alt+Shift menu)** — per-location sentinel design: hook touches `~/.claude/.skills-updated` or `<project>/.claude/.skills-updated` based on where skill was written; JB plugin watches both; also reloads `.agent-doc/components.toml` and re-registers claim
 <!-- /agent:pending -->

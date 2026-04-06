@@ -24,6 +24,7 @@ Operational task document for agent-loop workspace management.
 - Auto-compact: user wants more control; aggressive auto-compact unwanted. Partial auto-compact (keep active topics, archive older) preferred but not yet implemented. `agent_doc_auto_compact: 250` set as safety net.
 - Eval tuning (all done): system prompt added explaining do/conciseness/### Re: header conventions; token budgets tuned per case; `simple-question-concise` fixed (0.3→0.7) by clarifying headers are multi-topic only.
 - Partial compact feature was considered but dropped from pending by user.
+<!-- agent:boundary:bb7a3e75 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

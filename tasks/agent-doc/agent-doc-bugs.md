@@ -105,8 +105,8 @@ Yes — a good generalization. `Refresh Agent Doc Environment` in the Alt+Shift 
 3. **Claim re-registration** — re-assert the document→pane binding if registry drifted
 
 Single `AnAction` registered in the JB plugin, available in the Alt+Shift context menu and as a standalone keymap action. Added to pending.
-Why would we need t
-### Re: per-project vs global skills sentinel (HEAD)
+
+### Re: per-project vs global skills sentinel
 
 Good distinction. Skills live in two places:
 
@@ -116,11 +116,26 @@ Good distinction. Skills live in two places:
 The PostToolUse hook should touch the sentinel co-located with the written skill file — the hook has the file path to determine which. The JB plugin watches both locations; a project skill install only signals that project's sentinel, not all open projects.
 
 Updated pending to reflect per-location sentinels.
-<!-- agent:boundary:49f18ce8 -->
+Why would we need to touch `.skills-updated` at all?
+### Re: why touch `.skills-updated` at all? (HEAD)
+
+You're right — it's unnecessary. The JB Claude Code extension should already watch `.claude/skills/` via IntelliJ's VFS. Writing a new skill file fires the VFS event automatically.
+
+The actual gap: skills installed via the terminal (external to the IDE) may not trigger VFS sync immediately — IntelliJ's background sync isn't always instant. The fix is simpler:
+
+**`Refresh Agent Doc Environment`** calls:
+```kotlin
+LocalFileSystem.getInstance().refresh(false)  // on .claude/ dir
+```
+
+That's the programmatic equivalent of `Ctrl+Alt+Y` (Synchronize) — forces IntelliJ to re-scan `.claude/` and fires any registered VFS listeners in the Claude Code extension. No sentinel file, no hook needed.
+
+Pending updated.
+<!-- agent:boundary:34d4d9c6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **JB plugin: `Refresh Agent Doc Environment` action (Alt+Shift menu)** — per-location sentinel design: hook touches `~/.claude/.skills-updated` or `<project>/.claude/.skills-updated` based on where skill was written; JB plugin watches both; also reloads `.agent-doc/components.toml` and re-registers claim
+- [ ] **JB plugin: `Refresh Agent Doc Environment` action (Alt+Shift menu)** — calls `LocalFileSystem.refresh()` on `.claude/` dir (forces VFS rescan, equivalent to Ctrl+Alt+Y); also reloads `.agent-doc/components.toml` and re-registers claim
 <!-- /agent:pending -->

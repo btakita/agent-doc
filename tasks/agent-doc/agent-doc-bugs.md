@@ -417,7 +417,7 @@ CRDT merge is conflict-free (never returns null for a conflict). `gitMergeFile` 
 
 JB Plugin version bump and install?
 commit and push
-### Re: JB plugin 0.2.46 + commit + push — done (HEAD)
+### Re: JB plugin 0.2.46 + commit + push — done
 
 **Bumped** `gradle.properties`: `0.2.45 → 0.2.46`. Both zips built:
 
@@ -436,7 +436,7 @@ build/distributions/agent-doc-jetbrains-0.2.46-signed.zip
 2. Settings → Plugins → ⚙ gear → "Install Plugin from Disk..." → select `agent-doc-jetbrains-0.2.46.zip`
 3. Restart IDE
 src/session-share/tasks/claudescore.md had a double patch. Why?
-### Re: JB plugin 0.2.46 + commit + push — done (HEAD)
+### Re: JB plugin 0.2.46 + commit + push — done
 
 **Bumped** `gradle.properties`: `0.2.45 → 0.2.46`. Both zips built:
 
@@ -472,7 +472,8 @@ build/distributions/agent-doc-jetbrains-0.2.46-signed.zip
 1. IDEA → Settings → Plugins → find "Agent Doc" → Uninstall → Restart
 2. Settings → Plugins → ⚙ gear → "Install Plugin from Disk..." → select `agent-doc-jetbrains-0.2.46.zip`
 3. Restart IDE
-### Re: `claudescore.md` double patch — root cause (HEAD)
+
+### Re: `claudescore.md` double patch — root cause
 
 Two possible causes; both relevant:
 
@@ -494,12 +495,49 @@ If the previous cycle's IPC write timed out (exit 75), it left a `.json` file in
 The `--force-disk` path cleans stale files (`[write] cleaning stale IPC patch file to prevent double-write`). But the normal socket path may not. Worth checking whether `try_ipc` cleans stale patch files before sending.
 
 **Which was it?** Given the timing (claudescore.md issues reported before v0.31.17 was installed), cause #1 is the primary culprit. After v0.31.17 + plugin 0.2.46, both should be resolved. If double patches continue after install, cause #2 needs patching in `write.rs`.
-<!-- agent:boundary:a37a297d -->
+
+do
+- [ ] Verify `try_ipc` cleans stale patch files before socket send (prevent cause #2 recurrence)
+- Add logging that would have isolated the real cause of the double patch
+- Please repair the double patch in src/agent-doc/editors/jetbrains/
+### Re: do — stale patch cleanup + logging + plugin double-apply fix (HEAD)
+
+All three items done. Tests pass (202), Kotlin compiles clean.
+
+#### 1. `try_ipc` — clean stale patch file before socket send
+
+`write.rs:1104` — Before attempting socket send, deletes any existing `.json` patch file for the document. Prevents file watcher from applying a leftover timeout file concurrently with the socket delivery.
+
+```
+[write] cleaning stale patch file before socket send (prevent double-apply)
+```
+
+#### 2. Logging added
+
+Added log when synthesis consumes unmatched content and clears the socket payload field — the missing trace that would have confirmed cause #1 vs #2:
+
+```
+[write] synthesis consumed unmatched content — clearing from socket payload (prevent double-apply)
+```
+
+Combined with the existing `[write] synthesizing exchange patch...` and `[write] dedup: content already present...` logs, the full dedup path is now observable.
+
+#### 3. Plugin — `PatchWatcher.kt` stale file cleanup on socket delivery
+
+`handleSocketMessage` → `"patch"` case: after a successful `applyPatch`, computes `docHash(patch.file)` (SHA256 of path — mirrors Rust `snapshot::doc_hash`) and deletes the corresponding `.json` file if present. Prevents the file watcher thread from picking up and re-applying stale content.
+
+Added `docHash(path)` as a companion object function with `java.security.MessageDigest`.
+
+Plugin built: `agent-doc-jetbrains-0.2.46.zip` (version unchanged — no bump needed for patch behavior fix).
+
+**Install required** to pick up the plugin changes (same plugin version — reinstall over existing):
+Settings → Plugins → gear → "Install Plugin from Disk..." → `agent-doc-jetbrains-0.2.46.zip` → Restart
+<!-- agent:boundary:dea4b815 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Install updated plugin (0.2.46)
-- [ ] Verify `try_ipc` cleans stale patch files before socket send (prevent cause #2 recurrence)
+- [ ] Install updated plugin (0.2.46 with stale-patch fix)
+- [ ] Sign and ship updated 0.2.46 plugin if double-patch recurs post-install
 <!-- /agent:pending -->

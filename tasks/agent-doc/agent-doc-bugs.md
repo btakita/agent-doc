@@ -139,7 +139,7 @@ Fix
 3. **Same fix in sync.rs** — the stash rescue path now checks pane session against `context_session`. If mismatched, stashes in the target session first before rescuing.
 
 447 tests pass, clippy clean. Binary installed (v0.31.16).
-<!-- agent:boundary:321b2ed7 -->
+<!-- agent:boundary:910abb92 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

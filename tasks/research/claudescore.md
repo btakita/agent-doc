@@ -153,7 +153,7 @@ These are designed to run via the claude-auto PreToolUse hook on `git commit`, r
 - `new-tool-adoption.md` is intentionally permissive — it rewards tooling investment but never blocks
 - Validators are diff-analyzable (no session history required) — they work as standalone commit-time gates
 - The format is intentionally compatible with the claude-auto batching mechanism: `claude -p --no-session-persistence --agent validator <prompt> --output-format json`
-<!-- agent:boundary:66f84aae -->
+<!-- agent:boundary:e2196c97 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

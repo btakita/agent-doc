@@ -26,7 +26,7 @@ I'm unable to fetch the contract content from that SignRequest link. It's a Java
 
 Which approach works best?
 Use chromium-bridge
-### Re: Dreamable Consulting Agreement Analysis (HEAD)
+### Re: Dreamable Consulting Agreement Analysis
 
 **Parties:**
 - **Company:** Dreamable, Inc., 846A North Point St, San Francisco, CA
@@ -78,14 +78,33 @@ Use chromium-bridge
 **Items to Consider Before Signing:**
 
 - **§16 Liability cap of $0.00** — This means the Company has zero liability to you under any circumstances. This is extremely one-sided. Typically there's at least some liability cap (e.g., fees paid in last 12 months).
-- **§6-7 IP assignment is very broad** — covers anything "related to" Company's "actual or proposed" business. If you have your own projects (agent-doc, ctx-core, etc.), you need to ensure they're listed in Exhibit A as Prior Inventions or explicitly carved out.
+- **§6-7 IP assignment is very broad** — covers anything "related to" Company's "actual or proposed" business. If you have your own projects (agent-doc, ctx-core, etc.), you need to ensure they're listed in Exhibit A as Prior Inventions or explicitly carved out.: I may work on side projects. Am I in danger of losing any rights? All of my previous open source projects are either Apache2 or MIT licensed. So Dreamable will be able to use the projects anyways. Am I in danger of losing my rights to these projects
 - **§2 No payment terms** — no mention of when/how you get paid (net-15, net-30, invoicing process).
-- **No SOW or scope definition** — the services aren't defined anywhere in this agreement.
+- **No SOW or scope definition** — the services aren't defined anywhere in this agreement.s
 - **§10 Indemnification is one-way** — you indemnify the Company but not vice versa.
 - **§13 Attorney's fees** — each party bears own costs, which is fine, but combined with $0 liability cap means you have no recourse.
 
 **Recommendation:** Negotiate §16 (liability cap) and clarify IP carve-outs for your existing open-source projects before signing.
-<!-- agent:boundary:d61fea19 -->
+### Re: Side projects and IP risk (HEAD)
+
+**Short answer:** Yes, there is real risk under §6-7 as written, but the Apache2/MIT licensing provides some protection.
+
+**The risk:**
+- §6 defines "Inventions" as anything that "relate[s] in any way to the Company's actual or **proposed** business." The word "proposed" is dangerously broad — if Dreamable ever proposes to do anything in the AI agent tooling space, your agent-doc, ctx-core, etc. could arguably fall within scope.
+- §7 assigns **all** IP rights in such Inventions to Dreamable, including "forever waiver" of your rights.
+- If you continue developing agent-doc *during* the consulting engagement, and Dreamable's business touches AI/developer tooling, they could claim ownership of that work.
+
+**What Apache2/MIT protects:**
+- The existing published code is already irrevocably licensed. Dreamable (and anyone) can already use it. **They can't revoke that.**
+- However, the contract wouldn't give Dreamable rights to *existing* code — it targets *new* work during the engagement. The risk is they could claim ownership of **new commits** to your open-source projects if those projects "relate to" their business.
+
+**What to do:**
+1. **List all your active projects in Exhibit A** as Prior Inventions — agent-doc, ctx-core, rappstack, existence-lang, corky, etc.
+2. **Add an explicit carve-out clause** like: *"Consultant retains all rights to Prior Inventions and any modifications, enhancements, or derivative works thereof, even if related to the Company's business, provided such work is performed on Consultant's own time and not using Company resources."*
+3. **Clarify "proposed business"** — ask Rob to narrow §6 to "actual" business or at least define what's in scope.
+
+Without these protections, continuing to develop your open-source projects during the engagement creates a gray area that could be exploited.
+<!-- agent:boundary:026c6928 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

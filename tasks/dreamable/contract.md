@@ -257,7 +257,7 @@ Please explain. I don't know what this means exactly. Liability for what?
 **What the amendment proposes:** Cap liability at the total fees paid to you in the prior 12 months. So if you've been paid $50,000 over the past year, that's the maximum you could recover. This is the standard approach for consulting agreements — it's fair to both sides.
 
 **Bottom line:** It's your payment protection. Without fixing this, you have no contractual recourse if Dreamable doesn't pay you.
-<!-- agent:boundary:f12facd6 -->
+<!-- agent:boundary:ba3c4cd5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

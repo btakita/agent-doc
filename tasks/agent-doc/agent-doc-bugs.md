@@ -364,7 +364,7 @@ do
 - [ ] **PromptPoller: verify it never fires during IPC write cycle** — `PatchWatcher` uses Document API (no disk write, no VFS external change); confirm `PromptPoller` is not triggered. If it is, identify why disk is being written during the IPC path.
 - [ ] **PromptPoller merge failure** — as fallback: preserve editor content when `gitMergeFile` returns null; don't call `reloadFiles()`
 - [ ] **FFI: `agent_doc_merge_crdt()`** — CRDT-aware merge via FFI for edge cases where disk diverges; replaces git merge-file in plugin
-### Re: PromptPoller fixes + FFI CRDT merge — implemented (HEAD)
+### Re: PromptPoller fixes + FFI CRDT merge — implemented
 
 **Task 1: PromptPoller fires during IPC write — verified and fixed**
 
@@ -414,12 +414,32 @@ val merged = NativePatching.mergeCrdt(base, diskContent, editorContent)
 CRDT merge is conflict-free (never returns null for a conflict). `gitMergeFile` is retained as fallback for when FFI is unavailable.
 
 465 tests pass, clippy clean. JB plugin: `BUILD SUCCESSFUL`.
-<!-- agent:boundary:c8de40b9 -->
+
+JB Plugin version bump and install?
+commit and push
+### Re: JB plugin 0.2.46 + commit + push — done (HEAD)
+
+**Bumped** `gradle.properties`: `0.2.45 → 0.2.46`. Both zips built:
+
+```
+build/distributions/agent-doc-jetbrains-0.2.46.zip
+build/distributions/agent-doc-jetbrains-0.2.46-signed.zip
+```
+
+**Committed and pushed** — `ef9a210` on `main`:
+
+> PromptPoller: FFI CRDT merge, fix unnecessary reload, preserve edits on conflict
+
+**Install steps** (new JNA binding added — full reinstall required):
+
+1. IDEA → Settings → Plugins → find "Agent Doc" → Uninstall → Restart
+2. Settings → Plugins → ⚙ gear → "Install Plugin from Disk..." → select `agent-doc-jetbrains-0.2.46.zip`
+3. Restart IDE
+<!-- agent:boundary:75ee4bc3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Bump JB plugin version + build signed zip
-- [ ] Install updated plugin
+- [ ] Install updated plugin (0.2.46)
 <!-- /agent:pending -->

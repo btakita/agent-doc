@@ -142,7 +142,7 @@ How can I propose these amendment? By email?
 
 Please create an amendment based on https://github.com/btakita
 Should I also include my private repositories?
-### Re: Proposing the amendment and Exhibit A (HEAD)
+### Re: Proposing the amendment and Exhibit A
 
 **How to propose:** Yes, email is the right channel. Send it to Rob before signing. Frame it as: "Before I sign, I'd like to propose one addendum — here's the language." Keep it professional and brief. This is standard practice for contractors with active side projects.
 
@@ -223,7 +223,19 @@ Date: _______________
 - The Exhibit A lists your key active projects explicitly, then uses a blanket clause for "all other repositories" to catch everything
 - The open-source carve-out (2b) covers *future* projects categorically — no need to update Exhibit A every time you create a new library
 - Send this alongside a brief email explaining the rationale
-<!-- agent:boundary:f8933272 -->
+
+Please draft an email to robert-ross with the proposed amendments. Also send Exhibit A in the email.
+### Re: Email draft (HEAD)
+
+Email drafted at `mail/drafts/2026-04-06-proposed-addendum-to-consulting-agreement-prior-inventions-i.md`.
+
+Includes:
+- Brief intro framing the 3 items (Prior Inventions, Open-Source Carve-Out, Liability cap)
+- Full addendum language with Exhibit A listing your key projects + blanket clause
+- Professional, direct tone matching Rob's communication style
+
+Ready to push to Gmail Drafts on your approval.
+<!-- agent:boundary:798c9480 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

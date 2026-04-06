@@ -68,5 +68,13 @@
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
+        <action id="AgentDoc.RefreshEnvironment"
+                class="com.github.btakita.agentdoc.RefreshEnvironmentAction"
+                text="Refresh Agent Doc Environment"
+                description="Clears slash command cache and forces VFS rescan of .claude/ dirs">
+            <keyboard-shortcut first-keystroke="ctrl shift alt R" keymap="$default"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>

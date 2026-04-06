@@ -890,7 +890,7 @@ For the text reply to Rob, keep it simple and don't front-load the independent w
 Then when you read it, raise specifics. Mentioning "independent work" upfront before seeing the document could signal you're worried about competing, which isn't the framing you want. You want to frame it as: "I have existing open-source projects that predate this relationship"... that's a standard carve-out, not a red flag.
 
 If he asks on the call, you can say naturally: "I maintain several open-source projects I'll want to make sure are carved out, which is pretty standard."
-<!-- agent:boundary:55050f07 -->
+<!-- agent:boundary:269e8425 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

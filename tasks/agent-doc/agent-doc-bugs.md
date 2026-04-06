@@ -144,8 +144,8 @@ do
 - **`plugin.xml`** — registered action with `Ctrl+Shift+Alt+R` shortcut and ToolsMenu/EditorPopupMenu
 
 Build: `BUILD SUCCESSFUL`. Available via `Alt+Space` popup menu or `Ctrl+Shift+Alt+R`.
-Do we need to bump the JB plugin version? Do I need to install the latest plugin?
-### Re: version bump + install (HEAD)
+Do we need to bump the JB plugin version? Do I need to install the latest plugin? 
+### Re: version bump + install
 
 Yes and yes.
 
@@ -161,7 +161,23 @@ build/distributions/agent-doc-jetbrains-0.2.45-signed.zip
 1. IDEA → Settings → Plugins → find "Agent Doc" → Uninstall → Restart
 2. Settings → Plugins → ⚙ gear → "Install Plugin from Disk..." → select `agent-doc-jetbrains-0.2.45.zip`
 3. Restart IDE
-<!-- agent:boundary:d78f19e4 -->
+
+I don't see any `/codex` autocompletes in the agent document.
+### Re: `/codex` not in autocomplete — root cause and fix (HEAD)
+
+**Root cause:** `commands.rs` had a **static** command list. The codex commands live at `~/.claude/plugins/marketplaces/openai-codex/plugins/codex/commands/*.md` — a plugin location that the static list never scanned.
+
+**Fix:** Added `discover_plugin_commands()` to `commands.rs` that dynamically scans:
+```
+~/.claude/plugins/marketplaces/<MARKETPLACE>/plugins/<NAMESPACE>/commands/*.md
+```
+Each `.md` file's `description:` and `argument-hint:` frontmatter becomes a `/<namespace>:<stem>` entry.
+
+Verified — `agent-doc commands` now returns all 7 codex commands:
+`/codex:setup`, `/codex:rescue`, `/codex:review`, `/codex:result`, `/codex:status`, `/codex:cancel`, `/codex:adversarial-review`
+
+**Also:** rebuilt and reinstalled the binary. The agent-doc JB plugin calls `agent-doc commands` on first autocomplete in each session — after using `Refresh Agent Doc Environment` (`Ctrl+Shift+Alt+R`) to clear the cache, `/codex:*` commands will appear.
+<!-- agent:boundary:dc1c99d5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

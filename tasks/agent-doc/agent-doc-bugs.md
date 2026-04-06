@@ -98,7 +98,7 @@ Already published to crates.io (from earlier release). Committed the claim auto-
 - GitHub: tag force-updated to include claim fix
 - Binary: v0.31.16 installed
 An agent-doc tmux window somehome ended up in tmux session 12. How did this happen?
-### Re: agent-doc window in session 12 (HEAD)
+### Re: agent-doc window in session 12
 
 The configured session is `10` (`agent-doc session` returns 10). But session 12 has a window with 2 active agent-doc panes (window 0) and a stash window with 21 panes (window 1).
 
@@ -107,11 +107,28 @@ This likely happened when a session switch occurred — `agent-doc session set` 
 The stash window in session 12 (21 panes) accumulated dead/inactive sessions that weren't cleaned up. `agent-doc resync --fix` should move live panes to the correct session and clean up dead ones.
 
 Want me to run `agent-doc resync --fix` to clean this up?
-<!-- agent:boundary:f641d9bd -->
+yes
+### Re: Resync complete — stash cleaned, active panes split across sessions (HEAD)
+
+`agent-doc resync --fix` results:
+- **Deregistered** 20 stash panes (orphaned sessions in stash window)
+- **Purged** 21 orphaned agent panes from non-stash windows
+- **Active sessions** now clean: 4 documents with live panes
+
+However, active panes are still split across two tmux sessions:
+- **Session 10:** %491 (agent-doc-bugs.md), %515 (brain-fry.md)
+- **Session 12:** %509 (build-party.md), %478 (corky.md)
+
+The 21 stash panes were left alive (not killed) — resync marks running `agent-doc` processes as "rescuable." They'll clean up on next resync or when processes exit.
+
+**Root cause:** A `session set` or new tmux session creation provisioned panes in session 12 while agent-doc was active there. When focus returned to session 10, the stash window and its panes stayed in 12. Resync deregisters orphans but doesn't move active panes across sessions — that would require `agent-doc session set 10` to consolidate.
+<!-- agent:boundary:0bf43d7e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Investigate session leak — how agent-doc window ended up in session 12
+- [ ] Consolidate active panes — `agent-doc session set 10` to move session 12 panes back
+- [ ] Investigate whether `resync --fix` should auto-kill deregistered stash panes (currently "rescuable")
+- [ ] Add session-drift detection to preflight (warn when panes span multiple sessions)
 <!-- /agent:pending -->

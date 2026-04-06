@@ -221,7 +221,7 @@ For more information about this error, try `rustc --explain E0425`.
 error: could not compile `corky` (lib) due to 1 previous error
 Error: Process completed with exit code 101.
 ```
-### Re: CI fix — `instruction_files::init` not in published 0.2.0
+### Re: CI fix — `instruction_files::init` not in published 0.2.0 (HEAD)
 
 **Root cause:** `init()` was committed to the local `instruction-files` repo (`102dcc3`) but `0.2.0` was already published to crates.io *without* it. CI resolves from crates.io, so `init` didn't exist there.
 
@@ -232,7 +232,7 @@ Error: Process completed with exit code 101.
 4. Committed, retagged `v0.26.0` on corky, tagged `v0.2.1` on instruction-files, pushed both
 
 CI should now resolve `instruction-files 0.2.1` from crates.io and find `init()`.
-### Re: CI fix — `instruction_files::init` not in published 0.2.0 (HEAD)
+### Re: CI fix — `instruction_files::init` not in published 0.2.0
 
 **Root cause:** `init()` was committed to the local `instruction-files` repo (`102dcc3`) but `0.2.0` was already published to crates.io *without* it. CI resolves from crates.io, so `init` didn't exist there.
 
@@ -287,7 +287,7 @@ Error: Process completed with exit code 101.
 - `instruction-files/src/lib.rs` — `Environment::detect()` → `Environment::ClaudeCode`
 - Bumped to 0.2.2, published to crates.io, tagged v0.2.2, pushed
 - Updated corky `Cargo.toml`: `instruction-files = "0.2.2"`, committed, pushed, retagged v0.26.0
-<!-- agent:boundary:0e357f0e -->
+<!-- agent:boundary:34cae786 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

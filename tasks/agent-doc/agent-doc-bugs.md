@@ -72,7 +72,7 @@ touch ~/.claude/skills/.reload && rm ~/.claude/skills/.reload
 **Refresh in Agent Doc command menu:** This is in our control. We can add an `AnAction` to agent-doc's JB plugin that touches `.claude/skills/` to fire a VFS event (best case), with a fallback notification if the extension doesn't respond to it.
 
 Want me to add "refresh skills autocomplete" as a pending task for the JB plugin?
-<!-- agent:boundary:84da1573 -->
+<!-- agent:boundary:289b0cb1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

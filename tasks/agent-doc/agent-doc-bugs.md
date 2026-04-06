@@ -532,7 +532,7 @@ Plugin built: `agent-doc-jetbrains-0.2.46.zip` (version unchanged — no bump ne
 
 **Install required** to pick up the plugin changes (same plugin version — reinstall over existing):
 Settings → Plugins → gear → "Install Plugin from Disk..." → `agent-doc-jetbrains-0.2.46.zip` → Restart
-<!-- agent:boundary:2c435c6d -->
+<!-- agent:boundary:603ab17e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -969,7 +969,7 @@ transfer claude-audio research to tasks/research/claudescore.md
 ### Re: transfer claude-auto research (HEAD)
 
 Extracted `### Re: claude-auto` → `tasks/research/claudescore.md`.
-<!-- agent:boundary:00664f2e -->
+<!-- agent:boundary:acc1c23e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

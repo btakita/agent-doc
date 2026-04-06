@@ -75,7 +75,7 @@ Looks like `vllm serve44` is a typo — should be `vllm serve`.
 **Recommendation:** Start with `Qwen2.5-Coder-32B-AWQ` on vllm for speed. If quality ceiling isn't enough, switch to `Qwen2.5-Coder-72B-Q4` via ollama with partial offload.
 
 > Knowledge cutoff is Aug 2025 — "Qwen3-Coder-Next" may have released after that. Check HuggingFace for latest Qwen3-Coder variants; the 32B or 14B version would be the right size target.
-<!-- agent:boundary:713056e2 -->
+<!-- agent:boundary:70e3ff9f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

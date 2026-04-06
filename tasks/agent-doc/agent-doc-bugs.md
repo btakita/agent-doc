@@ -105,7 +105,7 @@ Yes — a good generalization. `Refresh Agent Doc Environment` in the Alt+Shift 
 3. **Claim re-registration** — re-assert the document→pane binding if registry drifted
 
 Single `AnAction` registered in the JB plugin, available in the Alt+Shift context menu and as a standalone keymap action. Added to pending.
-<!-- agent:boundary:7538995d -->
+<!-- agent:boundary:3920075b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

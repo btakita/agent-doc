@@ -44,7 +44,7 @@ Installing the Codex CLI (OpenAI's tool) doesn't automatically register a `/code
 If you want `/codex` available as a Claude Code slash command, you'd need to create a skill at `.claude/skills/codex/SKILL.md` that defines its behavior.
 
 Is the goal to use Codex from within Claude Code sessions, or were you expecting it to auto-register from the install?
-<!-- agent:boundary:fbd8f48f -->
+<!-- agent:boundary:fb987b6e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

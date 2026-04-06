@@ -213,7 +213,7 @@ All 711 tests pass, clippy clean, binary installed.
 **Why one copy was uncommitted:** After the IPC write, `agent-doc commit` repositioned the boundary marker. The duplicate ended up inserted before the user's question in the exchange, landing in the uncommitted (green gutter) region.
 
 **Fixed:** Ran `agent-doc dedupe` — removed 1192 bytes of duplicate content.
-<!-- agent:boundary:0985000b -->
+<!-- agent:boundary:eb0d4561 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

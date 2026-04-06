@@ -327,7 +327,7 @@ Want me to implement this?
 Why are we doing a 3 way merge?
 Why not CRDT?
 Why is the JB Plugin doing so much of the lifting. Can the FFI plugin get more involved?
-### Re: 3-way merge vs CRDT + JB Plugin lifting (HEAD)
+### Re: 3-way merge vs CRDT + JB Plugin lifting
 
 **Why 3-way merge (not CRDT)?**
 
@@ -359,13 +359,67 @@ VFS external change detected              VFS external change detected
 3. Long-term: add `ffi::agent_doc_merge_crdt()` for the edge case where a disk write diverges and needs CRDT-aware merge
 
 **Pending update:** the `PromptPoller merge failure` item should be re-scoped — the fix isn't just "preserve editor content on failure," it's "ensure PromptPoller never fires during a normal agent write cycle."
-<!-- agent:boundary:7a70abeb -->
+
+do
+- [ ] **PromptPoller: verify it never fires during IPC write cycle** — `PatchWatcher` uses Document API (no disk write, no VFS external change); confirm `PromptPoller` is not triggered. If it is, identify why disk is being written during the IPC path.
+- [ ] **PromptPoller merge failure** — as fallback: preserve editor content when `gitMergeFile` returns null; don't call `reloadFiles()`
+- [ ] **FFI: `agent_doc_merge_crdt()`** — CRDT-aware merge via FFI for edge cases where disk diverges; replaces git merge-file in plugin
+### Re: PromptPoller fixes + FFI CRDT merge — implemented (HEAD)
+
+**Task 1: PromptPoller fires during IPC write — verified and fixed**
+
+Root cause confirmed: `PatchWatcher` calls `FileDocumentManager.saveDocument()` after patching via Document API. This changes the VFS `modificationStamp`, which `PromptPoller.refreshTrackedFiles()` detects and calls `mergeOrReload`. The fix in `mergeOrReload`:
+
+```kotlin
+if (!fdm.isDocumentUnsaved(doc)) {
+    // Only reload if doc content differs from disk (true external write bypassing Document API)
+    val diskContent = String(tracked.file.contentsToByteArray(), Charsets.UTF_8)
+    if (doc.text != diskContent) {
+        fdm.reloadFiles(tracked.file)
+    }
+    return
+}
+```
+
+After PatchWatcher writes, `doc.text == diskContent` (both in sync), so the reload is skipped. For a genuinely external write (not via Document API), `doc.text != diskContent` triggers the real `reloadFiles()`.
+
+**Task 2: Preserve editor content on merge failure**
+
+```kotlin
+} else {
+    // Preserve editor content on merge failure — don't discard user edits
+    TerminalUtil.notifyInfo(project, "Merge conflict with external write — editor content preserved.")
+    tracked.lastSavedContent = editorContent  // reset base to avoid repeat merge attempts
+}
+```
+
+**Task 3: `agent_doc_merge_crdt()` — text-based CRDT 3-way merge**
+
+Added to `ffi.rs`:
+```rust
+pub unsafe extern "C" fn agent_doc_merge_crdt(
+    base: *const c_char, ours: *const c_char, theirs: *const c_char,
+) -> *mut c_char
+```
+Converts `base` text → CRDT state bytes, calls `crdt::merge(Some(&base_state), ours, theirs)`. Returns merged text; falls back to `ours` on any error.
+
+JNA binding added to `AgentDocLib` interface. `NativePatching.mergeCrdt(base, ours, theirs)` convenience method added.
+
+`PromptPoller.mergeOrReload` now uses:
+```kotlin
+val merged = NativePatching.mergeCrdt(base, diskContent, editorContent)
+    ?: gitMergeFile(base, diskContent, editorContent)
+```
+
+CRDT merge is conflict-free (never returns null for a conflict). `gitMergeFile` is retained as fallback for when FFI is unavailable.
+
+465 tests pass, clippy clean. JB plugin: `BUILD SUCCESSFUL`.
+<!-- agent:boundary:7e5ba606 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **PromptPoller: verify it never fires during IPC write cycle** — `PatchWatcher` uses Document API (no disk write, no VFS external change); confirm `PromptPoller` is not triggered. If it is, identify why disk is being written during the IPC path.
-- [ ] **PromptPoller merge failure** — as fallback: preserve editor content when `gitMergeFile` returns null; don't call `reloadFiles()`
-- [ ] **FFI: `agent_doc_merge_crdt()`** — CRDT-aware merge via FFI for edge cases where disk diverges; replaces git merge-file in plugin
+- [ ] Bump JB plugin version + build signed zip
+- [ ] Install updated plugin
 <!-- /agent:pending -->

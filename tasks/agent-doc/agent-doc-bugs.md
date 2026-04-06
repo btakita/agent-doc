@@ -31,6 +31,7 @@ agent-doc v0.31.14 released to crates.io + GitHub
 **audit-docs** — added layout_issues to SPEC.md §7.26, CLAUDE.md, README.md, SKILL.md.
 
 **Partial compact (--keep N)** — added to agent-doc compact: keeps last N ### Re: sections, archives older; parse_topic_sections() helper; run_component_compact_partial(); 4 new tests; 462 tests pass, clippy clean, release binary built.
+<!-- agent:boundary:5cb5f9c4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

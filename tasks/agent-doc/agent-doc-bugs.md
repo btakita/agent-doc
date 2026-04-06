@@ -161,7 +161,7 @@ build/distributions/agent-doc-jetbrains-0.2.45-signed.zip
 1. IDEA → Settings → Plugins → find "Agent Doc" → Uninstall → Restart
 2. Settings → Plugins → ⚙ gear → "Install Plugin from Disk..." → select `agent-doc-jetbrains-0.2.45.zip`
 3. Restart IDE
-<!-- agent:boundary:97094f21 -->
+<!-- agent:boundary:d78f19e4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

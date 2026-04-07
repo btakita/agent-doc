@@ -287,7 +287,7 @@ agent-doc resync --fix
 Then re-open `tasks/recruit/justin-caird.md` from the editor. Deregisters `%544`, provisions a fresh session.
 
 **Note:** preflight also flagged `%543` and `%548` (the session $14 agent-doc panes) as non-idle in the stash window. They've been moved to the stash rather than the active window — they'll be rescued or killed on next open of those documents.
-<!-- agent:boundary:1cee909b -->
+<!-- agent:boundary:26e909c5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

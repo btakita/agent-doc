@@ -231,7 +231,7 @@ Returns `Err` with a clear message if either pane is in the wrong session — ca
 `cargo check` + `cargo clippy` — clean.
 
 This closes the last direct `tmux.swap_pane()` callsite in agent-doc code. Any future accidental `tmux.swap_pane()` call skips the guard — so this should be noted as a convention: prefer `swap_pane_guarded()` over `tmux.swap_pane()` in agent-doc.
-<!-- agent:boundary:f947f917 -->
+<!-- agent:boundary:5ac811f6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

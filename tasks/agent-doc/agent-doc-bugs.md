@@ -206,7 +206,7 @@ Two-step failure in the pre-v0.31.18 code:
 2. **Lazy claim:**  When `%533` (the real justin-caird.md Claude session) exited, the next open of justin-caird.md hit Strategy 2 in `resolve_or_create_pane()` (`route.rs:261-268`): registered pane was dead → `find_target_pane()` found `%544` (corky, now in session $10's window) → registered it as the justin-caird.md pane → sent the `agent-doc route` command to corky's pane.
 
 Both bugs contributed: rescue brought corky into the window, lazy claim adopted it as the wrong document's pane. v0.31.18 fixes rescue (session guard). Lazy claim is still a risk if a foreign process is already in the window — that's the WrongProcess detection `resync` now covers.
-<!-- agent:boundary:28f061b1 -->
+<!-- agent:boundary:0f8dd9d5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

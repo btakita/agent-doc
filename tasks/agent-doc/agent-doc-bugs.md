@@ -328,7 +328,7 @@ Added `is_agent_process(tmux, pane_id)` helper and `AGENT_PROCESSES` const to `r
 CLI: `agent-doc resync --fix --session 10` relocates all WrongSession panes to session `10` instead of killing them.
 
 `cargo check` + `cargo clippy` clean. All 38 tests pass.
-<!-- agent:boundary:7741aecc -->
+<!-- agent:boundary:64490a29 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

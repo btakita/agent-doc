@@ -641,7 +641,7 @@ Added "When to bump the plugin version" section to `runbooks/plugin-install.md`:
 
 **Install:**
 Settings → Plugins → gear → "Install Plugin from Disk..." → `agent-doc-jetbrains-0.2.47.zip` → Restart
-### Re: dedup guard fix + claudescore repair #2 (HEAD)
+### Re: dedup guard fix + claudescore repair #2
 
 **Root cause identified:** The boundary-ID dedup guard in 0.2.47 was wrong.
 
@@ -666,7 +666,31 @@ Plugin rebuilt: **0.2.48** (`agent-doc-jetbrains-0.2.48.zip`).
 
 **Install to activate the fix:**
 Settings → Plugins → gear → "Install Plugin from Disk..." → `agent-doc-jetbrains-0.2.48.zip` → Restart
-<!-- agent:boundary:a2f7de69 -->
+
+Why was tasks/recruit/xbow.md compacted? I prompted it with:
+> Please compact, transcribe, and diarize [2026-04-07 09-00-51.mp4](../../../../../Videos/2026-04-07%2009-00-51.mp4)
+### Re: xbow.md compaction (HEAD)
+
+The word "compact" in your prompt triggered the compact-exchange runbook. The agent read:
+
+> Please **compact**, transcribe, and diarize …
+
+…and matched "compact" as a `/compact exchange` directive, collapsing the exchange content down to the one-liner summary you see now.
+
+This is a false-positive: you meant "compact" as an adjective describing the desired transcript output (concise/dense), not as a document management command.
+
+**Root cause:** The agent's natural-language parsing (or the skill's slash-command detection) matched "compact" in prose as a runbook trigger. It should only trigger on an isolated imperative like `compact exchange` at the start of a user turn, not when "compact" appears mid-sentence modifying a noun.
+
+**Fix needed in agent-doc skill / compact-exchange runbook:** Require the trigger to be the *first word* of the user message (or on its own line), and verify the next token is "exchange" or the document component name — not a comma followed by unrelated verbs.
+
+**Workaround for now:** Avoid starting a sentence with "compact" unless you intend to trigger compaction. Rephrase as "concise transcript" or "summarized transcript."
+
+**Recovering the lost exchange content:** The pre-compaction content is in git. Run:
+```bash
+git show f7f24a15:tasks/recruit/xbow.md
+```
+to see the full exchange before it was collapsed.
+<!-- agent:boundary:9d8b48c5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -674,4 +698,5 @@ Settings → Plugins → gear → "Install Plugin from Disk..." → `agent-doc-j
 <!-- agent:pending patch=replace -->
 - [ ] Install 0.2.48 (snapshot-timestamp dedup guard — correct approach)
 - [ ] Re-enter lost claudescore.md content (target audience / feasibility / chromium-bridge questions)
+- [ ] Fix compact-exchange trigger: require isolated imperative, not prose "compact" mid-sentence
 <!-- /agent:pending -->

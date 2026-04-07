@@ -140,19 +140,34 @@ Session drift warning (`spans sessions 10, 14`) comes from `%543`/`%548` still i
 
 **To recover:**
 ```bash
-# Return corky to session 14, provision fresh pane for justin-caird.md (HEAD)
+# Return corky to session 14, provision fresh pane for justin-caird.md
 tmux join-pane -t 14 -s %544
 agent-doc resync --fix
 ```
 Then re-open `tasks/recruit/justin-caird.md` in the editor — sync will auto-start a new agent-doc session.
 
 **Potential enhancement:** `resync` could detect process-name mismatches (pane running something other than `agent-doc`/`claude`) and flag them as suspect entries.
-<!-- agent:boundary:e2755475 -->
+
+Describe
+- [ ] Consider resync enhancement: flag panes whose running process doesn't match expected (agent-doc/claude)
+### Re: resync WrongProcess enhancement (HEAD)
+
+Already implemented. `agent-doc resync` just output:
+
+```
+Found 1 issue(s) (run with --fix to resolve):
+  tasks/recruit/justin-caird.md (pane %544) running 'corky', expected agent-doc/claude
+```
+
+`resync.rs` has `WrongProcess` as a first-class issue type (alongside `WrongSession`, `WrongWindow`, `InStash`). It checks `#{pane_current_command}` against `AGENT_PROCESSES = ["agent-doc", "claude", "node"]`.
+
+**Fix behavior:** `--fix` deregisters `%544` without killing corky. Then re-opening `justin-caird.md` auto-provisions a fresh session.
+<!-- agent:boundary:cb1ec405 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Return corky pane (%544) to session $14 and provision fresh justin-caird.md session
-- [ ] Consider resync enhancement: flag panes whose running process doesn't match expected (agent-doc/claude)
+- [ ] Run `agent-doc resync --fix` to deregister %544 (corky)
+- [ ] Re-open justin-caird.md to provision fresh session
 <!-- /agent:pending -->

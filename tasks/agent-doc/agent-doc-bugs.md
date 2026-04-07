@@ -304,7 +304,7 @@ agent-doc resync --fix
 Deregisters `%544`. Then opening justin-caird.md provisions a fresh pane without touching corky.
 
 **Deeper issue to fix in code:** The wrong-session recovery logic (`stash_pane` + rescue) should not apply to panes running non-AGENT_PROCESSES. If `%544` is running `corky`, it should be classified as `WrongProcess` and skipped — not relocated. The AGENT_PROCESSES check needs to guard the wrong-session recovery path in addition to Strategy 2 (lazy claim).
-<!-- agent:boundary:4ac1a69c -->
+<!-- agent:boundary:dc80c906 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

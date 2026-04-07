@@ -62,7 +62,7 @@ The typical edit cycle: write in your editor, trigger `agent-doc route <file>` v
 - **Linked resources** — `links` frontmatter field for local files and URLs; URL content fetched, converted HTML→markdown via `htmd`, cached, and diffed on each preflight
 - **Session logging** — persistent logs at `.agent-doc/logs/<session-uuid>.log` for debugging session crashes and restarts
 - **Git integration** — auto-commit each run; squash history with `agent-doc clean`
-- **Bulk resync** — validates session state and fixes stale/orphaned panes in 2 subprocess calls instead of ~20-40
+- **Bulk resync** — validates session state and fixes stale/orphaned panes in 2 subprocess calls instead of ~20-40; `--fix --session <name>` relocates WrongSession panes via join-pane instead of killing them
 - **Column memory** — `.agent-doc/last_layout.json` remembers column→agent-doc mapping; preserves 2-pane tmux layout when one editor column switches to a non-agent file
 - **Stash + rescue** — replaced panes are stashed (alive in background); stash rescue brings them back when the user switches to that document again
 - **Startup lock** — `.agent-doc/starting/<hash>.lock` with 5s TTL prevents double-spawn when sync fires twice in quick succession
@@ -75,7 +75,24 @@ The typical edit cycle: write in your editor, trigger `agent-doc route <file>` v
 
 The binary owns all deterministic behavior: component parsing, patch application, CRDT merge, snapshot management, git operations, tmux routing, and IPC writes. The SKILL.md Claude Code skill is the non-deterministic orchestrator — it reads the diff, generates responses, and decides what to write.
 
-See [CLAUDE.md](CLAUDE.md) for the full module layout, binary vs. agent responsibility table, stream mode details, and release process.
+**Binary vs. Agent Responsibility:**
+
+| Responsibility | Owner | Why |
+|---------------|-------|-----|
+| Component parsing, patch application, mode resolution | **Binary** (Rust) | Deterministic, testable, consistent across agents |
+| CRDT merge, snapshot management, atomic writes | **Binary** (Rust) | Concurrency safety requires flock + atomic rename |
+| Diff computation, comment stripping, truncation detection | **Binary** (Rust) | Reproducible baseline comparison |
+| Git operations (commit, history, clean) | **Binary** (Rust) | Direct `std::process::Command` calls |
+| Tmux routing, session registry, pane management | **Binary** (Rust) | Process-level coordination |
+| Pre-response snapshots, undo, extract, transfer | **Binary** (Rust) | File-level atomicity |
+| Boundary marker lifecycle (insert, reposition, cleanup) | **Binary** (Rust) | Deterministic, all write paths need it |
+| Reading diff, interpreting user intent | **Skill** (SKILL.md) | Requires LLM reasoning |
+| Generating response content | **Skill** (SKILL.md) | Non-deterministic |
+| Deciding what to write to which component | **Skill** (SKILL.md) | Context-dependent |
+| Streaming checkpoints, progress tracking | **Skill** (SKILL.md) | Response-generation timing |
+| Pending item management (parse, populate, process) | **Skill** (SKILL.md) | Semantic understanding of prompts |
+
+See [CLAUDE.md](CLAUDE.md) for the full module layout, stream mode details, and release process.
 
 ## Supported Editors
 

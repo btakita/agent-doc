@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.19
+
+- **AGENT_PROCESSES guard on wrong-session recovery (route.rs):** `is_agent_process()` helper added. Wrong-session recovery path now skips `stash_pane`+`rescue_from_stash` for panes running non-agent processes (corky, shells, etc.) — falls through to auto-start instead. Prevents corky/foreign panes from being dragged across tmux sessions.
+- **AGENT_PROCESSES guard on lazy claim Strategy 2 (route.rs):** `find_target_pane()` result is now gated by `is_agent_process()` — panes running non-agent processes are not claimed. Prevents corky from being registered as the owner of a document pane.
+- **`resync --fix --session <target>` (resync.rs + main.rs):** `WrongSession` fix now supports `--session <name>` to relocate panes via `join-pane` instead of killing them. `apply_fixes_to_registry` takes `relocate_session: Option<&str>`. Falls back to deregister if no active pane found in target session.
+
 ## 0.31.18
 
 - **Partial compact `--keep N` (compact.rs):** `agent-doc compact <FILE> --keep N` archives only exchanges older than the last N `### Re:` sections, preserving recent context. `parse_topic_sections()` helper added; 4 new tests.

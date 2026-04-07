@@ -19,20 +19,7 @@ Interactive document sessions with AI agents.
 
 ## Binary vs Agent Responsibility
 
-| Responsibility | Owner | Why |
-|---------------|-------|-----|
-| Component parsing, patch application, mode resolution | **Binary** (Rust) | Deterministic, testable, consistent across agents |
-| CRDT merge, snapshot management, atomic writes | **Binary** (Rust) | Concurrency safety requires flock + atomic rename |
-| Diff computation, comment stripping, truncation detection | **Binary** (Rust) | Reproducible baseline comparison |
-| Git operations (commit, history, clean) | **Binary** (Rust) | Direct `std::process::Command` calls |
-| Tmux routing, session registry, pane management | **Binary** (Rust) | Process-level coordination |
-| Pre-response snapshots, undo, extract, transfer | **Binary** (Rust) | File-level atomicity |
-| Boundary marker lifecycle (insert, reposition, cleanup) | **Binary** (Rust) | Deterministic, all write paths need it |
-| Reading diff, interpreting user intent | **Skill** (SKILL.md) | Requires LLM reasoning |
-| Generating response content | **Skill** (SKILL.md) | Non-deterministic |
-| Deciding what to write to which component | **Skill** (SKILL.md) | Context-dependent |
-| Streaming checkpoints, progress tracking | **Skill** (SKILL.md) | Response-generation timing |
-| Pending item management (parse, populate, process) | **Skill** (SKILL.md) | Semantic understanding of prompts |
+See [README.md](README.md) for the full responsibility table.
 
 **Rule of thumb:** If the operation can be unit-tested with fixed inputs → binary. If it requires understanding natural language → skill.
 - **Inline component attributes:** `<!-- agent:name patch=append max_lines=50 -->` — patch mode and max_lines are configurable on the tag itself. `mode=` is accepted as a backward-compatible alias for `patch=`; `patch=` takes precedence if both are present. `max_lines=N` trims content to the last N lines after patching (0 or absent = unlimited). Precedence: inline attr > `components.toml` > built-in defaults.
@@ -68,7 +55,7 @@ src/
   prompt.rs         # Detect permission prompts from Claude Code sessions (strip_ansi is pub(crate))
   skill.rs          # Manage bundled SKILL.md (install/check)
   install.rs        # System-level setup: check prerequisites (tmux, claude) and install editor plugins
-  resync.rs         # Validate sessions.json, remove dead panes, detect wrong-session/wrong-process panes (--fix)
+  resync.rs         # Validate sessions.json, remove dead panes, detect wrong-session/wrong-process panes (--fix [--session <target>])
   session_cmd.rs    # Show/set configured tmux session with pane migration
   history.rs        # Exchange version history from git + restore
   upgrade.rs        # Self-update via crates.io / GitHub Releases

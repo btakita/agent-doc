@@ -1152,7 +1152,7 @@ I want the order of events expanded upon:
 - Did not respond until I was in the call.
 - Rob Ross did not want me to join the interview.
 - Not an excuse but I was under much stress and I made some mistakes. I should have let them know sooner.
-### Re: Full Dreamable timeline (internal context, Apr 7) (HEAD)
+### Re: Full Dreamable timeline (internal context, Apr 7)
 
 Documented for context — this does not change the draft message.
 
@@ -1171,7 +1171,30 @@ Documented for context — this does not change the draft message.
 **Rob Ross detail stays internal.** Internal pressure to pull away from ECI is not Justin's concern, and mentioning it adds complexity without benefit.
 
 **The draft is still ready to send as-is.** This timeline is internal context only.
-<!-- agent:boundary:2a484d69 -->
+
+Why not send the order of event. They were exceptional. I did a call on Easter Sunday...an important holiday.
+### Re: Easter Sunday context — include it (Apr 7) (HEAD)
+
+Fair point. The circumstances were genuinely exceptional, and the Easter Sunday detail directly counters ECI's framing.
+
+ECI's complaint: "not kept in the loop that you had accepted a job before the interview." The Sunday offer timeline answers that: there was no window to loop them in — the offer arrived Easter Sunday, revisions went back and forth, and the contract wasn't signed until Monday morning.
+
+**Expanded draft (recommended):**
+
+---
+
+Hi Justin — I appreciate you going to bat for me. Understood on their reaction...the timing was genuinely poor on my end.
+
+For context: the offer came in on Easter Sunday and I spent the weekend working through contract revisions. The contract wasn't finalized until Monday morning — I was on the signing call when I reached out to you. It wasn't that I had accepted days earlier and stayed quiet. I know that doesn't fix the last-minute notice, but it may help explain how it unfolded.
+
+I'll leave it in your hands. Whatever the team decides, I appreciate you trying.
+
+---
+
+**What changed:** One sentence added — "the offer came in on Easter Sunday and I spent the weekend working through contract revisions." This establishes the compressed timeline and directly reframes the "not kept in the loop" concern without turning it into a sob story.
+
+The Easter Sunday call is exceptional context, not an excuse. Including it is the right call.
+<!-- agent:boundary:1ecd14f4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

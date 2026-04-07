@@ -162,7 +162,7 @@ Found 1 issue(s) (run with --fix to resolve):
 `resync.rs` has `WrongProcess` as a first-class issue type (alongside `WrongSession`, `WrongWindow`, `InStash`). It checks `#{pane_current_command}` against `AGENT_PROCESSES = ["agent-doc", "claude", "node"]`.
 
 **Fix behavior:** `--fix` deregisters `%544` without killing corky. Then re-opening `justin-caird.md` auto-provisions a fresh session.
-<!-- agent:boundary:cb1ec405 -->
+<!-- agent:boundary:27373077 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

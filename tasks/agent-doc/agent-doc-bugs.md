@@ -106,7 +106,8 @@ done
 do
 - [ ] Add SKILL.md note: patch:exchange must not echo user input (append mode)
 - [ ] Implement `❯ ` prefix normalization for user-added exchange lines in `agent-doc write` (both append + replace modes)
-### Re: done + do — tasks executed (HEAD)
+
+### Re: done + do — tasks executed
 
 **PyPI trusted publisher:** Marked done (user resolved externally).
 
@@ -139,12 +140,41 @@ Added `normalize_user_prompts_in_exchange(content, snapshot)` to `write.rs`. Cal
 `make check` clean (208 tests pass).
 
 **IPC note:** Disk write path fully normalized (editor file shows `❯ `). IPC path normalizes the snapshot only — editor shows prefix on next disk cycle. Full IPC-side normalization needs plugin support (TODO).
-<!-- agent:boundary:7624ec35 -->
+
+do
+- [ ] IPC-side ❯  normalization (plugin support needed)
+
+Use FFI plugin if possible
+### Re: IPC-side ❯  normalization (HEAD)
+
+Done. Both the binary and plugin now handle prefix normalization through the IPC path.
+
+**Binary side (`write.rs`):**
+- `extract_normalization_targets(before, after) -> Vec<String>` — diffs `content_ours` before/after normalization, returns list of original line texts that received the `❯ ` prefix
+- `try_ipc` signature: added `normalize_prefix_lines: Option<&[String]>` (7th arg)
+- Both socket payload and file IPC payload include `normalize_prefix_lines` array when non-empty
+- `run` path: computes targets from `content_ours` diff, passes to `try_ipc`
+- All callers (`stream.rs`, test sites) updated to pass `None`
+
+**Plugin side (`PatchWatcher.kt`):**
+- `IpcPatch` data class: added `normalizePrefixLines: List<String> = emptyList()`
+- `parsePatchJson`: reads `normalize_prefix_lines` array from JSON
+- `normalizeExchangePrefixes(doc, lines)`: targeted text replacement in user region only (before `<!-- agent:boundary:UUID -->`)
+- Applied in both Document API path (`applyPatch`) and VFS path (`applyPatchViaVfs`)
+
+`make check` passes (208 tests). Plugin build succeeded.
+
+**Pending: release v0.31.20 + plugin install.**
+<!-- agent:boundary:df755978 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Release v0.31.20 (SKILL.md note + ❯  prefix normalization)
-- [ ] IPC-side ❯  normalization (plugin support needed)
+- [ ] Bump versions: `Cargo.toml` + `pyproject.toml` → 0.31.20
+- [ ] Update `VERSIONS.md` with 0.31.20 entry
+- [ ] `make check` (clippy + test)
+- [ ] Tag + publish: crates.io, PyPI, GitHub Release
+- [ ] `cargo install --path .`
+- [ ] Build + install plugin v0.2.49 (JetBrains, with normalizeExchangePrefixes)
 <!-- /agent:pending -->

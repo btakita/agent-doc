@@ -208,7 +208,7 @@ An existence-lang-style ontology would let you define `LegalMatter → [Parties,
 "Your verifiable outputs feature checks AI answers against source citations — that's document-level grounding. An ontology layer would give you claim-level grounding: a formal graph of what's true in this case, so you can verify not just 'did you cite something' but 'is the citation sufficient for the claim.'"
 
 That's a conversation Cain would find genuinely interesting, and it's differentiated from what most engineers would bring to that interview.
-<!-- agent:boundary:15c1d8b3 -->
+<!-- agent:boundary:2fab53ac -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -45,7 +45,7 @@ Released.
 - PromptPoller FFI CRDT merge
 
 **Note on PyPI:** The `--compatibility manylinux_2_43 --auditwheel skip` flags were needed because glibc 2.43 (CachyOS) isn't in auditwheel's policy table yet. Previous versions (0.31.17) also missed PyPI for this reason — latest on PyPI was 0.31.16.
-<!-- agent:boundary:3c19c5a0 -->
+<!-- agent:boundary:111b35db -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

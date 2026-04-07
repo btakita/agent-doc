@@ -178,7 +178,7 @@ Worth asking directly in the interview if it's relevant to what you'd be working
 Your note — *"It seems that [?] make the artifacts interactive. In the case of LOIS..."* — looks like it got cut off. What were you thinking?
 
 My best guess at the direction: LOIS produces *static* outputs (drafted documents, summaries, extracted fields) but the artifact itself isn't interactive — you can't ask follow-up questions about a specific paragraph inline, for instance. That's a gap. Contrast with tools like Cursor or agent-doc where the document *is* the interface. If that's the direction you were going, it's a genuinely interesting product observation: LOIS generates artifacts, but attorneys can't currently converse *with* the artifact in context.
-<!-- agent:boundary:751c8785 -->
+<!-- agent:boundary:6c4db58b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

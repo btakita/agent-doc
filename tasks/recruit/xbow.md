@@ -45,7 +45,7 @@ Compacted. Transcript saved to [tasks/recruit/transcripts/xbow-2026-04-07.md](tr
 **Anna's question at end:** "What would you like to do more/less of?" — Brian: improve agentic dev practices, working with Claude Code/Codex, the fundamental shift in knowledge work
 
 **Diarization note:** 6 speaker clusters detected; some are likely voice splits. Anna = Speaker 3, Brian = Speaker 6 (long segment 05:34–32:20). Two unidentified XBOW voices (Speaker 1 at greeting, Speaker 2 in middle sections — possibly the same person or Anna voice splits).
-<!-- agent:boundary:07966166 -->
+<!-- agent:boundary:74968187 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

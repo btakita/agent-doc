@@ -305,7 +305,7 @@ Fix https://github.com/btakita/corky/actions/runs/24021664203/job/70051620000
 warning: build failed, waiting for other jobs to finish...
 Error: Process completed with exit code 101.
 ```
-### Re: OpenSSL version mismatch — vendored-openssl for Linux CI (HEAD)
+### Re: OpenSSL version mismatch — vendored-openssl for Linux CI
 
 **Root cause:** `native-tls` on Linux links against system OpenSSL via `openssl-sys`. On ubuntu-latest, the system OpenSSL version is incompatible with `openssl-sys 0.9.112` (likely OpenSSL 3.5.x, released 2025, not yet recognized).
 
@@ -331,7 +331,7 @@ Committed `bac9854`, pushed, retagged v0.26.0.
 Committed `bac9854`, pushed, retagged v0.26.0.
 
 Is this latest change released?
-### Re: Is v0.26.0 released? (HEAD)
+### Re: Is v0.26.0 released?
 
 **No** — the Release workflow is still failing (run [24022025948](https://github.com/btakita/corky/actions/runs/24022025948)). Two new issues:
 
@@ -354,16 +354,28 @@ sub-packages: '["nvcc", "cudart-dev"]'
 ```
 
 Want me to fix both and retag v0.26.0?
-<!-- agent:boundary:bdc14735 -->
+Yes
+### Re: CI fixes — native-tls/vendored + full CUDA toolkit (HEAD)
+
+**Fix 1 — aarch64 OpenSSL** (`Cargo.toml`):
+```toml
+vendored-openssl = ["openssl", "native-tls/vendored"]
+```
+`native-tls/vendored` compiles OpenSSL from source for ALL usages (not just the optional `openssl` dep).
+
+**Fix 2 — CUDA CMake** (`release.yml`):
+Removed `sub-packages` restriction — full CUDA toolkit installed so `FindCUDAToolkit` can find `cudart_static` and other libs needed by ggml-cuda.
+
+`make check` passes. Committed `c88a8ef`, pushed, retagged v0.26.0.
+
+Release workflow running: https://github.com/btakita/corky/actions/runs/24095058431
+<!-- agent:boundary:b621182f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Fix aarch64 OpenSSL: `vendored-openssl = ["openssl", "native-tls/vendored"]`
-- [ ] Fix CUDA CMake: try `cudart-dev` sub-package or downgrade to CUDA 12.4.0
-- [ ] Commit, push, retag v0.26.0
-- [ ] Monitor CI after retag
+- [ ] Monitor CI (release run 24095058431)
 - [ ] Verify sheet sharing / GCP test users
 - [ ] Re-test sheet read
 <!-- /agent:pending -->

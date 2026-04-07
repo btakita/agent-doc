@@ -705,7 +705,7 @@ Added explicit trigger rules:
 - "Never auto-compact without user approval" retained
 
 The stray `2` at the end of the exchange checklist item is noted — you can delete it.
-<!-- agent:boundary:f4964e30 -->
+<!-- agent:boundary:3a700b61 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

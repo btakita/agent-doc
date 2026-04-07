@@ -1196,7 +1196,7 @@ I'll leave it in your hands. Whatever the team decides, I appreciate you trying.
 The Easter Sunday call is exceptional context, not an excuse. Including it is the right call.
 
 I want to let them know that I requested to do the interview with Rob Ross but he asked me not to...to get started.
-### Re: Rob Ross blocking the interview — keep internal (Apr 7) (HEAD)
+### Re: Rob Ross blocking the interview — keep internal (Apr 7)
 
 This detail humanizes the situation for you but doesn't translate cleanly to Justin.
 
@@ -1210,7 +1210,29 @@ This detail humanizes the situation for you but doesn't translate cleanly to Jus
 **The current draft already covers the intent.** "I was on the signing call when I reached out to you" signals Brian was occupied with competing obligations, not being cavalier. That's the read Justin needs to make the case — without the Rob Ross complication.
 
 **Keep it internal. The message is ready as-is.**
-<!-- agent:boundary:ae5c17d2 -->
+
+I want to explain that the timing was **extremely** short. And it seemed like a good fit on Friday...with a Sunday follow up call to get started on Monday.
+### Re: Show the full Friday→Sunday→Monday arc (Apr 7) (HEAD)
+
+Good instinct. The Easter Sunday detail alone establishes weekend pressure but doesn't show how fast everything moved from first contact. The full arc (Friday interview → Sunday offer → Monday signing) makes the compressed timeline visceral without stating it explicitly.
+
+**Updated context sentence:**
+> For context: I interviewed Friday, received the offer on Easter Sunday, and spent the weekend working through contract revisions. The contract wasn't finalized until Monday morning — I was on the signing call when I reached out to you.
+
+**Full revised message (final):**
+
+---
+
+Hi Justin — I appreciate you going to bat for me. Understood on their reaction...the timing was genuinely poor on my end.
+
+For context: I interviewed Friday, received the offer on Easter Sunday, and spent the weekend working through contract revisions. The contract wasn't finalized until Monday morning — I was on the signing call when I reached out to you. It wasn't that I had accepted days earlier and stayed quiet. I know that doesn't fix the last-minute notice, but it may help explain how it unfolded.
+
+I'll leave it in your hands. Whatever the team decides, I appreciate you trying.
+
+---
+
+Friday → Easter Sunday → Monday morning signing. Under 72 hours. That's what "extremely short" looks like on the page, without saying it.
+<!-- agent:boundary:26c37207 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

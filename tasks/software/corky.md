@@ -316,7 +316,7 @@ Error: Process completed with exit code 101.
 (pypi.yml already used vendored-openssl — no change needed there.)
 
 Committed `bac9854`, pushed, retagged v0.26.0.
-<!-- agent:boundary:72dc2aca -->
+<!-- agent:boundary:60f8c407 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

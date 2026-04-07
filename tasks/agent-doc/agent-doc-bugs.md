@@ -147,7 +147,7 @@ agent-doc resync --fix
 Then re-open `tasks/recruit/justin-caird.md` in the editor — sync will auto-start a new agent-doc session.
 
 **Potential enhancement:** `resync` could detect process-name mismatches (pane running something other than `agent-doc`/`claude`) and flag them as suspect entries.
-<!-- agent:boundary:947e80b3 -->
+<!-- agent:boundary:e2755475 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

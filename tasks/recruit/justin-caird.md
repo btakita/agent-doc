@@ -980,7 +980,7 @@ Please review the latest linkedin message correspondence with justin-caird.
 I canceled the interview about 20 minutes prior b/c I accepted an offer with Dreamable. I was also in a meeting. However, the contract ended after 1 day.
 
 Please draft a reply explaining what happened a request to schedule an interview for Thursday.
-### Re: LinkedIn — cancellation & reconnect draft (Apr 7) (HEAD)
+### Re: LinkedIn — cancellation & reconnect draft (Apr 7)
 
 **Latest LinkedIn exchange:**
 
@@ -995,18 +995,38 @@ Please draft a reply explaining what happened a request to schedule an interview
 
 ---
 
-> Hi Justin — I wanted to follow up honestly. The role I accepted turned out to be a short-term contract arrangement, and it ended after the first day. I realize the timing of my cancellation was poor — I apologize for that.
->
-> I'm still very interested in the opportunity at ECI. If Thursday April 9th is still a possibility, I'd welcome the chance to have that conversation. Any of the time slots originally offered (4pm, 5pm, or 6pm ET) work for me.
->
-> I understand if the timing is difficult given how things unfolded. Either way, I appreciate how you've handled the process.
+Hi Justin — I wanted to follow up honestly. The role I accepted turned out to be a short-term contract arrangement, and it ended after the first day. I realize the timing of my cancellation was poor — I apologize for that.
+
+I'm still very interested in the opportunity at ECI. If Thursday April 9th is still a possibility, I'd welcome the chance to have that conversation. Any of the time slots originally offered (4pm, 5pm, or 6pm ET) work for me.
+
+I understand if the timing is difficult given how things unfolded. Either way, I appreciate how you've handled the process.
 
 ---
 
 Tone is direct and honest — no euphemisms about the Dreamable outcome. Acknowledges the last-minute disruption without over-explaining. References Thursday specifically since it was already on the table. The closing line gives Justin an easy out if they've moved on.
 
 Let me know if you want to adjust wording before sending.
-<!-- agent:boundary:bbea1cca -->
+
+I want to emphasize that it was supposed to be a full time hire. But the terms kept on shifting.
+And Rob Ross is also self-diagnosing himself with autism.
+### Re: Emphasizing full-time context (Apr 7) (HEAD)
+
+Good addition. "Short-term contract" understates it — if the offer was presented as full-time and the terms kept shifting until it fell apart day one, that's worth naming. It reframes the situation from "I bailed on a contract" to "I accepted what I understood to be a permanent role, the terms didn't hold."
+
+**Revised draft:**
+
+---
+
+Hi Justin — I wanted to follow up honestly. When I canceled Monday, I had accepted what I understood to be a full-time role — but the terms kept shifting and it ended after the first day. I realize my timing was poor and I apologize for that.
+
+I'm still genuinely interested in the opportunity at ECI. If Thursday April 9th is still a possibility, I'd welcome the chance to have that conversation. Any of the originally offered times (4pm, 5pm, or 6pm ET) work for me.
+
+I understand if the situation complicates things. Either way, I appreciate how you've handled the process.
+
+---
+
+Key change: "full-time role where the terms kept shifting" replaces "short-term contract arrangement." This accurately reflects what happened without over-explaining, and shifts the frame from "impulsive" to "circumstances changed fast."
+<!-- agent:boundary:ddf45f0e -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

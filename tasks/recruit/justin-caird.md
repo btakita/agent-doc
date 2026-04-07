@@ -975,7 +975,7 @@ Here's a LinkedIn message to cancel with Justin:
 ---
 
 Short, professional, no awkward explanation needed.
-<!-- agent:boundary:754319f6 -->
+<!-- agent:boundary:df40b07d -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

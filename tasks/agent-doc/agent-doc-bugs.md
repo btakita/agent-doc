@@ -276,7 +276,7 @@ agent-doc resync --fix
 For now: `tmux join-pane -t 10 -s %543 && tmux join-pane -t 10 -s %548`.
 
 Why is the `corky watch` pane claiming tasks/recruit/justin-caird.md?
-### Re: why is corky claiming justin-caird.md? (HEAD)
+### Re: why is corky claiming justin-caird.md?
 
 `resync --fix` hasn't been run. The registry still has `%544` (corky) → `justin-caird.md`. That mapping persists until explicitly cleared — every sync, open, and route for that document targets corky.
 
@@ -287,7 +287,24 @@ agent-doc resync --fix
 Then re-open `tasks/recruit/justin-caird.md` from the editor. Deregisters `%544`, provisions a fresh session.
 
 **Note:** preflight also flagged `%543` and `%548` (the session $14 agent-doc panes) as non-idle in the stash window. They've been moved to the stash rather than the active window — they'll be rescued or killed on next open of those documents.
-<!-- agent:boundary:26e909c5 -->
+
+I manually moved the `corky watch` tmux pane into tmux session 14. But when I navigated the editor to justin-caird.md, the `corky watch` pane came back. Why?
+### Re: corky came back after manual move (HEAD)
+
+**Root cause: v0.31.18's wrong-session recovery path is pulling corky back.**
+
+When you navigated to justin-caird.md, sync found `%544` (corky) in the registry, now in session $14. The v0.31.18 fix for "registered pane alive in wrong session" calls `stash_pane(pane, target_session)` to move it to $10's stash, then rescues it back — that's the self-correction you explicitly don't want, but it fires because the registry entry was never cleared.
+
+Sequence: manual move to $14 → open justin-caird.md → sync sees `%544` in $14 (wrong session) → applies session correction → corky returns to $10.
+
+**Fix: run `resync --fix` before opening the file:**
+```bash
+agent-doc resync --fix
+```
+Deregisters `%544`. Then opening justin-caird.md provisions a fresh pane without touching corky.
+
+**Deeper issue to fix in code:** The wrong-session recovery logic (`stash_pane` + rescue) should not apply to panes running non-AGENT_PROCESSES. If `%544` is running `corky`, it should be classified as `WrongProcess` and skipped — not relocated. The AGENT_PROCESSES check needs to guard the wrong-session recovery path in addition to Strategy 2 (lazy claim).
+<!-- agent:boundary:4ac1a69c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -295,6 +312,6 @@ Then re-open `tasks/recruit/justin-caird.md` from the editor. Deregisters `%544`
 <!-- agent:pending patch=replace -->
 - [ ] Run `agent-doc resync --fix` then re-open justin-caird.md
 - [ ] Build + release v0.31.19 with swap_pane_guarded()
-- [ ] Consider: add AGENT_PROCESSES check to Strategy 2 (lazy claim) in resolve_or_create_pane() to skip foreign-process panes
+- [ ] Fix wrong-session recovery path: skip `stash_pane`+rescue if pane is running a non-AGENT_PROCESS (guard applies to both wrong-session recovery AND Strategy 2 lazy claim)
 - [ ] Consider: resync WrongSession --fix mode using join-pane to relocate panes to target session
 <!-- /agent:pending -->

@@ -73,7 +73,7 @@ Please look at the recently synced email correcspondence to find Ana's name.
 Re-transcription completed. Early section (0:00–7:03) now has good alternating speaker attribution. The large block (7:03–32:20) persists but is now labeled with a `⚠️` correction note — the diarizer labeled it "Anna" but the content is clearly Brian's monologue.
 
 **Root cause of remaining issue:** The span check targets undivided pyannote segments, but pyannote's 61 segments alternate correctly. The problem is in the Whisper→speaker mapping layer: when Brian talks for 25 consecutive minutes, the embedding similarity comparison flips for that region. This is a harder fix — requires checking span in the *merged* output layer, not the raw diarized segments.
-<!-- agent:boundary:bdbe0d7f -->
+<!-- agent:boundary:14d61800 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

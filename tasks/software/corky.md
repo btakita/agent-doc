@@ -44,6 +44,7 @@ claude_args: --dangerously-skip-permissions
 - `[imports]` config in `.corky.toml` for multi-source import (SMS, Telegram, Slack) — designed, not yet implemented
 
 ### Open items
+- **Diarization span fix** — `max_speaker_span_ratio()` in `diarize.rs` + span check in `run_adaptive_diarization()` (engine.rs): cascade to smaller chunks (600s→120s→30s) if any speaker block >60% of total audio. Working tree changes in `src/corky`, not yet committed or released.
 - Attachment phases 2-3 (inline images, clipboard)
 - `collapsible_if` clippy refactor (48 instances)
 - `corky sync imports` config dispatcher (designed in session, not implemented)
@@ -304,6 +305,18 @@ Fix https://github.com/btakita/corky/actions/runs/24021664203/job/70051620000
 warning: build failed, waiting for other jobs to finish...
 Error: Process completed with exit code 101.
 ```
+### Re: OpenSSL version mismatch — vendored-openssl for Linux CI
+
+**Root cause:** `native-tls` on Linux links against system OpenSSL via `openssl-sys`. On ubuntu-latest, the system OpenSSL version is incompatible with `openssl-sys 0.9.112` (likely OpenSSL 3.5.x, released 2025, not yet recognized).
+
+**Fix:** Add `vendored-openssl` feature to all Linux native builds in CI:
+- `release.yml`: x86_64-unknown-linux-gnu → `features: vendored-openssl`
+- `release.yml`: CUDA build → `features: transcribe-cuda,vendored-openssl`
+- `ci.yml`: `cargo clippy/test --features vendored-openssl`
+
+(pypi.yml already used vendored-openssl — no change needed there.)
+
+Committed `bac9854`, pushed, retagged v0.26.0.
 ### Re: OpenSSL version mismatch — vendored-openssl for Linux CI (HEAD)
 
 **Root cause:** `native-tls` on Linux links against system OpenSSL via `openssl-sys`. On ubuntu-latest, the system OpenSSL version is incompatible with `openssl-sys 0.9.112` (likely OpenSSL 3.5.x, released 2025, not yet recognized).
@@ -316,18 +329,40 @@ Error: Process completed with exit code 101.
 (pypi.yml already used vendored-openssl — no change needed there.)
 
 Committed `bac9854`, pushed, retagged v0.26.0.
-<!-- agent:boundary:60f8c407 -->
+
+Is this latest change released?
+### Re: Is v0.26.0 released? (HEAD)
+
+**No** — the Release workflow is still failing (run [24022025948](https://github.com/btakita/corky/actions/runs/24022025948)). Two new issues:
+
+**Issue 1 — aarch64 OpenSSL (still broken despite `--features vendored-openssl`):**
+
+Root cause: `vendored-openssl = ["openssl"]` only vendors the optional `openssl` crate. But `native-tls = "0.2"` is an always-on dep that links system OpenSSL on Linux independently, bypassing the feature flag.
+
+Fix: `Cargo.toml` features:
+```toml
+vendored-openssl = ["openssl", "native-tls/vendored"]
+```
+
+**Issue 2 — CUDA x86_64 CMake error:**
+
+`whisper-rs-sys v0.15.0` fails in `ggml/src/ggml-cuda/CMakeLists.txt:176 (target_link_libraries)` — CMake can't find `CUDA::cudart_static`. Sub-packages `["nvcc", "cudart"]` only install the dynamic runtime, not the static library needed by ggml-cuda.
+
+Fix: change sub-packages to include dev headers, or try CUDA 12.4.0:
+```yaml
+sub-packages: '["nvcc", "cudart-dev"]'
+```
+
+Want me to fix both and retag v0.26.0?
+<!-- agent:boundary:4558c41b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] Fix CI aarch64 cross-compile (Cross.toml)
-- [x] Upgrade agent-kit 0.3→0.4, instruction-files 0.1→0.2
-- [x] Transitive SKILL installation via instruction_files::init()
-- [x] Commit, push, retag v0.26.0
-- [x] instruction-files 0.2.2 (always ClaudeCode env in init()) — published, v0.2.2 tagged
-- [x] corky bumped to instruction-files 0.2.2, retagged v0.26.0
+- [ ] Fix aarch64 OpenSSL: `vendored-openssl = ["openssl", "native-tls/vendored"]`
+- [ ] Fix CUDA CMake: try `cudart-dev` sub-package or downgrade to CUDA 12.4.0
+- [ ] Commit, push, retag v0.26.0
 - [ ] Monitor CI after retag
 - [ ] Verify sheet sharing / GCP test users
 - [ ] Re-test sheet read

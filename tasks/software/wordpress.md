@@ -87,10 +87,6 @@ For dedicated servers specifically (bare metal, not shared WordPress), pricing s
 
 ✻ Baked for 1m 7s
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)
   - US or Europe data center choice
   - 24/7/365 WordPress expert support (59-second response guarantee)
   - 30-day money-back guarantee
@@ -116,11 +112,50 @@ For dedicated servers specifically (bare metal, not shared WordPress), pricing s
 
 ✻ Baked for 1m 7s
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)
-<!-- agent:boundary:7c69cb74 -->
+How do I export a wordpress website?
+### Re: How to Export a WordPress Website (HEAD)
+
+There are a few methods depending on what you need:
+
+#### Built-in WordPress Export (Tools > Export)
+
+The simplest method — exports content as an XML file (WXR format):
+
+1. Go to **Dashboard > Tools > Export**
+2. Choose what to export: All content, Posts, Pages, Media, etc.
+3. Click **Download Export File** — saves a `.xml` file
+4. To import elsewhere: **Tools > Import > WordPress**, install the importer, upload the XML
+
+**Limitation:** This only exports content (posts, pages, comments, users). It does NOT include plugins, themes, or database tables outside core WordPress.
+
+#### Full Site Export (Database + Files)
+
+For a complete migration (moving hosts, cloning site):
+
+**Files:**
+- Use FTP/SFTP or your host's file manager to download the entire `wp-content/` folder (themes, plugins, uploads)
+- Also download `wp-config.php` (has DB credentials)
+
+**Database:**
+- Go to **phpMyAdmin** (via your host's cPanel/panel)
+- Select your WordPress database → **Export** → Quick → Format: SQL → Go
+
+**On the new host:**
+1. Upload all files
+2. Create a new database, import the SQL via phpMyAdmin
+3. Update `wp-config.php` with the new DB name/user/password
+4. If the domain changed, run search-replace on the DB (URLs are stored as absolute paths)
+
+#### Plugin-based Migration (Easiest Full Migration)
+
+**Duplicator** (free) or **All-in-One WP Migration** are the most popular:
+
+- Install the plugin → create a package/backup
+- Download the package file
+- On the new site: install the same plugin, upload the package, follow the wizard
+
+**All-in-One WP Migration** is the simplest — exports everything (DB + files) into a single `.wpress` file, handles search-replace for domain changes automatically. Free version is limited to 512MB imports; paid removes the limit.
+<!-- agent:boundary:a89b2295 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1040,7 +1040,7 @@ Finally signed during a call on Monday.
 Did not respond until I was in the call.
 
 Not an excuse but I was under much stress and I made some mistakes.
-### Re: Dreamable timeline & revised draft (Apr 7) (HEAD)
+### Re: Dreamable timeline & revised draft (Apr 7)
 
 **Most recent LinkedIn message from Justin (12:50 PM, Apr 6):**
 
@@ -1076,7 +1076,40 @@ I understand if things have moved on. Either way, thank you for how you've handl
 - Dropped "terms kept shifting" framing (implicitly blamed Dreamable)
 - "That role ended after the first day" — direct, no euphemism
 - Slightly warmer close ("thank you for how you've handled this" vs. "I appreciate how you've handled the process")
-<!-- agent:boundary:1ee3ae2e -->
+
+Please note Justin's reply
+> Hey Brian - Thanks for letting me know. We can try but the team was not too happy with the last minute cancellation and that we were not kept in the loop that you had accepted a job before your scheduled interview. Let me see what they say and I'll let you know.
+
+
+I also let Rob Ross know about the interview and he asked me not to do it.
+### Re: Justin's reply (Apr 7) (HEAD)
+
+**Justin's response:**
+
+> "Hey Brian - Thanks for letting me know. We can try but the team was not too happy with the last minute cancellation and that we were not kept in the loop that you had accepted a job before your scheduled interview. Let me see what they say and I'll let you know."
+
+Justin is going to bat for you — door isn't closed.
+
+**Two concerns ECI raised:**
+1. Last-minute cancellation
+2. "Not kept in the loop that you had accepted a job before the interview"
+
+The second point is addressable: you *didn't* accept before the interview in the traditional sense. The contract was being finalized Monday morning — you were on the signing call when you reached out to Justin. That's context he can use with the team.
+
+**Draft reply to Justin:**
+
+---
+
+Hi Justin — I appreciate you going to bat for me. Understood on their reaction — the timing was genuinely poor on my end.
+
+One thing worth knowing if it helps: the contract wasn't finalized until Monday morning. I was on the signing call when I reached out to you — it wasn't that I had accepted days earlier and stayed quiet. I know that doesn't fix the last-minute notice, but I wanted you to have the full picture.
+
+I'll leave it in your hands. Whatever the team decides, I appreciate you trying.
+
+---
+
+Short, gracious, gives Justin one concrete fact to use ("contract signing was simultaneous with the cancellation") without pressuring or over-explaining. You could also just wait and let Justin work it — but this gives him ammunition.
+<!-- agent:boundary:73cb7be7 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

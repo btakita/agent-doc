@@ -33,7 +33,7 @@ Help me prepare for an interview with the Filevine development team.
 
 ---
 
-## Company Overview (HEAD)
+## Company Overview
 
 **Filevine** (founded 2014, ~500 employees, HQ Salt Lake City UT) is a **legal work platform** — case management, document automation, contract lifecycle, billing, and AI — for law firms, government agencies, and in-house counsel. Scale: 5,000+ clients, 100,000 active users, 1.8B documents processed. Offices in Chicago, New York, Prague, Bratislava.
 
@@ -45,7 +45,7 @@ Help me prepare for an interview with the Filevine development team.
 
 ---
 
-## Flagship Product: LOIS (HEAD)
+## Flagship Product: LOIS
 
 LOIS is the core AI narrative right now — know it cold.
 
@@ -58,7 +58,7 @@ Key tools under LOIS: **AskAI** (chat with a case file), **DraftAI** (document d
 
 ---
 
-## Tech Stack (HEAD)
+## Tech Stack
 
 From job postings and engineering signals:
 
@@ -75,7 +75,7 @@ From job postings and engineering signals:
 
 ---
 
-## Your Interviewers (HEAD)
+## Your Interviewers
 
 **Chris Smith** — Principal Software Engineer
 Engineering track. Expect systems design, Python/React/AWS, architecture tradeoffs. Senior IC role, so probably asking about technical depth and ownership.
@@ -91,7 +91,7 @@ Engineering track. Background: Node/Express/React/MongoDB/GraphQL. Previous work
 
 ---
 
-## Key Talking Points (HEAD)
+## Key Talking Points
 
 1. **AI grounded in truth**: LOIS's design principle — verifiable outputs with citations. This matters in legal (malpractice risk from hallucination). Filevine differentiates on trustworthy AI.
 2. **System of record first**: AI is only as good as the data it touches. Filevine owns the data layer, which is a competitive moat.
@@ -100,7 +100,7 @@ Engineering track. Background: Node/Express/React/MongoDB/GraphQL. Previous work
 
 ---
 
-## Questions to Ask (HEAD)
+## Questions to Ask
 
 - *What does a sprint cycle look like for LOIS features — how close is engineering to the legal domain experts?*
 - *How does Filevine handle schema evolution for 1.8B documents across 5,000+ firm configurations?*
@@ -111,7 +111,7 @@ Engineering track. Background: Node/Express/React/MongoDB/GraphQL. Previous work
 ---
 
 *Sources: filevine.com, LinkedIn, LEX Summit 2025 announcements, Crunchbase, ZoomInfo, job postings (April 2026)*
-<!-- agent:boundary:4bf4daf3 -->
+<!-- agent:boundary:7420ffcf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

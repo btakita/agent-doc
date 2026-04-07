@@ -669,7 +669,7 @@ Settings → Plugins → gear → "Install Plugin from Disk..." → `agent-doc-j
 
 Why was tasks/recruit/xbow.md compacted? I prompted it with:
 > Please compact, transcribe, and diarize [2026-04-07 09-00-51.mp4](../../../../../Videos/2026-04-07%2009-00-51.mp4)
-### Re: xbow.md compaction (HEAD)
+### Re: xbow.md compaction
 
 The word "compact" in your prompt triggered the compact-exchange runbook. The agent read:
 
@@ -690,13 +690,27 @@ This is a false-positive: you meant "compact" as an adjective describing the des
 git show f7f24a15:tasks/recruit/xbow.md
 ```
 to see the full exchange before it was collapsed.
-<!-- agent:boundary:5d2f5c69 -->
+
+do
+- [ ] Fix compact-exchange trigger: require isolated imperative, not prose "compact" mid-sentence
+### Re: Fix compact-exchange trigger (HEAD)
+
+**Root cause confirmed:** The compact-exchange runbook said "User explicitly requests 'compact exchange'" but didn't guard against "compact" appearing as an adjective embedded in a sentence with unrelated verbs.
+
+**Fix applied** to `.claude/skills/agent-doc/runbooks/compact-exchange.md`:
+
+Added explicit trigger rules:
+- Requires "compact exchange" as a **standalone imperative sentence/line** — the sole verb phrase
+- Lists counter-examples: `compact, transcribe, and diarize …` is NOT a trigger (compact = adjective), `compact transcript` is NOT a trigger (compact modifies noun, not command)
+- "Never auto-compact without user approval" retained
+
+The stray `2` at the end of the exchange checklist item is noted — you can delete it.
+<!-- agent:boundary:f4964e30 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Install 0.2.48 (snapshot-timestamp dedup guard — correct approach)
 - [ ] Re-enter lost claudescore.md content (target audience / feasibility / chromium-bridge questions)
-- [ ] Fix compact-exchange trigger: require isolated imperative, not prose "compact" mid-sentence
+- [x] Fix compact-exchange trigger: require isolated imperative, not prose "compact" mid-sentence
 <!-- /agent:pending -->

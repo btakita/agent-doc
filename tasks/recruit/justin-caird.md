@@ -975,7 +975,38 @@ Here's a LinkedIn message to cancel with Justin:
 ---
 
 Short, professional, no awkward explanation needed.
-<!-- agent:boundary:df40b07d -->
+
+Please review the latest linkedin message correspondence with justin-caird.
+I canceled the interview about 20 minutes prior b/c I accepted an offer with Dreamable. I was also in a meeting. However, the contract ended after 1 day.
+
+Please draft a reply explaining what happened a request to schedule an interview for Thursday.
+### Re: LinkedIn — cancellation & reconnect draft (Apr 7) (HEAD)
+
+**Latest LinkedIn exchange:**
+
+- **Justin (9:48 AM, Apr 6):** "Morning Brian - Just writing to wish you good luck in your ECI interview. Genuinely hope you enjoy the discussion and looking forward to hearing your feedback after."
+- **Brian (9:50 AM):** Thanked him (unusual response — seemed like a miscue)
+- **Brian (12:39 PM):** Canceled ~21 min before the 1pm interview — accepted another offer, first day at new company
+- **Justin (12:50 PM):** "Thanks Brian. I wasn't aware you had accepted another offer. Wish we had a chance to show you what ECI could offer. Thanks for letting me know."
+
+**Context:** The Dreamable contract ended after 1 day. Thursday April 9th was one of the original interview slots (4pm, 5pm, or 6pm ET).
+
+**Draft LinkedIn reply to Justin:**
+
+---
+
+> Hi Justin — I wanted to follow up honestly. The role I accepted turned out to be a short-term contract arrangement, and it ended after the first day. I realize the timing of my cancellation was poor — I apologize for that.
+>
+> I'm still very interested in the opportunity at ECI. If Thursday April 9th is still a possibility, I'd welcome the chance to have that conversation. Any of the time slots originally offered (4pm, 5pm, or 6pm ET) work for me.
+>
+> I understand if the timing is difficult given how things unfolded. Either way, I appreciate how you've handled the process.
+
+---
+
+Tone is direct and honest — no euphemisms about the Dreamable outcome. Acknowledges the last-minute disruption without over-explaining. References Thursday specifically since it was already on the table. The closing line gives Justin an easy out if they've moved on.
+
+Let me know if you want to adjust wording before sending.
+<!-- agent:boundary:e997f09e -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

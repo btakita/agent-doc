@@ -1171,7 +1171,7 @@ Documented for context — this does not change the draft message.
 **Rob Ross detail stays internal.** Internal pressure to pull away from ECI is not Justin's concern, and mentioning it adds complexity without benefit.
 
 **The draft is still ready to send as-is.** This timeline is internal context only.
-<!-- agent:boundary:27f9769d -->
+<!-- agent:boundary:2a484d69 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

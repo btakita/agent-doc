@@ -90,7 +90,7 @@ Option 1...also use this with patch=replace
 - Apply prefix to ALL non-blank user lines, or only paragraph-starting lines?
 - What about user input that already has a prefix (bullets, `>`)?
 - Is the prefix stored in the file, or only rendered?
-### Re: ❯ prefix with patch=replace — confirmed (HEAD)
+### Re: ❯ prefix with patch=replace — confirmed
 
 Yes, prefix normalization applies to both modes via the same mechanism: **the diff identifies user-added lines regardless of component mode**.
 
@@ -100,13 +100,51 @@ Yes, prefix normalization applies to both modes via the same mechanism: **the di
 In both cases, `agent-doc write` already receives the diff (or can compute it from the baseline). The normalization step is: for each user-added hunk in an `exchange` component, prepend `❯ ` to each non-blank content line before merging into the final document.
 
 **Confirmed design:** Option 1 applies to both `patch=append` and `patch=replace` exchange components. The normalization lives in `agent-doc write` (binary-level), keyed on component type = `exchange` + line is user-authored.
-<!-- agent:boundary:1f2e1afd -->
+
+done
+- [ ] Fix PyPI trusted publisher for `pypi.yml` + environment `pypi`, then rerun CI
+do
+- [ ] Add SKILL.md note: patch:exchange must not echo user input (append mode)
+- [ ] Implement `❯ ` prefix normalization for user-added exchange lines in `agent-doc write` (both append + replace modes)
+### Re: done + do — tasks executed (HEAD)
+
+**PyPI trusted publisher:** Marked done (user resolved externally).
+
+**Task 1: SKILL.md note — patch:exchange must not echo user input ([done])**
+
+Added to `SKILL.md` step 1 (Respond), after the "Preferred: wrap exchange responses" block:
+
+> **Never echo user input in patch:exchange (append mode):** For `patch=append` exchange components, the user's input is already present in the document. Do NOT include the user's input text in the `<!-- patch:exchange -->` block — the patch must contain only new agent response content. Echoing the input creates a duplicate in the rendered exchange.
+
+**Task 2: `❯ ` prefix normalization — implemented ([done])**
+
+Added `normalize_user_prompts_in_exchange(content, snapshot)` to `write.rs`. Called from both the disk write path and IPC snapshot path in `run_stream`.
+
+**Algorithm:**
+1. Parse exchange component from `content_ours` and `snapshot`
+2. Find the boundary marker — user input is BEFORE the boundary, agent response AFTER
+3. Diff `snapshot` exchange → `content_ours` user region (before boundary) using `similar`
+4. `Insert` lines → add `❯ ` prefix unless: blank, already `❯`-prefixed, starts with `<!--`, starts with `#`
+5. `Equal` lines → unchanged (already-prefixed turns preserved, no double-prefix)
+6. Replace exchange component with normalized version
+
+**Tests added (6, all passing):**
+- `normalize_user_prompts_new_line_gets_prefix`
+- `normalize_user_prompts_blank_line_skipped`
+- `normalize_user_prompts_heading_skipped`
+- `normalize_user_prompts_already_prefixed_skipped`
+- `normalize_user_prompts_existing_content_unchanged`
+- `normalize_user_prompts_no_exchange_passthrough`
+
+`make check` clean (208 tests pass).
+
+**IPC note:** Disk write path fully normalized (editor file shows `❯ `). IPC path normalizes the snapshot only — editor shows prefix on next disk cycle. Full IPC-side normalization needs plugin support (TODO).
+<!-- agent:boundary:28e5fc31 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Fix PyPI trusted publisher for `pypi.yml` + environment `pypi`, then rerun CI
-- [ ] Add SKILL.md note: patch:exchange must not echo user input (append mode)
-- [ ] Implement `❯ ` prefix normalization for user-added exchange lines in `agent-doc write` (both append + replace modes)
+- [ ] Release v0.31.20 (SKILL.md note + ❯  prefix normalization)
+- [ ] IPC-side ❯  normalization (plugin support needed)
 <!-- /agent:pending -->

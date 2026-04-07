@@ -289,7 +289,7 @@ Then re-open `tasks/recruit/justin-caird.md` from the editor. Deregisters `%544`
 **Note:** preflight also flagged `%543` and `%548` (the session $14 agent-doc panes) as non-idle in the stash window. They've been moved to the stash rather than the active window — they'll be rescued or killed on next open of those documents.
 
 I manually moved the `corky watch` tmux pane into tmux session 14. But when I navigated the editor to justin-caird.md, the `corky watch` pane came back. Why?
-### Re: corky came back after manual move (HEAD)
+### Re: corky came back after manual move
 
 **Root cause: v0.31.18's wrong-session recovery path is pulling corky back.**
 
@@ -304,14 +304,35 @@ agent-doc resync --fix
 Deregisters `%544`. Then opening justin-caird.md provisions a fresh pane without touching corky.
 
 **Deeper issue to fix in code:** The wrong-session recovery logic (`stash_pane` + rescue) should not apply to panes running non-AGENT_PROCESSES. If `%544` is running `corky`, it should be classified as `WrongProcess` and skipped — not relocated. The AGENT_PROCESSES check needs to guard the wrong-session recovery path in addition to Strategy 2 (lazy claim).
-<!-- agent:boundary:dc80c906 -->
+do
+- [ ] Fix wrong-session recovery path: skip `stash_pane`+rescue if pane is running a non-AGENT_PROCESS (guard applies to both wrong-session recovery AND Strategy 2 lazy claim)
+- [ ] Consider: resync WrongSession --fix mode using join-pane to relocate panes to target session
+### Re: do — wrong-session guard + resync WrongSession relocate (HEAD)
+
+**Fix 1: route.rs — AGENT_PROCESSES guard on wrong-session path and lazy claim**
+
+Added `is_agent_process(tmux, pane_id)` helper and `AGENT_PROCESSES` const to `route.rs`. Applied at two sites:
+
+- **Wrong-session recovery (lines ~249-266):** If the registered pane is alive in the wrong session but running a non-agent process (corky, etc.), skip `stash_pane` + `rescue_from_stash` entirely and fall through. Only agent-process panes get relocated across sessions.
+- **Strategy 2 lazy claim (lines ~277-284):** Added `&& is_agent_process(tmux, &new_pane)` to the let-chain guard. A pane running corky/shell is not claimed — falls through to auto-start.
+
+`is_agent_process` returns `true` on query failure (conservative: don't skip panes we can't inspect).
+
+**Fix 2: resync.rs + main.rs — `WrongSession --fix --session <target>`**
+
+`apply_fixes_to_registry` now takes `relocate_session: Option<&str>`. When `Some(target)`:
+- Uses `join-pane` to move the pane to an active pane in the target session
+- Registry entry is preserved (pane ID is stable after `join-pane`)
+- Falls back to deregister if no active pane found in target session
+
+CLI: `agent-doc resync --fix --session 10` relocates all WrongSession panes to session `10` instead of killing them.
+
+`cargo check` + `cargo clippy` clean. All 38 tests pass.
+<!-- agent:boundary:7741aecc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Run `agent-doc resync --fix` then re-open justin-caird.md
-- [ ] Build + release v0.31.19 with swap_pane_guarded()
-- [ ] Fix wrong-session recovery path: skip `stash_pane`+rescue if pane is running a non-AGENT_PROCESS (guard applies to both wrong-session recovery AND Strategy 2 lazy claim)
-- [ ] Consider: resync WrongSession --fix mode using join-pane to relocate panes to target session
+- [ ] Build + release v0.31.19 with all route/resync fixes
 <!-- /agent:pending -->

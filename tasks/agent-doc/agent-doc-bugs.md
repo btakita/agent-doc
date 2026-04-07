@@ -348,7 +348,7 @@ Released.
 - Doc updates: SPEC.md §7.5 + §7.13, CLAUDE.md (table moved to README.md), SKILL.md (imperative context fix)
 
 **Pre-existing audit-docs issues fixed:** large table in CLAUDE.md moved to README.md; large code block in SKILL.md got imperative context.
-<!-- agent:boundary:f90501d4 -->
+<!-- agent:boundary:290ed561 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

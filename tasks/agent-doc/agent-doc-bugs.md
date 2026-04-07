@@ -68,7 +68,7 @@ agent-doc resync --fix
 Then re-open `tasks/recruit/justin-caird.md` in the editor — sync will provision a fresh pane in the correct session.
 
 **Note on ops.log / debug.log:** The cross-session swap itself isn't logged — `route.rs` and `sync.rs` operations only appear in the session `.log` and stderr (not in `ops.log` or `debug.log`). The session log confirmed Claude exited cleanly; the swap happened at re-open time (between the two log entries).
-<!-- agent:boundary:ba7454fb -->
+<!-- agent:boundary:f4eb03f6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

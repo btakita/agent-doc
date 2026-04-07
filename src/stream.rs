@@ -391,7 +391,7 @@ pub(crate) fn flush_to_document(
 
     // Try IPC first — if plugin is active, it applies patches via Document API
     // (no "externally modified" dialog, cursor preserved, undo preserved)
-    if crate::write::try_ipc(file, &patches, &unmatched, None, None, None)? {
+    if crate::write::try_ipc(file, &patches, &unmatched, None, None, None, None)? {
         return Ok(());
     }
 

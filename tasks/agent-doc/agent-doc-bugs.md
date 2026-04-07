@@ -115,7 +115,7 @@ The fix is already complete in v0.31.18. No further changes needed.
 Both paths are covered. The corky-in-wrong-session scenario (pane not in target session → skip) and the legitimate cross-session recovery (pane alive in wrong session → move to target session stash first) are handled.
 
 **JB plugin:** `agent-doc plugin list` shows "No plugins found" — that means it's installed directly (not via the plugin manager). If you installed v0.2.48 from disk already, the startup dedup guard is active.
-<!-- agent:boundary:3d9aecce -->
+<!-- agent:boundary:ded8f32f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

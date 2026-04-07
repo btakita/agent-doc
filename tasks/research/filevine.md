@@ -111,7 +111,28 @@ Engineering track. Background: Node/Express/React/MongoDB/GraphQL. Previous work
 ---
 
 *Sources: filevine.com, LinkedIn, LEX Summit 2025 announcements, Crunchbase, ZoomInfo, job postings (April 2026)*
-<!-- agent:boundary:7420ffcf -->
+
+How receptive would filevine be to agent-doc?
+How receptive would filevine be to agent-doc?
+
+### Re: Filevine receptivity to agent-doc (HEAD)
+
+Short answer: **low as a product fit, moderate as a conversation piece, high with the right people.**
+
+**Why low as a product fit:**
+Filevine is building LOIS — an AI-native legal platform for attorneys, not developers. Their customers use a web app, not a CLI. agent-doc's markdown/tmux/editor workflow is a dev tool with no natural path to a law firm's desktop. They're also deep into their own AI platform investment ($400M raised) — they're building, not buying dev tooling externally.
+
+**Why moderate as a conversation piece:**
+The *concept* behind agent-doc — document as the UI, AI responding to edits in a living document, preserving context across sessions — maps interestingly onto legal work. Legal documents are living artifacts: they accumulate annotations, revisions, cited sources. Filevine's DraftAI and AIFields are solving adjacent problems (AI-assisted drafting, structured extraction from case files).
+
+Cain Elliott in particular (PhD philosopher, "Chief Legal Futurist") would likely find the session/context model intellectually interesting — he thinks about the future of legal workflows, not just current UI patterns.
+
+**Why high with the right people:**
+Chris Smith and Stuart Hiller are developers. If you frame agent-doc as "how I work with AI on complex, multi-session engineering tasks" — using it to demonstrate your own process — that's a credibility signal, not a pitch. Engineers who see you dog-fooding a tool you built are more interested than if you sell it abstractly.
+
+**The interview angle:**
+Don't pitch agent-doc to Filevine. Use it as evidence of how you think about AI tooling, then ask: *"How does your engineering team actually work with AI day-to-day — in the codebase, in PRs, in design docs?"* That reframes the conversation toward their workflow and signals you're someone who builds for real-world AI integration, not just demos.
+<!-- agent:boundary:a247d865 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

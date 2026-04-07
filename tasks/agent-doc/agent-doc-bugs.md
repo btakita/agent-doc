@@ -49,7 +49,7 @@ Released.
 - PromptPoller FFI CRDT merge
 
 **Note on PyPI:** The `--compatibility manylinux_2_43 --auditwheel skip` flags were needed because glibc 2.43 (CachyOS) isn't in auditwheel's policy table yet. Previous versions (0.31.17) also missed PyPI for this reason — latest on PyPI was 0.31.16.
-### Re: justin-caird.md pane swapped to wrong tmux session (HEAD)
+### Re: justin-caird.md pane swapped to wrong tmux session
 
 **Root cause: cross-session `swap-pane` bug (now fixed in v0.31.18).**
 
@@ -68,7 +68,24 @@ agent-doc resync --fix
 Then re-open `tasks/recruit/justin-caird.md` in the editor — sync will provision a fresh pane in the correct session.
 
 **Note on ops.log / debug.log:** The cross-session swap itself isn't logged — `route.rs` and `sync.rs` operations only appear in the session `.log` and stderr (not in `ops.log` or `debug.log`). The session log confirmed Claude exited cleanly; the swap happened at re-open time (between the two log entries).
-<!-- agent:boundary:24c89b2f -->
+
+Why is the `corky watch` pane that originated from tmux session 14 in tmux session 10?
+
+Wh
+### Re: corky pane in wrong session (HEAD)
+
+Same root cause — the cross-session `swap-pane` bug.
+
+When you opened `justin-caird.md`, `rescue_from_stash()` found pane `%544` (corky) in session $14's stash and called `tmux swap-pane` without a session check. tmux allows `swap-pane` across sessions — it moved `%544` from session $14 into session $10.
+
+The v0.31.18 fix prevents recurrence (session guard + `join-pane` for cross-session panes). To move it back now:
+
+```bash
+tmux join-pane -t 14 -s %544
+```
+
+That rejoins `%544` (corky) into session $14 where it originated.
+<!-- agent:boundary:acd94a4c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

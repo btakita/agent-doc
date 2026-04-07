@@ -1210,7 +1210,7 @@ This detail humanizes the situation for you but doesn't translate cleanly to Jus
 **The current draft already covers the intent.** "I was on the signing call when I reached out to you" signals Brian was occupied with competing obligations, not being cavalier. That's the read Justin needs to make the case — without the Rob Ross complication.
 
 **Keep it internal. The message is ready as-is.**
-<!-- agent:boundary:1c80fb24 -->
+<!-- agent:boundary:ae5c17d2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

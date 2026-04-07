@@ -131,8 +131,8 @@ Don't pitch agent-doc to Filevine. Use it as evidence of how you think about AI 
 
 What is the scope of work for lois? Does filevine support webrtc?
 
-It seems that making the artifacts interactive is important  the case of lois,
-### Re: Continuous evals for LOIS + cost of failure (HEAD)
+It seems that making the artifacts interactive is important in the case of lois. 
+### Re: Continuous evals for LOIS + cost of failure
 
 High-value interview angle — this is exactly what separates people who think about AI in production from people who just use it.
 
@@ -155,7 +155,7 @@ Good question to ask Filevine: *"What does your eval pipeline look like for LOIS
 
 ---
 
-### Re: Scope of LOIS + WebRTC (HEAD)
+### Re: Scope of LOIS + WebRTC
 
 **LOIS scope** (what's confirmed):
 - AskAI: RAG over case files
@@ -173,12 +173,42 @@ Worth asking directly in the interview if it's relevant to what you'd be working
 
 ---
 
-### Re: Interactive artifacts + LOIS (incomplete thought?) (HEAD)
+### Re: Interactive artifacts + LOIS (incomplete thought?)
 
 Your note — *"It seems that [?] make the artifacts interactive. In the case of LOIS..."* — looks like it got cut off. What were you thinking?
 
 My best guess at the direction: LOIS produces *static* outputs (drafted documents, summaries, extracted fields) but the artifact itself isn't interactive — you can't ask follow-up questions about a specific paragraph inline, for instance. That's a gap. Contrast with tools like Cursor or agent-doc where the document *is* the interface. If that's the direction you were going, it's a genuinely interesting product observation: LOIS generates artifacts, but attorneys can't currently converse *with* the artifact in context.
-<!-- agent:boundary:6c4db58b -->
+
+Would the existence-lang ontology be important for lois?
+### Re: Interactive artifacts — confirmed direction (HEAD)
+
+Yes — making artifacts interactive is the key gap. LOIS generates outputs (summaries, drafted documents, extracted fields, medical chronologies) but those artifacts are endpoints, not starting points. An attorney receives the output, then has to context-switch to a different tool or conversation to ask follow-ups.
+
+The more powerful model: the artifact *is* the interface. Click on a sentence in a DraftAI document → ask "why did you word it this way?" or "what's the source for this?" inline. Annotate a MedCron entry → get the AI to expand it. This is where agent-doc's design pattern is ahead — the document accumulates context over a session rather than resetting each time.
+
+For the interview with Cain or Emily: *"LOIS generates artifacts — what's the plan for making those artifacts conversational rather than terminal?"* That's a sharp question that signals you've thought beyond the current product.
+
+---
+
+### Re: Existence-lang ontology for LOIS (HEAD)
+
+Potentially yes — especially given that Cain Elliott has a philosophy background (PhD from the Polish Academy of Sciences). He's exactly the person who'd engage with formal ontology thinking in legal AI.
+
+**Where existence-lang maps onto LOIS's actual problems:**
+
+*Entities and Scope.* Legal work is fundamentally about entities and their relationships: parties, matters, documents, claims, events, deadlines, jurisdictions. LOIS currently extracts these via AIFields (unstructured → structured), but without a formal ontology governing what entities exist and how they relate, the extractions are schema-dependent and brittle across different firm configurations.
+
+An existence-lang-style ontology would let you define `LegalMatter → [Parties, Claims, Evidence, Deadlines, Jurisdiction]` as a domain model, then use that model to guide extraction, query routing, and verifiable output generation.
+
+*Context and Resolution.* The Scope → Context → Resolution chain maps directly onto what LOIS needs for good RAG. "Scope" = what documents are in this case. "Context" = what's relevant to this query within those documents. "Resolution" = how detailed does the answer need to be (case summary vs. paragraph-level citation). Without a formal model for these, intent routing is heuristic.
+
+*Verifiable outputs.* The hardest problem in legal AI. If you have a formal ontology of case facts (Entity × Claim × Evidence × Confidence), you can check AI outputs against the ontology rather than against raw text. "The AI claimed X — does the ontology's evidence graph support X?" This turns verification from citation-lookup into formal inference.
+
+**The practical pitch to Cain:**
+"Your verifiable outputs feature checks AI answers against source citations — that's document-level grounding. An ontology layer would give you claim-level grounding: a formal graph of what's true in this case, so you can verify not just 'did you cite something' but 'is the citation sufficient for the claim.'"
+
+That's a conversation Cain would find genuinely interesting, and it's differentiated from what most engineers would bring to that interview.
+<!-- agent:boundary:15c1d8b3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

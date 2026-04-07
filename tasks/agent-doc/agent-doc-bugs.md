@@ -101,7 +101,7 @@ Please plan a fix if you know exactly what went wrong.
 
 Already done:
 - [ ] Install JB plugin v0.2.48 (snapshot-timestamp dedup guard)
-### Re: fix plan — cross-session swap-pane (HEAD)
+### Re: fix plan — cross-session swap-pane
 
 The fix is already complete in v0.31.18. No further changes needed.
 
@@ -115,10 +115,44 @@ The fix is already complete in v0.31.18. No further changes needed.
 Both paths are covered. The corky-in-wrong-session scenario (pane not in target session → skip) and the legitimate cross-session recovery (pane alive in wrong session → move to target session stash first) are handled.
 
 **JB plugin:** `agent-doc plugin list` shows "No plugins found" — that means it's installed directly (not via the plugin manager). If you installed v0.2.48 from disk already, the startup dedup guard is active.
-<!-- agent:boundary:ded8f32f -->
+
+`Sync: --col tasks/agent-doc/agent-doc-bugs.md --col tasks/recruit/justin-caird.md [focus: tasks/recruit/justin-caird.md]` did not surface the correct tmux pane. Why?
+### Re: Sync didn't surface correct pane
+
+**Root cause: registry–process mismatch.** Sync correctly resolved `justin-caird.md` → `%544` and called `select-pane %544`. But `%544` is running `corky`, not a justin-caird.md agent-doc session.
+
+What happened:
+1. The cross-session `swap-pane` bug (fixed in v0.31.18) swapped `%544` (corky, from session $14's stash) into session $10's window
+2. Sync registered `%544` as the `justin-caird.md` pane (it was the pane in that column)
+3. Subsequent syncs correctly surface `%544` — but it shows a corky terminal
+
+Sync has no process-validation step — it routes by pane ID, not by what's running inside the pane.
+
+**Current state:**
+| Pane | Session | Registered for | Actually running |
+|------|---------|---------------|-----------------|
+| `%544` | $10 | `justin-caird.md` | `corky` |
+| `%491` | $10 | `agent-doc-bugs.md` | `agent-doc` |
+| `%548` | $14 | `xbow.md` | (unknown) |
+| `%543` | $14 | `claudescore.md` | (unknown) |
+
+Session drift warning (`spans sessions 10, 14`) comes from `%543`/`%548` still in session $14.
+
+**To recover:**
+```bash
+# Return corky to session 14, provision fresh pane for justin-caird.md (HEAD)
+tmux join-pane -t 14 -s %544
+agent-doc resync --fix
+```
+Then re-open `tasks/recruit/justin-caird.md` in the editor — sync will auto-start a new agent-doc session.
+
+**Potential enhancement:** `resync` could detect process-name mismatches (pane running something other than `agent-doc`/`claude`) and flag them as suspect entries.
+<!-- agent:boundary:947e80b3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Return corky pane (%544) to session $14 and provision fresh justin-caird.md session
+- [ ] Consider resync enhancement: flag panes whose running process doesn't match expected (agent-doc/claude)
 <!-- /agent:pending -->

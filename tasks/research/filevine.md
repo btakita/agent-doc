@@ -132,7 +132,7 @@ Chris Smith and Stuart Hiller are developers. If you frame agent-doc as "how I w
 
 **The interview angle:**
 Don't pitch agent-doc to Filevine. Use it as evidence of how you think about AI tooling, then ask: *"How does your engineering team actually work with AI day-to-day — in the codebase, in PRs, in design docs?"* That reframes the conversation toward their workflow and signals you're someone who builds for real-world AI integration, not just demos.
-<!-- agent:boundary:a247d865 -->
+<!-- agent:boundary:d258e9fe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

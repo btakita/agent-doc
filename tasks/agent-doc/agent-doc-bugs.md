@@ -693,7 +693,7 @@ to see the full exchange before it was collapsed.
 
 do
 - [ ] Fix compact-exchange trigger: require isolated imperative, not prose "compact" mid-sentence
-### Re: Fix compact-exchange trigger (HEAD)
+### Re: Fix compact-exchange trigger
 
 **Root cause confirmed:** The compact-exchange runbook said "User explicitly requests 'compact exchange'" but didn't guard against "compact" appearing as an adjective embedded in a sentence with unrelated verbs.
 
@@ -705,12 +705,22 @@ Added explicit trigger rules:
 - "Never auto-compact without user approval" retained
 
 The stray `2` at the end of the exchange checklist item is noted — you can delete it.
-<!-- agent:boundary:3a700b61 -->
+
+Explain what is needed. Is this an agent-doc bug or a one-off task?:
+- [ ] Re-enter lost claudescore.md content (target audience / feasibility / chromium-bridge questions)
+### Re: claudescore.md pending item (HEAD)
+
+**One-off task, already done.** Not an agent-doc bug.
+
+The target audience / chromium-bridge questions are in `src/session-share/tasks/claudescore.md` at the expected location with a full response ("Re: ClaudeScore for the broader Claude Code community..."). The content was either re-entered by you or recovered before the repair commit (`02094a1`).
+
+The underlying **bug** (stale patch re-apply duplicating blocks and eating user content between them) was already fixed in plugin v0.2.48. Nothing left to track here.
+
+Clearing the item from pending.
+<!-- agent:boundary:7c259515 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Re-enter lost claudescore.md content (target audience / feasibility / chromium-bridge questions)
-- [x] Fix compact-exchange trigger: require isolated imperative, not prose "compact" mid-sentence
 <!-- /agent:pending -->

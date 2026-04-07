@@ -1237,7 +1237,7 @@ Now this sounds like an excuse. I like parts
 > It wasn't that I had accepted days earlier and stayed quiet. I know that doesn't fix the last-minute notice, but it may help explain how it unfolded.It wasn't that I had accepted days earlier and stayed quiet. I know that doesn't fix the last-minute notice, but it may help explain how it unfolded.
 
 I was also under much stress from the beginning of the day onward. Should I mention that?
-### Re: Strip the timeline, keep the strong lines (Apr 7) (HEAD)
+### Re: Strip the timeline, keep the strong lines (Apr 7)
 
 Right call. The Friday→Sunday chain was tipping it into excuse territory. The two lines you flagged are the core of the message — direct, honest, not over-explaining.
 
@@ -1256,7 +1256,24 @@ I'll leave it in your hands. Whatever the team decides, I appreciate you trying.
 ---
 
 Cleaner. One fact, the acknowledgment, leave it in Justin's hands. Ready to send.
-<!-- agent:boundary:256238ec -->
+
+Should I mention that I was on the call with robert-ross and it was already not starting off on the right footing?
+The entire situation was not the most stable.
+I really feel awful about how all this went down. Rob Ross messed up this opportunity for me.
+### Re: Keep it clean — none of this goes in the message (Apr 7) (HEAD)
+
+No to all three. Here's the breakdown:
+
+**"I was on the call with Rob Ross and it wasn't starting on the right footing"** — tells Justin the Dreamable relationship was already shaky. Raises the question of why you chose it over ECI. Doesn't help.
+
+**"The entire situation was not the most stable"** — vague and signals instability in your judgment. Justin needs to convince ECI to give you another shot; "not stable" is a red flag.
+
+**"Rob Ross messed up this opportunity"** — blame-shifting in a follow-up message is a warning sign for any recruiter. Stays internal.
+
+The draft is clean, honest, and gives Justin one usable fact to work with. Send it as written and see what he comes back with.
+
+The situation is genuinely rough — high-pressure weekend, offer that collapsed day one, now an uncertain door at ECI. But the message to Justin isn't where you process that. Short, dignified, leave it in his hands.
+<!-- agent:boundary:665daa1e -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

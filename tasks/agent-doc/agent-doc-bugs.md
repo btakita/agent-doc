@@ -164,13 +164,17 @@ Found 1 issue(s) (run with --fix to resolve):
 **Fix behavior:** `--fix` deregisters `%544` without killing corky. Then re-opening `justin-caird.md` auto-provisions a fresh session.
 
 Is it installed? I don't see the justin-caird tmux session.
-### Re: plugin installed? + justin-caird session (HEAD)
+### Re: plugin installed? + justin-caird session
 
 **Plugin v0.2.48:** Installed in IntelliJIdea2026.1 (`agent-doc-jetbrains-0.2.48.jar`). `plugin list` shows nothing because it's a direct install (not via plugin manager) — that's expected.
 
 Older installs still have stale versions:
 - IntelliJIdea2025.3 → v0.2.24
 - PyCharm2025.3 → v0.2.12
+
+I see 0.2.48
+
+![img_2.png](img_2.png)
 
 **Justin-caird session:** Not present because `%544` is registered but running `corky`. The agent-doc session for justin-caird.md was never provisioned after the swap. Fix:
 
@@ -179,12 +183,34 @@ agent-doc resync --fix
 ```
 
 Then re-open `tasks/recruit/justin-caird.md` in the editor — sync will auto-start a fresh session.
-<!-- agent:boundary:29b280b7 -->
+
+Still did not happen. The `corky watch` tmux pane is still in there.
+
+How did the `corky watch` pane end up in tmux session 10 to begin with?
+### Re: corky in session $10 + resync still pending
+
+**`resync --fix` hasn't run** — the WrongProcess issue is still in the registry. Important: `resync --fix` deregisters the sessions.json entry but does NOT kill or move corky. The pane will still be physically visible in the window after the fix. Corky leaves when sync stashes the excess pane after justin-caird.md provisions a new session.
+
+Full sequence to recover:
+```bash
+agent-doc resync --fix
+# then re-open tasks/recruit/justin-caird.md in the editor (HEAD)
+```
+
+**How corky ended up in session $10 — exact chain:**
+
+Two-step failure in the pre-v0.31.18 code:
+
+1. **Cross-session rescue_from_stash():** `%544` (corky) was in session $14's stash window. When something triggered `rescue_from_stash()` for session $10, the old code called `tmux swap-pane` without checking sessions — this moved `%544` from $14's stash into $10's agent-doc window.
+
+2. **Lazy claim:**  When `%533` (the real justin-caird.md Claude session) exited, the next open of justin-caird.md hit Strategy 2 in `resolve_or_create_pane()` (`route.rs:261-268`): registered pane was dead → `find_target_pane()` found `%544` (corky, now in session $10's window) → registered it as the justin-caird.md pane → sent the `agent-doc route` command to corky's pane.
+
+Both bugs contributed: rescue brought corky into the window, lazy claim adopted it as the wrong document's pane. v0.31.18 fixes rescue (session guard). Lazy claim is still a risk if a foreign process is already in the window — that's the WrongProcess detection `resync` now covers.
+<!-- agent:boundary:28f061b1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Run `agent-doc resync --fix` then re-open justin-caird.md
-- [ ] Update plugin in IntelliJIdea2025.3 (v0.2.24 → v0.2.48) and PyCharm2025.3 (v0.2.12 → v0.2.48) if those IDEs are still in use
+- [ ] Run `agent-doc resync --fix` then re-open justin-caird.md to provision fresh session
 <!-- /agent:pending -->

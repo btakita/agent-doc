@@ -251,7 +251,7 @@ Now corky IS the registry entry for justin-caird.md — legitimately registered,
 Future `rescue_from_stash()` calls for justin-caird.md receive `%544` from `sessions::lookup()`. They're acting correctly on the registered pane; it's just that the registered pane is running the wrong process.
 
 `swap_pane_guarded()` prevents Step 1 from recurring. The lazy claim path (Step 2) is the remaining risk — `find_target_pane()` picks any alive pane without checking the running process. A secondary hardening would be adding a process check in Strategy 2, skipping panes not in `AGENT_PROCESSES`.
-<!-- agent:boundary:9cef39f3 -->
+<!-- agent:boundary:3a5ef6e3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

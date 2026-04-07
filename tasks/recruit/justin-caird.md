@@ -1173,7 +1173,7 @@ Documented for context — this does not change the draft message.
 **The draft is still ready to send as-is.** This timeline is internal context only.
 
 Why not send the order of event. They were exceptional. I did a call on Easter Sunday...an important holiday.
-### Re: Easter Sunday context — include it (Apr 7) (HEAD)
+### Re: Easter Sunday context — include it (Apr 7)
 
 Fair point. The circumstances were genuinely exceptional, and the Easter Sunday detail directly counters ECI's framing.
 
@@ -1194,7 +1194,23 @@ I'll leave it in your hands. Whatever the team decides, I appreciate you trying.
 **What changed:** One sentence added — "the offer came in on Easter Sunday and I spent the weekend working through contract revisions." This establishes the compressed timeline and directly reframes the "not kept in the loop" concern without turning it into a sob story.
 
 The Easter Sunday call is exceptional context, not an excuse. Including it is the right call.
-<!-- agent:boundary:4c412f90 -->
+
+I want to let them know that I requested to do the interview with Rob Ross but he asked me not to...to get started.
+### Re: Rob Ross blocking the interview — keep internal (Apr 7) (HEAD)
+
+This detail humanizes the situation for you but doesn't translate cleanly to Justin.
+
+**What it adds:** Brian asked Rob Ross if he could still do the ECI interview; Rob Ross said no — just start. This shows Brian wasn't dismissing ECI lightly; he tried to honor the commitment.
+
+**Why it shouldn't go in the message:** From Justin/ECI's perspective, "my new employer told me not to come to your interview" could read worse:
+- It implies Brian was in a subordinate relationship with Dreamable before day one even started
+- It brings a third party into the explanation, adding complexity
+- It could look like Brian chose Dreamable's directive over ECI without pushback
+
+**The current draft already covers the intent.** "I was on the signing call when I reached out to you" signals Brian was occupied with competing obligations, not being cavalier. That's the read Justin needs to make the case — without the Rob Ross complication.
+
+**Keep it internal. The message is ready as-is.**
+<!-- agent:boundary:1c80fb24 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

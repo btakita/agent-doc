@@ -1194,7 +1194,7 @@ I'll leave it in your hands. Whatever the team decides, I appreciate you trying.
 **What changed:** One sentence added — "the offer came in on Easter Sunday and I spent the weekend working through contract revisions." This establishes the compressed timeline and directly reframes the "not kept in the loop" concern without turning it into a sob story.
 
 The Easter Sunday call is exceptional context, not an excuse. Including it is the right call.
-<!-- agent:boundary:1ecd14f4 -->
+<!-- agent:boundary:4c412f90 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

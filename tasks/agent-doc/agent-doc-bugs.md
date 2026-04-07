@@ -274,7 +274,7 @@ agent-doc resync --fix
 **Enhancement to add:** `resync` should support a `WrongSession` fix mode — `join-pane` to relocate panes to a target session. That would give `agent-doc resync --fix --session 10` to pull all registered panes into $10.
 
 For now: `tmux join-pane -t 10 -s %543 && tmux join-pane -t 10 -s %548`.
-<!-- agent:boundary:4fdc71b9 -->
+<!-- agent:boundary:365b6e05 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

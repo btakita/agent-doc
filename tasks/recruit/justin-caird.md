@@ -1006,7 +1006,7 @@ Please draft a reply explaining what happened a request to schedule an interview
 Tone is direct and honest — no euphemisms about the Dreamable outcome. Acknowledges the last-minute disruption without over-explaining. References Thursday specifically since it was already on the table. The closing line gives Justin an easy out if they've moved on.
 
 Let me know if you want to adjust wording before sending.
-<!-- agent:boundary:0a309cf4 -->
+<!-- agent:boundary:bbea1cca -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

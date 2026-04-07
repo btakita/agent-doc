@@ -305,7 +305,7 @@ Fix https://github.com/btakita/corky/actions/runs/24021664203/job/70051620000
 warning: build failed, waiting for other jobs to finish...
 Error: Process completed with exit code 101.
 ```
-### Re: OpenSSL version mismatch — vendored-openssl for Linux CI
+### Re: OpenSSL version mismatch — vendored-openssl for Linux CI (HEAD)
 
 **Root cause:** `native-tls` on Linux links against system OpenSSL via `openssl-sys`. On ubuntu-latest, the system OpenSSL version is incompatible with `openssl-sys 0.9.112` (likely OpenSSL 3.5.x, released 2025, not yet recognized).
 
@@ -317,7 +317,7 @@ Error: Process completed with exit code 101.
 (pypi.yml already used vendored-openssl — no change needed there.)
 
 Committed `bac9854`, pushed, retagged v0.26.0.
-### Re: OpenSSL version mismatch — vendored-openssl for Linux CI (HEAD)
+### Re: OpenSSL version mismatch — vendored-openssl for Linux CI
 
 **Root cause:** `native-tls` on Linux links against system OpenSSL via `openssl-sys`. On ubuntu-latest, the system OpenSSL version is incompatible with `openssl-sys 0.9.112` (likely OpenSSL 3.5.x, released 2025, not yet recognized).
 
@@ -354,7 +354,7 @@ sub-packages: '["nvcc", "cudart-dev"]'
 ```
 
 Want me to fix both and retag v0.26.0?
-<!-- agent:boundary:4558c41b -->
+<!-- agent:boundary:bdc14735 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

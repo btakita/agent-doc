@@ -418,9 +418,11 @@ enum Commands {
     Compact {
         /// Path to the session document
         file: PathBuf,
-        /// Number of recent exchanges to keep (default: 2, append-mode only)
-        #[arg(long, default_value = "2")]
-        keep: usize,
+        /// Number of recent exchanges/topics to keep.
+        /// Append mode default: 2. Template mode: omit to archive all (full compact),
+        /// or pass N to keep last N `### Re:` topic sections (partial compact).
+        #[arg(long)]
+        keep: Option<usize>,
         /// Component to compact (template/stream mode, default: exchange)
         #[arg(long)]
         component: Option<String>,

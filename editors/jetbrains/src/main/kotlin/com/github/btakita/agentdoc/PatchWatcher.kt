@@ -16,6 +16,7 @@ import java.nio.file.FileSystems
 import java.nio.file.Path
 import java.nio.file.StandardWatchEventKinds
 import java.nio.file.WatchService
+import java.security.MessageDigest
 
 /**
  * Watches `.agent-doc/patches/` for JSON patch files and applies them
@@ -176,6 +177,19 @@ class PatchWatcher(private val project: Project) : Disposable {
                         false
                     }
                 }
+                if (applied) {
+                    // Clean up any stale patch file for this document to prevent the file
+                    // watcher from applying the same content again (double-apply prevention).
+                    val basePath = project.basePath
+                    if (basePath != null) {
+                        val hash = docHash(patch.file)
+                        val patchFile = File(basePath, ".agent-doc/patches/$hash.json")
+                        if (patchFile.exists()) {
+                            LOG.info("[socket] cleaning stale patch file after socket delivery: ${patchFile.name}")
+                            patchFile.delete()
+                        }
+                    }
+                }
                 applied
             }
             "reposition" -> {
@@ -239,6 +253,16 @@ class PatchWatcher(private val project: Project) : Disposable {
             val patch = parsePatchJson(json) ?: return
             val parseMs = (System.nanoTime() - parseStart) / 1_000_000
             if (parseMs > 10) LOG.info("[perf] processPatchFile parse: ${parseMs}ms ${patchFile.name}")
+
+            // Startup dedup guard: check if this patch was already applied in a previous cycle.
+            // Uses snapshot timestamp — if the snapshot is newer than the patch file, the
+            // binary already saved a snapshot after applying this patch, so it's stale.
+            // Boundary-ID checks are unreliable because boundaries get consumed on apply.
+            if (isPatchAlreadyApplied(patch, patchFile)) {
+                LOG.info("[patch-watcher] dedup: snapshot newer than patch file, deleting stale: ${patchFile.name}")
+                patchFile.delete()
+                return
+            }
 
             ApplicationManager.getApplication().invokeLater {
                 val applyStart = System.nanoTime()
@@ -841,6 +865,43 @@ class PatchWatcher(private val project: Project) : Disposable {
     companion object {
         private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(PatchWatcher::class.java)
         private val instances = mutableMapOf<Project, PatchWatcher>()
+
+        /**
+         * Check if a patch file is stale (already applied in a previous cycle).
+         *
+         * Compares the patch file's modification time against the snapshot for the same
+         * document. If the snapshot is NEWER than the patch file, the binary already saved
+         * a snapshot after applying this patch — the file is stale.
+         *
+         * Boundary-ID checks were the original approach but are unreliable: when a patch is
+         * applied, its boundary marker is consumed and replaced. So checking "is boundary in
+         * doc" returns false for BOTH "not yet applied" AND "already applied" after a
+         * subsequent cycle. Snapshot timestamp is the correct signal.
+         */
+        fun isPatchAlreadyApplied(patch: IpcPatch, patchFile: File): Boolean {
+            // Walk up from the document to find .agent-doc/ — mirrors find_project_root in Rust.
+            var dir: File? = File(patch.file).parentFile
+            while (dir != null) {
+                val agentDocDir = File(dir, ".agent-doc")
+                if (agentDocDir.isDirectory) {
+                    val docHash = docHash(patch.file)
+                    val snapshotFile = File(agentDocDir, "snapshots/$docHash.md")
+                    if (snapshotFile.exists() && snapshotFile.lastModified() > patchFile.lastModified()) {
+                        return true
+                    }
+                    break
+                }
+                dir = dir.parentFile
+            }
+            return false
+        }
+
+        /** Compute SHA256 hex of a path string — mirrors snapshot::doc_hash in the Rust binary. */
+        fun docHash(path: String): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+            val bytes = digest.digest(path.toByteArray(Charsets.UTF_8))
+            return bytes.joinToString("") { "%02x".format(it) }
+        }
 
         fun getInstance(project: Project): PatchWatcher {
             return instances.getOrPut(project) {

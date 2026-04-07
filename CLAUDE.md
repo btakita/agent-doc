@@ -94,7 +94,7 @@ src/
   hook_cmd.rs       # CLI subcommands: agent-doc hook fire/poll/listen/gc
   ops_log.rs        # Best-effort operational logging to .agent-doc/logs/ops.log
   sync.rs           # Sync pane state between editor and tmux (reconciler always runs, no early exits, column memory)
-  preflight.rs      # Pre-agent checks: recover, commit, claims, diff, document read → JSON
+  preflight.rs      # Pre-agent checks: layout check, recover, commit, claims, diff, document read → JSON
   agent/
     mod.rs          # Agent trait
     claude.rs       # Claude backend (Agent + StreamingAgent)

@@ -46,6 +46,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 The command outputs JSON to stdout:
 ```json
 {
+  "layout_issues": [],
   "recovered": false,
   "committed": true,
   "claims": [],
@@ -56,6 +57,7 @@ The command outputs JSON to stdout:
 ```
 
 - If `no_changes` is `true`, tell the user nothing changed and stop
+- Print any `layout_issues` entries to the console as warnings (session drift, non-idle stash panes, etc.)
 - Print any `claims` entries to the console as a record
 - The `document` field contains the full HEAD content (no separate `Read` needed)
 - The `diff` field contains the user's changes since the last snapshot

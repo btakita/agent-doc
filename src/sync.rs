@@ -717,6 +717,8 @@ fn run_with_options(
                     }
                     // A pane in a stash window is alive — rescue it back to the
                     // agent-doc window instead of creating a new session.
+                    // Session guard: only rescue within the correct session.
+                    // If pane is in the wrong session, stash it in the target session first.
                     if let Ok(win_id) = tmux.pane_window(pane) {
                         let win_name = tmux
                             .cmd()
@@ -727,6 +729,25 @@ fn run_with_options(
                             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
                             .unwrap_or_default();
                         if win_name == "stash" || win_name.starts_with("stash-") {
+                            // Check if pane is in the correct session before rescuing
+                            let pane_session = tmux
+                                .cmd()
+                                .args(["display-message", "-t", pane, "-p", "#{session_name}"])
+                                .output()
+                                .ok()
+                                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                                .unwrap_or_default();
+                            let target_sess = context_session.as_deref().unwrap_or("");
+                            if !target_sess.is_empty() && pane_session != target_sess {
+                                eprintln!(
+                                    "[sync] pane {} for {} is in session '{}' stash, moving to target session '{}' stash first",
+                                    pane, file_path.display(), pane_session, target_sess
+                                );
+                                if let Err(e) = tmux.stash_pane(pane, target_sess) {
+                                    eprintln!("[sync] stash_pane to target session failed: {}", e);
+                                    return false;
+                                }
+                            }
                             eprintln!(
                                 "[sync] pane {} for {} is in stash window '{}', rescuing",
                                 pane, file_path.display(), win_name

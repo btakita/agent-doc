@@ -4,6 +4,16 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.18
+
+- **Partial compact `--keep N` (compact.rs):** `agent-doc compact <FILE> --keep N` archives only exchanges older than the last N `### Re:` sections, preserving recent context. `parse_topic_sections()` helper added; 4 new tests.
+- **Slash command dispatch from diff (diff.rs + preflight.rs):** `parse_slash_commands(diff)` extracts slash commands from user-added lines; preflight returns them in `slash_commands[]`; the SKILL executes each before responding. Guards: code fences, blockquotes, non-added/removed lines excluded.
+- **Dedupe stale patch cleanup (dedupe.rs):** After removing duplicate blocks, deletes `.agent-doc/patches/<hash>.json` to prevent `processPendingPatches()` from re-applying removed content on next plugin startup.
+- **JB plugin startup dedup guard (PatchWatcher.kt v0.2.48):** Before applying a pending patch file, compares snapshot mtime against patch file mtime. If snapshot is newer, the patch was already applied — deletes stale file and skips. Replaces the incorrect boundary-ID check from v0.2.47.
+- **Cross-session pane swap fix (route.rs + sync.rs):** `rescue_from_stash()` now checks pane session before swap; uses `join-pane` for cross-session panes. Session-drift detection added to `check_layout()` in preflight.
+- **PromptPoller FFI CRDT merge (editors/jetbrains):** FFI-based CRDT merge, fix unnecessary reload, preserve edits on conflict.
+- **SPEC.md §7.26 + §7.28 updated:** preflight JSON now documents `slash_commands[]`; dedupe documents stale patch file cleanup.
+
 ## 0.31.17
 
 - **CRDT duplicate bug fix (write.rs):** When boundary-synthesis consumed unmatched content into a patch, the IPC payload also sent the same content as `"unmatched"` — the plugin applied both, producing duplicates. Fixed by clearing `effective_unmatched` to `""` when synthesis occurred, on both socket and file IPC paths.

@@ -1120,7 +1120,7 @@ Should we not all of these details I have added?
 - Finally signed during a call on Monday.
 - Did not respond until I was in the call.
 - Not an excuse but I was under much stress and I made some mistakes.
-### Re: Keep details out of the message (Apr 7) (HEAD)
+### Re: Keep details out of the message (Apr 7)
 
 Yes — those details should stay internal. They were context for drafting, not content for Justin.
 
@@ -1141,7 +1141,37 @@ One thing worth knowing if it helps: the contract wasn't finalized until Monday 
 I'll leave it in your hands. Whatever the team decides, I appreciate you trying.
 
 ---
-<!-- agent:boundary:1dbaf8b8 -->
+I want the order of events expanded upon:
+- I want to recount the timeline of what happened.
+- Friday interview.
+- Had to sign a NDA
+- Follow up interview Sunday (Easter) at 5 Eastern.
+- Presented with a Job Offer
+- I had revisions to the contract that I sent in the evening.
+- Finally signed during a call on Monday.
+- Did not respond until I was in the call.
+- Rob Ross did not want me to join the interview.
+- Not an excuse but I was under much stress and I made some mistakes. I should have let them know sooner.
+### Re: Full Dreamable timeline (internal context, Apr 7) (HEAD)
+
+Documented for context — this does not change the draft message.
+
+**Timeline:**
+
+1. **Fri Apr 4** — first Dreamable interview
+2. **Fri Apr 4** — NDA signed
+3. **Sun Apr 5 (Easter), 5pm ET** — follow-up interview → job offer presented
+4. **Sun Apr 5 evening** — Brian submitted contract revisions
+5. **Mon Apr 6 morning** — contract still unresolved
+6. **Mon Apr 6, ~12:30pm** — signing call; Rob Ross did not want Brian to participate in the ECI interview
+7. **Mon Apr 6, 12:39pm** — cancellation sent to Justin while on the signing call
+
+**Note on "I should have let them know sooner":** This is a legitimate acknowledgment — once a competing offer materialized Sunday evening, Justin could have been looped in. But surfacing that regret in the message now doesn't help; what matters is the clarifying fact already in the draft ("I was on the signing call when I reached out to you").
+
+**Rob Ross detail stays internal.** Internal pressure to pull away from ECI is not Justin's concern, and mentioning it adds complexity without benefit.
+
+**The draft is still ready to send as-is.** This timeline is internal context only.
+<!-- agent:boundary:27f9769d -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

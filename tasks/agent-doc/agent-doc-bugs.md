@@ -194,7 +194,7 @@ How did the `corky watch` pane end up in tmux session 10 to begin with?
 Full sequence to recover:
 ```bash
 agent-doc resync --fix
-# then re-open tasks/recruit/justin-caird.md in the editor (HEAD)
+# then re-open tasks/recruit/justin-caird.md in the editor
 ```
 
 **How corky ended up in session $10 — exact chain:**
@@ -203,14 +203,40 @@ Two-step failure in the pre-v0.31.18 code:
 
 1. **Cross-session rescue_from_stash():** `%544` (corky) was in session $14's stash window. When something triggered `rescue_from_stash()` for session $10, the old code called `tmux swap-pane` without checking sessions — this moved `%544` from $14's stash into $10's agent-doc window.
 
+We should **always** check the tmux session before running **any** `tmux swap-pane`. Please extract a function for `tmux swap-pane` that validates the tmux session.
+
+I don want the system to "self-correct" in case an agent-doc tmux window moved to another tmux session. I don't want this bug where the tmux pane was moved from the correct tmux session to another tmux session. 
+
 2. **Lazy claim:**  When `%533` (the real justin-caird.md Claude session) exited, the next open of justin-caird.md hit Strategy 2 in `resolve_or_create_pane()` (`route.rs:261-268`): registered pane was dead → `find_target_pane()` found `%544` (corky, now in session $10's window) → registered it as the justin-caird.md pane → sent the `agent-doc route` command to corky's pane.
 
 Both bugs contributed: rescue brought corky into the window, lazy claim adopted it as the wrong document's pane. v0.31.18 fixes rescue (session guard). Lazy claim is still a risk if a foreign process is already in the window — that's the WrongProcess detection `resync` now covers.
-<!-- agent:boundary:0f8dd9d5 -->
+### Re: swap_pane_guarded() (HEAD)
+
+Added `swap_pane_guarded(tmux, src, dst, expected_session)` to `sessions.rs` and updated both call sites.
+
+**`sessions.rs`** — new helper after `capture_pane`:
+```rust
+pub fn swap_pane_guarded(tmux: &Tmux, src: &str, dst: &str, expected_session: &str) -> Result<()> {
+    // check src session
+    // check dst session
+    // only then: tmux.swap_pane(src, dst)
+}
+```
+Returns `Err` with a clear message if either pane is in the wrong session — callers fall through to `join-pane` as before.
+
+**Call sites updated:**
+- `route.rs:328` — `rescue_from_stash()`: `tmux.swap_pane(pane_id, target)` → `sessions::swap_pane_guarded(tmux, pane_id, target, target_session)`
+- `sync.rs:760` — stash rescue path: same pattern, uses `target_sess` as the expected session
+
+`cargo check` + `cargo clippy` — clean.
+
+This closes the last direct `tmux.swap_pane()` callsite in agent-doc code. Any future accidental `tmux.swap_pane()` call skips the guard — so this should be noted as a convention: prefer `swap_pane_guarded()` over `tmux.swap_pane()` in agent-doc.
+<!-- agent:boundary:f947f917 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Run `agent-doc resync --fix` then re-open justin-caird.md to provision fresh session
+- [ ] Build + release v0.31.19 with swap_pane_guarded() change
 <!-- /agent:pending -->

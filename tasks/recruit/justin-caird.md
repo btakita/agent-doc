@@ -1212,7 +1212,7 @@ This detail humanizes the situation for you but doesn't translate cleanly to Jus
 **Keep it internal. The message is ready as-is.**
 
 I want to explain that the timing was **extremely** short. And it seemed like a good fit on Friday...with a Sunday follow up call to get started on Monday.
-### Re: Show the full Friday→Sunday→Monday arc (Apr 7) (HEAD)
+### Re: Show the full Friday→Sunday→Monday arc (Apr 7)
 
 Good instinct. The Easter Sunday detail alone establishes weekend pressure but doesn't show how fast everything moved from first contact. The full arc (Friday interview → Sunday offer → Monday signing) makes the compressed timeline visceral without stating it explicitly.
 
@@ -1232,7 +1232,31 @@ I'll leave it in your hands. Whatever the team decides, I appreciate you trying.
 ---
 
 Friday → Easter Sunday → Monday morning signing. Under 72 hours. That's what "extremely short" looks like on the page, without saying it.
-<!-- agent:boundary:94ab3bb6 -->
+
+Now this sounds like an excuse. I like parts 
+> It wasn't that I had accepted days earlier and stayed quiet. I know that doesn't fix the last-minute notice, but it may help explain how it unfolded.It wasn't that I had accepted days earlier and stayed quiet. I know that doesn't fix the last-minute notice, but it may help explain how it unfolded.
+
+I was also under much stress from the beginning of the day onward. Should I mention that?
+### Re: Strip the timeline, keep the strong lines (Apr 7) (HEAD)
+
+Right call. The Friday→Sunday chain was tipping it into excuse territory. The two lines you flagged are the core of the message — direct, honest, not over-explaining.
+
+**On stress:** Don't include it. "I was under stress" shifts from "clarifying context" to "here's why I struggled." Not what you want Justin telling the ECI team.
+
+**Final message (stripped back):**
+
+---
+
+Hi Justin — I appreciate you going to bat for me. Understood on their reaction...the timing was genuinely poor on my end.
+
+One thing worth knowing if it helps: the contract wasn't finalized until Monday morning — I was on the signing call when I reached out to you. It wasn't that I had accepted days earlier and stayed quiet. I know that doesn't fix the last-minute notice, but it may help explain how it unfolded.
+
+I'll leave it in your hands. Whatever the team decides, I appreciate you trying.
+
+---
+
+Cleaner. One fact, the acknowledgment, leave it in Justin's hands. Ready to send.
+<!-- agent:boundary:a8898893 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

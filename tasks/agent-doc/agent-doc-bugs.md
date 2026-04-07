@@ -233,7 +233,7 @@ Why did the original `rescue_from_stash()` call identify the incorrect tmux pane
 `cargo check` + `cargo clippy` — clean.
 
 This closes the last direct `tmux.swap_pane()` callsite in agent-doc code. Any future accidental `tmux.swap_pane()` call skips the guard — so this should be noted as a convention: prefer `swap_pane_guarded()` over `tmux.swap_pane()` in agent-doc.
-### Re: why did rescue_from_stash() identify the wrong pane? (HEAD)
+### Re: why did rescue_from_stash() identify the wrong pane?
 
 `rescue_from_stash()` doesn't identify the pane — it receives it from `sessions::lookup()`. The wrong pane was in the registry because of a two-step sequence:
 
@@ -251,7 +251,30 @@ Now corky IS the registry entry for justin-caird.md — legitimately registered,
 Future `rescue_from_stash()` calls for justin-caird.md receive `%544` from `sessions::lookup()`. They're acting correctly on the registered pane; it's just that the registered pane is running the wrong process.
 
 `swap_pane_guarded()` prevents Step 1 from recurring. The lazy claim path (Step 2) is the remaining risk — `find_target_pane()` picks any alive pane without checking the running process. A secondary hardening would be adding a process check in Strategy 2, skipping panes not in `AGENT_PROCESSES`.
-<!-- agent:boundary:3a5ef6e3 -->
+
+The issue I'm running into now is I have an 0:agent-doc window in tmux session 14. How sdo I get those tmux panes back into tmux session 10 using agent-doc?
+### Re: moving session $14 panes to session $10
+
+**agent-doc has no built-in "relocate pane to session" command.** Two options:
+
+**Option 1 — Physical move with tmux (immediate):**
+```bash
+tmux join-pane -t 10 -s %543
+tmux join-pane -t 10 -s %548
+```
+Moves each pane from session $14 into session $10's current window. The running agent-doc sessions (claudescore.md, xbow.md) continue in $10.
+
+**Option 2 — Deregister + re-provision:**
+```bash
+agent-doc resync --fix
+# then re-open claudescore.md and xbow.md from within session $10 (HEAD)
+```
+`resync --fix` currently only handles `WrongProcess` (`%544`/corky). The `WrongSession` panes (`%543`, `%548`) aren't flagged — they're alive and correct, just provisioned in $14 (because the docs were opened from $14).
+
+**Enhancement to add:** `resync` should support a `WrongSession` fix mode — `join-pane` to relocate panes to a target session. That would give `agent-doc resync --fix --session 10` to pull all registered panes into $10.
+
+For now: `tmux join-pane -t 10 -s %543 && tmux join-pane -t 10 -s %548`.
+<!-- agent:boundary:4fdc71b9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -260,4 +283,5 @@ Future `rescue_from_stash()` calls for justin-caird.md receive `%544` from `sess
 - [ ] Run `agent-doc resync --fix` then re-open justin-caird.md
 - [ ] Build + release v0.31.19 with swap_pane_guarded()
 - [ ] Consider: add AGENT_PROCESSES check to Strategy 2 (lazy claim) in resolve_or_create_pane() to skip foreign-process panes
+- [ ] Consider: resync WrongSession --fix mode using join-pane to relocate panes to target session
 <!-- /agent:pending -->

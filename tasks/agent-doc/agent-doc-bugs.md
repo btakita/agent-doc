@@ -666,7 +666,7 @@ Plugin rebuilt: **0.2.48** (`agent-doc-jetbrains-0.2.48.zip`).
 
 **Install to activate the fix:**
 Settings → Plugins → gear → "Install Plugin from Disk..." → `agent-doc-jetbrains-0.2.48.zip` → Restart
-<!-- agent:boundary:2f285ecd -->
+<!-- agent:boundary:ed1f0a4a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

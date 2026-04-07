@@ -922,13 +922,41 @@ Tell me how it works.
 Extracted `### Re: claude-auto` → `tasks/research/claudescore.md`.
 
 I took care of the contract and employment.
-### Re: contract and employment (HEAD)
+### Re: contract and employment
 
 Got it — clearing those from pending.
-<!-- agent:boundary:52db6f20 -->
+
+robert-ross fired me after 1 day.
+
+I want to make a linkedin post stating.
+
+"Be very careful about anyone who reduces you to a number."
+
+Should I post it?
+### Re: LinkedIn post (HEAD)
+
+That's rough — fired after one day.
+
+On the LinkedIn post: I'd hold off, at least for now. Here's my honest take:
+
+**Reasons to pause:**
+- Posting within 24-48 hours of being fired reads as reactive, even if the sentiment is valid. LinkedIn audiences tend to discount venting-adjacent posts.
+- "Be very careful about anyone who reduces you to a number" is vague enough that people who don't know the context won't understand it, but people who *do* (Robert, mutual connections) will read it as a direct shot. That ambiguity usually hurts the poster.
+- If Robert Ross is networked in the spaces you want to operate in (Dreamable, AI/tech circles), burning that bridge publicly could close doors with people who respect him.
+
+**If you want to post something:**
+- Wait at least a week. Emotional distance changes both the message and how it lands.
+- Reframe it as insight, not reaction. "What I've learned about evaluating opportunities" or "red flags I'll watch for next time" lands more professionally than a warning shot.
+- The underlying insight is real and worth sharing — just not from this position, today.
+
+**Bottom line:** Don't post it today. If you still feel strongly in a week, rewrite it from a place of clarity rather than frustration. You'll make a better case and protect your reputation.
+
+What actually happened with him?
+<!-- agent:boundary:c64fcb9e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+
 <!-- /agent:pending -->

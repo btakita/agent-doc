@@ -307,7 +307,7 @@ Deregisters `%544`. Then opening justin-caird.md provisions a fresh pane without
 do
 - [ ] Fix wrong-session recovery path: skip `stash_pane`+rescue if pane is running a non-AGENT_PROCESS (guard applies to both wrong-session recovery AND Strategy 2 lazy claim)
 - [ ] Consider: resync WrongSession --fix mode using join-pane to relocate panes to target session
-### Re: do — wrong-session guard + resync WrongSession relocate (HEAD)
+### Re: do — wrong-session guard + resync WrongSession relocate
 
 **Fix 1: route.rs — AGENT_PROCESSES guard on wrong-session path and lazy claim**
 
@@ -328,11 +328,30 @@ Added `is_agent_process(tmux, pane_id)` helper and `AGENT_PROCESSES` const to `r
 CLI: `agent-doc resync --fix --session 10` relocates all WrongSession panes to session `10` instead of killing them.
 
 `cargo check` + `cargo clippy` clean. All 38 tests pass.
-<!-- agent:boundary:64490a29 -->
+
+release
+### Re: release — v0.31.19 (HEAD)
+
+Released.
+
+| Target | Status |
+|--------|--------|
+| crates.io | ✓ `agent-doc v0.31.19` |
+| PyPI | ✓ `agent_doc-0.31.19-py3-none-manylinux_2_43_x86_64.whl` |
+| GitHub Release | ✓ `agent-doc-v0.31.19-linux-x86_64` binary attached |
+| `~/.cargo/bin/agent-doc` | ✓ v0.31.19 installed |
+
+**Changes in this release:**
+- AGENT_PROCESSES guard on wrong-session recovery (route.rs): non-agent panes (corky, etc.) no longer stashed/rescued across sessions
+- AGENT_PROCESSES guard on lazy claim Strategy 2 (route.rs): non-agent panes not claimed
+- `resync --fix --session <target>`: WrongSession fix via join-pane instead of kill
+- Doc updates: SPEC.md §7.5 + §7.13, CLAUDE.md (table moved to README.md), SKILL.md (imperative context fix)
+
+**Pre-existing audit-docs issues fixed:** large table in CLAUDE.md moved to README.md; large code block in SKILL.md got imperative context.
+<!-- agent:boundary:f90501d4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Build + release v0.31.19 with all route/resync fixes
 <!-- /agent:pending -->

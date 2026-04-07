@@ -1082,7 +1082,7 @@ Please note Justin's reply
 
 
 I also let Rob Ross know about the interview and he asked me not to do it.
-### Re: Justin's reply (Apr 7) (HEAD)
+### Re: Justin's reply (Apr 7)
 
 **Justin's response:**
 
@@ -1100,16 +1100,48 @@ The second point is addressable: you *didn't* accept before the interview in the
 
 ---
 
-Hi Justin — I appreciate you going to bat for me. Understood on their reaction — the timing was genuinely poor on my end.
+Hi Justin — I appreciate you going to bat for me. Understood on their reaction...the timing was genuinely poor on my end.
 
-One thing worth knowing if it helps: the contract wasn't finalized until Monday morning. I was on the signing call when I reached out to you — it wasn't that I had accepted days earlier and stayed quiet. I know that doesn't fix the last-minute notice, but I wanted you to have the full picture.
+One thing worth knowing if it helps: the contract wasn't finalized until Monday morning. I was on the signing call when I reached out to you...it wasn't that I had accepted days earlier and stayed quiet. I know that doesn't fix the last-minute notice, but I wanted you to have the full picture.
 
 I'll leave it in your hands. Whatever the team decides, I appreciate you trying.
 
 ---
 
 Short, gracious, gives Justin one concrete fact to use ("contract signing was simultaneous with the cancellation") without pressuring or over-explaining. You could also just wait and let Justin work it — but this gives him ammunition.
-<!-- agent:boundary:de0dba25 -->
+
+Should we not all of these details I have added?
+- Need a job ASAP.
+- I want to recount the timeline of what happened.
+- Friday interview.
+- Follow up interview Sunday (Easter) at 5 Eastern.
+- NDA -> Job Offer
+- I had revisions to the contract.
+- Finally signed during a call on Monday.
+- Did not respond until I was in the call.
+- Not an excuse but I was under much stress and I made some mistakes.
+### Re: Keep details out of the message (Apr 7) (HEAD)
+
+Yes — those details should stay internal. They were context for drafting, not content for Justin.
+
+The timeline notes (Easter Sunday interview, NDA, contract revisions, stress) would make the message longer and read as defensive justification. The one fact that matters is already in the draft: "I was on the signing call when I reached out to you." That's the only new information Justin needs to advocate for you.
+
+"Need a job ASAP" is especially internal — Justin doesn't need to know that, and it would shift the dynamic.
+
+The `...` replacements are correct. **The draft is ready to send as-is.**
+
+**Final message (ready to send):**
+
+---
+
+Hi Justin — I appreciate you going to bat for me. Understood on their reaction...the timing was genuinely poor on my end.
+
+One thing worth knowing if it helps: the contract wasn't finalized until Monday morning. I was on the signing call when I reached out to you...it wasn't that I had accepted days earlier and stayed quiet. I know that doesn't fix the last-minute notice, but I wanted you to have the full picture.
+
+I'll leave it in your hands. Whatever the team decides, I appreciate you trying.
+
+---
+<!-- agent:boundary:6833809a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

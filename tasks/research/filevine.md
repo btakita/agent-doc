@@ -180,7 +180,7 @@ Your note — *"It seems that [?] make the artifacts interactive. In the case of
 My best guess at the direction: LOIS produces *static* outputs (drafted documents, summaries, extracted fields) but the artifact itself isn't interactive — you can't ask follow-up questions about a specific paragraph inline, for instance. That's a gap. Contrast with tools like Cursor or agent-doc where the document *is* the interface. If that's the direction you were going, it's a genuinely interesting product observation: LOIS generates artifacts, but attorneys can't currently converse *with* the artifact in context.
 
 Would the existence-lang ontology be important for lois?
-### Re: Interactive artifacts — confirmed direction (HEAD)
+### Re: Interactive artifacts — confirmed direction
 
 Yes — making artifacts interactive is the key gap. LOIS generates outputs (summaries, drafted documents, extracted fields, medical chronologies) but those artifacts are endpoints, not starting points. An attorney receives the output, then has to context-switch to a different tool or conversation to ask follow-ups.
 
@@ -190,7 +190,7 @@ For the interview with Cain or Emily: *"LOIS generates artifacts — what's the 
 
 ---
 
-### Re: Existence-lang ontology for LOIS (HEAD)
+### Re: Existence-lang ontology for LOIS
 
 Potentially yes — especially given that Cain Elliott has a philosophy background (PhD from the Polish Academy of Sciences). He's exactly the person who'd engage with formal ontology thinking in legal AI.
 
@@ -208,7 +208,17 @@ An existence-lang-style ontology would let you define `LegalMatter → [Parties,
 "Your verifiable outputs feature checks AI answers against source citations — that's document-level grounding. An ontology layer would give you claim-level grounding: a formal graph of what's true in this case, so you can verify not just 'did you cite something' but 'is the citation sufficient for the claim.'"
 
 That's a conversation Cain would find genuinely interesting, and it's differentiated from what most engineers would bring to that interview.
-<!-- agent:boundary:2fab53ac -->
+
+Please create a 1 page pdf summary for this interview.
+Use small margins.
+### Re: 1-page PDF (HEAD)
+
+Created: `tasks/research/filevine-interview.html`
+
+Open in browser and print to PDF (Ctrl+P → Save as PDF). Set margins to "None" or "Minimum" — the HTML has its own `@page` margins at 0.4in.
+
+Content fits one letter page: company overview, milestones, LOIS, tech stack table, all four interviewers (with track labels), key talking points, and questions to ask.
+<!-- agent:boundary:bfcbc27f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

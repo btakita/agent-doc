@@ -85,7 +85,7 @@ tmux join-pane -t 14 -s %544
 ```
 
 That rejoins `%544` (corky) into session $14 where it originated.
-### Re: agent-doc panes in session $14 (HEAD)
+### Re: agent-doc panes in session $14
 
 They were provisioned there directly — no swap involved.
 
@@ -96,11 +96,29 @@ From the session logs:
 **Why session $14?** agent-doc provisions panes in the tmux session that sync/plugin is running in. Those documents were opened from **within session $14** (different IDE window or tmux session). Session $10 documents (agent-doc-bugs.md) were opened from session $10.
 
 This is expected multi-window behavior — the drift itself isn't a bug. The bug was `rescue_from_stash()` reaching across sessions to grab %544 (corky) from $14's stash and swap it into $10, instead of provisioning a new pane within $10.
-<!-- agent:boundary:ae0aae0d -->
+
+Please plan a fix if you know exactly what went wrong.
+
+Already done:
+- [ ] Install JB plugin v0.2.48 (snapshot-timestamp dedup guard)
+### Re: fix plan — cross-session swap-pane (HEAD)
+
+The fix is already complete in v0.31.18. No further changes needed.
+
+**Precise root cause:** `rescue_from_stash()` had no session guard. When the registered pane (%544, corky) was found stashed in session $14, the function checked the window name (`"stash"` → rescue), then called `tmux swap-pane` unconditionally. tmux's `swap-pane` works across sessions — it moved the pane from $14 into $10.
+
+**Fix in v0.31.18 (`route.rs:286-307`):**
+
+1. `rescue_from_stash()` now checks session at entry: if `pane_session != target_session` → early return, skip rescue
+2. Caller (lines 237–250): if registered pane is alive but in wrong session, calls `stash_pane(pane, target_session)` first to move it to the target session's stash, then rescues within the target session
+
+Both paths are covered. The corky-in-wrong-session scenario (pane not in target session → skip) and the legitimate cross-session recovery (pane alive in wrong session → move to target session stash first) are handled.
+
+**JB plugin:** `agent-doc plugin list` shows "No plugins found" — that means it's installed directly (not via the plugin manager). If you installed v0.2.48 from disk already, the startup dedup guard is active.
+<!-- agent:boundary:3d9aecce -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Install JB plugin v0.2.48 (snapshot-timestamp dedup guard)
 <!-- /agent:pending -->

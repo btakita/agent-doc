@@ -25,7 +25,11 @@ Preflight returns `slash_commands: [...]`. SKILL.md step 0b dispatches each via 
 
 The `compact exchange` trigger you just used was processed via this path.
 release
-### Re: release — v0.31.18 (HEAD)
+
+When I opened the editor to tasks/recruit/jusdin-caird.md, a claude session did not properly start or crashed. Not sure. Please look at the logs.
+I will resync and run agent-doc.
+Actually, the tmux pane was swapped with another tmux session. Why?
+### Re: release — v0.31.18
 
 Released.
 
@@ -45,7 +49,26 @@ Released.
 - PromptPoller FFI CRDT merge
 
 **Note on PyPI:** The `--compatibility manylinux_2_43 --auditwheel skip` flags were needed because glibc 2.43 (CachyOS) isn't in auditwheel's policy table yet. Previous versions (0.31.17) also missed PyPI for this reason — latest on PyPI was 0.31.16.
-<!-- agent:boundary:10b01641 -->
+### Re: justin-caird.md pane swapped to wrong tmux session (HEAD)
+
+**Root cause: cross-session `swap-pane` bug (now fixed in v0.31.18).**
+
+From the session log (`fb7495d9`):
+- Pane `%533` — Claude started fresh, ran the session, **exited cleanly** (code 0) at ~1:22pm
+- User quit at ~3:08pm
+- When you re-opened the file, `rescue_from_stash()` in the old binary (v0.31.17) used `swap-pane` without a session guard — it grabbed a stash pane from **session $14** and swapped it into **session $10**. That's the "swapped to another tmux session" you saw.
+- The registry updated to `%544` which ended up running `corky` in session $10
+
+**The fix** landed in v0.31.18 (`route.rs + sync.rs`): `rescue_from_stash()` now checks the pane's session before swapping; uses `join-pane` for cross-session panes. This specific failure path is closed.
+
+**To recover now:**
+```bash
+agent-doc resync --fix
+```
+Then re-open `tasks/recruit/justin-caird.md` in the editor — sync will provision a fresh pane in the correct session.
+
+**Note on ops.log / debug.log:** The cross-session swap itself isn't logged — `route.rs` and `sync.rs` operations only appear in the session `.log` and stderr (not in `ops.log` or `debug.log`). The session log confirmed Claude exited cleanly; the swap happened at re-open time (between the two log entries).
+<!-- agent:boundary:ba7454fb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

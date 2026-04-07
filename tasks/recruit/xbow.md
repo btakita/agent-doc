@@ -48,10 +48,12 @@ Compacted. Transcript saved to [tasks/recruit/transcripts/xbow-2026-04-07.md](tr
 
 There was a large block of transcription that was not properly split up with diarization. Please have Corky understand that this diarization was not successful...and it should process the audio using progressively smaller chunks until successful diarization is achieved.
 > **Brian** (0.88) [00:05:34.720 → 00:32:20.820]
+
+Please look at the recently synced email correcspondence to find Ana's name.
 There was a large block of transcription that was not properly split up with diarization. Please have Corky understand that this diarization was not successful...and it should process the audio using progressively smaller chunks until successful diarization is achieved.
 > **Brian** (0.88) [00:05:34.720 → 00:32:20.820]
 
-### Re: Diarization fix + re-transcription in progress (HEAD)
+### Re: Diarization fix + re-transcription in progress
 
 **Root cause:** `quality_ok()` passed because speaker count and unknown% looked fine — but it didn't detect that one speaker's block spanned 26 of 32 minutes (81% of audio). The adaptive chunking cascade never triggered.
 
@@ -60,7 +62,18 @@ There was a large block of transcription that was not properly split up with dia
 - `engine.rs`: Added span check in `run_adaptive_diarization()` — if any speaker block exceeds **60%** of total audio, cascade to smaller chunks (600s → 120s → 30s)
 
 Now re-transcribing with `--speakers "Brian,Anna"` so speaker names are labeled directly. Running in background — will update transcript when done.
-<!-- agent:boundary:30d93abd -->
+Please look at the recently synced email correcspondence to find Ana's name.
+
+### Re: Anna Pareno / transcript updated (HEAD)
+
+**Anna's full name: Anna Pareno** — confirmed from email subject lines (`new-message-from-anna-pareno-...`).
+
+**Transcript updated:** [tasks/recruit/transcripts/xbow-2026-04-07.md](transcripts/xbow-2026-04-07.md)
+
+Re-transcription completed. Early section (0:00–7:03) now has good alternating speaker attribution. The large block (7:03–32:20) persists but is now labeled with a `⚠️` correction note — the diarizer labeled it "Anna" but the content is clearly Brian's monologue.
+
+**Root cause of remaining issue:** The span check targets undivided pyannote segments, but pyannote's 61 segments alternate correctly. The problem is in the Whisper→speaker mapping layer: when Brian talks for 25 consecutive minutes, the embedding similarity comparison flips for that region. This is a harder fix — requires checking span in the *merged* output layer, not the raw diarized segments.
+<!-- agent:boundary:bdbe0d7f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -21,13 +21,6 @@ Help me prepare for an interview with the Filevine development team.
 - Cain Elliott
 - Stuart Hiller
 - Emily Lippincott
-Help me prepare for an interview with the Filevine development team.
-- https://www.filevine.com/
-- https://www.linkedin.com/company/filevine
-- Chris Smith
-- Cain Elliott
-- Stuart Hiller
-- Emily Lippincott
 
 ### Re: Filevine Interview Prep
 
@@ -98,6 +91,10 @@ Engineering track. Background: Node/Express/React/MongoDB/GraphQL. Previous work
 3. **Compliance as a feature**: FedRAMP, HIPAA, SOC 2 aren't afterthoughts — they're part of the product story for government/enterprise customers.
 4. **Legal workflows ≠ generic SaaS**: Deadlines are jurisdictional, documents are privileged, billing is regulated. The domain complexity is why vertical SaaS wins here.
 
+How can we use continuous evals for LOIS?
+Is there a way to continuously the evals?
+If the cost of failure is high, how does LOIS ensure there are no errors?
+
 ---
 
 ## Questions to Ask
@@ -113,9 +110,8 @@ Engineering track. Background: Node/Express/React/MongoDB/GraphQL. Previous work
 *Sources: filevine.com, LinkedIn, LEX Summit 2025 announcements, Crunchbase, ZoomInfo, job postings (April 2026)*
 
 How receptive would filevine be to agent-doc?
-How receptive would filevine be to agent-doc?
 
-### Re: Filevine receptivity to agent-doc (HEAD)
+### Re: Filevine receptivity to agent-doc
 
 Short answer: **low as a product fit, moderate as a conversation piece, high with the right people.**
 
@@ -132,7 +128,57 @@ Chris Smith and Stuart Hiller are developers. If you frame agent-doc as "how I w
 
 **The interview angle:**
 Don't pitch agent-doc to Filevine. Use it as evidence of how you think about AI tooling, then ask: *"How does your engineering team actually work with AI day-to-day — in the codebase, in PRs, in design docs?"* That reframes the conversation toward their workflow and signals you're someone who builds for real-world AI integration, not just demos.
-<!-- agent:boundary:d258e9fe -->
+
+What is the scope of work for lois? Does filevine support webrtc?
+
+It seems that making the artifacts interactive is important  the case of lois,
+### Re: Continuous evals for LOIS + cost of failure (HEAD)
+
+High-value interview angle — this is exactly what separates people who think about AI in production from people who just use it.
+
+**How LOIS mitigates failure today:**
+- **Verifiable outputs**: every AI response is paired with source citations and excerpted evidence. This pushes error detection to the attorney (human-in-the-loop) rather than catching it at inference time. It's pragmatic but not automatic.
+- **Zero-retention AI**: reduces data leakage risk, but doesn't catch factual errors.
+- **FedRAMP compliance**: process controls, audit trails — governance layer, not correctness layer.
+
+**What continuous evals could look like for LOIS:**
+- **Regression suite on known case facts**: fixed case file + fixed question → expected answer. Run on every model or prompt change. Catch regressions before they hit production.
+- **Citation grounding checks**: for every AI response, verify the cited source actually supports the claim (automated RAG faithfulness scoring — RAGAS, TruLens, or custom).
+- **Jurisdiction deadline accuracy**: Timely's deadline calculations are high-stakes. Evals with known deadline scenarios per jurisdiction — deterministic, automatable.
+- **Adversarial inputs**: red-team prompts designed to elicit hallucinations or leak privileged info. Run nightly.
+- **Human-labeled golden sets**: sample of real attorney queries + expert-validated correct answers. Measure drift over time.
+
+**The deeper point for the interview:**
+Legal AI's cost of failure is malpractice-shaped — a missed deadline or fabricated case cite can lose a client's case. That asymmetry means you want *defense in depth*: model-level (better grounding), output-level (citation verification), UX-level (clear uncertainty signals to attorneys), and process-level (attorney review before any AI output is acted on). No single eval catches everything.
+
+Good question to ask Filevine: *"What does your eval pipeline look like for LOIS? Do you have automated regression suites, or is human review the primary quality gate?"*
+
+---
+
+### Re: Scope of LOIS + WebRTC (HEAD)
+
+**LOIS scope** (what's confirmed):
+- AskAI: RAG over case files
+- DraftAI: document drafting + redlining (Word via Pincites)
+- AIFields: structured data extraction from documents
+- Timely: jurisdictional deadline calculation
+- MedCron: medical chronology builder for personal injury/mass tort
+- Deposition prep tools (specific AI features unclear)
+
+Not in scope: anything outside case/document/billing workflows. LOIS is not a general assistant — it's scoped to legal matter management.
+
+**WebRTC**: No confirmed information. Filevine has a deposition product, which *could* involve WebRTC for video depositions — but their deposition product is more likely built around document management + testimony tracking than live video hosting. That would typically integrate with Zoom/Teams rather than rolling their own WebRTC stack.
+
+Worth asking directly in the interview if it's relevant to what you'd be working on: *"Does the platform have any real-time communication features — video, streaming, WebRTC?"*
+
+---
+
+### Re: Interactive artifacts + LOIS (incomplete thought?) (HEAD)
+
+Your note — *"It seems that [?] make the artifacts interactive. In the case of LOIS..."* — looks like it got cut off. What were you thinking?
+
+My best guess at the direction: LOIS produces *static* outputs (drafted documents, summaries, extracted fields) but the artifact itself isn't interactive — you can't ask follow-up questions about a specific paragraph inline, for instance. That's a gap. Contrast with tools like Cursor or agent-doc where the document *is* the interface. If that's the direction you were going, it's a genuinely interesting product observation: LOIS generates artifacts, but attorneys can't currently converse *with* the artifact in context.
+<!-- agent:boundary:751c8785 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

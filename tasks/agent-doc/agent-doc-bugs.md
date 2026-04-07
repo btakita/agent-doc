@@ -179,7 +179,7 @@ agent-doc resync --fix
 ```
 
 Then re-open `tasks/recruit/justin-caird.md` in the editor — sync will auto-start a fresh session.
-<!-- agent:boundary:deabcc40 -->
+<!-- agent:boundary:29b280b7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

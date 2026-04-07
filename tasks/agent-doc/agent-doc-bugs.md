@@ -145,7 +145,7 @@ do
 - [ ] IPC-side ❯  normalization (plugin support needed)
 
 Use FFI plugin if possible
-### Re: IPC-side ❯  normalization (HEAD)
+### Re: IPC-side ❯  normalization
 
 Done. Both the binary and plugin now handle prefix normalization through the IPC path.
 
@@ -165,16 +165,21 @@ Done. Both the binary and plugin now handle prefix normalization through the IPC
 `make check` passes (208 tests). Plugin build succeeded.
 
 **Pending: release v0.31.20 + plugin install.**
-<!-- agent:boundary:df755978 -->
+### Re: Release v0.31.20 (HEAD)
+
+❯ Done.
+
+❯ - crates.io: published ✓
+❯ - GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.31.20 (PyPI CI triggered)
+❯ - `cargo install --path .`: installed ✓
+❯ - Plugin v0.2.49 built: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.49-signed.zip`
+
+❯ **Install the plugin:** IDEA → Settings → Plugins → gear → "Install Plugin from Disk..." → select `agent-doc-jetbrains-0.2.49-signed.zip`.
+<!-- agent:boundary:12924589 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Bump versions: `Cargo.toml` + `pyproject.toml` → 0.31.20
-- [ ] Update `VERSIONS.md` with 0.31.20 entry
-- [ ] `make check` (clippy + test)
-- [ ] Tag + publish: crates.io, PyPI, GitHub Release
-- [ ] `cargo install --path .`
-- [ ] Build + install plugin v0.2.49 (JetBrains, with normalizeExchangePrefixes)
+- [ ] Install plugin v0.2.49 in IDEA (Settings → Plugins → gear → Install from Disk → `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.49-signed.zip`)
 <!-- /agent:pending -->

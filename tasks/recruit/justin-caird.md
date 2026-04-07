@@ -1026,7 +1026,7 @@ I understand if the situation complicates things. Either way, I appreciate how y
 ---
 
 Key change: "full-time role where the terms kept shifting" replaces "short-term contract arrangement." This accurately reflects what happened without over-explaining, and shifts the frame from "impulsive" to "circumstances changed fast."
-<!-- agent:boundary:352ea6c9 -->
+<!-- agent:boundary:0fece4fd -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

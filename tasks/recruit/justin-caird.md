@@ -1109,7 +1109,7 @@ I'll leave it in your hands. Whatever the team decides, I appreciate you trying.
 ---
 
 Short, gracious, gives Justin one concrete fact to use ("contract signing was simultaneous with the cancellation") without pressuring or over-explaining. You could also just wait and let Justin work it — but this gives him ammunition.
-<!-- agent:boundary:73cb7be7 -->
+<!-- agent:boundary:87b5dfa0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

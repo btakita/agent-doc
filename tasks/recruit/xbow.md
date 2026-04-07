@@ -64,7 +64,7 @@ There was a large block of transcription that was not properly split up with dia
 Now re-transcribing with `--speakers "Brian,Anna"` so speaker names are labeled directly. Running in background — will update transcript when done.
 Please look at the recently synced email correcspondence to find Ana's name.
 
-### Re: Anna Pareno / transcript updated (HEAD)
+### Re: Anna Pareno / transcript updated
 
 **Anna's full name: Anna Pareno** — confirmed from email subject lines (`new-message-from-anna-pareno-...`).
 
@@ -73,7 +73,12 @@ Please look at the recently synced email correcspondence to find Ana's name.
 Re-transcription completed. Early section (0:00–7:03) now has good alternating speaker attribution. The large block (7:03–32:20) persists but is now labeled with a `⚠️` correction note — the diarizer labeled it "Anna" but the content is clearly Brian's monologue.
 
 **Root cause of remaining issue:** The span check targets undivided pyannote segments, but pyannote's 61 segments alternate correctly. The problem is in the Whisper→speaker mapping layer: when Brian talks for 25 consecutive minutes, the embedding similarity comparison flips for that region. This is a harder fix — requires checking span in the *merged* output layer, not the raw diarized segments.
-<!-- agent:boundary:14d61800 -->
+
+Is the feature or bug fix added to tasks/software/corky.md?
+### Re: Diarization fix — tracking added (HEAD)
+
+Not yet. The fix was in the working tree (`src/corky/src/transcribe/diarize.rs` + `engine.rs`) but hadn't been logged. Added it now to `tasks/software/corky.md` under **Open items** — labeled as uncommitted/unreleased so it doesn't get lost.
+<!-- agent:boundary:ab0ff3bf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

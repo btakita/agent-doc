@@ -100,7 +100,7 @@ Yes, prefix normalization applies to both modes via the same mechanism: **the di
 In both cases, `agent-doc write` already receives the diff (or can compute it from the baseline). The normalization step is: for each user-added hunk in an `exchange` component, prepend `❯ ` to each non-blank content line before merging into the final document.
 
 **Confirmed design:** Option 1 applies to both `patch=append` and `patch=replace` exchange components. The normalization lives in `agent-doc write` (binary-level), keyed on component type = `exchange` + line is user-authored.
-<!-- agent:boundary:db06e0a6 -->
+<!-- agent:boundary:1f2e1afd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

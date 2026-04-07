@@ -86,7 +86,7 @@ This is a skill/prompt discipline issue, not a binary bug. Worth adding a note t
 - Apply prefix to ALL non-blank user lines, or only paragraph-starting lines?
 - What about user input that already has a prefix (bullets, `>`)?
 - Is the prefix stored in the file, or only rendered?
-<!-- agent:boundary:1c13bef4 -->
+<!-- agent:boundary:56892aa3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

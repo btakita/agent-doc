@@ -15,7 +15,7 @@ agent_doc_write: crdt
 Interview prep for XBOW (autonomous offensive security AI, M Series C unicorn, Jan 2024). Stack: TypeScript/Kotlin/Go/AWS, multi-agent LLM swarm. Core differentiator: 'proof not probability' (deterministic validator confirms exploits). Key domains: multi-agent orchestration, LLM tooling, CTF benchmark-driven eval, offensive security depth. Questions drafted for AI Systems/Security/SRE/Product roles. Open: transcription of 2026-04-07 09-00-51.mp4 requested.
 Please compact, transcribe, and diarize [2026-04-07 09-00-51.mp4](../../../../../Videos/2026-04-07%2009-00-51.mp4)
 
-### Re: Transcript — XBOW Recruiter Screen 2026-04-07 (HEAD)
+### Re: Transcript — XBOW Recruiter Screen 2026-04-07
 
 Compacted. Transcript saved to [tasks/recruit/transcripts/xbow-2026-04-07.md](transcripts/xbow-2026-04-07.md).
 
@@ -45,7 +45,22 @@ Compacted. Transcript saved to [tasks/recruit/transcripts/xbow-2026-04-07.md](tr
 **Anna's question at end:** "What would you like to do more/less of?" — Brian: improve agentic dev practices, working with Claude Code/Codex, the fundamental shift in knowledge work
 
 **Diarization note:** 6 speaker clusters detected; some are likely voice splits. Anna = Speaker 3, Brian = Speaker 6 (long segment 05:34–32:20). Two unidentified XBOW voices (Speaker 1 at greeting, Speaker 2 in middle sections — possibly the same person or Anna voice splits).
-<!-- agent:boundary:74968187 -->
+
+There was a large block of transcription that was not properly split up with diarization. Please have Corky understand that this diarization was not successful...and it should process the audio using progressively smaller chunks until successful diarization is achieved.
+> **Brian** (0.88) [00:05:34.720 → 00:32:20.820]
+There was a large block of transcription that was not properly split up with diarization. Please have Corky understand that this diarization was not successful...and it should process the audio using progressively smaller chunks until successful diarization is achieved.
+> **Brian** (0.88) [00:05:34.720 → 00:32:20.820]
+
+### Re: Diarization fix + re-transcription in progress (HEAD)
+
+**Root cause:** `quality_ok()` passed because speaker count and unknown% looked fine — but it didn't detect that one speaker's block spanned 26 of 32 minutes (81% of audio). The adaptive chunking cascade never triggered.
+
+**Fix applied to corky (`src/corky/src/transcribe/`):**
+- `diarize.rs`: Added `max_speaker_span_ratio()` — groups consecutive same-speaker segments, returns the largest block as a fraction of total covered duration
+- `engine.rs`: Added span check in `run_adaptive_diarization()` — if any speaker block exceeds **60%** of total audio, cascade to smaller chunks (600s → 120s → 30s)
+
+Now re-transcribing with `--speakers "Brian,Anna"` so speaker names are labeled directly. Running in background — will update transcript when done.
+<!-- agent:boundary:57a84212 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

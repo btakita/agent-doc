@@ -60,7 +60,7 @@ There was a large block of transcription that was not properly split up with dia
 - `engine.rs`: Added span check in `run_adaptive_diarization()` — if any speaker block exceeds **60%** of total audio, cascade to smaller chunks (600s → 120s → 30s)
 
 Now re-transcribing with `--speakers "Brian,Anna"` so speaker names are labeled directly. Running in background — will update transcript when done.
-<!-- agent:boundary:57a84212 -->
+<!-- agent:boundary:30d93abd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -84,7 +84,7 @@ If you're building scripts/tools that use Claude (e.g., via the Claude API), Dee
 Use Anthropic's Claude as the judge model too:
 ```python
 from deepeval.models import DeepEvalBaseLLM
-# configure Claude (claude-sonnet-4-6) as the evaluator (HEAD)
+# configure Claude (claude-sonnet-4-6) as the evaluator
 ```
 
 **3. Evaluate the agent-doc / agent-loop workflow**
@@ -104,7 +104,36 @@ deepeval login            # optional: connect to Confident AI for cloud tracking
 ```
 
 Write tests in `evals/`, hook `deepeval test run evals/` into the existing eval runner infra in `src/eval-runner/`.
-<!-- agent:boundary:56f420e3 -->
+
+Is DeepEval worth making part of the stack? Can the same analysis be built or is this something that we should have a dependency?
+Is DeepEval worth making part of the stack? Can the same analysis be built or is this something that we should have a dependency?
+
+### Re: Build vs. Dependency (HEAD)
+
+**Short answer:** Useful as an ad-hoc research/exploration tool; not worth adding as a core stack dependency given what's already in place.
+
+**Reasoning:**
+
+**The existing eval infra already covers the core need.** `src/eval-runner/` and `evals/agent-doc/diff-interpretation/` represent narrow, purpose-fit evaluations specific to agent-doc behavior. Those are exactly the right shape — they test the specific behavior you care about, not general LLM quality metrics.
+
+**Language mismatch.** DeepEval is Python; the agent-doc stack is Rust. Adding it as a core dependency means either a Python subprocess layer or maintaining separate Python eval tooling that runs alongside the Rust binary. That's friction without a clear payoff.
+
+**The metrics you'd actually use are buildable.** For agent-doc specifically:
+- *Answer relevancy* for session responses → straightforward LLM-as-judge prompt
+- *Plan adherence* → compare the planned steps in the doc to what was executed
+- *Tool correctness* → already partially captured by the existing diff-interpretation evals
+
+The hard part of DeepEval is the breadth (50+ metrics), not the depth. For a focused use case, that breadth is noise.
+
+**Where DeepEval *would* earn its place:**
+
+If agent-loop expands to evaluate general-purpose agent behavior across many dimensions — e.g., if `src/eval-runner` becomes a product rather than internal tooling — then DeepEval's metric library and LLM-as-judge infrastructure would be worth integrating rather than rebuilding. The `@observe()` tracing is particularly well-done; building that from scratch is non-trivial.
+
+**Suggested stance:**
+- Keep the existing custom evals as the primary system
+- Use DeepEval as a reference: study the metric implementations for ideas on improving custom metrics
+- Revisit as a dependency if eval scope grows beyond agent-doc into general LLM output quality across the stack
+<!-- agent:boundary:b8882d38 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

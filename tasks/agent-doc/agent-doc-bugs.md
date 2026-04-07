@@ -210,7 +210,7 @@ I don want the system to "self-correct" in case an agent-doc tmux window moved t
 2. **Lazy claim:**  When `%533` (the real justin-caird.md Claude session) exited, the next open of justin-caird.md hit Strategy 2 in `resolve_or_create_pane()` (`route.rs:261-268`): registered pane was dead → `find_target_pane()` found `%544` (corky, now in session $10's window) → registered it as the justin-caird.md pane → sent the `agent-doc route` command to corky's pane.
 
 Both bugs contributed: rescue brought corky into the window, lazy claim adopted it as the wrong document's pane. v0.31.18 fixes rescue (session guard). Lazy claim is still a risk if a foreign process is already in the window — that's the WrongProcess detection `resync` now covers.
-### Re: swap_pane_guarded() (HEAD)
+### Re: swap_pane_guarded()
 
 Added `swap_pane_guarded(tmux, src, dst, expected_session)` to `sessions.rs` and updated both call sites.
 
@@ -228,15 +228,36 @@ Returns `Err` with a clear message if either pane is in the wrong session — ca
 - `route.rs:328` — `rescue_from_stash()`: `tmux.swap_pane(pane_id, target)` → `sessions::swap_pane_guarded(tmux, pane_id, target, target_session)`
 - `sync.rs:760` — stash rescue path: same pattern, uses `target_sess` as the expected session
 
+Why did the original `rescue_from_stash()` call identify the incorrect tmux pane (running `corky watch`)?
+
 `cargo check` + `cargo clippy` — clean.
 
 This closes the last direct `tmux.swap_pane()` callsite in agent-doc code. Any future accidental `tmux.swap_pane()` call skips the guard — so this should be noted as a convention: prefer `swap_pane_guarded()` over `tmux.swap_pane()` in agent-doc.
-<!-- agent:boundary:7ce5cfcf -->
+### Re: why did rescue_from_stash() identify the wrong pane? (HEAD)
+
+`rescue_from_stash()` doesn't identify the pane — it receives it from `sessions::lookup()`. The wrong pane was in the registry because of a two-step sequence:
+
+**Step 1 — corky enters session $10's window (first incident):**
+An earlier `rescue_from_stash()` (pre-v0.31.18, no session guard) found `%544` (corky) stashed in session $14 and called `swap_pane` unconditionally → physically moved corky into session $10's agent-doc window.
+
+**Step 2 — lazy claim registers the wrong pane:**
+When `%533` (the real justin-caird.md Claude pane) exited, `resolve_or_create_pane()` fell to Strategy 2. `find_target_pane()` found `%544` (corky, now in the window) and called:
+```rust
+sessions::register("fb7495d9", "%544", "justin-caird.md")
+```
+Now corky IS the registry entry for justin-caird.md — legitimately registered, wrong process.
+
+**Step 3 — all subsequent calls operate on the now-registered wrong pane:**
+Future `rescue_from_stash()` calls for justin-caird.md receive `%544` from `sessions::lookup()`. They're acting correctly on the registered pane; it's just that the registered pane is running the wrong process.
+
+`swap_pane_guarded()` prevents Step 1 from recurring. The lazy claim path (Step 2) is the remaining risk — `find_target_pane()` picks any alive pane without checking the running process. A secondary hardening would be adding a process check in Strategy 2, skipping panes not in `AGENT_PROCESSES`.
+<!-- agent:boundary:9cef39f3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Run `agent-doc resync --fix` then re-open justin-caird.md to provision fresh session
-- [ ] Build + release v0.31.19 with swap_pane_guarded() change
+- [ ] Run `agent-doc resync --fix` then re-open justin-caird.md
+- [ ] Build + release v0.31.19 with swap_pane_guarded()
+- [ ] Consider: add AGENT_PROCESSES check to Strategy 2 (lazy claim) in resolve_or_create_pane() to skip foreign-process panes
 <!-- /agent:pending -->

@@ -717,7 +717,7 @@ The target audience / chromium-bridge questions are in `src/session-share/tasks/
 The underlying **bug** (stale patch re-apply duplicating blocks and eating user content between them) was already fixed in plugin v0.2.48. Nothing left to track here.
 
 Clearing the item from pending.
-<!-- agent:boundary:32679096 -->
+<!-- agent:boundary:6e81cb92 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

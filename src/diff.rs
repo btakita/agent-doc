@@ -82,6 +82,16 @@
 //! - `classify_multi_topic`: multiple separated added blocks → `DiffType::MultiTopic`
 //! - `classify_content_addition`: general new content → `DiffType::ContentAddition`
 //! - `classify_annotation`: colon-appended edit to agent line → `DiffType::Annotation`
+//! - `parse_slash_commands(diff)`: extracts slash commands from added lines in a unified diff
+//!   with guards against: code fences (``` / ~~~), blockquotes (`>`), HTML comments, and
+//!   non-added lines. Returns a vec of command strings (e.g. `["/clear", "/agent-doc foo.md"]`).
+//! - `parse_slash_commands_simple`: single added `/clear` line → `["/clear"]`
+//! - `parse_slash_commands_ignores_fenced`: `/cmd` inside a ``` block → empty
+//! - `parse_slash_commands_ignores_blockquote`: `> /cmd` → empty
+//! - `parse_slash_commands_ignores_context_lines`: `/cmd` on context line (` `) → empty
+//! - `parse_slash_commands_ignores_removed_lines`: `/cmd` on removed line (`-`) → empty
+//! - `parse_slash_commands_with_args`: `/agent-doc foo.md` → `["/agent-doc foo.md"]`
+//! - `parse_slash_commands_requires_letter_after_slash`: `/ `, `//comment` → empty
 
 use anyhow::Result;
 use serde::Serialize;
@@ -197,6 +207,88 @@ fn flush_removes(pending: &mut Vec<String>, result: &mut Vec<String>) {
 /// Count characters of common prefix between two strings.
 fn common_prefix_len(a: &str, b: &str) -> usize {
     a.chars().zip(b.chars()).take_while(|(x, y)| x == y).count()
+}
+
+/// Extract slash commands from user-added lines in a unified diff.
+///
+/// Guards against false positives:
+/// - Lines inside code fences (``` or ~~~) are excluded.
+/// - Blockquote lines (starting with `>`) are excluded.
+/// - Only lines added by the user (`+` prefix, not `+++`) are inspected.
+/// - The command must start with `/` followed immediately by an ASCII letter.
+///
+/// Returns the trimmed command strings (including any arguments after the command).
+pub fn parse_slash_commands(diff: &str) -> Vec<String> {
+    let mut commands = Vec::new();
+    let mut in_fence = false;
+    let mut fence_char = '`';
+    let mut fence_len = 0usize;
+
+    for line in diff.lines() {
+        // Skip unified diff meta-lines.
+        if line.starts_with("---") || line.starts_with("+++") || line.starts_with("@@") {
+            continue;
+        }
+
+        // Strip leading diff marker to get the actual content.
+        let content = if line.starts_with('+') || line.starts_with('-') || line.starts_with(' ') {
+            &line[1..]
+        } else {
+            line
+        };
+
+        // Track code-fence state across all lines (added, removed, and context).
+        let trimmed = content.trim_start();
+        if !in_fence {
+            let fc = trimmed.chars().next().unwrap_or('\0');
+            if fc == '`' || fc == '~' {
+                let fl = trimmed.chars().take_while(|&c| c == fc).count();
+                if fl >= 3 {
+                    in_fence = true;
+                    fence_char = fc;
+                    fence_len = fl;
+                    continue; // Fence delimiter itself is not a command.
+                }
+            }
+        } else {
+            // Check for matching closing fence.
+            let fc = trimmed.chars().next().unwrap_or('\0');
+            if fc == fence_char {
+                let fl = trimmed.chars().take_while(|&c| c == fc).count();
+                if fl >= fence_len && trimmed[fl..].trim().is_empty() {
+                    in_fence = false;
+                    continue; // Closing delimiter — not a command.
+                }
+            }
+        }
+
+        // Only process user-added lines (not context, removed, or meta).
+        if !line.starts_with('+') || line.starts_with("+++") {
+            continue;
+        }
+
+        // Skip lines inside code fences.
+        if in_fence {
+            continue;
+        }
+
+        // Skip blockquotes.
+        if content.starts_with('>') {
+            continue;
+        }
+
+        // Must start with '/' followed by an ASCII letter.
+        if !content.starts_with('/') {
+            continue;
+        }
+        if !content[1..].starts_with(|c: char| c.is_ascii_alphabetic()) {
+            continue;
+        }
+
+        commands.push(content.trim_end().to_string());
+    }
+
+    commands
 }
 
 /// Compute a unified diff between the snapshot and the current document.
@@ -1313,5 +1405,65 @@ Please fix the bug.\n\
     fn annotate_diff_empty() {
         let diff = "--- snapshot\n+++ document\n";
         assert!(annotate_diff(diff).is_none());
+    }
+
+    // parse_slash_commands tests
+
+    #[test]
+    fn parse_slash_commands_simple() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n context\n+/clear\n";
+        let cmds = parse_slash_commands(diff);
+        assert_eq!(cmds, vec!["/clear"]);
+    }
+
+    #[test]
+    fn parse_slash_commands_with_args() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+/agent-doc foo.md\n";
+        let cmds = parse_slash_commands(diff);
+        assert_eq!(cmds, vec!["/agent-doc foo.md"]);
+    }
+
+    #[test]
+    fn parse_slash_commands_ignores_fenced() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,4 @@\n ctx\n+```\n+/clear\n+```\n";
+        let cmds = parse_slash_commands(diff);
+        assert!(cmds.is_empty());
+    }
+
+    #[test]
+    fn parse_slash_commands_ignores_blockquote() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+> /clear\n";
+        let cmds = parse_slash_commands(diff);
+        assert!(cmds.is_empty());
+    }
+
+    #[test]
+    fn parse_slash_commands_ignores_context_lines() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,2 +1,2 @@\n /clear\n context\n";
+        let cmds = parse_slash_commands(diff);
+        assert!(cmds.is_empty());
+    }
+
+    #[test]
+    fn parse_slash_commands_ignores_removed_lines() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,2 +1,1 @@\n-/clear\n context\n";
+        let cmds = parse_slash_commands(diff);
+        assert!(cmds.is_empty());
+    }
+
+    #[test]
+    fn parse_slash_commands_requires_letter_after_slash() {
+        // "/ " (space after slash) and "//comment" should not match.
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,3 @@\n ctx\n+/ foo\n+//comment\n";
+        let cmds = parse_slash_commands(diff);
+        assert!(cmds.is_empty());
+    }
+
+    #[test]
+    fn parse_slash_commands_multiple() {
+        let diff =
+            "--- snapshot\n+++ document\n@@ -1 +1,3 @@\n ctx\n+/clear\n+/agent-doc foo.md\n";
+        let cmds = parse_slash_commands(diff);
+        assert_eq!(cmds, vec!["/clear", "/agent-doc foo.md"]);
     }
 }

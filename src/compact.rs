@@ -8,8 +8,14 @@
 //!   - Trailing `## User` blocks without an assistant reply are never counted or archived.
 //!   - Code blocks containing `## User` / `## Assistant` headings are not treated as section
 //!     boundaries.
-//! - **Template/stream mode:** archives the full content of a named component (default `exchange`)
-//!   and replaces it with a one-line summary marker; optionally accepts a custom `--message`.
+//! - **Template/stream mode (full compact):** when `keep` is `None`, archives the full content of
+//!   a named component (default `exchange`) and replaces it with a one-line summary marker;
+//!   optionally accepts a custom `--message`.
+//! - **Template/stream mode (partial compact):** when `keep` is `Some(N)`, archives all but the
+//!   last N `### Re:` topic sections; rebuilds the component with an archive summary + kept topics.
+//!   - The preamble (content before the first `### Re:` heading) is always preserved; use
+//!     `--message` to replace it with a fresh session summary.
+//!   - If section count ≤ N, logs to stderr and exits `Ok(())` without modifying the document.
 //!   - If the document uses CRDT write strategy, the CRDT state is compacted (GC tombstones)
 //!     before the component replacement.
 //! - Archive filenames are derived from the snapshot hash + a UTC timestamp computed without
@@ -19,6 +25,9 @@
 //! ## Agentic Contracts
 //! - `run(file, keep, component_name, message) -> Result<()>` — entry point; dispatches to
 //!   component compact (template/stream) or exchange compact (inline) based on frontmatter mode.
+//! - `keep: None` in template mode → full compact (archive all).
+//! - `keep: Some(N)` in template mode → partial compact (archive all but last N `### Re:` sections).
+//! - `keep: None` in inline mode → uses default of 2.
 //! - If `exchanges.len() <= keep` in inline mode, logs to stderr and exits `Ok(())` without
 //!   modifying the document.
 //! - Archive path is always under `.agent-doc/archives/` relative to the project root (found by
@@ -34,6 +43,9 @@
 //! - compacted_format: result has archive summary line, kept exchanges, trailing `## User\n\n`
 //! - timestamp_format: `chrono_timestamp()` → 15-char string matching `YYYYMMDD-HHMMSS`
 //! - component_archive_format: template-mode archive contains component name, session ID, content
+//! - partial_compact_keep_threshold: sections ≤ keep → no-op
+//! - partial_compact_archive_format: archive contains preamble + archived sections
+//! - partial_compact_result_format: result has archive pointer + preamble (or message) + kept sections
 
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -51,12 +63,14 @@ struct Exchange {
 
 /// Run the compact command.
 ///
-/// `keep` is the number of recent exchanges to keep in the document.
-/// `component_name` targets a specific component in template/stream mode.
-/// `message` is the summary marker text (default: auto-generated).
+/// - `keep`: number of recent exchanges/topics to keep.
+///   - Inline mode: `None` defaults to 2.
+///   - Template mode: `None` archives all (full compact); `Some(N)` archives all but last N `### Re:` sections.
+/// - `component_name`: targets a specific component in template/stream mode.
+/// - `message`: summary marker text (default: auto-generated).
 pub fn run(
     file: &Path,
-    keep: usize,
+    keep: Option<usize>,
     component_name: Option<&str>,
     message: Option<&str>,
 ) -> Result<()> {
@@ -71,39 +85,42 @@ pub fn run(
 
     let resolved = fm.resolve_mode();
     if resolved.is_template() {
+        // Compact CRDT state if CRDT write mode
+        if resolved.is_crdt()
+            && let Ok(Some(crdt_state)) = snapshot::load_crdt(file)
         {
-            // Compact CRDT state if CRDT write mode
-            if resolved.is_crdt()
-                && let Ok(Some(crdt_state)) = snapshot::load_crdt(file)
-            {
-                let compacted_crdt = crate::crdt::compact(&crdt_state)?;
-                snapshot::save_crdt(file, &compacted_crdt)?;
-                eprintln!(
-                    "[compact] CRDT state compacted: {} → {} bytes",
-                    crdt_state.len(),
-                    compacted_crdt.len()
-                );
-            }
-
-            let target = component_name.unwrap_or("exchange");
-            return run_component_compact(file, &content, target, message);
+            let compacted_crdt = crate::crdt::compact(&crdt_state)?;
+            snapshot::save_crdt(file, &compacted_crdt)?;
+            eprintln!(
+                "[compact] CRDT state compacted: {} → {} bytes",
+                crdt_state.len(),
+                compacted_crdt.len()
+            );
         }
+
+        let target = component_name.unwrap_or("exchange");
+        return match keep {
+            Some(n) => run_component_compact_partial(file, &content, target, n, message),
+            None => run_component_compact(file, &content, target, message),
+        };
     } // else: append mode — continue
+
+    let keep_n = keep.unwrap_or(2);
 
     // Parse exchanges from the body
     let exchanges = parse_exchanges(body);
 
-    if exchanges.len() <= keep {
+    if exchanges.len() <= keep_n {
         eprintln!(
             "[compact] Only {} exchange(s) found, keeping all (threshold: {})",
             exchanges.len(),
-            keep
+            keep_n
         );
         return Ok(());
     }
 
-    let to_archive = &exchanges[..exchanges.len() - keep];
-    let to_keep = &exchanges[exchanges.len() - keep..];
+    let to_archive = &exchanges[..exchanges.len() - keep_n];
+    let to_keep = &exchanges[exchanges.len() - keep_n..];
 
     // Build archive content
     let archive_content = build_archive(&content, to_archive);
@@ -184,6 +201,146 @@ fn run_component_compact(
     );
 
     Ok(())
+}
+
+/// Partial compact a named component in a template/stream-mode document.
+///
+/// Archives all but the last `keep` `### Re:` topic sections; rebuilds the component
+/// with an archive pointer + preamble (or `message`) + kept sections.
+fn run_component_compact_partial(
+    file: &Path,
+    content: &str,
+    target: &str,
+    keep: usize,
+    message: Option<&str>,
+) -> Result<()> {
+    let components = component::parse(content)?;
+    let comp = components
+        .iter()
+        .find(|c| c.name == target)
+        .ok_or_else(|| anyhow::anyhow!("component '{}' not found in document", target))?;
+
+    let old_content = comp.content(content);
+
+    let (preamble, sections) = parse_topic_sections(old_content);
+
+    if sections.len() <= keep {
+        eprintln!(
+            "[compact] Only {} topic section(s) found, keeping all (threshold: {})",
+            sections.len(),
+            keep
+        );
+        return Ok(());
+    }
+
+    let to_archive = &sections[..sections.len() - keep];
+    let to_keep = &sections[sections.len() - keep..];
+
+    // Build archive: preamble + archived sections
+    let mut archive_body = String::new();
+    if !preamble.trim().is_empty() {
+        archive_body.push_str(preamble.trim_end());
+        archive_body.push_str("\n\n");
+    }
+    for section in to_archive {
+        archive_body.push_str(section.trim_end());
+        archive_body.push_str("\n\n");
+    }
+
+    let archive_path = save_archive(
+        file,
+        &build_component_archive(content, target, &archive_body),
+    )?;
+
+    // Build new component content
+    let mut new_content = String::new();
+
+    // Preamble: use --message if provided, else keep original preamble
+    match message {
+        Some(msg) => {
+            new_content.push_str(msg.trim_end());
+            new_content.push('\n');
+        }
+        None => {
+            if !preamble.trim().is_empty() {
+                new_content.push_str(preamble.trim_end());
+                new_content.push('\n');
+            }
+        }
+    }
+
+    // Archive pointer
+    new_content.push_str(&format!(
+        "\n*{} earlier topic(s) archived to `{}`*\n",
+        to_archive.len(),
+        archive_path.display()
+    ));
+
+    // Kept sections
+    for section in to_keep {
+        new_content.push('\n');
+        new_content.push_str(section.trim_end());
+        new_content.push('\n');
+    }
+
+    let compacted = comp.replace_content(content, &new_content);
+    crate::write::atomic_write_pub(file, &compacted)?;
+    snapshot::save(file, &compacted)?;
+
+    eprintln!(
+        "[compact] Archived {} topic(s) from component '{}' to {}",
+        to_archive.len(),
+        target,
+        archive_path.display()
+    );
+    eprintln!(
+        "[compact] {} topic(s) remain in {}",
+        to_keep.len(),
+        file.display()
+    );
+
+    Ok(())
+}
+
+/// Parse a component's content into a preamble and a list of `### Re:` topic sections.
+///
+/// The preamble is everything before the first `### Re:` heading.
+/// Each section is the `### Re:` heading line + its content until the next `### Re:` (or end).
+/// Boundary markers (`<!-- agent:boundary:... -->`) are stripped from the final section
+/// so they are not archived.
+pub fn parse_topic_sections(content: &str) -> (String, Vec<String>) {
+    let mut preamble = String::new();
+    let mut sections: Vec<String> = Vec::new();
+    let mut current: Option<String> = None;
+    let mut found_first = false;
+
+    for line in content.lines() {
+        // Strip boundary markers — they are managed by the binary, not archived
+        if line.starts_with("<!-- agent:boundary:") {
+            continue;
+        }
+
+        if line.starts_with("### Re:") || line.starts_with("#### Re:") || line.starts_with("## Re:") {
+            if let Some(prev) = current.take() {
+                sections.push(prev);
+            }
+            found_first = true;
+            current = Some(format!("{}\n", line));
+        } else if found_first {
+            let section = current.get_or_insert_with(String::new);
+            section.push_str(line);
+            section.push('\n');
+        } else {
+            preamble.push_str(line);
+            preamble.push('\n');
+        }
+    }
+
+    if let Some(last) = current {
+        sections.push(last);
+    }
+
+    (preamble, sections)
 }
 
 /// Build archive content from a component.
@@ -522,5 +679,42 @@ mod tests {
         assert!(archive.contains("component: exchange"));
         assert!(archive.contains("session: abc-123"));
         assert!(archive.contains("Old conversation"));
+    }
+
+    #[test]
+    fn parse_topic_sections_basic() {
+        let content = "### Session Summary\n\nSome preamble.\n\n### Re: first topic\n\nFirst response.\n\n### Re: second topic\n\nSecond response.\n";
+        let (preamble, sections) = parse_topic_sections(content);
+        assert!(preamble.contains("Session Summary"));
+        assert!(preamble.contains("Some preamble."));
+        assert_eq!(sections.len(), 2);
+        assert!(sections[0].starts_with("### Re: first topic"));
+        assert!(sections[0].contains("First response."));
+        assert!(sections[1].starts_with("### Re: second topic"));
+        assert!(sections[1].contains("Second response."));
+    }
+
+    #[test]
+    fn parse_topic_sections_keep_threshold() {
+        let content = "### Re: topic 1\nResponse 1.\n### Re: topic 2\nResponse 2.\n";
+        let (_, sections) = parse_topic_sections(content);
+        // 2 sections ≤ keep=3 → no-op when called from run_component_compact_partial
+        assert_eq!(sections.len(), 2);
+    }
+
+    #[test]
+    fn parse_topic_sections_strips_boundary_marker() {
+        let content = "### Re: last topic\n\nContent.\n<!-- agent:boundary:abc123 -->\n";
+        let (_, sections) = parse_topic_sections(content);
+        assert_eq!(sections.len(), 1);
+        assert!(!sections[0].contains("agent:boundary"));
+    }
+
+    #[test]
+    fn parse_topic_sections_no_re_headings() {
+        let content = "Just preamble text.\nNo Re: headings here.\n";
+        let (preamble, sections) = parse_topic_sections(content);
+        assert!(preamble.contains("Just preamble text."));
+        assert_eq!(sections.len(), 0);
     }
 }

@@ -234,14 +234,17 @@ fn resolve_or_create_pane(
                 send_command(tmux, registered_pane, file_path)?;
                 return Ok(registered_pane.clone());
             }
-            // Pane is alive but in a different session — rescue it back to the
-            // configured session rather than following it. Following the pane
-            // would cascade config updates and move all subsequent panes to the
-            // wrong session.
+            // Pane is alive but in a different session — move it to the
+            // target session's stash first, then rescue from there.
+            // Never swap across sessions (that moves a target-session pane
+            // into the wrong session).
             eprintln!(
-                "[route] Pane {} is alive but in session '{}' (config says '{}'). Rescuing to configured session.",
+                "[route] Pane {} is alive but in session '{}' (config says '{}'). Moving to target session stash.",
                 registered_pane, pane_session, target_session
             );
+            if let Err(e) = tmux.stash_pane(registered_pane, target_session) {
+                eprintln!("[route] warning: stash_pane to target session failed: {}", e);
+            }
             rescue_from_stash(tmux, registered_pane, session_id, file_path, target_session);
             send_command(tmux, registered_pane, file_path)?;
             return Ok(registered_pane.clone());
@@ -279,6 +282,7 @@ fn resolve_or_create_pane(
 }
 
 /// Rescue a pane from a stash window back to the agent-doc window.
+/// Only rescues if the pane is in the target session — never swaps across sessions.
 fn rescue_from_stash(
     tmux: &Tmux,
     pane_id: &str,
@@ -286,6 +290,22 @@ fn rescue_from_stash(
     file_path: &str,
     target_session: &str,
 ) {
+    // Session guard: only rescue within the target session
+    let pane_session = tmux
+        .cmd()
+        .args(["display-message", "-t", pane_id, "-p", "#{session_name}"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    if pane_session != target_session {
+        eprintln!(
+            "[route] Pane {} is in session '{}', not target '{}' — skipping stash rescue",
+            pane_id, pane_session, target_session
+        );
+        return;
+    }
+
     let pane_win_name = tmux.pane_window(pane_id).ok()
         .and_then(|wid| {
             tmux.cmd()

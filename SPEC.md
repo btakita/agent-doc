@@ -576,22 +576,33 @@ Combines recover, commit, claims-log check, diff, and document HEAD read into a 
 4. Compute diff between snapshot and current document
 5. Read document HEAD from disk
 
+**Steps (in order, pre-step 1):**
+0. Layout check — `check_layout()` inspects the current tmux session:
+   - Check 1: Window 0 exists (base-index compliance)
+   - Check 2: Stash windows have no non-idle (running) panes
+   - Check 3: Registered panes all belong to the same tmux session (session-drift detection)
+   Returns empty outside tmux. Issues are reported in `layout_issues` (informational).
+
 **Output (JSON to stdout):**
 ```json
 {
+  "layout_issues": [],
   "recovered": false,
   "committed": true,
   "claims": [],
   "diff": "unified diff text or null",
   "no_changes": false,
   "document": "full document content",
+  "slash_commands": ["/clear", "/agent-doc foo.md"],
   "linked_changes": [{"path": "https://example.com", "summary": "content changed (1234 bytes)", "exists": true}]
 }
 ```
 
+- `layout_issues` — array of tmux health warnings (empty = healthy); always present
 - `no_changes` is `true` when the diff is `None` (snapshot == document)
 - `diff` is `null` when `no_changes` is `true`
 - `document` always contains the current HEAD content
+- `slash_commands` — slash commands extracted from user-added lines in the diff via `parse_slash_commands()`; omitted when empty. Guards: code fences (``` / ~~~), blockquotes (`>`), non-added lines, and removed lines are excluded. Pattern: `/` followed immediately by an ASCII letter.
 - `linked_changes` lists changes in linked docs/URLs since last cycle (omitted when empty)
 - Progress/diagnostic messages go to stderr
 
@@ -667,6 +678,8 @@ When the sync path (`skip_wait=true`) creates new panes, it prefers splitting in
 `agent-doc dedupe <FILE>` — remove consecutive duplicate response blocks.
 
 Detects consecutive `### Re:` blocks with identical content (after stripping boundary markers) and removes the duplicate. Updates the snapshot after removal. Idempotent — running twice produces the same result.
+
+After removing duplicates and updating the snapshot, `dedupe` also deletes the corresponding stale patch file at `.agent-doc/patches/<hash>.json` (if present). Without this cleanup, `processPendingPatches()` on plugin restart would re-apply the removed content, creating another duplicate.
 
 ## 8. Session Routing
 

@@ -5,7 +5,8 @@
 //!   session document and emits a single JSON object to stdout.
 //! - Bails immediately if the file does not exist.
 //! - Step 0 — layout check: calls `check_layout()` to detect tmux structural
-//!   problems; issues are included in output but do not abort the run.
+//!   problems (window index, stash non-idle panes, session drift); issues are
+//!   included in output but do not abort the run.
 //! - Step 1 — recover: calls `recover::run(file)` to detect and apply any
 //!   orphaned pending agent responses from a previous interrupted cycle.
 //! - Step 2 — commit: calls `git::commit(file)` to record the previous
@@ -68,8 +69,12 @@
 //!   → JSON has `"diff": null` and `"no_changes": true`.
 //! - `check_layout_returns_empty_outside_tmux`: `TMUX` env var unset →
 //!   `check_layout()` returns empty vec without invoking tmux.
+//! - `check_layout_detects_session_drift`: two alive registered panes in
+//!   different sessions → `layout_issues` contains a "session drift" entry.
 //! - `preflight_output_includes_layout_issues`: `PreflightOutput` with one
 //!   layout issue → JSON `layout_issues` array has length 1 with correct text.
+//! - `preflight_output_slash_commands_from_diff`: diff containing `+/clear` →
+//!   `slash_commands` array has one entry `"/clear"`.
 //! - `is_url_detects_http`: `http://` and `https://` prefixes → true;
 //!   relative paths and empty strings → false.
 //! - `is_html_content_detects_html`: `text/html` and `application/xhtml` → true;
@@ -87,6 +92,7 @@
 
 use anyhow::{Context, Result};
 use serde::Serialize;
+use std::collections::HashSet;
 use std::path::Path;
 use std::process::Command;
 
@@ -135,6 +141,10 @@ pub struct PreflightOutput {
     /// Annotated diff with content-source markers (`[agent]`, `[user+]`, `[user-]`, `[user~]`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub annotated_diff: Option<String>,
+    /// Slash commands found in user-added diff lines (e.g. `["/clear", "/agent-doc foo.md"]`).
+    /// Guards applied: code fences, blockquotes, non-added lines.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slash_commands: Vec<String>,
 }
 
 /// Shells considered idle (not actively running a meaningful process).
@@ -248,6 +258,38 @@ pub fn check_layout() -> Vec<String> {
                     win.name, pane_id, cmd,
                 ));
             }
+        }
+    }
+
+    // Check 3: Session-drift — registered panes spanning multiple tmux sessions.
+    let registry_path = sessions::registry_path();
+    let registry: Option<tmux_router::Registry> = std::fs::read_to_string(&registry_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok());
+    if let Some(registry) = registry {
+        let mut pane_sessions: HashSet<String> = HashSet::new();
+        for entry in registry.values() {
+            let pane = &entry.pane;
+            // Only check alive panes.
+            let pane_sess = Command::new("tmux")
+                .args(["display-message", "-t", pane, "-p", "#{session_name}"])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_default();
+            if !pane_sess.is_empty() {
+                pane_sessions.insert(pane_sess);
+            }
+        }
+        if pane_sessions.len() > 1 {
+            let mut sessions_vec: Vec<&str> = pane_sessions.iter().map(|s| s.as_str()).collect();
+            sessions_vec.sort();
+            issues.push(format!(
+                "session drift: registered panes span {} tmux sessions: {}",
+                pane_sessions.len(),
+                sessions_vec.join(", "),
+            ));
         }
     }
 
@@ -367,7 +409,7 @@ pub fn run(file: &Path, diff_only: bool) -> Result<()> {
                                         "[preflight] step 2c: auto-compact (exchange={} lines > threshold={})",
                                         line_count, threshold
                                     );
-                                    if let Err(e) = crate::compact::run(file, 0, Some("exchange"), None) {
+                                    if let Err(e) = crate::compact::run(file, None, Some("exchange"), None) {
                                         eprintln!("[preflight] auto-compact warning: {}", e);
                                     }
                 }
@@ -451,6 +493,12 @@ pub fn run(file: &Path, diff_only: bool) -> Result<()> {
     // Step 4c: Annotate the diff with content-source markers.
     let annotated_diff = diff_result.as_ref().and_then(|d| diff::annotate_diff(d));
 
+    // Step 4d: Extract slash commands from user-added diff lines.
+    let slash_commands = diff_result
+        .as_ref()
+        .map(|d| diff::parse_slash_commands(d))
+        .unwrap_or_default();
+
     // Step 5: Read document HEAD from disk (skip if --diff-only).
     let document = if diff_only {
         eprintln!("[preflight] step 5: skipped (--diff-only)");
@@ -477,6 +525,7 @@ pub fn run(file: &Path, diff_only: bool) -> Result<()> {
             .and_then(|v| v.as_str().map(|s| s.to_string())),
         diff_type_reason: classification.map(|c| c.diff_type_reason),
         annotated_diff,
+        slash_commands,
     };
 
     let json = serde_json::to_string_pretty(&output)
@@ -892,6 +941,7 @@ mod tests {
             diff_type: None,
             diff_type_reason: None,
             annotated_diff: None,
+            slash_commands: vec![],
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -919,6 +969,7 @@ mod tests {
             diff_type: None,
             diff_type_reason: None,
             annotated_diff: None,
+            slash_commands: vec![],
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -956,6 +1007,7 @@ mod tests {
             diff_type: None,
             diff_type_reason: None,
             annotated_diff: None,
+            slash_commands: vec![],
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1048,6 +1100,7 @@ mod tests {
             diff_type: None,
             diff_type_reason: None,
             annotated_diff: None,
+            slash_commands: vec![],
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1069,6 +1122,7 @@ mod tests {
             diff_type: None,
             diff_type_reason: None,
             annotated_diff: None,
+            slash_commands: vec![],
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1090,6 +1144,7 @@ mod tests {
             diff_type: Some("approval".to_string()),
             diff_type_reason: Some("single approval word: \"go\"".to_string()),
             annotated_diff: None,
+            slash_commands: vec![],
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1112,6 +1167,7 @@ mod tests {
             diff_type: None,
             diff_type_reason: None,
             annotated_diff: None,
+            slash_commands: vec![],
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1134,6 +1190,7 @@ mod tests {
             diff_type: None,
             diff_type_reason: None,
             annotated_diff: Some("[user+] line".to_string()),
+            slash_commands: vec![],
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1155,9 +1212,34 @@ mod tests {
             diff_type: None,
             diff_type_reason: None,
             annotated_diff: None,
+            slash_commands: vec![],
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(parsed.get("annotated_diff").is_none(), "annotated_diff should be omitted when None");
+    }
+
+    #[test]
+    fn preflight_output_slash_commands_from_diff() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+/clear\n";
+        let cmds = crate::diff::parse_slash_commands(diff);
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: Some(diff.to_string()),
+            no_changes: false,
+            document: "ctx\n/clear\n".to_string(),
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: cmds,
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["slash_commands"][0], "/clear");
     }
 }

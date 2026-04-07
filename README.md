@@ -68,6 +68,8 @@ The typical edit cycle: write in your editor, trigger `agent-doc route <file>` v
 - **Startup lock** — `.agent-doc/starting/<hash>.lock` with 5s TTL prevents double-spawn when sync fires twice in quick succession
 - **Component-aware baseline guard** — detects stale baselines by comparing append-mode components only; user edits to replace-mode components (status, pending) don't trigger false positives
 - **Hook system** — cross-session event coordination via `agent-doc hook fire/poll/listen/gc`; integrates with Claude Code hooks via `PostToolUse` bridge
+- **Slash command dispatch** — `preflight` extracts slash commands from user-added diff lines (`parse_slash_commands`); the SKILL executes them before responding; guards exclude code fences, blockquotes, and non-added lines
+- **Dedupe stale patch cleanup** — after removing duplicate blocks, `dedupe` also deletes the stale `.agent-doc/patches/<hash>.json` to prevent the plugin's startup scan from re-applying removed content
 
 ## Architecture
 
@@ -137,6 +139,8 @@ agent-doc extends the [existence kernel vocabulary](https://github.com/btakita/e
 |------|-----------|
 | **Directive** | A signal that authorizes and requests action. User inputs like "do", "go", "yes" are directives. Classified as `DiffType::Approval` in preflight. The directive's brevity is independent of the expected execution thoroughness — quality processes always apply in full. |
 | **Cycle** | One round-trip: user edits -> preflight -> agent response -> write-back -> commit. Logged in `.agent-doc/logs/cycles.jsonl` with git state references for reproducibility. |
+| **Layout check** | Pre-agent tmux health inspection (`check_layout()`). Detects: missing window 0, non-idle stash panes, and session drift (registered panes spanning multiple tmux sessions). Reported as `layout_issues[]` in preflight JSON. |
+| **Session drift** | Condition where registered document panes span more than one tmux session. Detected by preflight's `check_layout()`. Fixed by `agent-doc session set <N>` to consolidate panes into the target session. |
 | **Diff** | The user's changes since the last snapshot. Classified by `classify_diff()` into a `DiffType` for skill routing. Comment-stripped before comparison. |
 | **Annotation** | A user edit to agent-written content (inline modification, colon-append). Classified as `DiffType::Annotation`. |
 

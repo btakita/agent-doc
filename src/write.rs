@@ -1103,10 +1103,24 @@ pub fn try_ipc(
 
     // Try socket IPC first (lower latency, no inotify)
     if crate::ipc_socket::is_listener_active(&project_root) {
+        // Clean up any stale patch file from a previous timeout before socket send.
+        // Without this, the file watcher could pick up and apply the stale file
+        // concurrently with the socket delivery, causing double-apply.
+        let patches_dir_for_socket = project_root.join(".agent-doc/patches");
+        if patches_dir_for_socket.exists() {
+            let stale_patch_file = patches_dir_for_socket.join(format!("{}.json", hash));
+            if stale_patch_file.exists() {
+                eprintln!("[write] cleaning stale patch file before socket send (prevent double-apply)");
+                if let Err(e) = std::fs::remove_file(&stale_patch_file) {
+                    eprintln!("[write] WARNING: failed to clean stale patch file: {}", e);
+                }
+            }
+        }
         let ipc_patches_json = build_ipc_patches_json(file, patches, unmatched)?;
         // When unmatched content was synthesized into a patch (no explicit patch blocks),
         // don't also send it as "unmatched" — the plugin would apply both and duplicate.
         let effective_unmatched_socket = if patches.is_empty() && !ipc_patches_json.is_empty() {
+            eprintln!("[write] synthesis consumed unmatched content — clearing from socket payload (prevent double-apply)");
             ""
         } else {
             unmatched.trim()

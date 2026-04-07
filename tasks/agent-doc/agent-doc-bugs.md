@@ -71,8 +71,8 @@ Then re-open `tasks/recruit/justin-caird.md` in the editor — sync will provisi
 
 Why is the `corky watch` pane that originated from tmux session 14 in tmux session 10?
 
-Wh
-### Re: corky pane in wrong session (HEAD)
+Why were agent-doc tmux windows in tmux session 14 now?
+### Re: corky pane in wrong session
 
 Same root cause — the cross-session `swap-pane` bug.
 
@@ -85,7 +85,18 @@ tmux join-pane -t 14 -s %544
 ```
 
 That rejoins `%544` (corky) into session $14 where it originated.
-<!-- agent:boundary:b88fd48c -->
+### Re: agent-doc panes in session $14 (HEAD)
+
+They were provisioned there directly — no swap involved.
+
+From the session logs:
+- `%543` (claudescore.md) — went through panes %540→%541→%542→%543, all in session $14
+- `%548` (xbow.md) — provisioned directly in session $14 at startup
+
+**Why session $14?** agent-doc provisions panes in the tmux session that sync/plugin is running in. Those documents were opened from **within session $14** (different IDE window or tmux session). Session $10 documents (agent-doc-bugs.md) were opened from session $10.
+
+This is expected multi-window behavior — the drift itself isn't a bug. The bug was `rescue_from_stash()` reaching across sessions to grab %544 (corky) from $14's stash and swap it into $10, instead of provisioning a new pane within $10.
+<!-- agent:boundary:48b78c3b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

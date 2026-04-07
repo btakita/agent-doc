@@ -1009,7 +1009,7 @@ Let me know if you want to adjust wording before sending.
 
 I want to emphasize that it was supposed to be a full time hire. But the terms kept on shifting.
 And Rob Ross is also self-diagnosing himself with autism.
-### Re: Emphasizing full-time context (Apr 7) (HEAD)
+### Re: Emphasizing full-time context (Apr 7)
 
 Good addition. "Short-term contract" understates it — if the offer was presented as full-time and the terms kept shifting until it fell apart day one, that's worth naming. It reframes the situation from "I bailed on a contract" to "I accepted what I understood to be a permanent role, the terms didn't hold."
 
@@ -1026,7 +1026,57 @@ I understand if the situation complicates things. Either way, I appreciate how y
 ---
 
 Key change: "full-time role where the terms kept shifting" replaces "short-term contract arrangement." This accurately reflects what happened without over-explaining, and shifts the frame from "impulsive" to "circumstances changed fast."
-<!-- agent:boundary:0fece4fd -->
+
+Please read justin-caird's most recent message saved to the transcript.
+
+Need a job ASAP.
+
+I want to recount the timeline of what happened.
+Friday interview.
+Follow up interview Sunday (Easter) at 5 Eastern.
+NDA -> Job Offer
+I had revisions to the contract.
+Finally signed during a call on Monday.
+Did not respond until I was in the call.
+
+Not an excuse but I was under much stress and I made some mistakes.
+### Re: Dreamable timeline & revised draft (Apr 7) (HEAD)
+
+**Most recent LinkedIn message from Justin (12:50 PM, Apr 6):**
+
+> "Thanks Brian. I wasn't aware you had accepted another offer. Wish we had a chance to show you what ECI could offer. Thanks for letting me know."
+
+Gracious. Short. Not hostile — leaves the door open.
+
+**Dreamable timeline reconstruction:**
+
+- **Fri Apr 4** — first interview
+- **Sun Apr 5, 5pm ET** — follow-up → NDA → offer
+- Revisions back and forth on contract terms
+- **Mon Apr 6 morning** — contract still not final; signed during a call
+- **12:39 PM** — cancellation to Justin sent *while on the Dreamable signing call*
+- Employment ended after day 1
+
+This reframes the situation considerably. You weren't being impulsive — you were literally signing a contract at the moment the ECI interview was starting. The 21-minute notice was circumstantial, not careless.
+
+**Revised draft (sharpened):**
+
+---
+
+Hi Justin — I wanted to follow up honestly. The situation unfolded fast — I was still finalizing the contract on Monday morning, and by the time I reached out to you the signing call was already happening. That role ended after the first day.
+
+I realize the timing was disruptive and I apologize for that. I'm still genuinely interested in the opportunity at ECI. If Thursday April 9th is still possible, I'd welcome the chance to connect — any of the original times (4pm, 5pm, or 6pm ET) work for me.
+
+I understand if things have moved on. Either way, thank you for how you've handled this.
+
+---
+
+**What changed from prior draft:**
+- "I was still finalizing the contract...the signing call was already happening" — concrete, explains the timing without making excuses
+- Dropped "terms kept shifting" framing (implicitly blamed Dreamable)
+- "That role ended after the first day" — direct, no euphemism
+- Slightly warmer close ("thank you for how you've handled this" vs. "I appreciate how you've handled the process")
+<!-- agent:boundary:103c15ae -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

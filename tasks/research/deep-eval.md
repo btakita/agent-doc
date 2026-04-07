@@ -104,7 +104,7 @@ deepeval login            # optional: connect to Confident AI for cloud tracking
 ```
 
 Write tests in `evals/`, hook `deepeval test run evals/` into the existing eval runner infra in `src/eval-runner/`.
-<!-- agent:boundary:0f1c67b3 -->
+<!-- agent:boundary:56f420e3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

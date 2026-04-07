@@ -1076,7 +1076,7 @@ I understand if things have moved on. Either way, thank you for how you've handl
 - Dropped "terms kept shifting" framing (implicitly blamed Dreamable)
 - "That role ended after the first day" — direct, no euphemism
 - Slightly warmer close ("thank you for how you've handled this" vs. "I appreciate how you've handled the process")
-<!-- agent:boundary:103c15ae -->
+<!-- agent:boundary:1ee3ae2e -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

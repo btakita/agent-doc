@@ -357,6 +357,11 @@ class PatchWatcher(private val project: Project) : Disposable {
                 ?: applyFrontmatterPatchKotlin(result, patch.frontmatter)
         }
 
+        // Apply ❯  prefix normalization to user-typed lines before agent patches
+        if (patch.normalizePrefixLines.isNotEmpty()) {
+            result = normalizeExchangePrefixes(result, patch.normalizePrefixLines)
+        }
+
         for (p in patch.patches) {
             val effectiveBoundaryId = if (p.ensureBoundary && p.boundaryId == null) {
                 findBoundaryInComponent(result, p.component)
@@ -423,6 +428,11 @@ class PatchWatcher(private val project: Project) : Disposable {
                     ?: applyFrontmatterPatchKotlin(result, patch.frontmatter)
             }
 
+            // Apply ❯  prefix normalization to user-typed lines before agent patches
+            if (patch.normalizePrefixLines.isNotEmpty()) {
+                result = normalizeExchangePrefixes(result, patch.normalizePrefixLines)
+            }
+
             for (p in patch.patches) {
                 val effectiveBoundaryId = if (p.ensureBoundary && p.boundaryId == null) {
                     findBoundaryInComponent(result, p.component)
@@ -487,6 +497,48 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         return NativePatching.applyComponentPatch(doc, component, content, mode)
             ?: applyComponentPatchKotlin(doc, component, content)
+    }
+
+    /**
+     * Add `❯ ` prefix to specific lines within the exchange component.
+     *
+     * For each line in [lines], replaces the first occurrence of that exact
+     * line text (without `❯ ` prefix) with `❯ <line>` within the region of
+     * the exchange component that falls before the boundary marker. Lines
+     * that already have the prefix or do not appear in the component are
+     * left unchanged.
+     */
+    private fun normalizeExchangePrefixes(doc: String, lines: List<String>): String {
+        if (lines.isEmpty()) return doc
+        val openTag = Regex("""<!-- agent:exchange(\s[^>]*)? -->""")
+        val closeTag = "<!-- /agent:exchange -->"
+        val boundaryTag = Regex("""<!-- agent:boundary:[a-f0-9]+ -->""")
+
+        val openMatch = openTag.find(doc) ?: return doc
+        val closeIdx = doc.indexOf(closeTag, openMatch.range.last)
+        if (closeIdx < 0) return doc
+
+        val beforeExchange = doc.substring(0, openMatch.range.last + 1)
+        val exchangeContent = doc.substring(openMatch.range.last + 1, closeIdx)
+        val afterExchange = doc.substring(closeIdx)
+
+        // Only normalize the user-input region (before the boundary marker)
+        val boundaryMatch = boundaryTag.find(exchangeContent)
+        val userRegionEnd = boundaryMatch?.range?.first ?: exchangeContent.length
+        var userRegion = exchangeContent.substring(0, userRegionEnd)
+        val agentRegion = exchangeContent.substring(userRegionEnd)
+
+        for (line in lines) {
+            if (line.isBlank()) continue
+            // Replace exact line (with newline boundaries) — idempotent if already prefixed
+            userRegion = userRegion.replace("\n$line\n", "\n❯ $line\n")
+            // Handle line at very start of user region
+            if (userRegion.startsWith("$line\n")) {
+                userRegion = "❯ $line\n" + userRegion.substring(line.length + 1)
+            }
+        }
+
+        return beforeExchange + userRegion + agentRegion + afterExchange
     }
 
     /**
@@ -923,6 +975,8 @@ data class IpcPatch(
     val frontmatter: String?,
     val fullContent: String?,
     val repositionBoundary: Boolean = false,
+    /** Lines whose plain text should be prefixed with `❯ ` in the exchange component. */
+    val normalizePrefixLines: List<String> = emptyList(),
 )
 
 data class ComponentPatch(
@@ -958,7 +1012,9 @@ fun parsePatchJson(json: String): IpcPatch? {
         }
 
         val repositionBoundary = root.get("reposition_boundary")?.asBoolean ?: false
-        return IpcPatch(file, patches, unmatched, frontmatter, fullContent, repositionBoundary)
+        val normalizePrefixLines = root.getAsJsonArray("normalize_prefix_lines")
+            ?.mapNotNull { it.asString } ?: emptyList()
+        return IpcPatch(file, patches, unmatched, frontmatter, fullContent, repositionBoundary, normalizePrefixLines)
     } catch (e: Exception) {
         return null
     }

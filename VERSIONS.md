@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.20
+
+- **`❯ ` prefix normalization for exchange user prompts (write.rs):** After each agent cycle, new user-typed lines in `patch=append` exchange components are prefixed with `❯ ` to visually distinguish user input from agent responses. Implemented via `similar` diff of snapshot vs `content_ours`; only Insert lines before the boundary marker are prefixed. `normalize_user_prompts_in_exchange()` and `extract_normalization_targets()` added. 6 tests.
+- **IPC-side prefix normalization (write.rs + PatchWatcher.kt v0.2.49):** `try_ipc` passes `normalize_prefix_lines: Option<&[String]>` in the IPC payload. JetBrains plugin applies `normalizeExchangePrefixes()` targeting only the user region (before `<!-- agent:boundary:UUID -->`) via targeted text replacement. Both Document API and VFS paths updated.
+- **SKILL.md rule: never echo user input in patch:exchange (SKILL.md):** For `patch=append` exchange components, the patch must contain only new agent response content — echoing user input creates duplicates.
+
 ## 0.31.19
 
 - **AGENT_PROCESSES guard on wrong-session recovery (route.rs):** `is_agent_process()` helper added. Wrong-session recovery path now skips `stash_pane`+`rescue_from_stash` for panes running non-agent processes (corky, shells, etc.) — falls through to auto-start instead. Prevents corky/foreign panes from being dragged across tmux sessions.

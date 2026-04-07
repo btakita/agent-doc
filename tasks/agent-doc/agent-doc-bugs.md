@@ -139,7 +139,7 @@ Added `normalize_user_prompts_in_exchange(content, snapshot)` to `write.rs`. Cal
 `make check` clean (208 tests pass).
 
 **IPC note:** Disk write path fully normalized (editor file shows `❯ `). IPC path normalizes the snapshot only — editor shows prefix on next disk cycle. Full IPC-side normalization needs plugin support (TODO).
-<!-- agent:boundary:28e5fc31 -->
+<!-- agent:boundary:7624ec35 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -150,7 +150,7 @@ Then re-open `tasks/recruit/justin-caird.md` in the editor — sync will auto-st
 
 Describe
 - [ ] Consider resync enhancement: flag panes whose running process doesn't match expected (agent-doc/claude)
-### Re: resync WrongProcess enhancement (HEAD)
+### Re: resync WrongProcess enhancement
 
 Already implemented. `agent-doc resync` just output:
 
@@ -162,12 +162,29 @@ Found 1 issue(s) (run with --fix to resolve):
 `resync.rs` has `WrongProcess` as a first-class issue type (alongside `WrongSession`, `WrongWindow`, `InStash`). It checks `#{pane_current_command}` against `AGENT_PROCESSES = ["agent-doc", "claude", "node"]`.
 
 **Fix behavior:** `--fix` deregisters `%544` without killing corky. Then re-opening `justin-caird.md` auto-provisions a fresh session.
-<!-- agent:boundary:27373077 -->
+
+Is it installed? I don't see the justin-caird tmux session.
+### Re: plugin installed? + justin-caird session (HEAD)
+
+**Plugin v0.2.48:** Installed in IntelliJIdea2026.1 (`agent-doc-jetbrains-0.2.48.jar`). `plugin list` shows nothing because it's a direct install (not via plugin manager) — that's expected.
+
+Older installs still have stale versions:
+- IntelliJIdea2025.3 → v0.2.24
+- PyCharm2025.3 → v0.2.12
+
+**Justin-caird session:** Not present because `%544` is registered but running `corky`. The agent-doc session for justin-caird.md was never provisioned after the swap. Fix:
+
+```bash
+agent-doc resync --fix
+```
+
+Then re-open `tasks/recruit/justin-caird.md` in the editor — sync will auto-start a fresh session.
+<!-- agent:boundary:deabcc40 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Run `agent-doc resync --fix` to deregister %544 (corky)
-- [ ] Re-open justin-caird.md to provision fresh session
+- [ ] Run `agent-doc resync --fix` then re-open justin-caird.md
+- [ ] Update plugin in IntelliJIdea2025.3 (v0.2.24 → v0.2.48) and PyCharm2025.3 (v0.2.12 → v0.2.48) if those IDEs are still in use
 <!-- /agent:pending -->

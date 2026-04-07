@@ -690,7 +690,7 @@ This is a false-positive: you meant "compact" as an adjective describing the des
 git show f7f24a15:tasks/recruit/xbow.md
 ```
 to see the full exchange before it was collapsed.
-<!-- agent:boundary:9d8b48c5 -->
+<!-- agent:boundary:5d2f5c69 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

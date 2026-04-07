@@ -267,14 +267,27 @@ Moves each pane from session $14 into session $10's current window. The running 
 **Option 2 — Deregister + re-provision:**
 ```bash
 agent-doc resync --fix
-# then re-open claudescore.md and xbow.md from within session $10 (HEAD)
+# then re-open claudescore.md and xbow.md from within session $10
 ```
 `resync --fix` currently only handles `WrongProcess` (`%544`/corky). The `WrongSession` panes (`%543`, `%548`) aren't flagged — they're alive and correct, just provisioned in $14 (because the docs were opened from $14).
 
 **Enhancement to add:** `resync` should support a `WrongSession` fix mode — `join-pane` to relocate panes to a target session. That would give `agent-doc resync --fix --session 10` to pull all registered panes into $10.
 
 For now: `tmux join-pane -t 10 -s %543 && tmux join-pane -t 10 -s %548`.
-<!-- agent:boundary:365b6e05 -->
+
+Why is the `corky watch` pane claiming tasks/recruit/justin-caird.md?
+### Re: why is corky claiming justin-caird.md? (HEAD)
+
+`resync --fix` hasn't been run. The registry still has `%544` (corky) → `justin-caird.md`. That mapping persists until explicitly cleared — every sync, open, and route for that document targets corky.
+
+Fix:
+```bash
+agent-doc resync --fix
+```
+Then re-open `tasks/recruit/justin-caird.md` from the editor. Deregisters `%544`, provisions a fresh session.
+
+**Note:** preflight also flagged `%543` and `%548` (the session $14 agent-doc panes) as non-idle in the stash window. They've been moved to the stash rather than the active window — they'll be rescued or killed on next open of those documents.
+<!-- agent:boundary:1cee909b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

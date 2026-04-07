@@ -24,7 +24,7 @@ Yes — implemented in this session (now in the compacted archive). `parse_slash
 Preflight returns `slash_commands: [...]`. SKILL.md step 0b dispatches each via the `Skill` tool before generating a response. Built-ins like `/clear` that can't route through `Skill` are logged and skipped.
 
 The `compact exchange` trigger you just used was processed via this path.
-<!-- agent:boundary:e428dbae -->
+<!-- agent:boundary:e11ff685 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

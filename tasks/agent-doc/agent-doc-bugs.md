@@ -15,6 +15,7 @@ agent-doc v0.31.16 — active
 
 <!-- agent:exchange patch=append -->
 Session: agent-doc v0.31.16 release; cross-session pane swap fix; session-drift detection; partial compact (--keep N); dynamic plugin command discovery; Refresh Agent Doc Environment JB action (v0.2.45); CRDT boundary-synthesis duplicate bug; plugin v0.2.46 stale patch cleanup; v0.2.47 version bump + runbook; v0.2.48 snapshot-timestamp dedup guard (correct fix); compact-exchange runbook tightened (standalone imperative only); xbow.md false-positive compaction resolved; claudescore.md content confirmed intact. Open: install plugin v0.2.48.
+<!-- agent:boundary:dee79226 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

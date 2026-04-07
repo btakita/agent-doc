@@ -102,6 +102,49 @@ pub fn capture_pane(tmux: &Tmux, pane_id: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+/// Swap two panes only if both belong to `expected_session`.
+///
+/// `tmux swap-pane` works across sessions, which has caused bugs where panes
+/// from one tmux session were moved into another. This wrapper validates both
+/// panes before allowing the swap.
+///
+/// Returns `Err` if either pane is in the wrong session — callers should fall
+/// back to `join-pane` or provision a new pane instead.
+pub fn swap_pane_guarded(
+    tmux: &Tmux,
+    src: &str,
+    dst: &str,
+    expected_session: &str,
+) -> Result<()> {
+    let src_session = tmux
+        .cmd()
+        .args(["display-message", "-t", src, "-p", "#{session_name}"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    if src_session != expected_session {
+        anyhow::bail!(
+            "swap_pane_guarded: src pane {} is in session '{}', expected '{}' — refusing cross-session swap",
+            src, src_session, expected_session
+        );
+    }
+    let dst_session = tmux
+        .cmd()
+        .args(["display-message", "-t", dst, "-p", "#{session_name}"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    if dst_session != expected_session {
+        anyhow::bail!(
+            "swap_pane_guarded: dst pane {} is in session '{}', expected '{}' — refusing cross-session swap",
+            dst, dst_session, expected_session
+        );
+    }
+    tmux.swap_pane(src, dst)
+}
+
 /// Send a single key (not literal text) to a tmux pane.
 ///
 /// Unlike `Tmux::send_keys` (which sends literal text + Enter), this sends

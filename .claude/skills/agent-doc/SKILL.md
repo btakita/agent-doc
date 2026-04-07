@@ -43,7 +43,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 - Computing the diff (with comment stripping)
 - Reading the document HEAD
 
-The command outputs JSON to stdout:
+Use the following JSON output from stdout:
 ```json
 {
   "layout_issues": [],

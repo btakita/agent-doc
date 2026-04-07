@@ -344,6 +344,10 @@ enum Commands {
         /// Actually kill wrong-session panes and deregister stale entries (without this flag, dry-run only)
         #[arg(long)]
         fix: bool,
+        /// Relocate WrongSession panes to this tmux session via join-pane instead of killing them.
+        /// Requires --fix. Example: --session 10
+        #[arg(long)]
+        session: Option<String>,
     },
     /// Manage the Claude Code skill definition
     Skill {
@@ -815,7 +819,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Outline { file, json } => outline::run(&file, json),
-        Commands::Resync { fix } => resync::run(fix),
+        Commands::Resync { fix, session } => resync::run(fix, session.as_deref()),
         Commands::Skill { command } => match command {
             SkillCommands::Install { reload, harness, all } => {
                 if all {

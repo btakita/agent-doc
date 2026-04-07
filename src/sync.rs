@@ -757,7 +757,8 @@ fn run_with_options(
                                 let agent_doc_window = format!("{}:agent-doc", target_win);
                                 let target_panes = tmux.list_window_panes(&agent_doc_window).unwrap_or_default();
                                 if let Some(target) = target_panes.first() {
-                                    match tmux.swap_pane(pane, target) {
+                                    let swap_session = target_sess.to_string();
+                                    match sessions::swap_pane_guarded(tmux, pane, target, &swap_session) {
                                         Ok(()) => {
                                             eprintln!("[sync] rescued pane {} via swap-pane", pane);
                                             return true;
@@ -921,7 +922,7 @@ fn run_with_options(
     // Post-sync: validate session state (report only, no kill).
     // Disabled --fix because auto_start with context_session intentionally places
     // cross-session panes — resync --fix would kill them (lesson: context_session override).
-    if let Err(e) = resync::run(false) {
+    if let Err(e) = resync::run(false, None) {
         eprintln!("[sync] warning: post-sync resync failed: {}", e);
     }
 

@@ -18,9 +18,12 @@
 //!   5. Looks up the registered pane in `sessions.json`.
 //!   6. If pane is alive and in the correct session: optionally rescues from a stash window,
 //!      then sends the `/agent-doc <path>` command via `send_command`.
-//!   7. If pane is alive but in the wrong session: skips it and falls through.
+//!   7. If pane is alive but in the wrong session and running an agent process: moves it to the
+//!      target session stash then rescues. If running a non-agent process (corky, etc.): logs
+//!      and falls through — foreign processes are never stashed/rescued across sessions.
 //!   8. If pane is dead and was previously registered: lazy-claims to an active pane via
-//!      `find_target_pane`, sends the command, then calls `sync_after_claim` to re-sync layout.
+//!      `find_target_pane` (skipped if the candidate is running a non-agent process), sends
+//!      the command, then calls `sync_after_claim` to re-sync layout.
 //!   9. If no registered pane or no claimable pane: auto-starts a new Claude session.
 //!      Blocked by `AGENT_DOC_NO_AUTOSTART` env var (used in tests).
 //! - **`auto_start(tmux, file, session_id, file_path, context_session)`**: Public; spawns a
@@ -60,7 +63,11 @@
 //! - **One pane per document**: Each document gets its own Claude pane. Unregistered files
 //!   (no prior session) skip lazy-claim and always get a fresh pane via auto-start.
 //! - **Session isolation**: Panes are validated to be in the correct target tmux session.
-//!   Cross-session panes are not reused; a new pane is created in the correct session.
+//!   Cross-session agent panes are moved to the target session; cross-session non-agent panes
+//!   (e.g. corky) are never touched — a new pane is created in the correct session instead.
+//! - **Non-agent process guard**: `is_agent_process()` gates both the wrong-session recovery
+//!   path and the lazy-claim path. A pane running corky/shell is never stashed, rescued, or
+//!   claimed — it is left running and a fresh agent-doc pane is provisioned instead.
 //! - **Stash rescue**: Panes that ended up in a tmux `stash` / `stash-*` window are
 //!   automatically rescued back into the `agent-doc` window before routing.
 //! - **Auto-start inhibit**: Setting `AGENT_DOC_NO_AUTOSTART` prevents `auto_start_in_session`
@@ -96,6 +103,25 @@ use crate::sessions::Tmux;
 use crate::{frontmatter, prompt, resync, sessions, snapshot, sync};
 
 const TMUX_SESSION_NAME: &str = "claude";
+
+/// Valid process names for agent-doc panes (mirrors resync::AGENT_PROCESSES).
+const AGENT_PROCESSES: &[&str] = &["agent-doc", "claude", "node"];
+
+/// Returns true if the pane is running an agent process (agent-doc / claude / node).
+/// Returns true on query failure (conservative — don't skip panes we can't inspect).
+fn is_agent_process(tmux: &Tmux, pane_id: &str) -> bool {
+    let output = tmux
+        .cmd()
+        .args(["display-message", "-t", pane_id, "-p", "#{pane_current_command}"])
+        .output();
+    match output {
+        Ok(o) if o.status.success() => {
+            let cmd = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            cmd.is_empty() || AGENT_PROCESSES.contains(&cmd.as_str())
+        }
+        _ => true, // can't inspect → treat conservatively
+    }
+}
 
 /// Determine if the file is in the first column of the editor layout.
 /// When true, the new pane should be split BEFORE (left of) the existing pane.
@@ -234,20 +260,26 @@ fn resolve_or_create_pane(
                 send_command(tmux, registered_pane, file_path)?;
                 return Ok(registered_pane.clone());
             }
-            // Pane is alive but in a different session — move it to the
-            // target session's stash first, then rescue from there.
-            // Never swap across sessions (that moves a target-session pane
-            // into the wrong session).
-            eprintln!(
-                "[route] Pane {} is alive but in session '{}' (config says '{}'). Moving to target session stash.",
-                registered_pane, pane_session, target_session
-            );
-            if let Err(e) = tmux.stash_pane(registered_pane, target_session) {
-                eprintln!("[route] warning: stash_pane to target session failed: {}", e);
+            // Pane is alive but in a different session.
+            // Only move panes running agent processes — never stash/rescue foreign
+            // processes (corky, etc.) across sessions.  If the pane is running a
+            // non-agent process, fall through to Strategy 2/3 to get a fresh pane.
+            if is_agent_process(tmux, registered_pane) {
+                eprintln!(
+                    "[route] Pane {} is alive but in session '{}' (config says '{}'). Moving to target session stash.",
+                    registered_pane, pane_session, target_session
+                );
+                if let Err(e) = tmux.stash_pane(registered_pane, target_session) {
+                    eprintln!("[route] warning: stash_pane to target session failed: {}", e);
+                }
+                rescue_from_stash(tmux, registered_pane, session_id, file_path, target_session);
+                send_command(tmux, registered_pane, file_path)?;
+                return Ok(registered_pane.clone());
             }
-            rescue_from_stash(tmux, registered_pane, session_id, file_path, target_session);
-            send_command(tmux, registered_pane, file_path)?;
-            return Ok(registered_pane.clone());
+            eprintln!(
+                "[route] Pane {} in session '{}' is running a non-agent process — skipping cross-session rescue",
+                registered_pane, pane_session
+            );
         } else {
             eprintln!("[route] Pane {} is dead", registered_pane);
         }
@@ -259,8 +291,10 @@ fn resolve_or_create_pane(
     }
 
     // Strategy 2: Lazy claim (only when a registered pane died)
+    // Skip panes running non-agent processes to avoid claiming corky/shells.
     if registered.is_some()
         && let Some(new_pane) = find_target_pane(tmux, pane, target_session)
+        && is_agent_process(tmux, &new_pane)
     {
         eprintln!("[route] Lazy-claiming to pane {} (dead pane)", new_pane);
         sessions::register(session_id, &new_pane, file_path)?;
@@ -325,7 +359,7 @@ fn rescue_from_stash(
         let agent_doc_window = format!("{}:agent-doc", target_session);
         let target_panes = tmux.list_window_panes(&agent_doc_window).unwrap_or_default();
         if let Some(target) = target_panes.first() {
-            match tmux.swap_pane(pane_id, target) {
+            match sessions::swap_pane_guarded(tmux, pane_id, target, target_session) {
                 Ok(()) => eprintln!("[route] Rescued pane {} via swap-pane", pane_id),
                 Err(e) => {
                     eprintln!("[route] swap-pane rescue failed ({}), trying join-pane", e);

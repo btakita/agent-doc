@@ -14,7 +14,8 @@
 //!   (pane's tmux session differs from the document's `tmux_session` frontmatter
 //!   field), and `WrongWindow` (panes for the same tmux session are scattered across
 //!   multiple non-stash windows, determined by majority-window vote).
-//! - Fix application (`apply_fixes`): `WrongSession` → kill pane + deregister entry;
+//! - Fix application (`apply_fixes`): `WrongSession` → kill pane + deregister entry (default),
+//!   or when `relocate_session = Some(target)` → `join-pane` to target session (registry kept);
 //!   `WrongProcess` → deregister only (foreign process is not killed); `InStash` →
 //!   deregister only (pane left intact for potential manual recovery); `WrongWindow`
 //!   → stash the outlier pane so the next route consolidates it.
@@ -1173,7 +1174,7 @@ fn pane_current_command(tmux: &Tmux, pane_id: &str) -> Option<String> {
 }
 
 /// Apply fixes for detected issues: kill wrong-session panes, deregister wrong-process panes.
-fn apply_fixes(tmux: &Tmux, issues: &[Issue]) -> Result<usize> {
+fn apply_fixes(tmux: &Tmux, issues: &[Issue], relocate_session: Option<&str>) -> Result<usize> {
     if issues.is_empty() {
         return Ok(0);
     }
@@ -1182,7 +1183,7 @@ fn apply_fixes(tmux: &Tmux, issues: &[Issue]) -> Result<usize> {
     let registry_path = sessions::registry_path();
     let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
     let mut registry = sessions::load()?;
-    let fixed = apply_fixes_to_registry(tmux, issues, &mut registry);
+    let fixed = apply_fixes_to_registry(tmux, issues, &mut registry, relocate_session);
 
     if fixed > 0 {
         sessions::save(&registry)?;
@@ -1192,23 +1193,53 @@ fn apply_fixes(tmux: &Tmux, issues: &[Issue]) -> Result<usize> {
 
 /// Apply fixes to a mutable registry (testable without disk I/O).
 /// Returns number of issues fixed.
+///
+/// `relocate_session`: when `Some(target)`, `WrongSession` fixes use `join-pane` to
+/// move the pane to the target session instead of killing it. The registry entry is
+/// kept (pane ID is stable after join-pane). Use this to preserve running sessions
+/// while consolidating them into a single tmux session.
 fn apply_fixes_to_registry(
     tmux: &Tmux,
     issues: &[Issue],
     registry: &mut sessions::SessionRegistry,
+    relocate_session: Option<&str>,
 ) -> usize {
     let mut fixed = 0;
 
     for issue in issues {
         match issue {
-            Issue::WrongSession { key, pane, .. } => {
-                // Kill the pane (next route will auto-start in correct session).
-                // If kill fails (e.g., last pane in session), still deregister —
-                // the stale entry is worse than an orphaned pane.
-                if let Err(e) = tmux.kill_pane(pane) {
-                    eprintln!("resync: could not kill pane {} ({}), deregistering anyway", pane, e);
+            Issue::WrongSession { key, pane, expected_session, .. } => {
+                if let Some(target) = relocate_session {
+                    // join-pane: move the pane to the target session without killing it.
+                    // The pane ID is stable after join-pane, so the registry entry stays.
+                    // Use `expected_session` from frontmatter as the join target if it
+                    // matches the requested target; otherwise use the requested target directly.
+                    let dest_session = if target == expected_session.as_str() {
+                        expected_session.as_str()
+                    } else {
+                        target
+                    };
+                    if let Some(dest_pane) = tmux.active_pane(dest_session) {
+                        match tmux.join_pane(pane, &dest_pane, "-dh") {
+                            Ok(()) => eprintln!("  relocated pane {} → session '{}'", pane, dest_session),
+                            Err(e) => {
+                                eprintln!("  relocate failed for pane {} ({}), deregistering", pane, e);
+                                registry.remove(key);
+                            }
+                        }
+                    } else {
+                        eprintln!("  no active pane in '{}' to join into, deregistering pane {}", dest_session, pane);
+                        registry.remove(key);
+                    }
+                } else {
+                    // Default: kill the pane (next route will auto-start in correct session).
+                    // If kill fails (e.g., last pane in session), still deregister —
+                    // the stale entry is worse than an orphaned pane.
+                    if let Err(e) = tmux.kill_pane(pane) {
+                        eprintln!("resync: could not kill pane {} ({}), deregistering anyway", pane, e);
+                    }
+                    registry.remove(key);
                 }
-                registry.remove(key);
                 eprintln!("  fixed: {}", issue);
                 fixed += 1;
             }
@@ -1246,7 +1277,10 @@ fn apply_fixes_to_registry(
 }
 
 /// Verbose resync for the standalone `agent-doc resync` command.
-pub fn run(fix: bool) -> Result<()> {
+///
+/// `relocate_session`: when `Some(target)`, `WrongSession` panes are relocated via
+/// `join-pane` instead of being killed. Pass the target tmux session name (e.g. `"10"`).
+pub fn run(fix: bool, relocate_session: Option<&str>) -> Result<()> {
     let tmux = Tmux::default_server();
     let registry_path = sessions::registry_path();
 
@@ -1279,7 +1313,7 @@ pub fn run(fix: bool) -> Result<()> {
     if !issues.is_empty() {
         if fix {
             eprintln!("\nFixing {} issue(s):", issues.len());
-            let fixed = apply_fixes(&tmux, &issues)?;
+            let fixed = apply_fixes(&tmux, &issues, relocate_session)?;
             eprintln!("\nFixed {} of {} issue(s).", fixed, issues.len());
         } else {
             eprintln!("\nFound {} issue(s) (run with --fix to resolve):", issues.len());
@@ -1449,7 +1483,7 @@ mod tests {
             expected_session: "correct".to_string(),
         }];
 
-        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry);
+        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None);
         assert_eq!(fixed, 1);
         assert!(!registry.contains_key("sess-fix"), "entry should be removed from registry");
         assert!(!iso.pane_alive(&pane), "pane should be killed");
@@ -1473,7 +1507,7 @@ mod tests {
             process: "corky".to_string(),
         }];
 
-        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry);
+        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None);
         assert_eq!(fixed, 1);
         assert!(!registry.contains_key("sess-proc"), "entry should be removed from registry");
         assert!(iso.pane_alive(&pane), "pane should NOT be killed (foreign process)");
@@ -1652,7 +1686,7 @@ mod tests {
             expected_window: w1.clone(),
         }];
 
-        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry);
+        let fixed = apply_fixes_to_registry(&iso, &issues, &mut registry, None);
         assert_eq!(fixed, 1);
         assert!(iso.pane_alive(&pane2), "pane should still be alive (moved, not killed)");
 

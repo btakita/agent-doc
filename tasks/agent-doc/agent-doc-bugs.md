@@ -54,7 +54,7 @@ Why was part of my prompt included in the response in tasks/research/filevine.md
 > - Emily Lippincott
 
 Feature request: After an agent doc run...each line of the person's prompts should have a `❯ ` prefix
-### Re: prompt echoed in filevine.md (HEAD)
+### Re: prompt echoed in filevine.md
 
 The agent included the user's prompt verbatim in its `<!-- patch:exchange -->` response content. Since the exchange component uses `patch=append`, the write added the entire patch content (prompt + response) after the existing exchange text, which already contained the user's typed prompt.
 
@@ -68,7 +68,7 @@ This is a skill/prompt discipline issue, not a binary bug. Worth adding a note t
 
 > For `patch=append` exchange components, do NOT include the user's input in the patch block — it is already in the document. Patch content = new agent response only.
 
-### Re: feature — `❯ ` prefix on user prompts (HEAD)
+### Re: feature — `❯ ` prefix on user prompts
 
 **Concept:** After each agent-doc cycle, user-added lines in the exchange get a `❯ ` prefix, making the conversation visually scannable.
 
@@ -76,17 +76,31 @@ This is a skill/prompt discipline issue, not a binary bug. Worth adding a note t
 
 1. **Normalization in `agent-doc write`** — when `patch=append` merges, transform user-added diff lines by prepending `❯ ` to each non-blank non-metadata line before inserting into the document. The CRDT diff already identifies which lines are user-added.
 
+Can this also occur with patch=replace?
+
 2. **Agent-side normalization** — the agent includes a `<!-- patch:exchange -->` block with the user's input reformatted as `❯ text`, then its response. Works for replace-mode exchanges; awkward for append (would echo the prompt again, see above).
 
 3. **Plugin-side rendering** — the JB plugin adds a visual gutter or color for user-authored lines without modifying the file. Non-destructive, but doesn't affect raw file.
 
 **Recommendation:** Option 1 — binary-level normalization in `write` when processing user-added content in an `exchange` component. The CRDT already knows which hunks came from the user; apply the prefix during the merge step before writing the final document.
 
+Option 1...also use this with patch=replace
+
 **Open questions for design:**
 - Apply prefix to ALL non-blank user lines, or only paragraph-starting lines?
 - What about user input that already has a prefix (bullets, `>`)?
 - Is the prefix stored in the file, or only rendered?
-<!-- agent:boundary:56892aa3 -->
+### Re: ❯ prefix with patch=replace — confirmed (HEAD)
+
+Yes, prefix normalization applies to both modes via the same mechanism: **the diff identifies user-added lines regardless of component mode**.
+
+- `patch=append`: user types at the bottom → diff shows new lines → apply `❯ ` before appending
+- `patch=replace`: agent rewrites the whole component → but user edits *before* the agent cycle still show up as diff additions → same prefix logic applies to those lines
+
+In both cases, `agent-doc write` already receives the diff (or can compute it from the baseline). The normalization step is: for each user-added hunk in an `exchange` component, prepend `❯ ` to each non-blank content line before merging into the final document.
+
+**Confirmed design:** Option 1 applies to both `patch=append` and `patch=replace` exchange components. The normalization lives in `agent-doc write` (binary-level), keyed on component type = `exchange` + line is user-authored.
+<!-- agent:boundary:db06e0a6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -94,5 +108,5 @@ This is a skill/prompt discipline issue, not a binary bug. Worth adding a note t
 <!-- agent:pending patch=replace -->
 - [ ] Fix PyPI trusted publisher for `pypi.yml` + environment `pypi`, then rerun CI
 - [ ] Add SKILL.md note: patch:exchange must not echo user input (append mode)
-- [ ] Design `❯ ` prefix normalization for user-added exchange lines (option 1: binary-level in write)
+- [ ] Implement `❯ ` prefix normalization for user-added exchange lines in `agent-doc write` (both append + replace modes)
 <!-- /agent:pending -->

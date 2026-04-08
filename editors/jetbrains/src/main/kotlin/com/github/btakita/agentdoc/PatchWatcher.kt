@@ -528,8 +528,10 @@ class PatchWatcher(private val project: Project) : Disposable {
         val exchangeContent = doc.substring(openMatch.range.last + 1, closeIdx)
         val afterExchange = doc.substring(closeIdx)
 
-        // Only normalize the user-input region (before the boundary marker)
-        val boundaryMatch = boundaryTag.find(exchangeContent)
+        // Only normalize the user-input region (before the LAST boundary marker).
+        // Must use the last boundary — historical cycles each leave a marker, so stopping
+        // at the first one misclassifies later user-input lines as agent region.
+        val boundaryMatch = boundaryTag.findAll(exchangeContent).lastOrNull()
         val userRegionEnd = boundaryMatch?.range?.first ?: exchangeContent.length
         var userRegion = exchangeContent.substring(0, userRegionEnd)
         val agentRegion = exchangeContent.substring(userRegionEnd)

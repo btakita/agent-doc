@@ -415,7 +415,7 @@ Applied to both the main transcription path and the confidence re-transcription 
 This is a patch-level change. Ready to bump to v0.26.3 and release, or bundle with other fixes first?
 
 ❯ release
-### Re: v0.26.3 released (HEAD)
+### Re: v0.26.3 released
 
 **Released:**
 - Committed version bump + SPEC.md update (`suppress_blank`/`suppress_nst` documented)
@@ -424,7 +424,9 @@ This is a patch-level change. Ready to bump to v0.26.3 and release, or bundle wi
 - `cargo install --path . --features transcribe-cuda` ✓ (v0.26.2 → v0.26.3)
 
 **CI in progress:** Release workflow running ([24142052779](https://github.com/btakita/corky/actions/runs/24142052779)) — builds cross-platform binaries and creates GitHub Release. PyPI publish triggers automatically once the Release is created (pypi.yml fires on `release: [published]`).
-<!-- agent:boundary:f2ed8a7b -->
+
+gh action errors https://github.com/btakita/corky/actions/runs/24142052779
+<!-- agent:boundary:84e766d8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

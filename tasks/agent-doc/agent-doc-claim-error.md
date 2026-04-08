@@ -176,18 +176,20 @@ v0.31.16 was already published in the previous cycle — all targets are live:
 - Binary: `~/.cargo/bin/agent-doc` at v0.31.16
 
 In tasks/dreamable/robert-ross.md: All of the h3 `### ` have uncommitted text removing the ` (HEAD)` suffix. Why? Much of these headers were older.
-### Re: Stale (HEAD) markers after file move (HEAD)
+### Re: Stale (HEAD) markers after file move
 
 **Root cause:** `add_head_marker` in `git.rs` has a "preserve markers from HEAD" path (line 542-563). When no new headings exist, it re-applies ALL `(HEAD)` markers from the committed version. After the file move + drift re-sync, the committed version had 34 stale `(HEAD)` markers baked in — and they kept getting re-applied every cycle.
 
 **Fix:** Added a safety check — only re-apply markers if HEAD has ≤3 `(HEAD)` markers. If more, skip re-application and log: `[commit] Skipping (HEAD) re-application — N markers in HEAD (stale, likely from file move)`.
+
+Why are we reapplying any `(HEAD)` markers?
 
 **Verified:** Rebuilt and installed. Ran `agent-doc commit tasks/dreamable/robert-ross.md`:
 ```
 [commit] Skipping (HEAD) re-application — 34 markers in HEAD (stale, likely from file move)
 ```
 Committed version now has 0 `(HEAD)` markers. The 34 stale uncommitted diffs should be gone.
-<!-- agent:boundary:bc14ca78 -->
+<!-- agent:boundary:c6d8c5f6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

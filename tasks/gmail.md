@@ -323,5 +323,6 @@ Your Google Voice messages tab shows the most recent texts are from **2015**. Th
 
 **If the number is still yours:**
 - Try texting (508) 731-4882 from a completely different phone (not 424.249.2350) to rule out linked-number routing issues
-<!-- agent:boundary:ab6ddfee -->
+
+Are we synced with btak.dev@gmail.com?
 <!-- /agent:exchange -->

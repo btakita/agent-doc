@@ -1164,7 +1164,6 @@ Deployed to Cloudflare Pages.
 
 Provide `curl | sh` command to run to autopopulate the credentials as a url hash.
 
-
 ### Re: curl | sh command
 
 The setup script is already deployed. The command is:
@@ -2096,10 +2095,6 @@ The `setup.sh` script still works — it passes the session token which the work
 
 ● Pages deploy from the previous cycle completed successfully. All deployments are live.
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)
  ▐▛███▜▌   Claude Code v2.1.89
 ▝▜█████▛▘  Opus 4.6 (1M context) · Claude Max
   ▘▘ ▝▝    ~/work/btakita/agent-loop
@@ -2120,10 +2115,6 @@ The `setup.sh` script still works — it passes the session token which the work
 
 ● Pages deploy from the previous cycle completed successfully. All deployments are live.
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)
 <!-- agent:boundary:a77a8688 -->
 <!-- /agent:exchange -->
 

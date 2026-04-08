@@ -48,3 +48,4 @@ ExPhil proved that code beats prose for philosophical rigor. Existence Lang prov
 - **Living system** — nodes evolve with understanding, not frozen papers
 
 ## User
+

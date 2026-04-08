@@ -96,7 +96,7 @@ Crawled whiskerseeker.com and searched extensively. The dealers page uses a **St
 - [Manta.com listing](https://www.manta.com/c/mkbxhnp/whisker-seeker-tackle-llc) — Grimes, IA business record
 - PRADCO Outdoor Brands parent: [pradcooutdoorbrands.com](https://www.pradcooutdoorbrands.com/)
 
-Use chromium-bridge with brave to scrape the the Storemapper JS widget.
+Use chromium-bridge with brave to scrape the Storemapper JS widget.
 
 ### Re: Storemapper scrape via chromium-bridge
 
@@ -143,7 +143,7 @@ Plus 17 more states. Heavy Midwest/Southern concentration matching catfish fishi
 3. Extracted API endpoint from performance entries: `storemapper-herokuapp-com.global.ssl.fastly.net/api/users/5207/stores.json`
 4. `curl` direct API call → full JSON with all 1,458 stores
 5. Parsed to CSV with all fields including lat/lng coordinates
-<!-- agent:boundary:b3c46906 -->
+<!-- agent:boundary:45ab8aa3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

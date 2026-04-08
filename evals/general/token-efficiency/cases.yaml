@@ -1,0 +1,104 @@
+# Token efficiency baseline eval cases
+# Tests that LLM responses stay within token budgets for common operations.
+# Use with: eval-runner run cases.yaml --backend claude --system-prompt system-prompt.md
+
+cases:
+  - id: simple-question-concise
+    description: Simple question should get a concise answer, not a verbose essay
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -1,3 +1,5 @@
+       ## User
+      +
+      +What does the --diff-only flag do?
+    document_context: |
+      This is an agent-doc session document. The user is asking about a CLI flag.
+    expected_behavior:
+      - Answers the question directly in 1-3 sentences
+      - Does not include unnecessary preamble or filler
+      - Does not repeat the question back
+    grading: llm-rubric
+    max_output_tokens: 400
+    tags: [token-efficiency, smoke]
+
+  - id: approval-minimal-response
+    description: "Approval word 'do' should trigger action, not verbose confirmation"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -10,3 +10,5 @@
+       - [ ] Fix the typo in README
+      +
+      +do
+    document_context: |
+      Template mode document with a pending task list. User wrote "do" to approve execution.
+    expected_behavior:
+      - Acknowledges the approval briefly (1 sentence max)
+      - Focuses on action plan or execution steps
+      - Does not ask "are you sure?" or restate the entire task list
+    grading: llm-rubric
+    max_output_tokens: 600
+    tags: [token-efficiency]
+
+  - id: single-line-edit-response
+    description: Small edit should get proportionally small response
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -5,7 +5,7 @@
+       ## Assistant
+
+      -The function returns a boolean.
+      +The function returns a boolean. > actually it returns Result<bool>
+
+       ## User
+    document_context: |
+      Append mode document. User annotated a previous response with a correction.
+    expected_behavior:
+      - Acknowledges the correction
+      - Provides the corrected information concisely
+      - Does not re-explain the entire function
+    grading: llm-rubric
+    max_output_tokens: 200
+    tags: [token-efficiency]
+
+  - id: multi-topic-structured
+    description: Multi-topic response should be structured but not padded
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -1,3 +1,9 @@
+       ## User
+      +
+      +What is the release process?
+      +---
+      +Fix the typo in README
+      +---
+      +What version are we on?
+    document_context: |
+      Append mode document. Three topics separated by --- horizontal rules.
+    expected_behavior:
+      - Responds to each topic with a separate section
+      - Each section is concise and focused
+      - Total response is proportional to the 3 small questions
+    grading: llm-rubric
+    max_output_tokens: 1200
+    tags: [token-efficiency]
+
+  - id: no-changes-fast-exit
+    description: No meaningful changes should produce minimal output
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -1,3 +1,3 @@
+      -<!-- agent:boundary:abc-123 -->
+      +<!-- agent:boundary:def-456 -->
+    document_context: |
+      Template mode document. Only a boundary marker UUID changed.
+    expected_behavior:
+      - Recognizes this as a boundary artifact with no real changes
+      - Response is extremely brief or empty
+    grading: llm-rubric
+    max_output_tokens: 100
+    tags: [token-efficiency, smoke]

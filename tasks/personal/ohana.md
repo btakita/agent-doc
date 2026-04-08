@@ -599,7 +599,7 @@ Sent a combined reply to Laura in OHANA:
 > Love the LA photos too! Great seeing everyone together 😊
 
 Note: Laura's ChatGPT message from Friday had scrolled out of the visible viewport (Messenger lazy-loads), so I combined both into one message rather than separate reply-to threads. Proper paragraph spacing confirmed in screenshot.
-<!-- agent:boundary:484ded10 -->
+<!-- agent:boundary:65b6144d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

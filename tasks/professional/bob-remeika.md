@@ -54,7 +54,6 @@ Bob, I'm overwhelmed with gratitude for your kind post. It means a lot coming fr
 I see we have very similar interests. I want to integrate Ragie into the interactive documents workflow. It's a natural next step.
 Would love to reconnect with you as well.
 
-
 fyi, Bob was a reference for a job offer at Yammer. It was a great offer and I almost took it. I ended up turning it down to stay at Honk though. David Sacks told me "I'm making a mistake" when I turned it down. And he may have been right. I don't want to make that mistake again.
 
 Help me with the rest of the response.
@@ -644,7 +643,6 @@ Updated. Filename now includes the author's slug: `20260326-linkedin-bob-remeika
 Reload and re-drag.
 
 Got `20260326-linkedin-unknown-7442567335229444096.md` for snapshot /home/brian/work/btakita/agent-loop/tmp/linked-in-post-snapshot-2.html
-
 
 ### Re: "unknown" author in filename
 
@@ -1665,10 +1663,6 @@ Yes. I just started the demo.
 
 ✻ Crunched for 1m 10s
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)
  ▐▛███▜▌   Claude Code v2.1.89
 ▝▜█████▛▘  Opus 4.6 (1M context) · Claude Max
   ▘▘ ▝▝    ~/work/btakita/agent-loop
@@ -1692,10 +1686,6 @@ Yes. I just started the demo.
 
 ✻ Crunched for 1m 10s
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)
 <!-- agent:boundary:a8744100 -->
 <!-- /agent:exchange -->
 

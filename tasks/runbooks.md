@@ -243,7 +243,7 @@ Committed `0398848`, pushed, parent pointer updated.
 
 The following is talking about agent-doc...the ontology should be focused on agent-runbooks:
 - agent-runbooks/ontology/notification.md
-### Re: Removed notification.md from ontology (HEAD)
+### Re: Removed notification.md from ontology
 
 Removed `ontology/notification.md` -- that's agent-doc's domain, not agent-runbooks'. The ontology now has 6 terms focused on agent-runbooks' concerns:
 
@@ -255,7 +255,7 @@ Removed `ontology/notification.md` -- that's agent-doc's domain, not agent-runbo
 - `trigger.md` -- activation phrase
 
 Committed `6b999ea`, pushed, parent pointer updated.
-<!-- agent:boundary:30b85af2 -->
+<!-- agent:boundary:6ec72f8d -->
 <!-- /agent:exchange -->a
 
 ## Pending / Not Built

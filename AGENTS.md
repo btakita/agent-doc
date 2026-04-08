@@ -55,6 +55,7 @@ agent-loop/
 - Diff behavior between main and your changes when relevant.
 - Ask yourself: "Would a staff engineer approve this?"
 - Run tests, check logs, demonstrate correctness.
+- **Follow all runbooks and checklists rigorously.** "Approval" signals like "do", "go", "yes" mean "execute with full quality processes" — NOT "move fast and skip steps." Every runbook step applies regardless of how the task was initiated.
 
 ### 5. Demand Elegance (Balanced)
 - For non-trivial changes: pause and ask "is there a more elegant way?"
@@ -82,6 +83,7 @@ agent-loop/
 - **Simplicity First:** Make every change as simple as possible. Minimal code impact.
 - **No Laziness:** Find root causes. No temporary fixes. Senior developer standards.
 - **Minimal Impact:** Changes should only touch what's necessary. Avoid introducing bugs.
+- **No Confident Hallucination:** If you don't know, say "I don't know." If you speculate, label it as speculation. Never present unverified claims as facts.
 
 ## Security — Secret Handling
 
@@ -92,6 +94,15 @@ agent-loop/
 - If a command requires a secret, always wrap it with `pass` or reference an env var that's set in the shell profile
 - Never echo, print, or log secrets — not even in error messages
 - If you're unsure whether a value is secret, treat it as secret
+- **Docker mounts:** Never mount the entire `agent-loop/` directory into a Docker container — it contains sensitive files (`mail/`, credentials). Mount only the specific subdirectories needed (e.g., `src/agent-doc` + `src/tmux-router` for manylinux builds).
+
+## Runbooks
+
+On-demand procedures in `.agent/runbooks/`. Follow these when performing the corresponding task:
+
+- **Precommit**: `.agent/runbooks/precommit.md`
+- **Prerelease**: `.agent/runbooks/prerelease.md`
+- **LinkedIn posts**: `.agent/runbooks/linkedin-post.md`
 
 ## Conventions
 

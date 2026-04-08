@@ -135,7 +135,7 @@ rm ~/Videos/2026-04-07\ 16-00-17.mp4
 1.4 GB, 32 min, 1920×1080 @ 6 Mbps — same profile as the last one. Compressing in background with CRF 25.
 
 Output: `2026-04-07 09-00-51-compressed.mp4` — will notify when done.
-### Re: Compression complete — 09-00-51 (HEAD)
+### Re: Compression complete — 09-00-51
 
 **1.4 GB → 117 MB** (92% reduction, 367 kbps avg).
 
@@ -146,7 +146,7 @@ Check it looks good, then delete the originals:
 rm ~/Videos/2026-04-07\ 09-00-51.mp4
 rm ~/Videos/2026-04-07\ 16-00-17.mp4   # if not already done
 ```
-<!-- agent:boundary:3e4ec915 -->
+<!-- agent:boundary:81b039c1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

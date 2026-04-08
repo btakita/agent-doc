@@ -240,7 +240,6 @@ Did you get Judith's response?
 
 Robert Ward had some comments about this email.
 
-
 #### Re: Judith's Response (2026-03-17)
 
 Judith replied to the kickoff email:
@@ -312,7 +311,6 @@ Robert had some comments about the tone of the emails. Please summarize the comm
 Please help me with a draft response.
 
 Please have corky transcribe use --gpu on this machine by default. Set CLAUDE.local.md or a local skill.
-
 
 #### Re: Reply Sent (2026-03-19)
 
@@ -794,10 +792,6 @@ These items belong in the EFS task file. Removing from this doc's pending.
 
 ✻ Cooked for 34s
 
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ 
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)
       467    - [ ] Token-based document upload flow
       468    - [ ] Notification emails
       469  - [ ] Discuss Ragie content validation with Bob Remeika (scheduled call)
@@ -824,10 +818,8 @@ These items belong in the EFS task file. Removing from this doc's pending.
 
 ✻ Cooked for 34s
 
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ 
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)
+excel
+- costs
 <!-- agent:boundary:bc5167c3 -->
 <!-- /agent:exchange -->
 

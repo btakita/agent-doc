@@ -1,10 +1,22 @@
 [env]
 _.file = [".env"]
-_.path = [".bin"]
+_.path = [".bin", ".venv/bin"]
 
 [tools]
 bun = "latest"
-python = "3.14"
+python = "3.12"
 
 [settings]
 python.uv_venv_auto = true
+
+[tasks.qwen32]
+description = "Qwen 32B model"
+run = "vllm serve Qwen/Qwen2.5-Coder-32B-Instruct-AWQ  --host 0.0.0.0 --port 8000  --dtype auto"
+
+[tasks.qwen72]
+description = "Qwen 72B model with CPU offload"
+run = "vllm serve Qwen/Qwen2.5-Coder-72B-Instruct-AWQ --host 0.0.0.0 --port 8000 --dtype auto --cpu-offload-gb 20"
+
+[tasks.litellm-proxy]
+description = "litellm proxy for claude code"
+run = "litellm --model openai/Qwen2.5-Coder-32B-Instruct-AWQ --api_base http://localhost:8000/v1 --port 4000"

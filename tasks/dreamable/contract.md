@@ -293,12 +293,12 @@ The blanket language ("owned by or administered by Consultant") covers all repos
 Email draft updated at `mail/drafts/2026-04-06-proposed-addendum-to-consulting-agreement-prior-inventions-i.md`. Ready to push to Gmail Drafts on your approval.
 
 Please send email
-### Re: Email pushed (HEAD)
+### Re: Email pushed
 
 Email pushed to Gmail Drafts. Open your Gmail drafts to review and send to rob@dreamable.com.
 
 Subject: *Proposed Addendum to Consulting Agreement — Prior Inventions & IP Carve-Out*
-<!-- agent:boundary:0704143f -->
+<!-- agent:boundary:d57ea336 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

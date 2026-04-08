@@ -5,22 +5,19 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 ---
 
-## Status (HEAD)
+## Status
 
 <!-- agent:status patch=replace -->
 <!-- /agent:status -->
 
-## Exchange (HEAD)
+## Exchange
 
 <!-- agent:exchange patch=append -->
+We have runbooks, rules, and memories.
+Do memories cover general on demand contexts.
 <!-- /agent:exchange -->
 
-## Console (HEAD)
-
-<!-- agent:console patch=replace -->
-<!-- /agent:console -->
-
-## Pending / Not Built (HEAD)
+## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 <!-- /agent:pending -->

@@ -252,7 +252,7 @@ Transcript: [`tasks/research/transcripts/filevine-interview-2026-04-07.md`](tran
 ❯ - Chris Smith
 ❯ - Cain Elliott
 ❯ - Stuart Hiller
-### Re: Retranscription with named speakers (HEAD)
+### Re: Retranscription with named speakers
 
 Done. Chunked diarization (8 × 600s chunks) kicked in when full-audio quality was poor, producing **434 speaker segments / 4 speakers** vs the previous 4 segments / 2 speakers.
 
@@ -272,7 +272,7 @@ Chris Smith described the Forward Deployed Engineer role in detail:
 3. **Innovation piece** — separate track (Stuart's line: "the innovation piece... really exciting portion")
 
 **Key implication:** This is a data engineering + integration + AI-pipeline role, not a product feature team. The forward-deployed angle means working directly with specific firm configurations, which maps to your ontology/context precision work.
-<!-- agent:boundary:d17537e7 -->
+<!-- agent:boundary:05a72376 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

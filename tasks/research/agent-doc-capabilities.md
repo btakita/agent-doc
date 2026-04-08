@@ -147,10 +147,6 @@ completed
 ● Both research agents completed (after the response was already written). Their findings confirm the analysis — notably the first agent also found the ExecutionMode enum in config.rs (Hybrid/Parallel/Sequential) which I didn't mention in
   the response. That's an existing configuration-driven routing mechanism, though it's deterministic rather than adaptive. The document already covers the key gap accurately.
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)
    unlikely to need rework            │ Changes need review before merging to main               │
   ├─────────────────┼───────────────────────────────────────────────────────────────────────┼──────────────────────────
   ────────────────────────────────────┼──────────────────────────────────────────────────────────┤
@@ -207,10 +203,6 @@ completed
 ● Both research agents completed (after the response was already written). Their findings confirm the analysis — notably the first agent also found the ExecutionMode enum in config.rs (Hybrid/Parallel/Sequential) which I didn't mention in
   the response. That's an existing configuration-driven routing mechanism, though it's deterministic rather than adaptive. The document already covers the key gap accurately.
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)
 <!-- agent:boundary:dc9d2038 -->
 <!-- /agent:exchange -->
 

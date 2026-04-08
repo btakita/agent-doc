@@ -43,3 +43,4 @@ Thank you.
 - JetBrains docs: [Plugin Compatibility](https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html) | [Verifying Compatibility](https://plugins.jetbrains.com/docs/intellij/verifying-plugin-compatibility.html)
 
 ## User
+

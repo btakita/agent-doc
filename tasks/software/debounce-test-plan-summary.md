@@ -349,7 +349,7 @@ Each test includes:
 
 ---
 
-## References (HEAD)
+## References
 
 - **debounce.rs**: In-process state, cross-process signals, typing indicators, status files
 - **preflight.rs**: Pre-agent checks, 3-second timeout, debounce wait

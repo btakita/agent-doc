@@ -181,7 +181,6 @@ This resonates — the ability to test ideas at the speed of thought completely 
 
 Would love to see what you're building. Following!
 
-
 From David Bethune
 
 > It's funny how that, after decades of programming where no one questions your chops (shipped products, right?), if we use AI now suddenly we have abdicated all conscious thought and understanding of coding. How would that happen? Did farmers forget about basic agriculture because farming equipment made ag faster and easier. I think not! Ag got bigger and fed more people with tools. There was no retraction or regress.
@@ -315,7 +314,6 @@ Should we post the following today: Sunday 15:00:00 Eastern or wait until tomorr
 - LinkedIn post: https://www.linkedin.com/feed/update/urn:li:share:7440756026024488960
 - LinkedIn comment with video link: ID `7440760371260444672`
 
-
 **Re: posting timing**
 
 Per your own decisions in this doc: **Best post times: Tue-Thu, 8-10 AM ET; avoid Mon/Fri and evenings.**
@@ -407,7 +405,6 @@ Blog post with context: https://briantakita.me/posts/agent-resume-recruiter-work
 
 To publish: `corky social publish` or schedule with `scheduled_at` field. Remember to post the first comment with links manually right after publishing.
 It is a blend of vibe coding and structured collaboration. I'm not afraid of vibe coding personally. Both vibe coding and structured collaboration can be useful
-
 
 **Re: vibe coding framing**
 
@@ -652,65 +649,7 @@ You're right — LinkedIn's menu for post authors shows **Delete**, not **Hide**
 The engagement count loss is negligible — better than leaving a scam email visible on your post.
 
 **For Elvio Sacchi** (shown in screenshot) — that looks like a legitimate recruiter comment ("We're currently hiring for several industries..."). Worth keeping or replying to.
-       #12570            ⚖️  Pre-call outreach strategy for Ragie partnership discussion
-       #12571            ⚖️  Client use case disclosure strategy deferred to call
-
-     #S3638 Generate call structure document for Bob Remeika meeting from task file (Apr 2, 11:12 AM)
-
-     tmp/bob-remeika-call-structure.md
-       #12572  11:13 AM  ✅  Call structure document created for Ragie CEO meeting
-
-     tmp/bob-remeika-call-structure.html
-       #12573            ✅  PDF call structure generated for Bob Remeika meeting
-
-     tasks/professional/bob-remeika.md
-       #12574  11:24 AM  ✅  Added one-page summary constraint to Bob Remeika call structure document
-
-     tmp/bob-remeika-call-structure.md
-       #12575            🔄  Condensed Bob Remeika call structure into one-page table format
-
-     tasks/professional/bob-remeika.md
-       #12576  11:26 AM  🟣  Generated call structure PDF for Bob Remeika meeting
-
-     #S3639 Generate call preparation PDF for Bob Remeika meeting with structured agenda blocks (Apr 2, 11:26 AM)
-
-     tmp/bob-remeika-call-structure.md
-       #12577  11:26 AM  🔄  Restructured call document from table to hierarchical format with compact CSS
-
-
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ❯    ID.
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)37777
-       #12570            ⚖️  Pre-call outreach strategy for Ragie partnership discussion
-       #12571            ⚖️  Client use case disclosure strategy deferred to call
-
-     #S3638 Generate call structure document for Bob Remeika meeting from task file (Apr 2, 11:12 AM)
-
-     tmp/bob-remeika-call-structure.md
-       #12572  11:13 AM  ✅  Call structure document created for Ragie CEO meeting
-
-     tmp/bob-remeika-call-structure.html
-       #12573            ✅  PDF call structure generated for Bob Remeika meeting
-
-     tasks/professional/bob-remeika.md
-       #12574  11:24 AM  ✅  Added one-page summary constraint to Bob Remeika call structure document
-
-     tmp/bob-remeika-call-structure.md
-       #12575            🔄  Condensed Bob Remeika call structure into one-page table format
-
-     tasks/professional/bob-remeika.md
-       #12576  11:26 AM  🟣  Generated call structure PDF for Bob Remeika meeting
-
-     #S3639 Generate call preparation PDF for Bob Remeika meeting with structured agenda blocks (Apr 2, 11:26 AM)
-
-     tmp/bob-remeika-call-structure.md
-       #12577  11:26 AM  🔄  Restructured call document from table to hierarchical format with compact CSS
-
-
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ❯    ID.
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)37777
 <!-- agent:boundary:f38dd9e8 -->
 <!-- /agent:exchange -->

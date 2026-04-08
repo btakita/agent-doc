@@ -113,7 +113,7 @@ For dedicated servers specifically (bare metal, not shared WordPress), pricing s
 ✻ Baked for 1m 7s
 
 How do I export a wordpress website?
-### Re: How to Export a WordPress Website (HEAD)
+### Re: How to Export a WordPress Website
 
 There are a few methods depending on what you need:
 
@@ -155,7 +155,7 @@ For a complete migration (moving hosts, cloning site):
 - On the new site: install the same plugin, upload the package, follow the wizard
 
 **All-in-One WP Migration** is the simplest — exports everything (DB + files) into a single `.wpress` file, handles search-replace for domain changes automatically. Free version is limited to 512MB imports; paid removes the limit.
-<!-- agent:boundary:a89b2295 -->
+<!-- agent:boundary:ccc569ca -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

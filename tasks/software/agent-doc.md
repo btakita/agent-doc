@@ -900,7 +900,8 @@ All three features implemented, compiled, tested (38/38 pass), and release binar
      not thread correctly in Gmail despite attempts to fix Message-ID header issues
 
      unified diff computed showing the user's added feedback about email handling mistakes in the Rob Ross recruitment
-### Re: Yes + Debounce audit (HEAD)
+<!-- agent:boundary:0aa1215a -->
+### Re: Yes + Debounce audit
 
 **Golden-answer test cases approved.** Will proceed with 20-30 cases from real session diffs in the evals phase.
 
@@ -936,7 +937,6 @@ Example: `tasks/file.md` (depth 1) → failed to find `.agent-doc/` → indicato
 **SPEC.md updated:** Added §11.7 documenting the double-pop bug (fixed) and §11.8 updated recommendations (added stale indicator cleanup).
 
 **Audit (`make check`):** 637 tests pass, clippy clean, version-sync clean.
-<!-- agent:boundary:de2c6bc9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

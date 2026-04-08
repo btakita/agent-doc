@@ -216,7 +216,7 @@ Sonnet scored *lower* than Haiku this run — slightly surprising. Key failures:
 - `src/eval-runner/` (Rust CLI)
 
 Next: attack the top failure clusters — comment stripping, approval signals, pending protocol.
-### Re: Phase 1 Complete (HEAD)
+### Re: Phase 1 Complete
 
 Sonnet baseline run complete and saved to `evals/agent-doc/diff-interpretation/baselines/sonnet-2026-04-04.json`.
 
@@ -246,8 +246,7 @@ Sonnet scored *lower* than Haiku this run — slightly surprising. Key failures:
 - `src/eval-runner/` (Rust CLI)
 
 Next: attack the top failure clusters — comment stripping, approval signals, pending protocol.
-<!-- patch:exchange patch=append -->
-### Re: Yes + debounce gaps + tests + SPEC.md + audit (HEAD)
+### Re: Yes + debounce gaps + tests + SPEC.md + audit
 
 **Golden test cases:** 21 cases already exist in `evals/agent-doc/diff-interpretation/cases.yaml` — within the 20-30 target range. ✓
 
@@ -275,7 +274,6 @@ Next: attack the top failure clusters — comment stripping, approval signals, p
 **Audit (`make precommit`):** 4 pre-existing issues:
 - `SKILL.md`, `CLAUDE.md`, `README.md` older than `src/ffi.rs` — stale doc signal
 - `CLAUDE.md:22-35` large table (warning)
-<!-- /patch:exchange -->
 <!-- agent:boundary:e2330fbf -->
 <!-- /agent:exchange -->
 
@@ -285,10 +283,15 @@ Next: attack the top failure clusters — comment stripping, approval signals, p
 - [x] Approve Phase 1 plan
 - [x] Create `evals/` directory structure with agent-doc/diff-interpretation/
 - [x] Extract real session diffs from git history (21 cases)
-- [x] Write diff interpretation test cases (diff input → expected intent)
+- [x] Write diff interpretation test cases (21 cases, within 20-30 target)
 - [x] Build eval runner (Rust CLI: src/eval-runner)
 - [x] Haiku baseline: 9/21 (42.9%), mean 0.57
 - [x] Sonnet baseline: 11/21 (52.4%), mean 0.56
+- [x] Add debounce gap tests: 9/15 enabled in `tests/debounce_gaps_test_plan.rs`
+- [x] Update SPEC.md §11 test coverage references
+- [x] Audit: `make precommit` — 4 pre-existing issues (stale docs vs ffi.rs, large table)
 - [ ] Fix top 3 SKILL.md gaps: comment stripping, single-word approval, pending protocol
 - [ ] Re-run evals to verify improvement vs baseline
+- [ ] Fix 6 blocked debounce tests (expose `crdt::merge`, `preflight::run`, add GC)
+- [ ] Update `SKILL.md`, `CLAUDE.md`, `README.md` to newer than `src/ffi.rs` (audit staleness)
 <!-- /agent:pending -->

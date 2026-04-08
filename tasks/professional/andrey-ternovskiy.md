@@ -40,7 +40,7 @@ Create a contact for andrey-ternovskiy
 - Subject of reporting in Laura Shin's *The Cryptopians*
 
 **Current:** Still listed as Founder & CEO of Chatroulette. Limited public activity in 2024-2025.
-<!-- agent:boundary:16b6e270 -->
+<!-- agent:boundary:7912d24a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

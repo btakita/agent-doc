@@ -1,0 +1,415 @@
+# Agent-doc diff interpretation eval cases
+# Each case provides a diff, document context, and expected behavior.
+# Grading: LLM-graded rubric (does the agent's response match expected_behavior?)
+
+cases:
+  - id: simple-question
+    description: "User asks a straightforward question in exchange"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -14,6 +14,7 @@
+       <!-- agent:exchange patch=append -->
+      +How do I add a new component to a template-mode document?
+       <!-- /agent:exchange -->
+    document_context: |
+      Template-mode document with empty exchange component.
+    expected_behavior:
+      - Responds to the question with relevant information about adding components
+      - Does NOT flag as incomplete edit or ignore the question
+    grading: llm-rubric
+
+  - id: incomplete-fragment
+    description: "User typed a single letter — clearly mid-edit"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -14,6 +14,7 @@
+       <!-- agent:exchange patch=append -->
+      +W
+       <!-- /agent:exchange -->
+    document_context: |
+      Template-mode document with empty exchange component.
+    expected_behavior:
+      - Detects the edit is incomplete or fragmentary (not a real question)
+      - Does NOT attempt to answer or interpret partial text as a complete prompt
+      - Indicates it's waiting for the user to finish
+    grading: llm-rubric
+
+  - id: multi-topic
+    description: "User asks two distinct questions in one edit"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -14,6 +14,10 @@
+       <!-- agent:exchange patch=append -->
+      +1. What grading methods work best for tone evaluation?
+      +
+      +2. How should I structure test cases for threading correctness?
+       <!-- /agent:exchange -->
+    document_context: |
+      Evals planning document with exchange component.
+    expected_behavior:
+      - Addresses BOTH questions/topics separately (not just one)
+      - Does NOT conflate the two topics into a single blended answer
+    grading: llm-rubric
+
+  - id: comment-content-ignored
+    tags: [smoke]
+    description: "User adds an HTML comment — agent must not respond to it"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -14,6 +14,7 @@
+       <!-- agent:exchange patch=append -->
+      +<!-- TODO: revisit this section after lunch -->
+       <!-- /agent:exchange -->
+    document_context: |
+      Template-mode document. Comment stripping should remove this.
+    expected_behavior:
+      - Reports no changes (comment is stripped before diffing)
+      - Does NOT respond to the TODO content
+    grading: llm-rubric
+    notes: "Depends on preflight comment stripping — diff should be null"
+
+  - id: blockquote-annotation
+    description: "User adds inline annotation via blockquote to previous response"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -30,6 +30,8 @@
+       Start with **agent-doc diff interpretation** evals.
+      +
+      +> I'd rather start with corky threading — we have more bugs there
+       <!-- /agent:exchange -->
+    document_context: |
+      Evals planning document where agent previously recommended starting with agent-doc evals.
+    expected_behavior:
+      - Recognizes the blockquote as a user annotation or preference
+      - Responds to the annotation content (not ignoring it)
+      - Does NOT treat the blockquote as agent-authored text
+    grading: llm-rubric
+
+  - id: deletion-of-content
+    tags: [smoke]
+    description: "User deletes a section of agent's previous response"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -40,10 +40,6 @@
+       #### Phase 3: Automation & CI Integration
+      -
+      -1. **Eval runner script** — Python or Rust CLI
+      -2. **Regression detection** — Compare against baseline
+      -3. **Triggered evals** — On file changes
+
+       #### Phase 4: Continuous Improvement Loop
+    document_context: |
+      Evals planning document where user removed Phase 3 details.
+    expected_behavior:
+      - Notices the deletion of Phase 3 content
+      - Asks if user wants to remove Phase 3 entirely or replace it
+      - Does NOT silently re-add the deleted content
+    grading: llm-rubric
+
+  - id: truncated-sentence
+    description: "User was mid-sentence when cycle triggered"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -14,6 +14,7 @@
+       <!-- agent:exchange patch=append -->
+      +I think we should also consider adding evals for the way that
+       <!-- /agent:exchange -->
+    document_context: |
+      Template-mode document with exchange component.
+    expected_behavior:
+      - Detects the sentence is incomplete (ends mid-thought)
+      - Does NOT guess what the user was about to say or treat it as a complete prompt
+    grading: llm-rubric
+
+  - id: structural-reorg
+    description: "User reorganizes sections — moves Phase 4 before Phase 2"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -20,6 +20,12 @@
+       #### Phase 1: Define Success Criteria
+       ...
+      +#### Phase 4: Continuous Improvement Loop
+      +1. Failure analysis
+      +2. Test case expansion
+      +
+       #### Phase 2: Build Eval Test Suites
+      @@ -50,12 +56,6 @@
+       #### Phase 3: Automation
+      -
+      -#### Phase 4: Continuous Improvement Loop
+      -1. Failure analysis
+      -2. Test case expansion
+    document_context: |
+      Evals planning document where user moved Phase 4 up.
+    expected_behavior:
+      - Recognizes the change as reorganization/reordering, not new content
+      - Does NOT re-answer or duplicate content that was moved
+      - Does NOT treat moved content as a new question
+    grading: llm-rubric
+
+  # approval-to-implement moved to evals/agent-doc/agentic/cases.yaml (requires tool access)
+
+  - id: mixed-valid-and-comment
+    description: "User adds content alongside comments (comments stripped by preflight)"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -14,6 +14,7 @@
+       <!-- agent:exchange patch=append -->
+      +Can you add a latency eval for the agent-doc write command?
+       <!-- /agent:exchange -->
+    document_context: |
+      Template-mode document with exchange component. User also added HTML
+      comments in the same edit, but preflight stripped them before computing
+      the diff. Only the non-comment content appears here.
+    expected_behavior:
+      - Responds to the question about adding a latency eval
+      - Does NOT mention comments or suggest anything was stripped
+    grading: llm-rubric
+    notes: "Post-preflight diff — comments already stripped. Tests that model responds normally to clean content."
+
+  # === Real-world patterns from git history ===
+
+  - id: inline-colon-annotation
+    tags: [smoke]
+    description: "User appends feedback to agent's sentence with colon separator"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -35,7 +35,7 @@
+       <!-- agent:exchange patch=append -->
+       ### Re: Window 0 Bug
+
+      -The debounce passed even though your edit was logically incomplete.
+      +The debounce passed even though your edit was logically incomplete.: Not true. I was in the middle of typing. Is there a gap in the plugin debounce detection?
+       <!-- /agent:exchange -->
+    document_context: |
+      Agent previously diagnosed a debounce issue. User is correcting the agent's claim
+      by appending feedback directly to the end of the agent's sentence using ": " separator.
+    expected_behavior:
+      - Recognizes the colon-appended text as user feedback or correction (not a new question)
+      - Addresses the user's inline annotation specifically
+      - Does NOT treat the entire line as agent-authored
+      - Does NOT ignore the user's addition
+    grading: llm-rubric
+
+  - id: boundary-only-change
+    tags: [smoke]
+    description: "Only the boundary UUID changed — no real user edit"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -50,7 +50,7 @@
+       Start with **agent-doc diff interpretation** evals.
+      -<!-- agent:boundary:abc12345 -->
+      +<!-- agent:boundary:def67890 -->
+       <!-- /agent:exchange -->
+    document_context: |
+      Template-mode document. The boundary marker UUID rotated but no user content changed.
+    expected_behavior:
+      - Recognizes the boundary UUID change as automated housekeeping, NOT a user edit
+      - Reports no meaningful changes or states nothing to respond to
+      - Does NOT generate a substantive response about the boundary change
+    grading: llm-rubric
+    notes: "Boundary UUID changes are mechanical artifacts, not user edits"
+
+  - id: head-label-removal
+    tags: [smoke]
+    description: "Agent's (HEAD) label removed from section heading — mechanical cleanup"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -30,7 +30,7 @@
+       <!-- agent:exchange patch=append -->
+
+      -### Re: Eval Framework (HEAD)
+      +### Re: Eval Framework
+
+       Here is the proposed plan...
+    document_context: |
+      Template document where the (HEAD) marker from a previous agent response was removed
+      during preflight boundary repositioning.
+    expected_behavior:
+      - Recognizes this as agent artifact cleanup, not a user edit
+      - Reports no meaningful changes
+      - Does NOT generate a response
+    grading: llm-rubric
+
+  # single-word-approval moved to evals/agent-doc/agentic/cases.yaml (requires tool access)
+
+  - id: pasted-terminal-output
+    description: "User pastes terminal output as context alongside a question"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -14,6 +14,16 @@
+       <!-- agent:exchange patch=append -->
+      +The stash window is missing. Here's what I see:
+      +
+      +```
+      +$ tmux list-windows -t 0
+      +0: agent-doc* (1 panes) [200x50]
+      +2: zsh (1 panes) [200x50]
+      +```
+      +
+      +Where did window 1:stash go?
+       <!-- /agent:exchange -->
+    document_context: |
+      Agent-doc session document. User pasted tmux list-windows output showing
+      a gap at window index 1 (stash window missing).
+    expected_behavior:
+      - Identifies and responds to the actual question (not just the pasted output)
+      - Uses the terminal output as context, not as the primary content
+      - Does NOT just echo back or summarize the terminal output
+    grading: llm-rubric
+
+  - id: multi-item-instruction-list
+    description: "User provides a checklist of items to implement"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -70,6 +70,10 @@
+       Start with agent-doc diff interpretation evals.
+      +Implement:
+      +- [ ] IPC silent failure bug — add error propagation
+      +- [ ] FFI debounce bridge — file-based typing indicators
+      +- [ ] Truncation recheck timing — 3-iteration stability
+       <!-- /agent:exchange -->
+    document_context: |
+      Agent-doc bugs document with exchange and pending components.
+      The user is instructing the agent to implement three specific fixes.
+      <!-- agent:pending -->
+      - [ ] Review open bugs
+      <!-- /agent:pending -->
+    expected_behavior:
+      - Treats each checklist item as a separate work item to address
+      - Acknowledges all three items individually (IPC, FFI debounce, truncation)
+      - Describes approach or prioritization for the items
+      - Does NOT bundle all items into a single vague acknowledgment
+    grading: llm-rubric
+
+  - id: single-word-correction
+    tags: [smoke]
+    description: "User corrects a single word in agent's prior response"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -25,7 +25,7 @@
+       ### Re: Debounce Analysis
+
+      -The mtime detection has obvious gaps due to the cache then flush cycle.
+      +The mtime detection has obvious gaps due to the buffer then flush cycle.
+
+       This means edits within the flush window may be missed.
+    document_context: |
+      Agent previously wrote "cache then flush cycle" — user corrected to "buffer then flush cycle".
+    expected_behavior:
+      - Notices the user corrected a specific word (e.g. cache → buffer)
+      - Acknowledges the correction briefly
+      - Does NOT re-explain the entire concept or ignore the change
+    grading: llm-rubric
+
+  - id: mid-sentence-truncated-real
+    description: "Real truncated edit from git history — sentence cuts off mid-phrase"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -45,6 +45,7 @@
+       <!-- agent:exchange patch=append -->
+      +Why do you keep on opening
+       <!-- /agent:exchange -->
+    document_context: |
+      Agent-doc session. User was typing a question about tmux window management
+      but the debounce cycle triggered before they finished.
+    expected_behavior:
+      - Detects the edit is incomplete (sentence cut off mid-word or mid-thought)
+      - Does NOT guess what user was asking about or treat it as complete
+      - Flags it as partial or indicates waiting for the rest
+    grading: llm-rubric
+
+  - id: inline-annotation-corrections
+    description: "User appends corrections to agent's numbered list items"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -30,7 +30,7 @@
+       ### Re: Layout Issues
+
+      -1. Window 0 missing — agent-doc pane is at index 2 instead of 0.
+      +1. Window 0 missing — agent-doc pane is at index 2 instead of 0.: Fixed, moved to 0
+      -3. Stash window gone — session 0 no longer has a stash window.
+      +3. Stash window gone — session 0 no longer has a stash window.: We should have 1:stash now.
+    document_context: |
+      Agent listed layout issues. User appended corrections to two items using colon separator.
+    expected_behavior:
+      - Recognizes the colon-appended text as user corrections/feedback
+      - Addresses both corrections (Window 0 fix and stash window status)
+      - Does NOT treat the entire lines as agent-authored
+    grading: llm-rubric
+
+  - id: truncated-line-no-change
+    description: "Diff shows a line that appears changed but content is identical (truncated)"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -35,5 +35,5 @@
+
+      -I saw 0:agent-doc was earlier than what you are t
+      +I saw 0:agent-doc was earlier than what you are t
+    document_context: |
+      Agent-doc session. The diff shows a line that appears modified but the content
+      is identical — this is a truncated sentence with no actual change.
+    expected_behavior:
+      - Recognizes that the line content is identical (no real change)
+      - Reports no meaningful changes or flags the truncation
+      - Does NOT generate a substantive response about unchanged content
+    grading: llm-rubric
+
+  - id: multi-topic-approval-plus-questions
+    description: "User approves prior work AND asks follow-up questions in one edit"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -80,6 +80,11 @@
+       Create 20-30 golden-answer test cases from real session diffs.
+      +Yes
+      +What are the gaps in the current debounce logic?
+      +Add tests.
+      +Update SPEC.md
+      +audit
+       <!-- /agent:exchange -->
+    document_context: |
+      Agent-doc session with pending work items. User approves and adds multiple
+      follow-up instructions in a rapid-fire style.
+    expected_behavior:
+      - Recognizes "Yes" as approval for previously proposed work
+      - Addresses the multiple topics separately (question vs instructions)
+      - Does NOT ignore any of the listed items
+    grading: llm-rubric
+
+  - id: url-reference-question
+    description: "User asks a question referencing an external URL"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -14,6 +14,8 @@
+       <!-- agent:exchange patch=append -->
+      +Please review the approach described at https://platform.claude.com/docs/en/test-and-evaluate/develop-tests
+      +and adapt it for our agent-doc eval framework
+       <!-- /agent:exchange -->
+    document_context: |
+      Fresh evals planning document. User wants the agent to review an external
+      resource and apply its concepts.
+    expected_behavior:
+      - Acknowledges the URL reference and its relevance
+      - Produces a concrete response (not a generic summary)
+      - Does NOT ignore the URL or treat it as irrelevant
+    grading: llm-rubric

@@ -46,7 +46,7 @@ Complete. All 6 repos released with cross-platform binaries on GitHub + crates.i
 All items complete. Ecosystem fully built, tested, published, and released.
 
 Is v0.2.0 released?
-### Re: v0.2.0 release (HEAD)
+### Re: v0.2.0 release
 
 Yes. instruction-files v0.2.0 is released with all 5 platform binaries:
 - `instruction-files-x86_64-unknown-linux-gnu.tar.gz`
@@ -56,7 +56,7 @@ Yes. instruction-files v0.2.0 is released with all 5 platform binaries:
 - `instruction-files-x86_64-pc-windows-msvc.zip`
 
 All 6 repos now have successful GitHub Releases with cross-platform binaries.
-<!-- agent:boundary:68966eb1 -->
+<!-- agent:boundary:f432e666 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

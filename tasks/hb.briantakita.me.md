@@ -1,7 +1,8 @@
 ---
 agent_doc_session: c4d42e23-85d9-4810-b88c-5c21d32e697d
-tmux_session: '23'
-agent_doc_mode: template
+tmux_session: '0'
+agent_doc_format: template
+agent_doc_write: crdt
 ---
 
 
@@ -39,5 +40,4 @@ Converted to template mode and compacted conversation history (142 lines → ~30
 
 compact this file
 File is already compact (~40 lines). Merged input/output → exchange component. Ready for next task.
-<!-- agent:boundary:e9df774c -->
 <!-- /agent:exchange -->

@@ -206,7 +206,7 @@ match crdt::merge(&state, &ours, &theirs) {
 
 ---
 
-## Acceptance Criteria (HEAD)
+## Acceptance Criteria
 
 Test is "passing" when:
 1. Code compiles without `#[ignore]`

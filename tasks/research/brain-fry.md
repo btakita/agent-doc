@@ -68,7 +68,7 @@ Please go into more details on steps for process and product design including th
 - Shift metrics from activity—and intensity—to impact.
 - Develop worker skills related to managing AI workload.
 - Strategically deploy human attention as a finite resource.
-### Re: Detailed Leadership Recommendations — Process & Product Design (HEAD)
+### Re: Detailed Leadership Recommendations — Process & Product Design
 
 The article's "Lessons for Leaders" section frames the core insight: *"The difference between [productivity and overload] is not how much AI an individual uses, but how workers, teams, leaders, and organizations shape its use."*
 
@@ -164,7 +164,7 @@ The article's "Lessons for Leaders" section frames the core insight: *"The diffe
 | Attention | Budget attention like money | Treat oversight as free |
 | Tool design | Reduce working memory load | Add oversight layers |
 | Team structure | Embed AI as collective capability | Make AI an individual differentiator |
-<!-- agent:boundary:cf0d8bab -->
+<!-- agent:boundary:f6c2bb12 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

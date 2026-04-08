@@ -353,7 +353,7 @@ I suspect that we don't need to release...just commit and push?
 - **For consumers**: any crate can now `use existence::{config, markdown, commands}` for ontology tooling
 
 We currently have .claude/skills/module-harness/runbooks/ontology-references.md. This should be in module-harness itself.
-### Re: Move ontology-references runbook to module-harness (HEAD)
+### Re: Move ontology-references runbook to module-harness
 
 Done. Moved `.claude/skills/module-harness/runbooks/ontology-references.md` into `src/module-harness/runbooks/ontology-references.md`.
 
@@ -363,7 +363,7 @@ Done. Moved `.claude/skills/module-harness/runbooks/ontology-references.md` into
 3. Removed the old skill-local copy and its now-empty `runbooks/` directory
 
 This way the runbook ships with the module-harness crate and is available to anyone using it, not just agent-loop skill users.
-<!-- agent:boundary:1b1e48d3 -->
+<!-- agent:boundary:339b1f4f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

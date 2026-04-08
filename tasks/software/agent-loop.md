@@ -173,7 +173,7 @@ release
 - `src/agent-memories/rules/runbooks/skill-harness` — CI fix only, no version bump needed
 - `src/eval-runner` — internal tool, not published to crates.io
 ❯ - `philosophy`, `resume`, `mail` — content repos, no release targe
-### Re: transcript too short (HEAD)
+### Re: transcript too short
 
 Found the bug. The `collapse_repeated_phrases` hallucination detector in `engine.rs` was falsely truncating transcripts:
 
@@ -194,7 +194,9 @@ corky transcribe --diarize --speakers "Brian,Interviewer" ~/Videos/2026-04-07\ 1
 Transcript should be significantly longer. Say "publish corky" when it looks correct.
 
 **Note:** This bug also existed in 0.26.0/0.26.1 — good catch during testing.
-<!-- agent:boundary:4887e6fb -->
+
+commit + push all submodules
+<!-- agent:boundary:a201f25b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

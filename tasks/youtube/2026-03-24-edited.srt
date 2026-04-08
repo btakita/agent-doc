@@ -1,0 +1,2211 @@
+[00:00:00.000 --> 00:00:10.420] Hey everyone, this is Brian again and we are going through more messy bug fixes with AgentDoc.
+[00:00:10.420 --> 00:00:14.840] So how do we end up here?
+[00:00:14.840 --> 00:00:42.640] So I start basically, I'm transitioning away from having the TMUC session in the front matter and having the source of truth of the TMUC session be in AgentDoc project configuration.
+[00:00:42.640 --> 00:00:46.300] And that's going to be in here somewhere.
+[00:00:46.300 --> 00:00:49.620] I believe it's in config.
+[00:00:49.620 --> 00:00:51.480] Yeah.
+[00:00:51.480 --> 00:00:55.140] So this is the source of truth for this project.
+[00:00:55.140 --> 00:01:06.980] All the, what was happening was we were saving the TMUC session in all the front matter and all the task files.
+[00:01:06.980 --> 00:01:08.940] And they were different.
+[00:01:08.940 --> 00:01:20.540] And the source, actually the binary was reading that and was getting confused when the values were basically not zero and they were different.
+[00:01:21.820 --> 00:01:25.740] So let me do a quick check actually.
+[00:01:25.740 --> 00:01:32.140] Because, um, this is actually a good check.
+[00:01:32.140 --> 00:01:45.100] So even now it's incorrect because I had, as I was running through things, there was a bug where we killed all the pains in session zero.
+[00:01:45.340 --> 00:01:49.800] And now I think session six is the active session.
+[00:01:49.800 --> 00:02:08.940] So I'm just kind of going through, uh, just a bunch of sort of downstream effects with the, um, synchronization between the editor, you know, and AgentDoc session and TMUC.
+[00:02:10.940 --> 00:02:24.060] And I'm also really beginning to reconsider, you know, I, I like TMUCs a lot and everybody seems to like TMUCs or not everybody, but a lot of people do seem to like TMUCs as far as working within.
+[00:02:26.540 --> 00:02:37.140] So I think that's the cloud code, um, the cloud code ecosystem, you know, with the command line, but it's hard to sync up, you know, in, in, with the editor.
+[00:02:37.140 --> 00:02:41.500] Um, people have just been raining straight here.
+[00:02:41.500 --> 00:02:53.140] So the whole AgentDoc concept is we require synchronization and for most parts been working pretty solid as long as, you know, the values weren't really deviating.
+[00:02:53.140 --> 00:03:01.740] The TMUC session wasn't changing, but I kind of ran through some edge cases that I'm fixing up now and tightening up.
+[00:03:01.740 --> 00:03:09.300] So yeah, I've been kind of running through as I hit like one set edge cases, I fixed it.
+[00:03:09.300 --> 00:03:16.060] And now here's like another kind of nasty set of edge cases that I'm trying to reconcile.
+[00:03:16.060 --> 00:03:20.820] So, um, yeah, just, uh, continuing on.
+[00:03:20.820 --> 00:03:33.580] So in, so we are currently running, um, down to TMUCs, I believe it's TMUC session six, but let me make sure.
+[00:03:33.580 --> 00:03:48.780] Um, yeah, so we're currently down to, um, TMUC session six.
+[00:03:50.820 --> 00:04:03.580] Um, um, shows TMUC session one or zero.
+[00:04:03.580 --> 00:04:08.700] TMUC session equals zero.
+[00:04:08.700 --> 00:04:20.580] Um, we are currently recovering from agent, an agent doc bug.
+[00:04:20.820 --> 00:04:39.820] Um, we are currently running, um, where the TMUC session zero was killed due to all of the windows being killed.
+[00:04:39.820 --> 00:04:58.820] So, um, agent doc config dot tumul should be in sync when the new found TMUC session changes.
+[00:04:58.820 --> 00:05:05.820] Please add to agent doc sync.
+[00:05:05.820 --> 00:05:07.820] And there's, there's, there's, there's sync and there's repair.
+[00:05:07.820 --> 00:05:10.820] Please add to agent doc repair.
+[00:05:10.820 --> 00:05:11.820] Please add to agent doc repair.
+[00:05:11.820 --> 00:05:17.820] Please add to agent doc repair.
+[00:05:17.820 --> 00:05:19.820] Agent doc sync.
+[00:05:19.820 --> 00:05:25.820] I'll say agent doc run.
+[00:05:25.820 --> 00:05:29.820] Agent doc start.
+[00:05:29.820 --> 00:05:36.820] agent doc and any other commands.
+[00:05:36.820 --> 00:05:48.820] Basically, this, we, basically we should always be in sync.
+[00:05:48.820 --> 00:06:05.820] So, I had an idea, which is, you know, I've been looking at evals and specs and all that.
+[00:06:05.820 --> 00:06:23.820] So, one of the things that's kind of been going on with, as I'm working with these documents, these agent documents, is that things are kind of in different places.
+[00:06:23.820 --> 00:06:30.820] So, I just kind of had the realization that we need to really tighten up where things are located.
+[00:06:30.820 --> 00:06:42.820] So, I was thinking, okay, if you're working with agent doc source code, let's just put the spec and even the evals.
+[00:06:42.820 --> 00:06:49.820] And I would say, there I say contracts inside the source files themselves as comments.
+[00:06:49.820 --> 00:06:53.820] So, I'm going to try to do that.
+[00:06:53.820 --> 00:06:58.820] I think that it will help keep things in sync better.
+[00:06:58.820 --> 00:07:03.820] And it'll help really codify architecture.
+[00:07:03.820 --> 00:07:11.820] Because, you know, I think we should have a separate spec file or set of spec files that are functional and independent of architecture.
+[00:07:11.820 --> 00:07:17.820] It's just more of the software should do this and that.
+[00:07:17.820 --> 00:07:20.820] Not really necessarily specify the architecture.
+[00:07:20.820 --> 00:07:30.820] But we should also have another layer of specs, evals, and whatnot within the modules themselves.
+[00:07:30.820 --> 00:07:45.820] And I think that that will help us to really tighten up sort of the invariance that we can even have, probably have assertions.
+[00:07:45.820 --> 00:07:52.820] And, you know, maybe not like, we can have like binary assertions, but we can also have like agentic assertions as well.
+[00:07:52.820 --> 00:07:54.820] And evals.
+[00:07:54.820 --> 00:08:04.820] And maybe even like record the last set of, you know, eval metrics even within the modules as comments.
+[00:08:04.820 --> 00:08:25.820] And I think that that will help us to really track, you know, and also to really get really granular with the different aspects of, you know, spec-ness and evals and all that.
+[00:08:25.820 --> 00:08:38.820] And we can, you know, treat this as like a set of layers rather than just having one overarching set of specs that are kind of like in parallel with the rest of the software.
+[00:08:38.820 --> 00:08:44.820] We should, you know, we should have the overarching, but also the modular level as well.
+[00:08:44.820 --> 00:08:50.820] So I'm not sure if I'm going to get to that.
+[00:08:50.820 --> 00:08:55.820] I will try to, but we got quite a list here.
+[00:08:55.820 --> 00:08:59.820] Well, actually the pending is kind of getting smaller.
+[00:08:59.820 --> 00:09:01.820] It was a lot bigger.
+[00:09:01.820 --> 00:09:12.820] We had some catastrophic bugs and it was kind of interesting because it really had a very long list with the pending.
+[00:09:12.820 --> 00:09:19.820] So it seems to have shrunk down the four items now.
+[00:09:19.820 --> 00:09:23.820] I guess.
+[00:09:23.820 --> 00:09:24.820] Okay.
+[00:09:24.820 --> 00:09:26.820] So let me try.
+[00:09:26.820 --> 00:09:28.820] I'm going to say continue.
+[00:09:28.820 --> 00:09:29.820] Okay.
+[00:09:29.820 --> 00:09:30.820] Let's see what happened.
+[00:09:30.820 --> 00:09:32.820] So we have a problem.
+[00:09:32.820 --> 00:09:33.820] Let's make sure.
+[00:09:33.820 --> 00:09:34.820] Okay.
+[00:09:34.820 --> 00:09:35.820] We're on sick.
+[00:09:35.820 --> 00:09:40.820] Auto sync the config when the configured session is dead.
+[00:09:40.820 --> 00:09:41.820] Configure us.
+[00:09:41.820 --> 00:09:43.820] Add, say project update.
+[00:09:43.820 --> 00:09:46.820] Projects, you must session functions.
+[00:09:46.820 --> 00:09:47.820] Route.
+[00:09:47.820 --> 00:09:50.820] Both run with Tmux.
+[00:09:50.820 --> 00:09:52.820] Auto start X now.
+[00:09:52.820 --> 00:09:53.820] Check.
+[00:09:53.820 --> 00:09:55.820] If dead, fall back.
+[00:09:55.820 --> 00:10:01.820] So I think we should also have a good notion of back testing.
+[00:10:01.820 --> 00:10:12.820] Like kind of like with a portfolio, like with automated trading.
+[00:10:12.820 --> 00:10:18.820] It would be really good, ideal to have back testing with real software.
+[00:10:18.820 --> 00:10:33.820] So, had we had certain agentic hardness context would some edits or software development would have gone more smoothly.
+[00:10:33.820 --> 00:10:48.820] Given maybe a consistent baseline for the back test.
+[00:10:48.820 --> 00:10:52.820] I'm not exactly sure if I want to take that on right now.
+[00:10:52.820 --> 00:11:01.820] But I think that that would be a very effective way of evals.
+[00:11:01.820 --> 00:11:02.820] As well.
+[00:11:02.820 --> 00:11:14.820] Because I noticed that a lot of times evals are really basic.
+[00:11:14.820 --> 00:11:20.820] They have, you know, you have like your list of your expected and, you know, values and what you get and how close are you to it.
+[00:11:20.820 --> 00:11:29.820] But it's not really a complex system like what we're doing here.
+[00:11:29.820 --> 00:11:33.820] And this is kind of where it really matters is in the complex systems.
+[00:11:33.820 --> 00:11:39.820] So it would be hard to turn it into a metric as well.
+[00:11:39.820 --> 00:11:47.820] So, you know, it might, you know, right now it is like very qualitative as far as the software that's produced.
+[00:11:47.820 --> 00:12:00.820] But we could have like perhaps like a begin state of the code base, you know, with, you know, basically I'll get revision.
+[00:12:00.820 --> 00:12:07.820] And then maybe like a final spec of where we should head toward and then getting there.
+[00:12:07.820 --> 00:12:16.820] But what kind of complicates, you know, our work's a little bit more complicated right now because the specs are also being iterated on.
+[00:12:16.820 --> 00:12:29.820] And there's a large process of discovery going on with, you know, using the software and dog feeding it to determine what exactly it should do.
+[00:12:29.820 --> 00:12:45.820] So the specs are not static, but nonetheless, I think that sort of like a begin state, a begin to get commit and then back test toward a spec.
+[00:12:45.820 --> 00:12:58.820] So the specs would be useful to compare what is most effective.
+[00:12:58.820 --> 00:13:10.200] evolutionary algorithm sort of iterates on the harness and we maybe we could look at token usage
+[00:13:10.200 --> 00:13:17.060] you know what was able to achieve it with the least amount token usage of course you run into
+[00:13:17.060 --> 00:13:26.960] overfitting which is a problem which sort of all that so i think that yeah this is all kind of
+[00:13:26.960 --> 00:13:37.920] stuff that would be good to do and again i'm not really i kind of just want to get to a release point
+[00:13:37.920 --> 00:13:47.580] but and the nice thing about the back test as well is that we could just start with
+[00:13:47.580 --> 00:13:56.520] any revision in a code base and then say let's get to this point let's get from point a to point b
+[00:13:56.520 --> 00:14:05.040] with different harnesses you know we can use a git work tree or whatever git work trees and then
+[00:14:05.040 --> 00:14:09.280] we can then score the different harness
+[00:14:09.280 --> 00:14:18.360] contexts and configurations and the thing about the harness as well is that there's many different
+[00:14:18.360 --> 00:14:29.840] aspects to a harness, so we would probably have to throw at it, we would have to figure
+[00:14:29.840 --> 00:14:38.180] out what is a good architecture for the harness as well as working this way there. So I think
+[00:14:38.180 --> 00:14:42.840] that's something that people are doing with the evals, but I think that this is a good
+[00:14:42.840 --> 00:14:51.600] way of testing real-world software development or at least the eval for a particular project,
+[00:14:51.600 --> 00:15:03.620] which can be interesting if the software is fairly complex. Okay, so we've got a team
+[00:15:03.620 --> 00:15:11.320] up session working, Resync, ApplyFixes registry, so yeah, we have some safety now that we're
+[00:15:11.320 --> 00:15:18.540] not going to just have it have agent.kill the session. We don't have a stash, we should
+[00:15:18.540 --> 00:15:29.280] have a stash. Maybe if I switch. Okay, good, we got a stash. If I switch back, then cool.
+[00:15:29.280 --> 00:15:36.500] So that worked properly. Alright, so I should ask if we add...
+[00:15:36.500 --> 00:15:57.720] Let's start... Let's begin... Let's begin... Let's begin... Let's begin... Let's begin...
+[00:15:57.720 --> 00:16:12.940] Let's begin... Let's begin... Let's begin... Let's begin... Let's begin... Let's begin...
+[00:16:12.940 --> 00:16:28.160] Let's begin... Let's begin... Let's begin... Let's begin... Let's begin... Let's begin... Let's begin...
+[00:16:28.160 --> 00:16:48.060] module level harness context for each RUST module. This includes specs, agent
+[00:16:48.060 --> 00:17:00.060] contracts, agent, let's say agentic contracts and potentially evals with previous, with
+[00:17:00.060 --> 00:17:10.060] obviously cached results as comments.
+[00:17:18.060 --> 00:17:33.060] I'm kind of curious how this turns out and this is hopefully this will help us to
+[00:17:33.060 --> 00:17:43.060] modularize things because I've been noticing that certain mistakes get repeated. So I think
+[00:17:43.060 --> 00:18:01.060] that's kind of, maybe I should add that. I noticed that some mistakes have been repeated. I believe that
+[00:18:01.060 --> 00:18:18.060] agent harness context will help avoid repeating mistakes. And you know, it would help avoid, would help
+[00:18:18.060 --> 00:18:35.060] avoid mistakes, provide detailed context for each module, assist with, yeah. Yes. Interesting initiative. Okay. So make sure I understand shape,
+[00:18:35.060 --> 00:18:57.060] something like this, the top of each module. Yes. Okay.
+[00:18:57.060 --> 00:19:26.060] Okay. Yeah, I think that looks good. Okay. So before we start, so all modules in, so I like this, you know, I like working bottom up a lot as well as, you know, top down. Of course, I've been working a lot top down, but I think working bottom up,
+[00:19:26.060 --> 00:19:55.060] I think working bottom up really helps make things, makes things concrete. And really helps to tighten up a lot of the, it'll probably help tighten up a lot of the hallucinations. You know, and alpha, such as machine, anything machine learning related. It's kind of like the step, the stage between binary and deterministic logic. Then we have sort of like layers, maybe a few layers,
+[00:19:55.060 --> 00:19:57.060] you know,
+[00:19:57.060 --> 00:19:59.060] potentially of, you know, contracts,
+[00:19:59.060 --> 00:20:03.060] you know, contracts,
+[00:20:03.060 --> 00:20:03.060] specs,
+[00:20:03.060 --> 00:20:24.060] evalves, all that per module. I think that that'll be very, and then we have our like high level, functional level, what should the software do sort of thing. And all that together should reinforce things.
+[00:20:24.060 --> 00:20:48.060] So we should also be able to handle, how do we handle inconsistencies and conflicts. That should be part of the rule set of, you know, in the high level. So, okay, so questions for us start. So all modules. Yes. Yes.
+[00:20:48.060 --> 00:20:52.060] I would say all modules.
+[00:20:52.060 --> 00:20:53.060] Please.
+[00:20:53.060 --> 00:20:53.060] Please.
+[00:20:53.060 --> 00:20:58.060] Eval's format. Should the eval entity be runnable, tied to test or aspirational. I would say, hmm. So what do I mean by eval? Um,
+[00:20:58.060 --> 00:21:00.060] Okay, so, so,
+[00:21:00.060 --> 00:21:02.060] I think really the eval,
+[00:21:02.060 --> 00:21:04.060] I think really the eval,
+[00:21:04.060 --> 00:21:06.060] I think the eval,
+[00:21:06.060 --> 00:21:08.060] this is, this is, this is, this is, um,
+[00:21:08.060 --> 00:21:10.060] this is agentic eval.
+[00:21:10.060 --> 00:21:11.060] So,
+[00:21:11.060 --> 00:21:12.060] So,
+[00:21:12.060 --> 00:21:13.060] measure,
+[00:21:13.060 --> 00:21:14.060] measure,
+[00:21:14.060 --> 00:21:15.060] the effectiveness.
+[00:21:15.060 --> 00:21:15.060] the effectiveness.
+[00:21:15.060 --> 00:21:16.060] So,
+[00:21:16.060 --> 00:21:17.060] the effectiveness.
+[00:21:17.060 --> 00:21:19.060] Okay, so,
+[00:21:19.060 --> 00:21:20.060] of the agent.
+[00:21:20.060 --> 00:21:20.060] of the agent.
+[00:21:20.060 --> 00:21:21.060] of the agent.
+[00:21:21.060 --> 00:21:22.060] So,
+[00:21:22.060 --> 00:21:23.060] the agent,
+[00:21:23.060 --> 00:21:24.060] the agent,
+[00:21:24.060 --> 00:21:25.060] the agent.
+[00:21:25.060 --> 00:21:26.060] Okay, so,
+[00:21:26.060 --> 00:21:26.060] Okay, so,
+[00:21:26.060 --> 00:21:27.060] So,
+[00:21:27.060 --> 00:21:29.060] I think really the eval.
+[00:21:29.060 --> 00:21:30.060] Okay, so,
+[00:21:30.060 --> 00:21:31.060] I think really the eval,
+[00:21:31.060 --> 00:21:32.060] this is, this is, um,
+[00:21:32.060 --> 00:21:33.060] this is,
+[00:21:33.060 --> 00:21:35.060] agentic eval.
+[00:21:35.060 --> 00:21:36.060] So,
+[00:21:36.060 --> 00:21:37.060] measure,
+[00:21:37.060 --> 00:21:38.060] measure,
+[00:21:38.060 --> 00:21:41.060] the effectiveness.
+[00:21:41.060 --> 00:21:51.060] of the agent's harness context.
+[00:21:51.060 --> 00:22:04.060] Context.
+[00:22:04.060 --> 00:22:05.060] Um,
+[00:22:05.060 --> 00:22:12.060] I have an idea to back test.
+[00:22:12.060 --> 00:22:17.060] I would say to back test.
+[00:22:17.060 --> 00:22:22.060] To run back tests.
+[00:22:22.060 --> 00:22:26.060] Start.
+[00:22:26.060 --> 00:22:30.060] And,
+[00:22:30.060 --> 00:22:33.060] having the agent,
+[00:22:33.060 --> 00:22:34.060] the agent,
+[00:22:34.060 --> 00:22:35.060] harness,
+[00:22:35.060 --> 00:22:36.060] implement,
+[00:22:36.060 --> 00:22:37.060] specs,
+[00:22:37.060 --> 00:22:38.060] or,
+[00:22:38.060 --> 00:22:39.060] specs,
+[00:22:39.060 --> 00:22:40.060] to,
+[00:22:40.060 --> 00:22:41.060] I would say target specs.
+[00:22:41.060 --> 00:22:42.060] Quantity,
+[00:22:42.060 --> 00:22:43.060] quantitatively,
+[00:22:43.060 --> 00:22:44.060] compare,
+[00:22:44.060 --> 00:22:44.060] the different.
+[00:22:44.060 --> 00:22:45.060] Okay, so,
+[00:22:45.060 --> 00:22:46.060] you can compare,
+[00:22:46.060 --> 00:22:47.060] the different.
+[00:22:47.060 --> 00:22:48.060] Okay, so,
+[00:22:48.060 --> 00:22:48.060] I, I don't plan on,
+[00:22:48.060 --> 00:22:48.060] the different.
+[00:22:48.060 --> 00:22:49.060] I don't plan on,
+[00:22:49.060 --> 00:22:50.060] the different.
+[00:22:50.060 --> 00:22:51.060] I don't plan on,
+[00:22:51.060 --> 00:22:52.060] the different.
+[00:22:52.060 --> 00:22:53.060] I don't plan on,
+[00:22:53.060 --> 00:22:54.060] the different,
+[00:22:54.060 --> 00:22:55.060] the different,
+[00:22:55.060 --> 00:22:56.060] the different.
+[00:22:56.060 --> 00:22:57.060] I don't plan on,
+[00:22:57.060 --> 00:22:58.060] the different,
+[00:22:58.060 --> 00:22:59.060] the different.
+[00:22:59.060 --> 00:23:00.060] I don't plan on,
+[00:23:00.060 --> 00:23:02.060] the different.
+[00:23:02.060 --> 00:23:04.060] I don't plan on,
+[00:23:04.060 --> 00:23:05.060] the different.
+[00:23:05.060 --> 00:23:06.060] the different.
+[00:23:06.060 --> 00:23:07.060] Okay, so,
+[00:23:07.060 --> 00:23:12.060] I don't plan on,
+[00:23:12.060 --> 00:23:13.060] the different.
+[00:23:13.060 --> 00:23:14.060] Okay, so,
+[00:23:14.060 --> 00:23:16.060] I don't plan on,
+[00:23:16.060 --> 00:23:17.060] actually,
+[00:23:17.060 --> 00:23:18.060] beginning,
+[00:23:18.060 --> 00:23:19.060] the eval,
+[00:23:19.060 --> 00:23:20.060] beginning,
+[00:23:20.060 --> 00:23:21.060] the eval,
+[00:23:21.060 --> 00:23:22.060] I would say,
+[00:23:22.060 --> 00:23:23.060] beginning,
+[00:23:23.060 --> 00:23:24.060] the back tests.
+[00:23:24.060 --> 00:23:25.060] Okay,
+[00:23:25.060 --> 00:23:26.060] and,
+[00:23:26.060 --> 00:23:26.060] the contracts,
+[00:23:26.060 --> 00:23:27.060] are these guarantees,
+[00:23:27.060 --> 00:23:28.060] the module,
+[00:23:28.060 --> 00:23:29.060] make,
+[00:23:29.060 --> 00:23:30.060] to,
+[00:23:30.060 --> 00:23:31.060] agent call,
+[00:23:31.060 --> 00:23:32.060] say both?
+[00:23:32.060 --> 00:23:33.060] Both.
+[00:23:33.060 --> 00:23:34.060] Okay,
+[00:23:34.060 --> 00:23:35.060] so,
+[00:23:35.060 --> 00:23:36.060] let's,
+[00:23:36.060 --> 00:23:37.060] let's,
+[00:23:37.060 --> 00:23:38.060] let's run this.
+[00:23:38.060 --> 00:23:39.060] Alright,
+[00:23:39.060 --> 00:23:40.060] cool,
+[00:23:40.060 --> 00:23:41.060] so,
+[00:23:41.060 --> 00:23:42.060] let's,
+[00:23:42.060 --> 00:23:43.060] let's,
+[00:23:43.060 --> 00:23:44.060] let's run this.
+[00:23:44.060 --> 00:23:45.060] Okay,
+[00:23:45.060 --> 00:23:46.060] so,
+[00:23:46.060 --> 00:23:47.060] let's,
+[00:23:47.060 --> 00:23:48.060] let's run this.
+[00:23:48.060 --> 00:23:48.060] Alright,
+[00:23:48.060 --> 00:23:49.060] cool,
+[00:23:49.060 --> 00:23:50.060] so,
+[00:23:50.060 --> 00:23:51.060] there was an issue,
+[00:23:51.060 --> 00:23:52.060] where,
+[00:23:52.060 --> 00:23:53.060] when I was,
+[00:23:53.060 --> 00:23:54.060] I had a regression,
+[00:23:54.060 --> 00:23:55.060] where,
+[00:23:55.060 --> 00:23:56.060] I ran it from,
+[00:23:56.060 --> 00:23:57.060] the plugin,
+[00:23:57.060 --> 00:23:58.060] and,
+[00:23:58.060 --> 00:23:59.060] it would just,
+[00:23:59.060 --> 00:24:01.060] have one pain,
+[00:24:01.060 --> 00:24:02.060] it would just,
+[00:24:02.060 --> 00:24:03.060] I guess,
+[00:24:03.060 --> 00:24:05.060] kill one of the pains,
+[00:24:05.060 --> 00:24:06.060] so,
+[00:24:06.060 --> 00:24:07.060] that seems to have been fixed,
+[00:24:07.060 --> 00:24:08.060] which is good,
+[00:24:08.060 --> 00:24:09.060] that was a pretty,
+[00:24:09.060 --> 00:24:12.060] critical issue,
+[00:24:12.060 --> 00:24:13.060] that,
+[00:24:13.060 --> 00:24:14.060] we no longer have.
+[00:24:14.060 --> 00:24:16.060] Okay,
+[00:24:16.060 --> 00:24:18.060] so,
+[00:24:18.060 --> 00:24:20.060] I was also,
+[00:24:20.060 --> 00:24:21.060] I was also,
+[00:24:21.060 --> 00:24:22.060] to clean up my videos,
+[00:24:22.060 --> 00:24:23.060] here.
+[00:24:23.060 --> 00:24:24.060] Oh,
+[00:24:24.060 --> 00:24:25.060] okay,
+[00:24:25.060 --> 00:24:26.060] good.
+[00:24:26.060 --> 00:24:27.060] So,
+[00:24:27.060 --> 00:24:28.060] we are,
+[00:24:28.060 --> 00:24:29.060] flopping,
+[00:24:29.060 --> 00:24:30.060] okay,
+[00:24:30.060 --> 00:24:31.060] because I'm recording a new video now,
+[00:24:31.060 --> 00:24:32.060] and I'm getting low in this space,
+[00:24:32.060 --> 00:24:33.060] and I gotta save some money,
+[00:24:33.060 --> 00:24:34.060] so,
+[00:24:34.060 --> 00:24:35.060] alright.
+[00:24:35.060 --> 00:24:36.060] so,
+[00:24:36.060 --> 00:24:37.060] back to the evals,
+[00:24:37.060 --> 00:24:38.060] here.
+[00:24:38.060 --> 00:24:39.060] I'm,
+[00:24:39.060 --> 00:24:41.060] probably going to,
+[00:24:41.060 --> 00:24:42.060] I'm,
+[00:24:42.060 --> 00:24:43.060] probably going to,
+[00:24:43.060 --> 00:24:45.060] I'm not exactly sure,
+[00:24:45.060 --> 00:24:46.060] how I want to do the evals,
+[00:24:46.060 --> 00:24:47.060] because,
+[00:24:47.060 --> 00:24:48.060] I'm not exactly sure,
+[00:24:48.060 --> 00:24:50.060] how I want to do the evals,
+[00:24:50.060 --> 00:24:51.060] because,
+[00:24:51.060 --> 00:24:52.060] there's different types of evals,
+[00:24:52.060 --> 00:24:53.060] you know,
+[00:24:53.060 --> 00:24:54.060] depending on what it's for,
+[00:24:54.060 --> 00:24:56.060] how do we evaluate,
+[00:24:56.060 --> 00:24:57.060] different harnesses,
+[00:24:57.060 --> 00:24:58.060] for,
+[00:24:58.060 --> 00:25:01.060] what it's intended purpose is.
+[00:25:01.060 --> 00:25:02.060] So,
+[00:25:02.060 --> 00:25:03.060] in case of,
+[00:25:03.060 --> 00:25:04.060] agent doc development,
+[00:25:04.060 --> 00:25:05.060] it's pretty,
+[00:25:05.060 --> 00:25:06.060] sophisticated actually,
+[00:25:06.060 --> 00:25:07.060] because,
+[00:25:07.060 --> 00:25:10.060] we're doing some pretty heavy software development,
+[00:25:10.060 --> 00:25:11.060] and,
+[00:25:11.060 --> 00:25:13.060] requirements are fairly sophisticated.
+[00:25:13.060 --> 00:25:14.060] And,
+[00:25:14.060 --> 00:25:15.060] development,
+[00:25:15.060 --> 00:25:16.060] you know,
+[00:25:16.060 --> 00:25:17.060] I basically don't want to hit the same bugs,
+[00:25:17.060 --> 00:25:18.060] over and over and over again.
+[00:25:18.060 --> 00:25:19.060] I want to,
+[00:25:19.060 --> 00:25:21.060] make sure that my harness is,
+[00:25:21.060 --> 00:25:23.060] I don't want to hit the same bugs,
+[00:25:23.060 --> 00:25:24.060] over and over and over again.
+[00:25:24.060 --> 00:25:25.060] I want to,
+[00:25:25.060 --> 00:25:26.060] make sure that my harness is,
+[00:25:26.060 --> 00:25:27.060] I don't want to hit the same bugs,
+[00:25:27.060 --> 00:25:28.060] and I want to,
+[00:25:28.060 --> 00:25:29.060] make sure that my harness is,
+[00:25:29.060 --> 00:25:32.060] doing the right things.
+[00:25:32.060 --> 00:25:35.060] And,
+[00:25:35.060 --> 00:25:36.060] kind of,
+[00:25:36.060 --> 00:25:37.060] smooth,
+[00:25:37.060 --> 00:25:38.060] you know,
+[00:25:38.060 --> 00:25:39.060] out,
+[00:25:39.060 --> 00:25:41.060] some of these rough edges in development.
+[00:25:41.060 --> 00:25:42.060] Without having to,
+[00:25:42.060 --> 00:25:44.060] you have to specify,
+[00:25:44.060 --> 00:25:46.060] things in,
+[00:25:46.060 --> 00:25:47.060] detail.
+[00:25:47.060 --> 00:25:48.060] And,
+[00:25:48.060 --> 00:25:49.060] ultimately the idea is that,
+[00:25:49.060 --> 00:25:51.060] it would be great to,
+[00:25:51.060 --> 00:25:53.060] have this continuously,
+[00:25:53.060 --> 00:25:54.060] update,
+[00:25:54.060 --> 00:25:55.060] without me,
+[00:25:55.060 --> 00:25:57.060] having to attend to this.
+[00:25:57.060 --> 00:25:58.060] So,
+[00:25:58.060 --> 00:26:02.060] I think that,
+[00:26:02.060 --> 00:26:03.060] that goal of,
+[00:26:03.060 --> 00:26:04.060] sort of,
+[00:26:04.060 --> 00:26:05.060] being able to sleep while,
+[00:26:05.060 --> 00:26:07.060] the agent,
+[00:26:07.060 --> 00:26:11.060] develop your software according to what,
+[00:26:11.060 --> 00:26:12.060] you know,
+[00:26:12.060 --> 00:26:13.060] whatever you're trying to do.
+[00:26:13.060 --> 00:26:15.060] And,
+[00:26:15.060 --> 00:26:16.060] there might be,
+[00:26:16.060 --> 00:26:17.060] a way to,
+[00:26:17.060 --> 00:26:20.060] treat this as a general purpose problem.
+[00:26:20.060 --> 00:26:23.060] perhaps in the future.
+[00:26:23.060 --> 00:26:23.060] But,
+[00:26:23.060 --> 00:26:24.060] that's kind of like,
+[00:26:24.060 --> 00:26:24.060] you know,
+[00:26:24.060 --> 00:26:25.060] games were EGI,
+[00:26:25.060 --> 00:26:26.060] in a lot of ways too.
+[00:26:26.060 --> 00:26:27.060] It's,
+[00:26:27.060 --> 00:26:28.060] going to be,
+[00:26:28.060 --> 00:26:29.060] you know,
+[00:26:29.060 --> 00:26:31.060] a lot of it's going to depend on,
+[00:26:31.060 --> 00:26:32.060] you know,
+[00:26:32.060 --> 00:26:33.060] maybe,
+[00:26:33.060 --> 00:26:34.060] if we have like a,
+[00:26:34.060 --> 00:26:35.060] meta,
+[00:26:35.060 --> 00:26:36.060] go meta with this,
+[00:26:36.060 --> 00:26:37.060] which,
+[00:26:37.060 --> 00:26:38.060] which,
+[00:26:38.060 --> 00:26:40.060] can we build a system,
+[00:26:40.060 --> 00:26:42.060] which ultimately builds,
+[00:26:42.060 --> 00:26:44.060] what we're building right now.
+[00:26:44.060 --> 00:26:45.060] With,
+[00:26:45.060 --> 00:26:46.060] including,
+[00:26:46.060 --> 00:26:48.060] you know,
+[00:26:48.060 --> 00:26:49.060] all this stuff.
+[00:26:49.060 --> 00:26:51.060] I guess,
+[00:26:51.060 --> 00:26:56.060] can we have our system figure out how to do this?
+[00:26:56.060 --> 00:26:56.060] You know,
+[00:26:56.060 --> 00:26:57.060] ultimately,
+[00:26:57.060 --> 00:26:58.060] it would be,
+[00:26:58.060 --> 00:27:01.060] can we have our system,
+[00:27:01.060 --> 00:27:03.060] figure out,
+[00:27:03.060 --> 00:27:08.060] how to get to this point,
+[00:27:08.060 --> 00:27:10.060] maybe even more efficiently,
+[00:27:10.060 --> 00:27:12.060] than how we're doing it right now.
+[00:27:12.060 --> 00:27:13.060] And,
+[00:27:13.060 --> 00:27:15.060] that would be like another back test.
+[00:27:15.060 --> 00:27:16.060] So we could,
+[00:27:16.060 --> 00:27:18.060] we could like back test even further back.
+[00:27:18.060 --> 00:27:19.060] We could start from a,
+[00:27:19.060 --> 00:27:22.060] very early point on in this project even.
+[00:27:22.060 --> 00:27:23.060] Where,
+[00:27:23.060 --> 00:27:25.060] we just say,
+[00:27:25.060 --> 00:27:26.060] okay,
+[00:27:26.060 --> 00:27:26.060] well,
+[00:27:26.060 --> 00:27:27.060] get,
+[00:27:27.060 --> 00:27:28.060] let's get from there to,
+[00:27:28.060 --> 00:27:30.060] somewhere else.
+[00:27:30.060 --> 00:27:31.060] But,
+[00:27:31.060 --> 00:27:32.060] the problem,
+[00:27:32.060 --> 00:27:34.060] is it's not going to be,
+[00:27:34.060 --> 00:27:36.060] the same experience.
+[00:27:36.060 --> 00:27:38.060] Because if we just give it a spec file,
+[00:27:38.060 --> 00:27:39.060] you know,
+[00:27:39.060 --> 00:27:40.060] again,
+[00:27:40.060 --> 00:27:41.060] this is like,
+[00:27:41.060 --> 00:27:42.060] we give it a spec file,
+[00:27:42.060 --> 00:27:43.060] we already know what the specs are,
+[00:27:43.060 --> 00:27:44.060] because we,
+[00:27:44.060 --> 00:27:45.060] had to figure out the specs,
+[00:27:45.060 --> 00:27:46.060] and we figured it out through,
+[00:27:46.060 --> 00:27:47.060] using the software,
+[00:27:47.060 --> 00:27:48.060] and iterating on it.
+[00:27:48.060 --> 00:27:49.060] But,
+[00:27:49.060 --> 00:27:50.060] if we,
+[00:27:50.060 --> 00:27:51.060] just throw it,
+[00:27:51.060 --> 00:27:52.060] in like,
+[00:27:52.060 --> 00:27:53.060] a state of ignorance,
+[00:27:53.060 --> 00:27:54.060] of even what the specs are.
+[00:27:54.060 --> 00:27:55.060] And,
+[00:27:55.060 --> 00:27:55.060] just say,
+[00:27:55.060 --> 00:27:56.060] figure it out.
+[00:27:56.060 --> 00:27:57.060] See what you come up with.
+[00:27:57.060 --> 00:27:58.060] Um,
+[00:27:58.060 --> 00:27:59.060] that's,
+[00:27:59.060 --> 00:28:00.060] maybe that's where you can do some interesting things too.
+[00:28:00.060 --> 00:28:01.060] Which is like,
+[00:28:01.060 --> 00:28:02.060] maybe it could figure out how to,
+[00:28:02.060 --> 00:28:03.060] simulate interacting,
+[00:28:03.060 --> 00:28:16.060] like,
+[00:28:16.060 --> 00:28:17.060] typing,
+[00:28:17.060 --> 00:28:18.060] developing,
+[00:28:18.060 --> 00:28:19.060] and all that.
+[00:28:19.060 --> 00:28:20.060] that's where you can do some interesting things.
+[00:28:20.060 --> 00:28:20.060] I have a feeling that,
+[00:28:20.060 --> 00:28:21.060] that's gonna,
+[00:28:21.060 --> 00:28:22.060] that's gonna,
+[00:28:22.060 --> 00:28:24.060] take a whole lot of tokens,
+[00:28:24.060 --> 00:28:25.060] to do.
+[00:28:25.060 --> 00:28:26.060] Probably,
+[00:28:26.060 --> 00:28:26.060] more than I make in a year.
+[00:28:26.060 --> 00:28:27.060] It could be like,
+[00:28:27.060 --> 00:28:28.060] a very expensive,
+[00:28:28.060 --> 00:28:29.060] extremely expensive effort.
+[00:28:29.060 --> 00:28:30.060] If it's even possible.
+[00:28:30.060 --> 00:28:31.060] I mean,
+[00:28:31.060 --> 00:28:32.060] I'm sure it's possible.
+[00:28:32.060 --> 00:28:33.060] but,
+[00:28:33.060 --> 00:28:46.060] you might get a lot of variations of what,
+[00:28:46.060 --> 00:28:48.060] the output product is,
+[00:28:48.060 --> 00:28:50.060] from a back test that,
+[00:28:50.060 --> 00:28:52.060] starts very early on,
+[00:28:52.060 --> 00:28:53.060] and it has a very large,
+[00:28:53.060 --> 00:28:54.060] you know,
+[00:28:54.060 --> 00:28:55.060] potential delta,
+[00:28:55.060 --> 00:28:56.060] of,
+[00:28:56.060 --> 00:28:57.060] possible,
+[00:28:57.060 --> 00:28:58.060] up,
+[00:28:58.060 --> 00:28:59.060] you know,
+[00:28:59.060 --> 00:29:00.060] the,
+[00:29:00.060 --> 00:29:01.060] the space,
+[00:29:01.060 --> 00:29:02.060] you know,
+[00:29:02.060 --> 00:29:03.060] I guess you could give it like,
+[00:29:03.060 --> 00:29:04.060] pretty loose requirements,
+[00:29:04.060 --> 00:29:05.060] saying,
+[00:29:05.060 --> 00:29:06.060] build me,
+[00:29:06.060 --> 00:29:07.060] you know,
+[00:29:07.060 --> 00:29:08.060] a product that,
+[00:29:08.060 --> 00:29:09.060] is,
+[00:29:09.060 --> 00:29:10.060] you know,
+[00:29:10.060 --> 00:29:12.060] where you can edit code,
+[00:29:12.060 --> 00:29:14.060] and it syncs up with Tmux,
+[00:29:14.060 --> 00:29:15.060] with,
+[00:29:15.060 --> 00:29:15.060] you know,
+[00:29:15.060 --> 00:29:16.060] cloud code sessions,
+[00:29:16.060 --> 00:29:17.060] and Tmux,
+[00:29:17.060 --> 00:29:18.060] and,
+[00:29:18.060 --> 00:29:19.060] you know,
+[00:29:19.060 --> 00:29:20.060] make sure that it,
+[00:29:20.060 --> 00:29:22.060] is real use,
+[00:29:22.060 --> 00:29:23.060] you know,
+[00:29:23.060 --> 00:29:24.060] real live usage,
+[00:29:24.060 --> 00:29:25.060] and,
+[00:29:25.060 --> 00:29:27.060] yeah,
+[00:29:27.060 --> 00:29:28.060] so,
+[00:29:28.060 --> 00:29:29.060] you know,
+[00:29:29.060 --> 00:29:30.060] basically,
+[00:29:30.060 --> 00:29:31.060] just,
+[00:29:31.060 --> 00:29:33.060] to,
+[00:29:33.060 --> 00:29:35.060] yeah,
+[00:29:35.060 --> 00:29:36.060] I,
+[00:29:36.060 --> 00:29:37.060] I don't really think it's going to,
+[00:29:37.060 --> 00:29:38.060] imagine,
+[00:29:38.060 --> 00:29:41.060] my particular scenario,
+[00:29:41.060 --> 00:29:42.060] which is,
+[00:29:42.060 --> 00:29:42.060] yeah,
+[00:29:42.060 --> 00:29:43.060] I'm looking for jobs,
+[00:29:43.060 --> 00:29:45.060] I'm talking to recruiters right now,
+[00:29:45.060 --> 00:29:48.060] I'm talking to a bunch of people,
+[00:29:48.060 --> 00:29:50.060] I'm corresponding with people,
+[00:29:50.060 --> 00:29:53.060] and that's kind of been part of my requirements,
+[00:29:53.060 --> 00:29:54.060] but,
+[00:29:54.060 --> 00:29:56.060] you know,
+[00:29:56.060 --> 00:29:56.060] you could,
+[00:29:56.060 --> 00:29:57.060] you could,
+[00:29:57.060 --> 00:29:58.060] like that too,
+[00:29:58.060 --> 00:29:58.060] actually,
+[00:29:58.060 --> 00:29:59.060] actually,
+[00:29:59.060 --> 00:29:59.060] so,
+[00:29:59.060 --> 00:30:01.060] that's kind of where you,
+[00:30:01.060 --> 00:30:02.060] maybe,
+[00:30:02.060 --> 00:30:04.060] you have it correspond with other agents,
+[00:30:04.060 --> 00:30:05.060] and,
+[00:30:05.060 --> 00:30:10.060] it would probably figure out a more efficient way than using an editor,
+[00:30:10.060 --> 00:30:11.060] you know,
+[00:30:11.060 --> 00:30:12.060] probably,
+[00:30:12.060 --> 00:30:13.060] the editor is good for humans,
+[00:30:13.060 --> 00:30:14.060] but,
+[00:30:14.060 --> 00:30:16.060] probably not so good for agents,
+[00:30:16.060 --> 00:30:17.060] so,
+[00:30:17.060 --> 00:30:18.060] it would probably,
+[00:30:18.060 --> 00:30:18.060] yeah,
+[00:30:18.060 --> 00:30:19.060] this is going to take,
+[00:30:19.060 --> 00:30:20.060] like,
+[00:30:20.060 --> 00:30:21.060] this is going to take a while,
+[00:30:21.060 --> 00:30:23.060] anyways,
+[00:30:23.060 --> 00:30:24.060] that's,
+[00:30:24.060 --> 00:30:25.060] kind of a,
+[00:30:25.060 --> 00:30:26.060] I guess an experiment,
+[00:30:26.060 --> 00:30:27.060] I kind of want to run,
+[00:30:27.060 --> 00:30:28.060] and,
+[00:30:28.060 --> 00:30:29.060] I think it's going to go well,
+[00:30:29.060 --> 00:30:30.060] I mean,
+[00:30:30.060 --> 00:30:31.060] so far,
+[00:30:31.060 --> 00:30:35.060] it's all been going pretty good,
+[00:30:35.060 --> 00:30:36.060] considering,
+[00:30:36.060 --> 00:30:37.060] I mean,
+[00:30:37.060 --> 00:30:38.060] other than,
+[00:30:38.060 --> 00:30:39.060] like,
+[00:30:39.060 --> 00:30:40.060] there's been a few rough spots,
+[00:30:40.060 --> 00:30:41.060] but,
+[00:30:41.060 --> 00:30:42.060] these rough spots,
+[00:30:42.060 --> 00:30:44.060] can have a software development,
+[00:30:44.060 --> 00:30:48.060] it would still happen,
+[00:30:48.060 --> 00:30:49.060] you know,
+[00:30:49.060 --> 00:30:51.060] you have to do major refactorings,
+[00:30:51.060 --> 00:30:53.060] that could take a while,
+[00:30:53.060 --> 00:30:54.060] you know,
+[00:30:54.060 --> 00:30:56.060] this is kind of like the equivalent of that,
+[00:30:56.060 --> 00:30:57.060] and,
+[00:30:57.060 --> 00:30:58.060] but,
+[00:30:58.060 --> 00:30:59.060] you know,
+[00:30:59.060 --> 00:31:00.060] we can also improve,
+[00:31:00.060 --> 00:31:01.060] we can take a step back,
+[00:31:01.060 --> 00:31:02.060] and say,
+[00:31:02.060 --> 00:31:03.060] how could so,
+[00:31:03.060 --> 00:31:06.060] yeah,
+[00:31:06.060 --> 00:31:09.060] I think that this is also a good chance,
+[00:31:09.060 --> 00:31:10.060] to,
+[00:31:10.060 --> 00:31:11.060] really,
+[00:31:11.060 --> 00:31:13.060] get feedback,
+[00:31:13.060 --> 00:31:15.060] on the architecture,
+[00:31:15.060 --> 00:31:17.060] because I haven't really done,
+[00:31:17.060 --> 00:31:19.060] like a whole architecture review,
+[00:31:19.060 --> 00:31:21.060] I just kind of organically,
+[00:31:21.060 --> 00:31:22.060] grown the architecture,
+[00:31:22.060 --> 00:31:23.060] and,
+[00:31:23.060 --> 00:31:24.060] yes,
+[00:31:24.060 --> 00:31:25.060] Claude does,
+[00:31:25.060 --> 00:31:28.060] kind of do some,
+[00:31:28.060 --> 00:31:29.060] evaluations,
+[00:31:29.060 --> 00:31:30.060] and,
+[00:31:30.060 --> 00:31:31.060] you know,
+[00:31:31.060 --> 00:31:32.060] code reviews,
+[00:31:32.060 --> 00:31:33.060] and,
+[00:31:33.060 --> 00:31:34.060] all that,
+[00:31:34.060 --> 00:31:35.060] but,
+[00:31:35.060 --> 00:31:35.060] you know,
+[00:31:35.060 --> 00:31:36.060] I haven't like,
+[00:31:36.060 --> 00:31:37.060] made like,
+[00:31:37.060 --> 00:31:38.060] software team,
+[00:31:38.060 --> 00:31:39.060] work on this either,
+[00:31:39.060 --> 00:31:40.060] so,
+[00:31:40.060 --> 00:31:41.060] I,
+[00:31:41.060 --> 00:31:42.060] have,
+[00:31:42.060 --> 00:31:43.060] I guess,
+[00:31:43.060 --> 00:31:44.060] purpose,
+[00:31:44.060 --> 00:31:44.060] rather than,
+[00:31:44.060 --> 00:31:45.060] creating,
+[00:31:45.060 --> 00:31:46.060] the virtual team,
+[00:31:46.060 --> 00:31:46.060] but,
+[00:31:46.060 --> 00:31:47.060] this might also,
+[00:31:47.060 --> 00:31:49.060] you know,
+[00:31:49.060 --> 00:31:50.060] I,
+[00:31:50.060 --> 00:31:51.060] I personally think that,
+[00:31:51.060 --> 00:31:52.060] I have a hunch that,
+[00:31:52.060 --> 00:31:53.060] the team,
+[00:31:53.060 --> 00:31:54.060] the team,
+[00:31:54.060 --> 00:31:55.060] is not really,
+[00:31:55.060 --> 00:31:56.060] what you want,
+[00:31:56.060 --> 00:31:57.060] what you want,
+[00:31:57.060 --> 00:31:59.060] it's kind of,
+[00:31:59.060 --> 00:32:00.060] the team,
+[00:32:00.060 --> 00:32:01.060] the team,
+[00:32:01.060 --> 00:32:02.060] is not really,
+[00:32:02.060 --> 00:32:03.060] what you want,
+[00:32:03.060 --> 00:32:06.060] it's kind of a,
+[00:32:06.060 --> 00:32:07.060] artifact of,
+[00:32:07.060 --> 00:32:09.060] how we develop software,
+[00:32:09.060 --> 00:32:10.060] how we,
+[00:32:10.060 --> 00:32:11.060] partition work,
+[00:32:11.060 --> 00:32:13.060] the software development,
+[00:32:13.060 --> 00:32:14.060] based off of,
+[00:32:14.060 --> 00:32:15.060] I would say,
+[00:32:15.060 --> 00:32:17.060] human capacity,
+[00:32:17.060 --> 00:32:18.060] in any given moment,
+[00:32:18.060 --> 00:32:19.060] and we just kind of,
+[00:32:19.060 --> 00:32:20.060] had to,
+[00:32:20.060 --> 00:32:21.060] break up,
+[00:32:21.060 --> 00:32:22.060] according to what,
+[00:32:22.060 --> 00:32:24.060] a human can do,
+[00:32:24.060 --> 00:32:26.060] can be responsible for,
+[00:32:26.060 --> 00:32:27.060] effectively,
+[00:32:27.060 --> 00:32:28.060] but,
+[00:32:28.060 --> 00:32:30.060] I think it's different with agents,
+[00:32:30.060 --> 00:32:32.060] I think the whole equation,
+[00:32:32.060 --> 00:32:33.060] changes with agents,
+[00:32:33.060 --> 00:32:34.060] and,
+[00:32:34.060 --> 00:32:36.060] I think that we're,
+[00:32:36.060 --> 00:32:38.060] making a CTO,
+[00:32:38.060 --> 00:32:39.060] and this,
+[00:32:39.060 --> 00:32:40.060] whatever,
+[00:32:40.060 --> 00:32:41.060] developer,
+[00:32:41.060 --> 00:32:42.060] and a QA guy,
+[00:32:42.060 --> 00:32:43.060] and QA agent,
+[00:32:43.060 --> 00:32:44.060] you know,
+[00:32:44.060 --> 00:32:45.060] I think we're,
+[00:32:45.060 --> 00:32:46.060] just adding these,
+[00:32:46.060 --> 00:32:47.060] because we're familiar with it,
+[00:32:47.060 --> 00:32:48.060] with our teams,
+[00:32:48.060 --> 00:32:49.060] and,
+[00:32:49.060 --> 00:32:50.060] you know,
+[00:32:50.060 --> 00:32:51.060] I think that there's also,
+[00:32:51.060 --> 00:32:52.060] like a lot of managers,
+[00:32:52.060 --> 00:32:53.060] who,
+[00:32:53.060 --> 00:32:54.060] are we manage,
+[00:32:54.060 --> 00:32:56.060] they're just turning to agents,
+[00:32:56.060 --> 00:32:57.060] but,
+[00:32:57.060 --> 00:33:00.060] I personally think that,
+[00:33:00.060 --> 00:33:02.060] that's,
+[00:33:02.060 --> 00:33:03.060] kind of a,
+[00:33:03.060 --> 00:33:04.060] artificial construct,
+[00:33:04.060 --> 00:33:05.060] based off of,
+[00:33:05.060 --> 00:33:06.060] legacy,
+[00:33:06.060 --> 00:33:08.060] and,
+[00:33:09.060 --> 00:33:10.060] I think that,
+[00:33:10.060 --> 00:33:11.060] I think that,
+[00:33:11.060 --> 00:33:12.060] there's probably,
+[00:33:12.060 --> 00:33:13.060] there's different ways,
+[00:33:13.060 --> 00:33:14.060] you can do it,
+[00:33:14.060 --> 00:33:15.060] for sure,
+[00:33:15.060 --> 00:33:16.060] like,
+[00:33:16.060 --> 00:33:17.060] I'm doing it,
+[00:33:17.060 --> 00:33:18.060] in a different way,
+[00:33:18.060 --> 00:33:19.060] right now,
+[00:33:19.060 --> 00:33:20.060] which is,
+[00:33:20.060 --> 00:33:21.060] I'm just,
+[00:33:21.060 --> 00:33:22.060] keeping it simple,
+[00:33:22.060 --> 00:33:23.060] you know,
+[00:33:23.060 --> 00:33:24.060] trying to develop the software,
+[00:33:24.060 --> 00:33:25.060] but,
+[00:33:25.060 --> 00:33:26.060] I think that,
+[00:33:26.060 --> 00:33:27.060] yeah,
+[00:33:27.060 --> 00:33:28.060] I think that,
+[00:33:28.060 --> 00:33:29.060] probably,
+[00:33:29.060 --> 00:33:30.060] what's going to,
+[00:33:30.060 --> 00:33:30.060] end up happening,
+[00:33:30.060 --> 00:33:31.060] is,
+[00:33:31.060 --> 00:33:31.060] you know,
+[00:33:31.060 --> 00:33:32.060] I think that,
+[00:33:32.060 --> 00:33:32.060] yeah,
+[00:33:32.060 --> 00:33:33.060] people,
+[00:33:33.060 --> 00:33:34.060] especially managers,
+[00:33:34.060 --> 00:33:35.060] are comfortable,
+[00:33:35.060 --> 00:33:36.060] with,
+[00:33:36.060 --> 00:33:37.060] an agent representing,
+[00:33:37.060 --> 00:33:38.060] a person,
+[00:33:38.060 --> 00:33:39.060] in a role,
+[00:33:39.060 --> 00:33:40.060] a person role,
+[00:33:40.060 --> 00:33:41.060] but,
+[00:33:41.060 --> 00:33:42.060] where it's going to get,
+[00:33:42.060 --> 00:33:43.060] really wild,
+[00:33:43.060 --> 00:33:44.060] and probably,
+[00:33:44.060 --> 00:33:45.060] the big breakthrough,
+[00:33:45.060 --> 00:33:46.060] I think,
+[00:33:46.060 --> 00:33:47.060] is,
+[00:33:47.060 --> 00:33:48.060] treating this,
+[00:33:48.060 --> 00:33:49.060] like,
+[00:33:49.060 --> 00:33:50.060] you know,
+[00:33:50.060 --> 00:33:51.060] these things are,
+[00:33:51.060 --> 00:33:52.060] maybe,
+[00:33:52.060 --> 00:33:53.060] the goals are,
+[00:33:53.060 --> 00:33:54.060] ephemeral,
+[00:33:54.060 --> 00:33:56.060] maybe,
+[00:33:56.060 --> 00:33:57.060] or,
+[00:33:57.060 --> 00:33:58.060] you can have,
+[00:33:58.060 --> 00:33:59.060] dedicated roles,
+[00:33:59.060 --> 00:34:00.060] but,
+[00:34:00.060 --> 00:34:01.060] it's really,
+[00:34:01.060 --> 00:34:02.060] like,
+[00:34:02.060 --> 00:34:03.060] software,
+[00:34:03.060 --> 00:34:04.060] they're really,
+[00:34:04.060 --> 00:34:05.060] more,
+[00:34:05.060 --> 00:34:06.060] akin to a software,
+[00:34:06.060 --> 00:34:07.060] architecture,
+[00:34:07.060 --> 00:34:08.060] rather than,
+[00:34:08.060 --> 00:34:09.060] a human architecture,
+[00:34:09.060 --> 00:34:10.060] and,
+[00:34:10.060 --> 00:34:11.060] I think,
+[00:34:11.060 --> 00:34:12.060] that's,
+[00:34:12.060 --> 00:34:13.060] the big breakthrough,
+[00:34:13.060 --> 00:34:15.060] is,
+[00:34:15.060 --> 00:34:16.060] the big breakthrough,
+[00:34:16.060 --> 00:34:17.060] is,
+[00:34:17.060 --> 00:34:18.060] the big breakthrough,
+[00:34:18.060 --> 00:34:19.060] I think,
+[00:34:19.060 --> 00:34:20.060] is,
+[00:34:20.060 --> 00:34:21.060] that,
+[00:34:21.060 --> 00:34:22.060] I think,
+[00:34:22.060 --> 00:34:23.060] that,
+[00:34:23.060 --> 00:34:24.060] that's,
+[00:34:24.060 --> 00:34:25.060] kind of,
+[00:34:25.060 --> 00:34:26.060] where,
+[00:34:26.060 --> 00:34:27.060] you can,
+[00:34:27.060 --> 00:34:28.060] blur the lines,
+[00:34:28.060 --> 00:34:29.060] with,
+[00:34:29.060 --> 00:34:30.060] components,
+[00:34:30.060 --> 00:34:31.060] and modules,
+[00:34:31.060 --> 00:34:32.060] you know,
+[00:34:32.060 --> 00:34:33.060] and you can have,
+[00:34:33.060 --> 00:34:34.060] your,
+[00:34:34.060 --> 00:34:35.060] but you can also have,
+[00:34:35.060 --> 00:34:36.060] your agentic part,
+[00:34:36.060 --> 00:34:37.060] within the module,
+[00:34:37.060 --> 00:34:38.060] too,
+[00:34:38.060 --> 00:34:39.060] and that's,
+[00:34:39.060 --> 00:34:40.060] kind of,
+[00:34:40.060 --> 00:34:41.060] where I think,
+[00:34:41.060 --> 00:34:42.060] we're going to get to,
+[00:34:42.060 --> 00:34:43.060] with,
+[00:34:43.060 --> 00:34:44.060] with this over here,
+[00:34:44.060 --> 00:34:45.060] is that,
+[00:34:45.060 --> 00:34:46.060] you know,
+[00:34:46.060 --> 00:34:47.060] we have our different modules,
+[00:34:47.060 --> 00:34:48.060] and,
+[00:34:48.060 --> 00:34:49.060] right now,
+[00:34:49.060 --> 00:34:51.060] the,
+[00:34:51.060 --> 00:34:52.060] the deterministic part,
+[00:34:52.060 --> 00:34:53.060] of the module,
+[00:34:53.060 --> 00:34:54.060] but,
+[00:34:54.060 --> 00:34:56.060] maybe what should happen,
+[00:34:56.060 --> 00:34:57.060] is,
+[00:34:57.060 --> 00:34:58.060] we should also make,
+[00:34:58.060 --> 00:34:59.060] like a,
+[00:34:59.060 --> 00:35:00.060] agentic,
+[00:35:00.060 --> 00:35:02.060] role,
+[00:35:02.060 --> 00:35:03.060] for the module,
+[00:35:03.060 --> 00:35:04.060] too.
+[00:35:04.060 --> 00:35:05.060] And,
+[00:35:05.060 --> 00:35:07.060] that could be a way,
+[00:35:07.060 --> 00:35:08.060] that we do this,
+[00:35:08.060 --> 00:35:09.060] as well.
+[00:35:09.060 --> 00:35:10.060] that,
+[00:35:10.060 --> 00:35:11.060] you know,
+[00:35:11.060 --> 00:35:12.060] you could,
+[00:35:12.060 --> 00:35:13.060] you know,
+[00:35:13.060 --> 00:35:14.060] you could,
+[00:35:14.060 --> 00:35:15.060] you know,
+[00:35:15.060 --> 00:35:15.060] it,
+[00:35:15.060 --> 00:35:16.060] I'm,
+[00:35:16.060 --> 00:35:18.060] going to be cautious,
+[00:35:18.060 --> 00:35:19.060] about,
+[00:35:19.060 --> 00:35:19.060] just jumping,
+[00:35:19.060 --> 00:35:20.060] and doing that,
+[00:35:20.060 --> 00:35:20.060] though,
+[00:35:20.060 --> 00:35:21.060] because,
+[00:35:21.060 --> 00:35:22.060] I want to keep things,
+[00:35:22.060 --> 00:35:23.060] fluid,
+[00:35:23.060 --> 00:35:24.060] and,
+[00:35:24.060 --> 00:35:25.060] be able to,
+[00:35:25.060 --> 00:35:26.060] you know,
+[00:35:26.060 --> 00:35:27.060] adjust,
+[00:35:27.060 --> 00:35:28.060] as needed,
+[00:35:28.060 --> 00:35:29.060] because,
+[00:35:29.060 --> 00:35:30.060] I don't want to,
+[00:35:30.060 --> 00:35:31.060] prescribe,
+[00:35:31.060 --> 00:35:32.060] anything,
+[00:35:32.060 --> 00:35:32.060] yet.
+[00:35:32.060 --> 00:35:33.060] I want to be,
+[00:35:33.060 --> 00:35:34.060] as late to the game,
+[00:35:34.060 --> 00:35:35.060] prescribing,
+[00:35:35.060 --> 00:35:36.060] what the architecture should be,
+[00:35:36.060 --> 00:35:37.060] as possible,
+[00:35:37.060 --> 00:35:38.060] and,
+[00:35:38.060 --> 00:35:39.060] have,
+[00:35:39.060 --> 00:35:40.060] because,
+[00:35:40.060 --> 00:35:41.060] I think that,
+[00:35:41.060 --> 00:35:42.060] there's definitely a lot,
+[00:35:42.060 --> 00:35:43.060] of undiscovered territory,
+[00:35:43.060 --> 00:35:44.060] here.
+[00:35:44.060 --> 00:35:45.060] So,
+[00:35:45.060 --> 00:35:46.060] I don't want to,
+[00:35:46.060 --> 00:35:47.060] you know,
+[00:35:47.060 --> 00:35:48.060] anything about prescribing,
+[00:35:48.060 --> 00:35:49.060] is that,
+[00:35:49.060 --> 00:35:50.060] when you have,
+[00:35:50.060 --> 00:35:51.060] like the least amount,
+[00:35:51.060 --> 00:35:52.060] of information,
+[00:35:52.060 --> 00:35:53.060] and context,
+[00:35:53.060 --> 00:35:55.060] has the most impact,
+[00:35:55.060 --> 00:35:56.060] ,
+[00:35:56.060 --> 00:35:57.060] .
+[00:35:57.060 --> 00:35:58.060] You know,
+[00:35:58.060 --> 00:35:59.060] and the thing about prescribing,
+[00:35:59.060 --> 00:36:00.060] is that,
+[00:36:00.060 --> 00:36:01.060] when you have like,
+[00:36:01.060 --> 00:36:02.060] the least amount,
+[00:36:02.060 --> 00:36:03.060] of information,
+[00:36:03.060 --> 00:36:04.060] and context,
+[00:36:04.060 --> 00:36:06.060] has the most impact,
+[00:36:06.060 --> 00:36:07.060] you know,
+[00:36:07.060 --> 00:36:08.060] that's the problem,
+[00:36:08.060 --> 00:36:09.060] with it.
+[00:36:09.060 --> 00:36:10.060] You know,
+[00:36:10.060 --> 00:36:11.060] it really,
+[00:36:11.060 --> 00:36:12.060] that's when,
+[00:36:12.060 --> 00:36:13.060] you codify,
+[00:36:13.060 --> 00:36:14.060] the design.
+[00:36:14.060 --> 00:36:15.060] Because,
+[00:36:15.060 --> 00:36:16.060] that's when you have,
+[00:36:16.060 --> 00:36:17.060] the most experience,
+[00:36:17.060 --> 00:36:18.060] and,
+[00:36:18.060 --> 00:36:19.060] you also have,
+[00:36:19.060 --> 00:36:20.060] the most time,
+[00:36:20.060 --> 00:36:20.060] to,
+[00:36:20.060 --> 00:36:21.060] think of new ideas.
+[00:36:21.060 --> 00:36:22.060] And,
+[00:36:22.060 --> 00:36:23.060] you know,
+[00:36:23.060 --> 00:36:24.060] you kind of want to,
+[00:36:24.060 --> 00:36:26.060] I feel like,
+[00:36:26.060 --> 00:36:27.060] I want to reserve,
+[00:36:27.060 --> 00:36:28.060] that space,
+[00:36:28.060 --> 00:36:29.060] that opening,
+[00:36:29.060 --> 00:36:30.060] for,
+[00:36:30.060 --> 00:36:31.060] new things,
+[00:36:31.060 --> 00:36:32.060] to emerge,
+[00:36:32.060 --> 00:36:33.060] and,
+[00:36:33.060 --> 00:36:34.060] not really,
+[00:36:34.060 --> 00:36:35.060] lock us in,
+[00:36:35.060 --> 00:36:36.060] yet.
+[00:36:36.060 --> 00:36:37.060] So,
+[00:36:37.060 --> 00:36:38.060] yeah,
+[00:36:38.060 --> 00:36:39.060] so I guess,
+[00:36:39.060 --> 00:36:41.060] a happy balance,
+[00:36:41.060 --> 00:36:42.060] is,
+[00:36:42.060 --> 00:36:43.060] we keep,
+[00:36:43.060 --> 00:36:44.060] the modules,
+[00:36:44.060 --> 00:36:45.060] the,
+[00:36:45.060 --> 00:36:46.060] the primitives,
+[00:36:46.060 --> 00:36:47.060] very tight.
+[00:36:47.060 --> 00:36:48.060] And,
+[00:36:48.060 --> 00:36:49.060] in doing so,
+[00:36:49.060 --> 00:36:50.060] we're able to,
+[00:36:50.060 --> 00:36:51.060] be flexible,
+[00:36:51.060 --> 00:36:52.060] so we still maintain,
+[00:36:52.060 --> 00:36:53.060] our flexibility,
+[00:36:53.060 --> 00:36:54.060] but we also,
+[00:36:54.060 --> 00:36:55.060] you know,
+[00:36:55.060 --> 00:36:56.060] have,
+[00:36:56.060 --> 00:36:57.060] the advantages of,
+[00:36:57.060 --> 00:36:58.060] you know,
+[00:36:58.060 --> 00:36:59.060] using,
+[00:36:59.060 --> 00:37:00.060] having building blocks,
+[00:37:00.060 --> 00:37:01.060] that we can use.
+[00:37:01.060 --> 00:37:02.060] And,
+[00:37:02.060 --> 00:37:03.060] as long as we can identify,
+[00:37:03.060 --> 00:37:04.060] and,
+[00:37:04.060 --> 00:37:05.060] sort of like,
+[00:37:05.060 --> 00:37:06.060] essentialize,
+[00:37:06.060 --> 00:37:06.060] or,
+[00:37:06.060 --> 00:37:07.060] take away,
+[00:37:07.060 --> 00:37:08.060] the extra stuff,
+[00:37:08.060 --> 00:37:09.060] and,
+[00:37:09.060 --> 00:37:09.060] get to the essential primitives,
+[00:37:09.060 --> 00:37:10.060] then,
+[00:37:10.060 --> 00:37:10.060] we have pieces,
+[00:37:10.060 --> 00:37:11.060] we can move around.
+[00:37:11.060 --> 00:37:12.060] And,
+[00:37:12.060 --> 00:37:12.060] there are building blocks,
+[00:37:12.060 --> 00:37:13.060] that we can,
+[00:37:13.060 --> 00:37:14.060] you know,
+[00:37:14.060 --> 00:37:14.060] and,
+[00:37:14.060 --> 00:37:15.060] there are building blocks,
+[00:37:15.060 --> 00:37:16.060] that we can,
+[00:37:16.060 --> 00:37:16.060] you know,
+[00:37:16.060 --> 00:37:17.060] and,
+[00:37:17.060 --> 00:37:32.060] this is a process of,
+[00:37:32.060 --> 00:37:33.060] identification,
+[00:37:33.060 --> 00:37:34.060] and,
+[00:37:34.060 --> 00:37:36.060] unmasking the iteration too.
+[00:37:36.060 --> 00:37:37.060] So,
+[00:37:37.060 --> 00:37:38.060] yeah.
+[00:37:38.060 --> 00:37:39.060] Okay,
+[00:37:39.060 --> 00:37:40.060] so,
+[00:37:40.060 --> 00:37:41.060] I think,
+[00:37:41.060 --> 00:37:43.060] I guess we could do it.
+[00:37:43.060 --> 00:37:44.060] I'm not,
+[00:37:44.060 --> 00:37:45.060] I,
+[00:37:45.060 --> 00:37:46.060] I,
+[00:37:46.060 --> 00:37:47.060] I,
+[00:37:47.060 --> 00:37:48.060] have done this,
+[00:37:48.060 --> 00:37:50.060] with other projects.
+[00:37:50.060 --> 00:37:53.060] And,
+[00:37:53.060 --> 00:37:54.060] sometimes,
+[00:37:54.060 --> 00:37:56.060] the specs,
+[00:37:56.060 --> 00:37:57.060] end up getting ignored,
+[00:37:57.060 --> 00:37:59.060] to get out of sync.
+[00:37:59.060 --> 00:38:00.060] And,
+[00:38:00.060 --> 00:38:01.060] this also might be,
+[00:38:01.060 --> 00:38:06.060] expensive from a token standpoint too.
+[00:38:06.060 --> 00:38:07.060] So,
+[00:38:07.060 --> 00:38:09.060] I'm not sure exactly,
+[00:38:09.060 --> 00:38:11.060] if this is beneficial or not.
+[00:38:11.060 --> 00:38:12.060] So,
+[00:38:12.060 --> 00:38:13.060] I'm not sure exactly,
+[00:38:13.060 --> 00:38:15.060] if this is beneficial or not.
+[00:38:15.060 --> 00:38:16.060] So,
+[00:38:16.060 --> 00:38:17.060] I think,
+[00:38:17.060 --> 00:38:19.060] it can be beneficial.
+[00:38:19.060 --> 00:38:20.060] I know that like,
+[00:38:20.060 --> 00:38:22.060] there's a lot of movement to,
+[00:38:22.060 --> 00:38:24.060] sort of,
+[00:38:24.060 --> 00:38:26.060] not have,
+[00:38:26.060 --> 00:38:28.060] all the different tools,
+[00:38:28.060 --> 00:38:29.060] and just keep,
+[00:38:29.060 --> 00:38:31.060] just have the motto.
+[00:38:31.060 --> 00:38:32.060] but,
+[00:38:32.060 --> 00:38:33.060] nonetheless,
+[00:38:33.060 --> 00:38:34.060] you know,
+[00:38:34.060 --> 00:38:38.060] and I think the rule of thumb I've heard as well is,
+[00:38:38.060 --> 00:38:39.060] if,
+[00:38:39.060 --> 00:38:41.060] something keeps on repeating,
+[00:38:41.060 --> 00:38:43.060] a mistake from repeating,
+[00:38:43.060 --> 00:38:45.060] that's when you add it to,
+[00:38:45.060 --> 00:38:46.060] the,
+[00:38:46.060 --> 00:38:48.060] cloud MD or whatever.
+[00:38:48.060 --> 00:38:49.060] cloud MD or whatever.
+[00:38:49.060 --> 00:38:50.060] But,
+[00:38:50.060 --> 00:38:51.060] I think,
+[00:38:51.060 --> 00:38:52.060] spec makes sense.
+[00:38:52.060 --> 00:38:53.060] So,
+[00:38:53.060 --> 00:38:54.060] this is a good natural way to,
+[00:38:54.060 --> 00:38:55.060] modularize specs.
+[00:38:55.060 --> 00:38:57.060] From a module level.
+[00:38:57.060 --> 00:38:58.060] Um,
+[00:38:58.060 --> 00:38:59.060] all right.
+[00:38:59.060 --> 00:39:00.060] And,
+[00:39:00.060 --> 00:39:01.060] from here,
+[00:39:01.060 --> 00:39:02.060] we can kind of,
+[00:39:02.060 --> 00:39:03.060] try it out for a little bit.
+[00:39:03.060 --> 00:39:04.060] See how it goes.
+[00:39:04.060 --> 00:39:05.060] I kind of have like,
+[00:39:05.060 --> 00:39:06.060] a feeling of,
+[00:39:06.060 --> 00:39:07.060] you know,
+[00:39:07.060 --> 00:39:08.060] if it gets like,
+[00:39:08.060 --> 00:39:09.060] worse,
+[00:39:09.060 --> 00:39:10.060] I'll,
+[00:39:10.060 --> 00:39:11.060] I'll,
+[00:39:11.060 --> 00:39:12.060] I should be able to notice it,
+[00:39:12.060 --> 00:39:13.060] just because I'm familiar with the process of working with this,
+[00:39:13.060 --> 00:39:14.060] you know.
+[00:39:14.060 --> 00:39:15.060] But,
+[00:39:15.060 --> 00:39:16.060] yeah,
+[00:39:16.060 --> 00:39:17.060] we'll have to,
+[00:39:17.060 --> 00:39:18.060] let's see.
+[00:39:18.060 --> 00:39:19.060] So,
+[00:39:19.060 --> 00:39:20.060] I would say,
+[00:39:20.060 --> 00:39:21.060] let's,
+[00:39:21.060 --> 00:39:22.060] okay.
+[00:39:22.060 --> 00:39:23.060] Let's,
+[00:39:23.060 --> 00:39:24.060] um,
+[00:39:24.060 --> 00:39:25.060] let's,
+[00:39:25.060 --> 00:39:27.060] I don't want to back test now.
+[00:39:27.060 --> 00:39:28.060] Okay.
+[00:39:28.060 --> 00:39:29.060] Let's,
+[00:39:29.060 --> 00:39:30.060] let's,
+[00:39:30.060 --> 00:39:32.060] I don't want to back test now.
+[00:39:32.060 --> 00:39:33.060] Okay.
+[00:39:33.060 --> 00:39:34.060] Let's,
+[00:39:34.060 --> 00:39:35.060] add,
+[00:39:35.060 --> 00:39:36.060] to,
+[00:39:36.060 --> 00:39:37.060] agent.
+[00:39:37.060 --> 00:39:38.060] Let's,
+[00:39:38.060 --> 00:39:39.060] maybe,
+[00:39:39.060 --> 00:39:40.060] let's add to,
+[00:39:40.060 --> 00:39:41.060] a skill.
+[00:39:41.060 --> 00:39:43.060] A project-wide skill.
+[00:39:43.060 --> 00:39:44.060] What,
+[00:39:44.060 --> 00:39:45.060] um,
+[00:39:45.060 --> 00:39:47.060] do you have a skill?
+[00:39:47.060 --> 00:39:48.060] Because,
+[00:39:48.060 --> 00:39:51.060] module spec is probably not going to cut it because we can use it.
+[00:39:51.060 --> 00:39:52.060] Okay.
+[00:39:52.060 --> 00:39:53.060] Okay.
+[00:39:53.060 --> 00:39:54.060] Let's add to,
+[00:39:54.060 --> 00:39:55.060] let's add to,
+[00:39:55.060 --> 00:39:56.060] a skill.
+[00:39:56.060 --> 00:39:57.060] A project-wide skill.
+[00:39:57.060 --> 00:39:58.060] What,
+[00:39:58.060 --> 00:39:59.060] uh,
+[00:39:59.060 --> 00:40:00.060] do you have a skill?
+[00:40:00.060 --> 00:40:01.060] module harness.
+[00:40:01.060 --> 00:40:02.060] I think,
+[00:40:02.060 --> 00:40:03.060] I like module harness actually.
+[00:40:03.060 --> 00:40:04.060] Um,
+[00:40:04.060 --> 00:40:05.060] let's riff on this a bit.
+[00:40:05.060 --> 00:40:06.060] It's too crazy.
+[00:40:06.060 --> 00:40:07.060] I think,
+[00:40:07.060 --> 00:40:08.060] we should define,
+[00:40:08.060 --> 00:40:09.060] how,
+[00:40:09.060 --> 00:40:10.060] yes.
+[00:40:10.060 --> 00:40:11.060] Yeah.
+[00:40:11.060 --> 00:40:39.740] Let's riff on this a bit too crazy. I think we should define how. Okay.
+[00:40:39.740 --> 00:41:08.420] So, module harness. Let's make module harness work with any programming language. So, make sure the skill is general enough.
+[00:41:08.420 --> 00:41:30.420] Is there... maybe I'll just ask, is there any deterministic aspects that would benefit a binary executable?
+[00:41:30.420 --> 00:41:31.420] Okay.
+[00:41:31.420 --> 00:41:46.420] I'm just kind of keeping this light. Maybe... I'm still thinking about how we're going to do this.
+[00:41:46.420 --> 00:41:53.420] Because I think that spec should be part of the process. Like, we might even want hooks.
+[00:41:53.420 --> 00:42:04.420] Where spec is followed. And we make sure that we not only follow spec, but we audit it too.
+[00:42:04.420 --> 00:42:11.420] Okay.
+[00:42:11.420 --> 00:42:12.420] Okay.
+[00:42:12.420 --> 00:42:13.420] Okay.
+[00:42:13.420 --> 00:42:18.420] All right. So, we do have... okay. So, we do have some determinism. So, parse existing extract structure from comments. Okay.
+[00:42:18.420 --> 00:42:25.420] Uh, yeah. Compare harness. Okay. Yeah. Okay. Yeah. Okay. A module. Pardon. Maybe we'll call this... on...
+[00:42:25.420 --> 00:42:32.420] GitHub. It would be... it would be... it would be... uh, be Takeda. That's me.
+[00:42:32.420 --> 00:42:33.420] Module. Harness.
+[00:42:33.420 --> 00:42:33.420] Module. Harness.
+[00:42:33.420 --> 00:42:38.420] I'm assuming... on... create... you know, the...
+[00:42:38.420 --> 00:42:39.420] the... Rust. Package.
+[00:42:39.420 --> 00:42:40.420] Package.
+[00:42:40.420 --> 00:42:41.420] And...
+[00:42:41.420 --> 00:42:44.420] I'm assuming... on... create... you know, the...
+[00:42:44.420 --> 00:42:45.420] the...
+[00:42:45.420 --> 00:42:46.420] um...
+[00:42:46.420 --> 00:42:47.420] um...
+[00:42:47.420 --> 00:42:48.420] um...
+[00:42:48.420 --> 00:42:49.420] um...
+[00:42:49.420 --> 00:42:55.420] yeah. I guess... uh...
+[00:42:55.420 --> 00:42:56.420] um...
+[00:42:56.420 --> 00:42:59.420] yeah. I guess... uh...
+[00:42:59.420 --> 00:43:00.420] uh...
+[00:43:00.420 --> 00:43:01.420] yeah. I guess... uh...
+[00:43:01.420 --> 00:43:02.420] I guess... uh...
+[00:43:02.420 --> 00:43:03.420] what it would be... uh...
+[00:43:03.420 --> 00:43:04.420] it would be... uh... be Takeda. That's me.
+[00:43:04.420 --> 00:43:05.420] Module. Harness.
+[00:43:05.420 --> 00:43:07.420] I'm assuming... on... crate... you know, the... the... Rust.
+[00:43:07.420 --> 00:43:10.420] Package. And crates.
+[00:43:10.420 --> 00:43:11.420] Um...
+[00:43:11.420 --> 00:43:12.420] Um...
+[00:43:12.420 --> 00:43:16.420] Yeah. I guess... uh...
+[00:43:16.420 --> 00:43:20.420] let's do it.
+[00:43:20.420 --> 00:43:21.420] Oof...
+[00:43:21.420 --> 00:43:22.420] This... uh...
+[00:43:22.420 --> 00:43:23.420] file...
+[00:43:23.420 --> 00:43:26.420] Yeah. Let's... yeah. Um...
+[00:43:26.420 --> 00:43:27.420] I'm gonna say...
+[00:43:27.420 --> 00:43:28.420] let's uh...
+[00:43:28.420 --> 00:43:29.420] basic...
+[00:43:29.420 --> 00:43:33.420] because... I want... to wrap this session up.
+[00:43:33.420 --> 00:43:34.420] I want to wrap this...
+[00:43:34.420 --> 00:43:37.420] I want to wrap this session up.
+[00:43:37.420 --> 00:43:38.420] I want to wrap this...
+[00:43:38.420 --> 00:43:40.420] I want to wrap this session up.
+[00:43:40.420 --> 00:43:42.420] and dip through...
+[00:43:42.420 --> 00:43:44.420] the pending.
+[00:43:44.420 --> 00:43:45.420] Yeah. Let's just plant our flat harness.
+[00:43:45.420 --> 00:43:49.420] Yeah. Let's just plant our flat harness.
+[00:43:49.420 --> 00:43:53.420] And... maybe I'm just not gonna... really... I'll... I'll sort of table the... audit...
+[00:43:53.420 --> 00:44:04.420] you know... spec auditing... or really... the audits... um...
+[00:44:04.420 --> 00:44:26.420] you know... maybe... will... kind of... be a good thing. I think this is a good thing. This will be very effective. Because... what this allows us to do is now we can... yeah, we have our harness... each module has a good thing.
+[00:44:26.420 --> 00:44:48.420] So it's completely... modular... modular... but it also... like you can move it around... like... if you refactor... you have to... yeah... handle some of the finer points... such as like... refactoring...
+[00:44:48.420 --> 00:45:17.420] I don't know... I don't know... I can't quite hit the mark with eval. But... let's just leave it in here... it's kind of like... contracts... really... these are kind of like contracts... I think... but... yeah... let's just get our flag timing around... then we'll... deal with it. I mean... basically... eval... should be a... quantifiable measurement... should lead to a quantifiable measurement... should lead to a quantifiable measurement... well... it could also be...
+[00:45:17.420 --> 00:45:46.420] yeah... quantifiable... but... I guess it could also be qualitative... too... but... the qualitative need to be quant... need to turn to... something... locked... I didn't do that... didn't just... think... shhh... this should have happened... so... I'm not going to... I guess I should bug it... so... I... answer...
+[00:45:46.420 --> 00:45:53.420] answer... even... even... even though... this... document... has...
+[00:45:53.420 --> 00:45:59.420] has... the... front... to matter...
+[00:45:59.420 --> 00:46:07.420] alright... so... we got... module... harness... oh... shoot... this should be a... sub-module... um...
+[00:46:07.420 --> 00:46:17.420] I would say... let... I guess we don't...
+[00:46:17.420 --> 00:46:20.420] *sigh...*
+[00:46:20.420 --> 00:46:47.540] okay I'll take continuing... and coverage... okay so evals I would say evals should be a quantifiable
+[00:46:50.420 --> 00:47:03.220] should create either a quantifiable metric or a logical I mean I guess logic is quantifiable too
+[00:47:03.220 --> 00:47:14.180] like a boolean is one or a zero so should create I would say a quantifiable metric for a readme
+[00:47:16.420 --> 00:47:20.020] and the spec.idmd okay
+[00:47:20.020 --> 00:47:26.580] please update the
+[00:47:26.580 --> 00:47:45.460] accordingly don't worry don't don't over specify the evals yet
+[00:47:46.420 --> 00:47:59.380] we are still exploring what the eval how the evals will be used how how the evals in
+[00:48:00.660 --> 00:48:15.700] back to the evals should have done that before I published shoot oh well
+[00:48:19.220 --> 00:48:22.500] I'm not too worried right now I mean I iterate a lot
+[00:48:22.500 --> 00:48:27.140] this is alpha software I should say
+[00:48:27.140 --> 00:48:33.540] module harness is alpha software
+[00:48:36.340 --> 00:48:40.180] please note that and leave me
+[00:48:40.180 --> 00:48:46.420] all right so we got permissions with cloud art the
+[00:48:46.420 --> 00:48:48.820] the permissions front matter only applies to cloud
+[00:48:48.820 --> 00:48:50.420] so I owned by agent doc start
+[00:48:50.420 --> 00:48:58.020] the tmox pain session it doesn't affect the current cloud code session you're typing in directly okay I guess all right
+[00:48:59.220 --> 00:49:16.740] oh yeah okay so I did start off by typing in agent doc run this file because we were having a problem with plug-in closing everything except for closing the other pane so now that that's working then like
+[00:49:21.300 --> 00:49:37.860] so yeah I feel like a lot of people have gone ham with creating all these elaborate architectures and workflows with agents and that's all great but you know maybe just because I'm even flawed
+[00:49:39.540 --> 00:49:51.540] it's doing pretty good you know with creating the work trees itself and all that I haven't really had to be super specific except just other than just
+[00:49:51.540 --> 00:49:56.820] you know the recent releases have has a lead out feature where
+[00:49:56.820 --> 00:50:02.980] we can see how our existing skills on our project
+[00:50:02.980 --> 00:50:05.700] how effective they are
+[00:50:07.220 --> 00:50:08.980] so I haven't really been
+[00:50:08.980 --> 00:50:10.900] it's um
+[00:50:10.900 --> 00:50:17.380] that's something I'll probably do but maybe that's also like a good thing for back tests
+[00:50:17.380 --> 00:50:20.580] because it's hard to really
+[00:50:20.580 --> 00:50:25.860] like compare apples to apples right now because
+[00:50:25.860 --> 00:50:29.780] I'm sort of in the thick of making lots of changes and
+[00:50:29.780 --> 00:50:34.500] dog fooding and everything's changing a lot all the time
+[00:50:35.540 --> 00:50:42.660] so until I would say until I can have back tests it's really I can't really say I have an apple dabble
+[00:50:42.660 --> 00:50:43.860] comparison anything
+[00:50:43.860 --> 00:50:48.500] it's all feels and vibes at this point
+[00:50:48.500 --> 00:50:53.300] so which is fine I'm doing okay with that
+[00:50:53.300 --> 00:50:59.140] you know I'm not I'm not personally I'm not really a super big metrics guy I feel like
+[00:51:01.620 --> 00:51:15.220] metrics you tend to lose resolution of reality a lot once you start quantifying things but I think that's also
+[00:51:15.220 --> 00:51:22.820] something that you can improve on but you know case in point is the stock market
+[00:51:24.740 --> 00:51:27.220] you know you've been trying to quantify stuff for a long time
+[00:51:27.220 --> 00:51:33.060] and yes there are factor there's factor analysis where you quantify factors and it is effective
+[00:51:33.060 --> 00:51:35.460] some strategies are better than others clearly
+[00:51:35.460 --> 00:51:43.940] so that is definitely something that is effective and it has real world financial significance
+[00:51:44.900 --> 00:51:54.420] but I think also especially if you're new or exploring something I don't think I don't really know if
+[00:51:54.420 --> 00:52:03.700] going in on it too early is the best strategy it could be a good strategy
+[00:52:04.420 --> 00:52:11.780] but I think that you know maybe I think it is a good strategy in the case of right now with agents
+[00:52:11.780 --> 00:52:21.700] you know we have okay the cloud team but a lot of their work is like a couple months old a lot of their
+[00:52:21.700 --> 00:52:30.980] their research it's not very old so it's hard to really tell other than being in the thick of it
+[00:52:32.020 --> 00:52:41.460] and how it feels and yeah we can have some metrics to guide us but it's gonna it's still I would say it's still
+[00:52:41.460 --> 00:52:48.180] a lot yes you can use you know principal component analysis and try to figure out what the
+[00:52:48.180 --> 00:52:57.460] components are and maybe those would be factors that are tied to the real world somehow or maybe we just need to
+[00:52:58.260 --> 00:53:06.020] try out different things but you know as you know I'm most effective at not just starting to quantify
+[00:53:06.020 --> 00:53:12.740] things right away but at some point I will quantify things and especially if I'm working with others
+[00:53:12.740 --> 00:53:23.460] who you know and we have a researcher then yes I will play ball and we'll have good discussions about
+[00:53:24.020 --> 00:53:30.900] how to quantify this but at least we have evalve now we're starting with the process and from there we
+[00:53:30.900 --> 00:53:37.540] can kind of tiptoe our way into this and yeah all right
+[00:53:40.020 --> 00:53:42.580] I guess we have a release
+[00:53:42.580 --> 00:53:48.500] we should have module harness
+[00:53:48.500 --> 00:53:53.860] over here no we don't okay so we still
+[00:53:53.860 --> 00:53:58.340] happened I think
+[00:53:58.340 --> 00:54:01.700] all right so
+[00:54:03.780 --> 00:54:04.420] can we can we
+[00:54:04.420 --> 00:54:04.420] can we
+[00:54:04.420 --> 00:54:04.420] can we
+[00:54:04.420 --> 00:54:08.500] update
+[00:54:08.500 --> 00:54:10.340] can we define
+[00:54:10.340 --> 00:54:13.620] properly define
+[00:54:13.620 --> 00:54:21.620] what evals are in module harness
+[00:54:21.620 --> 00:54:28.180] please create an ontology playing in module harness
+[00:54:31.060 --> 00:54:32.660] let's precisely
+[00:54:32.660 --> 00:54:38.180] define our terminology
+[00:54:38.180 --> 00:54:43.060] let's spec
+[00:54:43.060 --> 00:54:45.620] agentic
+[00:54:45.620 --> 00:54:48.100] contracts
+[00:54:48.100 --> 00:54:52.180] and evalvar okay yeah let's do that
+[00:54:52.820 --> 00:54:53.460] I think we should
+[00:54:53.460 --> 00:54:56.340] let's let's let's let's create a domain language
+[00:54:56.340 --> 00:55:09.060] and I would say this is this might be the first I would say serious usage of existence slang in
+[00:55:09.060 --> 00:55:20.980] this development that I'm doing because yeah I have like used existence slang in a very loose sense with like domain driven design but
+[00:55:20.980 --> 00:55:28.260] I mean I would say I've used domain driven design a lot for you know over you know a couple decades but
+[00:55:28.260 --> 00:55:45.860] I think now we can really nail down existence laying themes in constructing the software project particularly because we're using agents so it's a lot more efficient to just create the ontology right now
+[00:55:46.740 --> 00:55:52.180] it's not just a bunch of extra you know work busy work that might take a little too long
+[00:55:52.180 --> 00:55:53.380] so
+[00:55:53.380 --> 00:55:55.380] yeah I think that
+[00:55:55.380 --> 00:56:04.420] let's figure out what the definition of an eval is at least at least what the agent thinks
+[00:56:05.460 --> 00:56:06.340] an eval is
+[00:56:06.340 --> 00:56:14.420] and in that way we can iterate on that and then yeah I think that this is good because now we can
+[00:56:14.420 --> 00:56:27.780] get some clarity as far as like what exactly is it thinking when it's creating these evals because this is not exactly what you know we're not
+[00:56:27.780 --> 00:56:37.060] awesome
+[00:56:37.060 --> 00:56:37.300] awesome
+[00:56:37.300 --> 00:56:42.260] all right
+[00:56:42.260 --> 00:56:46.740] so awesome we got an ontology
+[00:56:48.180 --> 00:56:49.220] I wonder if we should call it
+[00:56:49.220 --> 00:56:55.460] I guess ontology is good interesting so we have an ontology with a source
+[00:56:55.460 --> 00:56:57.220] fascinating
+[00:56:57.220 --> 00:57:00.020] okay
+[00:57:00.020 --> 00:57:02.180] I don't know why
+[00:57:02.180 --> 00:57:04.580] it likes Nicholas
+[00:57:04.580 --> 00:57:08.420] is this like guy real is this like a real guy
+[00:57:09.540 --> 00:57:10.340] or what
+[00:57:10.340 --> 00:57:11.380] or what
+[00:57:11.380 --> 00:57:14.900] yeah somebody I don't know why
+[00:57:14.900 --> 00:57:18.820] we seem to have this affinity for for him but
+[00:57:18.820 --> 00:57:21.140] okay
+[00:57:21.140 --> 00:57:29.060] it's everywhere
+[00:57:31.060 --> 00:57:31.780] this Nicholas
+[00:57:31.780 --> 00:57:31.780] this Nicholas
+[00:57:31.780 --> 00:57:35.540] I don't know what he did but
+[00:57:35.540 --> 00:57:37.460] he he got in
+[00:57:37.460 --> 00:57:39.780] he's in
+[00:57:39.780 --> 00:57:43.860] all right
+[00:57:43.860 --> 00:57:51.940] I guess we should look through what all these are okay cool we got back to us
+[00:57:51.940 --> 00:57:56.100] a replayed sequence agent working on the base awesome
+[00:57:56.100 --> 00:57:58.100] so
+[00:58:01.060 --> 00:58:10.900] so one thing I may want to do with agent doc as well is be able to work within this file in line
+[00:58:10.900 --> 00:58:17.380] but it's going to be a little right now how agent doc is made it's going to be super messy
+[00:58:17.380 --> 00:58:24.500] so I don't want to do that yet but at some point I might want to have like this like clean version
+[00:58:25.060 --> 00:58:25.380] of it
+[00:58:25.380 --> 00:58:25.380] of it
+[00:58:25.380 --> 00:58:27.380] or like maybe just
+[00:58:27.380 --> 00:58:33.220] like we start working it and then I just say all right we're done session cleanup
+[00:58:33.220 --> 00:58:36.980] you know maybe just coming back to this or something but
+[00:58:36.980 --> 00:58:38.900] yeah
+[00:58:38.900 --> 00:58:43.140] that I'm not going to take that on right now I think that it's
+[00:58:43.140 --> 00:58:46.180] probably a little premature but
+[00:58:48.420 --> 00:58:54.820] I would say let's create a module harness task over here
+[00:58:54.820 --> 00:59:03.860] so that way you can kind of play around with it
+[00:59:03.860 --> 00:59:06.660] all right
+[00:59:06.660 --> 00:59:07.220] you don't want
+[00:59:11.220 --> 00:59:12.100] all right
+[00:59:12.100 --> 00:59:14.500] all right
+[00:59:14.500 --> 00:59:17.700] all right a replay of harness effectiveness the back test starts
+[00:59:17.700 --> 00:59:19.620] where are we here
+[00:59:19.620 --> 00:59:21.860] back testing is
+[00:59:21.860 --> 00:59:23.940] right okay there you go
+[00:59:23.940 --> 00:59:27.620] close this close this if you actually done the harness quality without it
+[00:59:27.620 --> 00:59:28.500] harness improvement
+[00:59:28.500 --> 00:59:30.740] again anecdotal I think this helps with it
+[00:59:30.740 --> 00:59:31.940] harness okay cool
+[00:59:38.260 --> 00:59:40.900] I'm actually very happy with existence length
+[00:59:40.900 --> 00:59:47.700] this is actually pretty cool because this shows me
+[00:59:47.700 --> 00:59:58.100] what exactly the agent is how is it how is it defining these terms which is pretty amazing
+[00:59:58.100 --> 01:00:00.100] actually
+[01:00:03.540 --> 01:00:03.780] so
+[01:00:03.780 --> 01:00:03.780] so
+[01:00:03.780 --> 01:00:05.380] drift
+[01:00:05.380 --> 01:00:06.820] cool
+[01:00:06.820 --> 01:00:08.340] coverage
+[01:00:08.340 --> 01:00:11.380] I like it this is solid
+[01:00:11.380 --> 01:00:14.580] all right
+[01:00:14.580 --> 01:00:23.220] all right so here's the here's the big question so eval how is it just a little too tight to
+[01:00:23.220 --> 01:00:24.180] implementation
+[01:00:24.180 --> 01:00:31.700] all right I name testable scenario that specifies it verifies the module's behavior
+[01:00:32.900 --> 01:00:35.700] repeatable pattern connecting spec to evidence
+[01:00:35.700 --> 01:00:45.940] each eval has a name identifier a scenario input precondition and an expected outcome
+[01:00:45.940 --> 01:00:53.620] okay evals serve dual purposes they document what should be tested which is the specification
+[01:00:53.620 --> 01:00:56.180] huh
+[01:00:58.660 --> 01:01:03.620] and provide name targets for quantitative measurement metrics
+[01:01:03.620 --> 01:01:12.420] and eval may map to an existing test function or describe an aspirational scenario yeah
+[01:01:12.420 --> 01:01:14.100] I think we actually did this side
+[01:01:14.100 --> 01:01:16.900] yeah
+[01:01:19.140 --> 01:01:26.900] see this is where it's interesting because this is a module harness
+[01:01:26.900 --> 01:01:35.300] so you know like normally with uh eval across your entire code base
+[01:01:35.300 --> 01:01:42.660] you know it's very high level but this is kind of like module level so
+[01:01:44.980 --> 01:01:52.900] yeah I think that we do want to you know I mean I look at there might be tight coupling too so
+[01:01:52.900 --> 01:02:00.980] it's going to be interesting this is going to be interesting all right so evals
+[01:02:01.620 --> 01:02:09.220] I'm not really sure exactly what we want to do yet you know I think that we should just play around with it and see how it goes
+[01:02:09.220 --> 01:02:13.220] over the next few days and then we'll kind of get a better sentence but for now
+[01:02:13.220 --> 01:02:19.540] yeah I'm willing to have this be the definition and then we'll track it
+[01:02:20.580 --> 01:02:28.500] um evals make harness quality measurable without name evals how good is this harness is subjective
+[01:02:28.500 --> 01:02:35.300] with evals coverage becomes a ratio and back testing can compare harness versions by measuring which
+[01:02:35.300 --> 01:02:46.260] leads to better agent outcomes the name is critical it creates an addressable handle that test frameworks
+[01:02:46.260 --> 01:02:54.100] coverage tools and back test harnesses can reference programmatically okay that's a good point
+[01:02:54.100 --> 01:02:59.780] because the back test harness is something that I guess
+[01:02:59.780 --> 01:03:11.140] we'll probably need another rust module for back testing actually so maybe module module harness
+[01:03:13.140 --> 01:03:20.660] could be like a like a primitive level package but or maybe we just have like a maybe it's just the wrong
+[01:03:20.660 --> 01:03:28.260] abstraction maybe we want to have like a full well no no I think we do want to be couple module
+[01:03:28.260 --> 01:03:33.620] harness from back testing I think that back testing should be separate but it should use module well it could
+[01:03:33.620 --> 01:03:42.980] use module harnesses but back testing maybe well I guess do we want to tightly couple back test
+[01:03:42.980 --> 01:04:02.340] I think it's to have um well I think it'd be beneficial to have a harness on the module level for back testing for sure but we also we really do care about the full if we
+[01:04:05.300 --> 01:04:11.860] measure on the module we're kind of like measure on the module we're kind of seeing this module should exist probably
+[01:04:11.860 --> 01:04:28.740] like it's hard to say measure whether or not this module should even be here right I mean maybe you can I don't know I mean that's kind of interesting it's like how do you know when the module should just go away from our harness
+[01:04:31.140 --> 01:04:38.420] um but that could be you know something that we can address too all right the eval pattern is universal
+[01:04:38.420 --> 01:04:44.500] in verification systems unit tests bdd module harness
+[01:04:46.580 --> 01:04:51.460] all right all right all right all right this is where I'm not fully agreeing because
+[01:04:51.460 --> 01:05:11.780] I think this is too okay okay well I guess this is okay load missing no file returns default this is the module harness okay
+[01:05:13.540 --> 01:05:20.420] I guess I guess yeah I guess so because it's like you know we're thinking in terms of the module here
+[01:05:20.420 --> 01:05:25.380] we're scoped to the module so let's say your entire existence
+[01:05:25.380 --> 01:05:31.220] how effective are you at making that happen um
+[01:05:33.220 --> 01:05:39.540] but then I think I feel like also evals might also want to like get into like how effective are you at
+[01:05:39.540 --> 01:05:45.460] based off of inputs or based off the broader ecosystem
+[01:05:45.460 --> 01:05:50.660] and that's but that's kind of like a cross cutting
+[01:05:50.660 --> 01:05:56.820] eval but I think that perhaps we could
+[01:05:58.660 --> 01:06:07.300] even specify like like type and evaluate you know maybe like a certain module like a certain like
+[01:06:07.300 --> 01:06:11.860] member is like a like like an obvious case it's like a plug-in architecture
+[01:06:11.860 --> 01:06:22.580] like how do we know if this plug-in architecture is got has enough hooks for example and we can have an eval based off of that
+[01:06:23.380 --> 01:06:30.820] I guess that's kind of what it is is the eval uses the agent agents to evaluate itself
+[01:06:30.820 --> 01:06:39.860] in a quantifiable way so that's a good example which is does
+[01:06:41.860 --> 01:06:42.100] so
+[01:06:42.100 --> 01:06:42.100] so
+[01:06:42.100 --> 01:06:50.180] wonder if I um let's use a plug
+[01:06:50.180 --> 01:06:58.580] okay so to quantifiably measure phenomena maybe quantifiably measure
+[01:06:58.580 --> 01:07:03.940] or maybe like true is one
+[01:07:05.060 --> 01:07:13.940] so
+[01:07:13.940 --> 01:07:13.940] so
+[01:07:13.940 --> 01:07:15.940] okay
+[01:07:15.940 --> 01:07:17.940] okay
+[01:07:17.940 --> 01:07:18.260] and
+[01:07:18.260 --> 01:07:23.620] I think we want
+[01:07:23.620 --> 01:07:27.700] what are we talking about the plug-in example so
+[01:07:29.700 --> 01:07:30.580] let's also
+[01:07:30.580 --> 01:07:40.500] let's also like have a plug-in or let's let's have a plug-in example to demonstrate
+[01:07:40.500 --> 01:07:45.060] how evals
+[01:07:45.060 --> 01:07:49.540] can work within the module
+[01:07:49.540 --> 01:07:50.740] you know
+[01:07:50.740 --> 01:07:56.260] some evals could include um
+[01:07:58.020 --> 01:08:00.260] are there enough too many hooks
+[01:08:00.260 --> 01:08:03.060] um
+[01:08:03.060 --> 01:08:05.060] i don't know
+[01:08:05.060 --> 01:08:09.220] is this
+[01:08:09.220 --> 01:08:13.700] is the interface
+[01:08:13.700 --> 01:08:19.940] too simple or too complex
+[01:08:22.980 --> 01:08:23.460] i don't know
+[01:08:23.460 --> 01:08:23.460] i don't know
+[01:08:23.460 --> 01:08:26.740] maybe it's not the best measurement but
+[01:08:26.740 --> 01:08:28.580] i'll just throw it in there
+[01:08:28.580 --> 01:08:34.980] and i think that we can quantify these things
+[01:08:34.980 --> 01:08:38.580] i mean a lot of it's feel too but we can probably quantify it too
+[01:08:38.580 --> 01:08:41.220] okay
+[01:08:41.220 --> 01:08:43.220] let's do that
+[01:08:43.700 --> 01:08:44.500] okay
+[01:08:44.500 --> 01:08:47.460] all right so i think let's move on to the next one so contract
+[01:08:47.460 --> 01:08:55.380] an invariant or guarantee a module upholds for its colors what they rely on without reading
+[01:08:55.380 --> 01:09:03.140] implementation contracts define describe integrity the module's ability to adhere to its promises under all conditions
+[01:09:03.700 --> 01:09:06.340] contracts different from specs and scope
+[01:09:06.340 --> 01:09:14.740] a spec describes what each function does a contract describes cross-coding guarantees that span multiple functions
+[01:09:16.020 --> 01:09:29.700] the contract is the contract on a contract is the contract is the contract is the most valuable section for agent callers
+[01:09:31.700 --> 01:09:36.500] an agent deciding whether to call a function doesn't need to know
+[01:09:36.500 --> 01:09:39.460] ever need to know will this panic
+[01:09:39.460 --> 01:09:42.180] is it safe to call concurrency
+[01:09:42.180 --> 01:09:45.220] does it modify shared state
+[01:09:45.220 --> 01:09:49.380] contracts reduce agent hesitation and defensive coding
+[01:09:50.340 --> 01:09:56.340] when a contract says never panics on missing file the agent can skip null check and boil it place
+[01:09:56.340 --> 01:10:00.740] contract patterns appear at every system boundary
+[01:10:00.740 --> 01:10:04.580] api contract module contract save project
+[01:10:04.580 --> 01:10:12.420] creates parent directories if needed the agent qualifier distinguishes these from general api contracts
+[01:10:12.420 --> 01:10:16.340] agentic qualifier distinguishes these from general api contracts
+[01:10:17.140 --> 01:10:24.100] agentic contracts specifically surface guarantees that ai agents need to reason about error boundaries
+[01:10:24.100 --> 01:10:28.900] side effect scopes and safety properties okay
+[01:10:28.900 --> 01:10:33.620] all right
+[01:10:33.620 --> 01:10:36.980] spec okay let's go
+[01:10:36.980 --> 01:10:40.340] you gotta be in the loop here
+[01:10:40.340 --> 01:10:41.700] all right
+[01:10:41.700 --> 01:10:45.940] the eval elements that should transfer across context
+[01:10:47.140 --> 01:10:52.180] let's go down so i think that this is actually something that
+[01:10:52.180 --> 01:11:04.580] like existence laying is something that we could just run continuous agents with like we could
+[01:11:04.580 --> 01:11:13.780] like i can really think about yeah i can i can imagine having continuous agents just looking at all the chatter
+[01:11:14.660 --> 01:11:20.260] um just updating the definition just based off the chatter
+[01:11:20.260 --> 01:11:25.940] like sentiment like this just it's beyond sentiment analysis it's like
+[01:11:25.940 --> 01:11:27.220] you're gonna
+[01:11:27.220 --> 01:11:34.180] conversations that people have like let's say within a company let's say within a company you have
+[01:11:35.540 --> 01:11:44.100] the agents go through you know have access to all the emails then yes you could really in all the
+[01:11:44.100 --> 01:11:50.500] artifacts that people create and i would say publish because you know you don't want to necessarily
+[01:11:50.500 --> 01:12:02.180] go to i guess you have the confidence metric as well so that's something also to consider is that okay as you're like iterating on something
+[01:12:02.660 --> 01:12:05.620] it's probably going to be a lower confidence than a final product
+[01:12:05.620 --> 01:12:13.860] so yeah that's maybe confidence is not the right even the right word for it maybe it's more of a
+[01:12:13.860 --> 01:12:18.100] it might be a separate metric because confidence is
+[01:12:18.100 --> 01:12:24.900] confidence in something that is that it's really about identity
+[01:12:26.180 --> 01:12:33.860] it's uh how confident are you in the identity of or the alignment that i did identification alignment with
+[01:12:33.860 --> 01:12:37.780] a term i would say and
+[01:12:37.780 --> 01:12:46.660] whether or not something is done or not is i would say this is something else and i'm not really sure what
+[01:12:46.660 --> 01:12:54.660] that word is right now but but it should be codified somehow and i'm sure there's a word that i'm just not thinking of right now but
+[01:12:54.660 --> 01:13:03.380] it's like completeness
+[01:13:03.380 --> 01:13:07.220] i don't know if that's a good word for it even because it's like
+[01:13:08.660 --> 01:13:14.740] i guess it could be you know because yeah completeness is the absence of churn i would say it's like
+[01:13:18.340 --> 01:13:28.980] is this like a timeless definition at this point or is it still timelessness too so yeah but i'm not yeah
+[01:13:30.020 --> 01:13:31.940] got it that's got it that's the context
+[01:13:31.940 --> 01:13:40.820] okay so that's interesting the context here
+[01:13:40.820 --> 01:13:45.460] is different from how i would imagine context
+[01:13:45.460 --> 01:13:48.420] being used with software
+[01:13:48.420 --> 01:13:53.620] i would call this scope
+[01:13:53.620 --> 01:13:57.700] not um
+[01:14:00.020 --> 01:14:03.140] so regards term is
+[01:14:03.140 --> 01:14:07.620] has a broader scope than
+[01:14:07.620 --> 01:14:09.460] scope
+[01:14:09.460 --> 01:14:16.740] i would say it this is i mean text
+[01:14:16.740 --> 01:14:26.580] perhaps perhaps i would say it includes intended context and human context
+[01:14:29.460 --> 01:14:30.180] which is
+[01:14:30.180 --> 01:14:33.780] which is the which could arguably
+[01:14:33.780 --> 01:14:36.980] be the the entire
+[01:14:36.980 --> 01:14:43.860] set attention space in any given time
+[01:14:43.860 --> 01:14:53.860] which whatever is held in attention space at any given time
+[01:14:53.860 --> 01:14:54.740] any given moment
+[01:14:59.460 --> 01:15:28.460] Um, all right, so we got that. Okay, we got ordinal, continuous, component. Oh, oh, oh. This is module. So, I would say update. I would say update.
+[01:15:29.460 --> 01:15:36.460] Okay.
+[01:15:36.460 --> 01:15:42.460] With our research here.
+[01:15:42.460 --> 01:15:58.460] All right. Back to just kind of going next. So spec. Behavioral definition of a module. Public interface. What it does. Not how.
+[01:15:58.460 --> 01:16:10.460] Each entry in the spec describes one public function type or trait and the observable behavior caller can expect.
+[01:16:10.460 --> 01:16:13.460] Each entry.
+[01:16:13.460 --> 01:16:25.460] Okay. A spec is descriptive testable claims about current behavior, not aspirational future goals. It answers. If I call this function with these inputs, what happens?
+[01:16:25.460 --> 01:16:37.460] A spec is the primary navigation tool for agents before modifying code. An agent reads the spec to understand what the module promises. After modifying code, the agent updates the spec to reflect new behavior, creating a living document that stays synchronized with implementation. A spec that drifts from reality is worse than no spec. It creates false confidence.
+[01:16:37.460 --> 01:16:51.460] Drift detection catches this. Okay, interesting.
+[01:16:51.460 --> 01:17:09.460] Spec. Entries follow a consistent pattern across the means. Functional takes X returns Y side effect V. Types represents X invariance Y. Error handling on failure does X never Y.
+[01:17:09.460 --> 01:17:13.460] Spec. The spec pattern is the same function. Okay.
+[01:17:13.460 --> 01:17:25.460] Harness. Ontology. Structured context applied to a module that bounds what an agent needs to know for effective operation.
+[01:17:25.460 --> 01:17:33.460] A harness. A harness is the narrowest useful scope for coding agents.
+[01:17:33.460 --> 01:17:35.460] Broader.
+[01:17:35.460 --> 01:17:36.460] Okay.
+[01:17:36.460 --> 01:17:47.460] I guess in the case of the module.
+[01:17:47.460 --> 01:17:57.460] It provides just enough context to make informed changes without reading every line of implementation.
+[01:17:57.460 --> 01:18:09.460] Harness context bridges the gap between raw code and agent understanding. Without it, agents must re-derive module behavior from source on every interaction, expensive, error prone, and inconsistent.
+[01:18:09.460 --> 01:18:15.460] The harness serves as persistent structured memory at the module level.
+[01:18:15.460 --> 01:18:25.460] A well-written harness reduces agent errors, speeds up task completion, and makes agent behavior measurable through eval.
+[01:18:25.460 --> 01:18:31.460] A harness manifests as a structured doc comment at the top of each source file.
+[01:18:31.460 --> 01:18:41.460] The format is language agnostic. Identical sections, stack agentic contracts, and eval.
+[01:18:41.460 --> 01:18:49.460] Appear regardless of whether the comment uses whatever comment syntax.
+[01:18:49.460 --> 01:18:55.460] The harness pattern appears at multiple scales module level .comment on a single file.
+[01:18:55.460 --> 01:18:57.460] Create package level.
+[01:18:57.460 --> 01:18:59.460] Create package level.
+[01:18:59.460 --> 01:19:00.460] Free me.
+[01:19:00.460 --> 01:19:01.460] Describing.
+[01:19:01.460 --> 01:19:02.460] Describing.
+[01:19:02.460 --> 01:19:03.460] Describing.
+[01:19:03.460 --> 01:19:04.460] Component interactions.
+[01:19:04.460 --> 01:19:05.460] Okay.
+[01:19:05.460 --> 01:19:06.460] I like this a lot.
+[01:19:06.460 --> 01:19:07.460] Yeah.
+[01:19:07.460 --> 01:19:08.460] This is great.
+[01:19:08.460 --> 01:19:09.460] Alright.
+[01:19:09.460 --> 01:19:10.460] Let's go back to um.
+[01:19:10.460 --> 01:19:11.460] Eval.
+[01:19:11.460 --> 01:19:12.460] Let's see what eval looks like now.
+[01:19:12.460 --> 01:19:13.460] Okay.
+[01:19:13.460 --> 01:19:14.460] So eval is.
+[01:19:14.460 --> 01:19:15.460] So.
+[01:19:15.460 --> 01:19:16.460] I would say we.
+[01:19:16.460 --> 01:19:17.460] Probably do want to spend more time.
+[01:19:17.460 --> 01:19:18.460] I don't want to do.
+[01:19:18.460 --> 01:19:19.460] Spend more time on this one.
+[01:19:19.460 --> 01:19:20.460] I don't want to do.
+[01:19:20.460 --> 01:19:21.460] Spend more time on this one.
+[01:19:21.460 --> 01:19:22.460] I don't want to do.
+[01:19:22.460 --> 01:19:23.460] Spend more time on this one.
+[01:19:23.460 --> 01:19:24.460] But.
+[01:19:24.460 --> 01:19:25.460] Hmm.
+[01:19:25.460 --> 01:19:26.460] Okay.
+[01:19:26.460 --> 01:19:28.460] So this is kind of like existence blind over here.
+[01:19:28.460 --> 01:19:29.460] The untal event.
+[01:19:29.460 --> 01:19:30.460] Tweets eval.
+[01:19:30.460 --> 01:19:31.460] Limits the information.
+[01:19:31.460 --> 01:19:32.460] Use the coherent judgment.
+[01:19:32.460 --> 01:19:33.460] The full attention space.
+[01:19:33.460 --> 01:19:34.460] Agents of the students.
+[01:19:34.460 --> 01:19:35.460] Active during evaluation.
+[01:19:35.460 --> 01:19:36.460] Broader than scope.
+[01:19:36.460 --> 01:19:38.460] It keeps all information held in working memory at the moment of judgment.
+[01:19:38.460 --> 01:19:39.460] I mean because.
+[01:19:39.460 --> 01:19:40.460] Okay.
+[01:19:40.460 --> 01:19:41.460] So.
+[01:19:41.460 --> 01:19:42.460] Hmm.
+[01:19:42.460 --> 01:19:43.460] Focus.
+[01:19:43.460 --> 01:19:43.460] Finite attention applied.
+[01:19:43.460 --> 01:19:43.460] Each eval targets one measurable aspect to avoid delusion.
+[01:19:43.460 --> 01:19:44.460] Okay.
+[01:19:44.460 --> 01:19:45.460] So.
+[01:19:45.460 --> 01:19:46.460] With context.
+[01:19:46.460 --> 01:19:47.460] How I like to think about context is they're like snapshots.
+[01:19:47.460 --> 01:19:47.460] Moment to moment snapshots.
+[01:19:47.460 --> 01:19:48.460] And.
+[01:19:48.460 --> 01:19:49.460] the changes.
+[01:19:49.460 --> 01:19:49.460] You know.
+[01:19:49.460 --> 01:19:50.460] You know.
+[01:19:50.460 --> 01:19:51.460] Like.
+[01:19:51.460 --> 01:19:52.460] Like.
+[01:19:52.460 --> 01:19:52.460] You know.
+[01:19:52.460 --> 01:19:53.460] Like.
+[01:19:53.460 --> 01:19:54.460] It's like.
+[01:19:54.460 --> 01:19:54.460] You know.
+[01:19:54.460 --> 01:19:55.460] It's like.
+[01:19:55.460 --> 01:19:56.460] You know.
+[01:19:56.460 --> 01:19:57.460] You know.
+[01:19:57.460 --> 01:19:58.460] It's like.
+[01:19:58.460 --> 01:19:59.460] It's like.
+[01:19:59.460 --> 01:20:00.460] All frame.
+[01:20:00.460 --> 01:20:00.460] Has a context.
+[01:20:00.460 --> 01:20:01.460] Essentially.
+[01:20:01.460 --> 01:20:02.460] So.
+[01:20:02.460 --> 01:20:02.460] Yeah.
+[01:20:02.460 --> 01:20:03.460] You know.
+[01:20:03.460 --> 01:20:04.460] So.
+[01:20:04.460 --> 01:20:05.460] It's like.
+[01:20:05.460 --> 01:20:06.460] Yeah.
+[01:20:06.460 --> 01:20:07.460] You know.
+[01:20:07.460 --> 01:20:08.460] It's.
+[01:20:08.460 --> 01:20:09.460] It's like.
+[01:20:09.460 --> 01:20:10.460] It's like.
+[01:20:10.460 --> 01:20:11.460] All frame.
+[01:20:11.460 --> 01:20:12.460] Of.
+[01:20:12.460 --> 01:20:13.460] Has a context.
+[01:20:13.460 --> 01:20:14.460] Essentially.
+[01:20:14.460 --> 01:20:15.460] So.
+[01:20:15.460 --> 01:20:16.460] Yeah.
+[01:20:16.460 --> 01:20:17.460] You know.
+[01:20:17.460 --> 01:20:18.460] It's like.
+[01:20:18.460 --> 01:20:19.460] It's like.
+[01:20:19.460 --> 01:20:20.460] It's like.
+[01:20:20.460 --> 01:20:22.460] It's like.
+[01:20:22.460 --> 01:20:23.460] It's like.
+[01:20:23.460 --> 01:20:24.460] There's like.
+[01:20:24.460 --> 01:20:25.460] All frame.
+[01:20:25.460 --> 01:20:26.460] Of.
+[01:20:26.460 --> 01:20:27.460] Has a context.
+[01:20:27.460 --> 01:20:28.460] Essentially.
+[01:20:28.460 --> 01:20:37.460] So, that's how I understand it, and I think that's kind of something that maybe I should describe an existence language.
+[01:20:37.460 --> 01:20:46.460] Quantification model: evals these agents to quantify and measure phenomena.
+[01:20:46.460 --> 01:20:52.460] Each, every EDAL produces a score on 0, 20, 1.0, 1.0.
+[01:20:52.460 --> 01:20:56.460] Boolean true paths K1.
+[01:20:56.460 --> 01:21:04.460] Quality, spasys build a link, coverage ratios, similarity scores, high resolution.
+[01:21:04.460 --> 01:21:06.460] Composites.
+[01:21:06.460 --> 01:21:11.460] Weighted average of sub-EVALs, aggregated module health score.
+[01:21:11.460 --> 01:21:12.460] Range-EVALs.
+[01:21:12.460 --> 01:21:14.460] Okay, so we're just kind of going through here.
+[01:21:14.460 --> 01:21:20.460] Some properties have an optimal band rather than extremum.
+[01:21:20.460 --> 01:21:23.460] Is the interface too complex?
+[01:21:23.460 --> 01:21:25.460] Or is the interface too simple?
+[01:21:25.460 --> 01:21:27.460] Upside the band in either direction.
+[01:21:27.460 --> 01:21:28.460] Okay.
+[01:21:28.460 --> 01:21:29.460] Both, hmm.
+[01:21:29.460 --> 01:21:33.460] Under and over provision are penalized.
+[01:21:33.460 --> 01:21:35.460] Examples.
+[01:21:35.460 --> 01:21:36.460] Hook 1.
+[01:21:36.460 --> 01:21:36.460] API service.
+[01:21:36.460 --> 01:21:41.460] Optimal entry point count sits in the band.
+[01:21:41.460 --> 01:21:43.460] Too few is underserving.
+[01:21:43.460 --> 01:21:45.460] Too many is cognitive overload.
+[01:21:45.460 --> 01:21:46.460] Okay.
+[01:21:46.460 --> 01:21:46.460] I guess we don't necessarily know.
+[01:21:46.460 --> 01:21:47.460] We don't know.
+[01:21:47.460 --> 01:21:48.460] We have a vector.
+[01:21:48.460 --> 01:21:52.460] Maybe I should expand on that.
+[01:21:52.460 --> 01:21:53.460] Okay.
+[01:21:53.460 --> 01:21:53.460] Eval execution.
+[01:21:53.460 --> 01:21:53.460] Eval execution.
+[01:21:53.460 --> 01:21:54.460] Eval execution layers.
+[01:21:54.460 --> 01:21:55.460] Static eval.
+[01:21:55.460 --> 01:21:56.460] Code graded.
+[01:21:56.460 --> 01:21:57.460] Instant.
+[01:21:57.460 --> 01:21:58.460] We'll end on that.
+[01:22:27.460 --> 01:22:38.460] Okay, so I guess drift is kind of like the auditing.
+[01:22:38.460 --> 01:22:44.460] Maybe audit, we should add audit to the ontology.
+[01:22:44.460 --> 01:22:50.460] Add audit to the ontology.
+[01:22:50.460 --> 01:23:02.460] This is so cool.
+[01:23:02.460 --> 01:23:06.460] I don't know, like, this is like, what?
+[01:23:06.460 --> 01:23:10.460] This is like, yeah, this is great.
+[01:23:10.460 --> 01:23:12.460] I like it.
+[01:23:12.460 --> 01:23:15.460] Uh oh.
+[01:23:15.460 --> 01:23:17.460] Oh, okay.
+[01:23:17.460 --> 01:23:22.460] That was in the wrong place.
+[01:23:22.460 --> 01:23:23.460] Okay, so we got audit.
+[01:23:23.460 --> 01:23:27.460] Okay, here's our audit.
+[01:23:27.460 --> 01:23:28.460] Alright.
+[01:23:28.460 --> 01:23:37.460] A systematic process of evaluating the module's harness against its actual state, applying evals to detect drift and measure coverage.
+[01:23:37.460 --> 01:23:42.460] An audit produces a structured report with quantified results.
+[01:23:42.460 --> 01:23:43.460] Excuse me?
+[01:23:43.460 --> 01:23:45.460] Well, hmm.
+[01:23:45.460 --> 01:23:52.460] I think we're a little too, I think we want actionable too.
+[01:23:52.460 --> 01:23:57.460] Like, when I say audit docs, it's access.
+[01:23:57.460 --> 01:24:15.460] So, when I have been, you know, so when using audit docs, we have been getting access to perform.
+[01:24:15.460 --> 01:24:26.460] You know, quantifiable results are good.
+[01:24:26.460 --> 01:24:40.460] Are good, but I have not yet, you know, have yet used quantifiable results, I would say.
+[01:24:40.460 --> 01:25:01.000] I mean I guess I have as well.
+[01:25:01.000 --> 01:25:23.240] So an audit is a focus founded operation.
+[01:25:23.240 --> 01:25:29.120] It selects a scope, single module directory or project, runs evals within the scope and
+[01:25:29.120 --> 01:25:33.500] returns results at a chosen resolution.
+[01:25:33.500 --> 01:25:34.820] Relationship to other terms.
+[01:25:34.820 --> 01:25:36.740] Eval defines what to measure.
+[01:25:36.740 --> 01:25:39.880] Audit is the act of running those measurements.
+[01:25:39.880 --> 01:25:43.360] Alright, so eval defines what to measure.
+[01:25:43.360 --> 01:25:45.360] Audit is the act of running those measurements.
+[01:25:45.360 --> 01:25:46.360] I would say...
+[01:25:46.360 --> 01:25:49.360] Okay, so what is...
+[01:25:49.360 --> 01:25:53.160] I did audit docs.
+[01:25:53.160 --> 01:25:54.120] It actually...
+[01:25:54.120 --> 01:25:57.240] I would say actionable too.
+[01:25:57.240 --> 01:25:59.620] We can have actionable results too.
+[01:25:59.620 --> 01:26:01.620] Hopefully we get that.
+[01:26:01.620 --> 01:26:02.940] Well, coverage is the metric.
+[01:26:02.940 --> 01:26:04.700] The audit computes.
+[01:26:04.700 --> 01:26:08.860] The drift is the condition the audit detects.
+[01:26:08.860 --> 01:26:12.620] Back test compares audit results across...
+[01:26:12.620 --> 01:26:15.620] Yes and no, I guess.
+[01:26:15.620 --> 01:26:20.000] A single audit is a point in time snapshot.
+[01:26:20.000 --> 01:26:21.000] Okay.
+[01:26:21.000 --> 01:26:26.240] Audits close the feedback loop between harness offering and harness quality.
+[01:26:26.240 --> 01:26:28.000] Without audits, a harness is a static document.
+[01:26:28.000 --> 01:26:30.000] With audits, it becomes a living system that signals where...
+[01:26:30.000 --> 01:26:32.380] When it's much of a duty here.
+[01:26:32.380 --> 01:26:33.380] Good patch.
+[01:26:33.380 --> 01:26:37.380] The official definition that says structure reports quantified results...
+[01:26:37.380 --> 01:26:39.380] Which is too passive in your experience with auto items.
+[01:26:39.380 --> 01:26:44.380] That the agent performs not just to report the read, update, audit and be okay.
+[01:26:44.380 --> 01:26:45.380] So ontology definition.
+[01:26:45.380 --> 01:27:02.760] Now says an agentic audit that finds missing spec entries doesn't just report the gap and generates
+[01:27:02.760 --> 01:27:03.760] the entries.
+[01:27:03.760 --> 01:27:11.140] This is the key difference between a traditional audit which produces a document for humans to
+[01:27:11.140 --> 01:27:17.140] act on and an agentic audit produces a work cue that agents execute.
+[01:27:17.140 --> 01:27:22.760] The audit becomes a self-healing mechanism when the agent can act on its own findings.
+[01:27:22.760 --> 01:27:23.760] Good.
+[01:27:23.760 --> 01:27:32.140] Regarding along with quantifiable results report, write, it's both not either/or, updated audit
+[01:27:32.140 --> 01:27:36.140] and be to reflect dual outputs.
+[01:27:36.140 --> 01:27:41.760] Quantifiable result report scores coverage ratios drift metrics the measurement.
+[01:27:41.760 --> 01:27:47.000] Actionable items work cue for agent remediation which is the response.
+[01:27:47.000 --> 01:27:50.940] The report and the actions serve different consumers.
+[01:27:50.940 --> 01:27:55.940] The report feeds back testing and trend analytics.
+[01:27:55.940 --> 01:27:56.940] The act...
+[01:27:56.940 --> 01:27:57.940] Both are first class outputs very...
+[01:27:57.940 --> 01:27:58.940] That is excellent.
+[01:27:58.940 --> 01:27:59.940] Alright.
+[01:27:59.940 --> 01:28:00.940] So...
+[01:28:00.940 --> 01:28:01.940] Okay.
+[01:28:01.940 --> 01:28:02.940] Alright.
+[01:28:02.940 --> 01:28:03.940] So...
+[01:28:03.940 --> 01:28:05.940] I guess we got our...
+[01:28:05.940 --> 01:28:06.940] Okay, let's...
+[01:28:06.940 --> 01:28:11.940] Okay, so eval defines what to measure.
+[01:28:11.940 --> 01:28:14.940] Audit is the act of running through those measurements.
+[01:28:14.940 --> 01:28:15.940] Okay.
+[01:28:15.940 --> 01:28:16.940] Coverage is the metric.
+[01:28:16.940 --> 01:28:17.940] I guess...
+[01:28:17.940 --> 01:28:18.940] Okay.
+[01:28:18.940 --> 01:28:19.940] Coverage is the metric.
+[01:28:19.940 --> 01:28:20.940] The audit computes.
+[01:28:20.940 --> 01:28:21.940] Drift is the commissioned audit to text.
+[01:28:21.940 --> 01:28:22.940] Back test compares audit results across time.
+[01:28:22.940 --> 01:28:23.940] A single audit is a point in time snapshot.
+[01:28:23.940 --> 01:28:24.940] Okay.
+[01:28:24.940 --> 01:28:25.940] So...
+[01:28:25.940 --> 01:28:26.940] Axiology.
+[01:28:26.940 --> 01:28:27.940] Okay.
+[01:28:27.940 --> 01:28:28.940] So audits close the feedback loop between harness off-reading and harness quality.
+[01:28:28.940 --> 01:28:29.940] Without audits, I heard it's not a couple of words.
+[01:28:29.940 --> 01:28:30.940] I've already read that.
+[01:28:30.940 --> 01:28:31.940] Um...
+[01:28:31.940 --> 01:28:31.940] The value of an audit is proportional to its action ability.
+[01:28:31.940 --> 01:28:32.940] Excellent.
+[01:28:32.940 --> 01:28:33.940] A good audit tells you what is wrong, drift type.
+[01:28:33.940 --> 01:28:34.940] Where, module plus symbol.
+[01:28:34.940 --> 01:28:35.940] How far, egal score plus derivation.
+[01:28:35.940 --> 01:28:36.940] In which direction, over or under provision.
+[01:28:36.940 --> 01:28:37.940] A poor audit only reports past fail without context for remediation.
+[01:28:37.940 --> 01:28:37.940] All right.
+[01:28:37.940 --> 01:28:38.940] Audit layer.
+[01:28:38.940 --> 01:28:39.940] Audit layers.
+[01:28:39.940 --> 01:28:40.940] An audit...
+[01:28:40.940 --> 01:28:41.940] Audits execute...
+[01:28:41.940 --> 01:28:42.940] Across...
+[01:28:42.940 --> 01:28:43.940] Across three eval values.
+[01:28:43.940 --> 01:28:44.940] In which...
+[01:28:44.940 --> 01:28:45.940] In which direction, over or under provision.
+[01:28:45.940 --> 01:28:47.940] A poor audit only reports past fail without context for remediation.
+[01:28:47.940 --> 01:28:48.940] All right.
+[01:28:48.940 --> 01:28:49.940] Audit layers.
+[01:28:49.940 --> 01:28:50.940] Audits execute...
+[01:28:50.940 --> 01:28:51.940] Across three eval values.
+[01:28:51.940 --> 01:28:52.940] In which...
+[01:28:52.940 --> 01:28:53.940] In which direction, over or under provision.
+[01:28:53.940 --> 01:28:54.940] In which direction, over or under provision.
+[01:28:54.940 --> 01:28:55.940] In which direction, over or under provision.
+[01:28:55.940 --> 01:28:56.940] In which direction, over or under provision.
+[01:28:56.940 --> 01:28:57.940] In which direction, over or under provision.
+[01:28:57.940 --> 01:28:59.940] In which direction, over or under provision.
+[01:28:59.940 --> 01:29:00.940] In which direction, over or under provision.
+[01:29:00.940 --> 01:29:01.940] In which direction, over or under provision.
+[01:29:01.940 --> 01:29:02.940] In which direction, over or under provision.
+[01:29:02.940 --> 01:29:03.940] In which direction, over or under provision.
+[01:29:03.940 --> 01:29:04.940] In which direction, over or under provision.
+[01:29:04.940 --> 01:29:05.940] In which direction, over or under provision.
+[01:29:05.940 --> 01:29:06.940] In which direction, over or under provision.
+[01:29:06.940 --> 01:29:29.720] A static audit is: parse source, check harness, verify symbol coverage, validate structural
+[01:29:29.720 --> 01:29:37.420] rules, fast deterministic, no side effects. A dynamic audit is: run tests, map test results to
+[01:29:37.420 --> 01:29:44.880] main devals, compute coverage ratios, requires build test infrastructure. An anangetic audit
+[01:29:44.880 --> 01:29:53.300] is: agent reads module plus harness, judges contract validity, identifies behavioral drift
+[01:29:53.300 --> 01:30:03.180] that static analytics can protect. Highest fidelity, highest cost. Each eval is an audit
+[01:30:03.180 --> 01:30:16.300] procedure, or each eval in an audit produces an eval result. Struct, score, derivation, direction.
+[01:30:16.300 --> 01:30:32.180] Okay. Huh. Interesting. So I guess like if it's like a, like a, error count. Interesting.
+[01:30:32.180 --> 01:30:41.060] Alright, so cool. I like it. That's a lot. Alright, the audit aggregates those into module
+[01:30:41.060 --> 01:30:48.700] score, composite of all evals for one module, a directory score, composite across modules
+[01:30:48.700 --> 01:30:59.700] weighted by module size and a totality, and a drift report. List of detected drift items with
+[01:30:59.700 --> 01:31:09.580] type, location, and severity. Alright. Okay. So pattern expression. The audit, auditing is universal
+[01:31:09.580 --> 01:31:18.580] in systems that maintain invariance. Financial audits verify books against transactions. Security audits
+[01:31:18.580 --> 01:31:28.020] verify configurations against call. Cool. Alright, I think this is a good place to wrap this up. I, I don't want
+[01:31:28.020 --> 01:31:44.900] to wrap this up. Logs. I saw, what did I see. Write editor. I forgot what it was, but I think we selected audit MD.
+[01:31:44.900 --> 01:31:55.760] Then we selected SpecMD, then we selected Paint.
+[01:31:55.760 --> 01:32:01.280] This was in three pane layout.
+[01:32:01.280 --> 01:32:09.900] I would say this is L, L1, L2, R1.
+[01:32:09.900 --> 01:32:27.900] Hopefully we can fix this bug.
+[01:32:27.900 --> 01:32:38.900] Please write tests for this scenario.
+[01:32:38.900 --> 01:32:45.900] Let's do test-driven development here.
+[01:32:45.900 --> 01:32:51.900] Let's do test-driven development here.
+[01:32:51.900 --> 01:32:56.900] Let's do test-driven development here.
+[01:32:56.900 --> 01:33:11.900] Let's do test-driven development here.
+[01:33:11.900 --> 01:33:12.900] Let's do test-driven development here.
+[01:33:12.900 --> 01:33:12.900] Let's do test-driven development here.
+[01:33:12.900 --> 01:33:13.900] Let's do test-driven development here.
+[01:33:13.900 --> 01:33:14.900] Let's do test-driven development here.
+[01:33:14.900 --> 01:33:15.900] Let's do test-driven development here.
+[01:33:15.900 --> 01:33:16.900] Let's do test-driven development here.
+[01:33:16.900 --> 01:33:17.900] Let's do test-driven development here.
+[01:33:17.900 --> 01:33:18.900] Let's do test-driven development here.
+[01:33:18.900 --> 01:33:19.900] Let's do test-driven development here.
+[01:33:19.900 --> 01:33:20.900] Let's do test-driven development here.
+[01:33:20.900 --> 01:33:21.900] Let's do test-driven development here.
+[01:33:21.900 --> 01:33:22.900] I think we can release this.
+[01:33:22.900 --> 01:33:23.900] Let's do test-driven development here.
+[01:33:23.900 --> 01:33:24.900] Let's do test-driven development here.
+[01:33:24.900 --> 01:33:25.900] Let's do test-driven development here.
+[01:33:25.900 --> 01:33:26.900] Let's do test-driven development here.
+[01:33:26.900 --> 01:33:27.900] Let's do test-driven development here.
+[01:33:27.900 --> 01:33:28.900] Let's do test-driven development here.
+[01:33:28.900 --> 01:33:29.900] Let's do test-driven development here.
+[01:33:29.900 --> 01:33:30.900] Let's do test-driven development here.
+[01:33:30.900 --> 01:33:31.900] Let's do test-driven development here.
+[01:33:31.900 --> 01:33:32.900] Let's do test-driven development here.
+[01:33:32.900 --> 01:33:33.900] Let's do test-driven development here.
+[01:33:33.900 --> 01:33:34.900] Let's do test-driven development here.
+[01:33:34.900 --> 01:33:35.900] Let's do test-driven development here.
+[01:33:35.900 --> 01:33:36.900] Let's do test-driven development here.
+[01:33:36.900 --> 01:33:37.900] Let's do test-driven development here.
+[01:33:37.900 --> 01:33:38.900] Let's do test-driven development here.
+[01:33:38.900 --> 01:33:39.900] Let's do test-driven development here.
+[01:33:39.900 --> 01:33:40.900] Let's do test-driven development here.
+[01:33:40.900 --> 01:33:41.900] Let's do test-driven development here.
+[01:33:41.900 --> 01:33:42.900] Let's do test-driven development here.
+[01:33:42.900 --> 01:33:43.900] Let's do test-driven development here.
+[01:33:43.900 --> 01:33:44.900] Let's do test-driven development here.
+[01:33:44.900 --> 01:33:45.900] Let's do test-driven development here.
+[01:33:45.900 --> 01:33:46.900] Let's do test-driven development here.
+[01:33:46.900 --> 01:33:47.900] Let's do test-driven development here.
+[01:33:47.900 --> 01:33:48.900] Let's do test-driven development here.
+[01:33:48.900 --> 01:33:49.900] Let's do test-driven development here.
+[01:33:49.900 --> 01:33:50.900] Let's do test-driven development here.
+[01:33:50.900 --> 01:33:51.900] Let's do test-driven development here.
+[01:34:01.900 --> 01:34:02.900] Let's do test-driven development here.
+[01:34:02.900 --> 01:34:03.900] Let's do test-driven development here.
+[01:34:03.900 --> 01:34:04.900] Let's do test-driven development here.
+[01:34:04.900 --> 01:34:05.900] Let's do test-driven development here.
+[01:34:05.900 --> 01:34:06.900] Let's do test-driven development here.
+[01:34:06.900 --> 01:34:07.900] Let's do test-driven development here.
+[01:34:07.900 --> 01:34:08.900] Let's do test-driven development here.
+[01:34:08.900 --> 01:34:09.900] Let's do test-driven development here.
+[01:34:09.900 --> 01:34:10.900] Let's do test-driven development here.
+[01:34:10.900 --> 01:34:11.900] Let's do test-driven development here.
+[01:34:11.900 --> 01:34:12.900] Let's do test-driven development here.
+[01:34:12.900 --> 01:34:13.900] Let's do test-driven development here.
+[01:34:13.900 --> 01:34:14.900] Let's do test-driven development here.
+[01:34:14.900 --> 01:34:15.900] Let's do test-driven development here.
+[01:34:15.900 --> 01:34:16.900] Let's do test-driven development here.
+[01:34:16.900 --> 01:34:17.900] Let's do test-driven development here.
+[01:34:17.900 --> 01:34:18.900] Let's do test-driven development here.
+[01:34:18.900 --> 01:34:19.900] Let's do test-driven development here.
+[01:34:19.900 --> 01:34:20.900] Let's do test-driven development here.
+[01:34:20.900 --> 01:34:21.900] Let's do test-driven development here.
+[01:34:31.900 --> 01:34:32.900] Let's do test-driven development here.
+[01:34:32.900 --> 01:34:33.900] Let's do test-driven development here.
+[01:34:33.900 --> 01:34:34.900] Let's do test-driven development here.
+[01:34:34.900 --> 01:34:35.900] Let's do test-driven development here.
+[01:34:35.900 --> 01:34:36.900] Let's do test-driven development here.
+[01:34:36.900 --> 01:34:37.900] Let's do test-driven development here.
+[01:34:37.900 --> 01:34:38.900] Let's do test-driven development here.
+[01:34:38.900 --> 01:34:39.900] Let's do test-driven development here.
+[01:34:39.900 --> 01:34:40.900] Let's do test-driven development here.
+[01:34:40.900 --> 01:34:41.900] Let's do test-driven development here.
+[01:34:41.900 --> 01:34:42.900] Let's do test-driven development here.
+[01:34:42.900 --> 01:34:43.900] Let's do test-driven development here.
+[01:34:43.900 --> 01:34:44.900] Let's do test-driven development here.
+[01:34:44.900 --> 01:34:45.900] Let's do test-driven development here.
+[01:34:45.900 --> 01:34:46.900] Let's do test-driven development here.
+[01:34:46.900 --> 01:34:47.900] Let's do test-driven development here.
+[01:34:47.900 --> 01:34:48.900] Let's do test-driven development here.
+[01:34:48.900 --> 01:34:49.900] Let's do test-driven development here.
+[01:34:49.900 --> 01:34:50.900] Let's do test-driven development here.
+[01:34:50.900 --> 01:34:51.900] Let's do test-driven development here.
+[01:35:01.900 --> 01:35:02.900] Let's do test-driven development here.
+[01:35:02.900 --> 01:35:03.900] Let's do test-driven development here.
+[01:35:03.900 --> 01:35:04.900] Let's do test-driven development here.
+[01:35:04.900 --> 01:35:05.900] Let's do test-driven development here.
+[01:35:05.900 --> 01:35:06.900] Let's do test-driven development here.
+[01:35:06.900 --> 01:35:07.900] Let's do test-driven development here.
+[01:35:07.900 --> 01:35:08.900] Let's do test-driven development here.
+[01:35:08.900 --> 01:35:09.900] Let's do test-driven development here.
+[01:35:09.900 --> 01:35:10.900] Let's do test-driven development here.
+[01:35:10.900 --> 01:35:11.900] Let's do test-driven development here.
+[01:35:11.900 --> 01:35:12.900] Let's do test-driven development here.
+[01:35:12.900 --> 01:35:13.900] Let's do test-driven development here.
+[01:35:13.900 --> 01:35:14.900] Let's do test-driven development here.
+[01:35:14.900 --> 01:35:15.900] Let's do test-driven development here.
+[01:35:15.900 --> 01:35:16.900] Let's do test-driven development here.
+[01:35:16.900 --> 01:35:17.900] Let's do test-driven development here.
+[01:35:17.900 --> 01:35:18.900] Let's do test-driven development here.
+[01:35:18.900 --> 01:35:19.900] Let's do test-driven development here.
+[01:35:19.900 --> 01:35:20.900] Let's do test-driven development here.
+[01:35:20.900 --> 01:35:21.900] Let's do test-driven development here.
+[01:35:31.900 --> 01:35:34.900] I'm not going to fix that here.
+[01:35:34.900 --> 01:35:36.900] I'll feel that later.
+[01:35:36.900 --> 01:35:41.900] I did do some work with D-Balancing after me.
+[01:35:41.900 --> 01:35:48.900] This is actually, I think this was more of a CRDT issue where we popped in this CRDT merge
+[01:35:48.900 --> 01:35:54.900] as I was typing and things got kind of confused and popped in a weird place.
+[01:35:54.900 --> 01:36:03.900] I didn't really record exactly what happened, so I'm not going to bother with that.
+[01:36:03.900 --> 01:36:07.900] It'll come up later.
+[01:36:07.900 --> 01:36:12.900] So, yeah.
+[01:36:12.900 --> 01:36:17.900] Alright, so.
+[01:36:17.900 --> 01:36:29.900] We can force this to the current content correctly, but the exchange section got the
+[01:36:29.900 --> 01:36:30.900] ontology responsibility.
+[01:36:30.900 --> 01:36:33.900] Both in the IPC patch consumed late in the disk.
+[01:36:33.900 --> 01:36:34.900] Write applied.
+[01:36:34.900 --> 01:36:36.900] Root causes IPC timed out.
+[01:36:36.900 --> 01:36:38.900] Agent doc write.
+[01:36:38.900 --> 01:36:40.900] Exit for the code.
+[01:36:40.900 --> 01:36:42.900] Semi-fire to save the patch file.
+[01:36:42.900 --> 01:36:44.900] The plugin later consumes the patch.
+[01:36:44.900 --> 01:36:48.900] The content gets applied twice in the skill retrieved.
+[01:36:48.900 --> 01:36:49.900] Retri to the fourth disk.
+[01:36:49.900 --> 01:36:50.900] This is a known gap.
+[01:36:50.900 --> 01:36:54.900] I see kind of actually either delete the patch file before returning to the five return
+[01:36:54.900 --> 01:36:56.900] from the consumption or fourth disk.
+[01:36:56.900 --> 01:36:59.900] Oh boy, I have a choice here.
+[01:36:59.900 --> 01:37:01.900] I'll clean the content exchange.
+[01:37:01.900 --> 01:37:03.900] Alright, so what should we do?
+[01:37:03.900 --> 01:37:10.900] What do you recommend?
+[01:37:10.900 --> 01:37:12.900] Option one?
+[01:37:12.900 --> 01:37:13.900] I don't know.
+[01:37:13.900 --> 01:37:16.900] Two or both?
+[01:37:16.900 --> 01:37:18.900] Probably both.
+[01:37:18.900 --> 01:37:20.900] But we'll see.
+[01:37:20.900 --> 01:37:22.900] Alright, so when force is set.
+[01:37:22.900 --> 01:37:29.900] Now, okay, so looks like I already did it.
+[01:37:29.900 --> 01:37:30.900] Alright.
+[01:37:30.900 --> 01:37:33.900] We got the release binary.
+[01:37:33.900 --> 01:37:35.900] We are tests.
+[01:37:35.900 --> 01:37:37.900] Let's say let's just.
+[01:37:37.900 --> 01:37:39.900] Let's just do these two.
+[01:37:39.900 --> 01:37:40.900] Alright.
+[01:37:40.900 --> 01:37:41.900] Uh.
+[01:37:41.900 --> 01:37:42.900] Where is.
+[01:37:42.900 --> 01:37:43.900] Oh yeah, there it is.
+[01:37:43.900 --> 01:37:44.900] Okay, so.
+[01:37:44.900 --> 01:37:45.900] Impement.
+[01:37:45.900 --> 01:37:46.900] Im impatient now.
+[01:37:46.900 --> 01:37:47.900] I just wanna get it done.
+[01:37:47.900 --> 01:37:48.900] And we'll.
+[01:37:48.900 --> 01:37:49.900] End the session.
+[01:37:49.900 --> 01:37:50.900] This has been a good session.
+[01:37:50.900 --> 01:37:52.900] I'm very happy with it.
+[01:37:52.900 --> 01:38:16.900] I really need to talk about the first usage of existence lane here.
+[01:38:16.900 --> 01:38:29.900] Like the first like real like usage concrete usage where it like it's like it was fantastic.
+[01:38:29.900 --> 01:38:42.900] I would say the first usage of having the agent report what it how it understands the ontology.
+[01:38:42.900 --> 01:38:43.900] And then we.
+[01:38:43.900 --> 01:38:44.900] Iterated on.
+[01:38:44.900 --> 01:38:45.900] Okay.
+[01:38:45.900 --> 01:38:46.900] Still going.
+[01:38:46.900 --> 01:38:47.900] On that.
+[01:38:47.900 --> 01:38:48.900] We're releasing.
+[01:38:48.900 --> 01:38:49.900] Alright.
+[01:38:49.900 --> 01:38:50.900] Let's go.
+[01:38:50.900 --> 01:38:51.900] Go.
+[01:38:51.900 --> 01:38:52.900] Release.
+[01:38:52.900 --> 01:38:53.900] Oh wait.
+[01:38:53.900 --> 01:38:54.900] Shoot.
+[01:38:54.900 --> 01:38:55.900] I would say.
+[01:38:55.900 --> 01:38:56.900] Continue.
+[01:38:56.900 --> 01:38:57.900] Ah.
+[01:38:57.900 --> 01:38:58.900] Let's stop that.
+[01:38:58.900 --> 01:38:59.900] Stop it.
+[01:38:59.900 --> 01:39:00.900] Okay.
+[01:39:00.900 --> 01:39:01.900] Let's see.
+[01:39:01.900 --> 01:39:02.900] Continue.
+[01:39:02.900 --> 01:39:03.900] Ah.
+[01:39:03.900 --> 01:39:04.900] Let's stop that.
+[01:39:04.900 --> 01:39:05.900] Stop it.
+[01:39:05.900 --> 01:39:06.900] Okay.
+[01:39:06.900 --> 01:39:07.900] Okay.
+[01:39:07.900 --> 01:39:08.900] Let's see.
+[01:39:08.900 --> 01:39:09.900] Let's see.
+[01:39:09.900 --> 01:39:10.900] Let's see.
+[01:39:10.900 --> 01:39:11.900] Okay.
+[01:39:11.900 --> 01:39:12.900] Okay.
+[01:39:12.900 --> 01:39:13.900] There you go.
+[01:39:13.900 --> 01:39:14.900] Then release.
+[01:39:14.900 --> 01:39:15.900] Okay.
+[01:39:15.900 --> 01:39:16.900] I'm gonna go ahead and do this.
+[01:39:16.900 --> 01:39:17.900] I'm gonna go ahead and do this.
+[01:39:17.900 --> 01:39:18.900] Okay.
+[01:39:18.900 --> 01:39:19.900] Okay.
+[01:39:19.900 --> 01:39:20.900] I'm gonna go ahead and do this.
+[01:39:20.900 --> 01:39:21.900] Okay.
+[01:39:21.900 --> 01:39:22.900] I'm gonna go ahead and do this.
+[01:39:22.900 --> 01:39:23.900] Okay.
+[01:39:23.900 --> 01:39:24.900] I'm gonna go ahead and do that.
+[01:39:24.900 --> 01:39:25.900] Okay.
+[01:39:25.900 --> 01:39:26.900] I'm gonna go ahead and do this.
+[01:39:26.900 --> 01:39:27.900] Okay.
+[01:39:27.900 --> 01:39:28.900] I'm gonna go ahead and do this.
+[01:39:28.900 --> 01:39:29.900] Okay.
+[01:39:29.900 --> 01:39:30.900] Okay.
+[01:39:30.900 --> 01:39:31.900] Okay.
+[01:39:31.900 --> 01:39:32.900] Okay.
+[01:39:32.900 --> 01:39:35.900] So I guess we asked for its recommendation.
+[01:39:35.900 --> 01:39:36.900] I PC fixed.
+[01:39:36.900 --> 01:39:37.900] I implemented.
+[01:39:37.900 --> 01:39:38.900] I'll go ahead and do it later.
+[01:39:38.900 --> 01:39:39.900] I'll just do it.
+[01:39:39.900 --> 01:39:40.900] Okay.
+[01:39:40.900 --> 01:39:41.900] Okay.
+[01:39:41.900 --> 01:39:42.900] So I guess it.
+[01:39:42.900 --> 01:39:43.900] Okay.
+[01:39:43.900 --> 01:39:46.900] So I guess we asked for its recommendation.
+[01:39:46.900 --> 01:39:47.900] I PC fixed.
+[01:39:47.900 --> 01:39:48.900] I implemented.
+[01:39:48.900 --> 01:39:49.900] I'll go ahead and do it later.
+[01:39:49.900 --> 01:39:50.900] I'll just do it.
+[01:39:50.900 --> 01:39:51.900] Okay.
+[01:39:51.900 --> 01:39:52.900] I guess it.
+[01:39:52.900 --> 01:39:53.900] I guess it.
+[01:39:53.900 --> 01:39:54.900] I'll verify itself there.
+[01:39:54.900 --> 01:39:55.900] I trust you, Clyde.
+[01:39:55.900 --> 01:39:56.900] I believe in you, man.
+[01:39:56.900 --> 01:39:57.900] Don't, don't let me down though.
+[01:39:57.900 --> 01:39:58.900] Oh, cool.
+[01:39:58.900 --> 01:39:59.900] Look at that.
+[01:39:59.900 --> 01:40:00.900] 420 test paths.
+[01:40:00.900 --> 01:40:01.900] Sweet.
+[01:40:01.900 --> 01:40:02.900] What a good number.
+[01:40:02.900 --> 01:40:03.900] Um, I don't partake.
+[01:40:03.900 --> 01:40:18.900] Probably would be ripping my bong out, but, um, not anymore.
+[01:40:18.900 --> 01:40:19.900] All right.
+[01:40:19.900 --> 01:40:24.900] So I PC silent failure verification implemented.
+[01:40:24.900 --> 01:40:27.900] Add content verification, right.
+[01:40:27.900 --> 01:40:28.900] I can see in poll.
+[01:40:28.900 --> 01:40:31.900] Well, allegedly, I would say allegedly.
+[01:40:31.900 --> 01:40:39.900] Um, uh, the alleged bong.
+[01:40:39.900 --> 01:40:41.900] So, uh, all right.
+[01:40:41.900 --> 01:40:45.900] IPC silent, uh, failure verification implemented.
+[01:40:45.900 --> 01:40:46.900] All right.
+[01:40:46.900 --> 01:40:47.900] Added.
+[01:40:47.900 --> 01:40:48.900] All right.
+[01:40:48.900 --> 01:40:50.900] So this is the silent failure.
+[01:40:50.900 --> 01:40:52.900] Added content verification, right.
+[01:40:52.900 --> 01:40:57.900] So this is our, um, file that we write to, agent doc.
+[01:40:57.900 --> 01:40:58.900] Right.
+[01:40:58.900 --> 01:41:03.900] So this file, and then we pull it, um, the, uh, FFI plug.
+[01:41:03.900 --> 01:41:08.900] The, um, pot, I should.
+[01:41:08.900 --> 01:41:13.900] My poll, or, or a threaded poll.
+[01:41:13.900 --> 01:41:14.900] Okay.
+[01:41:14.900 --> 01:41:15.900] Probably a, might.
+[01:41:15.900 --> 01:41:16.900] Um, after the plugin consumed patch.
+[01:41:16.900 --> 01:41:17.900] The splash.
+[01:41:17.900 --> 01:41:18.900] We now check.
+[01:41:18.900 --> 01:41:19.900] If the file changed at all.
+[01:41:19.900 --> 01:41:20.900] Are we just, uh, patches full of failure.
+[01:41:20.900 --> 01:41:22.900] New verify that at least one patches contents appear.
+[01:41:22.900 --> 01:41:23.900] In the resulting file patches partial application.
+[01:41:23.900 --> 01:41:24.900] When the plugin consumed the patch.
+[01:41:24.900 --> 01:41:25.900] The mock plugin threads now.
+[01:41:25.900 --> 01:41:26.900] Okay.
+[01:41:26.900 --> 01:41:27.900] I'm gonna have to review the mocks.
+[01:41:27.900 --> 01:41:27.900] Um.
+[01:41:27.900 --> 01:41:27.900] All right.
+[01:41:27.900 --> 01:41:28.900] Debounce FFI.
+[01:41:28.900 --> 01:41:29.900] So let's just, let's just release this.
+[01:41:29.900 --> 01:41:30.900] I think we're done.
+[01:41:30.900 --> 01:41:31.900] Okay.
+[01:41:31.900 --> 01:41:50.880] The Mock plugin thread now. Okay. I'm gonna have to review the mocks. Um, all right.
+[01:41:50.880 --> 01:42:05.880] Debounce FFI. Let's just release this. I think we're done. Oh, stop it. Cut, cut.
+[01:42:05.880 --> 01:42:24.880] Um, audit docs. Update. Read me spec. I think we should add an ontology.
+[01:42:24.880 --> 01:42:31.880] Um, should we add module.
+[01:42:31.880 --> 01:42:45.880] Great. Yeah. File descriptor would be platform dependent.
+[01:42:45.880 --> 01:42:54.880] Module harnesses, dependency, dependency. It's okay. It's a development tool. Not on a requirement. Excellent.
+[01:42:54.880 --> 01:43:04.880] Got it. So honestly, for now, it doesn't need to be dependent at all. It's a scan on two-eye tool. Oh, okay.
+[01:43:04.880 --> 01:43:19.880] I'm gonna have to add a new stack update. Okay.
+[01:43:19.880 --> 01:43:26.880] I'll tap the dependency. These are non-trail attached. Let me scope them.
+[01:43:26.880 --> 01:43:31.880] Three stack update. Okay. Companies value. You may have installation. This is so useful.
+[01:43:31.880 --> 01:43:40.880] I think it has. Um, oh, okay. Got it. Yes.
+[01:43:40.880 --> 01:43:53.880] Now ontology. I would say proceed with both. Demo release.
+[01:43:53.880 --> 01:44:05.880] Oh, we have a pending list over here. So. I guess it'll do all three.
+[01:44:05.880 --> 01:44:12.880] Oh. Uh, let's, let's decide on this. Look, I, I think we should do a dev dep.
+[01:44:12.880 --> 01:44:22.880] Well. Yeah. We should definitely do dev dep. Dev dep.
+[01:44:22.880 --> 01:44:37.880] Because we may. Because we may. Because the syntax of the, um, module harness.
+[01:44:37.880 --> 01:44:40.880] We may change. And we want to be. In sync.
+[01:44:40.880 --> 01:44:44.880] And we want to be. In sync.
+[01:44:44.880 --> 01:45:08.620] so this is interesting because how would the agent make that decision you
+[01:45:08.620 --> 01:45:18.060] know like it was like thinking no you know this is this is like a human thing too you know we get a bright
+[01:45:18.060 --> 01:45:24.380] idea of like oh we actually might not need it so it's like we have these different like concerns
+[01:45:24.380 --> 01:45:31.580] going on it's like within our own mind we have already had agents that are kind of all also
+[01:45:32.460 --> 01:45:39.900] like came up with different perspectives so we have our sort of like simplified yaggy agent in our mind
+[01:45:39.900 --> 01:45:45.660] like i can like imagine like yeah thinking yeah but i really want to do that or not you know and that is
+[01:45:45.660 --> 01:45:52.220] a thought that might occur so these are like our magnetic like thoughts so that might occur they're
+[01:45:52.220 --> 01:45:58.300] like agents within our minds so it's also within we're also modeling with our conversation too so
+[01:45:58.300 --> 01:46:08.220] this is like a social phenomena so we could have different perspectives
+[01:46:08.220 --> 01:46:10.700] you know agents with different perspectives
+[01:46:17.660 --> 01:46:18.460] so exciting
+[01:46:18.460 --> 01:46:31.420] oh well i guess we haven't released yet here either so maybe i'll just take a oh so cool this is really
+[01:46:31.420 --> 01:46:31.740] cool
+[01:46:31.740 --> 01:46:42.700] um i really should go through every i guess it's not too many all right a claim a bind a binding between a
+[01:46:42.700 --> 01:46:50.780] document path and tmux pane establish which pane owns a given session document the claim in
+[01:46:50.780 --> 01:47:04.780] session json each entry record each entry records the document path hash and tmux target
+[01:47:06.220 --> 01:47:15.100] which is which is session window pane the process id of the running cloud cli and the session you would for
+[01:47:15.100 --> 01:47:23.340] resume claims matter because they enforce the one session for document invariant without a claim
+[01:47:23.340 --> 01:47:29.100] registry two tmux claims could both attempt to respond to the same document simultaneously what it
+[01:47:29.100 --> 01:47:37.340] actually i would have seen that happen producing conflicting rights and corrupted history the
+[01:47:37.340 --> 01:47:43.820] claim is a lock not a file system flock which guards atomic rights but a registry
+[01:47:43.820 --> 01:47:52.140] level agreement that a given pain has authority for a given document agent doc claim establishes a new claim
+[01:47:52.140 --> 01:47:59.420] for the current pain agent doc resync validates all live claims removing entries whose pains are dead
+[01:47:59.420 --> 01:48:06.860] or whose processes are no longer running the route algorithm reads claims to dispatch commands correctly
+[01:48:06.860 --> 01:48:15.020] a claim is the agent doc instance of a path of dns record ownership
+[01:48:16.300 --> 01:48:23.100] the common problem the common problem condition apply directly in agent doc resource is the document
+[01:48:23.100 --> 01:48:32.300] the claiming party is the tmux pain and worthy is confirmed by checking that their registered kid is
+[01:48:32.300 --> 01:48:40.380] still running the expected process to auto claim module implements claim registration on session start events
+[01:48:40.380 --> 01:49:09.980] so that new teams claim claim their document the decision process that maps an incoming agent doc command to the correct team up okay so this is out so i'm i'm you know i'm i'm gonna this is good this is all it seems like it's good i i'm i think i need a break so i'm probably going to end the session i don't i don't think i need to read through the entire ontology
+[01:49:09.980 --> 01:49:19.900] that got generated here but it all looks great and i'm pretty happy so um i will definitely read it i don't know maybe i'll read it later
+[01:49:19.900 --> 01:49:24.220] in indigo or not but my module harness
+[01:49:24.220 --> 01:49:26.380] sweet
+[01:49:26.380 --> 01:49:31.820] so we got module harness do we have existence laying in here
+[01:49:36.380 --> 01:49:50.300] should we have using playing the pencey
+[01:49:50.300 --> 01:49:55.420] i guess i should also ask over here too
+[01:50:02.220 --> 01:50:07.740] because i think that we do want to start to use the binary
+[01:50:07.740 --> 01:50:11.660] ah
+[01:50:11.660 --> 01:50:15.900] why did you do that
+[01:50:15.900 --> 01:50:21.900] like something i got something going on where i did a hot seat
+[01:50:22.780 --> 01:50:27.260] and like it like it like really changes like the mode of like
+[01:50:27.260 --> 01:50:36.060] it's like the zoom changes or something the zoom level
+[01:50:36.060 --> 01:50:36.940] has changed
+[01:50:36.940 --> 01:50:42.060] but it's like i can't zoom out anymore
+[01:50:47.420 --> 01:50:50.460] it's like oh maybe i can okay
+[01:50:50.460 --> 01:50:56.300] all right that's good all right so
+[01:50:56.300 --> 01:51:00.300] all right
+[01:51:00.300 --> 01:51:06.140] all the change i would say let's document this ontology chain
+[01:51:07.740 --> 01:51:09.340] let's uh document
+[01:51:09.340 --> 01:51:13.500] this section
+[01:51:13.500 --> 01:51:15.980] somewhere
+[01:51:15.980 --> 01:51:17.660] good
+[01:51:17.660 --> 01:51:27.660] somewhere appropriate
+[01:51:33.100 --> 01:51:33.500] all right
+[01:51:33.500 --> 01:51:38.540] do i do i do i care
+[01:51:38.540 --> 01:51:40.460] do i don't care
+[01:51:40.460 --> 01:51:45.900] oh wait this is the module harness so
+[01:51:45.900 --> 01:51:55.180] i think uh oh this is so good this uh like they they're coming together that's that's awesome man
+[01:51:55.180 --> 01:51:55.900] like i i
+[01:51:55.900 --> 01:51:59.580] i like i think that we should
+[01:51:59.580 --> 01:52:03.340] i wonder if we should
+[01:52:03.340 --> 01:52:13.340] oh this is like i think we just identified it
+[01:52:21.500 --> 01:52:21.740] no
+[01:52:21.740 --> 01:52:21.820] no
+[01:52:21.820 --> 01:52:24.620] it's not a rust crate
+[01:52:24.620 --> 01:52:25.340] oh
+[01:52:25.340 --> 01:52:28.780] does this thing playing is not a rust crate
+[01:52:28.780 --> 01:52:33.100] i could have sworn in this
+[01:52:33.100 --> 01:52:34.460] oh
+[01:52:34.460 --> 01:52:37.260] um
+[01:52:37.260 --> 01:52:43.660] well let me see
+[01:52:51.020 --> 01:52:55.740] this this should be a dependency
+[01:52:55.740 --> 01:52:56.780] a dead dependency
+[01:52:56.780 --> 01:53:01.900] um
+[01:53:01.900 --> 01:53:04.940] the response
+[01:53:04.940 --> 01:53:10.780] the response catch did not
+[01:53:10.780 --> 01:53:17.020] the response did not catch in the stock
+[01:53:21.020 --> 01:53:21.740] okay
+[01:53:21.740 --> 01:53:29.580] no
+[01:53:29.580 --> 01:53:29.580] no
+[01:53:29.580 --> 01:53:29.820] yeah
+[01:53:29.820 --> 01:53:39.180] so
+[01:53:39.180 --> 01:53:41.580] this will kind of like allow me to like
+[01:53:41.580 --> 01:53:48.140] this will allow me to experiment with existence length
+[01:53:49.260 --> 01:53:50.860] hopefully i don't get screwed with
+[01:53:50.860 --> 01:53:50.860] hopefully i don't get screwed with
+[01:53:50.860 --> 01:53:53.660] the conversions
+[01:53:53.660 --> 01:53:55.420] but
+[01:53:55.420 --> 01:53:58.300] if we were to upgrade
+[01:53:58.300 --> 01:53:59.900] um
+[01:53:59.900 --> 01:54:04.300] let's see how it goes
+[01:54:04.300 --> 01:54:07.260] i have to like keep on re-releasing
+[01:54:07.260 --> 01:54:08.380] just to get
+[01:54:08.380 --> 01:54:11.900] yeah we'll figure it out
+[01:54:11.900 --> 01:54:13.180] if if if if if like
+[01:54:13.180 --> 01:54:16.540] we just had this on head
+[01:54:16.540 --> 01:54:17.340] it might be okay
+[01:54:17.340 --> 01:54:18.700] as well
+[01:54:18.700 --> 01:54:22.220] all right
+[01:54:22.220 --> 01:54:27.820] all right so let's release this
+[01:54:30.700 --> 01:54:35.180] well okay great um
+[01:54:35.180 --> 01:54:37.500] um
+[01:54:37.500 --> 01:54:39.900] i'd exposes more time
+[01:54:39.900 --> 01:54:42.700] add to live
+[01:54:42.700 --> 01:54:45.660] using cli i'll take those
+[01:54:53.820 --> 01:54:54.620] all right
+[01:54:54.620 --> 01:54:54.620] all right
+[01:54:54.620 --> 01:54:56.460] and because yeah i think that
+[01:54:56.460 --> 01:55:04.060] yeah this is exciting
+[01:55:04.060 --> 01:55:06.140] i'm glad that it's fine
+[01:55:06.140 --> 01:55:06.540] let's be
+[01:55:06.540 --> 01:55:06.540] used
+[01:55:06.540 --> 01:55:19.580] i don't
+[01:55:19.580 --> 01:55:22.620] we probably don't need to release
+[01:55:22.620 --> 01:55:25.020] you can probably
+[01:55:25.020 --> 01:55:26.620] that we don't
+[01:55:29.020 --> 01:55:29.660] to release
+[01:55:29.660 --> 01:55:32.460] just commit
+[01:55:32.460 --> 01:55:33.980] and push
+[01:55:33.980 --> 01:55:40.860] i don't think we've released this yet
+[01:55:40.860 --> 01:55:45.660] cool
+[01:55:45.660 --> 01:55:48.460] okay so this is going to be good
+[01:55:48.460 --> 01:55:50.700] so i'm still a little
+[01:55:52.460 --> 01:55:53.980] like not sure about the evals yet
+[01:55:53.980 --> 01:55:55.180] i think that i want to
+[01:55:55.180 --> 01:55:59.420] explore the evals and especially with back testing but
+[01:55:59.420 --> 01:56:03.100] i'm not i don't feel ready to be back testing yet
+[01:56:03.100 --> 01:56:06.380] so right now it's going to be a little theoretical i guess
+[01:56:06.380 --> 01:56:15.580] oh i guess
+[01:56:22.460 --> 01:56:24.460] this thing's in module harness
+[01:56:24.460 --> 01:56:26.860] tmux router
+[01:56:26.860 --> 01:56:34.620] oh shoot
+[01:56:34.620 --> 01:56:38.220] oh
+[01:56:38.220 --> 01:56:40.940] that's no good
+[01:56:40.940 --> 01:56:44.860] okay um
+[01:56:48.780 --> 01:56:50.060] tmux router
+[01:56:50.060 --> 01:56:52.700] needs to be released
+[01:56:52.700 --> 01:56:57.020] um add i would say add
+[01:56:57.020 --> 01:56:58.140] and
+[01:56:58.140 --> 01:57:00.220] module harness
+[01:57:00.220 --> 01:57:06.380] and tmux router
+[01:57:06.380 --> 01:57:12.700] add
+[01:57:17.020 --> 01:57:17.340] i don't
+[01:57:17.340 --> 01:57:17.340] i don't
+[01:57:17.340 --> 01:57:17.580] um
+[01:57:17.580 --> 01:57:19.020] add
+[01:57:19.020 --> 01:57:21.340] and
+[01:57:21.340 --> 01:57:22.060] on
+[01:57:22.060 --> 01:57:24.220] toss router
+[01:57:24.220 --> 01:57:30.300] yeah i guess we might as well
+[01:57:30.300 --> 01:57:37.020] i don't know if we need to reconcile reconcile
+[01:57:37.020 --> 01:57:41.180] oh
+[01:57:47.580 --> 01:57:49.740] yeah because the tmux router is a dependence
+[01:57:49.740 --> 01:57:53.500] i need to re-release agent doc as well because
+[01:57:53.500 --> 01:57:55.500] because we missed this stuff
+[01:57:55.500 --> 01:58:01.420] i don't know why claude didn't get that
+[01:58:01.420 --> 01:58:02.620] i should probably
+[01:58:12.940 --> 01:58:18.540] i guess we should i probably need to have a way of exploring drift
+[01:58:18.540 --> 01:58:19.740] maybe
+[01:58:19.740 --> 01:58:26.700] existence needs to have a drift tool i suppose
+[01:58:26.700 --> 01:58:33.900] which might be need to be sophisticated because if it's going to support many different languages
+[01:58:35.580 --> 01:58:36.300] that's where
+[01:58:36.300 --> 01:58:37.020] that's where like
+[01:58:37.020 --> 01:58:37.420] type
+[01:58:37.420 --> 01:58:38.300] path might come in
+[01:58:38.300 --> 01:58:41.260] and some other things too
+[01:58:41.260 --> 01:58:42.060] maybe i'll use
+[01:58:42.060 --> 01:58:43.420] sift or something else
+[01:58:43.420 --> 01:58:45.260] but
+[01:58:45.260 --> 01:58:45.820] oh rip
+[01:58:45.820 --> 01:58:46.140] grip
+[01:58:46.140 --> 01:58:49.260] it should figure out
+[01:58:49.260 --> 01:58:53.900] too sweet
+[01:58:53.900 --> 01:59:03.580] okay
+[01:59:03.580 --> 01:59:16.700] i guess i'll use this chance to look at the session extends domain okay
+[01:59:18.940 --> 01:59:22.140] right i think domain comes from systems
+[01:59:22.140 --> 01:59:24.300] yep
+[01:59:24.300 --> 01:59:26.140] but
+[01:59:26.140 --> 01:59:34.220] this is wrong though because this is within the model change that
+[01:59:34.220 --> 01:59:44.940] i need to fix all that all right so it is a tmux session the bounded domain
+[01:59:46.300 --> 01:59:50.380] within which all window and pain operations are scoped
+[01:59:50.380 --> 01:59:57.260] a session has a name owns one or more windows and runs on a tmux server
+[01:59:57.260 --> 02:00:01.820] the router contains confines all routing to a single session
+[02:00:01.820 --> 02:00:06.700] cross-session pain movement is blocked by session scope
+[02:00:07.980 --> 02:00:16.300] so session boundary is a safety invariant without it a reconcile operation other users or projects layouts
+[02:00:16.300 --> 02:00:25.500] i don't understand because we i don't think we committed any of that
+[02:00:27.820 --> 02:00:28.460] what do we have
+[02:00:28.460 --> 02:00:32.700] oh oh there we go
+[02:00:32.700 --> 02:00:37.980] okay now we got a whole bunch more files okay
+[02:00:41.500 --> 02:00:45.180] i guess i won't read through all this because it's a whole bunch of stuff
+[02:00:45.180 --> 02:00:49.180] but yeah we got our stat awesome
+[02:00:49.180 --> 02:00:55.900] all right back in
+[02:01:00.780 --> 02:01:06.220] yeah got my to-do list over here i attached them to get hud issues
+[02:01:06.220 --> 02:01:17.900] still haven't really cracked this to-do list yet because i'm oh yeah so i want to
+[02:01:22.300 --> 02:01:26.780] okay
+[02:01:26.780 --> 02:01:34.380] all right so this is oh 26.0 and we have a 26.0 here okay cool i think um we're basic
+[02:01:34.380 --> 02:01:41.900] all right i think i'm just going to end it here it's just doing some post stuff
+[02:01:44.140 --> 02:01:52.140] so no need to stick around we got our release out we got existence laying and the i module harness
+[02:01:52.140 --> 02:01:59.260] so we can now modularize our harnesses and we can
+[02:01:59.260 --> 02:02:10.700] philosophy what is cool i think about that or if i need to think about that and experiment and see how
+[02:02:10.700 --> 02:02:21.340] it goes all right well peace out everybody and i'll have a video up soon have a good one

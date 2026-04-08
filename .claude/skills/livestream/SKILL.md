@@ -43,56 +43,8 @@ Removes the livestream guardrails. Print "Livestream mode OFF" to confirm.
 
 ### `audit` — Scan for Exposed Secrets
 
-Scan Claude Code session transcripts or files for exposed secrets.
+See `runbooks/livestream-audit.md` for full scan patterns, deny-list, and output format.
 
-**Usage:**
-```
-/livestream audit                          — audit current session transcript
-/livestream audit ~/.claude/projects/*/ID.jsonl   — audit specific transcript
-/livestream audit /path/to/dir             — audit all files in directory
-```
+## Runbooks
 
-**Scans for:**
-
-| Pattern | Example | Risk |
-|---------|---------|------|
-| OAuth access tokens | `ya29.a0...` | Medium (short-lived) |
-| OAuth refresh tokens | `1//0...` | **Critical** (long-lived) |
-| GitHub tokens | `ghp_...`, `gho_...` | Critical |
-| PyPI tokens | `pypi-...` | Critical |
-| Cargo registry tokens | `CARGO_REGISTRY_TOKEN=<value>` | Critical |
-| AWS credentials | `AKIA...`, `aws_secret_access_key` | Critical |
-| Cloudflare tokens | `CF_API_TOKEN=<value>` | Critical |
-| Generic API keys | Long alphanumeric strings in auth headers | Medium |
-| Bearer tokens | `Bearer <actual-token>` (not placeholders) | Critical |
-| Private keys | `-----BEGIN.*PRIVATE KEY-----` | Critical |
-| `.env` file contents | `KEY=value` patterns from .env reads | Varies |
-
-**Safe patterns (skip):**
-- `$(pass ...)` subshell references
-- `Bearer redacted`, `Bearer test-token`
-- Code comments and documentation references
-- Placeholder values like `YOUR_TOKEN_HERE`
-
-**Output:** Report each finding with:
-- File and approximate location
-- Secret type and risk level
-- Whether the value is real or a safe reference
-- Recommended remediation (rotate, revoke, etc.)
-
-**NEVER output actual secret values in the audit report.** Show only the prefix/pattern.
-
-## Secret Deny-List
-
-Files the agent should NEVER read during a livestream session:
-
-- `**/tokens.json` — OAuth token storage
-- `**/.env` — Environment secrets
-- `**/.env.*` — Environment variants
-- `**/credentials.json` — Service account keys
-- `**/*.pem` — Private keys
-- `**/*.key` — Private keys
-- `**/id_rsa*` — SSH keys
-- `**/.netrc` — Machine credentials
-
-If a workflow requires data from these files, instruct the user to set it up via `pass` or environment variables instead.
+- `audit secrets` — [runbooks/livestream-audit.md](runbooks/livestream-audit.md)

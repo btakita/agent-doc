@@ -1315,7 +1315,7 @@ When talking to someone with Jordan's position, translate your work into their l
 You don't need to change what you're building. You need to frame it in terms of what they're buying.
 
 This is a note for future interviews, not a follow-up email topic.
-<!-- agent:boundary:66565b8e -->
+<!-- agent:boundary:f759f76c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

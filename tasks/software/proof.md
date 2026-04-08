@@ -130,7 +130,7 @@ The key architectural guarantee: Proof only receives what Claude explicitly send
 
 For integration, Proof's anchored comments could serve as the "public discussion" layer while agent-doc's inline comments remain the "private scratchpad." This would give users both modes in one workflow.
 How would proof comments be overlaid in this agent doc?
-### Re: Packaging — agent-doc core vs plugin (HEAD)
+### Re: Packaging — agent-doc core vs plugin
 
 I'd recommend a **Claude Code skill** (not baked into agent-doc core). Here's why:
 
@@ -156,7 +156,7 @@ I'd recommend a **Claude Code skill** (not baked into agent-doc core). Here's wh
 
 This is essentially the same pattern as the `/agent-doc` skill itself — a Claude Code skill that orchestrates agent-doc CLI commands with external service calls.
 
-### Re: Proof comment overlay in agent-doc (HEAD)
+### Re: Proof comment overlay in agent-doc
 
 The overlay would work through the **sync skill**, not by modifying agent-doc's format. Here's the concrete mechanism:
 
@@ -190,7 +190,7 @@ The overlay would work through the **sync skill**, not by modifying agent-doc's 
 4. You run `/proof sync proof.md` — response + comment reply pushed to Proof
 
 The key design choice: Proof comments are **transient imports** in agent-doc, not permanent storage. The source of truth for comments stays in Proof's marks system. The local annotations are just a bridge for the agent-doc diff cycle.
-<!-- agent:boundary:bd8c62a0 -->
+<!-- agent:boundary:fe69bd0d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

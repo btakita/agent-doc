@@ -1,0 +1,1336 @@
+1
+00:00:00,000 --> 00:00:05,440
+Hey everyone, just working on Quirky today.
+
+2
+00:00:05,440 --> 00:00:10,280
+So I'm going to create an app.
+
+3
+00:00:10,280 --> 00:00:19,320
+So with basically a Google app so we can, people can connect their Gmail and YouTube
+
+4
+00:00:19,320 --> 00:00:20,400
+with it.
+
+5
+00:00:20,400 --> 00:00:22,160
+Right now I have a private app.
+
+6
+00:00:22,160 --> 00:00:28,840
+So I also have instructions on how to set up a private app as well, but yeah, but for
+
+7
+00:00:28,840 --> 00:00:32,800
+now just try to make it a little bit easier to get started with Quirky.
+
+8
+00:00:32,800 --> 00:00:36,200
+So I'm just kind of going through the last few steps.
+
+9
+00:00:36,200 --> 00:00:42,640
+I think the last one I have is this Google verification.
+
+10
+00:00:42,640 --> 00:00:54,480
+So whoops, okay, I think I have to go to here.
+
+11
+00:00:54,480 --> 00:01:09,480
+So yeah, it's just a little bit of a kind of a slog to go through this, but I think
+
+12
+00:01:09,480 --> 00:01:12,360
+we're just about done.
+
+13
+00:01:12,360 --> 00:01:20,880
+So Google verification, and this is going to be, let's make a new tab.
+
+14
+00:01:20,880 --> 00:01:27,680
+Console cloud, console cloud, there we go.
+
+15
+00:01:27,680 --> 00:01:49,440
+Okay so APIs and services, OAuth Consent Screen, Publishing Status or Audience.
+
+16
+00:01:49,440 --> 00:01:56,120
+There it is.
+
+17
+00:01:56,120 --> 00:02:05,840
+I guess I hit publish app, I guess, yep.
+
+18
+00:02:05,840 --> 00:02:13,560
+Okay, I guess we'll do it.
+
+19
+00:02:14,560 --> 00:02:27,200
+All right, so go to verification center, it's my logo.
+
+20
+00:02:27,200 --> 00:02:34,840
+I'm not really sure what needs to be done here.
+
+21
+00:02:34,840 --> 00:02:42,080
+Okay so I guess I need to, okay, so I guess I need my branding first.
+
+22
+00:02:42,080 --> 00:02:45,000
+So it's going to take a few, it's going to take a while.
+
+23
+00:02:45,000 --> 00:02:48,000
+So all right, next step.
+
+24
+00:02:48,000 --> 00:02:56,760
+So I guess we got that done, two to six weeks, but possibly longer with the status.
+
+25
+00:02:56,760 --> 00:03:10,440
+So yep, so I submitted, phase one done.
+
+26
+00:03:10,440 --> 00:03:17,040
+Okay, so we're going to do the next few steps here.
+
+27
+00:03:17,040 --> 00:03:22,080
+So on this side, on agent doc, I added a few things.
+
+28
+00:03:22,080 --> 00:03:30,280
+I added this pending area, and I don't know if I, so there's a pending component now which
+
+29
+00:03:30,280 --> 00:03:39,520
+kind of shows what steps we're on, and it'll update from the document, from the skill,
+
+30
+00:03:39,560 --> 00:03:41,880
+and then there's, we also have these different modes.
+
+31
+00:03:41,880 --> 00:03:49,640
+So I renamed mode to patch, so it'll either be replace, append, or prepend.
+
+32
+00:03:49,640 --> 00:03:55,240
+I set it to have defaults for the different components, so we have an exchange component,
+
+33
+00:03:55,240 --> 00:03:56,240
+a pending component.
+
+34
+00:03:56,240 --> 00:04:01,600
+I also have a status component, which right now is the same, but I think this is more
+
+35
+00:04:01,600 --> 00:04:07,480
+like a high level status, so that's what it's meant to be.
+
+36
+00:04:07,480 --> 00:04:14,040
+And this is more of what's pending, so, but in this case, it happens to be the same, but
+
+37
+00:04:14,040 --> 00:04:24,440
+I just added the pending, so I'm kind of testing it out, and hopefully status will kind of
+
+38
+00:04:24,440 --> 00:04:33,800
+act appropriately, but I probably need to define it better in the skill as well, so.
+
+39
+00:04:33,800 --> 00:04:39,600
+So yeah, basically, the idea is we just had different components, I don't have anything
+
+40
+00:04:39,600 --> 00:04:44,840
+like exciting, like real, from a real time sense yet, but I'll probably add something
+
+41
+00:04:44,840 --> 00:04:52,600
+soon which we could use lazily for, but I asked about lazily, and it was just, you know,
+
+42
+00:04:52,600 --> 00:04:59,080
+premature thing can be handled with the skills for now, so we'll just leave it at that.
+
+43
+00:04:59,080 --> 00:05:14,080
+All right, so, back to here, I'm not really sure what else there is to do, but, oh right,
+
+44
+00:05:14,080 --> 00:05:29,880
+so I guess I could get into agent doc, oh yeah, I made a logo as well, so agent doc
+
+45
+00:05:29,880 --> 00:05:42,000
+has a logo now, it's basically just an agent hat with a markdown document, but maybe I'll
+
+46
+00:05:42,080 --> 00:05:46,200
+have something more exciting later, but I guess this is a good enough logo for now.
+
+47
+00:05:46,200 --> 00:06:02,840
+All right, so, agent doc, I have a directory, I'm not using the directory, all right, oh yeah,
+
+48
+00:06:02,840 --> 00:06:12,680
+I also did a bunch of work on fixing the synchronization, but it looks like I have
+
+49
+00:06:12,680 --> 00:06:22,000
+this issue again, so, as we're swapping, you know, panes in and out, I think it moves it
+
+50
+00:06:22,000 --> 00:06:28,960
+to a different window, and let me make sure it didn't, yeah, so, it was also adding it
+
+51
+00:06:28,960 --> 00:06:38,520
+to different TMUX sessions too, but it seems we have fixed that, but now, it seems weird
+
+52
+00:06:38,520 --> 00:06:51,400
+it's heading in, so, I do have sort of this thing planned where we have this IPC, well,
+
+53
+00:06:51,400 --> 00:06:59,680
+it's gonna be over FFI, so I'm gonna have this shared library that will sort of be like this
+
+54
+00:06:59,680 --> 00:07:10,400
+cross-plugin shared library, so, all the editors would have like this thin layer, which is FFI
+
+55
+00:07:10,400 --> 00:07:19,680
+to this plug-in shared library, but that's not gonna really fix this over here, this is more
+
+56
+00:07:19,680 --> 00:07:38,120
+of an agent doc binary issue, so, I'm gonna try to stamp this out, so, this is TMUX session,
+
+57
+00:07:38,120 --> 00:08:06,560
+please diagnose, use the logs, add missing logs, use logs to debug, can you recognize
+
+58
+00:08:06,600 --> 00:08:31,440
+what caused the proliferation of TMUX windows, if not, add missing logs, add tests to simulate
+
+59
+00:08:31,440 --> 00:08:50,280
+the root cause of the issue of the proliferation of TMUX windows, add tests for the self-healing
+
+60
+00:08:50,280 --> 00:09:09,120
+agent doc, and I think it's a resync, why did it not work, go, I didn't need to say go, but,
+
+61
+00:09:09,120 --> 00:09:17,720
+this might take a little bit of time, but this is kind of something I've been struggling with a
+
+62
+00:09:17,720 --> 00:09:30,080
+little bit, and I've been, it's been finding issues, but I don't know if it's necessarily,
+
+63
+00:09:30,080 --> 00:09:35,760
+like, it's hard to say if it's helpful or not, or if it's just kind of spinning its wheels,
+
+64
+00:09:35,760 --> 00:09:44,200
+finding the wrong issue, but it is fixing things, and things are changing, but it seems like this
+
+65
+00:09:44,200 --> 00:09:50,080
+proliferation seems to happen, it could also be happening in multiple places due to race conditions
+
+66
+00:09:50,080 --> 00:10:00,320
+or other problems, so, I think this kind of goes to show that TMUX is great, but it's kind of lacking
+
+67
+00:10:00,320 --> 00:10:06,520
+for this particular task right now, there's definitely race conditions, like, you know,
+
+68
+00:10:06,520 --> 00:10:13,480
+we have to, like, type in text using TMUX and hit enter, and make sure, you know, everything syncs
+
+69
+00:10:13,480 --> 00:10:22,040
+up, so it would be great to have this be a tighter experience, but that's gonna take probably some
+
+70
+00:10:22,040 --> 00:10:30,640
+serious software to do, especially if we want it to work across different environments, so, I'm
+
+71
+00:10:30,640 --> 00:10:38,040
+starting to also look into supporting other people using this, because right now it's just
+
+72
+00:10:38,040 --> 00:10:43,080
+probably been me, and I guess maybe other people have been using it, I don't know if it's been
+
+73
+00:10:43,080 --> 00:10:54,560
+working or not for them, but, you know, I just have it set up for me, so it's been working great
+
+74
+00:10:54,560 --> 00:11:02,400
+for me, but not sure if it works great for other people. I have a JetBrains plugin, and a VS Code
+
+75
+00:11:02,400 --> 00:11:09,520
+plugin, I haven't really tested the VS Code plugin, and of course, Cursor would be good to set up,
+
+76
+00:11:09,560 --> 00:11:18,920
+it would be good to have Cursor, to work with the Cursor agent harness as well, and I've been
+
+77
+00:11:18,920 --> 00:11:31,880
+looking into doing that, but haven't quite gotten there yet. So, yeah, just kind of trying to nail
+
+78
+00:11:31,880 --> 00:11:40,000
+down this TMUX thing, and I'm hoping that it's not this long lingering issue, but, you know,
+
+79
+00:11:40,000 --> 00:11:48,320
+this proliferation is relatively harmless, it's a little annoying, but, and we do have a resync as
+
+80
+00:11:48,320 --> 00:11:57,840
+well, but, so this should fix it, but it kind of gets into these states to where it doesn't fix it,
+
+81
+00:11:57,840 --> 00:12:07,680
+so, and I kind of find that what causes it is when I jump to another TMUX session, and then I jump
+
+82
+00:12:07,680 --> 00:12:13,480
+back, and then I start, you know, I don't ever come back here, I never focus on this TMUX session,
+
+83
+00:12:13,480 --> 00:12:19,560
+so I think what might be happening is this has the focus, then I hit the editor, and then I run
+
+84
+00:12:19,560 --> 00:12:30,440
+the hotkey, and, you know, maybe it could be as simple as simulating the focus when I use the
+
+85
+00:12:30,440 --> 00:12:53,320
+hotkey. So, maybe a speculation. The issue is caused by focusing on another TMUX session,
+
+86
+00:12:53,320 --> 00:13:11,680
+then focusing on the editor, however, but, sorry to say, but, the claiming TMUX session is bypassed,
+
+87
+00:13:11,680 --> 00:13:27,880
+but focus on the claiming TMUX session is bypassed, so, so I noticed that the CRDT worked
+
+88
+00:13:27,880 --> 00:13:37,440
+pretty good there, it was interesting that I've been typing here, and it put underneath, that was
+
+89
+00:13:37,440 --> 00:13:51,960
+kind of cool, but the focus claim TMUX section has been bypassed, so I wonder if we are using
+
+90
+00:13:51,960 --> 00:14:11,880
+the last selected TMUX session for anything. When we call agent doc run, the claiming TMUX session
+
+91
+00:14:11,880 --> 00:14:41,640
+is effectively, well, shoot, should effectively override any preference for the last
+
+92
+00:14:41,640 --> 00:15:09,040
+selected TMUX session, since the claiming TMUX session, since focusing on the claiming TMUX session
+
+93
+00:15:09,040 --> 00:15:32,040
+may not happen, maybe bypassed. All right, so, okay, so I cleaned it up. When ID triggers a route
+
+94
+00:15:32,040 --> 00:15:37,640
+for multiple documents simultaneously, each route tries split window, but the windows get
+
+95
+00:15:37,640 --> 00:15:45,200
+progressively smaller, so here's another issue, is that, TMUX, you cannot split windows to be
+
+96
+00:15:45,200 --> 00:15:56,080
+infinitely small, so at some point, it's going to disallow further splits, so I kind of want to get
+
+97
+00:15:56,080 --> 00:16:03,640
+away from the business of splitting, and, you know, because what happens is, it's all put into this
+
+98
+00:16:03,640 --> 00:16:23,280
+stash over here, so what would be better is to not have a stash. Can we avoid using a stash window?
+
+99
+00:16:23,280 --> 00:16:53,200
+Can we just have the CLOD session resume when we change, when we swap in
+
+100
+00:16:53,200 --> 00:17:08,920
+another swap-in session? No, we don't want to do that because it may be actively running, so if
+
+101
+00:17:08,920 --> 00:17:17,760
+a CLOD session is running, you know, we can swap panes in and out, and we want to kind of keep it
+
+102
+00:17:17,760 --> 00:17:26,760
+running, so if we were to close it, it would stop running that task, so I don't think we can avoid
+
+103
+00:17:26,760 --> 00:17:44,760
+it, so, all right, so, if a stash, maybe we should say if a stash, I mean, maybe we could have a
+
+104
+00:17:44,760 --> 00:18:02,640
+separate TMUX session that's hidden, that's another alternative, or, I mean, in some ways, it is nice
+
+105
+00:18:02,640 --> 00:18:13,600
+to have it here, but this kind of assumes that Agent Doc owns this entire TMUX session, which I
+
+106
+00:18:13,600 --> 00:18:24,200
+think is fair. I guess it may be possible for people, people might want to also add their, excuse me,
+
+107
+00:18:24,200 --> 00:18:34,720
+their own windows here, I mean, I don't, excuse me, I don't do this, but other people may,
+
+108
+00:18:34,800 --> 00:18:48,000
+because in my workflow, I have all these different desktops, so I just go to a different desktop to
+
+109
+00:18:48,000 --> 00:18:57,320
+run things from the command line, and just leave this alone, so, but maybe other people might not
+
+110
+00:18:57,800 --> 00:19:05,320
+want to, you know, maybe they want to switch out, but I think it's really confusing to switch, if I were to
+
+111
+00:19:05,320 --> 00:19:16,280
+switch between windows, so let's just have it add more stash windows, so if a stash window is full,
+
+112
+00:19:16,280 --> 00:19:34,560
+why not create another stash window, and I'll leave it visible, but maybe at some point we might
+
+113
+00:19:34,560 --> 00:19:43,400
+just want to, like, take it off out of here. It only checks wrong session and wrong processes,
+
+114
+00:19:43,440 --> 00:19:50,040
+does not check wrong window, panes scatter across multiple windows, when they should be consolidated.
+
+115
+00:19:50,040 --> 00:20:10,760
+Okay, so, I guess I should ask, can we effect, robustly track where the binding session,
+
+116
+00:20:11,240 --> 00:20:24,440
+agent session is stashed? All right, so, I think you can just by using tmux, you know,
+
+117
+00:20:24,440 --> 00:20:33,720
+tmux has a process tree, or tmux pane tree, or whatever, so, I think we label it, you know,
+
+118
+00:20:33,880 --> 00:20:42,920
+we name it, so that's how we can identify it. All right, so, two fixes needed in the route,
+
+119
+00:20:42,920 --> 00:20:50,280
+when the split fails, stash the pane instead of creating a new window. Okay, that makes sense,
+
+120
+00:20:50,280 --> 00:20:56,200
+and add wrong window detection, and resync, consolidate panes in separate windows,
+
+121
+00:20:56,200 --> 00:21:22,880
+or an available stash, stash window, yes. All right, so, phase one is done here,
+
+122
+00:21:22,880 --> 00:21:34,880
+so, phase two plan is written, okay, verification submitted, phase two is not blocked,
+
+123
+00:21:34,880 --> 00:21:45,440
+add default constants, so, we'll have the default Gmail client ID, so, this is where you can either
+
+124
+00:21:45,440 --> 00:21:53,920
+have like your own self-hosted Google app, a Google cloud app, or you can just use the
+
+125
+00:21:53,920 --> 00:22:07,520
+default Corky app, and we're gonna just have the default ID, you know, in Corky itself,
+
+126
+00:22:07,520 --> 00:22:12,000
+but I don't know about putting the client secret in there, it seems a little iffy to me,
+
+127
+00:22:16,000 --> 00:22:27,280
+since it's, yeah, so, hard coding them in source, so, is there a security,
+
+128
+00:22:28,080 --> 00:22:36,800
+seems like there's a security issue with encoding the client's
+
+129
+00:22:36,960 --> 00:22:52,720
+secret in the binary, and I'm gonna say also that should have a different name,
+
+130
+00:22:55,920 --> 00:23:02,560
+because we are using other services or other scopes, such as YouTube,
+
+131
+00:23:02,560 --> 00:23:13,360
+how about, say, Corky, or GCP,
+
+132
+00:23:13,360 --> 00:23:36,240
+all right, modify Gmail config resolution when Gmail exists, but client ID, client secret, or
+
+133
+00:23:36,240 --> 00:23:45,120
+empty, or missing, fall back to the built-in defaults, resolution order, user config,
+
+134
+00:23:45,120 --> 00:23:55,760
+or built-in defaults, I'm gonna assume, I assume you will also check, or you will also check,
+
+135
+00:23:55,760 --> 00:24:00,160
+I guess, we'll ask, so, check client ID,
+
+136
+00:24:08,560 --> 00:24:15,760
+so, these commands are so I can run pass instead of saving the,
+
+137
+00:24:17,600 --> 00:24:24,480
+saving this data as clear text in the config file, all right, so, Corky init, when
+
+138
+00:24:25,760 --> 00:24:31,280
+update Corky init, when provider Gmail API is used, don't require manual credential entry,
+
+139
+00:24:31,280 --> 00:24:36,720
+generate Corky tumble with provider equals Gmail API, but no Gmail section triggers
+
+140
+00:24:37,520 --> 00:24:43,680
+default fallback, okay, so, I think this is using the public app, this is a focus code change, yes,
+
+141
+00:24:44,000 --> 00:24:52,000
+yes, yes, go, all right, so, back here to agent doc,
+
+142
+00:24:54,640 --> 00:25:02,000
+so, I put my speculation in here, so, they cleaned it up, so, implement, okay, so, I think it's still
+
+143
+00:25:02,000 --> 00:25:08,960
+going, so, this might take a while, this is a little complicated, apparently, this one's more
+
+144
+00:25:08,960 --> 00:25:16,880
+focused, so, we'll see how long this takes, but, yeah, so, I guess, so, you notice that, okay,
+
+145
+00:25:16,880 --> 00:25:27,680
+so, as I, you know, change what I focus on, this green bar moves, which is what is the Tmux pain
+
+146
+00:25:27,680 --> 00:25:36,320
+focus, so, that's like the basic, like the basics, and then from there, I can run one of these hot
+
+147
+00:25:36,320 --> 00:25:44,320
+keys, these commands, so, I don't really use juni, I used it a little bit when I was running
+
+148
+00:25:44,320 --> 00:25:48,880
+low on clod, but I upgraded my clod plan, so, I don't have this problem anymore,
+
+149
+00:25:51,360 --> 00:25:58,160
+claim for Tmux pain, yeah, so, this, I use this sometimes when it's like a new document,
+
+150
+00:25:58,160 --> 00:26:08,320
+and I'll have it claimed by one side or the other, and I also have sync the layout, so,
+
+151
+00:26:08,320 --> 00:26:16,320
+this is like, if things get messed up, I'll run sync layout, but it should, so, I haven't,
+
+152
+00:26:16,320 --> 00:26:22,080
+me personally, I haven't been doing that because I'm trying to make it self-corrected, you know,
+
+153
+00:26:22,080 --> 00:26:29,040
+self-heal if the layout gets messed up, or better yet, just not mess up the layout in the
+
+154
+00:26:29,040 --> 00:26:45,200
+first place, but still, it's a work in progress, yeah, so, just waiting, maybe we'll edit this out,
+
+155
+00:26:52,080 --> 00:27:13,280
+okay, look at that, so, I did command variants, good catch, so, I guess it wouldn't have caught
+
+156
+00:27:13,280 --> 00:27:19,920
+that and it would have introduced a bug had I not specified that, so, so, this is kind of like
+
+157
+00:27:19,920 --> 00:27:25,920
+something else I've been thinking about is, like, having specs and, you know, our, like,
+
+158
+00:27:25,920 --> 00:27:34,320
+Claude MD file or whatever, and skills, and what, you know, what, how much is over specification,
+
+159
+00:27:34,320 --> 00:27:40,880
+and, you know, versus not, like, how loose should we keep things versus specifying things, and,
+
+160
+00:27:41,760 --> 00:27:50,400
+you know, I guess as a programmer, you know, I have some skill and some ability to at least
+
+161
+00:27:51,360 --> 00:28:00,560
+track what is happening as features develop, and now, of course, with agent loops, things move
+
+162
+00:28:00,560 --> 00:28:08,800
+faster, oops, so, oops, I gotta get a call, so, I'm gonna, I'll hold that thought, and we'll
+
+163
+00:28:09,440 --> 00:28:22,000
+reconvene soon. Okay, so, yeah, I think that we want to be careful not to over specify and under
+
+164
+00:28:22,000 --> 00:28:26,480
+specify, we gotta figure out the right balance to things, and I think a lot of it depends on
+
+165
+00:28:29,040 --> 00:28:35,520
+the person who's operating the agents as well, or people who are operating the agents,
+
+166
+00:28:36,480 --> 00:28:46,960
+you kind of have to figure out how to make the glove fit. Yeah, so, phase two is implemented,
+
+167
+00:28:47,920 --> 00:28:50,400
+all right, but,
+
+168
+00:28:53,040 --> 00:28:53,920
+did we have,
+
+169
+00:29:02,720 --> 00:29:08,480
+all right, I'm not really sure if, let me look up here, yeah, so, it seems like
+
+170
+00:29:08,480 --> 00:29:18,080
+phase two is not fully implemented, so, all right, so, we added the defaults,
+
+171
+00:29:19,120 --> 00:29:30,320
+gsp, client ID, client secret, we rewrote result credentials, let's look for gmail,
+
+172
+00:29:30,400 --> 00:29:38,320
+in the command, environment variable, built in default constant, extracted, well,
+
+173
+00:29:40,960 --> 00:29:42,080
+I guess we should also,
+
+174
+00:29:44,480 --> 00:29:50,160
+oh, I guess it'll check for the clear text one, but the command is better, of course, than clear text,
+
+175
+00:29:55,360 --> 00:29:59,280
+all right, so, we have this,
+
+176
+00:30:00,320 --> 00:30:05,280
+so,
+
+177
+00:30:08,000 --> 00:30:23,280
+I don't see gmail in there,
+
+178
+00:30:23,280 --> 00:30:33,680
+keytoml example, all right, read me,
+
+179
+00:30:40,720 --> 00:30:42,240
+all right, I guess,
+
+180
+00:30:42,240 --> 00:30:55,200
+let's see what we got here, it's different, all right, we got the gmail api sync,
+
+181
+00:30:59,280 --> 00:31:07,200
+oh, I see, here it is, okay, so, all right, so, continue,
+
+182
+00:31:07,200 --> 00:31:18,160
+and let's look at the agent doc, both fixes are implemented,
+
+183
+00:31:23,200 --> 00:31:28,160
+so, we do the route stash fallback, so, this is where we have multiple stash windows,
+
+184
+00:31:29,120 --> 00:31:40,800
+we sync the wrong window detection, all right, six new tests, your speculation about the focus,
+
+185
+00:31:40,800 --> 00:31:46,800
+you're right, that claiming the tmux session should override any last selected preference,
+
+186
+00:31:46,800 --> 00:31:55,520
+the tmux session formatter, front matter field is used by route to determine the agent doc route,
+
+187
+00:31:56,160 --> 00:32:01,600
+to determine the target session, it doesn't rely on the currently focused tmux session,
+
+188
+00:32:02,960 --> 00:32:10,240
+okay, that, you know, that makes sense, but the window proliferation was caused by concurrent
+
+189
+00:32:10,240 --> 00:32:17,520
+routes plus pain through small failures, not this session focus, okay, so, my speculation wasn't
+
+190
+00:32:17,520 --> 00:32:24,320
+right, multiple stash windows, the stash pain implementation in tmux router handles this,
+
+191
+00:32:24,480 --> 00:32:32,800
+the stash window can't fit another pain, it creates stash two, etc., tracking stash sessions,
+
+192
+00:32:34,800 --> 00:32:38,640
+sessions registry already tracks which pain belongs to which file,
+
+193
+00:32:39,360 --> 00:32:44,160
+when the stash pain needs to be activated, route finds it in the registry,
+
+194
+00:32:44,160 --> 00:32:52,160
+splits it into a visible window, and updates the registration, all right, release,
+
+195
+00:32:54,800 --> 00:32:57,760
+okay,
+
+196
+00:33:00,560 --> 00:33:15,760
+so, agent doc version, soren 22,
+
+197
+00:33:24,480 --> 00:33:35,760
+so
+
+198
+00:33:36,240 --> 00:33:39,200
+so
+
+199
+00:33:49,520 --> 00:34:03,200
+cool, phase two is completely done now, and all right, ready, commit, commit,
+
+200
+00:34:06,720 --> 00:34:08,080
+and then implement phase three,
+
+201
+00:34:12,160 --> 00:34:21,600
+so, we have quirky doctor, which helps with sort of like oauth issues that you might have,
+
+202
+00:34:21,600 --> 00:34:27,840
+issues connecting to like gmail or whatever, so, that's the idea, quirky doctor and,
+
+203
+00:34:27,840 --> 00:34:34,480
+you know, other services too, like if you wanted to do, like, so we basically call
+
+204
+00:34:34,480 --> 00:34:51,920
+quirky doctor gmail or quirky doctor linkedin, and it'll like tell you what's wrong, basically,
+
+205
+00:34:56,000 --> 00:35:03,280
+cool, well, I think it's just going to run for a while, once we get the release, I'll probably
+
+206
+00:35:05,280 --> 00:35:07,840
+call it a night,
+
+207
+00:35:15,120 --> 00:35:20,080
+all right, we got the release, let's make sure it's over here,
+
+208
+00:35:22,640 --> 00:35:23,440
+and then we got
+
+209
+00:35:23,440 --> 00:35:25,440
+that,
+
+210
+00:35:28,640 --> 00:35:32,640
+create agent doc,
+
+211
+00:35:38,720 --> 00:35:47,200
+there we go, cool, we got a logo, all right, I think we have a new documentation,
+
+212
+00:35:54,000 --> 00:35:59,040
+so, I need to audit the docs, I didn't audit the docs, shoot,
+
+213
+00:36:04,640 --> 00:36:12,240
+so, I usually do this, and I don't have a skill that always audits the docs, but I probably should,
+
+214
+00:36:13,120 --> 00:36:15,520
+and this should probably actually be in
+
+215
+00:36:15,520 --> 00:36:28,560
+agent docs as well, well, maybe not, I don't know, audit docs can be independent of agent docs, so,
+
+216
+00:36:30,080 --> 00:36:32,800
+I should probably just have it as a skill in my environment,
+
+217
+00:36:36,480 --> 00:36:43,040
+and then, yeah, I've been a little conservative about adding all these skills that people really
+
+218
+00:36:43,040 --> 00:36:50,400
+seem to like, so, I should, but I'm going to add stuff, I just haven't, you know, I've just kind
+
+219
+00:36:50,400 --> 00:36:57,200
+of just been manually doing things a little bit, but, yeah, as I get more experienced with
+
+220
+00:36:58,640 --> 00:37:03,520
+agentic programming, agentic loops, I'm going to add more skills, but for now, I'm
+
+221
+00:37:04,640 --> 00:37:11,600
+doing most of my special stuff with agent doc, and going from there, and just learning as I go,
+
+222
+00:37:13,040 --> 00:37:31,920
+but let's do that, so, add audit, okay, so, we have instruction files, that's kind of where
+
+223
+00:37:32,800 --> 00:37:45,520
+audit docs comes in, so, what skill defines audit docs?
+
+224
+00:37:51,520 --> 00:37:55,040
+Is it from instruction files?
+
+225
+00:37:55,600 --> 00:38:02,720
+I don't think instruction files has a skill,
+
+226
+00:38:09,280 --> 00:38:20,000
+but, yeah, because we have agent doc, but I don't have quirky as a skill, so,
+
+227
+00:38:20,400 --> 00:38:36,720
+I guess I might have it here, no, I don't, I also have to worry about cleanup, too,
+
+228
+00:38:36,720 --> 00:38:48,320
+I'm not really doing anything about cleanup yet, so, all right, I guess I'll just ask,
+
+229
+00:38:50,720 --> 00:38:54,320
+so,
+
+230
+00:39:07,520 --> 00:39:10,320
+all right, so, we did quirky doc,
+
+231
+00:39:10,320 --> 00:39:14,640
+so,
+
+232
+00:39:16,960 --> 00:39:24,640
+okay, tests for quirky doc,
+
+233
+00:39:24,640 --> 00:39:41,280
+implement, quirky doctor gmail, here we'll have a few other of these, maybe
+
+234
+00:39:44,400 --> 00:39:50,960
+linkedin, youtube, let's do that for now,
+
+235
+00:39:54,640 --> 00:39:58,960
+so,
+
+236
+00:39:58,960 --> 00:40:24,640
+looks like we missed this over here, so, so, agent doc missed,
+
+237
+00:40:29,840 --> 00:40:38,800
+so, this, I was, or was in the middle of
+
+238
+00:40:40,480 --> 00:40:50,640
+editing this prompt when agent doc patched the exchange,
+
+239
+00:40:50,720 --> 00:41:00,000
+do you have logs as to why
+
+240
+00:41:04,960 --> 00:41:06,720
+the prompt was missed,
+
+241
+00:41:06,720 --> 00:41:22,000
+all right, so, one of the reasons why I added pending was to kind of, hopefully, track why
+
+242
+00:41:22,000 --> 00:41:27,360
+we have, you know, track the prompts, because I noticed that we're starting to miss a couple,
+
+243
+00:41:28,080 --> 00:41:39,600
+especially as we were adding prompts while processing, so, whenever
+
+244
+00:41:39,600 --> 00:41:49,360
+agent doc run is called,
+
+245
+00:41:49,360 --> 00:42:01,600
+it should be populated,
+
+246
+00:42:06,640 --> 00:42:13,600
+so, the skill, it's a rust subcommand, not a skill, it's a subcommand that delegates
+
+247
+00:42:13,600 --> 00:42:20,800
+instruction files create, okay, so, the CRDT preserved in the edit, but the diff
+
+248
+00:42:21,600 --> 00:42:25,680
+computation happened before you finished typing, okay, so,
+
+249
+00:42:30,320 --> 00:42:36,480
+the response is written in CRDT preserved in progress edit, but the, right, that's what
+
+250
+00:42:36,480 --> 00:42:41,760
+happened, but the response only addressed the initial audit docs prompt, not the block quoted
+
+251
+00:42:41,760 --> 00:42:51,280
+question, right, the pending would have captured the full prompt as a checkbox surviving
+
+252
+00:42:51,280 --> 00:42:58,560
+across cycles, the current exchange only flow, but we have pending here, so, I don't understand,
+
+253
+00:43:01,920 --> 00:43:04,320
+so, we already have
+
+254
+00:43:04,320 --> 00:43:18,080
+in the documents, in this document, why did you say,
+
+255
+00:43:29,840 --> 00:43:30,800
+why did you say
+
+256
+00:43:30,800 --> 00:43:35,120
+this, why did you say this,
+
+257
+00:43:39,040 --> 00:43:51,200
+all right, so, the doctor tests and provider specific checks, all right, so, we got our new
+
+258
+00:43:52,000 --> 00:44:02,960
+doctor stuff for LinkedIn and YouTube, and let's do phase three, so, commit,
+
+259
+00:44:10,400 --> 00:44:17,680
+phase four, so, this is sort of like creating your own Google, this is documentation on,
+
+260
+00:44:17,680 --> 00:44:23,760
+you know, creating your own Google app, so, it'll, so, you can just run this,
+
+261
+00:44:24,400 --> 00:44:29,040
+it's a self-serve and not use the public quirky thing, or if you want, or if you want to use
+
+262
+00:44:29,040 --> 00:44:34,800
+your own app and just add the credentials or the scopes you can too, all right, so,
+
+263
+00:44:34,800 --> 00:44:38,880
+we already have that, wait, we lost it, how do we lose it,
+
+264
+00:44:38,880 --> 00:44:54,880
+oh, my god, it, okay, so, I put
+
+265
+00:44:55,360 --> 00:45:13,680
+the inside of the full tag inside of backticks,
+
+266
+00:45:14,480 --> 00:45:19,760
+but the document got corrupted,
+
+267
+00:45:22,160 --> 00:45:34,000
+please add a test for this scenario to ensure this does not happen again,
+
+268
+00:45:37,440 --> 00:45:39,840
+so, I'm kind of curious to see if it recovers,
+
+269
+00:45:43,680 --> 00:45:57,600
+it should recover, should be robust enough, but you never know, yeah, so, basically, I put this
+
+270
+00:45:58,560 --> 00:46:08,160
+tag into backticks, but it corrupted the document, so, people don't normally do that,
+
+271
+00:46:08,720 --> 00:46:11,280
+but I'm doing it because I'm dogfooding,
+
+272
+00:46:18,720 --> 00:46:23,760
+so, I guess that is kind of an advantage of dogfooding, your product is that you tend to
+
+273
+00:46:23,760 --> 00:46:31,360
+get into these meta cases, which makes the software more robust, you know, if you run
+
+274
+00:46:31,360 --> 00:46:36,720
+through these issues more often, so, if you can fix them, then your software becomes more robust,
+
+275
+00:46:38,160 --> 00:46:53,680
+all right, so, all four phases complete here, I guess, let's just release,
+
+276
+00:46:54,240 --> 00:47:01,200
+so,
+
+277
+00:47:04,720 --> 00:47:08,480
+and I'm going to try to edit these videos to make them a little bit better,
+
+278
+00:47:08,480 --> 00:47:15,200
+and split them apart as well,
+
+279
+00:47:23,680 --> 00:47:29,200
+so,
+
+280
+00:47:43,680 --> 00:47:47,200
+oh, interesting, happening to sanitize, not the parser,
+
+281
+00:47:53,680 --> 00:47:57,200
+so,
+
+282
+00:47:58,560 --> 00:48:03,200
+I wonder if we should use like the AST for markdown,
+
+283
+00:48:03,760 --> 00:48:05,760
+so,
+
+284
+00:48:10,320 --> 00:48:16,400
+is there a markdown AST parser,
+
+285
+00:48:19,040 --> 00:48:26,720
+so, we can avoid these sort of issues,
+
+286
+00:48:33,200 --> 00:48:40,720
+so,
+
+287
+00:48:40,720 --> 00:48:48,320
+all right, inline code, our single end of common mark, so, the parser
+
+288
+00:48:49,200 --> 00:48:56,400
+correctly did not treat it as inline code, the tag was parsed as real component opener,
+
+289
+00:48:57,360 --> 00:49:02,160
+eating the pending comment, the parser is correct,
+
+290
+00:49:05,280 --> 00:49:11,280
+back to open, but the tag content continue to the next line, okay,
+
+291
+00:49:17,040 --> 00:49:24,160
+all right, so, we restored it, all right, I'm not really understanding this, line 130 had,
+
+292
+00:49:24,800 --> 00:49:38,640
+I didn't escape it, but maybe, Agent Doc did, oh, I lost the, we lost the change, because the, okay, so,
+
+293
+00:49:43,600 --> 00:49:46,640
+so, again,
+
+294
+00:49:46,880 --> 00:49:47,280
+again,
+
+295
+00:49:50,480 --> 00:49:55,920
+when my prompt is located
+
+296
+00:49:59,600 --> 00:50:07,680
+before the patch response,
+
+297
+00:50:07,680 --> 00:50:22,720
+my prompt is lost when both the prompt
+
+298
+00:50:24,720 --> 00:50:29,360
+and the, in the patch response
+
+299
+00:50:29,360 --> 00:50:36,080
+is in the diff,
+
+300
+00:50:39,280 --> 00:50:40,800
+in the run diff,
+
+301
+00:50:46,640 --> 00:50:51,520
+can we diff from the
+
+302
+00:50:52,320 --> 00:51:03,920
+CRDT patch diff against to get the user
+
+303
+00:51:06,000 --> 00:51:09,840
+prompt, say the human prompt,
+
+304
+00:51:12,160 --> 00:51:17,200
+I don't know if this is going to be fragile, but this would be one way of doing it,
+
+305
+00:51:18,160 --> 00:51:22,480
+um, I guess another way of doing it is
+
+306
+00:51:25,440 --> 00:51:33,600
+wheeze get to help out, but I'm hoping that the CRDT diff, we might be able to do it this way,
+
+307
+00:51:33,600 --> 00:51:54,000
+I'm hoping, and we have to catch this too, so, also, want to get my missed prompt,
+
+308
+00:52:04,080 --> 00:52:10,880
+all right, so, the problem is when you type the prompt about the last response, the next cycles diff
+
+309
+00:52:10,880 --> 00:52:16,240
+contains both your prompt and the previous response, which was just committed, the skill
+
+310
+00:52:16,240 --> 00:52:23,920
+sees them as one blob, yep, it only processes the response portion, your prompt gets swallowed,
+
+311
+00:52:23,920 --> 00:52:29,360
+I see, because it's all them skills, so, diffing against the CRDT patch, yes, this could work,
+
+312
+00:52:29,360 --> 00:52:36,000
+the idea is CRDT patch contains exactly what the agent wrote, the response, the full diff
+
+313
+00:52:36,000 --> 00:52:41,520
+contains the user edits, the agent, plus the agent response, subtracting the CRDT patch and
+
+314
+00:52:41,520 --> 00:52:48,560
+the full diff isolates the user edits, simpler approach, the snapshot already captures the state
+
+315
+00:52:48,560 --> 00:52:55,040
+before the agent wrote, the diff between the snapshot and the current file shows both the user
+
+316
+00:52:55,120 --> 00:53:02,400
+edits and the agent response, okay, but the commit, in step 0B commits the agent response,
+
+317
+00:53:03,040 --> 00:53:09,440
+so, after commit, the diff only shows, only continues to do that through, okay, user edits,
+
+318
+00:53:10,160 --> 00:53:18,000
+so, the real issue is the snapshot is updated when agent doc write runs, which includes the response,
+
+319
+00:53:18,000 --> 00:53:26,480
+so, next cycle is diff equals current minus snapshot, user, only user changes since last
+
+320
+00:53:26,480 --> 00:53:31,920
+write, this should work correctly, if your prompt is being lost, it means either snapshot was
+
+321
+00:53:31,920 --> 00:53:40,000
+updated after your prompt is written, race condition, snapshot, okay, diff computation is
+
+322
+00:53:40,000 --> 00:53:44,320
+stripping your prompt somehow, the skill is seeing the prompt without responding to it,
+
+323
+00:53:44,320 --> 00:53:49,200
+multi-prompted loss issue, most likely number three, the skill is seeing the prompt, but not,
+
+324
+00:53:49,200 --> 00:53:55,200
+yeah, I think that's what's happening, I see your prompt in the diff, but fail to address it, because
+
+325
+00:53:55,200 --> 00:54:01,280
+I'm focused on the agent response portion, this is a skill side attention problem, the CRDT issue,
+
+326
+00:54:01,280 --> 00:54:06,800
+let's be more disciplined, now address every line in the diff, that's just, okay, so, all right,
+
+327
+00:54:06,800 --> 00:54:14,240
+so, we have a AST, all right, okay,
+
+328
+00:54:19,840 --> 00:54:23,040
+I'm not sure which one to use, they all look interesting,
+
+329
+00:54:23,760 --> 00:54:26,480
+um,
+
+330
+00:54:34,320 --> 00:54:36,000
+50 kilobytes is not bad,
+
+331
+00:54:38,080 --> 00:54:42,720
+yeah, oh, yeah, we're using, yeah, we gotta use the AST, I don't know why I wasn't using it from
+
+332
+00:54:42,720 --> 00:54:52,960
+the beginning, um, pull down the C mark, okay, all right, streaming, okay, perfect,
+
+333
+00:54:57,520 --> 00:55:04,320
+yes, cool, well, I'm gonna end it here, because I think I'm getting a little
+
+334
+00:55:04,320 --> 00:55:17,520
+sleepy, but, yeah, hopefully, this will be more or less soon, so, peace out, everybody.
+

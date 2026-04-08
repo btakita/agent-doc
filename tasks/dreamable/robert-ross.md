@@ -7,6 +7,7 @@ links:
   - ./build-party.md
   - ./build-party-course-diagram.md
   - ./robert-ross-granola.md
+  - ../research/git-agent-workflow.md
 ---
 
 ## Status
@@ -991,8 +992,8 @@ Good instinct — it's directly relevant to his stated fear ("you ship Monday, l
 
 This reframes what looked like indecision as evidence of the loyalty itself.
 
-❯ Let's work on the git + agent workflow items. Please create a research task.|
-### Re: git + agent workflow research task (HEAD)
+❯ Let's work on the git + agent workflow items. Please create a research task|.|
+### Re: git + agent workflow research task
 
 Created [`tasks/research/git-agent-workflow.md`](../research/git-agent-workflow.md).
 
@@ -1003,7 +1004,7 @@ It covers:
 - **Open research questions** — GitButler vs agent-doc overlap, ClaudeScore git signals, practitioner variability
 
 Key open question worth pursuing: how does GitButler's virtual branch model compare to agent-doc's snapshot/commit approach — and is there a natural integration (sessions as virtual branches)?
-<!-- agent:boundary:9cc18642 -->
+<!-- agent:boundary:2afb3863 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

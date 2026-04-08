@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Filevine Interview Prep</title>
+<style>
+  @page { margin: 0.4in 0.45in 0.4in 0.45in; size: letter; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+    font-size: 8.5pt;
+    line-height: 1.35;
+    color: #111;
+  }
+  h1 {
+    font-size: 13pt;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    border-bottom: 2px solid #1a1aff;
+    padding-bottom: 3px;
+    margin-bottom: 7px;
+    color: #0a0a8c;
+  }
+  h2 {
+    font-size: 8pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #1a1aff;
+    border-bottom: 1px solid #ccd;
+    margin-bottom: 4px;
+    margin-top: 8px;
+    padding-bottom: 1px;
+  }
+  h2:first-of-type { margin-top: 0; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 10px; }
+  .col { }
+  p { margin-bottom: 3px; }
+  ul { padding-left: 12px; margin-bottom: 3px; }
+  li { margin-bottom: 1.5px; }
+  .tag {
+    display: inline-block;
+    background: #eef;
+    border: 1px solid #99c;
+    border-radius: 3px;
+    padding: 0 4px;
+    font-size: 7.5pt;
+    color: #334;
+    font-weight: 600;
+    margin-right: 2px;
+  }
+  .person { margin-bottom: 5px; }
+  .person-name { font-weight: 700; font-size: 8.5pt; }
+  .person-title { color: #555; font-style: italic; }
+  .person-track {
+    display: inline-block;
+    font-size: 7pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 0 4px;
+    border-radius: 2px;
+    margin-left: 4px;
+  }
+  .eng { background: #e8f5e9; color: #1b5e20; border: 1px solid #a5d6a7; }
+  .fut { background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; }
+  table { border-collapse: collapse; width: 100%; margin-bottom: 3px; }
+  th { background: #eef; color: #334; font-size: 7.5pt; text-align: left; padding: 2px 5px; border: 1px solid #ccd; }
+  td { padding: 2px 5px; border: 1px solid #dde; font-size: 7.5pt; }
+  tr:nth-child(even) td { background: #f8f8ff; }
+  .q { font-style: italic; color: #333; margin-bottom: 2px; }
+  .q::before { content: "▶ "; color: #1a1aff; font-style: normal; font-size: 7pt; }
+  .milestone { margin-bottom: 2px; }
+  .milestone strong { color: #0a0a8c; }
+  .lois-chip {
+    display: inline-block;
+    background: #0a0a8c;
+    color: white;
+    border-radius: 3px;
+    padding: 0 5px;
+    font-weight: 700;
+    font-size: 8pt;
+    margin-right: 3px;
+  }
+  .divider { border: none; border-top: 1px solid #dde; margin: 6px 0; }
+  .section { margin-bottom: 6px; }
+  .footer {
+    margin-top: 6px;
+    font-size: 7pt;
+    color: #888;
+    border-top: 1px solid #dde;
+    padding-top: 3px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Filevine — Interview Prep <span style="font-weight:400;font-size:9pt;color:#666;">April 2026</span></h1>
+
+<div class="grid">
+
+<!-- LEFT COLUMN -->
+<div class="col">
+
+<div class="section">
+<h2>Company</h2>
+<p><strong>Legal work platform</strong> — case mgmt, doc automation, contract lifecycle, billing, AI</p>
+<p>Founded 2014 · ~500 employees · HQ Salt Lake City, UT · Offices: Chicago, NY, Prague, Bratislava</p>
+<p style="margin-top:3px;">5,000+ clients · 100,000 active users · 1.8B documents processed</p>
+</div>
+
+<div class="section">
+<h2>Recent Milestones</h2>
+<p class="milestone"><strong>$400M</strong> all-equity round — Sept 2025</p>
+<p class="milestone"><strong>FedRAMP 20x</strong> Authorization — Oct 2025</p>
+<p class="milestone"><strong>Pincites</strong> acquired (AI contract redlining for Word) — Jan 2026</p>
+<p class="milestone"><strong>LOIS</strong> launched at LEX Summit 2025</p>
+</div>
+
+<div class="section">
+<h2><span class="lois-chip">LOIS</span> Legal Operating Intelligence System</h2>
+<ul>
+  <li><strong>Built into system of record</strong> — not bolted on; unifies all workflows</li>
+  <li><strong>Intent-aware routing</strong> — routes queries to the right capability</li>
+  <li><strong>Zero-retention AI</strong> — no data retained by AI providers (HIPAA/FedRAMP)</li>
+  <li><strong>Verifiable outputs</strong> — every answer paired with source citations + evidence</li>
+</ul>
+<p style="margin-top:3px;"><em>Tools:</em>
+  <span class="tag">AskAI</span>
+  <span class="tag">DraftAI</span>
+  <span class="tag">AIFields</span>
+  <span class="tag">Timely</span>
+  <span class="tag">MedCron</span>
+  <span class="tag">Pincites</span>
+</p>
+</div>
+
+<div class="section">
+<h2>Tech Stack</h2>
+<table>
+  <tr><th>Layer</th><th>Technologies</th></tr>
+  <tr><td>Backend</td><td>Python, Node.js, C#/.NET</td></tr>
+  <tr><td>Frontend</td><td>React, TypeScript, Svelte</td></tr>
+  <tr><td>Mobile</td><td>React Native, Swift, Kotlin</td></tr>
+  <tr><td>Infra</td><td>AWS, Kubernetes</td></tr>
+  <tr><td>Orchestration</td><td>Temporal</td></tr>
+  <tr><td>Data / Search</td><td>MS SQL, Redis, Elasticsearch</td></tr>
+  <tr><td>Testing</td><td>Playwright, Groovy</td></tr>
+  <tr><td>Compliance</td><td>SOC 2, HIPAA, FedRAMP</td></tr>
+</table>
+</div>
+
+</div>
+
+<!-- RIGHT COLUMN -->
+<div class="col">
+
+<div class="section">
+<h2>Interviewers</h2>
+
+<div class="person">
+  <span class="person-name">Chris Smith</span>
+  <span class="person-track eng">Engineering</span><br>
+  <span class="person-title">Principal Software Engineer</span><br>
+  Expect: systems design, Python/React/AWS, architecture depth, technical ownership
+</div>
+
+<div class="person">
+  <span class="person-name">Stuart Hiller</span>
+  <span class="person-track eng">Engineering</span><br>
+  <span class="person-title">Full Stack Developer</span><br>
+  Background: Node/Express/React/MongoDB/GraphQL. Expect: code quality, execution, full-stack judgment
+</div>
+
+<div class="person">
+  <span class="person-name">Cain Elliott</span>
+  <span class="person-track fut">Futurist</span><br>
+  <span class="person-title">Chief Legal Futurist — PhD Philosophy (Polish Academy of Sciences)</span><br>
+  Former philosophy professor (UPenn, Warsaw), CIO at Margolis Edelstein. Led Legal Futurists team, ImmigrationAI. Expect: AI product philosophy, formal knowledge representation, future of legal workflows
+</div>
+
+<div class="person">
+  <span class="person-name">Emily Lippincott</span>
+  <span class="person-track fut">Futurist</span><br>
+  <span class="person-title">Senior Legal Futurist — JD, Creighton Law · Monica Bay Women of Legal Tech</span><br>
+  16+ yrs Silicon Valley, ABA Techshow speaker. Expect: attorney workflows, customer-centric product thinking
+</div>
+</div>
+
+<div class="section">
+<h2>Key Talking Points</h2>
+<ul>
+  <li><strong>AI grounded in truth</strong> — verifiable outputs + citations prevent malpractice risk from hallucination</li>
+  <li><strong>System of record first</strong> — AI is only as good as the data it touches; Filevine owns the data layer</li>
+  <li><strong>Compliance as a feature</strong> — FedRAMP/HIPAA/SOC 2 are product differentiators for gov/enterprise</li>
+  <li><strong>Legal ≠ generic SaaS</strong> — jurisdictional deadlines, privileged docs, regulated billing = real domain complexity</li>
+  <li><strong>Interactive artifacts gap</strong> — LOIS generates static outputs; making artifacts conversational is the next frontier</li>
+  <li><strong>Ontology for claim-level grounding</strong> — citation-level verification (current) vs. formal evidence graph (next)</li>
+</ul>
+</div>
+
+<div class="section">
+<h2>Questions to Ask</h2>
+<p class="q">What does your eval pipeline look like for LOIS — automated regression suites, or human review as the primary gate?</p>
+<p class="q">How does Filevine handle schema evolution for 1.8B documents across 5,000+ firm configurations?</p>
+<p class="q">With FedRAMP just landed, how is that shaping the roadmap?</p>
+<p class="q">What's the boundary between Pincites and Filevine's existing DraftAI?</p>
+<p class="q">LOIS generates artifacts — what's the plan for making those conversational rather than terminal?</p>
+<p class="q">How does the Legal Futurists team interface with engineering on LOIS?</p>
+</div>
+
+</div>
+</div>
+
+<div class="footer">
+Sources: filevine.com · LinkedIn · LEX Summit 2025 · Crunchbase · ZoomInfo · job postings · April 2026
+</div>
+
+</body>
+</html>

@@ -327,4 +327,3 @@ For mortgage calls, the domain vocabulary is specific — loan amounts, rates, p
 | **Total** | **$90-$99/mo** |
 
 ## User
-

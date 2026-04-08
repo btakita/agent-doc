@@ -2313,7 +2313,7 @@ Committed and pushed:
 CI deploy in progress. Live at: https://briantakita.me/post/2026-04-03-agent-runbooks-on-demand-procedural-context
 
 Is the published linkedin teaser up to date with the latest corky.md savings?
-### Re: Is the published teaser up to date? (HEAD)
+### Re: Is the published teaser up to date?
 
 **Yes, the published numbers are correct.** 12 runbooks / 212 lines / 28% = the original runbook extraction from CLAUDE.md and pre-existing SKILL.md files.
 
@@ -2324,7 +2324,7 @@ Each LinkedIn post tells one clean story:
 - **Sequel teaser:** skill decomposition (695 → 58-66 lines per invocation, 4 additional runbooks)
 
 Updating the published post to "16 runbooks" would blur the narrative by mixing two different optimizations.
-<!-- agent:boundary:cb4a2c63 -->
+<!-- agent:boundary:8b6c5059 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

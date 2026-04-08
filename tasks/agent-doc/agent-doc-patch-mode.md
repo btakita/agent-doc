@@ -40,7 +40,11 @@ agent-doc write <FILE> --stream --origin skill --patch-mode replace
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+### Origin (transferred from tasks/software/eval-runner.md, 2026-04-03)
 
+During the eval-runner session, a `compact exchange` operation failed because `agent-doc write` with `<!-- patch:exchange -->` appended the compacted summary below the original content (following the component's `patch=append` default) instead of replacing it. The workaround was using Claude's Edit tool, which lacks CRDT merge safety.
+
+This led to the proposal for a `--patch-mode` override flag on `agent-doc write`.
 <!-- /agent:exchange -->
 
 ## Pending
@@ -51,7 +55,7 @@ agent-doc write <FILE> --stream --origin skill --patch-mode replace
 - [ ] Add test case for patch-mode override
 <!-- /agent:pending -->
 
-## Todo (HEAD)
+## Todo
 
 <!-- agent:todo -->
 - [ ] Consider per-patch-block mode override syntax (e.g., `<!-- patch:exchange mode=replace -->`)

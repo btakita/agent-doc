@@ -1,0 +1,57 @@
+# Agent-doc agentic eval cases
+# These cases require tool access (Read, Edit, Write) to properly test.
+# They were moved from diff-interpretation/ because `claude --print` can't
+# demonstrate the expected agentic behavior (implementing code, updating files).
+#
+# Future: each case needs a fixture directory with mock files.
+# See tasks/software/eval-runner.md for fixture design.
+
+cases:
+  - id: approval-to-implement
+    description: "User says 'yes, implement' — approval signal for pending work"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -90,6 +90,7 @@
+       Start with **agent-doc diff interpretation** evals.
+      +Yes, implement phase 1
+       <!-- /agent:exchange -->
+    document_context: |
+      Evals planning document. Previous exchange proposed Phase 1: creating
+      20-30 golden-answer test cases from real session diffs. The document has:
+      <!-- agent:pending -->
+      - [ ] Create golden-answer eval cases from real session diffs
+      - [ ] Build eval-runner CLI
+      - [ ] Run first baseline
+      <!-- /agent:pending -->
+    expected_behavior:
+      - Interprets "Yes, implement phase 1" as approval to proceed (not a question)
+      - Begins implementation work (not just planning)
+      - Updates pending component with active items
+      - Does NOT ask for clarification or confirmation
+    grading: llm-rubric
+    notes: "Requires tool access to demonstrate implementation. Fixture needed."
+
+  - id: single-word-approval
+    description: "User types minimal approval signal 'go'"
+    diff: |
+      --- snapshot
+      +++ document
+      @@ -60,6 +60,7 @@
+       Create 20-30 golden-answer test cases from real session diffs.
+      +go
+       <!-- /agent:exchange -->
+    document_context: |
+      Evals planning document. Agent previously proposed creating 20-30 eval
+      cases from real session diffs. The document has:
+      <!-- agent:pending -->
+      - [ ] Create golden-answer eval cases from real session diffs
+      - [ ] Run haiku baseline
+      <!-- /agent:pending -->
+    expected_behavior:
+      - Interprets "go" as approval to proceed (not an incomplete edit or question)
+      - Begins executing the next pending item
+      - Updates pending component to reflect active work
+      - Does NOT ask for clarification, permissions, or what "go" means
+    grading: llm-rubric
+    notes: "Requires tool access to demonstrate execution. Fixture needed."

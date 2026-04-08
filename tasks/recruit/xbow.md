@@ -75,10 +75,10 @@ Re-transcription completed. Early section (0:00–7:03) now has good alternating
 **Root cause of remaining issue:** The span check targets undivided pyannote segments, but pyannote's 61 segments alternate correctly. The problem is in the Whisper→speaker mapping layer: when Brian talks for 25 consecutive minutes, the embedding similarity comparison flips for that region. This is a harder fix — requires checking span in the *merged* output layer, not the raw diarized segments.
 
 Is the feature or bug fix added to tasks/software/corky.md?
-### Re: Diarization fix — tracking added (HEAD)
+### Re: Diarization fix — tracking added
 
 Not yet. The fix was in the working tree (`src/corky/src/transcribe/diarize.rs` + `engine.rs`) but hadn't been logged. Added it now to `tasks/software/corky.md` under **Open items** — labeled as uncommitted/unreleased so it doesn't get lost.
-<!-- agent:boundary:ab0ff3bf -->
+<!-- agent:boundary:bf8ae1c3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

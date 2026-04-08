@@ -15,7 +15,7 @@ Interview prep PDF generated at file:///tmp/filevine-interview-prep.pdf
 <!-- agent:exchange patch=append -->
 Give me a 1 page pdf prep for filevine interview.
 filevine.com
-### Re: Interview prep PDF (HEAD)
+### Re: Interview prep PDF
 
 Created a 1-page interview prep PDF at `file:///tmp/filevine-interview-prep.pdf`
 
@@ -53,10 +53,6 @@ Created a 1-page interview prep PDF at `file:///tmp/filevine-interview-prep.pdf`
 
 ✻ Cooked for 2m 56s
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)
 <!-- agent:boundary:190b8da0 -->
 <!-- /agent:exchange -->
 

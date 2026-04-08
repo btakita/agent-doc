@@ -369,7 +369,7 @@ Done. Updated both `data.toml` and `BrianTakita.md` — Menu.com entry now reads
 **PDF rebuilt** at `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-cdw-payments.pdf`
 
 Also saved the sent reply to `mail/contacts/kaci-railey/20260330-linkedin-brian-takita.txt` and updated the communication timeline in AGENTS.md.
-<!-- agent:boundary:60fd8e83 -->
+<!-- agent:boundary:2bd8eec1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

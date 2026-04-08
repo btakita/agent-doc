@@ -512,7 +512,7 @@ Message typed into PulseSMS (`#message-entry`) via chromium-bridge. **Not sent y
 > When you have a free moment after things settle down, would love to catch up on a call. No rush.
 
 Review in browser and approve to send, or edit in the text field first.
-<!-- agent:boundary:68630ae7 -->
+<!-- agent:boundary:9916c498 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

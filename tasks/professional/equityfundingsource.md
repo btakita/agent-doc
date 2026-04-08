@@ -499,7 +499,6 @@ npx wrangler d1 migrations apply equityfundingsource
 ~/work/btakita/agent-loop/src/equityfundingsource-dev main !7 ?1                                                                                                                                                                      16:05:52
 ❯ bunx wrangler d1 create equityfundingsource
  ⛅️ wrangler 4.80.0
-───────────────────
 ✅ Successfully created DB 'equityfundingsource' in region ENAM
 Created your new D1 database.
 
@@ -634,10 +633,6 @@ You mentioned you'll delete the existing Gmail drafts (there may be duplicates f
 
 ● No changes detected in the document. Nothing to respond to.
 
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ 
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)
  ▐▛███▜▌   Claude Code v2.1.89
 ▝▜█████▛▘  Opus 4.6 (1M context) · Claude Max
   ▘▘ ▝▝    ~/work/btakita/agent-loop
@@ -666,10 +661,6 @@ You mentioned you'll delete the existing Gmail drafts (there may be duplicates f
 
 ● No changes detected in the document. Nothing to respond to.
 
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ 
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)
 <!-- agent:boundary:1bcbd089 -->
 <!-- /agent:exchange -->
 

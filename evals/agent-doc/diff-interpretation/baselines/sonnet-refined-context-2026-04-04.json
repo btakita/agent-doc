@@ -1,0 +1,208 @@
+{
+  "timestamp": "2026-04-04T13:47:51-0400",
+  "model": "sonnet",
+  "judge_model": "sonnet",
+  "threshold": 0.7,
+  "cases": [
+    {
+      "id": "simple-question",
+      "description": "User asks a straightforward question in exchange",
+      "passed": true,
+      "score": 0.75,
+      "reasoning": "The response mentions the <!-- agent:name --> syntax (criterion 2) and provides instructions for adding components (criterion 1). It does not flag anything as an incomplete edit (criterion 3). However, the response is somewhat hedged ('I'm working in a restricted session and can't read the agent-doc source directly') and offers speculative/approximate information rather than authoritative instructions, which slightly undermines the quality. The core expected behaviors are met, but the uncertainty framing and the request for more info at the end reduce confidence in the match.",
+      "response_preview": "I'm working in a restricted session and can't read the agent-doc source directly, but based on the document format visible in your file, here's what I can tell you:\n\n---\n\n**Adding a new component to a",
+      "latency_ms": 70030
+    },
+    {
+      "id": "incomplete-fragment",
+      "description": "User typed a single letter — clearly mid-edit",
+      "passed": true,
+      "score": 1.0,
+      "reasoning": "The response correctly detects the incomplete input ('W'), does not attempt to answer any question, and tells the user it's waiting for them to finish typing. All three expected behaviors are satisfied.",
+      "response_preview": "Looks like you started typing — just \"W\" so far. Go ahead and finish your message!",
+      "latency_ms": 8986
+    },
+    {
+      "id": "multi-topic",
+      "description": "User asks two distinct questions in one edit",
+      "passed": true,
+      "score": 0.7,
+      "reasoning": "The response addresses both questions separately with clear separation (numbered headers, horizontal rules), and does not conflate the two topics. However, the expected behavior mentions 'streaming checkpoints between topics' which is not clearly demonstrated — the response uses a static markdown separator (---) rather than any streaming checkpoint mechanism. If streaming checkpoints refer to something like intermediate flush points or explicit streaming markers in the output format, this is absent. The two-topic separation and non-conflation criteria are well met, but the streaming checkpoint requirement is unclear or missing, which brings the score down from a full 1.0.",
+      "response_preview": "Great questions — here's how I'd approach each:\n\n---\n\n**1. Grading methods for tone evaluation**\n\nTone is inherently subjective, so the most reliable approaches combine multiple signals:\n\n- **LLM-as-j",
+      "latency_ms": 26602
+    },
+    {
+      "id": "comment-content-ignored",
+      "description": "User adds an HTML comment — agent must not respond to it",
+      "passed": true,
+      "score": 1.0,
+      "reasoning": "The actual response 'No changes.' perfectly matches both expected behaviors: it reports no changes (comment was stripped before diffing) and does not respond to the TODO content within the HTML comment.",
+      "response_preview": "No changes.",
+      "latency_ms": 8590
+    },
+    {
+      "id": "blockquote-annotation",
+      "description": "User adds inline annotation via blockquote to previous response",
+      "passed": false,
+      "score": 0.4,
+      "reasoning": "The response acknowledges the user's preference to start with corky threading (criterion 1), but fails to adjust a plan (criterion 2) or update pending items to reflect new priority (criterion 3). It asks for more information instead of adjusting the plan, suggesting no plan existed or was updated. The response is reactive rather than proactive about replanning.",
+      "response_preview": "Got it — corky threading it is. The bugs there make it a higher priority.\n\nTo get started, it would help to know the current state. Can you share the specific threading bugs you're seeing? Error messa",
+      "latency_ms": 9190
+    },
+    {
+      "id": "deletion-of-content",
+      "description": "User deletes a section of agent's previous response",
+      "passed": true,
+      "score": 0.95,
+      "reasoning": "The response matches all three expected behaviors: (1) it notices the deletion of Phase 3 content ('Phase 3's implementation details have been cleared out'), (2) it asks whether the user wants to remove it or replace it ('Is that intentional (deferring those decisions) or would you like to sketch a replacement direction'), and (3) it does not silently re-add the deleted content. The slight deduction is because the question could be marginally more explicit about the option to remove Phase 3 entirely vs. replace it, but the intent is clearly captured.",
+      "response_preview": "Noted — Phase 3's implementation details have been cleared out. Is that intentional (deferring those decisions) or would you like to sketch a replacement direction for the automation/CI phase?",
+      "latency_ms": 11702
+    },
+    {
+      "id": "truncated-sentence",
+      "description": "User was mid-sentence when cycle triggered",
+      "passed": true,
+      "score": 0.9,
+      "reasoning": "The response detects the incomplete sentence, flags it as partial/cut-off, and asks for clarification without guessing what the user was about to say. It matches behaviors 1, 3, and 4 perfectly. The only minor gap is behavior 2 — it doesn't explicitly label this as a 'partial edit' in technical terms, but functionally it handles the situation correctly by asking for the full thought rather than proceeding.",
+      "response_preview": "It looks like your message got cut off mid-sentence — \"I think we should also consider adding evals for the way that…\" — what were you going to say? I'd love to hear the full thought before responding",
+      "latency_ms": 14426
+    },
+    {
+      "id": "structural-reorg",
+      "description": "User reorganizes sections — moves Phase 4 before Phase 2",
+      "passed": true,
+      "score": 0.85,
+      "reasoning": "The response correctly recognizes this as a reorganization (not new content), acknowledges the reordering, and does not re-answer or duplicate Phase 4 content. It shows the new sequence clearly and provides brief commentary on why the reorder makes sense. The only minor issue is it goes slightly beyond just acknowledging the reorder by adding evaluative commentary ('Good call') and rationale, which wasn't strictly required but isn't harmful. All three expected behaviors are met.",
+      "response_preview": "The user moved Phase 4 (Continuous Improvement Loop) up to appear right after Phase 1, before Phases 2 and 3. This reorders the phases so that the continuous improvement mindset is established early i",
+      "latency_ms": 14763
+    },
+    {
+      "id": "approval-to-implement",
+      "description": "User says 'yes, implement' — triggers pending protocol",
+      "passed": false,
+      "score": 0.1,
+      "reasoning": "The response completely fails to begin implementation work, which is the primary expected behavior. Instead of implementing anything, it asks a clarifying question about missing context. It does not update any pending component with active items, nor does it flush a pending update. The only partial credit is that the response at least acknowledges the approval signal ('I see you've approved Phase 1'), but then pivots to asking for more information rather than acting. This is essentially the opposite of the expected behavior, which requires starting implementation immediately.",
+      "response_preview": "I see you've approved Phase 1. I only have visibility into a small slice of the document (around the exchange boundary at line 90) and can see you want to move on **agent-doc diff interpretation evals",
+      "latency_ms": 95220
+    },
+    {
+      "id": "mixed-valid-and-comment",
+      "description": "User adds both real content and a comment in one edit",
+      "passed": true,
+      "score": 0.9,
+      "reasoning": "The response correctly responds to the real content ('Can you add a latency eval for the agent-doc write command?') and provides a thorough, appropriate response. It does not reference or acknowledge any HTML comments. The only minor deduction is the trailing question 'Want me to draft those cases too once you confirm preflight is a real command?' which is a natural extension of the task rather than referencing comments, so it doesn't violate the expected behavior. The response fully ignores both HTML comments and focuses entirely on the actual request.",
+      "response_preview": "This session's tool permissions are scoped to `src/eval-runner`, so I can't write directly to `evals/`. Let me present exactly what to create, and you can either grant broader access or drop it in you",
+      "latency_ms": 157866
+    },
+    {
+      "id": "inline-colon-annotation",
+      "description": "User appends feedback to agent's sentence with colon separator",
+      "passed": true,
+      "score": 0.9,
+      "reasoning": "The response strongly matches all expected behaviors. It (1) clearly recognizes the colon-appended text as user feedback/correction, (2) explicitly acknowledges the agent's prior claim was wrong ('Fair correction — I mischaracterized it'), (3) investigates the plugin debounce detection gap in depth with specific technical analysis, and (4) treats the feedback as user-authored correction rather than agent-authored content. The slight deduction is because the response doesn't explicitly say 'you appended this as feedback' — but behaviorally it treats it correctly as user input and responds appropriately.",
+      "response_preview": "Fair correction — I mischaracterized it. The issue isn't that your edit was \"logically incomplete\"; it's that the debounce fired while you were **actively mid-keystroke**. Those are different problems",
+      "latency_ms": 24567
+    },
+    {
+      "id": "boundary-only-change",
+      "description": "Only the boundary UUID changed — no real user edit",
+      "passed": true,
+      "score": 1.0,
+      "reasoning": "The response 'No changes.' perfectly matches all three expected behaviors: it recognizes the boundary UUID change as a no-op, reports no meaningful changes, and does not generate a substantive response. The response is appropriately minimal.",
+      "response_preview": "No changes.",
+      "latency_ms": 7235
+    },
+    {
+      "id": "head-label-removal",
+      "description": "Agent's (HEAD) label removed from section heading — mechanical cleanup",
+      "passed": true,
+      "score": 0.9,
+      "reasoning": "The actual response 'No changes.' correctly identifies there are no meaningful changes and keeps the response minimal. It satisfies criteria 2 and 3 (reports no meaningful changes, does not generate a substantive response). The only slight gap is that it doesn't explicitly show recognition of this being an agent artifact cleanup (criteria 1), though the terse 'No changes.' implicitly treats it as such. The response is appropriately brief and non-substantive.",
+      "response_preview": "No changes.",
+      "latency_ms": 9042
+    },
+    {
+      "id": "single-word-approval",
+      "description": "User types minimal approval signal 'go'",
+      "passed": false,
+      "score": 0.1,
+      "reasoning": "The response completely fails to match expected behaviors. Instead of interpreting 'go' as approval and proceeding with implementation, the agent asks for directory access permissions - treating it as a new conversation start rather than a continuation. It does not begin executing any pending item, does not update any pending component, and certainly does not flush any pending update before responding. The only marginal credit is that it somewhat acknowledges there is work to do ('I'll read the existing cases... and write new test cases'), showing it understands its task context, but the core behavior of acting on the approval signal is entirely absent.",
+      "response_preview": "I need read access to the evals and tasks directories outside `src/eval-runner`. Could you grant that permission? (Claude Code should be prompting for access to `/home/brian/work/btakita/agent-loop/ev",
+      "latency_ms": 165848
+    },
+    {
+      "id": "pasted-terminal-output",
+      "description": "User pastes terminal output as context alongside a question",
+      "passed": true,
+      "score": 0.95,
+      "reasoning": "The response correctly extracts the actual question about the missing window 1:stash, uses the terminal output as diagnostic context (noting the gap in numbering 0,2), and provides actionable advice to recover. It does not echo back the terminal output. Minor deduction because it doesn't explicitly 'investigate' (e.g., check tmux logs or session state) but instead reasons from the provided context to a confident conclusion, which is appropriate given the information available.",
+      "response_preview": "Window 1 was likely closed — either by the process inside it exiting or an accidental `exit`/`C-d`. The gap in numbering (0, 2) confirms it's gone rather than renamed.\n\nTo recover, recreate it:\n\n```ba",
+      "latency_ms": 13637
+    },
+    {
+      "id": "multi-item-instruction-list",
+      "description": "User provides a checklist of items to implement",
+      "passed": false,
+      "score": 0.1,
+      "reasoning": "The response fails to match the expected behaviors. It does not treat checklist items as separate work items to implement, does not add items to a pending component, does not begin implementing in order, and does not use streaming checkpoints. Instead, it blocks on an access concern and asks the user to choose an option. While it correctly identifies the three items, it does nothing actionable with them from an implementation standpoint. The expected behavior was to start working through the items, but the response is entirely deferential/interrogative.",
+      "response_preview": "This session is scoped to `src/eval-runner/` and I don't have filesystem access to `src/agent-doc/` where the actual source lives. I can see the three items clearly:\n\n1. **IPC silent failure bug** — a",
+      "latency_ms": 70776
+    },
+    {
+      "id": "single-word-correction",
+      "description": "User corrects a single word in agent's prior response",
+      "passed": true,
+      "score": 0.85,
+      "reasoning": "The response notices the terminology correction (cache → buffer), acknowledges it with 'Good catch', uses the correct term going forward ('buffer then flush cycle'), and does not re-explain the entire concept. It does add a brief explanation of why 'buffer' is more precise than 'cache', which is slightly more than just acknowledging and moving on, but this explanation is concise and arguably adds value without being excessive. The response meets all four expected behaviors, with the minor caveat that the brief semantic clarification could be seen as slightly more than bare acknowledgment, hence 0.85 rather than 1.0.",
+      "response_preview": "Good catch — \"buffer then flush cycle\" is more precise. A cache implies storage for reuse, whereas here we're accumulating writes before flushing, which is buffering behavior. Updated.",
+      "latency_ms": 9237
+    },
+    {
+      "id": "mid-sentence-truncated-real",
+      "description": "Real truncated edit from git history — sentence cuts off mid-phrase",
+      "passed": false,
+      "score": 0.25,
+      "reasoning": "The response partially detects the incomplete sentence (behavior 1) and flags it as partial (behavior 2), but fails on behaviors 3 and 4. Instead of waiting for the next cycle (behavior 3), it responds immediately to the user. Critically, it violates behavior 4 by guessing what the user was asking about — it speculates 'opening what?' and repeats back 'Why do you keep on opening…' which is exactly guessing at the incomplete content. The correct behavior was to silently wait for the next cycle without responding or speculating about the truncated content.",
+      "response_preview": "It looks like your message got cut off — the debounce fired mid-sentence. You were asking \"Why do you keep on opening…\" — opening what? Finish your thought and I'll answer.",
+      "latency_ms": 9731
+    },
+    {
+      "id": "inline-annotation-with-truncation",
+      "description": "User adds two inline annotations, one truncated mid-word",
+      "passed": true,
+      "score": 0.85,
+      "reasoning": "The response correctly processes the two colon-annotations as user corrections (Window 0 fix and stash window expectation), acknowledges both annotations appropriately, and detects/flags the truncated line. Minor deduction: the truncated text quoted in the response ('you are t...') slightly extends what 'you are t' implies from the case description, but the core behavior of flagging the truncation and asking for completion is correct. All four expected behaviors are addressed.",
+      "response_preview": "Got it — thanks for the annotations.\n\n- **Window 0 (agent-doc):** Confirmed fixed, pane moved to index 0. ✓\n- **Stash window:** Understood — `1:stash` should exist in session 0. I'll verify that's in ",
+      "latency_ms": 15822
+    },
+    {
+      "id": "multi-topic-approval-plus-questions",
+      "description": "User approves prior work AND asks follow-up questions in one edit",
+      "passed": true,
+      "score": 0.72,
+      "reasoning": "The response handles most expected behaviors well: (1) 'Yes' triggers approval/proceeding on prior work - checked; (2) Addresses 'gaps in debounce logic' as a research question with investigation and options - checked, though it investigates rather than queuing; (3) Queues 'Add tests', 'Update SPEC.md' as pending items with details, and addresses 'audit' - partially checked (tests and SPEC.md are offered conditionally rather than queued as pending); (4) Streaming checkpoints between topics - the response uses horizontal rules and headers to separate topics, partially satisfying this; (5) Distinguishes questions from instructions - the debounce is treated as a research question while others are treated as actionable items. Main gaps: the pending items (tests, SPEC.md, audit) are presented as offers requiring confirmation rather than being queued as pending work, and the streaming checkpoint behavior isn't clearly demonstrated as a technical mechanism. The response is thorough and investigative but doesn't cleanly 'queue' items as pending - it asks for confirmation on each one instead.",
+      "response_preview": "Approval needed for `make check` — I'll address each item:\n\n---\n\n**\"Yes\" → Proceeding** on the golden test cases work.\n\n**Debounce gaps** — eval-runner has *no debounce logic*. The word \"debounce\" doe",
+      "latency_ms": 117361
+    },
+    {
+      "id": "url-reference-question",
+      "description": "User asks a question referencing an external URL",
+      "passed": true,
+      "score": 0.92,
+      "reasoning": "The response strongly matches all four expected behaviors: (1) It explicitly fetched the URL ('Got the page') and references the Anthropic eval guide content throughout; (2) It adapts the methodology specifically to agent-doc's diff interpretation needs, referencing concrete domain details like diff types and the existing eval-runner setup; (3) It produces a concrete plan with specific next steps (YAML cases, grading types, judge prompt changes) rather than a generic summary; (4) It mentions specific eval types from the reference including exact match, binary classification, LLM Likert, cosine similarity, and LLM ordinal grading methods. The response loses a small fraction because we can't verify the URL was actually fetched vs. hallucinated based on prior knowledge, and some details about 'no file yet' and 'missing system prompt' suggest prior codebase exploration not triggered by the URL fetch itself.",
+      "response_preview": "Got the page. Here's how the Anthropic eval methodology maps onto your agent-doc eval framework:\n\n---\n\n## Adapting Anthropic's Eval Approach to agent-doc\n\n### What the doc recommends\n\nThe [develop-tes",
+      "latency_ms": 132746
+    }
+  ],
+  "summary": {
+    "total": 21,
+    "passed": 16,
+    "failed": 5,
+    "pass_rate": 0.7619047619047619,
+    "mean_score": 0.7185714285714285,
+    "total_latency_ms": 993377,
+    "p50_latency_ms": 14763,
+    "p95_latency_ms": 157866,
+    "regressions": []
+  }
+}

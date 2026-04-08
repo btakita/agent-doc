@@ -1022,7 +1022,7 @@ Updated both blog posts with insights from the LinkedIn conversation:
 **FFI Plugin post** — Refined the "making conventions stick" section with the fuller framing about agent behavior and domain ontology as persistent vocabulary.
 
 Built, committed, pushed. CI deploying.
-<!-- agent:boundary:b884ea48 -->
+<!-- agent:boundary:fb1086f5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

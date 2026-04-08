@@ -1459,18 +1459,18 @@ Added `--backend open-ai` to eval-runner. Uses the OpenAI Chat Completions API f
 
 **Usage examples:**
 ```bash
-# GPT-4o (HEAD)
+# GPT-4o
 OPENAI_API_KEY="$(pass openai/api_key)" eval-runner run cases.yaml --backend open-ai --model gpt-4o
 
-# Gemini via OpenAI compat (HEAD)
+# Gemini via OpenAI compat
 OPENAI_API_KEY="$(pass google/gemini_key)" eval-runner run cases.yaml --backend open-ai --model gemini-2.0-flash --base-url https://generativelanguage.googleapis.com/v1beta/openai
 
-# Local ollama (HEAD)
+# Local ollama
 OPENAI_API_KEY=unused eval-runner run cases.yaml --backend open-ai --model llama3 --base-url http://localhost:11434/v1
 ```
 
 Builds clean, no new dependencies needed (`reqwest` already present).
-<!-- agent:boundary:f4b4bc9e -->
+<!-- agent:boundary:cbcf24fc -->
 <!-- /agent:exchange -->
 
 ## Pending

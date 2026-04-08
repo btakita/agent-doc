@@ -1260,7 +1260,7 @@ Cleaner. One fact, the acknowledgment, leave it in Justin's hands. Ready to send
 Should I mention that I was on the call with robert-ross and it was already not starting off on the right footing?
 The entire situation was not the most stable.
 I really feel awful about how all this went down. Rob Ross messed up this opportunity for me.
-### Re: Keep it clean — none of this goes in the message (Apr 7) (HEAD)
+### Re: Keep it clean — none of this goes in the message (Apr 7)
 
 No to all three. Here's the breakdown:
 
@@ -1273,7 +1273,7 @@ No to all three. Here's the breakdown:
 The draft is clean, honest, and gives Justin one usable fact to work with. Send it as written and see what he comes back with.
 
 The situation is genuinely rough — high-pressure weekend, offer that collapsed day one, now an uncertain door at ECI. But the message to Justin isn't where you process that. Short, dignified, leave it in his hands.
-<!-- agent:boundary:665daa1e -->
+<!-- agent:boundary:469574e0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

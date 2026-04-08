@@ -13,11 +13,10 @@ Session active — ready for input.
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-
-<!-- agent:boundary:4f77d39d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+
 <!-- /agent:pending -->

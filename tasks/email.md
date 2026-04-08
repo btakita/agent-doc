@@ -6,6 +6,11 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 ---
 
+
+
+
+
+
 # Email Management
 
 ## Session History
@@ -736,7 +741,7 @@ Rename all of the labels in the emails to/from btak.dev@gmail.com
 compact exchange
 **Compacted exchange** — prior conversation covered:
 
-### Account Setup (btak.dev) (HEAD)
+### Account Setup (btak.dev)
 - Added `btak.dev` account to `mail/.corky.toml` with `provider = "gmail-api"`, OAuth2 auth
 - Password stored at `pass email/btak.dev`
 - Added `btak.dev@gmail.com` as OAuth test user in Google Cloud Console
@@ -837,7 +842,7 @@ That explains the delivery failure — the bounce wasn't just DMARC, it's becaus
 **For corky sync:** The `btak.dev` account in `.corky.toml` won't be able to sync (OAuth and IMAP both require an active account). You may want to temporarily disable it to avoid sync errors. Once the appeal resolves, re-enable it.
 
 Want me to update the Cloudflare routing config? (I'd need access to `src/cloudflare/` or the dashboard.)
-<!-- agent:boundary:60b5c04d -->
+<!-- agent:boundary:4342030f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending -->

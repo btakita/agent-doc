@@ -14,7 +14,6 @@ Queue initialized. 2 pending items. Awaiting task selection.
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-
 ### Agent (initial review)
 
 **Pending items:**
@@ -34,7 +33,7 @@ Progression:
 - Task assignment locking: flock or claims log?
 - Completion signaling: status component value, or removal from pending?
 - Git conflicts: do parallel agents need isolated branches/worktrees?
-<!-- agent:boundary:0647908e -->
+<!-- agent:boundary:9632ec7e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

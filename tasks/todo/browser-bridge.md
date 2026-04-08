@@ -129,10 +129,9 @@ Not started. MVP scope: X extractor + MCP server + Chrome extension.
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-
 <!-- /agent:exchange -->
 
-## Pending / Not Built (HEAD)
+## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 <!-- /agent:pending -->

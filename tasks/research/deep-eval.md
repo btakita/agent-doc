@@ -202,7 +202,7 @@ The `@observe()` tracing decorator already separates instrumentation from evalua
 
 ❯ Would a self-hosted DeepEval be sufficient for ClaudeScore?
 ❯ What would a confident.ai subscription provide? It would likely cost too much. But I still want to know.
-### Re: Self-hosted DeepEval for ClaudeScore (HEAD)
+### Re: Self-hosted DeepEval for ClaudeScore
 
 **Yes — self-hosted is sufficient for the evaluation engine.** DeepEval is fully open-source (MIT); you get all 50+ metrics, LLM-as-judge via your own API keys, pytest integration, and JSON result output. Nothing in the core eval pipeline requires Confident AI.
 
@@ -213,7 +213,7 @@ What you'd need to build yourself if self-hosting:
 
 For ClaudeScore's use case (practitioners submitting traces, server running evals), self-hosted is the obvious path — you're building the server anyway, so you own the persistence and dashboard layer.
 
-### Re: What Confident AI Provides (HEAD)
+### Re: What Confident AI Provides
 
 As of mid-2025, Confident AI's tiers were roughly:
 
@@ -236,7 +236,7 @@ As of mid-2025, Confident AI's tiers were roughly:
 **For ClaudeScore specifically:** The subscription value is in the *product layer*, not the eval engine. If ClaudeScore is building its own practitioner-facing product, you'd be recreating that layer anyway — paying Confident AI for it is double-building. Self-host the eval engine, own the UX.
 
 Where Confident AI *would* make sense: internal tool for a single team that doesn't want to build a dashboard. At $100–150/month, that's cheap for a team. But for a product serving many practitioners, self-hosted is the right call.
-<!-- agent:boundary:799614e9 -->
+<!-- agent:boundary:63eb274f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

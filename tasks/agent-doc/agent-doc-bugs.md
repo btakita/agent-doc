@@ -475,19 +475,19 @@ You're right — those `❯ done` lines were correct. You typed `done` at the te
 My previous response was wrong to call them "artifacts of the prefix bug." I misread the edit context.
 
 ❯ release
-### Re: release (HEAD)
+### Re: release
 
 agent-doc v0.31.21 is fully published (crates.io, PyPI, GitHub Releases with cross-platform binaries). Plugin v0.2.50 is built and verified but not attached to the release.
 
 Uploading `agent-doc-jetbrains-0.2.50-signed.zip` to the v0.31.21 GitHub release now.
-### Re: plugin uploaded (HEAD)
+### Re: plugin uploaded
 
 `agent-doc-jetbrains-0.2.50-signed.zip` uploaded to https://github.com/btakita/agent-doc/releases/tag/v0.31.21
 
 Release v0.31.21 now includes:
 - CLI binaries (linux x86_64/aarch64, macOS x86_64/aarch64, Windows x86_64)
 - JetBrains plugin: `agent-doc-jetbrains-0.2.50-signed.zip`
-<!-- agent:boundary:fa7107e6 -->
+<!-- agent:boundary:73a27c72 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

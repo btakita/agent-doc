@@ -1,10 +1,8 @@
 ---
-session: 4602f467-ef2a-4094-a750-5eb533368988
-resume: null
-agent: null
-model: null
-branch: null
+agent_doc_session: 4602f467-ef2a-4094-a750-5eb533368988
+tmux_session: '1'
 ---
+
 
 ## Project Summary
 
@@ -107,3 +105,4 @@ presets/               Convention presets (immutable-tag.toml)
 **Compacted.** 260 lines → structured summary. Updated Phase 3 to ✅ (v0.5.0), added alias/prose/graph to architecture, bumped crate version to v0.5.0, created Phase 4 for remaining items. Conversation history preserved in git.
 
 ## User
+

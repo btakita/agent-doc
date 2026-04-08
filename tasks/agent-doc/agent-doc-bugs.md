@@ -1135,7 +1135,7 @@ Install JetBrains plugin from disk to pick up the `PatchWatcher.kt` fix.
 
 ❯ Increment the JB plugin version.
 ❯ rule: any change to a plugin **must** cause a version bump.
-### Re: JB 0.2.53 bump + partial rule (HEAD)
+### Re: JB 0.2.53 bump + partial rule
 
 **JetBrains 0.2.53 built:** `gradle.properties` bumped, `buildPlugin signPlugin` succeeded. Committed: `chore: bump JetBrains 0.2.53 (last-boundary normalization fix)`.
 
@@ -1146,12 +1146,14 @@ Install via IDEA → Settings → Plugins → gear → "Install Plugin from Disk
 **Rule (truncated — completing from context):** Any change to a plugin requires a version bump. Noted as a convention going forward.
 
 **On the remaining `❯ ` loss (`do`/`done` lines):** The old 0.2.52 plugin (running in IDEA) uses the first boundary, so standalone `do`/`done` lines between the first and last historical boundary aren't restored. Installing 0.2.53 (last-boundary fix) will resolve these.
-<!-- agent:boundary:50562630 -->
+### Re: same pattern — waiting on 0.2.53 install (HEAD)
+
+No new input. The diff is only the recurring `do`/`done` prefix pattern — same lines, same cause (old 0.2.52 plugin using first boundary). Once 0.2.53 is installed from disk and IDEA restarts, those lines get restored and this diff noise disappears.
+<!-- agent:boundary:271b48a7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Install JetBrains 0.2.53 from disk
-- [ ] Verify ❯  prefix fully restored after plugin update
+- [ ] Install JetBrains 0.2.53 from disk and restart IDEA
 <!-- /agent:pending -->

@@ -214,7 +214,7 @@ Parent repo committed + pushed: submodule pointer updates, tasks/, .claude/ skil
 ❯ - [ ] Fix `src/session-share` remote — `ClaudeScore/SessionShare` not found on GitHub
 ❯ - [ ] **Re-test gate**: re-transcribe filevine interview with corky v0.26.2+, verify transcript length
 
-### Re: do
+### Re: do (HEAD)
 
 #### 1. Fix session-share remote
 
@@ -229,7 +229,7 @@ Which do you want?
 #### 2. Re-transcribe filevine interview
 
 Running now (GPU loaded, whisper large-v3). Will update when complete.
-### Re: do (HEAD)
+### Re: do
 
 #### 1. Fix session-share remote
 
@@ -246,7 +246,7 @@ Running now (GPU loaded, whisper large-v3). Will update when complete.
 `tasks/research/transcripts/filevine-interview-2026-04-07.md` updated.
 
 Say "publish corky" to release v0.26.3 when satisfied with transcript.
-<!-- agent:boundary:c1622503 -->
+<!-- agent:boundary:f354f23f -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

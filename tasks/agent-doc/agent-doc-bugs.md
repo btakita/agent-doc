@@ -684,7 +684,7 @@ All tests pass (38/38). Binary installed.
 ❯ Does agent-doc support having an archive that is easily accessible in git?
 ❯ I want to be able to readily access older snapshots of agent docs from git. What would be a practical experience to do so?
 ❯ Note that we have many commits. So we would want to pay attention to an agent doc right before the exchange is compacted.
-### Re: git archive for agent-doc snapshots (HEAD)
+### Re: git archive for agent-doc snapshots
 
 **Current state:** Every agent-doc cycle commits to git (`agent-doc(<name>): <timestamp>`). The snapshot and document are both committed — full history is already there. The gap is surfacing the right commit, especially pre-compaction.
 
@@ -715,14 +715,41 @@ On compaction, write the pre-compact state to a branch (`agent-doc-archive`) as 
 **Recommended: Option A** — least friction. Auto-tagging during `compact` is one `git tag` call; reading archives uses standard git. Option B adds nice UX on top but is secondary.
 
 **One edge case:** documents with long paths hash to opaque snapshot filenames — the tag makes the document identity explicit. Tag should use the document's canonical short name, not the hash.
-<!-- agent:boundary:91b3506d -->
+
+❯ Can we do Option A + B?
+### Re: Option A + B (HEAD)
+
+Yes — they complement cleanly.
+
+**Option A** (auto-tag on compact) = passive archive creation, zero friction, works immediately.
+**Option B** (`agent-doc log <FILE>`) = discovery layer on top of those tags.
+
+**Option A — tag in `compact` command:**
+After committing the pre-compact state, tag it:
+```rust
+let tag = format!("agent-doc/{}/pre-compact-{}", short_name, seq);
+git_tag(&tag, "HEAD~1");
+```
+
+**Option B — `agent-doc log <FILE>` output:**
+```
+c4ee6aca  2026-04-08 16:32  append (+12 lines)
+0f90046f  2026-04-08 16:20  append (+8 lines)
+831d4f0e  2026-04-08 16:17  compact ← pre-compact-1 [tagged]
+...
+```
+- Walks `git log -- <file>`
+- Detects compact commits (large deletion in exchange component)
+- Annotates tagged commits with tag name
+- `git show <tag>:<path>` then retrieves the archived state
+
+A + B together: A ensures the archive exists; B makes it discoverable without remembering tag names.
+<!-- agent:boundary:30d3889f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Update skill routing: try `Skill` first for all slash commands; only document-note `/compact` and `/clear` — done
-- [x] Plugin: autocomplete enumerates user-defined skills from `.claude/skills/` — done
-- [x] Add `builtin_commands` distinction to preflight JSON — done
-- [x] Define `/agent-doc compact exchange <path>` slash command — done
+- [ ] `agent-doc compact` → auto-tag pre-compact commit as `agent-doc/<name>/pre-compact-<N>` (Option A)
+- [ ] `agent-doc log <FILE>` subcommand — walk git log, annotate compact commits, show tags (Option B)
 <!-- /agent:pending -->

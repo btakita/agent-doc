@@ -209,7 +209,7 @@ Rule: after `cargo install --path .`, pause and confirm feature works in a live 
 ### Re: plugin installed (HEAD)
 
 Plugin v0.2.49 installed ✓. Ready to verify `❯ ` prefix behavior in a live session — type a prompt in an exchange component and run agent-doc to confirm only user lines get `❯ `.
-<!-- agent:boundary:f511317e -->
+<!-- agent:boundary:fff836be -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1079,7 +1079,7 @@ VSCode: `code --install-extension src/agent-doc/editors/vscode/agent-doc-0.2.5.v
 Done — installed via `codium --install-extension agent-doc-0.2.5.vsix`. Extension successfully installed.
 
 ❯ The uncommitted state was not committed when the task completed. Why?
-### Re: uncommitted state after task completion (HEAD)
+### Re: uncommitted state after task completion
 
 Two separate issues:
 
@@ -1090,11 +1090,35 @@ I committed the version bumps inside `src/agent-doc` but never ran `git add src/
 `src/frontmatter.rs` and `src/start.rs` have a `hooks` field addition that predates this session (in-progress work, not part of the version-bump task). They remain uncommitted — correctly, since they're unrelated to what we just built.
 
 The fix for (1): commit the parent pointer now. The pre-existing submodule changes stay uncommitted until that in-progress work is ready.
-<!-- agent:boundary:7308d26c -->
+
+❯ We lost the `❯ ` prefix yet again. Why?
+### Re: ❯ prefix loss — root cause found and fixed (HEAD)
+
+**Root cause:** Both the binary and the plugins stop at the **first** boundary marker when determining the "user input region" for `❯ ` normalization. The exchange accumulates one boundary per cycle. Content between the first historical boundary and the most recent boundary was classified as "agent region" and skipped — those user-input lines never got the prefix restored.
+
+Additionally: the VSCode extension was missing `normalize_prefix_lines` support entirely (field not in `IpcPatch`, no normalization function). It never applied `❯ ` prefix normalization.
+
+**Fixes:**
+
+`write.rs`: removed `break` in the boundary-scan loop → now finds the **last** boundary (not first). All historical user-input lines (before the most recent cycle's boundary) are now in the user region and get normalized.
+
+`PatchWatcher.kt`: `boundaryTag.find()` → `boundaryTag.findAll().lastOrNull()` — same fix for the plugin's normalize step.
+
+`extension.ts` (VSCode): Added `normalize_prefix_lines?: string[]` to `IpcPatch`, implemented `normalizeExchangePrefixes()` using last boundary, called it in `applyPatch()` after component patches.
+
+**Built + installed:**
+- Binary: `cargo install --path .` (v0.31.23, same version — patch fix only)
+- JetBrains 0.2.52: rebuilt + available in `build/distributions/`
+- VSCode 0.2.5: rebuilt + reinstalled via `codium --install-extension`
+- Committed: `fix: use last boundary for ❯ prefix normalization; add VSCode normalize_prefix_lines support`
+
+Install JetBrains plugin from disk to pick up the `PatchWatcher.kt` fix.
+<!-- agent:boundary:9881910b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Commit parent repo submodule pointer for agent-doc (JetBrains 0.2.52, VSCode 0.2.5)
+- [ ] Install updated JetBrains 0.2.52 (last-boundary normalization fix)
+- [ ] Verify ❯  prefix restored on historical lines in next write cycle
 <!-- /agent:pending -->

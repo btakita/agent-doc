@@ -1077,7 +1077,7 @@ VSCode: `code --install-extension src/agent-doc/editors/vscode/agent-doc-0.2.5.v
 ### Re: Install VSCode 0.2.5 (HEAD)
 
 Done — installed via `codium --install-extension agent-doc-0.2.5.vsix`. Extension successfully installed.
-<!-- agent:boundary:6d62db3e -->
+<!-- agent:boundary:dea382e4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

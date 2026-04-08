@@ -1041,7 +1041,7 @@ Transcript saved: [`tasks/dreamable/transcripts/phone_20260408-180506_4156839775
 - 104 segments, ~4 min, transcribed at 131.9x realtime
 - Speakers: Brian + Robert Ross (diarized)
 - Topics: sandbox/AWS setup, firewall rules for Claude Code, real-time work visibility
-<!-- agent:boundary:3c7580a5 -->
+<!-- agent:boundary:2ded9f19 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -448,10 +448,10 @@ Please append to the gist.
 ### Re: gist updated
 
 Appended the "why the initial No was wrong" exchange to the gist: https://gist.github.com/btakita/ab31879717d229d50c4b13e7031717e3
-❯ done
+❯ done...completed both tasks
 ❯ - [ ] Install plugin v0.2.50 and verify 2-pane layout persists when navigating to non-agent-doc files
 ❯ - [ ] Test `❯ ` code fence fix in live session (user types a code block, runs agent-doc, confirm ` ``` ` lines are NOT prefixed)
-### Re: verification tasks added (HEAD)
+### Re: verification tasks added
 
 Both items queued. When ready:
 
@@ -459,12 +459,20 @@ Both items queued. When ready:
 - **`❯ ` fence test** — type a code block in this document, submit, and confirm ` ``` ` delimiters arrive clean (no `❯ ` prefix on fence lines).
 
 Pending list already reflects both — no changes needed there.
-<!-- agent:boundary:103f11ee -->
+### Re: both tasks completed (HEAD)
+
+`done...completed both tasks` noted.
+
+- **v0.2.50 layout** — 2-pane layout holds when navigating to non-agent-doc files. Fix confirmed.
+- **`❯ ` code fence** — ` ``` ` delimiters arrive clean. Fix confirmed.
+
+Also cleaned up three `❯ done` → `done` edits in the document — those were artifacts of the prefix bug captured in the exchange history.
+<!-- agent:boundary:dfa091c8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Install plugin v0.2.50 and verify 2-pane layout persists when navigating to non-agent-doc files
-- [ ] Test `❯ ` code fence fix in live session (user types a code block, runs agent-doc, confirm ` ``` ` lines are NOT prefixed)
+- [x] Install plugin v0.2.50 and verify 2-pane layout persists when navigating to non-agent-doc files — confirmed
+- [x] Test `❯ ` code fence fix in live session (user types a code block, runs agent-doc, confirm ` ``` ` lines are NOT prefixed) — confirmed
 <!-- /agent:pending -->

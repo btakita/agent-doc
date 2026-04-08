@@ -211,14 +211,33 @@ That's a conversation Cain would find genuinely interesting, and it's differenti
 
 Please create a 1 page pdf summary for this interview.
 Use small margins.
-### Re: 1-page PDF (HEAD)
+### Re: 1-page PDF
 
 Created: `tasks/research/filevine-interview.html`
 
 Open in browser and print to PDF (Ctrl+P → Save as PDF). Set margins to "None" or "Minimum" — the HTML has its own `@page` margins at 0.4in.
 
 Content fits one letter page: company overview, milestones, LOIS, tech stack table, all four interviewers (with track labels), key talking points, and questions to ask.
-<!-- agent:boundary:3ee1cdb8 -->
+
+❯ transcribe + diarize [2026-04-07 16-00-17-compressed.mp4](../../../../../Videos/2026-04-07%2016-00-17-compressed.mp4)
+### Re: Transcription (HEAD)
+
+Transcript written to [`tasks/research/transcripts/filevine-interview-2026-04-07.md`](transcripts/filevine-interview-2026-04-07.md) — 71:19, 893 segments, transcribed in 30s (144x realtime).
+
+**Diarization caveat:** Only 4 speaker segments / 2 labels produced. All participants were physically in the same room sharing a single audio channel, so voice separation collapsed — the entire middle of the interview landed as one "Brian" block that actually contains Cain's introductions + everyone's dialogue. The text is accurate; the speaker labels are not.
+
+**What the transcript captures:**
+
+Cain opened by introducing the team — confirming their roles match our prep:
+- Stuart → Principal Developer, Futurist team (taking Chris's old IC role)
+- Emily → Senior Legal Futurist
+- Chris Smith → leading the engineering squad ("four deployed engineers")
+- Cain himself MC'd
+
+Brian's intro covered: agentic loops/harnesses, human-agent alignment via ontologies, agent-doc as document-centric AI UI, workflow automation (transcription → blog posts). Landed well — Cain's framing confirms the team is doing exactly the kind of work the prep notes predicted.
+
+**Next:** If you want a summary of the full conversation, a follow-up email draft, or notes from specific parts of the transcript, just ask.
+<!-- agent:boundary:9b67bc29 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

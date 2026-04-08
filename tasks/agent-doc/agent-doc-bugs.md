@@ -1031,7 +1031,7 @@ Let me know which registries to target and whether you have the missing tokens, 
 #### claudescore.md duplicate
 
 Deleted the second `### Re: Slack-formatted copy/paste` block (lines after `<!-- agent:boundary:83095b9b -->`). Kept the `<!-- agent:boundary:623d770c -->` marker.
-### Re: FFI + VSCode parity (HEAD)
+### Re: FFI + VSCode parity
 
 **VSCode needed the same fix — done.**
 
@@ -1042,13 +1042,39 @@ Deleted the second `### Re: Slack-formatted copy/paste` block (lines after `<!--
 The `patches.isEmpty()` coordinator decision is too thin for FFI — it's a one-liner that each plugin handles in its dispatcher. The FFI-first rule targets non-trivial shared logic (IPC listener, layout validation, busy guards), not trivial dispatch conditions.
 
 The binary-side fix in `write.rs` (don't send `fullContent` when patches are present) is the actual fix. Plugin guards are defense in depth. If `NativePatching` is ever extended to cover the full patch application loop (`normalize_prefix_lines` + component patches + boundary reposition in one FFI call), the fullContent branch collapses entirely — no coordinator needed in the plugin at all. That's the right FFI-first destination, but it's a bigger refactor than this bug warrants.
-<!-- agent:boundary:0073221c -->
+
+❯ do
+❯ - [ ] Build JetBrains plugin with fullContent fix and install locally to verify
+❯ - [ ] Build/bump VSCode extension with fullContent fix
+
+❯ done
+❯ - [ ] Wait for CI to complete (prebuilt binaries + PyPI wheels for v0.31.23)
+### Re: Build JetBrains 0.2.52 + VSCode 0.2.5 (HEAD)
+
+Both built and version bumps committed.
+
+**JetBrains 0.2.52:**
+- Bumped `gradle.properties` → `pluginVersion = 0.2.52`
+- Built: `build/distributions/agent-doc-jetbrains-0.2.52.zip` + `-signed.zip`
+
+**VSCode 0.2.5:**
+- Bumped `package.json` → `"version": "0.2.5"`
+- Built: `editors/vscode/agent-doc-0.2.5.vsix`
+
+**Commit:** `chore: bump JetBrains 0.2.52, VSCode 0.2.5 (fullContent + baseline fix)`
+
+To install the JetBrains plugin:
+1. IDEA → Settings → Plugins → gear icon → "Install Plugin from Disk..."
+2. Select: `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.52.zip`
+3. Restart IDEA and verify the fullContent fix works in a live session
+
+VSCode: `code --install-extension src/agent-doc/editors/vscode/agent-doc-0.2.5.vsix`
+<!-- agent:boundary:5cc3bb5c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Build JetBrains plugin with fullContent fix and install locally to verify
-- [ ] Build/bump VSCode extension with fullContent fix
-- [ ] Wait for CI to complete (prebuilt binaries + PyPI wheels for v0.31.23)
+- [ ] Install JetBrains 0.2.52 and verify fullContent fix in live session
+- [ ] Install VSCode 0.2.5 extension
 <!-- /agent:pending -->

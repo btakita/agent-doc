@@ -414,7 +414,7 @@ pub fn run(file: &Path, diff_only: bool) -> Result<()> {
                                         "[preflight] step 2c: auto-compact (exchange={} lines > threshold={})",
                                         line_count, threshold
                                     );
-                                    if let Err(e) = crate::compact::run(file, None, Some("exchange"), None) {
+                                    if let Err(e) = crate::compact::run(file, None, Some("exchange"), None, None) {
                                         eprintln!("[preflight] auto-compact warning: {}", e);
                                     }
                 }

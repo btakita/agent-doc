@@ -23,7 +23,7 @@
 //! - All writes are atomic (temp file + rename); the snapshot is updated after each write.
 //!
 //! ## Agentic Contracts
-//! - `run(file, keep, component_name, message) -> Result<()>` — entry point; dispatches to
+//! - `run(file, keep, component_name, message, tag) -> Result<()>` — entry point; dispatches to
 //!   component compact (template/stream) or exchange compact (inline) based on frontmatter mode.
 //! - `keep: None` in template mode → full compact (archive all).
 //! - `keep: Some(N)` in template mode → partial compact (archive all but last N `### Re:` sections).
@@ -34,6 +34,8 @@
 //!   walking up to the directory containing `.agent-doc/`).
 //! - Returns `Err` if the file does not exist, the named component is not found (template mode),
 //!   or any I/O operation fails.
+//! - `tag: Some(name)` creates a lightweight git tag at HEAD before compaction (pre-compact checkpoint).
+//!   `tag: None` auto-generates `agent-doc/<doc-name>/pre-compact-N` where N is the next ordinal.
 //!
 //! ## Evals
 //! - parse_basic: two complete exchanges + trailing User → 2 exchanges parsed, trailing skipped
@@ -49,6 +51,7 @@
 
 use anyhow::{Context, Result};
 use std::path::Path;
+use std::process::Command;
 
 use crate::{component, frontmatter, snapshot};
 
@@ -68,14 +71,25 @@ struct Exchange {
 ///   - Template mode: `None` archives all (full compact); `Some(N)` archives all but last N `### Re:` sections.
 /// - `component_name`: targets a specific component in template/stream mode.
 /// - `message`: summary marker text (default: auto-generated).
+/// - `tag`: git tag to create at HEAD before compaction. `None` auto-generates
+///   `agent-doc/<doc-name>/pre-compact-N`. Pass `Some("skip")` to skip tagging entirely.
 pub fn run(
     file: &Path,
     keep: Option<usize>,
     component_name: Option<&str>,
     message: Option<&str>,
+    tag: Option<&str>,
 ) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
+    }
+
+    // Create a pre-compact git tag at HEAD before modifying the document.
+    // Skipped if tag == Some("skip").
+    if tag != Some("skip") {
+        if let Err(e) = create_pre_compact_tag(file, tag) {
+            eprintln!("[compact] Warning: could not create pre-compact tag: {}", e);
+        }
     }
 
     let content = std::fs::read_to_string(file)
@@ -528,6 +542,76 @@ fn build_compacted(
     result.push_str("## User\n\n");
 
     result
+}
+
+/// Create a lightweight git tag at the current HEAD to mark the pre-compact state.
+///
+/// If `tag_override` is provided it is used as the tag name verbatim.
+/// Otherwise, derives the document name from the file stem and auto-generates
+/// `agent-doc/<doc-name>/pre-compact-N` where N is the next unused ordinal.
+fn create_pre_compact_tag(file: &Path, tag_override: Option<&str>) -> Result<()> {
+    // Resolve git root
+    let canonical = file
+        .canonicalize()
+        .with_context(|| format!("file not found: {}", file.display()))?;
+    let parent = canonical.parent().unwrap_or(Path::new("/"));
+
+    let toplevel = Command::new("git")
+        .current_dir(parent)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .context("failed to run git rev-parse")?;
+
+    if !toplevel.status.success() {
+        anyhow::bail!("file is not in a git repository");
+    }
+    let git_root = std::path::PathBuf::from(
+        String::from_utf8_lossy(&toplevel.stdout).trim(),
+    );
+
+    let tag_name = match tag_override {
+        Some(name) => name.to_string(),
+        None => {
+            let doc_name = file
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("doc")
+                .to_string();
+
+            // Count existing pre-compact tags to determine next N
+            let pattern = format!("agent-doc/{}/pre-compact-*", doc_name);
+            let count = Command::new("git")
+                .current_dir(&git_root)
+                .args(["tag", "-l", &pattern])
+                .output()
+                .map(|o| {
+                    if o.status.success() {
+                        String::from_utf8_lossy(&o.stdout)
+                            .lines()
+                            .filter(|l| !l.trim().is_empty())
+                            .count()
+                    } else {
+                        0
+                    }
+                })
+                .unwrap_or(0);
+            format!("agent-doc/{}/pre-compact-{}", doc_name, count + 1)
+        }
+    };
+
+    let tag_output = Command::new("git")
+        .current_dir(&git_root)
+        .args(["tag", &tag_name])
+        .output()
+        .with_context(|| format!("failed to create git tag {}", tag_name))?;
+
+    if !tag_output.status.success() {
+        let stderr = String::from_utf8_lossy(&tag_output.stderr);
+        anyhow::bail!("git tag {} failed: {}", tag_name, stderr.trim());
+    }
+
+    eprintln!("[compact] Tagged pre-compact state as {}", tag_name);
+    Ok(())
 }
 
 /// Find project root by walking up to find `.agent-doc/`.

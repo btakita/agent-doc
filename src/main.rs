@@ -152,6 +152,25 @@ enum Commands {
         #[arg(long)]
         restore: Option<String>,
     },
+    /// Annotated git log for a session document (shows pre-compact tags)
+    Log {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Show document content at a specific point in git history
+    Show {
+        /// Path to the session document
+        file: PathBuf,
+        /// Show the file N commits back from HEAD (e.g. --back 1 → HEAD~1)
+        #[arg(long)]
+        back: Option<usize>,
+        /// Show the Nth commit in git log order (0 = newest, 1 = next oldest, …)
+        #[arg(long)]
+        at: Option<usize>,
+        /// Show the commit pointed to by this tag
+        #[arg(long)]
+        tag: Option<String>,
+    },
     /// Scaffold a new session document (omit file to initialize project)
     Init {
         /// Path for the new session document (omit to initialize project)
@@ -177,13 +196,19 @@ enum Commands {
         #[arg(long)]
         skip_plugins: bool,
     },
-    /// Preview the diff that would be sent
+    /// Preview the diff that would be sent, or diff between two git refs
     Diff {
         /// Path to the session document
         file: PathBuf,
         /// Wait for stable content (truncation detection) before computing diff
         #[arg(long)]
         wait: bool,
+        /// Starting git ref for historical diff (e.g. commit hash, tag, HEAD~2)
+        #[arg(long)]
+        from: Option<String>,
+        /// Ending git ref for historical diff (default: HEAD)
+        #[arg(long)]
+        to: Option<String>,
     },
     /// Clear session ID and delete snapshot
     Reset {
@@ -433,6 +458,10 @@ enum Commands {
         /// Summary message to replace content with
         #[arg(long)]
         message: Option<String>,
+        /// Git tag name for pre-compact checkpoint (default: auto-generated
+        /// agent-doc/<doc-name>/pre-compact-N). Use "skip" to disable tagging.
+        #[arg(long)]
+        tag: Option<String>,
     },
     /// Convert a document between append and template modes
     Convert {
@@ -740,13 +769,24 @@ fn main() -> anyhow::Result<()> {
             Some(commit) => history::restore(&file, &commit),
             None => history::list(&file),
         },
+        Commands::Log { file } => history::log(&file),
+        Commands::Show { file, back, at, tag } => {
+            history::show(&file, back, at, tag.as_deref())
+        }
         Commands::Init { file, title, agent, mode } => {
             init::run(file.as_deref(), title.as_deref(), agent.as_deref(), mode.as_deref(), &config)
         }
         Commands::Install { editor, skip_prereqs, skip_plugins } => {
             install::run(editor.as_deref(), skip_prereqs, skip_plugins)
         }
-        Commands::Diff { file, wait } => diff::run(&file, wait),
+        Commands::Diff { file, wait, from, to } => {
+            if let Some(from_ref) = from {
+                let to_ref = to.as_deref().unwrap_or("HEAD");
+                history::git_diff(&file, &from_ref, to_ref)
+            } else {
+                diff::run(&file, wait)
+            }
+        }
         Commands::Reset { file } => reset::run(&file),
         Commands::Clean { file, archive } => clean::run(&file, archive),
         Commands::AuditDocs { root } => audit_docs::run(root.as_deref()),
@@ -911,7 +951,8 @@ fn main() -> anyhow::Result<()> {
             keep,
             component,
             message,
-        } => compact::run(&file, keep, component.as_deref(), message.as_deref()),
+            tag,
+        } => compact::run(&file, keep, component.as_deref(), message.as_deref(), tag.as_deref()),
         Commands::Convert { file, mode, agent_doc_format, agent_doc_write } => {
             convert::run(&file, mode.as_ref(), agent_doc_format, agent_doc_write)
         }

@@ -145,7 +145,7 @@ Claude Code's "send messages while it works" feature reads from the terminal's s
 **Simpler first step:** A manual `agent-doc steer <FILE>` command that reads a designated steering block from the document, finds the claim pane, and injects via `tmux send-keys`. No watcher needed — user triggers it explicitly when they want to steer.
 
 **Feasibility:** High. The hard parts (pane tracking, tmux IPC) are already solved. The watcher + state detection would be the new work.
-<!-- agent:boundary:41e73e0b -->
+<!-- agent:boundary:1be63cab -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

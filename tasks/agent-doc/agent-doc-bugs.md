@@ -653,6 +653,7 @@ Fix: plugin autocomplete needs to read the available skills list (Claude Code sk
 ❯ - [ ] Plugin: autocomplete should enumerate user-defined skills from `~/.claude/skills/` (or skill registry)
 ❯ - [ ] Add `builtin_commands` distinction to preflight JSON (separate from `skill_commands`)
 ❯ - [ ] Define `/agent-doc compact exchange <path>` and `/agent-doc compact <path>` slash commands
+
 ### Re: do — all tasks implemented
 
 **Done:**
@@ -679,7 +680,42 @@ Fix: plugin autocomplete needs to read the available skills list (Claude Code sk
 - New entry in static command list, appears in plugin autocomplete
 
 All tests pass (38/38). Binary installed.
-<!-- agent:boundary:54790110 -->
+
+❯ Does agent-doc support having an archive that is easily accessible in git?
+❯ I want to be able to readily access older snapshots of agent docs from git. What would be a practical experience to do so?
+❯ Note that we have many commits. So we would want to pay attention to an agent doc right before the exchange is compacted.
+### Re: git archive for agent-doc snapshots (HEAD)
+
+**Current state:** Every agent-doc cycle commits to git (`agent-doc(<name>): <timestamp>`). The snapshot and document are both committed — full history is already there. The gap is surfacing the right commit, especially pre-compaction.
+
+**How compaction is identifiable in git:**
+- `compact exchange` rewrites `&lt;!-- agent:exchange --&gt;` — the diff shows large deletions in that block
+- Full `compact` rewrites large document sections
+- These are structurally distinct from normal append cycles
+
+**Practical options:**
+
+**Option A — Tag pre-compact commit automatically**
+When `agent-doc compact` runs, tag the previous commit:
+```
+git tag agent-doc/<docname>/pre-compact-<N>
+```
+Access later:
+```bash
+git show agent-doc/agent-doc-bugs/pre-compact-1:tasks/agent-doc/agent-doc-bugs.md
+```
+Pros: standard git UX, `git tag -l 'agent-doc/*'` lists all archives, no new tooling needed to read.
+
+**Option B — `agent-doc log <FILE>`**
+New subcommand that walks `git log -- <file>` and annotates each commit: `(compact)` vs `(append N lines)`. User picks a commit hash to check out or diff.
+
+**Option C — Dedicated archive branch**
+On compaction, write the pre-compact state to a branch (`agent-doc-archive`) as an orphan commit. Keeps archive separate from main history.
+
+**Recommended: Option A** — least friction. Auto-tagging during `compact` is one `git tag` call; reading archives uses standard git. Option B adds nice UX on top but is secondary.
+
+**One edge case:** documents with long paths hash to opaque snapshot filenames — the tag makes the document identity explicit. Tag should use the document's canonical short name, not the hash.
+<!-- agent:boundary:344dc46d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

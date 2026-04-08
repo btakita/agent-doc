@@ -1101,7 +1101,67 @@ The Dreamable use case maps cleanly: Rob's stated concern is "you ship Monday, l
 1. **Now**: push to a private GitHub repo with Rob as collaborator (5 min)
 2. **Short-term**: wire up the Stop hook to post a daily digest to a Slack channel Rob is in
 3. **Medium-term**: use the ClaudeScore self-hosted instance — you're building it anyway, and Rob gets a stakeholder-friendly view of your work quality over time
-<!-- agent:boundary:a543d9d6 -->
+
+❯ Slack message to send to Rob re: ClaudeScore status update
+
+### Re: Slack-formatted copy/paste (ClaudeScore update) (HEAD)
+
+❯ Slack uses `*bold*` (not `**bold**`), raw URLs auto-preview, and backtick code renders inline. Here's the ready-to-paste version:
+
+```
+❯ Hey Rob — good talking earlier. Here's where I'm at:
+
+❯ *Status:* Plan and spec are finalized. These are what Claude Code will follow:
+
+❯ • *SPEC:* https://github.com/ClaudeScore/SessionShare/blob/main/SPEC.md
+❯ • *Plan:* https://github.com/ClaudeScore/SessionShare/blob/main/PLAN.md
+
+❯ I'll keep the status column in the spreadsheet updated as I complete items.
+
+❯ *Starting with:*
+❯ • Sprint 1.1: Base app scaffold (Next.js 16 + Supabase local)
+❯ • Sprint 1.2: Rubric v1.0 (17 validators, 4 pillars)
+
+❯ *Still need from you when you get a chance:*
+❯ • Supabase project credentials (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) — building against local Supabase in the meantime
+❯ • Claude API key for Opus scoring (Shimmer Labs account?)
+❯ • Apr 10 scope — all 4 milestones or a subset?
+
+❯ *One thing to clarify:* You mentioned "we're going to do a different thing than we thought" — want to make sure I'm building the right thing. Happy to talk through it on our call tonight.
+```
+
+❯ Please tell me more about this
+❯ > *One thing to clarify:* You mentioned "we're going to do a different thing than we thought" — want to make sure I'm building the right thing. Happy to talk through it on our call tonight.
+### Re: "we're going to do a different thing than we thought" (HEAD)
+
+Here's what the transcript actually shows — it's worth reading carefully before you ask about it.
+
+**The quote in context (00:13:24):**
+
+Rob said it right after Brian showed him the ClaudeScore folder in Google Drive, while Rob was preparing to leave for a CEO meeting. He said:
+
+> "everything's going to work out. I'm really confident, Brian. I mean, honestly, I mean, we're going to do a different thing than we thought."
+
+He did not elaborate. He immediately pivoted to "you're going to end up getting paid for this. Hopefully you get the file [Filevine] thing with the other company."
+
+**Most likely interpretation:**
+
+The April 2 granola notes show Rob originally planned two scoped starter projects — one Build Party-side, one Shimmer-side. By April 8, you're building ClaudeScore instead. That's the "different thing" — the initial engagement shifted from Build Party/Shimmer to a standalone credentialing platform.
+
+The reassuring tone ("everything's going to work out") suggests he knows this is a scope change and was preemptively managing your reaction — not announcing a crisis.
+
+**What's still ambiguous:**
+
+- Does ClaudeScore *replace* the Build Party/Shimmer work, or is it a standalone paid engagement before those?
+- Is the Apr 10 deadline the same deliverables or did scope adjust when direction shifted?
+- "We're going to do a different thing" — is he referring to the product (ClaudeScore vs. Build Party), or something larger about how you'll collaborate?
+
+**Suggested clarification on tonight's call:**
+
+> "You mentioned on this morning's call that we're going to do a different thing than you thought — I want to make sure I'm building in the right direction. Is ClaudeScore the main deliverable for this engagement, or is it the onramp to the Build Party/Shimmer work? And does the Apr 10 scope still match the SOW?"
+
+That's targeted and non-anxious. It shows you were paying attention without making it sound like you're worried.
+<!-- agent:boundary:43e0dd0a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

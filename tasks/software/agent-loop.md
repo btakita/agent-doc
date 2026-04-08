@@ -105,7 +105,7 @@ Claude Code speaks Anthropic protocol; vllm speaks OpenAI protocol. Use **LiteLL
 ```bash
 pip install litellm[proxy]
 
-# Start proxy (translates Anthropic → OpenAI for vllm) (HEAD)
+# Start proxy (translates Anthropic → OpenAI for vllm)
 litellm --model openai/Qwen2.5-Coder-32B-Instruct-AWQ \
   --api_base http://localhost:8000/v1 \
   --port 4000
@@ -125,14 +125,33 @@ export ANTHROPIC_API_KEY=fake
 ```
 
 Then `claude` will use the local model by default. Swap back to Anthropic by unsetting those vars.
-<!-- agent:boundary:c9862e1c -->
+
+❯ commit + push all submodules
+### Re: commit + push all submodules (HEAD)
+
+Done. Committed and pushed:
+
+| Submodule | Commit | Notes |
+|-----------|--------|-------|
+| `philosophy` | docs: update README and add directive term | |
+| `resume` | chore: add CDW payments profile and update resume | rebased over remote changes (BrianTakita.md conflict resolved) |
+| `src/chromium-bridge` | docs: update CLAUDE.md | |
+| `src/corky` | feat: add max_speaker_span_ratio + improve transcribe engine; add runbooks | |
+| `src/eval-runner` | feat: add parallelism, backend support, and eval make targets | |
+| `src/module-harness` | docs: add ontology-references runbook | |
+| `src/session-share` | agent-doc(claude-auto-ruberic): update task | commit local only — `ClaudeScore/SessionShare` repo not found on GitHub |
+| `mail` | sync: update conversations, contacts, and corky config | 1109 files |
+
+Parent repo updated with all 8 submodule pointer updates and pushed.
+<!-- agent:boundary:56b2de93 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
 - [x] Fix Python version for vllm: `mise use python@3.12`
 - [x] Install vllm: `uv pip install vllm`
-- [ ] Download + serve `Qwen2.5-Coder-32B-Instruct-AWQ` via vllm
-- [ ] Install litellm proxy: `pip install litellm[proxy]`
+- [x] Download + serve `Qwen2.5-Coder-32B-Instruct-AWQ` via vllm
+- [x] Install litellm proxy: `pip install litellm[proxy]`
 - [ ] Run litellm proxy pointing at vllm
 - [ ] Test `claude` against local model via `ANTHROPIC_BASE_URL`
+- [ ] Fix `src/session-share` remote — `ClaudeScore/SessionShare` not found on GitHub
 <!-- /agent:pending -->

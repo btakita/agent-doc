@@ -1031,14 +1031,21 @@ Transcript saved: [`tasks/dreamable/transcripts/2026-04-08-robert-ross.md`](tran
 - Speakers: Brian + Robert Ross (diarized)
 
 transcribe + diarize /home/brian/work/btakita/agent-loop/mail/contacts/robert-ross/recordings/phone_20260408-180506_4156839775.m4a
-### Re: transcribe + diarize phone recording (HEAD)
+### Re: transcribe + diarize phone recording
 
 Transcribing `phone_20260408-180506_4156839775.m4a` (480 KB). Running now...
-<!-- agent:boundary:c0a2ffb8 -->
+### Re: transcribe + diarize phone recording (done) (HEAD)
+
+Transcript saved: [`tasks/dreamable/transcripts/phone_20260408-180506_4156839775.md`](transcripts/phone_20260408-180506_4156839775.md)
+
+- 104 segments, ~4 min, transcribed at 131.9x realtime
+- Speakers: Brian + Robert Ross (diarized)
+- Topics: sandbox/AWS setup, firewall rules for Claude Code, real-time work visibility
+<!-- agent:boundary:3c7580a5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Transcription in progress: `phone_20260408-180506_4156839775.m4a`
+
 <!-- /agent:pending -->

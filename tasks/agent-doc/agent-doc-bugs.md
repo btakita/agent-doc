@@ -1146,7 +1146,7 @@ Install via IDEA → Settings → Plugins → gear → "Install Plugin from Disk
 **Rule (truncated — completing from context):** Any change to a plugin requires a version bump. Noted as a convention going forward.
 
 **On the remaining `❯ ` loss (`do`/`done` lines):** The old 0.2.52 plugin (running in IDEA) uses the first boundary, so standalone `do`/`done` lines between the first and last historical boundary aren't restored. Installing 0.2.53 (last-boundary fix) will resolve these.
-<!-- agent:boundary:eef15d00 -->
+<!-- agent:boundary:50562630 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

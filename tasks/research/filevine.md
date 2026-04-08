@@ -247,7 +247,7 @@ Retranscribed successfully. Previous run was truncated by the corky bug — tran
 Diarization still shows 4 segments / 2 speakers (same as before). This is a recording constraint, not a software issue — everyone was physically in the same room sharing one mic channel, so pyannote can't separate voices accurately. The text content is complete and correct; speaker labels are unreliable past the first exchange.
 
 Transcript: [`tasks/research/transcripts/filevine-interview-2026-04-07.md`](transcripts/filevine-interview-2026-04-07.md)
-<!-- agent:boundary:2b719fcd -->
+<!-- agent:boundary:34d79a00 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

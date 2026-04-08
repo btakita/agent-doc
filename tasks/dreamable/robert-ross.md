@@ -1058,7 +1058,7 @@ Re-transcribed with 3 speakers (Brian, Robert Ross, Oleg) — 10 Oleg segments i
 - **Voiceprint:** `mail/contacts/oleg/voiceprint.m4a` — 10 segments concatenated, ~80s, 440K
 - **Contact:** `mail/contacts/oleg/AGENTS.md` — Russian-born US engineer, infrastructure/DevOps, introduced by Rob
 - **Transcript updated:** [`tasks/dreamable/transcripts/phone_20260408-180506_4156839775.md`](transcripts/phone_20260408-180506_4156839775.md) now shows all 3 speakers
-<!-- agent:boundary:d50b81f9 -->
+<!-- agent:boundary:a7ac9944 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

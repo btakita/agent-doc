@@ -136,7 +136,7 @@ If agent-loop expands to evaluate general-purpose agent behavior across many dim
 
 ❯ Can DeepEval scoring Ruberics be used to measure the effectiveness of a practitioner's agent harness and prompts?
 ❯ How can we know what the expected response is to a given prompt?
-### Re: DeepEval Rubrics for Agent Harness Evaluation (HEAD)
+### Re: DeepEval Rubrics for Agent Harness Evaluation
 
 ❯ Yes — this is actually one of DeepEval's stronger use cases. **G-Eval** (the custom rubric metric) and **DAG** (decision-tree metric) are designed exactly for this: you define what "good" looks like in natural language criteria, and an LLM scores outputs against them.
 
@@ -147,7 +147,7 @@ If agent-loop expands to evaluate general-purpose agent behavior across many dim
 
 ❯ The limitation: rubric quality determines metric quality. A vague rubric gives a noisy signal. But for well-defined workflows (like agent-doc's write→commit→snapshot cycle), you can write precise rubrics.
 
-### Re: Knowing the Expected Response (HEAD)
+### Re: Knowing the Expected Response
 
 ❯ This is the core challenge of LLM evaluation — the ground truth problem. There's no single answer; it depends on eval type:
 
@@ -159,12 +159,25 @@ If agent-loop expands to evaluate general-purpose agent behavior across many dim
 ❯ | **Regression baseline** | Compare to human-approved previous outputs | Catch degradation without needing perfect ground truth |
 ❯ | **Task oracle** | Run the output to verify (code compiles/runs, structured output validates schema) | Code gen, JSON output, function calls |
 
+❯ Does DeepEval use all of these approaches or only LLM-as-judge?
+
 ❯ For agent harness evaluation specifically, the most tractable path is **behavioral invariants + LLM-as-judge**:
 ❯ - Invariants handle the structural (did the right tool get called? was the response committed?)
 ❯ - LLM judge handles the qualitative (was the response relevant? did it follow the plan?)
 
 ❯ You never fully know the expected response — you define a quality space, then measure whether outputs fall within it. The more constrained the task, the tighter that space gets.
-<!-- agent:boundary:9f67db85 -->
+### Re: DeepEval's Evaluation Approaches (HEAD)
+
+DeepEval spans multiple approaches, though LLM-as-judge dominates:
+
+- **LLM-as-judge** — the default for most quality metrics (G-Eval, Answer Relevancy, Faithfulness, etc.)
+- **Task oracle** — HumanEval and pass@k actually execute code and check results; no LLM involved
+- **Golden dataset (reference-based)** — metrics like AnswerRelevancy accept `expected_output` as a reference, though an LLM still does the comparison reasoning
+- **Custom/invariant** — `BaseMetric` lets you implement any scoring logic without an LLM; pure Python checks
+- **Regression** — not a first-class metric, but the Confident AI cloud platform stores scores over time and surfaces regression across runs
+
+So the complete picture: LLM-as-judge is the default path, task oracle for code evaluation, and custom metrics for structural invariants. The framework is composable — you mix approaches within a test suite.
+<!-- agent:boundary:19cd9e15 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

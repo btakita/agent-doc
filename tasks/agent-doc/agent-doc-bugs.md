@@ -565,7 +565,7 @@ It fires when all three conditions are true:
 **Why does it happen at all?** The `mergeOrReload` path handles cases where the IPC write bypasses the Document API and the user has concurrent unsaved edits. Under normal operation (native lib loaded, no true conflict), the FFI CRDT merge handles this silently. The notification is the last-resort fallback.
 
 **Most likely trigger:** The agent-doc session wrote its response while `brian-takita.md` was open with unsaved edits, and the native lib happened to not be initialized yet (first session after IDE start, or plugin hot-reload). The git merge also failed because the agent response overlapped with your in-progress edits in the same file region.
-<!-- agent:boundary:a9006812 -->
+<!-- agent:boundary:0371be18 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

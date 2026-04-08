@@ -10,6 +10,10 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 - **Fix: boundary regex in `findBoundaryInComponent` + `repositionBoundaryToEnd` (PatchWatcher.kt v0.2.51):** Pattern updated from `[a-f0-9-]+` to `[a-z0-9][a-z0-9:-]*` so summary-style boundary IDs (e.g. `a0cfeb34:agent-doc-bugs`) are correctly matched.
 - **Fix: boundary stripping regex in VSCode extension (extension.ts v0.2.4):** `[a-f0-9]+` → `[a-z0-9][a-z0-9:-]*` in boundary marker strip-before-replace path.
 - **Regression test:** `normalize_user_prompts_restores_prefix_lost_in_file` — verifies snapshot `❯ do` is restored when editor file has bare `do`.
+- **`agent-doc compact --tag <name>` (compact.rs):** Creates a lightweight git tag at HEAD before compaction as a pre-compact checkpoint. Without `--tag`, auto-generates `agent-doc/<doc-name>/pre-compact-N`. Use `--tag skip` to disable. Tagging failure is a warning, not an error.
+- **`agent-doc log <FILE>` (history.rs):** Annotated git log for a session document. Walks `git log`, loads all `agent-doc/<name>/pre-compact-*` tags, and annotates matching commits in the output table (COMMIT, DATE, SUBJECT, TAG columns).
+- **`agent-doc show <FILE> [--back N | --at N | --tag <name>]` (history.rs):** Shows document content at a specific point in git history. `--back N` maps to `HEAD~N`; `--at N` selects the Nth commit in log order (0 = newest); `--tag <name>` resolves the tag to its commit.
+- **`agent-doc diff <FILE> --from <ref> [--to <ref>]` (history.rs):** Shows a unified diff of the document between two git refs. `--to` defaults to `HEAD`. Without `--from`, falls back to the existing live diff behavior.
 
 ## 0.31.22
 

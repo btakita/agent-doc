@@ -272,6 +272,183 @@ pub fn restore(file: &Path, commit: &str) -> Result<()> {
     Ok(())
 }
 
+/// Annotated git log for a session document.
+///
+/// Like `list` but also loads all `agent-doc/<name>/pre-compact-*` tags and
+/// annotates matching commits with the tag name.
+pub fn log(file: &Path) -> Result<()> {
+    let (git_root, rel_path) = resolve_git_paths(file)?;
+
+    let doc_name = file
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("doc");
+
+    // Load pre-compact tags: map commit → tag name
+    let pattern = format!("agent-doc/{}/pre-compact-*", doc_name);
+    let tag_out = Command::new("git")
+        .current_dir(&git_root)
+        .args(["tag", "-l", "--format=%(refname:short) %(objectname:short)", &pattern])
+        .output()
+        .unwrap_or_else(|_| std::process::Output {
+            status: std::process::ExitStatus::default(),
+            stdout: vec![],
+            stderr: vec![],
+        });
+
+    // Build tag map: short-commit → tag-name
+    let mut tag_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    if tag_out.status.success() {
+        for line in String::from_utf8_lossy(&tag_out.stdout).lines() {
+            let parts: Vec<&str> = line.splitn(2, ' ').collect();
+            if parts.len() == 2 {
+                let tag_name = parts[0].to_string();
+                let short_hash = parts[1].to_string();
+                // Resolve to full commit hash so we can match against git log
+                if let Ok(full_out) = Command::new("git")
+                    .current_dir(&git_root)
+                    .args(["rev-list", "-n1", &tag_name])
+                    .output()
+                {
+                    let full = String::from_utf8_lossy(&full_out.stdout).trim().to_string();
+                    if !full.is_empty() {
+                        tag_map.insert(full[..full.len().min(12)].to_string(), tag_name.clone());
+                        tag_map.insert(short_hash, tag_name);
+                    }
+                }
+            }
+        }
+    }
+
+    // Get commits that touched this file
+    let output = Command::new("git")
+        .current_dir(&git_root)
+        .args(["log", "--format=%H %ai %s", "--", &rel_path])
+        .output()
+        .context("failed to run git log")?;
+
+    if !output.status.success() {
+        bail!("git log failed for {}", file.display());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<&str> = stdout.lines().collect();
+
+    if lines.is_empty() {
+        eprintln!("No git history found for {}", file.display());
+        return Ok(());
+    }
+
+    println!("{:<12} {:<26} {:<30} TAG", "COMMIT", "DATE", "SUBJECT");
+    println!("{}", "-".repeat(90));
+
+    for line in &lines {
+        let parts: Vec<&str> = line.splitn(3, ' ').collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        let commit = parts[0];
+        let date = parts[1];
+        let subject = parts[2];
+        let short = &commit[..commit.len().min(12)];
+        let tag = tag_map.get(short).map(|s| s.as_str()).unwrap_or("");
+        let subj_display = if subject.len() > 30 {
+            format!("{}...", &subject[..28])
+        } else {
+            subject.to_string()
+        };
+        println!("{:<12} {:<26} {:<30} {}", short, date, subj_display, tag);
+    }
+
+    Ok(())
+}
+
+/// Show document content at a specific point in history.
+///
+/// Options:
+/// - `back`: `HEAD~N` (e.g. `back=1` → `HEAD~1`)
+/// - `at`: Nth commit from newest in git log (0 = HEAD, 1 = next oldest, …)
+/// - `tag`: resolve the named tag to its commit
+///
+/// Prints the full document content to stdout.
+pub fn show(
+    file: &Path,
+    back: Option<usize>,
+    at: Option<usize>,
+    tag: Option<&str>,
+) -> Result<()> {
+    let (git_root, rel_path) = resolve_git_paths(file)?;
+
+    let commit_ref = if let Some(t) = tag {
+        // Resolve tag to commit
+        let out = Command::new("git")
+            .current_dir(&git_root)
+            .args(["rev-list", "-n1", t])
+            .output()
+            .with_context(|| format!("failed to resolve tag {}", t))?;
+        if !out.status.success() {
+            bail!("tag not found: {}", t);
+        }
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    } else if let Some(n) = back {
+        format!("HEAD~{}", n)
+    } else if let Some(n) = at {
+        // Get commit at position n from newest
+        let out = Command::new("git")
+            .current_dir(&git_root)
+            .args(["log", "--format=%H", "--", &rel_path])
+            .output()
+            .context("failed to run git log")?;
+        if !out.status.success() {
+            bail!("git log failed");
+        }
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let commits_owned: Vec<String> = stdout.lines().map(|l| l.to_string()).collect();
+        if n >= commits_owned.len() {
+            bail!("--at {} exceeds history length ({})", n, commits_owned.len());
+        }
+        commits_owned[n].clone()
+    } else {
+        "HEAD".to_string()
+    };
+
+    let out = Command::new("git")
+        .current_dir(&git_root)
+        .args(["show", &format!("{}:{}", commit_ref, rel_path)])
+        .output()
+        .context("failed to run git show")?;
+
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        bail!("git show failed: {}", stderr.trim());
+    }
+
+    print!("{}", String::from_utf8_lossy(&out.stdout));
+    Ok(())
+}
+
+/// Show a unified diff of the document between two git refs.
+///
+/// - `from`: starting ref (e.g. commit hash, tag, `HEAD~2`)
+/// - `to`: ending ref (default: `HEAD`)
+pub fn git_diff(file: &Path, from: &str, to: &str) -> Result<()> {
+    let (git_root, rel_path) = resolve_git_paths(file)?;
+
+    let output = Command::new("git")
+        .current_dir(&git_root)
+        .args(["diff", &format!("{}..{}", from, to), "--", &rel_path])
+        .output()
+        .context("failed to run git diff")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("git diff failed: {}", stderr.trim());
+    }
+
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

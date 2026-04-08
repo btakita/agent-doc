@@ -308,7 +308,7 @@ Add to the document body:
 **Would "Musing..." be captured?**
 
 Still no — same reason as before. The Claude Code status bar is a terminal UI element (escape sequences in the status line), not stdout. `agent:console` captures pane content via `tmux capture-pane`, which renders the visible screen — so it *would* show "Musing..." if the pane being captured is the Claude Code pane. But you'd also get the surrounding chrome and any prior output above the status bar.
-<!-- agent:boundary:6c53391c -->
+<!-- agent:boundary:d9c2f23f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

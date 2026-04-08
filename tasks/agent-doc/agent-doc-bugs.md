@@ -717,7 +717,7 @@ On compaction, write the pre-compact state to a branch (`agent-doc-archive`) as 
 **One edge case:** documents with long paths hash to opaque snapshot filenames — the tag makes the document identity explicit. Tag should use the document's canonical short name, not the hash.
 
 ❯ Can we do Option A + B?
-### Re: Option A + B (HEAD)
+### Re: Option A + B
 
 Yes — they complement cleanly.
 
@@ -744,12 +744,49 @@ c4ee6aca  2026-04-08 16:32  append (+12 lines)
 - `git show <tag>:<path>` then retrieves the archived state
 
 A + B together: A ensures the archive exists; B makes it discoverable without remembering tag names.
-<!-- agent:boundary:8a6c7beb -->
+❯ Can B accept custom tag names as well?
+❯ Can we use `agent-doc log <FILE>` to walk with "relative" jumps? How would the command look?
+### Re: custom tags + relative jumps
+
+**Custom tag names:**
+
+Yes — `agent-doc compact` can accept `--tag <name>`:
+```bash
+agent-doc compact tasks/foo.md --tag "before-big-refactor"
+```
+Creates `agent-doc/<docname>/before-big-refactor` instead of `pre-compact-N`. Auto-numbering is the fallback when `--tag` is omitted. `agent-doc log` displays custom tags the same way — just shows whatever tag points at that commit.
+
+**Relative jumps in `agent-doc log`:**
+
+The log output could look like:
+```
+$ agent-doc log tasks/agent-doc/agent-doc-bugs.md
+
+  #   commit    date              type       lines  tag (HEAD)
+  1   91bce0bc  2026-04-08 16:38  append     +18
+  2   c4ee6aca  2026-04-08 16:32  append     +22
+  3   0f90046f  2026-04-08 16:20  append     +15
+  4   831d4f0e  2026-04-08 16:17  compact ★  pre-compact-1
+  5   d71dd3a1  2026-04-08 16:16  append     +8
+```
+
+Then navigation subcommands:
+```bash
+agent-doc show tasks/foo.md --at 4          # by log index
+agent-doc show tasks/foo.md --back 3        # relative offset from HEAD
+agent-doc show tasks/foo.md --tag pre-compact-1
+agent-doc diff tasks/foo.md --from pre-compact-1 --to HEAD
+```
+
+`★` marks tagged commits as restore points. `show` = `git show <ref>:<path>`, `diff` = `git diff <ref1> <ref2> -- <path>`. Thin wrappers — no new storage.
+<!-- agent:boundary:12507729 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] `agent-doc compact` → auto-tag pre-compact commit as `agent-doc/<name>/pre-compact-<N>` (Option A)
+- [ ] `agent-doc compact` → auto-tag pre-compact commit as `agent-doc/<name>/pre-compact-<N>` (Option A); add `--tag <name>` flag for custom names
 - [ ] `agent-doc log <FILE>` subcommand — walk git log, annotate compact commits, show tags (Option B)
+- [ ] `agent-doc show <FILE> --at N / --back N / --tag <name>` subcommand
+- [ ] `agent-doc diff <FILE> --from <ref> --to <ref>` subcommand
 <!-- /agent:pending -->

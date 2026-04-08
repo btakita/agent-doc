@@ -220,7 +220,7 @@ Open in browser and print to PDF (Ctrl+P → Save as PDF). Set margins to "None"
 Content fits one letter page: company overview, milestones, LOIS, tech stack table, all four interviewers (with track labels), key talking points, and questions to ask.
 
 ❯ transcribe + diarize [2026-04-07 16-00-17-compressed.mp4](../../../../../Videos/2026-04-07%2016-00-17-compressed.mp4)
-### Re: Transcription (HEAD)
+### Re: Transcription
 
 Transcript written to [`tasks/research/transcripts/filevine-interview-2026-04-07.md`](transcripts/filevine-interview-2026-04-07.md) — 71:19, 893 segments, transcribed in 30s (144x realtime).
 
@@ -237,7 +237,17 @@ Cain opened by introducing the team — confirming their roles match our prep:
 Brian's intro covered: agentic loops/harnesses, human-agent alignment via ontologies, agent-doc as document-centric AI UI, workflow automation (transcription → blog posts). Landed well — Cain's framing confirms the team is doing exactly the kind of work the prep notes predicted.
 
 **Next:** If you want a summary of the full conversation, a follow-up email draft, or notes from specific parts of the transcript, just ask.
-<!-- agent:boundary:85135a94 -->
+
+❯ corky transcribe bug was addressed...see /home/brian/work/btakita/agent-loop/tasks/software/agent-loop.md
+❯ Please retranscribe filevine-interview-2026-04-07
+### Re: Retranscription (corky 0.26.2) (HEAD)
+
+Retranscribed successfully. Previous run was truncated by the corky bug — transcript was only 5KB / ~900 words. Fixed transcript: **55KB / 10,460 words** — full 71:19 covered.
+
+Diarization still shows 4 segments / 2 speakers (same as before). This is a recording constraint, not a software issue — everyone was physically in the same room sharing one mic channel, so pyannote can't separate voices accurately. The text content is complete and correct; speaker labels are unreliable past the first exchange.
+
+Transcript: [`tasks/research/transcripts/filevine-interview-2026-04-07.md`](transcripts/filevine-interview-2026-04-07.md)
+<!-- agent:boundary:2b719fcd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

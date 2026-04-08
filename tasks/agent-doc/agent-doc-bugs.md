@@ -279,7 +279,7 @@ stream_config:
 **So to answer the question:** Yes, `max_lines: 50` is the default. You can override it per-document in frontmatter. The component name defaults to `"console"` — add `&lt;!-- agent:console --&gt;...&lt;!-- /agent:console --&gt;` to the document to receive the output.
 
 ❯ Please revise the agent:terminal answer for agent:console.
-### Re: revised — agent:console (not agent:terminal) (HEAD)
+### Re: revised — agent:console (not agent:terminal)
 
 Correction: the component is `agent:console`, not `agent:terminal`. Here's the accurate version of the earlier answer:
 
@@ -308,7 +308,14 @@ Add to the document body:
 **Would "Musing..." be captured?**
 
 Still no — same reason as before. The Claude Code status bar is a terminal UI element (escape sequences in the status line), not stdout. `agent:console` captures pane content via `tmux capture-pane`, which renders the visible screen — so it *would* show "Musing..." if the pane being captured is the Claude Code pane. But you'd also get the surrounding chrome and any prior output above the status bar.
-<!-- agent:boundary:7a02491e -->
+
+❯ Please rewrite the gist using `agent:console` instead of `agent:terminal`.
+### Re: gist updated — agent:console (HEAD)
+
+Gist rewritten with `agent:console` throughout: https://gist.github.com/btakita/ab31879717d229d50c4b13e7031717e3
+
+Removed all `agent:terminal` references. Updated title to "agent:console — streaming terminal output to a document". Content now accurately reflects `StreamCapture` mode writing into `&lt;!-- agent:console --&gt;`.
+<!-- agent:boundary:c4206dec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

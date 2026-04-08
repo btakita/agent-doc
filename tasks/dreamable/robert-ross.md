@@ -956,7 +956,7 @@ What actually happened with him?
 ❯ I'm talking with Rob Ross again. Please read rob-ross-sms.txt.
 ❯ On top of researching what he sent me...I want to explain my circumstance. I have 2 small gigs (judith-krug, ron-berkes). I also have a pipeline of interviews. Should I also mention lucas-huang collaboration?
 ❯ I want to mention that I'm loyal...sometimes to a fault.
-### Re: Rob Ross re-engagement (HEAD)
+### Re: Rob Ross re-engagement
 
 **What Rob sent you:**
 
@@ -977,7 +977,20 @@ Rob already knows about Filevine (he explicitly encouraged you to pursue it). He
 This respects what he said earlier — that his concern was you shipping ClaudeScore on Monday and leaving on Tuesday. If you can address that directly (e.g., what's your realistic timeline on Filevine, what happens if you get an offer mid-project), that's the conversation he actually needs to have.
 
 **On the lucas-huang collaboration:** Don't mention it. It's a side informal arrangement helping someone with recruiter emails using your own tools. It's not material to Rob's question of whether you can commit to Dreamable work. Bringing it up adds noise and could make your situation sound more fractured than it is. The relevant facts are: two small gigs, active interviews — that's sufficient.
-<!-- agent:boundary:f6a26003 -->
+### Re: mentioning loyalty (HEAD)
+
+Good instinct — it's directly relevant to his stated fear ("you ship Monday, leave Tuesday"). But framing matters.
+
+**What lands:** Concrete behavior, not a trait declaration. Rob has 29 repos from devs who didn't work out — he's heard "I'm committed" before. What will actually land is showing the pattern: you stuck with Filevine through 3 rounds while still offering to come back, you spent your own time going through his document even after things fell apart. That *is* loyalty. Say the behavior, let him draw the conclusion.
+
+**What to avoid:** "Loyal sometimes to a fault" sounds like a veiled warning. Just say loyal — let him interpret it.
+
+**Suggested language:**
+
+> "One thing I want you to know about me: I'm loyal. When I commit to something, I see it through. Part of why things got stressful last week was that I was holding another interview open until the last minute because I didn't want to abandon our work. That's not always the most efficient approach, but it's who I am."
+
+This reframes what looked like indecision as evidence of the loyalty itself.
+<!-- agent:boundary:8cab0365 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -202,7 +202,7 @@ Added **step 5: manual testing gate** to both:
 - `src/agent-doc/CLAUDE.md` Release Process (step 4→5, pushes publish steps to 6+)
 
 Rule: after `cargo install --path .`, pause and confirm feature works in a live session before publishing to crates.io/PyPI/GitHub Releases.
-<!-- agent:boundary:30563c31 -->
+<!-- agent:boundary:f856b6ac -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -82,7 +82,7 @@ The section covers:
 - **His communication style**: burst texts, overnight processing, direct cadence
 
 This means any future session drafting messages to Rob, or reviewing his communications, will have these priorities loaded automatically — no need to re-derive them from the SMS thread.
-<!-- agent:boundary:59225e4d -->
+<!-- agent:boundary:23ccf1cb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

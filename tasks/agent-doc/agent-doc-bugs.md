@@ -679,7 +679,7 @@ Fix: plugin autocomplete needs to read the available skills list (Claude Code sk
 - New entry in static command list, appears in plugin autocomplete
 
 All tests pass (38/38). Binary installed.
-<!-- agent:boundary:9ee02d99 -->
+<!-- agent:boundary:f34ce36d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

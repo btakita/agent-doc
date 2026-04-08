@@ -153,7 +153,7 @@ pub fn run(file: &Path) -> Result<()> {
     );
 
     // Fire document-level session_start hooks
-    fire_doc_hooks(&fm.hooks, "session_start", file, &session_id, &fm.agent, &fm.model);
+    crate::hooks::fire_doc_hooks(&fm.hooks, "session_start", file, &session_id, &fm.agent, &fm.model);
 
     // Run claude in a restart loop — pane never dies
     let mut first_run = true;
@@ -267,55 +267,10 @@ pub fn run(file: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Execute document-level hooks for the given event.
-///
-/// Template vars `{{session_id}}`, `{{file}}`, `{{agent}}`, `{{model}}` are substituted
-/// before each command is passed to `sh -c`. Best-effort: failures log to stderr only.
-pub fn fire_doc_hooks(
-    hooks: &std::collections::HashMap<String, Vec<String>>,
-    event: &str,
-    file: &Path,
-    session_id: &str,
-    agent: &Option<String>,
-    model: &Option<String>,
-) {
-    let Some(cmds) = hooks.get(event) else { return };
-    if cmds.is_empty() { return; }
-
-    let file_str = file.to_string_lossy();
-    let agent_str = agent.as_deref().unwrap_or("");
-    let model_str = model.as_deref().unwrap_or("");
-
-    for cmd_template in cmds {
-        let cmd = cmd_template
-            .replace("{{session_id}}", session_id)
-            .replace("{{file}}", &file_str)
-            .replace("{{agent}}", agent_str)
-            .replace("{{model}}", model_str);
-
-        eprintln!("[hooks] {} running: {}", event, cmd);
-        match std::process::Command::new("sh").args(["-c", &cmd]).output() {
-            Ok(output) if output.status.success() => {
-                eprintln!("[hooks] {} ok", event);
-            }
-            Ok(output) => {
-                eprintln!(
-                    "[hooks] {} exited with code {:?}: {}",
-                    event,
-                    output.status.code(),
-                    String::from_utf8_lossy(&output.stderr).trim()
-                );
-            }
-            Err(e) => {
-                eprintln!("[hooks] {} failed to spawn: {}", event, e);
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hooks::fire_doc_hooks;
     use std::collections::HashMap;
 
     #[test]

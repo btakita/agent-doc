@@ -250,7 +250,7 @@ No, not directly. The status bar is a Claude Code terminal UI element rendered v
 https://gist.github.com/btakita/ab31879717d229d50c4b13e7031717e3
 
 Contains the last prompt (`❯ ` prefixed) + answer from the agent:terminal / Musing capture exchange.
-<!-- agent:boundary:36df582c -->
+<!-- agent:boundary:1100803c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

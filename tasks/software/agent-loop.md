@@ -145,7 +145,7 @@ Done. Committed and pushed:
 Parent repo updated with all 8 submodule pointer updates and pushed.
 
 ❯ release the submodules
-### Re: release the submodules (HEAD)
+### Re: release the submodules
 
 Prepped and installed — **pausing for your testing confirmation before publishing upstream**.
 
@@ -156,17 +156,45 @@ Prepped and installed — **pausing for your testing confirmation before publish
 - Installed locally: `cargo install --path . --features transcribe-cuda,diarize`
 - **Waiting on:** please test `corky transcribe` in a live session, then say "publish corky" to proceed
 
+❯ I tested in tasks/research/filevine.md
+❯ > Transcript written to [`tasks/research/transcripts/filevine-interview-2026-04-07.md`](transcripts/filevine-interview-2026-04-07.md) —
+
+❯ The transcript is too short.
+
 #### agent-kit 0.4.0
 - `VERSIONS.md` updated with 0.3.1 + 0.4.0 entries
 - `cargo clippy` + tests passed (43 tests)
 - **Waiting on:** confirm OK to tag + publish
 
+release
+
 #### Not released (no new features since last tag)
 - `src/chromium-bridge` — CLAUDE.md edit only
 - `src/agent-memories/rules/runbooks/skill-harness` — CI fix only, no version bump needed
 - `src/eval-runner` — internal tool, not published to crates.io
-- `philosophy`, `resume`, `mail` — content repos, no release target
-<!-- agent:boundary:1ab63f52 -->
+❯ - `philosophy`, `resume`, `mail` — content repos, no release targe
+### Re: transcript too short (HEAD)
+
+Found the bug. The `collapse_repeated_phrases` hallucination detector in `engine.rs` was falsely truncating transcripts:
+
+- **Trigger**: any single word appearing ≥10 times in a 100-word window → truncate
+- **Problem**: conversational words like "I", "you", "well", "know" naturally hit this in speech
+- **Evidence**: 918 words for a 71-minute call (~6.5% of expected content)
+
+**Fix in 0.26.2:**
+- Exclude stopwords from frequency check (50 common English/speech words)
+- Raise threshold 10 → 15
+- Tests pass, installed locally
+
+**Re-transcribe to verify:**
+```bash
+corky transcribe --diarize --speakers "Brian,Interviewer" ~/Videos/2026-04-07\ 16-00-17-compressed.mp4
+```
+
+Transcript should be significantly longer. Say "publish corky" when it looks correct.
+
+**Note:** This bug also existed in 0.26.0/0.26.1 — good catch during testing.
+<!-- agent:boundary:902846f2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -177,6 +205,7 @@ Prepped and installed — **pausing for your testing confirmation before publish
 - [ ] Run litellm proxy pointing at vllm
 - [ ] Test `claude` against local model via `ANTHROPIC_BASE_URL`
 - [ ] Fix `src/session-share` remote — `ClaudeScore/SessionShare` not found on GitHub
-- [ ] **Manual test gate**: test `corky transcribe`, then approve to publish corky v0.26.1
-- [ ] **Publish gate**: approve agent-kit v0.4.0 tag + publish
+- [ ] **Re-test gate**: re-transcribe filevine interview with corky v0.26.2, verify transcript length
+- [ ] **Publish gate (corky)**: approve v0.26.2 publish after re-test
+- [ ] **Publish gate (agent-kit)**: approve v0.4.0 tag + publish
 <!-- /agent:pending -->

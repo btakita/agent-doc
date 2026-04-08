@@ -800,7 +800,7 @@ The same lines appear as "user changes" in every diff. If the agent ever acts on
 1. IPC write path must write `❯ ` prefix to the editor file, not just the snapshot
 2. Normalization must be idempotent: if a line already has `❯ `, preserve it — never strip it
 3. Add a regression test: write a line with `❯ `, run through IPC path, confirm editor file still shows `❯ `
-<!-- agent:boundary:6cd73247 -->
+<!-- agent:boundary:7d4a5d29 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

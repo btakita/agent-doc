@@ -73,12 +73,15 @@ hooks:
 ```
 
 `post_write` and `post_commit` are schema-ready but call sites in `hooks.rs` are not yet wired — that's a follow-on.
-<!-- agent:boundary:27a2f31b -->
+
+❯ do
+❯ - [ ] Wire `post_write` / `post_commit` events to `fire_doc_hooks` in `hooks.rs`
+<!-- agent:boundary:7d03cae0:agent-doc-feat -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Wire `post_write` / `post_commit` events to `fire_doc_hooks` in `hooks.rs`
+- [ ] Wire `post_write` / `post_commit` events to `fire_doc_hooks` in `hooks.rs` (in progress)
 - [ ] Bump version + release agent-doc with hooks feature
 <!-- /agent:pending -->

@@ -355,7 +355,7 @@ sub-packages: '["nvcc", "cudart-dev"]'
 
 Want me to fix both and retag v0.26.0?
 Yes
-### Re: CI fixes — native-tls/vendored + full CUDA toolkit (HEAD)
+### Re: CI fixes — native-tls/vendored + full CUDA toolkit
 
 **Fix 1 — aarch64 OpenSSL** (`Cargo.toml`):
 ```toml
@@ -369,12 +369,37 @@ Removed `sub-packages` restriction — full CUDA toolkit installed so `FindCUDAT
 `make check` passes. Committed `c88a8ef`, pushed, retagged v0.26.0.
 
 Release workflow running: https://github.com/btakita/corky/actions/runs/24095058431
-<!-- agent:boundary:83894ef5 -->
+
+❯ tasks/research/transcripts/filevine-interview-2026-04-07.md now has too much hallucination.
+❯ See tasks/research/filevine.md
+### Re: Transcript hallucination — filevine-interview-2026-04-07 (HEAD)
+
+Transcript contains classic Whisper hallucinations — voicemail fragments mixed in ("Mailbox is full. Hi Steve.") and repeated phrases ("things got off the rails" 3× in a row, "to work with the lawyer." 4×). The confidence re-transcription in v0.26.0 didn't catch them because Whisper often hallucinations score *high* confidence.
+
+The interview text itself is intact (10,400+ real words), but ~5-10% is hallucinated filler injected into silence/gaps.
+
+**Root cause:** confidence scoring catches low-confidence *segments* but not high-confidence hallucinations. Whisper can be confidently wrong when it fills silence with invented content.
+
+**Fix options:**
+
+1. **VAD pre-processing** (highest leverage) — run Voice Activity Detection before transcription to strip silence/noise where hallucinations originate. `faster-whisper` has `vad_filter=True` built in. Prevents hallucination at the source.
+
+2. **Hallucination blocklist post-pass** — detect and strip known Whisper hallucination patterns after transcription. Whisper's common hallucinations are well-documented: voicemail phrases, "Thank you for watching", high-repetition n-grams. Add a post-pass filter.
+
+3. **Model upgrade** — `large-v3-turbo` has fewer hallucinations than older large-v2 for long-form audio.
+
+4. **Manual cleanup** — strip hallucinated sections from the existing transcript for immediate use.
+
+For the immediate need (filevine follow-up), option 4 is fastest. For corky, option 1 (VAD filter) is the right long-term fix.
+
+Want me to add VAD filtering to corky, or clean up the transcript now?
+<!-- agent:boundary:5f17a7c9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] Add VAD filter to corky transcription pipeline (or manual transcript cleanup)
 - [ ] Monitor CI (release run 24095058431)
 - [ ] Verify sheet sharing / GCP test users
 - [ ] Re-test sheet read

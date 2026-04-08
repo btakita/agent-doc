@@ -413,7 +413,7 @@ Applied to both the main transcription path and the confidence re-transcription 
 **What this doesn't fix:** Cross-segment repetition scattered through the transcript (e.g. "going to work with the lawyer" 4x at non-consecutive points). That's real speech in a 71-min interview — the repetitions are coincidental.
 
 This is a patch-level change. Ready to bump to v0.26.3 and release, or bundle with other fixes first?
-<!-- agent:boundary:0a9a47b6 -->
+<!-- agent:boundary:3022253e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

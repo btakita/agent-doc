@@ -770,10 +770,19 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             // (e.g., a previous response was committed but the baseline predates it).
             // A baseline with EXTRA content beyond the snapshot is normal (user edits).
             //
+            // IMPORTANT: Skip this check when an explicit baseline was provided via
+            // --baseline-file. Streaming checkpoints intentionally use the original
+            // document (before any response) as baseline so cumulative patch blocks
+            // apply cleanly on each checkpoint. The snapshot will have content from
+            // earlier checkpoints, causing is_stale_baseline to incorrectly fire and
+            // apply patches on top of content_at_start (which already has earlier
+            // checkpoint content) → duplicate response content.
+            //
             // Compare component-by-component: for each component in the snapshot, check
             // that the baseline's corresponding component contains the snapshot content.
             // This handles user edits anywhere in the document (not just appended at end).
-            if let Ok(Some(current_snap)) = snapshot::load(file)
+            if baseline.is_none()
+                && let Ok(Some(current_snap)) = snapshot::load(file)
                 && is_stale_baseline(base, &current_snap)
             {
                 eprintln!(
@@ -1336,10 +1345,12 @@ pub fn try_ipc(
             socket_payload["normalize_prefix_lines"] = serde_json::Value::Array(
                 lines.iter().map(|l| serde_json::Value::String(l.clone())).collect()
             );
-            // Include full normalized content so plugin can replace entire document
-            // when normalize_prefix_lines approach fails (e.g. boundary regex mismatch).
-            // The plugin's fullContent path guarantees ❯  prefixes reach the editor file.
-            if let Some(ours) = content_ours {
+            // Include full normalized content ONLY when there are no component patches.
+            // When patches are present, the plugin applies normalize_prefix_lines before
+            // component patches — fullContent would conflict by replacing the document
+            // before patches run, causing duplicates on the next cycle.
+            // fullContent is only safe as a fallback for append-mode (no-component) docs.
+            if ipc_patches_json.is_empty() && let Some(ours) = content_ours {
                 socket_payload["fullContent"] = serde_json::Value::String(ours.to_string());
             }
         }
@@ -1419,9 +1430,11 @@ pub fn try_ipc(
         ipc_payload["normalize_prefix_lines"] = serde_json::Value::Array(
             lines.iter().map(|l| serde_json::Value::String(l.clone())).collect()
         );
-        // Include full normalized content so plugin can replace entire document
-        // when normalize_prefix_lines approach fails (e.g. boundary regex mismatch).
-        if let Some(ours) = content_ours {
+        // Include full normalized content ONLY when there are no component patches.
+        // When patches are present, normalize_prefix_lines + patches apply correctly
+        // without fullContent. Sending fullContent alongside patches causes the plugin
+        // to apply fullContent (full replacement) and skip patches → duplicate on next cycle.
+        if ipc_patches.is_empty() && let Some(ours) = content_ours {
             ipc_payload["fullContent"] = serde_json::Value::String(ours.to_string());
         }
     }

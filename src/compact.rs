@@ -86,10 +86,10 @@ pub fn run(
 
     // Create a pre-compact git tag at HEAD before modifying the document.
     // Skipped if tag == Some("skip").
-    if tag != Some("skip") {
-        if let Err(e) = create_pre_compact_tag(file, tag) {
-            eprintln!("[compact] Warning: could not create pre-compact tag: {}", e);
-        }
+    if tag != Some("skip")
+        && let Err(e) = create_pre_compact_tag(file, tag)
+    {
+        eprintln!("[compact] Warning: could not create pre-compact tag: {}", e);
     }
 
     let content = std::fs::read_to_string(file)

@@ -334,8 +334,13 @@ class PatchWatcher(private val project: Project) : Disposable {
         // if the content actually changed.
         val content = document.text
 
-        // Full content replacement (append-mode documents without component markers)
-        if (!patch.fullContent.isNullOrEmpty()) {
+        // Full content replacement — only for append-mode documents without component patches.
+        // When component patches are present, use the patch path instead: it applies
+        // normalize_prefix_lines + patches correctly without clobbering the response.
+        // Sending fullContent alongside patches caused the plugin to bypass patches and
+        // replace the document with a version that may not include the new response,
+        // leading to duplicates on the next cycle.
+        if (!patch.fullContent.isNullOrEmpty() && patch.patches.isEmpty()) {
             if (patch.fullContent == content) {
                 LOG.warn("Patch produced no changes for ${patch.file}")
                 return true
@@ -409,8 +414,9 @@ class PatchWatcher(private val project: Project) : Disposable {
         try {
             val content = String(targetFile.contentsToByteArray(), targetFile.charset)
 
-            // Full content replacement
-            if (!patch.fullContent.isNullOrEmpty()) {
+            // Full content replacement — only for append-mode documents without component patches.
+            // Same guard as the Document path: skip fullContent when patches are present.
+            if (!patch.fullContent.isNullOrEmpty() && patch.patches.isEmpty()) {
                 if (patch.fullContent != content) {
                     ApplicationManager.getApplication().runWriteAction {
                         targetFile.setBinaryContent(patch.fullContent.toByteArray(targetFile.charset))

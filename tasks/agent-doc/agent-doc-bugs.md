@@ -243,7 +243,7 @@ No, not directly. The status bar is a Claude Code terminal UI element rendered v
 `agent-doc`'s `agent:terminal` component targets process stdout/stderr. It won't see the status bar unless you first capture it via `tmux capture-pane -p` and pipe that.
 
 **Feasibility:** `tmux capture-pane -p -t <pane>` could snapshot the Claude Code terminal state (including "Musing...") and stream it into an `agent:terminal` component on a timer. Rough, but works for debugging/observability without API changes.
-<!-- agent:boundary:cd9705fa -->
+<!-- agent:boundary:c4c8e22b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

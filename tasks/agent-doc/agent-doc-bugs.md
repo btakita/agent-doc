@@ -762,7 +762,7 @@ The log output could look like:
 ```
 $ agent-doc log tasks/agent-doc/agent-doc-bugs.md
 
-  #   commit    date              type       lines  tag (HEAD)
+  #   commit    date              type       lines  tag
   1   91bce0bc  2026-04-08 16:38  append     +18
   2   c4ee6aca  2026-04-08 16:32  append     +22
   3   0f90046f  2026-04-08 16:20  append     +15
@@ -779,14 +779,36 @@ agent-doc diff tasks/foo.md --from pre-compact-1 --to HEAD
 ```
 
 `★` marks tagged commits as restore points. `show` = `git show <ref>:<path>`, `diff` = `git diff <ref1> <ref2> -- <path>`. Thin wrappers — no new storage.
-<!-- agent:boundary:14c9cea7 -->
+
+❯ In this document, I lost **all** of the `❯ ` prefixes for `❯ do`. Why? This should not happen because I really did do these in the past. The change may rerun previous tasks. This cannot happen.
+### Re: `❯ ` prefix loss on historical `do` lines — bug (HEAD)
+
+This is a real bug. The `❯ ` prefixes are being stripped from historical `❯ do` lines, causing them to surface as diff changes every cycle — and risking re-execution.
+
+**Root cause (most likely):**
+
+The IPC note from earlier in this session flagged it: "IPC path normalizes the snapshot only — editor shows prefix on next disk cycle." The IPC write path writes the document WITHOUT `❯ ` prefixes to the editor file, but WITH them in the snapshot. Next cycle the diff sees `❯ do` (snapshot) vs `do` (file) as a "user edit" even though nothing changed.
+
+The normalization is not idempotent across the IPC/disk split:
+- Disk write path: adds `❯ ` correctly
+- IPC write path: updates snapshot with `❯ ` but leaves editor file without → perpetual phantom diff
+
+**Why this is dangerous:**
+The same lines appear as "user changes" in every diff. If the agent ever acts on `do` lines in the diff, it re-executes completed task blocks.
+
+**Fix required:**
+1. IPC write path must write `❯ ` prefix to the editor file, not just the snapshot
+2. Normalization must be idempotent: if a line already has `❯ `, preserve it — never strip it
+3. Add a regression test: write a line with `❯ `, run through IPC path, confirm editor file still shows `❯ `
+<!-- agent:boundary:6cd73247 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] `agent-doc compact` → auto-tag pre-compact commit as `agent-doc/<name>/pre-compact-<N>` (Option A); add `--tag <name>` flag for custom names
-- [ ] `agent-doc log <FILE>` subcommand — walk git log, annotate compact commits, show tags (Option B)
-- [ ] `agent-doc show <FILE> --at N / --back N / --tag <name>` subcommand
-- [ ] `agent-doc diff <FILE> --from <ref> --to <ref>` subcommand
+- [ ] **BUG (high priority):** `❯ ` prefix stripped from historical `do` lines by IPC write path — IPC must write prefix to editor file, not snapshot only; normalization must be idempotent
+- [ ] `agent-doc compact` → auto-tag pre-compact commit as `agent-doc/<name>/pre-compact-<N>`; add `--tag <name>` flag
+- [ ] `agent-doc log <FILE>` — walk git log, annotate compact commits, show tags
+- [ ] `agent-doc show <FILE> --at N / --back N / --tag <name>`
+- [ ] `agent-doc diff <FILE> --from <ref> --to <ref>`
 <!-- /agent:pending -->

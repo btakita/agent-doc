@@ -1146,14 +1146,28 @@ Install via IDEA → Settings → Plugins → gear → "Install Plugin from Disk
 **Rule (truncated — completing from context):** Any change to a plugin requires a version bump. Noted as a convention going forward.
 
 **On the remaining `❯ ` loss (`do`/`done` lines):** The old 0.2.52 plugin (running in IDEA) uses the first boundary, so standalone `do`/`done` lines between the first and last historical boundary aren't restored. Installing 0.2.53 (last-boundary fix) will resolve these.
-### Re: same pattern — waiting on 0.2.53 install (HEAD)
+### Re: same pattern — waiting on 0.2.53 install
 
 No new input. The diff is only the recurring `do`/`done` prefix pattern — same lines, same cause (old 0.2.52 plugin using first boundary). Once 0.2.53 is installed from disk and IDEA restarts, those lines get restored and this diff noise disappears.
-<!-- agent:boundary:87428dd4 -->
+
+❯ There are **still** uncommitted stripping of the `❯ ` prefix of `do` and `done`.
+
+❯ done
+❯ - [ ] Install JetBrains 0.2.53 from disk and restart IDEA
+### Re: ❯ prefix still stripped after 0.2.53 install (HEAD)
+
+**Status:** Expected — stripping happened in 0.2.52 before the fix was installed. The plugin only normalizes on IPC patch receipt, not proactively on load.
+
+**This write cycle restores them:** The binary detects snapshot has `❯ do` but document has `do` → includes those lines in `normalize_prefix_lines` → 0.2.53 applies normalization on this patch → `❯ do`/`❯ done` restored.
+
+After this write-back, the `do`/`done` lines should show `❯ ` in the document and the git diff noise disappears.
+
+If stripping persists after this cycle: there's a residual bug to debug (normalize list generation or plugin apply order). Report back and we'll dig into `write.rs` normalize logic.
+<!-- agent:boundary:e477090a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Install JetBrains 0.2.53 from disk and restart IDEA
+(none)
 <!-- /agent:pending -->

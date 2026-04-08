@@ -195,19 +195,28 @@ Transcript should be significantly longer. Say "publish corky" when it looks cor
 
 **Note:** This bug also existed in 0.26.0/0.26.1 — good catch during testing.
 
-commit + push all submodules
-<!-- agent:boundary:a201f25b -->
+❯ commit + push all submodules
+### Re: commit + push all submodules (HEAD)
+
+Done. Committed and pushed:
+
+| Submodule | Action |
+|-----------|--------|
+| `src/agent-doc` | Committed: code fence fix in `normalize_user_prompts`, layout hash fix (structural-only), JetBrains plugin 0.2.50 → pushed |
+| `src/agent-kit` | Pushed existing commits (VERSIONS.md for 0.3.1/0.4.0) |
+| `src/corky` | Pushed existing commits (v0.26.3 CI fixes) |
+| `mail` | Committed 82 files (conversations + contacts) → pushed |
+| `src/session-share` | Skipped — `ClaudeScore/SessionShare` repo still not found on GitHub |
+
+Parent repo committed + pushed: submodule pointer updates, tasks/, .claude/ skills, evals/, pyproject.toml, README, config.
+<!-- agent:boundary:aad58be4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Fix Python version for vllm: `mise use python@3.12`
-- [x] Install vllm: `uv pip install vllm`
-- [x] Download + serve `Qwen2.5-Coder-32B-Instruct-AWQ` via vllm
-- [x] Install litellm proxy: `pip install litellm[proxy]`
+- [ ] Fix `src/session-share` remote — `ClaudeScore/SessionShare` not found on GitHub
+- [ ] **Re-test gate**: re-transcribe filevine interview with corky v0.26.2+, verify transcript length
+- [ ] **Publish gate (corky)**: approve v0.26.3 publish after re-test
+- [ ] **Publish gate (agent-kit)**: approve v0.4.0 tag + publish
 - [ ] Run litellm proxy pointing at vllm
 - [ ] Test `claude` against local model via `ANTHROPIC_BASE_URL`
-- [ ] Fix `src/session-share` remote — `ClaudeScore/SessionShare` not found on GitHub
-- [ ] **Re-test gate**: re-transcribe filevine interview with corky v0.26.2, verify transcript length
-- [ ] **Publish gate (corky)**: approve v0.26.2 publish after re-test
-- [ ] **Publish gate (agent-kit)**: approve v0.4.0 tag + publish
 <!-- /agent:pending -->

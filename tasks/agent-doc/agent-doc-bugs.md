@@ -315,7 +315,7 @@ Still no — same reason as before. The Claude Code status bar is a terminal UI 
 Gist rewritten with `agent:console` throughout: https://gist.github.com/btakita/ab31879717d229d50c4b13e7031717e3
 
 Removed all `agent:terminal` references. Updated title to "agent:console — streaming terminal output to a document". Content now accurately reflects `StreamCapture` mode writing into `&lt;!-- agent:console --&gt;`.
-<!-- agent:boundary:c4206dec -->
+<!-- agent:boundary:9100eede -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

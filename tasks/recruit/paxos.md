@@ -27,7 +27,7 @@ Contact added: `mail/contacts/bryan-boyer/AGENTS.md`
 
 ---
 
-## Paxos Overview (HEAD)
+## Paxos Overview
 
 **Mission:** Build the open financial system — regulated blockchain infrastructure for instant movement of any asset.
 
@@ -39,7 +39,7 @@ Contact added: `mail/contacts/bryan-boyer/AGENTS.md`
 
 ---
 
-## Products (HEAD)
+## Products
 
 | Product | Description |
 |---------|-------------|
@@ -54,7 +54,7 @@ Contact added: `mail/contacts/bryan-boyer/AGENTS.md`
 
 ---
 
-## Tech Stack (HEAD)
+## Tech Stack
 
 - **Languages:** Kotlin, Golang, **Rust** (recently adopted in trading/performance-critical systems)
 - Distributed systems, consensus algorithms, cryptography (ECC, MPC)
@@ -63,7 +63,7 @@ Contact added: `mail/contacts/bryan-boyer/AGENTS.md`
 
 ---
 
-## Recent Milestones (HEAD)
+## Recent Milestones
 
 - **Nov 2025:** Acquired Fordefi (MPC wallet platform) — adds full custody + DeFi stack
 - **Dec 2025:** OCC national trust bank charter conditional approval
@@ -72,7 +72,7 @@ Contact added: `mail/contacts/bryan-boyer/AGENTS.md`
 
 ---
 
-## Questions to Ask (HEAD)
+## Questions to Ask
 
 1. "What drove the OCC charter conversion, and how does it change what engineering can build?"
 2. "Where is Rust being adopted beyond trading? Plans for custody/settlement infrastructure?"
@@ -83,14 +83,14 @@ Contact added: `mail/contacts/bryan-boyer/AGENTS.md`
 
 ---
 
-## Talking Points for Brian (HEAD)
+## Talking Points for Brian
 
 - **Rust expertise** — Paxos actively expanding Rust in security/performance-critical systems
 - **Agent tooling** — relevant to Paxos Labs and potential internal dev tools
 - **Distributed systems** — settlement infrastructure is inherently distributed; consensus experience lands well
 - Emphasize correctness + safety-first engineering under regulatory constraints
 - Paxos values engineers who understand business impact, not just tech
-<!-- agent:boundary:1b289df2 -->
+<!-- agent:boundary:b9215bb1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

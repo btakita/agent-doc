@@ -159,7 +159,7 @@ Design docs before code · rigorous PR review · "ask forgiveness, not permissio
 3. Rust expansion roadmap beyond trading?
 4. AI tooling policy for engineers?
 5. Biggest technical challenge this year?
-<!-- agent:boundary:bc4813a5 -->
+<!-- agent:boundary:74e234cc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -248,20 +248,38 @@ Running now (GPU loaded, whisper large-v3). Will update when complete.
 `tasks/research/transcripts/filevine-interview-2026-04-07.md` updated.
 
 Say "publish corky" to release v0.26.3 when satisfied with transcript.
-### Re: Use my personal account. Make btakita/session-share a private repo. (HEAD)
+### Re: Use my personal account. Make btakita/session-share a private repo.
 
 Done:
 1. Created `btakita/session-share` (private) on GitHub
 2. Updated remote in `src/session-share` from `ClaudeScore/SessionShare` → `btakita/session-share`
 3. Pushed all commits (including the `claude-auto-ruberic` session docs)
 4. Updated `.gitmodules` in parent repo + pushed
-<!-- agent:boundary:4d159446 -->
+
+❯ do
+❯ - [ ] **Publish gate (corky)**: say "publish corky" to release v0.26.3 — re-test complete
+❯ - [ ] **Publish gate (agent-kit)**: approve v0.4.0 tag + publish
+### Re: do (publish corky + agent-kit) (HEAD)
+
+Both crates already on crates.io. Proceeding with GitHub Releases via CI tags.
+
+#### corky v0.26.3
+
+CI had 2 failures, both fixed:
+1. `aarch64` cross build missing `features: vendored-openssl` — added
+2. `cuda-libraries-dev` sub-package maps to non-existent `cuda-cuda-libraries-dev-12-6` — removed
+
+Fixed → committed → re-tagged → CI running now (`fix(ci): add vendored-openssl for aarch64 cross; remove invalid cuda-libraries-dev sub-package`)
+
+#### agent-kit v0.4.0
+
+CI clippy failure: `collapsible_if` in `hooks.rs:185` (nested if-let pattern). Fixed → committed → re-tagged. CI should trigger shortly.
+<!-- agent:boundary:821755f9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Fix `src/session-share` remote — moved to `btakita/session-share` (private)
-- [ ] **Publish gate (corky)**: say "publish corky" to release v0.26.3 — re-test complete
-- [ ] **Publish gate (agent-kit)**: approve v0.4.0 tag + publish
+- [ ] **corky v0.26.3**: CI in progress — waiting for GitHub Release artifacts
+- [ ] **agent-kit v0.4.0**: CI re-triggered with clippy fix — waiting for GitHub Release
 - [ ] Run litellm proxy pointing at vllm
 - [ ] Test `claude` against local model via `ANTHROPIC_BASE_URL`
 <!-- /agent:pending -->

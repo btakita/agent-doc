@@ -1060,7 +1060,7 @@ Re-transcribed with 3 speakers (Brian, Robert Ross, Oleg) — 10 Oleg segments i
 - **Transcript updated:** [`tasks/dreamable/transcripts/phone_20260408-180506_4156839775.md`](transcripts/phone_20260408-180506_4156839775.md) now shows all 3 speakers
 
 ❯ Please offer suggestion as far as making my work more visible. I already have git commits. Is there a way to isolate claude sessions for specific agent docs to send to any private services that we run to create visibility?
-### Re: making work more visible (HEAD)
+### Re: making work more visible
 
 You have git commits — that's the durable foundation. Here are the layers on top, ranked by effort:
 
@@ -1102,6 +1102,34 @@ The Dreamable use case maps cleanly: Rob's stated concern is "you ship Monday, l
 2. **Short-term**: wire up the Stop hook to post a daily digest to a Slack channel Rob is in
 3. **Medium-term**: use the ClaudeScore self-hosted instance — you're building it anyway, and Rob gets a stakeholder-friendly view of your work quality over time
 <!-- agent:boundary:29411e41 -->
+
+Slack message to send to Rob re: ClaudeScore status update
+
+### Re: Slack-formatted copy/paste (ClaudeScore update)
+
+Slack uses `*bold*` (not `**bold**`), raw URLs auto-preview, and backtick code renders inline. Here's the ready-to-paste version:
+
+```
+Hey Rob — good talking earlier. Here's where I'm at:
+
+*Status:* Plan and spec are finalized. These are what Claude Code will follow:
+
+• *SPEC:* https://github.com/ClaudeScore/SessionShare/blob/main/SPEC.md
+• *Plan:* https://github.com/ClaudeScore/SessionShare/blob/main/PLAN.md
+
+I'll keep the status column in the spreadsheet updated as I complete items.
+
+*Starting with:*
+• Sprint 1.1: Base app scaffold (Next.js 16 + Supabase local)
+• Sprint 1.2: Rubric v1.0 (17 validators, 4 pillars)
+
+*Still need from you when you get a chance:*
+• Supabase project credentials (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) — building against local Supabase in the meantime
+• Claude API key for Opus scoring (Shimmer Labs account?)
+• Apr 10 scope — all 4 milestones or a subset?
+
+*One thing to clarify:* You mentioned "we're going to do a different thing than we thought" — want to make sure I'm building the right thing. Happy to talk through it on our call tonight.
+```
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

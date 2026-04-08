@@ -261,6 +261,7 @@ pub fn commit(file: &Path) -> Result<()> {
             // Fire post_commit hook for cross-session coordination
             let session_id = crate::frontmatter::read_session_id(file).unwrap_or_default();
             crate::hooks::fire_post_commit(file, &session_id);
+            crate::hooks::fire_doc_event(file, "post_commit");
         }
         Ok(s) => {
             crate::ops_log::log_op(file, &format!(

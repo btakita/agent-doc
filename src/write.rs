@@ -838,6 +838,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                 // Fire post_write hook for cross-session coordination
                 let session_id = frontmatter::read_session_id(file).unwrap_or_default();
                 crate::hooks::fire_post_write(file, &session_id, patches.len());
+                crate::hooks::fire_doc_event(file, "post_write");
                 recover::clear_pending(file)?;
                 return Ok(());
             }

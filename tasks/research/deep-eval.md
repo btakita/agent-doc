@@ -108,7 +108,7 @@ Write tests in `evals/`, hook `deepeval test run evals/` into the existing eval 
 Is DeepEval worth making part of the stack? Can the same analysis be built or is this something that we should have a dependency?
 Is DeepEval worth making part of the stack? Can the same analysis be built or is this something that we should have a dependency?
 
-### Re: Build vs. Dependency (HEAD)
+### Re: Build vs. Dependency
 
 **Short answer:** Useful as an ad-hoc research/exploration tool; not worth adding as a core stack dependency given what's already in place.
 
@@ -133,7 +133,38 @@ If agent-loop expands to evaluate general-purpose agent behavior across many dim
 - Keep the existing custom evals as the primary system
 - Use DeepEval as a reference: study the metric implementations for ideas on improving custom metrics
 - Revisit as a dependency if eval scope grows beyond agent-doc into general LLM output quality across the stack
-<!-- agent:boundary:061fa38f -->
+
+❯ Can DeepEval scoring Ruberics be used to measure the effectiveness of a practitioner's agent harness and prompts?
+❯ How can we know what the expected response is to a given prompt?
+### Re: DeepEval Rubrics for Agent Harness Evaluation (HEAD)
+
+❯ Yes — this is actually one of DeepEval's stronger use cases. **G-Eval** (the custom rubric metric) and **DAG** (decision-tree metric) are designed exactly for this: you define what "good" looks like in natural language criteria, and an LLM scores outputs against them.
+
+❯ For a practitioner's harness/prompts specifically:
+❯ - G-Eval can score "does the agent follow the workflow the harness specifies?" with criteria written as rubric points
+❯ - You can evaluate system prompt effectiveness by running the same user prompt through different system prompts and comparing G-Eval scores
+❯ - Task Completion + Plan Adherence metrics measure whether the harness actually shapes agent behavior toward the intended goal
+
+❯ The limitation: rubric quality determines metric quality. A vague rubric gives a noisy signal. But for well-defined workflows (like agent-doc's write→commit→snapshot cycle), you can write precise rubrics.
+
+### Re: Knowing the Expected Response (HEAD)
+
+❯ This is the core challenge of LLM evaluation — the ground truth problem. There's no single answer; it depends on eval type:
+
+❯ | Approach | How | When to use |
+❯ |---|---|---|
+❯ | **Golden dataset** | Manually curated expected outputs | Narrow, stable tasks; expensive upfront |
+❯ | **LLM-as-judge (reference-free)** | Another LLM scores against rubric criteria, no expected output needed | Most open-ended tasks; G-Eval / DAG path |
+❯ | **Behavioral invariants** | Test properties that must hold, not exact output | Structural constraints (output format, tool must be in allowed set) |
+❯ | **Regression baseline** | Compare to human-approved previous outputs | Catch degradation without needing perfect ground truth |
+❯ | **Task oracle** | Run the output to verify (code compiles/runs, structured output validates schema) | Code gen, JSON output, function calls |
+
+❯ For agent harness evaluation specifically, the most tractable path is **behavioral invariants + LLM-as-judge**:
+❯ - Invariants handle the structural (did the right tool get called? was the response committed?)
+❯ - LLM judge handles the qualitative (was the response relevant? did it follow the plan?)
+
+❯ You never fully know the expected response — you define a quality space, then measure whether outputs fall within it. The more constrained the task, the tighter that space gets.
+<!-- agent:boundary:2462e583 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

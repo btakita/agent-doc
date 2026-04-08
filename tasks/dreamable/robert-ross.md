@@ -7,6 +7,7 @@ links:
   - ./build-party.md
   - ./build-party-course-diagram.md
   - ./robert-ross-granola.md
+  - ../research/git-agent-workflow.md
 ---
 
 ## Status
@@ -991,7 +992,7 @@ Good instinct — it's directly relevant to his stated fear ("you ship Monday, l
 
 This reframes what looked like indecision as evidence of the loyalty itself.
 
-❯ Let's work on the git + agent workflow items. Please create a research task.|
+❯ Let's work on the git + agent workflow items. Please create a research task|.|
 ### Re: git + agent workflow research task
 
 Created [`tasks/research/git-agent-workflow.md`](../research/git-agent-workflow.md).
@@ -1003,11 +1004,16 @@ It covers:
 - **Open research questions** — GitButler vs agent-doc overlap, ClaudeScore git signals, practitioner variability
 
 Key open question worth pursuing: how does GitButler's virtual branch model compare to agent-doc's snapshot/commit approach — and is there a natural integration (sessions as virtual branches)?
-<!-- agent:boundary:af0fb04f -->
+
+❯ Please compact [2026-04-08 15-07-35.mp4](../../../../../Videos/2026-04-08%2015-07-35.mp4)
+### Re: compact video (HEAD)
+
+Compressing `/home/brian/Videos/2026-04-08 15-07-35.mp4` (2.1 GB) → `2026-04-08 15-07-35-compact.mp4` using H.264 CRF 28. Running in background — will complete in a few minutes.
+<!-- agent:boundary:1a8d9d1b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Research git+agent workflow landscape → `tasks/research/git-agent-workflow.md`
+- ffmpeg compression running: `2026-04-08 15-07-35.mp4` → `-compact.mp4`
 <!-- /agent:pending -->

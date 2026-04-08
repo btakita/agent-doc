@@ -127,7 +127,7 @@ export ANTHROPIC_API_KEY=fake
 Then `claude` will use the local model by default. Swap back to Anthropic by unsetting those vars.
 
 ❯ commit + push all submodules
-### Re: commit + push all submodules (HEAD)
+### Re: commit + push all submodules
 
 Done. Committed and pushed:
 
@@ -209,12 +209,31 @@ Done. Committed and pushed:
 | `src/session-share` | Skipped — `ClaudeScore/SessionShare` repo still not found on GitHub |
 
 Parent repo committed + pushed: submodule pointer updates, tasks/, .claude/ skills, evals/, pyproject.toml, README, config.
-<!-- agent:boundary:5d1255b2 -->
+
+❯ do
+❯ - [ ] Fix `src/session-share` remote — `ClaudeScore/SessionShare` not found on GitHub
+❯ - [ ] **Re-test gate**: re-transcribe filevine interview with corky v0.26.2+, verify transcript length
+### Re: do (HEAD)
+
+#### 1. Fix session-share remote
+
+`ClaudeScore` org doesn't exist in your GitHub orgs. Need to choose a path:
+
+1. **Create the org**: github.com/organizations/new → create `ClaudeScore` → I create `SessionShare` repo + push
+2. **Use personal account**: retarget to `btakita/session-share` — I can create + push now
+3. **Use an existing org**: pick from: `rr`, `ctx-core`, `cogov`, `rappstack`, etc.
+
+Which do you want?
+
+#### 2. Re-transcribe filevine interview
+
+Running now (GPU loaded, whisper large-v3). Will update when complete.
+<!-- agent:boundary:7e6a6955 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Fix `src/session-share` remote — `ClaudeScore/SessionShare` not found on GitHub
-- [ ] **Re-test gate**: re-transcribe filevine interview with corky v0.26.2+, verify transcript length
+- [ ] Fix `src/session-share` remote — **blocked**: choose target repo (create `ClaudeScore` org, or use `btakita/session-share`, or another org)
+- [ ] **Re-test gate**: re-transcribing filevine interview with corky v0.26.3 (in progress)
 - [ ] **Publish gate (corky)**: approve v0.26.3 publish after re-test
 - [ ] **Publish gate (agent-kit)**: approve v0.4.0 tag + publish
 - [ ] Run litellm proxy pointing at vllm

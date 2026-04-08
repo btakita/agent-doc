@@ -117,4 +117,4 @@
 	url = git@github.com:btakita/skill-harness.git
 [submodule "src/session-share"]
 	path = src/session-share
-	url = git@github.com:ClaudeScore/SessionShare.git
+	url = git@github.com:btakita/session-share.git

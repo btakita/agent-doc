@@ -166,7 +166,7 @@ Design docs before code · rigorous PR review · "ask forgiveness, not permissio
 Written to: `file:///home/brian/work/btakita/agent-loop/tmp/paxos-summary.html`
 
 One-page reference card — company overview, products table, Bryan Boyer background, tech stack, recent milestones, questions to ask, and your angle. Sized to fit a single browser tab alongside Zoom.
-<!-- agent:boundary:73a2af93 -->
+<!-- agent:boundary:af36c4af -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

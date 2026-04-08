@@ -211,7 +211,7 @@ Rule: after `cargo install --path .`, pause and confirm feature works in a live 
 Plugin v0.2.49 installed ✓. Ready to verify `❯ ` prefix behavior in a live session — type a prompt in an exchange component and run agent-doc to confirm only user lines get `❯ `.
 
 ❯ When I navigate the editor to a non agent doc...the tmux window goes to a 1 pane layout. Why? It should keep the 2 pane layout with the previously selected agent doc.
-### Re: 1-pane collapse on non-agent-doc navigation (HEAD)
+### Re: 1-pane collapse on non-agent-doc navigation
 
 The plugin listens to `FileEditorManagerListener.selectionChanged` (or equivalent). When the active editor switches to a non-agent-doc file, the plugin concludes "no active agent-doc" and tears down the split — collapsing to 1 pane.
 
@@ -220,7 +220,30 @@ The plugin listens to `FileEditorManagerListener.selectionChanged` (or equivalen
 **Fix:** In the plugin's selection-changed handler, instead of closing the pane when the new file isn't an agent-doc, **do nothing** — leave the existing layout intact. The split should only be provisioned (on agent-doc open) or explicitly torn down (on agent-doc close/tab close), not on navigation to other files.
 
 Concretely: remove or guard the `collapse_to_1_pane` / `restore_layout` call in the `selectionChanged` branch that handles non-agent-doc files. The last-claimed pane should persist until the user explicitly closes the agent-doc tab.
-<!-- agent:boundary:6fb1da20 -->
+
+❯ Can agent-doc capture this? agent-doc can stream terminal output + chain of thought using agent:terminal. Would the message in the screenshot be captured?
+❯ ![img_3.png](img_3.png)
+### Re: agent:terminal + Musing status capture (HEAD)
+
+The screenshot shows the Claude Code status bar: **"Musing... 12m 32s ↑ 1.2k tokens"** — Claude's extended thinking indicator.
+
+**Two separate questions:**
+
+**1. Can `agent:terminal` stream terminal output to the document?**
+
+Yes in concept — `agent:terminal` is designed for live process output. An agent running in a tmux pane can pipe stdout/stderr into the document component. Think: `cargo build 2>&1 | agent-doc write <FILE> --stream --component terminal`.
+
+**2. Would the "Musing..." status bar be captured?**
+
+No, not directly. The status bar is a Claude Code terminal UI element rendered via escape sequences (likely using a terminal renderer/status line). It's not stdout — it's written to the terminal's status area as control codes. To capture it you'd need:
+
+- **Terminal screen scraping** (e.g., `tmux capture-pane`) — captures the raw rendered text, including "Musing..." but also the surrounding UI chrome
+- **Claude API integration** — streaming the actual thinking tokens from the API before they're rendered; requires hooking into the API response stream, not the terminal
+
+`agent-doc`'s `agent:terminal` component targets process stdout/stderr. It won't see the status bar unless you first capture it via `tmux capture-pane -p` and pipe that.
+
+**Feasibility:** `tmux capture-pane -p -t <pane>` could snapshot the Claude Code terminal state (including "Musing...") and stream it into an `agent:terminal` component on a timer. Rough, but works for debugging/observability without API changes.
+<!-- agent:boundary:cd9705fa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

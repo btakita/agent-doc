@@ -73,7 +73,7 @@ hooks:
 ```
 
 `post_write` and `post_commit` are schema-ready but call sites in `hooks.rs` are not yet wired — that's a follow-on.
-<!-- agent:boundary:f1dbd018 -->
+<!-- agent:boundary:27a2f31b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

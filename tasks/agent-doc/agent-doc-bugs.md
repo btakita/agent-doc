@@ -1042,7 +1042,7 @@ Deleted the second `### Re: Slack-formatted copy/paste` block (lines after `<!--
 The `patches.isEmpty()` coordinator decision is too thin for FFI — it's a one-liner that each plugin handles in its dispatcher. The FFI-first rule targets non-trivial shared logic (IPC listener, layout validation, busy guards), not trivial dispatch conditions.
 
 The binary-side fix in `write.rs` (don't send `fullContent` when patches are present) is the actual fix. Plugin guards are defense in depth. If `NativePatching` is ever extended to cover the full patch application loop (`normalize_prefix_lines` + component patches + boundary reposition in one FFI call), the fullContent branch collapses entirely — no coordinator needed in the plugin at all. That's the right FFI-first destination, but it's a bigger refactor than this bug warrants.
-<!-- agent:boundary:993fc33c -->
+<!-- agent:boundary:0073221c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

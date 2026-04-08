@@ -977,7 +977,7 @@ Rob already knows about Filevine (he explicitly encouraged you to pursue it). He
 This respects what he said earlier — that his concern was you shipping ClaudeScore on Monday and leaving on Tuesday. If you can address that directly (e.g., what's your realistic timeline on Filevine, what happens if you get an offer mid-project), that's the conversation he actually needs to have.
 
 **On the lucas-huang collaboration:** Don't mention it. It's a side informal arrangement helping someone with recruiter emails using your own tools. It's not material to Rob's question of whether you can commit to Dreamable work. Bringing it up adds noise and could make your situation sound more fractured than it is. The relevant facts are: two small gigs, active interviews — that's sufficient.
-### Re: mentioning loyalty (HEAD)
+### Re: mentioning loyalty
 
 Good instinct — it's directly relevant to his stated fear ("you ship Monday, leave Tuesday"). But framing matters.
 
@@ -990,11 +990,24 @@ Good instinct — it's directly relevant to his stated fear ("you ship Monday, l
 > "One thing I want you to know about me: I'm loyal. When I commit to something, I see it through. Part of why things got stressful last week was that I was holding another interview open until the last minute because I didn't want to abandon our work. That's not always the most efficient approach, but it's who I am."
 
 This reframes what looked like indecision as evidence of the loyalty itself.
-<!-- agent:boundary:c946ec35 -->
+
+❯ Let's work on the git + agent workflow items. Please create a research task.|
+### Re: git + agent workflow research task (HEAD)
+
+Created [`tasks/research/git-agent-workflow.md`](../research/git-agent-workflow.md).
+
+It covers:
+- **GitButler** — virtual branches, $60M, ex-GitHub CEO; the specific tool Rob flagged
+- **Competitive landscape** — GitButler, Bench, claudebin, agent-doc, DeepEval side-by-side
+- **Brian's inclinations** from the SMS conversation
+- **Open research questions** — GitButler vs agent-doc overlap, ClaudeScore git signals, practitioner variability
+
+Key open question worth pursuing: how does GitButler's virtual branch model compare to agent-doc's snapshot/commit approach — and is there a natural integration (sessions as virtual branches)?
+<!-- agent:boundary:9cc18642 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-
+- Research git+agent workflow landscape → `tasks/research/git-agent-workflow.md`
 <!-- /agent:pending -->

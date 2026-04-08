@@ -425,7 +425,7 @@ Run: `agent-doc stream <FILE>`
 The stream loop feeds `"type": "thinking"` chunks to `thinking_buffer`, interleaved with response text in the main buffer. Both flush to their components on the timer interval (default 200ms). You see thinking tokens appearing live in the `agent:log` component as Claude reasons.
 
 **Caveat:** This only works for sessions run *through* `agent-doc stream`. If Claude Code is running independently in another tmux pane (not as an agent-doc stream session), its API stream is not accessible — `tmux capture-pane` is the only option for that case.
-<!-- agent:boundary:fa255a58 -->
+<!-- agent:boundary:05cda9bf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -54,7 +54,7 @@ Template vars: `{{session_id}}`, `{{file}}`, `{{agent}}`, `{{model}}`
 
 **Scope to build now:** `session_start` hook execution in `start.rs`.
 ❯ go
-### Re: go (HEAD)
+### Re: go
 
 Done. Committed to `src/agent-doc` as `feat: document-level session_start hooks via frontmatter`.
 
@@ -76,12 +76,33 @@ hooks:
 
 ❯ do
 ❯ - [ ] Wire `post_write` / `post_commit` events to `fire_doc_hooks` in `hooks.rs`
-<!-- agent:boundary:7d03cae0:agent-doc-feat -->
+### Re: post_write / post_commit wiring (HEAD)
+
+Done. Second commit: `feat: wire post_write/post_commit document-level hooks`.
+
+**Changes:**
+- `hooks.rs` — `fire_doc_hooks` moved here from `start.rs` (correct home); `fire_doc_event(file, event)` added — reads frontmatter, calls `fire_doc_hooks`, best-effort (no-op on missing file or empty hooks)
+- `start.rs` — calls `crate::hooks::fire_doc_hooks` directly (no local copy)
+- `write.rs` — `fire_doc_event(file, "post_write")` after `fire_post_write` on IPC-consumed path
+- `git.rs` — `fire_doc_event(file, "post_commit")` after `fire_post_commit` on successful commit
+
+**Tests added (4 more in hooks.rs):** all vars substituted, noop-for-unknown-event, noop-for-nonexistent-file, noop-when-hooks-empty-frontmatter. Total 12 tests across this feature.
+
+**All three lifecycle events now wired:**
+```yaml
+hooks:
+  session_start:  # fires in start.rs when Claude pane launches
+    - "..."
+  post_write:     # fires in write.rs after IPC-consumed write
+    - "..."
+  post_commit:    # fires in git.rs after successful commit
+    - "..."
+```
+<!-- agent:boundary:015c7c92 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Wire `post_write` / `post_commit` events to `fire_doc_hooks` in `hooks.rs` (in progress)
 - [ ] Bump version + release agent-doc with hooks feature
 <!-- /agent:pending -->

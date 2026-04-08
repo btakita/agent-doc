@@ -1043,7 +1043,7 @@ Transcript saved: [`tasks/dreamable/transcripts/phone_20260408-180506_4156839775
 - Topics: sandbox/AWS setup, firewall rules for Claude Code, real-time work visibility
 
 ❯ Oleg was another speaker on the conversation. Please save the voiceprint.
-### Re: save Oleg's voiceprint (HEAD)
+### Re: save Oleg's voiceprint
 
 No Oleg contact yet and corky doesn't have a native voiceprint-enroll command. Plan:
 1. Re-transcribe `phone_20260408-180506_4156839775.m4a` with `--speakers "Brian,Robert Ross,Oleg"` (3 speakers) to get proper segment timestamps
@@ -1051,13 +1051,18 @@ No Oleg contact yet and corky doesn't have a native voiceprint-enroll command. P
 3. Create Oleg contact stub in `mail/contacts/`
 
 Running now...
-<!-- agent:boundary:ce794a1e -->
+### Re: save Oleg's voiceprint (done) (HEAD)
+
+Re-transcribed with 3 speakers (Brian, Robert Ross, Oleg) — 10 Oleg segments identified. Updated transcript and created contact:
+
+- **Voiceprint:** `mail/contacts/oleg/voiceprint.m4a` — 10 segments concatenated, ~80s, 440K
+- **Contact:** `mail/contacts/oleg/AGENTS.md` — Russian-born US engineer, infrastructure/DevOps, introduced by Rob
+- **Transcript updated:** [`tasks/dreamable/transcripts/phone_20260408-180506_4156839775.md`](transcripts/phone_20260408-180506_4156839775.md) now shows all 3 speakers
+<!-- agent:boundary:d50b81f9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Re-transcribe phone call with 3 speakers (Brian, Robert Ross, Oleg)
-- [ ] Extract Oleg audio segments → voiceprint.m4a
-- [ ] Create Oleg contact
+
 <!-- /agent:pending -->

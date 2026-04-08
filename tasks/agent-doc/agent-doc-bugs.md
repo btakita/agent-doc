@@ -475,7 +475,7 @@ You're right — those `❯ done` lines were correct. You typed `done` at the te
 My previous response was wrong to call them "artifacts of the prefix bug." I misread the edit context.
 
 ❯ release
-### Re: release
+### Re: release (HEAD)
 
 agent-doc v0.31.21 is fully published (crates.io, PyPI, GitHub Releases with cross-platform binaries). Plugin v0.2.50 is built and verified but not attached to the release.
 
@@ -572,14 +572,14 @@ Caveman mode: active.
 Fix noted: `❯ "Merge conflicts..."` → `"Merge conflicts..."`. Correct — `❯ ` should not tag quoted strings, only actual user prompts typed at terminal. Another over-prefix case in `normalize_user_prompts_in_exchange`. Filter missing `"` -prefixed lines.
 
 ❯ release?
-### Re: release (HEAD)
+### Re: release
 
 Fix applied + installed. v0.31.22.
 
 Change: `normalize_user_prompts_in_exchange` skips `"` -prefixed lines. Quoted strings no longer get `❯ ` tag.
 
 Test in live session. Confirm works, then publish (crates.io + PyPI + GitHub Release).
-<!-- agent:boundary:7cb6b7da -->
+<!-- agent:boundary:7cceb64d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

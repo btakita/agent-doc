@@ -220,7 +220,7 @@ The plugin listens to `FileEditorManagerListener.selectionChanged` (or equivalen
 **Fix:** In the plugin's selection-changed handler, instead of closing the pane when the new file isn't an agent-doc, **do nothing** — leave the existing layout intact. The split should only be provisioned (on agent-doc open) or explicitly torn down (on agent-doc close/tab close), not on navigation to other files.
 
 Concretely: remove or guard the `collapse_to_1_pane` / `restore_layout` call in the `selectionChanged` branch that handles non-agent-doc files. The last-claimed pane should persist until the user explicitly closes the agent-doc tab.
-<!-- agent:boundary:2e6d60ee -->
+<!-- agent:boundary:6fb1da20 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

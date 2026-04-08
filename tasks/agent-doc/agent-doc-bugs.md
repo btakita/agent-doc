@@ -581,13 +581,38 @@ Change: `normalize_user_prompts_in_exchange` skips `"` -prefixed lines. Quoted s
 Test in live session. Confirm works, then publish (crates.io + PyPI + GitHub Release).
 
 ❯ /clear
-### Re: /clear (HEAD)
+### Re: /clear
 
 `/clear` is a built-in CLI command — cannot execute from document context. If you meant to reset the Claude Code conversation, run `/clear` directly in the terminal prompt.
-<!-- agent:boundary:964acd08 -->
+
+❯ Add a feature where built-in CLI command are parsed from the diff and run separate of the document context. Is this possible from the agent-doc binary? Does the FFI Plugin need to do this?
+### Re: built-in CLI command execution from document (HEAD)
+
+**Partially possible from agent-doc binary; execution must happen at the skill (Claude) layer — not the binary or FFI plugin.**
+
+**Current state:** Binary already parses slash commands from diffs and emits them in `slash_commands`. The skill routes them: skills → `Skill` tool, built-ins → note + skip.
+
+**What the binary can do:**
+- Already parses/categorizes slash commands from diffs
+- Could split into `skill_commands` + `builtin_commands` (or add `is_builtin: bool` per entry) so the skill doesn't need to re-detect which are built-ins
+
+**What the skill (Claude) can do per built-in:**
+- `/compact` — Claude can execute this: read the compact exchange runbook and perform compaction. Already possible today, just not wired up in the routing.
+- `/clear` — Claude cannot usefully execute mid-session. It would destroy the current conversation context. Best behavior: write a note to the document ("cannot clear mid-session — run at terminal").
+- Unknown built-ins → current behavior (log + skip)
+
+**FFI Plugin:** Wrong layer. It manages document I/O and IDE integration — no mechanism to control the Claude Code process or conversation state.
+
+**Proposed minimal implementation:**
+1. Binary: distinguish built-ins from skill commands in the preflight output (new field or per-entry flag)
+2. Skill: route `builtin_commands` to known handlers — `/compact` → compact exchange runbook, `/clear` → document note, others → skip
+<!-- agent:boundary:22af91c7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Add `builtin_commands` field (or `is_builtin` flag) to preflight JSON output
+- [ ] Wire `/compact` in skill routing → compact exchange runbook
+- [ ] Wire `/clear` in skill routing → write document note
 <!-- /agent:pending -->

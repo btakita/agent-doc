@@ -53,7 +53,7 @@ Template vars: `{{session_id}}`, `{{file}}`, `{{agent}}`, `{{model}}`
 `hooks` with shell commands covers this without a separate plugin system. Named/reusable plugins (`~/.config/agent-doc/plugins.toml` lookup) can layer on top later if needed.
 
 **Scope to build now:** `session_start` hook execution in `start.rs`.
-<!-- agent:boundary:2a893001 -->
+<!-- agent:boundary:172d8550 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -192,7 +192,7 @@ Regression test added: `normalize_user_prompts_agent_response_not_prefixed` — 
 **Bug 2 (prefix stripped from user prompts):** Was a consequence of Bug 1. The overeager normalization saved an incorrect snapshot (with `❯ ` on agent lines). A subsequent write using the baseline (which never had those `❯ ` additions) produced content without them. Fixing Bug 1 corrects the snapshot, preventing this cascade.
 
 v0.31.21 released: crates.io ✓, GitHub Release ✓, `cargo install` ✓.
-<!-- agent:boundary:9326c0d4 -->
+<!-- agent:boundary:df872922 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1114,7 +1114,7 @@ Additionally: the VSCode extension was missing `normalize_prefix_lines` support 
 
 Install JetBrains plugin from disk to pick up the `PatchWatcher.kt` fix.
 ❯ Rule: agent-doc should **never** strip out the `❯ ` prefix.
-### Re: ❯ prefix rule + restoration (HEAD)
+### Re: ❯ prefix rule + restoration
 
 ❯ Rule recorded: agent-doc must never strip `❯ ` from user input lines.
 
@@ -1122,8 +1122,8 @@ Install JetBrains plugin from disk to pick up the `PatchWatcher.kt` fix.
 
 ❯ The next diff should show no spurious `❯ ` removals.
 ❯ We **still** have `❯ ` being stripped out in git uncommitted changes. Why?
-❯ Also, this last response patch was not committed. Why?
-### Re: still stripped + not committed (HEAD)
+❯ Also, this last response patches are not being committed. Why?
+### Re: still stripped + not committed
 
 **`❯ ` still stripped:** The JetBrains plugin running in IDEA is the OLD 0.2.52 — built before the `PatchWatcher.kt` fix (which changes `find()` → `findAll().lastOrNull()`). The updated `build/distributions/agent-doc-jetbrains-0.2.52.zip` has the fix, but IDEA is still loading the prior build. The git diff shows `❯ ` in the snapshot (binary normalizes correctly) vs `text` in the file (old plugin doesn't restore it). Installing the rebuilt 0.2.52 from disk will fix this.
 
@@ -1132,12 +1132,26 @@ Install JetBrains plugin from disk to pick up the `PatchWatcher.kt` fix.
 **Duplicate response:** The IPC timeout left the patch file in `.agent-doc/patches/`. The binary also fell back to a disk write. When the plugin eventually consumed the patch, it appended the response again via component patch → duplicate. Removed the duplicate via Edit above.
 
 **Fix for commit skip:** After `agent-doc write --stream`, always run `agent-doc commit` regardless of exit code. The commit is idempotent.
-<!-- agent:boundary:f22fe191 -->
+
+❯ Increment the JB plugin version.
+❯ rule: any change to a plugin **must** cause a version bump.
+### Re: JB 0.2.53 bump + partial rule (HEAD)
+
+**JetBrains 0.2.53 built:** `gradle.properties` bumped, `buildPlugin signPlugin` succeeded. Committed: `chore: bump JetBrains 0.2.53 (last-boundary normalization fix)`.
+
+Plugin at: `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.53.zip`
+
+Install via IDEA → Settings → Plugins → gear → "Install Plugin from Disk...".
+
+**Rule (truncated — completing from context):** Any change to a plugin requires a version bump. Noted as a convention going forward.
+
+**On the remaining `❯ ` loss (`do`/`done` lines):** The old 0.2.52 plugin (running in IDEA) uses the first boundary, so standalone `do`/`done` lines between the first and last historical boundary aren't restored. Installing 0.2.53 (last-boundary fix) will resolve these.
+<!-- agent:boundary:eef15d00 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Install rebuilt JetBrains 0.2.52 from disk (has last-boundary PatchWatcher.kt fix)
-- [ ] Verify ❯  prefix restored after plugin update
+- [ ] Install JetBrains 0.2.53 from disk
+- [ ] Verify ❯  prefix fully restored after plugin update
 <!-- /agent:pending -->

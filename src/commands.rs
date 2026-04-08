@@ -67,6 +67,7 @@ fn all_commands() -> Vec<CommandInfo> {
     cmds.push(cmd("/agent-doc outline", "<FILE>", "Display markdown outline with token counts"));
     cmds.push(cmd("/agent-doc resync", "", "Validate sessions.json, remove stale entries"));
     cmds.push(cmd("/agent-doc compact", "<FILE>", "Archive old exchanges to reduce document size"));
+    cmds.push(cmd("/agent-doc compact exchange", "<FILE>", "Compact the exchange component of a document"));
     cmds.push(cmd("/agent-doc convert", "<FILE>", "Convert append-mode document to template mode"));
     cmds.push(cmd("/agent-doc mode", "<FILE>", "Get or set the document mode"));
     cmds.push(cmd("/agent-doc write", "<FILE>", "Append assistant response (reads from stdin)"));
@@ -136,6 +137,13 @@ fn all_commands() -> Vec<CommandInfo> {
     let mut plugin_cmds = discover_plugin_commands();
     plugin_cmds.retain(|c| !static_names.contains(&c.name));
     cmds.extend(plugin_cmds);
+
+    // --- Dynamic: user-invocable skills from .claude/skills/ (relative to CWD) ---
+    let all_names: std::collections::HashSet<String> =
+        cmds.iter().map(|c| c.name.clone()).collect();
+    let mut skill_cmds = discover_skill_commands();
+    skill_cmds.retain(|c| !all_names.contains(&c.name));
+    cmds.extend(skill_cmds);
 
     cmds
 }
@@ -245,6 +253,84 @@ fn parse_command_frontmatter(content: &str) -> (String, String) {
     }
 
     (description, args)
+}
+
+/// Scan `.claude/skills/<name>/SKILL.md` in the current directory and return one
+/// `CommandInfo` per skill with `user-invocable: true` in YAML frontmatter.
+/// Command name: `/<skill-name>` (directory name).
+fn discover_skill_commands() -> Vec<CommandInfo> {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let mut cmds = Vec::new();
+
+    let skills_dir = PathBuf::from(".claude/skills");
+    if !skills_dir.is_dir() {
+        return cmds;
+    }
+
+    let Ok(entries) = fs::read_dir(&skills_dir) else {
+        return cmds;
+    };
+
+    let mut discovered: Vec<CommandInfo> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if !path.is_dir() {
+                return None;
+            }
+            let name = path.file_name()?.to_string_lossy().to_string();
+            if name.is_empty() || name.starts_with('.') {
+                return None;
+            }
+            let skill_md = path.join("SKILL.md");
+            if !skill_md.is_file() {
+                return None;
+            }
+            let content = fs::read_to_string(&skill_md).unwrap_or_default();
+            let (description, args, user_invocable) = parse_skill_frontmatter(&content);
+            if !user_invocable || description.is_empty() {
+                return None;
+            }
+            Some(CommandInfo {
+                name: format!("/{name}"),
+                args,
+                description,
+            })
+        })
+        .collect();
+
+    discovered.sort_by(|a, b| a.name.cmp(&b.name));
+    cmds.extend(discovered);
+    cmds
+}
+
+/// Parse `description:`, `argument-hint:`, and `user-invocable:` from YAML frontmatter.
+/// Returns `(description, args, user_invocable)`.
+fn parse_skill_frontmatter(content: &str) -> (String, String, bool) {
+    let mut description = String::new();
+    let mut args = String::new();
+    let mut user_invocable = false;
+
+    let Some(rest) = content.strip_prefix("---") else {
+        return (description, args, user_invocable);
+    };
+    let end = rest.find("\n---").unwrap_or(rest.len());
+    let frontmatter = &rest[..end];
+
+    for line in frontmatter.lines() {
+        if let Some(val) = line.strip_prefix("description:") {
+            description = val.trim().trim_matches('"').trim_matches('\'').to_string();
+        } else if let Some(val) = line.strip_prefix("argument-hint:") {
+            args = val.trim().trim_matches('"').trim_matches('\'').to_string();
+        } else if let Some(val) = line.strip_prefix("user-invocable:") {
+            let v = val.trim();
+            user_invocable = v == "true";
+        }
+    }
+
+    (description, args, user_invocable)
 }
 
 fn cmd(name: &str, args: &str, description: &str) -> CommandInfo {

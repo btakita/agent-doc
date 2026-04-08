@@ -546,7 +546,7 @@ Six separate user lines, all systematically stripped. That's not a user accident
 1. The compact exchange command should use `agent-doc compact` (binary, verbatim copy) — NOT a manual LLM rewrite via `<!-- patch:exchange -->`
 2. The write-back response should never include unmodified user lines — only new agent-authored content
 3. If the diff shows `❯ ` systematically stripped from user lines, the agent should treat this as a write-back bug, not "formatting cleanup"
-<!-- agent:boundary:07a90695 -->
+<!-- agent:boundary:7d5371b8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

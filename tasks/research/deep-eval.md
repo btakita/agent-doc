@@ -164,7 +164,7 @@ If agent-loop expands to evaluate general-purpose agent behavior across many dim
 ❯ - LLM judge handles the qualitative (was the response relevant? did it follow the plan?)
 
 ❯ You never fully know the expected response — you define a quality space, then measure whether outputs fall within it. The more constrained the task, the tighter that space gets.
-<!-- agent:boundary:2462e583 -->
+<!-- agent:boundary:9f67db85 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

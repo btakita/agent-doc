@@ -990,7 +990,7 @@ Good instinct — it's directly relevant to his stated fear ("you ship Monday, l
 > "One thing I want you to know about me: I'm loyal. When I commit to something, I see it through. Part of why things got stressful last week was that I was holding another interview open until the last minute because I didn't want to abandon our work. That's not always the most efficient approach, but it's who I am."
 
 This reframes what looked like indecision as evidence of the loyalty itself.
-<!-- agent:boundary:fbf1b717 -->
+<!-- agent:boundary:c946ec35 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

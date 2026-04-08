@@ -106,7 +106,7 @@ Uploaded files (7 files, ~2.3 GB):
 Still need your input on these — are any of them sources for older YouTube videos (Dog-fooding Parts 1-3, Lazily, Sub-1KB Framework)?
 
 ❯ please compress [2026-04-07 16-00-17.mp4](../../../../Videos/2026-04-07%2016-00-17.mp4)
-### Re: Compress 2026-04-07 16-00-17.mp4 (HEAD)
+### Re: Compress 2026-04-07 16-00-17.mp4
 
 File details: 3.1 GB, 71 min, 1920×1080 @ 30fps, 6 Mbps h264.
 
@@ -118,7 +118,17 @@ ffmpeg -i "2026-04-07 16-00-17.mp4" -c:v libx264 -crf 25 -preset medium -c:a aac
 ```
 
 Will notify when done. Once complete, verify quality and delete the original if it looks good.
-<!-- agent:boundary:76934b5d -->
+### Re: Compression complete (HEAD)
+
+**3.1 GB → 340 MB** (89% reduction, 529 kbps avg).
+
+Output: `2026-04-07 16-00-17-compressed.mp4`
+
+Check it looks good, then delete the original:
+```
+rm ~/Videos/2026-04-07\ 16-00-17.mp4
+```
+<!-- agent:boundary:f59289d5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -126,7 +136,7 @@ Will notify when done. Once complete, verify quality and delete the original if 
 <!-- agent:pending patch=replace -->
 - [x] Delete raw source videos already on YouTube (~46 GB)
 - [x] Delete epN-light.mp4 uploaded files (1.9 GB)
-- [ ] Compression in progress: 2026-04-07 16-00-17.mp4→ compressed (background, ~10-20 min)
+- [ ] Verify compressed 2026-04-07 16-00-17-compressed.mp4, delete original if good
 - [ ] Identify remaining 8 unmapped videos (03-09, 03-12, 03-15, 03-16, 03-18, 03-23)
 - [ ] Compress or process unmapped videos if keeping
 - [ ] Backup strategy decision (YouTube-only vs external)

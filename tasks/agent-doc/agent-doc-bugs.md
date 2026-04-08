@@ -628,7 +628,7 @@ This makes sense: agent-doc slash commands in the document become self-referenti
 - `/compact` → built-in, can't execute internally, note to user
 - `/agent-doc compact exchange <file>` → invoke compact exchange runbook via Skill
 - `/agent-doc compact <file>` → invoke full document compact via Skill
-<!-- agent:boundary:6630aedd -->
+<!-- agent:boundary:5c7c5035 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

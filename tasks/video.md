@@ -128,7 +128,7 @@ Check it looks good, then delete the original:
 ```
 rm ~/Videos/2026-04-07\ 16-00-17.mp4
 ```
-<!-- agent:boundary:f59289d5 -->
+<!-- agent:boundary:0de051b0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

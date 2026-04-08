@@ -475,7 +475,7 @@ You're right — those `❯ done` lines were correct. You typed `done` at the te
 My previous response was wrong to call them "artifacts of the prefix bug." I misread the edit context.
 
 ❯ release
-### Re: release (HEAD)
+### Re: release
 
 agent-doc v0.31.21 is fully published (crates.io, PyPI, GitHub Releases with cross-platform binaries). Plugin v0.2.50 is built and verified but not attached to the release.
 
@@ -579,11 +579,15 @@ Fix applied + installed. v0.31.22.
 Change: `normalize_user_prompts_in_exchange` skips `"` -prefixed lines. Quoted strings no longer get `❯ ` tag.
 
 Test in live session. Confirm works, then publish (crates.io + PyPI + GitHub Release).
-<!-- agent:boundary:c2c00aef -->
+
+❯ /clear
+### Re: /clear (HEAD)
+
+`/clear` is a built-in CLI command — cannot execute from document context. If you meant to reset the Claude Code conversation, run `/clear` directly in the terminal prompt.
+<!-- agent:boundary:f1b4c38a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Upload plugin v0.2.50 signed zip to GitHub release v0.31.21 — done
 <!-- /agent:pending -->

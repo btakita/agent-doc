@@ -181,7 +181,7 @@ Done. Both the binary and plugin now handle prefix normalization through the IPC
 ❯ Also, there is an uncommitted git content which has the `❯ ` prefix removed for the user prompt. This should not happen for the user prompt.
 
 ❯ Note in this file, I reset the uncommitted change to remove the `❯ ` prefix. Use tasks/research/deep-eval.md as the baseline
-### Re: overeager `❯ ` — root cause + fix (HEAD)
+### Re: overeager `❯ ` — root cause + fix
 
 **Root cause:** `apply_patches_with_overrides` repositions the boundary to the **end** of the exchange during its pre-patch step. So in `content_ours`, *everything* before the boundary — including the agent's new response — was in the "user region". Diffing `snapshot → content_ours user_region` marked agent response lines as Insert → they got `❯ `.
 
@@ -192,12 +192,22 @@ Regression test added: `normalize_user_prompts_agent_response_not_prefixed` — 
 **Bug 2 (prefix stripped from user prompts):** Was a consequence of Bug 1. The overeager normalization saved an incorrect snapshot (with `❯ ` on agent lines). A subsequent write using the baseline (which never had those `❯ ` additions) produced content without them. Fixing Bug 1 corrects the snapshot, preventing this cascade.
 
 v0.31.21 released: crates.io ✓, GitHub Release ✓, `cargo install` ✓.
-<!-- agent:boundary:df872922 -->
+
+❯ Please do not release upstream until I can fully test <- Add to release runbook.
+### Re: release runbook updated (HEAD)
+
+Added **step 5: manual testing gate** to both:
+
+- `.agent/runbooks/prerelease.md` (Common section, after `make check`)
+- `src/agent-doc/CLAUDE.md` Release Process (step 4→5, pushes publish steps to 6+)
+
+Rule: after `cargo install --path .`, pause and confirm feature works in a live session before publishing to crates.io/PyPI/GitHub Releases.
+<!-- agent:boundary:30563c31 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Install plugin v0.2.49 in IDEA (Settings → Plugins → gear → Install from Disk → `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.49-signed.zip`)
-- [ ] Verify `❯ ` prefix correct behavior in live session after plugin install
+- [ ] Verify `❯ ` prefix correct behavior in live session
 <!-- /agent:pending -->

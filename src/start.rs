@@ -152,6 +152,9 @@ pub fn run(file: &Path) -> Result<()> {
         ),
     );
 
+    // Fire document-level session_start hooks
+    fire_doc_hooks(&fm.hooks, "session_start", file, &session_id, &fm.agent, &fm.model);
+
     // Run claude in a restart loop — pane never dies
     let mut first_run = true;
     let mut restart_count: u32 = 0;
@@ -262,4 +265,102 @@ pub fn run(file: &Path) -> Result<()> {
     log_event(&mut session_log, "session_end");
     eprintln!("Session ended for {}", file.display());
     Ok(())
+}
+
+/// Execute document-level hooks for the given event.
+///
+/// Template vars `{{session_id}}`, `{{file}}`, `{{agent}}`, `{{model}}` are substituted
+/// before each command is passed to `sh -c`. Best-effort: failures log to stderr only.
+pub fn fire_doc_hooks(
+    hooks: &std::collections::HashMap<String, Vec<String>>,
+    event: &str,
+    file: &Path,
+    session_id: &str,
+    agent: &Option<String>,
+    model: &Option<String>,
+) {
+    let Some(cmds) = hooks.get(event) else { return };
+    if cmds.is_empty() { return; }
+
+    let file_str = file.to_string_lossy();
+    let agent_str = agent.as_deref().unwrap_or("");
+    let model_str = model.as_deref().unwrap_or("");
+
+    for cmd_template in cmds {
+        let cmd = cmd_template
+            .replace("{{session_id}}", session_id)
+            .replace("{{file}}", &file_str)
+            .replace("{{agent}}", agent_str)
+            .replace("{{model}}", model_str);
+
+        eprintln!("[hooks] {} running: {}", event, cmd);
+        match std::process::Command::new("sh").args(["-c", &cmd]).output() {
+            Ok(output) if output.status.success() => {
+                eprintln!("[hooks] {} ok", event);
+            }
+            Ok(output) => {
+                eprintln!(
+                    "[hooks] {} exited with code {:?}: {}",
+                    event,
+                    output.status.code(),
+                    String::from_utf8_lossy(&output.stderr).trim()
+                );
+            }
+            Err(e) => {
+                eprintln!("[hooks] {} failed to spawn: {}", event, e);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn fire_doc_hooks_substitutes_template_vars() {
+        let tmp = std::env::temp_dir().join(format!("agent-doc-hook-test-{}.txt", std::process::id()));
+        let cmd = format!("echo '{{{{session_id}}}}:{{{{agent}}}}:{{{{model}}}}' > {}", tmp.display());
+        let mut hooks: HashMap<String, Vec<String>> = HashMap::new();
+        hooks.insert("session_start".to_string(), vec![cmd]);
+        fire_doc_hooks(
+            &hooks,
+            "session_start",
+            Path::new("/doc/test.md"),
+            "abc-123",
+            &Some("claude".to_string()),
+            &Some("opus".to_string()),
+        );
+        let output = std::fs::read_to_string(&tmp).unwrap_or_default();
+        assert!(output.contains("abc-123"), "session_id not substituted: {}", output);
+        assert!(output.contains("claude"), "agent not substituted: {}", output);
+        assert!(output.contains("opus"), "model not substituted: {}", output);
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn fire_doc_hooks_noop_for_missing_event() {
+        let hooks: HashMap<String, Vec<String>> = HashMap::new();
+        fire_doc_hooks(&hooks, "session_start", Path::new("/doc/test.md"), "id", &None, &None);
+    }
+
+    #[test]
+    fn fire_doc_hooks_noop_for_empty_event() {
+        let mut hooks: HashMap<String, Vec<String>> = HashMap::new();
+        hooks.insert("session_start".to_string(), vec![]);
+        fire_doc_hooks(&hooks, "session_start", Path::new("/doc/test.md"), "id", &None, &None);
+    }
+
+    #[test]
+    fn fire_doc_hooks_handles_none_agent_model() {
+        let tmp = std::env::temp_dir().join(format!("agent-doc-hook-none-test-{}.txt", std::process::id()));
+        let cmd = format!("printf '{{{{agent}}}}:{{{{model}}}}' > {}", tmp.display());
+        let mut hooks: HashMap<String, Vec<String>> = HashMap::new();
+        hooks.insert("session_start".to_string(), vec![cmd]);
+        fire_doc_hooks(&hooks, "session_start", Path::new("/doc/test.md"), "id", &None, &None);
+        let output = std::fs::read_to_string(&tmp).unwrap_or_default();
+        assert_eq!(output, ":", "expected empty agent+model, got: {}", output);
+        let _ = std::fs::remove_file(&tmp);
+    }
 }

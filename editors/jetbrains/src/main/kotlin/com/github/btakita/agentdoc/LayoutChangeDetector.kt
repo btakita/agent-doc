@@ -140,8 +140,18 @@ class LayoutChangeDetector(private val project: Project) {
             if (disposed.get() || project.isDisposed) return@invokeLater
             try {
                 val layout = LayoutDetector.detectEditorLayout(project)
-                val hash = layout?.columns?.map { it.files.sorted() }?.toString()
-                    ?: "single"
+                // Hash on structural shape only (column count + window count), NOT file contents.
+                // File-content changes are caused by navigation between files and should NOT
+                // trigger a sync — that would collapse the 2-pane layout when the user navigates
+                // to a non-agent-doc file. Only structural changes (splits opened/closed, tab
+                // drags that change window count) should trigger LayoutChangeDetector sync.
+                // EditorTabSyncListener.selectionChanged handles .md file navigation separately.
+                val windowCount = FileEditorManagerEx.getInstanceEx(project).windows.size
+                val hash = if (layout != null) {
+                    "cols=${layout.columns.size},wins=$windowCount"
+                } else {
+                    "single,wins=$windowCount"
+                }
 
                 val prev = lastLayoutHash.getAndSet(hash)
                 if (hash == prev) return@invokeLater // No change

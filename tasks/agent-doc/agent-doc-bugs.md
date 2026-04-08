@@ -21,9 +21,9 @@ Fix https://github.com/btakita/agent-doc/actions/runs/24093596675
 
 The `publish` job fails with:
 
-```
+❯ ```
 invalid-publisher: valid token, but no corresponding publisher
-```
+❯ ```
 
 OIDC token was issued correctly, but PyPI has no matching trusted publisher record for `btakita/agent-doc/.github/workflows/pypi.yml` + environment `pypi`.
 
@@ -38,9 +38,9 @@ Add a new **GitHub Actions** trusted publisher:
 - **Environment:** `pypi`
 
 Then re-run the failed `publish` job:
-```bash
+❯ ```bash
 gh run rerun 24093596675 --failed --repo btakita/agent-doc
-```
+❯ ```
 
 **Note:** The trusted publisher might have been set up for a different workflow filename (e.g., `publish.yml`) in a prior setup. Check the existing publishers list on PyPI before adding a new one.
 
@@ -103,7 +103,7 @@ In both cases, `agent-doc write` already receives the diff (or can compute it fr
 
 ❯ done
 - [ ] Fix PyPI trusted publisher for `pypi.yml` + environment `pypi`, then rerun CI
-do
+❯ do
 - [ ] Add SKILL.md note: patch:exchange must not echo user input (append mode)
 - [ ] Implement `❯ ` prefix normalization for user-added exchange lines in `agent-doc write` (both append + replace modes)
 
@@ -141,7 +141,7 @@ Added `normalize_user_prompts_in_exchange(content, snapshot)` to `write.rs`. Cal
 
 **IPC note:** Disk write path fully normalized (editor file shows `❯ `). IPC path normalizes the snapshot only — editor shows prefix on next disk cycle. Full IPC-side normalization needs plugin support (TODO).
 
-do
+❯ do
 - [ ] IPC-side ❯  normalization (plugin support needed)
 
 Use FFI plugin if possible
@@ -258,7 +258,7 @@ Yes — agent-doc has `StreamCapture` mode with `max_lines` support. It's not a 
 
 **Frontmatter config:**
 ```yaml
----
+❯ ---
 agent_doc_write: crdt
 stream_config:
   target: console       # component to write into (default: "console")
@@ -267,8 +267,8 @@ stream_config:
   interval: 200         # poll interval ms (default: 200)
   thinking: false       # include chain-of-thought blocks (default: false)
   thinking_target: log  # route thinking to separate component (optional)
----
-```
+❯ ---
+❯ ```
 
 **How it works:**
 - `agent-doc watch` polls the claimed tmux pane via `tmux capture-pane`
@@ -289,38 +289,82 @@ Yes — via `StreamCapture` mode. `agent-doc watch` polls the claimed tmux pane 
 
 **Document setup:**
 ```yaml
----
+❯ ---
 agent_doc_write: crdt
 stream_config:
   target: console    # writes into &lt;!-- agent:console --&gt; (default)
   max_lines: 50      # keep last N lines (default: 50)
   strip_ansi: true   # strip escape codes (default: true)
   interval: 200      # poll interval ms (default: 200)
----
-```
+❯ ---
+❯ ```
 
 Add to the document body:
-```markdown
+❯ ```markdown
 &lt;!-- agent:console --&gt;
 &lt;!-- /agent:console --&gt;
-```
+❯ ```
 
 **Would "Musing..." be captured?**
 
 Still no — same reason as before. The Claude Code status bar is a terminal UI element (escape sequences in the status line), not stdout. `agent:console` captures pane content via `tmux capture-pane`, which renders the visible screen — so it *would* show "Musing..." if the pane being captured is the Claude Code pane. But you'd also get the surrounding chrome and any prior output above the status bar.
 
 ❯ Please rewrite the gist using `agent:console` instead of `agent:terminal`.
-### Re: gist updated — agent:console (HEAD)
+### Re: gist updated — agent:console
 
 Gist rewritten with `agent:console` throughout: https://gist.github.com/btakita/ab31879717d229d50c4b13e7031717e3
 
 Removed all `agent:terminal` references. Updated title to "agent:console — streaming terminal output to a document". Content now accurately reflects `StreamCapture` mode writing into `&lt;!-- agent:console --&gt;`.
-<!-- agent:boundary:9100eede -->
+
+done
+- [ ] Verify `❯ ` prefix correct behavior in live session (type prompt, run agent-doc, confirm only user lines prefixed — not agent responses)
+
+❯ do
+- [ ] Fix: keep 2-pane layout when navigating to non-agent-doc files (plugin: don't collapse on selectionChanged if no active agent-doc — only collapse on tab close)
+Does claude code provide any way to hook into capturing the status indicators?
+❯ ```
+✻ Orbiting… (35s · ↓ 313 tokens · thought for 4s)
+  ⎿  Tip: Run claude --continue or claude --resume to resume a conversation
+❯ ```
+❯ done
+❯ - [ ] Verify `❯ ` prefix correct behavior in live session (type prompt, run agent-doc, confirm only user lines prefixed — not agent responses)
+
+❯ do
+❯ - [ ] Fix: keep 2-pane layout when navigating to non-agent-doc files (plugin: don't collapse on selectionChanged if no active agent-doc — only collapse on tab close)
+### Re: done + layout fix (HEAD)
+
+**`❯ ` prefix verification:** Marked done.
+
+**2-pane layout fix — root cause:**
+
+`LayoutChangeDetector.checkAndSync()` computed its layout hash from file names (which files are selected in each editor window). When navigating to a non-`.md` file, the selected file in that window changes → hash changes → `SyncLayoutAction.syncLayout()` fires → it sees only 1 visible `.md` file → calls `agent-doc sync --col single-file` → collapses to 1 pane.
+
+`EditorTabSyncListener.selectionChanged` was already correct (it returns early for non-`.md` files). The culprit was `LayoutChangeDetector`.
+
+**Fix:** Changed the layout hash in `LayoutChangeDetector.checkAndSync()` to track **structure only** (column count + window count), not file contents:
+
+```kotlin
+val windowCount = FileEditorManagerEx.getInstanceEx(project).windows.size
+val hash = if (layout != null) {
+    "cols=${layout.columns.size},wins=$windowCount"
+} else {
+    "single,wins=$windowCount"
+}
+❯ ```
+
+- Navigation to non-`.md` file: window count unchanged, column count unchanged → hash unchanged → no sync → 2-pane layout preserved ✓
+- Split opened/closed: window count changes → hash changes → sync fires ✓
+- Tab dragged between splits (changing column count): hash changes → sync fires ✓
+- `.md` navigation: handled by `EditorTabSyncListener.selectionChanged` independently ✓
+
+Plugin v0.2.50 built: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.50-signed.zip`
+
+**Install:** IDEA → Settings → Plugins → gear → "Install Plugin from Disk..." → select `agent-doc-jetbrains-0.2.50-signed.zip`.
+<!-- agent:boundary:80f49323 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Verify `❯ ` prefix correct behavior in live session (type prompt, run agent-doc, confirm only user lines prefixed — not agent responses)
-- [ ] Fix: keep 2-pane layout when navigating to non-agent-doc files (plugin: don't collapse on selectionChanged if no active agent-doc — only collapse on tab close)
+- [ ] Install plugin v0.2.50 and verify 2-pane layout persists when navigating to non-agent-doc files
 <!-- /agent:pending -->

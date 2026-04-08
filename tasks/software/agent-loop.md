@@ -127,7 +127,7 @@ export ANTHROPIC_API_KEY=fake
 Then `claude` will use the local model by default. Swap back to Anthropic by unsetting those vars.
 
 ❯ commit + push all submodules
-### Re: commit + push all submodules (HEAD)
+### Re: commit + push all submodules
 
 Done. Committed and pushed:
 
@@ -143,7 +143,30 @@ Done. Committed and pushed:
 | `mail` | sync: update conversations, contacts, and corky config | 1109 files |
 
 Parent repo updated with all 8 submodule pointer updates and pushed.
-<!-- agent:boundary:13eef0c8 -->
+
+❯ release the submodules
+### Re: release the submodules (HEAD)
+
+Prepped and installed — **pausing for your testing confirmation before publishing upstream**.
+
+#### corky 0.26.1
+- Bumped `Cargo.toml` to 0.26.1
+- `VERSIONS.md` updated
+- `make check` passed (all tests green)
+- Installed locally: `cargo install --path . --features transcribe-cuda,diarize`
+- **Waiting on:** please test `corky transcribe` in a live session, then say "publish corky" to proceed
+
+#### agent-kit 0.4.0
+- `VERSIONS.md` updated with 0.3.1 + 0.4.0 entries
+- `cargo clippy` + tests passed (43 tests)
+- **Waiting on:** confirm OK to tag + publish
+
+#### Not released (no new features since last tag)
+- `src/chromium-bridge` — CLAUDE.md edit only
+- `src/agent-memories/rules/runbooks/skill-harness` — CI fix only, no version bump needed
+- `src/eval-runner` — internal tool, not published to crates.io
+- `philosophy`, `resume`, `mail` — content repos, no release target
+<!-- agent:boundary:6ad97644 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
@@ -154,4 +177,6 @@ Parent repo updated with all 8 submodule pointer updates and pushed.
 - [ ] Run litellm proxy pointing at vllm
 - [ ] Test `claude` against local model via `ANTHROPIC_BASE_URL`
 - [ ] Fix `src/session-share` remote — `ClaudeScore/SessionShare` not found on GitHub
+- [ ] **Manual test gate**: test `corky transcribe`, then approve to publish corky v0.26.1
+- [ ] **Publish gate**: approve agent-kit v0.4.0 tag + publish
 <!-- /agent:pending -->

@@ -199,7 +199,7 @@ The answer depends on what "claudescore" means architecturally — but for a sco
 - **Production / regression tracking**: client sends traces to the claudescore server; server runs the evals, stores history, surfaces regressions across versions
 
 The `@observe()` tracing decorator already separates instrumentation from evaluation — it captures spans locally and flushes them to a backend. That's the right seam: instrument on client, evaluate on server.
-<!-- agent:boundary:be6addb3 -->
+<!-- agent:boundary:319ba9c3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

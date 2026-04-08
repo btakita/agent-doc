@@ -647,7 +647,7 @@ Skill instructions should change from "built-ins → skip" to: **try `Skill` too
 The plugin's autocomplete uses a static list of Claude Code built-in commands — it doesn't enumerate dynamically-loaded skills. Skills (`/caveman`, `/agent-doc`, etc.) are user-defined and registered in `~/.claude/skills/`; the plugin has no mechanism to discover them at autocomplete time.
 
 Fix: plugin autocomplete needs to read the available skills list (Claude Code skill registry or skills directory) and include them alongside built-ins. Feature gap in the plugin.
-<!-- agent:boundary:081fedcb -->
+<!-- agent:boundary:a8fafcd6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

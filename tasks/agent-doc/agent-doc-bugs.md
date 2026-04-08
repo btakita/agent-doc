@@ -432,7 +432,7 @@ Please append the last patch to the gist.
 Appended the last exchange (Claude API thinking token streaming Q&A) to the gist: https://gist.github.com/btakita/ab31879717d229d50c4b13e7031717e3
 
 Why was the initial answer incorrectly answer that agent-doc does not support thinking in the patches?
-### Re: why the initial "No" was wrong (HEAD)
+### Re: why the initial "No" was wrong
 
 The initial answer was framed around **Claude Code hooks** (does CC expose hook events for status indicators?) and correctly said "No" to that narrow question — there are no hook events for "Musing/Orbiting" state changes.
 
@@ -443,7 +443,12 @@ The accurate framing should have been:
 > **`agent-doc stream` supports thinking capture natively** via `stream_config.thinking: true`. For the "agent:console" use case, run the Claude session through `agent-doc stream` and route thinking tokens to a component. This is the intended path — no scraping needed.
 
 The confusion: I mentally categorized the question as "Claude Code hooks" rather than "what does agent-doc support?" Since the user was looking at the Claude Code status bar and asking about capturing it, I anchored on "Claude Code hooks don't support this" instead of "agent-doc stream already does thinking capture."
-<!-- agent:boundary:51708345 -->
+
+Please append to the gist.
+### Re: gist updated (HEAD)
+
+Appended the "why the initial No was wrong" exchange to the gist: https://gist.github.com/btakita/ab31879717d229d50c4b13e7031717e3
+<!-- agent:boundary:82be7698 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

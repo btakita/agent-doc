@@ -565,12 +565,21 @@ It fires when all three conditions are true:
 **Why does it happen at all?** The `mergeOrReload` path handles cases where the IPC write bypasses the Document API and the user has concurrent unsaved edits. Under normal operation (native lib loaded, no true conflict), the FFI CRDT merge handles this silently. The notification is the last-resort fallback.
 
 **Most likely trigger:** The agent-doc session wrote its response while `brian-takita.md` was open with unsaved edits, and the native lib happened to not be initialized yet (first session after IDE start, or plugin hot-reload). The git merge also failed because the agent response overlapped with your in-progress edits in the same file region.
-### Re: /caveman + quote fix (HEAD)
+### Re: /caveman + quote fix
 
 Caveman mode: active.
 
 Fix noted: `❯ "Merge conflicts..."` → `"Merge conflicts..."`. Correct — `❯ ` should not tag quoted strings, only actual user prompts typed at terminal. Another over-prefix case in `normalize_user_prompts_in_exchange`. Filter missing `"` -prefixed lines.
-<!-- agent:boundary:2bfe8938 -->
+
+❯ release?
+### Re: release (HEAD)
+
+Fix applied + installed. v0.31.22.
+
+Change: `normalize_user_prompts_in_exchange` skips `"` -prefixed lines. Quoted strings no longer get `❯ ` tag.
+
+Test in live session. Confirm works, then publish (crates.io + PyPI + GitHub Release).
+<!-- agent:boundary:7cb6b7da -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

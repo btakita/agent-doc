@@ -149,6 +149,8 @@
 //!   exits with code 75 and leaves a patch file for deferred plugin pickup.
 //! - `normalize_user_prompts_new_line_gets_prefix`: user adds "Hello" to exchange
 //!   → normalized content has "❯ Hello".
+//! - `normalize_user_prompts_agent_response_not_prefixed`: agent response lines in content_ours
+//!   must NOT get `❯ ` prefix — only user-added lines (snapshot→baseline diff) are prefixed.
 //! - `normalize_user_prompts_blank_line_skipped`: blank line added → no prefix.
 //! - `normalize_user_prompts_heading_skipped`: line starting with `#` → no prefix.
 //! - `normalize_user_prompts_already_prefixed_skipped`: line already starts with `❯` → unchanged.
@@ -247,30 +249,40 @@ pub fn extract_normalization_targets(before: &str, after: &str) -> Vec<String> {
 
 /// Add `❯ ` prefix to user-added lines in exchange components.
 ///
-/// Compares the exchange content in `content` against `snapshot`. Lines that
-/// appear in `content`'s exchange but not `snapshot`'s exchange (i.e., user-typed
-/// since the last agent cycle) and occur before the boundary marker are prefixed
-/// with `❯ `.
+/// Compares the exchange content in `baseline` against `snapshot` to identify
+/// lines the user typed this cycle (Insert lines in the diff). Those lines are
+/// then prefixed with `❯ ` in `content` (content_ours = baseline + agent patches).
+///
+/// Using `baseline` (not `content_ours`) for the diff is critical: after
+/// `apply_patches_with_overrides`, the boundary marker is repositioned to the end
+/// of the exchange. Everything before it — including the agent's new response —
+/// is the "user region". Diffing `snapshot → content_ours user_region` would
+/// incorrectly mark agent response lines as Insert and prefix them. Diffing
+/// `snapshot → baseline` identifies only genuine user additions.
 ///
 /// Skips lines that: are blank, already start with `❯`, start with `<!--`,
-/// or start with `#` (headings / agent responses). Non-destructive if no exchange
-/// component is present or no new lines are found.
+/// or start with `#`. Non-destructive if no exchange component is present or
+/// no new lines are found.
 ///
 /// Both disk and IPC write paths call this after computing `content_ours` so the
 /// snapshot and merged document consistently show `❯ ` on user input.
-pub fn normalize_user_prompts_in_exchange(content: &str, snapshot: &str) -> String {
-    use similar::{ChangeTag, TextDiff};
-
-    let Ok(components) = component::parse(content) else {
+pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapshot: &str) -> String {
+    let Ok(content_comps) = component::parse(content) else {
         return content.to_string();
     };
+    let baseline_comps = component::parse(baseline).unwrap_or_default();
     let snap_comps = component::parse(snapshot).unwrap_or_default();
 
-    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
+    let Some(exchange) = content_comps.iter().find(|c| c.name == "exchange") else {
         return content.to_string();
     };
 
-    let snap_exchange_content = snap_comps
+    let baseline_exc = baseline_comps
+        .iter()
+        .find(|c| c.name == "exchange")
+        .map(|e| e.content(baseline))
+        .unwrap_or("");
+    let snap_exc = snap_comps
         .iter()
         .find(|c| c.name == "exchange")
         .map(|e| e.content(snapshot))
@@ -278,8 +290,7 @@ pub fn normalize_user_prompts_in_exchange(content: &str, snapshot: &str) -> Stri
 
     let exc_content = exchange.content(content);
 
-    // Find the boundary marker — user input is BEFORE the boundary.
-    // Everything at or after the boundary was written by the agent this cycle.
+    // Find the boundary marker in content_ours — user region is before, agent region after.
     let boundary_prefix = "<!-- agent:boundary:";
     let boundary_pos = {
         let mut pos = exc_content.len();
@@ -289,39 +300,68 @@ pub fn normalize_user_prompts_in_exchange(content: &str, snapshot: &str) -> Stri
                 pos = offset;
                 break;
             }
-            offset += line.len() + 1; // +1 for '\n'
+            offset += line.len() + 1;
         }
         pos
     };
+    let content_user_region = &exc_content[..boundary_pos];
+    let content_agent_region = &exc_content[boundary_pos..];
 
-    let user_region = &exc_content[..boundary_pos];
-    let agent_region = &exc_content[boundary_pos..];
+    // Strip boundary markers from baseline and snapshot for diffing.
+    // Preserves trailing newline if present in the original.
+    let strip = |s: &str| -> String {
+        let filtered: Vec<&str> = s.lines()
+            .filter(|l| !l.trim().starts_with(boundary_prefix))
+            .collect();
+        let mut out = filtered.join("\n");
+        if s.ends_with('\n') && !out.is_empty() {
+            out.push('\n');
+        }
+        out
+    };
+    let baseline_stripped = strip(baseline_exc);
+    let snap_stripped = strip(snap_exc);
 
-    // Diff: snapshot exchange → user_region.
-    // Equal lines = already in snapshot (old content, may already have ❯).
-    // Insert lines = new user input this cycle → candidates for ❯ prefix.
-    let diff = TextDiff::from_lines(snap_exchange_content, user_region);
-    let mut normalized_user = String::new();
+    // Diff snapshot → baseline to find user-added lines (not agent lines).
+    use similar::{ChangeTag, TextDiff};
+    let diff = TextDiff::from_lines(snap_stripped.as_str(), baseline_stripped.as_str());
+    let mut user_added = std::collections::HashSet::<String>::new();
     for change in diff.iter_all_changes() {
-        match change.tag() {
-            ChangeTag::Equal => normalized_user.push_str(change.value()),
-            ChangeTag::Insert => {
-                let line = change.value();
-                let trimmed = line.trim();
-                let should_prefix = !trimmed.is_empty()
-                    && !trimmed.starts_with('❯')
-                    && !trimmed.starts_with("<!-- ")
-                    && !trimmed.starts_with('#');
-                if should_prefix {
-                    normalized_user.push_str("❯ ");
-                }
-                normalized_user.push_str(line);
+        if change.tag() == ChangeTag::Insert {
+            let line = change.value().trim_end_matches('\n');
+            let trimmed = line.trim();
+            if !trimmed.is_empty()
+                && !trimmed.starts_with('❯')
+                && !trimmed.starts_with("<!-- ")
+                && !trimmed.starts_with('#')
+            {
+                user_added.insert(line.to_string());
             }
-            ChangeTag::Delete => {} // Removed from snapshot — exclude from output
         }
     }
 
-    let new_exc_content = format!("{}{}", normalized_user, agent_region);
+    if user_added.is_empty() {
+        return content.to_string();
+    }
+
+    // Apply ❯  prefix to user-added lines in content_user_region.
+    // Agent response lines (not in user_added) pass through unchanged.
+    let mut normalized_user = String::new();
+    for line in content_user_region.lines() {
+        if user_added.contains(line) {
+            normalized_user.push_str("❯ ");
+        }
+        normalized_user.push_str(line);
+        normalized_user.push('\n');
+    }
+    if !content_user_region.is_empty() && !content_user_region.ends_with('\n') {
+        normalized_user.truncate(normalized_user.len() - 1);
+    }
+    if content_user_region.is_empty() {
+        normalized_user.clear();
+    }
+
+    let new_exc_content = format!("{}{}", normalized_user, content_agent_region);
     exchange.replace_content(content, &new_exc_content)
 }
 
@@ -753,7 +793,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             let normalize_prefix_lines: Vec<String> =
                 if let Ok(Some(ref snap)) = snapshot::load(file) {
                     let before = content_ours.clone();
-                    content_ours = normalize_user_prompts_in_exchange(&content_ours, snap);
+                    content_ours = normalize_user_prompts_in_exchange(&content_ours, base, snap);
                     extract_normalization_targets(&before, &content_ours)
                 } else {
                     vec![]
@@ -888,7 +928,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     // Normalize user input in exchange: add ❯  prefix to user-added lines.
     // Load snapshot to identify which lines are new (user-typed this cycle).
     if let Ok(Some(snap)) = snapshot::load(file) {
-        content_ours = normalize_user_prompts_in_exchange(&content_ours, &snap);
+        content_ours = normalize_user_prompts_in_exchange(&content_ours, base, &snap);
     }
 
     // Acquire advisory lock
@@ -2611,18 +2651,39 @@ mod tests {
     #[test]
     fn normalize_user_prompts_new_line_gets_prefix() {
         let snapshot = "<!-- agent:exchange patch=append -->\nOld content.\n<!-- /agent:exchange -->\n";
+        // baseline = user added "Hello" but agent hasn't responded yet
+        let baseline = "<!-- agent:exchange patch=append -->\nOld content.\nHello\n<!-- /agent:exchange -->\n";
+        // content_ours = baseline + agent response appended (boundary at end after pre-patch)
         let content = "<!-- agent:exchange patch=append -->\nOld content.\nHello\n<!-- agent:boundary:abc123 -->\n### Re: response\n<!-- /agent:exchange -->\n";
-        let result = normalize_user_prompts_in_exchange(content, snapshot);
+        let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
         assert!(result.contains("❯ Hello"), "user line should get ❯  prefix: {}", result);
         assert!(result.contains("Old content."), "old content should be preserved");
         assert!(result.contains("### Re: response"), "agent response should be preserved");
+        assert!(!result.contains("❯ ###"), "agent heading should not get prefix: {}", result);
+    }
+
+    #[test]
+    fn normalize_user_prompts_agent_response_not_prefixed() {
+        // Regression: agent response lines in content_ours (before boundary) must NOT get ❯  prefix.
+        // Before the fix, apply_patches_with_overrides moves the boundary to the end of exchange,
+        // so the agent's response lines ended up in the "user region" and were incorrectly prefixed.
+        let snapshot = "<!-- agent:exchange patch=append -->\nOld.\n<!-- /agent:exchange -->\n";
+        // baseline: user added "My question"
+        let baseline = "<!-- agent:exchange patch=append -->\nOld.\nMy question\n<!-- /agent:exchange -->\n";
+        // content_ours: boundary at end (after pre-patch), agent response before it
+        let content = "<!-- agent:exchange patch=append -->\nOld.\nMy question\nAgent answer here.\n<!-- agent:boundary:xyz -->\n<!-- /agent:exchange -->\n";
+        let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
+        assert!(result.contains("❯ My question"), "user question should get prefix: {}", result);
+        assert!(!result.contains("❯ Agent answer"), "agent response should NOT get prefix: {}", result);
+        assert!(result.contains("Agent answer here."), "agent response should be preserved: {}", result);
     }
 
     #[test]
     fn normalize_user_prompts_blank_line_skipped() {
         let snapshot = "<!-- agent:exchange patch=append -->\nOld.\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\nOld.\n\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\nOld.\n\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
-        let result = normalize_user_prompts_in_exchange(content, snapshot);
+        let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
         // blank line should not get prefix
         assert!(!result.contains("❯ \n"), "blank line should not be prefixed: {}", result);
     }
@@ -2630,16 +2691,18 @@ mod tests {
     #[test]
     fn normalize_user_prompts_heading_skipped() {
         let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\n### Re: answer\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\n### Re: answer\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
-        let result = normalize_user_prompts_in_exchange(content, snapshot);
+        let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
         assert!(!result.contains("❯ ###"), "heading should not get prefix: {}", result);
     }
 
     #[test]
     fn normalize_user_prompts_already_prefixed_skipped() {
         let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\n❯ Already prefixed\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\n❯ Already prefixed\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
-        let result = normalize_user_prompts_in_exchange(content, snapshot);
+        let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
         assert!(!result.contains("❯ ❯"), "should not double-prefix: {}", result);
         assert!(result.contains("❯ Already prefixed"), "prefix should be preserved");
     }
@@ -2647,8 +2710,9 @@ mod tests {
     #[test]
     fn normalize_user_prompts_existing_content_unchanged() {
         let snapshot = "<!-- agent:exchange patch=append -->\n❯ Previous question\n### Re: answer\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\n❯ Previous question\n### Re: answer\nNew question\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\n❯ Previous question\n### Re: answer\nNew question\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
-        let result = normalize_user_prompts_in_exchange(content, snapshot);
+        let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
         // Previous question already prefixed — should not double-prefix
         assert!(!result.contains("❯ ❯"), "should not double-prefix existing content: {}", result);
         // New question should get prefix
@@ -2658,8 +2722,9 @@ mod tests {
     #[test]
     fn normalize_user_prompts_no_exchange_passthrough() {
         let content = "No exchange here.\n";
+        let baseline = "No exchange here.\n";
         let snapshot = "";
-        let result = normalize_user_prompts_in_exchange(content, snapshot);
+        let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
         assert_eq!(result, content, "document without exchange should pass through unchanged");
     }
 }

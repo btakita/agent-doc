@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.21
+
+- **Fix overeager `❯ ` prefix on agent response lines (write.rs):** `normalize_user_prompts_in_exchange` now takes a `baseline` parameter. User-added lines are identified by diffing `snapshot → baseline` (not `snapshot → content_ours user_region`). After `apply_patches_with_overrides`, the boundary moves to the end of exchange — so content_ours' "user region" incorrectly included agent response lines. The fix diffs against baseline (pre-agent state), ensuring only genuine user additions get `❯ `. New regression test: `normalize_user_prompts_agent_response_not_prefixed`.
+
 ## 0.31.20
 
 - **`❯ ` prefix normalization for exchange user prompts (write.rs):** After each agent cycle, new user-typed lines in `patch=append` exchange components are prefixed with `❯ ` to visually distinguish user input from agent responses. Implemented via `similar` diff of snapshot vs `content_ours`; only Insert lines before the boundary marker are prefixed. `normalize_user_prompts_in_exchange()` and `extract_normalization_targets()` added. 6 tests.

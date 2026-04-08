@@ -161,12 +161,34 @@ Design docs before code · rigorous PR review · "ask forgiveness, not permissio
 5. Biggest technical challenge this year?
 
 ❯ Please write the summary to a file that I can open in the browser.
-### Re: Browser summary (HEAD)
+### Re: Browser summary
 
 Written to: `file:///home/brian/work/btakita/agent-loop/tmp/paxos-summary.html`
 
 One-page reference card — company overview, products table, Bryan Boyer background, tech stack, recent milestones, questions to ask, and your angle. Sized to fit a single browser tab alongside Zoom.
-<!-- agent:boundary:af36c4af -->
+
+❯ Does Paxos have a physical reserve of Gold?
+❯ Does Paxos have a reserve for other currencies?
+### Re: Gold reserves and currency backing (HEAD)
+
+**PAXG — physical gold**
+
+Yes. Each PAXG token is backed 1:1 by one fine troy ounce of a 400 oz London Good Delivery gold bar held in Brink's vaults in London. Paxos Trust Company is the custodian. Token holders can look up their specific bar (serial number, weight, vault location) on-chain. Independent auditors verify the vault regularly.
+
+**Stablecoin reserves (no fractional reserve)**
+
+Paxos is a trust company, not a bank — they cannot lend out funds. Every token is fully collateralized 1:1 at all times.
+
+| Token | Reserve composition |
+|-------|---------------------|
+| **USDP** | Cash + short-duration U.S. Treasuries, segregated accounts at FDIC-insured banks / Federal Reserve |
+| **PYUSD** | Same structure — Paxos issues and manages reserves, PayPal is the brand |
+| **USDG** | USD deposits + Treasuries |
+
+Monthly public attestations by independent accountants for USDP and PYUSD.
+
+**No other currency reserves** — all stablecoins are USD-denominated. PAXG is the only non-USD asset they tokenize (gold). No EUR, GBP, or multi-currency stablecoins currently under the Paxos brand (Membrane Finance, their EU acquisition, handles MiCA-compliant EUR stablecoin territory).
+<!-- agent:boundary:64673b0c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

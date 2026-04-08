@@ -1029,11 +1029,16 @@ Transcript saved: [`tasks/dreamable/transcripts/2026-04-08-robert-ross.md`](tran
 
 - 1862 segments, 46:34 runtime, transcribed at 126.9x realtime on RTX 5090
 - Speakers: Brian + Robert Ross (diarized)
-<!-- agent:boundary:f1f58afb -->
+
+transcribe + diarize /home/brian/work/btakita/agent-loop/mail/contacts/robert-ross/recordings/phone_20260408-180506_4156839775.m4a
+### Re: transcribe + diarize phone recording (HEAD)
+
+Transcribing `phone_20260408-180506_4156839775.m4a` (480 KB). Running now...
+<!-- agent:boundary:c0a2ffb8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-
+- [ ] Transcription in progress: `phone_20260408-180506_4156839775.m4a`
 <!-- /agent:pending -->

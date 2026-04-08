@@ -443,7 +443,7 @@ The accurate framing should have been:
 > **`agent-doc stream` supports thinking capture natively** via `stream_config.thinking: true`. For the "agent:console" use case, run the Claude session through `agent-doc stream` and route thinking tokens to a component. This is the intended path — no scraping needed.
 
 The confusion: I mentally categorized the question as "Claude Code hooks" rather than "what does agent-doc support?" Since the user was looking at the Claude Code status bar and asking about capturing it, I anchored on "Claude Code hooks don't support this" instead of "agent-doc stream already does thinking capture."
-<!-- agent:boundary:a7a96dde -->
+<!-- agent:boundary:51708345 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

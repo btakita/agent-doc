@@ -1016,7 +1016,7 @@ Compressing `/home/brian/Videos/2026-04-08 15-07-35.mp4` (2.1 GB) → `2026-04-0
 - **Compact:** 123 MB (94% reduction)
 - **Duration:** 46:34, H.264 1080p / AAC stereo
 - **Path:** `/home/brian/Videos/2026-04-08 15-07-35-compact.mp4`
-<!-- agent:boundary:fba3ca1b -->
+<!-- agent:boundary:bc88add3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

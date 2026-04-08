@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-1-page summary ready — call with Bryan Boyer, Paxos
+1-page HTML summary written — tmp/paxos-summary.html
 <!-- /agent:status -->
 
 ## Exchange
@@ -121,7 +121,7 @@ This actually pairs well with AI-assisted development: agents handle the mechani
 
 ---
 
-## 1-Page Call Summary (HEAD)
+## 1-Page Call Summary
 
 **PAXOS** | Regulated blockchain infrastructure | Founded 2012, NY
 
@@ -159,7 +159,14 @@ Design docs before code · rigorous PR review · "ask forgiveness, not permissio
 3. Rust expansion roadmap beyond trading?
 4. AI tooling policy for engineers?
 5. Biggest technical challenge this year?
-<!-- agent:boundary:74e234cc -->
+
+❯ Please write the summary to a file that I can open in the browser.
+### Re: Browser summary (HEAD)
+
+Written to: `file:///home/brian/work/btakita/agent-loop/tmp/paxos-summary.html`
+
+One-page reference card — company overview, products table, Bryan Boyer background, tech stack, recent milestones, questions to ask, and your angle. Sized to fit a single browser tab alongside Zoom.
+<!-- agent:boundary:73a2af93 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

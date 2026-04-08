@@ -869,7 +869,7 @@ This is in the boundary-stripping path (before inserting a fresh 8-hex-char boun
 | `extension.ts` | 808 | `[a-f0-9]+` → `[a-z0-9][a-z0-9:-]*` |
 
 After those are in: bump JB to 0.2.51, VSCode to 0.2.4.
-<!-- agent:boundary:e9a42643 -->
+<!-- agent:boundary:1cd936e2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

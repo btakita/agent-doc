@@ -425,14 +425,32 @@ This is a patch-level change. Ready to bump to v0.26.3 and release, or bundle wi
 
 **CI in progress:** Release workflow running ([24142052779](https://github.com/btakita/corky/actions/runs/24142052779)) — builds cross-platform binaries and creates GitHub Release. PyPI publish triggers automatically once the Release is created (pypi.yml fires on `release: [published]`).
 
-gh action errors https://github.com/btakita/corky/actions/runs/24142052779
-<!-- agent:boundary:84e766d8 -->
+❯ gh action errors https://github.com/btakita/corky/actions/runs/24142052779
+### Re: CI failures — two root causes found and fixed (HEAD)
+
+**aarch64 OpenSSL:**
+
+Root cause: The cross-rs container (`ghcr.io/cross-rs/aarch64-unknown-linux-gnu`) has `PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig/` pre-set, but that directory has no `openssl.pc` (no arm64 OpenSSL dev files in the default image). `vendored-openssl` builds failed because `openssl-src` was unable to produce a working arm64 binary in ~1.5s (the fast failure confirmed it never compiled from source).
+
+Fix:
+- `Cross.toml`: use `dpkg --add-architecture arm64` + `libssl-dev:arm64` — installs `openssl.pc` into the arm64 pkgconfig path the container already searches
+- `release.yml` cross build: remove hardcoded `--features vendored-openssl` (use `matrix.features` like the cargo step — aarch64 entry has no features, so it builds without vendored)
+
+**CUDA build:**
+
+Root cause: Full CUDA toolkit (no `sub-packages`) installs `nvidia-dkms-560-open` which tries to build a kernel module. Azure CI kernel (6.17.0-1008-azure) doesn't have matching headers → DKMS build fails.
+
+Fix:
+- `sub-packages: '["nvcc", "cudart-dev", "cuda-libraries-dev"]'` — installs only compiler + dev headers, no DKMS/driver
+
+Committed `fa4ff87`, retagged v0.26.3. New Release run queued: [24144164805](https://github.com/btakita/corky/actions/runs/24144164805)
+<!-- agent:boundary:12c71bdb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Monitor CI release run 24142052779 — confirm GitHub Release + PyPI publish succeed
+- [ ] Monitor CI release run 24144164805 — confirm both aarch64 and CUDA builds pass
 - [ ] Verify sheet sharing / GCP test users
 - [ ] Re-test sheet read
 <!-- /agent:pending -->

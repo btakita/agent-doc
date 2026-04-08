@@ -1018,16 +1018,22 @@ Compressing `/home/brian/Videos/2026-04-08 15-07-35.mp4` (2.1 GB) → `2026-04-0
 - **Path:** `/home/brian/Videos/2026-04-08 15-07-35-compact.mp4`
 
 transcribe + diarize [2026-04-08 15-07-35-compact.mp4](../../../../../Videos/2026-04-08%2015-07-35-compact.mp4): Brian + robert-ross
-### Re: transcribe + diarize (HEAD)
+### Re: transcribe + diarize
 
 Running `corky transcribe` with diarization on `2026-04-08 15-07-35-compact.mp4` (46:34, speakers: Brian + Robert Ross). GPU transcription in background — will complete in a few minutes.
 
 Output will be saved to `tasks/dreamable/transcripts/2026-04-08-robert-ross.md` when done.
-<!-- agent:boundary:b70374df -->
+### Re: transcribe + diarize (done) (HEAD)
+
+Transcript saved: [`tasks/dreamable/transcripts/2026-04-08-robert-ross.md`](transcripts/2026-04-08-robert-ross.md)
+
+- 1862 segments, 46:34 runtime, transcribed at 126.9x realtime on RTX 5090
+- Speakers: Brian + Robert Ross (diarized)
+<!-- agent:boundary:129fbd80 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Transcription in progress: `2026-04-08 15-07-35-compact.mp4` → `tasks/dreamable/transcripts/2026-04-08-robert-ross.md`
+
 <!-- /agent:pending -->

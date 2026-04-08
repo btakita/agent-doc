@@ -512,7 +512,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         if (lines.isEmpty()) return doc
         val openTag = Regex("""<!-- agent:exchange(\s[^>]*)? -->""")
         val closeTag = "<!-- /agent:exchange -->"
-        val boundaryTag = Regex("""<!-- agent:boundary:[a-f0-9]+ -->""")
+        val boundaryTag = Regex("""<!-- agent:boundary:[a-z0-9][a-z0-9:-]* -->""")
 
         val openMatch = openTag.find(doc) ?: return doc
         val closeIdx = doc.indexOf(closeTag, openMatch.range.last)
@@ -548,7 +548,7 @@ class PatchWatcher(private val project: Project) : Disposable {
     private fun findBoundaryInComponent(doc: String, component: String): String? {
         val openPattern = Regex("""<!-- agent:${Regex.escape(component)}(\s[^>]*)? -->""")
         val closeTag = "<!-- /agent:$component -->"
-        val boundaryPattern = Regex("""<!-- agent:boundary:([a-f0-9-]+) -->""")
+        val boundaryPattern = Regex("""<!-- agent:boundary:([a-z0-9][a-z0-9:-]*) -->""")
 
         val openMatch = openPattern.find(doc) ?: return null
         val contentStart = openMatch.range.last + 1
@@ -855,7 +855,7 @@ class PatchWatcher(private val project: Project) : Disposable {
     private fun repositionBoundaryToEnd(doc: String, component: String): String? {
         val openPattern = Regex("""<!-- agent:${Regex.escape(component)}(\s[^>]*)? -->""")
         val closeTag = "<!-- /agent:$component -->"
-        val boundaryPattern = Regex("""<!-- agent:boundary:([a-f0-9-]+) -->""")
+        val boundaryPattern = Regex("""<!-- agent:boundary:([a-z0-9][a-z0-9:-]*) -->""")
 
         val codeRanges = findCodeBlockRanges(doc)
 

@@ -155,6 +155,7 @@
 //! - `normalize_user_prompts_heading_skipped`: line starting with `#` → no prefix.
 //! - `normalize_user_prompts_already_prefixed_skipped`: line already starts with `❯` → unchanged.
 //! - `normalize_user_prompts_existing_content_unchanged`: lines from snapshot → unchanged (no double-prefix).
+//! - `normalize_user_prompts_restores_prefix_lost_in_file`: snapshot has `❯ do`, baseline (file) has `do` → restored to `❯ do`.
 //! - `normalize_user_prompts_no_exchange_passthrough`: document without exchange → returned unchanged.
 
 use anyhow::{Context, Result};
@@ -1335,6 +1336,12 @@ pub fn try_ipc(
             socket_payload["normalize_prefix_lines"] = serde_json::Value::Array(
                 lines.iter().map(|l| serde_json::Value::String(l.clone())).collect()
             );
+            // Include full normalized content so plugin can replace entire document
+            // when normalize_prefix_lines approach fails (e.g. boundary regex mismatch).
+            // The plugin's fullContent path guarantees ❯  prefixes reach the editor file.
+            if let Some(ours) = content_ours {
+                socket_payload["fullContent"] = serde_json::Value::String(ours.to_string());
+            }
         }
         match crate::ipc_socket::send_message(&project_root, &socket_payload) {
             Ok(Some(_ack)) => {
@@ -1412,6 +1419,11 @@ pub fn try_ipc(
         ipc_payload["normalize_prefix_lines"] = serde_json::Value::Array(
             lines.iter().map(|l| serde_json::Value::String(l.clone())).collect()
         );
+        // Include full normalized content so plugin can replace entire document
+        // when normalize_prefix_lines approach fails (e.g. boundary regex mismatch).
+        if let Some(ours) = content_ours {
+            ipc_payload["fullContent"] = serde_json::Value::String(ours.to_string());
+        }
     }
 
     // Log IPC write details for debugging cross-contamination
@@ -2747,5 +2759,21 @@ mod tests {
         let snapshot = "";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
         assert_eq!(result, content, "document without exchange should pass through unchanged");
+    }
+
+    #[test]
+    fn normalize_user_prompts_restores_prefix_lost_in_file() {
+        // Regression: snapshot has ❯ do but the editor file (baseline) has do without prefix.
+        // This happens when the IPC normalization fails to update the editor file.
+        // The binary must restore ❯  so the snapshot stays correct and the
+        // next IPC write delivers fullContent with the correct prefix.
+        let snapshot = "<!-- agent:exchange patch=append -->\n❯ done\n❯ do\n- [ ] task\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\n❯ done\ndo\n- [ ] task\n<!-- /agent:exchange -->\n";
+        let content = "<!-- agent:exchange patch=append -->\n❯ done\ndo\n- [ ] task\n<!-- agent:boundary:abc123:doc -->\n<!-- /agent:exchange -->\n";
+        let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
+        assert!(result.contains("❯ do"), "❯  prefix must be restored when snapshot had it but file lost it: {}", result);
+        assert!(!result.contains("\ndo\n"), "bare do line must not remain without prefix: {}", result);
+        // ❯ done must not be double-prefixed
+        assert!(!result.contains("❯ ❯"), "no double-prefix: {}", result);
     }
 }

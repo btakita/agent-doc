@@ -805,7 +805,7 @@ class PatchWatcher implements vscode.Disposable {
         let content = doc.substring(contentStart, closeIdx);
 
         // Remove all existing boundary markers
-        content = content.replace(/<!-- agent:boundary:[a-f0-9]+ -->\n?/g, '');
+        content = content.replace(/<!-- agent:boundary:[a-z0-9][a-z0-9:-]* -->\n?/g, '');
 
         // Generate a fresh boundary ID (8 hex chars)
         const id = Array.from({ length: 8 }, () =>

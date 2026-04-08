@@ -579,7 +579,7 @@ Fix applied + installed. v0.31.22.
 Change: `normalize_user_prompts_in_exchange` skips `"` -prefixed lines. Quoted strings no longer get `❯ ` tag.
 
 Test in live session. Confirm works, then publish (crates.io + PyPI + GitHub Release).
-<!-- agent:boundary:59972a6e -->
+<!-- agent:boundary:c2c00aef -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

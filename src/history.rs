@@ -321,9 +321,11 @@ pub fn log(file: &Path) -> Result<()> {
     }
 
     // Get commits that touched this file
+    // Use NUL-delimited fields so spaces in dates/subjects don't break parsing.
+    // Format: <hash>\0<date>\0<subject>\n
     let output = Command::new("git")
         .current_dir(&git_root)
-        .args(["log", "--format=%H %ai %s", "--", &rel_path])
+        .args(["log", "--format=%H%x00%ai%x00%s", "--", &rel_path])
         .output()
         .context("failed to run git log")?;
 
@@ -331,25 +333,27 @@ pub fn log(file: &Path) -> Result<()> {
         bail!("git log failed for {}", file.display());
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let lines: Vec<&str> = stdout.lines().collect();
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let entries: Vec<[&str; 3]> = stdout
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(3, '\0');
+            let hash = parts.next()?;
+            let date = parts.next()?;
+            let subject = parts.next()?;
+            Some([hash, date, subject])
+        })
+        .collect();
 
-    if lines.is_empty() {
+    if entries.is_empty() {
         eprintln!("No git history found for {}", file.display());
         return Ok(());
     }
 
-    println!("{:<12} {:<26} {:<30} TAG", "COMMIT", "DATE", "SUBJECT");
+    println!("{:<12} {:<32} {:<30} TAG", "COMMIT", "DATE", "SUBJECT");
     println!("{}", "-".repeat(90));
 
-    for line in &lines {
-        let parts: Vec<&str> = line.splitn(3, ' ').collect();
-        if parts.len() < 3 {
-            continue;
-        }
-        let commit = parts[0];
-        let date = parts[1];
-        let subject = parts[2];
+    for [commit, date, subject] in &entries {
         let short = &commit[..commit.len().min(12)];
         let tag = tag_map.get(short).map(|s| s.as_str()).unwrap_or("");
         let subj_display = if subject.len() > 30 {
@@ -357,7 +361,7 @@ pub fn log(file: &Path) -> Result<()> {
         } else {
             subject.to_string()
         };
-        println!("{:<12} {:<26} {:<30} {}", short, date, subj_display, tag);
+        println!("{:<12} {:<32} {:<30} {}", short, date, subj_display, tag);
     }
 
     Ok(())

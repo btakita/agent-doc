@@ -838,7 +838,7 @@ The normalization gap:
 All 480 tests pass. Binary installed. This fix will take effect on the next write cycle for this document.
 
 **What changes next cycle:** The IPC will send `fullContent = content_ours` (with `❯ do` restored) to the plugin. The plugin writes it to disk. The snapshot and file will converge.
-<!-- agent:boundary:c5064f86 -->
+<!-- agent:boundary:918ea0aa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

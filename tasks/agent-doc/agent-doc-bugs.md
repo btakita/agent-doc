@@ -715,7 +715,7 @@ On compaction, write the pre-compact state to a branch (`agent-doc-archive`) as 
 **Recommended: Option A** — least friction. Auto-tagging during `compact` is one `git tag` call; reading archives uses standard git. Option B adds nice UX on top but is secondary.
 
 **One edge case:** documents with long paths hash to opaque snapshot filenames — the tag makes the document identity explicit. Tag should use the document's canonical short name, not the hash.
-<!-- agent:boundary:344dc46d -->
+<!-- agent:boundary:91b3506d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

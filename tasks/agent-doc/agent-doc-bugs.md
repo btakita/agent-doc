@@ -245,12 +245,39 @@ No, not directly. The status bar is a Claude Code terminal UI element rendered v
 **Feasibility:** `tmux capture-pane -p -t <pane>` could snapshot the Claude Code terminal state (including "Musing...") and stream it into an `agent:terminal` component on a timer. Rough, but works for debugging/observability without API changes.
 
 ❯ Please create a github gist (gist.github.com) with the last prompt + answer. Include the `❯ ` prefix.
-### Re: gist created (HEAD)
+### Re: gist created
 
 https://gist.github.com/btakita/ab31879717d229d50c4b13e7031717e3
 
 Contains the last prompt (`❯ ` prefixed) + answer from the agent:terminal / Musing capture exchange.
-<!-- agent:boundary:1100803c -->
+
+Does agent-doc have a element to stream terminal output...with max_lines=50 lines being the default truncation?
+### Re: agent:terminal / stream capture — yes, with max_lines=50 default (HEAD)
+
+Yes — agent-doc has `StreamCapture` mode with `max_lines` support. It's not a document component per se; it's a **document mode** where the watcher polls a tmux pane and writes output into a target component.
+
+**Frontmatter config:**
+```yaml
+---
+agent_doc_write: crdt
+stream_config:
+  target: console       # component to write into (default: "console")
+  max_lines: 50         # truncation limit (default: 50)
+  strip_ansi: true      # strip escape codes (default: true)
+  interval: 200         # poll interval ms (default: 200)
+  thinking: false       # include chain-of-thought blocks (default: false)
+  thinking_target: log  # route thinking to separate component (optional)
+---
+```
+
+**How it works:**
+- `agent-doc watch` polls the claimed tmux pane via `tmux capture-pane`
+- Diffs against previous capture to extract new lines
+- `limit_lines(content, max_lines)` keeps only the last N lines (tail truncation)
+- Writes the limited content into the `&lt;!-- agent:console --&gt;` component via CRDT merge
+
+**So to answer the question:** Yes, `max_lines: 50` is the default. You can override it per-document in frontmatter. The component name defaults to `"console"` — add `&lt;!-- agent:console --&gt;...&lt;!-- /agent:console --&gt;` to the document to receive the output.
+<!-- agent:boundary:20ed7a13 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

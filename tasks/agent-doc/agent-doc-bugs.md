@@ -998,7 +998,7 @@ Let me know which registries to target and whether you have the missing tokens, 
 ❯ do
 ❯ - [ ] BUG: `fullContent` + component patches conflict — `fullContent` overwrites response → duplicate on next cycle; fix in `write.rs`/`PatchWatcher.kt`
 ❯ - [ ] Fix duplicate in `src/session-share/tasks/claudescore.md` — delete second `### Re: Slack-formatted copy/paste` block
-### Re: do — fullContent + patches bug fix + claudescore duplicate (HEAD)
+### Re: do — fullContent + patches bug fix + claudescore duplicate
 
 **Acknowledged:** skipping marketplace publishing for now.
 
@@ -1024,17 +1024,31 @@ Let me know which registries to target and whether you have the missing tokens, 
 `PatchWatcher.kt` (defense in depth):
 - Both the Document path and the VFS path now guard the `fullContent` branch with `&& patch.patches.isEmpty()`. If `fullContent` is ever sent alongside patches (e.g., from an older binary), the plugin falls through to the component patch path instead of replacing the document.
 
+❯ Can any of this logic live on the ffi plugin? Is the VSCode plugin updated for parity?
+
 ---
 
 #### claudescore.md duplicate
 
 Deleted the second `### Re: Slack-formatted copy/paste` block (lines after `<!-- agent:boundary:83095b9b -->`). Kept the `<!-- agent:boundary:623d770c -->` marker.
-<!-- agent:boundary:08b853bb -->
+### Re: FFI + VSCode parity (HEAD)
+
+**VSCode needed the same fix — done.**
+
+`extension.ts` had the identical bug: `fullContent` applied as full replacement regardless of whether `patches` were also present. Added `&& patch.patches.length === 0` guard, matching the JetBrains fix.
+
+**On FFI for this logic:**
+
+The `patches.isEmpty()` coordinator decision is too thin for FFI — it's a one-liner that each plugin handles in its dispatcher. The FFI-first rule targets non-trivial shared logic (IPC listener, layout validation, busy guards), not trivial dispatch conditions.
+
+The binary-side fix in `write.rs` (don't send `fullContent` when patches are present) is the actual fix. Plugin guards are defense in depth. If `NativePatching` is ever extended to cover the full patch application loop (`normalize_prefix_lines` + component patches + boundary reposition in one FFI call), the fullContent branch collapses entirely — no coordinator needed in the plugin at all. That's the right FFI-first destination, but it's a bigger refactor than this bug warrants.
+<!-- agent:boundary:993fc33c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Build JetBrains plugin with fullContent fix and install locally to verify
+- [ ] Build/bump VSCode extension with fullContent fix
 - [ ] Wait for CI to complete (prebuilt binaries + PyPI wheels for v0.31.23)
 <!-- /agent:pending -->

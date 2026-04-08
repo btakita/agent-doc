@@ -335,6 +335,7 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
                 && !trimmed.starts_with("<!-- ")
                 && !trimmed.starts_with('#')
                 && !trimmed.starts_with("```")
+                && !trimmed.starts_with('"')
             {
                 user_added.insert(line.to_string());
             }
@@ -2728,6 +2729,15 @@ mod tests {
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
         assert!(!result.contains("❯ ```"), "code fence should not get prefix: {}", result);
         assert!(result.contains("❯ Some text."), "regular user line should get prefix: {}", result);
+    }
+
+    #[test]
+    fn normalize_user_prompts_quoted_string_skipped() {
+        let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\n\"Merge conflict with external write\"\n<!-- /agent:exchange -->\n";
+        let content = "<!-- agent:exchange patch=append -->\n\"Merge conflict with external write\"\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
+        let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
+        assert!(!result.contains("❯ \""), "quoted string should not get prefix: {}", result);
     }
 
     #[test]

@@ -209,6 +209,45 @@ fn common_prefix_len(a: &str, b: &str) -> usize {
     a.chars().zip(b.chars()).take_while(|(x, y)| x == y).count()
 }
 
+/// Known Claude Code built-in slash command names (without arguments).
+/// These affect Claude Code session state and cannot be invoked via the Skill tool.
+const BUILTIN_COMMAND_NAMES: &[&str] = &[
+    "/help", "/model", "/clear", "/compact", "/cost", "/login", "/logout",
+    "/status", "/config", "/memory", "/review", "/bug", "/fast", "/slow",
+    "/permissions", "/terminal-setup", "/doctor", "/init", "/pr-comments",
+    "/vim", "/diff", "/undo", "/resume", "/listen", "/mcp", "/approved-tools",
+    "/add-dir", "/release-notes", "/hooks", "/btw",
+];
+
+/// Returns true if the command is a Claude Code built-in (not invocable via Skill tool).
+pub fn is_builtin_command(cmd: &str) -> bool {
+    let cmd_name = cmd.split_whitespace().next().unwrap_or("");
+    BUILTIN_COMMAND_NAMES.contains(&cmd_name)
+}
+
+/// Result of classifying slash commands from a diff.
+pub struct ParsedSlashCommands {
+    /// Skill commands (non-built-ins) — route to Skill tool.
+    pub skill_commands: Vec<String>,
+    /// Claude Code built-in commands — cannot invoke via Skill tool.
+    pub builtin_commands: Vec<String>,
+}
+
+/// Like `parse_slash_commands` but classifies results into skill vs built-in commands.
+pub fn parse_slash_commands_classified(diff: &str) -> ParsedSlashCommands {
+    let commands = parse_slash_commands(diff);
+    let mut skill_commands = Vec::new();
+    let mut builtin_commands = Vec::new();
+    for cmd in commands {
+        if is_builtin_command(&cmd) {
+            builtin_commands.push(cmd);
+        } else {
+            skill_commands.push(cmd);
+        }
+    }
+    ParsedSlashCommands { skill_commands, builtin_commands }
+}
+
 /// Extract slash commands from user-added lines in a unified diff.
 ///
 /// Guards against false positives:

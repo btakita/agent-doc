@@ -74,7 +74,7 @@
 //! - `preflight_output_includes_layout_issues`: `PreflightOutput` with one
 //!   layout issue → JSON `layout_issues` array has length 1 with correct text.
 //! - `preflight_output_slash_commands_from_diff`: diff containing `+/clear` →
-//!   `slash_commands` array has one entry `"/clear"`.
+//!   `builtin_commands` array has one entry `"/clear"` (built-in, not in `slash_commands`).
 //! - `is_url_detects_http`: `http://` and `https://` prefixes → true;
 //!   relative paths and empty strings → false.
 //! - `is_html_content_detects_html`: `text/html` and `application/xhtml` → true;
@@ -141,10 +141,15 @@ pub struct PreflightOutput {
     /// Annotated diff with content-source markers (`[agent]`, `[user+]`, `[user-]`, `[user~]`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub annotated_diff: Option<String>,
-    /// Slash commands found in user-added diff lines (e.g. `["/clear", "/agent-doc foo.md"]`).
+    /// Skill slash commands found in user-added diff lines (non-built-ins, e.g. `["/agent-doc foo.md", "/caveman"]`).
     /// Guards applied: code fences, blockquotes, non-added lines.
+    /// Built-in Claude Code commands are excluded here — see `builtin_commands`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub slash_commands: Vec<String>,
+    /// Claude Code built-in commands found in user-added diff lines (e.g. `["/compact", "/clear"]`).
+    /// These affect Claude Code session state and cannot be invoked via the Skill tool.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub builtin_commands: Vec<String>,
 }
 
 /// Shells considered idle (not actively running a meaningful process).
@@ -493,11 +498,16 @@ pub fn run(file: &Path, diff_only: bool) -> Result<()> {
     // Step 4c: Annotate the diff with content-source markers.
     let annotated_diff = diff_result.as_ref().and_then(|d| diff::annotate_diff(d));
 
-    // Step 4d: Extract slash commands from user-added diff lines.
-    let slash_commands = diff_result
+    // Step 4d: Extract slash commands from user-added diff lines (classified into skill vs built-in).
+    let parsed_commands = diff_result
         .as_ref()
-        .map(|d| diff::parse_slash_commands(d))
-        .unwrap_or_default();
+        .map(|d| diff::parse_slash_commands_classified(d))
+        .unwrap_or_else(|| diff::ParsedSlashCommands {
+            skill_commands: vec![],
+            builtin_commands: vec![],
+        });
+    let slash_commands = parsed_commands.skill_commands;
+    let builtin_commands = parsed_commands.builtin_commands;
 
     // Step 5: Read document HEAD from disk (skip if --diff-only).
     let document = if diff_only {
@@ -526,6 +536,7 @@ pub fn run(file: &Path, diff_only: bool) -> Result<()> {
         diff_type_reason: classification.map(|c| c.diff_type_reason),
         annotated_diff,
         slash_commands,
+        builtin_commands,
     };
 
     let json = serde_json::to_string_pretty(&output)
@@ -942,6 +953,7 @@ mod tests {
             diff_type_reason: None,
             annotated_diff: None,
             slash_commands: vec![],
+            builtin_commands: vec![],
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -970,6 +982,7 @@ mod tests {
             diff_type_reason: None,
             annotated_diff: None,
             slash_commands: vec![],
+            builtin_commands: vec![],
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1008,6 +1021,7 @@ mod tests {
             diff_type_reason: None,
             annotated_diff: None,
             slash_commands: vec![],
+            builtin_commands: vec![],
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1101,6 +1115,7 @@ mod tests {
             diff_type_reason: None,
             annotated_diff: None,
             slash_commands: vec![],
+            builtin_commands: vec![],
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1123,6 +1138,7 @@ mod tests {
             diff_type_reason: None,
             annotated_diff: None,
             slash_commands: vec![],
+            builtin_commands: vec![],
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1145,6 +1161,7 @@ mod tests {
             diff_type_reason: Some("single approval word: \"go\"".to_string()),
             annotated_diff: None,
             slash_commands: vec![],
+            builtin_commands: vec![],
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1168,6 +1185,7 @@ mod tests {
             diff_type_reason: None,
             annotated_diff: None,
             slash_commands: vec![],
+            builtin_commands: vec![],
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1191,6 +1209,7 @@ mod tests {
             diff_type_reason: None,
             annotated_diff: Some("[user+] line".to_string()),
             slash_commands: vec![],
+            builtin_commands: vec![],
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1213,6 +1232,7 @@ mod tests {
             diff_type_reason: None,
             annotated_diff: None,
             slash_commands: vec![],
+            builtin_commands: vec![],
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1221,8 +1241,9 @@ mod tests {
 
     #[test]
     fn preflight_output_slash_commands_from_diff() {
+        // /clear is a built-in command — goes to builtin_commands, not slash_commands
         let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+/clear\n";
-        let cmds = crate::diff::parse_slash_commands(diff);
+        let parsed_cmds = crate::diff::parse_slash_commands_classified(diff);
         let output = PreflightOutput {
             layout_issues: vec![],
             recovered: false,
@@ -1236,10 +1257,13 @@ mod tests {
             diff_type: None,
             diff_type_reason: None,
             annotated_diff: None,
-            slash_commands: cmds,
+            slash_commands: parsed_cmds.skill_commands,
+            builtin_commands: parsed_cmds.builtin_commands,
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed["slash_commands"][0], "/clear");
+        // /clear is a built-in — appears in builtin_commands, not slash_commands
+        assert_eq!(parsed["builtin_commands"][0], "/clear");
+        assert!(parsed["slash_commands"].is_null() || parsed["slash_commands"].as_array().map_or(true, |a| a.is_empty()));
     }
 }

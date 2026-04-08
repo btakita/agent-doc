@@ -874,7 +874,7 @@ After those are in: bump JB to 0.2.51, VSCode to 0.2.4.
 ❯ - [ ] Fix `PatchWatcher.kt` lines 551, 858: `[a-f0-9-]+` → `[a-z0-9][a-z0-9:-]*`
 ❯ - [ ] Fix `extension.ts` line 808: `[a-f0-9]+` → `[a-z0-9][a-z0-9:-]*`
 ❯ - [ ] Bump JB plugin to 0.2.51, VSCode to 0.2.4, build and release both
-### Re: do (HEAD)
+### Re: do
 
 All three fixes applied, versions bumped, built, installed. Here's what was done:
 
@@ -904,18 +904,55 @@ All three fixes applied, versions bumped, built, installed. Here's what was done
 Committed as `351ff77` in `src/agent-doc`.
 
 **Manual testing gate:** Please verify the `❯ do` restoration works end-to-end in a live session before I publish to crates.io / PyPI / GitHub Releases. Also install the JetBrains 0.2.51 zip to verify boundary tracking with summary-style IDs.
-<!-- agent:boundary:30fc2bcb -->
+
+❯ JB 0.2.51 installed
+❯ do
+❯ - [ ] `agent-doc compact` → auto-tag pre-compact commit as `agent-doc/<name>/pre-compact-<N>`; add `--tag <name>` flag
+❯ - [ ] `agent-doc log <FILE>` — walk git log, annotate compact commits, show tags
+❯ - [ ] `agent-doc show <FILE> --at N / --back N / --tag <name>`
+❯ - [ ] `agent-doc diff <FILE> --from <ref> --to <ref>`
+### Re: do — log/show/diff/compact-tag (HEAD)
+
+**JB 0.2.51 installed noted.** All 4 items implemented:
+
+#### 1. `agent-doc compact --tag <name>` (compact.rs)
+
+Before any compaction runs, creates a lightweight git tag at HEAD:
+- No `--tag`: auto-generates `agent-doc/<doc-name>/pre-compact-N` (counts existing tags to pick N)
+- `--tag <name>`: uses that name verbatim
+- `--tag skip`: disables tagging entirely
+- Tag failure is a warning, not an error (don't block compaction if not in a git repo)
+
+#### 2. `agent-doc log <FILE>` (history.rs)
+
+Annotated git log with compact tag annotations:
+```
+COMMIT       DATE                       SUBJECT                        TAG
+------------------------------------------------------------------------------------------
+df86a5cc     2026-04-08 17:12:51 -0400  agent-doc(agent-doc-bugs):...  agent-doc/agent-doc-bugs/pre-compact-1
+```
+Loads all `agent-doc/<doc-name>/pre-compact-*` tags and annotates matching commits.
+
+#### 3. `agent-doc show <FILE> [--back N | --at N | --tag <name>]` (history.rs)
+
+Shows document content at a specific point:
+- `--back 1` → `HEAD~1`
+- `--at 3` → 3rd commit in git log (0 = newest)
+- `--tag agent-doc/agent-doc-bugs/pre-compact-1` → resolves tag to commit, shows content
+
+#### 4. `agent-doc diff <FILE> --from <ref> [--to <ref>]` (history.rs)
+
+Unified diff between git refs. `--to` defaults to HEAD. Without `--from`, falls back to live diff behavior.
+
+**Build:** 473 tests pass. `cargo install` complete. Committed as `484d887` in `src/agent-doc`.
+<!-- agent:boundary:92bd6bfd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Manual test gate: verify `❯ do` restored end-to-end in live session; install JB 0.2.51 + confirm boundary tracking
+- [ ] Manual test gate: verify new commands (log/show/diff/compact --tag) work end-to-end
 - [ ] Publish: `cargo publish` (crates.io), `maturin publish` (PyPI), `gh release create v0.31.23`
 - [ ] Publish JB plugin 0.2.51 to JetBrains Marketplace
 - [ ] Publish VSCode extension 0.2.4 to VSCode Marketplace
-- [ ] `agent-doc compact` → auto-tag pre-compact commit as `agent-doc/<name>/pre-compact-<N>`; add `--tag <name>` flag
-- [ ] `agent-doc log <FILE>` — walk git log, annotate compact commits, show tags
-- [ ] `agent-doc show <FILE> --at N / --back N / --tag <name>`
-- [ ] `agent-doc diff <FILE> --from <ref> --to <ref>`
 <!-- /agent:pending -->

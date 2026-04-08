@@ -781,7 +781,7 @@ agent-doc diff tasks/foo.md --from pre-compact-1 --to HEAD
 `★` marks tagged commits as restore points. `show` = `git show <ref>:<path>`, `diff` = `git diff <ref1> <ref2> -- <path>`. Thin wrappers — no new storage.
 
 ❯ In this document, I lost **all** of the `❯ ` prefixes for `❯ do`. Why? This should not happen because I really did do these in the past. The change may rerun previous tasks. This cannot happen.
-### Re: `❯ ` prefix loss on historical `do` lines — bug (HEAD)
+### Re: `❯ ` prefix loss on historical `do` lines — bug
 
 This is a real bug. The `❯ ` prefixes are being stripped from historical `❯ do` lines, causing them to surface as diff changes every cycle — and risking re-execution.
 
@@ -800,13 +800,29 @@ The same lines appear as "user changes" in every diff. If the agent ever acts on
 1. IPC write path must write `❯ ` prefix to the editor file, not just the snapshot
 2. Normalization must be idempotent: if a line already has `❯ `, preserve it — never strip it
 3. Add a regression test: write a line with `❯ `, run through IPC path, confirm editor file still shows `❯ `
-<!-- agent:boundary:7d4a5d29 -->
+
+❯ Is the IPC implemented in the FFI plugin?
+
+❯ do
+❯ - [ ] **BUG (high priority):** `❯ ` prefix stripped from historical `do` lines by IPC write path — IPC must write prefix to editor file, not snapshot only; normalization must be idempotent
+### Re: IPC location + do (HEAD)
+
+**IPC consumption is in the FFI plugin.** The binary writes a patch JSON to `.agent-doc/patches/<hash>.json`; the JetBrains plugin reads and applies it to the editor file. The binary writes the snapshot directly.
+
+The normalization gap:
+- Disk write path: binary normalizes (`❯ ` added) → writes to snapshot + file ✓
+- IPC path: binary writes patch JSON with raw (un-normalized) content → plugin applies it → editor shows lines without `❯ ` ✗
+
+**Fix location: binary-side, before serializing the patch JSON.** Run the same normalization over patch content that runs before disk write. The plugin never needs to know user-vs-agent line semantics — it just applies whatever the binary sends.
+
+**`do` item noted** — tracked in pending below.
+<!-- agent:boundary:99bae218 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **BUG (high priority):** `❯ ` prefix stripped from historical `do` lines by IPC write path — IPC must write prefix to editor file, not snapshot only; normalization must be idempotent
+- [ ] **BUG (high priority):** `❯ ` prefix stripped from historical lines — fix: run normalization on patch content before writing IPC JSON (binary-side, pre-serialization); add regression test
 - [ ] `agent-doc compact` → auto-tag pre-compact commit as `agent-doc/<name>/pre-compact-<N>`; add `--tag <name>` flag
 - [ ] `agent-doc log <FILE>` — walk git log, annotate compact commits, show tags
 - [ ] `agent-doc show <FILE> --at N / --back N / --tag <name>`

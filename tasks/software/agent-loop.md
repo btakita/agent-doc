@@ -45,7 +45,7 @@ Previous CI run used stale tag — it pointed to `7df8203`, not `9a0b6ea` (host 
 **New run**: `24148041223` (in progress, "fix(ci): add host libssl-dev for cross build; add libcublas-dev-12-6")
 
 Will update when complete.
-<!-- agent:boundary:83d2d0f8 -->
+<!-- agent:boundary:ea130ef1 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

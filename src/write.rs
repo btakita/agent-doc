@@ -291,15 +291,17 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
 
     let exc_content = exchange.content(content);
 
-    // Find the boundary marker in content_ours — user region is before, agent region after.
+    // Find the LAST boundary marker in content_ours — user region is before, agent region after.
+    // Must use the last boundary (most recent cycle) — historical cycles each insert their own
+    // boundary marker, so stopping at the first one would misclassify later user-input lines
+    // (between historical boundaries) as "agent region" and skip ❯  prefix restoration.
     let boundary_prefix = "<!-- agent:boundary:";
     let boundary_pos = {
         let mut pos = exc_content.len();
         let mut offset = 0;
         for line in exc_content.lines() {
             if line.trim().starts_with(boundary_prefix) {
-                pos = offset;
-                break;
+                pos = offset; // keep updating — use the last boundary found
             }
             offset += line.len() + 1;
         }

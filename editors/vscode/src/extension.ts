@@ -591,6 +591,7 @@ interface IpcPatch {
     frontmatter?: string;
     fullContent?: string;
     reposition_boundary?: boolean;
+    normalize_prefix_lines?: string[];
 }
 
 class PatchWatcher implements vscode.Disposable {
@@ -877,6 +878,11 @@ class PatchWatcher implements vscode.Disposable {
             }
         }
 
+        // Apply ❯  prefix normalization for user-input lines in exchange
+        if (patch.normalize_prefix_lines && patch.normalize_prefix_lines.length > 0) {
+            content = this.normalizeExchangePrefixes(content, patch.normalize_prefix_lines);
+        }
+
         // Apply the combined edit
         if (content !== document.getText()) {
             const edit = new vscode.WorkspaceEdit();
@@ -890,6 +896,51 @@ class PatchWatcher implements vscode.Disposable {
 
         await document.save();
         return true;
+    }
+
+    /**
+     * Add ❯  prefix to user-input lines in the exchange component.
+     * Only normalizes the user-input region (before the LAST boundary marker).
+     * Uses the last boundary — historical cycles each leave a marker, so stopping
+     * at the first one would misclassify later user-input lines as agent region.
+     */
+    private normalizeExchangePrefixes(doc: string, lines: string[]): string {
+        if (lines.length === 0) return doc;
+        const openTag = /<!-- agent:exchange(\s[^>]*)? -->/;
+        const closeTag = '<!-- /agent:exchange -->';
+        const boundaryPattern = /<!-- agent:boundary:[a-z0-9][a-z0-9:-]* -->/g;
+
+        const openMatch = openTag.exec(doc);
+        if (!openMatch) return doc;
+        const closeIdx = doc.indexOf(closeTag, openMatch.index + openMatch[0].length);
+        if (closeIdx < 0) return doc;
+
+        const beforeExchange = doc.substring(0, openMatch.index + openMatch[0].length);
+        const exchangeContent = doc.substring(openMatch.index + openMatch[0].length, closeIdx);
+        const afterExchange = doc.substring(closeIdx);
+
+        // Find the LAST boundary marker — use it as the user-region boundary
+        let lastBoundaryIdx = -1;
+        let m: RegExpExecArray | null;
+        const re = new RegExp(boundaryPattern.source, 'g');
+        while ((m = re.exec(exchangeContent)) !== null) {
+            lastBoundaryIdx = m.index;
+        }
+        const userRegionEnd = lastBoundaryIdx >= 0 ? lastBoundaryIdx : exchangeContent.length;
+        let userRegion = exchangeContent.substring(0, userRegionEnd);
+        const agentRegion = exchangeContent.substring(userRegionEnd);
+
+        for (const line of lines) {
+            if (!line.trim()) continue;
+            // Replace exact line (with newline boundaries) — idempotent if already prefixed
+            userRegion = userRegion.replace(`\n${line}\n`, `\n❯ ${line}\n`);
+            // Handle line at very start of user region
+            if (userRegion.startsWith(`${line}\n`)) {
+                userRegion = `❯ ${line}\n` + userRegion.substring(line.length + 1);
+            }
+        }
+
+        return beforeExchange + userRegion + agentRegion + afterExchange;
     }
 
     /**

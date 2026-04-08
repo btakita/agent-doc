@@ -4,6 +4,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.23
+
+- **Fix: `❯ ` prefix normalization via IPC `fullContent` (write.rs):** When `normalize_prefix_lines` is non-empty, `try_ipc` now also sends `fullContent = content_ours` in the IPC payload (both socket and file paths). The plugin's `fullContent` path replaces the entire document, guaranteeing `❯ ` prefixes reach the editor file even when targeted string replacement fails.
+- **Fix: boundary regex in `findBoundaryInComponent` + `repositionBoundaryToEnd` (PatchWatcher.kt v0.2.51):** Pattern updated from `[a-f0-9-]+` to `[a-z0-9][a-z0-9:-]*` so summary-style boundary IDs (e.g. `a0cfeb34:agent-doc-bugs`) are correctly matched.
+- **Fix: boundary stripping regex in VSCode extension (extension.ts v0.2.4):** `[a-f0-9]+` → `[a-z0-9][a-z0-9:-]*` in boundary marker strip-before-replace path.
+- **Regression test:** `normalize_user_prompts_restores_prefix_lost_in_file` — verifies snapshot `❯ do` is restored when editor file has bare `do`.
+
 ## 0.31.22
 
 - **Fix: quoted strings skip `❯ ` prefix normalization (write.rs):** `normalize_user_prompts_in_exchange` now excludes lines starting with `"` from `❯ ` prefix tagging. Previously, user-written quoted strings (e.g., `"Merge conflict with external write"`) were incorrectly tagged as terminal prompts. New test: `normalize_user_prompts_quoted_string_skipped`.

@@ -116,7 +116,7 @@ If the exchange `patch=append` writes out content that was assembled before norm
 **Why transfer hits it:** The transfer injects a large user block (all lines are "new" for normalization) while simultaneously producing an exchange component patch. Normal agent-response cycles don't trigger this because the agent's own response lines are in the agent region, not the user region — normalization ignores them.
 
 **Fix direction:** Normalization should run *after* patches are assembled for the IPC payload so the patch body already contains `❯ `-prefixed lines, making `normalize_prefix_lines` redundant for that content. Or: re-apply normalization to the exchange component content after `apply_patches_with_overrides` inside the plugin itself.
-<!-- agent:boundary:09651f74 -->
+<!-- agent:boundary:78b1334a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

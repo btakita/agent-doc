@@ -53,10 +53,16 @@ Template vars: `{{session_id}}`, `{{file}}`, `{{agent}}`, `{{model}}`
 `hooks` with shell commands covers this without a separate plugin system. Named/reusable plugins (`~/.config/agent-doc/plugins.toml` lookup) can layer on top later if needed.
 
 **Scope to build now:** `session_start` hook execution in `start.rs`.
-<!-- agent:boundary:172d8550 -->
+❯ go
+<!-- agent:boundary:d334a9ef:agent-doc-feat -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Implement `session_start` hook in `start.rs`
+  - Parse `hooks.session_start` from frontmatter
+  - Shell-expand template vars (`{{session_id}}`, `{{file}}`, `{{agent}}`, `{{model}}`)
+  - Execute each command with `std::process::Command` after pane is provisioned
+  - Best-effort: log failures to stderr, never block
 <!-- /agent:pending -->

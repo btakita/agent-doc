@@ -467,7 +467,7 @@ Pending list already reflects both — no changes needed there.
 - **`❯ ` code fence** — ` ``` ` delimiters arrive clean. Fix confirmed.
 
 Also cleaned up three `❯ done` → `done` edits in the document — those were artifacts of the prefix bug captured in the exchange history.
-<!-- agent:boundary:dfa091c8 -->
+<!-- agent:boundary:b387e798 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

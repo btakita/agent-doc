@@ -468,17 +468,30 @@ Pending list already reflects both — no changes needed there.
 
 Also cleaned up three `❯ done` → `done` edits in the document — those were artifacts of the prefix bug captured in the exchange history.
 ❯ Why? Those `❯ done` were correct. I did prompt `done` a few times.
-### Re: ❯ done was correct (HEAD)
+### Re: ❯ done was correct
 
 You're right — those `❯ done` lines were correct. You typed `done` at the terminal prompt, so agent-doc captured them with `❯ ` as expected. That's the prefix feature working as designed.
 
 My previous response was wrong to call them "artifacts of the prefix bug." I misread the edit context.
-<!-- agent:boundary:d609d0be -->
+
+❯ release
+### Re: release (HEAD)
+
+agent-doc v0.31.21 is fully published (crates.io, PyPI, GitHub Releases with cross-platform binaries). Plugin v0.2.50 is built and verified but not attached to the release.
+
+Uploading `agent-doc-jetbrains-0.2.50-signed.zip` to the v0.31.21 GitHub release now.
+### Re: plugin uploaded (HEAD)
+
+`agent-doc-jetbrains-0.2.50-signed.zip` uploaded to https://github.com/btakita/agent-doc/releases/tag/v0.31.21
+
+Release v0.31.21 now includes:
+- CLI binaries (linux x86_64/aarch64, macOS x86_64/aarch64, Windows x86_64)
+- JetBrains plugin: `agent-doc-jetbrains-0.2.50-signed.zip`
+<!-- agent:boundary:fa7107e6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Install plugin v0.2.50 and verify 2-pane layout persists when navigating to non-agent-doc files — confirmed
-- [x] Test `❯ ` code fence fix in live session (user types a code block, runs agent-doc, confirm ` ``` ` lines are NOT prefixed) — confirmed
+- [x] Upload plugin v0.2.50 signed zip to GitHub release v0.31.21 — done
 <!-- /agent:pending -->

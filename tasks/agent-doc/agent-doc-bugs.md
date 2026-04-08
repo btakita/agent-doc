@@ -393,7 +393,7 @@ So for the `agent:console` use case: if the Claude Code session is the pane bein
 
 How can we implement:
 > - **Claude API integration** — streaming the actual thinking tokens from the API before they're rendered; requires hooking into the API response stream, not the terminal
-### Re: Claude API thinking token streaming (HEAD)
+### Re: Claude API thinking token streaming
 
 `agent-doc stream` already implements this. It spawns Claude with `--output-format stream-json`, and `streaming.rs` extracts both `"type": "text"` and `"type": "thinking"` blocks. Thinking is buffered separately and flushed to a target component on the write interval.
 
@@ -425,7 +425,12 @@ Run: `agent-doc stream <FILE>`
 The stream loop feeds `"type": "thinking"` chunks to `thinking_buffer`, interleaved with response text in the main buffer. Both flush to their components on the timer interval (default 200ms). You see thinking tokens appearing live in the `agent:log` component as Claude reasons.
 
 **Caveat:** This only works for sessions run *through* `agent-doc stream`. If Claude Code is running independently in another tmux pane (not as an agent-doc stream session), its API stream is not accessible — `tmux capture-pane` is the only option for that case.
-<!-- agent:boundary:05cda9bf -->
+
+Please append the last patch to the gist.
+### Re: gist updated (HEAD)
+
+Appended the last exchange (Claude API thinking token streaming Q&A) to the gist: https://gist.github.com/btakita/ab31879717d229d50c4b13e7031717e3
+<!-- agent:boundary:d84a1666 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

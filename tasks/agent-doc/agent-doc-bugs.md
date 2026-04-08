@@ -816,7 +816,7 @@ The normalization gap:
 **Fix location: binary-side, before serializing the patch JSON.** Run the same normalization over patch content that runs before disk write. The plugin never needs to know user-vs-agent line semantics — it just applies whatever the binary sends.
 
 **`do` item noted** — tracked in pending below.
-<!-- agent:boundary:99bae218 -->
+<!-- agent:boundary:4f50e5d5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

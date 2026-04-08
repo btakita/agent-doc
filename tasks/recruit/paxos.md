@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Interview prep complete — Paxos call with Bryan Boyer
+1-page summary ready — call with Bryan Boyer, Paxos
 <!-- /agent:status -->
 
 ## Exchange
@@ -90,7 +90,76 @@ Contact added: `mail/contacts/bryan-boyer/AGENTS.md`
 - **Distributed systems** — settlement infrastructure is inherently distributed; consensus experience lands well
 - Emphasize correctness + safety-first engineering under regulatory constraints
 - Paxos values engineers who understand business impact, not just tech
-<!-- agent:boundary:b9215bb1 -->
+
+❯ Should I look into anything before the call? How open is Paxos to agent harnesses to develop Rust code? Is manual code review very important?
+
+❯ Please genera a 1 page summary that I can look at during the call on Zoom.
+### Re: Pre-call prep, agent harnesses, code review, and 1-page summary
+
+**Pre-call: what to look into**
+- Skim the Fordefi acquisition announcement — it's the freshest news and likely to come up
+- Read 1-2 posts on [eng.paxos.com](https://eng.paxos.com/) to get a feel for their engineering voice
+- Check LinkedIn for Bryan Boyer's recent activity / posts before the call
+
+**Agent harnesses for Rust development**
+
+No public evidence Paxos currently uses AI coding agents/harnesses in their workflow. This is actually an opportunity: position it as something you bring, not something to ask permission for. Useful framing:
+- "I use agent harnesses to handle boilerplate and keep review focused on correctness and architecture — which matters even more in regulated systems"
+- Ask: *"Are engineers free to use AI coding tools in their workflow, or are there policies around that given the regulatory environment?"*
+
+Given their "ask forgiveness, not permission" culture, they'll likely be receptive — but no guarantees in a regulated fintech context.
+
+**Code review: yes, it's rigorous**
+
+Paxos has a design-first review culture:
+- Engineers write design docs *before* coding (approach, alternatives, tradeoffs, dependencies) — reviewed by multiple teams
+- PRs are expected to be self-reviewed and "great" before submission
+- Strong CI/CD and testing discipline
+- Code is "read far more than written" — they care about clarity
+
+This actually pairs well with AI-assisted development: agents handle the mechanical work, you focus review energy on correctness and design. Frame it that way.
+
+---
+
+## 1-Page Call Summary (HEAD)
+
+**PAXOS** | Regulated blockchain infrastructure | Founded 2012, NY
+
+**What they do**
+Build the financial plumbing for digital assets — stablecoin issuance, tokenized assets, post-trade settlement, MPC custody. Customers: PayPal, Mastercard, Robinhood, Bank of America, Mercado Libre.
+
+**Scale:** $180B+ tokenization activity · 10M+ wallets · PYUSD ($3.7B) is their flagship
+
+**Recent moves**
+- **Fordefi acquired** Nov 2025 (~$100M) — MPC wallets + DeFi integrations
+- **OCC national trust bank charter** Dec 2025 — federally regulated, serves all 50 states
+- **Paxos Labs** Jun 2025 — DeFi/on-chain incubator for institutions
+
+**Tech stack**
+Kotlin · Go · **Rust** (security/perf-critical systems, expanding) · distributed systems · cryptography (ECC, MPC)
+
+**Engineering culture**
+Design docs before code · rigorous PR review · "ask forgiveness, not permission" · correctness + safety first
+
+**Bryan Boyer** — engineering leadership, Paxos. Background: Wayfair (Sr Eng Manager, Supply Chain), Evolent Health, Flowhub. Georgia Tech ISyE.
+
+---
+
+**My angle**
+- Rust expertise → aligns with their expansion direction
+- Agent harnesses → I write less boilerplate, more focused review
+- Distributed systems / correctness → settlement infrastructure is my domain
+- I understand building under regulatory constraints
+
+---
+
+**Questions to ask**
+1. OCC charter — what does it unlock for engineering?
+2. Fordefi integration — near-term priorities?
+3. Rust expansion roadmap beyond trading?
+4. AI tooling policy for engineers?
+5. Biggest technical challenge this year?
+<!-- agent:boundary:bc4813a5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

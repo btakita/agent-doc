@@ -1092,7 +1092,7 @@ I committed the version bumps inside `src/agent-doc` but never ran `git add src/
 The fix for (1): commit the parent pointer now. The pre-existing submodule changes stay uncommitted until that in-progress work is ready.
 
 ❯ We lost the `❯ ` prefix yet again. Why?
-### Re: ❯ prefix loss — root cause found and fixed (HEAD)
+### Re: ❯ prefix loss — root cause found and fixed
 
 **Root cause:** Both the binary and the plugins stop at the **first** boundary marker when determining the "user input region" for `❯ ` normalization. The exchange accumulates one boundary per cycle. Content between the first historical boundary and the most recent boundary was classified as "agent region" and skipped — those user-input lines never got the prefix restored.
 
@@ -1113,12 +1113,31 @@ Additionally: the VSCode extension was missing `normalize_prefix_lines` support 
 - Committed: `fix: use last boundary for ❯ prefix normalization; add VSCode normalize_prefix_lines support`
 
 Install JetBrains plugin from disk to pick up the `PatchWatcher.kt` fix.
-<!-- agent:boundary:27093da9 -->
+❯ Rule: agent-doc should **never** strip out the `❯ ` prefix.
+### Re: ❯ prefix rule + restoration (HEAD)
+
+❯ Rule recorded: agent-doc must never strip `❯ ` from user input lines.
+
+❯ The historical prefix loss is still visible in this diff (snapshot has `❯ `, document has `text`). This write cycle triggers the last-boundary normalization fix — the IPC plugin will restore `❯ ` to ALL historical user-input lines (everything before the most recent boundary). Snapshot is saved as `content_ours` (already normalized). Both sides will be aligned after this write.
+
+❯ The next diff should show no spurious `❯ ` removals.
+❯ We **still** have `❯ ` being stripped out in git uncommitted changes. Why?
+❯ Also, this last response patch was not committed. Why?
+### Re: still stripped + not committed (HEAD)
+
+**`❯ ` still stripped:** The JetBrains plugin running in IDEA is the OLD 0.2.52 — built before the `PatchWatcher.kt` fix (which changes `find()` → `findAll().lastOrNull()`). The updated `build/distributions/agent-doc-jetbrains-0.2.52.zip` has the fix, but IDEA is still loading the prior build. The git diff shows `❯ ` in the snapshot (binary normalizes correctly) vs `text` in the file (old plugin doesn't restore it). Installing the rebuilt 0.2.52 from disk will fix this.
+
+**Patch not committed:** The binary exited with code 75 (IPC timeout). The skill workflow requires running `agent-doc commit` after every `agent-doc write`. When the write exits with 75, the commit step was skipped. The preflight in the next cycle ran `agent-doc commit` automatically (step 2), committing what was on disk at that point. In the skill, `agent-doc commit` must be called even when write exits non-zero — the preflight safety net handles it, but the agent should not rely on it.
+
+**Duplicate response:** The IPC timeout left the patch file in `.agent-doc/patches/`. The binary also fell back to a disk write. When the plugin eventually consumed the patch, it appended the response again via component patch → duplicate. Removed the duplicate via Edit above.
+
+**Fix for commit skip:** After `agent-doc write --stream`, always run `agent-doc commit` regardless of exit code. The commit is idempotent.
+<!-- agent:boundary:1c0d6b2d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Install updated JetBrains 0.2.52 (last-boundary normalization fix)
-- [ ] Verify ❯  prefix restored on historical lines in next write cycle
+- [ ] Install rebuilt JetBrains 0.2.52 from disk (has last-boundary PatchWatcher.kt fix)
+- [ ] Verify ❯  prefix restored after plugin update
 <!-- /agent:pending -->

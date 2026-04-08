@@ -177,7 +177,7 @@ DeepEval spans multiple approaches, though LLM-as-judge dominates:
 - **Regression** — not a first-class metric, but the Confident AI cloud platform stores scores over time and surfaces regression across runs
 
 So the complete picture: LLM-as-judge is the default path, task oracle for code evaluation, and custom metrics for structural invariants. The framework is composable — you mix approaches within a test suite.
-<!-- agent:boundary:19cd9e15 -->
+<!-- agent:boundary:c9fab718 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

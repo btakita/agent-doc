@@ -473,7 +473,7 @@ Also cleaned up three `❯ done` → `done` edits in the document — those were
 You're right — those `❯ done` lines were correct. You typed `done` at the terminal prompt, so agent-doc captured them with `❯ ` as expected. That's the prefix feature working as designed.
 
 My previous response was wrong to call them "artifacts of the prefix bug." I misread the edit context.
-<!-- agent:boundary:de110ca9 -->
+<!-- agent:boundary:d609d0be -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

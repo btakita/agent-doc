@@ -206,14 +206,26 @@ Rule: after `cargo install --path .`, pause and confirm feature works in a live 
 ❯ plugin installed
 ❯ done
 ❯ - [ ] Verify `❯ ` prefix correct behavior in live session
-### Re: plugin installed (HEAD)
+### Re: plugin installed
 
 Plugin v0.2.49 installed ✓. Ready to verify `❯ ` prefix behavior in a live session — type a prompt in an exchange component and run agent-doc to confirm only user lines get `❯ `.
-<!-- agent:boundary:fff836be -->
+
+❯ When I navigate the editor to a non agent doc...the tmux window goes to a 1 pane layout. Why? It should keep the 2 pane layout with the previously selected agent doc.
+### Re: 1-pane collapse on non-agent-doc navigation (HEAD)
+
+The plugin listens to `FileEditorManagerListener.selectionChanged` (or equivalent). When the active editor switches to a non-agent-doc file, the plugin concludes "no active agent-doc" and tears down the split — collapsing to 1 pane.
+
+**Expected behavior:** When navigating away from an agent-doc, the tmux window should keep its 2-pane layout. The agent-doc pane should stay visible alongside whatever non-agent-doc file is now active in the editor.
+
+**Fix:** In the plugin's selection-changed handler, instead of closing the pane when the new file isn't an agent-doc, **do nothing** — leave the existing layout intact. The split should only be provisioned (on agent-doc open) or explicitly torn down (on agent-doc close/tab close), not on navigation to other files.
+
+Concretely: remove or guard the `collapse_to_1_pane` / `restore_layout` call in the `selectionChanged` branch that handles non-agent-doc files. The last-claimed pane should persist until the user explicitly closes the agent-doc tab.
+<!-- agent:boundary:2e6d60ee -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Verify `❯ ` prefix correct behavior in live session (type prompt, run agent-doc, confirm only user lines prefixed — not agent responses)
+- [ ] Fix: keep 2-pane layout when navigating to non-agent-doc files (plugin: don't collapse on selectionChanged if no active agent-doc — only collapse on tab close)
 <!-- /agent:pending -->

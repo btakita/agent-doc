@@ -213,7 +213,8 @@ Parent repo committed + pushed: submodule pointer updates, tasks/, .claude/ skil
 ❯ do
 ❯ - [ ] Fix `src/session-share` remote — `ClaudeScore/SessionShare` not found on GitHub
 ❯ - [ ] **Re-test gate**: re-transcribe filevine interview with corky v0.26.2+, verify transcript length
-### Re: do (HEAD)
+
+### Re: do
 
 #### 1. Fix session-share remote
 
@@ -228,13 +229,29 @@ Which do you want?
 #### 2. Re-transcribe filevine interview
 
 Running now (GPU loaded, whisper large-v3). Will update when complete.
-<!-- agent:boundary:7e6a6955 -->
+### Re: do (HEAD)
+
+#### 1. Fix session-share remote
+
+`ClaudeScore` org doesn't exist in your GitHub orgs. Choose a path:
+
+1. **Create the org**: github.com/organizations/new → create `ClaudeScore` → I'll create `SessionShare` + push
+2. **Use personal account**: retarget to `btakita/session-share` — I can do this now
+3. **Use an existing org**: `rr`, `ctx-core`, `rappstack`, etc.
+
+#### 2. Re-transcribe filevine interview — **done**
+
+**63KB, 11,283 words, 129 speaker turns** — vs. 918 words before. Truncation bug confirmed fixed.
+
+`tasks/research/transcripts/filevine-interview-2026-04-07.md` updated.
+
+Say "publish corky" to release v0.26.3 when satisfied with transcript.
+<!-- agent:boundary:c1622503 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Fix `src/session-share` remote — **blocked**: choose target repo (create `ClaudeScore` org, or use `btakita/session-share`, or another org)
-- [ ] **Re-test gate**: re-transcribing filevine interview with corky v0.26.3 (in progress)
-- [ ] **Publish gate (corky)**: approve v0.26.3 publish after re-test
+- [ ] Fix `src/session-share` remote — **blocked**: choose target (create `ClaudeScore` org, `btakita/session-share`, or another org)
+- [ ] **Publish gate (corky)**: say "publish corky" to release v0.26.3 — re-test complete
 - [ ] **Publish gate (agent-kit)**: approve v0.4.0 tag + publish
 - [ ] Run litellm proxy pointing at vllm
 - [ ] Test `claude` against local model via `ANTHROPIC_BASE_URL`

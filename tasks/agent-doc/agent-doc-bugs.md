@@ -1090,7 +1090,7 @@ I committed the version bumps inside `src/agent-doc` but never ran `git add src/
 `src/frontmatter.rs` and `src/start.rs` have a `hooks` field addition that predates this session (in-progress work, not part of the version-bump task). They remain uncommitted — correctly, since they're unrelated to what we just built.
 
 The fix for (1): commit the parent pointer now. The pre-existing submodule changes stay uncommitted until that in-progress work is ready.
-<!-- agent:boundary:973ebf7f -->
+<!-- agent:boundary:7308d26c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

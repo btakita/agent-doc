@@ -819,7 +819,7 @@ The normalization gap:
 
 ❯ implement:
 ❯ - [ ] **BUG (high priority):** `❯ ` prefix stripped from historical lines — fix: run normalization on patch content before writing IPC JSON (binary-side, pre-serialization); add regression test
-### Re: implement — `❯ ` prefix normalization IPC fix (HEAD)
+### Re: implement — `❯ ` prefix normalization IPC fix
 
 **Root cause found:** The snapshot gets `❯ do` correctly (binary saves `content_ours` which is normalized). But the editor file keeps `do` because the plugin's `normalizeExchangePrefixes` doesn't reliably update it. Two contributing factors:
 
@@ -833,19 +833,53 @@ The normalization gap:
 
 2. **`PatchWatcher.kt`:** Fixed boundary regex in `normalizeExchangePrefixes` from `[a-f0-9]+` to `[a-z0-9][a-z0-9:-]*` — correctly matches summary IDs like `a0cfeb34:agent-doc-bugs`.
 
+❯ Since you changed `PatchWatcher.kt`, do we need to bump the JB plugin version? Does the VSCode plugin need updating?
+
 3. **Regression test added** (`normalize_user_prompts_restores_prefix_lost_in_file`): verifies that when snapshot has `❯ do` but file has `do`, the normalization restores the prefix.
 
 All 480 tests pass. Binary installed. This fix will take effect on the next write cycle for this document.
 
 **What changes next cycle:** The IPC will send `fullContent = content_ours` (with `❯ do` restored) to the plugin. The plugin writes it to disk. The snapshot and file will converge.
-<!-- agent:boundary:1092ce25 -->
+
+❯ seems to be working:
+❯ - [ ] Verify `❯ do` restored in editor file after next write cycle (confirm fix works end-to-end)
+### Re: JB plugin version + VSCode update (HEAD)
+
+**JetBrains — yes, version bump needed before release.** The `normalizeExchangePrefixes` regex fix (line 515) is already in the source at `[a-z0-9][a-z0-9:-]*`. However, two other spots in `PatchWatcher.kt` still use the old `[a-f0-9-]+` pattern and need the same fix:
+
+- Line 551 — `findBoundaryInComponent`: extracts boundary ID for tracking/repositioning
+- Line 858 — `repositionBoundaryToEnd`: same; finds boundary to move it to component end
+
+Both will silently fail to locate boundaries with summary-style IDs like `a0cfeb34:agent-doc-bugs`. Fix both before bumping to 0.2.51.
+
+**VSCode — yes, needs a fix too.** `extension.ts:808` has the same stale pattern:
+
+```typescript
+content = content.replace(/<!-- agent:boundary:[a-f0-9]+ -->\n?/g, '');
+```
+
+This is in the boundary-stripping path (before inserting a fresh 8-hex-char boundary). VSCode doesn't have `normalizeExchangePrefixes`, so the `fullContent` path already handles the prefix restoration correctly. But this regex will leave stale summary-style boundary markers in the content instead of stripping them. Fix to match the new pattern: `/<!-- agent:boundary:[a-z0-9][a-z0-9:-]* -->\n?/g`.
+
+**Summary of remaining work before releases:**
+
+| File | Line | Fix needed |
+|------|------|-----------|
+| `PatchWatcher.kt` | 551 | `[a-f0-9-]+` → `[a-z0-9][a-z0-9:-]*` |
+| `PatchWatcher.kt` | 858 | `[a-f0-9-]+` → `[a-z0-9][a-z0-9:-]*` |
+| `extension.ts` | 808 | `[a-f0-9]+` → `[a-z0-9][a-z0-9:-]*` |
+
+After those are in: bump JB to 0.2.51, VSCode to 0.2.4.
+<!-- agent:boundary:e9a42643 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Fix `PatchWatcher.kt` lines 551, 858: `[a-f0-9-]+` → `[a-z0-9][a-z0-9:-]*`
+- [ ] Fix `extension.ts` line 808: `[a-f0-9]+` → `[a-z0-9][a-z0-9:-]*`
+- [ ] Bump JB plugin to 0.2.51, VSCode to 0.2.4, build and release both
 - [ ] Verify `❯ do` restored in editor file after next write cycle (confirm fix works end-to-end)
-- [ ] Release agent-doc with this fix
+- [ ] Release agent-doc binary with prefix normalization fix
 - [ ] `agent-doc compact` → auto-tag pre-compact commit as `agent-doc/<name>/pre-compact-<N>`; add `--tag <name>` flag
 - [ ] `agent-doc log <FILE>` — walk git log, annotate compact commits, show tags
 - [ ] `agent-doc show <FILE> --at N / --back N / --tag <name>`

@@ -1051,14 +1051,57 @@ No Oleg contact yet and corky doesn't have a native voiceprint-enroll command. P
 3. Create Oleg contact stub in `mail/contacts/`
 
 Running now...
-### Re: save Oleg's voiceprint (done) (HEAD)
+### Re: save Oleg's voiceprint (done)
 
 Re-transcribed with 3 speakers (Brian, Robert Ross, Oleg) — 10 Oleg segments identified. Updated transcript and created contact:
 
 - **Voiceprint:** `mail/contacts/oleg/voiceprint.m4a` — 10 segments concatenated, ~80s, 440K
 - **Contact:** `mail/contacts/oleg/AGENTS.md` — Russian-born US engineer, infrastructure/DevOps, introduced by Rob
 - **Transcript updated:** [`tasks/dreamable/transcripts/phone_20260408-180506_4156839775.md`](transcripts/phone_20260408-180506_4156839775.md) now shows all 3 speakers
-<!-- agent:boundary:a7ac9944 -->
+
+❯ Please offer suggestion as far as making my work more visible. I already have git commits. Is there a way to isolate claude sessions for specific agent docs to send to any private services that we run to create visibility?
+### Re: making work more visible (HEAD)
+
+You have git commits — that's the durable foundation. Here are the layers on top, ranked by effort:
+
+#### 1. Git + GitHub (zero new infra)
+
+Push your agent-loop (or a Dreamable-specific repo) to a private GitHub repo and add Rob as a collaborator. He watches the commit feed. Agent-doc commits are already labeled by document (e.g. `agent-doc(robert-ross): 2026-04-08`) so the activity is readable without code review.
+
+**Limit:** passive pull, not real-time push.
+
+#### 2. claudebin share (one command per session)
+
+The `/claudebin:share` skill snapshots the current session and returns a URL. You could run it at the end of each work block and drop the URL in Slack to Rob. No infra required.
+
+**Limit:** manual, per-session; not streaming.
+
+#### 3. Claude Code Stop hook → webhook (lowest-friction automation)
+
+Claude Code fires a `Stop` hook at session end. You can configure it in `.claude/settings.json` to POST a summary to any URL — a private AWS endpoint, Slack webhook, or simple Cloudflare Worker. The hook receives the full tool-call log.
+
+To scope it per agent-doc: the document's frontmatter has `agent_doc_session` UUID. A hook script can read the active document from the tmux pane title (agent-doc sets it) and filter which sessions get forwarded.
+
+**Limit:** end-of-session granularity, not continuous.
+
+#### 4. ClaudeScore (src/session-share) — the natural fit
+
+You're already building this. ClaudeScore's asset capture is triggered by the Stop hook and scores sessions across four pillars. The "sharing infrastructure" in the spec is privacy-first sharing — exactly what you'd give Rob: a URL with your session score and activity. Self-hosting it for Dreamable gives Rob a dashboard showing your session history, not just raw commits.
+
+The Dreamable use case maps cleanly: Rob's stated concern is "you ship Monday, leave Tuesday" — session history + growth trajectory score directly addresses that. A ClaudeScore dashboard is more legible to a non-technical stakeholder than a git log.
+
+#### 5. Live tmux share (most real-time, most exposure)
+
+`tmate` broadcasts your terminal session as a URL. Rob can watch live. Overkill for most workflows but occasionally useful for pair-debugging.
+
+---
+
+**Recommended path for Dreamable specifically:**
+
+1. **Now**: push to a private GitHub repo with Rob as collaborator (5 min)
+2. **Short-term**: wire up the Stop hook to post a daily digest to a Slack channel Rob is in
+3. **Medium-term**: use the ClaudeScore self-hosted instance — you're building it anyway, and Rob gets a stakeholder-friendly view of your work quality over time
+<!-- agent:boundary:29411e41 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

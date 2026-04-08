@@ -551,7 +551,7 @@ Six separate user lines, all systematically stripped. That's not a user accident
 
 ❯ /caveman
 ❯ "Merge conflicts with external writes ... editor content preserved"
-### Re: merge error in editor prompt (HEAD)
+### Re: merge error in editor prompt
 
 The notification you saw is **"Merge conflict with external write — editor content preserved."** — an info balloon from the JetBrains plugin (`PromptPoller.mergeOrReload`).
 
@@ -565,7 +565,12 @@ It fires when all three conditions are true:
 **Why does it happen at all?** The `mergeOrReload` path handles cases where the IPC write bypasses the Document API and the user has concurrent unsaved edits. Under normal operation (native lib loaded, no true conflict), the FFI CRDT merge handles this silently. The notification is the last-resort fallback.
 
 **Most likely trigger:** The agent-doc session wrote its response while `brian-takita.md` was open with unsaved edits, and the native lib happened to not be initialized yet (first session after IDE start, or plugin hot-reload). The git merge also failed because the agent response overlapped with your in-progress edits in the same file region.
-<!-- agent:boundary:0371be18 -->
+### Re: /caveman + quote fix (HEAD)
+
+Caveman mode: active.
+
+Fix noted: `❯ "Merge conflicts..."` → `"Merge conflicts..."`. Correct — `❯ ` should not tag quoted strings, only actual user prompts typed at terminal. Another over-prefix case in `normalize_user_prompts_in_exchange`. Filter missing `"` -prefixed lines.
+<!-- agent:boundary:0482ffdd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

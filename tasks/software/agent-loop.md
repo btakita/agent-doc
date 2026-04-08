@@ -21,7 +21,7 @@ Operational task document for agent-loop workspace management.
 
 <!-- agent:exchange patch=append -->
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca3007b9c6c5bc21d81a0b9ff27f894487e97141f4cdafe2a9d12a4a19b1-20260408-160355.md`*
-### Re: CI fixes (corky + agent-kit) (HEAD)
+### Re: CI fixes (corky + agent-kit)
 
 #### agent-kit v0.4.0 — done
 
@@ -36,11 +36,20 @@ Round 3 of CI fixes:
 - CUDA: added `libcublas-dev-12-6` step (Jimver sub-packages can't install it via `cuda-` prefix)
 
 New CI run in progress. Waiting on result.
-<!-- agent:boundary:5fd173d2 -->
+❯ verify:
+❯ - [ ] **corky v0.26.3**: CI running (fix: host libssl-dev + libcublas-dev-12-6)
+### Re: verify (HEAD)
+
+Previous CI run used stale tag — it pointed to `7df8203`, not `9a0b6ea` (host libssl-dev + libcublas-dev). Retagged to correct commit and triggered new run.
+
+**New run**: `24148041223` (in progress, "fix(ci): add host libssl-dev for cross build; add libcublas-dev-12-6")
+
+Will update when complete.
+<!-- agent:boundary:83d2d0f8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] **corky v0.26.3**: CI running (fix: host libssl-dev + libcublas-dev-12-6)
+- [ ] **corky v0.26.3**: CI run 24148041223 in progress (correct tag now)
 - [x] **agent-kit v0.4.0**: GitHub Release created
 - [ ] Run litellm proxy pointing at vllm
 - [ ] Test `claude` against local model via `ANTHROPIC_BASE_URL`

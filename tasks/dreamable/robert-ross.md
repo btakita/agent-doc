@@ -1023,13 +1023,13 @@ transcribe + diarize [2026-04-08 15-07-35-compact.mp4](../../../../../Videos/202
 Running `corky transcribe` with diarization on `2026-04-08 15-07-35-compact.mp4` (46:34, speakers: Brian + Robert Ross). GPU transcription in background — will complete in a few minutes.
 
 Output will be saved to `tasks/dreamable/transcripts/2026-04-08-robert-ross.md` when done.
-### Re: transcribe + diarize (done) (HEAD)
+### Re: transcribe + diarize (done)
 
 Transcript saved: [`tasks/dreamable/transcripts/2026-04-08-robert-ross.md`](transcripts/2026-04-08-robert-ross.md)
 
 - 1862 segments, 46:34 runtime, transcribed at 126.9x realtime on RTX 5090
 - Speakers: Brian + Robert Ross (diarized)
-<!-- agent:boundary:129fbd80 -->
+<!-- agent:boundary:1437e984 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -118,3 +118,6 @@
 [submodule "src/session-share"]
 	path = src/session-share
 	url = git@github.com:btakita/session-share.git
+[submodule "src/equityfundingsource-dev"]
+	path = src/equityfundingsource-dev
+	url = git@github.com:btakita/equityfundingsource-dev.git

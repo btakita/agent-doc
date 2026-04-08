@@ -34,6 +34,12 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 
 **Detect claim:** If the first argument is `claim`, run `agent-doc claim <FILE>` via Bash and stop. Do not proceed with the document session workflow. Print the output to confirm the claim.
 
+**Detect compact:** If the first argument is `compact`, handle compaction and stop:
+- `compact exchange <FILE>` → read and follow the compact exchange runbook: [runbooks/compact-exchange.md](runbooks/compact-exchange.md)
+- `compact <FILE>` → run `agent-doc compact <FILE>` then `agent-doc commit <FILE>`
+
+Do not proceed with the normal document session workflow after handling compact.
+
 **Auto-update skill:** Run `agent-doc --version` and compare against the `agent-doc-version` in this file's frontmatter. If the binary version is newer, run `agent-doc skill install --reload compact` to update this SKILL.md. If the output contains `SKILL_RELOAD=compact`, use `AskUserQuestion` to prompt the user: "SKILL.md was updated. Run /compact to reload the skill, then re-run /agent-doc." Stop and do not proceed with the document session. If `agent-doc` is not installed or the version matches, skip this step.
 
 **Run preflight:** Execute `agent-doc preflight <FILE>` via Bash. This single command handles:
@@ -52,7 +58,8 @@ The command outputs JSON to stdout:
   "diff": "unified diff text or null",
   "no_changes": false,
   "document": "full document content",
-  "slash_commands": []
+  "slash_commands": [],
+  "builtin_commands": []
 }
 ```
 
@@ -64,13 +71,18 @@ The command outputs JSON to stdout:
 
 ### 0b. Execute slash commands (if any)
 
-If preflight returns a non-empty `slash_commands` array, execute each command **before** generating your response.
+If preflight returns a non-empty `slash_commands` or `builtin_commands` array, handle each **before** generating your response.
 
-For each command in `slash_commands`:
-- Use the `Skill` tool with the command name (strip the leading `/`) and any arguments
-- Log each executed command to the console: `Running: /command args`
+**Skill commands** (`slash_commands` — non-built-ins): Invoke each via the `Skill` tool:
+- Strip the leading `/` to get the skill name and args
+- Log each: `Running: /command args`
 - Example: `/agent-doc ./plan.md` → `Skill { skill: "agent-doc", args: "./plan.md" }`
-- For built-in commands that cannot be invoked via `Skill` (e.g. `/clear`, `/compact`), note them in the console and skip
+- Example: `/caveman` → `Skill { skill: "caveman" }`
+
+**Built-in commands** (`builtin_commands` — Claude Code built-ins): Cannot invoke via Skill. Write a note to the document for each:
+- `/compact` → document note: "Run `/compact` at the terminal to compact the conversation context."
+- `/clear` → document note: "Run `/clear` at the terminal to clear the conversation history."
+- All other built-ins → log to console and skip (cannot execute Claude Code built-ins from within the session)
 
 **Guards:** `parse_slash_commands` already filtered out code-fenced lines, blockquotes, and non-added lines — trust the output. Do not re-validate.
 

@@ -447,7 +447,7 @@ Committed `fa4ff87`, retagged v0.26.3. New Release run queued: [24144164805](htt
 ❯ fix gh actions:
 ❯ - https://github.com/btakita/corky/actions/runs/24145568234
 ❯ - https://github.com/btakita/corky/actions/runs/24148041223
-### Re: aarch64 root cause — cross 0.2.5 uses Ubuntu 16.04 (OpenSSL 1.0.2g) (HEAD)
+### Re: aarch64 root cause — cross 0.2.5 uses Ubuntu 16.04 (OpenSSL 1.0.2g)
 
 **Root cause:** `cargo install cross --version 0.2.5` pulls the cross 0.2.5 container which is based on Ubuntu 16.04 (Xenial). Ubuntu 16.04's `libssl-dev:arm64` provides OpenSSL **1.0.2g** — not supported by `openssl-sys 0.9.112` (requires >= 1.1.1).
 
@@ -460,7 +460,7 @@ Confirmed locally: `docker run --rm ghcr.io/cross-rs/aarch64-unknown-linux-gnu:0
 Committed `52a20ee`, retagged v0.26.3. New Release run: [24156432054](https://github.com/btakita/corky/actions/runs/24156432054).
 
 Two runs active (user also pushed another fix simultaneously). Either one passing confirms the direction.
-<!-- agent:boundary:98ba34af -->
+<!-- agent:boundary:a7af83d3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

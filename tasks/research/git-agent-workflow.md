@@ -197,7 +197,7 @@ How about entire?
 - https://entire.io/blog/hello-entire-world/
 - https://dev.ua/en/news/kolyshnii-ceo-github-zaluchyv-60-mln-dlia-novoho-startapu-entire-shcho-intehruie-shi-ahentiv-u-git-1770805513
 
-### Re: Entire (HEAD)
+### Re: Entire
 
 **Entire is a separate company from GitButler.** The $60M news article linked under GitButler in the Key Tools section is actually about Entire — worth correcting there.
 
@@ -210,8 +210,8 @@ When an agent (Claude Code, Gemini CLI) generates code and commits, Checkpoints 
 
 **Overlap with agent-doc:** High. Both use git as the persistence layer for agent sessions. Key difference: Entire stores metadata on a side branch (non-intrusive), agent-doc commits inline to the working branch as the document surface. Entire is a passive recorder; agent-doc is the workflow UI itself.
 
-❯ Should agent-doc also use the side-branch approach to be non-intrusive? Or support both modes?
-❯ Perhaps a key distinction is does Entire manage any content or only metadata?
+Should agent-doc also use the side-branch approach to be non-intrusive? Or support both modes?
+Perhaps a key distinction is does Entire manage any content or only metadata?
 
 **On the side-branch question:** Entire stores only metadata (transcripts, prompts, file lists, token usage) — no content. It's passive capture. The document/code on the working branch is untouched.
 
@@ -221,17 +221,17 @@ The distinction: **content** (agent-doc) vs **metadata-only** (Entire). agent-do
 
 **Strategic read:** Dohmke building this with $60M and GitHub credibility signals that "git as agent memory" is becoming a platform-level primitive. agent-doc is ahead on the interactive/document side; Entire is ahead on the passive capture / multi-agent side. These could be complementary.
 
-❯ I have been working on explicit harness context shaping is libraries:
-❯ - skill-harness
-❯ - module-harness
-❯ - agent-runbooks
-❯ - agent-memories
-❯ - agent-rules
+I have been working on explicit harness context shaping is libraries:
+- skill-harness
+- module-harness
+- agent-runbooks
+- agent-memories
+- agent-rules
 
-❯ Along with the agent docs themselves.
-❯ Would multiple agent memory systems compat well or have reliability issues?
+Along with the agent docs themselves.
+Would multiple agent memory systems compat well or have reliability issues?
 
-### Re: Multiple memory system compatibility (HEAD)
+### Re: Multiple memory system compatibility
 
 The systems you've built operate at different resolutions:
 - **agent-memories** — cross-session user/project/feedback (coarsest, highest persistence)
@@ -250,5 +250,5 @@ This is a scope stack, not competing systems. The risk isn't incompatibility —
 The integration point is `CLAUDE.md` — it's the priority resolver. The CLAUDE.md ontology gives a framework (Scope → Context → Resolution), but the actual precedence order isn't explicit. Making that explicit (e.g., "runbook overrides rule if task-specific") would harden the system.
 
 **Reliability verdict:** Compatible by scope, but fragile under contradiction. The more layers, the more important it is to have explicit priority rules at the top-level CLAUDE.md.
-<!-- agent:boundary:7bb34041 -->
+<!-- agent:boundary:785aebf1 -->
 <!-- /agent:exchange -->

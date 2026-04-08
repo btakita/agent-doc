@@ -103,7 +103,7 @@ In both cases, `agent-doc write` already receives the diff (or can compute it fr
 
 ❯ done
 - [ ] Fix PyPI trusted publisher for `pypi.yml` + environment `pypi`, then rerun CI
-❯ do
+do
 - [ ] Add SKILL.md note: patch:exchange must not echo user input (append mode)
 - [ ] Implement `❯ ` prefix normalization for user-added exchange lines in `agent-doc write` (both append + replace modes)
 
@@ -141,7 +141,7 @@ Added `normalize_user_prompts_in_exchange(content, snapshot)` to `write.rs`. Cal
 
 **IPC note:** Disk write path fully normalized (editor file shows `❯ `). IPC path normalizes the snapshot only — editor shows prefix on next disk cycle. Full IPC-side normalization needs plugin support (TODO).
 
-❯ do
+do
 - [ ] IPC-side ❯  normalization (plugin support needed)
 
 Use FFI plugin if possible
@@ -319,7 +319,7 @@ Removed all `agent:terminal` references. Updated title to "agent:console — str
 ❯ done
 - [ ] Verify `❯ ` prefix correct behavior in live session (type prompt, run agent-doc, confirm only user lines prefixed — not agent responses)
 
-❯ do
+do
 - [ ] Fix: keep 2-pane layout when navigating to non-agent-doc files (plugin: don't collapse on selectionChanged if no active agent-doc — only collapse on tab close)
 Does claude code provide any way to hook into capturing the status indicators?
 ```
@@ -648,12 +648,13 @@ The plugin's autocomplete uses a static list of Claude Code built-in commands �
 
 Fix: plugin autocomplete needs to read the available skills list (Claude Code skill registry or skills directory) and include them alongside built-ins. Feature gap in the plugin.
 
-❯ do
+do
 ❯ - [ ] Update skill routing: try `Skill` first for all slash commands; only document-note `/compact` and `/clear`
 ❯ - [ ] Plugin: autocomplete should enumerate user-defined skills from `~/.claude/skills/` (or skill registry)
 ❯ - [ ] Add `builtin_commands` distinction to preflight JSON (separate from `skill_commands`)
 ❯ - [ ] Define `/agent-doc compact exchange <path>` and `/agent-doc compact <path>` slash commands
-### Re: do — all tasks implemented (HEAD)
+
+### Re: do — all tasks implemented
 
 **Done:**
 
@@ -679,7 +680,7 @@ Fix: plugin autocomplete needs to read the available skills list (Claude Code sk
 - New entry in static command list, appears in plugin autocomplete
 
 All tests pass (38/38). Binary installed.
-<!-- agent:boundary:dd90b014 -->
+<!-- agent:boundary:b741e7d5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

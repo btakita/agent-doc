@@ -38,14 +38,18 @@ Round 3 of CI fixes:
 New CI run in progress. Waiting on result.
 ❯ verify:
 ❯ - [ ] **corky v0.26.3**: CI running (fix: host libssl-dev + libcublas-dev-12-6)
-### Re: verify (HEAD)
+### Re: verify
 
 Previous CI run used stale tag — it pointed to `7df8203`, not `9a0b6ea` (host libssl-dev + libcublas-dev). Retagged to correct commit and triggered new run.
 
 **New run**: `24148041223` (in progress, "fix(ci): add host libssl-dev for cross build; add libcublas-dev-12-6")
 
 Will update when complete.
-<!-- agent:boundary:ea130ef1 -->
+
+commit and push submodules
+release anything pending
+commit and push agent-loop
+<!-- agent:boundary:4e11d391 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

@@ -84,7 +84,7 @@ The section covers:
 This means any future session drafting messages to Rob, or reviewing his communications, will have these priorities loaded automatically — no need to re-derive them from the SMS thread.
 
 ❯ This same prioritization should be with **all** of my communication...with everybody.
-### Re: Apply to all communications (HEAD)
+### Re: Apply to all communications
 
 Done. Saved as a universal user memory:
 
@@ -95,7 +95,7 @@ Done. Saved as a universal user memory:
 - Contact-specific priorities go in `mail/contacts/<name>/AGENTS.md` under "Communication Priorities"
 
 This will be applied automatically whenever reviewing any professional correspondence, not just Dreamable.
-<!-- agent:boundary:cb18791c -->
+<!-- agent:boundary:9586f829 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

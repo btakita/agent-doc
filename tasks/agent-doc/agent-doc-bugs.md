@@ -175,7 +175,7 @@ Done. Both the binary and plugin now handle prefix normalization through the IPC
 ❯ - Plugin v0.2.49 built: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.49-signed.zip`
 
 ❯ **Install the plugin:** IDEA → Settings → Plugins → gear → "Install Plugin from Disk..." → select `agent-doc-jetbrains-0.2.49-signed.zip`.
-<!-- agent:boundary:12924589 -->
+<!-- agent:boundary:5d723599 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

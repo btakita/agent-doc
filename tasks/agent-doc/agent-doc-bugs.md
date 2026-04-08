@@ -964,7 +964,7 @@ Pending: JB 0.2.51 and VSCode 0.2.4 marketplace publishes (separate steps).
 
 ❯ do
 ❯ > In src/session-share/tasks/claudescore.me, why do we have duplicate response patches...both of which are uncommitted?
-### Re: duplicate response patches in claudescore.md (HEAD)
+### Re: duplicate response patches in claudescore.md
 
 The `tasks/claudescore.md` file in `src/session-share` has the same response (`### Re: Slack-formatted copy/paste`) written twice with different boundary markers (`83095b9b` and `623d770c`). Both are uncommitted working tree changes.
 
@@ -981,7 +981,7 @@ The `fullContent` fix we shipped in 0.31.23 sends `content_ours` (pre-response +
 
 **Immediate fix:** In `claudescore.md`, delete the duplicate `### Re: Slack-formatted copy/paste` block (lines after `<!-- agent:boundary:83095b9b -->` through the second `<!-- agent:boundary:623d770c -->`), leaving only the first occurrence with the final boundary.
 
-### Re: do — marketplace publishes (HEAD)
+### Re: do — marketplace publishes
 
 **JetBrains Marketplace:** The signed zip is ready (`agent-doc-jetbrains-0.2.51-signed.zip`) but I don't see a JetBrains Marketplace publish token in pass. The Gradle `publishPlugin` task needs `PUBLISH_TOKEN`. Do you have a JetBrains Hub token stored somewhere?
 
@@ -992,15 +992,49 @@ OVSX_PAT="$(pass btak/OVSX_TOKEN)" npx ovsx publish editors/vscode/agent-doc-0.2
 ```
 
 Let me know which registries to target and whether you have the missing tokens, or I'll publish to Open VSX now and wait on the others.
-<!-- agent:boundary:245535ae -->
+
+❯ Don't worry about publish to the marketplaces yet.
+
+❯ do
+❯ - [ ] BUG: `fullContent` + component patches conflict — `fullContent` overwrites response → duplicate on next cycle; fix in `write.rs`/`PatchWatcher.kt`
+❯ - [ ] Fix duplicate in `src/session-share/tasks/claudescore.md` — delete second `### Re: Slack-formatted copy/paste` block
+### Re: do — fullContent + patches bug fix + claudescore duplicate (HEAD)
+
+**Acknowledged:** skipping marketplace publishing for now.
+
+**Both tasks done.**
+
+---
+
+#### Bug: `fullContent` + component patches conflict
+
+**Root causes found (two):**
+
+1. **Stale baseline detection fires for streaming checkpoints.** When checkpoint 2 uses `--baseline-file` (the pre-response document), the snapshot already has checkpoint 1's partial response. `is_stale_baseline` sees the baseline is "behind" the snapshot and falls back to `content_at_start` (which has checkpoint 1's content), then applies the full patches on top → DUPLICATE content in `content_ours` → fullContent carries the duplicate to the editor.
+
+2. **`fullContent` sent alongside component patches.** When `normalize_prefix_lines` is non-empty, `fullContent` = `content_ours` is included in the IPC payload even when component patches are present. PatchWatcher applies `fullContent` (full document replacement) and early-returns, skipping the component patches. If `content_ours` had duplicated content (from bug 1), the editor gets the duplicate.
+
+**Fixes applied:**
+
+`write.rs`:
+- `is_stale_baseline` check is now skipped when an explicit `--baseline-file` was provided (`baseline.is_none()` guard). Streaming checkpoints intentionally use the pre-response document as baseline — the stale baseline check must not fire for them.
+- `fullContent` is no longer sent in the IPC payload when component patches are present. `normalize_prefix_lines` + component patches handle normalization correctly without it. `fullContent` is now only sent when there are NO patches (append-mode docs).
+- Pre-existing `collapsible_if` clippy error in `compact.rs` fixed while here.
+
+`PatchWatcher.kt` (defense in depth):
+- Both the Document path and the VFS path now guard the `fullContent` branch with `&& patch.patches.isEmpty()`. If `fullContent` is ever sent alongside patches (e.g., from an older binary), the plugin falls through to the component patch path instead of replacing the document.
+
+---
+
+#### claudescore.md duplicate
+
+Deleted the second `### Re: Slack-formatted copy/paste` block (lines after `<!-- agent:boundary:83095b9b -->`). Kept the `<!-- agent:boundary:623d770c -->` marker.
+<!-- agent:boundary:94615321 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] BUG: `fullContent` + component patches conflict — `fullContent` overwrites response → duplicate on next cycle; fix in `write.rs`/`PatchWatcher.kt`
-- [ ] Fix duplicate in `src/session-share/tasks/claudescore.md` — delete second `### Re: Slack-formatted copy/paste` block
-- [ ] JetBrains Marketplace: need `PUBLISH_TOKEN` — where is it?
-- [ ] VSCode Marketplace: need VS Marketplace PAT for `vsce publish` (or publish to Open VSX with existing `OVSX_TOKEN`)
+- [ ] Build JetBrains plugin with fullContent fix and install locally to verify
 - [ ] Wait for CI to complete (prebuilt binaries + PyPI wheels for v0.31.23)
 <!-- /agent:pending -->

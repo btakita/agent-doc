@@ -316,7 +316,7 @@ Gist rewritten with `agent:console` throughout: https://gist.github.com/btakita/
 
 Removed all `agent:terminal` references. Updated title to "agent:console — streaming terminal output to a document". Content now accurately reflects `StreamCapture` mode writing into `&lt;!-- agent:console --&gt;`.
 
-done
+❯ done
 - [ ] Verify `❯ ` prefix correct behavior in live session (type prompt, run agent-doc, confirm only user lines prefixed — not agent responses)
 
 do
@@ -361,8 +361,8 @@ Plugin v0.2.50 built: `editors/jetbrains/build/distributions/agent-doc-jetbrains
 
 **Install:** IDEA → Settings → Plugins → gear → "Install Plugin from Disk..." → select `agent-doc-jetbrains-0.2.50-signed.zip`.
 
-done
-- [ ] Install plugin v0.2.50 and verify 2-pane layout persists when navigating to non-agent-doc files
+❯ done
+❯ - [ ] Install plugin v0.2.50 and verify 2-pane layout persists when navigating to non-agent-doc files
 
 Please read this document. The `❯ ` prefix was incorrectly added...then removed as an uncommitted change...during the last run. Why?
 ### Re: ❯ code fence bug + Claude Code status hooks
@@ -427,7 +427,7 @@ The stream loop feeds `"type": "thinking"` chunks to `thinking_buffer`, interlea
 **Caveat:** This only works for sessions run *through* `agent-doc stream`. If Claude Code is running independently in another tmux pane (not as an agent-doc stream session), its API stream is not accessible — `tmux capture-pane` is the only option for that case.
 
 Please append the last patch to the gist.
-### Re: gist updated (HEAD)
+### Re: gist updated
 
 Appended the last exchange (Claude API thinking token streaming Q&A) to the gist: https://gist.github.com/btakita/ab31879717d229d50c4b13e7031717e3
 
@@ -448,12 +448,23 @@ Please append to the gist.
 ### Re: gist updated
 
 Appended the "why the initial No was wrong" exchange to the gist: https://gist.github.com/btakita/ab31879717d229d50c4b13e7031717e3
-<!-- agent:boundary:6ce60fbb -->
+❯ done
+❯ - [ ] Install plugin v0.2.50 and verify 2-pane layout persists when navigating to non-agent-doc files
+❯ - [ ] Test `❯ ` code fence fix in live session (user types a code block, runs agent-doc, confirm ` ``` ` lines are NOT prefixed)
+### Re: verification tasks added (HEAD)
+
+Both items queued. When ready:
+
+- **v0.2.50 layout test** — install the plugin, open any non-agent-doc file (e.g. `README.md`) and confirm the 2-pane split persists without the agent pane collapsing.
+- **`❯ ` fence test** — type a code block in this document, submit, and confirm ` ``` ` delimiters arrive clean (no `❯ ` prefix on fence lines).
+
+Pending list already reflects both — no changes needed there.
+<!-- agent:boundary:08bd6b78 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Test `❯ ` code fence fix in live session (user types a code block, runs agent-doc, confirm ` ``` ` lines are NOT prefixed)
 - [ ] Install plugin v0.2.50 and verify 2-pane layout persists when navigating to non-agent-doc files
+- [ ] Test `❯ ` code fence fix in live session (user types a code block, runs agent-doc, confirm ` ``` ` lines are NOT prefixed)
 <!-- /agent:pending -->

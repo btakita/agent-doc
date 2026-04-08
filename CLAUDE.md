@@ -101,12 +101,13 @@ editors/
 1. Bump version in `Cargo.toml` + `pyproject.toml` (keep in sync)
 2. Update `VERSIONS.md` with a new version entry summarizing the changes
 3. `make check` (clippy + test)
-4. Branch → PR → squash merge to main
-5. Tag: `git tag v<version> && git push origin v<version>`
-6. `cargo publish` (crates.io)
-7. `maturin publish` (PyPI)
-8. `gh release create v<version> --generate-notes` with prebuilt binary (GitHub Release)
-9. Install binary: `cargo install --path .`
+4. `cargo install --path .` — install locally and verify the changed behavior end-to-end
+5. **Manual testing gate:** Do NOT proceed to step 6+ until the user has confirmed the feature works in a live session
+6. Branch → PR → squash merge to main
+7. Tag: `git tag v<version> && git push origin v<version>`
+8. `cargo publish` (crates.io)
+9. `maturin publish` (PyPI)
+10. `gh release create v<version> --generate-notes` with prebuilt binary (GitHub Release)
 
 ## Agent Backend Contract
 

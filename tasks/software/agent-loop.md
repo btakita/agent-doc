@@ -125,7 +125,7 @@ export ANTHROPIC_API_KEY=fake
 ```
 
 Then `claude` will use the local model by default. Swap back to Anthropic by unsetting those vars.
-<!-- agent:boundary:4e318f45 -->
+<!-- agent:boundary:c9862e1c -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

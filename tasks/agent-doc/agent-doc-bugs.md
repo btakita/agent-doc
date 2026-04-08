@@ -611,7 +611,7 @@ Test in live session. Confirm works, then publish (crates.io + PyPI + GitHub Rel
 ❯ > `/compact` → compact exchange runbook
 
 ❯ `compact exchange` is separate. Perhaps this should be a `/agent-doc compact exchange <document-path>` command? `/agent-doc compact <document-path>` could compact the entire document.
-### Re: `/compact` correction + proposed commands (HEAD)
+### Re: `/compact` correction + proposed commands
 
 Agreed — my earlier mapping was wrong. Two distinct things:
 
@@ -628,15 +628,33 @@ This makes sense: agent-doc slash commands in the document become self-referenti
 - `/compact` → built-in, can't execute internally, note to user
 - `/agent-doc compact exchange <file>` → invoke compact exchange runbook via Skill
 - `/agent-doc compact <file>` → invoke full document compact via Skill
-<!-- agent:boundary:5c7c5035 -->
+
+❯ I want any `/` "command" to run the literal claude or skill command. This should like running the commands in the terminal as much as possible.
+❯ Note that `/caveman` does not auto-complete in the JB plugin. Why not?
+### Re: literal command execution + `/caveman` autocomplete (HEAD)
+
+**Literal command execution:**
+
+Agreed. The routing should attempt to run everything as-if typed in the terminal:
+- Skills → `Skill` tool (already works today)
+- `/agent-doc ...` → Skill or Bash (already works)
+- `/compact`, `/clear` → genuinely can't execute from within the session — they'd compact/destroy current conversation context. No workaround. These two get a document note ("run at terminal") instead.
+
+Skill instructions should change from "built-ins → skip" to: **try `Skill` tool first; only fall back to document note for `/compact` and `/clear`.**
+
+**`/caveman` autocomplete in JB plugin:**
+
+The plugin's autocomplete uses a static list of Claude Code built-in commands — it doesn't enumerate dynamically-loaded skills. Skills (`/caveman`, `/agent-doc`, etc.) are user-defined and registered in `~/.claude/skills/`; the plugin has no mechanism to discover them at autocomplete time.
+
+Fix: plugin autocomplete needs to read the available skills list (Claude Code skill registry or skills directory) and include them alongside built-ins. Feature gap in the plugin.
+<!-- agent:boundary:081fedcb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Correct skill routing: `/compact` → document note (not compact exchange runbook)
+- [ ] Update skill routing: try `Skill` first for all slash commands; only document-note `/compact` and `/clear`
+- [ ] Plugin: autocomplete should enumerate user-defined skills from `~/.claude/skills/` (or skill registry)
 - [ ] Add `builtin_commands` distinction to preflight JSON (separate from `skill_commands`)
-- [ ] Define `/agent-doc compact exchange <path>` slash command
-- [ ] Define `/agent-doc compact <path>` slash command
-- [ ] Wire skill routing for `/agent-doc compact exchange` → compact exchange runbook
+- [ ] Define `/agent-doc compact exchange <path>` and `/agent-doc compact <path>` slash commands
 <!-- /agent:pending -->

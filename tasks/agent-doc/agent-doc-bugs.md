@@ -277,7 +277,7 @@ stream_config:
 - Writes the limited content into the `&lt;!-- agent:console --&gt;` component via CRDT merge
 
 **So to answer the question:** Yes, `max_lines: 50` is the default. You can override it per-document in frontmatter. The component name defaults to `"console"` — add `&lt;!-- agent:console --&gt;...&lt;!-- /agent:console --&gt;` to the document to receive the output.
-<!-- agent:boundary:20ed7a13 -->
+<!-- agent:boundary:241a5ed8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

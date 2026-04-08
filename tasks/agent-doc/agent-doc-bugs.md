@@ -165,7 +165,7 @@ Done. Both the binary and plugin now handle prefix normalization through the IPC
 `make check` passes (208 tests). Plugin build succeeded.
 
 **Pending: release v0.31.20 + plugin install.**
-### Re: Release v0.31.20 (HEAD)
+### Re: Release v0.31.20
 
 ❯ Done.
 
@@ -175,11 +175,29 @@ Done. Both the binary and plugin now handle prefix normalization through the IPC
 ❯ - Plugin v0.2.49 built: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.49-signed.zip`
 
 ❯ **Install the plugin:** IDEA → Settings → Plugins → gear → "Install Plugin from Disk..." → select `agent-doc-jetbrains-0.2.49-signed.zip`.
-<!-- agent:boundary:5d723599 -->
+
+❯ Look at both this document and tasks/research/deep-eval.md
+❯ Committing the leading `❯ ` is overeager. Only the user prompt should have the leading `❯ `.
+❯ Also, there is an uncommitted git content which has the `❯ ` prefix removed for the user prompt. This should not happen for the user prompt.
+
+❯ Note in this file, I reset the uncommitted change to remove the `❯ ` prefix. Use tasks/research/deep-eval.md as the baseline
+### Re: overeager `❯ ` — root cause + fix (HEAD)
+
+**Root cause:** `apply_patches_with_overrides` repositions the boundary to the **end** of the exchange during its pre-patch step. So in `content_ours`, *everything* before the boundary — including the agent's new response — was in the "user region". Diffing `snapshot → content_ours user_region` marked agent response lines as Insert → they got `❯ `.
+
+**Fix:** `normalize_user_prompts_in_exchange` now takes a `baseline` parameter (3rd arg). User-added lines are identified by diffing `snapshot → baseline` (pre-agent state). Only genuine user additions get `❯ `; agent response lines in `content_ours` pass through unchanged.
+
+Regression test added: `normalize_user_prompts_agent_response_not_prefixed` — verifies agent answer lines are NOT prefixed even when they precede the boundary in `content_ours`.
+
+**Bug 2 (prefix stripped from user prompts):** Was a consequence of Bug 1. The overeager normalization saved an incorrect snapshot (with `❯ ` on agent lines). A subsequent write using the baseline (which never had those `❯ ` additions) produced content without them. Fixing Bug 1 corrects the snapshot, preventing this cascade.
+
+v0.31.21 released: crates.io ✓, GitHub Release ✓, `cargo install` ✓.
+<!-- agent:boundary:9326c0d4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Install plugin v0.2.49 in IDEA (Settings → Plugins → gear → Install from Disk → `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.49-signed.zip`)
+- [ ] Verify `❯ ` prefix correct behavior in live session after plugin install
 <!-- /agent:pending -->

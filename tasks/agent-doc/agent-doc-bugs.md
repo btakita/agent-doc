@@ -1074,13 +1074,27 @@ VSCode: `code --install-extension src/agent-doc/editors/vscode/agent-doc-0.2.5.v
 
 ❯ do
 ❯ - [ ] Install VSCode 0.2.5 extension
-### Re: Install VSCode 0.2.5 (HEAD)
+### Re: Install VSCode 0.2.5
 
 Done — installed via `codium --install-extension agent-doc-0.2.5.vsix`. Extension successfully installed.
-<!-- agent:boundary:dea382e4 -->
+
+❯ The uncommitted state was not committed when the task completed. Why?
+### Re: uncommitted state after task completion (HEAD)
+
+Two separate issues:
+
+**1. Parent submodule pointer not updated.**
+I committed the version bumps inside `src/agent-doc` but never ran `git add src/agent-doc && git commit` in the parent `agent-loop` repo. The `M src/agent-doc` in `git status` shows the pointer is stale. This is a workflow gap — I followed the submodule commit rule but skipped the "update parent pointer" step.
+
+**2. Pre-existing uncommitted changes in agent-doc submodule.**
+`src/frontmatter.rs` and `src/start.rs` have a `hooks` field addition that predates this session (in-progress work, not part of the version-bump task). They remain uncommitted — correctly, since they're unrelated to what we just built.
+
+The fix for (1): commit the parent pointer now. The pre-existing submodule changes stay uncommitted until that in-progress work is ready.
+<!-- agent:boundary:973ebf7f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Commit parent repo submodule pointer for agent-doc (JetBrains 0.2.52, VSCode 0.2.5)
 <!-- /agent:pending -->

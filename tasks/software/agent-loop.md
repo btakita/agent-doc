@@ -214,7 +214,7 @@ Parent repo committed + pushed: submodule pointer updates, tasks/, .claude/ skil
 ❯ - [ ] Fix `src/session-share` remote — `ClaudeScore/SessionShare` not found on GitHub
 ❯ - [ ] **Re-test gate**: re-transcribe filevine interview with corky v0.26.2+, verify transcript length
 
-### Re: do (HEAD)
+### Re: do
 
 #### 1. Fix session-share remote
 
@@ -225,6 +225,8 @@ Parent repo committed + pushed: submodule pointer updates, tasks/, .claude/ skil
 3. **Use an existing org**: pick from: `rr`, `ctx-core`, `cogov`, `rappstack`, etc.
 
 Which do you want?
+
+❯ Use my personal account. Make btakita/session-share a private repo.
 
 #### 2. Re-transcribe filevine interview
 
@@ -246,11 +248,18 @@ Running now (GPU loaded, whisper large-v3). Will update when complete.
 `tasks/research/transcripts/filevine-interview-2026-04-07.md` updated.
 
 Say "publish corky" to release v0.26.3 when satisfied with transcript.
-<!-- agent:boundary:f354f23f -->
+### Re: Use my personal account. Make btakita/session-share a private repo. (HEAD)
+
+Done:
+1. Created `btakita/session-share` (private) on GitHub
+2. Updated remote in `src/session-share` from `ClaudeScore/SessionShare` → `btakita/session-share`
+3. Pushed all commits (including the `claude-auto-ruberic` session docs)
+4. Updated `.gitmodules` in parent repo + pushed
+<!-- agent:boundary:5581cad3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Fix `src/session-share` remote — **blocked**: choose target (create `ClaudeScore` org, `btakita/session-share`, or another org)
+- [x] Fix `src/session-share` remote — moved to `btakita/session-share` (private)
 - [ ] **Publish gate (corky)**: say "publish corky" to release v0.26.3 — re-test complete
 - [ ] **Publish gate (agent-kit)**: approve v0.4.0 tag + publish
 - [ ] Run litellm proxy pointing at vllm

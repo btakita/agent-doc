@@ -519,7 +519,7 @@ The `❯ ` prefix is a **semantic marker** (terminal prompt input), not decorati
 - OR flag it prominently rather than silently committing
 
 The current workaround is to restore the `❯ ` prefixes on lines 160-163 in git-agent-workflow.md if they were stripped accidentally.
-<!-- agent:boundary:6645b9c2 -->
+<!-- agent:boundary:527518c1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

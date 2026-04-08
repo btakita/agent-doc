@@ -977,7 +977,7 @@ Rob already knows about Filevine (he explicitly encouraged you to pursue it). He
 This respects what he said earlier — that his concern was you shipping ClaudeScore on Monday and leaving on Tuesday. If you can address that directly (e.g., what's your realistic timeline on Filevine, what happens if you get an offer mid-project), that's the conversation he actually needs to have.
 
 **On the lucas-huang collaboration:** Don't mention it. It's a side informal arrangement helping someone with recruiter emails using your own tools. It's not material to Rob's question of whether you can commit to Dreamable work. Bringing it up adds noise and could make your situation sound more fractured than it is. The relevant facts are: two small gigs, active interviews — that's sufficient.
-<!-- agent:boundary:31696a72 -->
+<!-- agent:boundary:f6a26003 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

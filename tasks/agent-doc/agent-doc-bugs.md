@@ -390,7 +390,7 @@ The available hook events (`PreToolUse`, `PostToolUse`, `Notification`, `Stop`, 
 3. **Terminal screen scraping** — poll `tmux capture-pane` on a short interval and write into `agent:console`. Rough but functional for observability.
 
 So for the `agent:console` use case: if the Claude Code session is the pane being watched, `stream_config` with a short `interval` (e.g. 200ms) will capture the status text as part of the pane content. It would appear in the console component briefly while thinking is active, then get replaced by the next capture.
-<!-- agent:boundary:1be44463 -->
+<!-- agent:boundary:1c8e16f8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

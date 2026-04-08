@@ -424,7 +424,7 @@ This is a patch-level change. Ready to bump to v0.26.3 and release, or bundle wi
 - `cargo install --path . --features transcribe-cuda` ✓ (v0.26.2 → v0.26.3)
 
 **CI in progress:** Release workflow running ([24142052779](https://github.com/btakita/corky/actions/runs/24142052779)) — builds cross-platform binaries and creates GitHub Release. PyPI publish triggers automatically once the Release is created (pypi.yml fires on `release: [published]`).
-<!-- agent:boundary:09c594c5 -->
+<!-- agent:boundary:f2ed8a7b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

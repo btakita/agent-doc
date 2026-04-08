@@ -1006,14 +1006,20 @@ It covers:
 Key open question worth pursuing: how does GitButler's virtual branch model compare to agent-doc's snapshot/commit approach — and is there a natural integration (sessions as virtual branches)?
 
 ❯ Please compact [2026-04-08 15-07-35.mp4](../../../../../Videos/2026-04-08%2015-07-35.mp4)
-### Re: compact video (HEAD)
+### Re: compact video
 
 Compressing `/home/brian/Videos/2026-04-08 15-07-35.mp4` (2.1 GB) → `2026-04-08 15-07-35-compact.mp4` using H.264 CRF 28. Running in background — will complete in a few minutes.
-<!-- agent:boundary:1a8d9d1b -->
+### Re: compact video (done) (HEAD)
+
+`2026-04-08 15-07-35.mp4` compressed:
+- **Original:** 2.1 GB
+- **Compact:** 123 MB (94% reduction)
+- **Duration:** 46:34, H.264 1080p / AAC stereo
+- **Path:** `/home/brian/Videos/2026-04-08 15-07-35-compact.mp4`
+<!-- agent:boundary:fba3ca1b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- ffmpeg compression running: `2026-04-08 15-07-35.mp4` → `-compact.mp4`
 <!-- /agent:pending -->

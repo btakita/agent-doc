@@ -124,5 +124,5 @@ When an agent (Claude Code, Gemini CLI) generates code and commits, Checkpoints 
 ❯ - https://entire.io/
 ❯ - https://entire.io/blog/hello-entire-world/
 ❯ - https://dev.ua/en/news/kolyshnii-ceo-github-zaluchyv-60-mln-dlia-novoho-startapu-entire-shcho-intehruie-shi-ahentiv-u-git-1770805513
-<!-- agent:boundary:385facd2 -->
+<!-- agent:boundary:78391ef7 -->
 <!-- /agent:exchange -->

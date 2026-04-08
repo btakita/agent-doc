@@ -7,16 +7,74 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
+Active. Rob re-engaged. ClaudeScore implementation pending. Communication cadence established.
 <!-- /agent:status -->
 
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+❯ For robert-ross text. Organize and prioritize what robert-ross communicates with me.
 
-<!-- agent:boundary:9f27c7c8 -->
+❯ Whenever something is sent:
+❯ - understand and clarify what is important
+❯ - highlight what is truly important
+❯   - do not let biased communication override focus from truly import topics
+❯     - temporal bias
+❯     - content length bias
+
+❯ reread robert-ross-sms.txt
+### Re: Organize and prioritize Robert Ross communications (HEAD)
+
+After rereading the full SMS thread, here's what matters most — stripped of temporal and length bias.
+
+---
+
+#### What's truly important (action items and non-negotiables)
+
+**1. Proactive communication is a hard requirement.**
+This is Rob's #1 concern and the issue that killed his prior relationship with "Gabriel." He doesn't need elaborate updates — even "let's wait until we talk" is sufficient. Any logistical text needs a reply, same day. This is the single thing most likely to determine whether the engagement survives.
+
+**2. Re-engagement is genuine and active.**
+He processed for a day, came back voluntarily: "I desperately want to work with you." The relationship is repairing. Treat current state as a fresh start, not residue from the conflict.
+
+**3. ClaudeScore is the concrete work.**
+He asked you to start on ClaudeScore implementation as discussed. Monday was the stated deadline. This is the action item — not research, not discussion, implementation.
+
+**4. Filevine situation needs resolution.**
+He's aware of the competing offer and said he'll figure out a solution. He gave you honest advice ("better bet, more money") — this means he's being collaborative, not adversarial. Keep him updated on Filevine status so he can plan.
+
+**5. agent-doc interest is real.**
+He spent an evening researching it. His suggestion — "I think you'd significantly improve agent-doc if you had a memory service integrated" — is genuine product feedback, not small talk.
+
+---
+
+#### What's context but not action
+
+- The emotional back-and-forth about stress, anxiety, financial pressure — resolved now. Don't relitigate.
+- His motivational texts (Stoics, Marcus Aurelius, your wife, your daughter) — appreciated, acknowledged, move on.
+- The earlier conflict — it's why the communication standard is so explicit now, but the conflict itself is closed.
+
+---
+
+#### Communication pattern to internalize
+
+- Rob sends short bursts; **each burst is a prompt for a reply**, even brief
+- He processes overnight — his silence is not disinterest
+- Logistics must be confirmed **explicitly**, not implied ("sounds good" to an emotional message doesn't confirm the morning's logistics)
+- He's direct and fast-moving; match that cadence
+
+---
+
+#### Current status (bottom of thread)
+
+The thread ends with him calling you on the phone. Whatever happened on that call is where things actually stand — the SMS thread itself is resolved.
+<!-- agent:boundary:1fcf8d31 -->
 <!-- /agent:exchange -->
 
-## Pending / Not Built (HEAD)
+## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Start ClaudeScore implementation (Monday deadline)
+- [ ] Keep Rob updated on Filevine status
+- [ ] Reply proactively to any logistics texts same-day
 <!-- /agent:pending -->

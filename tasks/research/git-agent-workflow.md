@@ -105,7 +105,7 @@ The **gap GitButler doesn't address**: cross-submodule sessions. If a feature sp
 
 So: submodules + focused PRs solves the scale problem GitButler is pitching against, and does so without requiring a new tool. GitButler adds value *within* each focused repo but doesn't solve cross-repo coordination.
 
-### Re: Entire
+### Re: Entire (HEAD)
 
 **Entire is a separate company from GitButler.** The $60M news article linked under GitButler in the Key Tools section is actually about Entire — worth correcting there.
 
@@ -142,7 +142,7 @@ The **gap GitButler doesn't address**: cross-submodule sessions. If a feature sp
 
 So: submodules + focused PRs solves the scale problem GitButler is pitching against, and does so without requiring a new tool. GitButler adds value *within* each focused repo but doesn't solve cross-repo coordination.
 
-### Re: Entire (HEAD)
+### Re: Entire
 
 **Entire is a separate company from GitButler.** The $60M news article linked under GitButler in the Key Tools section is actually about Entire — worth correcting there.
 
@@ -161,5 +161,5 @@ When an agent (Claude Code, Gemini CLI) generates code and commits, Checkpoints 
 ❯ - https://entire.io/
 ❯ - https://entire.io/blog/hello-entire-world/
 ❯ - https://dev.ua/en/news/kolyshnii-ceo-github-zaluchyv-60-mln-dlia-novoho-startapu-entire-shcho-intehruie-shi-ahentiv-u-git-1770805513
-<!-- agent:boundary:dc05ceae -->
+<!-- agent:boundary:f1c8ffbe -->
 <!-- /agent:exchange -->

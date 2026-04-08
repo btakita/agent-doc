@@ -237,7 +237,7 @@ Cain opened by introducing the team — confirming their roles match our prep:
 Brian's intro covered: agentic loops/harnesses, human-agent alignment via ontologies, agent-doc as document-centric AI UI, workflow automation (transcription → blog posts). Landed well — Cain's framing confirms the team is doing exactly the kind of work the prep notes predicted.
 
 **Next:** If you want a summary of the full conversation, a follow-up email draft, or notes from specific parts of the transcript, just ask.
-<!-- agent:boundary:9b67bc29 -->
+<!-- agent:boundary:85135a94 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

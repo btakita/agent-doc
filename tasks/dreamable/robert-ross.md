@@ -54,11 +54,11 @@ Please draft an email proposing 1PM PT (4 PM ET).
 **Draft email:**
 
 > Hi Rob,
->
+❯ >
 > Thanks for reaching out... I'd love to chat about the role at Dreamable.
->
+❯ >
 > Thursday at 1pm PT / 4pm ET works great for me. Looking forward to it.
->
+❯ >
 > Best,
 > Brian
 
@@ -71,11 +71,11 @@ Email sent directly to rob@dreamable.com via corky (`--send`). Replied to thread
 
 **Sent content:**
 > Hi Rob,
->
+❯ >
 > Thanks for reaching out... I'd love to chat about the role at Dreamable.
->
+❯ >
 > Thursday at 1pm PT / 4pm ET works great for me. Looking forward to it.
->
+❯ >
 > Best,
 > Brian
 
@@ -118,11 +118,11 @@ Which approach do you want?
 Updated the draft at `mail/drafts/2026-04-02-re-brian-rob-zoom.md` with new messaging:
 
 > Hi Rob,
->
+❯ >
 > Apologies...my earlier reply didn't thread properly due to a technical issue on my end, so resending to make sure you see it.
->
+❯ >
 > I'd love to chat about the role at Dreamable. I'm open to whenever works for you on Thursday. Looking forward to it.
->
+❯ >
 > Best,
 > Brian
 
@@ -313,7 +313,7 @@ His pain points he described on the call:
 #### Your direct alignment
 
 | Rob's Need | Your Existing Tool | Leverage |
-|---|---|---|
+❯ |---|---|---|
 | Session analyzer | **agent-doc** — already tracks sessions, diffs, snapshots, git history | Extend to parse/score sessions |
 | Cross-platform context | **CLAUDE.md/AGENTS.md** convention + agent-doc templates | Your context architecture IS the answer to his "unified viewer" problem |
 | Interactive context modification | **agent-doc template mode** — named components, patch blocks, CRDT merge | Exactly what DocWalk needs |
@@ -471,7 +471,7 @@ To test it now: open `tasks/software/session-analyzer.md`, type a session file p
 **Cloudflare-native alternatives for semantic search:**
 
 | Option | What it is | Fit |
-|---|---|---|
+❯ |---|---|---|
 | **Cloudflare Vectorize** | Native vector database, integrates with Workers AI | Best fit — purpose-built for this |
 | **Workers AI + D1** | Run embedding models on Workers AI, store metadata in D1 | More control, more work |
 | **Turbopuffer / Qdrant Cloud** | External vector DBs accessible via HTTP from Workers | If you need more features than Vectorize |
@@ -499,7 +499,7 @@ Can we build a granola-like demo for Rob? Should we have real-time whisper trans
 #### Recording vs real-time for the demo
 
 | Approach | Pros | Cons |
-|---|---|---|
+❯ |---|---|---|
 | **Recording** (corky transcribe post-hoc) | Reliable, already proven, GPU-accelerated, good diarization | Not "live" |
 | **Real-time whisper** | Impressive demo, matches Build Party's live vision | Latency issues, diarization is harder in real-time, more failure modes |
 
@@ -734,7 +734,7 @@ do
 
 **Verdict:** Deepgram + LiveKit is the right choice for Build Party. Native plugin, cheapest at scale, and LiveKit's architecture eliminates the hardest part (diarization).
 
----
+❯ ---
 
 ### Re: Cloudflare Vectorize + Workers AI — session indexing evaluation
 
@@ -967,7 +967,7 @@ What actually happened with him?
 
 These two links show Rob is still researching and thinking about your work. The GitButler link in particular is him actively engaging with your ideas.
 
----
+❯ ---
 
 **Explaining your circumstances to Rob:**
 
@@ -1009,17 +1009,25 @@ Key open question worth pursuing: how does GitButler's virtual branch model comp
 ### Re: compact video
 
 Compressing `/home/brian/Videos/2026-04-08 15-07-35.mp4` (2.1 GB) → `2026-04-08 15-07-35-compact.mp4` using H.264 CRF 28. Running in background — will complete in a few minutes.
-### Re: compact video (done) (HEAD)
+### Re: compact video (done)
 
 `2026-04-08 15-07-35.mp4` compressed:
 - **Original:** 2.1 GB
 - **Compact:** 123 MB (94% reduction)
 - **Duration:** 46:34, H.264 1080p / AAC stereo
 - **Path:** `/home/brian/Videos/2026-04-08 15-07-35-compact.mp4`
-<!-- agent:boundary:bc88add3 -->
+
+transcribe + diarize [2026-04-08 15-07-35-compact.mp4](../../../../../Videos/2026-04-08%2015-07-35-compact.mp4): Brian + robert-ross
+### Re: transcribe + diarize (HEAD)
+
+Running `corky transcribe` with diarization on `2026-04-08 15-07-35-compact.mp4` (46:34, speakers: Brian + Robert Ross). GPU transcription in background — will complete in a few minutes.
+
+Output will be saved to `tasks/dreamable/transcripts/2026-04-08-robert-ross.md` when done.
+<!-- agent:boundary:b70374df -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Transcription in progress: `2026-04-08 15-07-35-compact.mp4` → `tasks/dreamable/transcripts/2026-04-08-robert-ross.md`
 <!-- /agent:pending -->

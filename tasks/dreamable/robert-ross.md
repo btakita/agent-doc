@@ -1034,18 +1034,30 @@ transcribe + diarize /home/brian/work/btakita/agent-loop/mail/contacts/robert-ro
 ### Re: transcribe + diarize phone recording
 
 Transcribing `phone_20260408-180506_4156839775.m4a` (480 KB). Running now...
-### Re: transcribe + diarize phone recording (done) (HEAD)
+### Re: transcribe + diarize phone recording (done)
 
 Transcript saved: [`tasks/dreamable/transcripts/phone_20260408-180506_4156839775.md`](transcripts/phone_20260408-180506_4156839775.md)
 
 - 104 segments, ~4 min, transcribed at 131.9x realtime
 - Speakers: Brian + Robert Ross (diarized)
 - Topics: sandbox/AWS setup, firewall rules for Claude Code, real-time work visibility
-<!-- agent:boundary:2ded9f19 -->
+
+❯ Oleg was another speaker on the conversation. Please save the voiceprint.
+### Re: save Oleg's voiceprint (HEAD)
+
+No Oleg contact yet and corky doesn't have a native voiceprint-enroll command. Plan:
+1. Re-transcribe `phone_20260408-180506_4156839775.m4a` with `--speakers "Brian,Robert Ross,Oleg"` (3 speakers) to get proper segment timestamps
+2. Extract Oleg's audio segments via ffmpeg → `mail/contacts/oleg/voiceprint.m4a`
+3. Create Oleg contact stub in `mail/contacts/`
+
+Running now...
+<!-- agent:boundary:ce794a1e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-
+- [ ] Re-transcribe phone call with 3 speakers (Brian, Robert Ross, Oleg)
+- [ ] Extract Oleg audio segments → voiceprint.m4a
+- [ ] Create Oleg contact
 <!-- /agent:pending -->

@@ -394,7 +394,7 @@ For the immediate need (filevine follow-up), option 4 is fastest. For corky, opt
 
 Want me to add VAD filtering to corky, or clean up the transcript now?
 ❯ yes
-### Re: VAD filtering + transcript cleanup — done (HEAD)
+### Re: VAD filtering + transcript cleanup — done
 
 **Transcript cleaned:** Trimmed 1,080 chars of post-call hallucination from `tasks/research/transcripts/filevine-interview-2026-04-07.md`. The recording continued after the Zoom call ended — Whisper filled the silence with voicemail fragments. Cut at "Thanks everyone. Yeah." which is the actual end.
 
@@ -413,14 +413,24 @@ Applied to both the main transcription path and the confidence re-transcription 
 **What this doesn't fix:** Cross-segment repetition scattered through the transcript (e.g. "going to work with the lawyer" 4x at non-consecutive points). That's real speech in a 71-min interview — the repetitions are coincidental.
 
 This is a patch-level change. Ready to bump to v0.26.3 and release, or bundle with other fixes first?
-<!-- agent:boundary:6c2c62f3 -->
+
+❯ release
+### Re: v0.26.3 released (HEAD)
+
+**Released:**
+- Committed version bump + SPEC.md update (`suppress_blank`/`suppress_nst` documented)
+- Tagged `v0.26.3`, pushed to `main`
+- Published to crates.io ✓
+- `cargo install --path . --features transcribe-cuda` ✓ (v0.26.2 → v0.26.3)
+
+**CI in progress:** Release workflow running ([24142052779](https://github.com/btakita/corky/actions/runs/24142052779)) — builds cross-platform binaries and creates GitHub Release. PyPI publish triggers automatically once the Release is created (pypi.yml fires on `release: [published]`).
+<!-- agent:boundary:09c594c5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Release v0.26.3 (suppress_blank + suppress_nst) or bundle
-- [ ] Monitor CI (release run 24095058431) — check if v0.26.0 released
+- [ ] Monitor CI release run 24142052779 — confirm GitHub Release + PyPI publish succeed
 - [ ] Verify sheet sharing / GCP test users
 - [ ] Re-test sheet read
 <!-- /agent:pending -->

@@ -98,8 +98,8 @@ hooks:
   post_commit:    # fires in git.rs after successful commit
     - "..."
 ```
-When I transferred a conversation from src/session-share/tasks/claudescore.md to tasks/dreamable/robert-ross.md, the `❯ ` prefix was committed for the entire transfer...which makes sense...given that the transfer is a prompt. Why was it removed in the uncommitted text?
-### Re: ❯ prefix removed in uncommitted (editor) after transfer (HEAD)
+❯ When I transferred a conversation from src/session-share/tasks/claudescore.md to tasks/dreamable/robert-ross.md, the `❯ ` prefix was committed for the entire transfer...which makes sense...given that the transfer is a prompt. Why was it removed in the uncommitted text?  
+### Re: ❯ prefix removed in uncommitted (editor) after transfer
 
 The normalization adds `❯ ` on the **disk write path** and sends it to the IPC plugin via `normalize_prefix_lines`. But there's a known conflict: when `normalize_prefix_lines` is non-empty AND component patches also exist, `fullContent` (with `❯ `) is intentionally NOT sent — to avoid the duplicate-on-next-cycle bug.
 
@@ -116,7 +116,36 @@ If the exchange `patch=append` writes out content that was assembled before norm
 **Why transfer hits it:** The transfer injects a large user block (all lines are "new" for normalization) while simultaneously producing an exchange component patch. Normal agent-response cycles don't trigger this because the agent's own response lines are in the agent region, not the user region — normalization ignores them.
 
 **Fix direction:** Normalization should run *after* patches are assembled for the IPC payload so the patch body already contains `❯ `-prefixed lines, making `normalize_prefix_lines` redundant for that content. Or: re-apply normalization to the exchange component content after `apply_patches_with_overrides` inside the plugin itself.
-<!-- agent:boundary:78b1334a -->
+
+❯ Can agent doc send messages to claude in real-time while claude is executing a task?
+```
+❯ ✶ Quantumizing… (2m 47s · ↓ 661 tokens · thinking)
+❯   ⎿  Tip: Send messages to Claude while it works to steer Claude in real-time
+
+
+  ❯ /agent-doc tasks/agent-doc/agent-doc-bugs.md
+```
+### Re: Real-time message injection while Claude executes (HEAD)
+
+**Short answer:** Not natively yet, but it's buildable — the mechanism is `tmux send-keys`.
+
+Claude Code's "send messages while it works" feature reads from the terminal's stdin. When Claude is in the thinking/executing state, keystrokes typed in that pane get queued as a real-time steering message.
+
+**The plumbing agent-doc already has:**
+- `agent-doc` knows which tmux pane owns each document (claim/pane lifecycle)
+- `tmux send-keys -t <pane> "text" Enter` can inject text into that pane's stdin
+
+**What a `realtime_steer` feature would look like:**
+1. A file watcher (inotify) monitors the document for writes while the claim pane is active
+2. When the user edits `&lt;!-- agent:input --&gt;` or adds a `❯ ` line during an active Claude session, the watcher fires
+3. The watcher calls `tmux send-keys` to the Claude pane with the new content
+
+**Key challenge:** Distinguishing "Claude is mid-execution and ready to receive" from "Claude is idle". Claude Code shows the streaming indicator (the `✶ Quantumizing…` line) only during execution — we'd need to check pane content or process state to know when injection is safe.
+
+**Simpler first step:** A manual `agent-doc steer <FILE>` command that reads a designated steering block from the document, finds the claim pane, and injects via `tmux send-keys`. No watcher needed — user triggers it explicitly when they want to steer.
+
+**Feasibility:** High. The hard parts (pane tracking, tmux IPC) are already solved. The watcher + state detection would be the new work.
+<!-- agent:boundary:41e73e0b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -124,4 +153,6 @@ If the exchange `patch=append` writes out content that was assembled before norm
 <!-- agent:pending patch=replace -->
 - [ ] Fix IPC plugin: `❯ ` prefix lost in editor after transfer (normalize runs before patch body assembled)
 - [ ] Bump version + release agent-doc with hooks feature
+- [ ] `agent-doc steer <FILE>` — inject steering message to claim pane via tmux send-keys
+- [ ] (stretch) inotify watcher for automatic real-time steering on document edit
 <!-- /agent:pending -->

@@ -779,7 +779,7 @@ agent-doc diff tasks/foo.md --from pre-compact-1 --to HEAD
 ```
 
 `★` marks tagged commits as restore points. `show` = `git show <ref>:<path>`, `diff` = `git diff <ref1> <ref2> -- <path>`. Thin wrappers — no new storage.
-<!-- agent:boundary:12507729 -->
+<!-- agent:boundary:14c9cea7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

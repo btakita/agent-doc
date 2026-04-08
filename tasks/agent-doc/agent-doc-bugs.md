@@ -1049,7 +1049,7 @@ The binary-side fix in `write.rs` (don't send `fullContent` when patches are pre
 
 ❯ done
 ❯ - [ ] Wait for CI to complete (prebuilt binaries + PyPI wheels for v0.31.23)
-### Re: Build JetBrains 0.2.52 + VSCode 0.2.5 (HEAD)
+### Re: Build JetBrains 0.2.52 + VSCode 0.2.5
 
 Both built and version bumps committed.
 
@@ -1069,12 +1069,18 @@ To install the JetBrains plugin:
 3. Restart IDEA and verify the fullContent fix works in a live session
 
 VSCode: `code --install-extension src/agent-doc/editors/vscode/agent-doc-0.2.5.vsix`
-<!-- agent:boundary:4e1b91c8 -->
+❯ done
+❯ - [ ] Install JetBrains 0.2.52 and verify fullContent fix in live session
+
+❯ do
+❯ - [ ] Install VSCode 0.2.5 extension
+### Re: Install VSCode 0.2.5 (HEAD)
+
+Done — installed via `codium --install-extension agent-doc-0.2.5.vsix`. Extension successfully installed.
+<!-- agent:boundary:6d62db3e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Install JetBrains 0.2.52 and verify fullContent fix in live session
-- [ ] Install VSCode 0.2.5 extension
 <!-- /agent:pending -->

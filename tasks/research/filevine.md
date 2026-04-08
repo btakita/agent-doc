@@ -17,9 +17,9 @@ Give me a 1 page pdf of research for filevine.com for an interview.
 Help me prepare for an interview with the Filevine development team.
 - https://www.filevine.com/
 - https://www.linkedin.com/company/filevine
-- Chris Smith
-- Cain Elliott
-- Stuart Hiller
+❯ - Chris Smith
+❯ - Cain Elliott
+❯ - Stuart Hiller
 - Emily Lippincott
 
 ### Re: Filevine Interview Prep
@@ -240,14 +240,39 @@ Brian's intro covered: agentic loops/harnesses, human-agent alignment via ontolo
 
 ❯ corky transcribe bug was addressed...see /home/brian/work/btakita/agent-loop/tasks/software/agent-loop.md
 ❯ Please retranscribe filevine-interview-2026-04-07
-### Re: Retranscription (corky 0.26.2) (HEAD)
+### Re: Retranscription (corky 0.26.2)
 
 Retranscribed successfully. Previous run was truncated by the corky bug — transcript was only 5KB / ~900 words. Fixed transcript: **55KB / 10,460 words** — full 71:19 covered.
 
 Diarization still shows 4 segments / 2 speakers (same as before). This is a recording constraint, not a software issue — everyone was physically in the same room sharing one mic channel, so pyannote can't separate voices accurately. The text content is complete and correct; speaker labels are unreliable past the first exchange.
 
 Transcript: [`tasks/research/transcripts/filevine-interview-2026-04-07.md`](transcripts/filevine-interview-2026-04-07.md)
-<!-- agent:boundary:34d79a00 -->
+
+❯ retranscribe + diarize filevine-interview-2026-04-07. Speakers are:
+❯ - Chris Smith
+❯ - Cain Elliott
+❯ - Stuart Hiller
+### Re: Retranscription with named speakers (HEAD)
+
+Done. Chunked diarization (8 × 600s chunks) kicked in when full-audio quality was poor, producing **434 speaker segments / 4 speakers** vs the previous 4 segments / 2 speakers.
+
+**Transcript:** [`tasks/research/transcripts/filevine-interview-2026-04-07.md`](transcripts/filevine-interview-2026-04-07.md) — 398 lines / 63KB
+
+**Speaker attribution is now accurate** (verified against opening):
+- **Brian** — your voice (hello at 0:00)
+- **Cain Elliott** — introduced the team, opened the interview (0:05)
+- **Chris Smith** — described the Forward Deployed Engineer role in detail (5:13)
+- **Stuart Hiller** — chimed in on client migration context (10:10)
+
+**What the transcript reveals about the role:**
+
+Chris Smith described the Forward Deployed Engineer role in detail:
+1. **Data migration** — help clients move data into Filevine without abandoning their current platform. Many firms want LOIS/AI capabilities but can't culturally commit to a full migration. The strategy: import their data into Filevine, they run LOIS on top, and continue using their existing platform. "Scooby-doo them" — they've been using Filevine all along without realizing it.
+2. **Last-mile tooling** — build connectors from client systems (Salesforce, SharePoint, etc.) to pull, transform, and map data ready for Filevine/LOIS consumption. No clients currently in production on this — still in talks / PoC stage.
+3. **Innovation piece** — separate track (Stuart's line: "the innovation piece... really exciting portion")
+
+**Key implication:** This is a data engineering + integration + AI-pipeline role, not a product feature team. The forward-deployed angle means working directly with specific firm configurations, which maps to your ontology/context precision work.
+<!-- agent:boundary:d17537e7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

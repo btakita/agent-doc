@@ -68,7 +68,7 @@ He spent an evening researching it. His suggestion — "I think you'd significan
 #### Current status (bottom of thread)
 
 The thread ends with him calling you on the phone. Whatever happened on that call is where things actually stand — the SMS thread itself is resolved.
-<!-- agent:boundary:1fcf8d31 -->
+<!-- agent:boundary:9541980d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

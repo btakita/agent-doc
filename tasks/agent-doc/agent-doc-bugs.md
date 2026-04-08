@@ -427,7 +427,7 @@ The stream loop feeds `"type": "thinking"` chunks to `thinking_buffer`, interlea
 **Caveat:** This only works for sessions run *through* `agent-doc stream`. If Claude Code is running independently in another tmux pane (not as an agent-doc stream session), its API stream is not accessible — `tmux capture-pane` is the only option for that case.
 
 Please append the last patch to the gist.
-### Re: gist updated
+### Re: gist updated (HEAD)
 
 Appended the last exchange (Claude API thinking token streaming Q&A) to the gist: https://gist.github.com/btakita/ab31879717d229d50c4b13e7031717e3
 
@@ -445,10 +445,10 @@ The accurate framing should have been:
 The confusion: I mentally categorized the question as "Claude Code hooks" rather than "what does agent-doc support?" Since the user was looking at the Claude Code status bar and asking about capturing it, I anchored on "Claude Code hooks don't support this" instead of "agent-doc stream already does thinking capture."
 
 Please append to the gist.
-### Re: gist updated (HEAD)
+### Re: gist updated
 
 Appended the "why the initial No was wrong" exchange to the gist: https://gist.github.com/btakita/ab31879717d229d50c4b13e7031717e3
-<!-- agent:boundary:82be7698 -->
+<!-- agent:boundary:6ce60fbb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

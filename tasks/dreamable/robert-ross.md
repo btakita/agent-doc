@@ -952,7 +952,7 @@ On the LinkedIn post: I'd hold off, at least for now. Here's my honest take:
 **Bottom line:** Don't post it today. If you still feel strongly in a week, rewrite it from a place of clarity rather than frustration. You'll make a better case and protect your reputation.
 
 What actually happened with him?
-<!-- agent:boundary:c64fcb9e -->
+<!-- agent:boundary:55573ee1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

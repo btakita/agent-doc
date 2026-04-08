@@ -130,12 +130,23 @@ rm ~/Videos/2026-04-07\ 16-00-17.mp4
 ```
 
 ❯ compress [2026-04-07 09-00-51.mp4](../../../../Videos/2026-04-07%2009-00-51.mp4)
-### Re: Compress 2026-04-07 09-00-51.mp4 (HEAD)
+### Re: Compress 2026-04-07 09-00-51.mp4
 
 1.4 GB, 32 min, 1920×1080 @ 6 Mbps — same profile as the last one. Compressing in background with CRF 25.
 
 Output: `2026-04-07 09-00-51-compressed.mp4` — will notify when done.
-<!-- agent:boundary:09c4c463 -->
+### Re: Compression complete — 09-00-51 (HEAD)
+
+**1.4 GB → 117 MB** (92% reduction, 367 kbps avg).
+
+Output: `2026-04-07 09-00-51-compressed.mp4`
+
+Check it looks good, then delete the originals:
+```
+rm ~/Videos/2026-04-07\ 09-00-51.mp4
+rm ~/Videos/2026-04-07\ 16-00-17.mp4   # if not already done
+```
+<!-- agent:boundary:3e4ec915 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -143,8 +154,7 @@ Output: `2026-04-07 09-00-51-compressed.mp4` — will notify when done.
 <!-- agent:pending patch=replace -->
 - [x] Delete raw source videos already on YouTube (~46 GB)
 - [x] Delete epN-light.mp4 uploaded files (1.9 GB)
-- [ ] Verify 2026-04-07 16-00-17-compressed.mp4, delete original if good
-- [ ] Compression in progress: 2026-04-07 09-00-51.mp4 (background, ~5-10 min)
+- [ ] Verify + delete originals: 2026-04-07 09-00-51.mp4 and 16-00-17.mp4
 - [ ] Identify remaining 8 unmapped videos (03-09, 03-12, 03-15, 03-16, 03-18, 03-23)
 - [ ] Compress or process unmapped videos if keeping
 - [ ] Backup strategy decision (YouTube-only vs external)

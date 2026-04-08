@@ -46,15 +46,42 @@ Previous CI run used stale tag — it pointed to `7df8203`, not `9a0b6ea` (host 
 
 Will update when complete.
 
-commit and push submodules
-release anything pending
-commit and push agent-loop
-<!-- agent:boundary:4e11d391 -->
+❯ commit and push submodules
+❯ release anything pending
+❯ commit and push agent-loop
+### Re: commit/push submodules, release, push agent-loop (HEAD)
+
+#### Submodules committed and pushed
+
+- **mail**: sync conversations + contacts (Robert Ross Slack drafts)
+- **src/agent-doc**: `ff17475` streaming checkpoints + baseline-file support, v0.31.22
+- **src/censible-core/data**: archived ESG report PDFs removed (104 files)
+- **src/censible-core**: pointer updated
+- **src/eval-runner**: Cargo.lock updated (agent-doc v0.31.22)
+- **src/equityfundingsource-dev**: added as submodule + `325ef03` SSR routing + wrangler pages config
+
+All other submodule pointers (agent-kit, agent-memories, agent-rules, agent-runbooks, briantakita.me-dev, ctx-core-dev, instruction-files, rappstack-dev, session-share, skill-harness) were already current.
+
+#### corky v0.26.3 — released
+
+CI was failing through 5 iterations. Root causes found and fixed:
+1. Cross Docker image (Ubuntu 16.04) had OpenSSL 1.0.2g → fix: use `edge` image (Ubuntu 20.04, OpenSSL 1.1.1)
+2. `libssl-dev:arm64` contaminated HOST build linker path → fix: x86_64-only `libssl-dev`
+3. `default = ["transcribe", "diarize"]` pulled `ort-sys` into aarch64 cross; `ort-sys` tries to download prebuilt ONNX Runtime binaries → fails in CI → fix: `--no-default-features` for aarch64 cross build
+
+**GitHub Release**: https://github.com/btakita/corky/releases/tag/v0.26.3 — 7 binaries (all platforms). crates.io 0.26.3 already published. Local install updated.
+
+#### agent-loop pushed
+
+All submodule pointer updates committed and pushed → `84b98b52`.
+<!-- agent:boundary:f8ef3d25 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] **corky v0.26.3**: CI run 24148041223 in progress (correct tag now)
+- [x] **corky v0.26.3**: released — GitHub Release + local install done
 - [x] **agent-kit v0.4.0**: GitHub Release created
+- [x] Commit and push submodules
+- [x] Commit and push agent-loop
 - [ ] Run litellm proxy pointing at vllm
 - [ ] Test `claude` against local model via `ANTHROPIC_BASE_URL`
 <!-- /agent:pending -->

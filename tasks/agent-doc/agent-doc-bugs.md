@@ -1113,7 +1113,7 @@ Additionally: the VSCode extension was missing `normalize_prefix_lines` support 
 - Committed: `fix: use last boundary for ❯ prefix normalization; add VSCode normalize_prefix_lines support`
 
 Install JetBrains plugin from disk to pick up the `PatchWatcher.kt` fix.
-<!-- agent:boundary:9881910b -->
+<!-- agent:boundary:27093da9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

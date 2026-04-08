@@ -188,7 +188,7 @@ Paxos is a trust company, not a bank — they cannot lend out funds. Every token
 Monthly public attestations by independent accountants for USDP and PYUSD.
 
 **No other currency reserves** — all stablecoins are USD-denominated. PAXG is the only non-USD asset they tokenize (gold). No EUR, GBP, or multi-currency stablecoins currently under the Paxos brand (Membrane Finance, their EU acquisition, handles MiCA-compliant EUR stablecoin territory).
-<!-- agent:boundary:64673b0c -->
+<!-- agent:boundary:59fd4dd6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

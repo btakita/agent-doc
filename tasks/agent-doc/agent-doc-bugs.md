@@ -805,7 +805,7 @@ The same lines appear as "user changes" in every diff. If the agent ever acts on
 
 ❯ do
 ❯ - [ ] **BUG (high priority):** `❯ ` prefix stripped from historical `do` lines by IPC write path — IPC must write prefix to editor file, not snapshot only; normalization must be idempotent
-### Re: IPC location + do (HEAD)
+### Re: IPC location + do
 
 **IPC consumption is in the FFI plugin.** The binary writes a patch JSON to `.agent-doc/patches/<hash>.json`; the JetBrains plugin reads and applies it to the editor file. The binary writes the snapshot directly.
 
@@ -816,13 +816,36 @@ The normalization gap:
 **Fix location: binary-side, before serializing the patch JSON.** Run the same normalization over patch content that runs before disk write. The plugin never needs to know user-vs-agent line semantics — it just applies whatever the binary sends.
 
 **`do` item noted** — tracked in pending below.
-<!-- agent:boundary:4f50e5d5 -->
+
+❯ implement:
+❯ - [ ] **BUG (high priority):** `❯ ` prefix stripped from historical lines — fix: run normalization on patch content before writing IPC JSON (binary-side, pre-serialization); add regression test
+### Re: implement — `❯ ` prefix normalization IPC fix (HEAD)
+
+**Root cause found:** The snapshot gets `❯ do` correctly (binary saves `content_ours` which is normalized). But the editor file keeps `do` because the plugin's `normalizeExchangePrefixes` doesn't reliably update it. Two contributing factors:
+
+1. **Boundary regex mismatch** — `normalizeExchangePrefixes` used `[a-f0-9]+` which doesn't match summary-style boundary IDs (`a0cfeb34:agent-doc-bugs`). With no boundary found, the entire exchange became the "user region" — but the `\ndo\n` replacement should still work.
+
+2. **`fullContent` not sent** — the binary sends `normalize_prefix_lines = ["do"]` but the plugin's string replacement silently fails for unknown reasons. The `content_ours` (which already has `❯ do`) was never sent as `fullContent` to the plugin.
+
+**Fix implemented (both changes in `write.rs` + `PatchWatcher.kt`):**
+
+1. **`write.rs`:** When `normalize_prefix_lines` is non-empty, also include `content_ours` as `"fullContent"` in the IPC payload (both socket and file paths). The plugin's `fullContent` path replaces the entire document with the normalized content — guaranteed to have `❯ do`.
+
+2. **`PatchWatcher.kt`:** Fixed boundary regex in `normalizeExchangePrefixes` from `[a-f0-9]+` to `[a-z0-9][a-z0-9:-]*` — correctly matches summary IDs like `a0cfeb34:agent-doc-bugs`.
+
+3. **Regression test added** (`normalize_user_prompts_restores_prefix_lost_in_file`): verifies that when snapshot has `❯ do` but file has `do`, the normalization restores the prefix.
+
+All 480 tests pass. Binary installed. This fix will take effect on the next write cycle for this document.
+
+**What changes next cycle:** The IPC will send `fullContent = content_ours` (with `❯ do` restored) to the plugin. The plugin writes it to disk. The snapshot and file will converge.
+<!-- agent:boundary:c5064f86 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **BUG (high priority):** `❯ ` prefix stripped from historical lines — fix: run normalization on patch content before writing IPC JSON (binary-side, pre-serialization); add regression test
+- [ ] Verify `❯ do` restored in editor file after next write cycle (confirm fix works end-to-end)
+- [ ] Release agent-doc with this fix
 - [ ] `agent-doc compact` → auto-tag pre-compact commit as `agent-doc/<name>/pre-compact-<N>`; add `--tag <name>` flag
 - [ ] `agent-doc log <FILE>` — walk git log, annotate compact commits, show tags
 - [ ] `agent-doc show <FILE> --at N / --back N / --tag <name>`

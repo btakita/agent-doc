@@ -487,7 +487,7 @@ Uploading `agent-doc-jetbrains-0.2.50-signed.zip` to the v0.31.21 GitHub release
 Release v0.31.21 now includes:
 - CLI binaries (linux x86_64/aarch64, macOS x86_64/aarch64, Windows x86_64)
 - JetBrains plugin: `agent-doc-jetbrains-0.2.50-signed.zip`
-<!-- agent:boundary:24a60e6c -->
+<!-- agent:boundary:54e72bdb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

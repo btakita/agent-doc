@@ -101,7 +101,7 @@ In both cases, `agent-doc write` already receives the diff (or can compute it fr
 
 **Confirmed design:** Option 1 applies to both `patch=append` and `patch=replace` exchange components. The normalization lives in `agent-doc write` (binary-level), keyed on component type = `exchange` + line is user-authored.
 
-done
+❯ done
 - [ ] Fix PyPI trusted publisher for `pypi.yml` + environment `pypi`, then rerun CI
 do
 - [ ] Add SKILL.md note: patch:exchange must not echo user input (append mode)
@@ -194,7 +194,7 @@ Regression test added: `normalize_user_prompts_agent_response_not_prefixed` — 
 v0.31.21 released: crates.io ✓, GitHub Release ✓, `cargo install` ✓.
 
 ❯ Please do not release upstream until I can fully test <- Add to release runbook.
-### Re: release runbook updated (HEAD)
+### Re: release runbook updated
 
 Added **step 5: manual testing gate** to both:
 
@@ -202,12 +202,18 @@ Added **step 5: manual testing gate** to both:
 - `src/agent-doc/CLAUDE.md` Release Process (step 4→5, pushes publish steps to 6+)
 
 Rule: after `cargo install --path .`, pause and confirm feature works in a live session before publishing to crates.io/PyPI/GitHub Releases.
-<!-- agent:boundary:f856b6ac -->
+
+❯ plugin installed
+❯ done
+❯ - [ ] Verify `❯ ` prefix correct behavior in live session
+### Re: plugin installed (HEAD)
+
+Plugin v0.2.49 installed ✓. Ready to verify `❯ ` prefix behavior in a live session — type a prompt in an exchange component and run agent-doc to confirm only user lines get `❯ `.
+<!-- agent:boundary:f511317e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Install plugin v0.2.49 in IDEA (Settings → Plugins → gear → Install from Disk → `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.49-signed.zip`)
-- [ ] Verify `❯ ` prefix correct behavior in live session
+- [ ] Verify `❯ ` prefix correct behavior in live session (type prompt, run agent-doc, confirm only user lines prefixed — not agent responses)
 <!-- /agent:pending -->

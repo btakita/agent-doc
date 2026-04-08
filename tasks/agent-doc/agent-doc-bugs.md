@@ -1069,7 +1069,7 @@ To install the JetBrains plugin:
 3. Restart IDEA and verify the fullContent fix works in a live session
 
 VSCode: `code --install-extension src/agent-doc/editors/vscode/agent-doc-0.2.5.vsix`
-<!-- agent:boundary:5cc3bb5c -->
+<!-- agent:boundary:fa565ee6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

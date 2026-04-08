@@ -949,7 +949,7 @@ Unified diff between git refs. `--to` defaults to HEAD. Without `--from`, falls 
 ❯ do
 ❯ - [ ] Manual test gate: verify new commands (log/show/diff/compact --tag) work end-to-end
 ❯ - [ ] Publish: `cargo publish` (crates.io), `maturin publish` (PyPI), `gh release create v0.31.23`
-### Re: do — publish (HEAD)
+### Re: do — publish
 
 **Manual test gate approved (do).** Fixed a log column alignment bug before publishing (NUL-delimited `%H%x00%ai%x00%s` format so date spaces don't break parsing).
 
@@ -961,13 +961,46 @@ Unified diff between git refs. `--to` defaults to HEAD. Without `--from`, falls 
 **`.bin/agent-doc`** symlink updated via `cargo build --release`.
 
 Pending: JB 0.2.51 and VSCode 0.2.4 marketplace publishes (separate steps).
-<!-- agent:boundary:60575416 -->
+
+❯ do
+❯ > In src/session-share/tasks/claudescore.me, why do we have duplicate response patches...both of which are uncommitted?
+### Re: duplicate response patches in claudescore.md (HEAD)
+
+The `tasks/claudescore.md` file in `src/session-share` has the same response (`### Re: Slack-formatted copy/paste`) written twice with different boundary markers (`83095b9b` and `623d770c`). Both are uncommitted working tree changes.
+
+**Root cause:** Two separate write cycles ran without a commit between them. The sequence:
+
+1. First `/agent-doc` cycle: generated response → `agent-doc write` delivered via IPC (editor file updated with response + boundary `83095b9b`) → snapshot updated
+2. Second `/agent-doc` cycle ran before the user made new edits: preflight diffed snapshot vs file — but the snapshot had already been updated, so diff should have been empty... unless the IPC `fullContent` path (from our recent fix) replaced the file with `content_ours`, which doesn't include the response but does include `❯` prefix — this would cause the snapshot and file to diverge again
+
+The `fullContent` fix we shipped in 0.31.23 sends `content_ours` (pre-response + normalization) as the full document replacement. If the plugin applies `fullContent` AFTER the response was already in the file, it would overwrite the response. Then the next cycle would re-generate and re-apply it.
+
+**This is a new bug introduced by the `fullContent` normalization fix.** The `fullContent` should only be sent when `normalize_prefix_lines` is non-empty AND the plugin should apply it BEFORE the component patches, not instead of them.
+
+**Fix needed:** In `try_ipc`, `fullContent` and component patches should not coexist — only send `fullContent` if there are no component-level patches, OR make the plugin apply component patches on top of `fullContent`.
+
+**Immediate fix:** In `claudescore.md`, delete the duplicate `### Re: Slack-formatted copy/paste` block (lines after `<!-- agent:boundary:83095b9b -->` through the second `<!-- agent:boundary:623d770c -->`), leaving only the first occurrence with the final boundary.
+
+### Re: do — marketplace publishes (HEAD)
+
+**JetBrains Marketplace:** The signed zip is ready (`agent-doc-jetbrains-0.2.51-signed.zip`) but I don't see a JetBrains Marketplace publish token in pass. The Gradle `publishPlugin` task needs `PUBLISH_TOKEN`. Do you have a JetBrains Hub token stored somewhere?
+
+**VSCode Marketplace:** `OVSX_TOKEN` in pass covers Open VSX Registry (openvsx.org), not the official VS Code Marketplace. `vsce publish` needs a different PAT. Can publish to Open VSX with the existing token:
+
+```bash
+OVSX_PAT="$(pass btak/OVSX_TOKEN)" npx ovsx publish editors/vscode/agent-doc-0.2.4.vsix -p "$OVSX_PAT"
+```
+
+Let me know which registries to target and whether you have the missing tokens, or I'll publish to Open VSX now and wait on the others.
+<!-- agent:boundary:6402abde -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Publish JB plugin 0.2.51 to JetBrains Marketplace
-- [ ] Publish VSCode extension 0.2.4 to VSCode Marketplace
-- [ ] Wait for CI to complete (prebuilt binaries + PyPI wheels)
+- [ ] BUG: `fullContent` + component patches conflict — `fullContent` overwrites response → duplicate on next cycle; fix in `write.rs`/`PatchWatcher.kt`
+- [ ] Fix duplicate in `src/session-share/tasks/claudescore.md` — delete second `### Re: Slack-formatted copy/paste` block
+- [ ] JetBrains Marketplace: need `PUBLISH_TOKEN` — where is it?
+- [ ] VSCode Marketplace: need VS Marketplace PAT for `vsce publish` (or publish to Open VSX with existing `OVSX_TOKEN`)
+- [ ] Wait for CI to complete (prebuilt binaries + PyPI wheels for v0.31.23)
 <!-- /agent:pending -->

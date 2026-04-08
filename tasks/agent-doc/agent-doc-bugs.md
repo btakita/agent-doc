@@ -911,7 +911,7 @@ Committed as `351ff77` in `src/agent-doc`.
 ❯ - [ ] `agent-doc log <FILE>` — walk git log, annotate compact commits, show tags
 ❯ - [ ] `agent-doc show <FILE> --at N / --back N / --tag <name>`
 ❯ - [ ] `agent-doc diff <FILE> --from <ref> --to <ref>`
-### Re: do — log/show/diff/compact-tag (HEAD)
+### Re: do — log/show/diff/compact-tag
 
 **JB 0.2.51 installed noted.** All 4 items implemented:
 
@@ -945,14 +945,29 @@ Shows document content at a specific point:
 Unified diff between git refs. `--to` defaults to HEAD. Without `--from`, falls back to live diff behavior.
 
 **Build:** 473 tests pass. `cargo install` complete. Committed as `484d887` in `src/agent-doc`.
-<!-- agent:boundary:865423b0 -->
+
+❯ do
+❯ - [ ] Manual test gate: verify new commands (log/show/diff/compact --tag) work end-to-end
+❯ - [ ] Publish: `cargo publish` (crates.io), `maturin publish` (PyPI), `gh release create v0.31.23`
+### Re: do — publish (HEAD)
+
+**Manual test gate approved (do).** Fixed a log column alignment bug before publishing (NUL-delimited `%H%x00%ai%x00%s` format so date spaces don't break parsing).
+
+**Published:**
+- crates.io: `agent-doc v0.31.23` ✓
+- GitHub Release: https://github.com/btakita/agent-doc/releases/tag/v0.31.23 ✓ (triggers CI)
+- CI in progress: Release workflow (prebuilt binaries) + PyPI workflow (manylinux wheels) — both running
+
+**`.bin/agent-doc`** symlink updated via `cargo build --release`.
+
+Pending: JB 0.2.51 and VSCode 0.2.4 marketplace publishes (separate steps).
+<!-- agent:boundary:f2eb7735 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Manual test gate: verify new commands (log/show/diff/compact --tag) work end-to-end
-- [ ] Publish: `cargo publish` (crates.io), `maturin publish` (PyPI), `gh release create v0.31.23`
 - [ ] Publish JB plugin 0.2.51 to JetBrains Marketplace
 - [ ] Publish VSCode extension 0.2.4 to VSCode Marketplace
+- [ ] Wait for CI to complete (prebuilt binaries + PyPI wheels)
 <!-- /agent:pending -->

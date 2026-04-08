@@ -83,5 +83,5 @@ Where GitButler *could* help within a submodule setup: managing concurrent work 
 The **gap GitButler doesn't address**: cross-submodule sessions. If a feature spans `agent-doc` + `corky` + `agent-loop`, you're managing multiple virtual-branch contexts. That's where agent-doc's approach (document as session, git as persistence) has an advantage — the session document can span repos while each commit goes into the right submodule.
 
 So: submodules + focused PRs solves the scale problem GitButler is pitching against, and does so without requiring a new tool. GitButler adds value *within* each focused repo but doesn't solve cross-repo coordination.
-<!-- agent:boundary:707f0387 -->
+<!-- agent:boundary:571a6bfa -->
 <!-- /agent:exchange -->

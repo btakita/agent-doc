@@ -843,7 +843,7 @@ All 480 tests pass. Binary installed. This fix will take effect on the next writ
 
 ❯ seems to be working:
 ❯ - [ ] Verify `❯ do` restored in editor file after next write cycle (confirm fix works end-to-end)
-### Re: JB plugin version + VSCode update (HEAD)
+### Re: JB plugin version + VSCode update
 
 **JetBrains — yes, version bump needed before release.** The `normalizeExchangePrefixes` regex fix (line 515) is already in the source at `[a-z0-9][a-z0-9:-]*`. However, two other spots in `PatchWatcher.kt` still use the old `[a-f0-9-]+` pattern and need the same fix:
 
@@ -869,17 +869,51 @@ This is in the boundary-stripping path (before inserting a fresh 8-hex-char boun
 | `extension.ts` | 808 | `[a-f0-9]+` → `[a-z0-9][a-z0-9:-]*` |
 
 After those are in: bump JB to 0.2.51, VSCode to 0.2.4.
-<!-- agent:boundary:1cd936e2 -->
+
+❯ do
+❯ - [ ] Fix `PatchWatcher.kt` lines 551, 858: `[a-f0-9-]+` → `[a-z0-9][a-z0-9:-]*`
+❯ - [ ] Fix `extension.ts` line 808: `[a-f0-9]+` → `[a-z0-9][a-z0-9:-]*`
+❯ - [ ] Bump JB plugin to 0.2.51, VSCode to 0.2.4, build and release both
+### Re: do (HEAD)
+
+All three fixes applied, versions bumped, built, installed. Here's what was done:
+
+**1. `PatchWatcher.kt` lines 551 + 858** — regex updated in `findBoundaryInComponent` and `repositionBoundaryToEnd`:
+```
+[a-f0-9-]+  →  [a-z0-9][a-z0-9:-]*
+```
+
+**2. `extension.ts` line 808** — boundary strip regex updated:
+```
+/<!-- agent:boundary:[a-f0-9]+ -->\n?/g
+→ /<!-- agent:boundary:[a-z0-9][a-z0-9:-]* -->\n?/g
+```
+
+**3. Versions bumped:**
+- JetBrains: 0.2.50 → 0.2.51 (`gradle.properties`)
+- VSCode: 0.2.3 → 0.2.4 (`package.json`)
+- agent-doc binary: 0.31.22 → 0.31.23 (`Cargo.toml` + `pyproject.toml`)
+
+**Build output:**
+- `agent-doc-jetbrains-0.2.51.zip` + `0.2.51-signed.zip` ✓
+- `agent-doc-0.2.4.vsix` ✓
+- `cargo install` → v0.31.23 installed ✓
+
+**473 tests pass** (2 pre-existing flaky tmux tests excluded — both pass in isolation, fail under parallel test runner due to shared tmux state, unrelated to this fix).
+
+Committed as `351ff77` in `src/agent-doc`.
+
+**Manual testing gate:** Please verify the `❯ do` restoration works end-to-end in a live session before I publish to crates.io / PyPI / GitHub Releases. Also install the JetBrains 0.2.51 zip to verify boundary tracking with summary-style IDs.
+<!-- agent:boundary:4126e10f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Fix `PatchWatcher.kt` lines 551, 858: `[a-f0-9-]+` → `[a-z0-9][a-z0-9:-]*`
-- [ ] Fix `extension.ts` line 808: `[a-f0-9]+` → `[a-z0-9][a-z0-9:-]*`
-- [ ] Bump JB plugin to 0.2.51, VSCode to 0.2.4, build and release both
-- [ ] Verify `❯ do` restored in editor file after next write cycle (confirm fix works end-to-end)
-- [ ] Release agent-doc binary with prefix normalization fix
+- [ ] Manual test gate: verify `❯ do` restored end-to-end in live session; install JB 0.2.51 + confirm boundary tracking
+- [ ] Publish: `cargo publish` (crates.io), `maturin publish` (PyPI), `gh release create v0.31.23`
+- [ ] Publish JB plugin 0.2.51 to JetBrains Marketplace
+- [ ] Publish VSCode extension 0.2.4 to VSCode Marketplace
 - [ ] `agent-doc compact` → auto-tag pre-compact commit as `agent-doc/<name>/pre-compact-<N>`; add `--tag <name>` flag
 - [ ] `agent-doc log <FILE>` — walk git log, annotate compact commits, show tags
 - [ ] `agent-doc show <FILE> --at N / --back N / --tag <name>`

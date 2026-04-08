@@ -66,5 +66,22 @@ Curious how the git submodule workflow is supported. It seems the premise of Git
 Managing the submodules does require work and diligence.
 <!-- agent:exchange -->
 
-<!-- agent:boundary:7c704700 -->
+**On GitButler + submodules:**
+
+GitButler's virtual branch model operates within a single repo's working tree — it doesn't have special submodule awareness. The premise you're identifying ("PRs don't scale for monorepos") is more about *diff noise and review fatigue* than a hard technical limit.
+
+Your submodule approach threads the needle well:
+
+- **Focused repos** → small, reviewable PRs with clear context
+- **Aggregator monorepo** → unified view, cross-repo builds, single deploy surface
+- **Submodule pointers** → explicit versioning of inter-repo dependencies
+
+The real friction is the **update cycle**: when you change `src/corky/` you need to commit there, then update the pointer in `agent-loop/`, then in any other aggregators. This is disciplined but mechanical — exactly the kind of thing an agent workflow can automate.
+
+Where GitButler *could* help within a submodule setup: managing concurrent work *within* a focused repo (e.g., working on two features in `corky` simultaneously without branches). The virtual branch model is well-suited to that focused-repo context.
+
+The **gap GitButler doesn't address**: cross-submodule sessions. If a feature spans `agent-doc` + `corky` + `agent-loop`, you're managing multiple virtual-branch contexts. That's where agent-doc's approach (document as session, git as persistence) has an advantage — the session document can span repos while each commit goes into the right submodule.
+
+So: submodules + focused PRs solves the scale problem GitButler is pitching against, and does so without requiring a new tool. GitButler adds value *within* each focused repo but doesn't solve cross-repo coordination.
+<!-- agent:boundary:707f0387 -->
 <!-- /agent:exchange -->

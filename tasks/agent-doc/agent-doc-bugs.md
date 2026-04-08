@@ -365,7 +365,7 @@ done
 - [ ] Install plugin v0.2.50 and verify 2-pane layout persists when navigating to non-agent-doc files
 
 Please read this document. The `❯ ` prefix was incorrectly added...then removed as an uncommitted change...during the last run. Why?
-### Re: ❯ code fence bug + Claude Code status hooks (HEAD)
+### Re: ❯ code fence bug + Claude Code status hooks
 
 **Bug: code fences getting `❯ ` prefix**
 
@@ -390,7 +390,42 @@ The available hook events (`PreToolUse`, `PostToolUse`, `Notification`, `Stop`, 
 3. **Terminal screen scraping** — poll `tmux capture-pane` on a short interval and write into `agent:console`. Rough but functional for observability.
 
 So for the `agent:console` use case: if the Claude Code session is the pane being watched, `stream_config` with a short `interval` (e.g. 200ms) will capture the status text as part of the pane content. It would appear in the console component briefly while thinking is active, then get replaced by the next capture.
-<!-- agent:boundary:8b9218bb -->
+
+How can we implement:
+> - **Claude API integration** — streaming the actual thinking tokens from the API before they're rendered; requires hooking into the API response stream, not the terminal
+### Re: Claude API thinking token streaming (HEAD)
+
+`agent-doc stream` already implements this. It spawns Claude with `--output-format stream-json`, and `streaming.rs` extracts both `"type": "text"` and `"type": "thinking"` blocks. Thinking is buffered separately and flushed to a target component on the write interval.
+
+**Document setup:**
+
+```yaml
+---
+agent_doc_format: template
+agent_doc_write: crdt
+agent_doc_stream:
+  target: exchange        # response text → agent:exchange
+  thinking: true
+  thinking_target: log    # thinking tokens → agent:log (separate component)
+  interval: 200
+---
+```
+
+Add components to the document body:
+```markdown
+&lt;!-- agent:exchange --&gt;
+&lt;!-- /agent:exchange --&gt;
+
+&lt;!-- agent:log --&gt;
+&lt;!-- /agent:log --&gt;
+```
+
+Run: `agent-doc stream <FILE>`
+
+The stream loop feeds `"type": "thinking"` chunks to `thinking_buffer`, interleaved with response text in the main buffer. Both flush to their components on the timer interval (default 200ms). You see thinking tokens appearing live in the `agent:log` component as Claude reasons.
+
+**Caveat:** This only works for sessions run *through* `agent-doc stream`. If Claude Code is running independently in another tmux pane (not as an agent-doc stream session), its API stream is not accessible — `tmux capture-pane` is the only option for that case.
+<!-- agent:boundary:fa255a58 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

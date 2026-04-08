@@ -493,7 +493,7 @@ Release v0.31.21 now includes:
 ❯ and committed, no new content to respond to.
 
 ❯ Why did this happen? It should not have stripped the `❯ ` terminal prefixes for user prompts.
-### Re: ❯ prefix stripping (HEAD)
+### Re: ❯ prefix stripping
 
 The stripping came from a **user edit** to git-agent-workflow.md — the working copy currently has `❯ ` removed from lines 160-163, while both HEAD and the snapshot still have it. The same situation appears to have happened in a prior session.
 
@@ -519,7 +519,34 @@ The `❯ ` prefix is a **semantic marker** (terminal prompt input), not decorati
 - OR flag it prominently rather than silently committing
 
 The current workaround is to restore the `❯ ` prefixes on lines 160-163 in git-agent-workflow.md if they were stripped accidentally.
-<!-- agent:boundary:527518c1 -->
+
+❯ I did not strip out the `❯ ` prefix. Something with agent-doc SKILL did that. The Chain of Thought I posted above is evidence.
+### Re: the skill stripped ❯ prefixes — correcting my previous response (HEAD)
+
+I was wrong to say you stripped them. Looking at the full current diff for `tasks/research/git-agent-workflow.md`, the stripping is **systematic** — every single user-authored line in the exchange had its `❯ ` prefix removed:
+
+```
+❯ Should agent-doc also use the side-branch approach...  →  Should agent-doc also use...
+❯ Perhaps a key distinction is does Entire manage...      →  Perhaps a key distinction...
+❯ I have been working on explicit harness context...      →  I have been working on...
+❯ - skill-harness                                         →  - skill-harness
+❯ Along with the agent docs themselves.                   →  Along with the agent docs...
+❯ Would multiple agent memory systems compat well...      →  Would multiple agent memory systems...
+```
+
+Six separate user lines, all systematically stripped. That's not a user accident — that's a uniform transform.
+
+**What happened:** A previous agent-doc session for `git-agent-workflow.md` wrote back to the exchange component and reproduced the user's lines without the `❯ ` prefix. The LLM (Claude) treated `❯ ` as a UI artifact (terminal prompt decoration) rather than verbatim content to preserve. When the agent rewrites any portion of the exchange during a response or compaction, it regenerates the user's lines from memory — and drops the prefix.
+
+**Why the previous response was wrong:** I checked committed history, saw `❯ ` was preserved in all commits, and concluded you edited the file. But the stripping is in the *working tree* (uncommitted), and it's too systematic to be accidental. The agent-doc session ran, wrote back, and the IPC plugin updated the snapshot — but either `agent-doc commit` didn't run, or the commit created the HEAD you see. The write stripped all `❯ `.
+
+**Root cause:** When an agent-doc session generates any content that overlaps with user-authored exchange lines (compaction, rewrite, or any patch that covers those lines), the LLM regenerates the text and loses the `❯ ` terminal prefix.
+
+**Fix direction:**
+1. The compact exchange command should use `agent-doc compact` (binary, verbatim copy) — NOT a manual LLM rewrite via `<!-- patch:exchange -->`
+2. The write-back response should never include unmodified user lines — only new agent-authored content
+3. If the diff shows `❯ ` systematically stripped from user lines, the agent should treat this as a write-back bug, not "formatting cleanup"
+<!-- agent:boundary:07a90695 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

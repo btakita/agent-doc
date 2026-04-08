@@ -393,7 +393,7 @@ The interview text itself is intact (10,400+ real words), but ~5-10% is hallucin
 For the immediate need (filevine follow-up), option 4 is fastest. For corky, option 1 (VAD filter) is the right long-term fix.
 
 Want me to add VAD filtering to corky, or clean up the transcript now?
-<!-- agent:boundary:5f17a7c9 -->
+<!-- agent:boundary:361f7be7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

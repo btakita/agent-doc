@@ -135,7 +135,7 @@ rm ~/Videos/2026-04-07\ 16-00-17.mp4
 1.4 GB, 32 min, 1920×1080 @ 6 Mbps — same profile as the last one. Compressing in background with CRF 25.
 
 Output: `2026-04-07 09-00-51-compressed.mp4` — will notify when done.
-<!-- agent:boundary:45e6c2c6 -->
+<!-- agent:boundary:09c4c463 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -961,7 +961,7 @@ Unified diff between git refs. `--to` defaults to HEAD. Without `--from`, falls 
 **`.bin/agent-doc`** symlink updated via `cargo build --release`.
 
 Pending: JB 0.2.51 and VSCode 0.2.4 marketplace publishes (separate steps).
-<!-- agent:boundary:11171587 -->
+<!-- agent:boundary:60575416 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

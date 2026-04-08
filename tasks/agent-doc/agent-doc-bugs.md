@@ -584,7 +584,7 @@ Test in live session. Confirm works, then publish (crates.io + PyPI + GitHub Rel
 ### Re: /clear (HEAD)
 
 `/clear` is a built-in CLI command — cannot execute from document context. If you meant to reset the Claude Code conversation, run `/clear` directly in the terminal prompt.
-<!-- agent:boundary:eba2cccb -->
+<!-- agent:boundary:964acd08 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

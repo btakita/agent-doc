@@ -1,10 +1,11 @@
 ---
-agent_doc_session: null
+agent_doc_session: 0ec9433a-94a8-4bdd-bf78-79a6c8c6af93
 agent_doc_mode: template
 claude_args: --dangerously-skip-permissions
 links:
-  - ../dreamable/robert-ross.md
+- ../dreamable/robert-ross.md
 ---
+
 
 # Git + Agent Workflow Research
 
@@ -60,6 +61,9 @@ Key inclinations from earlier context:
 | DeepEval | LLM evals | None | Partial |
 
 ## Exchange
+Curious how the git submodule workflow is supported. It seems the premise of GitButler is that Pull Requests don't scale for monorepos. But using git submodules, you can have the best of both worlds. A focused repo that is PR friendly and a monorepo with the focused repos grouped together.
 
+Managing the submodules does require work and diligence.
 <!-- agent:exchange -->
+
 <!-- /agent:exchange -->

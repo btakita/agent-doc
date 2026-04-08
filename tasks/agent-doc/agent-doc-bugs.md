@@ -744,7 +744,7 @@ c4ee6aca  2026-04-08 16:32  append (+12 lines)
 - `git show <tag>:<path>` then retrieves the archived state
 
 A + B together: A ensures the archive exists; B makes it discoverable without remembering tag names.
-<!-- agent:boundary:30d3889f -->
+<!-- agent:boundary:8a6c7beb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

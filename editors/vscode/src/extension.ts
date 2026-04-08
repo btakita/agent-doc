@@ -835,8 +835,11 @@ class PatchWatcher implements vscode.Disposable {
             document.positionAt(document.getText().length),
         );
 
-        // Full content replacement (inline-mode documents without component markers)
-        if (patch.fullContent != null && patch.fullContent !== '') {
+        // Full content replacement — only for append-mode documents without component patches.
+        // When component patches are present, use the patch path instead so the response
+        // is applied correctly. Applying fullContent alongside patches would replace the
+        // document before patches run, causing the response to be lost or duplicated.
+        if (patch.fullContent != null && patch.fullContent !== '' && patch.patches.length === 0) {
             const content = document.getText();
             if (patch.fullContent !== content) {
                 const edit = new vscode.WorkspaceEdit();

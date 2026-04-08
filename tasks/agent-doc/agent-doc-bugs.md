@@ -904,7 +904,7 @@ All three fixes applied, versions bumped, built, installed. Here's what was done
 Committed as `351ff77` in `src/agent-doc`.
 
 **Manual testing gate:** Please verify the `❯ do` restoration works end-to-end in a live session before I publish to crates.io / PyPI / GitHub Releases. Also install the JetBrains 0.2.51 zip to verify boundary tracking with summary-style IDs.
-<!-- agent:boundary:2b2a4af7 -->
+<!-- agent:boundary:f8304cb3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

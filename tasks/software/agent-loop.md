@@ -127,7 +127,7 @@ export ANTHROPIC_API_KEY=fake
 Then `claude` will use the local model by default. Swap back to Anthropic by unsetting those vars.
 
 ❯ commit + push all submodules
-### Re: commit + push all submodules
+### Re: commit + push all submodules (HEAD)
 
 Done. Committed and pushed:
 
@@ -196,7 +196,7 @@ Transcript should be significantly longer. Say "publish corky" when it looks cor
 **Note:** This bug also existed in 0.26.0/0.26.1 — good catch during testing.
 
 ❯ commit + push all submodules
-### Re: commit + push all submodules (HEAD)
+### Re: commit + push all submodules
 
 Done. Committed and pushed:
 
@@ -209,7 +209,7 @@ Done. Committed and pushed:
 | `src/session-share` | Skipped — `ClaudeScore/SessionShare` repo still not found on GitHub |
 
 Parent repo committed + pushed: submodule pointer updates, tasks/, .claude/ skills, evals/, pyproject.toml, README, config.
-<!-- agent:boundary:aad58be4 -->
+<!-- agent:boundary:df517d10 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

@@ -487,7 +487,39 @@ Uploading `agent-doc-jetbrains-0.2.50-signed.zip` to the v0.31.21 GitHub release
 Release v0.31.21 now includes:
 - CLI binaries (linux x86_64/aarch64, macOS x86_64/aarch64, Windows x86_64)
 - JetBrains plugin: `agent-doc-jetbrains-0.2.50-signed.zip`
-<!-- agent:boundary:54e72bdb -->
+
+❯ When I ran tasks/research/git-agent-workflow.md, I saw the following in the chain of thought:
+❯ > ● Formatting cleanup only — the ❯ terminal prefixes were stripped from the "How about entire?" lines. Snapshot updated
+❯ and committed, no new content to respond to.
+
+❯ Why did this happen? It should not have stripped the `❯ ` terminal prefixes for user prompts.
+### Re: ❯ prefix stripping (HEAD)
+
+The stripping came from a **user edit** to git-agent-workflow.md — the working copy currently has `❯ ` removed from lines 160-163, while both HEAD and the snapshot still have it. The same situation appears to have happened in a prior session.
+
+Two separate issues:
+
+**1. Why were the `❯ ` prefixes stripped?**
+
+This was a user edit — your editor (or accidental keypress) removed the `❯ ` characters. Nothing in agent-doc's code strips `❯ ` prefixes during write-back. `strip_comments` (used for diff comparison) only removes `<!-- ... -->` HTML comments and `[//]: # (...)` link-ref comments — it doesn't touch `❯ `.
+
+**2. Why did the agent call it "Formatting cleanup only" and skip responding?**
+
+This is the actual bug. When Claude saw the diff:
+```
+-❯ How about entire?
++How about entire?
+```
+…it reasoned that the text content hadn't changed — only the `❯ ` prefix markers were removed — and classified this as formatting cleanup with no new user content. That's wrong.
+
+The `❯ ` prefix is a **semantic marker** (terminal prompt input), not decorative formatting. Removing it changes the meaning of the line: the distinction between "user typed this at a terminal" and "user wrote this in the doc editor" is meaningful. The agent should not silently commit when user-authored content is modified, even if the modification looks cosmetic.
+
+**Fix direction:** The preflight's diff classification logic (or the agent's chain-of-thought prompt) should treat removal of `❯ ` from existing user lines as a substantive edit, not formatting cleanup. The agent should either:
+- Respond and ask whether the user intentionally stripped the prefix markers
+- OR flag it prominently rather than silently committing
+
+The current workaround is to restore the `❯ ` prefixes on lines 160-163 in git-agent-workflow.md if they were stripped accidentally.
+<!-- agent:boundary:6645b9c2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

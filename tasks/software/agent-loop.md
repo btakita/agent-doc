@@ -166,7 +166,7 @@ Prepped and installed — **pausing for your testing confirmation before publish
 - `src/agent-memories/rules/runbooks/skill-harness` — CI fix only, no version bump needed
 - `src/eval-runner` — internal tool, not published to crates.io
 - `philosophy`, `resume`, `mail` — content repos, no release target
-<!-- agent:boundary:6ad97644 -->
+<!-- agent:boundary:1ab63f52 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

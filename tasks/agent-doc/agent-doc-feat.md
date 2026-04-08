@@ -98,7 +98,7 @@ hooks:
   post_commit:    # fires in git.rs after successful commit
     - "..."
 ```
-<!-- agent:boundary:015c7c92 -->
+<!-- agent:boundary:0ed6184f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

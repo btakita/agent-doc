@@ -1132,7 +1132,7 @@ Install JetBrains plugin from disk to pick up the `PatchWatcher.kt` fix.
 **Duplicate response:** The IPC timeout left the patch file in `.agent-doc/patches/`. The binary also fell back to a disk write. When the plugin eventually consumed the patch, it appended the response again via component patch → duplicate. Removed the duplicate via Edit above.
 
 **Fix for commit skip:** After `agent-doc write --stream`, always run `agent-doc commit` regardless of exit code. The commit is idempotent.
-<!-- agent:boundary:1c0d6b2d -->
+<!-- agent:boundary:f22fe191 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

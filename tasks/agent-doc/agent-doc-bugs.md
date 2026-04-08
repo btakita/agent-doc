@@ -521,7 +521,7 @@ The `❯ ` prefix is a **semantic marker** (terminal prompt input), not decorati
 The current workaround is to restore the `❯ ` prefixes on lines 160-163 in git-agent-workflow.md if they were stripped accidentally.
 
 ❯ I did not strip out the `❯ ` prefix. Something with agent-doc SKILL did that. The Chain of Thought I posted above is evidence.
-### Re: the skill stripped ❯ prefixes — correcting my previous response (HEAD)
+### Re: the skill stripped ❯ prefixes — correcting my previous response
 
 I was wrong to say you stripped them. Looking at the full current diff for `tasks/research/git-agent-workflow.md`, the stripping is **systematic** — every single user-authored line in the exchange had its `❯ ` prefix removed:
 
@@ -546,7 +546,26 @@ Six separate user lines, all systematically stripped. That's not a user accident
 1. The compact exchange command should use `agent-doc compact` (binary, verbatim copy) — NOT a manual LLM rewrite via `<!-- patch:exchange -->`
 2. The write-back response should never include unmodified user lines — only new agent-authored content
 3. If the diff shows `❯ ` systematically stripped from user lines, the agent should treat this as a write-back bug, not "formatting cleanup"
-<!-- agent:boundary:7d5371b8 -->
+
+❯ In tasks/dreamable/brian-takita.me, I saw a merge error pop up in my editor prompt. Why?
+
+❯ /caveman
+❯ "Merge conflicts with external writes ... editor content preserved"
+### Re: merge error in editor prompt (HEAD)
+
+The notification you saw is **"Merge conflict with external write — editor content preserved."** — an info balloon from the JetBrains plugin (`PromptPoller.mergeOrReload`).
+
+It fires when all three conditions are true:
+1. The file changed on disk (an agent-doc write updated `brian-takita.md`)
+2. You had **unsaved edits** in your editor for that file
+3. The automatic merge failed — specifically: the native FFI library wasn't loaded at that moment (only then does `mergeCrdt` return `null`), AND `git merge-file` also couldn't auto-resolve (true text conflict, exit code 1)
+
+**Result:** The plugin kept your editor content and did not apply the external write. The agent response was lost from the editor's view — you'd need to reload to pick it up (losing your unsaved edits), or manually reconcile.
+
+**Why does it happen at all?** The `mergeOrReload` path handles cases where the IPC write bypasses the Document API and the user has concurrent unsaved edits. Under normal operation (native lib loaded, no true conflict), the FFI CRDT merge handles this silently. The notification is the last-resort fallback.
+
+**Most likely trigger:** The agent-doc session wrote its response while `brian-takita.md` was open with unsaved edits, and the native lib happened to not be initialized yet (first session after IDE start, or plugin hot-reload). The git merge also failed because the agent response overlapped with your in-progress edits in the same file region.
+<!-- agent:boundary:a9006812 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

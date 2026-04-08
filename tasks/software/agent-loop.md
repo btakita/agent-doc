@@ -143,7 +143,7 @@ Done. Committed and pushed:
 | `mail` | sync: update conversations, contacts, and corky config | 1109 files |
 
 Parent repo updated with all 8 submodule pointer updates and pushed.
-<!-- agent:boundary:56b2de93 -->
+<!-- agent:boundary:13eef0c8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

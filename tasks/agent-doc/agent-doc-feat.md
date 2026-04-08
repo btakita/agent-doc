@@ -16,7 +16,7 @@ agent_doc_write: crdt
 ❯ Perhaps when the claude session starts, we can run plugin instructions within a frontmatter list?
 
 ❯  See tasks/dreamable/robert-ross.md
-### Re: Document-level hooks + session push (HEAD)
+### Re: Document-level hooks + session push
 
 Yes — feasible and fits naturally into the existing architecture.
 
@@ -54,15 +54,31 @@ Template vars: `{{session_id}}`, `{{file}}`, `{{agent}}`, `{{model}}`
 
 **Scope to build now:** `session_start` hook execution in `start.rs`.
 ❯ go
-<!-- agent:boundary:d334a9ef:agent-doc-feat -->
+### Re: go (HEAD)
+
+Done. Committed to `src/agent-doc` as `feat: document-level session_start hooks via frontmatter`.
+
+**What was implemented:**
+
+- `frontmatter.rs` — `hooks: HashMap<String, Vec<String>>` field on `Frontmatter`; omitted from serialization when empty
+- `start.rs` — `fire_doc_hooks()` called after pane provisioning; substitutes `{{session_id}}`, `{{file}}`, `{{agent}}`, `{{model}}` before `sh -c`; best-effort (log to stderr, never block)
+
+**Tests added (7 total):** hooks roundtrip, omitted-when-empty, absent-parses-as-empty, template var substitution, noop-for-missing, noop-for-empty, None agent/model → empty string.
+
+**Usage:**
+```yaml
+hooks:
+  session_start:
+    - "curl -s -X POST https://api.dreamable.com/sessions -d '{\"session_id\": \"{{session_id}}\", \"file\": \"{{file}}\"}'"
+```
+
+`post_write` and `post_commit` are schema-ready but call sites in `hooks.rs` are not yet wired — that's a follow-on.
+<!-- agent:boundary:f1dbd018 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Implement `session_start` hook in `start.rs`
-  - Parse `hooks.session_start` from frontmatter
-  - Shell-expand template vars (`{{session_id}}`, `{{file}}`, `{{agent}}`, `{{model}}`)
-  - Execute each command with `std::process::Command` after pane is provisioned
-  - Best-effort: log failures to stderr, never block
+- [ ] Wire `post_write` / `post_commit` events to `fire_doc_hooks` in `hooks.rs`
+- [ ] Bump version + release agent-doc with hooks feature
 <!-- /agent:pending -->

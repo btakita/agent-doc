@@ -1149,7 +1149,7 @@ Install via IDEA → Settings → Plugins → gear → "Install Plugin from Disk
 ### Re: same pattern — waiting on 0.2.53 install (HEAD)
 
 No new input. The diff is only the recurring `do`/`done` prefix pattern — same lines, same cause (old 0.2.52 plugin using first boundary). Once 0.2.53 is installed from disk and IDEA restarts, those lines get restored and this diff noise disappears.
-<!-- agent:boundary:5f155ccf -->
+<!-- agent:boundary:87428dd4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

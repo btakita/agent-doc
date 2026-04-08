@@ -1029,7 +1029,7 @@ Transcript saved: [`tasks/dreamable/transcripts/2026-04-08-robert-ross.md`](tran
 
 - 1862 segments, 46:34 runtime, transcribed at 126.9x realtime on RTX 5090
 - Speakers: Brian + Robert Ross (diarized)
-<!-- agent:boundary:1437e984 -->
+<!-- agent:boundary:f1f58afb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -459,7 +459,7 @@ Both items queued. When ready:
 - **`❯ ` fence test** — type a code block in this document, submit, and confirm ` ``` ` delimiters arrive clean (no `❯ ` prefix on fence lines).
 
 Pending list already reflects both — no changes needed there.
-<!-- agent:boundary:08bd6b78 -->
+<!-- agent:boundary:103f11ee -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

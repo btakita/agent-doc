@@ -586,7 +586,7 @@ Test in live session. Confirm works, then publish (crates.io + PyPI + GitHub Rel
 `/clear` is a built-in CLI command — cannot execute from document context. If you meant to reset the Claude Code conversation, run `/clear` directly in the terminal prompt.
 
 ❯ Add a feature where built-in CLI command are parsed from the diff and run separate of the document context. Is this possible from the agent-doc binary? Does the FFI Plugin need to do this?
-### Re: built-in CLI command execution from document (HEAD)
+### Re: built-in CLI command execution from document
 
 **Partially possible from agent-doc binary; execution must happen at the skill (Claude) layer — not the binary or FFI plugin.**
 
@@ -606,13 +606,37 @@ Test in live session. Confirm works, then publish (crates.io + PyPI + GitHub Rel
 **Proposed minimal implementation:**
 1. Binary: distinguish built-ins from skill commands in the preflight output (new field or per-entry flag)
 2. Skill: route `builtin_commands` to known handlers — `/compact` → compact exchange runbook, `/clear` → document note, others → skip
-<!-- agent:boundary:2584906f -->
+
+❯ Incorrect. This should be the literal `/compact` claude session command.
+❯ > `/compact` → compact exchange runbook
+
+❯ `compact exchange` is separate. Perhaps this should be a `/agent-doc compact exchange <document-path>` command? `/agent-doc compact <document-path>` could compact the entire document.
+### Re: `/compact` correction + proposed commands (HEAD)
+
+Agreed — my earlier mapping was wrong. Two distinct things:
+
+- **`/compact`** — Claude Code built-in that compacts conversation context/history. When detected in slash_commands, the skill cannot execute it on itself mid-session. Best behavior: write a document note ("run `/compact` at the terminal to compact conversation context").
+- **`compact exchange`** — Document-level operation (rewrite exchange component). Separate runbook. Not the same as `/compact`.
+
+**Proposed `/agent-doc` sub-commands:**
+
+`/agent-doc compact exchange <path>` — compact just the exchange component of a document. Could be invoked directly as a slash command from within a document (`/agent-doc compact exchange tasks/foo.md`), routed through the skill.
+
+`/agent-doc compact <path>` — compact the full document. Broader operation.
+
+This makes sense: agent-doc slash commands in the document become self-referential actions (`/agent-doc <verb> <args>`) rather than overloading Claude Code built-in names. The routing stays clean:
+- `/compact` → built-in, can't execute internally, note to user
+- `/agent-doc compact exchange <file>` → invoke compact exchange runbook via Skill
+- `/agent-doc compact <file>` → invoke full document compact via Skill
+<!-- agent:boundary:6630aedd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Add `builtin_commands` field (or `is_builtin` flag) to preflight JSON output
-- [ ] Wire `/compact` in skill routing → compact exchange runbook
-- [ ] Wire `/clear` in skill routing → write document note
+- [ ] Correct skill routing: `/compact` → document note (not compact exchange runbook)
+- [ ] Add `builtin_commands` distinction to preflight JSON (separate from `skill_commands`)
+- [ ] Define `/agent-doc compact exchange <path>` slash command
+- [ ] Define `/agent-doc compact <path>` slash command
+- [ ] Wire skill routing for `/agent-doc compact exchange` → compact exchange runbook
 <!-- /agent:pending -->

@@ -71,7 +71,7 @@ The thread ends with him calling you on the phone. Whatever happened on that cal
 
 ❯ Add to the proper scoped context. I want to make sure that any conversation with professional clients is proactive and we capture the true priorities.
 ❯ I need these priorities to be clear so I don't miss important details.
-### Re: Add to proper scoped context (HEAD)
+### Re: Add to proper scoped context
 
 Done. Added a **Communication Priorities** section to `mail/contacts/robert-ross/AGENTS.md` — the canonical context file for all future Rob correspondence.
 
@@ -82,7 +82,20 @@ The section covers:
 - **His communication style**: burst texts, overnight processing, direct cadence
 
 This means any future session drafting messages to Rob, or reviewing his communications, will have these priorities loaded automatically — no need to re-derive them from the SMS thread.
-<!-- agent:boundary:23ccf1cb -->
+
+❯ This same prioritization should be with **all** of my communication...with everybody.
+### Re: Apply to all communications (HEAD)
+
+Done. Saved as a universal user memory:
+
+- **Proactive same-day replies** to all logistical messages (not just Rob)
+- **Temporal bias filter** — older messages aren't less important
+- **Length bias filter** — longer messages aren't more important
+- **Explicit logistics confirmation** — emotional acknowledgments don't count as confirmations
+- Contact-specific priorities go in `mail/contacts/<name>/AGENTS.md` under "Communication Priorities"
+
+This will be applied automatically whenever reviewing any professional correspondence, not just Dreamable.
+<!-- agent:boundary:cb18791c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

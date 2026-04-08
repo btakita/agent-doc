@@ -21,9 +21,9 @@ Fix https://github.com/btakita/agent-doc/actions/runs/24093596675
 
 The `publish` job fails with:
 
-❯ ```
+```
 invalid-publisher: valid token, but no corresponding publisher
-❯ ```
+```
 
 OIDC token was issued correctly, but PyPI has no matching trusted publisher record for `btakita/agent-doc/.github/workflows/pypi.yml` + environment `pypi`.
 
@@ -38,9 +38,9 @@ Add a new **GitHub Actions** trusted publisher:
 - **Environment:** `pypi`
 
 Then re-run the failed `publish` job:
-❯ ```bash
+```bash
 gh run rerun 24093596675 --failed --repo btakita/agent-doc
-❯ ```
+```
 
 **Note:** The trusted publisher might have been set up for a different workflow filename (e.g., `publish.yml`) in a prior setup. Check the existing publishers list on PyPI before adding a new one.
 
@@ -103,7 +103,7 @@ In both cases, `agent-doc write` already receives the diff (or can compute it fr
 
 ❯ done
 - [ ] Fix PyPI trusted publisher for `pypi.yml` + environment `pypi`, then rerun CI
-❯ do
+do
 - [ ] Add SKILL.md note: patch:exchange must not echo user input (append mode)
 - [ ] Implement `❯ ` prefix normalization for user-added exchange lines in `agent-doc write` (both append + replace modes)
 
@@ -141,7 +141,7 @@ Added `normalize_user_prompts_in_exchange(content, snapshot)` to `write.rs`. Cal
 
 **IPC note:** Disk write path fully normalized (editor file shows `❯ `). IPC path normalizes the snapshot only — editor shows prefix on next disk cycle. Full IPC-side normalization needs plugin support (TODO).
 
-❯ do
+do
 - [ ] IPC-side ❯  normalization (plugin support needed)
 
 Use FFI plugin if possible
@@ -258,7 +258,7 @@ Yes — agent-doc has `StreamCapture` mode with `max_lines` support. It's not a 
 
 **Frontmatter config:**
 ```yaml
-❯ ---
+---
 agent_doc_write: crdt
 stream_config:
   target: console       # component to write into (default: "console")
@@ -267,8 +267,8 @@ stream_config:
   interval: 200         # poll interval ms (default: 200)
   thinking: false       # include chain-of-thought blocks (default: false)
   thinking_target: log  # route thinking to separate component (optional)
-❯ ---
-❯ ```
+---
+```
 
 **How it works:**
 - `agent-doc watch` polls the claimed tmux pane via `tmux capture-pane`
@@ -289,21 +289,21 @@ Yes — via `StreamCapture` mode. `agent-doc watch` polls the claimed tmux pane 
 
 **Document setup:**
 ```yaml
-❯ ---
+---
 agent_doc_write: crdt
 stream_config:
   target: console    # writes into &lt;!-- agent:console --&gt; (default)
   max_lines: 50      # keep last N lines (default: 50)
   strip_ansi: true   # strip escape codes (default: true)
   interval: 200      # poll interval ms (default: 200)
-❯ ---
-❯ ```
+---
+```
 
 Add to the document body:
-❯ ```markdown
+```markdown
 &lt;!-- agent:console --&gt;
 &lt;!-- /agent:console --&gt;
-❯ ```
+```
 
 **Would "Musing..." be captured?**
 
@@ -319,19 +319,19 @@ Removed all `agent:terminal` references. Updated title to "agent:console — str
 done
 - [ ] Verify `❯ ` prefix correct behavior in live session (type prompt, run agent-doc, confirm only user lines prefixed — not agent responses)
 
-❯ do
+do
 - [ ] Fix: keep 2-pane layout when navigating to non-agent-doc files (plugin: don't collapse on selectionChanged if no active agent-doc — only collapse on tab close)
 Does claude code provide any way to hook into capturing the status indicators?
-❯ ```
+```
 ✻ Orbiting… (35s · ↓ 313 tokens · thought for 4s)
   ⎿  Tip: Run claude --continue or claude --resume to resume a conversation
-❯ ```
+```
 ❯ done
 ❯ - [ ] Verify `❯ ` prefix correct behavior in live session (type prompt, run agent-doc, confirm only user lines prefixed — not agent responses)
 
 ❯ do
 ❯ - [ ] Fix: keep 2-pane layout when navigating to non-agent-doc files (plugin: don't collapse on selectionChanged if no active agent-doc — only collapse on tab close)
-### Re: done + layout fix (HEAD)
+### Re: done + layout fix
 
 **`❯ ` prefix verification:** Marked done.
 
@@ -350,7 +350,7 @@ val hash = if (layout != null) {
 } else {
     "single,wins=$windowCount"
 }
-❯ ```
+```
 
 - Navigation to non-`.md` file: window count unchanged, column count unchanged → hash unchanged → no sync → 2-pane layout preserved ✓
 - Split opened/closed: window count changes → hash changes → sync fires ✓
@@ -360,11 +360,42 @@ val hash = if (layout != null) {
 Plugin v0.2.50 built: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.50-signed.zip`
 
 **Install:** IDEA → Settings → Plugins → gear → "Install Plugin from Disk..." → select `agent-doc-jetbrains-0.2.50-signed.zip`.
-<!-- agent:boundary:80f49323 -->
+
+done
+- [ ] Install plugin v0.2.50 and verify 2-pane layout persists when navigating to non-agent-doc files
+
+Please read this document. The `❯ ` prefix was incorrectly added...then removed as an uncommitted change...during the last run. Why?
+### Re: ❯ code fence bug + Claude Code status hooks (HEAD)
+
+**Bug: code fences getting `❯ ` prefix**
+
+Root cause: `normalize_user_prompts_in_exchange` skips blank lines, `#` headings, `<!--` comments, and already-prefixed `❯` lines — but NOT ` ``` ` code fence markers. User-typed code fences were added to `user_added` and prefixed.
+
+Fix: added ` !trimmed.starts_with("```") ` to the skip conditions in `write.rs`. Test `normalize_user_prompts_code_fence_skipped` added and passing. `make check` clean (209 tests). `cargo install --path .` installed.
+
+**`❯ do` in snapshot:** That came from the skill (me), not the binary. The previous response echoed the user's `❯ do` / `❯ done` lines in the `<!-- patch:exchange -->` block, violating the no-echo rule. The `patch=append` mode appended those lines a second time. Won't repeat that error.
+
+**Claude Code status hooks**
+
+No — Claude Code does not provide hooks specifically for status indicators like `✻ Orbiting…`. Those are ANSI escape sequences rendered inline to the TTY by the Claude Code renderer, not events in the hook system.
+
+The available hook events (`PreToolUse`, `PostToolUse`, `Notification`, `Stop`, `SubagentStop`, `UserPromptSubmit`) fire on tool calls and task completion, not on thinking-state changes.
+
+**Capture options:**
+
+1. **`tmux capture-pane -p -t <pane>`** — grabs the visible terminal content including "Orbiting…" text. This is what `agent:console`'s `stream_config` uses internally. If the claimed pane is the Claude Code pane, the console component would receive it (though ANSI codes are stripped via `strip_ansi: true`).
+
+2. **`--output-format stream-json`** — gives structured thinking blocks (`"type": "thinking"`) from the API stream, which is what triggers the "Orbiting…" display. You'd get the thinking content tokens, not the UI status text. Agent-doc's `stream_config.thinking` option routes these to a separate component.
+
+3. **Terminal screen scraping** — poll `tmux capture-pane` on a short interval and write into `agent:console`. Rough but functional for observability.
+
+So for the `agent:console` use case: if the Claude Code session is the pane being watched, `stream_config` with a short `interval` (e.g. 200ms) will capture the status text as part of the pane content. It would appear in the console component briefly while thinking is active, then get replaced by the next capture.
+<!-- agent:boundary:1be44463 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Test `❯ ` code fence fix in live session (user types a code block, runs agent-doc, confirm ` ``` ` lines are NOT prefixed)
 - [ ] Install plugin v0.2.50 and verify 2-pane layout persists when navigating to non-agent-doc files
 <!-- /agent:pending -->

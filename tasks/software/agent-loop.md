@@ -36,7 +36,7 @@ Round 3 of CI fixes:
 - CUDA: added `libcublas-dev-12-6` step (Jimver sub-packages can't install it via `cuda-` prefix)
 
 New CI run in progress. Waiting on result.
-<!-- agent:boundary:cca9f168 -->
+<!-- agent:boundary:5fd173d2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

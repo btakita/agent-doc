@@ -271,6 +271,29 @@ pub struct Frontmatter {
         rename = "agent_doc_auto_compact"
     )]
     pub auto_compact: Option<usize>,
+    /// Document-level lifecycle hooks: shell commands executed at key events.
+    ///
+    /// Supported events: `session_start`, `post_write`, `post_commit`.
+    /// Each event maps to a list of shell commands (run via `sh -c`).
+    ///
+    /// Template variables substituted before execution:
+    /// - `{{session_id}}` — document session UUID
+    /// - `{{file}}` — document file path
+    /// - `{{agent}}` — agent name (or empty string)
+    /// - `{{model}}` — model name (or empty string)
+    ///
+    /// Execution is best-effort: failures log to stderr and never block the session.
+    ///
+    /// Example:
+    /// ```yaml
+    /// hooks:
+    ///   session_start:
+    ///     - "curl -s -X POST https://api.example.com/sessions -d '{\"session_id\": \"{{session_id}}\"}'"
+    ///   post_write:
+    ///     - "notify-send 'agent-doc' 'Response written to {{file}}'"
+    /// ```
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub hooks: std::collections::HashMap<String, Vec<String>>,
 }
 
 impl Frontmatter {
@@ -536,6 +559,7 @@ mod tests {
             debounce_ms: None,
             links: vec![],
             auto_compact: None,
+            hooks: std::collections::HashMap::new(),
         };
         let body = "# Hello\n\nBody text.\n";
         let written = write(&fm, body).unwrap();
@@ -872,5 +896,27 @@ mod tests {
         assert!(fm.mode.is_none());
         assert_eq!(fm.format, Some(AgentDocFormat::Template));
         assert_eq!(fm.write_mode, Some(AgentDocWrite::Crdt));
+    }
+
+    #[test]
+    fn hooks_roundtrip() {
+        let content = "---\nhooks:\n  session_start:\n    - \"echo start {{session_id}}\"\n  post_write:\n    - \"notify {{file}}\"\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.hooks.get("session_start"), Some(&vec!["echo start {{session_id}}".to_string()]));
+        assert_eq!(fm.hooks.get("post_write"), Some(&vec!["notify {{file}}".to_string()]));
+    }
+
+    #[test]
+    fn hooks_omitted_when_empty() {
+        let fm = Frontmatter::default();
+        let result = write(&fm, "body\n").unwrap();
+        assert!(!result.contains("hooks"));
+    }
+
+    #[test]
+    fn hooks_absent_parses_as_empty() {
+        let content = "---\nsession: abc\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert!(fm.hooks.is_empty());
     }
 }

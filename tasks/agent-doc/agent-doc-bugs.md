@@ -570,7 +570,7 @@ It fires when all three conditions are true:
 Caveman mode: active.
 
 Fix noted: `❯ "Merge conflicts..."` → `"Merge conflicts..."`. Correct — `❯ ` should not tag quoted strings, only actual user prompts typed at terminal. Another over-prefix case in `normalize_user_prompts_in_exchange`. Filter missing `"` -prefixed lines.
-<!-- agent:boundary:0482ffdd -->
+<!-- agent:boundary:ea9541a1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

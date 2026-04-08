@@ -426,7 +426,7 @@ This is a patch-level change. Ready to bump to v0.26.3 and release, or bundle wi
 **CI in progress:** Release workflow running ([24142052779](https://github.com/btakita/corky/actions/runs/24142052779)) — builds cross-platform binaries and creates GitHub Release. PyPI publish triggers automatically once the Release is created (pypi.yml fires on `release: [published]`).
 
 ❯ gh action errors https://github.com/btakita/corky/actions/runs/24142052779
-### Re: CI failures — two root causes found and fixed (HEAD)
+### Re: CI failures — two root causes found and fixed
 
 **aarch64 OpenSSL:**
 
@@ -444,13 +444,29 @@ Fix:
 - `sub-packages: '["nvcc", "cudart-dev", "cuda-libraries-dev"]'` — installs only compiler + dev headers, no DKMS/driver
 
 Committed `fa4ff87`, retagged v0.26.3. New Release run queued: [24144164805](https://github.com/btakita/corky/actions/runs/24144164805)
-<!-- agent:boundary:41fe8b3c -->
+❯ fix gh actions:
+❯ - https://github.com/btakita/corky/actions/runs/24145568234
+❯ - https://github.com/btakita/corky/actions/runs/24148041223
+### Re: aarch64 root cause — cross 0.2.5 uses Ubuntu 16.04 (OpenSSL 1.0.2g) (HEAD)
+
+**Root cause:** `cargo install cross --version 0.2.5` pulls the cross 0.2.5 container which is based on Ubuntu 16.04 (Xenial). Ubuntu 16.04's `libssl-dev:arm64` provides OpenSSL **1.0.2g** — not supported by `openssl-sys 0.9.112` (requires >= 1.1.1).
+
+The `vendored-openssl` feature was enabled, but wasn't compiling from source (too fast, ~1.5s). Likely because the OpenSSL 1.0.2g was found first via system pkg-config (overriding vendored source lookup).
+
+Confirmed locally: `docker run --rm ghcr.io/cross-rs/aarch64-unknown-linux-gnu:0.2.5 bash -c "... pkg-config --modversion openssl"` → `1.0.2g`.
+
+**Fix:** Add `image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:edge"` to `Cross.toml`. The `edge` tag uses Ubuntu 20.04 with OpenSSL 1.1.1f (supported). Restored `dpkg --add-architecture arm64` + `libssl-dev:arm64` so pkg-config finds arm64 OpenSSL.
+
+Committed `52a20ee`, retagged v0.26.3. New Release run: [24156432054](https://github.com/btakita/corky/actions/runs/24156432054).
+
+Two runs active (user also pushed another fix simultaneously). Either one passing confirms the direction.
+<!-- agent:boundary:98ba34af -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Monitor CI release run 24144164805 — confirm both aarch64 and CUDA builds pass
+- [ ] Monitor CI release run 24156432054 — confirm aarch64 now passes
 - [ ] Verify sheet sharing / GCP test users
 - [ ] Re-test sheet read
 <!-- /agent:pending -->

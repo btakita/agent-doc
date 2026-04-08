@@ -1163,7 +1163,7 @@ No new input. The diff is only the recurring `do`/`done` prefix pattern — same
 After this write-back, the `do`/`done` lines should show `❯ ` in the document and the git diff noise disappears.
 
 If stripping persists after this cycle: there's a residual bug to debug (normalize list generation or plugin apply order). Report back and we'll dig into `write.rs` normalize logic.
-<!-- agent:boundary:e477090a -->
+<!-- agent:boundary:243c54b1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

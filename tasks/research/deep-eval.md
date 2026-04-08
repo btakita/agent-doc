@@ -179,7 +179,7 @@ DeepEval spans multiple approaches, though LLM-as-judge dominates:
 So the complete picture: LLM-as-judge is the default path, task oracle for code evaluation, and custom metrics for structural invariants. The framework is composable — you mix approaches within a test suite.
 
 ❯ In the cause of claudescore, would DeepEval run on the client machine or on the server?
-### Re: DeepEval Deployment for claudescore (HEAD)
+### Re: DeepEval Deployment for claudescore
 
 The answer depends on what "claudescore" means architecturally — but for a scoring service that practitioners use to evaluate their harnesses, **server-side is the right model**.
 
@@ -199,11 +199,47 @@ The answer depends on what "claudescore" means architecturally — but for a sco
 - **Production / regression tracking**: client sends traces to the claudescore server; server runs the evals, stores history, surfaces regressions across versions
 
 The `@observe()` tracing decorator already separates instrumentation from evaluation — it captures spans locally and flushes them to a backend. That's the right seam: instrument on client, evaluate on server.
-<!-- agent:boundary:319ba9c3 -->
+
+❯ Would a self-hosted DeepEval be sufficient for ClaudeScore?
+❯ What would a confident.ai subscription provide? It would likely cost too much. But I still want to know.
+### Re: Self-hosted DeepEval for ClaudeScore (HEAD)
+
+**Yes — self-hosted is sufficient for the evaluation engine.** DeepEval is fully open-source (MIT); you get all 50+ metrics, LLM-as-judge via your own API keys, pytest integration, and JSON result output. Nothing in the core eval pipeline requires Confident AI.
+
+What you'd need to build yourself if self-hosting:
+- **Historical regression tracking** — DeepEval doesn't persist results across runs by default; you'd store JSON outputs in a DB (SQLite/Postgres) and query for trends
+- **Dashboard** — plain pytest output, or wire JSON results into Grafana/a custom UI
+- **Dataset management** — golden datasets live as local files; no centralized store
+
+For ClaudeScore's use case (practitioners submitting traces, server running evals), self-hosted is the obvious path — you're building the server anyway, so you own the persistence and dashboard layer.
+
+### Re: What Confident AI Provides (HEAD)
+
+As of mid-2025, Confident AI's tiers were roughly:
+
+| Tier | Approx. cost | What you get |
+|------|-------------|------|
+| Free | $0 | 100 evaluations/month, basic dashboard |
+| Pro | ~$99–149/month | Higher eval limits, dataset management, regression alerts |
+| Team | ~$299+/month | Multi-user, production tracing integration, SSO |
+| Enterprise | Custom | Volume, SLA, on-prem option |
+
+*(Pricing as of knowledge cutoff — verify at confident-ai.com for current rates)*
+
+**What the subscription adds beyond self-hosting:**
+
+- **One-click dataset curation from production traces** — stream real interactions, flag edge cases, build golden datasets without manual CSV wrangling. Non-trivial to replicate.
+- **Hosted regression dashboard** — compare eval scores across git commits, PRs, and prompt versions.
+- **Production monitoring** — instrument your live app; traces stream to their platform and get automatically scored. Closest thing to observability for LLM quality.
+- **Collaborative annotation** — multiple humans can label/validate examples in a shared dataset.
+
+**For ClaudeScore specifically:** The subscription value is in the *product layer*, not the eval engine. If ClaudeScore is building its own practitioner-facing product, you'd be recreating that layer anyway — paying Confident AI for it is double-building. Self-host the eval engine, own the UX.
+
+Where Confident AI *would* make sense: internal tool for a single team that doesn't want to build a dashboard. At $100–150/month, that's cheap for a team. But for a product serving many practitioners, self-hosted is the right call.
+<!-- agent:boundary:799614e9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-
 <!-- /agent:pending -->

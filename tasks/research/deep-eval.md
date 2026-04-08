@@ -133,7 +133,7 @@ If agent-loop expands to evaluate general-purpose agent behavior across many dim
 - Keep the existing custom evals as the primary system
 - Use DeepEval as a reference: study the metric implementations for ideas on improving custom metrics
 - Revisit as a dependency if eval scope grows beyond agent-doc into general LLM output quality across the stack
-<!-- agent:boundary:b8882d38 -->
+<!-- agent:boundary:061fa38f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

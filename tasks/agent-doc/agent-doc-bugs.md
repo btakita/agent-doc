@@ -606,7 +606,7 @@ Test in live session. Confirm works, then publish (crates.io + PyPI + GitHub Rel
 **Proposed minimal implementation:**
 1. Binary: distinguish built-ins from skill commands in the preflight output (new field or per-entry flag)
 2. Skill: route `builtin_commands` to known handlers — `/compact` → compact exchange runbook, `/clear` → document note, others → skip
-<!-- agent:boundary:22af91c7 -->
+<!-- agent:boundary:ac9295d7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

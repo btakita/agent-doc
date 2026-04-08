@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-1-page HTML summary written — tmp/paxos-summary.html
+Video compression running in background
 <!-- /agent:status -->
 
 ## Exchange
@@ -169,7 +169,8 @@ One-page reference card — company overview, products table, Bryan Boyer backgr
 
 ❯ Does Paxos have a physical reserve of Gold?
 ❯ Does Paxos have a reserve for other currencies?
-### Re: Gold reserves and currency backing (HEAD)
+
+### Re: Gold reserves and currency backing
 
 **PAXG — physical gold**
 
@@ -188,7 +189,17 @@ Paxos is a trust company, not a bank — they cannot lend out funds. Every token
 Monthly public attestations by independent accountants for USDP and PYUSD.
 
 **No other currency reserves** — all stablecoins are USD-denominated. PAXG is the only non-USD asset they tokenize (gold). No EUR, GBP, or multi-currency stablecoins currently under the Paxos brand (Membrane Finance, their EU acquisition, handles MiCA-compliant EUR stablecoin territory).
-<!-- agent:boundary:59fd4dd6 -->
+
+❯ compress [2026-04-08 17-00-21.mp4](../../../../../Videos/2026-04-08%2017-00-21.mp4)
+### Re: Video compression (HEAD)
+
+Compressing `Videos/2026-04-08 17-00-21.mp4` (2.3 GB, 1080p, ~53 min) in background.
+
+Output: `~/Videos/2026-04-08 17-00-21-compressed.mp4`
+Settings: H.264 CRF 28, medium preset, AAC 128k audio
+
+Expected output size: ~300–600 MB depending on content. Will complete in ~10–20 min.
+<!-- agent:boundary:69a7ccce -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

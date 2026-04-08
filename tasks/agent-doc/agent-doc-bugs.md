@@ -992,7 +992,7 @@ OVSX_PAT="$(pass btak/OVSX_TOKEN)" npx ovsx publish editors/vscode/agent-doc-0.2
 ```
 
 Let me know which registries to target and whether you have the missing tokens, or I'll publish to Open VSX now and wait on the others.
-<!-- agent:boundary:6402abde -->
+<!-- agent:boundary:8d15e58d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

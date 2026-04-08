@@ -945,7 +945,7 @@ Shows document content at a specific point:
 Unified diff between git refs. `--to` defaults to HEAD. Without `--from`, falls back to live diff behavior.
 
 **Build:** 473 tests pass. `cargo install` complete. Committed as `484d887` in `src/agent-doc`.
-<!-- agent:boundary:92bd6bfd -->
+<!-- agent:boundary:865423b0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

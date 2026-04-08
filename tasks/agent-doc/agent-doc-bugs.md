@@ -251,8 +251,8 @@ https://gist.github.com/btakita/ab31879717d229d50c4b13e7031717e3
 
 Contains the last prompt (`❯ ` prefixed) + answer from the agent:terminal / Musing capture exchange.
 
-Does agent-doc have a element to stream terminal output...with max_lines=50 lines being the default truncation?
-### Re: agent:terminal / stream capture — yes, with max_lines=50 default (HEAD)
+❯ Does agent-doc have a element to stream terminal output...with max_lines=50 lines being the default truncation? 
+### Re: agent:terminal / stream capture — yes, with max_lines=50 default
 
 Yes — agent-doc has `StreamCapture` mode with `max_lines` support. It's not a document component per se; it's a **document mode** where the watcher polls a tmux pane and writes output into a target component.
 
@@ -277,7 +277,38 @@ stream_config:
 - Writes the limited content into the `&lt;!-- agent:console --&gt;` component via CRDT merge
 
 **So to answer the question:** Yes, `max_lines: 50` is the default. You can override it per-document in frontmatter. The component name defaults to `"console"` — add `&lt;!-- agent:console --&gt;...&lt;!-- /agent:console --&gt;` to the document to receive the output.
-<!-- agent:boundary:241a5ed8 -->
+
+❯ Please revise the agent:terminal answer for agent:console.
+### Re: revised — agent:console (not agent:terminal) (HEAD)
+
+Correction: the component is `agent:console`, not `agent:terminal`. Here's the accurate version of the earlier answer:
+
+**Can agent-doc stream terminal output to a document?**
+
+Yes — via `StreamCapture` mode. `agent-doc watch` polls the claimed tmux pane via `tmux capture-pane`, diffs for new lines, and writes into the `&lt;!-- agent:console --&gt;` component with tail truncation.
+
+**Document setup:**
+```yaml
+---
+agent_doc_write: crdt
+stream_config:
+  target: console    # writes into &lt;!-- agent:console --&gt; (default)
+  max_lines: 50      # keep last N lines (default: 50)
+  strip_ansi: true   # strip escape codes (default: true)
+  interval: 200      # poll interval ms (default: 200)
+---
+```
+
+Add to the document body:
+```markdown
+&lt;!-- agent:console --&gt;
+&lt;!-- /agent:console --&gt;
+```
+
+**Would "Musing..." be captured?**
+
+Still no — same reason as before. The Claude Code status bar is a terminal UI element (escape sequences in the status line), not stdout. `agent:console` captures pane content via `tmux capture-pane`, which renders the visible screen — so it *would* show "Musing..." if the pane being captured is the Claude Code pane. But you'd also get the surrounding chrome and any prior output above the status bar.
+<!-- agent:boundary:6c53391c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

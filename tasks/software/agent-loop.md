@@ -274,7 +274,7 @@ Fixed → committed → re-tagged → CI running now (`fix(ci): add vendored-ope
 #### agent-kit v0.4.0
 
 CI clippy failure: `collapsible_if` in `hooks.rs:185` (nested if-let pattern). Fixed → committed → re-tagged. CI should trigger shortly.
-<!-- agent:boundary:821755f9 -->
+<!-- agent:boundary:fd7a8968 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

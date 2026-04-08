@@ -166,7 +166,7 @@ If agent-loop expands to evaluate general-purpose agent behavior across many dim
 ❯ - LLM judge handles the qualitative (was the response relevant? did it follow the plan?)
 
 ❯ You never fully know the expected response — you define a quality space, then measure whether outputs fall within it. The more constrained the task, the tighter that space gets.
-### Re: DeepEval's Evaluation Approaches (HEAD)
+### Re: DeepEval's Evaluation Approaches
 
 DeepEval spans multiple approaches, though LLM-as-judge dominates:
 
@@ -177,10 +177,33 @@ DeepEval spans multiple approaches, though LLM-as-judge dominates:
 - **Regression** — not a first-class metric, but the Confident AI cloud platform stores scores over time and surfaces regression across runs
 
 So the complete picture: LLM-as-judge is the default path, task oracle for code evaluation, and custom metrics for structural invariants. The framework is composable — you mix approaches within a test suite.
-<!-- agent:boundary:c9fab718 -->
+
+❯ In the cause of claudescore, would DeepEval run on the client machine or on the server?
+### Re: DeepEval Deployment for claudescore (HEAD)
+
+The answer depends on what "claudescore" means architecturally — but for a scoring service that practitioners use to evaluate their harnesses, **server-side is the right model**.
+
+**Why server-side:**
+- DeepEval's LLM-as-judge calls (to Claude, OpenAI, etc.) happen regardless of where the framework runs — the question is who pays the API cost and manages the infra
+- Centralized execution enables cross-practitioner regression tracking, leaderboards, aggregate metric trends — impossible if every client runs locally
+- Practitioners ship traces/outputs; the server runs the evals and returns scores — no Python install required on client
+- Confident AI's own architecture works this way: instrument locally via `@observe()`, send spans to their cloud, they run evals server-side
+
+**Why client-side would matter:**
+- Privacy — outputs never leave the client machine (important for proprietary agent logic or sensitive data)
+- Offline / air-gapped environments
+- Low-latency feedback during local development (run evals in CI, not after shipping to a server)
+
+**Practical split for claudescore:**
+- **Local dev mode**: client runs DeepEval directly against their harness — tight feedback loop, no server needed
+- **Production / regression tracking**: client sends traces to the claudescore server; server runs the evals, stores history, surfaces regressions across versions
+
+The `@observe()` tracing decorator already separates instrumentation from evaluation — it captures spans locally and flushes them to a backend. That's the right seam: instrument on client, evaluate on server.
+<!-- agent:boundary:be6addb3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+
 <!-- /agent:pending -->

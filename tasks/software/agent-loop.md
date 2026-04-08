@@ -194,7 +194,7 @@ corky transcribe --diarize --speakers "Brian,Interviewer" ~/Videos/2026-04-07\ 1
 Transcript should be significantly longer. Say "publish corky" when it looks correct.
 
 **Note:** This bug also existed in 0.26.0/0.26.1 — good catch during testing.
-<!-- agent:boundary:902846f2 -->
+<!-- agent:boundary:0ba24eea -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

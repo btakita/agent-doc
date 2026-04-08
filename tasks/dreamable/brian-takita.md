@@ -23,7 +23,7 @@ Active. Rob re-engaged. ClaudeScore implementation pending. Communication cadenc
 ❯     - content length bias
 
 ❯ reread robert-ross-sms.txt
-### Re: Organize and prioritize Robert Ross communications (HEAD)
+### Re: Organize and prioritize Robert Ross communications
 
 After rereading the full SMS thread, here's what matters most — stripped of temporal and length bias.
 
@@ -68,7 +68,21 @@ He spent an evening researching it. His suggestion — "I think you'd significan
 #### Current status (bottom of thread)
 
 The thread ends with him calling you on the phone. Whatever happened on that call is where things actually stand — the SMS thread itself is resolved.
-<!-- agent:boundary:9541980d -->
+
+❯ Add to the proper scoped context. I want to make sure that any conversation with professional clients is proactive and we capture the true priorities.
+❯ I need these priorities to be clear so I don't miss important details.
+### Re: Add to proper scoped context (HEAD)
+
+Done. Added a **Communication Priorities** section to `mail/contacts/robert-ross/AGENTS.md` — the canonical context file for all future Rob correspondence.
+
+The section covers:
+- **Non-negotiables**: proactive communication, explicit logistics confirmation
+- **Active priorities**: ClaudeScore, Filevine status, genuine re-engagement
+- **What's resolved**: don't relitigate (stress, conflict, motivational texts)
+- **His communication style**: burst texts, overnight processing, direct cadence
+
+This means any future session drafting messages to Rob, or reviewing his communications, will have these priorities loaded automatically — no need to re-derive them from the SMS thread.
+<!-- agent:boundary:59225e4d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

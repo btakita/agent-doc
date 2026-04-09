@@ -358,7 +358,7 @@ v0.31.25 released:
 - **PyPI:** `pypi.yml` triggers on GitHub Release publish (in flight via CI)
 
 CI chain: tag push → `release.yml` creates GitHub Release → `pypi.yml` triggers on `release: published`.
-<!-- agent:boundary:b5383f4c -->
+<!-- agent:boundary:3952ae3b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

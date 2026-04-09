@@ -562,7 +562,7 @@ This eliminates the stale-baseline root cause for the initial write. The 129-byt
 **"Use opus":** I can't switch models mid-session — model is set at invocation. To use opus, set `model: opus` in the frontmatter or restart with `claude --model claude-opus-4-6`.
 
 **Updating SKILL.md now.**
-<!-- agent:boundary:d55e5c3f -->
+<!-- agent:boundary:ffffb904 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

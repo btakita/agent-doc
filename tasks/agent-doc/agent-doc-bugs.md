@@ -462,7 +462,7 @@ New entries now appear in `.agent-doc/logs/ops.log`:
 The `snap_source=content_ours` vs `snap_source=file_read` field is key: when `file_read`, the snapshot reflects what the plugin wrote to disk (post-boundary-reposition), which differs from `content_ours`. When `content_ours`, the snapshot is the pre-reposition content — explaining the persistent "file is N bytes larger" warning.
 
 Note: the `snapshot_saved_file_ipc` and `ipc_file_delivered` entries will appear on the next write cycle (new binary is built but `cargo install` not yet run — symlink `.bin/agent-doc` points to `target/release/agent-doc` which is already updated).
-<!-- agent:boundary:e58707c0 -->
+<!-- agent:boundary:a0c4d75e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

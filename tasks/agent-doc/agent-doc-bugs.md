@@ -83,7 +83,7 @@ agent-doc commit src/session-share/tasks/claudescore.md
 `agent-doc commit` writes a **VCS refresh signal** after committing so the editor updates its git gutter. A raw `git commit` skips that signal — the editor kept showing all ~32 summary lines as green (uncommitted) even though git had already committed them. The summary was in git; the editor just didn't refresh.
 
 **Fix:** The compact-exchange runbook step 4 says `agent-doc commit <FILE>` — that's correct. The skill that ran the compact substituted a manual `git commit -m "..."` instead, which is the bug. `agent-doc commit` always uses the `agent-doc(<stem>): <timestamp>` format, so if a custom message were needed that's a missing feature — but for correctness and editor state, `agent-doc commit` must be used.
-<!-- agent:boundary:2f66776e -->
+<!-- agent:boundary:759d56ef -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

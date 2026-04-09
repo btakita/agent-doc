@@ -1250,7 +1250,7 @@ So `❯ ` wasn't "stripped" by anything — it was never applied to the live doc
 - `normalize_user_prompts_code_fence_interior_skipped` — new test: multi-line fence with text before and after. Asserts: text before/after fence gets `❯ `, fence interior (`let x`, `let y`) does not, fence marker does not.
 
 All 11 `normalize_user_prompts_*` tests pass.
-<!-- agent:boundary:cc62cdf0 -->
+<!-- agent:boundary:b265d47c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

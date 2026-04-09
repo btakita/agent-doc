@@ -68,7 +68,7 @@ No re-release needed. The published v0.31.24 binary (crates.io/PyPI/GitHub Relea
 The fix just unblocks CI on main (prevents the red check on new PRs). Fold it into v0.31.25 whenever there's enough to release.
 
 ❯ When I ran `compact exchange` in session-share/tasks/claudescore.md, all of the summary was uncommitted. Why?
-### Re: compact exchange — uncommitted summary (HEAD)
+### Re: compact exchange — uncommitted summary
 
 The compact summary **was** committed to git (`50f67f9`), but the skill used a raw `git commit` instead of `agent-doc commit`:
 
@@ -83,11 +83,30 @@ agent-doc commit src/session-share/tasks/claudescore.md
 `agent-doc commit` writes a **VCS refresh signal** after committing so the editor updates its git gutter. A raw `git commit` skips that signal — the editor kept showing all ~32 summary lines as green (uncommitted) even though git had already committed them. The summary was in git; the editor just didn't refresh.
 
 **Fix:** The compact-exchange runbook step 4 says `agent-doc commit <FILE>` — that's correct. The skill that ran the compact substituted a manual `git commit -m "..."` instead, which is the bug. `agent-doc commit` always uses the `agent-doc(<stem>): <timestamp>` format, so if a custom message were needed that's a missing feature — but for correctness and editor state, `agent-doc commit` must be used.
-<!-- agent:boundary:759d56ef -->
+
+❯ Please diagnose. What are there +269 lines? We should allow non-idle panes in the stash window.
+```
+● Bash(agent-doc preflight /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore.md 2>&1)
+● ⎿  [diff] Last line may be truncated (recheck 5/12): "Can the server be configurable with the env"
+     [preflight] step 0: layout check                                                               ronment v"
+     [preflight] layout issue: stash window 'stash' has non-idle pane %46 running 'agent-doc'
+     [preflight] layout issue: stash window 'stash' has non-idle pane %51 running 'agent-doc'
+     … +269 lines (ctrl+o to expand)
+```
+❯ W
+### Re: +269 lines + stash window layout check (HEAD)
+
+**+269 lines:** That's just Claude Code's tool output truncation. The claudescore.md document is 26KB — the preflight JSON is long because the document is large. Not a bug.
+
+**Stash window non-idle check:** Removed. The check flagged any pane in a `stash*` window running something other than an idle shell. But stash windows exist specifically to hold backgrounded sessions — `agent-doc` panes there are intentional.
+
+**Fix in `preflight.rs`:** Deleted Check 2 (stash window non-idle pane loop) plus the now-dead `IDLE_SHELLS` constant. Also simplified `WinInfo` struct to just `Vec<u32>` (only the window index is needed for Check 1). `make check` — 38 tests pass.
+<!-- agent:boundary:7413fba5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Verify CI passes on 7fc7905
+- [ ] Release v0.31.25 with this fix
 <!-- /agent:pending -->

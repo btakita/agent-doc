@@ -650,7 +650,7 @@ The original trigger in the ❯ prefix case: normalization ran on lines derived 
 
 ❯ do
 ❯ - [ ] Audit remaining `content_ours` snapshot saves in run.rs, stream.rs, write.rs:1288
-### Re: audit — content_ours snapshot saves in run.rs, stream.rs, write.rs:1288 (HEAD)
+### Re: audit — content_ours snapshot saves in run.rs, stream.rs, write.rs:1288
 
 **write.rs:1288 — `apply_stream_from_string`**
 
@@ -683,13 +683,37 @@ Both read a fresh file as their baseline (`content = std::fs::read_to_string(fil
 | `apply_template_from_string` write.rs:1360 | Intentional (recover) | Attribution noise only |
 
 No active bugs in the current SKILL workflow. The one actionable item is removing `apply_stream_from_string` (dead code, stale-baseline risk if enabled).
-<!-- agent:boundary:8febca23 -->
+
+❯ A duplicate response patch was uncommitted as a response in this document. Why?
+
+❯ do
+❯ - [ ] Remove or fix `apply_stream_from_string` (dead code, stale-baseline risk if enabled)
+### Re: duplicate uncommitted response + apply_stream_from_string removal (HEAD)
+
+**Duplicate uncommitted response — why it happened:**
+
+The previous cycle had an IPC timeout (exit 75):
+1. Write #1 (IPC): patch file written to `.agent-doc/patches/`; 2s timeout hit
+2. Write #2 (`--force-disk`): cleaned the stale patch, wrote response to disk, saved snapshot
+3. **Race**: JB had already buffered the filesystem notification for the patch file before `--force-disk` deleted it — JB still processed and applied patches via Document API
+4. Both writes landed: file = response applied twice; snapshot = response applied once
+5. Next preflight gap commit staged snapshot content → git HEAD = one copy; file = two copies → second copy appeared as uncommitted in gutter
+6. Preflight resolved it ("repositioned boundary in snapshot")
+
+The root cause is the deletion-race window between IPC timeout detection and JB's in-flight patch processing. The `--force-disk` cleanup is a best-effort guard but can't cancel an in-progress JB Document API write.
+
+**`apply_stream_from_string` — removed**
+
+Correction to the earlier audit: this function did NOT have stale-baseline risk. `content` was freshly read from disk, so `content_ours = fresh_file + response` uses the same safe pattern as the other recover paths (`apply_append_from_string`, `apply_template_from_string`). The `content_ours` save was intentional (concurrent edits surface in next diff), not a bug.
+
+Removed it anyway — it was acknowledged dead code (`#[allow(dead_code)]`, no callers) and can be restored from git if stream-mode recovery is ever wired. Builds clean.
+<!-- agent:boundary:f716cfa4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Remove or fix `apply_stream_from_string` (dead code, stale-baseline risk if enabled)
 - [ ] Consider: plugin ACK protocol to include applied content (hard guarantee for IPC)
+- [ ] Investigate IPC deletion-race window for double-write (JB in-flight when patch file deleted)
 - [ ] Bump to v0.31.26, update VERSIONS.md, publish
 <!-- /agent:pending -->

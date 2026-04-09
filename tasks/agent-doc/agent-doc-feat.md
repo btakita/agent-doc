@@ -175,7 +175,7 @@ No fenced code context tracked. So `# bash_comment` inside a diff's fenced block
 Truncated line completed. The `❯ ` prefix was dropped again in the editor — live confirmation of the normalization bug.
 
 `claudescore.md` is an extract of the claude-auto/ClaudeScore context (commit validation hooks, reminders, claude-auto plugin). Doesn't add new context to the `#`-in-fenced-code analysis — that response stands as-is.
-<!-- agent:boundary:8457c879 -->
+<!-- agent:boundary:a501cb92 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

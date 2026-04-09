@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-agent-doc v0.31.19 — active
+agent-doc v0.31.24 — active
 <!-- /agent:status -->
 
 ## Exchange
@@ -42,11 +42,28 @@ Sessions v0.31.18–v0.31.24. Key work:
 13. Commit-after-write rule: always call agent-doc commit after every agent-doc write.
 
 Open: 2-pane layout loss when navigating to non-agent-doc file in editor (tmux collapses to 1 pane). Not yet fixed.
-<!-- agent:boundary:6892cfd3 -->
+
+❯ Please fix https://github.com/btakita/agent-doc/actions/runs/24167784102
+### Re: CI fix — collapsible_if in git.rs (HEAD)
+
+Clippy error in `src/git.rs:410` — nested `if` that CI flags as `collapsible_if` on Rust 1.94.1:
+
+```rust
+// before
+if !in_fence {
+    if let Some(stripped) = line.strip_suffix(" (HEAD)") { ... }
+}
+
+// after
+if !in_fence && let Some(stripped) = line.strip_suffix(" (HEAD)") { ... }
+```
+
+Fixed, all 743 tests pass. Committed as `7fc7905`, pushed — CI should be green.
+<!-- agent:boundary:244f7b59 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Bump version, update VERSIONS.md, build + release 0.31.24
+- [ ] Verify CI passes on 7fc7905
 <!-- /agent:pending -->

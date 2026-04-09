@@ -613,7 +613,7 @@ docker: Error response from daemon: failed to set up container networking: drive
 
 Run 'docker run --help' for more information
 ```
-### Re: port 80 already in use (HEAD)
+### Re: port 80 already in use
 
 Something else is holding port 80. Find it:
 
@@ -646,13 +646,34 @@ systemctl stop nginx   # or apache2
 ```
 
 Certbot needs port 80 temporarily to complete the ACME HTTP challenge. Once the cert is issued, port 80 goes to the nginx container instead.
-<!-- agent:boundary:f412d255 -->
+
+```
+[root@oddball-business app]# ss -tlnp | grep :80
+LISTEN 0      511                     *:80               *:*    users:(("httpd",pid=998683,fd=4),("httpd",pid=993496,fd=4),("httpd",pid=993441,fd=4),("httpd",pid=993398,fd=4),("httpd",pid=993397,fd=4),("httpd",pid=993391,fd=4))
+```
+### Re: httpd on port 80 (HEAD)
+
+Apache (`httpd`) — stop it:
+
+```bash
+systemctl stop httpd
+systemctl disable httpd   # prevent it from restarting on reboot
+```
+
+Then retry certbot:
+
+```bash
+./scripts/certbot-init.sh
+```
+
+The Docker nginx container will take over port 80 after the stack is up, so Apache isn't needed.
+<!-- agent:boundary:3756d572 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Server step 8 (in progress):** Stop whatever is using port 80 (`docker stop $(docker ps -q)` or `ss -tlnp | grep :80`), then retry `./scripts/certbot-init.sh`
+- [ ] **Server step 8 (in progress):** `systemctl stop httpd && systemctl disable httpd`, then retry `./scripts/certbot-init.sh`
 - [ ] **Server step 9:** `docker compose up -d`
 - [ ] **Server step 10:** Transfer + import backup, then run `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`; remove WP Engine mu-plugins
 - [ ] Verify site on `50.28.2.199.nip.io`

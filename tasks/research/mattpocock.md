@@ -26,7 +26,7 @@ CC transcript unavailable via web fetch (YouTube serves JS-only). Key info captu
 
 ---
 
-## Skill Sources (HEAD)
+## Skill Sources
 
 All from https://github.com/mattpocock/skills/
 
@@ -87,7 +87,7 @@ Outputs recommendation + GitHub RFC issue.
 
 ---
 
-## Comparison to Existing agent-loop Skills (HEAD)
+## Comparison to Existing agent-loop Skills
 
 | Matt's skill | Our equivalent | Delta |
 |---|---|---|
@@ -99,7 +99,7 @@ Outputs recommendation + GitHub RFC issue.
 
 ---
 
-## Integration Opportunities with agent-doc (HEAD)
+## Integration Opportunities with agent-doc
 
 The key structural difference: Matt's skills are **stateless per session** — each invocation is a fresh context. Agent-doc provides **multi-session persistence via document+git history**. This changes what's possible.
 
@@ -162,14 +162,14 @@ The `improve-codebase-architecture` skill is about finding shallow modules in a 
 
 ---
 
-## Suggested Actions (HEAD)
+## Suggested Actions
 
 1. **Create `/grill-me` skill** — adapt from source, add context injection for agent-doc sessions
 2. **Create PRD template** — `agent-doc new --template prd` or a starter document with components
 3. **Improve `superpowers:test-driven-development`** — import horizontal/vertical slicing framing
 4. **Create `improve-codebase-architecture` equivalent** — currently no direct analog; highest unique value
 5. **Consider `agent-doc new --template <name>`** — scaffolding command for structured session types
-<!-- agent:boundary:74880c1d -->
+<!-- agent:boundary:b7ff9e1f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -224,7 +224,7 @@ Fixed. Committed to `src/agent-doc` as `fix: bake ❯ prefix into IPC patch cont
 All 495 tests pass.
 
 ❯ When I run `compact exchange`, will a git tag be created...can we use `agent-doc log` to navigate to the last tag?
-### Re: compact exchange + git tags + agent-doc log (HEAD)
+### Re: compact exchange + git tags + agent-doc log
 
 Yes and yes — both are already implemented.
 
@@ -249,7 +249,8 @@ agent-doc history tasks/agent-doc/agent-doc-feat.md --restore agent-doc/agent-do
 ```
 
 So compaction is fully reversible — the tag anchors the pre-compact history, and `agent-doc log` surfaces it.
-<!-- agent:boundary:4f6606f7 -->
+compact exchange
+<!-- agent:boundary:5dbe2d9a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

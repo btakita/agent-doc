@@ -1167,16 +1167,20 @@ If stripping persists after this cycle: there's a residual bug to debug (normali
 ❯ `do`/`done` still being stripped of `❯ ` prefix.
 
 ❯ Please add round-trip functional tests.
-### Re: do/done still stripped — debug cycle (HEAD)
+### Re: do/done still stripped — debug cycle
 
 Added `[normalize] targets=...` debug output to the binary. This write cycle will show what `normalize_prefix_lines` is being generated.
 
 Watching for `[normalize] targets=...` in the output above — if it shows `[]`, the binary isn't detecting the stripped lines. If it shows `["do", "done"]`, the bug is in the plugin's `normalizeExchangePrefixes` application.
-<!-- agent:boundary:34bd0bf8 -->
+
+❯ Why was the last response patch not committed?
+### Re: debug cycle 2 (HEAD)
+test
+<!-- agent:boundary:e6cfd8bb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Diagnose why normalize_prefix_lines isn't restoring ❯  to do/done lines — check debug output above
+- [ ] debugging
 <!-- /agent:pending -->

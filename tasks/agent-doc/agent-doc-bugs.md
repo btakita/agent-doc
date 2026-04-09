@@ -309,7 +309,7 @@ That was from an older binary. Step 5 was "include full document content in outp
 **Token audit summary:**
 
 Current preflight sends: layout_issues, recovered, committed, claims, diff, annotated_diff, no_changes, slash_commands, builtin_commands. No full document. The diff and annotated_diff are the largest fields and they're bounded by what you actually changed — small edits → small diff. The only way preflight bleeds tokens is the stale-snapshot case, which causes a larger-than-expected diff. No new code needed; the stale snapshot warning already surfaces this.
-<!-- agent:boundary:a883437e -->
+<!-- agent:boundary:9bff1bab -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

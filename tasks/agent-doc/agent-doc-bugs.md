@@ -339,7 +339,7 @@ git tag v0.31.25 && git push origin v0.31.25
 CI will handle GitHub Release + PyPI. Then `cargo publish` for crates.io.
 
 ❯ Would /reload-plugins update the skills? Can you /reload-plugins in all of my existing tmux panes?
-### Re: `/reload-plugins` and skills (HEAD)
+### Re: `/reload-plugins` and skills
 
 `/reload-plugins` reloads MCP servers — it doesn't affect skills. Skills are plain `.md` files read fresh from disk each time they're invoked (`Skill { skill: "agent-doc", ... }` causes SKILL.md to be loaded right then). No caching, no reload needed.
 
@@ -348,12 +348,21 @@ For other sessions: the next time any session runs `/agent-doc`, it reads the cu
 The only reload case is when `skill install` emits `SKILL_RELOAD=compact` — that means THIS conversation's context has an old skill cached as part of the system prompt, and `/compact` is needed to flush it. That didn't fire this session (binary and skill matched after install).
 
 Won't send `/reload-plugins` to other panes — it would interrupt active sessions and accomplishes nothing for skills.
-<!-- agent:boundary:f3124516 -->
+❯ release
+### Re: release (HEAD)
+
+v0.31.25 released:
+
+- **Tag pushed:** `v0.31.25` → `origin` — `release.yml` CI building cross-platform binaries
+- **crates.io:** `agent-doc v0.31.25` published
+- **PyPI:** `pypi.yml` triggers on GitHub Release publish (in flight via CI)
+
+CI chain: tag push → `release.yml` creates GitHub Release → `pypi.yml` triggers on `release: published`.
+<!-- agent:boundary:b5383f4c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] User confirmation: v0.31.25 works end-to-end → then tag + publish
 - [ ] Follow-on: duplicate claims check in `check_layout()`
 <!-- /agent:pending -->

@@ -334,27 +334,63 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
     // Diff snapshot → baseline to find user-added lines (not agent lines).
     // Track code-fence state so lines inside fences are excluded — they are code,
     // not user prompts, and must not receive the ❯  prefix.
+    // Handles both ``` and ~~~ fences (matching CommonMark spec).
     use similar::{ChangeTag, TextDiff};
+
+    /// Returns Some((fence_char, fence_len)) if `trimmed` opens a new fence, else None.
+    fn fence_open(trimmed: &str) -> Option<(char, usize)> {
+        let fc = trimmed.chars().next()?;
+        if fc != '`' && fc != '~' {
+            return None;
+        }
+        let fl = trimmed.chars().take_while(|&c| c == fc).count();
+        if fl >= 3 { Some((fc, fl)) } else { None }
+    }
+
+    /// Returns true if `trimmed` closes a fence opened with `(fence_char, fence_len)`.
+    fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
+        let fc = trimmed.chars().next().unwrap_or('\0');
+        if fc != fence_char { return false; }
+        let fl = trimmed.chars().take_while(|&c| c == fc).count();
+        fl >= fence_len && trimmed[fl..].trim().is_empty()
+    }
+
     let diff = TextDiff::from_lines(snap_stripped.as_str(), baseline_stripped.as_str());
     let mut user_added = std::collections::HashSet::<String>::new();
     let mut in_baseline_fence = false;
+    let mut baseline_fence_char = '`';
+    let mut baseline_fence_len = 3usize;
     for change in diff.iter_all_changes() {
         let line = change.value().trim_end_matches('\n');
         let trimmed = line.trim();
         // Equal and Insert lines are present in baseline — track their fence state.
-        if change.tag() != ChangeTag::Delete && trimmed.starts_with("```") {
-            in_baseline_fence = !in_baseline_fence;
-        }
-        if change.tag() == ChangeTag::Insert && !in_baseline_fence {
-            if !trimmed.is_empty()
-                && !trimmed.starts_with('❯')
-                && !trimmed.starts_with("<!-- ")
-                && !trimmed.starts_with('#')
-                && !trimmed.starts_with("```")
-                && !trimmed.starts_with('"')
-            {
-                user_added.insert(line.to_string());
+        // Capture pre-update state to correctly detect closing delimiters as fence markers.
+        let was_in_fence = in_baseline_fence;
+        if change.tag() != ChangeTag::Delete {
+            if !in_baseline_fence {
+                if let Some((fc, fl)) = fence_open(trimmed) {
+                    in_baseline_fence = true;
+                    baseline_fence_char = fc;
+                    baseline_fence_len = fl;
+                }
+            } else if fence_close(trimmed, baseline_fence_char, baseline_fence_len) {
+                in_baseline_fence = false;
             }
+        }
+        // A line is a fence delimiter if it opens a fence (fence_open), or closes the current
+        // one (was_in_fence before update, and matches close pattern).
+        let is_fence_delim = fence_open(trimmed).is_some()
+            || (was_in_fence && fence_close(trimmed, baseline_fence_char, baseline_fence_len));
+        if change.tag() == ChangeTag::Insert
+            && !in_baseline_fence
+            && !trimmed.is_empty()
+            && !trimmed.starts_with('❯')
+            && !trimmed.starts_with("<!-- ")
+            && !trimmed.starts_with('#')
+            && !is_fence_delim
+            && !trimmed.starts_with('"')
+        {
+            user_added.insert(line.to_string());
         }
     }
 
@@ -364,13 +400,21 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
 
     // Apply ❯  prefix to user-added lines in content_user_region.
     // Agent response lines (not in user_added) pass through unchanged.
-    // Track code-fence state so prefix is never added inside fences.
+    // Track code-fence state (``` and ~~~) so prefix is never added inside fences.
     let mut in_content_fence = false;
+    let mut content_fence_char = '`';
+    let mut content_fence_len = 3usize;
     let mut normalized_user = String::new();
     for line in content_user_region.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("```") {
-            in_content_fence = !in_content_fence;
+        if !in_content_fence {
+            if let Some((fc, fl)) = fence_open(trimmed) {
+                in_content_fence = true;
+                content_fence_char = fc;
+                content_fence_len = fl;
+            }
+        } else if fence_close(trimmed, content_fence_char, content_fence_len) {
+            in_content_fence = false;
         }
         if !in_content_fence && user_added.contains(line) {
             normalized_user.push_str("❯ ");
@@ -2836,6 +2880,19 @@ mod tests {
         assert!(!result.contains("❯ let x"), "fence interior should not get prefix: {}", result);
         assert!(!result.contains("❯ let y"), "fence interior should not get prefix: {}", result);
         assert!(!result.contains("❯ ```"), "fence marker should not get prefix: {}", result);
+    }
+
+    #[test]
+    fn normalize_user_prompts_tilde_fence_interior_skipped() {
+        // ~~~ fences must be tracked the same as ``` fences.
+        let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\nBefore.\n~~~sh\necho hello\n~~~\nAfter.\n<!-- /agent:exchange -->\n";
+        let content = "<!-- agent:exchange patch=append -->\nBefore.\n~~~sh\necho hello\n~~~\nAfter.\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
+        let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
+        assert!(result.contains("❯ Before."), "text before tilde fence should get prefix: {result}");
+        assert!(result.contains("❯ After."), "text after tilde fence should get prefix: {result}");
+        assert!(!result.contains("❯ echo hello"), "tilde fence interior should not get prefix: {result}");
+        assert!(!result.contains("❯ ~~~"), "tilde fence marker should not get prefix: {result}");
     }
 
     #[test]

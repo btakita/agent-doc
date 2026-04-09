@@ -42,6 +42,7 @@ Sessions v0.31.18–v0.31.24. Key work:
 13. Commit-after-write rule: always call agent-doc commit after every agent-doc write.
 
 Open: 2-pane layout loss when navigating to non-agent-doc file in editor (tmux collapses to 1 pane). Not yet fixed.
+<!-- agent:boundary:6892cfd3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

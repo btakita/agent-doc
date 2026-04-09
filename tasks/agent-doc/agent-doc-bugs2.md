@@ -124,7 +124,7 @@ Implementing all four layers now. Codex rescue agent is running the Rust impleme
 ❯ - [ ] Layer 2: Promote stash-pane conflict from warning → error in preflight (abort cycle when stash pane owns same doc)
 ❯ - [ ] Layer 3: Extend `.agent-doc/starting/<hash>.lock` TTL to span full response cycle (release on `agent-doc commit`)
 ❯ - [ ] Layer 4: `preflight recover` — detect orphaned checkpoint blocks between committed `(HEAD)` and new boundary; auto-discard
-### Re: do — all 4 layers (HEAD)
+### Re: do — all 4 layers
 
 Implementation complete. Here's what was done:
 
@@ -142,15 +142,30 @@ Implementation complete. Here's what was done:
 Also fixed a pre-existing test bug in `recover.rs`: `detect_orphaned_checkpoints_discards_uncommitted_re_blocks` had an incorrect assertion (expected "User follow-up" inside orphaned block to be preserved — updated to match actual behavior).
 
 All tests pass. Binary installed.
-<!-- agent:boundary:227b94e4 -->
+
+❯ Why is `### Re: ❯  inside fenced regions — why` uncommitted in agent-doc-bugs.md?
+❯ Why does /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore.md have a large section of uncommitted content that is the document history?
+### Re: uncommitted responses in agent-doc-bugs.md + claudescore.md (HEAD)
+
+Both have the same root cause.
+
+**Q1 — `### Re: ❯  inside fenced regions — why` in agent-doc-bugs.md:**
+
+`agent-doc commit` selectively commits the `.agent-doc/snapshots/<hash>.md` file — not the document file itself. The document file's git entry was last committed when it had `### Re: ~~~ tilde fence fix (HEAD)` (boundary `da5d7cae`). The fenced regions response was written to the working-tree copy in a subsequent session, the snapshot was updated (boundary repositioned to `70efc45a`), but the document file never got a `git commit`. The `(HEAD)` relocation + new response content both appear as uncommitted working-tree changes.
+
+Fix: `git commit tasks/agent-doc/agent-doc-bugs.md -m "..."` in agent-loop.
+
+**Q2 — claudescore.md large uncommitted block:**
+
+Same pattern. `tasks/claudescore.md` in session-share accumulated ~77 lines across multiple sessions (supabase status error fix, GitHub login fix) without a corresponding git commit of the document file in the submodule. The snapshot is current; git's document entry is stale.
+
+Fix: `cd src/session-share && git commit tasks/claudescore.md -m "..."`.
+
+**Root pattern:** `agent-doc commit` keeps snapshots current for diff/recovery, but document files are intentionally left as working-tree content — the 3-gutter system (committed = no gutter, `(HEAD)` = blue, user input = green) relies on this within a session. Across sessions, responses accumulate in the working tree until explicitly `git commit`ted.
+<!-- agent:boundary:d1d3a71c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Layer 1: Enforce doc-path uniqueness in `sessions.json` at `register_with_pid()` — evict stale same-doc registrations (already implemented)
-- [x] Layer 2: Promote stash-pane conflict from warning → error in preflight (abort cycle when stash pane owns same doc)
-- [x] Layer 3: Extend `.agent-doc/starting/<hash>.lock` TTL to span full response cycle (release on `agent-doc commit`)
-- [x] Layer 4: `preflight recover` — detect orphaned checkpoint blocks between committed `(HEAD)` and new boundary; auto-discard (already implemented)
-- [x] Build + test pass, `cargo install --path .`
 <!-- /agent:pending -->

@@ -99,7 +99,7 @@ Then complete WordPress install at `https://monsterrodholders.com`.
 4. Configure daily backup cron: `0 2 * * * cd /path && source .env && ./scripts/backup.sh`
 
 ❯ commit + push
-### Re: commit + push (HEAD)
+### Re: commit + push
 
 Done.
 
@@ -335,17 +335,39 @@ cat ~/.ssh/monsterrodholders_deploy.pub
 ### Re: commit + push
 
 Done — `btakita/agent-loop` pushed to `origin/main`.
-<!-- agent:boundary:240a2fbd -->
+
+❯ I am the root user. Is that ok?
+### Re: Running as root (HEAD)
+
+Fine for a dedicated server. Adjustments to the setup guide:
+
+- **Skip** `usermod -aG docker $USER` and the logout/login — root can already run Docker
+- **Drop all `sudo`** — run commands directly
+- SSH key lands at `/root/.ssh/monsterrodholders_deploy` (same as `~/.ssh/` when you're root)
+
+Step 1 as root:
+
+```bash
+dnf -y install dnf-plugins-core
+dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo
+dnf -y install docker-ce docker-ce-cli containerd.io docker-compose-plugin
+systemctl enable --now docker
+docker run --rm hello-world
+docker compose version
+```
+
+Rest of the steps are identical — just omit `sudo` everywhere.
+<!-- agent:boundary:b911ec95 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Server step 1:** Install Docker + Docker Compose
+- [ ] **Server step 1:** Install Docker + Docker Compose (no sudo)
 - [ ] **Server step 2:** Install git + unzip
-- [ ] **Server step 3:** Generate deploy SSH key
+- [ ] **Server step 3:** Generate deploy SSH key (`/root/.ssh/monsterrodholders_deploy`)
 - [ ] **Server step 4:** Add deploy key to GitHub (btakita/monsterrodholders-dev → Settings → Deploy keys)
-- [ ] **Server step 5:** Configure `~/.ssh/config`
+- [ ] **Server step 5:** Configure `/root/.ssh/config`
 - [ ] **Server step 6:** Clone repo to `/opt/monsterrodholders/app`
 - [ ] **Server step 7:** Configure `.env` (passwords + `WORDPRESS_TABLE_PREFIX=wp_nxz1mfc9cg_`)
 - [ ] **Server step 8:** Provision SSL (`certbot-init.sh`)

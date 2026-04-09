@@ -124,20 +124,49 @@ The current fix (deleted Check 2 entirely) is correct: it removes the false posi
          "stash window 'stash' has non-idle pane %46 running 'agent-doc'",
      … +270 lines (ctrl+o to expand)
 ```
-### Re: context tokens + stash window (HEAD)
+### Re: context tokens + stash window
 
 **Does preflight consume context tokens?** Yes. The `document` field in the preflight JSON contains the full document — for claudescore.md that's 26KB of content landing in the tool result every `/agent-doc` run. It's a real cost. The tradeoff: no separate `Read` tool call needed. For very large documents, an optimization would be to skip sending `document` when only the `diff` matters (e.g., when `no_changes=false` and the diff is small). Not implemented yet.
 
+❯ This cannot happen. I already asked you to only process diffs. We need a way to safeguard against wasting tokens. Use opus to plan.
+
 **Stash window still showing:** The fix is in source (`preflight.rs`) but the running binary is still v0.31.24 — `cargo install --path .` hasn't been run since the edit. Once installed, the stash layout issues will disappear from preflight output.
-<!-- agent:boundary:5a0784f8 -->
+
+❯ Go ahead and kill that pan if it's running an old binary.
+### Re: token waste + kill stash panes (HEAD)
+
+**Stash panes killed.** All 5 (`%43 %46 %47 %49 %51`) terminated.
+
+---
+
+**Plan (Opus) — skip `document` in preflight:**
+
+Key finding: `--diff-only` flag **already exists** in `preflight.rs` and `main.rs`. The token waste is entirely skill-side — SKILL.md never passes it. Smallest fix is one line in the skill. Elegant fix adds `agent-doc read` for on-demand HEAD fetches.
+
+#### Changes
+
+1. **`preflight.rs`** — `document: String` → `Option<String>` (serializes as `null` when skipped, not `""`). Add `document_bytes: Option<usize>` + `document_sha256: Option<String>` so agent can verify cache freshness without fetching.
+
+2. **`main.rs`** — add `Read { file, component: Option<String> }` subcommand. Prints full document or single named component body.
+
+3. **`src/read.rs`** (new, ~40 lines) — `run(file, component)`.
+
+4. **`SKILL.md` step 0** — change invocation to `agent-doc preflight --diff-only <FILE>`. Update JSON schema block: `"document": null`, add `document_bytes`/`document_sha256`. Replace "no separate Read needed" with: first cycle → run `agent-doc read <FILE>` once; subsequent cycles → trust diff + prior context.
+
+5. **Tests** — `preflight_diff_only_omits_document`, `preflight_diff_only_includes_metadata`, `preflight_default_includes_document` regression, `read.rs` tests.
+
+**Backward compat:** `preflight` without `--diff-only` unchanged. Only the skill changes its call.
+
+Shall I implement this now?
+<!-- agent:boundary:d4b5382c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Verify CI passes on 7fc7905
-- [ ] `cargo install --path .` in src/agent-doc to install stash-fix locally
-- [ ] Release v0.31.25 with stash fix
+- [ ] Implement diff-only optimization: `preflight.rs` Option<String>, `read.rs`, `main.rs` Read subcommand, SKILL.md update
+- [ ] `cargo install --path .` in src/agent-doc to install stash-fix locally (stash-fix already in source, not yet installed)
+- [ ] Release v0.31.25 with stash fix + diff-only optimization
 - [ ] Follow-on: add "duplicate document claims" check to `check_layout()`
-- [ ] Optimization: skip sending `document` field when diff is sufficient (large doc perf)
+- [ ] Verify CI passes on 7fc7905
 <!-- /agent:pending -->

@@ -379,7 +379,7 @@ If you ran between 1–3, the file hadn't been written yet — diff is empty. If
 Evidence: this cycle's preflight also shows `WARNING: file is 349 bytes larger than snapshot`. Same stale-snapshot pattern. It happens when content reaches the file via a path that doesn't update the snapshot (interrupted sessions, Edit tool, manual edits).
 
 **The `annotated_diff` labeling in the current run:** `[user+]` for your question, `[agent]` for the preceding content — correct.
-<!-- agent:boundary:45e8eed1 -->
+<!-- agent:boundary:2b5faf45 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1104,35 +1104,35 @@ The Dreamable use case maps cleanly: Rob's stated concern is "you ship Monday, l
 
 ❯ Slack message to send to Rob re: ClaudeScore status update
 
-### Re: Slack-formatted copy/paste (ClaudeScore update) (HEAD)
+### Re: Slack-formatted copy/paste (ClaudeScore update)
 
 ❯ Slack uses `*bold*` (not `**bold**`), raw URLs auto-preview, and backtick code renders inline. Here's the ready-to-paste version:
 
 ```
-❯ Hey Rob — good talking earlier. Here's where I'm at:
+Hey Rob — good talking earlier. Here's where I'm at:
 
-❯ *Status:* Plan and spec are finalized. These are what Claude Code will follow:
+*Status:* Plan and spec are finalized. These are what Claude Code will follow:
 
-❯ • *SPEC:* https://github.com/ClaudeScore/SessionShare/blob/main/SPEC.md
-❯ • *Plan:* https://github.com/ClaudeScore/SessionShare/blob/main/PLAN.md
+• *SPEC:* https://github.com/ClaudeScore/SessionShare/blob/main/SPEC.md
+• *Plan:* https://github.com/ClaudeScore/SessionShare/blob/main/PLAN.md
 
-❯ I'll keep the status column in the spreadsheet updated as I complete items.
+I'll keep the status column in the spreadsheet updated as I complete items.
 
-❯ *Starting with:*
-❯ • Sprint 1.1: Base app scaffold (Next.js 16 + Supabase local)
-❯ • Sprint 1.2: Rubric v1.0 (17 validators, 4 pillars)
+*Starting with:*
+• Sprint 1.1: Base app scaffold (Next.js 16 + Supabase local)
+• Sprint 1.2: Rubric v1.0 (17 validators, 4 pillars)
 
-❯ *Still need from you when you get a chance:*
-❯ • Supabase project credentials (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) — building against local Supabase in the meantime
-❯ • Claude API key for Opus scoring (Shimmer Labs account?)
-❯ • Apr 10 scope — all 4 milestones or a subset?
+*Still need from you when you get a chance:*
+• Supabase project credentials (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) — building against local Supabase in the meantime
+• Claude API key for Opus scoring (Shimmer Labs account?)
+• Apr 10 scope — all 4 milestones or a subset?
 
-❯ *One thing to clarify:* You mentioned "we're going to do a different thing than we thought" — want to make sure I'm building the right thing. Happy to talk through it on our call tonight.
+*One thing to clarify:* You mentioned "we're going to do a different thing than we thought" — want to make sure I'm building the right thing. Happy to talk through it on our call tonight.
 ```
 
 ❯ Please tell me more about this
 ❯ > *One thing to clarify:* You mentioned "we're going to do a different thing than we thought" — want to make sure I'm building the right thing. Happy to talk through it on our call tonight.
-### Re: "we're going to do a different thing than we thought" (HEAD)
+### Re: "we're going to do a different thing than we thought"
 
 Here's what the transcript actually shows — it's worth reading carefully before you ask about it.
 
@@ -1161,7 +1161,23 @@ The reassuring tone ("everything's going to work out") suggests he knows this is
 > "You mentioned on this morning's call that we're going to do a different thing than you thought — I want to make sure I'm building in the right direction. Is ClaudeScore the main deliverable for this engagement, or is it the onramp to the Build Party/Shimmer work? And does the Apr 10 scope still match the SOW?"
 
 That's targeted and non-anxious. It shows you were paying attention without making it sound like you're worried.
-<!-- agent:boundary:5cf11abe -->
+
+❯ Proposed message to Rob updated at /home/brian/work/btakita/agent-loop/mail/slack/robert-ross-apr10-update.md
+❯ Anything else we need from him?
+### Re: Anything else we need from him? (HEAD)
+
+The current message covers the three hard blockers (Supabase, Claude key, scope) and the direction question. A few more things worth surfacing, roughly in priority order:
+
+**1. Build Party PRD** — Rob explicitly assigned this as a deliverable ("read Build Party PRD; make a recommendation"), but it hasn't come up in the current message thread. If Build Party work is still in the Apr 10 scope, you need the doc. Ask him to send it, or confirm it's been deprioritized.
+
+**2. ClaudeScore GitHub org access** — The Slack message references `github.com/ClaudeScore/SessionShare`. If that org is Rob's (not one you created), you need to be added. If you created it, he needs to be added as a collaborator. Worth a one-liner to confirm who owns it.
+
+**3. Written SOW or rate confirmation** — The call notes say "$100/hr starting point." Is there a signed statement of work, or is this still informal? For a multi-week engagement with Apr 10 deliverables, it's worth having something in writing — even a short email thread confirming scope, rate, and payment cadence counts.
+
+**4. Feedback channel** — How does he want to be updated as milestones hit? The Slack message says you'll update the spreadsheet, but does he want a Slack ping when sprint items close? Knowing this upfront saves you from over-communicating or going silent.
+
+If you want to fold #1 (Build Party PRD) into tonight's call instead of the Slack message, that's fine — it's a conversation item more than a blocker.
+<!-- agent:boundary:95e09886 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

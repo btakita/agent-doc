@@ -1346,6 +1346,20 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     Ok(())
 }
 
+/// Read the ack-content sidecar file written by the plugin after apply.
+/// Keyed by `patch_id` (same UUID the binary embedded in the patch payload).
+/// Deletes the sidecar on success. Returns None if no sidecar present (old plugin).
+fn read_ack_content_sidecar(project_root: &Path, patch_id: &str) -> Result<Option<String>> {
+    let sidecar = project_root.join(".agent-doc/ack-content").join(format!("{patch_id}.md"));
+    if !sidecar.exists() {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(&sidecar)
+        .with_context(|| format!("failed to read ack-content sidecar {sidecar:?}"))?;
+    let _ = std::fs::remove_file(&sidecar);
+    Ok(Some(content))
+}
+
 /// Attempt to write via IPC (socket-first, file-based fallback).
 ///
 /// First tries socket IPC via `ipc_socket::send_message()` for lowest latency.
@@ -1399,7 +1413,7 @@ pub fn try_ipc(
             "baseline": baseline.unwrap_or(""),
             "reposition_boundary": true,
         });
-        socket_payload["patch_id"] = serde_json::Value::String(patch_id);
+        socket_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
         if let Some(yaml) = frontmatter_yaml {
             socket_payload["frontmatter"] = serde_json::Value::String(yaml.to_string());
         }
@@ -1421,15 +1435,22 @@ pub fn try_ipc(
         match crate::ipc_socket::send_message(&project_root, &socket_payload) {
             Ok(Some(_ack)) => {
                 eprintln!("[write] socket IPC patch delivered");
-                // Save snapshot as actual post-write disk state.
-                // Wait briefly for the plugin's Document API write to flush to disk,
-                // then read the file. Using content_ours risks snapshot drift when
-                // the baseline is stale — stale content_ours perpetuates ghost diffs.
+                // Try ack-content sidecar (written by plugin for hard snapshot guarantee).
+                // Fall back to 200ms sleep + file read for backward compat with older plugins.
                 // Bug 2A fix: snapshot save failure after IPC success is non-fatal.
-                std::thread::sleep(std::time::Duration::from_millis(200));
-                let snap_source = "file_read";
-                let snap_content = std::fs::read_to_string(file)
-                    .with_context(|| format!("failed to read {} after socket IPC", file.display()))?;
+                let (snap_source, snap_content) = match read_ack_content_sidecar(&project_root, &patch_id) {
+                    Ok(Some(content)) => {
+                        eprintln!("[write] snapshot from ack-content sidecar ({} bytes)", content.len());
+                        ("ack_content_sidecar", content)
+                    }
+                    _ => {
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        eprintln!("[write] snapshot from file read (ack-content not available)");
+                        let content = std::fs::read_to_string(file)
+                            .with_context(|| format!("failed to read {} after socket IPC", file.display()))?;
+                        ("file_read", content)
+                    }
+                };
                 crate::ops_log::log_op(file, &format!(
                     "ipc_socket_delivered file={} snap_source={} snap_len={}",
                     file.display(), snap_source, snap_content.len()
@@ -1532,7 +1553,7 @@ pub fn try_ipc(
         ));
     }
 
-    write_ipc_and_poll(&patch_file, &ipc_payload, file, patches.len(), content_ours)
+    write_ipc_and_poll(&patch_file, &ipc_payload, file, patches.len(), content_ours, &project_root)
 }
 
 /// Attempt to write full document content via IPC.
@@ -1594,7 +1615,7 @@ pub fn try_ipc_full_content(
         "fullContent": content,
     });
 
-    write_ipc_and_poll(&patch_file, &ipc_payload, file, 0, Some(content))
+    write_ipc_and_poll(&patch_file, &ipc_payload, file, 0, Some(content), &project_root)
 }
 
 /// Send a reposition-only IPC signal to the plugin.
@@ -1643,6 +1664,7 @@ fn write_ipc_and_poll(
     doc_file: &Path,
     patch_count: usize,
     _content_ours: Option<&str>,
+    project_root: &Path,
 ) -> Result<bool> {
     // Atomic write of patch file
     atomic_write(
@@ -1663,11 +1685,24 @@ fn write_ipc_and_poll(
 
     while start.elapsed() < timeout {
         if !patch_file.exists() {
-            // Plugin consumed the patch — verify it was actually applied.
-            // Wait briefly for the plugin's Document API write to flush to disk,
-            // then check that the file has changed from the baseline.
-            std::thread::sleep(std::time::Duration::from_millis(200));
-            let current_on_disk = std::fs::read_to_string(doc_file).unwrap_or_default();
+            // Plugin consumed the patch — get snapshot from ack-content sidecar if available,
+            // otherwise fall back to 200ms sleep + file read.
+            let patch_id = payload.get("patch_id").and_then(|v| v.as_str()).unwrap_or("");
+            let current_on_disk = if !patch_id.is_empty() {
+                match read_ack_content_sidecar(project_root, patch_id) {
+                    Ok(Some(content)) => {
+                        eprintln!("[write] snapshot from ack-content sidecar ({} bytes)", content.len());
+                        content
+                    }
+                    _ => {
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        std::fs::read_to_string(doc_file).unwrap_or_default()
+                    }
+                }
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                std::fs::read_to_string(doc_file).unwrap_or_default()
+            };
             let baseline_content = payload.get("baseline")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
@@ -1709,15 +1744,12 @@ fn write_ipc_and_poll(
             }
 
             // Plugin applied the patch — update snapshot as actual post-write disk state.
-            // `current_on_disk` was already read after the 200ms flush delay above.
-            // Using content_ours risks snapshot drift when the baseline is stale
-            // (stale content_ours perpetuates ghost diffs cycle after cycle).
+            // `current_on_disk` is from ack-content sidecar when available, or 200ms file read.
             // Bug 2A fix: snapshot save failure after IPC success is non-fatal.
-            let snap_content = current_on_disk.clone();
-            let snap_source = "file_read";
+            let snap_content = current_on_disk;
             crate::ops_log::log_op(doc_file, &format!(
-                "ipc_file_delivered file={} snap_source={} snap_len={}",
-                doc_file.display(), snap_source, snap_content.len()
+                "ipc_file_delivered file={} snap_len={}",
+                doc_file.display(), snap_content.len()
             ));
             if let Err(e) = snapshot::save(doc_file, &snap_content) {
                 eprintln!(
@@ -2943,5 +2975,27 @@ mod tests {
         assert!(!result.contains("\ndo\n"), "bare do line must not remain without prefix: {}", result);
         // ❯ done must not be double-prefixed
         assert!(!result.contains("❯ ❯"), "no double-prefix: {}", result);
+    }
+}
+
+#[cfg(test)]
+mod ack_content_snapshot_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_ack_content_sidecar_read() {
+        let tmp = TempDir::new().unwrap();
+        let project_root = tmp.path().to_path_buf();
+        let patch_id = "test-patch-abc123";
+
+        let ack_dir = project_root.join(".agent-doc/ack-content");
+        std::fs::create_dir_all(&ack_dir).unwrap();
+        let sidecar = ack_dir.join(format!("{patch_id}.md"));
+        std::fs::write(&sidecar, "applied content from plugin").unwrap();
+
+        let result = read_ack_content_sidecar(&project_root, patch_id).unwrap();
+        assert_eq!(result, Some("applied content from plugin".to_string()));
+        assert!(!sidecar.exists(), "sidecar should be deleted after read");
     }
 }

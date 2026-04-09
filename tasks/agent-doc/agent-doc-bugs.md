@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-agent-doc v0.31.26 — released
+agent-doc v0.31.27 — released
 <!-- /agent:status -->
 
 ## Exchange
@@ -236,7 +236,7 @@ Merges `%57` into session 0's agent-doc window alongside `%56`/`%72`. If you wan
 **Recommendation:** Do B (build + resync) — it validates the pane_policy cross-session path before publishing.
 
 ❯ do b
-### Re: do b (HEAD)
+### Re: do b
 
 Option B executed and validated:
 
@@ -259,11 +259,28 @@ tmux list-panes -a | grep %57
 ```
 
 `%57` (mattpocock.md) is now in tmux session 0. WrongSession detection + PaneMoveOp cross-session relocation is working end-to-end. Ready to publish v0.31.27.
-<!-- agent:boundary:41bf599a -->
+
+❯ release
+### Re: release (HEAD)
+
+v0.31.27 released:
+
+**tmux-router v0.3.10 (prerequisite):**
+- `pane_policy.rs` — `PaneMoveOp` + `CrossSession` enum
+- `lib.rs` — `pub mod pane_policy; pub use pane_policy::PaneMoveOp`
+- Published to crates.io; tag `v0.3.10` pushed
+
+**agent-doc v0.31.27:**
+- **Committed:** `Cargo.toml` (0.31.27, tmux-router 0.3.10), `pyproject.toml`, `VERSIONS.md`, layout/resync/route/sessions/start/sync changes; 2 clippy fixes (collapsible_if, redundant_closure)
+- **crates.io:** `agent-doc v0.31.27` published
+- **PyPI:** manylinux wheel built and uploaded (`agent_doc-0.31.27-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl`)
+- **Tag:** `v0.31.27` pushed — CI building GitHub Release
+- **cargo install:** v0.31.27 running locally
+<!-- agent:boundary:5f2b67f0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Publish v0.31.27 (crates.io + PyPI + GitHub Release) after user confirms feature works
+(none)
 <!-- /agent:pending -->

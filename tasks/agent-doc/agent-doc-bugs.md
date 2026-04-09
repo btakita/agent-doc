@@ -359,15 +359,15 @@ v0.31.25 released:
 
 CI chain: tag push → `release.yml` creates GitHub Release → `pypi.yml` triggers on `release: published`.
 
-Could we test the preflight json again. I want to see what the content of this `diff` and `annotated_diff`. I ran `agent-doc preflight` while the last run was going and got the entire response patch with my annotation inside. Could it be due to me running `agent-doc preflight` after the run's `agent-doc preflight` and before the run completed?
-### Re: preflight race condition + diff content (HEAD)
+❯ Could we test the preflight json again. I want to see what the content of this `diff` and `annotated_diff`. I ran `agent-doc preflight` while the last run was going and got the entire response patch with my annotation inside. Could it be due to me running `agent-doc preflight` after the run's `agent-doc preflight` and before the run completed?  
+### Re: preflight race condition + diff content
 
 **Current diff** (this cycle): just your new question — small, bounded. Correct behavior.
 
 **What happened when you ran manual preflight during the last run:**
 
 The timing window that matters:
-1. Agent preflight runs → commits stale content → updates snapshot
+❯ 1. Agent preflight runs → commits stale content → updates snapshot: Why would the previous response patch be excluded from the "stale content"? Is the snapshot changing the entire response patch when annotating inside the previous response patch?
 2. Agent generates response (no file changes yet)
 3. Agent runs `agent-doc write` → writes response to file + updates snapshot **atomically**
 4. Agent runs `agent-doc commit`
@@ -379,7 +379,28 @@ If you ran between 1–3, the file hadn't been written yet — diff is empty. If
 Evidence: this cycle's preflight also shows `WARNING: file is 349 bytes larger than snapshot`. Same stale-snapshot pattern. It happens when content reaches the file via a path that doesn't update the snapshot (interrupted sessions, Edit tool, manual edits).
 
 **The `annotated_diff` labeling in the current run:** `[user+]` for your question, `[agent]` for the preceding content — correct.
-<!-- agent:boundary:2b5faf45 -->
+### Re: "stale content" and snapshot lifecycle (HEAD)
+
+The confusion is about what "stale content" means in step 1.
+
+**Snapshot lifecycle:**
+- End of cycle N-1: `agent-doc write` atomically updates BOTH the file AND the snapshot together. After this, `file == snapshot`.
+- User makes edits (adds annotations, new `## User` block, etc.). Now `file != snapshot`.
+- Cycle N starts, preflight runs. It computes `diff(file, snapshot)` — finding your edits. It then commits: stages the diff to git, and updates snapshot = file. After this, `file == snapshot` again.
+
+**What "stale content" means:** Only the user edits made since the previous `agent-doc write` — NOT the agent's previous response. The agent's previous response was already baked into the snapshot at the end of cycle N-1. It was never "excluded" — it was committed in a prior cycle.
+
+**So when you ran manual preflight between agent preflight and `agent-doc write`:**
+- Agent preflight updated snapshot = file (your annotation was now in the snapshot)
+- You ran manual preflight: `diff(file, snapshot)` = empty (both are equal)
+- That should have returned `no_changes: true`
+
+**The actual bug** — if you got the "entire response patch" — suggests something else happened. Two possibilities:
+1. The snapshot update in step 0 preflight didn't save properly (file lock issue, crash)
+2. The file showed content (response already written) but snapshot was an older version
+
+Which path did you observe — did the manual preflight output show `committed: true` in its JSON? That would tell us whether step 0 of the agent run had actually committed before you ran your manual preflight.
+<!-- agent:boundary:828659c6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -12,7 +12,8 @@
 //!   problem classes: `InStash` (pane parked in a stash window), `WrongProcess`
 //!   (pane running a non-agent process such as `corky watch`), `WrongSession`
 //!   (pane's tmux session differs from the document's `tmux_session` frontmatter
-//!   field), and `WrongWindow` (panes for the same tmux session are scattered across
+//!   field, or from `config::project_tmux_session()` when frontmatter field is absent),
+//!   and `WrongWindow` (panes for the same tmux session are scattered across
 //!   multiple non-stash windows, determined by majority-window vote).
 //! - Fix application (`apply_fixes`): `WrongSession` → kill pane + deregister entry (default),
 //!   or when `relocate_session = Some(target)` → `join-pane` to target session (registry kept);
@@ -77,8 +78,8 @@
 
 use anyhow::Result;
 
-use crate::frontmatter;
-use crate::sessions::{self, Tmux};
+use crate::{config, frontmatter};
+use crate::sessions::{self, PaneMoveOp, Tmux};
 
 /// Valid process names for agent-doc panes.
 const AGENT_PROCESSES: &[&str] = &["agent-doc", "claude", "node"];
@@ -472,8 +473,8 @@ fn return_stashed_panes_with_registry(tmux: &Tmux, registry: &sessions::SessionR
                 }
             };
 
-            // Move the pane back using join-pane
-            match tmux.join_pane(pane_id, &target, "-dv") {
+            // Move the pane back using join-pane (same session — stash is in same session)
+            match PaneMoveOp::new(tmux, pane_id, &target).join("-dv") {
                 Ok(()) => {
                     eprintln!(
                         "resync: returned stashed pane {} ({}, running '{}') to window {}",
@@ -723,7 +724,7 @@ fn return_stashed_panes_bulk(
             }
         };
 
-        match tmux.join_pane(pane_id, &target, "-dv") {
+        match PaneMoveOp::new(tmux, pane_id, &target).join("-dv") {
             Ok(()) => {
                 eprintln!(
                     "resync: returned stashed pane {} ({}, running '{}') to window {}",
@@ -1044,13 +1045,18 @@ fn detect_issues_in_registry(tmux: &Tmux, registry: &sessions::SessionRegistry) 
             continue; // Can't check frontmatter without a file path
         }
 
-        let expected_session = match std::fs::read_to_string(&entry.file) {
+        let frontmatter_session = match std::fs::read_to_string(&entry.file) {
             Ok(content) => match frontmatter::parse(&content) {
                 Ok((fm, _)) => fm.tmux_session,
                 Err(_) => None,
             },
             Err(_) => None,
         };
+
+        // Use frontmatter `tmux_session` if present; otherwise fall back to project config.
+        // This ensures cross-session drift is detected even when documents lack a
+        // `tmux_session` frontmatter field (the common case).
+        let expected_session = frontmatter_session.or_else(config::project_tmux_session);
 
         if let Some(ref expected) = expected_session {
             match tmux.pane_session(&entry.pane) {
@@ -1220,7 +1226,10 @@ fn apply_fixes_to_registry(
                         target
                     };
                     if let Some(dest_pane) = tmux.active_pane(dest_session) {
-                        match tmux.join_pane(pane, &dest_pane, "-dh") {
+                        match PaneMoveOp::new(tmux, pane, &dest_pane)
+                            .allow_cross_session("relocate WrongSession pane to project session")
+                            .join("-dh")
+                        {
                             Ok(()) => eprintln!("  relocated pane {} → session '{}'", pane, dest_session),
                             Err(e) => {
                                 eprintln!("  relocate failed for pane {} ({}), deregistering", pane, e);

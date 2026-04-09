@@ -99,7 +99,7 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::time::Duration;
 
-use crate::sessions::Tmux;
+use crate::sessions::{PaneMoveOp, Tmux};
 use crate::{frontmatter, prompt, resync, sessions, snapshot, sync};
 
 const TMUX_SESSION_NAME: &str = "claude";
@@ -363,7 +363,7 @@ fn rescue_from_stash(
                 Ok(()) => eprintln!("[route] Rescued pane {} via swap-pane", pane_id),
                 Err(e) => {
                     eprintln!("[route] swap-pane rescue failed ({}), trying join-pane", e);
-                    let _ = tmux.join_pane(pane_id, target, "-dh");
+                    let _ = PaneMoveOp::new(tmux, pane_id, target).join("-dh");
                 }
             }
         }
@@ -468,8 +468,10 @@ fn current_tmux_session(tmux: &Tmux) -> Option<String> {
 /// 2. config.toml `tmux_session` if the session is alive
 /// 3. Fallback to current tmux session or "claude" constant
 ///
-/// When the configured session is dead and `auto_update_config` is true,
-/// updates config.toml with the fallback session.
+/// When no session is configured AND `auto_update_config` is true, writes
+/// the fallback to config.toml. When a session IS configured (even if dead),
+/// the config is NOT updated — this prevents a session-1 terminal from
+/// silently overwriting a session-0 project config.
 fn resolve_target_session(
     tmux: &Tmux,
     context_session: Option<&str>,
@@ -487,7 +489,10 @@ fn resolve_target_session(
     let fallback = current_tmux_session(tmux)
         .unwrap_or_else(|| TMUX_SESSION_NAME.to_string());
 
-    if auto_update_config && configured.as_deref() != Some(&fallback)
+    // Only auto-update config when no session was previously configured.
+    // If a session IS configured but dead (e.g. server restart), preserve the config value
+    // so a session-1 terminal cannot silently overwrite the project's session-0 target.
+    if auto_update_config && configured.is_none()
         && let Err(e) = crate::config::update_project_tmux_session(&fallback)
     {
         eprintln!("warning: failed to update project tmux_session config: {}", e);

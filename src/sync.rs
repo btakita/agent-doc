@@ -102,7 +102,7 @@ use anyhow::Result;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
-use crate::sessions::Tmux;
+use crate::sessions::{PaneMoveOp, Tmux};
 use crate::{frontmatter, resync, route, sessions};
 
 use tmux_router::FileResolution;
@@ -246,7 +246,7 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
                     continue;
                 }
 
-                match tmux.join_pane(pane, &target, "-dv") {
+                match PaneMoveOp::new(tmux, pane, &target).join("-dv") {
                     Ok(()) => {
                         eprintln!("[repair] joined pane {} → stash {}", pane, primary_id);
                     }
@@ -765,7 +765,7 @@ fn run_with_options(
                                         }
                                         Err(e) => {
                                             eprintln!("[sync] swap-pane rescue failed ({}), trying join-pane", e);
-                                            if tmux.join_pane(pane, target, "-dh").is_ok() {
+                                            if PaneMoveOp::new(tmux, pane, target).join("-dh").is_ok() {
                                                 eprintln!("[sync] rescued pane {} via join-pane", pane);
                                                 return true;
                                             }

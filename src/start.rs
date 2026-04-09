@@ -130,6 +130,23 @@ pub fn run(file: &Path) -> Result<()> {
 
     let pane_id = sessions::current_pane()?;
 
+    // Guard: warn if registering from a session that differs from the configured project session.
+    // This is how cross-session drift happens — a terminal in session 1 claims a document,
+    // permanently binding it to session 1 even though the project targets session 0.
+    if let Some(expected_session) = config::project_tmux_session() {
+        let tmux = sessions::Tmux::default_server();
+        if let Ok(actual_session) = tmux.pane_session(&pane_id)
+            && actual_session != expected_session
+        {
+            eprintln!(
+                "[start] WARNING: pane {} is in tmux session '{}', but project config expects '{}'. \
+                 This document will be registered to session '{}'. \
+                 To avoid session drift, run /agent-doc from a terminal in session '{}'.",
+                pane_id, actual_session, expected_session, actual_session, expected_session
+            );
+        }
+    }
+
     // Register session → pane (with relative file path)
     let file_str = file.to_string_lossy();
     sessions::register(&session_id, &pane_id, &file_str)?;

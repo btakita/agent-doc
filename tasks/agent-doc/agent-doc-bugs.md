@@ -445,22 +445,22 @@ Also notable: every cycle in this session starts with `WARNING: file is N bytes 
 ```
 ### Re: the diff content + logging added
 
-❯ **What the manual preflight diff shows:** Looking at the JSON you pasted — the `+` lines are only your comment ("I don't recall for that instance..."). My previous response appears as context lines (standard unified diff context, not new content). So the manual preflight correctly captured just your uncommitted comment as the diff. The "entire previous patch" visible in the output is unified diff context, not added content.
+**What the manual preflight diff shows:** Looking at the JSON you pasted — the `+` lines are only your comment ("I don't recall for that instance..."). My previous response appears as context lines (standard unified diff context, not new content). So the manual preflight correctly captured just your uncommitted comment as the diff. The "entire previous patch" visible in the output is unified diff context, not added content.
 
-❯ **The sequence now:** Your manual preflight ran AFTER my write completed (my response was in the file as context) but BEFORE my next preflight committed your comment. Manual preflight grabbed it first → `committed: true`.
+**The sequence now:** Your manual preflight ran AFTER my write completed (my response was in the file as context) but BEFORE my next preflight committed your comment. Manual preflight grabbed it first → `committed: true`.
 
-❯ **Logging added** (built and installed v0.31.25):
+**Logging added** (built and installed v0.31.25):
 
-❯ Three new `ops_log` entries now appear in `.agent-doc/logs/ops.log`:
+Three new `ops_log` entries now appear in `.agent-doc/logs/ops.log`:
 
-❯ 1. **`ipc_socket_delivered`** — logged immediately after socket IPC ack, records `snap_source` (whether snapshot uses `content_ours` or reads file after plugin write) and `snap_len`
-❯ 2. **`snapshot_saved_socket_ipc`** — logged after successful snapshot save on socket IPC path
-❯ 3. **`snapshot_saved_file_ipc`** — logged after successful snapshot save on file-based IPC path
-❯ 4. **`preflight_diff_start`** — logged at step 4 before diff computation, records `snap_len` vs `file_len` at that exact moment
+1. **`ipc_socket_delivered`** — logged immediately after socket IPC ack, records `snap_source` (whether snapshot uses `content_ours` or reads file after plugin write) and `snap_len`
+2. **`snapshot_saved_socket_ipc`** — logged after successful snapshot save on socket IPC path
+3. **`snapshot_saved_file_ipc`** — logged after successful snapshot save on file-based IPC path
+4. **`preflight_diff_start`** — logged at step 4 before diff computation, records `snap_len` vs `file_len` at that exact moment
 
-❯ This gives a complete timeline in `.agent-doc/logs/ops.log`: `ipc_socket_delivered` → `snapshot_saved_socket_ipc` → `commit_staging` → `commit_success` → `preflight_diff_start` → `commit_staging` (next cycle).
+This gives a complete timeline in `.agent-doc/logs/ops.log`: `ipc_socket_delivered` → `snapshot_saved_socket_ipc` → `commit_staging` → `commit_success` → `preflight_diff_start` → `commit_staging` (next cycle).
 
-❯ The `snap_source=content_ours` vs `snap_source=file_read` field tells you which snapshot strategy was used — if it ever shows `file_read`, the snapshot reflects what the plugin wrote (after boundary reposition), which would differ from `content_ours`.
+The `snap_source=content_ours` vs `snap_source=file_read` field tells you which snapshot strategy was used — if it ever shows `file_read`, the snapshot reflects what the plugin wrote (after boundary reposition), which would differ from `content_ours`.
 ### Re: the diff + logging added
 
 **What the manual preflight diff showed:** The `+` lines in the diff were only your comment ("I don't recall for that instance..."). My previous response appears as context lines — standard unified diff surrounding context, not new content. The manual preflight correctly captured just your uncommitted comment as the diff. "The entire previous patch" you saw was the unified diff context, not added content.
@@ -481,12 +481,12 @@ The `snap_source=content_ours` vs `snap_source=file_read` field is key: when `fi
 
 Note: the `snapshot_saved_file_ipc` and `ipc_file_delivered` entries will appear on the next write cycle (new binary is built but `cargo install` not yet run — symlink `.bin/agent-doc` points to `target/release/agent-doc` which is already updated).
 
-❯ Why is the `### Re: the diff content + logging added` response block uncommitted? We need to stop doing this. If there are race conditions, we need a low level solution with the snapshots. Should we use CRDT with the snapshots?
+Why is the `### Re: the diff content + logging added` response block uncommitted? We need to stop doing this. If there are race conditions, we need a low level solution with the snapshots. Should we use CRDT with the snapshots?
 
-❯ do
-❯ - [ ] Follow-on: duplicate claims check in `check_layout()`
-❯ Look at src/session-share/tasks/claudescore.md.
-❯ The an uncommitted patch include the `<!-- patch:pending -->` section at the end of the document. Something is very wrong. Use opus.
+do
+- [ ] Follow-on: duplicate claims check in `check_layout()`
+Look at src/session-share/tasks/claudescore.md.
+The an uncommitted patch include the `<!-- patch:pending -->` section at the end of the document. Something is very wrong. Use opus.
 ### Re: uncommitted block + snapshot CRDT question
 
 **Why `### Re: the diff content + logging added` was uncommitted:**
@@ -499,7 +499,7 @@ The fix is already in the SKILL.md — "re-save the baseline after each checkpoi
 
 CRDT would eliminate this class of problem — intermediate writes would be tracked as operations, so the snapshot could always be reconstructed accurately. But the root cause here is a skill-level baseline drift, not a fundamental CRDT gap. A simpler and more targeted fix: have `agent-doc write` save the snapshot as the **actual post-merge file state on disk**, not `content_ours` (the constructed pre-merge view). That way even when baseline drifts across checkpoints, the snapshot stays accurate.
 
-❯ I'm scared to rely on SKILL for any deterministic guarantees.
+I'm scared to rely on SKILL for any deterministic guarantees.
 
 This is a lower-risk change than full CRDT snapshot storage. Adding it to pending.
 
@@ -519,11 +519,11 @@ Legacy entries (`file` is empty) are skipped. Added 4 tests:
 
 All 4 pass. Built + installed v0.31.25.
 
-❯ do
-❯ - [ ] Fix snapshot saved as actual post-merge disk state instead of `content_ours` (eliminates checkpoint baseline drift)
+do
+- [ ] Fix snapshot saved as actual post-merge disk state instead of `content_ours` (eliminates checkpoint baseline drift)
 
-❯ Please review this last response patch in this document. There are too many changes. Including committed `❯ ` prefixes for a previous response patch coming from Claude. It seems there are issues with multiple snapshots overwriting each other and missing content.
-### Re: `❯ ` prefix drift + snapshot fix (HEAD)
+Please review this last response patch in this document. There are too many changes. Including committed `❯ ` prefixes for a previous response patch coming from Claude. It seems there are issues with multiple snapshots overwriting each other and missing content.
+### Re: `❯ ` prefix drift + snapshot fix
 
 **What happened with the `❯ ` prefixes:**
 
@@ -550,7 +550,31 @@ The IPC primary path already read actual file contents after plugin ACK — now 
 **On "scared to rely on SKILL for deterministic guarantees":** Correct instinct. The SKILL's `baseline_file` fix was skill-level. This moves the invariant into the binary — snapshot is always the actual post-write disk state regardless of what baseline the skill passed in.
 
 Tests pass, release build + `cargo install` done. v0.31.25 now installed with the fix.
-<!-- agent:boundary:a17e629d -->
+Please repair src/session-share/tasks/claudescore.md.
+Would the latest change fix the issue in src/session-share/tasks/claudescore.md?
+### Re: claudescore.md repair + root cause (IPC snapshot was wrong too) (HEAD)
+
+**Why the `❯ ` ghost diffs persisted despite the first fix:**
+
+My first fix (saving `final_content` instead of `content_ours`) only covered the non-IPC disk paths. But the document uses IPC (JetBrains plugin), which has its own snapshot save logic that I missed:
+
+- **Socket IPC** (`try_ipc` lines ~1437–1474): saved `content_ours` when available
+- **File IPC** (`write_ipc_and_poll` lines ~1726–1737): also saved `content_ours` when available
+
+Both IPC paths had the same stale-baseline contamination problem. Since `content_ours = baseline + response` and the baseline was constructed from the old (contaminated) snapshot, `content_ours` also had `❯ ` on those lines. Saving it as the snapshot kept the cycle going indefinitely.
+
+**Second fix (also in v0.31.25):**
+
+- **File IPC**: `write_ipc_and_poll` already reads `current_on_disk` after a 200ms flush delay for patch verification. Now uses that as the snapshot instead of `content_ours`.
+- **Socket IPC**: Added a 200ms flush delay after ACK, then reads the file for the snapshot.
+- All IPC and non-IPC paths now consistently save the actual post-write disk state.
+
+**claudescore.md repaired:** The 3701-byte drift was force-synced (snapshot ← file). Preflight confirms `no_changes: true`. The new binary prevents this from happening again.
+
+**Would the latest change fix claudescore.md's original issue?** Yes — the original issue was that `content_ours` was built from a stale snapshot as baseline. With the fix, the IPC paths read the actual post-write file, so even a stale baseline can't contaminate future snapshots.
+
+All 753 tests pass. `cargo install` done.
+<!-- agent:boundary:7e1caffc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -93,20 +93,34 @@ agent-doc commit src/session-share/tasks/claudescore.md
      [preflight] layout issue: stash window 'stash' has non-idle pane %51 running 'agent-doc'
      … +269 lines (ctrl+o to expand)
 ```
-❯ W
-### Re: +269 lines + stash window layout check (HEAD)
+❯ We don't want multiple claiming tmux panes for a single document. But panes can be running active claude commands.
+### Re: +269 lines + stash window layout check
 
 **+269 lines:** That's just Claude Code's tool output truncation. The claudescore.md document is 26KB — the preflight JSON is long because the document is large. Not a bug.
 
 **Stash window non-idle check:** Removed. The check flagged any pane in a `stash*` window running something other than an idle shell. But stash windows exist specifically to hold backgrounded sessions — `agent-doc` panes there are intentional.
 
 **Fix in `preflight.rs`:** Deleted Check 2 (stash window non-idle pane loop) plus the now-dead `IDLE_SHELLS` constant. Also simplified `WinInfo` struct to just `Vec<u32>` (only the window index is needed for Check 1). `make check` — 38 tests pass.
-<!-- agent:boundary:9ec07593 -->
+### Re: clarification — claiming vs running (HEAD)
+
+Right — the distinction is:
+
+- **Multiple claiming panes for one document** → real issue (sessions registry conflict, two panes both believe they own the same file)
+- **Panes running active claude commands** → fine, expected in stash windows
+
+The stash non-idle check was using the wrong signal (idle shell vs. not) instead of checking the registry. The right future check would iterate the sessions registry looking for any document with >1 registered pane — that's the actual invariant.
+
+The current fix (deleted Check 2 entirely) is correct: it removes the false positives. A follow-on "duplicate claims" registry check can be added as a separate issue.
+
+**Note:** fix is source-only — binary is still v0.31.24. Run `cargo install --path .` inside `src/agent-doc/` to pick it up locally, then verify before releasing v0.31.25.
+<!-- agent:boundary:652d2a02 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Verify CI passes on 7fc7905
-- [ ] Release v0.31.25 with this fix
+- [ ] `cargo install --path .` in src/agent-doc to install stash-fix locally
+- [ ] Release v0.31.25 with stash fix
+- [ ] Follow-on: add "duplicate document claims" check to `check_layout()`
 <!-- /agent:pending -->

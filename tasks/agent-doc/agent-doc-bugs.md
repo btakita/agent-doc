@@ -1279,19 +1279,6 @@ The `❯ ` lines visible inside fenced regions in this document fall into two ca
 do
 - [ ] Fix `~~~` tilde fence gap in `write.rs` normalize loops (match `diff.rs` which tracks both `` ` `` and `~~~`)
 
-### Re: ~~~ tilde fence fix
-
-Fixed. Both normalize loops in `write.rs` now handle `~~~` fences in addition to `` ``` `` — matching the `fence_char` / `fence_len` approach already used in `diff.rs`.
-
-**Changes in `normalize_user_prompts_in_exchange`:**
-
-- Extracted two inline helpers: `fence_open(trimmed)` → `Option<(char, usize)>` and `fence_close(trimmed, fence_char, fence_len)` → `bool`
-- **Diff loop** (building `user_added`): replaced `starts_with("```")` toggle with proper open/close tracking. Uses `was_in_fence` snapshot to correctly detect closing delimiters as fence markers.
-- **Apply loop** (prefixing `content_user_region`): same — open sets `(content_fence_char, content_fence_len)`, close clears when char and length match.
-
-**New test:** `normalize_user_prompts_tilde_fence_interior_skipped` — `~~~sh` fence with `echo hello` inside, `Before.` and `After.` outside. Asserts: `Before.`/`After.` get `❯ `, interior does not, tilde markers do not.
-
-All 12 `normalize_user_prompts_*` tests pass. `make check`: 493 passed, 0 failed. Binary reinstalled.
 <!-- agent:boundary:70efc45a -->
 <!-- /agent:exchange -->
 

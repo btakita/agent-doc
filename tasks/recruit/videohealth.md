@@ -22,7 +22,7 @@ Here's a comprehensive brief on VideaHealth (videa.ai) and Liam Sullivan.
 
 ---
 
-## Company: VideaHealth (videa.ai) (HEAD)
+## Company: VideaHealth (videa.ai)
 
 **What they do:** FDA-cleared dental AI platform — analyzes dental X-rays, automates documentation, and handles revenue cycle management for dental practices and DSOs (Dental Service Organizations).
 
@@ -55,7 +55,7 @@ Here's a comprehensive brief on VideaHealth (videa.ai) and Liam Sullivan.
 
 ---
 
-## Liam Sullivan (lm-sullivan) (HEAD)
+## Liam Sullivan (lm-sullivan)
 
 LinkedIn: https://www.linkedin.com/in/lm-sullivan/
 
@@ -67,7 +67,7 @@ LinkedIn: https://www.linkedin.com/in/lm-sullivan/
 
 ---
 
-## Key Talking Points to Prepare (HEAD)
+## Key Talking Points to Prepare
 
 **1. Their expansion story**
 They went from imaging AI → full workflow platform. Voice Notes (ambient scribe) + AutoVerify (RCM) show they're not just selling X-ray analysis — they're selling time and revenue back to practices. Know this arc.
@@ -89,14 +89,14 @@ The company consistently frames AI as supporting clinicians, not replacing them.
 
 ---
 
-## Questions to ask (HEAD)
+## Questions to ask
 
 - What does the onboarding/activation lifecycle look like for a new DSO vs. independent practice?
 - How does the AI Leadership Council feed back into product roadmap decisions?
 - What's the biggest operational challenge in the Canada expansion?
 - How does VideaInsights cross-sell to existing clinical AI customers?
 - What does success look like in the first 90 days in this role?
-<!-- agent:boundary:dba06c1b -->
+<!-- agent:boundary:d49a8810 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

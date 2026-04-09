@@ -712,7 +712,7 @@ Would the ACK protocol fix this issue?
 - [ ] Investigate IPC deletion-race window for double-write (JB in-flight when patch file deleted)
 - [ ] Consider: plugin ACK protocol to include applied content (hard guarantee for IPC)
 
-### Re: Would the ACK protocol fix the double-write? (HEAD)
+### Re: Would the ACK protocol fix the double-write?
 
 The double-write race involves:
 1. Binary writes patch → 2s timer starts
@@ -738,13 +738,44 @@ The ACK-with-content proposal closes the snapshot computation gap — gives a ha
 Do both ACK-with-content and Option C as independent improvements:
 - ACK with content → hard snapshot guarantee, eliminates ghost diffs from IPC timing
 - Idempotent apply (pre-apply hash) → hard double-write prevention, no latency cost
-<!-- agent:boundary:1c175cd0 -->
+
+do
+- [ ] IPC double-write: implement idempotent apply (pre-apply hash in patch metadata)
+- [ ] IPC snapshot: implement ACK-with-content protocol (hard snapshot guarantee)
+### Re: do — IPC improvements plan (HEAD)
+
+Plan written to `tasks/agent-doc/plan-ipc-improvements.md`.
+
+**Feature 1 — Idempotent Apply (7 tasks):**
+
+The core race: JB reads patch file → `isPatchAlreadyApplied` check passes (snapshot not yet saved) → `invokeLater` queues apply → `--force-disk` writes disk + snapshot → EDT runs apply → double-write.
+
+Two layers of protection:
+1. **Sentinel file** (cross-process): `--force-disk` reads `patch_id` from stale patch, writes `.agent-doc/claimed-patches/<patch_id>` before deleting. Plugin checks sentinel in both `processPatchFile` and `handleSocketMessage` before applying.
+2. **Move dedup check inside `invokeLater`**: `isPatchAlreadyApplied` re-runs inside the EDT callback (not just before queuing). By that point, `--force-disk` has saved the snapshot → check returns true → skip.
+
+`patch_id` = UUID in every patch JSON payload (binary generates, `uuid` crate). `IpcPatch` data class gains `patchId: String?` field.
+
+**Feature 2 — ACK-with-Content (sidecar file):**
+
+After every successful apply, plugin calls `agent_doc_write_ack_content(projectRoot, filePath, content)` → writes `.agent-doc/ack-content/<doc_hash>.md`.
+
+Binary (`try_ipc` + `write_ipc_and_poll`): after ACK received, check for sidecar file. If present → read it as snapshot content, delete file. If absent (old plugin) → fall back to 200ms sleep + disk read. Hard guarantee replaces heuristic. Eliminates 200ms latency when plugin is current.
+
+**Why sidecar over JNA callback change:**
+- No JNA interface changes → no memory management risk
+- Backward compatible (old plugin = old heuristic, new plugin = hard guarantee)
+- Both binary and plugin write through well-typed paths
+
+Execution options?
+1. Subagent-driven (recommended) — fresh subagent per task, review between tasks
+2. Inline execution — execute tasks in this session
+<!-- agent:boundary:f9263c73 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] IPC double-write: implement idempotent apply (pre-apply hash in patch metadata)
-- [ ] IPC snapshot: implement ACK-with-content protocol (hard snapshot guarantee)
-- [ ] Bump to v0.31.26, update VERSIONS.md, publish
+- [ ] Execute `tasks/agent-doc/plan-ipc-improvements.md` (Task 1–7)
+- [ ] After Task 6 manual verification: user confirms, then Task 7 release
 <!-- /agent:pending -->

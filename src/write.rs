@@ -950,7 +950,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                 "unmatched": unmatched.trim(),
                 "baseline": baseline.unwrap_or(""),
             });
-            ipc_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
+            ipc_payload["patch_id"] = serde_json::Value::String(patch_id);
 
             // Include frontmatter if present
             let frontmatter_yaml: Option<String> = patches
@@ -984,14 +984,17 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                 if patch_file.exists() {
                     eprintln!("[write] cleaning stale IPC patch file to prevent double-write");
                     // Read patch_id from stale patch before deleting — write sentinel so plugin skips apply
-                    if let Ok(stale_content) = std::fs::read_to_string(&patch_file) {
-                        if let Ok(stale_json) = serde_json::from_str::<serde_json::Value>(&stale_content) {
-                            if let Some(patch_id) = stale_json.get("patch_id").and_then(|v| v.as_str()) {
-                                let claimed_dir = project_root.join(".agent-doc/claimed-patches");
-                                let _ = std::fs::create_dir_all(&claimed_dir);
+                    if let Ok(stale_content) = std::fs::read_to_string(&patch_file)
+                        && let Ok(stale_json) = serde_json::from_str::<serde_json::Value>(&stale_content)
+                        && let Some(patch_id) = stale_json.get("patch_id").and_then(|v| v.as_str())
+                    {
+                        let claimed_dir = project_root.join(".agent-doc/claimed-patches");
+                        match std::fs::create_dir_all(&claimed_dir) {
+                            Err(e) => eprintln!("[write] WARNING: failed to create claimed-patches dir: {e}"),
+                            Ok(_) => {
                                 let sentinel = claimed_dir.join(patch_id);
                                 if let Err(e) = std::fs::write(&sentinel, "") {
-                                    eprintln!("[write] WARNING: failed to write patch sentinel: {}", e);
+                                    eprintln!("[write] WARNING: failed to write patch sentinel: {e}");
                                 } else {
                                     eprintln!("[write] patch_id {} claimed (sentinel written)", &patch_id[..8]);
                                 }
@@ -1396,7 +1399,7 @@ pub fn try_ipc(
             "baseline": baseline.unwrap_or(""),
             "reposition_boundary": true,
         });
-        socket_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
+        socket_payload["patch_id"] = serde_json::Value::String(patch_id);
         if let Some(yaml) = frontmatter_yaml {
             socket_payload["frontmatter"] = serde_json::Value::String(yaml.to_string());
         }
@@ -1489,7 +1492,7 @@ pub fn try_ipc(
         "baseline": baseline.unwrap_or(""),
         "reposition_boundary": true,
     });
-    ipc_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
+    ipc_payload["patch_id"] = serde_json::Value::String(patch_id);
 
     if let Some(yaml) = frontmatter_yaml {
         ipc_payload["frontmatter"] = serde_json::Value::String(yaml.to_string());

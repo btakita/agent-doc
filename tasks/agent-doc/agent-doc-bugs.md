@@ -257,7 +257,7 @@ Rebuilt v0.31.25 and ran `skill install` — installed SKILL.md now matches. `SK
 Already resolved. The last cycle's write-back included the "### Re: default should be diff-only" content in the snapshot, so git gutter should be clear. No code change needed.
 
 For prevention: the SKILL.md rule ("Do NOT use the Edit tool for write-back") is the guard. A runtime check in `agent-doc commit` that warns when file diverges from snapshot by >N bytes already exists (the "possible out-of-band write" warning). Refusing to commit in that case would be heavier than a warning — judgment call.
-### Re: tests for preflight format + token efficiency (HEAD)
+### Re: tests for preflight format + token efficiency
 
 Added two tests in `preflight.rs`:
 
@@ -273,18 +273,48 @@ Also cleaned up:
 
 497 tests pass.
 
-### Re: why mention `document` in SKILL.md at all? (HEAD)
+### Re: why mention `document` in SKILL.md at all?
 
 You're right — it shouldn't be there. Removed. The field is gone from the struct, so it won't appear in JSON output, so there's nothing to document. SKILL.md JSON schema now only shows fields that actually exist.
 
 `skill install` emitted `SKILL_RELOAD=compact` — please run `/compact` to reload the updated skill.
-<!-- agent:boundary:67aa0627 -->
+
+❯ We need a way to audit the preflight to ensure efficient token usage.
+❯ When I ran `agent-doc preflight <agent-doc-bugs.md>`, I saw some issues:
+❯ - What is diff and annotated_diff used for? Should it only contain the actual diffs? Can we use git diff instead?- The diff and annotated_diff included the entire previous response patch. Is this due to me annotating inline with the previous response patch?
+❯ - Saw `[commit] WARNING: file is 184 bytes larger than snapshot for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md — possible out-of-band write (snap=16307, file=16491)`. Is this due to me running preflight while another agent-doc run on this file was occurring?
+❯ - Saw `[preflight] step 5: skipped (use `agent-doc read` to fetch)`. What is step 5? Does this have to do with the old behavior of preflight passing the entire document?
+❯ We need a way to audit the preflight to ensure correct design and efficient token usage.
+### Re: preflight token audit — your 4 questions (HEAD)
+
+**1. `diff` and `annotated_diff` — what are they for?**
+
+- **`diff`** — unified diff from snapshot → document. Only changed regions (+/- context). This is what the agent reads to know what you added.
+- **`annotated_diff`** — same lines with `[agent]`/`[user+]`/`[user-]` labels so the agent can distinguish new user input from unchanged agent content without re-reading the full file.
+
+Neither contains the full document — only the delta. They don't need to be replaced with `git diff` because the snapshot isn't always in sync with the git index (e.g., the agent may have written a response without committing yet). The snapshot is the correct baseline.
+
+**Why did the diff include the entire previous response patch?**
+
+Stale snapshot. The previous session wrote the response to the file but didn't update the snapshot (interrupted, or used the Edit tool which bypasses snapshot management). When the next preflight ran, it diffed from the old snapshot — so everything written since that stale snapshot appeared as "new," including the full previous response patch. This is the same root cause as the 184-byte warning.
+
+**2. "file is 184 bytes larger than snapshot" warning**
+
+Not caused by concurrent preflight runs — preflight is read-only for the file. The cause is a stale snapshot: a previous session wrote to the file (via Edit tool, or was interrupted after `agent-doc write` but before snapshot update). Preflight detects the divergence and warns. The commit step then commits the stale content and repositions the snapshot — which is what `[commit] repositioned boundary in snapshot` means.
+
+**3. `[preflight] step 5: skipped`**
+
+That was from an older binary. Step 5 was "include full document content in output" (the `document` field). When we made it opt-in via `--with-document`, step 5 became a conditional skip. When we removed the field entirely in v0.31.25, step 5 disappeared. The current binary (v0.31.25) doesn't emit that log line at all — you saw it from a pre-release binary running the new code with the old step numbering.
+
+**Token audit summary:**
+
+Current preflight sends: layout_issues, recovered, committed, claims, diff, annotated_diff, no_changes, slash_commands, builtin_commands. No full document. The diff and annotated_diff are the largest fields and they're bounded by what you actually changed — small edits → small diff. The only way preflight bleeds tokens is the stale-snapshot case, which causes a larger-than-expected diff. No new code needed; the stale snapshot warning already surfaces this.
+<!-- agent:boundary:a883437e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Run `/compact` to reload updated SKILL.md
 - [ ] Release v0.31.25 (crates.io + PyPI + GitHub Release)
 - [ ] Follow-on: duplicate claims check in `check_layout()`
 <!-- /agent:pending -->

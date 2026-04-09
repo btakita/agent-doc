@@ -461,7 +461,7 @@ Three new `ops_log` entries now appear in `.agent-doc/logs/ops.log`:
 This gives a complete timeline in `.agent-doc/logs/ops.log`: `ipc_socket_delivered` → `snapshot_saved_socket_ipc` → `commit_staging` → `commit_success` → `preflight_diff_start` → `commit_staging` (next cycle).
 
 The `snap_source=content_ours` vs `snap_source=file_read` field tells you which snapshot strategy was used — if it ever shows `file_read`, the snapshot reflects what the plugin wrote (after boundary reposition), which would differ from `content_ours`.
-<!-- agent:boundary:89522636 -->
+<!-- agent:boundary:d29a999b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

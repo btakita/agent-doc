@@ -5,7 +5,7 @@
 //!   session document and emits a single JSON object to stdout.
 //! - Bails immediately if the file does not exist.
 //! - Step 0 — layout check: calls `check_layout()` to detect tmux structural
-//!   problems (window index, stash non-idle panes, session drift); issues are
+//!   problems (window index, session drift); issues are
 //!   included in output but do not abort the run.
 //! - Step 1 — recover: calls `recover::run(file)` to detect and apply any
 //!   orphaned pending agent responses from a previous interrupted cycle.
@@ -30,8 +30,8 @@
 //! - Serializes `PreflightOutput` as pretty JSON to stdout; all diagnostic
 //!   messages go to stderr.
 //! - `check_layout()`: inspects the current tmux session for structural issues:
-//!   missing window index 0 (base-index compliance) and stash windows that
-//!   have non-idle panes running meaningful processes. Read-only; no mutations.
+//!   missing window index 0 (base-index compliance) and session drift. Stash
+//!   windows may have non-idle panes (backgrounded sessions). Read-only; no mutations.
 //!   Returns an empty vec when not inside tmux (silent).
 //! - `read_and_truncate_claims(file)`: locates `.agent-doc/claims.log` relative
 //!   to the project root, collects non-empty lines, truncates the file to empty,
@@ -124,7 +124,8 @@ pub struct PreflightOutput {
     /// True when the snapshot matches the document (no new user input).
     pub no_changes: bool,
     /// Full document content at HEAD (current file on disk).
-    pub document: String,
+    /// Always `null` — use `agent-doc read <FILE>` to fetch.
+    pub document: Option<String>,
     /// Changes detected in linked documents since last cycle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub linked_changes: Vec<RelatedDocChange>,
@@ -151,9 +152,6 @@ pub struct PreflightOutput {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub builtin_commands: Vec<String>,
 }
-
-/// Shells considered idle (not actively running a meaningful process).
-const IDLE_SHELLS: &[&str] = &["zsh", "bash", "sh", "fish"];
 
 /// Check tmux layout health for the current session.
 ///
@@ -200,70 +198,21 @@ pub fn check_layout() -> Vec<String> {
         _ => return issues,
     };
 
-    struct WinInfo {
-        index: u32,
-        name: String,
-    }
-    let windows: Vec<WinInfo> = window_output
+    let windows: Vec<u32> = window_output
         .lines()
         .filter_map(|line| {
             let mut parts = line.splitn(3, '\t');
             let index: u32 = parts.next()?.parse().ok()?;
-            let name = parts.next()?.to_string();
-            // pane count consumed but not stored
-            let _pane_count: usize = parts.next()?.parse().ok()?;
-            Some(WinInfo { index, name })
+            Some(index)
         })
         .collect();
 
     // Check 1: Window 0 should exist (base-index compliance).
-    if !windows.iter().any(|w| w.index == 0) {
+    if !windows.contains(&0) {
         issues.push(format!(
             "window index 0 missing in session '{}' (base-index compliance)",
             session_name,
         ));
-    }
-
-    // Check 2: Stash windows with non-idle panes.
-    for win in &windows {
-        if win.name != "stash" && !win.name.starts_with("stash-") {
-            continue;
-        }
-
-        let pane_output = match Command::new("tmux")
-            .args([
-                "list-panes",
-                "-t",
-                &format!("{}:{}", session_name, win.index),
-                "-F",
-                "#{pane_id}\t#{pane_current_command}",
-            ])
-            .output()
-        {
-            Ok(out) if out.status.success() => {
-                String::from_utf8_lossy(&out.stdout).to_string()
-            }
-            _ => continue,
-        };
-
-        for line in pane_output.lines() {
-            let mut parts = line.splitn(2, '\t');
-            let pane_id = match parts.next() {
-                Some(id) => id,
-                None => continue,
-            };
-            let cmd = match parts.next() {
-                Some(c) => c,
-                None => continue,
-            };
-
-            if !IDLE_SHELLS.contains(&cmd) {
-                issues.push(format!(
-                    "stash window '{}' has non-idle pane {} running '{}'",
-                    win.name, pane_id, cmd,
-                ));
-            }
-        }
     }
 
     // Check 3: Session-drift — registered panes spanning multiple tmux sessions.
@@ -312,7 +261,7 @@ pub fn check_layout() -> Vec<String> {
 /// 5. Read document HEAD from disk
 ///
 /// Outputs JSON to stdout. Progress/diagnostic messages go to stderr.
-pub fn run(file: &Path, diff_only: bool) -> Result<()> {
+pub fn run(file: &Path) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -509,15 +458,9 @@ pub fn run(file: &Path, diff_only: bool) -> Result<()> {
     let slash_commands = parsed_commands.skill_commands;
     let builtin_commands = parsed_commands.builtin_commands;
 
-    // Step 5: Read document HEAD from disk (skip if --diff-only).
-    let document = if diff_only {
-        eprintln!("[preflight] step 5: skipped (--diff-only)");
-        String::new()
-    } else {
-        eprintln!("[preflight] step 5: read document");
-        std::fs::read_to_string(file)
-            .with_context(|| format!("failed to read document {}", file.display()))?
-    };
+    // Step 5: document field is always null — use `agent-doc read` to fetch.
+    eprintln!("[preflight] step 5: skipped (use `agent-doc read` to fetch)");
+    let document: Option<String> = None;
 
     let output = PreflightOutput {
         layout_issues,
@@ -876,14 +819,14 @@ mod tests {
         // Snapshot matches document → no_changes = true.
         snapshot::save(&doc, &std::fs::read_to_string(&doc).unwrap()).unwrap();
 
-        run(&doc, false).unwrap();
+        run(&doc).unwrap();
         // If run() returns Ok(()), the JSON was printed to stdout without error.
         // The test verifies no panic and no error return.
     }
 
     #[test]
     fn preflight_file_not_found() {
-        let err = run(Path::new("/nonexistent/missing.md"), false).unwrap_err();
+        let err = run(Path::new("/nonexistent/missing.md")).unwrap_err();
         assert!(err.to_string().contains("file not found"));
     }
 
@@ -946,7 +889,7 @@ mod tests {
             claims: vec!["foo".to_string()],
             diff: Some("+new line\n".to_string()),
             no_changes: false,
-            document: "# Doc\n".to_string(),
+            document: Some("# Doc\n".to_string()),
             linked_changes: vec![],
             baseline_file: None,
             diff_type: None,
@@ -975,7 +918,7 @@ mod tests {
             claims: vec![],
             diff: None,
             no_changes: true,
-            document: "content".to_string(),
+            document: Some("content".to_string()),
             linked_changes: vec![],
             baseline_file: None,
             diff_type: None,
@@ -1014,7 +957,7 @@ mod tests {
             claims: vec![],
             diff: None,
             no_changes: true,
-            document: "content".to_string(),
+            document: Some("content".to_string()),
             linked_changes: vec![],
             baseline_file: None,
             diff_type: None,
@@ -1108,7 +1051,7 @@ mod tests {
             claims: vec![],
             diff: None,
             no_changes: true,
-            document: "content".to_string(),
+            document: Some("content".to_string()),
             linked_changes: vec![],
             baseline_file: Some("/tmp/baseline.md".to_string()),
             diff_type: None,
@@ -1131,7 +1074,7 @@ mod tests {
             claims: vec![],
             diff: None,
             no_changes: true,
-            document: "content".to_string(),
+            document: Some("content".to_string()),
             linked_changes: vec![],
             baseline_file: None,
             diff_type: None,
@@ -1154,7 +1097,7 @@ mod tests {
             claims: vec![],
             diff: Some("+go\n".to_string()),
             no_changes: false,
-            document: "content".to_string(),
+            document: Some("content".to_string()),
             linked_changes: vec![],
             baseline_file: None,
             diff_type: Some("approval".to_string()),
@@ -1178,7 +1121,7 @@ mod tests {
             claims: vec![],
             diff: None,
             no_changes: true,
-            document: "content".to_string(),
+            document: Some("content".to_string()),
             linked_changes: vec![],
             baseline_file: None,
             diff_type: None,
@@ -1202,7 +1145,7 @@ mod tests {
             claims: vec![],
             diff: Some("+line\n".to_string()),
             no_changes: false,
-            document: "content".to_string(),
+            document: Some("content".to_string()),
             linked_changes: vec![],
             baseline_file: None,
             diff_type: None,
@@ -1225,7 +1168,7 @@ mod tests {
             claims: vec![],
             diff: None,
             no_changes: true,
-            document: "content".to_string(),
+            document: Some("content".to_string()),
             linked_changes: vec![],
             baseline_file: None,
             diff_type: None,
@@ -1251,7 +1194,7 @@ mod tests {
             claims: vec![],
             diff: Some(diff.to_string()),
             no_changes: false,
-            document: "ctx\n/clear\n".to_string(),
+            document: Some("ctx\n/clear\n".to_string()),
             linked_changes: vec![],
             baseline_file: None,
             diff_type: None,

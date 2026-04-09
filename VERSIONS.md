@@ -4,6 +4,14 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.25
+
+- **`preflight` diff-only always (preflight.rs):** `document` field is always `null` — the full document is never sent automatically. Use `agent-doc read <FILE>` to fetch on demand.
+- **BREAKING CHANGE: `--diff-only` and `--with-document` flags removed from `preflight`:** Both flags removed. Diff-only is now unconditional. Any callers using either flag must remove it.
+- **`agent-doc read <FILE> [--component <name>]` (read.rs):** New subcommand to fetch the full document or a single named component's body on demand. Use on the first cycle when the document is not yet in context.
+- **Stash window pane check removed (preflight.rs):** `check_layout` no longer flags panes in `stash*` windows as layout issues. Stash windows hold intentional backgrounded sessions.
+- **Fix: `collapsible_if` in `git.rs` (CI):** Nested `if` at line 410 collapsed to satisfy Rust 1.94.1 clippy.
+
 ## 0.31.24
 
 - **Fix: `~~~` tilde fences protected from `❯ ` prefix normalization (write.rs):** `normalize_user_prompts_in_exchange` previously only tracked `` ``` `` (backtick) fences. Lines inside `~~~` fenced regions could incorrectly enter `user_added` and receive a `❯ ` prefix. Fixed by extracting `fence_open`/`fence_close` helpers that handle both `` ` `` and `~` fence chars with proper length tracking (matching `diff.rs`'s `fence_char`/`fence_len` approach). New test: `normalize_user_prompts_tilde_fence_interior_skipped`.

@@ -537,7 +537,7 @@ The script touches Docker and certbot as root. No other user needs to see or exe
 [root@oddball-business app]# ./scripts/certbot-init.sh
 ./scripts/certbot-init.sh: line 8: DOMAIN: Set DOMAIN in .env
 ```
-### Re: DOMAIN not set (HEAD)
+### Re: DOMAIN not set
 
 `DOMAIN` isn't in your `.env` yet. The script checks for it on line 8 with `${DOMAIN:?...}` — fails fast if unset.
 
@@ -558,17 +558,50 @@ Fix:
    source .env
    ./scripts/certbot-init.sh
    ```
-<!-- agent:boundary:3cbe28b6 -->
+   
+```
+[root@oddball-business app]# echo $DOMAIN
+50.28.2.199.nip.io
+[root@oddball-business app]# ./scripts/certbot-init.sh
+./scripts/certbot-init.sh: line 8: DOMAIN: Set DOMAIN in .env
+```
+### Re: DOMAIN set but script still fails (HEAD)
+
+`$DOMAIN` is in the shell but not exported — child processes (the script) don't inherit it. `source .env` sets variables in the current shell only.
+
+Fix — export everything from `.env` before running the script:
+
+```bash
+export $(grep -v '^#' .env | xargs)
+./scripts/certbot-init.sh
+```
+
+Or just export the one variable since it's already set:
+
+```bash
+export DOMAIN
+./scripts/certbot-init.sh
+```
+
+To avoid this every time, add `export` to the variables in `.env` that need to reach subprocesses:
+
+```
+export DOMAIN=50.28.2.199.nip.io
+export CERTBOT_EMAIL=rberkes@gmail.com
+```
+
+Note: Docker Compose handles `KEY=VALUE` (no export) natively, so adding `export` doesn't break it.
+<!-- agent:boundary:b5d91db2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Server step 7:** Add `DOMAIN=<server-ip>.nip.io` to `.env`, then `source .env`
+- [ ] **Server step 7:** `export $(grep -v '^#' .env | xargs)` to make env vars available to scripts
 - [ ] **Server step 8:** `chmod 700 ./scripts/certbot-init.sh && ./scripts/certbot-init.sh`
 - [ ] **Server step 9:** `docker compose up -d`
-- [ ] **Server step 10:** Transfer + import backup, then run `wp search-replace 'https://monsterrodholders.com' 'https://<ip>.nip.io' --all-tables`; remove WP Engine mu-plugins
-- [ ] Verify site on nip.io test domain
+- [ ] **Server step 10:** Transfer + import backup, then run `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`; remove WP Engine mu-plugins
+- [ ] Verify site on `50.28.2.199.nip.io`
 - [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot
 - [ ] Clean spam comments post-import
 - [ ] Plugin audit: delete `worker`, `wpmudev-updates`; pick TaxJar OR AvaTax

@@ -647,7 +647,7 @@ If the next response uses stale baseline (`S`), `content_ours = S + R₂` — no
 **The v0.31.25 fix:** IPC paths now read the actual post-flush file (200ms delay + disk read) instead of computing `content_ours`. Snapshot = file. No gap. No stale-snapshot gap commits. The domino can't start.
 
 The original trigger in the ❯ prefix case: normalization ran on lines derived from `content_ours` (built from the wrong baseline). The snapshot accumulated a version of the file the actual disk never had. Once snapshot ≠ file, every subsequent cycle's gap commit could roll back correct content.
-<!-- agent:boundary:8931852b -->
+<!-- agent:boundary:1318bd58 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

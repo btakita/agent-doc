@@ -142,7 +142,7 @@ Implementation complete. Here's what was done:
 Also fixed a pre-existing test bug in `recover.rs`: `detect_orphaned_checkpoints_discards_uncommitted_re_blocks` had an incorrect assertion (expected "User follow-up" inside orphaned block to be preserved — updated to match actual behavior).
 
 All tests pass. Binary installed.
-<!-- agent:boundary:b8ab6498 -->
+<!-- agent:boundary:227b94e4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

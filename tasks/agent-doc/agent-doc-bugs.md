@@ -819,7 +819,7 @@ Oversight — the plan's Task 4+5 steps didn't include a version bump, but they 
 
 Bumped to `0.2.54`, rebuilt, and committed. Install:
 > `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.54.zip`
-<!-- agent:boundary:bdd0ca4a -->
+<!-- agent:boundary:de22b411 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

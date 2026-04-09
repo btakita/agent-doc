@@ -118,7 +118,7 @@ Each layer catches a different failure mode:
 ### Re: implementing all 4 layers (HEAD)
 
 Implementing all four layers now. Codex rescue agent is running the Rust implementation across `sessions.rs`, `preflight.rs`, `route.rs`, and `recover.rs`. Will update when the build passes.
-<!-- agent:boundary:7412114c -->
+<!-- agent:boundary:051dab0e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -13,7 +13,7 @@ agent_doc_write: crdt
 
 <!-- agent:exchange patch=append -->
 ❯ Why does src/session-share/tasks/claudescore.md have an uncommitted response patch?
-### Re: uncommitted response patch in claudescore.md (HEAD)
+### Re: uncommitted response patch in claudescore.md
 
 **Root cause: streaming checkpoint stuck after interrupted/overlapping session.**
 
@@ -34,6 +34,8 @@ The snapshot only contains `### Re: local Postgres setup — done (HEAD)` — th
 
 The preflight also flagged two `agent-doc` panes running in the stash window (`%34`, `%36`). The likely sequence:
 
+❯ We had 2 sessions running the same agent doc?
+
 - Session committed snapshot with just `done (HEAD)` (clean state)
 - A second pane (stash) started a new response cycle on claudescore.md
 - That session wrote the streaming checkpoint but was interrupted before the final write
@@ -47,7 +49,23 @@ When a new preflight detects that the working tree has content added *between* a
 **Immediate action for this file:**
 
 The intermediate checkpoint block (lines 1504–1522) can be removed — it's superseded by the `done` response. This is a manual cleanup since the automated recovery path doesn't cover this case yet.
-<!-- agent:boundary:c51d513d -->
+
+❯ do it
+### Re: two sessions / do it (HEAD)
+
+**"We had 2 sessions running the same agent doc?"** — Yes. The stash panes (`%34`/`%36`) each held an `agent-doc` session. When both pointed to `claudescore.md`, the second session's preflight diffed the file against the last committed snapshot and saw the `done` response as "already committed" baseline, then started its own response cycle — racing the first session's in-flight streaming checkpoint write.
+
+**Done.** Removed the orphaned checkpoint block from `src/session-share/tasks/claudescore.md` and committed in the submodule:
+
+```
+chore(claudescore): remove orphaned streaming checkpoint
+Removes the intermediate `### Re: local Postgres setup` block that was
+left behind by an interrupted second agent-doc session (race condition
+between two stash panes pointing at the same document).
+```
+
+Remaining diff (boundary hash `0f29e90b` → `cabc81e1` + `(HEAD)` removal) reflects the second session taking over document ownership — that's now committed too.
+<!-- agent:boundary:b0518efd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

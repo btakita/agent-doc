@@ -707,7 +707,7 @@ The root cause is the deletion-race window between IPC timeout detection and JB'
 Correction to the earlier audit: this function did NOT have stale-baseline risk. `content` was freshly read from disk, so `content_ours = fresh_file + response` uses the same safe pattern as the other recover paths (`apply_append_from_string`, `apply_template_from_string`). The `content_ours` save was intentional (concurrent edits surface in next diff), not a bug.
 
 Removed it anyway — it was acknowledged dead code (`#[allow(dead_code)]`, no callers) and can be restored from git if stream-mode recovery is ever wired. Builds clean.
-<!-- agent:boundary:f716cfa4 -->
+<!-- agent:boundary:cee7f3f0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

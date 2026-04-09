@@ -169,7 +169,7 @@ The `improve-codebase-architecture` skill is about finding shallow modules in a 
 3. **Improve `superpowers:test-driven-development`** — import horizontal/vertical slicing framing
 4. **Create `improve-codebase-architecture` equivalent** — currently no direct analog; highest unique value
 5. **Consider `agent-doc new --template <name>`** — scaffolding command for structured session types
-<!-- agent:boundary:b7ff9e1f -->
+<!-- agent:boundary:122e9180 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

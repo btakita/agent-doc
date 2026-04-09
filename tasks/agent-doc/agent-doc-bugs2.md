@@ -82,7 +82,7 @@ The numbers I reported were just whatever happened to be in the stash window at 
 **The real fix:**
 
 Stash pane eviction in `route.rs` — before spawning a new pane for document X, check if a stash pane already claims X and kill it. That's what's in the pending list. Until that's in, killing panes manually achieves nothing lasting.
-<!-- agent:boundary:3ce84976 -->
+<!-- agent:boundary:1b2eea54 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

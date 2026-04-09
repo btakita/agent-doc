@@ -190,7 +190,7 @@ Done. Changes in `src/agent-doc/`:
 **`VERSIONS.md`**: diff-only default, `--diff-only` removal (BREAKING), `agent-doc read` subcommand, stash window fix, clippy fix
 
 38/38 tests pass. Run `cargo install --path .` to pick it up, then verify before publishing.
-<!-- agent:boundary:ccc12fc6 -->
+<!-- agent:boundary:fcd62dfd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

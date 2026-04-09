@@ -211,7 +211,7 @@ To avoid session drift, run /agent-doc from a terminal in session '0'.
 Test results: 758 agent-doc + 85 tmux-router tests, 0 failures.
 
 ❯ How can we recover tmux window 2:agent-doc from tmux session 1?
-### Re: recovering window 1:2 (agent-doc) to session 0 (HEAD)
+### Re: recovering window 1:2 (agent-doc) to session 0
 
 Three options:
 
@@ -234,14 +234,36 @@ tmux join-pane -s %57 -t 0:agent-doc
 Merges `%57` into session 0's agent-doc window alongside `%56`/`%72`. If you want all agent-doc panes in one window rather than two windows, this is the right form.
 
 **Recommendation:** Do B (build + resync) — it validates the pane_policy cross-session path before publishing.
-<!-- agent:boundary:2df42940 -->
+
+❯ do b
+### Re: do b (HEAD)
+
+Option B executed and validated:
+
+**`cargo install --path src/agent-doc`:**
+- Built from HEAD (v0.31.26), installed to `~/.cargo/bin/agent-doc` — 1.55s (pre-compiled artifacts cached).
+
+**`agent-doc resync --fix --session 0`:**
+```
+Fixing 1 issue(s):
+[pane_policy] cross-session move: %57 ('1') → %72 ('0') — relocate WrongSession pane to project session
+  relocated pane %57 → session '0'
+  fixed: tasks/research/mattpocock.md (pane %57) in session '1', expected '0'
+Fixed 1 of 1 issue(s).
+```
+
+**Confirmation:**
+```
+tmux list-panes -a | grep %57
+0:0.2: [59x15] [history 281/50000, 79322 bytes] %57
+```
+
+`%57` (mattpocock.md) is now in tmux session 0. WrongSession detection + PaneMoveOp cross-session relocation is working end-to-end. Ready to publish v0.31.27.
+<!-- agent:boundary:b1fdda53 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] `cargo install --path src/agent-doc` — get new code live
-- [ ] `agent-doc resync --fix --session 0` — validate cross-session WrongSession detection + PaneMoveOp relocation
-- [ ] Confirm `%57` is now in session 0 (`tmux list-panes -a | grep %57`)
-- [ ] Publish v0.31.27 (crates.io + PyPI + GitHub Release) after validation
+- [ ] Publish v0.31.27 (crates.io + PyPI + GitHub Release) after user confirms feature works
 <!-- /agent:pending -->

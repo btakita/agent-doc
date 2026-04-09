@@ -145,7 +145,7 @@ All tests pass. Binary installed.
 
 ❯ Why is `### Re: ❯  inside fenced regions — why` uncommitted in agent-doc-bugs.md?
 ❯ Why does /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore.md have a large section of uncommitted content that is the document history?
-### Re: uncommitted responses in agent-doc-bugs.md + claudescore.md (HEAD)
+### Re: uncommitted responses in agent-doc-bugs.md + claudescore.md
 
 Both have the same root cause.
 
@@ -162,10 +162,35 @@ Same pattern. `tasks/claudescore.md` in session-share accumulated ~77 lines acro
 Fix: `cd src/session-share && git commit tasks/claudescore.md -m "..."`.
 
 **Root pattern:** `agent-doc commit` keeps snapshots current for diff/recovery, but document files are intentionally left as working-tree content — the 3-gutter system (committed = no gutter, `(HEAD)` = blue, user input = green) relies on this within a session. Across sessions, responses accumulate in the working tree until explicitly `git commit`ted.
-<!-- agent:boundary:1f4ff730 -->
+
+❯ How can we prevent this from happening? Is there an agent-doc binary change that we can do?
+### Re: prevent doc accumulation — binary fix
+
+Yes, implemented in `git.rs`.
+
+**Root cause recap:** `agent-doc commit` was staging only the snapshot file, leaving the document file as a perpetually-growing working-tree blob.
+
+**Fix (in `git.rs`):**
+
+1. **Stage the document file** (not the snapshot): The staging block now creates a blob from the actual document content with `(HEAD)` stripped from all response headings, and stages that blob for the document file path via `hash_object + update-index`. ALL session content (including responses from previous sessions) is now committed in each cycle.
+
+2. **Working tree retains `(HEAD)`:** Removed the post-commit block that previously stripped `(HEAD)` from the working tree. The IPC boundary reposition step already puts `(HEAD)` on the latest response heading. Since the committed version has it stripped and the working tree has it, that heading line shows as modified → **blue gutter** (the visual cycle boundary).
+
+3. **`add_head_marker` now test-only:** No longer used in production, annotated `#[cfg(test)]`.
+
+**3-gutter behavior going forward:**
+| Gutter | What | Why |
+|--------|------|-----|
+| None | All prior + new response content | Committed with `(HEAD)` stripped |
+| Blue | Latest response heading | Working tree has `(HEAD)`, committed version doesn't |
+| Green | New user input | Not yet staged |
+
+No more multi-session accumulation. All tests pass, binary reinstalled.
+<!-- agent:boundary:a3c11d97 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+
 <!-- /agent:pending -->

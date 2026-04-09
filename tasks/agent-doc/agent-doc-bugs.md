@@ -166,7 +166,7 @@ impl<'a> PaneMoveOp<'a> {
 **Migration path:** 22 call sites in agent-doc. The intentional cross-session sites (stash rescue in `resync.rs`, route stash) use `CrossSession::Allow { reason: "relocate to project session" }`. All others use `CrossSession::Deny` by default. Any new cross-session move that hits `Deny` becomes a visible bug, not silent drift.
 
 **Additional guard — `start.rs`:** When registering a new pane, check if `$TMUX_PANE`'s session matches `config::project_tmux_session()`. If not, log a warning and optionally refuse to register (or auto-relocate via `PaneMoveOp` with `Allow`).
-<!-- agent:boundary:be023121 -->
+<!-- agent:boundary:338c0558 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -400,7 +400,7 @@ The confusion is about what "stale content" means in step 1.
 2. The file showed content (response already written) but snapshot was an older version
 
 Which path did you observe — did the manual preflight output show `committed: true` in its JSON? That would tell us whether step 0 of the agent run had actually committed before you ran your manual preflight.
-<!-- agent:boundary:828659c6 -->
+<!-- agent:boundary:1fda4894 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

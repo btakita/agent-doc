@@ -111,7 +111,7 @@ Each layer catches a different failure mode:
 | 2 — Preflight stash check | Second pane triggering a cycle while first is active |
 | 3 — Cycle lock | Concurrent preflight runs even with stale/bypassed registry |
 | 4 — Recovery | Cleanup of leftover partial writes after a race |
-<!-- agent:boundary:f7aac7c2 -->
+<!-- agent:boundary:50b1f449 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

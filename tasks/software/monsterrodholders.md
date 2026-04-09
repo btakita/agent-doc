@@ -337,7 +337,7 @@ cat ~/.ssh/monsterrodholders_deploy.pub
 Done — `btakita/agent-loop` pushed to `origin/main`.
 
 ❯ I am the root user. Is that ok?
-### Re: Running as root (HEAD)
+### Re: Running as root
 
 Fine for a dedicated server. Adjustments to the setup guide:
 
@@ -357,13 +357,25 @@ docker compose version
 ```
 
 Rest of the steps are identical — just omit `sudo` everywhere.
-<!-- agent:boundary:c6ff82a0 -->
+
+❯ update server-setup.md
+### Re: update server-setup.md (HEAD)
+
+Updated and pushed. Changes:
+
+- Removed all `sudo` — root runs everything directly
+- Paths changed: `~/.ssh/` → `/root/.ssh/` (explicit)
+- Step 6 (clone): removed `chown` step — not needed as root
+- Step 1: removed `usermod` and logout/login instructions
+- Added note at top: "Running as root — no `sudo` needed"
+- Step 10 `scp`: changed `user@` → `root@` and clarified it runs on local machine
+<!-- agent:boundary:4f9d0699 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Server step 1:** Install Docker + Docker Compose (no sudo)
+- [ ] **Server step 1:** Install Docker + Docker Compose
 - [ ] **Server step 2:** Install git + unzip
 - [ ] **Server step 3:** Generate deploy SSH key (`/root/.ssh/monsterrodholders_deploy`)
 - [ ] **Server step 4:** Add deploy key to GitHub (btakita/monsterrodholders-dev → Settings → Deploy keys)

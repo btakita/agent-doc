@@ -1275,7 +1275,7 @@ The `❯ ` lines visible inside fenced regions in this document fall into two ca
 **This cycle is clean:** `user_added` for this cycle contains only your question line (outside any fence). No fence-interior lines will be touched.
 
 **One remaining gap:** `write.rs` only tracks `` ``` `` fences (`starts_with("```")`), not `~~~` tilde fences. `diff.rs` handles both via `fence_char`. If any exchange content uses `~~~` delimiters, those interiors would still be unprotected. All fences in this document use `` ``` ``, so no impact here.
-<!-- agent:boundary:61aab740 -->
+<!-- agent:boundary:2dc1547a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

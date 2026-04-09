@@ -1198,6 +1198,10 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
             let content = std::fs::read_to_string(file)
                 .with_context(|| format!("failed to read {} after IPC", file.display()))?;
             snapshot::save(file, &content)?;
+            crate::ops_log::log_op(file, &format!(
+                "snapshot_saved_file_ipc file={} snap_len={}",
+                file.display(), content.len()
+            ));
             let crdt_doc = crate::crdt::CrdtDoc::from_text(&content);
             snapshot::save_crdt(file, &crdt_doc.encode_state())?;
             recover::clear_pending(file)?;
@@ -1434,12 +1438,17 @@ pub fn try_ipc(
                 // Bug 2A fix: snapshot save failure after IPC success is non-fatal.
                 // The plugin already has the correct content; the snapshot can be
                 // recovered by commit's divergence detection (Bug 2B fix).
+                let snap_source = if content_ours.is_some() { "content_ours" } else { "file_read" };
                 let snap_content = if let Some(ours) = content_ours {
                     ours.to_string()
                 } else {
                     std::fs::read_to_string(file)
                         .with_context(|| format!("failed to read {} after socket IPC", file.display()))?
                 };
+                crate::ops_log::log_op(file, &format!(
+                    "ipc_socket_delivered file={} snap_source={} snap_len={}",
+                    file.display(), snap_source, snap_content.len()
+                ));
                 if let Err(e) = snapshot::save(file, &snap_content) {
                     eprintln!(
                         "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
@@ -1451,6 +1460,10 @@ pub fn try_ipc(
                         file.display(), e
                     ));
                 } else {
+                    crate::ops_log::log_op(file, &format!(
+                        "snapshot_saved_socket_ipc file={} snap_len={}",
+                        file.display(), snap_content.len()
+                    ));
                     let crdt_doc = crate::crdt::CrdtDoc::from_text(&snap_content);
                     if let Err(e) = snapshot::save_crdt(file, &crdt_doc.encode_state()) {
                         eprintln!("[write] WARNING: CRDT state save failed: {}", e);
@@ -1713,12 +1726,17 @@ fn write_ipc_and_poll(
             // file. The current file may include user edits typed after the boundary,
             // which would be absorbed into the snapshot and lost to the next diff.
             // Bug 2A fix: snapshot save failure after IPC success is non-fatal.
+            let snap_source = if content_ours.is_some() { "content_ours" } else { "file_read" };
             let snap_content = if let Some(ours) = content_ours {
                 ours.to_string()
             } else {
                 std::fs::read_to_string(doc_file)
                     .with_context(|| format!("failed to read {} after IPC", doc_file.display()))?
             };
+            crate::ops_log::log_op(doc_file, &format!(
+                "ipc_file_delivered file={} snap_source={} snap_len={}",
+                doc_file.display(), snap_source, snap_content.len()
+            ));
             if let Err(e) = snapshot::save(doc_file, &snap_content) {
                 eprintln!(
                     "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
@@ -1730,6 +1748,10 @@ fn write_ipc_and_poll(
                     doc_file.display(), e
                 ));
             } else {
+                crate::ops_log::log_op(doc_file, &format!(
+                    "snapshot_saved_file_ipc file={} snap_len={}",
+                    doc_file.display(), snap_content.len()
+                ));
                 let crdt_doc = crate::crdt::CrdtDoc::from_text(&snap_content);
                 if let Err(e) = snapshot::save_crdt(doc_file, &crdt_doc.encode_state()) {
                     eprintln!("[write] WARNING: CRDT state save failed: {}", e);

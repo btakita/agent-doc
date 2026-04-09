@@ -443,25 +443,26 @@ Also notable: every cycle in this session starts with `WARNING: file is N bytes 
   "annotated_diff": "[agent] **The actual bug** — if you got the \"entire response patch\" — suggests something else happened. Two possibilities:\n[agent] 1. The snapshot update in step 0 preflight didn't save properly (file lock issue, crash)\n[agent] 2. The file showed content (response already written) but snapshot was an older version\n[agent] \n[agent] Which path did you observe — did the manual preflight output show `committed: true` in its JSON? That would tell us whether step 0 of the agent run had actually committed before you ran your manual preflight.\n[user+] \n[user+] I don't recall for that instance...but running `agent-doc preflight` again in the same scenario has `committed: true`. \n[agent] <!-- /agent:exchange -->\n[agent] \n[agent] ## Pending / Not Built\n[agent] \n[agent] <!-- agent:pending patch=replace -->"
 }
 ```
-### Re: the diff content + logging added (HEAD)
+### Re: the diff + logging added (HEAD)
 
-**What the manual preflight diff shows:** Looking at the JSON you pasted — the `+` lines are only your comment ("I don't recall for that instance..."). My previous response appears as context lines (standard unified diff context, not new content). So the manual preflight correctly captured just your uncommitted comment as the diff. The "entire previous patch" visible in the output is unified diff context, not added content.
+**What the manual preflight diff showed:** The `+` lines in the diff were only your comment ("I don't recall for that instance..."). My previous response appears as context lines — standard unified diff surrounding context, not new content. The manual preflight correctly captured just your uncommitted comment as the diff. "The entire previous patch" you saw was the unified diff context, not added content.
 
-**The sequence now:** Your manual preflight ran AFTER my write completed (my response was in the file as context) but BEFORE my next preflight committed your comment. Manual preflight grabbed it first → `committed: true`.
+**The sequence:** Your manual preflight ran AFTER my write completed (my response was in the file as context) but BEFORE my cycle N preflight committed your comment. Manual preflight grabbed it first → `committed: true`.
 
-**Logging added** (built and installed v0.31.25):
+**Logging added** (built into release binary — `cargo build --release` complete):
 
-Three new `ops_log` entries now appear in `.agent-doc/logs/ops.log`:
+New entries now appear in `.agent-doc/logs/ops.log`:
 
-1. **`ipc_socket_delivered`** — logged immediately after socket IPC ack, records `snap_source` (whether snapshot uses `content_ours` or reads file after plugin write) and `snap_len`
-2. **`snapshot_saved_socket_ipc`** — logged after successful snapshot save on socket IPC path
-3. **`snapshot_saved_file_ipc`** — logged after successful snapshot save on file-based IPC path
-4. **`preflight_diff_start`** — logged at step 4 before diff computation, records `snap_len` vs `file_len` at that exact moment
+1. **`ipc_socket_delivered`** — after socket IPC ack; records `snap_source` (content_ours vs file_read) and `snap_len`
+2. **`snapshot_saved_socket_ipc`** — after successful snapshot save on socket IPC path
+3. **`ipc_file_delivered`** — after file-based IPC patch consumed; records `snap_source` and `snap_len` before snapshot save
+4. **`snapshot_saved_file_ipc`** — after successful snapshot save on file-based IPC path
+5. **`preflight_diff_start`** — at step 4 before diff computation; records `snap_len` vs `file_len` at that exact moment (already confirmed working ✓)
 
-This gives a complete timeline in `.agent-doc/logs/ops.log`: `ipc_socket_delivered` → `snapshot_saved_socket_ipc` → `commit_staging` → `commit_success` → `preflight_diff_start` → `commit_staging` (next cycle).
+The `snap_source=content_ours` vs `snap_source=file_read` field is key: when `file_read`, the snapshot reflects what the plugin wrote to disk (post-boundary-reposition), which differs from `content_ours`. When `content_ours`, the snapshot is the pre-reposition content — explaining the persistent "file is N bytes larger" warning.
 
-The `snap_source=content_ours` vs `snap_source=file_read` field tells you which snapshot strategy was used — if it ever shows `file_read`, the snapshot reflects what the plugin wrote (after boundary reposition), which would differ from `content_ours`.
-<!-- agent:boundary:d29a999b -->
+Note: the `snapshot_saved_file_ipc` and `ipc_file_delivered` entries will appear on the next write cycle (new binary is built but `cargo install` not yet run — symlink `.bin/agent-doc` points to `target/release/agent-doc` which is already updated).
+<!-- agent:boundary:e58707c0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

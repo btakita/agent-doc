@@ -407,19 +407,17 @@ fn strip_head_markers(content: &str) -> String {
         if is_fence_marker(trimmed) {
             in_fence = !in_fence;
         }
-        if !in_fence {
-            if let Some(stripped) = line.strip_suffix(" (HEAD)") {
-                // Strip from markdown headings
-                if trimmed.starts_with('#') {
-                    result_lines.push(stripped);
-                    continue;
-                }
-                // Strip from bold-text pseudo-headers (e.g., "**Re: Foo** (HEAD)")
-                let without_suffix = stripped.trim_end();
-                if trimmed.starts_with("**") && without_suffix.trim_start().ends_with("**") {
-                    result_lines.push(stripped);
-                    continue;
-                }
+        if !in_fence && let Some(stripped) = line.strip_suffix(" (HEAD)") {
+            // Strip from markdown headings
+            if trimmed.starts_with('#') {
+                result_lines.push(stripped);
+                continue;
+            }
+            // Strip from bold-text pseudo-headers (e.g., "**Re: Foo** (HEAD)")
+            let without_suffix = stripped.trim_end();
+            if trimmed.starts_with("**") && without_suffix.trim_start().ends_with("**") {
+                result_lines.push(stripped);
+                continue;
             }
         }
         result_lines.push(line);

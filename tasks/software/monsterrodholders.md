@@ -49,7 +49,7 @@ Want me to draft a `docker-compose.yml` + Nginx config for this setup?
 
 ❯ Yes...create a private btakita/monsterrodholders-dev repo to put our config files into. Add a submodule at src/monsterrodholders-dev.
 ❯ Layout the repo assuming that we will be administering wordpress with it.
-### Re: Create repo + submodule (HEAD)
+### Re: Create repo + submodule
 
 Done. Here's what was created:
 
@@ -97,7 +97,15 @@ Then complete WordPress install at `https://monsterrodholders.com`.
 2. Set up cron for SSL auto-renewal (line in README)
 3. Install Redis Object Cache plugin in WordPress admin and activate it
 4. Configure daily backup cron: `0 2 * * * cd /path && source .env && ./scripts/backup.sh`
-<!-- agent:boundary:b21ed5a5 -->
+
+❯ commit + push
+### Re: commit + push (HEAD)
+
+Done.
+
+- `btakita/monsterrodholders-dev` — committed `.gitignore` (added `*.iml`), pushed to `origin/main`
+- `btakita/agent-loop` — updated submodule pointer, pushed to `origin/main`
+<!-- agent:boundary:f2092de5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

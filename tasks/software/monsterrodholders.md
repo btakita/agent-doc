@@ -330,7 +330,7 @@ Start with step 1. When you get to step 4, you'll need to paste the public key i
 ```bash
 cat ~/.ssh/monsterrodholders_deploy.pub
 ```
-<!-- agent:boundary:cf72eda9 -->
+<!-- agent:boundary:be4ebdf0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -856,6 +856,91 @@ pub unsafe extern "C" fn agent_doc_stop_ipc_listener(
     }
 }
 
+/// Write the final applied document content to the ack-content sidecar file.
+///
+/// The binary reads this after receiving IPC ACK to use as snapshot content,
+/// eliminating the 200ms sleep + re-read. If the plugin doesn't call this,
+/// the binary falls back to the 200ms sleep heuristic.
+///
+/// Sidecar path: `<project_root>/.agent-doc/ack-content/<patch_id>.md`
+///
+/// # Safety
+///
+/// All three pointers must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_write_ack_content(
+    project_root: *const c_char,
+    patch_id: *const c_char,
+    content: *const c_char,
+) -> bool {
+    let root_str = match unsafe { CStr::from_ptr(project_root) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let patch_id_str = match unsafe { CStr::from_ptr(patch_id) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let content_str = match unsafe { CStr::from_ptr(content) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    let ack_dir = std::path::Path::new(root_str).join(".agent-doc/ack-content");
+    if let Err(e) = std::fs::create_dir_all(&ack_dir) {
+        eprintln!("[ffi] agent_doc_write_ack_content: mkdir error: {e}");
+        return false;
+    }
+
+    let sidecar = ack_dir.join(format!("{patch_id_str}.md"));
+    match std::fs::write(&sidecar, content_str) {
+        Ok(_) => {
+            eprintln!("[ffi] ack_content written: {} bytes for patch_id {}",
+                content_str.len(), &patch_id_str[..patch_id_str.len().min(8)]);
+            true
+        }
+        Err(e) => {
+            eprintln!("[ffi] agent_doc_write_ack_content: write error: {e}");
+            false
+        }
+    }
+}
+
+/// Check if --force-disk claimed this patch by writing a sentinel file.
+/// Returns true if the sentinel `.agent-doc/claimed-patches/<patch_id>` exists.
+/// Deletes the sentinel on success (one-time use).
+///
+/// # Safety
+///
+/// Both pointers must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_is_claimed_by_force_disk(
+    project_root: *const c_char,
+    patch_id: *const c_char,
+) -> bool {
+    let root_str = match unsafe { CStr::from_ptr(project_root) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let patch_id_str = match unsafe { CStr::from_ptr(patch_id) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    let sentinel = std::path::Path::new(root_str)
+        .join(".agent-doc/claimed-patches")
+        .join(patch_id_str);
+
+    if sentinel.exists() {
+        eprintln!("[ffi] patch_id {} claimed by force-disk — skipping apply",
+            &patch_id_str[..patch_id_str.len().min(8)]);
+        let _ = std::fs::remove_file(&sentinel);
+        true
+    } else {
+        false
+    }
+}
+
 /// Get the agent-doc library version.
 ///
 /// Returns a NUL-terminated string like "0.26.1".
@@ -990,5 +1075,58 @@ mod tests {
             agent_doc_free_string(result.text);
             agent_doc_free_state(result.state, result.state_len);
         };
+    }
+}
+
+#[cfg(test)]
+mod ack_content_tests {
+    use super::*;
+    use std::ffi::CString;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_write_ack_content_creates_file() {
+        let tmp = TempDir::new().unwrap();
+        let project_root = CString::new(tmp.path().to_str().unwrap()).unwrap();
+        let patch_id = CString::new("test-patch-id-123").unwrap();
+        let content = CString::new("hello world").unwrap();
+
+        let result = unsafe {
+            agent_doc_write_ack_content(
+                project_root.as_ptr(),
+                patch_id.as_ptr(),
+                content.as_ptr(),
+            )
+        };
+        assert!(result, "should return true on success");
+
+        let sidecar = tmp.path().join(".agent-doc/ack-content/test-patch-id-123.md");
+        assert!(sidecar.exists(), "sidecar file should exist at {:?}", sidecar);
+        assert_eq!(std::fs::read_to_string(&sidecar).unwrap(), "hello world");
+    }
+
+    #[test]
+    fn test_is_claimed_by_force_disk_present() {
+        let tmp = TempDir::new().unwrap();
+        let claimed_dir = tmp.path().join(".agent-doc/claimed-patches");
+        std::fs::create_dir_all(&claimed_dir).unwrap();
+        std::fs::write(claimed_dir.join("test-patch-456"), "").unwrap();
+
+        let project_root = CString::new(tmp.path().to_str().unwrap()).unwrap();
+        let patch_id = CString::new("test-patch-456").unwrap();
+
+        let claimed = unsafe { agent_doc_is_claimed_by_force_disk(project_root.as_ptr(), patch_id.as_ptr()) };
+        assert!(claimed, "should return true when sentinel exists");
+        assert!(!claimed_dir.join("test-patch-456").exists(), "sentinel should be deleted after check");
+    }
+
+    #[test]
+    fn test_is_claimed_by_force_disk_absent() {
+        let tmp = TempDir::new().unwrap();
+        let project_root = CString::new(tmp.path().to_str().unwrap()).unwrap();
+        let patch_id = CString::new("nonexistent-patch").unwrap();
+
+        let claimed = unsafe { agent_doc_is_claimed_by_force_disk(project_root.as_ptr(), patch_id.as_ptr()) };
+        assert!(!claimed, "should return false when sentinel absent");
     }
 }

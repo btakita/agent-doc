@@ -66,7 +66,7 @@ Fixed, all 743 tests pass. Committed as `7fc7905`, pushed — CI should be green
 No re-release needed. The published v0.31.24 binary (crates.io/PyPI/GitHub Release) was built from `1305ce9` — before `7fc7905` was introduced. The clippy issue only exists in main post-release, so published users are unaffected.
 
 The fix just unblocks CI on main (prevents the red check on new PRs). Fold it into v0.31.25 whenever there's enough to release.
-<!-- agent:boundary:4e5d3dde -->
+<!-- agent:boundary:f8e18afa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1187,7 +1187,7 @@ test
 ❯     The preflight on the next cycle will auto-commit as a safety net (that's what the "committed: true" in preflight
 ❯     output covers), but the agent should have called agent-doc commit right after every write — that's the rule in
 ```
-### Re: root cause found — extract_normalization_targets HashSet bug (HEAD)
+### Re: root cause found — extract_normalization_targets HashSet bug
 
 **Root cause confirmed:** `extract_normalization_targets` used a `HashSet<&str>` to check `!before_lines.contains(line)`. The exchange has both `❯ do` (correctly normalized at historical positions) AND `do` (un-normalized at the affected positions). Since `"❯ do"` was in `before_lines` (from the correct historical lines), the check `!before_lines.contains("❯ do")` was `false` → `"do"` never reached `targets`.
 
@@ -1196,12 +1196,19 @@ test
 This write cycle sends the correct `normalize_prefix_lines = ["do", "done"]` to the plugin. After this patch is applied, `do`/`done` lines should have `❯ ` restored.
 
 **Next step:** Verify `do`/`done` lines show `❯ ` in the editor after this write. If clean, bump version and release.
-<!-- agent:boundary:58d60d8b -->
+### Re: memory question + commit skip (HEAD)
+
+**"Memory involved":** No external memory (claude-mem) involved. "Memory" in this context was the `HashSet<&str>` used for set-membership checks inside `extract_normalization_targets`. The operation is fully deterministic — same inputs produce the same output. The bug was that the HashSet de-duplicated across ALL positions in the exchange, so `"❯ do"` from one line polluted the check for `"do"` at a different position. Fixed by replacing set-membership with a positional `zip()` comparison (line i of before vs line i of after). Still deterministic, no statefulness.
+
+**Commit skip:** Yes — missed calling `agent-doc commit` after the debug write. Got absorbed in analyzing the debug output. Preflight auto-committed as the safety net. Rule stands: always call `agent-doc commit` right after every `agent-doc write`, regardless of what happens next.
+
+**This cycle:** the fixed binary sends correct `normalize_prefix_lines` for the stripped lines above. After this patch is applied, those lines should show `❯ ` in the document.
+<!-- agent:boundary:a1f839ef -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Verify ❯ do/done restored in document after this write
-- [ ] If clean: bump version, update VERSIONS.md, build + release
+- [ ] Verify ❯  restored on all stripped lines after this write
+- [ ] If clean: bump version, update VERSIONS.md, build + release 0.31.24 (or 0.32.0)
 <!-- /agent:pending -->

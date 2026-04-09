@@ -174,7 +174,7 @@ impl<'a> PaneMoveOp<'a> {
 ❯ - [ ] Guard `start.rs` registration: warn when `$TMUX_PANE` session ≠ `project_tmux_session`
 ❯ - [ ] Guard `resolve_target_session` auto-update: only write config when new session matches existing configured session (prevent session 1 from overwriting session 0)
 ❯ - [ ] Fix `resync.rs`: detect `WrongSession` against `config::project_tmux_session()` (not only `frontmatter.tmux_session`)
-### Re: all 6 tasks done (HEAD)
+### Re: all 6 tasks done
 
 All implemented and tested. Summary:
 
@@ -209,13 +209,39 @@ To avoid session drift, run /agent-doc from a terminal in session '0'.
 **6. `resync.rs` WrongSession** — WrongSession detection now falls back to `config::project_tmux_session()` when `frontmatter.tmux_session` is absent. Panes in session 1 with no frontmatter field will now trigger WrongSession when project config says session 0.
 
 Test results: 758 agent-doc + 85 tmux-router tests, 0 failures.
-<!-- agent:boundary:878e7835 -->
+
+❯ How can we recover tmux window 2:agent-doc from tmux session 1?
+### Re: recovering window 1:2 (agent-doc) to session 0 (HEAD)
+
+Three options:
+
+**A — `tmux move-window` (immediate, no rebuild required):**
+```bash
+tmux move-window -s 1:2 -t 0:
+```
+Moves the entire session 1 `agent-doc` window (containing `%57` / mattpocock.md) into session 0. All panes survive intact. `%57` registry entry stays valid — pane ID is stable after `move-window`.
+
+**B — `agent-doc resync --fix --session 0` (validates new code path):**
+```bash
+cargo install --path src/agent-doc && agent-doc resync --fix --session 0
+```
+With the new binary: `detect_issues` now flags `%57` as `WrongSession` (pane in session 1, config says session 0). `apply_fixes_to_registry` uses `PaneMoveOp::allow_cross_session("relocate WrongSession pane to project session").join("-dh")` to move it. This is the new automated path — good to run before publishing to confirm the cross-session detection + relocation works end-to-end.
+
+**C — `tmux join-pane` (merge into existing window):**
+```bash
+tmux join-pane -s %57 -t 0:agent-doc
+```
+Merges `%57` into session 0's agent-doc window alongside `%56`/`%72`. If you want all agent-doc panes in one window rather than two windows, this is the right form.
+
+**Recommendation:** Do B (build + resync) — it validates the pane_policy cross-session path before publishing.
+<!-- agent:boundary:07863195 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] `cargo install --path .` and confirm behavior in live session before publishing
-- [ ] Consider adding a test for the `start.rs` session guard (mock `project_tmux_session` + wrong pane session → warning logged)
-- [ ] Consider adding a test for the resync config-fallback WrongSession detection
+- [ ] `cargo install --path src/agent-doc` — get new code live
+- [ ] `agent-doc resync --fix --session 0` — validate cross-session WrongSession detection + PaneMoveOp relocation
+- [ ] Confirm `%57` is now in session 0 (`tmux list-panes -a | grep %57`)
+- [ ] Publish v0.31.27 (crates.io + PyPI + GitHub Release) after validation
 <!-- /agent:pending -->

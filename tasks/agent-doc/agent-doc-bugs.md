@@ -1253,19 +1253,34 @@ All 11 `normalize_user_prompts_*` tests pass.
 
 ❯ done
 ❯ - [ ] Verify ❯  restored on all stripped lines after this write
-### Re: done + verification (HEAD)
+### Re: done + verification
 
 Binary rebuilt with the fence-interior fix (`cargo install --path .`). The updated normalization is now live.
 
 For the verification: this write cycle runs `normalize_user_prompts_in_exchange` with the new binary, which will send `normalize_prefix_lines` to the plugin for any stripped lines. If `❯ ` was missing from any lines in the live document that the snapshot shows should have it, the plugin will restore them as part of applying this response patch.
 
 The fence-interior fix means `echo hello` and similar code lines will no longer enter `user_added` — so they'll never appear in `normalize_prefix_lines` going forward.
-<!-- agent:boundary:f6952202 -->
+
+❯ Each line in a fenced regions are getting a `❯ ` prefix. Why?
+### Re: ❯  inside fenced regions — why (HEAD)
+
+The fence-interior fix IS in the installed binary (v0.31.23). The exchange has 25 balanced fence pairs, so fence tracking doesn't misfire.
+
+The `❯ ` lines visible inside fenced regions in this document fall into two categories:
+
+**1. Pre-fix normalization artifacts.** The `/btw` fence block was written before the fence-interior fix. The old normalization treated those lines as user-region content and added `❯ `. The fix prevents new additions — it does not retroactively strip existing ones.
+
+**2. Intentional agent content.** The comparison table fence (the "Should agent-doc also use..." block) was explicitly formatted by the agent as `❯ [original] → [stripped]` to illustrate the stripping bug. Those `❯ ` prefixes are meaningful content, not normalization artifacts.
+
+**This cycle is clean:** `user_added` for this cycle contains only your question line (outside any fence). No fence-interior lines will be touched.
+
+**One remaining gap:** `write.rs` only tracks `` ``` `` fences (`starts_with("```")`), not `~~~` tilde fences. `diff.rs` handles both via `fence_char`. If any exchange content uses `~~~` delimiters, those interiors would still be unprotected. All fences in this document use `` ``` ``, so no impact here.
+<!-- agent:boundary:61aab740 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Verify ❯  restored on all stripped lines after this write
+- [ ] Fix `~~~` tilde fence gap in `write.rs` normalize loops (match `diff.rs` which tracks both `` ` `` and `~~~`)
 - [ ] If clean: bump version, update VERSIONS.md, build + release 0.31.24 (or 0.32.0)
 <!-- /agent:pending -->

@@ -56,7 +56,6 @@ The command outputs JSON to stdout:
   "claims": [],
   "diff": "unified diff text or null",
   "no_changes": false,
-  "document": null,
   "slash_commands": [],
   "builtin_commands": []
 }
@@ -64,7 +63,6 @@ The command outputs JSON to stdout:
 
 - If `no_changes` is `true`, tell the user nothing changed and stop
 - Print any `claims` entries to the console as a record
-- The `document` field is `null` by default — preflight sends only the diff
 - The `diff` field contains the user's changes since the last snapshot
 - **First cycle only:** if the document is not yet in context, run `agent-doc read <FILE>` to fetch HEAD content before responding
 - **Do NOT read the snapshot file directly** — use `agent-doc read <FILE>` if HEAD content is needed

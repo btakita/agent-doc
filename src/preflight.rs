@@ -26,7 +26,6 @@
 //!   comparing against the cached content.
 //! - Step 4 — diff: calls `diff::compute(file)` to compare the current
 //!   document against the last snapshot; `no_changes=true` when they match.
-//! - Step 5 — read document: reads the current file from disk into `document`.
 //! - Serializes `PreflightOutput` as pretty JSON to stdout; all diagnostic
 //!   messages go to stderr.
 //! - `check_layout()`: inspects the current tmux session for structural issues:
@@ -123,9 +122,6 @@ pub struct PreflightOutput {
     pub diff: Option<String>,
     /// True when the snapshot matches the document (no new user input).
     pub no_changes: bool,
-    /// Full document content at HEAD (current file on disk).
-    /// Always `null` — use `agent-doc read <FILE>` to fetch.
-    pub document: Option<String>,
     /// Changes detected in linked documents since last cycle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub linked_changes: Vec<RelatedDocChange>,
@@ -458,10 +454,6 @@ pub fn run(file: &Path) -> Result<()> {
     let slash_commands = parsed_commands.skill_commands;
     let builtin_commands = parsed_commands.builtin_commands;
 
-    // Step 5: document field is always null — use `agent-doc read` to fetch.
-    eprintln!("[preflight] step 5: skipped (use `agent-doc read` to fetch)");
-    let document: Option<String> = None;
-
     let output = PreflightOutput {
         layout_issues,
         recovered,
@@ -469,7 +461,6 @@ pub fn run(file: &Path) -> Result<()> {
         claims,
         diff: diff_result,
         no_changes,
-        document,
         linked_changes,
         baseline_file,
         diff_type: classification
@@ -889,7 +880,6 @@ mod tests {
             claims: vec!["foo".to_string()],
             diff: Some("+new line\n".to_string()),
             no_changes: false,
-            document: Some("# Doc\n".to_string()),
             linked_changes: vec![],
             baseline_file: None,
             diff_type: None,
@@ -906,7 +896,7 @@ mod tests {
         assert_eq!(parsed["claims"][0], "foo");
         assert_eq!(parsed["no_changes"], false);
         assert!(parsed["diff"].as_str().is_some());
-        assert_eq!(parsed["document"], "# Doc\n");
+        assert!(parsed.get("document").is_none(), "document field must be absent");
     }
 
     #[test]
@@ -918,7 +908,6 @@ mod tests {
             claims: vec![],
             diff: None,
             no_changes: true,
-            document: Some("content".to_string()),
             linked_changes: vec![],
             baseline_file: None,
             diff_type: None,
@@ -957,7 +946,6 @@ mod tests {
             claims: vec![],
             diff: None,
             no_changes: true,
-            document: Some("content".to_string()),
             linked_changes: vec![],
             baseline_file: None,
             diff_type: None,
@@ -1051,7 +1039,6 @@ mod tests {
             claims: vec![],
             diff: None,
             no_changes: true,
-            document: Some("content".to_string()),
             linked_changes: vec![],
             baseline_file: Some("/tmp/baseline.md".to_string()),
             diff_type: None,
@@ -1074,7 +1061,6 @@ mod tests {
             claims: vec![],
             diff: None,
             no_changes: true,
-            document: Some("content".to_string()),
             linked_changes: vec![],
             baseline_file: None,
             diff_type: None,
@@ -1097,7 +1083,6 @@ mod tests {
             claims: vec![],
             diff: Some("+go\n".to_string()),
             no_changes: false,
-            document: Some("content".to_string()),
             linked_changes: vec![],
             baseline_file: None,
             diff_type: Some("approval".to_string()),
@@ -1121,7 +1106,6 @@ mod tests {
             claims: vec![],
             diff: None,
             no_changes: true,
-            document: Some("content".to_string()),
             linked_changes: vec![],
             baseline_file: None,
             diff_type: None,
@@ -1145,7 +1129,6 @@ mod tests {
             claims: vec![],
             diff: Some("+line\n".to_string()),
             no_changes: false,
-            document: Some("content".to_string()),
             linked_changes: vec![],
             baseline_file: None,
             diff_type: None,
@@ -1168,7 +1151,6 @@ mod tests {
             claims: vec![],
             diff: None,
             no_changes: true,
-            document: Some("content".to_string()),
             linked_changes: vec![],
             baseline_file: None,
             diff_type: None,
@@ -1194,7 +1176,6 @@ mod tests {
             claims: vec![],
             diff: Some(diff.to_string()),
             no_changes: false,
-            document: Some("ctx\n/clear\n".to_string()),
             linked_changes: vec![],
             baseline_file: None,
             diff_type: None,
@@ -1208,5 +1189,78 @@ mod tests {
         // /clear is a built-in — appears in builtin_commands, not slash_commands
         assert_eq!(parsed["builtin_commands"][0], "/clear");
         assert!(parsed["slash_commands"].is_null() || parsed["slash_commands"].as_array().map_or(true, |a| a.is_empty()));
+    }
+
+    #[test]
+    fn preflight_output_no_document_field() {
+        // The `document` field was removed — it must not appear in serialized JSON.
+        // Having it would send full document content to the agent every cycle,
+        // wasting tokens on every invocation.
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: None,
+            no_changes: true,
+            linked_changes: vec![],
+            baseline_file: None,
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parsed.get("document").is_none(),
+            "document key must be absent from preflight JSON — it would waste tokens on every cycle"
+        );
+    }
+
+    #[test]
+    fn preflight_output_no_large_content() {
+        // Regression: preflight JSON must not embed document content.
+        // Any field containing the full file body would be sent to the agent
+        // on every cycle, burning tokens proportional to document size.
+        let large_content = "x".repeat(10_000);
+        let output = PreflightOutput {
+            layout_issues: vec![],
+            recovered: false,
+            committed: false,
+            claims: vec![],
+            diff: Some(format!("+{large_content}")), // diff can include content
+            no_changes: false,
+            linked_changes: vec![],
+            baseline_file: Some("/tmp/baseline.md".to_string()),
+            diff_type: None,
+            diff_type_reason: None,
+            annotated_diff: None,
+            slash_commands: vec![],
+            builtin_commands: vec![],
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        // Only `diff` may contain the large content (it's the actual user change).
+        // No OTHER field should contain it.
+        let diff_str = parsed["diff"].as_str().unwrap_or("");
+        for (key, val) in parsed.as_object().unwrap() {
+            if key == "diff" {
+                continue;
+            }
+            let val_str = val.to_string();
+            assert!(
+                !val_str.contains(&large_content),
+                "field `{key}` contains large content — this would waste tokens on every preflight cycle"
+            );
+            assert!(
+                val_str.len() < 1_000 || key == "annotated_diff",
+                "field `{key}` is suspiciously large ({} bytes) — preflight should not embed document content",
+                val_str.len()
+            );
+        }
+        // Diff itself is allowed to contain the content
+        assert!(diff_str.contains(&large_content));
     }
 }

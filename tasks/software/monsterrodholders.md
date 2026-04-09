@@ -565,7 +565,7 @@ Fix:
 [root@oddball-business app]# ./scripts/certbot-init.sh
 ./scripts/certbot-init.sh: line 8: DOMAIN: Set DOMAIN in .env
 ```
-### Re: DOMAIN set but script still fails (HEAD)
+### Re: DOMAIN set but script still fails
 
 `$DOMAIN` is in the shell but not exported — child processes (the script) don't inherit it. `source .env` sets variables in the current shell only.
 
@@ -591,14 +591,68 @@ export CERTBOT_EMAIL=rberkes@gmail.com
 ```
 
 Note: Docker Compose handles `KEY=VALUE` (no export) natively, so adding `export` doesn't break it.
-<!-- agent:boundary:824b64ec -->
+
+```
+[root@oddball-business app]# ./scripts/certbot-init.sh
+Unable to find image 'certbot/certbot:latest' locally
+latest: Pulling from certbot/certbot
+1799ce2dd17e: Pull complete
+de19b7a249e5: Pull complete
+4bd2d3896265: Pull complete
+bde296103a2e: Pull complete
+0a9a5dfd008f: Pull complete
+61535b7ba0cb: Pull complete
+d4954f48dcc7: Pull complete
+1d7a63b094ee: Pull complete
+eac39555de92: Pull complete
+b2ee67ef6cca: Pull complete
+8be8a68a3e49: Pull complete
+Digest: sha256:78a7eaa40af657301e25731297b6e73646c695370d17e9bb03189fa82966d65c
+Status: Downloaded newer image for certbot/certbot:latest
+docker: Error response from daemon: failed to set up container networking: driver failed programming external connectivity on endpoint eager_sutherland (723fadfe9d4fdaf1c632badf72d20eaa919e2d46e37b161d337a20f8af156c5b): failed to bind host port 0.0.0.0:80/tcp: address already in use
+
+Run 'docker run --help' for more information
+```
+### Re: port 80 already in use (HEAD)
+
+Something else is holding port 80. Find it:
+
+```bash
+ss -tlnp | grep :80
+```
+
+Or:
+
+```bash
+docker ps
+```
+
+**Most likely:** a Docker container from a previous test run is still up. Stop all running containers:
+
+```bash
+docker stop $(docker ps -q)
+```
+
+Then retry:
+
+```bash
+./scripts/certbot-init.sh
+```
+
+If `ss` shows something non-Docker (like nginx or apache installed on the host), stop that service:
+
+```bash
+systemctl stop nginx   # or apache2
+```
+
+Certbot needs port 80 temporarily to complete the ACME HTTP challenge. Once the cert is issued, port 80 goes to the nginx container instead.
+<!-- agent:boundary:741146b8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Server step 7:** `export $(grep -v '^#' .env | xargs)` to make env vars available to scripts
-- [ ] **Server step 8:** `chmod 700 ./scripts/certbot-init.sh && ./scripts/certbot-init.sh`
+- [ ] **Server step 8 (in progress):** Stop whatever is using port 80 (`docker stop $(docker ps -q)` or `ss -tlnp | grep :80`), then retry `./scripts/certbot-init.sh`
 - [ ] **Server step 9:** `docker compose up -d`
 - [ ] **Server step 10:** Transfer + import backup, then run `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`; remove WP Engine mu-plugins
 - [ ] Verify site on `50.28.2.199.nip.io`

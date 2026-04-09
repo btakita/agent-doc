@@ -170,7 +170,7 @@ No fenced code context tracked. So `# bash_comment` inside a diff's fenced block
 2. Apply `strip_comments`/component parsing before classifying (already done for comment stripping, not for `#` detection)
 
 **Fix, if needed:** Port `find_code_ranges` into the diff classifier so `classify_diff` can mark lines as in-fence and skip heading-semantics for them. Currently there's no concrete bug from this, just a potential one.
-<!-- agent:boundary:41cdd240 -->
+<!-- agent:boundary:f0f9de7c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

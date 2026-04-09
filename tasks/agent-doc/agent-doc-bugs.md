@@ -91,7 +91,7 @@ v0.31.26 released:
 `resync.rs` currently only detects `WrongSession` when `frontmatter.tmux_session` is explicitly set. It should also check registered panes against `config::project_tmux_session()`. Panes in session 1 (while config says session 0) would trigger `WrongSession` → auto-relocated via `join-pane` to session 0. This makes the system self-healing without requiring `tmux_session` frontmatter in every document.
 
 **Immediate action:** Manually relocate `%57` now, or just kill+deregister mattpocock.md and re-run it from a session 0 terminal.
-<!-- agent:boundary:9ec95bd4 -->
+<!-- agent:boundary:592a3606 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

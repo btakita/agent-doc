@@ -695,7 +695,7 @@ systemctl status firewalld
 ```
 
 If it's active, firewalld and Docker are fighting over iptables. Either stop firewalld (`systemctl stop firewalld`) or configure Docker to use `iptables=false` and manage rules via firewalld — but stopping it is simpler for a single-admin server.
-<!-- agent:boundary:09eb7d96 -->
+<!-- agent:boundary:d0b77f15 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

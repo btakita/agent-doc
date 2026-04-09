@@ -853,7 +853,7 @@ The runbook also specifies full uninstall+restart when class structure changes (
 > Then install from disk → Restart IDE
 
 So the correct install flow for `0.2.54` is full uninstall, not reinstall-over-existing.
-<!-- agent:boundary:9e0e92f6 -->
+<!-- agent:boundary:117798ba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

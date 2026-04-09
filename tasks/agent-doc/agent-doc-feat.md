@@ -198,7 +198,7 @@ Fixed. Committed to `src/agent-doc` as `fix: skip fenced code blocks in add_head
 - `strip_head_markers_ignores_fenced_code_hash` — `# comment (HEAD)` inside fence is preserved verbatim
 
 All 20 git tests pass.
-<!-- agent:boundary:efdceeee -->
+<!-- agent:boundary:1ffe16bd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

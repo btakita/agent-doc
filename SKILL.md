@@ -56,6 +56,7 @@ The command outputs JSON to stdout:
   "claims": [],
   "diff": "unified diff text or null",
   "no_changes": false,
+  "baseline_file": "/path/to/.agent-doc/baselines/<hash>.md",
   "slash_commands": [],
   "builtin_commands": []
 }
@@ -64,6 +65,7 @@ The command outputs JSON to stdout:
 - If `no_changes` is `true`, tell the user nothing changed and stop
 - Print any `claims` entries to the console as a record
 - The `diff` field contains the user's changes since the last snapshot
+- **`baseline_file`** — use this path as `--baseline-file` when calling `agent-doc write`. It is taken AFTER preflight commits any gap, so it always reflects the stable pre-response file state. Do NOT save your own baseline before preflight — a pre-preflight copy may be stale if a concurrent write occurred between the copy and preflight.
 - **First cycle only:** if the document is not yet in context, run `agent-doc read <FILE>` to fetch HEAD content before responding
 - **Do NOT read the snapshot file directly** — use `agent-doc read <FILE>` if HEAD content is needed
 
@@ -191,11 +193,13 @@ The agent responds with **patch blocks** that target specific components.
 **IMPORTANT:** Do NOT use the Edit tool for write-back. Use `agent-doc write` via Bash.
 The Edit tool is prone to "file modified since read" errors when the user edits concurrently.
 
-**Baseline file:** Before generating your response (step 1), save the current document to a temp file:
+**Baseline file:** Use the `baseline_file` path from the preflight JSON output as `--baseline-file`. Do NOT save your own baseline before preflight — a pre-preflight copy may be stale if the file was modified concurrently between the copy and preflight. The preflight-saved baseline is always taken at a stable post-commit point.
+
+For streaming checkpoints, re-save the baseline after each flush:
 ```bash
 cp <FILE> /tmp/agent-doc-baseline-$$.md
 ```
-Then pass it as `--baseline-file` so the 3-way merge can detect user edits accurately.
+Pass this updated copy as `--baseline-file` for subsequent checkpoint writes.
 
 ### 3. Git integration
 

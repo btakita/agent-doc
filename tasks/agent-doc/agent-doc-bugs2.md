@@ -48,7 +48,7 @@ tmux kill-pane -t %41
 **Missing safeguard — stash pane eviction:** The existing fixes don't address *how panes get stashed in the first place*. A follow-up fix in `route.rs` could: when routing a new session for document X, if an existing stash pane already claims X, kill the stash pane and reuse the route rather than adding another one.
 
 ❯ ran the command. all ok?
-### Re: ran the command — all ok? (HEAD)
+### Re: ran the command — all ok?
 
 Not fully. %40 and %41 are gone, but **%43 and %46 are still running `agent-doc` in the stash window** (visible in this preflight's layout issues).
 
@@ -60,12 +60,33 @@ tmux kill-pane -t %46
 ```
 
 After that the stash window should be clean.
-<!-- agent:boundary:49f9df9e -->
+
+❯ Why do I need to kill these panes? The previous killing 6 tmux panes resulting in already running panes being killed.
+❯ Why are there now 2 kill-panes recommended?
+### Re: Why kill panes? Why only 2? (HEAD)
+
+**Why you keep having to kill panes:**
+
+The routing code in `route.rs` spawns a new tmux pane into the stash window every time a document session is opened, *without checking if one already exists for that document*. So:
+
+1. You open `/agent-doc agent-doc-bugs2.md` → new stash pane spawned
+2. You kill it
+3. You open it again → another new stash pane spawned
+
+Killing manually is whack-a-mole — the root bug keeps recreating them.
+
+**Why the count keeps changing (6 → 2 → 3):**
+
+The numbers I reported were just whatever happened to be in the stash window at that moment. Some of the original 6 may have been from older orphaned sessions. New ones appeared because the bug ran again between cycles.
+
+**The real fix:**
+
+Stash pane eviction in `route.rs` — before spawning a new pane for document X, check if a stash pane already claims X and kill it. That's what's in the pending list. Until that's in, killing panes manually achieves nothing lasting.
+<!-- agent:boundary:3ce84976 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Kill remaining stash panes: `tmux kill-pane -t %43 && tmux kill-pane -t %46`
-- [ ] Follow-up: stash pane eviction in `route.rs` — kill stash pane when routing new session for same doc
+- [ ] Implement stash pane eviction in `route.rs` — before spawning, kill any existing stash pane claiming the same document (this is the root fix; manual kills are whack-a-mole without it)
 <!-- /agent:pending -->

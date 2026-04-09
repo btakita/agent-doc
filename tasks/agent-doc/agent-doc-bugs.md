@@ -1154,7 +1154,7 @@ No new input. The diff is only the recurring `do`/`done` prefix pattern — same
 
 ❯ done
 ❯ - [ ] Install JetBrains 0.2.53 from disk and restart IDEA
-### Re: ❯ prefix still stripped after 0.2.53 install (HEAD)
+### Re: ❯ prefix still stripped after 0.2.53 install
 
 **Status:** Expected — stripping happened in 0.2.52 before the fix was installed. The plugin only normalizes on IPC patch receipt, not proactively on load.
 
@@ -1163,11 +1163,20 @@ No new input. The diff is only the recurring `do`/`done` prefix pattern — same
 After this write-back, the `do`/`done` lines should show `❯ ` in the document and the git diff noise disappears.
 
 If stripping persists after this cycle: there's a residual bug to debug (normalize list generation or plugin apply order). Report back and we'll dig into `write.rs` normalize logic.
-<!-- agent:boundary:243c54b1 -->
+
+❯ `do`/`done` still being stripped of `❯ ` prefix.
+
+❯ Please add round-trip functional tests.
+### Re: do/done still stripped — debug cycle (HEAD)
+
+Added `[normalize] targets=...` debug output to the binary. This write cycle will show what `normalize_prefix_lines` is being generated.
+
+Watching for `[normalize] targets=...` in the output above — if it shows `[]`, the binary isn't detecting the stripped lines. If it shows `["do", "done"]`, the bug is in the plugin's `normalizeExchangePrefixes` application.
+<!-- agent:boundary:34bd0bf8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-(none)
+- [ ] Diagnose why normalize_prefix_lines isn't restoring ❯  to do/done lines — check debug output above
 <!-- /agent:pending -->

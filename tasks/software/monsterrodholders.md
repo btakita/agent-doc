@@ -99,20 +99,109 @@ Then complete WordPress install at `https://monsterrodholders.com`.
 4. Configure daily backup cron: `0 2 * * * cd /path && source .env && ./scripts/backup.sh`
 
 ❯ commit + push
-### Re: commit + push (HEAD)
+### Re: commit + push
 
 Done.
 
 - `btakita/monsterrodholders-dev` — committed `.gitignore` (added `*.iml`), pushed to `origin/main`
 - `btakita/agent-loop` — updated submodule pointer, pushed to `origin/main`
-<!-- agent:boundary:7551927d -->
+
+❯ We are in the process of moving monsterrodholders.com to the new host.
+❯ I have a backup zip file.
+❯ There are many plugins that are unnecessary. Not sure which ones.
+❯ There's currently spam on the site.
+❯ Is it possible to keep the same passwords for the existing user accounts?
+❯ Please give me instructions on the migration.
+### Re: WordPress migration to new Docker host (HEAD)
+
+**User passwords are preserved** — hashed in `wp_users.user_pass`, migrating the DB keeps all accounts intact.
+
+#### What format is the backup zip?
+
+The process depends on how it was created:
+
+- **All-in-One WP Migration** (`.wpress` file) — easiest path, plugin handles everything
+- **cPanel/Plesk backup** — contains separate files + SQL dump
+- **Manual zip** — wp-content folder + SQL dump
+
+Which is it? If unsure, open the zip and check for a `.wpress` file or a `.sql`/`.sql.gz` file inside.
+
+---
+
+#### Path A: All-in-One WP Migration backup
+
+```bash
+cd src/monsterrodholders-dev
+cp .env.example .env    # fill in passwords + domain
+docker compose up -d
+
+# Install plugin
+./scripts/wp.sh plugin install all-in-one-wp-migration --activate
+
+# Copy backup into container
+docker compose run --rm wordpress sh -c \
+  'mkdir -p /var/www/html/wp-content/ai1wm-backups'
+docker cp /path/to/backup.wpress \
+  $(docker compose ps -q wordpress):/var/www/html/wp-content/ai1wm-backups/
+
+# Import
+./scripts/wp.sh ai1wm restore backup.wpress --yes
+
+# Update URLs if domain changed
+./scripts/wp.sh search-replace 'https://old-domain.com' 'https://monsterrodholders.com' --all-tables
+./scripts/wp.sh cache flush
+```
+
+#### Path B: Manual zip (files + SQL dump)
+
+```bash
+cd src/monsterrodholders-dev
+cp .env.example .env
+source .env
+docker compose up -d
+
+# Replace wp-content
+docker compose run --rm wordpress sh -c 'rm -rf /var/www/html/wp-content'
+docker cp /path/to/wp-content $(docker compose ps -q wordpress):/var/www/html/
+docker compose exec wordpress chown -R www-data:www-data /var/www/html/wp-content
+
+# Import database
+gunzip -c /path/to/backup.sql.gz | docker compose exec -T db mariadb \
+  -u"${WORDPRESS_DB_USER}" -p"${WORDPRESS_DB_PASSWORD}" "${WORDPRESS_DB_NAME}"
+
+# Update URLs
+./scripts/wp.sh search-replace 'https://old-domain.com' 'https://monsterrodholders.com' --all-tables
+./scripts/wp.sh cache flush
+```
+
+#### Clean up spam
+
+```bash
+./scripts/wp.sh comment list --status=spam --format=count
+./scripts/wp.sh comment delete $(./scripts/wp.sh comment list --status=spam --format=ids) --force
+```
+
+#### Audit plugins
+
+```bash
+./scripts/wp.sh plugin list
+# Share the output — I can identify which to remove
+```
+
+#### User passwords
+
+Passwords are hashed (bcrypt/phpass) in the DB — all existing users keep their passwords after migration.
+<!-- agent:boundary:5f453473 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Server: clone repo, fill `.env`, run `certbot-init.sh`, `docker compose up -d`
-- [ ] Server: complete WordPress install at https://monsterrodholders.com
+- [ ] Confirm backup format (.wpress / cPanel / manual zip)
+- [ ] Server: clone repo, fill `.env`, provision SSL, `docker compose up -d`
+- [ ] Import backup using appropriate path (A or B above)
+- [ ] Clean up spam comments post-import
+- [ ] Run `./scripts/wp.sh plugin list` and share output for plugin audit
 - [ ] Server: install + activate Redis Object Cache plugin
 - [ ] Server: set up cron jobs (SSL renewal + daily backup)
 <!-- /agent:pending -->

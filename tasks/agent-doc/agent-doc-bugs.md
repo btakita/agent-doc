@@ -1231,7 +1231,7 @@ The snapshot (computed from `content_ours` after binary normalization) DID have 
 6. Repeat
 
 So `❯ ` wasn't "stripped" by anything — it was never applied to the live document due to the missing IPC notification. The snapshot just diverged from the file.
-<!-- agent:boundary:12f16b4b -->
+<!-- agent:boundary:8a1b28a0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

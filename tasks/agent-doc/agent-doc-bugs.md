@@ -101,7 +101,7 @@ agent-doc commit src/session-share/tasks/claudescore.md
 **Stash window non-idle check:** Removed. The check flagged any pane in a `stash*` window running something other than an idle shell. But stash windows exist specifically to hold backgrounded sessions — `agent-doc` panes there are intentional.
 
 **Fix in `preflight.rs`:** Deleted Check 2 (stash window non-idle pane loop) plus the now-dead `IDLE_SHELLS` constant. Also simplified `WinInfo` struct to just `Vec<u32>` (only the window index is needed for Check 1). `make check` — 38 tests pass.
-### Re: clarification — claiming vs running (HEAD)
+### Re: clarification — claiming vs running
 
 Right — the distinction is:
 
@@ -113,7 +113,23 @@ The stash non-idle check was using the wrong signal (idle shell vs. not) instead
 The current fix (deleted Check 2 entirely) is correct: it removes the false positives. A follow-on "duplicate claims" registry check can be added as a separate issue.
 
 **Note:** fix is source-only — binary is still v0.31.24. Run `cargo install --path .` inside `src/agent-doc/` to pick it up locally, then verify before releasing v0.31.25.
-<!-- agent:boundary:45b649ec -->
+
+❯ I'm looking at `agent-doc preflight`. I notice that the entire document is sent. Does this consume context tokens every time agent-doc is run?
+❯ Also noticing `stash window 'stash' has non-idle pane %46 running 'agent-doc'`. Why?
+
+```
+● Bash(agent-doc preflight /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore.md 2>/dev/null)
+  ⎿  {
+       "layout_issues": [
+         "stash window 'stash' has non-idle pane %46 running 'agent-doc'",
+     … +270 lines (ctrl+o to expand)
+```
+### Re: context tokens + stash window (HEAD)
+
+**Does preflight consume context tokens?** Yes. The `document` field in the preflight JSON contains the full document — for claudescore.md that's 26KB of content landing in the tool result every `/agent-doc` run. It's a real cost. The tradeoff: no separate `Read` tool call needed. For very large documents, an optimization would be to skip sending `document` when only the `diff` matters (e.g., when `no_changes=false` and the diff is small). Not implemented yet.
+
+**Stash window still showing:** The fix is in source (`preflight.rs`) but the running binary is still v0.31.24 — `cargo install --path .` hasn't been run since the edit. Once installed, the stash layout issues will disappear from preflight output.
+<!-- agent:boundary:bbf316f3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -123,4 +139,5 @@ The current fix (deleted Check 2 entirely) is correct: it removes the false posi
 - [ ] `cargo install --path .` in src/agent-doc to install stash-fix locally
 - [ ] Release v0.31.25 with stash fix
 - [ ] Follow-on: add "duplicate document claims" check to `check_layout()`
+- [ ] Optimization: skip sending `document` field when diff is sufficient (large doc perf)
 <!-- /agent:pending -->

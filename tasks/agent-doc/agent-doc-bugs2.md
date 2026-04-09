@@ -65,7 +65,7 @@ between two stash panes pointing at the same document).
 ```
 
 Remaining diff (boundary hash `0f29e90b` → `cabc81e1` + `(HEAD)` removal) reflects the second session taking over document ownership — that's now committed too.
-<!-- agent:boundary:b0518efd -->
+<!-- agent:boundary:99173564 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

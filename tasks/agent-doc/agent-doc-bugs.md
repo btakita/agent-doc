@@ -483,7 +483,7 @@ Note: the `snapshot_saved_file_ipc` and `ipc_file_delivered` entries will appear
 
 Why is the `### Re: the diff content + logging added` response block uncommitted? We need to stop doing this. If there are race conditions, we need a low level solution with the snapshots. Should we use CRDT with the snapshots?
 
-do
+❯ do
 - [ ] Follow-on: duplicate claims check in `check_layout()`
 Look at src/session-share/tasks/claudescore.md.
 The an uncommitted patch include the `<!-- patch:pending -->` section at the end of the document. Something is very wrong. Use opus.
@@ -519,7 +519,7 @@ Legacy entries (`file` is empty) are skipped. Added 4 tests:
 
 All 4 pass. Built + installed v0.31.25.
 
-do
+❯ do
 - [ ] Fix snapshot saved as actual post-merge disk state instead of `content_ours` (eliminates checkpoint baseline drift)
 
 Please review this last response patch in this document. There are too many changes. Including committed `❯ ` prefixes for a previous response patch coming from Claude. It seems there are issues with multiple snapshots overwriting each other and missing content.
@@ -618,7 +618,7 @@ The reconciliation is the safety net: even wrong snapshots get corrected. The co
 Tell me the mechanics of the last issue. Where we had a response patch committing then being removed in the next commit and ending up appearing again as uncommitted on the next response patch?
 
 The 30+ snapshot write sites are worth auditing for `content_ours` vs `final_content` consistency. Most non-response paths (compact, convert, extract) are already correct — they save exactly the document they modified.
-### Re: "There are many paths" + ghost-reappearance mechanics (HEAD)
+### Re: "There are many paths" + ghost-reappearance mechanics
 
 > There are many paths.
 
@@ -647,13 +647,49 @@ If the next response uses stale baseline (`S`), `content_ours = S + R₂` — no
 **The v0.31.25 fix:** IPC paths now read the actual post-flush file (200ms delay + disk read) instead of computing `content_ours`. Snapshot = file. No gap. No stale-snapshot gap commits. The domino can't start.
 
 The original trigger in the ❯ prefix case: normalization ran on lines derived from `content_ours` (built from the wrong baseline). The snapshot accumulated a version of the file the actual disk never had. Once snapshot ≠ file, every subsequent cycle's gap commit could roll back correct content.
-<!-- agent:boundary:1318bd58 -->
+
+❯ do
+❯ - [ ] Audit remaining `content_ours` snapshot saves in run.rs, stream.rs, write.rs:1288
+### Re: audit — content_ours snapshot saves in run.rs, stream.rs, write.rs:1288 (HEAD)
+
+**write.rs:1288 — `apply_stream_from_string`**
+
+Dead code. No callers exist outside the module. `recover.rs` uses `apply_template_from_string` and `apply_append_from_string` but never `apply_stream_from_string`. The function saves `content_ours` (not `final_content`) and has the same stale-baseline risk as the old IPC paths. Since it's unreachable, it's low priority — but should be removed or fixed before enabling.
+
+**run.rs:214 — `run_inline`**
+
+Intentional design. The module doc comment is explicit:
+
+> The snapshot saved after a successful run always reflects `content_ours` (baseline + response), never `final_content`, so concurrent user edits are detectable on the next diff.
+
+`content_ours = file_read_at_start + response`. Baseline = fresh disk read, not a stale snapshot. Safe as long as the old snapshot was accurate going in. `agent-doc run` is not used by the current SKILL, so this path doesn't affect our workflow.
+
+**stream.rs:357 — end-of-stream snapshot save**
+
+Same intentional rationale. `content_ours = apply_patches(baseline, final_response, replace mode)`. Baseline is the one loaded at stream-session start (accurate at that point). Concurrent user edits during the stream are intentionally NOT included so they surface as detectable additions in the next diff. `agent-doc stream` is a separate command from `agent-doc write --stream`; the SKILL doesn't use it.
+
+**`apply_append_from_string` and `apply_template_from_string` (recover paths)**
+
+Both read a fresh file as their baseline (`content = std::fs::read_to_string(file)` at function start). `content_ours = file + response`. Same intentional tradeoff — concurrent edits during recovery show up as user additions next cycle. Attribution noise only, no content loss.
+
+**Summary**
+
+| Site | Status | Risk |
+|------|--------|------|
+| `apply_stream_from_string` write.rs:1288 | Dead code | Stale-baseline risk if ever called — remove or fix |
+| `run.rs:214` | Intentional | None for SKILL; run_inline not used by skill workflow |
+| `stream.rs:357` | Intentional | None for SKILL; stream command not used by skill workflow |
+| `apply_append_from_string` write.rs:1326 | Intentional (recover) | Attribution noise only |
+| `apply_template_from_string` write.rs:1360 | Intentional (recover) | Attribution noise only |
+
+No active bugs in the current SKILL workflow. The one actionable item is removing `apply_stream_from_string` (dead code, stale-baseline risk if enabled).
+<!-- agent:boundary:ad16a100 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Audit remaining `content_ours` snapshot saves in run.rs, stream.rs, write.rs:1288
+- [ ] Remove or fix `apply_stream_from_string` (dead code, stale-baseline risk if enabled)
 - [ ] Consider: plugin ACK protocol to include applied content (hard guarantee for IPC)
 - [ ] Bump to v0.31.26, update VERSIONS.md, publish
 <!-- /agent:pending -->

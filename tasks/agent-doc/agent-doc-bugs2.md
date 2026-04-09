@@ -186,6 +186,10 @@ Yes, implemented in `git.rs`.
 | Green | New user input | Not yet staged |
 
 No more multi-session accumulation. All tests pass, binary reinstalled.
+
+Please fix:
+- /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md
+- /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore.md
 <!-- agent:boundary:a3c11d97 -->
 <!-- /agent:exchange -->
 

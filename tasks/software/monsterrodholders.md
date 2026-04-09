@@ -472,7 +472,7 @@ nip.io is a wildcard DNS service: `<ip>.nip.io` resolves to `<ip>`. If your serv
 
 nip.io is simpler (zero setup), DuckDNS is easier to remember. Either works.
 ❯ Will Docker + wordpress serve pages with the nip.io domain?
-### Re: Docker + WordPress with nip.io (HEAD)
+### Re: Docker + WordPress with nip.io
 
 Yes — with one WordPress-specific step.
 
@@ -500,7 +500,24 @@ docker exec wordpress wp search-replace \
 ```
 
 Then flip DNS.
-<!-- agent:boundary:62cd50fb -->
+
+❯ Can we have multiple domains pointing to the wordpress site?
+### Re: multiple domains pointing to WordPress (HEAD)
+
+**Short answer:** WordPress has one primary domain. Multiple domains can point at the server, but they all redirect to that one domain — not serve separate content.
+
+**What works:**
+- `www.monsterrodholders.com` → redirects to `monsterrodholders.com` (nginx handles the redirect, WordPress never sees the www)
+- Any other domain → can also redirect to `monsterrodholders.com` via nginx 301
+
+**What doesn't work without plugins:** Two domains serving the same WordPress content simultaneously. WordPress stores one `siteurl` and redirects anything that doesn't match.
+
+**For the test→production workflow:** nip.io is temporary — once you `wp search-replace` to `monsterrodholders.com`, the nip.io URL stops working. That's fine; it was just for verification. You don't keep both alive.
+
+**If Ron wants a permanent staging URL after launch:** easiest is a separate server (or subdomain like `staging.monsterrodholders.com`) with its own WordPress install — that's a future problem, not this migration.
+
+For now: test on nip.io → verify → flip to `monsterrodholders.com` → done. One domain, one site.
+<!-- agent:boundary:466abb42 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

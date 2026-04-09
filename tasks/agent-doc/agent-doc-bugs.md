@@ -552,7 +552,7 @@ The IPC primary path already read actual file contents after plugin ACK — now 
 Tests pass, release build + `cargo install` done. v0.31.25 now installed with the fix.
 Please repair src/session-share/tasks/claudescore.md.
 Would the latest change fix the issue in src/session-share/tasks/claudescore.md?
-### Re: claudescore.md repair + root cause (IPC snapshot was wrong too) (HEAD)
+### Re: claudescore.md repair + root cause (IPC snapshot was wrong too)
 
 **Why the `❯ ` ghost diffs persisted despite the first fix:**
 
@@ -574,11 +574,53 @@ Both IPC paths had the same stale-baseline contamination problem. Since `content
 **Would the latest change fix claudescore.md's original issue?** Yes — the original issue was that `content_ours` was built from a stale snapshot as baseline. With the fix, the IPC paths read the actual post-write file, so even a stale baseline can't contaminate future snapshots.
 
 All 753 tests pass. `cargo install` done.
-<!-- agent:boundary:c765d23e -->
+
+How many write paths are there into the snapshot?
+How can we guarantee that adding content won't cause content loss into the snapshot?
+### Re: snapshot write paths + content-loss guarantee (HEAD)
+
+**How many write paths into the snapshot?**
+
+In `write.rs` alone there are 11 `snapshot::save` calls (excluding tests and crdt/pre_response saves). Across the codebase: 30+ locations. The ones relevant to agent responses:
+
+| Path | File | What it saves | Status |
+|------|------|---------------|--------|
+| `run_inline` | write.rs:641 | `final_content` | ✓ fixed |
+| `run_template` | write.rs:728 | `final_content` | ✓ fixed |
+| `run_stream` disk | write.rs:1061 | `final_content` | ✓ fixed |
+| `run_stream` IPC timeout fallback | write.rs:1245 | `final_content` | ✓ fixed |
+| Socket IPC | write.rs:1452 | file read after 200ms | ✓ fixed |
+| File IPC (`write_ipc_and_poll`) | write.rs:1735 | `current_on_disk` | ✓ fixed |
+| Old inline IPC path | write.rs:1202 | file read (no delay) | ⚠ timing risk |
+| `apply_append_from_string` (recover) | write.rs:1326 | `content_ours` | ✓ safe (baseline = current file) |
+| `apply_template_from_string` (recover) | write.rs:1360 | `content_ours` | ✓ safe (baseline = current file) |
+| `apply_patches_from_stream_internal` | write.rs:1288 | `content_ours` | needs investigation |
+| `agent-doc run` | run.rs:214 | `content_ours` | ⚠ stale-baseline risk |
+| `agent-doc stream` flush | stream.rs:357 | `content_ours` | ⚠ stale-baseline risk |
+
+The recover paths (`apply_append_from_string`, `apply_template_from_string`) are safe because their baseline IS the current file content — `content_ours = file + response` is always accurate.
+
+The `agent-doc run` and `agent-doc stream` paths are not used by the current SKILL (which uses `agent-doc write --stream`). They could be fixed with the same pattern.
+
+**How can we guarantee adding content won't cause content loss?**
+
+Currently: there is no hard guarantee for IPC paths. The 200ms delay is a heuristic — if JetBrains hasn't flushed when we read, we get stale content. The guarantee is:
+
+- **Non-IPC paths:** `final_content` is what was atomically written to disk by `atomic_write`. Snapshot = file, always. Hard guarantee.
+- **IPC paths:** 200ms delay + read. Soft guarantee. If the read is too early, the snapshot lags — but preflight's commit step detects and reconciles the gap on the next cycle.
+
+The reconciliation is the safety net: even wrong snapshots get corrected. The cost is a cycle of ghost diffs appearing as `[user+]` in the annotated diff. No content is lost — it's attribution noise.
+
+**For a hard guarantee on IPC paths:** the plugin would need to send back the final applied content in its ACK response. That's a protocol change (plugin sends content, not just ack). Alternatively, write directly to disk (bypass plugin) and accept the IDE "externally modified" dialog.
+
+The 30+ snapshot write sites are worth auditing for `content_ours` vs `final_content` consistency. Most non-response paths (compact, convert, extract) are already correct — they save exactly the document they modified.
+<!-- agent:boundary:92cac3a9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Audit remaining `content_ours` snapshot saves in run.rs, stream.rs, write.rs:1288
+- [ ] Consider: plugin ACK protocol to include applied content (hard guarantee for IPC)
 - [ ] Bump to v0.31.26, update VERSIONS.md, publish
 <!-- /agent:pending -->

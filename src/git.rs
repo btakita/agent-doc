@@ -388,27 +388,43 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
     false
 }
 
+/// Returns true if `trimmed` (already `trim_start()`-ed) opens or closes a fenced code block.
+/// Matches 3+ consecutive backticks or tildes at the start of the trimmed line.
+fn is_fence_marker(trimmed: &str) -> bool {
+    match trimmed.chars().next() {
+        Some('`') => trimmed.chars().take_while(|&c| c == '`').count() >= 3,
+        Some('~') => trimmed.chars().take_while(|&c| c == '~').count() >= 3,
+        _ => false,
+    }
+}
+
 /// Strip ` (HEAD)` suffix from markdown heading lines and bold-text pseudo-headers.
 fn strip_head_markers(content: &str) -> String {
-    let mut lines: Vec<&str> = Vec::new();
+    let mut result_lines: Vec<&str> = Vec::new();
+    let mut in_fence = false;
     for line in content.lines() {
-        lines.push(line);
-    }
-    let result: String = lines.iter().map(|line| {
         let trimmed = line.trim_start();
-        if let Some(stripped) = line.strip_suffix(" (HEAD)") {
-            // Strip from markdown headings
-            if trimmed.starts_with('#') {
-                return stripped;
-            }
-            // Strip from bold-text pseudo-headers (e.g., "**Re: Foo** (HEAD)")
-            let without_suffix = stripped.trim_end();
-            if trimmed.starts_with("**") && without_suffix.trim_start().ends_with("**") {
-                return stripped;
+        if is_fence_marker(trimmed) {
+            in_fence = !in_fence;
+        }
+        if !in_fence {
+            if let Some(stripped) = line.strip_suffix(" (HEAD)") {
+                // Strip from markdown headings
+                if trimmed.starts_with('#') {
+                    result_lines.push(stripped);
+                    continue;
+                }
+                // Strip from bold-text pseudo-headers (e.g., "**Re: Foo** (HEAD)")
+                let without_suffix = stripped.trim_end();
+                if trimmed.starts_with("**") && without_suffix.trim_start().ends_with("**") {
+                    result_lines.push(stripped);
+                    continue;
+                }
             }
         }
-        line
-    }).collect::<Vec<&str>>().join("\n");
+        result_lines.push(line);
+    }
+    let result = result_lines.join("\n");
     if content.ends_with('\n') { format!("{}\n", result) } else { result }
 }
 
@@ -427,9 +443,13 @@ fn add_head_marker(content: &str, file: &Path) -> String {
     // Step 1: Strip ALL existing (HEAD) markers from heading lines and bold-text pseudo-headers.
     // This prevents accumulation across commit cycles.
     let mut cleaned_lines: Vec<String> = Vec::new();
+    let mut in_fence = false;
     for line in content.lines() {
         let trimmed = line.trim_start();
-        if trimmed.ends_with(" (HEAD)") {
+        if is_fence_marker(trimmed) {
+            in_fence = !in_fence;
+        }
+        if !in_fence && trimmed.ends_with(" (HEAD)") {
             if trimmed.starts_with('#') {
                 cleaned_lines.push(line[..line.len() - 7].to_string());
                 continue;
@@ -474,10 +494,13 @@ fn add_head_marker(content: &str, file: &Path) -> String {
     // Step 2: Collect all heading positions from cleaned content
     let mut heading_positions: Vec<(usize, usize, usize)> = Vec::new();
     let mut offset = 0usize;
+    let mut in_fence = false;
     for line in cleaned.lines() {
         let trimmed = line.trim_start();
         let line_end = offset + line.len();
-        if trimmed.starts_with('#') {
+        if is_fence_marker(trimmed) {
+            in_fence = !in_fence;
+        } else if !in_fence && trimmed.starts_with('#') {
             let level = trimmed.chars().take_while(|c| *c == '#').count();
             if level <= 6 && trimmed.len() > level && trimmed.as_bytes()[level] == b' ' {
                 heading_positions.push((offset, line_end, level));
@@ -515,9 +538,12 @@ fn add_head_marker(content: &str, file: &Path) -> String {
         // Count how many times each heading text appears in HEAD
         let head_heading_counts: std::collections::HashMap<&str, usize> = {
             let mut counts = std::collections::HashMap::new();
+            let mut in_fence = false;
             for line in hc.lines() {
                 let trimmed = line.trim_start();
-                if trimmed.starts_with('#') {
+                if is_fence_marker(trimmed) {
+                    in_fence = !in_fence;
+                } else if !in_fence && trimmed.starts_with('#') {
                     let level = trimmed.chars().take_while(|c| *c == '#').count();
                     if level <= 6 && trimmed.len() > level && trimmed.as_bytes()[level] == b' ' {
                         *counts.entry(line).or_insert(0) += 1;
@@ -860,6 +886,35 @@ mod tests {
         let input = "**Re: Something** (HEAD)\nSome text.\n";
         let result = strip_head_markers(input);
         assert_eq!(result, "**Re: Something**\nSome text.\n");
+    }
+
+    #[test]
+    fn add_head_marker_ignores_fenced_code_hash() {
+        // A line starting with `#` inside a fenced code block must NOT get (HEAD).
+        // The last real markdown heading should get it instead.
+        let content = "### Re: Implementation\nSome response.\n```yaml\n# this is a yaml comment\nkey: value\n```\n";
+        let result = add_head_marker(content, Path::new("/nonexistent/file.md"));
+        assert!(
+            result.contains("### Re: Implementation (HEAD)"),
+            "real heading should get (HEAD), got:\n{result}"
+        );
+        assert!(
+            !result.contains("# this is a yaml comment (HEAD)"),
+            "fenced code comment must NOT get (HEAD), got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn strip_head_markers_ignores_fenced_code_hash() {
+        // strip_head_markers should not remove content inside fenced code blocks.
+        // If somehow `# comment (HEAD)` ended up in a fence, it should be left alone.
+        let input = "### Re: Answer (HEAD)\nResponse.\n```bash\n# comment (HEAD)\n```\n";
+        let result = strip_head_markers(input);
+        assert_eq!(
+            result,
+            "### Re: Answer\nResponse.\n```bash\n# comment (HEAD)\n```\n",
+            "fenced (HEAD) must be preserved, got:\n{result}"
+        );
     }
 
     #[test]

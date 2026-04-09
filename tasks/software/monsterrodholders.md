@@ -191,7 +191,7 @@ gunzip -c /path/to/backup.sql.gz | docker compose exec -T db mariadb \
 #### User passwords
 
 Passwords are hashed (bcrypt/phpass) in the DB — all existing users keep their passwords after migration.
-<!-- agent:boundary:5f453473 -->
+<!-- agent:boundary:1b113f07 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

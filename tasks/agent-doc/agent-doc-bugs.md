@@ -810,7 +810,7 @@ Then verify:
 2. Check the timing log: should see `[write] snapshot from ack-content sidecar` instead of `file_read`
 
 Confirm here when verified — then I'll proceed with Task 7 release.
-<!-- agent:boundary:9c07cbb7 -->
+<!-- agent:boundary:a3ab55fe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

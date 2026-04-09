@@ -101,7 +101,7 @@ agent-doc commit src/session-share/tasks/claudescore.md
 **Stash window non-idle check:** Removed. The check flagged any pane in a `stash*` window running something other than an idle shell. But stash windows exist specifically to hold backgrounded sessions — `agent-doc` panes there are intentional.
 
 **Fix in `preflight.rs`:** Deleted Check 2 (stash window non-idle pane loop) plus the now-dead `IDLE_SHELLS` constant. Also simplified `WinInfo` struct to just `Vec<u32>` (only the window index is needed for Check 1). `make check` — 38 tests pass.
-<!-- agent:boundary:7413fba5 -->
+<!-- agent:boundary:9ec07593 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

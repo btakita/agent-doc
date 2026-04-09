@@ -531,7 +531,7 @@ chmod 700 ./scripts/certbot-init.sh
 - `700` — only root reads or runs it, which is all you need on a single-admin root server
 
 The script touches Docker and certbot as root. No other user needs to see or execute it. `700` is the right habit for any script that runs infrastructure commands, even when there are no other users.
-<!-- agent:boundary:2d74bf35 -->
+<!-- agent:boundary:c7287f88 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

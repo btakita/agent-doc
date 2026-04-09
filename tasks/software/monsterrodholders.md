@@ -519,7 +519,7 @@ Then flip DNS.
 For now: test on nip.io → verify → flip to `monsterrodholders.com` → done. One domain, one site.
 
 ❯ Should I call `chmod a+x ./scripts/certbot-init.sh` or more strict permissions?
-### Re: certbot-init.sh permissions (HEAD)
+### Re: certbot-init.sh permissions
 
 Use `chmod 700`:
 
@@ -531,13 +531,40 @@ chmod 700 ./scripts/certbot-init.sh
 - `700` — only root reads or runs it, which is all you need on a single-admin root server
 
 The script touches Docker and certbot as root. No other user needs to see or execute it. `700` is the right habit for any script that runs infrastructure commands, even when there are no other users.
-<!-- agent:boundary:c7287f88 -->
+
+```
+[root@oddball-business app]# source .env
+[root@oddball-business app]# ./scripts/certbot-init.sh
+./scripts/certbot-init.sh: line 8: DOMAIN: Set DOMAIN in .env
+```
+### Re: DOMAIN not set (HEAD)
+
+`DOMAIN` isn't in your `.env` yet. The script checks for it on line 8 with `${DOMAIN:?...}` — fails fast if unset.
+
+Fix:
+
+1. Get your server's public IP:
+   ```bash
+   curl ifconfig.me
+   ```
+
+2. Add to `.env` (open with `nano .env`):
+   ```
+   DOMAIN=<ip>.nip.io
+   ```
+
+3. Re-source and retry:
+   ```bash
+   source .env
+   ./scripts/certbot-init.sh
+   ```
+<!-- agent:boundary:90a726c0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Server step 7:** `touch .env && chmod 600 .env`, fill in values — use `openssl rand -base64 32` for passwords, `CERTBOT_EMAIL=rberkes@gmail.com`, set `DOMAIN=<server-ip>.nip.io` for test first
+- [ ] **Server step 7:** Add `DOMAIN=<server-ip>.nip.io` to `.env`, then `source .env`
 - [ ] **Server step 8:** `chmod 700 ./scripts/certbot-init.sh && ./scripts/certbot-init.sh`
 - [ ] **Server step 9:** `docker compose up -d`
 - [ ] **Server step 10:** Transfer + import backup, then run `wp search-replace 'https://monsterrodholders.com' 'https://<ip>.nip.io' --all-tables`; remove WP Engine mu-plugins

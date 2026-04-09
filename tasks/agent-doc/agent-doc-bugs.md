@@ -44,7 +44,7 @@ Sessions v0.31.18–v0.31.24. Key work:
 Open: 2-pane layout loss when navigating to non-agent-doc file in editor (tmux collapses to 1 pane). Not yet fixed.
 
 ❯ Please fix https://github.com/btakita/agent-doc/actions/runs/24167784102
-### Re: CI fix — collapsible_if in git.rs (HEAD)
+### Re: CI fix — collapsible_if in git.rs
 
 Clippy error in `src/git.rs:410` — nested `if` that CI flags as `collapsible_if` on Rust 1.94.1:
 
@@ -59,7 +59,14 @@ if !in_fence && let Some(stripped) = line.strip_suffix(" (HEAD)") { ... }
 ```
 
 Fixed, all 743 tests pass. Committed as `7fc7905`, pushed — CI should be green.
-<!-- agent:boundary:9c37662d -->
+
+❯ Do we need a new version or is this harmless for the current release?
+### Re: new version needed? (HEAD)
+
+No re-release needed. The published v0.31.24 binary (crates.io/PyPI/GitHub Release) was built from `1305ce9` — before `7fc7905` was introduced. The clippy issue only exists in main post-release, so published users are unaffected.
+
+The fix just unblocks CI on main (prevents the red check on new PRs). Fold it into v0.31.25 whenever there's enough to release.
+<!-- agent:boundary:4e5d3dde -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

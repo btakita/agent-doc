@@ -90,7 +90,7 @@ The binding invariant (`claim.rs:162–186`) prevents pane theft (a pane can't b
 3. **Preflight hard-block on stash conflict.** Promote the current warning to an error when the stash pane's claimed document matches the current one — abort that cycle.
 
 **Recommendation:** Option 1 + Option 3. Option 1 makes the invariant explicit at registration time. Option 3 is a cheap belt-and-suspenders check that catches edge cases where the registry gets stale.
-<!-- agent:boundary:c95e84de -->
+<!-- agent:boundary:af0d37df -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

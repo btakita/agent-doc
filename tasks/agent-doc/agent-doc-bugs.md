@@ -379,7 +379,7 @@ If you ran between 1–3, the file hadn't been written yet — diff is empty. If
 Evidence: this cycle's preflight also shows `WARNING: file is 349 bytes larger than snapshot`. Same stale-snapshot pattern. It happens when content reaches the file via a path that doesn't update the snapshot (interrupted sessions, Edit tool, manual edits).
 
 **The `annotated_diff` labeling in the current run:** `[user+]` for your question, `[agent]` for the preceding content — correct.
-### Re: "stale content" and snapshot lifecycle (HEAD)
+### Re: "stale content" and snapshot lifecycle
 
 The confusion is about what "stale content" means in step 1.
 
@@ -400,7 +400,33 @@ The confusion is about what "stale content" means in step 1.
 2. The file showed content (response already written) but snapshot was an older version
 
 Which path did you observe — did the manual preflight output show `committed: true` in its JSON? That would tell us whether step 0 of the agent run had actually committed before you ran your manual preflight.
-<!-- agent:boundary:e2c37212 -->
+
+I don't recall for that instance...but running `agent-doc preflight` again in the same scenario has `committed: true`.
+### Re: committed: true + snapshot desync (HEAD)
+
+Good data point. If your manual preflight showed `committed: true`, it found a real diff between file and snapshot and committed it. For the diff to contain the entire response patch, the file already had the response written, but the snapshot was still at the older state.
+
+This points to `agent-doc write` writing the file successfully but NOT updating the snapshot. That's the bug.
+
+**What likely happened:**
+
+Looking at this cycle's write output pattern:
+```
+[write] IPC patch written to ...patches/...json (0 components)
+[write] IPC patch consumed by plugin — snapshot updated
+```
+
+The snapshot update goes through JetBrains plugin IPC. If the plugin processes it but the disk snapshot (`snapshots/*.md`) doesn't get written (IPC succeeds but file flush fails, or plugin crashes between IPC and disk write), you'd get:
+
+- file = response already written ✓
+- snapshot = pre-response state ✗
+
+Then your manual preflight sees diff = entire response → commits → `committed: true`.
+
+Also notable: every cycle in this session starts with `WARNING: file is N bytes larger than snapshot`. That's a consistent signal that after `agent-doc commit` repositions the boundary, the snapshot on disk is slightly behind the file.
+
+**The root question:** Does `agent-doc write` guarantee the snapshot file on disk is updated before returning when IPC is in use? Or does it hand off to the plugin and return optimistically — leaving a window where the file is updated but the disk snapshot isn't?
+<!-- agent:boundary:cfe57831 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

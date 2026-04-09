@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-agent-doc v0.31.24 — active
+agent-doc v0.31.26 — released
 <!-- /agent:status -->
 
 ## Exchange
@@ -58,14 +58,23 @@ Sessions v0.31.18–v0.31.26. Key decisions and fixes:
 - Snapshot invariant: always save actual post-write disk state, not `content_ours` from baseline.
 - FFI-first: new socket/IPC behavior implemented in ffi.rs, called from plugins via JNA.
 - Runbook: `runbooks/plugin-install.md` must be consulted for any JB plugin change (version bump, uninstall protocol).
-<!-- agent:boundary:34900e67 -->
+
+❯ release
+### Re: release (HEAD)
+
+v0.31.26 released:
+
+- **Committed:** 7 files (recover.rs, preflight.rs, Cargo.toml, pyproject.toml, VERSIONS.md, SKILL.md, Cargo.lock) pushed to origin/main
+- **crates.io:** `agent-doc v0.31.26` published
+- **PyPI:** manylinux wheel built and uploaded (`agent_doc-0.31.26-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl`)
+- **Tag:** `v0.31.26` pushed — CI building GitHub Release with cross-platform binaries
+- **cargo install:** v0.31.26 running locally
+<!-- agent:boundary:85454bac -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Manual verification: confirm ghost-reappearance no longer occurs in next /agent-doc cycle
-- [ ] Publish: `cargo publish` (crates.io)
-- [ ] Publish: `maturin publish --no-sdist` (PyPI)
-- [ ] Release: `gh release create v0.31.26 --generate-notes` with prebuilt binary
+- [ ] Install plugin v0.2.54 (full uninstall+restart, per runbooks/plugin-install.md)
 <!-- /agent:pending -->

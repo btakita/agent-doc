@@ -207,9 +207,13 @@ fn is_append_mode_component(name: &str) -> bool {
 
 /// Extract lines that were normalized by `normalize_user_prompts_in_exchange`.
 ///
-/// Compares `before` and `after` content for exchange components and returns
-/// lines whose `❯ `-stripped version exists in `before` but the prefixed version
-/// does not — i.e., lines that the normalization step added `❯ ` to.
+/// Compares `before` and `after` exchange content line-by-line and returns
+/// lines where `before` had plain text and `after` has `❯ <text>` at the
+/// same position — i.e., lines the normalization step added `❯ ` to this cycle.
+///
+/// Line-by-line comparison avoids false negatives when the exchange already
+/// contains `❯ <text>` lines at OTHER positions (which would cause a
+/// HashSet-based check to incorrectly skip newly normalized lines).
 ///
 /// These are passed to the IPC plugin so it can apply the same normalization
 /// to the live editor document.
@@ -232,14 +236,16 @@ pub fn extract_normalization_targets(before: &str, after: &str) -> Vec<String> {
         return vec![];
     }
 
-    let before_lines: std::collections::HashSet<&str> = before_exc.lines().collect();
+    // Line-by-line: find positions where before had `text` and after has `❯ text`.
+    // Using position comparison prevents false negatives when the exchange already
+    // contains `❯ text` lines elsewhere (HashSet membership would exclude them).
+    let mut seen = std::collections::HashSet::<String>::new();
     let mut targets = Vec::new();
 
-    for line in after_exc.lines() {
-        if let Some(stripped) = line.strip_prefix("❯ ") {
-            // Line has ❯  prefix in 'after': check if the original (no prefix) was in 'before'
-            // and the prefixed version was NOT in 'before' (= normalization added it this cycle)
-            if before_lines.contains(stripped) && !before_lines.contains(line) {
+    for (before_line, after_line) in before_exc.lines().zip(after_exc.lines()) {
+        if let Some(stripped) = after_line.strip_prefix("❯ ") {
+            // after has ❯ prefix; before must have the plain version at the same position
+            if before_line == stripped && seen.insert(stripped.to_string()) {
                 targets.push(stripped.to_string());
             }
         }
@@ -326,13 +332,20 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
     let snap_stripped = strip(snap_exc);
 
     // Diff snapshot → baseline to find user-added lines (not agent lines).
+    // Track code-fence state so lines inside fences are excluded — they are code,
+    // not user prompts, and must not receive the ❯  prefix.
     use similar::{ChangeTag, TextDiff};
     let diff = TextDiff::from_lines(snap_stripped.as_str(), baseline_stripped.as_str());
     let mut user_added = std::collections::HashSet::<String>::new();
+    let mut in_baseline_fence = false;
     for change in diff.iter_all_changes() {
-        if change.tag() == ChangeTag::Insert {
-            let line = change.value().trim_end_matches('\n');
-            let trimmed = line.trim();
+        let line = change.value().trim_end_matches('\n');
+        let trimmed = line.trim();
+        // Equal and Insert lines are present in baseline — track their fence state.
+        if change.tag() != ChangeTag::Delete && trimmed.starts_with("```") {
+            in_baseline_fence = !in_baseline_fence;
+        }
+        if change.tag() == ChangeTag::Insert && !in_baseline_fence {
             if !trimmed.is_empty()
                 && !trimmed.starts_with('❯')
                 && !trimmed.starts_with("<!-- ")
@@ -351,9 +364,15 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
 
     // Apply ❯  prefix to user-added lines in content_user_region.
     // Agent response lines (not in user_added) pass through unchanged.
+    // Track code-fence state so prefix is never added inside fences.
+    let mut in_content_fence = false;
     let mut normalized_user = String::new();
     for line in content_user_region.lines() {
-        if user_added.contains(line) {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            in_content_fence = !in_content_fence;
+        }
+        if !in_content_fence && user_added.contains(line) {
             normalized_user.push_str("❯ ");
         }
         normalized_user.push_str(line);
@@ -854,13 +873,20 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             let raw_doc = std::fs::read_to_string(file).unwrap_or_default();
             let current_doc_for_boundary = template::reposition_boundary_to_end_with_summary(&raw_doc, file.file_stem().and_then(|s| s.to_str()));
 
+            let norm_lines_for_timeout = if normalize_prefix_lines.is_empty() { None } else { Some(normalize_prefix_lines.as_slice()) };
             let ipc_patches: Vec<serde_json::Value> = patches
                 .iter()
                 .filter(|p| p.name != "frontmatter")
                 .map(|p| {
+                    let content = match norm_lines_for_timeout {
+                        Some(prefix_lines) if !prefix_lines.is_empty() => {
+                            normalize_patch_content(&p.content, prefix_lines)
+                        }
+                        _ => p.content.clone(),
+                    };
                     let mut patch_json = serde_json::json!({
                         "component": p.name,
-                        "content": p.content,
+                        "content": content,
                     });
                     if let Some(bid) = find_boundary_id(&current_doc_for_boundary, &p.name) {
                         patch_json["boundary_id"] = serde_json::Value::String(bid);
@@ -1322,7 +1348,7 @@ pub fn try_ipc(
                 }
             }
         }
-        let ipc_patches_json = build_ipc_patches_json(file, patches, unmatched)?;
+        let ipc_patches_json = build_ipc_patches_json(file, patches, unmatched, normalize_prefix_lines)?;
         // When unmatched content was synthesized into a patch (no explicit patch blocks),
         // don't also send it as "unmatched" — the plugin would apply both and duplicate.
         let effective_unmatched_socket = if patches.is_empty() && !ipc_patches_json.is_empty() {
@@ -1407,7 +1433,7 @@ pub fn try_ipc(
     let patch_file = patches_dir.join(format!("{}.json", hash));
 
     // Build patches using shared helper (same logic as socket path)
-    let ipc_patches = build_ipc_patches_json(file, patches, unmatched)?;
+    let ipc_patches = build_ipc_patches_json(file, patches, unmatched, normalize_prefix_lines)?;
 
     // Same dedup guard as socket path: don't send unmatched when it was synthesized into a patch.
     let effective_unmatched_file = if patches.is_empty() && !ipc_patches.is_empty() {
@@ -1677,14 +1703,46 @@ fn write_ipc_and_poll(
     Ok(false)
 }
 
+/// Apply `❯ ` prefix to lines in `content` that appear in `normalize_prefix_lines`.
+///
+/// Bakes normalization into patch content before IPC delivery so the plugin
+/// receives already-prefixed lines. The plugin runs normalization *before*
+/// applying patches, so it cannot normalize lines the patch is about to append.
+fn normalize_patch_content(content: &str, prefix_lines: &[String]) -> String {
+    if prefix_lines.is_empty() {
+        return content.to_string();
+    }
+    let prefix_set: std::collections::HashSet<&str> =
+        prefix_lines.iter().map(|s| s.as_str()).collect();
+    let mut result = String::with_capacity(content.len() + 2 * prefix_lines.len());
+    for line in content.lines() {
+        let bare = line.strip_prefix("\u{276f} ").unwrap_or(line);
+        if prefix_set.contains(bare) && !line.starts_with("\u{276f} ") {
+            result.push_str("\u{276f} ");
+        }
+        result.push_str(line);
+        result.push('\n');
+    }
+    if !content.ends_with('\n') && result.ends_with('\n') {
+        result.truncate(result.len() - 1);
+    }
+    result
+}
+
 /// Build the IPC patches JSON array (shared between socket and file-based paths).
 ///
 /// Reads the document to find boundary IDs, filters frontmatter patches,
 /// synthesizes exchange patches for unmatched content.
+///
+/// When `normalize_prefix_lines` is provided, applies `❯ ` prefix to matching
+/// lines inside each patch's content so newly-appended lines already carry the
+/// prefix. (The plugin runs normalization *before* applying patches, so it
+/// cannot normalize lines that the patch is about to append.)
 fn build_ipc_patches_json(
     file: &Path,
     patches: &[crate::template::PatchBlock],
     unmatched: &str,
+    normalize_prefix_lines: Option<&[String]>,
 ) -> Result<Vec<serde_json::Value>> {
     let raw_doc = std::fs::read_to_string(file).unwrap_or_default();
     let current_doc = template::reposition_boundary_to_end_with_summary(
@@ -1696,9 +1754,15 @@ fn build_ipc_patches_json(
         .iter()
         .filter(|p| p.name != "frontmatter")
         .map(|p| {
+            let content = match normalize_prefix_lines {
+                Some(prefix_lines) if !prefix_lines.is_empty() => {
+                    normalize_patch_content(&p.content, prefix_lines)
+                }
+                _ => p.content.clone(),
+            };
             let mut patch_json = serde_json::json!({
                 "component": p.name,
-                "content": p.content,
+                "content": content,
             });
             if let Some(bid) = find_boundary_id(&current_doc, &p.name) {
                 patch_json["boundary_id"] = serde_json::Value::String(bid);
@@ -2583,7 +2647,7 @@ mod tests {
         // No explicit patches (simulates skill sending raw content)
         let patches: Vec<crate::template::PatchBlock> = vec![];
         // Unmatched content is identical to what's already in the exchange
-        let result = build_ipc_patches_json(&doc, &patches, existing).unwrap();
+        let result = build_ipc_patches_json(&doc, &patches, existing, None).unwrap();
 
         assert!(
             result.is_empty(),
@@ -2606,7 +2670,7 @@ mod tests {
 
         let patches: Vec<crate::template::PatchBlock> = vec![];
         let new_content = "Completely new agent response.";
-        let result = build_ipc_patches_json(&doc, &patches, new_content).unwrap();
+        let result = build_ipc_patches_json(&doc, &patches, new_content, None).unwrap();
 
         assert_eq!(result.len(), 1, "synthesis should produce one patch for new content");
         assert_eq!(
@@ -2755,8 +2819,23 @@ mod tests {
         let baseline = "<!-- agent:exchange patch=append -->\nSome text.\n```bash\necho hello\n```\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\nSome text.\n```bash\necho hello\n```\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-        assert!(!result.contains("❯ ```"), "code fence should not get prefix: {}", result);
+        assert!(!result.contains("❯ ```"), "code fence marker should not get prefix: {}", result);
+        assert!(!result.contains("❯ echo hello"), "code fence interior should not get prefix: {}", result);
         assert!(result.contains("❯ Some text."), "regular user line should get prefix: {}", result);
+    }
+
+    #[test]
+    fn normalize_user_prompts_code_fence_interior_skipped() {
+        // Multi-line code block with text before and after — only non-fence lines get prefix.
+        let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\nQuestion here.\n```rust\nlet x = 1;\nlet y = 2;\n```\nFollow-up.\n<!-- /agent:exchange -->\n";
+        let content = "<!-- agent:exchange patch=append -->\nQuestion here.\n```rust\nlet x = 1;\nlet y = 2;\n```\nFollow-up.\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
+        let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
+        assert!(result.contains("❯ Question here."), "text before fence should get prefix: {}", result);
+        assert!(result.contains("❯ Follow-up."), "text after fence should get prefix: {}", result);
+        assert!(!result.contains("❯ let x"), "fence interior should not get prefix: {}", result);
+        assert!(!result.contains("❯ let y"), "fence interior should not get prefix: {}", result);
+        assert!(!result.contains("❯ ```"), "fence marker should not get prefix: {}", result);
     }
 
     #[test]
@@ -2769,6 +2848,39 @@ mod tests {
     }
 
     #[test]
+    fn normalize_patch_content_applies_prefix_to_matching_lines() {
+        let patch_content = "transferred line 1\ntransferred line 2\n### Re: Response\nAgent answer\n";
+        let prefix_lines = vec!["transferred line 1".to_string(), "transferred line 2".to_string()];
+        let result = normalize_patch_content(patch_content, &prefix_lines);
+        let expected = "❯ transferred line 1\n❯ transferred line 2\n### Re: Response\nAgent answer\n";
+        assert_eq!(result, expected, "prefix lines should get ❯  in patch content");
+    }
+
+    #[test]
+    fn normalize_patch_content_idempotent_already_prefixed() {
+        let patch_content = "❯ already prefixed\nnot prefixed\n";
+        let prefix_lines = vec!["already prefixed".to_string(), "not prefixed".to_string()];
+        let result = normalize_patch_content(patch_content, &prefix_lines);
+        let expected = "❯ already prefixed\n❯ not prefixed\n";
+        assert_eq!(result, expected, "already-prefixed lines should not get double prefix");
+    }
+
+    #[test]
+    fn normalize_patch_content_empty_prefix_lines_passthrough() {
+        let patch_content = "some line\nanother line\n";
+        let result = normalize_patch_content(patch_content, &[]);
+        assert_eq!(result, patch_content, "empty prefix_lines should leave content unchanged");
+    }
+
+    #[test]
+    fn normalize_patch_content_non_matching_lines_unchanged() {
+        let patch_content = "agent response line\n### heading\n";
+        let prefix_lines = vec!["user line".to_string()];
+        let result = normalize_patch_content(patch_content, &prefix_lines);
+        assert_eq!(result, patch_content, "non-matching lines should pass through unchanged");
+    }
+
+        #[test]
     fn normalize_user_prompts_no_exchange_passthrough() {
         let content = "No exchange here.\n";
         let baseline = "No exchange here.\n";

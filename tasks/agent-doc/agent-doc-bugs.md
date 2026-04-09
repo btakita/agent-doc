@@ -72,7 +72,7 @@ v0.31.26 released:
 
 ❯ The agent-loop project is swapping with tmux session 1. We should keep everything on this tmux session 0.
 ❯ This has been a reoccuring issue. Let's figure out all of the horizontal and vertical workflows that can cause this.
-### Re: session drift — tmux session 1 contamination (HEAD)
+### Re: session drift — tmux session 1 contamination
 
 **Current state:** `%57` (mattpocock.md) is registered in `$1:@13` (session 1). All other panes are in session 0. Config correctly shows `tmux_session = "0"`.
 
@@ -91,13 +91,91 @@ v0.31.26 released:
 `resync.rs` currently only detects `WrongSession` when `frontmatter.tmux_session` is explicitly set. It should also check registered panes against `config::project_tmux_session()`. Panes in session 1 (while config says session 0) would trigger `WrongSession` → auto-relocated via `join-pane` to session 0. This makes the system self-healing without requiring `tmux_session` frontmatter in every document.
 
 **Immediate action:** Manually relocate `%57` now, or just kill+deregister mattpocock.md and re-run it from a session 0 terminal.
-<!-- agent:boundary:592a3606 -->
+❯ How did the swap to tmux session 1 happen? Why does it keep happening. Can we have a module with a defined inteface to ensure that all pane movement logic is protected by rules...such as not swapping with another tmux session...unless explicitly overridden.
+### Re: how it happened + pane policy module (HEAD)
+
+**How `%57` ended up in session 1:**
+
+`start.rs` calls `sessions::current_pane()` which reads `$TMUX_PANE`. At 18:58 when mattpocock.md was claimed, the terminal that ran `/agent-doc` had `TMUX_PANE=%57` — a pane already in `$1:@13`. That environment variable is set by tmux itself; it's whatever pane the shell is running in. The claim permanently bound the document to that session 1 pane.
+
+**Why it keeps recurring — 3 triggers:**
+
+1. **WezTerm tab/window connecting to session 1**: Any shell opened in a session 1 window has `TMUX_PANE` pointing there. Running `/agent-doc` from that shell registers to session 1. No code path prevents this.
+
+2. **`resolve_target_session` auto-update** (`route.rs:473-491`): If `config.toml`'s session is dead or unset, the fallback reads `current_tmux_session()` and **writes it back**. One route call from session 1 silently flips the project to `tmux_session = "1"`, routing all subsequent documents there.
+
+3. **22 unchecked pane move call sites**: `Tmux::join_pane`, `Tmux::swap_pane`, `Tmux::break_pane` — none check whether source and destination are in the same session. A cross-session move goes through silently. There's no audit trail and no refusal.
+
+**`pane_policy` module design:**
+
+Add `tmux-router/src/pane_policy.rs` as a mandatory gateway for all pane movement. Existing `Tmux::join_pane` / `Tmux::swap_pane` become internal; callers use the policy layer.
+
+```rust
+// tmux-router/src/pane_policy.rs
+
+pub enum CrossSession {
+    /// Default: refuse cross-session moves (returns Err)
+    Deny,
+    /// Allow with audit log — for intentional relocations
+    Allow { reason: &'static str },
+}
+
+/// Builder for a single pane move operation.
+pub struct PaneMoveOp<'a> {
+    pub tmux: &'a Tmux,
+    pub src: &'a str,
+    pub dst: &'a str,
+    pub cross_session: CrossSession,
+}
+
+impl<'a> PaneMoveOp<'a> {
+    pub fn join(&self, split_flag: &str) -> Result<()> {
+        self.check()?;
+        self.tmux.join_pane_unchecked(self.src, self.dst, split_flag)
+    }
+
+    pub fn swap(&self) -> Result<()> {
+        self.check()?;
+        self.tmux.swap_pane_unchecked(self.src, self.dst)
+    }
+
+    fn check(&self) -> Result<()> {
+        let src_sess = self.tmux.pane_session(self.src)?;
+        let dst_sess = self.tmux.pane_session(self.dst)?;
+        if src_sess == dst_sess {
+            return Ok(());
+        }
+        match self.cross_session {
+            CrossSession::Deny => anyhow::bail!(
+                "cross-session pane move denied: {} (sess {}) → {} (sess {}); \
+                 use CrossSession::Allow{{reason}} to override",
+                self.src, src_sess, self.dst, dst_sess
+            ),
+            CrossSession::Allow { reason } => {
+                eprintln!(
+                    "[pane_policy] cross-session move: {} ({}) → {} ({}) — reason: {}",
+                    self.src, src_sess, self.dst, dst_sess, reason
+                );
+                Ok(())
+            }
+        }
+    }
+}
+```
+
+**Migration path:** 22 call sites in agent-doc. The intentional cross-session sites (stash rescue in `resync.rs`, route stash) use `CrossSession::Allow { reason: "relocate to project session" }`. All others use `CrossSession::Deny` by default. Any new cross-session move that hits `Deny` becomes a visible bug, not silent drift.
+
+**Additional guard — `start.rs`:** When registering a new pane, check if `$TMUX_PANE`'s session matches `config::project_tmux_session()`. If not, log a warning and optionally refuse to register (or auto-relocate via `PaneMoveOp` with `Allow`).
+<!-- agent:boundary:be023121 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Add `tmux-router/src/pane_policy.rs` — `PaneMoveOp` + `CrossSession` enum
+- [ ] Rename `Tmux::join_pane` → `join_pane_unchecked`; `swap_pane` → `swap_pane_unchecked`; add `#[deprecated]` or `pub(crate)` visibility
+- [ ] Migrate 22 agent-doc call sites to `PaneMoveOp` (deny by default, explicit allow for 3 intentional cross-session sites)
+- [ ] Guard `start.rs` registration: warn when `$TMUX_PANE` session ≠ `project_tmux_session`
+- [ ] Guard `resolve_target_session` auto-update: only write config when new session matches existing configured session (prevent session 1 from overwriting session 0)
 - [ ] Fix `resync.rs`: detect `WrongSession` against `config::project_tmux_session()` (not only `frontmatter.tmux_session`)
-- [ ] Guard `resolve_target_session` auto-update: only write config when new session matches `project_tmux_session` (don't let session 1 overwrite session 0 config)
-- [ ] Relocate or deregister `%57` (mattpocock.md) — it's in session 1, should be in session 0
 <!-- /agent:pending -->

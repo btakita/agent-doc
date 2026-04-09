@@ -1164,7 +1164,7 @@ That's targeted and non-anxious. It shows you were paying attention without maki
 
 ❯ Proposed message to Rob updated at /home/brian/work/btakita/agent-loop/mail/slack/robert-ross-apr10-update.md
 ❯ Anything else we need from him?
-### Re: Anything else we need from him? (HEAD)
+### Re: Anything else we need from him?
 
 The current message covers the three hard blockers (Supabase, Claude key, scope) and the direction question. A few more things worth surfacing, roughly in priority order:
 
@@ -1172,12 +1172,18 @@ The current message covers the three hard blockers (Supabase, Claude key, scope)
 
 **2. ClaudeScore GitHub org access** — The Slack message references `github.com/ClaudeScore/SessionShare`. If that org is Rob's (not one you created), you need to be added. If you created it, he needs to be added as a collaborator. Worth a one-liner to confirm who owns it.
 
+I am already an admin.
+
 **3. Written SOW or rate confirmation** — The call notes say "$100/hr starting point." Is there a signed statement of work, or is this still informal? For a multi-week engagement with Apr 10 deliverables, it's worth having something in writing — even a short email thread confirming scope, rate, and payment cadence counts.
+
+We are doing a fixed bid
 
 **4. Feedback channel** — How does he want to be updated as milestones hit? The Slack message says you'll update the spreadsheet, but does he want a Slack ping when sprint items close? Knowing this upfront saves you from over-communicating or going silent.
 
+spreadsheet is how we track
+
 If you want to fold #1 (Build Party PRD) into tonight's call instead of the Slack message, that's fine — it's a conversation item more than a blocker.
-<!-- agent:boundary:95e09886 -->
+<!-- agent:boundary:ef76cde4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

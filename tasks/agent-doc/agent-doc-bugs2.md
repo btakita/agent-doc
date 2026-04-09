@@ -67,7 +67,7 @@ between two stash panes pointing at the same document).
 Remaining diff (boundary hash `0f29e90b` → `cabc81e1` + `(HEAD)` removal) reflects the second session taking over document ownership — that's now committed too.
 
 ❯ How did we get an orphaned tmux pane? Can we have a safeguard to prevent this from happening?
-❯ eIdeally multiple safeguards?
+❯ Ideally multiple safeguards?
 ### Re: orphaned pane + safeguard
 
 **How the stash pane formed:**
@@ -91,7 +91,9 @@ The binding invariant (`claim.rs:162–186`) prevents pane theft (a pane can't b
 3. **Preflight hard-block on stash conflict.** Promote the current warning to an error when the stash pane's claimed document matches the current one — abort that cycle.
 
 **Recommendation:** Option 1 + Option 3. Option 1 makes the invariant explicit at registration time. Option 3 is a cheap belt-and-suspenders check that catches edge cases where the registry gets stale.
-### Re: multiple safeguards (HEAD)
+
+❯ Option 1 + 3
+### Re: multiple safeguards
 
 Yes — all three options are independent layers and all should be implemented:
 
@@ -111,7 +113,12 @@ Each layer catches a different failure mode:
 | 2 — Preflight stash check | Second pane triggering a cycle while first is active |
 | 3 — Cycle lock | Concurrent preflight runs even with stale/bypassed registry |
 | 4 — Recovery | Cleanup of leftover partial writes after a race |
-<!-- agent:boundary:50b1f449 -->
+
+❯ Do it
+### Re: implementing all 4 layers (HEAD)
+
+Implementing all four layers now. Codex rescue agent is running the Rust implementation across `sessions.rs`, `preflight.rs`, `route.rs`, and `recover.rs`. Will update when the build passes.
+<!-- agent:boundary:7412114c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -121,4 +128,5 @@ Each layer catches a different failure mode:
 - [ ] Layer 2: Promote stash-pane conflict from warning → error in preflight (abort cycle when stash pane owns same doc)
 - [ ] Layer 3: Extend `.agent-doc/starting/<hash>.lock` TTL to span full response cycle (release on `agent-doc commit`)
 - [ ] Layer 4: `preflight recover` — detect orphaned checkpoint blocks between committed `(HEAD)` and new boundary; auto-discard
+- [ ] Build + test pass, `cargo install --path .`
 <!-- /agent:pending -->

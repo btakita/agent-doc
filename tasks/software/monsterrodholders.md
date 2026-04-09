@@ -357,7 +357,7 @@ docker compose version
 ```
 
 Rest of the steps are identical — just omit `sudo` everywhere.
-<!-- agent:boundary:b911ec95 -->
+<!-- agent:boundary:c6ff82a0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

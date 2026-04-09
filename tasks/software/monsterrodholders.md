@@ -675,7 +675,7 @@ docker: Error response from daemon: failed to set up container networking: drive
 
 Run 'docker run --help' for more information
 ```
-### Re: iptables DOCKER chain missing (HEAD)
+### Re: iptables DOCKER chain missing
 
 Docker's NAT chains are out of sync — likely because stopping `httpd` or firewalld triggered an iptables reload that wiped Docker's rules.
 
@@ -695,14 +695,38 @@ systemctl status firewalld
 ```
 
 If it's active, firewalld and Docker are fighting over iptables. Either stop firewalld (`systemctl stop firewalld`) or configure Docker to use `iptables=false` and manage rules via firewalld — but stopping it is simpler for a single-admin server.
-<!-- agent:boundary:d0b77f15 -->
+
+❯ http://50.28.2.199.nip.io/ is not serving the wordpress site
+### Re: site not serving (HEAD)
+
+Check the container state first:
+
+```bash
+docker ps
+docker compose logs --tail=50
+```
+
+**Also try HTTPS** — if certbot ran successfully, nginx may be redirecting HTTP → HTTPS:
+
+```
+https://50.28.2.199.nip.io/
+```
+
+If `docker ps` shows no containers (or exited ones), the stack isn't up — run:
+
+```bash
+docker compose up -d
+```
+
+Then check logs for errors. What does `docker ps` show?
+<!-- agent:boundary:6cf71945 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Server step 8 (in progress):** `systemctl restart docker`, then retry `./scripts/certbot-init.sh`
-- [ ] **Server step 9:** `docker compose up -d`
+- [ ] **Server step 8:** Check `docker ps` + `docker compose logs`; run `docker compose up -d` if not running
+- [ ] **Server step 9:** Verify site at `https://50.28.2.199.nip.io/`
 - [ ] **Server step 10:** Transfer + import backup, then run `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`; remove WP Engine mu-plugins
 - [ ] Verify site on `50.28.2.199.nip.io`
 - [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot

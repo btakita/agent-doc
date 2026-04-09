@@ -426,7 +426,7 @@ Then your manual preflight sees diff = entire response → commits → `committe
 Also notable: every cycle in this session starts with `WARNING: file is N bytes larger than snapshot`. That's a consistent signal that after `agent-doc commit` repositions the boundary, the snapshot on disk is slightly behind the file.
 
 **The root question:** Does `agent-doc write` guarantee the snapshot file on disk is updated before returning when IPC is in use? Or does it hand off to the plugin and return optimistically — leaving a window where the file is updated but the disk snapshot isn't?
-<!-- agent:boundary:cfe57831 -->
+<!-- agent:boundary:c40e9644 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

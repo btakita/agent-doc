@@ -1172,18 +1172,31 @@ The current message covers the three hard blockers (Supabase, Claude key, scope)
 
 **2. ClaudeScore GitHub org access** — The Slack message references `github.com/ClaudeScore/SessionShare`. If that org is Rob's (not one you created), you need to be added. If you created it, he needs to be added as a collaborator. Worth a one-liner to confirm who owns it.
 
-I am already an admin.
+❯ I am already an admin.
 
 **3. Written SOW or rate confirmation** — The call notes say "$100/hr starting point." Is there a signed statement of work, or is this still informal? For a multi-week engagement with Apr 10 deliverables, it's worth having something in writing — even a short email thread confirming scope, rate, and payment cadence counts.
 
-We are doing a fixed bid
+❯ We are doing a fixed bid
 
 **4. Feedback channel** — How does he want to be updated as milestones hit? The Slack message says you'll update the spreadsheet, but does he want a Slack ping when sprint items close? Knowing this upfront saves you from over-communicating or going silent.
 
-spreadsheet is how we track
+❯ spreadsheet is how we track
 
 If you want to fold #1 (Build Party PRD) into tonight's call instead of the Slack message, that's fine — it's a conversation item more than a blocker.
-<!-- agent:boundary:ef76cde4 -->
+### Re: Resolved + Build Party PRD
+
+Three items off the list:
+- GitHub org: you're admin — done.
+- SOW: fixed bid — good, no need to ask for a written hourly rate confirmation.
+- Feedback channel: spreadsheet — clear.
+
+That leaves the **Build Party PRD**. Since it was an explicit Rob deliverable ("evaluate 3-5 GitHub repos; read Build Party PRD; make a recommendation"), either:
+
+- It's still in the Apr 10 scope → ask him to send it now, or add it to tonight's call agenda
+- It was deprioritized when direction shifted → confirm that so you don't carry it
+
+If you're not sure, a one-liner in the Slack message works: "Also — is the Build Party PRD still something you want me to evaluate for Apr 10, or is ClaudeScore the focus?"
+<!-- agent:boundary:f309eecc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

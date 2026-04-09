@@ -499,6 +499,8 @@ The fix is already in the SKILL.md — "re-save the baseline after each checkpoi
 
 CRDT would eliminate this class of problem — intermediate writes would be tracked as operations, so the snapshot could always be reconstructed accurately. But the root cause here is a skill-level baseline drift, not a fundamental CRDT gap. A simpler and more targeted fix: have `agent-doc write` save the snapshot as the **actual post-merge file state on disk**, not `content_ours` (the constructed pre-merge view). That way even when baseline drifts across checkpoints, the snapshot stays accurate.
 
+❯ I'm scared to rely on SKILL for any deterministic guarantees.
+
 This is a lower-risk change than full CRDT snapshot storage. Adding it to pending.
 
 **Duplicate claims check in `check_layout()` — done:**
@@ -516,58 +518,43 @@ Legacy entries (`file` is empty) are skipped. Added 4 tests:
 - `detect_duplicate_claims_skips_empty_file_entries` → empty (legacy entries ignored)
 
 All 4 pass. Built + installed v0.31.25.
-### Re: claudescore.md + uncommitted pending + root cause (HEAD)
 
-**claudescore.md:** The ops log shows a major drift there:
-```
-preflight_diff_start: snap_len=46737, file_len=48619   (1882-byte gap)
-write:                snap_saved=48290                  (baseline was OLD snapshot)
-commit_staging:       snap=48290, file=51991            (3701-byte drift)
-```
-The write's `content_ours` was 48290 = 46737 (old snapshot) + 1553 (response). That's the old snapshot as the baseline — missing the 1882 bytes that were in the file but not in the snapshot. The plugin correctly applied patches to the 48619-byte file, adding response content. File = 48619 + response + boundary = 51991. Snapshot = 46737 + response = 48290. Gap = 3701 bytes = the 1882 pre-existing gap + ~1690 bytes of boundary/other.
+❯ do
+❯ - [ ] Fix snapshot saved as actual post-merge disk state instead of `content_ours` (eliminates checkpoint baseline drift)
 
-**Root cause — stale baseline saved BEFORE preflight:**
+❯ Please review this last response patch in this document. There are too many changes. Including committed `❯ ` prefixes for a previous response patch coming from Claude. It seems there are issues with multiple snapshots overwriting each other and missing content.
+### Re: `❯ ` prefix drift + snapshot fix (HEAD)
 
-The skill saves the baseline FIRST, then runs preflight. Preflight commits any existing file-vs-snapshot gap. But if the file grew between the baseline save and preflight (concurrent write, plugin applying a pending patch), the baseline is STALE relative to what preflight sees.
+**What happened with the `❯ ` prefixes:**
 
-```
-time →
-  skill saves baseline = file at T₀ = 46737 bytes
-  [concurrent write: file grows to 48619 bytes]
-  preflight runs: sees file=48619, snap=46737 → commits gap
-  agent responds
-  write: --baseline-file = 46737-byte baseline (stale)
-  content_ours = 46737 + response ← WRONG (missing 1882 bytes)
-  snapshot saved = 48290 (missing the 1882-byte gap content)
-  plugin writes to 48619-byte file → file = 51991
-  next cycle: diff shows 3701-byte gap as [user+]
-```
+The snapshot had `❯ `-prefixed lines for the `### Re: the diff content + logging added` block, but the document had the non-prefixed versions. This is the classic stale-`content_ours` bug:
 
-**Fix: use `baseline_file` from preflight output**
+1. A streaming checkpoint wrote non-prefixed content to the file
+2. A second checkpoint used a stale baseline (pre-first-checkpoint), constructing `content_ours` with different formatting
+3. The snapshot was saved as that stale `content_ours` — which had `❯ `-prefixed lines
+4. Next cycle's diff: snapshot had `❯ ` version, file had non-prefixed version → appeared as user modifications
 
-Preflight already saves the baseline as `.agent-doc/baselines/<hash>.md` and returns it in the JSON:
-```json
-"baseline_file": "/path/to/.agent-doc/baselines/<hash>.md"
-```
+**Fix implemented (snapshot = disk state):**
 
-This is taken AFTER preflight commits any gaps and reaches a stable state. The skill should use this instead of the pre-preflight `cp`.
+Changed all four non-IPC write paths to save `final_content` (the actual post-merge disk state) instead of `content_ours` (the constructed baseline + response view):
 
-**SKILL.md change:**
-- Remove: `cp <FILE> /tmp/agent-doc-baseline-$$.md` (step before preflight)
-- In the write call, use `--baseline-file` from the preflight JSON's `baseline_file` field
-- For streaming checkpoints: keep re-saving baseline after each checkpoint (the checkpoint baseline needs to be the file state AFTER the previous checkpoint, not the preflight baseline)
+- `run_inline` (line 639)
+- `run_template` (line 726)
+- `run_stream` disk path (line 1059)
+- IPC timeout fallback (line 1243)
 
-This eliminates the stale-baseline root cause for the initial write. The 129-byte boundary drift remains (that's expected and handled by commit).
+The IPC primary path already read actual file contents after plugin ACK — now all paths are consistent.
 
-**"Use opus":** I can't switch models mid-session — model is set at invocation. To use opus, set `model: opus` in the frontmatter or restart with `claude --model claude-opus-4-6`.
+**Tradeoff:** Concurrent user edits made during response generation are absorbed into the snapshot (won't appear as new diff items next cycle). This is acceptable — they're rare, and ghost-diff pollution from stale `content_ours` is worse.
 
-**Updating SKILL.md now.**
-<!-- agent:boundary:ffffb904 -->
+**On "scared to rely on SKILL for deterministic guarantees":** Correct instinct. The SKILL's `baseline_file` fix was skill-level. This moves the invariant into the binary — snapshot is always the actual post-write disk state regardless of what baseline the skill passed in.
+
+Tests pass, release build + `cargo install` done. v0.31.25 now installed with the fix.
+<!-- agent:boundary:a52fe525 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] SKILL.md: use `baseline_file` from preflight JSON (remove pre-preflight `cp`)
-- [ ] claudescore.md: investigate why concurrent write occurred (who wrote 1882 bytes between baseline save and preflight)
+- [ ] Bump to v0.31.26, update VERSIONS.md, publish
 <!-- /agent:pending -->

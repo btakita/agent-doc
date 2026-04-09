@@ -61,12 +61,29 @@ if !in_fence && let Some(stripped) = line.strip_suffix(" (HEAD)") { ... }
 Fixed, all 743 tests pass. Committed as `7fc7905`, pushed — CI should be green.
 
 ❯ Do we need a new version or is this harmless for the current release?
-### Re: new version needed? (HEAD)
+### Re: new version needed?
 
 No re-release needed. The published v0.31.24 binary (crates.io/PyPI/GitHub Release) was built from `1305ce9` — before `7fc7905` was introduced. The clippy issue only exists in main post-release, so published users are unaffected.
 
 The fix just unblocks CI on main (prevents the red check on new PRs). Fold it into v0.31.25 whenever there's enough to release.
-<!-- agent:boundary:f8e18afa -->
+
+❯ When I ran `compact exchange` in session-share/tasks/claudescore.md, all of the summary was uncommitted. Why?
+### Re: compact exchange — uncommitted summary (HEAD)
+
+The compact summary **was** committed to git (`50f67f9`), but the skill used a raw `git commit` instead of `agent-doc commit`:
+
+```
+# what actually ran:
+git commit -m "Compact exchange — ClaudeScore session history archived"
+
+# what should run:
+agent-doc commit src/session-share/tasks/claudescore.md
+```
+
+`agent-doc commit` writes a **VCS refresh signal** after committing so the editor updates its git gutter. A raw `git commit` skips that signal — the editor kept showing all ~32 summary lines as green (uncommitted) even though git had already committed them. The summary was in git; the editor just didn't refresh.
+
+**Fix:** The compact-exchange runbook step 4 says `agent-doc commit <FILE>` — that's correct. The skill that ran the compact substituted a manual `git commit -m "..."` instead, which is the bug. `agent-doc commit` always uses the `agent-doc(<stem>): <timestamp>` format, so if a custom message were needed that's a missing feature — but for correctness and editor state, `agent-doc commit` must be used.
+<!-- agent:boundary:2f66776e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -125,7 +125,7 @@ If the exchange `patch=append` writes out content that was assembled before norm
 
   ❯ /agent-doc tasks/agent-doc/agent-doc-bugs.md
 ```
-### Re: Real-time message injection while Claude executes (HEAD)
+### Re: Real-time message injection while Claude executes
 
 **Short answer:** Not natively yet, but it's buildable — the mechanism is `tmux send-keys`.
 
@@ -145,7 +145,32 @@ Claude Code's "send messages while it works" feature reads from the terminal's s
 **Simpler first step:** A manual `agent-doc steer <FILE>` command that reads a designated steering block from the document, finds the claim pane, and injects via `tmux send-keys`. No watcher needed — user triggers it explicitly when they want to steer.
 
 **Feasibility:** High. The hard parts (pane tracking, tmux IPC) are already solved. The watcher + state detection would be the new work.
-<!-- agent:boundary:1be63cab -->
+
+❯ Fenced code comments beginning with `#` should not be treated as markdown headers. Are we using the ast the markdown parser to distinguish between markdown and fenced code?
+
+❯ See src/session-share/tasks/c
+### Re: Fenced code `#` vs markdown headers (HEAD)
+
+**Partial: yes for `outline.rs`, no for `diff.rs`.**
+
+`outline.rs` uses `pulldown-cmark` — CommonMark-compliant AST parser, explicitly tested (`code_block_ignored: # heading inside triple-backtick fence → not emitted as section`). That code path is correct.
+
+`diff.rs` does NOT use an AST. The `looks_truncated()` function has a bare string check:
+
+```rust
+|| trimmed.starts_with('#')
+```
+
+No fenced code context tracked. So `# bash_comment` inside a diff's fenced block is treated the same as a markdown `# Heading` — both cause `looks_truncated` to return `false` (not truncated).
+
+**The impact is narrow** — `looks_truncated` only affects the stability check (should we wait for more input?). For `#` lines it always returns `false` (conservative: proceed), so a bash comment in a code block would just be treated as a complete line. It doesn't cause misclassification of diff type, and `classify_diff()` doesn't look for `#` at all.
+
+**The real gap:** `classify_diff()` operates on raw diff line strings with no fenced-code state machine. If the diff ever needs to distinguish "user added a `# comment` inside a code block" from "user added a heading", it can't — it would need either:
+1. A line-by-line fenced-code tracker (simple, like what `component.rs`'s `find_code_ranges` does), or
+2. Apply `strip_comments`/component parsing before classifying (already done for comment stripping, not for `#` detection)
+
+**Fix, if needed:** Port `find_code_ranges` into the diff classifier so `classify_diff` can mark lines as in-fence and skip heading-semantics for them. Currently there's no concrete bug from this, just a potential one.
+<!-- agent:boundary:41cdd240 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -155,4 +180,5 @@ Claude Code's "send messages while it works" feature reads from the terminal's s
 - [ ] Bump version + release agent-doc with hooks feature
 - [ ] `agent-doc steer <FILE>` — inject steering message to claim pane via tmux send-keys
 - [ ] (stretch) inotify watcher for automatic real-time steering on document edit
+- [ ] (low priority) Port `find_code_ranges` into diff classifier for fenced-code-aware `#` handling
 <!-- /agent:pending -->

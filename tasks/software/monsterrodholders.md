@@ -517,7 +517,7 @@ Then flip DNS.
 **If Ron wants a permanent staging URL after launch:** easiest is a separate server (or subdomain like `staging.monsterrodholders.com`) with its own WordPress install — that's a future problem, not this migration.
 
 For now: test on nip.io → verify → flip to `monsterrodholders.com` → done. One domain, one site.
-<!-- agent:boundary:466abb42 -->
+<!-- agent:boundary:73cfb032 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

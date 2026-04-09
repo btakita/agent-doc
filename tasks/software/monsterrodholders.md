@@ -300,7 +300,7 @@ cd src/monsterrodholders-dev
 source .env && ./scripts/certbot-init.sh
 docker compose up -d
 ```
-<!-- agent:boundary:73d2ea3a -->
+<!-- agent:boundary:1d552b69 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -348,7 +348,7 @@ For other sessions: the next time any session runs `/agent-doc`, it reads the cu
 The only reload case is when `skill install` emits `SKILL_RELOAD=compact` — that means THIS conversation's context has an old skill cached as part of the system prompt, and `/compact` is needed to flush it. That didn't fire this session (binary and skill matched after install).
 
 Won't send `/reload-plugins` to other panes — it would interrupt active sessions and accomplishes nothing for skills.
-<!-- agent:boundary:f60bfb56 -->
+<!-- agent:boundary:f470a46d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

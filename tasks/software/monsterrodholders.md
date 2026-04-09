@@ -359,7 +359,7 @@ docker compose version
 Rest of the steps are identical — just omit `sudo` everywhere.
 
 ❯ update server-setup.md
-### Re: update server-setup.md (HEAD)
+### Re: update server-setup.md
 
 Updated and pushed. Changes:
 
@@ -369,7 +369,23 @@ Updated and pushed. Changes:
 - Step 1: removed `usermod` and logout/login instructions
 - Added note at top: "Running as root — no `sudo` needed"
 - Step 10 `scp`: changed `user@` → `root@` and clarified it runs on local machine
-<!-- agent:boundary:486e0314 -->
+
+❯ Should I use the pass command or is cleartext ok for the .env files. On step 7 btw
+### Re: cleartext vs pass for `.env` (step 7) (HEAD)
+
+**Cleartext in `.env` is fine.**
+
+The `.env` file is gitignored, only readable by root on the server, and never leaves the machine. That's the standard Docker Compose credential pattern.
+
+Lock down permissions when you create it:
+
+```bash
+touch .env && chmod 600 .env
+nano .env   # fill in values
+```
+
+`chmod 600` ensures only root can read or write it — no further protection needed on a single-admin server. `pass` would add GPG key setup and subprocess substitution complexity with no practical benefit here.
+<!-- agent:boundary:3269d83f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -381,7 +397,7 @@ Updated and pushed. Changes:
 - [ ] **Server step 4:** Add deploy key to GitHub (btakita/monsterrodholders-dev → Settings → Deploy keys)
 - [ ] **Server step 5:** Configure `/root/.ssh/config`
 - [ ] **Server step 6:** Clone repo to `/opt/monsterrodholders/app`
-- [ ] **Server step 7:** Configure `.env` (passwords + `WORDPRESS_TABLE_PREFIX=wp_nxz1mfc9cg_`)
+- [ ] **Server step 7:** `touch .env && chmod 600 .env`, fill in values
 - [ ] **Server step 8:** Provision SSL (`certbot-init.sh`)
 - [ ] **Server step 9:** `docker compose up -d`
 - [ ] **Server step 10:** Transfer + import backup, remove WP Engine mu-plugins

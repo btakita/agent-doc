@@ -550,7 +550,7 @@ The IPC primary path already read actual file contents after plugin ACK — now 
 **On "scared to rely on SKILL for deterministic guarantees":** Correct instinct. The SKILL's `baseline_file` fix was skill-level. This moves the invariant into the binary — snapshot is always the actual post-write disk state regardless of what baseline the skill passed in.
 
 Tests pass, release build + `cargo install` done. v0.31.25 now installed with the fix.
-<!-- agent:boundary:a52fe525 -->
+<!-- agent:boundary:a17e629d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -169,7 +169,19 @@ The `improve-codebase-architecture` skill is about finding shallow modules in a 
 3. **Improve `superpowers:test-driven-development`** — import horizontal/vertical slicing framing
 4. **Create `improve-codebase-architecture` equivalent** — currently no direct analog; highest unique value
 5. **Consider `agent-doc new --template <name>`** — scaffolding command for structured session types
-<!-- agent:boundary:122e9180 -->
+
+Should I fork the mattpocock/skills repo?
+### Re: Fork the mattpocock/skills repo? (HEAD)
+
+No. His skills are 5–20 line stubs — the moment you add agent-doc context injection, superpowers frontmatter, and your workflow conventions, you diverge immediately. The fork relationship creates overhead without tracking value.
+
+Better: use his repo as a reference bookmark. Read source when needed, adapt ideas directly into agent-loop's skill system. The reference is already in this document.
+### Re: Fork the mattpocock/skills repo? (HEAD)
+
+No. His skills are 5–20 line stubs — the moment you add agent-doc context injection, superpowers frontmatter, and your workflow conventions, you diverge immediately. The fork relationship creates overhead without tracking value.
+
+Better: use his repo as a reference bookmark. Read source when needed, adapt ideas directly into agent-loop's skill system. The reference is already in this document.
+<!-- agent:boundary:c25deeed -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

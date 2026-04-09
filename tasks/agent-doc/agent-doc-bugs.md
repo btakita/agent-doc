@@ -514,7 +514,7 @@ Legacy entries (`file` is empty) are skipped. Added 4 tests:
 - `detect_duplicate_claims_skips_empty_file_entries` → empty (legacy entries ignored)
 
 All 4 pass. Built + installed v0.31.25.
-<!-- agent:boundary:6b464e03 -->
+<!-- agent:boundary:d01d05f6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -416,7 +416,7 @@ CERTBOT_EMAIL=support@monsterrodholders.com
 ```
 
 Let's Encrypt sends renewal warnings 30 and 7 days before expiry. Whoever monitors that inbox needs to act if auto-renewal fails.
-<!-- agent:boundary:deb3b1d0 -->
+<!-- agent:boundary:02fe9f14 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

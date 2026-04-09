@@ -434,7 +434,7 @@ Let's Encrypt sends renewal warnings 30 and 7 days before expiry. Whoever monito
 **So:** nothing to remove — ssl.com disappears when DNS flips to the new server. You do still need `CERTBOT_EMAIL`.
 
 `rberkes@gmail.com` is fine for that — Ron gets the "your cert expires in 30 days" emails if auto-renewal breaks.
-<!-- agent:boundary:f12f71bd -->
+<!-- agent:boundary:4ee539cd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

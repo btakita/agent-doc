@@ -278,7 +278,7 @@ Also cleaned up:
 You're right — it shouldn't be there. Removed. The field is gone from the struct, so it won't appear in JSON output, so there's nothing to document. SKILL.md JSON schema now only shows fields that actually exist.
 
 `skill install` emitted `SKILL_RELOAD=compact` — please run `/compact` to reload the updated skill.
-<!-- agent:boundary:29099d4d -->
+<!-- agent:boundary:67aa0627 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

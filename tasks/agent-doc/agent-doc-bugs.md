@@ -133,7 +133,7 @@ The current fix (deleted Check 2 entirely) is correct: it removes the false posi
 **Stash window still showing:** The fix is in source (`preflight.rs`) but the running binary is still v0.31.24 — `cargo install --path .` hasn't been run since the edit. Once installed, the stash layout issues will disappear from preflight output.
 
 ❯ Go ahead and kill that pan if it's running an old binary.
-### Re: token waste + kill stash panes (HEAD)
+### Re: token waste + kill stash panes
 
 **Stash panes killed.** All 5 (`%43 %46 %47 %49 %51`) terminated.
 
@@ -158,15 +158,39 @@ Key finding: `--diff-only` flag **already exists** in `preflight.rs` and `main.r
 **Backward compat:** `preflight` without `--diff-only` unchanged. Only the skill changes its call.
 
 Shall I implement this now?
-<!-- agent:boundary:82ff648a -->
+
+❯ First `--diff-only` should be the default. The option should be to preflight the entire document.
+
+I thought the intent of preflight is to send only the diff. Why is the entire document sent?
+### Re: default should be diff-only (HEAD)
+
+**Why is the document sent?** It was added as convenience — one tool call returns both diff + HEAD content so the agent doesn't need a separate `Read`. The intent was "save a round-trip." But the cost is 26KB landing in context every cycle regardless of whether the agent needs it.
+
+**Revised design (your direction):**
+
+Flip the default:
+- `preflight <FILE>` → `document: null` (diff-only, no document)
+- `preflight --with-document <FILE>` → full document included
+
+This means:
+1. **`preflight.rs`** — remove `--diff-only` flag. Default `document` to `None`. Add `--with-document` flag that populates it.
+2. **`main.rs`** — rename/flip the flag in `Preflight` args.
+3. **`SKILL.md`** — invocation stays `agent-doc preflight <FILE>` (no flag). First-cycle protocol: run `agent-doc read <FILE>` when document not in context.
+4. **`read.rs`** (new) + `Read` subcommand — same as before.
+5. Keep `--diff-only` as a deprecated alias (or remove it — no external users outside the skill).
+
+Implementing now.
+<!-- agent:boundary:9b66e7e6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Implement diff-only optimization: `preflight.rs` Option<String>, `read.rs`, `main.rs` Read subcommand, SKILL.md update
-- [ ] `cargo install --path .` in src/agent-doc to install stash-fix locally (stash-fix already in source, not yet installed)
-- [ ] Release v0.31.25 with stash fix + diff-only optimization
-- [ ] Follow-on: add "duplicate document claims" check to `check_layout()`
+- [ ] Implement diff-only as default in `preflight.rs` (flip flag, rename to --with-document)
+- [ ] Add `agent-doc read <FILE>` subcommand + `read.rs`
+- [ ] Update SKILL.md: remove --diff-only, add first-cycle read protocol
+- [ ] `cargo install --path .` in src/agent-doc after changes
+- [ ] Release v0.31.25 with stash fix + diff-only default
+- [ ] Follow-on: duplicate claims check in `check_layout()`
 - [ ] Verify CI passes on 7fc7905
 <!-- /agent:pending -->

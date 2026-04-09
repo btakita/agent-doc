@@ -369,7 +369,7 @@ Updated and pushed. Changes:
 - Step 1: removed `usermod` and logout/login instructions
 - Added note at top: "Running as root — no `sudo` needed"
 - Step 10 `scp`: changed `user@` → `root@` and clarified it runs on local machine
-<!-- agent:boundary:4f9d0699 -->
+<!-- agent:boundary:486e0314 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

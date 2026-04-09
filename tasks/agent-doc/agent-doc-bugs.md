@@ -1196,14 +1196,42 @@ test
 This write cycle sends the correct `normalize_prefix_lines = ["do", "done"]` to the plugin. After this patch is applied, `do`/`done` lines should have `❯ ` restored.
 
 **Next step:** Verify `do`/`done` lines show `❯ ` in the editor after this write. If clean, bump version and release.
-### Re: memory question + commit skip (HEAD)
+### Re: memory question + commit skip
 
 **"Memory involved":** No external memory (claude-mem) involved. "Memory" in this context was the `HashSet<&str>` used for set-membership checks inside `extract_normalization_targets`. The operation is fully deterministic — same inputs produce the same output. The bug was that the HashSet de-duplicated across ALL positions in the exchange, so `"❯ do"` from one line polluted the check for `"do"` at a different position. Fixed by replacing set-membership with a positional `zip()` comparison (line i of before vs line i of after). Still deterministic, no statefulness.
 
 **Commit skip:** Yes — missed calling `agent-doc commit` after the debug write. Got absorbed in analyzing the debug output. Preflight auto-committed as the safety net. Rule stands: always call `agent-doc commit` right after every `agent-doc write`, regardless of what happens next.
 
 **This cycle:** the fixed binary sends correct `normalize_prefix_lines` for the stripped lines above. After this patch is applied, those lines should show `❯ ` in the document.
-<!-- agent:boundary:cd197030 -->
+
+❯ Why does `do`/`done` get special treatment? Because they are short words? Why would `❯ ` be stripped from short words?
+### Re: why `do`/`done` lose `❯ ` prefix (HEAD)
+
+No special treatment for short words anywhere in the code. The word `do`/`done` isn't special — it was just what was typed when the bug manifested. Any word could trigger it.
+
+**The actual mechanism:** In template mode (with component patches), the binary does NOT send `fullContent` to the plugin — only patches + `normalize_prefix_lines`. From `write.rs`:
+
+```rust
+// fullContent only sent when no component patches:
+if ipc_patches_json.is_empty() && let Some(ours) = content_ours {
+    socket_payload["fullContent"] = ...;
+}
+```
+
+So the live-document update path for prefix normalization is exclusively `normalize_prefix_lines`. When the HashSet bug in `extract_normalization_targets` caused those lines to be **empty or wrong**, the plugin received no instruction to prefix `do` — and it stayed bare in the live document.
+
+The snapshot (computed from `content_ours` after binary normalization) DID have `❯ do` correctly. But the **live editor document** had bare `do`, because the plugin only acts on what it receives via IPC.
+
+**Chain:**
+1. User types `do` (bare)
+2. Binary normalizes `content_ours` → `❯ do` (snapshot is correct)
+3. `extract_normalization_targets` (HashSet bug): fails to include `do` in `normalize_prefix_lines` when `❯ do` appears elsewhere in the exchange
+4. Plugin receives patches but no `normalize_prefix_lines` → live document keeps bare `do`
+5. Next preflight: snapshot has `❯ do`, file has `do` → "prefix lost in file" scenario
+6. Repeat
+
+So `❯ ` wasn't "stripped" by anything — it was never applied to the live document due to the missing IPC notification. The snapshot just diverged from the file.
+<!-- agent:boundary:12f16b4b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

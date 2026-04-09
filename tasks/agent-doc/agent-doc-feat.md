@@ -201,7 +201,7 @@ All 20 git tests pass.
 
 ❯ do
 ❯ - [ ] Fix IPC plugin: `❯ ` prefix lost in editor after transfer (normalize runs before patch body assembled)
-### Re: ❯ prefix lost in editor after transfer (HEAD)
+### Re: ❯ prefix lost in editor after transfer
 
 Fixed. Committed to `src/agent-doc` as `fix: bake ❯ prefix into IPC patch content to fix transfer normalization`.
 
@@ -222,7 +222,34 @@ Fixed. Committed to `src/agent-doc` as `fix: bake ❯ prefix into IPC patch cont
 - `normalize_patch_content_non_matching_lines_unchanged` — agent lines untouched
 
 All 495 tests pass.
-<!-- agent:boundary:d49a5b61 -->
+
+❯ When I run `compact exchange`, will a git tag be created...can we use `agent-doc log` to navigate to the last tag?
+### Re: compact exchange + git tags + agent-doc log (HEAD)
+
+Yes and yes — both are already implemented.
+
+**`compact exchange` creates a git tag automatically:**
+Tag format: `agent-doc/<doc-name>/pre-compact-N` (N is the next ordinal, auto-incremented).
+For this document: `agent-doc/agent-doc-feat/pre-compact-1`, then `pre-compact-2`, etc.
+The tag is created at HEAD *before* the compaction modifies the exchange, so it preserves the full uncompacted state as a checkpoint.
+
+**`agent-doc log <FILE>` shows compaction points:**
+It lists all commits that touched the document, and annotates compaction commits with their `pre-compact-N` tag name inline. So you can see exactly which commit in the log corresponds to each pre-compact checkpoint.
+
+**To navigate back to a pre-compact state:**
+```bash
+# See the log with tag annotations
+agent-doc log tasks/agent-doc/agent-doc-feat.md
+
+# Show document content at a specific commit or tag
+agent-doc show tasks/agent-doc/agent-doc-feat.md --tag agent-doc/agent-doc-feat/pre-compact-1
+
+# Restore exchange component from a tagged commit
+agent-doc history tasks/agent-doc/agent-doc-feat.md --restore agent-doc/agent-doc-feat/pre-compact-1
+```
+
+So compaction is fully reversible — the tag anchors the pre-compact history, and `agent-doc log` surfaces it.
+<!-- agent:boundary:4f6606f7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -198,6 +198,7 @@ Done.
 - `src/session-share/tasks/claudescore.md` — committed (+73 lines, 2 deletions)
 
 Both working trees are clean.
+compact exchange
 <!-- agent:boundary:cc7e74b9 -->
 <!-- /agent:exchange -->
 

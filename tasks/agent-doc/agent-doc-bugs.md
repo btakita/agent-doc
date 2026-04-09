@@ -161,8 +161,26 @@ Shall I implement this now?
 
 ❯ First `--diff-only` should be the default. The option should be to preflight the entire document.
 
-I thought the intent of preflight is to send only the diff. Why is the entire document sent?
-### Re: diff-only default + `agent-doc read` (HEAD)
+❯ I thought the intent of preflight is to send only the diff. Why is the entire document sent? 
+### Re: default should be diff-only (HEAD)
+
+❯ **Why is the document sent?** It was added as convenience — one tool call returns both diff + HEAD content so the agent doesn't need a separate `Read`. The intent was "save a round-trip." But the cost is 26KB landing in context every cycle regardless of whether the agent needs it.
+
+❯ **Revised design (your direction):**
+
+❯ Flip the default:
+❯ - `preflight <FILE>` → `document: null` (diff-only, no document)
+❯ - `preflight --with-document <FILE>` → full document included
+
+❯ This means:
+❯ 1. **`preflight.rs`** — remove `--diff-only` flag. Default `document` to `None`. Add `--with-document` flag that populates it.
+❯ 2. **`main.rs`** — rename/flip the flag in `Preflight` args.
+❯ 3. **`SKILL.md`** — invocation stays `agent-doc preflight <FILE>` (no flag). First-cycle protocol: run `agent-doc read <FILE>` when document not in context.
+❯ 4. **`read.rs`** (new) + `Read` subcommand — same as before.
+❯ 5. Keep `--diff-only` as a deprecated alias (or remove it — no external users outside the skill).
+
+❯ Implementing now.
+### Re: diff-only default + `agent-doc read`
 
 Done. Changes in `src/agent-doc/`:
 
@@ -190,7 +208,32 @@ Done. Changes in `src/agent-doc/`:
 **`VERSIONS.md`**: diff-only default, `--diff-only` removal (BREAKING), `agent-doc read` subcommand, stash window fix, clippy fix
 
 38/38 tests pass. Run `cargo install --path .` to pick it up, then verify before publishing.
-<!-- agent:boundary:bf91c2b2 -->
+
+❯ Local install.
+
+❯ Are there any valid use cases for "saving the round trip" and sending the entire document? If we were to use remote claude sessions, we would use an existing remote transport that work for **all** claude sessions. So I cannot think of any valid use cases.
+
+The response patch before this last one was removed in the last commit. The content is now uncommitted to be added. Why?
+### Re: no valid use cases for `--with-document` (HEAD)
+
+Agreed, and removed. The flag never shipped (only lived in v0.31.25 pre-release), so this is a clean deletion.
+
+**Changes (folded into v0.31.25):**
+
+- **`preflight.rs`**: `run(file, with_document)` → `run(file)`. Step 5 is unconditional skip. Doc comment updated: "Always `null` — use `agent-doc read <FILE>` to fetch."
+- **`main.rs`**: `--with-document` arg and `{ file, with_document }` destructure removed.
+- **`VERSIONS.md`**: Entry updated — `--with-document` removal noted alongside `--diff-only` removal.
+
+38/38 tests pass.
+
+### Re: uncommitted response patch (HEAD)
+
+The "### Re: default should be diff-only" section was in the document file but not in the snapshot. When this session's preflight ran its commit step, it committed the stale snapshot (the one before that response) — leaving that 1453-byte block as uncommitted in git (green gutter), even though the content was correctly in the file.
+
+**Root cause:** The snapshot wasn't updated after that response was written. Most likely the session that generated it used the Edit tool (or was interrupted between file write and snapshot update) — `agent-doc write` updates both atomically, but Edit tool writes only the file and bypasses snapshot management.
+
+**Resolution:** This session's write-back will include the full content (including "### Re: default should be diff-only") in the snapshot. After `agent-doc commit`, git gutter will clear for those lines.
+<!-- agent:boundary:fbcd4b54 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

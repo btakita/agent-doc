@@ -194,7 +194,7 @@ gunzip -c /path/to/backup.sql.gz | docker compose exec -T db mariadb \
 #### User passwords
 
 Passwords are hashed (bcrypt/phpass) in the DB — all existing users keep their passwords after migration.
-### Re: Migration steps for this backup (HEAD)
+### Re: Migration steps for this backup
 
 **Good news:** Domain is already `https://monsterrodholders.com` — no URL search-replace needed.
 
@@ -300,18 +300,53 @@ cd src/monsterrodholders-dev
 source .env && ./scripts/certbot-init.sh
 docker compose up -d
 ```
-<!-- agent:boundary:1d552b69 -->
+
+❯ Put instructions into it's own artifact md file.
+❯ I am logged in via ssh.
+❯ Walk me through setting up a ssh key, adding permission just to the github repo, cloning, installing necessary software on Alma Linux, etc.
+❯ Step by step.
+I want to test the site before switching over the DNS.
+### Re: Server setup guide (HEAD)
+
+Created `docs/server-setup.md` in the repo and pushed. Full step-by-step:
+
+**File:** `src/monsterrodholders-dev/docs/server-setup.md`
+
+Steps covered:
+
+1. **Install Docker + Docker Compose** (via Docker's official RHEL repo)
+2. **Install git + unzip**
+3. **Generate a deploy SSH key** — scoped to this repo only, no passphrase
+4. **Add deploy key to GitHub** — `btakita/monsterrodholders-dev` → Settings → Deploy keys
+5. **Configure `~/.ssh/config`** — maps `github-monsterrodholders` host to the deploy key
+6. **Clone the repo** to `/opt/monsterrodholders/app`
+7. **Configure `.env`** — passwords, table prefix `wp_nxz1mfc9cg_`, domain, certbot email
+8. **Provision SSL** — `./scripts/certbot-init.sh` (port 80 must be open first)
+9. **Start services** — `docker compose up -d`
+10. **Transfer + import backup** — `scp` the zip over, then follow migration steps
+
+Start with step 1. When you get to step 4, you'll need to paste the public key into GitHub. Copy the output of:
+
+```bash
+cat ~/.ssh/monsterrodholders_deploy.pub
+```
+<!-- agent:boundary:cf72eda9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Set `WORDPRESS_TABLE_PREFIX=wp_nxz1mfc9cg_` in `.env` on server
-- [ ] Server: clone repo, fill `.env`, `docker compose up -d`
-- [ ] Extract backup zip, import DB, copy wp-content
-- [ ] Remove WP Engine mu-plugins (step 6)
-- [ ] Plugin audit: delete `worker`, `wpmudev-updates`; pick TaxJar OR AvaTax; check `wctzin`
-- [ ] Clean spam comments
-- [ ] Server: provision SSL (`certbot-init.sh`), `docker compose up -d` to go live
-- [ ] Server: set up cron jobs (SSL renewal + daily backup)
+- [ ] **Server step 1:** Install Docker + Docker Compose
+- [ ] **Server step 2:** Install git + unzip
+- [ ] **Server step 3:** Generate deploy SSH key
+- [ ] **Server step 4:** Add deploy key to GitHub (btakita/monsterrodholders-dev → Settings → Deploy keys)
+- [ ] **Server step 5:** Configure `~/.ssh/config`
+- [ ] **Server step 6:** Clone repo to `/opt/monsterrodholders/app`
+- [ ] **Server step 7:** Configure `.env` (passwords + `WORDPRESS_TABLE_PREFIX=wp_nxz1mfc9cg_`)
+- [ ] **Server step 8:** Provision SSL (`certbot-init.sh`)
+- [ ] **Server step 9:** `docker compose up -d`
+- [ ] **Server step 10:** Transfer + import backup, remove WP Engine mu-plugins
+- [ ] Clean spam comments post-import
+- [ ] Plugin audit: delete `worker`, `wpmudev-updates`; pick TaxJar OR AvaTax
+- [ ] Set up cron jobs (SSL renewal + daily backup)
 <!-- /agent:pending -->

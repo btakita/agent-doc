@@ -577,7 +577,7 @@ All 753 tests pass. `cargo install` done.
 
 How many write paths are there into the snapshot?
 How can we guarantee that adding content won't cause content loss into the snapshot?
-### Re: snapshot write paths + content-loss guarantee (HEAD)
+### Re: snapshot write paths + content-loss guarantee
 
 **How many write paths into the snapshot?**
 
@@ -598,6 +598,8 @@ In `write.rs` alone there are 11 `snapshot::save` calls (excluding tests and crd
 | `agent-doc run` | run.rs:214 | `content_ours` | ⚠ stale-baseline risk |
 | `agent-doc stream` flush | stream.rs:357 | `content_ours` | ⚠ stale-baseline risk |
 
+There are many paths.
+
 The recover paths (`apply_append_from_string`, `apply_template_from_string`) are safe because their baseline IS the current file content — `content_ours = file + response` is always accurate.
 
 The `agent-doc run` and `agent-doc stream` paths are not used by the current SKILL (which uses `agent-doc write --stream`). They could be fixed with the same pattern.
@@ -613,8 +615,39 @@ The reconciliation is the safety net: even wrong snapshots get corrected. The co
 
 **For a hard guarantee on IPC paths:** the plugin would need to send back the final applied content in its ACK response. That's a protocol change (plugin sends content, not just ack). Alternatively, write directly to disk (bypass plugin) and accept the IDE "externally modified" dialog.
 
+Tell me the mechanics of the last issue. Where we had a response patch committing then being removed in the next commit and ending up appearing again as uncommitted on the next response patch?
+
 The 30+ snapshot write sites are worth auditing for `content_ours` vs `final_content` consistency. Most non-response paths (compact, convert, extract) are already correct — they save exactly the document they modified.
-<!-- agent:boundary:80f2cafd -->
+### Re: "There are many paths" + ghost-reappearance mechanics (HEAD)
+
+> There are many paths.
+
+Yes — 12 distinct response-path entries in that table alone, and 30+ total snapshot write sites. The diversity is partly historical (append → template → stream → IPC) and partly because each new transport added its own save logic rather than funneling through a shared post-write hook.
+
+> Tell me the mechanics of the last issue. Where we had a response patch committing then being removed in the next commit and ending up appearing again as uncommitted on the next response patch?
+
+The bug requires three conditions lining up:
+
+**Step 1 — R gets committed correctly (non-stale cycle):**
+Snapshot = `old_snapshot + R`, which is accurate. `agent-doc commit` stages snapshot content → git HEAD = `S + R`. Correct.
+
+**Step 2 — Stale snapshot accumulates:**
+Old IPC code saved `content_ours = old_snapshot + response`. If `old_snapshot` was itself stale (missing content X due to a prior IPC timing miss), `content_ours` also omits X. Snapshot = `S + R` where S is missing X. File = `X + R`. Small gap opens.
+
+**Step 3 — Gap commit removes R:**
+Next cycle, preflight detects `file ≠ snapshot` (the "file larger than snapshot" warning). The preflight gap commit stages the *snapshot* content — which is `S` (stale, without R). It commits `S` on top of the previous commit that had `S + R`. That new commit effectively **removes R** from HEAD: parent had `S + R`, child has `S`.
+
+File on disk still has R. Git HEAD does not. Gutter shows R as an uncommitted addition — the same content the user already saw committed last cycle.
+
+**Step 4 — Content loss risk:**
+If the next response uses stale baseline (`S`), `content_ours = S + R₂` — no R. If committed, R is permanently deleted, not just mis-attributed.
+
+**Root cause in one line:** `agent-doc commit` stages snapshot content, not file content. When snapshot ≠ file, the commit regresses HEAD toward the snapshot, undoing whatever the file had that the snapshot missed.
+
+**The v0.31.25 fix:** IPC paths now read the actual post-flush file (200ms delay + disk read) instead of computing `content_ours`. Snapshot = file. No gap. No stale-snapshot gap commits. The domino can't start.
+
+The original trigger in the ❯ prefix case: normalization ran on lines derived from `content_ours` (built from the wrong baseline). The snapshot accumulated a version of the file the actual disk never had. Once snapshot ≠ file, every subsequent cycle's gap commit could roll back correct content.
+<!-- agent:boundary:8931852b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

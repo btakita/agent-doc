@@ -312,7 +312,7 @@ Current preflight sends: layout_issues, recovered, committed, claims, diff, anno
 
 ❯ add tests to ensure preflight behavior. Include a test safeguard to ensure the full document is never sent.
 ❯ release
-### Re: tests + release (HEAD)
+### Re: tests + release
 
 **Tests** — already in place from the previous session:
 
@@ -337,7 +337,18 @@ git tag v0.31.25 && git push origin v0.31.25
 ```
 
 CI will handle GitHub Release + PyPI. Then `cargo publish` for crates.io.
-<!-- agent:boundary:5f13bd77 -->
+
+❯ Would /reload-plugins update the skills? Can you /reload-plugins in all of my existing tmux panes?
+### Re: `/reload-plugins` and skills (HEAD)
+
+`/reload-plugins` reloads MCP servers — it doesn't affect skills. Skills are plain `.md` files read fresh from disk each time they're invoked (`Skill { skill: "agent-doc", ... }` causes SKILL.md to be loaded right then). No caching, no reload needed.
+
+For other sessions: the next time any session runs `/agent-doc`, it reads the current SKILL.md (v0.31.25) automatically. Nothing to do.
+
+The only reload case is when `skill install` emits `SKILL_RELOAD=compact` — that means THIS conversation's context has an old skill cached as part of the system prompt, and `/compact` is needed to flush it. That didn't fire this session (binary and skill matched after install).
+
+Won't send `/reload-plugins` to other panes — it would interrupt active sessions and accomplishes nothing for skills.
+<!-- agent:boundary:f60bfb56 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

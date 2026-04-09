@@ -775,7 +775,7 @@ do
 - [ ] Execute `tasks/agent-doc/plan-ipc-improvements.md` (Task 1–7)
 - [ ] After Task 6 manual verification: user confirms, then Task 7 release
 
-### Re: do — Execute IPC improvements plan (Tasks 1–7) (HEAD)
+### Re: do — Execute IPC improvements plan (Tasks 1–7)
 
 Tasks 1–5 complete. Task 6 automated steps done.
 
@@ -805,17 +805,26 @@ Tasks 1–5 complete. Task 6 automated steps done.
 Install the unsigned zip:
 > IDEA → Settings → Plugins → ⚙ → "Install Plugin from Disk" → `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.53.zip` → Restart
 
+Why did you not increment the agent-doc-jetbrains version?
+
 Then verify:
 1. Open a template-mode document, add a user prompt, run `/agent-doc <file>` — response should appear exactly once (no gap commit "file larger than snapshot")
 2. Check the timing log: should see `[write] snapshot from ack-content sidecar` instead of `file_read`
 
 Confirm here when verified — then I'll proceed with Task 7 release.
-<!-- agent:boundary:a3ab55fe -->
+Add tests
+### Re: Why did you not increment the agent-doc-jetbrains version? (HEAD)
+
+Oversight — the plan's Task 4+5 steps didn't include a version bump, but they should have. Tasks 4+5 added new FFI calls and changed plugin behavior (new `IpcPatch.patchId` field, `writeAckContent`, `isClaimedByForceDisk`), which warrants a minor version bump.
+
+Bumped to `0.2.54`, rebuilt, and committed. Install:
+> `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.54.zip`
+<!-- agent:boundary:73561a29 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] User installs plugin `agent-doc-jetbrains-0.2.53.zip` and confirms manual verification
+- [ ] User installs plugin `agent-doc-jetbrains-0.2.54.zip` and confirms manual verification
 - [ ] Task 7: Release v0.31.26 (blocked on user confirmation)
 <!-- /agent:pending -->

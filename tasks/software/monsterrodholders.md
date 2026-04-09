@@ -502,7 +502,7 @@ docker exec wordpress wp search-replace \
 Then flip DNS.
 
 ❯ Can we have multiple domains pointing to the wordpress site?
-### Re: multiple domains pointing to WordPress (HEAD)
+### Re: multiple domains pointing to WordPress
 
 **Short answer:** WordPress has one primary domain. Multiple domains can point at the server, but they all redirect to that one domain — not serve separate content.
 
@@ -517,14 +517,28 @@ Then flip DNS.
 **If Ron wants a permanent staging URL after launch:** easiest is a separate server (or subdomain like `staging.monsterrodholders.com`) with its own WordPress install — that's a future problem, not this migration.
 
 For now: test on nip.io → verify → flip to `monsterrodholders.com` → done. One domain, one site.
-<!-- agent:boundary:73cfb032 -->
+
+❯ Should I call `chmod a+x ./scripts/certbot-init.sh` or more strict permissions?
+### Re: certbot-init.sh permissions (HEAD)
+
+Use `chmod 700`:
+
+```bash
+chmod 700 ./scripts/certbot-init.sh
+```
+
+- `a+x` (755) — world-executable, no reason for that
+- `700` — only root reads or runs it, which is all you need on a single-admin root server
+
+The script touches Docker and certbot as root. No other user needs to see or execute it. `700` is the right habit for any script that runs infrastructure commands, even when there are no other users.
+<!-- agent:boundary:2d74bf35 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] **Server step 7:** `touch .env && chmod 600 .env`, fill in values — use `openssl rand -base64 32` for passwords, `CERTBOT_EMAIL=rberkes@gmail.com`, set `DOMAIN=<server-ip>.nip.io` for test first
-- [ ] **Server step 8:** Provision SSL (`certbot-init.sh`) with nip.io test domain
+- [ ] **Server step 8:** `chmod 700 ./scripts/certbot-init.sh && ./scripts/certbot-init.sh`
 - [ ] **Server step 9:** `docker compose up -d`
 - [ ] **Server step 10:** Transfer + import backup, then run `wp search-replace 'https://monsterrodholders.com' 'https://<ip>.nip.io' --all-tables`; remove WP Engine mu-plugins
 - [ ] Verify site on nip.io test domain

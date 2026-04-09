@@ -47,7 +47,7 @@ When a new preflight detects that the working tree has content added *between* a
 **Immediate action for this file:**
 
 The intermediate checkpoint block (lines 1504–1522) can be removed — it's superseded by the `done` response. This is a manual cleanup since the automated recovery path doesn't cover this case yet.
-<!-- agent:boundary:93d0c788 -->
+<!-- agent:boundary:c51d513d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

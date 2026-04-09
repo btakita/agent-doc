@@ -155,7 +155,7 @@ For a complete migration (moving hosts, cloning site):
 - On the new site: install the same plugin, upload the package, follow the wizard
 
 **All-in-One WP Migration** is the simplest — exports everything (DB + files) into a single `.wpress` file, handles search-replace for domain changes automatically. Free version is limited to 512MB imports; paid removes the limit.
-<!-- agent:boundary:ccc569ca -->
+<!-- agent:boundary:e00743d2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

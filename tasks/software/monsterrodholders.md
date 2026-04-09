@@ -651,7 +651,7 @@ Certbot needs port 80 temporarily to complete the ACME HTTP challenge. Once the 
 [root@oddball-business app]# ss -tlnp | grep :80
 LISTEN 0      511                     *:80               *:*    users:(("httpd",pid=998683,fd=4),("httpd",pid=993496,fd=4),("httpd",pid=993441,fd=4),("httpd",pid=993398,fd=4),("httpd",pid=993397,fd=4),("httpd",pid=993391,fd=4))
 ```
-### Re: httpd on port 80 (HEAD)
+### Re: httpd on port 80
 
 Apache (`httpd`) — stop it:
 
@@ -667,13 +667,41 @@ Then retry certbot:
 ```
 
 The Docker nginx container will take over port 80 after the stack is up, so Apache isn't needed.
-<!-- agent:boundary:4d55e7b3 -->
+
+```
+[root@oddball-business app]# ./scripts/certbot-init.sh
+docker: Error response from daemon: failed to set up container networking: driver failed programming external connectivity on endpoint hungry_ride (f8e5ec74ae53de492638286b6f0a5971e6acc7efe0b257693a691b9cb2e53c3b): Unable to enable DNAT rule:  (iptables failed: iptables --wait -t nat -A DOCKER -p tcp -d 0/0 --dport 80 -j DNAT --to-destination 172.17.0.2:80 ! -i docker0: iptables: No chain/target/match by that name.
+ (exit status 1))
+
+Run 'docker run --help' for more information
+```
+### Re: iptables DOCKER chain missing (HEAD)
+
+Docker's NAT chains are out of sync — likely because stopping `httpd` or firewalld triggered an iptables reload that wiped Docker's rules.
+
+Fix:
+
+```bash
+systemctl restart docker
+./scripts/certbot-init.sh
+```
+
+Restarting Docker reinitializes its iptables chains. Should clear the error.
+
+If it fails again, check whether `firewalld` is running:
+
+```bash
+systemctl status firewalld
+```
+
+If it's active, firewalld and Docker are fighting over iptables. Either stop firewalld (`systemctl stop firewalld`) or configure Docker to use `iptables=false` and manage rules via firewalld — but stopping it is simpler for a single-admin server.
+<!-- agent:boundary:09eb7d96 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Server step 8 (in progress):** `systemctl stop httpd && systemctl disable httpd`, then retry `./scripts/certbot-init.sh`
+- [ ] **Server step 8 (in progress):** `systemctl restart docker`, then retry `./scripts/certbot-init.sh`
 - [ ] **Server step 9:** `docker compose up -d`
 - [ ] **Server step 10:** Transfer + import backup, then run `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`; remove WP Engine mu-plugins
 - [ ] Verify site on `50.28.2.199.nip.io`

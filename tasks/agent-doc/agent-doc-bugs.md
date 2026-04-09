@@ -443,7 +443,7 @@ Also notable: every cycle in this session starts with `WARNING: file is N bytes 
   "annotated_diff": "[agent] **The actual bug** — if you got the \"entire response patch\" — suggests something else happened. Two possibilities:\n[agent] 1. The snapshot update in step 0 preflight didn't save properly (file lock issue, crash)\n[agent] 2. The file showed content (response already written) but snapshot was an older version\n[agent] \n[agent] Which path did you observe — did the manual preflight output show `committed: true` in its JSON? That would tell us whether step 0 of the agent run had actually committed before you ran your manual preflight.\n[user+] \n[user+] I don't recall for that instance...but running `agent-doc preflight` again in the same scenario has `committed: true`. \n[agent] <!-- /agent:exchange -->\n[agent] \n[agent] ## Pending / Not Built\n[agent] \n[agent] <!-- agent:pending patch=replace -->"
 }
 ```
-### Re: the diff content + logging added (HEAD)
+### Re: the diff content + logging added
 
 ❯ **What the manual preflight diff shows:** Looking at the JSON you pasted — the `+` lines are only your comment ("I don't recall for that instance..."). My previous response appears as context lines (standard unified diff context, not new content). So the manual preflight correctly captured just your uncommitted comment as the diff. The "entire previous patch" visible in the output is unified diff context, not added content.
 
@@ -485,7 +485,9 @@ Note: the `snapshot_saved_file_ipc` and `ipc_file_delivered` entries will appear
 
 ❯ do
 ❯ - [ ] Follow-on: duplicate claims check in `check_layout()`
-### Re: uncommitted block + snapshot CRDT question (HEAD)
+❯ Look at src/session-share/tasks/claudescore.md.
+❯ The an uncommitted patch include the `<!-- patch:pending -->` section at the end of the document. Something is very wrong. Use opus.
+### Re: uncommitted block + snapshot CRDT question
 
 **Why `### Re: the diff content + logging added` was uncommitted:**
 
@@ -514,11 +516,58 @@ Legacy entries (`file` is empty) are skipped. Added 4 tests:
 - `detect_duplicate_claims_skips_empty_file_entries` → empty (legacy entries ignored)
 
 All 4 pass. Built + installed v0.31.25.
-<!-- agent:boundary:d01d05f6 -->
+### Re: claudescore.md + uncommitted pending + root cause (HEAD)
+
+**claudescore.md:** The ops log shows a major drift there:
+```
+preflight_diff_start: snap_len=46737, file_len=48619   (1882-byte gap)
+write:                snap_saved=48290                  (baseline was OLD snapshot)
+commit_staging:       snap=48290, file=51991            (3701-byte drift)
+```
+The write's `content_ours` was 48290 = 46737 (old snapshot) + 1553 (response). That's the old snapshot as the baseline — missing the 1882 bytes that were in the file but not in the snapshot. The plugin correctly applied patches to the 48619-byte file, adding response content. File = 48619 + response + boundary = 51991. Snapshot = 46737 + response = 48290. Gap = 3701 bytes = the 1882 pre-existing gap + ~1690 bytes of boundary/other.
+
+**Root cause — stale baseline saved BEFORE preflight:**
+
+The skill saves the baseline FIRST, then runs preflight. Preflight commits any existing file-vs-snapshot gap. But if the file grew between the baseline save and preflight (concurrent write, plugin applying a pending patch), the baseline is STALE relative to what preflight sees.
+
+```
+time →
+  skill saves baseline = file at T₀ = 46737 bytes
+  [concurrent write: file grows to 48619 bytes]
+  preflight runs: sees file=48619, snap=46737 → commits gap
+  agent responds
+  write: --baseline-file = 46737-byte baseline (stale)
+  content_ours = 46737 + response ← WRONG (missing 1882 bytes)
+  snapshot saved = 48290 (missing the 1882-byte gap content)
+  plugin writes to 48619-byte file → file = 51991
+  next cycle: diff shows 3701-byte gap as [user+]
+```
+
+**Fix: use `baseline_file` from preflight output**
+
+Preflight already saves the baseline as `.agent-doc/baselines/<hash>.md` and returns it in the JSON:
+```json
+"baseline_file": "/path/to/.agent-doc/baselines/<hash>.md"
+```
+
+This is taken AFTER preflight commits any gaps and reaches a stable state. The skill should use this instead of the pre-preflight `cp`.
+
+**SKILL.md change:**
+- Remove: `cp <FILE> /tmp/agent-doc-baseline-$$.md` (step before preflight)
+- In the write call, use `--baseline-file` from the preflight JSON's `baseline_file` field
+- For streaming checkpoints: keep re-saving baseline after each checkpoint (the checkpoint baseline needs to be the file state AFTER the previous checkpoint, not the preflight baseline)
+
+This eliminates the stale-baseline root cause for the initial write. The 129-byte boundary drift remains (that's expected and handled by commit).
+
+**"Use opus":** I can't switch models mid-session — model is set at invocation. To use opus, set `model: opus` in the frontmatter or restart with `claude --model claude-opus-4-6`.
+
+**Updating SKILL.md now.**
+<!-- agent:boundary:d55e5c3f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Fix snapshot saved as actual post-merge disk state instead of `content_ours` (eliminates checkpoint baseline drift)
+- [ ] SKILL.md: use `baseline_file` from preflight JSON (remove pre-preflight `cp`)
+- [ ] claudescore.md: investigate why concurrent write occurred (who wrote 1882 bytes between baseline save and preflight)
 <!-- /agent:pending -->

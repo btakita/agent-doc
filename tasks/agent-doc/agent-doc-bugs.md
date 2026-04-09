@@ -443,7 +443,25 @@ Also notable: every cycle in this session starts with `WARNING: file is N bytes 
   "annotated_diff": "[agent] **The actual bug** — if you got the \"entire response patch\" — suggests something else happened. Two possibilities:\n[agent] 1. The snapshot update in step 0 preflight didn't save properly (file lock issue, crash)\n[agent] 2. The file showed content (response already written) but snapshot was an older version\n[agent] \n[agent] Which path did you observe — did the manual preflight output show `committed: true` in its JSON? That would tell us whether step 0 of the agent run had actually committed before you ran your manual preflight.\n[user+] \n[user+] I don't recall for that instance...but running `agent-doc preflight` again in the same scenario has `committed: true`. \n[agent] <!-- /agent:exchange -->\n[agent] \n[agent] ## Pending / Not Built\n[agent] \n[agent] <!-- agent:pending patch=replace -->"
 }
 ```
-### Re: the diff + logging added (HEAD)
+### Re: the diff content + logging added (HEAD)
+
+❯ **What the manual preflight diff shows:** Looking at the JSON you pasted — the `+` lines are only your comment ("I don't recall for that instance..."). My previous response appears as context lines (standard unified diff context, not new content). So the manual preflight correctly captured just your uncommitted comment as the diff. The "entire previous patch" visible in the output is unified diff context, not added content.
+
+❯ **The sequence now:** Your manual preflight ran AFTER my write completed (my response was in the file as context) but BEFORE my next preflight committed your comment. Manual preflight grabbed it first → `committed: true`.
+
+❯ **Logging added** (built and installed v0.31.25):
+
+❯ Three new `ops_log` entries now appear in `.agent-doc/logs/ops.log`:
+
+❯ 1. **`ipc_socket_delivered`** — logged immediately after socket IPC ack, records `snap_source` (whether snapshot uses `content_ours` or reads file after plugin write) and `snap_len`
+❯ 2. **`snapshot_saved_socket_ipc`** — logged after successful snapshot save on socket IPC path
+❯ 3. **`snapshot_saved_file_ipc`** — logged after successful snapshot save on file-based IPC path
+❯ 4. **`preflight_diff_start`** — logged at step 4 before diff computation, records `snap_len` vs `file_len` at that exact moment
+
+❯ This gives a complete timeline in `.agent-doc/logs/ops.log`: `ipc_socket_delivered` → `snapshot_saved_socket_ipc` → `commit_staging` → `commit_success` → `preflight_diff_start` → `commit_staging` (next cycle).
+
+❯ The `snap_source=content_ours` vs `snap_source=file_read` field tells you which snapshot strategy was used — if it ever shows `file_read`, the snapshot reflects what the plugin wrote (after boundary reposition), which would differ from `content_ours`.
+### Re: the diff + logging added
 
 **What the manual preflight diff showed:** The `+` lines in the diff were only your comment ("I don't recall for that instance..."). My previous response appears as context lines — standard unified diff surrounding context, not new content. The manual preflight correctly captured just your uncommitted comment as the diff. "The entire previous patch" you saw was the unified diff context, not added content.
 
@@ -462,11 +480,45 @@ New entries now appear in `.agent-doc/logs/ops.log`:
 The `snap_source=content_ours` vs `snap_source=file_read` field is key: when `file_read`, the snapshot reflects what the plugin wrote to disk (post-boundary-reposition), which differs from `content_ours`. When `content_ours`, the snapshot is the pre-reposition content — explaining the persistent "file is N bytes larger" warning.
 
 Note: the `snapshot_saved_file_ipc` and `ipc_file_delivered` entries will appear on the next write cycle (new binary is built but `cargo install` not yet run — symlink `.bin/agent-doc` points to `target/release/agent-doc` which is already updated).
-<!-- agent:boundary:a0c4d75e -->
+
+❯ Why is the `### Re: the diff content + logging added` response block uncommitted? We need to stop doing this. If there are race conditions, we need a low level solution with the snapshots. Should we use CRDT with the snapshots?
+
+❯ do
+❯ - [ ] Follow-on: duplicate claims check in `check_layout()`
+### Re: uncommitted block + snapshot CRDT question (HEAD)
+
+**Why `### Re: the diff content + logging added` was uncommitted:**
+
+In the previous session, two streaming checkpoint writes ran against the same original baseline. Write 1 produced `### Re: the diff content + logging added`, write 2 produced `### Re: the diff + logging added`. Because the baseline wasn't re-saved after write 1, write 2's `content_ours` was `baseline + response2` — so the snapshot saved with write 2 only captured response2. Both blocks are in the file, but only the second is in the snapshot → write 1's block shows as `[user+]` on the next cycle.
+
+The fix is already in the SKILL.md — "re-save the baseline after each checkpoint flush." The previous session skipped that step.
+
+**Should we use CRDT for snapshots?**
+
+CRDT would eliminate this class of problem — intermediate writes would be tracked as operations, so the snapshot could always be reconstructed accurately. But the root cause here is a skill-level baseline drift, not a fundamental CRDT gap. A simpler and more targeted fix: have `agent-doc write` save the snapshot as the **actual post-merge file state on disk**, not `content_ours` (the constructed pre-merge view). That way even when baseline drifts across checkpoints, the snapshot stays accurate.
+
+This is a lower-risk change than full CRDT snapshot storage. Adding it to pending.
+
+**Duplicate claims check in `check_layout()` — done:**
+
+Implemented `detect_duplicate_claims(registry)` as a separate testable function and called it from `check_layout()`. It reports:
+
+```
+duplicate claims: 2 sessions claim 'tasks/shared.md': session-a, session-b
+```
+
+Legacy entries (`file` is empty) are skipped. Added 4 tests:
+- `detect_duplicate_claims_empty_registry` → empty
+- `detect_duplicate_claims_no_duplicates` → empty (two sessions, two different files)
+- `detect_duplicate_claims_two_sessions_same_file` → one issue with both session IDs
+- `detect_duplicate_claims_skips_empty_file_entries` → empty (legacy entries ignored)
+
+All 4 pass. Built + installed v0.31.25.
+<!-- agent:boundary:6b464e03 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Follow-on: duplicate claims check in `check_layout()`
+- [ ] Fix snapshot saved as actual post-merge disk state instead of `content_ours` (eliminates checkpoint baseline drift)
 <!-- /agent:pending -->

@@ -259,7 +259,7 @@ tmux list-panes -a | grep %57
 ```
 
 `%57` (mattpocock.md) is now in tmux session 0. WrongSession detection + PaneMoveOp cross-session relocation is working end-to-end. Ready to publish v0.31.27.
-<!-- agent:boundary:b1fdda53 -->
+<!-- agent:boundary:41bf599a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

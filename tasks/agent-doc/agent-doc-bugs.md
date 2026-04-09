@@ -58,6 +58,7 @@ Sessions v0.31.18–v0.31.26. Key decisions and fixes:
 - Snapshot invariant: always save actual post-write disk state, not `content_ours` from baseline.
 - FFI-first: new socket/IPC behavior implemented in ffi.rs, called from plugins via JNA.
 - Runbook: `runbooks/plugin-install.md` must be consulted for any JB plugin change (version bump, uninstall protocol).
+<!-- agent:boundary:34900e67 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

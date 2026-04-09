@@ -168,6 +168,10 @@ class PatchWatcher(private val project: Project) : Disposable {
         return when (type) {
             "patch" -> {
                 val patch = parsePatchJson(json) ?: return false
+                if (isClaimedByForceDisk(patch.patchId)) {
+                    LOG.info("[socket] dedup: sentinel exists for patch_id ${patch.patchId} — skipping apply")
+                    return true
+                }
                 var applied = false
                 ApplicationManager.getApplication().invokeAndWait {
                     applied = try {
@@ -265,6 +269,10 @@ class PatchWatcher(private val project: Project) : Disposable {
             }
 
             ApplicationManager.getApplication().invokeLater {
+                if (isClaimedByForceDisk(patch.patchId) || isPatchAlreadyApplied(patch, patchFile)) {
+                    LOG.info("[patch-watcher] dedup (inner): skipping apply for ${patchFile.name}")
+                    return@invokeLater
+                }
                 val applyStart = System.nanoTime()
                 val applied = try {
                     applyPatch(patch)
@@ -282,6 +290,38 @@ class PatchWatcher(private val project: Project) : Disposable {
             }
         } catch (e: Exception) {
             LOG.warn("Failed to read patch file ${patchFile.name}", e)
+        }
+    }
+
+    /**
+     * Write the final document content to the ack-content sidecar file via FFI.
+     * Called after every successful apply so the CLI binary can use it as the
+     * snapshot source instead of the 200ms sleep + re-read heuristic.
+     * Keyed by patch_id (not file path) — all path logic lives in Rust.
+     */
+    private fun writeAckContent(patchId: String?, content: String) {
+        if (patchId == null) return
+        val basePath = project.basePath ?: return
+        val lib = AgentDocLib.get() ?: run {
+            LOG.debug("[ack-content] FFI unavailable, skipping ack-content write")
+            return
+        }
+        if (!lib.agent_doc_write_ack_content(basePath, patchId, content)) {
+            LOG.warn("[ack-content] FFI write_ack_content returned false for patch_id $patchId")
+        }
+    }
+
+    /**
+     * Check if --force-disk claimed this patch via FFI.
+     * Returns true if the sentinel exists (patch already applied by CLI disk write).
+     * Sentinel is deleted by the Rust side on check (one-time use).
+     */
+    private fun isClaimedByForceDisk(patchId: String?): Boolean {
+        if (patchId == null) return false
+        val basePath = project.basePath ?: return false
+        val lib = AgentDocLib.get() ?: return false
+        return lib.agent_doc_is_claimed_by_force_disk(basePath, patchId).also { claimed ->
+            if (claimed) LOG.info("[patch-watcher] dedup: patch_id $patchId claimed by force-disk — skipping apply")
         }
     }
 
@@ -350,6 +390,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                 LOG.info("Patch applied (full content) to ${patch.file}")
             })
             FileDocumentManager.getInstance().saveDocument(document)
+            writeAckContent(patch.patchId, document.text)
             return true
         }
 
@@ -402,6 +443,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         // Save the document to disk (so snapshot can read it)
         FileDocumentManager.getInstance().saveDocument(document)
+        writeAckContent(patch.patchId, document.text)
         return true
     }
 
@@ -422,6 +464,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                         targetFile.setBinaryContent(patch.fullContent.toByteArray(targetFile.charset))
                     }
                     LOG.info("VFS patch applied (full content) to ${patch.file}")
+                    writeAckContent(patch.patchId, patch.fullContent)
                 }
                 return true
             }
@@ -465,6 +508,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                     targetFile.setBinaryContent(result.toByteArray(targetFile.charset))
                 }
                 LOG.info("VFS patch applied to ${patch.file} (${result.length - content.length} chars changed)")
+                writeAckContent(patch.patchId, result)
             } else {
                 LOG.warn("VFS patch produced no changes for ${patch.file}")
             }
@@ -985,6 +1029,8 @@ data class IpcPatch(
     val repositionBoundary: Boolean = false,
     /** Lines whose plain text should be prefixed with `❯ ` in the exchange component. */
     val normalizePrefixLines: List<String> = emptyList(),
+    /** UUID identifying this patch — used for ack-content sidecar and claimed-patches sentinel. */
+    val patchId: String? = null,
 )
 
 data class ComponentPatch(
@@ -1022,7 +1068,8 @@ fun parsePatchJson(json: String): IpcPatch? {
         val repositionBoundary = root.get("reposition_boundary")?.asBoolean ?: false
         val normalizePrefixLines = root.getAsJsonArray("normalize_prefix_lines")
             ?.mapNotNull { it.asString } ?: emptyList()
-        return IpcPatch(file, patches, unmatched, frontmatter, fullContent, repositionBoundary, normalizePrefixLines)
+        val patchId = root.get("patch_id")?.asString
+        return IpcPatch(file, patches, unmatched, frontmatter, fullContent, repositionBoundary, normalizePrefixLines, patchId)
     } catch (e: Exception) {
         return null
     }

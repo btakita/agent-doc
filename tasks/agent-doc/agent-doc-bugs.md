@@ -574,7 +574,7 @@ Both IPC paths had the same stale-baseline contamination problem. Since `content
 **Would the latest change fix claudescore.md's original issue?** Yes — the original issue was that `content_ours` was built from a stale snapshot as baseline. With the fix, the IPC paths read the actual post-write file, so even a stale baseline can't contaminate future snapshots.
 
 All 753 tests pass. `cargo install` done.
-<!-- agent:boundary:7e1caffc -->
+<!-- agent:boundary:c765d23e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

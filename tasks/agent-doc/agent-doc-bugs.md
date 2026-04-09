@@ -912,7 +912,7 @@ do
 **Test added:** `recover_skips_duplicate_apply` — document already contains the response content, pending file still exists, `run` returns `Ok(false)`, document unchanged, pending file removed.
 
 `make check` clean. `cargo install` → v0.31.26.
-<!-- agent:boundary:5d16da16 -->
+<!-- agent:boundary:233c019e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

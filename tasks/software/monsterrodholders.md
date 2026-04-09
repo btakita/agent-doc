@@ -306,7 +306,7 @@ docker compose up -d
 ❯ Walk me through setting up a ssh key, adding permission just to the github repo, cloning, installing necessary software on Alma Linux, etc.
 ❯ Step by step.
 I want to test the site before switching over the DNS.
-### Re: Server setup guide (HEAD)
+### Re: Server setup guide
 
 Created `docs/server-setup.md` in the repo and pushed. Full step-by-step:
 
@@ -330,7 +330,12 @@ Start with step 1. When you get to step 4, you'll need to paste the public key i
 ```bash
 cat ~/.ssh/monsterrodholders_deploy.pub
 ```
-<!-- agent:boundary:e06ecb16 -->
+
+❯ commit + push
+### Re: commit + push (HEAD)
+
+Done — `btakita/agent-loop` pushed to `origin/main`.
+<!-- agent:boundary:cb74e36f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

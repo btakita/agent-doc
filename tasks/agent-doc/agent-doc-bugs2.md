@@ -162,7 +162,7 @@ Same pattern. `tasks/claudescore.md` in session-share accumulated ~77 lines acro
 Fix: `cd src/session-share && git commit tasks/claudescore.md -m "..."`.
 
 **Root pattern:** `agent-doc commit` keeps snapshots current for diff/recovery, but document files are intentionally left as working-tree content — the 3-gutter system (committed = no gutter, `(HEAD)` = blue, user input = green) relies on this within a session. Across sessions, responses accumulate in the working tree until explicitly `git commit`ted.
-<!-- agent:boundary:d1d3a71c -->
+<!-- agent:boundary:1f4ff730 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

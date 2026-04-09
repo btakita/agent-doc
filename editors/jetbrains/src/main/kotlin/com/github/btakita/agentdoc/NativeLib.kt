@@ -132,6 +132,29 @@ interface AgentDocLib : Library {
     /** Stop the IPC socket listener by removing the socket file. */
     fun agent_doc_stop_ipc_listener(project_root: String)
 
+    /**
+     * Write the final applied document content to the ack-content sidecar file.
+     * Sidecar path: `<project_root>/.agent-doc/ack-content/<patch_id>.md`
+     * Call this after applying a patch so the CLI binary can use it as snapshot
+     * content without the 200ms sleep + re-read heuristic.
+     *
+     * @param project_root  path to the project root containing `.agent-doc/`
+     * @param patch_id      UUID from the patch payload (identifies the sidecar file)
+     * @param content       the final document content after all patches applied
+     * @return true if written successfully, false on error
+     */
+    fun agent_doc_write_ack_content(project_root: String, patch_id: String, content: String): Boolean
+
+    /**
+     * Check if --force-disk claimed this patch by writing a sentinel file.
+     * Checks `.agent-doc/claimed-patches/<patch_id>`. Deletes sentinel if found (one-time use).
+     *
+     * @param project_root  path to the project root containing `.agent-doc/`
+     * @param patch_id      UUID from the patch payload
+     * @return true if sentinel exists (patch already applied by CLI disk write), false otherwise
+     */
+    fun agent_doc_is_claimed_by_force_disk(project_root: String, patch_id: String): Boolean
+
     /** Callback interface for socket IPC messages. */
     interface IpcMessageCallback : Callback {
         /** Called with each JSON message. Return true if handled, false on error. */

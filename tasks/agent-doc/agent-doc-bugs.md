@@ -742,7 +742,7 @@ Do both ACK-with-content and Option C as independent improvements:
 do
 - [ ] IPC double-write: implement idempotent apply (pre-apply hash in patch metadata)
 - [ ] IPC snapshot: implement ACK-with-content protocol (hard snapshot guarantee)
-### Re: do — IPC improvements plan (HEAD)
+### Re: do — IPC improvements plan
 
 Plan written to `tasks/agent-doc/plan-ipc-improvements.md`.
 
@@ -770,12 +770,52 @@ Binary (`try_ipc` + `write_ipc_and_poll`): after ACK received, check for sidecar
 Execution options?
 1. Subagent-driven (recommended) — fresh subagent per task, review between tasks
 2. Inline execution — execute tasks in this session
-<!-- agent:boundary:1a3f5588 -->
+
+do
+- [ ] Execute `tasks/agent-doc/plan-ipc-improvements.md` (Task 1–7)
+- [ ] After Task 6 manual verification: user confirms, then Task 7 release
+
+### Re: do — Execute IPC improvements plan (Tasks 1–7) (HEAD)
+
+Tasks 1–5 complete. Task 6 automated steps done.
+
+**Task 1 ✅** — `patch_id` UUID injected into all 3 IPC payload sites (socket, file IPC, timeout fallback). `--force-disk` cleanup writes sentinel to `.agent-doc/claimed-patches/<patch_id>` before deleting stale patch. `make check` clean.
+
+**Task 2 ✅** — Two new Rust FFI exports (FFI-first, per your direction):
+- `agent_doc_write_ack_content(project_root, patch_id, content)` — writes `.agent-doc/ack-content/<patch_id>.md`
+- `agent_doc_is_claimed_by_force_disk(project_root, patch_id)` — checks + deletes sentinel, pure Rust file I/O
+
+**Task 3 ✅** — `read_ack_content_sidecar(project_root, patch_id)` helper in `write.rs`. Both socket (`try_ipc`) and file (`write_ipc_and_poll`) paths now try sidecar first, fall back to 200ms sleep only for older plugins.
+
+**Task 4 ✅** — Two JNA bindings in `NativeLib.kt` (`agent_doc_write_ack_content`, `agent_doc_is_claimed_by_force_disk`).
+
+**Task 5 ✅** — `PatchWatcher.kt` updated (FFI-first, zero `java.io.File` in new code):
+- `patchId: String?` parsed from patch JSON
+- `writeAckContent(patchId, content)` → pure FFI call after apply
+- `isClaimedByForceDisk(patchId)` → pure FFI call, guards both socket and file paths
+- `isPatchAlreadyApplied` check moved inside `invokeLater` (closes timing race)
+
+**Task 6 automated steps ✅**
+- `make check`: all 38 tests pass, clippy clean
+- `cargo install`: installed `agent-doc v0.31.25`
+- Plugin built: `agent-doc-jetbrains-0.2.53.zip` + `-signed.zip` in `build/distributions/`
+
+**Manual verification needed (Task 6 steps 4–7):**
+
+Install the unsigned zip:
+> IDEA → Settings → Plugins → ⚙ → "Install Plugin from Disk" → `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.53.zip` → Restart
+
+Then verify:
+1. Open a template-mode document, add a user prompt, run `/agent-doc <file>` — response should appear exactly once (no gap commit "file larger than snapshot")
+2. Check the timing log: should see `[write] snapshot from ack-content sidecar` instead of `file_read`
+
+Confirm here when verified — then I'll proceed with Task 7 release.
+<!-- agent:boundary:9c07cbb7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Execute `tasks/agent-doc/plan-ipc-improvements.md` (Task 1–7)
-- [ ] After Task 6 manual verification: user confirms, then Task 7 release
+- [ ] User installs plugin `agent-doc-jetbrains-0.2.53.zip` and confirms manual verification
+- [ ] Task 7: Release v0.31.26 (blocked on user confirmation)
 <!-- /agent:pending -->

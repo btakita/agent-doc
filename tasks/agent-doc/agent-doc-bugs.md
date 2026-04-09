@@ -285,7 +285,7 @@ You're right — it shouldn't be there. Removed. The field is gone from the stru
 ❯ - Saw `[commit] WARNING: file is 184 bytes larger than snapshot for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md — possible out-of-band write (snap=16307, file=16491)`. Is this due to me running preflight while another agent-doc run on this file was occurring?
 ❯ - Saw `[preflight] step 5: skipped (use `agent-doc read` to fetch)`. What is step 5? Does this have to do with the old behavior of preflight passing the entire document?
 ❯ We need a way to audit the preflight to ensure correct design and efficient token usage.
-### Re: preflight token audit — your 4 questions (HEAD)
+### Re: preflight token audit — your 4 questions
 
 **1. `diff` and `annotated_diff` — what are they for?**
 
@@ -309,12 +309,40 @@ That was from an older binary. Step 5 was "include full document content in outp
 **Token audit summary:**
 
 Current preflight sends: layout_issues, recovered, committed, claims, diff, annotated_diff, no_changes, slash_commands, builtin_commands. No full document. The diff and annotated_diff are the largest fields and they're bounded by what you actually changed — small edits → small diff. The only way preflight bleeds tokens is the stale-snapshot case, which causes a larger-than-expected diff. No new code needed; the stale snapshot warning already surfaces this.
-<!-- agent:boundary:9bff1bab -->
+
+❯ add tests to ensure preflight behavior. Include a test safeguard to ensure the full document is never sent.
+❯ release
+### Re: tests + release (HEAD)
+
+**Tests** — already in place from the previous session:
+
+- `preflight_output_no_document_field` — asserts the `document` key is absent from serialized JSON, with message "it would waste tokens on every cycle"
+- `preflight_output_no_large_content` — regression guard: constructs a 10,000-char string, verifies no field other than `diff` contains it; `annotated_diff` exempt from size check (it scales with diff size)
+
+38/38 pass.
+
+**Release prep done:**
+
+- `src/read.rs` committed (was untracked — new `agent-doc read` subcommand)
+- `Cargo.toml` / `pyproject.toml` / `Cargo.lock` committed (0.31.24 → 0.31.25)
+- All 4 commits pushed to `origin/main`
+- `cargo install --path .` complete — v0.31.25 running locally
+
+**Manual testing gate (prerelease runbook step 8):**
+
+Before tagging and publishing, please confirm v0.31.25 works end-to-end. Once you give the go-ahead:
+
+```
+git tag v0.31.25 && git push origin v0.31.25
+```
+
+CI will handle GitHub Release + PyPI. Then `cargo publish` for crates.io.
+<!-- agent:boundary:4b1a581e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Release v0.31.25 (crates.io + PyPI + GitHub Release)
+- [ ] User confirmation: v0.31.25 works end-to-end → then tag + publish
 - [ ] Follow-on: duplicate claims check in `check_layout()`
 <!-- /agent:pending -->

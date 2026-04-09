@@ -1203,7 +1203,7 @@ This write cycle sends the correct `normalize_prefix_lines = ["do", "done"]` to 
 **Commit skip:** Yes — missed calling `agent-doc commit` after the debug write. Got absorbed in analyzing the debug output. Preflight auto-committed as the safety net. Rule stands: always call `agent-doc commit` right after every `agent-doc write`, regardless of what happens next.
 
 **This cycle:** the fixed binary sends correct `normalize_prefix_lines` for the stripped lines above. After this patch is applied, those lines should show `❯ ` in the document.
-<!-- agent:boundary:a1f839ef -->
+<!-- agent:boundary:cd197030 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

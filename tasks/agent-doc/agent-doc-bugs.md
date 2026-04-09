@@ -1205,7 +1205,8 @@ This write cycle sends the correct `normalize_prefix_lines = ["do", "done"]` to 
 **This cycle:** the fixed binary sends correct `normalize_prefix_lines` for the stripped lines above. After this patch is applied, those lines should show `❯ ` in the document.
 
 ❯ Why does `do`/`done` get special treatment? Because they are short words? Why would `❯ ` be stripped from short words?
-### Re: why `do`/`done` lose `❯ ` prefix (HEAD)
+❯ Should the `❯ ` prefix be added inside of fenced regions?
+### Re: why `do`/`done` lose `❯ ` prefix
 
 No special treatment for short words anywhere in the code. The word `do`/`done` isn't special — it was just what was typed when the bug manifested. Any word could trigger it.
 
@@ -1231,7 +1232,25 @@ The snapshot (computed from `content_ours` after binary normalization) DID have 
 6. Repeat
 
 So `❯ ` wasn't "stripped" by anything — it was never applied to the live document due to the missing IPC notification. The snapshot just diverged from the file.
-<!-- agent:boundary:8a1b28a0 -->
+
+❯ Please add tests
+### Re: fenced regions + tests (HEAD)
+
+**`❯ ` inside code fences: no, should not be added.** Code inside fences is code, not user prompts — prefixing it would corrupt the content. The existing test `normalize_user_prompts_code_fence_skipped` only checked that the fence MARKER (`` ``` ``) wasn't prefixed; it said nothing about lines INSIDE the fence like `echo hello`. That was a gap.
+
+**Fixed.** Both loops in `normalize_user_prompts_in_exchange` now track fence state:
+
+1. **Diff loop** (`user_added` build): tracks baseline fence state by toggling on `` ``` `` for Equal + Insert lines (lines present in baseline). Lines inside a baseline fence are skipped — never enter `user_added`.
+
+2. **Apply loop** (prefix application to `content_user_region`): tracks fence state in merged content. Belt-and-suspenders — even if a line somehow ended up in `user_added`, it won't get prefixed while `in_content_fence` is true.
+
+**Tests added:**
+
+- `normalize_user_prompts_code_fence_skipped` — updated to also assert `❯ echo hello` is absent (closes the existing gap)
+- `normalize_user_prompts_code_fence_interior_skipped` — new test: multi-line fence with text before and after. Asserts: text before/after fence gets `❯ `, fence interior (`let x`, `let y`) does not, fence marker does not.
+
+All 11 `normalize_user_prompts_*` tests pass.
+<!-- agent:boundary:cc62cdf0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

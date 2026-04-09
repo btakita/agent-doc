@@ -591,7 +591,7 @@ export CERTBOT_EMAIL=rberkes@gmail.com
 ```
 
 Note: Docker Compose handles `KEY=VALUE` (no export) natively, so adding `export` doesn't break it.
-<!-- agent:boundary:b5d91db2 -->
+<!-- agent:boundary:824b64ec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1174,13 +1174,34 @@ Added `[normalize] targets=...` debug output to the binary. This write cycle wil
 Watching for `[normalize] targets=...` in the output above — if it shows `[]`, the binary isn't detecting the stripped lines. If it shows `["do", "done"]`, the bug is in the plugin's `normalizeExchangePrefixes` application.
 
 ❯ Why was the last response patch not committed?
-### Re: debug cycle 2 (HEAD)
+### Re: debug cycle 2
 test
-<!-- agent:boundary:e6cfd8bb -->
+❯ Why is memory involved with this operation? This should be deterministic, correct?
+```
+❯   /btw Why was the last response patch not committed?
+
+❯     The agent-doc commit call was skipped after the agent-doc write. The main agent ran the write (which succeeded —
+    "IPC patch consumed by plugin"), then immediately started analyzing the debug output and never called agent-doc
+❯     commit.
+
+❯     The preflight on the next cycle will auto-commit as a safety net (that's what the "committed: true" in preflight
+❯     output covers), but the agent should have called agent-doc commit right after every write — that's the rule in
+```
+### Re: root cause found — extract_normalization_targets HashSet bug (HEAD)
+
+**Root cause confirmed:** `extract_normalization_targets` used a `HashSet<&str>` to check `!before_lines.contains(line)`. The exchange has both `❯ do` (correctly normalized at historical positions) AND `do` (un-normalized at the affected positions). Since `"❯ do"` was in `before_lines` (from the correct historical lines), the check `!before_lines.contains("❯ do")` was `false` → `"do"` never reached `targets`.
+
+**Fix:** Replaced set-membership check with line-by-line positional comparison. Now only lines where `before[i] == "do"` and `after[i] == "❯ do"` at the SAME position produce a target. Historical lines where both had `❯ do` are correctly skipped.
+
+This write cycle sends the correct `normalize_prefix_lines = ["do", "done"]` to the plugin. After this patch is applied, `do`/`done` lines should have `❯ ` restored.
+
+**Next step:** Verify `do`/`done` lines show `❯ ` in the editor after this write. If clean, bump version and release.
+<!-- agent:boundary:8de21ad0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] debugging
+- [ ] Verify ❯ do/done restored in document after this write
+- [ ] If clean: bump version, update VERSIONS.md, build + release
 <!-- /agent:pending -->

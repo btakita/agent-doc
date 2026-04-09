@@ -177,7 +177,7 @@ No fenced code context tracked. So `# bash_comment` inside a diff's fenced block
 Truncated line completed. The `❯ ` prefix was dropped again in the editor — live confirmation of the normalization bug.
 
 `claudescore.md` is an extract of the claude-auto/ClaudeScore context (commit validation hooks, reminders, claude-auto plugin). Doesn't add new context to the `#`-in-fenced-code analysis — that response stands as-is.
-### Re: (HEAD) on fenced code comment (HEAD)
+### Re: (HEAD) on fenced code comment
 
 Fixed. Committed to `src/agent-doc` as `fix: skip fenced code blocks in add_head_marker and strip_head_markers`.
 
@@ -198,13 +198,36 @@ Fixed. Committed to `src/agent-doc` as `fix: skip fenced code blocks in add_head
 - `strip_head_markers_ignores_fenced_code_hash` — `# comment (HEAD)` inside fence is preserved verbatim
 
 All 20 git tests pass.
-<!-- agent:boundary:27771789 -->
+
+❯ do
+❯ - [ ] Fix IPC plugin: `❯ ` prefix lost in editor after transfer (normalize runs before patch body assembled)
+### Re: ❯ prefix lost in editor after transfer (HEAD)
+
+Fixed. Committed to `src/agent-doc` as `fix: bake ❯ prefix into IPC patch content to fix transfer normalization`.
+
+**Root cause:** The plugin applies `normalize_prefix_lines` *before* component patches. In a transfer, the transferred user content is delivered as an `exchange patch=append` body. Since normalization ran first (on the pre-patch document), lines being appended couldn't be normalized — they didn't exist yet. The patch then appended them without `❯ `.
+
+**Fix:** `normalize_patch_content()` applies `❯ ` prefix directly to patch content before building the IPC payload. The patch body already carries the prefix when the plugin appends it.
+
+**Changes:**
+- `normalize_patch_content(content, prefix_lines)` — new helper; bakes normalization into any patch body
+- `build_ipc_patches_json()` — accepts `normalize_prefix_lines: Option<&[String]>` and applies it to each patch's content
+- IPC timeout fallback path — same normalization applied
+- All three `build_ipc_patches_json` call sites updated
+
+**Tests added (4):**
+- `normalize_patch_content_applies_prefix_to_matching_lines` — transferred lines get `❯ ` in patch body
+- `normalize_patch_content_idempotent_already_prefixed` — no double-prefix if already `❯ `
+- `normalize_patch_content_empty_prefix_lines_passthrough` — no-op with empty list
+- `normalize_patch_content_non_matching_lines_unchanged` — agent lines untouched
+
+All 495 tests pass.
+<!-- agent:boundary:2c0b0672 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Fix IPC plugin: `❯ ` prefix lost in editor after transfer (normalize runs before patch body assembled)
 - [ ] Bump version + release agent-doc with hooks feature + this fix
 - [ ] `agent-doc steer <FILE>` — inject steering message to claim pane via tmux send-keys
 - [ ] (stretch) inotify watcher for automatic real-time steering on document edit

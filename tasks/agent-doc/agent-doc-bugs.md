@@ -237,7 +237,8 @@ The "### Re: default should be diff-only" section was in the document file but n
 **Resolution:** This session's write-back will include the full content (including "### Re: default should be diff-only") in the snapshot. After `agent-doc commit`, git gutter will clear for those lines.
 
 ❯ What are the next steps to fix?
-### Re: skill should remove `document: null` (HEAD)
+❯ Please add tests to for the preflight format. Please add tests that ensure the preflight is token efficient.
+### Re: skill should remove `document: null`
 
 Yes. The source `SKILL.md` was stale — it still had `"document": "full document content"` and "Reading the document HEAD" as a preflight bullet. The `skill install` in this session had compiled that old content into v0.31.25 and downgraded the installed copy from the correct version.
 
@@ -247,20 +248,43 @@ Yes. The source `SKILL.md` was stale — it still had `"document": "full documen
 - Bullet updated: "The `document` field contains the full HEAD content (no separate `Read` needed)" → "The `document` field is `null` by default — preflight sends only the diff"
 - Added: "**First cycle only:** if the document is not yet in context, run `agent-doc read <FILE>` to fetch HEAD content before responding"
 
+❯ Re `"document": null`: Why does SKILL.md need to mention document at all?
+
 Rebuilt v0.31.25 and ran `skill install` — installed SKILL.md now matches. `SKILL_RELOAD=compact` was emitted — please run `/compact` then re-run `/agent-doc` to reload the updated skill.
 
-### Re: next steps for snapshot staleness (HEAD)
+### Re: next steps for snapshot staleness
 
 Already resolved. The last cycle's write-back included the "### Re: default should be diff-only" content in the snapshot, so git gutter should be clear. No code change needed.
 
 For prevention: the SKILL.md rule ("Do NOT use the Edit tool for write-back") is the guard. A runtime check in `agent-doc commit` that warns when file diverges from snapshot by >N bytes already exists (the "possible out-of-band write" warning). Refusing to commit in that case would be heavier than a warning — judgment call.
-<!-- agent:boundary:cfb12470 -->
+### Re: tests for preflight format + token efficiency (HEAD)
+
+Added two tests in `preflight.rs`:
+
+**`preflight_output_no_document_field`** — asserts the `document` key is absent from serialized JSON. The assertion message explains why: "it would waste tokens on every cycle."
+
+**`preflight_output_no_large_content`** — regression test. Constructs an output with a 10,000-char string and verifies no field other than `diff` contains it. Guards against any future field accidentally embedding document content.
+
+Also cleaned up:
+- Removed the `document` field from `PreflightOutput` struct entirely (not just set to `None`)
+- Updated module doc comment (removed "Step 5 — read document")
+- Updated existing `preflight_output_serializes_correctly` to assert `document` key is absent
+- Removed `document: Some(...)` from all other test constructors (11 occurrences)
+
+497 tests pass.
+
+### Re: why mention `document` in SKILL.md at all? (HEAD)
+
+You're right — it shouldn't be there. Removed. The field is gone from the struct, so it won't appear in JSON output, so there's nothing to document. SKILL.md JSON schema now only shows fields that actually exist.
+
+`skill install` emitted `SKILL_RELOAD=compact` — please run `/compact` to reload the updated skill.
+<!-- agent:boundary:29099d4d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Run `/compact` to reload updated SKILL.md, then re-run `/agent-doc`
+- [ ] Run `/compact` to reload updated SKILL.md
 - [ ] Release v0.31.25 (crates.io + PyPI + GitHub Release)
 - [ ] Follow-on: duplicate claims check in `check_layout()`
 <!-- /agent:pending -->

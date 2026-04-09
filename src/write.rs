@@ -4,7 +4,7 @@
 //! (CRDT), IPC-to-IDE-plugin, and recovery helpers. Each path follows the same
 //! invariant: save pending → acquire lock → compute `content_ours` (baseline +
 //! response) → merge with any concurrent user edits → atomic write → save
-//! snapshot as `content_ours` (not the merged result) → clear pending.
+//! snapshot as `final_content` (the actual post-merge disk state) → clear pending.
 //!
 //! ## Write dedup (v0.28.2)
 //!
@@ -87,9 +87,12 @@
 //! ## Agentic Contracts
 //!
 //! - Snapshot invariant: the snapshot saved after every write contains
-//!   `content_ours` (baseline + response), never the merged result. This
-//!   ensures the next diff cycle sees concurrent user edits as a diff, not as
-//!   already-committed content.
+//!   `final_content` (the actual post-merge disk state), not `content_ours`.
+//!   This eliminates ghost diffs caused by stale baselines (e.g. streaming
+//!   checkpoints with an outdated baseline). Concurrent user edits made during
+//!   response generation are absorbed into the snapshot; they will not appear
+//!   in the next diff cycle, but this is preferable to phantom committed-line
+//!   drift from a mismatched snapshot.
 //! - Pending response is saved before any write attempt and cleared only after
 //!   a successful write, so an interrupted write is recoverable.
 //! - Pre-response snapshot is saved before acquiring the lock so `undo` can
@@ -128,9 +131,8 @@
 //! - `concurrent_writes_no_corruption`: 20 threads racing on atomic_write →
 //!   final file is one complete writer's content (no corruption or partial
 //!   writes).
-//! - `snapshot_excludes_concurrent_user_edits`: snapshot saved as
-//!   `content_ours`; concurrent user edit is present in the file but absent
-//!   from the snapshot, so the next diff detects it.
+//! - `snapshot_matches_disk_state`: snapshot saved as `final_content`;
+//!   snapshot always matches the actual file on disk after a write.
 //! - `try_ipc_returns_false_when_no_patches_dir`: `try_ipc` with no
 //!   `.agent-doc/patches/` → returns `false` immediately.
 //! - `try_ipc_times_out_when_no_plugin`: `.agent-doc/patches/` exists but
@@ -633,14 +635,14 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
 
     atomic_write(file, &final_content)?;
 
-    // Save snapshot as content_ours (baseline + response), NOT final_content.
-    // If the user edited during response generation, final_content includes their
-    // edits via merge. Saving content_ours ensures the next diff detects those edits.
-    snapshot::save(file, &content_ours)?;
+    // Save snapshot as final_content (actual post-merge disk state).
+    // Using content_ours would cause snapshot drift when the baseline is stale
+    // (e.g. streaming checkpoint with outdated baseline), producing ghost diffs.
+    snapshot::save(file, &final_content)?;
     crate::ops_log::log_cycle(file, "write_inline", Some(&content_ours), Some(&final_content));
     crate::ops_log::log_op(file, &format!(
         "write_inline_done file={} snap_len={}",
-        file.display(), content_ours.len()
+        file.display(), final_content.len()
     ));
 
     drop(doc_lock);
@@ -722,12 +724,12 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
 
     atomic_write(file, &final_content)?;
 
-    // Save snapshot as content_ours (baseline + response), not final_content
-    snapshot::save(file, &content_ours)?;
+    // Save snapshot as final_content (actual post-merge disk state).
+    snapshot::save(file, &final_content)?;
     crate::ops_log::log_cycle(file, "write_template", Some(&content_ours), Some(&final_content));
     crate::ops_log::log_op(file, &format!(
         "write_template_done file={} snap_len={} patches={}",
-        file.display(), content_ours.len(), patches.len()
+        file.display(), final_content.len(), patches.len()
     ));
 
     drop(doc_lock);
@@ -941,12 +943,14 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                 })
                 .collect();
 
+            let patch_id = uuid::Uuid::new_v4().to_string();
             let mut ipc_payload = serde_json::json!({
                 "file": canonical.to_string_lossy(),
                 "patches": ipc_patches,
                 "unmatched": unmatched.trim(),
                 "baseline": baseline.unwrap_or(""),
             });
+            ipc_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
 
             // Include frontmatter if present
             let frontmatter_yaml: Option<String> = patches
@@ -979,6 +983,21 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                 let patch_file = patches_dir.join(format!("{}.json", hash));
                 if patch_file.exists() {
                     eprintln!("[write] cleaning stale IPC patch file to prevent double-write");
+                    // Read patch_id from stale patch before deleting — write sentinel so plugin skips apply
+                    if let Ok(stale_content) = std::fs::read_to_string(&patch_file) {
+                        if let Ok(stale_json) = serde_json::from_str::<serde_json::Value>(&stale_content) {
+                            if let Some(patch_id) = stale_json.get("patch_id").and_then(|v| v.as_str()) {
+                                let claimed_dir = project_root.join(".agent-doc/claimed-patches");
+                                let _ = std::fs::create_dir_all(&claimed_dir);
+                                let sentinel = claimed_dir.join(patch_id);
+                                if let Err(e) = std::fs::write(&sentinel, "") {
+                                    eprintln!("[write] WARNING: failed to write patch sentinel: {}", e);
+                                } else {
+                                    eprintln!("[write] patch_id {} claimed (sentinel written)", &patch_id[..8]);
+                                }
+                            }
+                        }
+                    }
                     let _ = std::fs::remove_file(&patch_file);
                 }
             }
@@ -1053,10 +1072,10 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
 
     atomic_write(file, &final_content)?;
 
-    // Save snapshot as content_ours (baseline + response), not final_content.
-    // If the user edited concurrently, final_content includes their edits via CRDT merge.
-    // Saving content_ours ensures the next diff detects those concurrent edits.
-    snapshot::save(file, &content_ours)?;
+    // Save snapshot as final_content (actual post-merge disk state).
+    // Using content_ours risks snapshot drift when baseline is stale (streaming
+    // checkpoint with outdated baseline), producing ghost diffs on next cycle.
+    snapshot::save(file, &final_content)?;
     // Save the merged CRDT state — NOT a fresh state from content_ours.
     // Using content_ours would lose user edits from the merge, causing
     // the next merge cycle to re-insert them as duplicates.
@@ -1064,7 +1083,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     crate::ops_log::log_cycle(file, "write_stream", Some(&content_ours), Some(&final_content));
     crate::ops_log::log_op(file, &format!(
         "write_stream_done file={} snap_len={}",
-        file.display(), content_ours.len()
+        file.display(), final_content.len()
     ));
 
     drop(doc_lock);
@@ -1240,7 +1259,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
         merge::merge_contents_crdt(crdt_state.as_deref(), &content_ours, &content_current)?
     };
     atomic_write(file, &final_content)?;
-    snapshot::save(file, &content_ours)?;
+    snapshot::save(file, &final_content)?;
     snapshot::save_crdt(file, &crdt_state)?;
     drop(doc_lock);
     recover::clear_pending(file)?;
@@ -1252,43 +1271,6 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// Apply stream-mode patches from a string (not stdin).
-/// Used by `recover` to apply orphaned stream responses.
-#[allow(dead_code)] // Wired by recover module when stream mode recovery is added
-pub fn apply_stream_from_string(file: &Path, response: &str) -> Result<()> {
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
-
-    let (mut patches, unmatched) = template::parse_patches(response)
-        .context("failed to parse patch blocks from response")?;
-
-    // Sanitize component tags in patch content to prevent parser corruption
-    sanitize_patches(&mut patches);
-
-    let content_ours = template::apply_patches(&content, &patches, &unmatched, file)
-        .context("failed to apply template patches")?;
-
-    let doc_lock = acquire_doc_lock(file)?;
-
-    let content_current = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to re-read {}", file.display()))?;
-
-    let (final_content, crdt_state) = if content_current == content {
-        let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
-        (content_ours.clone(), doc.encode_state())
-    } else {
-        let crdt_state = snapshot::load_crdt(file)?;
-        merge::merge_contents_crdt(crdt_state.as_deref(), &content_ours, &content_current)?
-    };
-
-    atomic_write(file, &final_content)?;
-    // Save snapshot as content_ours, not final_content
-    snapshot::save(file, &content_ours)?;
-    snapshot::save_crdt(file, &crdt_state)?;
-    drop(doc_lock);
-    eprintln!("[write] Stream patches applied to {}", file.display());
-    Ok(())
-}
 
 /// Apply an append-mode response from a string (not stdin).
 /// Used by `recover` to apply orphaned responses.
@@ -1405,6 +1387,7 @@ pub fn try_ipc(
         } else {
             unmatched.trim()
         };
+        let patch_id = uuid::Uuid::new_v4().to_string();
         let mut socket_payload = serde_json::json!({
             "type": "patch",
             "file": canonical.to_string_lossy(),
@@ -1413,6 +1396,7 @@ pub fn try_ipc(
             "baseline": baseline.unwrap_or(""),
             "reposition_boundary": true,
         });
+        socket_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
         if let Some(yaml) = frontmatter_yaml {
             socket_payload["frontmatter"] = serde_json::Value::String(yaml.to_string());
         }
@@ -1434,17 +1418,15 @@ pub fn try_ipc(
         match crate::ipc_socket::send_message(&project_root, &socket_payload) {
             Ok(Some(_ack)) => {
                 eprintln!("[write] socket IPC patch delivered");
-                // Save snapshot — use content_ours (baseline + response) when available.
+                // Save snapshot as actual post-write disk state.
+                // Wait briefly for the plugin's Document API write to flush to disk,
+                // then read the file. Using content_ours risks snapshot drift when
+                // the baseline is stale — stale content_ours perpetuates ghost diffs.
                 // Bug 2A fix: snapshot save failure after IPC success is non-fatal.
-                // The plugin already has the correct content; the snapshot can be
-                // recovered by commit's divergence detection (Bug 2B fix).
-                let snap_source = if content_ours.is_some() { "content_ours" } else { "file_read" };
-                let snap_content = if let Some(ours) = content_ours {
-                    ours.to_string()
-                } else {
-                    std::fs::read_to_string(file)
-                        .with_context(|| format!("failed to read {} after socket IPC", file.display()))?
-                };
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                let snap_source = "file_read";
+                let snap_content = std::fs::read_to_string(file)
+                    .with_context(|| format!("failed to read {} after socket IPC", file.display()))?;
                 crate::ops_log::log_op(file, &format!(
                     "ipc_socket_delivered file={} snap_source={} snap_len={}",
                     file.display(), snap_source, snap_content.len()
@@ -1499,6 +1481,7 @@ pub fn try_ipc(
         unmatched.trim()
     };
 
+    let patch_id = uuid::Uuid::new_v4().to_string();
     let mut ipc_payload = serde_json::json!({
         "file": canonical.to_string_lossy(),
         "patches": ipc_patches,
@@ -1506,6 +1489,7 @@ pub fn try_ipc(
         "baseline": baseline.unwrap_or(""),
         "reposition_boundary": true,
     });
+    ipc_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
 
     if let Some(yaml) = frontmatter_yaml {
         ipc_payload["frontmatter"] = serde_json::Value::String(yaml.to_string());
@@ -1655,7 +1639,7 @@ fn write_ipc_and_poll(
     payload: &serde_json::Value,
     doc_file: &Path,
     patch_count: usize,
-    content_ours: Option<&str>,
+    _content_ours: Option<&str>,
 ) -> Result<bool> {
     // Atomic write of patch file
     atomic_write(
@@ -1721,18 +1705,13 @@ fn write_ipc_and_poll(
                 }
             }
 
-            // Plugin applied the patch — update snapshot.
-            // Use content_ours (baseline + response) when available, NOT the current
-            // file. The current file may include user edits typed after the boundary,
-            // which would be absorbed into the snapshot and lost to the next diff.
+            // Plugin applied the patch — update snapshot as actual post-write disk state.
+            // `current_on_disk` was already read after the 200ms flush delay above.
+            // Using content_ours risks snapshot drift when the baseline is stale
+            // (stale content_ours perpetuates ghost diffs cycle after cycle).
             // Bug 2A fix: snapshot save failure after IPC success is non-fatal.
-            let snap_source = if content_ours.is_some() { "content_ours" } else { "file_read" };
-            let snap_content = if let Some(ours) = content_ours {
-                ours.to_string()
-            } else {
-                std::fs::read_to_string(doc_file)
-                    .with_context(|| format!("failed to read {} after IPC", doc_file.display()))?
-            };
+            let snap_content = current_on_disk.clone();
+            let snap_source = "file_read";
             crate::ops_log::log_op(doc_file, &format!(
                 "ipc_file_delivered file={} snap_source={} snap_len={}",
                 doc_file.display(), snap_source, snap_content.len()
@@ -2190,11 +2169,10 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_excludes_concurrent_user_edits() {
-        // Regression test: when the user edits during response generation,
-        // the snapshot should contain baseline + response ONLY (content_ours),
-        // NOT the merged content that includes user edits.
-        // This ensures the next diff detects the user's concurrent edits.
+    fn snapshot_matches_disk_state() {
+        // Snapshot saved after write must equal the actual post-merge file on disk.
+        // Using content_ours (pre-merge) as the snapshot risks phantom diffs when
+        // the baseline is stale (e.g. streaming checkpoint with an outdated baseline).
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc").join("snapshots");
         fs::create_dir_all(&agent_doc_dir).unwrap();
@@ -2222,25 +2200,15 @@ mod tests {
         assert!(merged.contains(response), "response missing from merged");
         assert!(merged.contains("Follow-up question"), "user edit missing from merged");
 
-        // KEY: Save snapshot as content_ours (NOT merged)
-        snapshot::save(&doc, &content_ours).unwrap();
+        // KEY: Save snapshot as final_content (the actual disk state after merge)
+        snapshot::save(&doc, &merged).unwrap();
 
-        // Verify: snapshot should NOT contain user's concurrent edit
+        // Verify: snapshot matches what's on disk exactly
         let snap = snapshot::load(&doc).unwrap().unwrap();
-        assert!(snap.contains(response), "snapshot should have response");
-        assert!(
-            !snap.contains("Follow-up question"),
-            "snapshot must NOT contain concurrent user edit — \
-             otherwise the next diff won't detect it"
-        );
-
-        // Verify: diff between snapshot and current file should detect user's edit
         let current = fs::read_to_string(&doc).unwrap();
-        assert_ne!(snap, current, "snapshot and file should differ (user edit not in snapshot)");
-        assert!(
-            current.contains("Follow-up question"),
-            "current file should contain user's edit"
-        );
+        assert_eq!(snap, current, "snapshot must match actual disk state after write");
+        assert!(snap.contains(response), "snapshot should contain agent response");
+        assert!(snap.contains("Follow-up question"), "snapshot should contain merged user edit");
     }
 
     #[test]
@@ -2417,11 +2385,11 @@ mod tests {
     }
 
     #[test]
-    fn try_ipc_snapshot_saves_content_ours() {
-        // Verify that after IPC succeeds, the snapshot contains content_ours
-        // (baseline + response), NOT whatever is currently in the working tree file.
-        // This is critical: if we snapshot the file on disk, user edits typed after
-        // the boundary would be absorbed and lost to the next diff.
+    fn try_ipc_snapshot_saves_disk_state() {
+        // Verify that after IPC succeeds, the snapshot contains the actual post-write
+        // disk state (file read after the 200ms flush delay), NOT content_ours.
+        // Using the actual disk state prevents stale baselines from perpetuating
+        // ghost diffs cycle after cycle.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
@@ -2434,26 +2402,24 @@ mod tests {
 
         let patch = crate::template::PatchBlock::new("exchange", "agent response content");
 
-        // content_ours = baseline with patches applied (what the snapshot should contain)
         let content_ours = "---\nsession: test\n---\n\n<!-- agent:exchange -->\nagent response content\n<!-- /agent:exchange -->\n";
 
-        // Simulate user editing the file AFTER write began (working tree differs from content_ours)
-        let user_edited = "---\nsession: test\n---\n\n<!-- agent:exchange -->\noriginal content\nuser typed something new\n<!-- agent:boundary:test-boundary-123 -->\n<!-- /agent:exchange -->\n";
-        fs::write(&doc, user_edited).unwrap();
+        // Simulate user editing the file (working tree has additional content)
+        let after_plugin_write = "---\nsession: test\n---\n\n<!-- agent:exchange -->\nagent response content\nuser typed something new\n<!-- /agent:exchange -->\n";
 
         // Spawn "plugin" thread that watches for patch files, writes content, then deletes
         let patches_dir = agent_doc_dir.join("patches");
         let watcher_dir = patches_dir.clone();
         let doc_for_watcher = doc.clone();
+        let after_plugin_write_owned = after_plugin_write.to_string();
         let _watcher = std::thread::spawn(move || {
             for _ in 0..20 {
                 std::thread::sleep(std::time::Duration::from_millis(50));
                 if let Ok(entries) = fs::read_dir(&watcher_dir) {
                     for entry in entries.flatten() {
                         if entry.path().extension().is_some_and(|e| e == "json") {
-                            // Simulate plugin applying patch + user edits
-                            let _ = fs::write(&doc_for_watcher,
-                                "---\nsession: test\n---\n\n<!-- agent:exchange -->\nagent response content\nuser typed something new\n<!-- /agent:exchange -->\n");
+                            // Simulate plugin applying patch + leaving user edits in file
+                            let _ = fs::write(&doc_for_watcher, &after_plugin_write_owned);
                             let _ = fs::remove_file(entry.path());
                             return;
                         }
@@ -2468,34 +2434,26 @@ mod tests {
             "",
             None,
             Some(original),     // baseline
-            Some(content_ours), // content_ours — what snapshot should save
+            Some(content_ours), // content_ours (no longer used for snapshot)
             None,               // normalize_prefix_lines
         )
         .unwrap();
         assert!(result, "IPC should succeed when plugin consumes patch");
 
-        // KEY ASSERTION: snapshot must contain content_ours, not the working tree file
+        // KEY ASSERTION: snapshot must match actual disk state (includes user edits)
         let snap = snapshot::load(&doc).unwrap().unwrap();
         assert!(
             snap.contains("agent response content"),
-            "snapshot must contain content_ours (agent response), got: {}",
+            "snapshot must contain agent response, got: {}",
             snap
         );
         assert!(
-            !snap.contains("user typed something new"),
-            "snapshot must NOT contain working tree edits — \
-             it should save content_ours, not the current file"
+            snap.contains("user typed something new"),
+            "snapshot must match disk state (include user edits written by plugin)"
         );
         assert_eq!(
-            snap, content_ours,
-            "snapshot must exactly match content_ours"
-        );
-
-        // Working tree file should still have the user's edits (untouched by IPC snapshot)
-        let on_disk = fs::read_to_string(&doc).unwrap();
-        assert!(
-            on_disk.contains("user typed something new"),
-            "working tree file should still contain user edits"
+            snap, after_plugin_write,
+            "snapshot must exactly match post-write disk state"
         );
     }
 

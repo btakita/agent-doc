@@ -401,7 +401,7 @@ Run it twice — one output for `WORDPRESS_DB_PASSWORD`, the other for `MARIADB_
 ❯ > CERTBOT_EMAIL=<your email for Let's Encrypt>
 How do I setup test domain for the WP site?
 Can DOMAIN have 2 values?
-### Re: steve-douglas contact + CERTBOT_EMAIL (HEAD)
+### Re: steve-douglas contact + CERTBOT_EMAIL
 
 **Contact saved:** `mail/contacts/steve-douglas/AGENTS.md` created with info from Ron's file and the research doc (founder background, health status, YouTube channels, business contact, the Monster Energy trademark dispute).
 
@@ -412,17 +412,35 @@ Can DOMAIN have 2 values?
 
 In `.env`, set:
 ```
-CERTBOT_EMAIL=support@monsterrodholders.com
+CERTBOT_EMAIL=rberkes@gmail.com
 ```
 
 Let's Encrypt sends renewal warnings 30 and 7 days before expiry. Whoever monitors that inbox needs to act if auto-renewal fails.
-<!-- agent:boundary:02fe9f14 -->
+
+❯ monsterrodholders.com is using ssl.com. Can we remove it? If we keep ssl.com, do we still have CERTBOT_EMAIL?
+### Re: ssl.com vs certbot (HEAD)
+
+**ssl.com is WP Engine's certificate** — not yours. WP Engine auto-provisions SSL using various commercial CAs (often ssl.com or DigiCert). You don't install, pay for, or control it. When the domain moves off WP Engine, that cert goes with it.
+
+**On the new server**, you're using certbot (Let's Encrypt). They're completely separate:
+
+| | WP Engine (current) | New server |
+|---|---|---|
+| CA | ssl.com (WP Engine manages) | Let's Encrypt (certbot) |
+| Cost | Included in WP Engine | Free |
+| Auto-renew | WP Engine handles it | certbot cron in Docker |
+| CERTBOT_EMAIL | N/A | Required |
+
+**So:** nothing to remove — ssl.com disappears when DNS flips to the new server. You do still need `CERTBOT_EMAIL`.
+
+`rberkes@gmail.com` is fine for that — Ron gets the "your cert expires in 30 days" emails if auto-renewal breaks.
+<!-- agent:boundary:f12f71bd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Server step 7:** `touch .env && chmod 600 .env`, fill in values (use `openssl rand -base64 32` for passwords)
+- [ ] **Server step 7:** `touch .env && chmod 600 .env`, fill in values — use `openssl rand -base64 32` for passwords, `CERTBOT_EMAIL=rberkes@gmail.com`
 - [ ] **Server step 8:** Provision SSL (`certbot-init.sh`)
 - [ ] **Server step 9:** `docker compose up -d`
 - [ ] **Server step 10:** Transfer + import backup, remove WP Engine mu-plugins

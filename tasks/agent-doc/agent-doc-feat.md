@@ -222,7 +222,7 @@ Fixed. Committed to `src/agent-doc` as `fix: bake ❯ prefix into IPC patch cont
 - `normalize_patch_content_non_matching_lines_unchanged` — agent lines untouched
 
 All 495 tests pass.
-<!-- agent:boundary:2c0b0672 -->
+<!-- agent:boundary:d49a5b61 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

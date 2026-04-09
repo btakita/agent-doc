@@ -418,7 +418,7 @@ CERTBOT_EMAIL=rberkes@gmail.com
 Let's Encrypt sends renewal warnings 30 and 7 days before expiry. Whoever monitors that inbox needs to act if auto-renewal fails.
 
 ❯ monsterrodholders.com is using ssl.com. Can we remove it? If we keep ssl.com, do we still have CERTBOT_EMAIL?
-### Re: ssl.com vs certbot (HEAD)
+### Re: ssl.com vs certbot
 
 **ssl.com is WP Engine's certificate** — not yours. WP Engine auto-provisions SSL using various commercial CAs (often ssl.com or DigiCert). You don't install, pay for, or control it. When the domain moves off WP Engine, that cert goes with it.
 
@@ -434,16 +434,55 @@ Let's Encrypt sends renewal warnings 30 and 7 days before expiry. Whoever monito
 **So:** nothing to remove — ssl.com disappears when DNS flips to the new server. You do still need `CERTBOT_EMAIL`.
 
 `rberkes@gmail.com` is fine for that — Ron gets the "your cert expires in 30 days" emails if auto-renewal breaks.
-<!-- agent:boundary:4ee539cd -->
+
+❯ How can we have a test DOMAIN and monsterrodholders.com. I want the test domain first so we can verify the site works.
+### Re: test domain first (HEAD)
+
+**Easiest option: nip.io** — no registration, no DNS setup, works immediately.
+
+nip.io is a wildcard DNS service: `<ip>.nip.io` resolves to `<ip>`. If your server is `1.2.3.4`, then `1.2.3.4.nip.io` is a real public domain pointing at it. Let's Encrypt will issue a cert for it.
+
+**Setup:**
+
+1. Get your server's IP:
+   ```bash
+   curl ifconfig.me
+   ```
+
+2. In `.env`, set:
+   ```
+   DOMAIN=<server-ip>.nip.io
+   WORDPRESS_SITEURL=https://<server-ip>.nip.io
+   WORDPRESS_HOME=https://<server-ip>.nip.io
+   ```
+
+3. Run certbot and bring up the stack as normal
+
+4. Verify: browse to `https://<server-ip>.nip.io`, import the WP backup, test everything
+
+5. When ready to go live, update `.env` to:
+   ```
+   DOMAIN=monsterrodholders.com
+   WORDPRESS_SITEURL=https://monsterrodholders.com
+   WORDPRESS_HOME=https://monsterrodholders.com
+   ```
+   Then flip DNS, re-run certbot, and `docker compose up -d`
+
+**Alternative if you want something more readable:** DuckDNS (duckdns.org) gives you a free subdomain like `mrhtest.duckdns.org` — takes 2 minutes to set up and lets you choose the name.
+
+nip.io is simpler (zero setup), DuckDNS is easier to remember. Either works.
+<!-- agent:boundary:2a50ab21 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Server step 7:** `touch .env && chmod 600 .env`, fill in values — use `openssl rand -base64 32` for passwords, `CERTBOT_EMAIL=rberkes@gmail.com`
-- [ ] **Server step 8:** Provision SSL (`certbot-init.sh`)
+- [ ] **Server step 7:** `touch .env && chmod 600 .env`, fill in values — use `openssl rand -base64 32` for passwords, `CERTBOT_EMAIL=rberkes@gmail.com`, set `DOMAIN=<server-ip>.nip.io` for test first
+- [ ] **Server step 8:** Provision SSL (`certbot-init.sh`) with test domain
 - [ ] **Server step 9:** `docker compose up -d`
 - [ ] **Server step 10:** Transfer + import backup, remove WP Engine mu-plugins
+- [ ] Verify site on test domain before DNS flip
+- [ ] Update `.env` to `monsterrodholders.com`, flip DNS, re-run certbot
 - [ ] Clean spam comments post-import
 - [ ] Plugin audit: delete `worker`, `wpmudev-updates`; pick TaxJar OR AvaTax
 - [ ] Set up cron jobs (SSL renewal + daily backup)

@@ -20,7 +20,7 @@ agent_doc_write: crdt
      [preflight] layout issue: stash window 'stash' has non-idle pane %1 running 'agent-doc'
      [preflight] layout issue: stash window 'stash' has non-idle pane %36 running 'agent-doc'
 ```
-### Re: stash pane layout issues persisting (HEAD)
+### Re: stash pane layout issues persisting
 
 The safeguards (L1–L4) prevent **new** races — they don't retroactively kill existing stash panes.
 
@@ -46,12 +46,26 @@ tmux kill-pane -t %41
 ```
 
 **Missing safeguard — stash pane eviction:** The existing fixes don't address *how panes get stashed in the first place*. A follow-up fix in `route.rs` could: when routing a new session for document X, if an existing stash pane already claims X, kill the stash pane and reuse the route rather than adding another one.
-<!-- agent:boundary:d01be0c0 -->
+
+❯ ran the command. all ok?
+### Re: ran the command — all ok? (HEAD)
+
+Not fully. %40 and %41 are gone, but **%43 and %46 are still running `agent-doc` in the stash window** (visible in this preflight's layout issues).
+
+Kill those two:
+
+```bash
+tmux kill-pane -t %43
+tmux kill-pane -t %46
+```
+
+After that the stash window should be clean.
+<!-- agent:boundary:d9e0c817 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Kill existing stash panes (%1, %34, %36, %39, %40, %41) manually
+- [ ] Kill remaining stash panes: `tmux kill-pane -t %43 && tmux kill-pane -t %46`
 - [ ] Follow-up: stash pane eviction in `route.rs` — kill stash pane when routing new session for same doc
 <!-- /agent:pending -->

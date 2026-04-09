@@ -187,10 +187,18 @@ Yes, implemented in `git.rs`.
 
 No more multi-session accumulation. All tests pass, binary reinstalled.
 
-Please fix:
-- /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md
-- /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore.md
-<!-- agent:boundary:a3c11d97 -->
+❯ Please fix:
+❯ - /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md
+❯ - /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore.md
+### Re: fix both files
+
+Done.
+
+- `tasks/agent-doc/agent-doc-bugs.md` — committed (+19 lines, 2 deletions, `(HEAD)` repositioned)
+- `src/session-share/tasks/claudescore.md` — committed (+73 lines, 2 deletions)
+
+Both working trees are clean.
+<!-- agent:boundary:cc7e74b9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

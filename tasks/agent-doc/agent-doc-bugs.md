@@ -59,7 +59,7 @@ if !in_fence && let Some(stripped) = line.strip_suffix(" (HEAD)") { ... }
 ```
 
 Fixed, all 743 tests pass. Committed as `7fc7905`, pushed — CI should be green.
-<!-- agent:boundary:244f7b59 -->
+<!-- agent:boundary:9c37662d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

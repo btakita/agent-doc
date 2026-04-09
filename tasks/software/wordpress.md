@@ -174,7 +174,47 @@ For a complete migration (moving hosts, cloning site):
 - "Restore This Revision" button
 
 **Note:** WordPress tracks revisions for posts, pages, and custom post types — not for plugin settings, theme options, or the database at large. If you want site-wide snapshots (including settings/media), that's what migration plugins like All-in-One WP Migration are for.
-<!-- agent:boundary:994032b6 -->
+
+❯ Use my credentials to log into the api for https://monsterrodholders.com/
+❯ Find out the most recent changes. The home page has major layout issues. Can you find out why?
+### Re: monsterrodholders.com — Site Hacked, Homepage Down (HEAD)
+
+I couldn't find WordPress credentials in the pass store. Here's what the public API revealed — the news is serious.
+
+**The site has been hacked and the homepage is returning HTTP 500 (completely down).**
+
+#### What I found (no credentials needed)
+
+1. **Homepage → HTTP 500** — completely broken as of right now
+2. **Home page modified today at 10:45 AM** — a suspicious edit that broke the WPBakery page structure
+3. **Hidden spam link injected** into home page content:
+   ```html
+   <a href="https://eggsinc.se/" style="position: absolute;top:-9999px;left:-9999px">utländska casino</a>
+   ```
+   Swedish gambling site, hidden via CSS off-screen positioning (invisible to users, visible to search crawlers)
+4. **Spam posts flooding the blog** — gambling/casino content in Russian and Azerbaijani (Aviator, 1xbet, Pin-Up Casino) published over the past 10+ days — classic SEO spam injection
+5. **Structural breakage** — double nested `<section class="wpb-content-wrapper">` in the home page source; the attacker's edit corrupted the WPBakery shortcode structure, likely triggering the 500
+
+#### Root cause
+
+This is a **WordPress SEO spam hack** (a very common attack). The attacker gained WordPress admin access (or file-system access via a vulnerable plugin), then:
+- Injected hidden outbound links to boost gambling sites in Google
+- Published hundreds of spam posts for the same purpose
+- Their edit to the home page inadvertently (or deliberately) broke the page structure, causing the 500
+
+#### Immediate recovery steps
+
+1. **Log into WP Admin** → Posts → find and bulk-delete all spam posts (gambling content in Russian/Azerbaijani)
+2. **Home page → Revisions** → restore to a pre-April-9 revision (fixes the 500 and removes the injected link)
+3. **Users → check for unauthorized admin accounts** → delete any unknown users
+4. **Change all admin passwords**
+5. **Install Wordfence** (free) → run a full malware scan, check for backdoors in `wp-content/uploads/` and theme files
+6. **Check active plugins** for anything unfamiliar — attackers often install a hidden plugin as a backdoor
+
+#### Credentials
+
+I couldn't find WordPress credentials in `pass ls`. Can you point me to where they're stored, or log into the admin yourself at `https://monsterrodholders.com/wp-admin/`? Once you're in, I can guide the cleanup step by step.
+<!-- agent:boundary:7a59133f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

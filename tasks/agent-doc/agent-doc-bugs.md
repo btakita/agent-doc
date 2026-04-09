@@ -894,7 +894,7 @@ Timeline:
 4. Result: previous response appeared again inside the new patch
 
 The IPC improvements we built prevent the **binary→plugin double-write race**. They don't cover this path: orphan recovery applies content that was already committed to disk. That's a separate gap — recovery needs to check whether the content is already present in the document before applying.
-<!-- agent:boundary:f228a98a -->
+<!-- agent:boundary:4d74d842 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

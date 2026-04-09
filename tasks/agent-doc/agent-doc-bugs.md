@@ -233,7 +233,7 @@ The "### Re: default should be diff-only" section was in the document file but n
 **Root cause:** The snapshot wasn't updated after that response was written. Most likely the session that generated it used the Edit tool (or was interrupted between file write and snapshot update) — `agent-doc write` updates both atomically, but Edit tool writes only the file and bypasses snapshot management.
 
 **Resolution:** This session's write-back will include the full content (including "### Re: default should be diff-only") in the snapshot. After `agent-doc commit`, git gutter will clear for those lines.
-<!-- agent:boundary:fbcd4b54 -->
+<!-- agent:boundary:9f0fab7f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

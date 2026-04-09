@@ -436,7 +436,7 @@ Let's Encrypt sends renewal warnings 30 and 7 days before expiry. Whoever monito
 `rberkes@gmail.com` is fine for that — Ron gets the "your cert expires in 30 days" emails if auto-renewal breaks.
 
 ❯ How can we have a test DOMAIN and monsterrodholders.com. I want the test domain first so we can verify the site works.
-### Re: test domain first (HEAD)
+### Re: test domain first
 
 **Easiest option: nip.io** — no registration, no DNS setup, works immediately.
 
@@ -471,18 +471,47 @@ nip.io is a wildcard DNS service: `<ip>.nip.io` resolves to `<ip>`. If your serv
 **Alternative if you want something more readable:** DuckDNS (duckdns.org) gives you a free subdomain like `mrhtest.duckdns.org` — takes 2 minutes to set up and lets you choose the name.
 
 nip.io is simpler (zero setup), DuckDNS is easier to remember. Either works.
-<!-- agent:boundary:789ac7e0 -->
+❯ Will Docker + wordpress serve pages with the nip.io domain?
+### Re: Docker + WordPress with nip.io (HEAD)
+
+Yes — with one WordPress-specific step.
+
+**Docker/nginx:** The container just listens on port 80/443. It doesn't care what domain points at it, as long as the nginx config has the right `server_name`. When you set `DOMAIN=<ip>.nip.io` in `.env` before first boot, the nginx config is generated with that domain. certbot issues the cert for it. All good.
+
+**WordPress:** Stores its base URL in the database (`wp_options`: `siteurl` and `home`). On a fresh install these are set from `WORDPRESS_SITEURL`/`WORDPRESS_HOME` env vars — which you'll set to the nip.io domain. Pages will serve correctly.
+
+**The catch — importing the WP Engine backup:** The backup DB has `https://monsterrodholders.com` hardcoded everywhere. After importing, WordPress will redirect all requests to that domain. You need a search-replace:
+
+```bash
+docker exec wordpress wp search-replace \
+  'https://monsterrodholders.com' \
+  'https://<ip>.nip.io' \
+  --all-tables
+```
+
+Run that once after import. Then the site serves on nip.io cleanly.
+
+When switching to production:
+```bash
+docker exec wordpress wp search-replace \
+  'https://<ip>.nip.io' \
+  'https://monsterrodholders.com' \
+  --all-tables
+```
+
+Then flip DNS.
+<!-- agent:boundary:946166f0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] **Server step 7:** `touch .env && chmod 600 .env`, fill in values — use `openssl rand -base64 32` for passwords, `CERTBOT_EMAIL=rberkes@gmail.com`, set `DOMAIN=<server-ip>.nip.io` for test first
-- [ ] **Server step 8:** Provision SSL (`certbot-init.sh`) with test domain
+- [ ] **Server step 8:** Provision SSL (`certbot-init.sh`) with nip.io test domain
 - [ ] **Server step 9:** `docker compose up -d`
-- [ ] **Server step 10:** Transfer + import backup, remove WP Engine mu-plugins
-- [ ] Verify site on test domain before DNS flip
-- [ ] Update `.env` to `monsterrodholders.com`, flip DNS, re-run certbot
+- [ ] **Server step 10:** Transfer + import backup, then run `wp search-replace 'https://monsterrodholders.com' 'https://<ip>.nip.io' --all-tables`; remove WP Engine mu-plugins
+- [ ] Verify site on nip.io test domain
+- [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot
 - [ ] Clean spam comments post-import
 - [ ] Plugin audit: delete `worker`, `wpmudev-updates`; pick TaxJar OR AvaTax
 - [ ] Set up cron jobs (SSL renewal + daily backup)

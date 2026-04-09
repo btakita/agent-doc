@@ -434,6 +434,14 @@ pub fn run(file: &Path) -> Result<()> {
 
     // Step 4: Compute diff between snapshot and current document.
     eprintln!("[preflight] step 4: diff");
+    {
+        let snap_len = crate::snapshot::load(file).unwrap_or(None).map(|s| s.len()).unwrap_or(0);
+        let file_len = std::fs::metadata(file).map(|m| m.len() as usize).unwrap_or(0);
+        crate::ops_log::log_op(file, &format!(
+            "preflight_diff_start file={} snap_len={} file_len={}",
+            file.display(), snap_len, file_len
+        ));
+    }
     let diff_result = diff::compute(file)?;
     let no_changes = diff_result.is_none();
 

@@ -129,7 +129,7 @@ The current fix (deleted Check 2 entirely) is correct: it removes the false posi
 **Does preflight consume context tokens?** Yes. The `document` field in the preflight JSON contains the full document — for claudescore.md that's 26KB of content landing in the tool result every `/agent-doc` run. It's a real cost. The tradeoff: no separate `Read` tool call needed. For very large documents, an optimization would be to skip sending `document` when only the `diff` matters (e.g., when `no_changes=false` and the diff is small). Not implemented yet.
 
 **Stash window still showing:** The fix is in source (`preflight.rs`) but the running binary is still v0.31.24 — `cargo install --path .` hasn't been run since the edit. Once installed, the stash layout issues will disappear from preflight output.
-<!-- agent:boundary:bbf316f3 -->
+<!-- agent:boundary:5a0784f8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

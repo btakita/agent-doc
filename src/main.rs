@@ -54,6 +54,7 @@ mod convert;
 mod gc;
 mod parallel;
 mod preflight;
+mod read;
 mod dedupe;
 mod diff;
 mod extract;
@@ -438,10 +439,15 @@ enum Commands {
     Preflight {
         /// Path to the session document
         file: PathBuf,
-        /// Omit the full document from output (only include diff).
-        /// Use on subsequent cycles when the document is already in context.
+    },
+    /// Print document content to stdout (full file or a single named component).
+    Read {
+        /// Path to the session document
+        file: PathBuf,
+        /// Name of a specific component to extract (e.g. "exchange", "pending").
+        /// If omitted, the full file is printed.
         #[arg(long)]
-        diff_only: bool,
+        component: Option<String>,
     },
     /// Archive old exchanges / compact component content
     Compact {
@@ -945,7 +951,8 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Commands::Preflight { file, diff_only } => preflight::run(&file, diff_only),
+        Commands::Preflight { file } => preflight::run(&file),
+        Commands::Read { file, component } => read::run(&file, component.as_deref()),
         Commands::Compact {
             file,
             keep,

@@ -234,7 +234,7 @@ tmux join-pane -s %57 -t 0:agent-doc
 Merges `%57` into session 0's agent-doc window alongside `%56`/`%72`. If you want all agent-doc panes in one window rather than two windows, this is the right form.
 
 **Recommendation:** Do B (build + resync) — it validates the pane_policy cross-session path before publishing.
-<!-- agent:boundary:07863195 -->
+<!-- agent:boundary:992855a0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

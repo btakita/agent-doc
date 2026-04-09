@@ -67,7 +67,8 @@ between two stash panes pointing at the same document).
 Remaining diff (boundary hash `0f29e90b` → `cabc81e1` + `(HEAD)` removal) reflects the second session taking over document ownership — that's now committed too.
 
 ❯ How did we get an orphaned tmux pane? Can we have a safeguard to prevent this from happening?
-### Re: orphaned pane + safeguard (HEAD)
+❯ eIdeally multiple safeguards?
+### Re: orphaned pane + safeguard
 
 **How the stash pane formed:**
 
@@ -90,10 +91,34 @@ The binding invariant (`claim.rs:162–186`) prevents pane theft (a pane can't b
 3. **Preflight hard-block on stash conflict.** Promote the current warning to an error when the stash pane's claimed document matches the current one — abort that cycle.
 
 **Recommendation:** Option 1 + Option 3. Option 1 makes the invariant explicit at registration time. Option 3 is a cheap belt-and-suspenders check that catches edge cases where the registry gets stale.
-<!-- agent:boundary:af0d37df -->
+### Re: multiple safeguards (HEAD)
+
+Yes — all three options are independent layers and all should be implemented:
+
+**Layer 1 — Registration (Option 1):** Document-path uniqueness in `sessions.json`. Prevents two panes from ever both being registered to the same document. Root fix — blocks the race at its origin.
+
+**Layer 2 — Preflight entry (Option 3):** Hard-block when a stash pane's claimed document matches the current document. Catches cases where the registry is stale or bypassed.
+
+**Layer 3 — Active cycle lock (Option 2):** Extend the startup lock to span the full response cycle. Even if Layers 1+2 fail (registry corruption, concurrent claim race), no two preflight runs can proceed simultaneously for the same document.
+
+**Layer 4 — Recovery (existing gap):** `preflight recover` should detect orphaned streaming checkpoints that sit between a committed `(HEAD)` boundary and a new boundary, and auto-discard them. Closes the cleanup gap when the race slips through all other layers.
+
+Each layer catches a different failure mode:
+
+| Layer | What it blocks |
+|-------|---------------|
+| 1 — Registry uniqueness | Two panes registered to same doc at claim time |
+| 2 — Preflight stash check | Second pane triggering a cycle while first is active |
+| 3 — Cycle lock | Concurrent preflight runs even with stale/bypassed registry |
+| 4 — Recovery | Cleanup of leftover partial writes after a race |
+<!-- agent:boundary:f7aac7c2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Layer 1: Enforce doc-path uniqueness in `sessions.json` at `register_with_pid()` — evict stale same-doc registrations
+- [ ] Layer 2: Promote stash-pane conflict from warning → error in preflight (abort cycle when stash pane owns same doc)
+- [ ] Layer 3: Extend `.agent-doc/starting/<hash>.lock` TTL to span full response cycle (release on `agent-doc commit`)
+- [ ] Layer 4: `preflight recover` — detect orphaned checkpoint blocks between committed `(HEAD)` and new boundary; auto-discard
 <!-- /agent:pending -->

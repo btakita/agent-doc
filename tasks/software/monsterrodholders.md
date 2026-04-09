@@ -387,7 +387,7 @@ nano .env   # fill in values
 `chmod 600` ensures only root can read or write it — no further protection needed on a single-admin server. `pass` would add GPG key setup and subprocess substitution complexity with no practical benefit here.
 
 ❯ How do I generate a secure password on my machine?
-### Re: generate a secure password (HEAD)
+### Re: generate a secure password
 
 Run this on your local machine (or the server):
 
@@ -396,7 +396,27 @@ openssl rand -base64 32
 ```
 
 Run it twice — one output for `WORDPRESS_DB_PASSWORD`, the other for `MARIADB_ROOT_PASSWORD`. Copy each directly into `.env`. No need to remember them.
-<!-- agent:boundary:8598e196 -->
+
+❯ ron-berkes is managing this project for steve-douglas (save him as a contact). steve-douglas is the catfish dude. See tasks/research/monsterrodholders.md 
+❯ > CERTBOT_EMAIL=<your email for Let's Encrypt>
+How do I setup test domain for the WP site?
+Can DOMAIN have 2 values?
+### Re: steve-douglas contact + CERTBOT_EMAIL (HEAD)
+
+**Contact saved:** `mail/contacts/steve-douglas/AGENTS.md` created with info from Ron's file and the research doc (founder background, health status, YouTube channels, business contact, the Monster Energy trademark dispute).
+
+**CERTBOT_EMAIL:** Use the business email that makes most sense for SSL expiration notices. Options:
+
+- `support@monsterrodholders.com` — already public, someone checks it
+- Steve's personal email if Ron has it — more reliable given business support responsiveness issues
+
+In `.env`, set:
+```
+CERTBOT_EMAIL=support@monsterrodholders.com
+```
+
+Let's Encrypt sends renewal warnings 30 and 7 days before expiry. Whoever monitors that inbox needs to act if auto-renewal fails.
+<!-- agent:boundary:c154189a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

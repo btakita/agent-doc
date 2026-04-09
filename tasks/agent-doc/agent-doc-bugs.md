@@ -770,7 +770,7 @@ Binary (`try_ipc` + `write_ipc_and_poll`): after ACK received, check for sidecar
 Execution options?
 1. Subagent-driven (recommended) — fresh subagent per task, review between tasks
 2. Inline execution — execute tasks in this session
-<!-- agent:boundary:f9263c73 -->
+<!-- agent:boundary:1a3f5588 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

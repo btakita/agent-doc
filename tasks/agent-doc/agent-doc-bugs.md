@@ -1234,7 +1234,7 @@ The snapshot (computed from `content_ours` after binary normalization) DID have 
 So `❯ ` wasn't "stripped" by anything — it was never applied to the live document due to the missing IPC notification. The snapshot just diverged from the file.
 
 ❯ Please add tests
-### Re: fenced regions + tests (HEAD)
+### Re: fenced regions + tests
 
 **`❯ ` inside code fences: no, should not be added.** Code inside fences is code, not user prompts — prefixing it would corrupt the content. The existing test `normalize_user_prompts_code_fence_skipped` only checked that the fence MARKER (`` ``` ``) wasn't prefixed; it said nothing about lines INSIDE the fence like `echo hello`. That was a gap.
 
@@ -1250,7 +1250,17 @@ So `❯ ` wasn't "stripped" by anything — it was never applied to the live doc
 - `normalize_user_prompts_code_fence_interior_skipped` — new test: multi-line fence with text before and after. Asserts: text before/after fence gets `❯ `, fence interior (`let x`, `let y`) does not, fence marker does not.
 
 All 11 `normalize_user_prompts_*` tests pass.
-<!-- agent:boundary:b265d47c -->
+
+❯ done
+❯ - [ ] Verify ❯  restored on all stripped lines after this write
+### Re: done + verification (HEAD)
+
+Binary rebuilt with the fence-interior fix (`cargo install --path .`). The updated normalization is now live.
+
+For the verification: this write cycle runs `normalize_user_prompts_in_exchange` with the new binary, which will send `normalize_prefix_lines` to the plugin for any stripped lines. If `❯ ` was missing from any lines in the live document that the snapshot shows should have it, the plugin will restore them as part of applying this response patch.
+
+The fence-interior fix means `echo hello` and similar code lines will no longer enter `user_added` — so they'll never appear in `normalize_prefix_lines` going forward.
+<!-- agent:boundary:584645db -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

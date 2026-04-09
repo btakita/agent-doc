@@ -614,7 +614,7 @@ The reconciliation is the safety net: even wrong snapshots get corrected. The co
 **For a hard guarantee on IPC paths:** the plugin would need to send back the final applied content in its ACK response. That's a protocol change (plugin sends content, not just ack). Alternatively, write directly to disk (bypass plugin) and accept the IDE "externally modified" dialog.
 
 The 30+ snapshot write sites are worth auditing for `content_ours` vs `final_content` consistency. Most non-response paths (compact, convert, extract) are already correct — they save exactly the document they modified.
-<!-- agent:boundary:92cac3a9 -->
+<!-- agent:boundary:80f2cafd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -91,7 +91,7 @@
 
 use anyhow::{Context, Result};
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
 
@@ -212,6 +212,7 @@ pub fn check_layout() -> Vec<String> {
     }
 
     // Check 3: Session-drift — registered panes spanning multiple tmux sessions.
+    // Check 4: Duplicate claims — multiple sessions claiming the same document file.
     let registry_path = sessions::registry_path();
     let registry: Option<tmux_router::Registry> = std::fs::read_to_string(&registry_path)
         .ok()
@@ -241,8 +242,42 @@ pub fn check_layout() -> Vec<String> {
                 sessions_vec.join(", "),
             ));
         }
+
+        // Check 4: duplicate file claims — two sessions pointing to the same document.
+        issues.extend(detect_duplicate_claims(&registry));
     }
 
+    issues
+}
+
+/// Detect duplicate file claims in a registry snapshot.
+///
+/// Returns one issue string per file that has two or more sessions claiming it.
+/// Entries with an empty `file` field are skipped (legacy entries).
+fn detect_duplicate_claims(registry: &tmux_router::Registry) -> Vec<String> {
+    let mut file_sessions: HashMap<String, Vec<String>> = HashMap::new();
+    for (session_id, entry) in registry {
+        if entry.file.is_empty() {
+            continue;
+        }
+        file_sessions
+            .entry(entry.file.clone())
+            .or_default()
+            .push(session_id.clone());
+    }
+    let mut issues = Vec::new();
+    for (file, session_ids) in &file_sessions {
+        if session_ids.len() > 1 {
+            let mut sorted = session_ids.clone();
+            sorted.sort();
+            issues.push(format!(
+                "duplicate claims: {} sessions claim '{}': {}",
+                session_ids.len(),
+                file,
+                sorted.join(", "),
+            ));
+        }
+    }
     issues
 }
 
@@ -966,6 +1001,101 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["layout_issues"].as_array().unwrap().len(), 1);
         assert_eq!(parsed["layout_issues"][0], "window index 0 missing");
+    }
+
+    #[test]
+    fn detect_duplicate_claims_empty_registry() {
+        let registry = tmux_router::Registry::new();
+        assert!(detect_duplicate_claims(&registry).is_empty());
+    }
+
+    #[test]
+    fn detect_duplicate_claims_no_duplicates() {
+        let mut registry = tmux_router::Registry::new();
+        registry.insert(
+            "session-a".to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%1".to_string(),
+                pid: 100,
+                cwd: "/work".to_string(),
+                started: "2026-01-01".to_string(),
+                file: "tasks/foo.md".to_string(),
+                window: "@1".to_string(),
+            },
+        );
+        registry.insert(
+            "session-b".to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%2".to_string(),
+                pid: 101,
+                cwd: "/work".to_string(),
+                started: "2026-01-01".to_string(),
+                file: "tasks/bar.md".to_string(),
+                window: "@1".to_string(),
+            },
+        );
+        assert!(detect_duplicate_claims(&registry).is_empty());
+    }
+
+    #[test]
+    fn detect_duplicate_claims_two_sessions_same_file() {
+        let mut registry = tmux_router::Registry::new();
+        registry.insert(
+            "session-a".to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%1".to_string(),
+                pid: 100,
+                cwd: "/work".to_string(),
+                started: "2026-01-01".to_string(),
+                file: "tasks/shared.md".to_string(),
+                window: "@1".to_string(),
+            },
+        );
+        registry.insert(
+            "session-b".to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%2".to_string(),
+                pid: 101,
+                cwd: "/work".to_string(),
+                started: "2026-01-01".to_string(),
+                file: "tasks/shared.md".to_string(),
+                window: "@1".to_string(),
+            },
+        );
+        let issues = detect_duplicate_claims(&registry);
+        assert_eq!(issues.len(), 1);
+        assert!(issues[0].contains("duplicate claims"));
+        assert!(issues[0].contains("tasks/shared.md"));
+        assert!(issues[0].contains("session-a"));
+        assert!(issues[0].contains("session-b"));
+    }
+
+    #[test]
+    fn detect_duplicate_claims_skips_empty_file_entries() {
+        let mut registry = tmux_router::Registry::new();
+        registry.insert(
+            "session-a".to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%1".to_string(),
+                pid: 100,
+                cwd: "/work".to_string(),
+                started: "2026-01-01".to_string(),
+                file: String::new(), // legacy entry — no file
+                window: "@1".to_string(),
+            },
+        );
+        registry.insert(
+            "session-b".to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%2".to_string(),
+                pid: 101,
+                cwd: "/work".to_string(),
+                started: "2026-01-01".to_string(),
+                file: String::new(),
+                window: "@1".to_string(),
+            },
+        );
+        assert!(detect_duplicate_claims(&registry).is_empty());
     }
 
     #[test]

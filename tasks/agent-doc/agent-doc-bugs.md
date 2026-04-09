@@ -349,7 +349,7 @@ The only reload case is when `skill install` emits `SKILL_RELOAD=compact` — th
 
 Won't send `/reload-plugins` to other panes — it would interrupt active sessions and accomplishes nothing for skills.
 ❯ release
-### Re: release (HEAD)
+### Re: release
 
 v0.31.25 released:
 
@@ -358,7 +358,28 @@ v0.31.25 released:
 - **PyPI:** `pypi.yml` triggers on GitHub Release publish (in flight via CI)
 
 CI chain: tag push → `release.yml` creates GitHub Release → `pypi.yml` triggers on `release: published`.
-<!-- agent:boundary:32ea5970 -->
+
+Could we test the preflight json again. I want to see what the content of this `diff` and `annotated_diff`. I ran `agent-doc preflight` while the last run was going and got the entire response patch with my annotation inside. Could it be due to me running `agent-doc preflight` after the run's `agent-doc preflight` and before the run completed?
+### Re: preflight race condition + diff content (HEAD)
+
+**Current diff** (this cycle): just your new question — small, bounded. Correct behavior.
+
+**What happened when you ran manual preflight during the last run:**
+
+The timing window that matters:
+1. Agent preflight runs → commits stale content → updates snapshot
+2. Agent generates response (no file changes yet)
+3. Agent runs `agent-doc write` → writes response to file + updates snapshot **atomically**
+4. Agent runs `agent-doc commit`
+
+If you ran between 1–3, the file hadn't been written yet — diff is empty. If you ran between 3–4, snapshot and file are already in sync — also empty. Neither path produces the full-response diff.
+
+**More likely cause:** the previous session had a stale snapshot (interrupted before `agent-doc write` completed, or a partial write left snapshot behind the file). Your manual preflight diffed against that stale snapshot and showed everything added since — including the whole response patch and your inline annotation on it.
+
+Evidence: this cycle's preflight also shows `WARNING: file is 349 bytes larger than snapshot`. Same stale-snapshot pattern. It happens when content reaches the file via a path that doesn't update the snapshot (interrupted sessions, Edit tool, manual edits).
+
+**The `annotated_diff` labeling in the current run:** `[user+]` for your question, `[agent]` for the preceding content — correct.
+<!-- agent:boundary:45e8eed1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -99,7 +99,7 @@ Then complete WordPress install at `https://monsterrodholders.com`.
 4. Configure daily backup cron: `0 2 * * * cd /path && source .env && ./scripts/backup.sh`
 
 ❯ commit + push
-### Re: commit + push
+### Re: commit + push (HEAD)
 
 Done.
 
@@ -332,10 +332,10 @@ cat ~/.ssh/monsterrodholders_deploy.pub
 ```
 
 ❯ commit + push
-### Re: commit + push (HEAD)
+### Re: commit + push
 
 Done — `btakita/agent-loop` pushed to `origin/main`.
-<!-- agent:boundary:cb74e36f -->
+<!-- agent:boundary:240a2fbd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

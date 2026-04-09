@@ -337,7 +337,7 @@ git tag v0.31.25 && git push origin v0.31.25
 ```
 
 CI will handle GitHub Release + PyPI. Then `cargo publish` for crates.io.
-<!-- agent:boundary:4b1a581e -->
+<!-- agent:boundary:5f13bd77 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

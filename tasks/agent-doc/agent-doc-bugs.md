@@ -1262,7 +1262,24 @@ For the verification: this write cycle runs `normalize_user_prompts_in_exchange`
 The fence-interior fix means `echo hello` and similar code lines will no longer enter `user_added` — so they'll never appear in `normalize_prefix_lines` going forward.
 
 ❯ Each line in a fenced regions are getting a `❯ ` prefix. Why?
-### Re: ~~~ tilde fence fix (HEAD)
+### Re: ❯  inside fenced regions — why
+
+The fence-interior fix IS in the installed binary (v0.31.23). The exchange has 25 balanced fence pairs, so fence tracking doesn't misfire.
+
+The `❯ ` lines visible inside fenced regions in this document fall into two categories:
+
+**1. Pre-fix normalization artifacts.** The `/btw` fence block was written before the fence-interior fix. The old normalization treated those lines as user-region content and added `❯ `. The fix prevents new additions — it does not retroactively strip existing ones.
+
+**2. Intentional agent content.** The comparison table fence (the "Should agent-doc also use..." block) was explicitly formatted by the agent as `❯ [original] → [stripped]` to illustrate the stripping bug. Those `❯ ` prefixes are meaningful content, not normalization artifacts.
+
+**This cycle is clean:** `user_added` for this cycle contains only your question line (outside any fence). No fence-interior lines will be touched.
+
+**One remaining gap:** `write.rs` only tracks `` ``` `` fences (`starts_with("```")`), not `~~~` tilde fences. `diff.rs` handles both via `fence_char`. If any exchange content uses `~~~` delimiters, those interiors would still be unprotected. All fences in this document use `` ``` ``, so no impact here.
+
+do
+- [ ] Fix `~~~` tilde fence gap in `write.rs` normalize loops (match `diff.rs` which tracks both `` ` `` and `~~~`)
+
+### Re: ~~~ tilde fence fix
 
 Fixed. Both normalize loops in `write.rs` now handle `~~~` fences in addition to `` ``` `` — matching the `fence_char` / `fence_len` approach already used in `diff.rs`.
 
@@ -1275,7 +1292,7 @@ Fixed. Both normalize loops in `write.rs` now handle `~~~` fences in addition to
 **New test:** `normalize_user_prompts_tilde_fence_interior_skipped` — `~~~sh` fence with `echo hello` inside, `Before.` and `After.` outside. Asserts: `Before.`/`After.` get `❯ `, interior does not, tilde markers do not.
 
 All 12 `normalize_user_prompts_*` tests pass. `make check`: 493 passed, 0 failed. Binary reinstalled.
-<!-- agent:boundary:da5d7cae -->
+<!-- agent:boundary:70efc45a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

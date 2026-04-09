@@ -371,7 +371,7 @@ Updated and pushed. Changes:
 - Step 10 `scp`: changed `user@` → `root@` and clarified it runs on local machine
 
 ❯ Should I use the pass command or is cleartext ok for the .env files. On step 7 btw
-### Re: cleartext vs pass for `.env` (step 7) (HEAD)
+### Re: cleartext vs pass for `.env` (step 7)
 
 **Cleartext in `.env` is fine.**
 
@@ -385,19 +385,24 @@ nano .env   # fill in values
 ```
 
 `chmod 600` ensures only root can read or write it — no further protection needed on a single-admin server. `pass` would add GPG key setup and subprocess substitution complexity with no practical benefit here.
-<!-- agent:boundary:939d0670 -->
+
+❯ How do I generate a secure password on my machine?
+### Re: generate a secure password (HEAD)
+
+Run this on your local machine (or the server):
+
+```bash
+openssl rand -base64 32
+```
+
+Run it twice — one output for `WORDPRESS_DB_PASSWORD`, the other for `MARIADB_ROOT_PASSWORD`. Copy each directly into `.env`. No need to remember them.
+<!-- agent:boundary:bdc44650 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Server step 1:** Install Docker + Docker Compose
-- [ ] **Server step 2:** Install git + unzip
-- [ ] **Server step 3:** Generate deploy SSH key (`/root/.ssh/monsterrodholders_deploy`)
-- [ ] **Server step 4:** Add deploy key to GitHub (btakita/monsterrodholders-dev → Settings → Deploy keys)
-- [ ] **Server step 5:** Configure `/root/.ssh/config`
-- [ ] **Server step 6:** Clone repo to `/opt/monsterrodholders/app`
-- [ ] **Server step 7:** `touch .env && chmod 600 .env`, fill in values
+- [ ] **Server step 7:** `touch .env && chmod 600 .env`, fill in values (use `openssl rand -base64 32` for passwords)
 - [ ] **Server step 8:** Provision SSL (`certbot-init.sh`)
 - [ ] **Server step 9:** `docker compose up -d`
 - [ ] **Server step 10:** Transfer + import backup, remove WP Engine mu-plugins

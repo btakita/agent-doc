@@ -46,7 +46,7 @@ Certbot or Traefik handles Let's Encrypt SSL. Traefik integrates directly with D
 - Docker Swarm: basically never — k3s has replaced it and Swarm is in maintenance mode
 
 Want me to draft a `docker-compose.yml` + Nginx config for this setup?
-<!-- agent:boundary:0f8e8d85 -->
+<!-- agent:boundary:f503d2b1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

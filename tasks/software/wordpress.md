@@ -155,7 +155,26 @@ For a complete migration (moving hosts, cloning site):
 - On the new site: install the same plugin, upload the package, follow the wizard
 
 **All-in-One WP Migration** is the simplest — exports everything (DB + files) into a single `.wpress` file, handles search-replace for domain changes automatically. Free version is limited to 512MB imports; paid removes the limit.
-<!-- agent:boundary:e00743d2 -->
+
+❯ In wordpress, how do I see the site revisions?
+**WordPress revisions** are per-post/page (not site-wide). Here's how to access them:
+
+**In the Block Editor (Gutenberg):**
+1. Open any post or page
+2. In the right sidebar, click the **"Post"** tab
+3. Scroll down to find **"Revisions"** — click it to see a count and open the revisions browser
+4. Or: click the three-dot menu (⋮) at the top right → **"Revisions"**
+
+**In the Classic Editor:**
+- A **"Revisions"** meta box appears below the editor showing a count; click "Browse" to compare versions
+
+**Revisions browser:**
+- Slider to move through revisions
+- Side-by-side diff showing what changed
+- "Restore This Revision" button
+
+**Note:** WordPress tracks revisions for posts, pages, and custom post types — not for plugin settings, theme options, or the database at large. If you want site-wide snapshots (including settings/media), that's what migration plugins like All-in-One WP Migration are for.
+<!-- agent:boundary:2a155d18 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

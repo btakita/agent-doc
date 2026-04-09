@@ -688,7 +688,7 @@ No active bugs in the current SKILL workflow. The one actionable item is removin
 
 ❯ do
 ❯ - [ ] Remove or fix `apply_stream_from_string` (dead code, stale-baseline risk if enabled)
-### Re: duplicate uncommitted response + apply_stream_from_string removal (HEAD)
+### Re: duplicate uncommitted response + apply_stream_from_string removal
 
 **Duplicate uncommitted response — why it happened:**
 
@@ -707,13 +707,44 @@ The root cause is the deletion-race window between IPC timeout detection and JB'
 Correction to the earlier audit: this function did NOT have stale-baseline risk. `content` was freshly read from disk, so `content_ours = fresh_file + response` uses the same safe pattern as the other recover paths (`apply_append_from_string`, `apply_template_from_string`). The `content_ours` save was intentional (concurrent edits surface in next diff), not a bug.
 
 Removed it anyway — it was acknowledged dead code (`#[allow(dead_code)]`, no callers) and can be restored from git if stream-mode recovery is ever wired. Builds clean.
-<!-- agent:boundary:cee7f3f0 -->
+
+Would the ACK protocol fix this issue?
+- [ ] Investigate IPC deletion-race window for double-write (JB in-flight when patch file deleted)
+- [ ] Consider: plugin ACK protocol to include applied content (hard guarantee for IPC)
+
+### Re: Would the ACK protocol fix the double-write? (HEAD)
+
+The double-write race involves:
+1. Binary writes patch → 2s timer starts
+2. JB reads patch content, buffers it, queues Document API apply
+3. 2s timeout fires → binary deletes patch + `--force-disk` writes to disk
+4. JB's queued apply runs (content was already buffered before deletion) → applies again
+5. File = 2× response; snapshot = 1× response
+
+**ACK-with-content targets snapshot accuracy, not double-write prevention.**
+
+The ACK-with-content proposal closes the snapshot computation gap — gives a hard guarantee that `snapshot = exactly what JB wrote`. But it doesn't prevent the double-write. Binary already did `--force-disk` before any late ACK arrives; both writes are in the file by then.
+
+**What would actually close the double-write race:**
+
+**Option A — Supersede marker (practical):** Before `--force-disk`, binary writes `.agent-doc/patches/<name>.superseded`. JB checks for this sentinel before applying buffered content. If `.superseded` exists → skip Document API apply (disk write already landed). Race-tight but not race-free: the window is [JB reads patch content] → [before JB applies] → [binary writes .superseded]. If JB checks and applies faster than binary writes the marker, double-write still occurs. Low probability but not impossible.
+
+**Option B — Two-phase handshake (hard guarantee):** JB sends "intent-to-apply" ACK → binary confirms or cancels → JB applies only on confirm. If binary timed out and did `--force-disk`, it sends cancel. Zero double-write risk, but adds a round-trip latency before every apply.
+
+**Option C — Idempotent apply (detect and deduplicate):** Patch file contains a content hash of the expected pre-apply state. JB verifies that hash before applying. If the file already contains the response (because `--force-disk` landed first), the hash doesn't match and JB skips. No protocol change needed — the patch metadata carries the guard.
+
+**Recommendation:**
+
+Do both ACK-with-content and Option C as independent improvements:
+- ACK with content → hard snapshot guarantee, eliminates ghost diffs from IPC timing
+- Idempotent apply (pre-apply hash) → hard double-write prevention, no latency cost
+<!-- agent:boundary:2ca6ba13 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Consider: plugin ACK protocol to include applied content (hard guarantee for IPC)
-- [ ] Investigate IPC deletion-race window for double-write (JB in-flight when patch file deleted)
+- [ ] IPC double-write: implement idempotent apply (pre-apply hash in patch metadata)
+- [ ] IPC snapshot: implement ACK-with-content protocol (hard snapshot guarantee)
 - [ ] Bump to v0.31.26, update VERSIONS.md, publish
 <!-- /agent:pending -->

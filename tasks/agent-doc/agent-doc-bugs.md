@@ -402,7 +402,7 @@ The confusion is about what "stale content" means in step 1.
 Which path did you observe — did the manual preflight output show `committed: true` in its JSON? That would tell us whether step 0 of the agent run had actually committed before you ran your manual preflight.
 
 I don't recall for that instance...but running `agent-doc preflight` again in the same scenario has `committed: true`.
-### Re: committed: true + snapshot desync (HEAD)
+### Re: committed: true + snapshot desync
 
 Good data point. If your manual preflight showed `committed: true`, it found a real diff between file and snapshot and committed it. For the diff to contain the entire response patch, the file already had the response written, but the snapshot was still at the older state.
 
@@ -426,7 +426,42 @@ Then your manual preflight sees diff = entire response → commits → `committe
 Also notable: every cycle in this session starts with `WARNING: file is N bytes larger than snapshot`. That's a consistent signal that after `agent-doc commit` repositions the boundary, the snapshot on disk is slightly behind the file.
 
 **The root question:** Does `agent-doc write` guarantee the snapshot file on disk is updated before returning when IPC is in use? Or does it hand off to the plugin and return optimistically — leaving a window where the file is updated but the disk snapshot isn't?
-<!-- agent:boundary:c40e9644 -->
+❯ Not sure. I do know that JB has a file buffer and can have unsaved state. I recall that the JB plugin saves the document before calling `agent-doc`.
+
+❯ I ran `agent-doc preflight <agent-doc-bugs.md>`. It includes the entire previous patch at that time. This happened during the run. Please add logging so you can see the sequence of events.
+```
+{
+  "layout_issues": [],
+  "recovered": false,
+  "committed": true,
+  "claims": [],
+  "diff": "--- snapshot\n+++ document\n@@ -398,10 +398,12 @@\n **The actual bug** — if you got the \"entire response patch\" — suggests something else happened. Two possibilities:\n 1. The snapshot update in step 0 preflight didn't save properly (file lock issue, crash)\n 2. The file showed content (response already written) but snapshot was an older version\n \n Which path did you observe — did the manual preflight output show `committed: true` in its JSON? That would tell us whether step 0 of the agent run had actually committed before you ran your manual preflight.\n+\n+I don't recall for that instance...but running `agent-doc preflight` again in the same scenario has `committed: true`. \n <!-- /agent:exchange -->\n \n ## Pending / Not Built\n \n <!-- agent:pending patch=replace -->\n",
+  "no_changes": false,
+  "baseline_file": "/home/brian/work/btakita/agent-loop/.agent-doc/baselines/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816.md",
+  "diff_type": "content_addition",
+  "diff_type_reason": "1 lines added",
+  "annotated_diff": "[agent] **The actual bug** — if you got the \"entire response patch\" — suggests something else happened. Two possibilities:\n[agent] 1. The snapshot update in step 0 preflight didn't save properly (file lock issue, crash)\n[agent] 2. The file showed content (response already written) but snapshot was an older version\n[agent] \n[agent] Which path did you observe — did the manual preflight output show `committed: true` in its JSON? That would tell us whether step 0 of the agent run had actually committed before you ran your manual preflight.\n[user+] \n[user+] I don't recall for that instance...but running `agent-doc preflight` again in the same scenario has `committed: true`. \n[agent] <!-- /agent:exchange -->\n[agent] \n[agent] ## Pending / Not Built\n[agent] \n[agent] <!-- agent:pending patch=replace -->"
+}
+```
+### Re: the diff content + logging added (HEAD)
+
+**What the manual preflight diff shows:** Looking at the JSON you pasted — the `+` lines are only your comment ("I don't recall for that instance..."). My previous response appears as context lines (standard unified diff context, not new content). So the manual preflight correctly captured just your uncommitted comment as the diff. The "entire previous patch" visible in the output is unified diff context, not added content.
+
+**The sequence now:** Your manual preflight ran AFTER my write completed (my response was in the file as context) but BEFORE my next preflight committed your comment. Manual preflight grabbed it first → `committed: true`.
+
+**Logging added** (built and installed v0.31.25):
+
+Three new `ops_log` entries now appear in `.agent-doc/logs/ops.log`:
+
+1. **`ipc_socket_delivered`** — logged immediately after socket IPC ack, records `snap_source` (whether snapshot uses `content_ours` or reads file after plugin write) and `snap_len`
+2. **`snapshot_saved_socket_ipc`** — logged after successful snapshot save on socket IPC path
+3. **`snapshot_saved_file_ipc`** — logged after successful snapshot save on file-based IPC path
+4. **`preflight_diff_start`** — logged at step 4 before diff computation, records `snap_len` vs `file_len` at that exact moment
+
+This gives a complete timeline in `.agent-doc/logs/ops.log`: `ipc_socket_delivered` → `snapshot_saved_socket_ipc` → `commit_staging` → `commit_success` → `preflight_diff_start` → `commit_staging` (next cycle).
+
+The `snap_source=content_ours` vs `snap_source=file_read` field tells you which snapshot strategy was used — if it ever shows `file_read`, the snapshot reflects what the plugin wrote (after boundary reposition), which would differ from `content_ours`.
+<!-- agent:boundary:89522636 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

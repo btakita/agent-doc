@@ -60,7 +60,7 @@ Sessions v0.31.18–v0.31.26. Key decisions and fixes:
 - Runbook: `runbooks/plugin-install.md` must be consulted for any JB plugin change (version bump, uninstall protocol).
 
 ❯ release
-### Re: release (HEAD)
+### Re: release
 
 v0.31.26 released:
 
@@ -69,12 +69,35 @@ v0.31.26 released:
 - **PyPI:** manylinux wheel built and uploaded (`agent_doc-0.31.26-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl`)
 - **Tag:** `v0.31.26` pushed — CI building GitHub Release with cross-platform binaries
 - **cargo install:** v0.31.26 running locally
-<!-- agent:boundary:dee44a45 -->
+
+❯ The agent-loop project is swapping with tmux session 1. We should keep everything on this tmux session 0.
+❯ This has been a reoccuring issue. Let's figure out all of the horizontal and vertical workflows that can cause this.
+### Re: session drift — tmux session 1 contamination (HEAD)
+
+**Current state:** `%57` (mattpocock.md) is registered in `$1:@13` (session 1). All other panes are in session 0. Config correctly shows `tmux_session = "0"`.
+
+**Root causes — what creates cross-session registrations:**
+
+1. **Start from wrong terminal** (`start.rs`): `sessions::current_pane()` reads `$TMUX_PANE`. If `/agent-doc` runs from a Claude Code terminal attached to session 1, that pane registers to session 1. This is the most likely trigger for mattpocock.md.
+
+2. **`resolve_target_session` fallback + auto-update** (`route.rs:473`): When the configured session is dead or unset, it falls back to `current_tmux_session()` and **writes that back to `config.toml`**. A single route call from a session 1 context silently flips `tmux_session = "1"`, causing all subsequent routing to land there.
+
+3. **`break_pane` fallback in `stash_pane`** (`tmux-router/src/tmux.rs:717`): When `ensure_stash_window(session_0)` fails, it falls back to `break_pane` with no `-t` destination. tmux sends the pane to its current session — which could be session 1 if the caller was cross-session.
+
+4. **`sync.rs` / `parallel.rs` stash with wrong `target_sess`**: If `target_sess` resolves to "1" via the route fallback, stash operations accumulate panes in session 1's stash window.
+
+**Fix path:**
+
+`resync.rs` currently only detects `WrongSession` when `frontmatter.tmux_session` is explicitly set. It should also check registered panes against `config::project_tmux_session()`. Panes in session 1 (while config says session 0) would trigger `WrongSession` → auto-relocated via `join-pane` to session 0. This makes the system self-healing without requiring `tmux_session` frontmatter in every document.
+
+**Immediate action:** Manually relocate `%57` now, or just kill+deregister mattpocock.md and re-run it from a session 0 terminal.
+<!-- agent:boundary:9ec95bd4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Manual verification: confirm ghost-reappearance no longer occurs in next /agent-doc cycle
-- [ ] Install plugin v0.2.54 (full uninstall+restart, per runbooks/plugin-install.md)
+- [ ] Fix `resync.rs`: detect `WrongSession` against `config::project_tmux_session()` (not only `frontmatter.tmux_session`)
+- [ ] Guard `resolve_target_session` auto-update: only write config when new session matches `project_tmux_session` (don't let session 1 overwrite session 0 config)
+- [ ] Relocate or deregister `%57` (mattpocock.md) — it's in session 1, should be in session 0
 <!-- /agent:pending -->

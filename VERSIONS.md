@@ -4,6 +4,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.27
+
+- **`pane_policy` module (tmux-router 0.3.10):** New `PaneMoveOp` + `CrossSession` enum as a mandatory gateway for all pane movement. `CrossSession::Deny` by default; `CrossSession::Allow { reason }` for intentional cross-session relocations. All 7 `join_pane` call sites in agent-doc migrated to use `PaneMoveOp`.
+- **Guard `start.rs` registration:** When claiming a pane, warns if `$TMUX_PANE`'s session ≠ `project_tmux_session()` — prevents silent session drift on claim.
+- **Guard `resolve_target_session` auto-update (route.rs):** No longer overwrites `tmux_session` config when a previously-configured session is dead. Only writes config when no session was previously set. Prevents session 1 from silently overwriting session 0.
+- **Fix `resync.rs` WrongSession detection:** `detect_issues` now falls back to `config::project_tmux_session()` when `frontmatter.tmux_session` is absent. Panes in a wrong session are flagged even without per-document session frontmatter. `apply_fixes_to_registry` uses `PaneMoveOp::allow_cross_session("relocate WrongSession pane to project session")` to move them.
+
 ## 0.31.26
 
 - **Fix: orphan recovery dedup guard (recover.rs):** `recover::run` now reads the document before applying a pending response and checks if the content is already present using a 3-line fingerprint. If already applied (e.g., IPC path wrote the content but `clear_pending` was never called due to exit 75), the pending file is removed without re-applying. Prevents ghost-reappearance of previous responses. New test: `recover_skips_duplicate_apply`.

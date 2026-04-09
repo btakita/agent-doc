@@ -77,6 +77,7 @@ pub use tmux_router::Tmux;
 #[cfg(test)]
 pub use tmux_router::IsolatedTmux;
 pub use tmux_router::{RegistryEntry as SessionEntry, RegistryLock, Registry as SessionRegistry};
+pub use tmux_router::PaneMoveOp;
 
 const SESSIONS_FILE: &str = ".agent-doc/sessions.json";
 

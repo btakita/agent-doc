@@ -61,7 +61,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use crate::sessions::Tmux;
+use crate::sessions::{PaneMoveOp, Tmux};
 use crate::{frontmatter, sessions};
 
 /// Split direction for the mirror window.
@@ -228,7 +228,7 @@ pub fn run_with_tmux(files: &[&Path], split: Split, pane: Option<&str>, window: 
             continue;
         }
 
-        tmux.join_pane(pane_id, &anchor_pane, split.tmux_flag())?;
+        PaneMoveOp::new(tmux, pane_id, &anchor_pane).join(split.tmux_flag())?;
         eprintln!("Joined {} (pane {}) into window {}", file_display, pane_id, target_window);
     }
 

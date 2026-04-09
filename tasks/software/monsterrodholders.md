@@ -385,7 +385,7 @@ nano .env   # fill in values
 ```
 
 `chmod 600` ensures only root can read or write it — no further protection needed on a single-admin server. `pass` would add GPG key setup and subprocess substitution complexity with no practical benefit here.
-<!-- agent:boundary:3269d83f -->
+<!-- agent:boundary:939d0670 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -855,7 +855,7 @@ The runbook also specifies full uninstall+restart when class structure changes (
 So the correct install flow for `0.2.54` is full uninstall, not reinstall-over-existing.
 Why do I need to do a full uninstall?
 Why was the before last response patch in the last response patch?
-### Re: Why full uninstall + why before-last response appeared in last patch (HEAD)
+### Re: Why full uninstall + why before-last response appeared in last patch
 
 **Why full uninstall?**
 
@@ -877,7 +877,7 @@ Why is `### Re: Did we not have the skill → runbook that has the release proce
 Why is `### Re: Why full uninstall + why before-last response appeared in last patch` not committed?
 
 This patch seems to have made the situation worse :-(
-### Re: Why full uninstall + why before-last response appeared in last patch (HEAD)
+### Re: Why full uninstall + why before-last response appeared in last patch
 
 **Why full uninstall?**
 
@@ -894,13 +894,32 @@ Timeline:
 4. Result: previous response appeared again inside the new patch
 
 The IPC improvements we built prevent the **binary→plugin double-write race**. They don't cover this path: orphan recovery applies content that was already committed to disk. That's a separate gap — recovery needs to check whether the content is already present in the document before applying.
-<!-- agent:boundary:4d74d842 -->
+
+do
+- [ ] Recovery dedup: orphan recovery should check if content already present before applying
+### Re: do — Recovery dedup (HEAD)
+
+**Implementation complete.** `recover::run` now checks if the pending response content is already present in the document before applying.
+
+**How it works:**
+- After reading the pending content, reads the current document
+- Extracts a fingerprint: first 3 non-empty, non-marker lines (skipping `<!-- patch:`, `<!-- /patch:`, etc.)
+- If the fingerprint appears in the document → pending file was already applied via IPC → remove pending file, return `Ok(false)` (no re-apply)
+- If not present → apply as before
+
+**New function:** `response_fingerprint(response)` is `pub` (available to callers if needed).
+
+**Test added:** `recover_skips_duplicate_apply` — document already contains the response content, pending file still exists, `run` returns `Ok(false)`, document unchanged, pending file removed.
+
+`make check` clean. `cargo install` → v0.31.26.
+<!-- agent:boundary:5d16da16 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Recovery dedup: orphan recovery should check if content already present before applying
-- [ ] User full-uninstalls plugin, restarts, installs `agent-doc-jetbrains-0.2.54.zip`, restarts, confirms
-- [ ] Task 7: Release v0.31.26 (blocked on user confirmation)
+- [ ] Manual verification: confirm ghost-reappearance no longer occurs in next /agent-doc cycle
+- [ ] Publish: `cargo publish` (crates.io)
+- [ ] Publish: `maturin publish --no-sdist` (PyPI)
+- [ ] Release: `gh release create v0.31.26 --generate-notes` with prebuilt binary
 <!-- /agent:pending -->

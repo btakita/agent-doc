@@ -162,7 +162,7 @@ Shall I implement this now?
 ❯ First `--diff-only` should be the default. The option should be to preflight the entire document.
 
 ❯ I thought the intent of preflight is to send only the diff. Why is the entire document sent? 
-### Re: default should be diff-only (HEAD)
+### Re: default should be diff-only
 
 ❯ **Why is the document sent?** It was added as convenience — one tool call returns both diff + HEAD content so the agent doesn't need a separate `Read`. The intent was "save a round-trip." But the cost is 26KB landing in context every cycle regardless of whether the agent needs it.
 
@@ -213,10 +213,12 @@ Done. Changes in `src/agent-doc/`:
 
 ❯ Are there any valid use cases for "saving the round trip" and sending the entire document? If we were to use remote claude sessions, we would use an existing remote transport that work for **all** claude sessions. So I cannot think of any valid use cases.
 
-The response patch before this last one was removed in the last commit. The content is now uncommitted to be added. Why?
-### Re: no valid use cases for `--with-document` (HEAD)
+❯ The response patch before this last one was removed in the last commit. The content is now uncommitted to be added. Why?  
+### Re: no valid use cases for `--with-document`
 
 Agreed, and removed. The flag never shipped (only lived in v0.31.25 pre-release), so this is a clean deletion.
+
+❯ Should the skill also remove document: null?
 
 **Changes (folded into v0.31.25):**
 
@@ -226,21 +228,39 @@ Agreed, and removed. The flag never shipped (only lived in v0.31.25 pre-release)
 
 38/38 tests pass.
 
-### Re: uncommitted response patch (HEAD)
+### Re: uncommitted response patch
 
 The "### Re: default should be diff-only" section was in the document file but not in the snapshot. When this session's preflight ran its commit step, it committed the stale snapshot (the one before that response) — leaving that 1453-byte block as uncommitted in git (green gutter), even though the content was correctly in the file.
 
 **Root cause:** The snapshot wasn't updated after that response was written. Most likely the session that generated it used the Edit tool (or was interrupted between file write and snapshot update) — `agent-doc write` updates both atomically, but Edit tool writes only the file and bypasses snapshot management.
 
 **Resolution:** This session's write-back will include the full content (including "### Re: default should be diff-only") in the snapshot. After `agent-doc commit`, git gutter will clear for those lines.
-<!-- agent:boundary:dc05c99f -->
+
+❯ What are the next steps to fix?
+### Re: skill should remove `document: null` (HEAD)
+
+Yes. The source `SKILL.md` was stale — it still had `"document": "full document content"` and "Reading the document HEAD" as a preflight bullet. The `skill install` in this session had compiled that old content into v0.31.25 and downgraded the installed copy from the correct version.
+
+**Fixed:** source `SKILL.md` updated:
+- JSON schema: `"document": "full document content"` → `"document": null`
+- Bullet removed: "Reading the document HEAD"
+- Bullet updated: "The `document` field contains the full HEAD content (no separate `Read` needed)" → "The `document` field is `null` by default — preflight sends only the diff"
+- Added: "**First cycle only:** if the document is not yet in context, run `agent-doc read <FILE>` to fetch HEAD content before responding"
+
+Rebuilt v0.31.25 and ran `skill install` — installed SKILL.md now matches. `SKILL_RELOAD=compact` was emitted — please run `/compact` then re-run `/agent-doc` to reload the updated skill.
+
+### Re: next steps for snapshot staleness (HEAD)
+
+Already resolved. The last cycle's write-back included the "### Re: default should be diff-only" content in the snapshot, so git gutter should be clear. No code change needed.
+
+For prevention: the SKILL.md rule ("Do NOT use the Edit tool for write-back") is the guard. A runtime check in `agent-doc commit` that warns when file diverges from snapshot by >N bytes already exists (the "possible out-of-band write" warning). Refusing to commit in that case would be heavier than a warning — judgment call.
+<!-- agent:boundary:2aee77d1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] `cargo install --path .` in src/agent-doc, verify live session behavior
+- [ ] Run `/compact` to reload updated SKILL.md, then re-run `/agent-doc`
 - [ ] Release v0.31.25 (crates.io + PyPI + GitHub Release)
 - [ ] Follow-on: duplicate claims check in `check_layout()`
-- [ ] Verify CI passes on 7fc7905
 <!-- /agent:pending -->

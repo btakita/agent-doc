@@ -821,7 +821,7 @@ Did we not have the skill -> runbook that has the release procedure for agent-do
 
 Bumped to `0.2.54`, rebuilt, and committed. Install:
 > `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.54.zip`
-### Re: Did we not have the skill → runbook that has the release procedure for agent-doc-jetbrains? (HEAD)
+### Re: Did we not have the skill → runbook that has the release procedure for agent-doc-jetbrains?
 
 Yes — `runbooks/plugin-install.md` covers exactly this. Rule:
 
@@ -839,7 +839,7 @@ The runbook also specifies full uninstall+restart when class structure changes (
 So the correct install flow for `0.2.54` is full uninstall, not reinstall-over-existing.
 
 Why is the entire response patch uncommitted? Did the work you just do fail to catch this bug?
-### Re: Did we not have the skill → runbook that has the release procedure for agent-doc-jetbrains? (HEAD)
+### Re: Did we not have the skill → runbook that has the release procedure for agent-doc-jetbrains?
 
 Yes — `runbooks/plugin-install.md` covers exactly this. Rule:
 
@@ -853,12 +853,54 @@ The runbook also specifies full uninstall+restart when class structure changes (
 > Then install from disk → Restart IDE
 
 So the correct install flow for `0.2.54` is full uninstall, not reinstall-over-existing.
-<!-- agent:boundary:117798ba -->
+Why do I need to do a full uninstall?
+Why was the before last response patch in the last response patch?
+### Re: Why full uninstall + why before-last response appeared in last patch (HEAD)
+
+**Why full uninstall?**
+
+JetBrains plugin classloaders keep loaded classes in memory until a full IDE restart. Install-over-existing replaces the zip on disk and reloads the plugin — but the classloader may cache old class definitions, especially for structural changes. With new fields (`patchId: String?`) and new JNA methods (`writeAckContent`, `isClaimedByForceDisk`), stale definitions throw `NoSuchFieldException` / `NoSuchMethodException` at runtime. Full uninstall + restart purges the classloader entirely, guaranteeing clean class loading.
+
+**Why was the before-last response in the last response patch?**
+
+Ghost-reappearance bug — and it appeared right as we were documenting and fixing it.
+
+Timeline:
+1. The "Why not?" cycle wrote its response to disk (longer version with "Why not?" answered at bottom)
+2. Something interrupted the session — snapshot wasn't updated, but the response content was saved as an IPC-pending / orphaned response
+3. First `/agent-doc` invocation this session: preflight detected the orphan — `[recover] Found orphaned response (1143 bytes). Applying...` — and re-inserted it
+4. Result: previous response appeared again inside the new patch
+
+The IPC improvements we built prevent the **binary→plugin double-write race**. They don't cover this path: orphan recovery applies content that was already committed to disk. That's a separate gap — recovery needs to check whether the content is already present in the document before applying.
+
+Why is `### Re: Did we not have the skill → runbook that has the release procedure for agent-doc-jetbrains?` duplicated?
+Why is `### Re: Why full uninstall + why before-last response appeared in last patch` not committed?
+
+This patch seems to have made the situation worse :-(
+### Re: Why full uninstall + why before-last response appeared in last patch (HEAD)
+
+**Why full uninstall?**
+
+JetBrains plugin classloaders keep loaded classes in memory until a full IDE restart. Install-over-existing replaces the zip on disk and reloads the plugin — but the classloader may cache old class definitions, especially for structural changes. With new fields (`patchId: String?`) and new JNA methods (`writeAckContent`, `isClaimedByForceDisk`), stale definitions throw `NoSuchFieldException` / `NoSuchMethodException` at runtime. Full uninstall + restart purges the classloader entirely, guaranteeing clean class loading.
+
+**Why was the before-last response in the last response patch?**
+
+Ghost-reappearance bug — and it appeared right as we were documenting and fixing it.
+
+Timeline:
+1. The "Why not?" cycle wrote its response to disk (longer version with "Why not?" answered at bottom)
+2. Something interrupted the session — snapshot wasn't updated, but the response content was saved as an IPC-pending / orphaned response
+3. First `/agent-doc` invocation this session: preflight detected the orphan — `[recover] Found orphaned response (1143 bytes). Applying...` — and re-inserted it
+4. Result: previous response appeared again inside the new patch
+
+The IPC improvements we built prevent the **binary→plugin double-write race**. They don't cover this path: orphan recovery applies content that was already committed to disk. That's a separate gap — recovery needs to check whether the content is already present in the document before applying.
+<!-- agent:boundary:f228a98a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Recovery dedup: orphan recovery should check if content already present before applying
 - [ ] User full-uninstalls plugin, restarts, installs `agent-doc-jetbrains-0.2.54.zip`, restarts, confirms
 - [ ] Task 7: Release v0.31.26 (blocked on user confirmation)
 <!-- /agent:pending -->

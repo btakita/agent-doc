@@ -113,7 +113,7 @@ The stash non-idle check was using the wrong signal (idle shell vs. not) instead
 The current fix (deleted Check 2 entirely) is correct: it removes the false positives. A follow-on "duplicate claims" registry check can be added as a separate issue.
 
 **Note:** fix is source-only — binary is still v0.31.24. Run `cargo install --path .` inside `src/agent-doc/` to pick it up locally, then verify before releasing v0.31.25.
-<!-- agent:boundary:652d2a02 -->
+<!-- agent:boundary:ae9b4be0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

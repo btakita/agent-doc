@@ -209,7 +209,7 @@ To avoid session drift, run /agent-doc from a terminal in session '0'.
 **6. `resync.rs` WrongSession** — WrongSession detection now falls back to `config::project_tmux_session()` when `frontmatter.tmux_session` is absent. Panes in session 1 with no frontmatter field will now trigger WrongSession when project config says session 0.
 
 Test results: 758 agent-doc + 85 tmux-router tests, 0 failures.
-<!-- agent:boundary:b0977498 -->
+<!-- agent:boundary:878e7835 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

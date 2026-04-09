@@ -738,7 +738,7 @@ The ACK-with-content proposal closes the snapshot computation gap — gives a ha
 Do both ACK-with-content and Option C as independent improvements:
 - ACK with content → hard snapshot guarantee, eliminates ghost diffs from IPC timing
 - Idempotent apply (pre-apply hash) → hard double-write prevention, no latency cost
-<!-- agent:boundary:2ca6ba13 -->
+<!-- agent:boundary:1c175cd0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

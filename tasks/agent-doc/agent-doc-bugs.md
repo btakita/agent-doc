@@ -1196,7 +1196,7 @@ test
 This write cycle sends the correct `normalize_prefix_lines = ["do", "done"]` to the plugin. After this patch is applied, `do`/`done` lines should have `❯ ` restored.
 
 **Next step:** Verify `do`/`done` lines show `❯ ` in the editor after this write. If clean, bump version and release.
-<!-- agent:boundary:8de21ad0 -->
+<!-- agent:boundary:d260acc7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

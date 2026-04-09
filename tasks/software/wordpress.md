@@ -174,7 +174,7 @@ For a complete migration (moving hosts, cloning site):
 - "Restore This Revision" button
 
 **Note:** WordPress tracks revisions for posts, pages, and custom post types — not for plugin settings, theme options, or the database at large. If you want site-wide snapshots (including settings/media), that's what migration plugins like All-in-One WP Migration are for.
-<!-- agent:boundary:2a155d18 -->
+<!-- agent:boundary:994032b6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

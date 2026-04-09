@@ -46,7 +46,7 @@ tmux kill-pane -t %41
 ```
 
 **Missing safeguard — stash pane eviction:** The existing fixes don't address *how panes get stashed in the first place*. A follow-up fix in `route.rs` could: when routing a new session for document X, if an existing stash pane already claims X, kill the stash pane and reuse the route rather than adding another one.
-<!-- agent:boundary:aca01cca -->
+<!-- agent:boundary:d01be0c0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

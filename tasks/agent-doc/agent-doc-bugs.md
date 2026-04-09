@@ -1260,7 +1260,7 @@ Binary rebuilt with the fence-interior fix (`cargo install --path .`). The updat
 For the verification: this write cycle runs `normalize_user_prompts_in_exchange` with the new binary, which will send `normalize_prefix_lines` to the plugin for any stripped lines. If `❯ ` was missing from any lines in the live document that the snapshot shows should have it, the plugin will restore them as part of applying this response patch.
 
 The fence-interior fix means `echo hello` and similar code lines will no longer enter `user_added` — so they'll never appear in `normalize_prefix_lines` going forward.
-<!-- agent:boundary:584645db -->
+<!-- agent:boundary:f6952202 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

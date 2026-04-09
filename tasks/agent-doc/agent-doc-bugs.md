@@ -162,35 +162,42 @@ Shall I implement this now?
 ❯ First `--diff-only` should be the default. The option should be to preflight the entire document.
 
 I thought the intent of preflight is to send only the diff. Why is the entire document sent?
-### Re: default should be diff-only (HEAD)
+### Re: diff-only default + `agent-doc read` (HEAD)
 
-**Why is the document sent?** It was added as convenience — one tool call returns both diff + HEAD content so the agent doesn't need a separate `Read`. The intent was "save a round-trip." But the cost is 26KB landing in context every cycle regardless of whether the agent needs it.
+Done. Changes in `src/agent-doc/`:
 
-**Revised design (your direction):**
+**`preflight.rs`**
+- `document: String` → `Option<String>` (serializes as `null` by default)
+- `run(file, diff_only: bool)` → `run(file, with_document: bool)` — inverted flag
+- Step 5 log: "skipped (use --with-document or `agent-doc read` to fetch)"
+- Test fixtures: all `document: "..."` → `document: Some("...")`
 
-Flip the default:
-- `preflight <FILE>` → `document: null` (diff-only, no document)
-- `preflight --with-document <FILE>` → full document included
+**`main.rs`**
+- `Preflight`: `diff_only` → `with_document` (inverted semantics)
+- Added `Read { file, component: Option<String> }` subcommand
+- Dispatch: `Commands::Read { file, component } => read::run(&file, component.as_deref())`
 
-This means:
-1. **`preflight.rs`** — remove `--diff-only` flag. Default `document` to `None`. Add `--with-document` flag that populates it.
-2. **`main.rs`** — rename/flip the flag in `Preflight` args.
-3. **`SKILL.md`** — invocation stays `agent-doc preflight <FILE>` (no flag). First-cycle protocol: run `agent-doc read <FILE>` when document not in context.
-4. **`read.rs`** (new) + `Read` subcommand — same as before.
-5. Keep `--diff-only` as a deprecated alias (or remove it — no external users outside the skill).
+**`read.rs`** (new, 60 lines)
+- `run(file, component)`: full file or named component body to stdout
+- Tests: full read, named component, missing component error, missing file error
 
-Implementing now.
-<!-- agent:boundary:9b66e7e6 -->
+**`SKILL.md`**
+- JSON schema: `"document": null`
+- First-cycle protocol: run `agent-doc read <FILE>` when document not in context
+
+**`Cargo.toml` / `pyproject.toml`**: bumped to v0.31.25
+
+**`VERSIONS.md`**: diff-only default, `--diff-only` removal (BREAKING), `agent-doc read` subcommand, stash window fix, clippy fix
+
+38/38 tests pass. Run `cargo install --path .` to pick it up, then verify before publishing.
+<!-- agent:boundary:ccc12fc6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Implement diff-only as default in `preflight.rs` (flip flag, rename to --with-document)
-- [ ] Add `agent-doc read <FILE>` subcommand + `read.rs`
-- [ ] Update SKILL.md: remove --diff-only, add first-cycle read protocol
-- [ ] `cargo install --path .` in src/agent-doc after changes
-- [ ] Release v0.31.25 with stash fix + diff-only default
+- [ ] `cargo install --path .` in src/agent-doc, verify live session behavior
+- [ ] Release v0.31.25 (crates.io + PyPI + GitHub Release)
 - [ ] Follow-on: duplicate claims check in `check_layout()`
 - [ ] Verify CI passes on 7fc7905
 <!-- /agent:pending -->

@@ -396,7 +396,7 @@ openssl rand -base64 32
 ```
 
 Run it twice — one output for `WORDPRESS_DB_PASSWORD`, the other for `MARIADB_ROOT_PASSWORD`. Copy each directly into `.env`. No need to remember them.
-<!-- agent:boundary:bdc44650 -->
+<!-- agent:boundary:8598e196 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

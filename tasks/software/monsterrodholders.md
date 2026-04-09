@@ -97,7 +97,7 @@ Then complete WordPress install at `https://monsterrodholders.com`.
 2. Set up cron for SSL auto-renewal (line in README)
 3. Install Redis Object Cache plugin in WordPress admin and activate it
 4. Configure daily backup cron: `0 2 * * * cd /path && source .env && ./scripts/backup.sh`
-<!-- agent:boundary:1f56001a -->
+<!-- agent:boundary:b21ed5a5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

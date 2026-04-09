@@ -813,18 +813,52 @@ Then verify:
 
 Confirm here when verified — then I'll proceed with Task 7 release.
 Add tests
-### Re: Why did you not increment the agent-doc-jetbrains version? (HEAD)
+### Re: Why did you not increment the agent-doc-jetbrains version?
 
 Oversight — the plan's Task 4+5 steps didn't include a version bump, but they should have. Tasks 4+5 added new FFI calls and changed plugin behavior (new `IpcPatch.patchId` field, `writeAckContent`, `isClaimedByForceDisk`), which warrants a minor version bump.
 
+Did we not have the skill -> runbook that has the release procedure for agent-doc-jetbrains?
+
 Bumped to `0.2.54`, rebuilt, and committed. Install:
 > `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.54.zip`
-<!-- agent:boundary:de22b411 -->
+### Re: Did we not have the skill → runbook that has the release procedure for agent-doc-jetbrains? (HEAD)
+
+Yes — `runbooks/plugin-install.md` covers exactly this. Rule:
+
+> **Any PR or committed change to `editors/jetbrains/` → bump `pluginVersion`.**
+
+I didn't consult it when generating the plan's Task 4+5 steps, so the version bump was missing. The plan should have included a step like: "Bump `pluginVersion` in `gradle.properties` (see `runbooks/plugin-install.md`)."
+
+Why not?
+
+The runbook also specifies full uninstall+restart when class structure changes (new fields/methods) — which applies here (`IpcPatch.patchId`, `writeAckContent`, `isClaimedByForceDisk`):
+
+> IDEA → Settings → Plugins → find "Agent Doc" → Uninstall → Restart IDE
+> Then install from disk → Restart IDE
+
+So the correct install flow for `0.2.54` is full uninstall, not reinstall-over-existing.
+
+Why is the entire response patch uncommitted? Did the work you just do fail to catch this bug?
+### Re: Did we not have the skill → runbook that has the release procedure for agent-doc-jetbrains? (HEAD)
+
+Yes — `runbooks/plugin-install.md` covers exactly this. Rule:
+
+> **Any PR or committed change to `editors/jetbrains/` → bump `pluginVersion`.**
+
+I didn't consult it when generating the plan's Task 4+5 steps, so the version bump was missing. The plan should have included a step like: "Bump `pluginVersion` in `gradle.properties` (see `runbooks/plugin-install.md`)."
+
+The runbook also specifies full uninstall+restart when class structure changes (new fields/methods) — which applies here (`IpcPatch.patchId`, `writeAckContent`, `isClaimedByForceDisk`):
+
+> IDEA → Settings → Plugins → find "Agent Doc" → Uninstall → Restart IDE
+> Then install from disk → Restart IDE
+
+So the correct install flow for `0.2.54` is full uninstall, not reinstall-over-existing.
+<!-- agent:boundary:45866cbb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] User installs plugin `agent-doc-jetbrains-0.2.54.zip` and confirms manual verification
+- [ ] User full-uninstalls plugin, restarts, installs `agent-doc-jetbrains-0.2.54.zip`, restarts, confirms
 - [ ] Task 7: Release v0.31.26 (blocked on user confirmation)
 <!-- /agent:pending -->

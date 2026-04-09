@@ -158,7 +158,7 @@ Key finding: `--diff-only` flag **already exists** in `preflight.rs` and `main.r
 **Backward compat:** `preflight` without `--diff-only` unchanged. Only the skill changes its call.
 
 Shall I implement this now?
-<!-- agent:boundary:d4b5382c -->
+<!-- agent:boundary:82ff648a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

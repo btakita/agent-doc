@@ -254,7 +254,7 @@ Rebuilt v0.31.25 and ran `skill install` — installed SKILL.md now matches. `SK
 Already resolved. The last cycle's write-back included the "### Re: default should be diff-only" content in the snapshot, so git gutter should be clear. No code change needed.
 
 For prevention: the SKILL.md rule ("Do NOT use the Edit tool for write-back") is the guard. A runtime check in `agent-doc commit` that warns when file diverges from snapshot by >N bytes already exists (the "possible out-of-band write" warning). Refusing to commit in that case would be heavier than a warning — judgment call.
-<!-- agent:boundary:2aee77d1 -->
+<!-- agent:boundary:2b7e3143 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

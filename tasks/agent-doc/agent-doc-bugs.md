@@ -683,7 +683,7 @@ Both read a fresh file as their baseline (`content = std::fs::read_to_string(fil
 | `apply_template_from_string` write.rs:1360 | Intentional (recover) | Attribution noise only |
 
 No active bugs in the current SKILL workflow. The one actionable item is removing `apply_stream_from_string` (dead code, stale-baseline risk if enabled).
-<!-- agent:boundary:ad16a100 -->
+<!-- agent:boundary:8febca23 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

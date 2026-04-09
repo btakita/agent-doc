@@ -170,19 +170,42 @@ No fenced code context tracked. So `# bash_comment` inside a diff's fenced block
 2. Apply `strip_comments`/component parsing before classifying (already done for comment stripping, not for `#` detection)
 
 **Fix, if needed:** Port `find_code_ranges` into the diff classifier so `classify_diff` can mark lines as in-fence and skip heading-semantics for them. Currently there's no concrete bug from this, just a potential one.
-### Re: `See src/session-share/tasks/claudescore.md` (HEAD)
+
+❯ There is a bug. The ` (HEAD)` suffix on the fenced comment was committed to git. This is a bug. Please fix.
+### Re: `See src/session-share/tasks/claudescore.md`
 
 Truncated line completed. The `❯ ` prefix was dropped again in the editor — live confirmation of the normalization bug.
 
 `claudescore.md` is an extract of the claude-auto/ClaudeScore context (commit validation hooks, reminders, claude-auto plugin). Doesn't add new context to the `#`-in-fenced-code analysis — that response stands as-is.
-<!-- agent:boundary:a501cb92 -->
+### Re: (HEAD) on fenced code comment (HEAD)
+
+Fixed. Committed to `src/agent-doc` as `fix: skip fenced code blocks in add_head_marker and strip_head_markers`.
+
+**Root cause:** `add_head_marker` and `strip_head_markers` in `git.rs` scanned all lines using `trimmed.starts_with('#')` with no fenced code awareness. A line like `# yaml comment` inside a ` ``` ` block would match the heading pattern and receive the ` (HEAD)` suffix.
+
+**Three loops affected:**
+1. Step 1 (strip existing `(HEAD)`) — could incorrectly strip ` (HEAD)` from user content in fenced code
+2. Step 2 (collect heading positions) — the main bug: fenced `# comment` treated as heading
+3. Step 3 (count HEAD occurrences) — same issue in git HEAD content scan
+
+**Fix:**
+- Module-level `fn is_fence_marker(trimmed: &str) -> bool` — matches 3+ backticks or tildes at line start
+- `in_fence` boolean added to all three loops; heading detection skips when `in_fence == true`
+- Same fix applied to `strip_head_markers`
+
+**Tests added:**
+- `add_head_marker_ignores_fenced_code_hash` — real heading gets `(HEAD)`, `# yaml comment` inside fence does not
+- `strip_head_markers_ignores_fenced_code_hash` — `# comment (HEAD)` inside fence is preserved verbatim
+
+All 20 git tests pass.
+<!-- agent:boundary:efdceeee -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Fix IPC plugin: `❯ ` prefix lost in editor after transfer (normalize runs before patch body assembled)
-- [ ] Bump version + release agent-doc with hooks feature
+- [ ] Bump version + release agent-doc with hooks feature + this fix
 - [ ] `agent-doc steer <FILE>` — inject steering message to claim pane via tmux send-keys
 - [ ] (stretch) inotify watcher for automatic real-time steering on document edit
 - [ ] (low priority) Port `find_code_ranges` into diff classifier for fenced-code-aware `#` handling

@@ -664,17 +664,38 @@ ssh root@50.28.2.199 'docker compose -f /opt/monsterrodholders/app/docker-compos
 ```
 
 Then I can build the Gutenberg HTML and update via `wp post update <ID> --post_content='...'` — in-place replacement, no URL changes, no redirects.
-<!-- agent:boundary:8b142b5e -->
+
+❯ Do
+❯ - [ ] Pull page IDs from server (`wp post list --post_type=page`)
+❯ - [ ] Build Gutenberg replacement HTML for home page (preserve all text/links)
+### Re: do — pull page IDs + build Gutenberg HTML
+
+SSH auth failing from this session (too many keys tried). Please run these from your terminal and paste the output here:
+
+**Step 1 — page list:**
+```bash
+ssh root@50.28.2.199 'docker compose -f /opt/monsterrodholders/app/docker-compose.yml run --rm wpcli \
+  wp post list --post_type=page --fields=ID,post_title,post_name --format=table 2>/dev/null'
+```
+
+**Step 2 — home page raw content** (replace `2` with actual home page ID):
+```bash
+ssh root@50.28.2.199 'docker compose -f /opt/monsterrodholders/app/docker-compose.yml run --rm wpcli \
+  wp post get 2 --field=post_content 2>/dev/null'
+```
+
+Once I have the page IDs and the raw content, I'll build the full Gutenberg replacement and update via `wp post update`.
+<!-- agent:boundary:6a8e67d8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Pull page IDs from server (`wp post list --post_type=page`)
-- [ ] Build Gutenberg replacement HTML for home page (preserve all text/links)
+- [ ] User to paste: page list output + home page raw content
+❯ - [ ] Build Gutenberg replacement HTML for home page (preserve all text/links)
 - [ ] Update page content via `wp post update`
 - [ ] Verify rendered output in browser
-- [ ] On server: `git config pull.rebase true && git config user.name/email` (one-time setup)
-- [ ] On server: bootstrap theme files into wordpress/themes/blocksy/
+- [ ] On server: `git config pull.rebase true && git config user.name/email`
+- [ ] On server: bootstrap blocksy theme files into wordpress/themes/blocksy/
 - [ ] When ready to go live: search-replace URLs → monsterrodholders.com, flip DNS, re-run certbot
 <!-- /agent:pending -->

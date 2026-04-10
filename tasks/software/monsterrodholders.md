@@ -2191,7 +2191,7 @@ Container app-wpcli-run-0476febcdaa6 Creating
 Container app-wpcli-run-0476febcdaa6 Created
 https://50.28.2.199.nip.io
 ```
-### Re: siteurl already correct — redirect is in nginx config (HEAD)
+### Re: siteurl already correct — redirect is in nginx config
 
 `siteurl` already shows `https://50.28.2.199.nip.io` — WordPress isn't causing the redirect. The redirect must be in the **nginx config** itself.
 
@@ -2207,23 +2207,63 @@ And check what the orphan is doing:
 ssh root@50.28.2.199 "docker inspect app-nginx-1 | grep -E 'Status|Ports' -A 2"
 ```
 
+```
+[root@oddball-business app]# docker exec app-nginx-1 cat /etc/nginx/conf.d/default.conf 2>/dev/null || docker exec app-nginx-1 cat /etc/nginx/nginx.conf
+Error response from daemon: Container b45480f0dd33b14b9c9cd4c11120053ada5e8400243ef92c73944d7d16a683bf is restarting, wait until the container is running
+[root@oddball-business app]# docker inspect app-nginx-1 | grep -E 'Status|Ports' -A 2
+            "Status": "restarting",
+            "Running": true,
+            "Paused": false,
+--
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": null,
+--
+            "ExposedPorts": {
+                "443/tcp": {},
+                "80/tcp": {}
+--
+            "Ports": {},
+            "Networks": {}
+        },
+```
+
 If the config has `return 301 https://monsterrodholders.com` or `server_name monsterrodholders.com`, that's the culprit. Once identified, update the nginx config file on disk and restart:
 ```bash
 ssh root@50.28.2.199 "docker restart app-nginx-1"
 ```
-<!-- agent:boundary:9706e996 -->
+
+❯ Still has the original issues.
+### Re: orphan nginx not binding ports — need to find what's on 443 (HEAD)
+
+`app-nginx-1` is crash-looping AND has `"Ports": {}` — it's not bound to any host ports, so it's **not handling any traffic**. Something else is on port 443 causing the redirect.
+
+Check what's actually listening on 80 and 443:
+```bash
+ssh root@50.28.2.199 "ss -tlnp | grep -E ':80|:443'"
+```
+
+And all running Docker containers with their port bindings:
+```bash
+ssh root@50.28.2.199 "docker ps --format 'table {{.Names}}\t{{.Ports}}\t{{.Status}}'"
+```
+
+InterWorx/Apache may also have an SSL vhost for `monsterrodholders.com` that's intercepting port 443. Check:
+```bash
+ssh root@50.28.2.199 "grep -r 'monsterrodholders' /etc/httpd/conf/ /etc/httpd/conf.d/ 2>/dev/null"
+```
+<!-- agent:boundary:56e3ec44 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Check nginx config for hardcoded redirect to `monsterrodholders.com`
-- [ ] Identify if `app-nginx-1` orphan is handling port 443
-- [ ] Update nginx config if redirect found, restart container
-- [ ] Update wp_options `home` (siteurl already correct)
-- [ ] Configure Apache proxy for HTTP (`50.28.2.199.nip.io` → Docker nginx)
-- [ ] Verify `http://50.28.2.199.nip.io/` loads via Apache proxy
-- [ ] Verify `https://50.28.2.199.nip.io/` loads without redirect
+- [ ] Run `ss -tlnp | grep -E ':80|:443'` to find what's bound to those ports
+- [ ] Run `docker ps` with port info to see active containers
+- [ ] Check Apache/httpd configs for monsterrodholders.com SSL vhost
+- [ ] Stop/fix the crash-looping `app-nginx-1` container
+- [ ] Configure correct handler for HTTPS on 443
+- [ ] Configure Apache proxy for HTTP (InterWorx constraint)
 - [ ] `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`
 - [ ] Copy uploads into wordpress container (if not done)
 - [ ] Install + activate new theme

@@ -80,7 +80,7 @@ docker compose -f /opt/monsterrodholders/app/docker-compose.yml run --rm wpcli \
 **Step 4 — Enter license key** in WP Admin → Blocksy → License (unlocks pro features). Do you have the license key?
 
 ❯ Take a look at https://50.28.2.199.nip.io/
-### Re: site check — https://50.28.2.199.nip.io/ (HEAD)
+### Re: site check — https://50.28.2.199.nip.io/
 
 Site is up and working:
 
@@ -95,14 +95,62 @@ Next steps (when ready to go live):
 1. Run `wp search-replace 'https://50.28.2.199.nip.io' 'https://monsterrodholders.com' --all-tables`
 2. Flip DNS to `50.28.2.199`
 3. Run certbot for `monsterrodholders.com` SSL
-<!-- agent:boundary:fdd2db81 -->
+
+❯ The page is not being properly rendered. Look at the home page content.
+
+I see
+```
+[vc_section][vc_row css=”.vc_custom_1715354722310{padding-left: 30px !important;}”][vc_column width=”1/4″][/vc_column][vc_column width=”3/4″][vc_single_image image=”79596″ img_size=”full” onclick=”custom_link” link=”https://50.28.2.199.nip.io/product/talon-5-35-lh-bargin-bin-sale/”][vc_column_text]Welcome to Monster Rod Holders, the leader in American-made heavy-duty fishing rod holders and catfishing rod holders since 2007. We designed the original 33/45 Rod Holders and many others to suit your fishing style. Discover a wide range of heavy-duty fishing rod holders, rod holder bases, and catfishing accessories.[/vc_column_text][pbr_products title=”Rod Holder Types” categories=”rod-holders” type=”top_rate” columns_count=”4″][pbr_products title=”Rod Holder Bases” categories=”rod-holder-bases” columns_count=”4″ number=”8″ view_more_page=”bestsellers”][pbr_products type=”featured_product” columns_count=”2″][/vc_column][/vc_row][vc_row][vc_column][vc_single_image image=”8782″ img_size=”full” alignment=”center” onclick=”custom_link” css_animation=”effect-v3″ link=”/bestsellers/”][pbr_products title=”Other Monster Rod Holder Products” categories=”boat-accessories” columns_count=”4″ number=”8″ view_more_page=”bestsellers”][product_attribute per_page=”12″ columns=”4″ orderby=”title” order=”ASC” filter=””][/vc_column][/vc_ro[/vc_section]
+```
+### Re: home page not rendering — WPBakery shortcodes (HEAD)
+
+Found the cause. The home page `entry-content` is all raw WPBakery shortcodes:
+
+```
+[vc_section][vc_row][vc_column width="1/4"][/vc_column]
+[vc_column width="3/4"][vc_single_image ...][vc_column_text]...[/vc_column_text]
+[pbr_products title="Rod Holder Types" categories="rod-holders" ...]
+[pbr_products title="Rod Holder Bases" categories="rod-holder-bases" ...]
+...
+[/vc_section]
+```
+
+Without WPBakery plugin, the browser shows the raw shortcode text.
+
+**What's in the backup:**
+- `js_composer` (WPBakery) plugin — can be extracted and installed
+- `[pbr_products]` shortcode — part of the **fishzone theme's** vc_templates, won't work in Blocksy
+
+**Two options:**
+
+**Option A — Rebuild home page in Blocksy** (recommended — you want a new theme anyway)
+
+The WPBakery content structure is clear: hero image, product grids by category (rod holders, rod holder bases, boat accessories). Rebuild using Gutenberg + WooCommerce product blocks. Clean, no WPBakery dependency.
+
+**Option B — Install WPBakery temporarily**
+
+```bash
+# Extract WPBakery from backup (local machine)
+mkdir -p /tmp/mrh-plugins
+unzip /home/brian/work/rberkes/monsterrodholders/MonsterRodholdersNETNEWcloud-040626-backup.zip \
+  "files/wp-content/plugins/js_composer/*" -d /tmp/mrh-plugins
+
+# Copy to server and install
+scp -r /tmp/mrh-plugins/files/wp-content/plugins/js_composer root@50.28.2.199:/tmp/
+# Then docker cp into container and activate
+```
+
+`[vc_*]` layout blocks would render, but `[pbr_products]` product grids still won't (fishzone-specific). So even with WPBakery, products won't show without fishzone.
+
+**Recommendation:** Rebuild with Blocksy/Gutenberg. The page structure is simple — product category blocks replace `[pbr_products]`. Which approach?
+<!-- agent:boundary:9e06d9ae -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Decision: rebuild home page in Blocksy, or install WPBakery?
 - [ ] (Optional) Install blocksy-companion-pro plugin + license key
-- [ ] Verify products/WooCommerce pages load correctly
 - [ ] Remove crash-looping `app-nginx-1` orphan container
 - [ ] When ready to go live: search-replace URLs → monsterrodholders.com, flip DNS, re-run certbot
 <!-- /agent:pending -->

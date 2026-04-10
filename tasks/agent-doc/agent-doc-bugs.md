@@ -448,7 +448,7 @@ Added to `template.rs` with 2 tests. 504 tests pass (1 flaky tmux test unrelated
 **Updated `stream::tests::content_ours_exchange_duplicates_without_replace`:**
 - Was: assertion `count == 2` (documenting the bug)
 - Now: assertion `count == 1` (dedup makes append mode safe, replace override no longer required for echo prevention)
-<!-- agent:boundary:65873cbd -->
+<!-- agent:boundary:c482a5ec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

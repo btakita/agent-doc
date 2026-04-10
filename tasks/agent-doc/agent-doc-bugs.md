@@ -479,7 +479,7 @@ Called from `apply_mode` append branch (template.rs:655-659):
 - Changed `.filter(..).last()` → `.rfind(..)` (both were reported as errors under `-D warnings`)
 
 502 tests pass. 1 flaky tmux test unrelated.
-<!-- agent:boundary:253b9437 -->
+<!-- agent:boundary:d2905a12 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

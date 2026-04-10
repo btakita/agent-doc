@@ -510,7 +510,7 @@ Only worth it if you need the socket to carry structured events (e.g., "only ref
 The key insight: the JetBrains plugin needed JNA + socket because JetBrains has no `inotify` hook. neovim has `vim.loop` (libuv) built in — filesystem events are native.
 
 ❯ Why did the tmux session for src/session-share/tasks/claudescore.md get swapped into tmux session 1?
-### Re: tmux session drift (HEAD)
+### Re: tmux session drift
 
 The preflight warning is accurate but the affected document isn't claudescore — it's **claude-code.md**. Here's what the data shows:
 
@@ -541,13 +541,97 @@ agent-doc claim tasks/software/claude-code.md
 ```
 
 Or ignore it — the drift warning is informational. agent-doc still routes to the correct pane; it just flags the cross-session topology as unusual.
-<!-- agent:boundary:9ac8315f -->
+❯ agent-doc is swapping panes with tmux session 1 again. Several. Why? We keep on having this issue. Architect the system so this never occurs again. Use the same flow to keep the tmux panes in the correct tmux session. The tmux panes should never be swapped into the wrong tmux session.
+### Re: session drift — root cause + architectural fix (HEAD)
+
+#### Exact root cause
+
+`claim.rs` resolves the pane to register via:
+
+```rust
+} else {
+    sessions::current_pane()? // reads $TMUX_PANE
+};
+```
+
+It reads `$TMUX_PANE` from the environment — whichever tmux pane spawned the claim command. **No session validation.** If you run claim from a pane in session 1 (or the JetBrains terminal or any non-session-0 shell), `%111` gets registered without complaint.
+
+The stash/rescue dance in `route.rs` then fires every time that document is routed: it detects `pane_session != target_session`, calls `tmux.stash_pane(registered_pane, target_session)` (physically moves the pane from session 1 to session 0's stash window), then calls `rescue_from_stash` to pull it back into the main window. That's the "swapping" you see.
+
+`config.toml` already has `tmux_session = "0"` — the routing target is correct. The only gap is claim ignores it.
+
+---
+
+#### Fix: session validation in `claim.rs`
+
+Add one check after `pane_id` is resolved (around line 160, after the `Tmux::default_server()` call):
+
+```rust
+// Validate claiming pane is in the configured target session
+let pane_tmux_session = tmux.cmd()
+    .args(["display-message", "-t", &pane_id, "-p", "#{session_name}"])
+    .output()
+    .ok()
+    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    .unwrap_or_default();
+
+if let Some(configured) = crate::config::project_tmux_session() {
+    if !pane_tmux_session.is_empty() && pane_tmux_session != configured {
+        if !force {
+            eprintln!(
+                "error: pane {} is in tmux session '{}' but project session is '{}'.\n\
+                 Switch to session '{}' and re-run, or use --force to override.",
+                pane_id, pane_tmux_session, configured, configured
+            );
+            anyhow::bail!("session mismatch: cross-session claim rejected");
+        }
+        eprintln!(
+            "warning [--force]: registering cross-session pane {} (session '{}', configured '{}')",
+            pane_id, pane_tmux_session, configured
+        );
+    }
+}
+```
+
+This is the entire fix. One block, ~15 lines, placed before any file writes. `--force` escapes it for intentional overrides. No other code paths change.
+
+---
+
+#### Immediate fix for `claude-code.md`
+
+Re-claim from session 0 (the pane you're in right now):
+
+```bash
+agent-doc claim tasks/software/claude-code.md
+```
+
+That re-registers `%75` (or whichever session-0 pane runs this), replacing `%111`. The drift warning disappears on the next preflight.
+
+---
+
+#### Optional: `agent-doc sessions audit`
+
+A subcommand that scans `sessions.json`, checks each pane's session, and reports mismatches:
+
+```
+sessions audit output:
+  DRIFT  tasks/software/claude-code.md → pane %111 (session 1, expected 0)
+  OK     tasks/agent-doc/agent-doc-bugs.md → pane %75 (session 0)
+  OK     src/session-share/tasks/claudescore.md → pane %55 (session 0)
+  ...
+
+Run 'agent-doc claim <file>' from session 0 to fix each DRIFT entry.
+```
+
+Low priority — the claim validation fix prevents new drift; audit is just UX for cleaning up existing state.
+<!-- agent:boundary:1d5ae53d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] **Fix session drift**: add pane-session validation in `claim.rs` after pane_id resolved
+- [ ] Re-claim `tasks/software/claude-code.md` from session 0 to clear existing drift
 - [ ] Manual testing: verify `# On the server — run once` no longer gets `(HEAD)` in a new commit
 - [ ] Release v0.31.31: `cargo publish`, `maturin publish`, GitHub Release with binary
-- [ ] (optional) neovim plugin: Tier 0 autoread config → Tier 1 fs_event watcher
 <!-- /agent:pending -->

@@ -482,7 +482,7 @@ Called from `apply_mode` append branch (template.rs:655-659):
 
 ❯ do
 ❯ - [ ] Change `start.rs` warn → auto-relocate via `PaneMoveOp`
-### Re: `start.rs` warn → auto-relocate via `PaneMoveOp` (HEAD)
+### Re: `start.rs` warn → auto-relocate via `PaneMoveOp`
 
 Implemented. `start.rs:133-165` — the warn-only block is now an auto-relocate block:
 
@@ -493,7 +493,17 @@ Implemented. `start.rs:133-165` — the warn-only block is now an auto-relocate 
 5. On failure (no anchor or join fails): falls back to warn-only so the start isn't aborted
 
 `cargo check` clean. 501 tests pass. 2 pre-existing flaky tmux pane tests unrelated.
-<!-- agent:boundary:49ca3ff6 -->
+❯ add tests
+### Re: add tests (HEAD)
+
+Extracted the guard into `pub(crate) fn relocate_if_wrong_session(tmux, pane_id, expected_session) -> bool` so it can be unit-tested with `IsolatedTmux`. Added 3 tests to `start.rs`:
+
+- `relocate_noop_when_already_correct_session` — pane already in correct session, returns `true`, pane stays
+- `relocate_succeeds_cross_session` — pane in `sess-b`, expected `sess-a`, relocates successfully, pane ends up in `sess-a`
+- `relocate_fails_gracefully_when_no_anchor` — expected session doesn't exist, returns `false`, pane stays in original session
+
+765 tests pass (all suites, including the new 3).
+<!-- agent:boundary:ca1aed68 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

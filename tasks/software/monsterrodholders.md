@@ -878,7 +878,7 @@ docker compose logs nginx --tail=20
 ```
 
 nginx should now find the cert via the volume mount.
-<!-- agent:boundary:2a63dd8b -->
+<!-- agent:boundary:2a00029d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

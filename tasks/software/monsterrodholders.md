@@ -1686,7 +1686,7 @@ networks:
 **Simplest path if you want to skip debugging nginx:** Switch to `wordpress:apache` image. Apache inside Docker handles PHP + static files, listens on 80, map to host 8080, host Apache proxies to it. Eliminates FastCGI and the nginx DNS issue entirely.
 
 ❯ How does it perform compared to the nginx solution?
-### Re: `wordpress:apache` vs nginx + PHP-FPM performance (HEAD)
+### Re: `wordpress:apache` vs nginx + PHP-FPM performance
 
 **nginx + PHP-FPM — faster at scale:**
 - Event-driven, low memory per connection
@@ -1699,15 +1699,40 @@ networks:
 - Zero FastCGI config, no nginx DNS debugging
 
 **For monsterrodholders:** Use `wordpress:apache`. The performance gap only matters at scale — thousands of concurrent visitors. A rod holders shop isn't in that range. The nginx + PHP-FPM setup is correct for high-traffic WooCommerce, but here it's complexity with no measurable return.
-<!-- agent:boundary:95e76e5c -->
+
+❯ do
+❯ - [ ] Switch docker-compose to `wordpress:apache` (drop nginx service)
+### Re: switch docker-compose to wordpress:apache (HEAD)
+
+Done. `docker-compose.yml` updated and pushed.
+
+**Changes:**
+- Removed `nginx` service entirely
+- Changed `wordpress:php8.3-fpm-alpine` → `wordpress:apache`
+- Added `ports: - "127.0.0.1:8080:80"` to wordpress service
+- Removed nginx volumes, certs volume mount, nginx depends_on
+
+**To apply on the server:**
+```bash
+cd /opt/monsterrodholders/app
+git pull
+docker compose down
+docker compose up -d
+docker compose ps
+```
+
+The wordpress container will now serve HTTP on host port 8080. Host Apache/InterWorx proxies to it. Verify with:
+```bash
+curl -s http://localhost:8080/ | head -5
+```
+<!-- agent:boundary:352adeba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Switch docker-compose to `wordpress:apache` (drop nginx service)
-- [ ] Revise docker-compose nginx ports to `127.0.0.1:8080:80` (internal only)
-- [ ] Write Apache VirtualHost config at `/etc/httpd/conf.d/monsterrodholders.conf`
+- [ ] Pull updated docker-compose.yml on server + `docker compose up -d`
+- [ ] Write Apache VirtualHost config at `/etc/httpd/conf.d/monsterrodholders.conf` (ProxyPass to 8080)
 - [ ] `systemctl reload httpd` and test `https://50.28.2.199.nip.io`
 - [ ] **Server step 10:** Transfer + import backup, `wp search-replace` domain
 - [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot for real domain

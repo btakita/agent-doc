@@ -1952,7 +1952,7 @@ Caveat: `env_file` passes **all** `.env` vars to the container (DB passwords, et
    ```
 
 Recommend option 1 (sed) — it's immediate and doesn't require a restart.
-<!-- agent:boundary:d8266b0d -->
+<!-- agent:boundary:5f7b82f6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

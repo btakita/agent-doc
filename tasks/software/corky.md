@@ -505,7 +505,7 @@ The Google Workspace integration is now in place:
 ❯ - https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8eyCijtqqteslsWcvJ1JCM/edit?gid=210871523#gid=210871523
 
 Note I need to use the brian@dreamable.com account
-### Re: Implement threading fix (HEAD)
+### Re: Implement threading fix
 
 Done. Added `--thread-id` option to `corky draft new`:
 
@@ -525,7 +525,7 @@ corky draft new "Re: Subject" \
 
 `make check` passes (47 tests, 0 errors).
 
-### Re: Read Google Sheet (gws test) (HEAD)
+### Re: Read Google Sheet (gws test)
 
 `gws` plugin is not installed — `which gws` and `claude plugin list` both return nothing.
 
@@ -537,14 +537,49 @@ gws auth login
 ```
 
 After install, re-run `/agent-doc tasks/software/corky.md` with "read sheet" to test.
-<!-- agent:boundary:af7498d2 -->
+
+❯ Do we need the gws plugin? Can we have missing binary logic + SKILL->runbook logic added to the corky library?
+### Re: Do we need gws? Build natively in corky instead? (HEAD)
+
+No — and we already have the groundwork.
+
+`src/filter/gmail_auth.rs` already defines:
+```rust
+pub const SHEETS_READONLY_SCOPE: &str = "https://www.googleapis.com/auth/spreadsheets.readonly";
+pub const DOCS_SCOPE: &str = "https://www.googleapis.com/auth/documents";
+pub const DRIVE_FILE_SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
+```
+
+Same `get_access_token_for_user(account, scope, login_hint)` pattern used for Gmail sync/send works for Sheets and Docs.
+
+**Plan: native `corky sheets` + `corky docs` commands**
+
+1. `corky sheets read <url-or-id> [--sheet <name>] [--account <acct>]`
+   - Parse spreadsheet ID from URL or bare ID
+   - OAuth with `SHEETS_READONLY_SCOPE` (scoped token key: `sheets-ro`)
+   - Call `https://sheets.googleapis.com/v4/spreadsheets/{id}/values/{sheet}!A1:ZZ`
+   - Output: markdown table to stdout
+
+2. `corky docs read <url-or-id> [--account <acct>]`
+   - OAuth with `DOCS_SCOPE`
+   - Call `https://docs.googleapis.com/v1/documents/{id}`
+   - Output: markdown (strip formatting, render text content)
+
+**SKILL/runbook update:** Remove gws prerequisites. Replace `/gws-sheets-read` references with `corky sheets read <url>`.
+
+**gws plugin:** Remove from `AGENTS.md` (Google Workspace Integration section). Delete `src/corky/.claude/skills/gws/` and the two gws runbooks — they add confusion with no value once corky handles it natively.
+
+Want me to implement `corky sheets read` now?
+<!-- agent:boundary:f99baf16 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Install gws plugin (`claude plugin marketplace add https://github.com/WadeWarren/gws-claude-plugin && claude plugin install gws && gws auth login`)
-- [ ] Re-test Google Sheet read after gws install
+- [ ] Implement `corky sheets read <url>` using existing `SHEETS_READONLY_SCOPE` + OAuth pattern
+- [ ] Implement `corky docs read <url>` using `DOCS_SCOPE`
+- [ ] Remove gws skill + runbooks from corky, update AGENTS.md
+- [ ] Test Google Sheet read: https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8eyCijtqqteslsWcvJ1JCM/edit?gid=210871523
 - [ ] Monitor CI release run 24156432054 — confirm aarch64 passes
 - [ ] Release corky with threading fix (`--thread-id` flag)
 <!-- /agent:pending -->

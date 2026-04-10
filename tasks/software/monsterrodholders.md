@@ -1757,7 +1757,7 @@ docker compose -f /opt/monsterrodholders/app/docker-compose.yml up -d
 
 ❯ Do I need to install wordpress?
 ❯ https://50.28.2.199.nip.io/wp-admin/install.php
-### Re: WordPress installer at nip.io (HEAD)
+### Re: WordPress installer at nip.io
 
 Docker is running and host Apache is proxying correctly — good.
 
@@ -1773,19 +1773,64 @@ Yes — run the installer first (any temp credentials, any title). Then:
 Skip the installer. Import the SQL directly, copy wp-content, done.
 
 What format is the backup?
-<!-- agent:boundary:5e1495ce -->
+
+❯ zip with a *.sql file. I want to use a new theme. Have it exclude all plugins.
+### Re: zip with SQL — skip installer, imports only (HEAD)
+
+Raw SQL + new theme + no plugins → only two things to import: **database** and **uploads**.
+
+**Step 1 — get the zip onto the server:**
+```bash
+# From your local machine:
+scp /path/to/backup.zip root@50.28.2.199:/opt/monsterrodholders/app/
+```
+
+**Step 2 — extract and check contents:**
+```bash
+cd /opt/monsterrodholders/app
+unzip backup.zip -d /tmp/backup
+ls /tmp/backup/          # confirm .sql file location
+ls /tmp/backup/wp-content/uploads/ 2>/dev/null  # check if uploads are included
+```
+
+**Step 3 — import the database:**
+```bash
+source .env
+docker compose exec -T db mariadb \
+  -u"${WORDPRESS_DB_USER}" -p"${WORDPRESS_DB_PASSWORD}" "${WORDPRESS_DB_NAME}" \
+  < /tmp/backup/your-backup.sql
+```
+Replace `your-backup.sql` with the actual filename.
+
+**Step 4 — copy uploads only (skip plugins + themes):**
+```bash
+WP_CTR=$(docker compose ps -q wordpress)
+docker compose exec wordpress mkdir -p /var/www/html/wp-content/uploads
+docker cp /tmp/backup/wp-content/uploads/. ${WP_CTR}:/var/www/html/wp-content/uploads/
+docker compose exec wordpress chown -R www-data:www-data /var/www/html/wp-content/uploads
+```
+If the zip doesn't include a wp-content folder, skip this — uploads can be added later.
+
+**Step 5 — fix URLs (what's the old domain?):**
+```bash
+docker compose run --rm wpcli wp search-replace 'https://OLD-DOMAIN.com' 'https://50.28.2.199.nip.io' --all-tables
+```
+
+What's the old domain on the SQL dump?
+<!-- agent:boundary:1203fb3b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Confirm backup format (.wpress vs SQL dump)
-- [ ] If .wpress: run minimal installer → install All-in-One WP Migration plugin → import
-- [ ] If SQL dump: skip installer, import database directly + copy wp-content
-- [ ] `wp search-replace 'old-domain.com' 'monsterrodholders.com'` after import
-- [ ] Write Apache VirtualHost config at `/etc/httpd/conf.d/monsterrodholders.conf` (if not done)
-- [ ] Flip DNS when ready, re-run certbot for real domain
+- [ ] `scp backup.zip root@50.28.2.199:/opt/monsterrodholders/app/`
+- [ ] Extract + import SQL into MariaDB container
+- [ ] Copy wp-content/uploads into wordpress container
+- [ ] `wp search-replace` old domain → nip.io temp domain
+- [ ] Verify site loads at https://50.28.2.199.nip.io
+- [ ] Install + activate new theme
+- [ ] Flip DNS, re-run certbot for real domain, `wp search-replace` → monsterrodholders.com
 - [ ] Clean spam comments post-import
-- [ ] Plugin audit: delete `worker`, `wpmudev-updates`; pick TaxJar OR AvaTax
+- [ ] Plugin audit: only install what's actually needed
 - [ ] Set up cron jobs (SSL renewal + daily backup)
 <!-- /agent:pending -->

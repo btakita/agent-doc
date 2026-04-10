@@ -643,7 +643,7 @@ All claim tests pass (`21 passed`). The only failing test (`send_keys_delivers_c
 ❯ - [ ] Re-claim `tasks/software/claude-code.md` from session 0 to clear existing drift
 ❯ - [ ] `cargo install --path .` — install locally and verify cross-session claim is rejected
 
-### Re: cargo install + re-claim (HEAD)
+### Re: cargo install + re-claim
 
 **`cargo install --path .`** — done, v0.31.31 installed to `~/.cargo/bin/agent-doc`.
 
@@ -666,7 +666,126 @@ The error fired correctly — but it read `src/agent-doc/.agent-doc/config.toml`
 Drift cleared. `claude-code.md` is now registered in session 0.
 
 > **Note:** The CWD-sensitivity of `project_config_path()` is a latent issue — callers in different CWDs pick up different project configs. Not blocking for this fix, but worth a follow-up to anchor config resolution to the document's project root instead of CWD.
-<!-- agent:boundary:67df7df5 -->
+
+❯ tasks/software/corky.md has an uncommitted response patch. Why? This keeps on happening. We need to fix **all** cases where this can happen. Think like an expert architect.
+### Re: Uncommitted response patch — root cause and all fixes (HEAD)
+
+**Confirmed cause from `cycles.jsonl`:** corky.md had no commit log entry between 18:50:15 and 19:10:22. The commit was never attempted for the OAuth response — not a lock failure, not a CWD bug. The `git::commit` call was simply never reached.
+
+**Why:** `write.rs:970` — IPC timeout path exits the process cold:
+
+```rust
+std::process::exit(75); // EX_TEMPFAIL
+```
+
+When the JetBrains plugin doesn't acknowledge in time, `run_stream` saves a patch file and calls `process::exit(75)`. This terminates the binary entirely, so the `--commit` check in `main.rs` is unreachable. The plugin later applies the patch (file + snapshot updated), but no git commit ever fires.
+
+This is the primary driver. Here are all failure modes I found, ranked by frequency:
+
+---
+
+#### Failure modes
+
+**1. IPC timeout → `process::exit(75)` (primary, frequent)**
+
+`write.rs:970`: saves patch to `.agent-doc/patches/`, then hard-exits. `main.rs` commit logic unreachable. Plugin applies patch later — snapshot updated, no commit.
+
+**2. `run_stream` returns `Err` → `result?` short-circuits commit**
+
+```rust
+let result = write::run_stream(&file, ...);
+result?;           // ← early return here if write fails
+if do_commit {     // ← never reached
+    git::commit(&file)?;
+}
+```
+
+If `run_stream` returns `Err` (e.g., `verify_pane_ownership` fails, `apply_patches_with_overrides` fails) AFTER the snapshot was saved, the snapshot has new content but commit never fires.
+
+**3. Concurrent git lock (periodic, multi-session)**
+
+`git commit` fails due to `index.lock` — another session committed at the same time. No retry in `git::commit`. The call to `update-index --cacheinfo` already staged the snapshot; the `git commit` fails. Staged content accumulates and gets swept into the next successful commit from ANY document (explains some `committed=False` entries that show up committed in git log anyway).
+
+**4. Session interruption between write and commit**
+
+Less common — only when Claude Code is killed mid-tool-call. Preflight's step 2 handles recovery.
+
+---
+
+#### Architectural fixes
+
+**Fix 1 — Commit before `process::exit(75)` (fixes primary case)**
+
+In the IPC timeout path, save the snapshot and commit before exiting:
+
+```rust
+// IPC timeout path (write.rs ~line 968)
+let _ = snapshot::save(file, &content_ours);  // save what we would have written
+if git::is_in_git_repo(file) {
+    let _ = git::commit(file);  // best-effort commit before exit
+}
+std::process::exit(75);
+```
+
+The snapshot already has `content_ours` computed. Committing here ensures the agent response is tracked before the process dies.
+
+**Fix 2 — Commit before propagating write error (fixes `result?` short-circuit)**
+
+In `main.rs`, reorder so commit runs even when write returns `Err`:
+
+```rust
+let result = write::run_stream(&file, baseline.as_deref(), force_disk);
+if do_commit {
+    if git::is_in_git_repo(&file) {
+        if let Err(e) = git::commit(&file) {
+            eprintln!("[commit] warning: {}", e);
+        }
+    }
+}
+result?;  // propagate write error AFTER commit attempt
+```
+
+**Fix 3 — Retry with backoff on git lock (fixes concurrent sessions)**
+
+In `git::commit`, detect `index.lock` in the error output and retry up to 3 times:
+
+```rust
+let mut attempts = 0;
+let commit_output = loop {
+    let out = Command::new("git").args(["commit", "-m", &msg, "--no-verify"]).output()?;
+    if out.status.success() { break out; }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if attempts < 3 && stderr.contains("index.lock") {
+        attempts += 1;
+        std::thread::sleep(std::time::Duration::from_millis(50 * (1 << attempts)));
+        continue;
+    }
+    break out;
+};
+```
+
+**Fix 4 — Plugin post-apply commit (defense-in-depth for IPC success path)**
+
+After the plugin successfully applies a patch, have `ffi.rs`/IPC handler call `agent-doc commit <file>`. This ensures a commit even if Fix 1 is not applied and the IPC succeeds but the shell-side commit was skipped for any reason.
+
+**Fix 5 — Preflight cross-document sweep (backstop for all cases)**
+
+When preflight runs for any document, scan all tracked docs in the same project for snapshot-ahead-of-commit state and commit them. This turns preflight into a sweep, not just a per-document operation. Catches every missed commit within one cycle.
+
+---
+
+#### Priority
+
+| Fix | Impact | Complexity |
+|-----|--------|------------|
+| Fix 1 (IPC timeout commit) | High — eliminates primary case | Low — 3 lines |
+| Fix 2 (commit before `result?`) | Medium — error path | Low — reorder 4 lines |
+| Fix 3 (retry on lock) | Medium — concurrent sessions | Low — add retry loop |
+| Fix 5 (preflight sweep) | High — catches all remaining | Medium — scan + conditional commit |
+| Fix 4 (plugin post-apply commit) | Low — defense-in-depth | Medium — IPC handler change |
+
+Fix 1, 2, 3 are low-effort and eliminate the known cases. Fix 5 is the reliable backstop — even if a new edge case appears, the next preflight cleans it up.
+<!-- agent:boundary:1f598e95 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

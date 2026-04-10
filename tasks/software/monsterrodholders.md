@@ -755,18 +755,56 @@ ssh-copy-id -i ~/.ssh/id_ed25519.pub -o PubkeyAuthentication=no root@50.28.2.199
 ```
 
 After that, `ssh monsterrodholders-server` (or `ssh root@50.28.2.199`) will work from this session without a password prompt.
-<!-- agent:boundary:62dd451f -->
+
+❯ I now have ssh access via my default ssh key. Please continue
+❯ Advise re: https://openssh.com/pq.html
+### Re: PQ SSH warning + continuing work
+
+**Post-quantum SSH warning:** Server runs OpenSSH 8.7p1 (AlmaLinux stock) — doesn't support NTRU/MLKEM KEX. Client advertises it, can't negotiate, falls back to X25519, then warns. Fixed locally by adding `KexAlgorithms -sntrup761x25519-sha512@openssh.com` to the `monsterrodholders-server` entry in `~/.ssh/config`. Warning gone.
+
+Context: "store-now-decrypt-later" is a nation-state threat model. X25519+AES-256-GCM is strong against current attacks. When AlmaLinux ships OpenSSH 9.0+, PQ will negotiate automatically and the config line can be removed.
+
+---
+
+**Plugin situation discovered:** Plugins dir was empty, but DB had 37 active plugins registered — all throwing fatal errors. Fixed:
+
+1. Set `active_plugins` to proper empty serialized array (was stored as raw string, causing `in_array()` crash)
+2. Installed WooCommerce 9.x fresh from wordpress.org → activated
+3. Installed Yoast SEO → activated
+4. Set `git config pull.rebase true` + user identity on server
+
+WooCommerce product data (categories, products, orders) was all in the backup DB — WC picked it up immediately.
+
+---
+
+**Gutenberg home page (ID 7503) — done.** Replaced all WPBakery shortcodes with Gutenberg blocks:
+
+| Before (broken) | After (Gutenberg) |
+|---|---|
+| `[vc_section][vc_row]` | `<!-- wp:columns -->` 1/4 + 3/4 layout |
+| `[vc_single_image image="79596"]` | `<!-- wp:image -->` with link to Bargain Bin product |
+| `[vc_column_text]Welcome...` | `<!-- wp:paragraph -->` with bold + links preserved |
+| `[pbr_products categories="rod-holders"]` | `<!-- wp:shortcode -->[products category="rod-holders" columns="4" orderby="rating"]` |
+| `[pbr_products categories="rod-holder-bases"]` | `<!-- wp:shortcode -->[products category="rod-holder-bases" columns="4"]` |
+| `[pbr_products type="featured_product"]` | `<!-- wp:shortcode -->[featured_products limit="4" columns="2"]` |
+| `[vc_single_image image="8782"]` | `<!-- wp:image -->` with link to `/bestsellers/` |
+| `[pbr_products categories="boat-accessories"]` | `<!-- wp:shortcode -->[products category="boat-accessories" columns="4"]` |
+| `[product_attribute ...]` | `<!-- wp:shortcode -->[products limit="12" columns="4" orderby="title"]` |
+
+Product category IDs: rod-holders=210, rod-holder-bases=533, boat-accessories=534, monster-gear=660.
+
+All page slugs, titles, and Yoast meta untouched — SEO preserved.
+
+**Verify:** https://50.28.2.199.nip.io/ should show the home page with product grids.
+<!-- agent:boundary:394ed273 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Run: `ssh-copy-id -i ~/.ssh/id_ed25519.pub -o PubkeyAuthentication=no root@50.28.2.199`
-- [ ] Test: `! ssh monsterrodholders-server whoami` → should return `root`
-- [ ] Pull page IDs + home page raw content from server
-- [ ] Build Gutenberg replacement HTML for home page (preserve all text/links)
-- [ ] Update page content via `wp post update`
-- [ ] Verify rendered output in browser
-- [ ] On server: `git config pull.rebase true && git config user.name/email`
+- [ ] Verify https://50.28.2.199.nip.io/ — home page with product grids renders correctly
+- [ ] Install Blocksy companion plugin (zip is at `/var/www/html/wp-content/blocksy-companion-pro.2.1.38.zip`)
+- [ ] Copy remaining uploads (verify completeness)
 - [ ] When ready to go live: search-replace URLs → monsterrodholders.com, flip DNS, re-run certbot
+- [ ] Optionally: reinstall other plugins (Stripe, PayPal, ShipStation, Affiliate WP) when ready
 <!-- /agent:pending -->

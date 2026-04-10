@@ -1010,7 +1010,7 @@ Removed from top: My Account, Certified Resellers, Sponsorship Application, Affi
 **Heuristic — top bar link selection:**
 
 > Include only the 4–6 links a first-time visitor needs to discover → evaluate → buy. That's: primary product entry point (Shop), editorial/guide content (Blog), trust/identity (About), support contact (Contact). Account links go in footer or header icon. Programs, resellers, affiliates, and sponsorships belong in footer. Never include: WP admin pages, plugin demo pages, placeholder/Lorem ipsum pages, GeoDirectory pages, duplicate checkout pages, deactivated features.
-<!-- agent:boundary:aca32d9c -->
+<!-- agent:boundary:e5647283 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

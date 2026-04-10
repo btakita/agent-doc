@@ -250,7 +250,7 @@ This means claim always lands on the geometrically correct tmux pane, and the su
 **Single-file case:** If there's only one editor window, `detectEditorLayout` returns `null`, `position` is `null`, and the old fallback applies — no regression.
 
 **Plugin built:** `buildPlugin signPlugin` — `BUILD SUCCESSFUL`. Install from `editors/jetbrains/build/distributions/`.
-<!-- agent:boundary:9300d398 -->
+<!-- agent:boundary:25f29ff4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

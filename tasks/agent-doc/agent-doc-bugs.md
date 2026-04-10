@@ -628,7 +628,7 @@ Low priority — the claim validation fix prevents new drift; audit is just UX f
 ❯ do
 ❯ - [ ] **Fix session drift**: add pane-session validation in `claim.rs` after pane_id resolved
 
-### Re: Fix session drift — implemented (HEAD)
+### Re: Fix session drift — implemented
 
 Added pane-session validation in `claim.rs` before registration (`src/agent-doc/src/claim.rs:168-195`):
 
@@ -639,14 +639,40 @@ Added pane-session validation in `claim.rs` before registration (`src/agent-doc/
 - Updated module doc comment to describe the validation
 
 All claim tests pass (`21 passed`). The only failing test (`send_keys_delivers_command_with_enter`) is a pre-existing flaky tmux timing test in `route.rs`, unrelated to this change.
-<!-- agent:boundary:bf79d6f4 -->
+❯ do
+❯ - [ ] Re-claim `tasks/software/claude-code.md` from session 0 to clear existing drift
+❯ - [ ] `cargo install --path .` — install locally and verify cross-session claim is rejected
+
+### Re: cargo install + re-claim (HEAD)
+
+**`cargo install --path .`** — done, v0.31.31 installed to `~/.cargo/bin/agent-doc`.
+
+**Validation test:** Running `agent-doc claim tasks/software/claude-code.md` from `src/agent-doc/` (CWD after `make check`) produced:
+
+```
+error: pane %75 is in tmux session '0' but project session is 'claude'.
+Switch to session 'claude' and re-run, or use --force to override.
+Error: session mismatch: cross-session claim rejected
+```
+
+The error fired correctly — but it read `src/agent-doc/.agent-doc/config.toml` (which has `tmux_session = "claude"`) because `config::project_config_path()` is **CWD-relative**. CWD had drifted to `src/agent-doc` during `make check`.
+
+**Re-claim from correct CWD:** Running from `/home/brian/work/btakita/agent-loop` succeeded:
+```
+[claim] pane %75 already claimed by agent-doc-bugs.md; provisioning new pane %114
+[route] Started Claude for tasks/software/claude-code.md in pane %114
+```
+
+Drift cleared. `claude-code.md` is now registered in session 0.
+
+> **Note:** The CWD-sensitivity of `project_config_path()` is a latent issue — callers in different CWDs pick up different project configs. Not blocking for this fix, but worth a follow-up to anchor config resolution to the document's project root instead of CWD.
+<!-- agent:boundary:544b6aff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Re-claim `tasks/software/claude-code.md` from session 0 to clear existing drift
-- [ ] `cargo install --path .` — install locally and verify cross-session claim is rejected
-- [ ] Manual testing gate: verify feature works in a live session before publishing
+- [ ] Manual testing gate: verify session-0 routing no longer triggers stash/rescue for `tasks/software/claude-code.md`
 - [ ] Release v0.31.32: `cargo publish`, `maturin publish`, GitHub Release with binary
+- [ ] Follow-up: anchor `project_config_path()` to document project root, not CWD (latent CWD-sensitivity issue)
 <!-- /agent:pending -->

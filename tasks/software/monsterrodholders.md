@@ -456,7 +456,7 @@ Container app-wpcli-run-315d553ee878 Creating
 Container app-wpcli-run-315d553ee878 Created
 Error: The directory '/var/www/html/wp-content/exports' is not writable.
 ```
-### Re: exports directory not writable (HEAD)
+### Re: exports directory not writable
 
 `mkdir -p` created the dir but owned by root — wpcli (running as `www-data`) can't write it. Fixed: script now does `mkdir -p` + `chown www-data:www-data`. Committed and pushed.
 
@@ -464,16 +464,45 @@ On the server:
 ```bash
 cd /opt/monsterrodholders/app && git pull && ./scripts/wp-to-git.sh
 ```
-<!-- agent:boundary:5dc6ab0c -->
+```
+[root@oddball-business app]# cd /opt/monsterrodholders/app && git pull && ./scripts/wp-to-git.sh
+Already up to date.
+==> Ensuring exports directory exists...
+==> Exporting WordPress content (WXR)...
+WARN[0000] Found orphan containers ([app-nginx-1]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up.
+[+]  2/2t 2/22
+ ✔ Container app-db-1        Running                                                                                                                                                                                                       0.0s
+ ✔ Container app-wordpress-1 Running                                                                                                                                                                                                       0.0s
+Container app-wpcli-run-d90191904c15 Creating
+Container app-wpcli-run-d90191904c15 Created
+Error: The directory '/var/www/html/wp-content/exports' is not writable.
+```
+### Re: still not writable (HEAD)
+
+Both containers share the `wordpress_data` named volume, so the chown should have worked — but the write check kept failing. Root cause is likely that each `docker compose run` spawns a fresh container, and the writability check in WP-CLI inspects it differently. Simpler fix: export to `/tmp` and pipe stdout out in a single container run — no cross-container volume dependency:
+
+```bash
+docker compose run --rm -T wpcli \
+  bash -c "wp export --dir=/tmp --filename_format=mrh-export.xml --skip_comments --allow-root && cat /tmp/mrh-export.xml" \
+  > wordpress/exports/mrh-export.xml
+```
+
+Both export and cat happen in the same container, `/tmp` is always writable. Committed + pushed.
+
+On the server:
+```bash
+cd /opt/monsterrodholders/app && git pull && ./scripts/wp-to-git.sh
+```
+<!-- agent:boundary:46f10b2d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] On server: `git pull` + re-run `./scripts/wp-to-git.sh` (exports dir permissions fix)
+- [ ] On server: `git pull` + re-run `./scripts/wp-to-git.sh` (single-container export fix)
 - [ ] Verify commit + push succeeds (need write deploy key — see server-setup.md)
-- [ ] On server: git pull + bootstrap theme files into wordpress/themes/blocksy/
-- [ ] (Optional) Set up Option 2 mu-plugin + inotify watcher for real-time sync
+- [ ] On server: bootstrap theme files into wordpress/themes/blocksy/
+- [ ] (Optional) Set up mu-plugin + inotify watcher for real-time sync
 - [ ] Decision: rebuild home page in Blocksy, or install WPBakery?
 - [ ] When ready to go live: search-replace URLs → monsterrodholders.com, flip DNS, re-run certbot
 <!-- /agent:pending -->

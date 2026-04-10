@@ -464,7 +464,6 @@ On the server:
 ```bash
 cd /opt/monsterrodholders/app && git pull && ./scripts/wp-to-git.sh
 ```
-```
 [root@oddball-business app]# cd /opt/monsterrodholders/app && git pull && ./scripts/wp-to-git.sh
 Already up to date.
 ==> Ensuring exports directory exists...
@@ -493,7 +492,26 @@ On the server:
 ```bash
 cd /opt/monsterrodholders/app && git pull && ./scripts/wp-to-git.sh
 ```
-<!-- agent:boundary:46f10b2d -->
+
+I'm using monsterrodholders_deploy instead of monsterrodholders_deploy_rw.
+commit + push
+### Re: still not writable
+
+Both containers share the `wordpress_data` named volume, so the chown should have worked — but the write check kept failing. Root cause is likely that each `docker compose run` spawns a fresh container, and the writability check in WP-CLI inspects it differently. Simpler fix: export to `/tmp` and pipe stdout out in a single container run — no cross-container volume dependency:
+
+```bash
+docker compose run --rm -T wpcli \
+  bash -c "wp export --dir=/tmp --filename_format=mrh-export.xml --skip_comments --allow-root && cat /tmp/mrh-export.xml" \
+  > wordpress/exports/mrh-export.xml
+```
+
+Both export and cat happen in the same container, `/tmp` is always writable. Committed + pushed.
+
+On the server:
+```bash
+cd /opt/monsterrodholders/app && git pull && ./scripts/wp-to-git.sh
+```
+<!-- agent:boundary:3a48e1ef -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

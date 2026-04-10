@@ -961,7 +961,22 @@ Note: sidebar is hidden on small/medium screens (`ct-hidden-sm ct-hidden-md`) by
 - Save this somewhere safe (1Password, pass, etc.) — the old compromised password is now invalid
 
 Note: sendmail warning during password change is expected (no mail relay in Docker) — WP shows "Updated user 1" which confirms success. No notification email was sent.
-<!-- agent:boundary:a711165b -->
+
+❯ The sidebar on the https://50.28.2.199.nip.io/ home page is not showing up
+### Re: home page sidebar not showing
+
+**Root cause:** Three separate issues stacked:
+
+1. **Wrong sidebar area** — Product Categories widget was only in `sidebar-woocommerce`. The home page (a regular WP page) uses `sidebar-1` (Main Sidebar). Added Product Categories widget to `sidebar-1` too.
+
+2. **Wrong meta key** — Used `blocksy_post_meta` but Blocksy reads `blocksy_post_meta_options`. Fixed.
+
+3. **Wrong layout type** — Blocksy pages default to `type-4` (normal width, no sidebar). Set `page_structure_type = type-2` (left sidebar) in the home page's `blocksy_post_meta_options`.
+
+**Fixed:** `data-sidebar="left"` confirmed in home page HTML. Product Categories widget renders in the left sidebar. ✓
+
+Note: sidebar is hidden on mobile/tablet (`ct-hidden-sm ct-hidden-md`) — same as the shop page.
+<!-- agent:boundary:f6c6e542 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

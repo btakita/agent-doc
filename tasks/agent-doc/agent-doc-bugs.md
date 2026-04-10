@@ -49,7 +49,7 @@ Sessions v0.31.18–v0.31.28. Key decisions and fixes:
 - Manual testing gate: confirm v0.31.28 auto-relocate in live session, then publish: crates.io → PyPI → GitHub Release.
 
 ❯ release
-### Re: release
+### Re: release (HEAD)
 
 v0.31.28 released:
 
@@ -279,7 +279,7 @@ What IS the FFI boundary: the `--position left|right|top|bottom` flag in `claim.
 **SKILL / runbook:** No changes needed. The SKILL's `/agent-doc claim <FILE>` path runs from a tmux terminal where `TMUX_PANE` is set — `current_pane()` returns the correct pane from `$TMUX_PANE`. The bug was specific to the JetBrains action running outside tmux. The SKILL path is unaffected.
 
 ❯ release
-### Re: release (HEAD)
+### Re: release
 
 v0.31.30 + JB plugin v0.2.55 released.
 
@@ -290,7 +290,7 @@ v0.31.30 + JB plugin v0.2.55 released.
 - **cargo install:** already at v0.31.30 (installed earlier)
 - **JB plugin:** `agent-doc-jetbrains-0.2.55.zip` + `-signed.zip` in `build/distributions/`
 - **Parent submodule pointer:** updated and pushed (`4997649e`)
-<!-- agent:boundary:1692f6b9 -->
+<!-- agent:boundary:fee3a27a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1875,7 +1875,7 @@ Error: The site you have requested is not installed.
 Your table prefix is 'wp_'. Found installation with table prefix: wp_nxz1mfc9cg_.
 Or, run `wp core install` to create database tables.
 ```
-### Re: table prefix mismatch (HEAD)
+### Re: table prefix mismatch
 
 Good news: the SQL imported successfully — the tables exist with prefix `wp_nxz1mfc9cg_`. The problem is `wp-config.php` defaults to `wp_`, so WP-CLI can't find the tables.
 
@@ -1885,6 +1885,8 @@ Good news: the SQL imported successfully — the tables exist with prefix `wp_nx
 WORDPRESS_TABLE_PREFIX=wp_nxz1mfc9cg_
 ```
 
+❯ The .env variable was already set. How do I get the docker env to use .env when it loads?
+
 Then restart to regenerate `wp-config.php`:
 ```bash
 cd /opt/monsterrodholders/app
@@ -1893,21 +1895,42 @@ docker compose down && docker compose up -d
 # Now search-replace will work:
 docker compose run --rm wpcli wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables
 ```
-<!-- agent:boundary:b1fe4b1a -->
+### Re: `.env` doesn't flow into containers automatically (HEAD)
+
+Two things are needed:
+
+**Immediate fix — edit `wp-config.php` directly (already-running container):**
+```bash
+docker compose exec wordpress grep table_prefix /var/www/html/wp-config.php
+# fix it:
+docker compose exec wordpress sed -i "s/\$table_prefix = 'wp_';/\$table_prefix = 'wp_nxz1mfc9cg_';/" /var/www/html/wp-config.php
+# verify:
+docker compose exec wordpress grep table_prefix /var/www/html/wp-config.php
+```
+
+**Why `.env` alone isn't enough:**
+Docker Compose reads `.env` for *compose file variable interpolation* (`${VAR}` syntax in the YAML). But that doesn't pass vars into containers — only `environment:` entries or `env_file:` do.
+
+**Permanent fix — make the compose file pass it through:**
+
+In `docker-compose.yml`, find the `wordpress:` service's `environment:` block and add:
+```yaml
+      WORDPRESS_TABLE_PREFIX: ${WORDPRESS_TABLE_PREFIX}
+```
+
+Or add `env_file: .env` to the wordpress service to pass all `.env` vars into the container automatically.
+
+After patching `wp-config.php`, WP-CLI should work without a restart. Then proceed with the search-replace.
+<!-- agent:boundary:8aabfbaf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Update `.env`: `WORDPRESS_TABLE_PREFIX=wp_nxz1mfc9cg_`
+- [ ] Edit `wp-config.php` table prefix OR add `WORDPRESS_TABLE_PREFIX` to wordpress service environment
 - [ ] `docker compose down && docker compose up -d`
 - [ ] `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`
 - [ ] Copy uploads into wordpress container (if not done)
 - [ ] Verify site at https://50.28.2.199.nip.io — content, images, pages
 - [ ] Install + activate new theme
-- [ ] Flip DNS → new server; run certbot for real cert
-- [ ] `wp search-replace 'https://50.28.2.199.nip.io' 'https://monsterrodholders.com' --all-tables`
-- [ ] Clean spam comments
-- [ ] Plugin audit: only install what's needed
-- [ ] Set up cron jobs (SSL renewal + daily backup)
 <!-- /agent:pending -->

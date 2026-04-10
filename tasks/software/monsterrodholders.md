@@ -748,7 +748,7 @@ ls /etc/letsencrypt/live/
 If that directory is empty or doesn't have `50.28.2.199.nip.io/`, certbot didn't finish. You'd need to stop the stack, fix the certbot issue (restart docker, rerun certbot-init.sh), then bring everything back up.
 
 If certbot DID succeed, share the `docker compose logs nginx` output.
-<!-- agent:boundary:94ab0a8e -->
+<!-- agent:boundary:22ba7af0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

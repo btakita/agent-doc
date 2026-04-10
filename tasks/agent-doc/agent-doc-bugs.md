@@ -494,7 +494,7 @@ Implemented. `start.rs:133-165` — the warn-only block is now an auto-relocate 
 
 `cargo check` clean. 501 tests pass. 2 pre-existing flaky tmux pane tests unrelated.
 ❯ add tests
-### Re: add tests (HEAD)
+### Re: add tests
 
 Extracted the guard into `pub(crate) fn relocate_if_wrong_session(tmux, pane_id, expected_session) -> bool` so it can be unit-tested with `IsolatedTmux`. Added 3 tests to `start.rs`:
 
@@ -503,11 +503,22 @@ Extracted the guard into `pub(crate) fn relocate_if_wrong_session(tmux, pane_id,
 - `relocate_fails_gracefully_when_no_anchor` — expected session doesn't exist, returns `false`, pane stays in original session
 
 765 tests pass (all suites, including the new 3).
-<!-- agent:boundary:43ccb647 -->
+❯ release
+### Re: release (HEAD)
+
+v0.31.28 prepped and installed locally:
+
+- **Cargo.toml + pyproject.toml:** bumped to `0.31.28`
+- **VERSIONS.md:** new entry — `start.rs` auto-relocate + `relocate_if_wrong_session` helper + 3 tests
+- **`make check`:** 765 tests pass, no clippy errors
+- **`cargo install --path .`:** v0.31.28 running locally
+
+**Manual testing gate:** Please confirm the auto-relocate behavior works in a live session (or confirm you're satisfied with the test coverage), then I'll proceed to publish (crates.io → PyPI → GitHub Release).
+<!-- agent:boundary:b02d084f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Bump version to 0.31.28, update VERSIONS.md, test, publish
+- [ ] User confirms v0.31.28 — then publish crates.io + PyPI + GitHub Release
 <!-- /agent:pending -->

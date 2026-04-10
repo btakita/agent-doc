@@ -115,7 +115,7 @@ The commit step runs atomically after write completes — including after the IP
 - `agent-doc write` — no commit (safe for checkpoints and non-git dirs)
 - `agent-doc write --commit` — commit after write; silently skips if not in git repo
 - Skill step 3: final write always uses `--commit`; checkpoint writes do not
-### Re: when would the skill call `--commit`? (HEAD)
+### Re: when would the skill call `--commit`?
 
 On the **final `agent-doc write` in step 2** — replacing the separate step 3.
 
@@ -132,11 +132,25 @@ Step 3: (eliminated)
 ```
 
 **Checkpoint writes are unchanged** — no `--commit` on intermediate flushes. The SKILL.md diff is: final write gains `--commit`, step 3 is removed.
-<!-- agent:boundary:9717f4c6 -->
+❯ do
+❯ - [ ] Implement `agent-doc write --commit` flag + git-repo guard (awaiting approval)
+### Re: implement `agent-doc write --commit` (HEAD)
+
+Done. v0.31.29 shipped.
+
+**Changes:**
+- `git.rs`: `is_in_git_repo(file)` — runs `git rev-parse --is-inside-work-tree` from the file's directory; returns `false` if not a repo or git unavailable
+- `main.rs`: `--commit` flag on `Write` subcommand; after write succeeds, calls `is_in_git_repo` then `git::commit`; logs `[commit] skipped (not in git repo)` when outside git
+- `SKILL.md`: step 2a/2b final writes use `--commit`; step 3 updated to describe merged write+commit; `agent-doc-version` bumped to `0.31.29`
+- `VERSIONS.md`: `0.31.29` entry added
+- `Cargo.toml` + `pyproject.toml`: bumped to `0.31.29`
+
+765 tests pass, clippy clean. `cargo install v0.31.29` running locally.
+<!-- agent:boundary:1163342b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Implement `agent-doc write --commit` flag + git-repo guard (awaiting approval)
+- [ ] Manual testing gate: confirm `agent-doc write --commit` in a live session, then publish (crates.io → PyPI → GitHub Release)
 <!-- /agent:pending -->

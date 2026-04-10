@@ -624,7 +624,7 @@ Run 'agent-doc claim <file>' from session 0 to fix each DRIFT entry.
 ```
 
 Low priority — the claim validation fix prevents new drift; audit is just UX for cleaning up existing state.
-<!-- agent:boundary:1d5ae53d -->
+<!-- agent:boundary:ceaa7cfa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

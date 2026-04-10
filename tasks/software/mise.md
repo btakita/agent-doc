@@ -233,7 +233,7 @@ ln -s ~/.age/key.txt ~/.passage/identities
 ```
 
 Then `passage show <name>` should work the same as `pass show <name>`.
-<!-- agent:boundary:42599d8b -->
+<!-- agent:boundary:9bffea98 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -426,7 +426,7 @@ Before staging, `add_head_marker` appends ` (HEAD)` to the last shallow heading 
 ```
 
 The response body (the table, all analysis text) is identical between HEAD and working tree — no gutter marks on those lines. Only the `(HEAD)` heading line (blue, by design) and your new question (green, uncommitted) differ.
-<!-- agent:boundary:acde9c6b -->
+<!-- agent:boundary:4ebb19c2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

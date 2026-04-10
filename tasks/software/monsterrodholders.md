@@ -1329,7 +1329,7 @@ Change `docker-compose.yml` nginx ports from `80:80 / 443:443` to internal-only 
 With nginx inside Docker exposed only on `127.0.0.1:8080:80` (no SSL in Docker — Apache/certbot handles SSL at the host level).
 
 Does this server have an InterWorx control panel URL you can log into, or is direct config editing the only option?
-<!-- agent:boundary:815f5a55 -->
+<!-- agent:boundary:c2e78135 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

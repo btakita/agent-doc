@@ -497,7 +497,7 @@ The Google Workspace integration is now in place:
 - corky `AGENTS.md` — `## Google Workspace Integration (gws)` section with install/auth steps
 
 **gws** is a Claude Code plugin (not a standalone CLI). Install: `claude plugin install gws`. Auth: `gws auth login`.
-<!-- agent:boundary:12c24b39 -->
+<!-- agent:boundary:cff4a558 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

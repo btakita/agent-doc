@@ -296,7 +296,7 @@ docker compose restart wordpress
 ```
 
 After that, `wordpress/themes/blocksy/` is git-tracked and live in the container simultaneously.
-<!-- agent:boundary:9efd9d6c -->
+<!-- agent:boundary:f78bb5e2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

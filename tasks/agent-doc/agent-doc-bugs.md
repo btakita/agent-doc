@@ -148,8 +148,8 @@ Done. v0.31.29 shipped.
 765 tests pass, clippy clean. `cargo install v0.31.29` running locally.
 ❯ add tests
 add full lifecycle tests
-tasks/software/monsterrodholders.md had an uncommitted response patch.
-### Re: tests (HEAD)
+❯ tasks/software/monsterrodholders.md had an uncommitted response patch.
+### Re: tests
 
 Added 3 tests to `git.rs` (768 total, up from 765):
 
@@ -158,7 +158,15 @@ Added 3 tests to `git.rs` (768 total, up from 765):
 - **`write_commit_lifecycle`** — full lifecycle: init repo, create doc + snapshot, call `commit()`, verify `agent-doc(session):` appears in git log
 
 All 768 tests pass.
-<!-- agent:boundary:7614c9ef -->
+tasks/software/monsterrodholders.md had an uncommitted response patch.
+### Re: monsterrodholders.md uncommitted patch (HEAD)
+
+Confirmed — this is a live example of the gap class that `--commit` eliminates.
+
+The write happened (`agent-doc write` ran, snapshot updated), but `agent-doc commit` was never called. Preflight's step 2 caught it at `11:04:40` and committed the response.
+
+With `--commit` on the final write, that gap window disappears — write and commit are atomic from the skill's perspective.
+<!-- agent:boundary:44866ee0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

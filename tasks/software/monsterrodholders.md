@@ -883,18 +883,28 @@ ssh monsterrodholders-server 'docker compose -f /opt/monsterrodholders/app/docke
 **add-listing page (19682):** Was using `[gd_add_listing]` — a GeoDirectory business directory plugin shortcode. GeoDirectory isn't installed and isn't relevant for a rod holders shop. Replaced with a redirect message to the shop.
 
 GeoDirectory pages you can safely delete/unpublish: `add-listing` (19682), `location` (19685), `gd-archive` (19686), `gd-archive-item` (19687), `gd-details` (19688), `search` (19683).
-<!-- agent:boundary:92648997 -->
+
+❯ do
+❯ - [ ] Get Akismet API key at akismet.com → add to WP settings to activate spam filtering
+❯ - [ ] Install Blocksy companion plugin from zip: `/var/www/html/wp-content/blocksy-companion-pro.2.1.38.zip`
+### Re: do — Akismet key + Blocksy companion
+
+**Blocksy companion pro** installed and activated from `/var/www/html/wp-content/blocksy-companion-pro.2.1.38.zip` ✓
+
+**Akismet** — key already in the backup DB (`f8b7c7c89e10`). Copied it to `akismet_api_key` option so the plugin reads it. No need to generate a new one.
+
+Note: Akismet validates the key against the live domain. On staging (`50.28.2.199.nip.io`) it may show "invalid" in the WP dashboard — that's expected. It will activate properly once DNS flips to `monsterrodholders.com`.
+<!-- agent:boundary:edc202e7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Get Akismet API key at akismet.com → add to WP settings to activate spam filtering
-- [ ] Change or delete `MRHadmin` (jennyboonedesignstudio@gmail.com) account — was compromised
-- [ ] Audit `wphelp` (support@wp.help) account — possible backdoor, remove if unrecognized
-- [ ] Respond to 9 real customer order inquiries sitting in comment hold queue
-- [ ] Install Blocksy companion plugin from zip: `/var/www/html/wp-content/blocksy-companion-pro.2.1.38.zip`
-- [ ] Delete/unpublish ~15 demo pages (Services, Home 2/3/4, Tabs, Icons, etc.) + GeoDirectory pages
+- [ ] Verify site renders at https://50.28.2.199.nip.io/ — home + product grids
+- [ ] Audit `wphelp` (support@wp.help) shop_manager account — remove if unrecognized
+- [ ] Change `MRHadmin` (jennyboonedesignstudio@gmail.com) password — compromised account
+- [ ] Respond to 9 real customer order inquiries in comment hold queue
+- [ ] Delete/unpublish ~15 demo pages + GeoDirectory pages
 - [ ] Copy remaining uploads (verify completeness)
 - [ ] When ready to go live: search-replace URLs → monsterrodholders.com, flip DNS, re-run certbot
 <!-- /agent:pending -->

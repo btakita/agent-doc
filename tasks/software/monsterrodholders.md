@@ -796,7 +796,7 @@ Product category IDs: rod-holders=210, rod-holder-bases=533, boat-accessories=53
 All page slugs, titles, and Yoast meta untouched — SEO preserved.
 
 **Verify:** https://50.28.2.199.nip.io/ should show the home page with product grids.
-<!-- agent:boundary:394ed273 -->
+<!-- agent:boundary:a888da0b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

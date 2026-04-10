@@ -253,7 +253,7 @@ This means claim always lands on the geometrically correct tmux pane, and the su
 ❯ Why is this logic not in the FFI plugin?
 ❯ Did you bump the JB plugin version? Why not? We need this to be solid. Any missing edge cases in the SKILL->runbook?
 Please fix the last swap to tmux session 1. 
-### Re: FFI / version / edge cases (HEAD)
+### Re: FFI / version / edge cases
 
 #### Why not in FFI?
 
@@ -277,7 +277,20 @@ What IS the FFI boundary: the `--position left|right|top|bottom` flag in `claim.
 2. **3+ columns, middle column:** Returns `null` — tmux `--position` doesn't have a "center" concept. Fallback to active pane. Acceptable for now.
 
 **SKILL / runbook:** No changes needed. The SKILL's `/agent-doc claim <FILE>` path runs from a tmux terminal where `TMUX_PANE` is set — `current_pane()` returns the correct pane from `$TMUX_PANE`. The bug was specific to the JetBrains action running outside tmux. The SKILL path is unaffected.
-<!-- agent:boundary:e4855077 -->
+
+❯ release
+### Re: release (HEAD)
+
+v0.31.30 + JB plugin v0.2.55 released.
+
+- **Committed:** `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, `VERSIONS.md`, `src/write.rs`, `editors/jetbrains/gradle.properties`, `editors/jetbrains/src/main/kotlin/.../ClaimAction.kt` pushed to origin/main
+- **Tag:** `v0.31.30` pushed — CI building GitHub Release
+- **crates.io:** `agent-doc = "0.31.30"` published
+- **PyPI:** `agent_doc-0.31.30-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl` uploaded
+- **cargo install:** already at v0.31.30 (installed earlier)
+- **JB plugin:** `agent-doc-jetbrains-0.2.55.zip` + `-signed.zip` in `build/distributions/`
+- **Parent submodule pointer:** updated and pushed (`4997649e`)
+<!-- agent:boundary:1692f6b9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

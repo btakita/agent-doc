@@ -15,11 +15,11 @@ agent_doc_write: crdt
 ❯ Please look at https://www.skills.google/
 ❯ Can we install the google skills to interact with google docs?
 Would corky benefit from the google skills?
-### Re: skills.google (HEAD)
+### Re: skills.google
 
 [skills.google](https://www.skills.google/) is Google's **cloud learning platform** — Vertex AI, Gemini, certifications, hands-on labs. It is not a plugin or MCP system; it offers no installable integrations.
 
-### Re: Can we install google skills to interact with Google Docs? (HEAD)
+### Re: Can we install google skills to interact with Google Docs?
 
 Not from skills.google — it's a training site, not an integration hub.
 
@@ -27,15 +27,44 @@ The correct path for Google Docs integration is the **Google Workspace MCP** or 
 
 To add Google Docs support you'd need to install or configure a Workspace MCP that covers Drive/Docs, then authenticate it similarly to Gmail.
 
-### Re: Would corky benefit from the google skills? (HEAD)
+### Re: Would corky benefit from the google skills?
 
 Corky handles correspondence: email (Gmail API), LinkedIn, YouTube. A Google Drive/Docs MCP would let corky read drafts or content directly from Google Docs — useful if you author correspondence or content in Docs before sending.
 
 Current corky workflow: local files → Gmail/LinkedIn/YouTube APIs. If drafts live in Google Docs rather than local files, the integration would be valuable. If not, the benefit is minimal.
-<!-- agent:boundary:986e277b -->
+
+❯ Lets add a feature to add useful skills + runbooks from https://github.com/WadeWarren/gws-claude-plugin into corky
+### Re: Add gws skills + runbooks into corky (HEAD)
+
+[WadeWarren/gws-claude-plugin](https://github.com/WadeWarren/gws-claude-plugin) wraps a `gws` CLI with 92 skills across 13 Google Workspace services (Gmail, Docs, Drive, Sheets, Slides, Calendar, Chat, Forms, Tasks, Keep, Meet, Classroom, Admin). Key gap it fills vs. native Claude: full Gmail send with attachments, full Docs/Sheets/Slides read-write, Google Chat/Tasks/Keep.
+
+**What's useful for corky specifically:**
+- Gmail: real send + attachment support (corky currently drafts only)
+- Docs/Drive: read drafts from Docs, write outputs back
+- Personas: "Executive Assistant" — close match to corky's correspondence role
+- Recipes: `team-announcement`, `attachment-management`, `expense-tracking` all map to corky use cases
+
+**Proposed integration (additive, no new Rust required):**
+
+1. **New skill:** `src/corky/.claude/skills/gws/SKILL.md` — routes to gws personas/recipes, documents prerequisites (`gws` CLI installed, OAuth configured)
+2. **New runbooks** under `src/corky/.agent/runbooks/`:
+   - `gws-gmail-send.md` — send with attachments via `gws gmail send`
+   - `gws-docs-draft.md` — create/update a Google Doc draft before sending
+   - `gws-workspace-announcement.md` — team announcement recipe
+3. **Install prerequisite:** document `gws` CLI install path in corky's `AGENTS.md`
+
+The `gws` CLI handles execution; the skill layer in corky orchestrates the workflow. No Rust code changes needed for an initial integration.
+
+**Next step:** Clone/review the gws plugin repo to confirm the CLI interface before writing the skill and runbooks.
+<!-- agent:boundary:97f04b0e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Review gws CLI interface from https://github.com/WadeWarren/gws-claude-plugin
+- [ ] Add `src/corky/.claude/skills/gws/SKILL.md`
+- [ ] Add `src/corky/.agent/runbooks/gws-gmail-send.md`
+- [ ] Add `src/corky/.agent/runbooks/gws-docs-draft.md`
+- [ ] Document gws install prerequisite in corky AGENTS.md
 <!-- /agent:pending -->

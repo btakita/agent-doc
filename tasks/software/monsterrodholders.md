@@ -46,7 +46,7 @@ Rod Holders are clearly the pull product. Bases have 17 SKUs across boat types (
 - A full-width cover/banner block above fold (image + headline + "Shop Now" CTA) — garderobe's above-fold CTA pattern
 - "Shop by Boat Type" filter shortcut for the bases category (this is where compatibility friction lives)
 - Verify the 5-column Best Sellers layout looks right on mobile (may want 3 columns on small screens — requires CSS or a Blocksy column override)
-<!-- agent:boundary:4224bd3b -->
+<!-- agent:boundary:52254d80 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

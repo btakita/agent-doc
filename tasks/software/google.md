@@ -32,7 +32,7 @@ To add Google Docs support you'd need to install or configure a Workspace MCP th
 Corky handles correspondence: email (Gmail API), LinkedIn, YouTube. A Google Drive/Docs MCP would let corky read drafts or content directly from Google Docs — useful if you author correspondence or content in Docs before sending.
 
 Current corky workflow: local files → Gmail/LinkedIn/YouTube APIs. If drafts live in Google Docs rather than local files, the integration would be valuable. If not, the benefit is minimal.
-<!-- agent:boundary:4ee26922 -->
+<!-- agent:boundary:161a3e36 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -634,15 +634,47 @@ aff6ebc fix: push to origin to keep tracking ref in sync
 ```
 
 Local repo is current with the server.
-<!-- agent:boundary:d8a717ab -->
+
+❯ Can we replace the WPBakery content. We absolutely need to keep SEO
+### Re: replace WPBakery content, preserve SEO
+
+Yes — replacing WPBakery with Gutenberg blocks will actually **improve** SEO, not hurt it. The current state is broken: Google is crawling raw `[vc_section][vc_row]` shortcode text. Gutenberg produces clean semantic HTML.
+
+**SEO preservation strategy:**
+- Page slugs → unchanged (no redirects needed)
+- Page titles → unchanged (separate from `post_content`)
+- Yoast/RankMath meta → stored in `wp_postmeta`, untouched by content rewrite
+- Text copy → preserve word-for-word
+- Heading hierarchy → replicate in Gutenberg
+- Internal links → keep same `/product/...`, `/bestsellers/` paths
+
+**WPBakery → Gutenberg mapping for the home page:**
+
+| WPBakery | Gutenberg |
+|----------|-----------|
+| `[vc_single_image]` | `<!-- wp:image -->` |
+| `[vc_column_text]` | `<!-- wp:paragraph -->` |
+| `[pbr_products categories="rod-holders"]` | `<!-- wp:woocommerce/product-category -->` |
+| `[pbr_products type="featured_product"]` | `<!-- wp:woocommerce/featured-products -->` |
+
+**Next step — pull page IDs from server:**
+```bash
+ssh root@50.28.2.199 'docker compose -f /opt/monsterrodholders/app/docker-compose.yml run --rm wpcli \
+  wp post list --post_type=page --fields=ID,post_title,post_name --format=table'
+```
+
+Then I can build the Gutenberg HTML and update via `wp post update <ID> --post_content='...'` — in-place replacement, no URL changes, no redirects.
+<!-- agent:boundary:1951ee4f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Pull page IDs from server (`wp post list --post_type=page`)
+- [ ] Build Gutenberg replacement HTML for home page (preserve all text/links)
+- [ ] Update page content via `wp post update`
+- [ ] Verify rendered output in browser
 - [ ] On server: `git config pull.rebase true && git config user.name/email` (one-time setup)
-- [ ] On server: bootstrap theme files into wordpress/themes/blocksy/ (if not already live via bind mount)
-- [ ] Decision: rebuild home page in Blocksy, or install WPBakery?
-- [ ] (Optional) Set up mu-plugin + inotify watcher for real-time sync
+- [ ] On server: bootstrap theme files into wordpress/themes/blocksy/
 - [ ] When ready to go live: search-replace URLs → monsterrodholders.com, flip DNS, re-run certbot
 <!-- /agent:pending -->

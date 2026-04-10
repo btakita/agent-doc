@@ -2141,7 +2141,7 @@ ssh root@50.28.2.199 "cd /opt/monsterrodholders/app && docker compose run --rm w
 ```
 
 After both — verify `http://50.28.2.199.nip.io/` hits nginx and `https://50.28.2.199.nip.io/` loads without redirect.
-<!-- agent:boundary:f40782e9 -->
+<!-- agent:boundary:8a9ebb2e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

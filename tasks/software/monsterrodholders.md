@@ -95,7 +95,7 @@ Next steps (when ready to go live):
 1. Run `wp search-replace 'https://50.28.2.199.nip.io' 'https://monsterrodholders.com' --all-tables`
 2. Flip DNS to `50.28.2.199`
 3. Run certbot for `monsterrodholders.com` SSL
-<!-- agent:boundary:e9c8f575 -->
+<!-- agent:boundary:fdd2db81 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

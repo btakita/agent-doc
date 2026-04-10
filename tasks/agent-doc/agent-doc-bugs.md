@@ -435,7 +435,7 @@ I'm not familiar enough with these editors to give accurate pros/cons or integra
 **Fallback: vscode Remote SSH.** If you want a GUI editor with zero config investment, VS Code Remote SSH is the most mature path and has the easiest plugin API for the agent-doc IPC integration.
 
 **Skip for this use case:** Zed (IPC extension path is uncertain), cursor (redundant AI), vim (lower ceiling than neovim for the same effort).
-### Re: neovim integration breakdown + time reduction (HEAD)
+### Re: neovim integration breakdown + time reduction
 
 The 1–2 day estimate covers a **full plugin with live IPC** (same depth as the JetBrains plugin). Here's what's inside it:
 
@@ -508,7 +508,40 @@ Only worth it if you need the socket to carry structured events (e.g., "only ref
 3. **Later (optional):** Socket-based IPC if you want sub-millisecond precision or structured event types.
 
 The key insight: the JetBrains plugin needed JNA + socket because JetBrains has no `inotify` hook. neovim has `vim.loop` (libuv) built in — filesystem events are native.
-<!-- agent:boundary:1fd2dfc1 -->
+
+❯ Why did the tmux session for src/session-share/tasks/claudescore.md get swapped into tmux session 1?
+### Re: tmux session drift (HEAD)
+
+The preflight warning is accurate but the affected document isn't claudescore — it's **claude-code.md**. Here's what the data shows:
+
+From `sessions.json` + `tmux list-panes -a`:
+
+| Pane | Document | tmux session |
+|------|----------|-------------|
+| `%55` | `src/session-share/tasks/claudescore.md` | `$0` (session 0) ← session 0, fine |
+| `%75` | `tasks/agent-doc/agent-doc-bugs.md` | `$0` (session 0) ← fine |
+| `%111` | `tasks/software/claude-code.md` | `$1` (session 1) ← **drift** |
+| all others | various | `$0` (session 0) ← fine |
+
+claudescore.md is in session 0, not session 1. The session 1 outlier is `claude-code.md` (pane `%111`, window `@27`).
+
+#### Why it happens
+
+agent-doc stores the pane ID (e.g., `%111`) when `agent-doc claim` runs. tmux pane IDs are global across sessions — a pane created in session 1 has a higher ID than session 0 panes but lives permanently in session 1. When that pane's owner runs `agent-doc claim tasks/software/claude-code.md`, the registration binds to `%111` in session 1.
+
+The most likely cause: at some point `claude-code.md` was claimed from a pane that was in tmux session 1 — probably when you were attached to session 1 (`tmux attach -t 1`) or a new-session was created.
+
+#### Fix
+
+Re-claim it from a session 0 pane:
+
+```bash
+# From a pane in session 0 (your main session)
+agent-doc claim tasks/software/claude-code.md
+```
+
+Or ignore it — the drift warning is informational. agent-doc still routes to the correct pane; it just flags the cross-session topology as unusual.
+<!-- agent:boundary:1ae3f21f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

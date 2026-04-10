@@ -1058,8 +1058,17 @@ Current page inventory is clean. A few to optionally review:
 - `On Sale` (5531), `Bestsellers` (7519), `Hot Deal` (6987) — may be legit shop landing pages or leftover demos
 - `Monster Rod Holders New Metallic Look` (15892 draft) — duplicate of published 15894?
 
+❯ Remove `On Sale` (5531), `Bestsellers` (7519), `Hot Deal` (6987), `Monster Rod Holders New Metallic Look` (15892 draft)
+
+❯ Is `Recently Viewed Products` for the user's session?
+
 Let me know if any of those should be deleted.
-<!-- agent:boundary:7fd80e99 -->
+### Re: page cleanup (HEAD)
+
+**Deleted ✓:** On Sale (5531), Bestsellers (7519), Hot Deal (6987), Monster Rod Holders New Metallic Look draft (15892)
+
+**Recently Viewed Products (18849):** Yes — this is a WooCommerce shortcode page (`[woocommerce_recently_viewed_products]`) that shows products the current visitor browsed in their session. It's not nav-linked and not useful as a standalone page. Want me to delete that too?
+<!-- agent:boundary:d7fff54e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

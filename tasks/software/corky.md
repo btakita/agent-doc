@@ -462,7 +462,7 @@ Committed `52a20ee`, retagged v0.26.3. New Release run: [24156432054](https://gi
 Two runs active (user also pushed another fix simultaneously). Either one passing confirms the direction.
 > **[EXTRACT from tasks/recruit/filevine.md]** (2026-04-10T15:37:57Z)
 >
-### Re: Threading fix (take 2) (HEAD)
+### Re: Threading fix (take 2)
 
 The issue: the draft only had `in_reply_to` (the RFC 2822 Message-ID) but Gmail API also needs `thread_id` (the Gmail thread ID) to attach the draft to the existing thread. Both are required.
 
@@ -476,13 +476,33 @@ Re-pushed. The draft in your `btak.dev` Gmail Drafts should now be properly atta
 
 Last one worked.
 Please transfer bug fix to tasks/software/corky.md
-<!-- agent:boundary:9da8bc9d -->
+
+❯ See tasks/software/google.com for new gcp skills in corky
+### Re: Threading bug fix (from filevine session) (HEAD)
+
+**Bug:** Gmail API requires *both* `thread_id` and `in_reply_to` to attach a draft to an existing thread. Setting only `in_reply_to` (RFC 2822 Message-ID) is insufficient — the draft creates a new thread instead.
+
+**Fix to document/implement in corky:**
+- When `in_reply_to` is provided, also look up (or accept) the Gmail `thread_id` and set it on the draft
+- `thread_id` is the Gmail-internal ID (e.g. `"19d5467199f95043"`) from the `messages.list` or `threads.list` response
+- Both fields must be present in the `create draft` API call
+
+### Re: gws GCP skills added to corky (from google.md) (HEAD)
+
+The Google Workspace integration is now in place:
+
+- `src/corky/.claude/skills/gws/SKILL.md` — routes to gws personas/recipes across 13 Workspace services (Gmail, Docs, Drive, Sheets, Calendar, etc.)
+- `src/corky/.agent/runbooks/gws-gmail-send.md` — send with attachments via `gws gmail send`, threading guidance, corky-vs-gws decision table
+- `src/corky/.agent/runbooks/gws-docs-draft.md` — read-from-Docs→send-via-corky, create-new-Doc, announcement recipes
+- corky `AGENTS.md` — `## Google Workspace Integration (gws)` section with install/auth steps
+
+**gws** is a Claude Code plugin (not a standalone CLI). Install: `claude plugin install gws`. Auth: `gws auth login`.
+<!-- agent:boundary:12c24b39 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] Implement threading fix in corky: set both `thread_id` + `in_reply_to` when drafting replies
 - [ ] Monitor CI release run 24156432054 — confirm aarch64 now passes
-- [ ] Verify sheet sharing / GCP test users
-- [ ] Re-test sheet read
 <!-- /agent:pending -->

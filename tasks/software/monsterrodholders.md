@@ -1837,7 +1837,7 @@ The site is only on nip.io temporarily — users on the live site never see it.
 grep -m1 'siteurl' /opt/monsterrodholders/restore/backup.sql
 ```
 Expected output: something like `'https://monsterrodholders.com'` — paste it and I'll fill in the exact search-replace command.
-<!-- agent:boundary:c54b6eef -->
+<!-- agent:boundary:fe4adf76 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

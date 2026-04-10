@@ -1178,7 +1178,7 @@ docker compose logs nginx --tail=5
 ```
 
 (httpd is now disabled — port 80 is free, stack came all the way up. Just the cert content issue remains.)
-<!-- agent:boundary:f3d1e1e9 -->
+<!-- agent:boundary:4633d724 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

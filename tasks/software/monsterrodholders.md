@@ -1556,7 +1556,7 @@ certbot certonly --standalone -d 50.28.2.199.nip.io
 This keeps certbot from touching your Apache config at all.
 
 ❯ http://50.28.2.199.nip.io/ did not win. https://50.28.2.199.nip.io/ has Service Unavailable
-### Re: http didn't redirect, https is Service Unavailable (HEAD)
+### Re: http didn't redirect, https is Service Unavailable
 
 "Service Unavailable" on HTTPS means Apache's proxy is active but can't reach the backend on port 8080. Let's isolate:
 
@@ -1586,7 +1586,36 @@ Most likely causes:
 - **mod_proxy not enabled** — `httpd -t` would show a directive error
 
 Run those and share the output — the error log especially will pinpoint it.
-<!-- agent:boundary:ad4e04a3 -->
+
+❯ Running on port 9000
+```
+[root@oddball-business app]# docker compose -f /opt/monsterrodholders/app/docker-compose.yml ps
+NAME              IMAGE                         COMMAND                  SERVICE     CREATED       STATUS                          PORTS
+app-db-1          mariadb:11                    "docker-entrypoint.s…"   db          2 hours ago   Up 2 hours                      3306/tcp
+app-nginx-1       nginx:alpine                  "/docker-entrypoint.…"   nginx       2 hours ago   Restarting (1) 11 seconds ago
+app-redis-1       redis:alpine                  "docker-entrypoint.s…"   redis       2 hours ago   Up 2 hours                      6379/tcp
+app-wordpress-1   wordpress:php8.3-fpm-alpine   "docker-entrypoint.s…"   wordpress   2 hours ago   Up 2 hours                      9000/tcp
+```
+### Re: nginx is Restarting — crash loop (HEAD)
+
+nginx is crash-looping — that's why you get 503. The other containers are fine. Need to see why:
+
+```bash
+# See what's killing nginx
+docker compose -f /opt/monsterrodholders/app/docker-compose.yml logs nginx --tail=30
+
+# Also show current nginx config inside the container
+docker compose -f /opt/monsterrodholders/app/docker-compose.yml exec nginx cat /etc/nginx/conf.d/default.conf 2>/dev/null || \
+  docker compose -f /opt/monsterrodholders/app/docker-compose.yml exec nginx cat /etc/nginx/nginx.conf
+
+# And the current docker-compose.yml ports section
+grep -A5 'nginx:' /opt/monsterrodholders/app/docker-compose.yml | grep -A3 'ports:'
+```
+
+The most likely cause: **nginx config inside Docker still references SSL cert files that don't exist inside the container**, or it's trying to bind a port that's failing. Since WordPress is running PHP-FPM on port 9000, nginx inside Docker also needs to be configured as a FastCGI proxy (not just HTTP proxy).
+
+Share the logs output and I can pinpoint exactly what's wrong.
+<!-- agent:boundary:80c31e36 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

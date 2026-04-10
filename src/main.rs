@@ -407,6 +407,9 @@ enum Commands {
         /// Write origin identifier for tracing (e.g., "skill", "watch", "stream")
         #[arg(long)]
         origin: Option<String>,
+        /// Commit the document to git after a successful write (skipped silently if not in a git repo)
+        #[arg(long)]
+        commit: bool,
     },
     /// Stream agent output to document in real-time (CRDT merge)
     Stream {
@@ -908,7 +911,7 @@ fn main() -> anyhow::Result<()> {
             PluginAction::Update { editor } => plugin::update(&editor),
             PluginAction::List => plugin::list(),
         },
-        Commands::Write { file, baseline_file, template: is_template, stream: is_stream, ipc: is_ipc, force_disk, origin } => {
+        Commands::Write { file, baseline_file, template: is_template, stream: is_stream, ipc: is_ipc, force_disk, origin, commit: do_commit } => {
             // Log write origin for tracing
             if let Some(ref orig) = origin {
                 crate::ops_log::log_op(&file, &format!("write_origin file={} origin={}", file.display(), orig));
@@ -918,7 +921,7 @@ fn main() -> anyhow::Result<()> {
                 .map(std::fs::read_to_string)
                 .transpose()
                 .context("failed to read baseline file")?;
-            if is_ipc {
+            let result = if is_ipc {
                 write::run_ipc(&file, baseline.as_deref())
             } else if is_stream {
                 write::run_stream(&file, baseline.as_deref(), force_disk)
@@ -934,7 +937,16 @@ fn main() -> anyhow::Result<()> {
                 } else {
                     write::run(&file, baseline.as_deref())
                 }
+            };
+            result?;
+            if do_commit {
+                if git::is_in_git_repo(&file) {
+                    git::commit(&file)?;
+                } else {
+                    eprintln!("[commit] skipped (not in git repo)");
+                }
             }
+            Ok(())
         }
         Commands::Stream { file, interval, agent, model, no_git } => {
             stream::run(&file, interval, agent.as_deref(), model.as_deref(), no_git, &config)

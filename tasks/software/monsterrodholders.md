@@ -2093,7 +2093,7 @@ ssh root@50.28.2.199 "cd /opt/monsterrodholders/app && git checkout -- . && git 
 ```
 
 Recommend Option A — production configs often have local tweaks that shouldn't be in git. The `scp` gives explicit control over what changes without touching git state.
-<!-- agent:boundary:0e0b4977 -->
+<!-- agent:boundary:4c7ca906 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

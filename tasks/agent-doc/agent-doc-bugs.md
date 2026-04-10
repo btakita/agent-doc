@@ -67,7 +67,7 @@ Done. `git add src/agent-doc && git commit` in agent-loop — pointer updated to
 
 ❯ Why does src/session-share/tasks/claudescore.md have an uncommitted response patch? What do the logs say?
 ❯ Did I call 2 agent-doc runs in a row? Which caused a race condition?
-### Re: claudescore.md uncommitted patch — diagnosis (HEAD)
+### Re: claudescore.md uncommitted patch — diagnosis
 
 **What happened — `agent-doc write` without `agent-doc commit`:**
 
@@ -81,11 +81,29 @@ The `### Re: "Score pending..."` response was written by a previous session (`ag
 **2 agent-doc runs in a row?** Possibly — second session's preflight would commit the first's gap. But the diff is clean, so no overlapping writes. More likely: the session ended (Ctrl+C, /clear, timeout) after `agent-doc write` but before `agent-doc commit`.
 
 **Not a bug** — preflight's gap commit is designed for exactly this. The `file is 176 bytes larger than snapshot` warning flagged it correctly. No data lost.
-<!-- agent:boundary:eed3aff4 -->
+
+Why do `agent-doc write` + `agent-doc commit` need to be separate? Can be part of the same agent-doc operation instead? 
+### Re: merge write + commit (HEAD)
+
+**Why they're currently separate:**
+
+`agent-doc write` handles file write + snapshot update + IPC to the plugin. `agent-doc commit` handles git staging via `hash-object` + `update-index` + `(HEAD)` boundary marker. They're separate because streaming checkpoints need write-without-commit — intermediate flushes during a long response shouldn't create partial git commits.
+
+**Yes, they can be merged with a `--commit` flag:**
+
+The commit step runs atomically after write completes — including after the IPC ACK-content sidecar is read. Streaming checkpoint writes omit `--commit`; only the final write uses it.
+
+**This eliminates the gap-commit class entirely.** The window between write and commit disappears. The skill's step 3 becomes one command instead of two.
+
+**Implementation:**
+1. Add `--commit` bool flag to the `write` subcommand
+2. After `run_stream` returns successfully, call `commit::run(file, opts)`
+3. Update SKILL.md step 3 to use `--commit` on the final write (checkpoint writes stay as-is)
+<!-- agent:boundary:d8ed2e4c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-(nothing pending)
+- [ ] Implement `--commit` flag on `agent-doc write` (awaiting user approval)
 <!-- /agent:pending -->

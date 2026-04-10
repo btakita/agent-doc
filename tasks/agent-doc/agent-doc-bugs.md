@@ -401,7 +401,7 @@ This is the self-healing version of the pane_policy guard — instead of warning
 1. `dedup_exchange_adjacent_lines` in `template.rs` after `apply_patches` (V1/V2 fix)
 2. `strip_leading_overlap` in `apply_mode("append", ...)` (V1 fix, complementary)  
 3. `start.rs` auto-relocate instead of warn-only (H2 recurring drift fix)
-<!-- agent:boundary:38528354 -->
+<!-- agent:boundary:c7a63649 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

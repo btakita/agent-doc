@@ -621,7 +621,7 @@ git config user.email "deploy@monsterrodholders.com"
 ```
 
 After that, `./scripts/wp-to-git.sh` will run cleanly with no prompts.
-<!-- agent:boundary:9d1c20d6 -->
+<!-- agent:boundary:c52ffa34 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

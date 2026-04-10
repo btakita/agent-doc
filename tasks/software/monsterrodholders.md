@@ -942,14 +942,31 @@ The staging shop page shows products but with no sidebar at all.
 - Verified on server: `data-sidebar="left"` + `<aside class="ct-sidebar">` renders with both widgets ✓
 
 Note: sidebar is hidden on small/medium screens (`ct-hidden-sm ct-hidden-md`) by default — Blocksy's responsive behavior.
-<!-- agent:boundary:c209422a -->
+
+❯ do
+❯ - [ ] Audit `wphelp` (support@wp.help) shop_manager account — remove if unrecognized
+❯ - [ ] Change `MRHadmin` (jennyboonedesignstudio@gmail.com) password — compromised account
+### Re: do — wphelp audit + MRHadmin password reset
+
+**`wphelp` (support@wp.help):** Deleted ✓
+
+- Was user ID 19530, role `shop_manager`
+- No legitimate origin found — matches known "Managed WP" backdoor pattern
+- Removed with `wp user delete wphelp --yes`
+
+**`MRHadmin` (jennyboonedesignstudio@gmail.com):** Password reset ✓
+
+- User ID 1 (admin account that posted spam)
+- New password: `bId0WN2le4HTVa82hOJxwqs50MnG8o7N`
+- Save this somewhere safe (1Password, pass, etc.) — the old compromised password is now invalid
+
+Note: sendmail warning during password change is expected (no mail relay in Docker) — WP shows "Updated user 1" which confirms success. No notification email was sent.
+<!-- agent:boundary:12b92e4f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Audit `wphelp` (support@wp.help) shop_manager account — remove if unrecognized
-- [ ] Change `MRHadmin` (jennyboonedesignstudio@gmail.com) password — compromised account
 - [ ] Respond to 9 real customer order inquiries in comment hold queue
 - [ ] Delete/unpublish ~15 demo pages + GeoDirectory pages
 - [ ] Copy remaining uploads (verify completeness)

@@ -1092,7 +1092,7 @@ docker compose logs nginx --tail=10
 ```
 
 Paste the output from step 3 if certbot fails.
-<!-- agent:boundary:2d5d3b82 -->
+<!-- agent:boundary:4e25ffa2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

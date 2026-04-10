@@ -1630,7 +1630,7 @@ nginx-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/20-envsubst-on-
 nginx-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/30-tune-worker-processes.sh
 nginx-1  | /docker-entrypoint.sh: Configuration complete; ready for start up
 ```
-### Re: Why nginx inside Docker? And the crash log (HEAD)
+### Re: Why nginx inside Docker? And the crash log
 
 **Why nginx inside Docker:** WordPress is running as PHP-FPM (`php8.3-fpm-alpine`) — it only speaks FastCGI, not HTTP. Something inside Docker must handle HTTP requests and proxy PHP files to FastCGI port 9000. That's nginx's role. The stack is:
 
@@ -1663,7 +1663,28 @@ Or verify all services use the same network. If docker-compose has explicit `net
 The nginx config at `/etc/nginx/conf.d/wordpress.conf:27` likely has `fastcgi_pass wordpress:9000;` — that syntax is correct. The problem is purely DNS resolution within Docker.
 
 **Alternative to simplify:** Replace `wordpress:php8.3-fpm-alpine` with `wordpress:apache` — then you don't need nginx inside Docker at all, just Apache inside Docker serving WordPress directly. Host Apache proxies to Docker Apache on 8080. Removes one moving part.
-<!-- agent:boundary:4cf6ddf1 -->
+
+❯ Why not just proxy pass to port 9000?
+❯ Or have Nginx use port 8080
+### Re: proxy to port 9000 / nginx on 8080 (HEAD)
+
+**Why not proxy-pass to port 9000?**
+
+Port 9000 is FastCGI — not HTTP. Apache can't `ProxyPass` to it with standard HTTP proxy. FastCGI is a binary protocol for PHP processes, not a web server. You'd need `mod_proxy_fcgi` + `SetHandler "proxy:fcgi://..."`, which forces Apache to also handle the static-file / PHP routing logic nginx handles now. Possible, but you'd be duplicating nginx's job.
+
+Also, port 9000 is currently only reachable inside the Docker network — it's not published to the host. You'd need to expose it first.
+
+**Or have Nginx use port 8080** — that's already what the setup does: nginx inside Docker listens on container port 80, mapped to host port 8080. The crash is purely the DNS bug (`host not found in upstream "wordpress"`) — nginx can't resolve the `wordpress` service name. Cause: the two containers are on different Docker networks (or networks aren't configured). One look at `docker-compose.yml` will confirm.
+
+Fix: ensure both services share a default network (or an explicit shared one):
+```yaml
+networks:
+  default:
+    name: app-network
+```
+
+**Simplest path if you want to skip debugging nginx:** Switch to `wordpress:apache` image. Apache inside Docker handles PHP + static files, listens on 80, map to host 8080, host Apache proxies to it. Eliminates FastCGI and the nginx DNS issue entirely.
+<!-- agent:boundary:867115e9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

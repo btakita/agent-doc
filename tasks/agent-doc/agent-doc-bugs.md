@@ -295,7 +295,7 @@ v0.31.30 + JB plugin v0.2.55 released.
 ❯ We have `# On the server — run once` which is in a fenced comment.
 ❯ `# On the server — run once (HEAD)` was committed. Why? We should guard against that using AST. Did something bypass the AST?
 ❯ Do a vertical + horizontal analysis. Make sure we always use the AST over regex parsing unless it cannot be done.
-### Re: Bug 3 — `(HEAD)` inside fenced code block (HEAD)
+### Re: Bug 3 — `(HEAD)` inside fenced code block
 
 **Root cause (two interacting paths):**
 
@@ -326,7 +326,114 @@ All 770 unit tests pass. Pre-existing flaky tmux test (`send_keys_delivers_comma
 **Version bumped to 0.31.31.** `cargo install --path .` done.
 
 Next: manual testing gate before release.
-<!-- agent:boundary:fdc6c345 -->
+
+❯ I'm going to set up an instance of Claude Code on an AWS server using the method & technologies in this image. I don't think JetBrains is a good IDE for this b/c it will be too resource intensive. So I need something that is time + cost efficient that will replace JB as an IDE to use with agent-doc. Please advise me on the top options & give me the pros & cons of each. Also include the likely estimated time to integrate each IDE/editor into agent-doc. Include:
+❯ - vim
+❯ - neovim
+❯ - zed
+❯ - vscode
+❯ - cursor
+❯ - antigravity
+❯ - ki
+❯ ![img_4.png](img_4.png)
+### Re: IDE/Editor for AWS server + agent-doc (HEAD)
+
+Setup context from your image: Ubuntu 24 LTS, Docker, ripgrep, Claude Code CLI (via sh script), tmux — SSH-based access. Primary constraint: time + cost efficient, not resource-intensive like JetBrains.
+
+For agent-doc, the core editing loop is: **edit a markdown file → Claude Code runs `/agent-doc` → see response in the same file**. The git gutter (HEAD boundary marker) is the visual feedback mechanism. Any editor with git diff decoration works for basic use. "Integration" effort below refers to building a plugin comparable to the JetBrains plugin (IPC socket → refresh git gutter on agent-doc events).
+
+---
+
+#### neovim — Recommended
+
+**Pros:**
+- Runs directly on server via SSH/tmux — zero extra server process
+- Excellent git gutter via `gitsigns.nvim` (Lua, actively maintained)
+- Full LSP support, telescope, lazy.nvim ecosystem
+- Resource footprint: ~30MB RAM, negligible CPU
+- Already works with agent-doc today (edit file, `/agent-doc`, see response)
+- IPC integration: a small Lua plugin listening to a Unix socket, calling `nvim_buf_reload` on the active buffer — straightforward
+
+**Cons:**
+- Config investment upfront (dotfiles, plugin setup)
+- Modal editing has a learning curve if not already familiar
+
+**Integration estimate:** 1–2 days for a solid Lua plugin with socket listener + buffer reload + gitsigns refresh.
+
+---
+
+#### vim — Viable but lower ceiling
+
+**Pros:**
+- Ubiquitous on any Ubuntu server, zero install needed
+- Extremely low resource use
+- `vim-gitgutter` for git diff display
+
+**Cons:**
+- Plugin ecosystem significantly weaker than neovim
+- No native LSP; `vim-lsp` is clunky compared to neovim's built-in
+- VimScript integration for IPC is awkward (jobs API works but is verbose)
+
+**Integration estimate:** 2–3 days — VimScript job-based socket listener is less ergonomic than Lua.
+
+---
+
+#### zed — Strong second option
+
+**Pros:**
+- Built in Rust — extremely fast startup and rendering
+- Remote SSH mode: editor UI runs locally, backend on server (lightweight server process)
+- Built-in git diff gutter, no plugin needed
+- Extension API is Rust-based (WASM plugins) — fits the agent-doc codebase naturally
+
+**Cons:**
+- Remote SSH mode is newer and has rough edges (2024-era feature)
+- Extension API is more constrained than VS Code — no arbitrary IPC today
+- IPC integration path is unclear until the extension API matures
+
+**Integration estimate:** 3–5 days — extension API investigation + IPC feasibility work needed first; may require a workaround (e.g., a file-watch sidecar rather than socket-based IPC).
+
+---
+
+#### vscode (Remote SSH)
+
+**Pros:**
+- Remote SSH is the most mature remote editing experience available
+- Git gutter built-in, excellent
+- Extension API is rich (TypeScript) — easiest IPC integration path
+- Server component that runs on the server (`vscode-server`) is surprisingly lightweight (~150MB RAM after warmup)
+
+**Cons:**
+- Electron client runs locally — heavier on your laptop, not the server
+- On the server, `vscode-server` takes ~30–60s to install on first connect
+- If the goal is a pure server-side lightweight setup, vscode-server adds overhead
+
+**Integration estimate:** 1–2 days — TypeScript extension with `vscode.workspace.onDidChangeTextDocument` + socket listener is well-trodden path. Easiest of the bunch.
+
+---
+
+#### cursor
+
+Same architecture as VS Code (fork). Remote SSH works identically. The built-in AI features overlap with Claude Code — probably redundant here. Treat it as VS Code with extra cost and less ecosystem stability. Skip unless you're already on cursor.
+
+**Integration estimate:** Same as vscode (shared codebase).
+
+---
+
+#### antigravity, ki
+
+I'm not familiar enough with these editors to give accurate pros/cons or integration estimates. If you have links or more context, I can evaluate them. I won't speculate.
+
+---
+
+#### Recommendation for your setup
+
+**Primary: neovim.** Runs entirely in tmux on the server over SSH — no separate remote server process, minimal resources, best long-term ecosystem. agent-doc already works with it today; the plugin integration is tractable. If you invest in a neovim dotfiles config once, it travels everywhere (any Linux server, AWS, local).
+
+**Fallback: vscode Remote SSH.** If you want a GUI editor with zero config investment, VS Code Remote SSH is the most mature path and has the easiest plugin API for the agent-doc IPC integration.
+
+**Skip for this use case:** Zed (IPC extension path is uncertain), cursor (redundant AI), vim (lower ceiling than neovim for the same effort).
+<!-- agent:boundary:4b9adcd6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -334,4 +441,5 @@ Next: manual testing gate before release.
 <!-- agent:pending patch=replace -->
 - [ ] Manual testing: verify `# On the server — run once` no longer gets `(HEAD)` in a new commit
 - [ ] Release v0.31.31: `cargo publish`, `maturin publish`, GitHub Release with binary
+- [ ] (optional) neovim plugin for agent-doc IPC integration
 <!-- /agent:pending -->

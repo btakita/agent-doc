@@ -1022,7 +1022,7 @@ lrwxrwxrwx 1 root root 52 Apr  9 22:12 certs/privkey.pem -> /etc/letsencrypt/liv
 [root@oddball-business app]# ls /etc/letsencrypt/live/50.28.2.199.nip.io/fullchain.pem
 ls: cannot access '/etc/letsencrypt/live/50.28.2.199.nip.io/fullchain.pem': No such file or directory
 ```
-### Re: broken symlinks — certbot container filesystem is gone (HEAD)
+### Re: broken symlinks — certbot container filesystem is gone
 
 The symlinks in `./certs/` point to `/etc/letsencrypt/live/50.28.2.199.nip.io/` on the HOST, but that path doesn't exist. Certbot ran inside a temporary container and the cert files lived only in that container's ephemeral filesystem. Container exited → certs gone.
 
@@ -1050,13 +1050,55 @@ docker compose logs nginx --tail=10
 ```
 
 Note: certbot will say "not yet due for renewal" again — add `--force-renewal` if it skips issuance without writing files. But since the host `/etc/letsencrypt/` directory is empty, it should issue fresh.
-<!-- agent:boundary:8cbc4efb -->
+
+```
+[root@oddball-business app]# docker compose logs nginx --tail=10
+nginx-1  | /docker-entrypoint.sh: /docker-entrypoint.d/ is not empty, will attempt to perform configuration
+nginx-1  | /docker-entrypoint.sh: Looking for shell scripts in /docker-entrypoint.d/
+nginx-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/10-listen-on-ipv6-by-default.sh
+nginx-1  | 10-listen-on-ipv6-by-default.sh: info: /etc/nginx/conf.d/default.conf is not a file or does not exist
+nginx-1  | /docker-entrypoint.sh: Sourcing /docker-entrypoint.d/15-local-resolvers.envsh
+nginx-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/20-envsubst-on-templates.sh
+nginx-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/30-tune-worker-processes.sh
+nginx-1  | /docker-entrypoint.sh: Configuration complete; ready for start up
+nginx-1  | 2026/04/10 02:15:01 [emerg] 1#1: cannot load certificate "/etc/nginx/certs/fullchain.pem": BIO_new_file() failed (SSL: error:80000002:system library::No such file or directory:calling fopen(/etc/nginx/certs/fullchain.pem, r) error:10000080:BIO routines::no such file)
+nginx-1  | nginx: [emerg] cannot load certificate "/etc/nginx/certs/fullchain.pem": BIO_new_file() failed (SSL: error:80000002:system library::No such file or directory:calling fopen(/etc/nginx/certs/fullchain.pem, r) error:10000080:BIO routines::no such file)
+```
+### Re: same error — certbot steps not run yet (HEAD)
+
+Same nginx failure — the certbot/copy steps haven't been executed yet. Run the full sequence on the server:
+
+```bash
+# 1. Stop the stack
+docker compose down
+
+# 2. Install certbot on the host
+dnf install -y certbot
+
+# 3. Issue the cert (certbot binds port 80 temporarily)
+certbot certonly --standalone -d 50.28.2.199.nip.io \
+  --non-interactive --agree-tos \
+  -m admin@monsterrodholders.com
+
+# 4. Copy real cert files into the certs dir (replace broken symlinks)
+cp /etc/letsencrypt/live/50.28.2.199.nip.io/fullchain.pem \
+   /opt/monsterrodholders/app/certs/fullchain.pem
+cp /etc/letsencrypt/live/50.28.2.199.nip.io/privkey.pem \
+   /opt/monsterrodholders/app/certs/privkey.pem
+
+# 5. Restart
+docker compose up -d
+docker compose logs nginx --tail=10
+```
+
+Paste the output from step 3 if certbot fails.
+<!-- agent:boundary:2d5d3b82 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] `docker compose down` → `dnf install certbot` → issue cert → copy to `./certs/` → `docker compose up -d`
+- [ ] Run certbot sequence (steps above) on server
 - [ ] Verify nginx up + test `https://50.28.2.199.nip.io`
 - [ ] **Server step 10:** Transfer + import backup, `wp search-replace` domain
 - [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot

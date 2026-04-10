@@ -460,7 +460,6 @@ Confirmed locally: `docker run --rm ghcr.io/cross-rs/aarch64-unknown-linux-gnu:0
 Committed `52a20ee`, retagged v0.26.3. New Release run: [24156432054](https://github.com/btakita/corky/actions/runs/24156432054).
 
 Two runs active (user also pushed another fix simultaneously). Either one passing confirms the direction.
-<!-- agent:boundary:a7af83d3 -->
 > **[EXTRACT from tasks/recruit/filevine.md]** (2026-04-10T15:37:57Z)
 >
 ### Re: Threading fix (take 2) (HEAD)
@@ -477,7 +476,7 @@ Re-pushed. The draft in your `btak.dev` Gmail Drafts should now be properly atta
 
 Last one worked.
 Please transfer bug fix to tasks/software/corky.md
-<!-- agent:boundary:62898ead -->
+<!-- agent:boundary:9da8bc9d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -112,7 +112,7 @@ The push is now unblocked — it just needs a one-time OAuth re-authorization si
 ```
 
 A browser window will open (or print a URL). Sign in as `btak.dev@gmail.com`, grant Gmail compose access, and the draft will land in your Gmail Drafts folder.
-<!-- agent:boundary:e5653b03 -->
+<!-- agent:boundary:3d3964ce -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

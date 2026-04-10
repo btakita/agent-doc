@@ -1699,7 +1699,7 @@ networks:
 - Zero FastCGI config, no nginx DNS debugging
 
 **For monsterrodholders:** Use `wordpress:apache`. The performance gap only matters at scale — thousands of concurrent visitors. A rod holders shop isn't in that range. The nginx + PHP-FPM setup is correct for high-traffic WooCommerce, but here it's complexity with no measurable return.
-<!-- agent:boundary:b0fbd955 -->
+<!-- agent:boundary:95e76e5c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

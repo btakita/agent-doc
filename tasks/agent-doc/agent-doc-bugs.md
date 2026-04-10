@@ -451,7 +451,7 @@ Added to `template.rs` with 2 tests. 504 tests pass (1 flaky tmux test unrelated
 
 ❯ do
 ❯ - [ ] Implement `strip_leading_overlap` in `apply_mode` for append mode
-### Re: `strip_leading_overlap` implemented (HEAD)
+### Re: `strip_leading_overlap` implemented
 
 Added `strip_leading_overlap` to `apply_mode("append", ...)` in `template.rs:653-683`.
 
@@ -479,12 +479,25 @@ Called from `apply_mode` append branch (template.rs:655-659):
 - Changed `.filter(..).last()` → `.rfind(..)` (both were reported as errors under `-D warnings`)
 
 502 tests pass. 1 flaky tmux test unrelated.
-<!-- agent:boundary:d2905a12 -->
+
+❯ do
+❯ - [ ] Change `start.rs` warn → auto-relocate via `PaneMoveOp`
+### Re: `start.rs` warn → auto-relocate via `PaneMoveOp` (HEAD)
+
+Implemented. `start.rs:133-165` — the warn-only block is now an auto-relocate block:
+
+1. Detects session mismatch as before (`pane_session != expected_session`)
+2. Calls `tmux.active_pane(&expected_session)` to get an anchor pane in the project session
+3. `PaneMoveOp::new(&tmux, &pane_id, &anchor).allow_cross_session("auto-relocate to project session on start").join("-dh")` — moves the pane before registration
+4. On success: logs `[start] relocated pane %N → session 'X'`
+5. On failure (no anchor or join fails): falls back to warn-only so the start isn't aborted
+
+`cargo check` clean. 501 tests pass. 2 pre-existing flaky tmux pane tests unrelated.
+<!-- agent:boundary:e9a5aab1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Change `start.rs` warn → auto-relocate via `PaneMoveOp`
 - [ ] Bump version to 0.31.28, update VERSIONS.md, test, publish
 <!-- /agent:pending -->

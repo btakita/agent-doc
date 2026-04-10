@@ -1158,7 +1158,7 @@ nginx-1  | /docker-entrypoint.sh: Configuration complete; ready for start up
 nginx-1  | 2026/04/10 02:24:55 [emerg] 1#1: cannot load certificate "/etc/nginx/certs/fullchain.pem": BIO_new_file() failed (SSL: error:80000002:system library::No such file or directory:calling fopen(/etc/nginx/certs/fullchain.pem, r) error:10000080:BIO routines::no such file)
 nginx-1  | nginx: [emerg] cannot load certificate "/etc/nginx/certs/fullchain.pem": BIO_new_file() failed (SSL: error:80000002:system library::No such file or directory:calling fopen(/etc/nginx/certs/fullchain.pem, r) error:10000080:BIO routines::no such file)
 ```
-### Re: symlinks inside Docker bind mount don't resolve in the container (HEAD)
+### Re: symlinks inside Docker bind mount don't resolve in the container
 
 Good progress — certs now exist on the host (`cp` said "same file" = the symlink resolves correctly). But the problem is the symlinks themselves. When Docker mounts `./certs:/etc/nginx/certs:ro`, the symlinks come along, and inside the nginx container they point to `/etc/letsencrypt/live/50.28.2.199.nip.io/fullchain.pem` — a path that doesn't exist in the container's filesystem. nginx follows the symlink, gets a dead path, crashes.
 
@@ -1178,16 +1178,49 @@ docker compose logs nginx --tail=5
 ```
 
 (httpd is now disabled — port 80 is free, stack came all the way up. Just the cert content issue remains.)
-<!-- agent:boundary:4633d724 -->
+```
+[root@oddball-business app]# ls -la certs/
+total 36
+drwxr-xr-x 7 root root 4096 Apr  9 22:40 .
+drwxr-xr-x 9 root root 4096 Apr  9 19:09 ..
+drwx------ 3 root root 4096 Apr  9 19:13 accounts
+drwx------ 3 root root 4096 Apr  9 19:13 archive
+-rw-r--r-- 1 root root 2860 Apr  9 22:40 fullchain.pem
+drwx------ 3 root root 4096 Apr  9 19:13 live
+-rw------- 1 root root  227 Apr  9 22:40 privkey.pem
+drwxr-xr-x 2 root root 4096 Apr  9 22:01 renewal
+drwxr-xr-x 5 root root 4096 Apr  9 19:13 renewal-hooks
+[root@oddball-business app]# docker compose up -d
+[+] up 4/4
+ ✔ Container app-redis-1     Running                                                                                                                                                                                                       0.0s
+ ✔ Container app-db-1        Running                                                                                                                                                                                                       0.0s
+ ✔ Container app-wordpress-1 Running                                                                                                                                                                                                       0.0s
+ ✔ Container app-nginx-1     Started                                                                                                                                                                                                       0.1s
+[root@oddball-business app]# docker compose logs nginx --tail=5
+nginx-1  | 10-listen-on-ipv6-by-default.sh: info: /etc/nginx/conf.d/default.conf is not a file or does not exist
+nginx-1  | /docker-entrypoint.sh: Sourcing /docker-entrypoint.d/15-local-resolvers.envsh
+nginx-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/20-envsubst-on-templates.sh
+nginx-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/30-tune-worker-processes.sh
+nginx-1  | /docker-entrypoint.sh: Configuration complete; ready for start up
+```
+### Re: nginx is up (HEAD)
+
+No certificate error in the logs — "Configuration complete; ready for start up" is the clean exit. All 4 containers running. The cert fix worked.
+
+Test the site:
+- `https://50.28.2.199.nip.io` — should load WordPress
+- `http://50.28.2.199.nip.io` — should redirect to HTTPS
+
+If WordPress loads (even if it looks like a fresh install or shows a DB error), the stack is working. Next step is the backup import.
+<!-- agent:boundary:763e52ca -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Remove symlinks, copy real cert files → `docker compose up -d`
-- [ ] Verify nginx up + test `https://50.28.2.199.nip.io`
+- [ ] Test `https://50.28.2.199.nip.io` — confirm site loads
 - [ ] **Server step 10:** Transfer + import backup, `wp search-replace` domain
-- [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot
+- [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot for real domain
 - [ ] Clean spam comments post-import
 - [ ] Plugin audit: delete `worker`, `wpmudev-updates`; pick TaxJar OR AvaTax
 - [ ] Set up cron jobs (SSL renewal + daily backup)

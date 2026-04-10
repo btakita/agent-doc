@@ -2234,7 +2234,7 @@ ssh root@50.28.2.199 "docker restart app-nginx-1"
 ```
 
 ❯ Still has the original issues.
-### Re: orphan nginx not binding ports — need to find what's on 443 (HEAD)
+### Re: orphan nginx not binding ports — need to find what's on 443
 
 `app-nginx-1` is crash-looping AND has `"Ports": {}` — it's not bound to any host ports, so it's **not handling any traffic**. Something else is on port 443 causing the redirect.
 
@@ -2243,27 +2243,84 @@ Check what's actually listening on 80 and 443:
 ssh root@50.28.2.199 "ss -tlnp | grep -E ':80|:443'"
 ```
 
+❯ Do I need to restart apache?
+```
+[root@oddball-business app]# ss -tlnp | grep -E ':80|:443'
+LISTEN 0      30000           127.0.0.1:8080       0.0.0.0:*    users:(("docker-proxy",pid=1318669,fd=8))
+LISTEN 0      511                     *:443              *:*    users:(("httpd",pid=1283314,fd=8),("httpd",pid=1277235,fd=8),("httpd",pid=1277176,fd=8),("httpd",pid=1277130,fd=8),("httpd",pid=1277127,fd=8),("httpd",pid=1277038,fd=8))
+LISTEN 0      511                     *:80               *:*    users:(("httpd",pid=1283314,fd=4),("httpd",pid=1277235,fd=4),("httpd",pid=1277176,fd=4),("httpd",pid=1277130,fd=4),("httpd",pid=1277127,fd=4),("httpd",pid=1277038,fd=4))
+```
+
 And all running Docker containers with their port bindings:
 ```bash
 ssh root@50.28.2.199 "docker ps --format 'table {{.Names}}\t{{.Ports}}\t{{.Status}}'"
+```
+
+```
+[root@oddball-business app]# docker ps --format 'table {{.Names}}\t{{.Ports}}\t{{.Status}}'
+NAMES             PORTS                    STATUS
+app-wordpress-1   127.0.0.1:8080->80/tcp   Up 7 hours
+app-redis-1       6379/tcp                 Up 7 hours
+app-db-1          3306/tcp                 Up 7 hours
+app-nginx-1                                Restarting (1) 36 seconds ago
 ```
 
 InterWorx/Apache may also have an SSL vhost for `monsterrodholders.com` that's intercepting port 443. Check:
 ```bash
 ssh root@50.28.2.199 "grep -r 'monsterrodholders' /etc/httpd/conf/ /etc/httpd/conf.d/ 2>/dev/null"
 ```
-<!-- agent:boundary:5754193d -->
+```
+[root@oddball-business app]# grep -r 'monsterrodholders' /etc/httpd/conf/ /etc/httpd/conf.d/ 2>/dev/null
+```
+### Re: Apache owns 80 + 443 — need to find InterWorx vhost config (HEAD)
+
+Now the picture is clear:
+
+- **httpd (Apache)** owns port 80 AND port 443 — InterWorx manages all traffic
+- `app-wordpress-1` is only on `127.0.0.1:8080` (loopback, not accessible publicly)
+- `app-nginx-1` crash-looping with no ports — not involved
+- No `monsterrodholders` config in `/etc/httpd/conf/` or `/etc/httpd/conf.d/`
+
+The redirect is coming from an Apache SSL vhost that InterWorx created outside the standard conf.d path. InterWorx often stores these in `/home/<user>/` or `/var/interworx/`.
+
+Find it:
+```bash
+ssh root@50.28.2.199 "find /etc/httpd /home -name '*.conf' 2>/dev/null | xargs grep -l 'monsterrodholders' 2>/dev/null"
+```
+
+Also check InterWorx-specific paths:
+```bash
+ssh root@50.28.2.199 "find /var/interworx /etc/interworx -name '*.conf' 2>/dev/null | head -30"
+```
+
+**The fix (once the vhost is found):** Add reverse proxy directives to route Apache → WordPress on `127.0.0.1:8080`:
+```apache
+ProxyPreserveHost On
+ProxyPass / http://127.0.0.1:8080/
+ProxyPassReverse / http://127.0.0.1:8080/
+```
+
+Add this to both the HTTP (:80) and SSL (:443) vhost blocks for the domain. Then:
+```bash
+ssh root@50.28.2.199 "apachectl configtest && systemctl reload httpd"
+```
+
+No restart needed — `reload` is sufficient after config changes.
+
+**Re: Do I need to restart Apache?** Not yet — find the vhost file first.
+<!-- agent:boundary:8c238bbd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Run `ss -tlnp | grep -E ':80|:443'` to find what's bound to those ports
-- [ ] Run `docker ps` with port info to see active containers
-- [ ] Check Apache/httpd configs for monsterrodholders.com SSL vhost
-- [ ] Stop/fix the crash-looping `app-nginx-1` container
-- [ ] Configure correct handler for HTTPS on 443
-- [ ] Configure Apache proxy for HTTP (InterWorx constraint)
+- [ ] Find InterWorx vhost config: `find /etc/httpd /home -name '*.conf' | xargs grep -l 'monsterrodholders'`
+- [ ] Check InterWorx paths: `find /var/interworx /etc/interworx -name '*.conf'`
+- [ ] Add ProxyPass directives to HTTP + SSL vhosts → `127.0.0.1:8080`
+- [ ] `apachectl configtest && systemctl reload httpd`
+- [ ] Verify `http://50.28.2.199.nip.io/` loads WordPress via Apache proxy
+- [ ] Verify `https://50.28.2.199.nip.io/` loads without redirect
+- [ ] Fix crash-looping `app-nginx-1` (or remove from docker-compose)
 - [ ] `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`
 - [ ] Copy uploads into wordpress container (if not done)
 - [ ] Install + activate new theme

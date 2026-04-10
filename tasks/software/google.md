@@ -34,7 +34,7 @@ Corky handles correspondence: email (Gmail API), LinkedIn, YouTube. A Google Dri
 Current corky workflow: local files → Gmail/LinkedIn/YouTube APIs. If drafts live in Google Docs rather than local files, the integration would be valuable. If not, the benefit is minimal.
 
 ❯ Lets add a feature to add useful skills + runbooks from https://github.com/WadeWarren/gws-claude-plugin into corky
-### Re: Add gws skills + runbooks into corky (HEAD)
+### Re: Add gws skills + runbooks into corky
 
 [WadeWarren/gws-claude-plugin](https://github.com/WadeWarren/gws-claude-plugin) wraps a `gws` CLI with 92 skills across 13 Google Workspace services (Gmail, Docs, Drive, Sheets, Slides, Calendar, Chat, Forms, Tasks, Keep, Meet, Classroom, Admin). Key gap it fills vs. native Claude: full Gmail send with attachments, full Docs/Sheets/Slides read-write, Google Chat/Tasks/Keep.
 
@@ -56,15 +56,31 @@ Current corky workflow: local files → Gmail/LinkedIn/YouTube APIs. If drafts l
 The `gws` CLI handles execution; the skill layer in corky orchestrates the workflow. No Rust code changes needed for an initial integration.
 
 **Next step:** Clone/review the gws plugin repo to confirm the CLI interface before writing the skill and runbooks.
-<!-- agent:boundary:9639232f -->
+
+❯ do
+❯ - [ ] Review gws CLI interface from https://github.com/WadeWarren/gws-claude-plugin
+❯ - [ ] Add `src/corky/.claude/skills/gws/SKILL.md`
+❯ - [ ] Add `src/corky/.agent/runbooks/gws-gmail-send.md`
+❯ - [ ] Add `src/corky/.agent/runbooks/gws-docs-draft.md`
+❯ - [ ] Document gws install prerequisite in corky AGENTS.md
+### Re: do (HEAD)
+
+All tasks complete.
+
+**[done] Review gws CLI interface** — gws is a Claude Code *plugin* (not standalone CLI), invoked via `/gws-*` slash skills. 92 skills across 13 Workspace services. Install: `claude plugin install gws`. Auth: `gws auth login`.
+
+**[done] `src/corky/.claude/skills/gws/SKILL.md`** — created. Documents all services (Gmail, Docs, Drive, Sheets, Calendar), personas, recipes, prerequisites, and links to runbooks.
+
+**[done] `src/corky/.agent/runbooks/gws-gmail-send.md`** — created. Covers when to use gws vs. corky native, send steps, threading for replies, confirmation gate, safety rules.
+
+**[done] `src/corky/.agent/runbooks/gws-docs-draft.md`** — created. Three workflows: read-from-Docs→send-via-corky, create-new-Doc, post-mortem/announcement recipes.
+
+**[done] Document gws prerequisite in corky AGENTS.md** — added `## Google Workspace Integration (gws)` section with install commands and when-to-use decision table.
+<!-- agent:boundary:b0428dbe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Review gws CLI interface from https://github.com/WadeWarren/gws-claude-plugin
-- [ ] Add `src/corky/.claude/skills/gws/SKILL.md`
-- [ ] Add `src/corky/.agent/runbooks/gws-gmail-send.md`
-- [ ] Add `src/corky/.agent/runbooks/gws-docs-draft.md`
-- [ ] Document gws install prerequisite in corky AGENTS.md
+
 <!-- /agent:pending -->

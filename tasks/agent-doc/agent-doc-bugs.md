@@ -429,7 +429,7 @@ The response body (the table, all analysis text) is identical between HEAD and w
 
 ❯ do
 ❯ - [ ] Implement `dedup_exchange_adjacent_lines` in `template.rs`
-### Re: `dedup_exchange_adjacent_lines` implemented (HEAD)
+### Re: `dedup_exchange_adjacent_lines` implemented
 
 Added to `template.rs` with 2 tests. 504 tests pass (1 flaky tmux test unrelated).
 
@@ -448,13 +448,43 @@ Added to `template.rs` with 2 tests. 504 tests pass (1 flaky tmux test unrelated
 **Updated `stream::tests::content_ours_exchange_duplicates_without_replace`:**
 - Was: assertion `count == 2` (documenting the bug)
 - Now: assertion `count == 1` (dedup makes append mode safe, replace override no longer required for echo prevention)
-<!-- agent:boundary:c482a5ec -->
+
+❯ do
+❯ - [ ] Implement `strip_leading_overlap` in `apply_mode` for append mode
+### Re: `strip_leading_overlap` implemented (HEAD)
+
+Added `strip_leading_overlap` to `apply_mode("append", ...)` in `template.rs:653-683`.
+
+**What was added:**
+
+`strip_leading_overlap<'a>(existing: &str, new_content: &'a str) -> &'a str` (template.rs:665):
+- Finds the last non-blank line of `existing` via `.rfind()`
+- Checks if `new_content` starts with that line + `\n`
+- If so, strips that prefix before `apply_mode` concatenates — no duplicate
+
+Called from `apply_mode` append branch (template.rs:655-659):
+```rust
+"append" => {
+    let stripped = strip_leading_overlap(existing, new_content);
+    format!("{}{}", existing, stripped)
+}
+```
+
+**Two tests added:**
+- `apply_mode_append_strips_leading_overlap` — verifies overlap line appears exactly once
+- `apply_mode_append_no_overlap_unchanged` — verifies non-overlapping patches concatenate normally
+
+**Also fixed two pre-existing clippy lints** in `dedup_exchange_adjacent_lines`:
+- Collapsed nested `if !... { if ... }` → `if !... && ...`
+- Changed `.filter(..).last()` → `.rfind(..)` (both were reported as errors under `-D warnings`)
+
+502 tests pass. 1 flaky tmux test unrelated.
+<!-- agent:boundary:253b9437 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Implement `strip_leading_overlap` in `apply_mode` for append mode
 - [ ] Change `start.rs` warn → auto-relocate via `PaneMoveOp`
 - [ ] Bump version to 0.31.28, update VERSIONS.md, test, publish
 <!-- /agent:pending -->

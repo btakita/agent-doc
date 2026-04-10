@@ -280,7 +280,7 @@ v0.31.27 released:
 ❯ In tasks/software/mise.md, the `❯ How do I configure .mise.toml to read .env with shell expansion. See .env with $(pass ...)` was duplicated in the response patch.
 ❯ Please find all cases where this can happen...vertically and horizontally.
 ❯ Please add safeguards against this happening if nondeterminism is the cause.
-### Re: exchange duplication + recurring session drift (HEAD)
+### Re: exchange duplication + recurring session drift
 
 **Root cause — mise.md duplication:**
 
@@ -401,7 +401,32 @@ This is the self-healing version of the pane_policy guard — instead of warning
 1. `dedup_exchange_adjacent_lines` in `template.rs` after `apply_patches` (V1/V2 fix)
 2. `strip_leading_overlap` in `apply_mode("append", ...)` (V1 fix, complementary)  
 3. `start.rs` auto-relocate instead of warn-only (H2 recurring drift fix)
-<!-- agent:boundary:c7a63649 -->
+
+Why is the response patch not committed?
+### Re: why is the response patch not committed? (HEAD)
+
+The response IS committed. Here's what `agent-doc commit` actually does:
+
+**Staging — not `git add <file>`:**
+`agent-doc commit` uses `git hash-object` to create a git object from the snapshot content, then `git update-index --cacheinfo` to stage that object at the file path. The working tree file is never written. So:
+- Index (staged) = snapshot content → committed
+- Working tree = snapshot + your new prompt → "modified" (green gutter)
+
+**The `(HEAD)` mechanism creates the blue gutter:**
+Before staging, `add_head_marker` appends ` (HEAD)` to the last shallow heading in the snapshot. After commit succeeds, `strip_head_markers` removes it from the snapshot and working tree. This creates exactly ONE modified line (the `### Re: ...` heading — `(HEAD)` in index, no `(HEAD)` in working tree), which shows as a blue gutter line and acts as the visual boundary between committed agent response and uncommitted user input.
+
+**The diff you see (`HEAD` → working tree) is intentional:**
+```diff
+-### Re: exchange duplication + recurring session drift (HEAD)   ← committed, has (HEAD)
++### Re: exchange duplication + recurring session drift           ← working tree, stripped
+-<!-- agent:boundary:c7a63649 -->                                 ← preflight repositioned it
++<!-- agent:boundary:38528354 -->
++
++Why is the response patch not committed?                         ← your new prompt (green)
+```
+
+The response body (the table, all analysis text) is identical between HEAD and working tree — no gutter marks on those lines. Only the `(HEAD)` heading line (blue, by design) and your new question (green, uncommitted) differ.
+<!-- agent:boundary:acde9c6b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

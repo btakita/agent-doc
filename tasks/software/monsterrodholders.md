@@ -1684,7 +1684,7 @@ networks:
 ```
 
 **Simplest path if you want to skip debugging nginx:** Switch to `wordpress:apache` image. Apache inside Docker handles PHP + static files, listens on 80, map to host 8080, host Apache proxies to it. Eliminates FastCGI and the nginx DNS issue entirely.
-<!-- agent:boundary:48fe3d35 -->
+<!-- agent:boundary:6f39ac2f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

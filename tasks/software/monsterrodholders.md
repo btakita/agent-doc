@@ -67,7 +67,7 @@ Note: this disables mod_security for `/wp-login.php` and `/wp-admin/*` only. The
 ❯ Add a rule to exclude Sold Out items from the home page. The items should show on the home page when inventory is added.
 
 ❯ The footer should have links to all of the categories and other pages on the website.
-### Re: sold-out exclusion + footer (HEAD)
+### Re: sold-out exclusion + footer
 
 **Sold-out items hidden ✓**
 
@@ -84,14 +84,27 @@ Added to Footer 2 (assigned to `footer` location):
 Existing 16 items kept: Shop, Rod Holders, Rod Holder Bases, Boat Accessories, About Us, Contact Us, Blog, Certified Resellers, Pro Staff, Sponsorship Application, My Account, Cart, Checkout, Rewards Program, Affiliate Area, Wildcatters TV
 
 Blocksy will wrap these into columns automatically. If the layout needs 4 columns instead of 3, adjust under Customize → Footer → Footer Columns.
-<!-- agent:boundary:b1d16664 -->
+
+❯ Deploy updates. Use ssh with my default ssh key to login to make updates. Ensure the changes are in the git repo.
+### Re: deploy to git (HEAD)
+
+`wp-to-git.sh` ran and pushed ✓
+
+```
+[main 1b0cbd2] sync: WP content 2026-04-10 18:14
+ 1 file changed, 33008 insertions(+), 32360 deletions(-)
+→ github-monsterrodholders:btakita/monsterrodholders-dev.git main → main
+```
+
+All recent WP changes are now in git: home page (cover block, best sellers, bases layout), footer menu (33 items), out-of-stock hiding, page deletions.
+<!-- agent:boundary:98319e18 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Verify home page in browser — sold-out products no longer visible
-- [ ] Verify footer renders all 33 links in a clean grid
+- [ ] Verify home page in browser — Cover block hero, Best Sellers, sold-out items hidden
+- [ ] Verify footer renders 33 links cleanly
 - [ ] Delete Recently Viewed Products page (18849)
 - [ ] DNS flip: point monsterrodholders.com → 50.28.2.199
 - [ ] Respond to 9 real customer order inquiries in comment hold queue

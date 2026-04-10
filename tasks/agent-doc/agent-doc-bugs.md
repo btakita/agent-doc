@@ -336,7 +336,7 @@ Next: manual testing gate before release.
 ❯ - antigravity
 ❯ - ki
 ❯ ![img_4.png](img_4.png)
-### Re: IDE/Editor for AWS server + agent-doc (HEAD)
+### Re: IDE/Editor for AWS server + agent-doc
 
 Setup context from your image: Ubuntu 24 LTS, Docker, ripgrep, Claude Code CLI (via sh script), tmux — SSH-based access. Primary constraint: time + cost efficient, not resource-intensive like JetBrains.
 
@@ -359,6 +359,8 @@ For agent-doc, the core editing loop is: **edit a markdown file → Claude Code 
 - Modal editing has a learning curve if not already familiar
 
 **Integration estimate:** 1–2 days for a solid Lua plugin with socket listener + buffer reload + gitsigns refresh.
+
+❯ Give me a full breakdown as to why it will take 1-2 days? Explain how I can significantly reduce this development time.
 
 ---
 
@@ -433,7 +435,80 @@ I'm not familiar enough with these editors to give accurate pros/cons or integra
 **Fallback: vscode Remote SSH.** If you want a GUI editor with zero config investment, VS Code Remote SSH is the most mature path and has the easiest plugin API for the agent-doc IPC integration.
 
 **Skip for this use case:** Zed (IPC extension path is uncertain), cursor (redundant AI), vim (lower ceiling than neovim for the same effort).
-<!-- agent:boundary:c2b93587 -->
+### Re: neovim integration breakdown + time reduction (HEAD)
+
+The 1–2 day estimate covers a **full plugin with live IPC** (same depth as the JetBrains plugin). Here's what's inside it:
+
+#### What the 1–2 days actually includes
+
+| Task | Hours | Notes |
+|------|-------|-------|
+| Understand agent-doc IPC protocol | 1–2h | Read `src/agent-doc/src/ipc.rs` / ffi.rs, understand socket path convention + message format |
+| Lua socket client (`vim.loop.new_pipe`) | 2–3h | Connect to Unix socket, read events, handle reconnect |
+| Buffer reload logic | 1h | `vim.cmd('checktime')` in right context, handle multiple windows |
+| gitsigns refresh | 0.5h | `require('gitsigns').refresh()` after commit event |
+| Plugin packaging (lazy.nvim spec) | 1–2h | config API, keymaps, BufRead autocmd |
+| Iteration/debugging | 2–4h | Socket timing, race between write and reload, gitsigns lag |
+| **Total** | **7–12h** | **= 1–2 days** |
+
+The majority of the time is **IPC protocol research + iteration/debugging** — not the Lua itself.
+
+---
+
+#### How to cut it to under 2 hours
+
+**Tier 0 — Zero code, works today (15 min):**
+
+```lua
+-- In your init.lua or a small agent-doc.lua snippet
+vim.opt.autoread = true
+vim.api.nvim_create_autocmd({ "CursorHold", "FocusGained" }, {
+  command = "checktime",
+})
+```
+
+neovim will re-read the file from disk whenever you pause or refocus. gitsigns auto-refreshes on buffer reload. No IPC, no plugin, no socket. Works immediately.
+
+**Limitation:** Reload fires on cursor pause (~4s), not instantly on agent-doc commit. For most workflows this is fine — you're reading the response, not racing a clock.
+
+**Tier 1 — Filesystem event watcher (1–2h):**
+
+Use `vim.loop.new_fs_event()` to watch the markdown file for writes:
+
+```lua
+local function watch_agent_doc(path)
+  local handle = vim.loop.new_fs_event()
+  handle:start(path, {}, vim.schedule_wrap(function()
+    vim.cmd('checktime')
+    require('gitsigns').refresh()
+  end))
+  return handle
+end
+
+vim.api.nvim_create_autocmd("BufRead", {
+  pattern = "*.md",
+  callback = function(ev)
+    watch_agent_doc(vim.api.nvim_buf_get_name(ev.buf))
+  end,
+})
+```
+
+This fires **instantly** when agent-doc writes the file — no socket needed. libuv (`vim.loop`) wraps `inotify` on Linux. This is the sweet spot: near-instant reload, ~50 lines of Lua, no protocol research.
+
+**Tier 2 — Full socket IPC (1–2 more days):**
+
+Only worth it if you need the socket to carry structured events (e.g., "only refresh the gutter, don't reload the whole buffer"). For the basic use case (reload + gitsigns refresh), Tier 1 is equivalent.
+
+---
+
+#### Recommended path
+
+1. **Now (15 min):** Add `autoread` + `CursorHold` to your dotfiles. Works on any server immediately.
+2. **This week (1–2h):** Add the `fs_event` watcher. Instant reload without IPC.
+3. **Later (optional):** Socket-based IPC if you want sub-millisecond precision or structured event types.
+
+The key insight: the JetBrains plugin needed JNA + socket because JetBrains has no `inotify` hook. neovim has `vim.loop` (libuv) built in — filesystem events are native.
+<!-- agent:boundary:26552a2d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -441,5 +516,5 @@ I'm not familiar enough with these editors to give accurate pros/cons or integra
 <!-- agent:pending patch=replace -->
 - [ ] Manual testing: verify `# On the server — run once` no longer gets `(HEAD)` in a new commit
 - [ ] Release v0.31.31: `cargo publish`, `maturin publish`, GitHub Release with binary
-- [ ] (optional) neovim plugin for agent-doc IPC integration
+- [ ] (optional) neovim plugin: Tier 0 autoread config → Tier 1 fs_event watcher
 <!-- /agent:pending -->

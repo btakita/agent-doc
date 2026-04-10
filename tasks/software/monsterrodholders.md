@@ -103,7 +103,7 @@ All recent WP changes are now in git: home page (cover block, best sellers, base
 **Map removed ✓** — the Google Maps iframe (`777 KY-434, Lebanon Junction, KY 40150`) is gone from the Contact page. Kept the contact info text (address, phone, email) and the Zoho support form on the left.
 
 Pushed to git: `1ff234b sync: WP content 2026-04-10 18:17`.
-<!-- agent:boundary:fcaed07e -->
+<!-- agent:boundary:0e123bf1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

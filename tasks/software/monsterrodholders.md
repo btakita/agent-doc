@@ -1064,7 +1064,7 @@ nginx-1  | /docker-entrypoint.sh: Configuration complete; ready for start up
 nginx-1  | 2026/04/10 02:15:01 [emerg] 1#1: cannot load certificate "/etc/nginx/certs/fullchain.pem": BIO_new_file() failed (SSL: error:80000002:system library::No such file or directory:calling fopen(/etc/nginx/certs/fullchain.pem, r) error:10000080:BIO routines::no such file)
 nginx-1  | nginx: [emerg] cannot load certificate "/etc/nginx/certs/fullchain.pem": BIO_new_file() failed (SSL: error:80000002:system library::No such file or directory:calling fopen(/etc/nginx/certs/fullchain.pem, r) error:10000080:BIO routines::no such file)
 ```
-### Re: same error — certbot steps not run yet (HEAD)
+### Re: same error — certbot steps not run yet
 
 Same nginx failure — the certbot/copy steps haven't been executed yet. Run the full sequence on the server:
 
@@ -1092,13 +1092,99 @@ docker compose logs nginx --tail=10
 ```
 
 Paste the output from step 3 if certbot fails.
-<!-- agent:boundary:4e25ffa2 -->
+```
+[root@oddball-business app]# docker compose down
+[+] down 5/5
+ ✔ Container app-nginx-1     Removed                                                                                                                                                                                                       0.0s
+ ✔ Container app-redis-1     Removed                                                                                                                                                                                                       0.2s
+ ✔ Container app-wordpress-1 Removed                                                                                                                                                                                                       0.1s
+ ✔ Container app-db-1        Removed                                                                                                                                                                                                       0.3s
+ ✔ Network app_wp_net        Removed                                                                                                                                                                                                       0.1s
+[root@oddball-business app]# dnf install -y certbot
+Last metadata expiration check: 0:25:37 ago on Thu 09 Apr 2026 09:58:24 PM EDT.
+Package certbot-3.1.0-1.el9.noarch is already installed.
+Dependencies resolved.
+Nothing to do.
+Complete!
+[root@oddball-business app]# certbot certonly --standalone -d 50.28.2.199.nip.io \
+  --non-interactive --agree-tos \
+  -m admin@monsterrodholders.com
+Saving debug log to /var/log/letsencrypt/letsencrypt.log
+Certificate not yet due for renewal
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+Certificate not yet due for renewal; no action taken.
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+[root@oddball-business app]# cp /etc/letsencrypt/live/50.28.2.199.nip.io/fullchain.pem \
+   /opt/monsterrodholders/app/certs/fullchain.pem
+cp: '/etc/letsencrypt/live/50.28.2.199.nip.io/fullchain.pem' and '/opt/monsterrodholders/app/certs/fullchain.pem' are the same file
+[root@oddball-business app]# cp /etc/letsencrypt/live/50.28.2.199.nip.io/privkey.pem \
+   /opt/monsterrodholders/app/certs/privkey.pem
+cp: '/etc/letsencrypt/live/50.28.2.199.nip.io/privkey.pem' and '/opt/monsterrodholders/app/certs/privkey.pem' are the same file
+[root@oddball-business app]# docker compose up -d
+[+] up 4/5
+ ✔ Network app_wp_net        Created                                                                                                                                                                                                       0.0s
+ ✔ Container app-db-1        Started                                                                                                                                                                                                       0.2s
+ ✔ Container app-redis-1     Started                                                                                                                                                                                                       0.3s
+ ✔ Container app-wordpress-1 Started                                                                                                                                                                                                       0.4s
+ ⠸ Container app-nginx-1     Starting                                                                                                                                                                                                      0.5s
+Error response from daemon: failed to set up container networking: driver failed programming external connectivity on endpoint app-nginx-1 (e2af03870dac727f00dda47f2eed57bf0a2facbf352d5a80c67b0ba7be6bfda3): failed to bind host port 0.0.0.0:80/tcp: address already in use
+[root@oddball-business app]# docker compose down
+[+] down 5/5
+ ✔ Container app-redis-1     Removed                                                                                                                                                                                                       0.2s
+ ✔ Container app-nginx-1     Removed                                                                                                                                                                                                       0.0s
+ ✔ Container app-wordpress-1 Removed                                                                                                                                                                                                       0.1s
+ ✔ Container app-db-1        Removed                                                                                                                                                                                                       0.3s
+ ✔ Network app_wp_net        Removed                                                                                                                                                                                                       0.1s
+[root@oddball-business app]# systemctl stop httpd
+[root@oddball-business app]# systemctl disable httpd
+[root@oddball-business app]# systemctl stop httpd
+[root@oddball-business app]# docker compose up -d
+[+] up 5/5
+ ✔ Network app_wp_net        Created                                                                                                                                                                                                       0.0s
+ ✔ Container app-redis-1     Started                                                                                                                                                                                                       0.3s
+ ✔ Container app-db-1        Started                                                                                                                                                                                                       0.3s
+ ✔ Container app-wordpress-1 Started                                                                                                                                                                                                       0.4s
+ ✔ Container app-nginx-1     Started                                                                                                                                                                                                       0.5s
+[root@oddball-business app]# docker compose logs nginx --tail=10
+nginx-1  | /docker-entrypoint.sh: /docker-entrypoint.d/ is not empty, will attempt to perform configuration
+nginx-1  | /docker-entrypoint.sh: Looking for shell scripts in /docker-entrypoint.d/
+nginx-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/10-listen-on-ipv6-by-default.sh
+nginx-1  | 10-listen-on-ipv6-by-default.sh: info: /etc/nginx/conf.d/default.conf is not a file or does not exist
+nginx-1  | /docker-entrypoint.sh: Sourcing /docker-entrypoint.d/15-local-resolvers.envsh
+nginx-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/20-envsubst-on-templates.sh
+nginx-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/30-tune-worker-processes.sh
+nginx-1  | /docker-entrypoint.sh: Configuration complete; ready for start up
+nginx-1  | 2026/04/10 02:24:55 [emerg] 1#1: cannot load certificate "/etc/nginx/certs/fullchain.pem": BIO_new_file() failed (SSL: error:80000002:system library::No such file or directory:calling fopen(/etc/nginx/certs/fullchain.pem, r) error:10000080:BIO routines::no such file)
+nginx-1  | nginx: [emerg] cannot load certificate "/etc/nginx/certs/fullchain.pem": BIO_new_file() failed (SSL: error:80000002:system library::No such file or directory:calling fopen(/etc/nginx/certs/fullchain.pem, r) error:10000080:BIO routines::no such file)
+```
+### Re: symlinks inside Docker bind mount don't resolve in the container (HEAD)
+
+Good progress — certs now exist on the host (`cp` said "same file" = the symlink resolves correctly). But the problem is the symlinks themselves. When Docker mounts `./certs:/etc/nginx/certs:ro`, the symlinks come along, and inside the nginx container they point to `/etc/letsencrypt/live/50.28.2.199.nip.io/fullchain.pem` — a path that doesn't exist in the container's filesystem. nginx follows the symlink, gets a dead path, crashes.
+
+Fix: remove the symlinks, replace with actual file copies:
+
+```bash
+cd /opt/monsterrodholders/app
+rm certs/fullchain.pem certs/privkey.pem
+cp /etc/letsencrypt/live/50.28.2.199.nip.io/fullchain.pem certs/fullchain.pem
+cp /etc/letsencrypt/live/50.28.2.199.nip.io/privkey.pem certs/privkey.pem
+
+# Verify: should show -rw-r--r-- regular files, not lrwxrwxrwx symlinks
+ls -la certs/
+
+docker compose up -d
+docker compose logs nginx --tail=5
+```
+
+(httpd is now disabled — port 80 is free, stack came all the way up. Just the cert content issue remains.)
+<!-- agent:boundary:f3d1e1e9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Run certbot sequence (steps above) on server
+- [ ] Remove symlinks, copy real cert files → `docker compose up -d`
 - [ ] Verify nginx up + test `https://50.28.2.199.nip.io`
 - [ ] **Server step 10:** Transfer + import backup, `wp search-replace` domain
 - [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot

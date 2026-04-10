@@ -685,14 +685,38 @@ ssh root@50.28.2.199 'docker compose -f /opt/monsterrodholders/app/docker-compos
 ```
 
 Once I have the page IDs and the raw content, I'll build the full Gutenberg replacement and update via `wp post update`.
-<!-- agent:boundary:f6599350 -->
+
+❯ Should I setup an allowed ssh key to login to ssh...to avoid the password issues?
+### Re: SSH key setup
+
+Yes — add a `~/.ssh/config` entry with `IdentitiesOnly yes` to pin which key to offer. That stops SSH from trying every agent key until the server rejects.
+
+**Check which key works:**
+```bash
+ssh -v root@50.28.2.199 exit 2>&1 | grep "Offering\|Authenticated"
+```
+
+**Add to `~/.ssh/config`:**
+```
+Host monsterrodholders
+  HostName 50.28.2.199
+  User root
+  IdentityFile ~/.ssh/<your_key>
+  IdentitiesOnly yes
+```
+
+After that, `ssh monsterrodholders` works cleanly and I can run server commands directly from this session.
+
+Paste `!cat ~/.ssh/config` here and I'll write the entry for you, or tell me which key file to use.
+<!-- agent:boundary:6205bab0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] User to paste: page list output + home page raw content
-❯ - [ ] Build Gutenberg replacement HTML for home page (preserve all text/links)
+- [ ] Add `~/.ssh/config` entry for 50.28.2.199 with IdentitiesOnly yes
+- [ ] Pull page IDs + home page raw content from server
+- [ ] Build Gutenberg replacement HTML for home page (preserve all text/links)
 - [ ] Update page content via `wp post update`
 - [ ] Verify rendered output in browser
 - [ ] On server: `git config pull.rebase true && git config user.name/email`

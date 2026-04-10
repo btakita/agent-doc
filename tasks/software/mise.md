@@ -113,7 +113,7 @@ default-cache-ttl 604800
 max-cache-ttl 604800    
 ```
 
-### Re: cache already long — likely a stuck agent (HEAD)
+### Re: cache already long — likely a stuck agent
 
 With a 7-day cache, that 23-minute 99% CPU run isn't decryption thrashing — gpg-agent is stuck in a loop. Kill and restart it:
 
@@ -125,7 +125,7 @@ It restarts on next `pass` call. No data loss.
 
 ❯ Is there a faster alternative to gpg?
 
-### Re: faster alternatives to GPG (HEAD)
+### Re: faster alternatives to GPG
 
 **`age` + `passage`** — best drop-in replacement:
 
@@ -143,6 +143,19 @@ for f in **/*.gpg; do
   pass show "${f%.gpg}" | age -r "$(age-keygen -y ~/.age/key.txt)" -o "${f%.gpg}.age"
   rm "$f"
 done
+```
+
+```
+❯ cd ~/.password-store
+for f in **/*.gpg; do
+  pass show "${f%.gpg}" | age -r "$(age-keygen -y ~/.age/key.txt)" -o "${f%.gpg}.age"
+  rm "$f"
+done
+age-keygen: error: failed to open input file "/home/brian/.age/key.txt": open /home/brian/.age/key.txt: no such file or directory
+age-keygen: report unexpected or unhelpful errors at https://filippo.io/age/report
+age: error: unknown recipient type: ""
+age: report unexpected or unhelpful errors at https://filippo.io/age/report
+rm: remove regular file 'briantakita.me/rw/AWS_SECRET_ACCESS_KEY.gpg'?
 ```
 
 **`secret-tool`** (GNOME Keyring / libsecret) — fastest for local secrets:
@@ -165,7 +178,62 @@ run = "sops -d secrets.env.sops > .env.local"
 ```
 
 **Recommendation:** If you want to keep the `pass` UX, switch to `passage` (age backend). If you want zero-overhead per-call reads, `secret-tool` with GNOME Keyring is the fastest option on Linux.
-<!-- agent:boundary:bef25b04 -->
+```
+❯ cd ~/.password-store
+for f in **/*.gpg; do
+  pass show "${f%.gpg}" | age -r "$(age-keygen -y ~/.age/key.txt)" -o "${f%.gpg}.age"
+  rm "$f"
+done
+age-keygen: error: failed to open input file "/home/brian/.age/key.txt": open /home/brian/.age/key.txt: no such file or directory
+age-keygen: report unexpected or unhelpful errors at https://filippo.io/age/report
+age: error: unknown recipient type: ""
+age: report unexpected or unhelpful errors at https://filippo.io/age/report
+rm: remove regular file 'briantakita.me/rw/AWS_SECRET_ACCESS_KEY.gpg'?
+```
+
+### Re: age key doesn't exist yet (HEAD)
+
+The key file needs to be generated first. `age-keygen -y` reads an existing key — it doesn't create one. Also the original script had no safety gate before `rm`, so it started deleting even when encryption failed.
+
+**Step 1: Generate the key:**
+
+```bash
+mkdir -p ~/.age
+age-keygen -o ~/.age/key.txt
+# Output: Public key: age1xxxxxxxxxxxxxxxxxx
+```
+
+Note the public key printed to stderr — use it directly in the migration instead of calling `age-keygen -y` in a subshell each iteration.
+
+**Step 2: Safe migration (encrypt then verify before delete):**
+
+```bash
+cd ~/.password-store
+PUBLIC_KEY="age1xxxxxxxxxx"   # from step 1 output
+
+for f in **/*.gpg; do
+  name="${f%.gpg}"
+  if pass show "$name" | age -r "$PUBLIC_KEY" -o "${name}.age"; then
+    echo "OK: $name"
+    rm -f "$f"
+  else
+    echo "FAILED: $name — keeping .gpg"
+  fi
+done
+```
+
+The `&&`-style guard means `.gpg` files are only deleted after successful age encryption. Answer `n` to any remaining `rm` prompts from the failed first run — the `.gpg` files are safe.
+
+**Step 3: Configure `passage` to use the key:**
+
+```bash
+mkdir -p ~/.passage
+ln -s ~/.age/key.txt ~/.passage/identities
+# passage looks for identities at ~/.passage/identities by default
+```
+
+Then `passage show <name>` should work the same as `pass show <name>`.
+<!-- agent:boundary:42599d8b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -158,7 +158,7 @@ Added 3 tests to `git.rs` (768 total, up from 765):
 - **`write_commit_lifecycle`** — full lifecycle: init repo, create doc + snapshot, call `commit()`, verify `agent-doc(session):` appears in git log
 
 All 768 tests pass.
-<!-- agent:boundary:7ed2fe01 -->
+<!-- agent:boundary:8336c04e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -49,7 +49,7 @@ Sessions v0.31.18–v0.31.28. Key decisions and fixes:
 - Manual testing gate: confirm v0.31.28 auto-relocate in live session, then publish: crates.io → PyPI → GitHub Release.
 
 ❯ release
-### Re: release (HEAD)
+### Re: release
 
 v0.31.28 released:
 
@@ -290,11 +290,48 @@ v0.31.30 + JB plugin v0.2.55 released.
 - **cargo install:** already at v0.31.30 (installed earlier)
 - **JB plugin:** `agent-doc-jetbrains-0.2.55.zip` + `-signed.zip` in `build/distributions/`
 - **Parent submodule pointer:** updated and pushed (`4997649e`)
-<!-- agent:boundary:9080b916 -->
+
+❯ In tasks/software/monsterrodholders.md
+❯ We have `# On the server — run once` which is in a fenced comment.
+❯ `# On the server — run once (HEAD)` was committed. Why? We should guard against that using AST. Did something bypass the AST?
+❯ Do a vertical + horizontal analysis. Make sure we always use the AST over regex parsing unless it cannot be done.
+### Re: Bug 3 — `(HEAD)` inside fenced code block (HEAD)
+
+**Root cause (two interacting paths):**
+
+The old `is_fence_marker` toggled `in_fence` on every line starting with 3+ backticks — including ` ```bash `. But per CommonMark, a *closing* fence cannot have an info string. Only plain ` ``` ` (no language tag) can close a fence.
+
+In `tasks/software/monsterrodholders.md`, a plain ` ``` ` fence at line 526 opens a long terminal-output block. Inside it (lines 483–513), several ` ```bash ` sequences appear as literal content. Because the old tracker treated each ` ```bash ` as a fence toggle, the state inverted repeatedly. By line 597 (the real close), the Rust `in_fence` was `true` when CommonMark says `false`. Then:
+- Line 598: `### Re: wp-to-git.sh working ✓` — **not** collected as heading (wrong)
+- Line 607: ` ```bash ` — `in_fence` incorrectly flips to `false`
+- Line 608: `# On the server — run once` — seen as **outside** fence → gets `(HEAD)` ← bug
+
+**Four code paths replaced with AST-based detection:**
+
+1. `strip_head_markers` — was toggling `in_fence` with `is_fence_marker`; now uses `code_block_byte_ranges`
+2. `add_head_marker` Step 1 (cleanup) — same issue; now uses `code_block_byte_ranges(content)`
+3. `add_head_marker` Step 2 (heading collection) — primary introduction path; now uses `code_block_byte_ranges(&cleaned)`
+4. `add_head_marker` Step 3 (HEAD heading counts) — same issue; now uses `code_block_byte_ranges(hc)`
+5. `add_head_marker` re-application loop — was not checking fence context **at all** when re-applying markers from git HEAD; now computes `code_block_byte_ranges(head)` and skips any ` # comment (HEAD) ` that falls inside a code block in HEAD (prevents propagation of the baked-in bad marker)
+
+**`is_fence_marker` removed** — all callers replaced; no longer used.
+
+**New test:** `add_head_marker_bash_comment_inside_plain_fence` — exercises the exact failure path:
+- A plain ` ``` ` fence containing a ` ```bash ` line (old tracker would toggle here)
+- A real `### Re: new heading` after the fence
+- A ` ```bash ` fence with `# On the server — run once`
+
+All 770 unit tests pass. Pre-existing flaky tmux test (`send_keys_delivers_command_with_enter`) passes when run alone; intermittent in `make check` suite — unrelated to this change.
+
+**Version bumped to 0.31.31.** `cargo install --path .` done.
+
+Next: manual testing gate before release.
+<!-- agent:boundary:faa6a411 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-
+- [ ] Manual testing: verify `# On the server — run once` no longer gets `(HEAD)` in a new commit
+- [ ] Release v0.31.31: `cargo publish`, `maturin publish`, GitHub Release with binary
 <!-- /agent:pending -->

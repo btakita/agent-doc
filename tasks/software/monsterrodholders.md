@@ -1775,7 +1775,7 @@ Skip the installer. Import the SQL directly, copy wp-content, done.
 What format is the backup?
 
 ❯ zip with a *.sql file. I want to use a new theme. Have it exclude all plugins.
-### Re: zip with SQL — skip installer, imports only (HEAD)
+### Re: zip with SQL — skip installer, imports only
 
 Raw SQL + new theme + no plugins → only two things to import: **database** and **uploads**.
 
@@ -1798,7 +1798,7 @@ ls /tmp/backup/wp-content/uploads/ 2>/dev/null  # check if uploads are included
 source .env
 docker compose exec -T db mariadb \
   -u"${WORDPRESS_DB_USER}" -p"${WORDPRESS_DB_PASSWORD}" "${WORDPRESS_DB_NAME}" \
-  < /tmp/backup/your-backup.sql
+  < /opt/monsterrodholders/restore/backup.sql
 ```
 Replace `your-backup.sql` with the actual filename.
 
@@ -1817,20 +1817,41 @@ docker compose run --rm wpcli wp search-replace 'https://OLD-DOMAIN.com' 'https:
 ```
 
 What's the old domain on the SQL dump?
-<!-- agent:boundary:2ec83b48 -->
+❯ Can I switch the domain back to monsterrodholders.com once we test?
+Can I copy the container. Do the switch in the 
+### Re: domain switching + backup path confirmed (HEAD)
+
+Yes — switching back to `monsterrodholders.com` is the standard flow:
+
+1. **Import SQL** → DB has `monsterrodholders.com` as siteurl
+2. **search-replace → nip.io** for testing on the new server
+3. **Verify** everything looks correct on nip.io
+4. **Flip DNS** to the new server IP (`50.28.2.199`)
+5. **Run certbot** for a real SSL cert on `monsterrodholders.com`
+6. **search-replace → monsterrodholders.com** (switch back from nip.io)
+
+The site is only on nip.io temporarily — users on the live site never see it.
+
+**Confirm old domain before import:**
+```bash
+grep -m1 'siteurl' /opt/monsterrodholders/restore/backup.sql
+```
+Expected output: something like `'https://monsterrodholders.com'` — paste it and I'll fill in the exact search-replace command.
+<!-- agent:boundary:c54b6eef -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] `scp backup.zip root@50.28.2.199:/opt/monsterrodholders/app/`
-- [ ] Extract + import SQL into MariaDB container
-- [ ] Copy wp-content/uploads into wordpress container
-- [ ] `wp search-replace` old domain → nip.io temp domain
-- [ ] Verify site loads at https://50.28.2.199.nip.io
+- [ ] Confirm old domain: `grep -m1 'siteurl' /opt/monsterrodholders/restore/backup.sql`
+- [ ] Import SQL: `docker compose exec -T db mariadb ... < /opt/monsterrodholders/restore/backup.sql`
+- [ ] Copy uploads into wordpress container
+- [ ] `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`
+- [ ] Verify site at https://50.28.2.199.nip.io — content, images, pages
 - [ ] Install + activate new theme
-- [ ] Flip DNS, re-run certbot for real domain, `wp search-replace` → monsterrodholders.com
-- [ ] Clean spam comments post-import
-- [ ] Plugin audit: only install what's actually needed
+- [ ] Flip DNS → new server; run certbot for real cert
+- [ ] `wp search-replace 'https://50.28.2.199.nip.io' 'https://monsterrodholders.com' --all-tables`
+- [ ] Clean spam comments
+- [ ] Plugin audit: only install what's needed
 - [ ] Set up cron jobs (SSL renewal + daily backup)
 <!-- /agent:pending -->

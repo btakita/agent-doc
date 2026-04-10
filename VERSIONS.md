@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.28
+
+- **`start.rs` auto-relocate:** When claiming a pane from a terminal in a different tmux session than the project expects, automatically relocates the pane to the correct session before registration (was warn-only). Falls back to warn-only if no anchor pane exists in the expected session.
+- **`relocate_if_wrong_session` helper + 3 tests:** Extracted guard into a testable `pub(crate)` function; 3 `IsolatedTmux`-based tests cover noop, cross-session success, and no-anchor fallback.
+
 ## 0.31.27
 
 - **`pane_policy` module (tmux-router 0.3.10):** New `PaneMoveOp` + `CrossSession` enum as a mandatory gateway for all pane movement. `CrossSession::Deny` by default; `CrossSession::Allow { reason }` for intentional cross-session relocations. All 7 `join_pane` call sites in agent-doc migrated to use `PaneMoveOp`.

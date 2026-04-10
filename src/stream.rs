@@ -809,8 +809,9 @@ Done — all packages pushed.";
         assert!(content_ours.contains("Done — all packages pushed."));
     }
 
-    /// Verify that WITHOUT replace mode, exchange component WOULD duplicate
-    /// content (demonstrating the bug this fix prevents).
+    /// Verify that dedup_exchange_adjacent_lines prevents echo-duplication even
+    /// without replace mode override. Previously this test documented the bug
+    /// (count == 2); now dedup makes append mode safe (count == 1).
     #[test]
     fn content_ours_exchange_duplicates_without_replace() {
         let baseline = "\
@@ -830,17 +831,18 @@ user prompt here
         let (patches, unmatched) = crate::template::parse_patches(&patch).unwrap();
         let file = std::path::Path::new("test.md");
 
-        // Without mode override, exchange defaults to append → duplicates
+        // dedup_exchange_adjacent_lines now removes the echo duplication in append mode
         let content_no_override = crate::template::apply_patches(
             baseline, &patches, &unmatched, file,
         ).unwrap();
 
-        // With append mode, "user prompt here" appears twice (baseline + patch)
+        // "user prompt here" should appear exactly once — dedup prevents echo duplication
         assert_eq!(
             content_no_override.matches("user prompt here").count(),
-            2,
-            "Expected duplication without replace override:\n{}",
+            1,
+            "Expected dedup to prevent echo duplication in append mode:\n{}",
             content_no_override
         );
+        assert!(content_no_override.contains("Agent response."));
     }
 }

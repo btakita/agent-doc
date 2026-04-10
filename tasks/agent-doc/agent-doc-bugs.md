@@ -542,7 +542,7 @@ agent-doc claim tasks/software/claude-code.md
 
 Or ignore it — the drift warning is informational. agent-doc still routes to the correct pane; it just flags the cross-session topology as unusual.
 ❯ agent-doc is swapping panes with tmux session 1 again. Several. Why? We keep on having this issue. Architect the system so this never occurs again. Use the same flow to keep the tmux panes in the correct tmux session. The tmux panes should never be swapped into the wrong tmux session.
-### Re: session drift — root cause + architectural fix (HEAD)
+### Re: session drift — root cause + architectural fix
 
 #### Exact root cause
 
@@ -624,14 +624,29 @@ Run 'agent-doc claim <file>' from session 0 to fix each DRIFT entry.
 ```
 
 Low priority — the claim validation fix prevents new drift; audit is just UX for cleaning up existing state.
-<!-- agent:boundary:ceaa7cfa -->
+
+❯ do
+❯ - [ ] **Fix session drift**: add pane-session validation in `claim.rs` after pane_id resolved
+
+### Re: Fix session drift — implemented (HEAD)
+
+Added pane-session validation in `claim.rs` before registration (`src/agent-doc/src/claim.rs:168-195`):
+
+- After `pane_id` is resolved and `tmux` is created, checks `display-message #{session_name}` against `project_tmux_session()`
+- Mismatch → `anyhow::bail!("session mismatch: cross-session claim rejected")` with a helpful error message
+- `--force` allows cross-session with a warning
+- Removed the post-registration "note" log block (now superseded)
+- Updated module doc comment to describe the validation
+
+All claim tests pass (`21 passed`). The only failing test (`send_keys_delivers_command_with_enter`) is a pre-existing flaky tmux timing test in `route.rs`, unrelated to this change.
+<!-- agent:boundary:fe49eef0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Fix session drift**: add pane-session validation in `claim.rs` after pane_id resolved
 - [ ] Re-claim `tasks/software/claude-code.md` from session 0 to clear existing drift
-- [ ] Manual testing: verify `# On the server — run once` no longer gets `(HEAD)` in a new commit
-- [ ] Release v0.31.31: `cargo publish`, `maturin publish`, GitHub Release with binary
+- [ ] `cargo install --path .` — install locally and verify cross-session claim is rejected
+- [ ] Manual testing gate: verify feature works in a live session before publishing
+- [ ] Release v0.31.32: `cargo publish`, `maturin publish`, GitHub Release with binary
 <!-- /agent:pending -->

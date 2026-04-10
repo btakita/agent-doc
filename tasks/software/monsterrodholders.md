@@ -394,7 +394,7 @@ WP plugin POSTs to `http://host:PORT/sync` on content save, tiny server runs `wp
 
 ❯ I edited `crontab -e`.
 ❯ Can I run the script from the host system to see if the file are committed + pushed?
-### Re: running wp-to-git.sh manually (HEAD)
+### Re: running wp-to-git.sh manually
 
 Yes — run it from local via SSH:
 
@@ -418,14 +418,39 @@ ssh root@50.28.2.199 'cat /root/.ssh/monsterrodholders_deploy_rw.pub'
 ```
 
 Then run the script — it'll print each step: export WXR, git add/commit, git push.
-<!-- agent:boundary:4b16669b -->
+```
+[root@oddball-business app]# 'cd /opt/monsterrodholders/app && ./scripts/wp-to-git.sh'
+-bash: cd /opt/monsterrodholders/app && ./scripts/wp-to-git.sh: No such file or directory
+[root@oddball-business app]# cd /opt/monsterrodholders/app && ./scripts/wp-to-git.sh
+==> Exporting WordPress content (WXR)...
+WARN[0000] Found orphan containers ([app-nginx-1]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up.
+[+]  2/2t 2/22
+ ✔ Container app-db-1        Running                                                                                                                                                                                                       0.0s
+ ✔ Container app-wordpress-1 Running                                                                                                                                                                                                       0.0s
+Container app-wpcli-run-a3a653647a2d Creating
+Container app-wpcli-run-a3a653647a2d Created
+Error: The directory '/var/www/html/wp-content/exports' does not exist.
+```
+### Re: exports directory missing (HEAD)
+
+The exports dir doesn't exist inside the container. Fixed `scripts/wp-to-git.sh` to create it automatically — committed and pushed.
+
+**Immediate fix on the server:**
+```bash
+cd /opt/monsterrodholders/app
+git pull
+./scripts/wp-to-git.sh
+```
+
+`git pull` gets the updated script (which now runs `mkdir -p` before `wp export`), then re-run.
+<!-- agent:boundary:baf23d74 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] On server: check/generate write deploy key + add to GitHub with write access
-- [ ] Run `./scripts/wp-to-git.sh` manually to verify commit + push works
+- [ ] On server: `git pull` to get wp-to-git.sh fix, then re-run `./scripts/wp-to-git.sh`
+- [ ] Verify commit + push succeeds (need write deploy key — see server-setup.md)
 - [ ] On server: git pull + bootstrap theme files into wordpress/themes/blocksy/
 - [ ] (Optional) Set up Option 2 mu-plugin + inotify watcher for real-time sync
 - [ ] Decision: rebuild home page in Blocksy, or install WPBakery?

@@ -503,7 +503,7 @@ Extracted the guard into `pub(crate) fn relocate_if_wrong_session(tmux, pane_id,
 - `relocate_fails_gracefully_when_no_anchor` — expected session doesn't exist, returns `false`, pane stays in original session
 
 765 tests pass (all suites, including the new 3).
-<!-- agent:boundary:ca1aed68 -->
+<!-- agent:boundary:43ccb647 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

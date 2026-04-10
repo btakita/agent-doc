@@ -1413,7 +1413,7 @@ Should show `proxy_module`, `proxy_http_module`. If missing: `LoadModule proxy_m
 **3. InterWorx may regenerate Apache configs** — if InterWorx manages vhosts via its panel, it could overwrite `/etc/httpd/conf.d/monsterrodholders.conf`. Either add the domain through the InterWorx panel (if it has a reverse proxy option) or put the config somewhere InterWorx doesn't touch (check what directories it manages).
 
 Otherwise the architecture is solid — this is exactly how most WordPress + Docker + existing Apache setups work.
-<!-- agent:boundary:e8595bcb -->
+<!-- agent:boundary:d51bc21f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

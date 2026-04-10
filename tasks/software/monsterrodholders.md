@@ -1377,7 +1377,7 @@ Result:
 Want me to write out the full revised `docker-compose.yml` and nginx config for this architecture?
 
 ❯ Is this safe or can this cause problems?
-### Re: Is this safe or can this cause problems? (HEAD)
+### Re: Is this safe or can this cause problems?
 
 Yes, this is safe — it's a standard reverse proxy pattern. A few things to watch:
 
@@ -1413,7 +1413,35 @@ Should show `proxy_module`, `proxy_http_module`. If missing: `LoadModule proxy_m
 **3. InterWorx may regenerate Apache configs** — if InterWorx manages vhosts via its panel, it could overwrite `/etc/httpd/conf.d/monsterrodholders.conf`. Either add the domain through the InterWorx panel (if it has a reverse proxy option) or put the config somewhere InterWorx doesn't touch (check what directories it manages).
 
 Otherwise the architecture is solid — this is exactly how most WordPress + Docker + existing Apache setups work.
-<!-- agent:boundary:d51bc21f -->
+
+❯ Is this docker-compose setup safe to use with InterWorx?
+### Re: Is this docker-compose setup safe to use with InterWorx? (HEAD)
+
+The docker-compose setup with `127.0.0.1:8080:80` is safe with InterWorx. Here's the breakdown:
+
+**Why it's safe:**
+- Docker daemon runs independently — InterWorx doesn't manage it and can't interfere with it
+- Binding to `127.0.0.1:8080` avoids any port conflict with InterWorx's Apache (80/443)
+- Docker's internal networking (172.17.x.x bridge) doesn't overlap with anything InterWorx manages
+
+**One thing to watch — firewall:**
+InterWorx typically runs CSF (ConfigServer Firewall) or APF, which also manages iptables. Docker adds its own `DOCKER` iptables chain. These usually coexist fine, but if the site is unreachable after setup, check:
+```bash
+csf -s   # if CSF is installed — it may need to flush/reload after Docker starts
+iptables -L DOCKER -n  # verify Docker's chain is intact
+```
+
+**The main risk is the old config** — if `docker-compose.yml` still has `80:80` or `443:443` bindings from before, restarting Docker will fail to bind (InterWorx's Apache holds those ports). Make sure the ports are updated to `127.0.0.1:8080:80` before running `docker compose up`.
+
+Simplified check before launch:
+```bash
+# Verify no port conflicts
+ss -tlnp | grep ':80\|:443\|:8080'
+# Docker should only own 127.0.0.1:8080, Apache owns 80/443
+```
+
+Otherwise: Docker + InterWorx on the same host is a common setup and works reliably when Docker stays off the controlled ports.
+<!-- agent:boundary:c19fdc35 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

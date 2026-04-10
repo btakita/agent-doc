@@ -476,7 +476,7 @@ Container app-wpcli-run-d90191904c15 Creating
 Container app-wpcli-run-d90191904c15 Created
 Error: The directory '/var/www/html/wp-content/exports' is not writable.
 ```
-### Re: still not writable (HEAD)
+### Re: still not writable
 
 Both containers share the `wordpress_data` named volume, so the chown should have worked — but the write check kept failing. Root cause is likely that each `docker compose run` spawns a fresh container, and the writability check in WP-CLI inspects it differently. Simpler fix: export to `/tmp` and pipe stdout out in a single container run — no cross-container volume dependency:
 
@@ -523,14 +523,112 @@ Script already used `monsterrodholders_deploy` in `GIT_SSH_COMMAND` — but the 
 ```
 
 The server should now be able to run `./scripts/wp-to-git.sh` and push successfully with the key at `/root/.ssh/monsterrodholders_deploy`.
-<!-- agent:boundary:4f88d753 -->
+```
+[root@oddball-business app]# cd /opt/monsterrodholders/app && git pull && ./scripts/wp-to-git.sh
+remote: Enumerating objects: 11, done.
+remote: Counting objects: 100% (11/11), done.
+remote: Compressing objects: 100% (1/1), done.
+remote: Total 6 (delta 4), reused 6 (delta 4), pack-reused 0 (from 0)
+Unpacking objects: 100% (6/6), 504 bytes | 504.00 KiB/s, done.
+From github-monsterrodholders:btakita/monsterrodholders-dev
+   b2f9076..004725d  main       -> origin/main
+hint: You have divergent branches and need to specify how to reconcile them.
+hint: You can do so by running one of the following commands sometime before
+hint: your next pull:
+hint:
+hint:   git config pull.rebase false  # merge
+hint:   git config pull.rebase true   # rebase
+hint:   git config pull.ff only       # fast-forward only
+hint:
+hint: You can replace "git config" with "git config --global" to set a default
+hint: preference for all repositories. You can also pass --rebase, --no-rebase,
+hint: or --ff-only on the command line to override the configured default per
+hint: invocation.
+fatal: Need to specify how to reconcile divergent branches.
+[root@oddball-business app]# git fetch && git pull rebase
+fatal: 'rebase' does not appear to be a git repository
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+[root@oddball-business app]# git pull --rebase
+Successfully rebased and updated refs/heads/main.
+[root@oddball-business app]# cd /opt/monsterrodholders/app && git pull && ./scripts/wp-to-git.sh
+Already up to date.
+==> Exporting WordPress content (WXR)...
+WARN[0000] Found orphan containers ([app-nginx-1]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up.
+ Container app-db-1 Running
+ Container app-wordpress-1 Running
+ Container app-wpcli-run-03aa0e455053 Creating
+ Container app-wpcli-run-03aa0e455053 Created
+[main 47194dc] sync: WP content 2026-04-10 11:30
+ Committer: root <root@oddball-business.metalseed.net>
+Your name and email address were configured automatically based
+on your username and hostname. Please check that they are accurate.
+You can suppress this message by setting them explicitly. Run the
+following command and follow the instructions in your editor to edit
+your configuration file:
+
+    git config --global --edit
+
+After doing this, you may fix the identity used for this commit with:
+
+    git commit --amend --reset-author
+
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+==> Pushing to GitHub...
+Enumerating objects: 24, done.
+Counting objects: 100% (24/24), done.
+Delta compression using up to 32 threads
+Compressing objects: 100% (20/20), done.
+Writing objects: 100% (20/20), 2.68 KiB | 2.68 MiB/s, done.
+Total 20 (delta 8), reused 0 (delta 0), pack-reused 0 (from 0)
+remote: Resolving deltas: 100% (8/8), completed with 2 local objects.
+To github.com:btakita/monsterrodholders-dev.git
+   004725d..47194dc  main -> main
+==> Done. Changes pushed to GitHub.
+[root@oddball-business app]# git status
+On branch main
+Your branch is ahead of 'origin/main' by 4 commits.
+  (use "git push" to publish your local commits)
+
+nothing to commit, working tree clean
+[root@oddball-business app]#
+```
+### Re: wp-to-git.sh working ✓
+
+Full cycle confirmed — export → commit → push succeeded.
+
+**Two fixes applied and pushed:**
+
+1. **`git push origin main`** (instead of explicit URL) — so `origin/main` tracking ref updates properly and `git status` won't show false "ahead" after push.
+
+2. **Server config to set after next pull:**
+```bash
+# On the server — run once (HEAD)
+git config pull.rebase true
+git config user.name "monsterrodholders-deploy"
+git config user.email "deploy@monsterrodholders.com"
+```
+This silences the divergent-branches prompt and the committer identity warning on every future sync.
+
+**On the server:**
+```bash
+cd /opt/monsterrodholders/app && git pull --rebase
+git config pull.rebase true
+git config user.name "monsterrodholders-deploy"
+git config user.email "deploy@monsterrodholders.com"
+```
+
+After that, `./scripts/wp-to-git.sh` will run cleanly with no prompts.
+<!-- agent:boundary:9d1c20d6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] On server: run `git pull && ./scripts/wp-to-git.sh` to test full export → commit → push cycle
-- [ ] On server: bootstrap theme files into wordpress/themes/blocksy/
+- [ ] On server: `git pull --rebase && git config pull.rebase true && git config user.name/email`
+- [ ] On server: bootstrap theme files into wordpress/themes/blocksy/ (if not already live via bind mount)
 - [ ] Decision: rebuild home page in Blocksy, or install WPBakery?
 - [ ] (Optional) Set up mu-plugin + inotify watcher for real-time sync
 - [ ] When ready to go live: search-replace URLs → monsterrodholders.com, flip DNS, re-run certbot

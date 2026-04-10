@@ -2023,7 +2023,7 @@ Then: `docker compose up -d --force-recreate wordpress`
 Note: the local `monsterrodholders-dev` compose has `WORDPRESS_TABLE_PREFIX: ${WORDPRESS_TABLE_PREFIX:-wp_}` for wordpress but is also missing it on wpcli — fix both when you update.
 
 Recommend Option 1 now to unblock, then Option 2 to clean up the compose files.
-<!-- agent:boundary:e1c55959 -->
+<!-- agent:boundary:ed356021 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

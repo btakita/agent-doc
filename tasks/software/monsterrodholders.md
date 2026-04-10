@@ -304,7 +304,7 @@ Done. Committed to `btakita/monsterrodholders-dev` and updated parent submodule 
 Commit: `feat: add git↔WP sync (bind-mount themes/plugins, export/import scripts)`
 
 Next: bootstrap the theme files on the server so the bind mount picks them up.
-<!-- agent:boundary:f2fec81a -->
+<!-- agent:boundary:cafc1810 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

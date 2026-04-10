@@ -1443,7 +1443,7 @@ ss -tlnp | grep ':80\|:443\|:8080'
 ```
 
 Otherwise: Docker + InterWorx on the same host is a common setup and works reliably when Docker stays off the controlled ports.
-### Re: Do I need this on all WordPress sites? Can I just always set `$_SERVER['HTTPS'] = 'on'`? (HEAD)
+### Re: Do I need this on all WordPress sites? Can I just always set `$_SERVER['HTTPS'] = 'on'`?
 
 **Do you need it on all WordPress sites?** Only sites behind a reverse proxy that terminates SSL — i.e., where PHP/WordPress receives plain HTTP while Apache upstream serves HTTPS. WordPress sites where Apache directly handles SSL with mod_ssl don't need it.
 
@@ -1470,7 +1470,39 @@ RequestHeader set X-Forwarded-Proto "https"
 ```
 
 That way it's configured once at the Apache layer and the mu-plugin handles the PHP side for every WP site automatically.
-<!-- agent:boundary:0f3bc5a0 -->
+
+❯ How do I ensure that Interworx does not overwrite my apache configs?
+### Re: How do I ensure InterWorx doesn't overwrite my Apache configs? (HEAD)
+
+InterWorx regenerates Apache vhost configs when you change domain settings, add/renew SSL, etc. Any file it manages gets overwritten. There are two safe approaches:
+
+**Option 1 (recommended): Use InterWorx's built-in custom httpd directives**
+
+SiteWorx (per-domain control panel) has a "Extra httpd Configuration" or "Custom httpd Directives" field — the exact label varies by version. Directives entered there get merged into InterWorx's generated vhost config and survive regeneration.
+
+Log into SiteWorx for monsterrodholders.com and look for something under Hosting Features → Custom httpd Configuration (or similar). Add the ProxyPass directives there rather than directly editing the .conf file.
+
+**Option 2: Separate include file + reference from InterWorx config**
+
+If InterWorx's generated vhost includes an `IncludeOptional` or similar directive pointing to a file you control, put your custom config there. Check the generated vhost to see if there's an include hook:
+
+```bash
+grep -i include /etc/httpd/conf.d/50.28.2.199.nip.io*.conf
+```
+
+**Option 3: Separate .conf file for the internal-only proxy (safest fallback)**
+
+If the ProxyPass config is in a *separate* file that InterWorx didn't generate, it typically won't touch it:
+
+```bash
+# Put proxy config in a file InterWorx doesn't own
+/etc/httpd/conf.d/monsterrodholders-proxy.conf
+```
+
+InterWorx manages its own files (usually named after the domain or account). A distinctly named file it didn't create is generally left alone — but this is not guaranteed across panel updates, so option 1 is more durable.
+
+**Practical advice:** Try option 1 first via SiteWorx. If the UI doesn't expose it or the directives don't take effect, fall back to the separate .conf file and monitor after any InterWorx domain or SSL changes.
+<!-- agent:boundary:0e234706 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -621,13 +621,26 @@ git config user.email "deploy@monsterrodholders.com"
 ```
 
 After that, `./scripts/wp-to-git.sh` will run cleanly with no prompts.
-<!-- agent:boundary:c52ffa34 -->
+
+❯ git pull monsterrodholders-dev.
+### Re: git pull monsterrodholders-dev
+
+Already up to date. The server's content commits were pulled in when I synced the submodule pointer earlier:
+
+```
+aff6ebc fix: push to origin to keep tracking ref in sync
+47194dc sync: WP content 2026-04-10 11:30
+0540a50 sync: WP content 2026-04-10 11:30
+```
+
+Local repo is current with the server.
+<!-- agent:boundary:5412ad7f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] On server: `git pull --rebase && git config pull.rebase true && git config user.name/email`
+- [ ] On server: `git config pull.rebase true && git config user.name/email` (one-time setup)
 - [ ] On server: bootstrap theme files into wordpress/themes/blocksy/ (if not already live via bind mount)
 - [ ] Decision: rebuild home page in Blocksy, or install WPBakery?
 - [ ] (Optional) Set up mu-plugin + inotify watcher for real-time sync

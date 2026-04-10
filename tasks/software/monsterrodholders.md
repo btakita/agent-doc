@@ -523,7 +523,7 @@ Script already used `monsterrodholders_deploy` in `GIT_SSH_COMMAND` — but the 
 ```
 
 The server should now be able to run `./scripts/wp-to-git.sh` and push successfully with the key at `/root/.ssh/monsterrodholders_deploy`.
-<!-- agent:boundary:840f4517 -->
+<!-- agent:boundary:4f88d753 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

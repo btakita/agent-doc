@@ -639,7 +639,7 @@ Added pane-session validation in `claim.rs` before registration (`src/agent-doc/
 - Updated module doc comment to describe the validation
 
 All claim tests pass (`21 passed`). The only failing test (`send_keys_delivers_command_with_enter`) is a pre-existing flaky tmux timing test in `route.rs`, unrelated to this change.
-<!-- agent:boundary:fe49eef0 -->
+<!-- agent:boundary:bf79d6f4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -848,7 +848,7 @@ A pro zip is sitting at `/var/www/html/wp-content/blocksy-companion-pro.2.1.38.z
 ```bash
 ssh monsterrodholders-server 'docker compose -f /opt/monsterrodholders/app/docker-compose.yml run --rm --user www-data wpcli wp plugin install /var/www/html/wp-content/blocksy-companion-pro.2.1.38.zip --activate 2>&1' | tail -3
 ```
-<!-- agent:boundary:505b04c9 -->
+<!-- agent:boundary:106278c1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

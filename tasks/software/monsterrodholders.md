@@ -267,7 +267,7 @@ wordpress/uploads/
 ```
 
 Want me to scaffold the scripts and updated `.gitignore` in `src/monsterrodholders-dev` now?
-<!-- agent:boundary:8f30ebbd -->
+<!-- agent:boundary:56ddc703 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

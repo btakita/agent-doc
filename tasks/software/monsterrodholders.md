@@ -1050,7 +1050,7 @@ docker compose logs nginx --tail=10
 ```
 
 Note: certbot will say "not yet due for renewal" again — add `--force-renewal` if it skips issuance without writing files. But since the host `/etc/letsencrypt/` directory is empty, it should issue fresh.
-<!-- agent:boundary:40d1b591 -->
+<!-- agent:boundary:8cbc4efb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

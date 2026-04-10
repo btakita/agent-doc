@@ -1615,7 +1615,7 @@ grep -A5 'nginx:' /opt/monsterrodholders/app/docker-compose.yml | grep -A3 'port
 The most likely cause: **nginx config inside Docker still references SSL cert files that don't exist inside the container**, or it's trying to bind a port that's failing. Since WordPress is running PHP-FPM on port 9000, nginx inside Docker also needs to be configured as a FastCGI proxy (not just HTTP proxy).
 
 Share the logs output and I can pinpoint exactly what's wrong.
-<!-- agent:boundary:80c31e36 -->
+<!-- agent:boundary:23963503 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

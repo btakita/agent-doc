@@ -508,7 +508,7 @@ Only worth it if you need the socket to carry structured events (e.g., "only ref
 3. **Later (optional):** Socket-based IPC if you want sub-millisecond precision or structured event types.
 
 The key insight: the JetBrains plugin needed JNA + socket because JetBrains has no `inotify` hook. neovim has `vim.loop` (libuv) built in — filesystem events are native.
-<!-- agent:boundary:26552a2d -->
+<!-- agent:boundary:1fd2dfc1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

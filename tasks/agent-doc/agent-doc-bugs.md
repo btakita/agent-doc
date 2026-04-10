@@ -99,7 +99,7 @@ The commit step runs atomically after write completes — including after the IP
 1. Add `--commit` bool flag to the `write` subcommand
 2. After `run_stream` returns successfully, call `commit::run(file, opts)`
 3. Update SKILL.md step 3 to use `--commit` on the final write (checkpoint writes stay as-is)
-<!-- agent:boundary:d8ed2e4c -->
+<!-- agent:boundary:db6301b1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

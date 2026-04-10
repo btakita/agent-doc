@@ -863,7 +863,7 @@ Certificate not yet due for renewal; no action taken.
 [root@oddball-business app]# ls /etc/letsencrypt/live/
 ls: cannot access '/etc/letsencrypt/live/': No such file or directory
 ```
-### Re: certbot "not yet due for renewal" (HEAD)
+### Re: certbot "not yet due for renewal"
 
 That's actually a success path — certbot found a cert from a previous attempt and it's still valid (doesn't need renewal). The script printed "Certs provisioned. Start services with: docker compose up -d" which is the success signal.
 
@@ -878,13 +878,79 @@ docker compose logs nginx --tail=20
 ```
 
 nginx should now find the cert via the volume mount.
-<!-- agent:boundary:2a00029d -->
+
+❯ Site cannot be reached. Why?
+❯ http://50.28.2.199.nip.io/
+
+```
+[root@oddball-business app]# docker compose up -d
+[+] up 5/5
+ ✔ Network app_wp_net        Created                                                                                                                                                                                                       0.0s
+ ✔ Container app-redis-1     Started                                                                                                                                                                                                       0.2s
+ ✔ Container app-db-1        Started                                                                                                                                                                                                       0.3s
+ ✔ Container app-wordpress-1 Started                                                                                                                                                                                                       0.4s
+ ✔ Container app-nginx-1     Started                                                                                                                                                                                                       0.5s
+[root@oddball-business app]# docker compose ps
+NAME              IMAGE                         COMMAND                  SERVICE     CREATED         STATUS                                  PORTS
+app-db-1          mariadb:11                    "docker-entrypoint.s…"   db          4 seconds ago   Up 3 seconds                            3306/tcp
+app-nginx-1       nginx:alpine                  "/docker-entrypoint.…"   nginx       3 seconds ago   Restarting (1) Less than a second ago
+app-redis-1       redis:alpine                  "docker-entrypoint.s…"   redis       4 seconds ago   Up 3 seconds                            6379/tcp
+app-wordpress-1   wordpress:php8.3-fpm-alpine   "docker-entrypoint.s…"   wordpress   3 seconds ago   Up 3 seconds                            9000/tcp
+[root@oddball-business app]# docker compose logs nginx --tail=20
+nginx-1  | /docker-entrypoint.sh: /docker-entrypoint.d/ is not empty, will attempt to perform configuration
+nginx-1  | /docker-entrypoint.sh: Looking for shell scripts in /docker-entrypoint.d/
+nginx-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/10-listen-on-ipv6-by-default.sh
+nginx-1  | 10-listen-on-ipv6-by-default.sh: info: /etc/nginx/conf.d/default.conf is not a file or does not exist
+nginx-1  | /docker-entrypoint.sh: Sourcing /docker-entrypoint.d/15-local-resolvers.envsh
+nginx-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/20-envsubst-on-templates.sh
+nginx-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/30-tune-worker-processes.sh
+nginx-1  | /docker-entrypoint.sh: Configuration complete; ready for start up
+nginx-1  | 2026/04/10 02:04:07 [emerg] 1#1: cannot load certificate "/etc/nginx/certs/fullchain.pem": BIO_new_file() failed (SSL: error:80000002:system library::No such file or directory:calling fopen(/etc/nginx/certs/fullchain.pem, r) error:10000080:BIO routines::no such file)
+nginx-1  | nginx: [emerg] cannot load certificate "/etc/nginx/certs/fullchain.pem": BIO_new_file() failed (SSL: error:80000002:system library::No such file or directory:calling fopen(/etc/nginx/certs/fullchain.pem, r) error:10000080:BIO routines::no such file)
+nginx-1  | /docker-entrypoint.sh: /docker-entrypoint.d/ is not empty, will attempt to perform configuration
+nginx-1  | /docker-entrypoint.sh: Looking for shell scripts in /docker-entrypoint.d/
+nginx-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/10-listen-on-ipv6-by-default.sh
+nginx-1  | 10-listen-on-ipv6-by-default.sh: info: /etc/nginx/conf.d/default.conf is not a file or does not exist
+nginx-1  | /docker-entrypoint.sh: Sourcing /docker-entrypoint.d/15-local-resolvers.envsh
+nginx-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/20-envsubst-on-templates.sh
+nginx-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/30-tune-worker-processes.sh
+nginx-1  | /docker-entrypoint.sh: Configuration complete; ready for start up
+nginx-1  | 2026/04/10 02:04:09 [emerg] 1#1: cannot load certificate "/etc/nginx/certs/fullchain.pem": BIO_new_file() failed (SSL: error:80000002:system library::No such file or directory:calling fopen(/etc/nginx/certs/fullchain.pem, r) error:10000080:BIO routines::no such file)
+nginx-1  | nginx: [emerg] cannot load certificate "/etc/nginx/certs/fullchain.pem": BIO_new_file() failed (SSL: error:80000002:system library::No such file or directory:calling fopen(/etc/nginx/certs/fullchain.pem, r) error:10000080:BIO routines::no such file)
+```
+### Re: nginx still can't find certs (HEAD)
+
+The certs aren't landing where nginx expects (`/etc/nginx/certs/fullchain.pem`). "Certificate not yet due for renewal" suggests certbot found stale state from a previous run but the actual cert files aren't accessible to nginx.
+
+Need to see where the certs are and how nginx mounts them:
+
+```bash
+# What volumes exist?
+docker volume ls
+
+# What does the compose config say about nginx mounts?
+cat /root/app/docker-compose.yml
+```
+
+Also check if there's actually anything in the certbot volume:
+
+```bash
+# Try to list whatever certbot volume exists
+docker run --rm -v app_certbot_certs:/certs alpine ls -la /certs/ 2>/dev/null \
+  || docker run --rm -v certbot_certs:/certs alpine ls -la /certs/ 2>/dev/null \
+  || echo "volume not found"
+```
+
+The certbot script claimed certs are provisioned but nginx is still failing — the cert path or volume mount is mismatched.
+<!-- agent:boundary:edc22d64 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] `docker compose up -d` → verify nginx comes up
+- [ ] Share `docker volume ls` + `cat /root/app/docker-compose.yml` output
+- [ ] Diagnose cert path mismatch between certbot output and nginx mount
+- [ ] Fix nginx to find certs → get stack running
 - [ ] Test site on `https://50.28.2.199.nip.io`
 - [ ] **Server step 10:** Transfer + import backup, `wp search-replace` domain
 - [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot

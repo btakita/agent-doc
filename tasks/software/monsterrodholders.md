@@ -151,7 +151,7 @@ If you want a full garderobe-feel, I can:
 3. Add hover overlays to product cards matching their grid style
 
 This gets the aesthetic without the import risk. Want me to proceed?
-<!-- agent:boundary:4fc52d01 -->
+<!-- agent:boundary:6ce6c7f4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

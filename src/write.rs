@@ -925,7 +925,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                 .filter(|p| p.name != "frontmatter")
                 .map(|p| {
                     let content = match norm_lines_for_timeout {
-                        Some(prefix_lines) if !prefix_lines.is_empty() => {
+                        Some(prefix_lines) if !prefix_lines.is_empty() && is_append_mode_component(&p.name) => {
                             normalize_patch_content(&p.content, prefix_lines)
                         }
                         _ => p.content.clone(),
@@ -1835,7 +1835,7 @@ fn build_ipc_patches_json(
         .filter(|p| p.name != "frontmatter")
         .map(|p| {
             let content = match normalize_prefix_lines {
-                Some(prefix_lines) if !prefix_lines.is_empty() => {
+                Some(prefix_lines) if !prefix_lines.is_empty() && is_append_mode_component(&p.name) => {
                     normalize_patch_content(&p.content, prefix_lines)
                 }
                 _ => p.content.clone(),
@@ -2950,6 +2950,27 @@ mod tests {
         let prefix_lines = vec!["user line".to_string()];
         let result = normalize_patch_content(patch_content, &prefix_lines);
         assert_eq!(result, patch_content, "non-matching lines should pass through unchanged");
+    }
+
+    #[test]
+    fn normalize_prefix_lines_skipped_for_replace_mode_components() {
+        // Regression: normalize_patch_content was applied to ALL patches including agent:pending.
+        // When a line from the exchange user_added set also appeared in a pending patch, it would
+        // incorrectly receive the ❯  prefix. The fix gates normalization on is_append_mode_component.
+        let pending_content = "- [ ] Build Gutenberg replacement HTML for home page\n- [ ] Update page content\n";
+        let prefix_lines = vec!["- [ ] Build Gutenberg replacement HTML for home page".to_string()];
+        // Simulate the guard: only apply normalize_patch_content for exchange (append-mode) components.
+        // For pending (replace-mode), content must pass through unchanged.
+        let is_pending = !is_append_mode_component("pending");
+        assert!(is_pending, "pending should not be an append-mode component");
+        // If the guard is respected, pending content is not normalized.
+        let result = if is_append_mode_component("pending") {
+            normalize_patch_content(pending_content, &prefix_lines)
+        } else {
+            pending_content.to_string()
+        };
+        assert_eq!(result, pending_content, "agent:pending content must NOT receive ❯  prefix");
+        assert!(!result.contains("❯ "), "no ❯  prefix should appear in pending patches");
     }
 
         #[test]

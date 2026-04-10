@@ -726,7 +726,7 @@ CONTAINER ID   IMAGE                         COMMAND                  CREATED   
 8cfe407b1414   redis:alpine                  "docker-entrypoint.s…"   2 hours ago   Up 2 hours   6379/tcp   app-redis-1
 63f95dcdc125   mariadb:11                    "docker-entrypoint.s…"   2 hours ago   Up 2 hours   3306/tcp   app-db-1
 ```
-### Re: nginx missing (HEAD)
+### Re: nginx missing
 
 Three containers running (wordpress-fpm, redis, mariadb) — but **no nginx**. The FPM container handles PHP, not HTTP. Without nginx there's nothing serving port 80/443.
 
@@ -748,16 +748,46 @@ ls /etc/letsencrypt/live/
 If that directory is empty or doesn't have `50.28.2.199.nip.io/`, certbot didn't finish. You'd need to stop the stack, fix the certbot issue (restart docker, rerun certbot-init.sh), then bring everything back up.
 
 If certbot DID succeed, share the `docker compose logs nginx` output.
-<!-- agent:boundary:22ba7af0 -->
+
+❯ Diagnose server + docker issues
+❯ MONSTERRODHOLDERS_IP_ADDRESS="50.28.2.199"
+❯ MONSTERRODHOLDERS_SSH_PASSWD="$(pass monsterrodholders/SSH_PASSWD)"
+
+### Re: remote diagnosis (HEAD)
+
+Can't connect via SSH — `pass monsterrodholders/SSH_PASSWD` is failing auth (both password and keyboard-interactive). Password may have changed or the pass entry may be stale.
+
+Run these on the server:
+
+```bash
+# 1. Check all containers (including stopped/failed)
+docker ps --all
+
+# 2. Check nginx logs specifically
+cd /root/app && docker compose logs nginx
+
+# 3. Check if certbot completed
+ls /etc/letsencrypt/live/
+
+# 4. Check firewalld
+systemctl is-active firewalld
+```
+
+Paste the output back. Most likely nginx is stopped because certbot didn't finish (no cert files), or there's a config error in the nginx container.
+
+Also — update the pass entry if the server password changed:
+```bash
+pass edit monsterrodholders/SSH_PASSWD
+```
+<!-- agent:boundary:737baf7e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Diagnose nginx:** `docker compose ps --all` + `docker compose logs nginx` + `ls /etc/letsencrypt/live/`
-- [ ] If certbot incomplete: restart docker, rerun `certbot-init.sh`, then `docker compose up -d`
-- [ ] If certbot OK: fix nginx startup error from logs
-- [ ] **Server step 10:** Transfer + import backup, then `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`; remove WP Engine mu-plugins
+- [ ] **Diagnose nginx:** Paste `docker ps --all`, `docker compose logs nginx`, `ls /etc/letsencrypt/live/` output
+- [ ] Fix nginx startup (likely certbot incomplete)
+- [ ] **Server step 10:** Transfer + import backup, `wp search-replace` domain
 - [ ] Verify site on `https://50.28.2.199.nip.io`
 - [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot
 - [ ] Clean spam comments post-import

@@ -102,7 +102,7 @@ I see
 ```
 [vc_section][vc_row css=”.vc_custom_1715354722310{padding-left: 30px !important;}”][vc_column width=”1/4″][/vc_column][vc_column width=”3/4″][vc_single_image image=”79596″ img_size=”full” onclick=”custom_link” link=”https://50.28.2.199.nip.io/product/talon-5-35-lh-bargin-bin-sale/”][vc_column_text]Welcome to Monster Rod Holders, the leader in American-made heavy-duty fishing rod holders and catfishing rod holders since 2007. We designed the original 33/45 Rod Holders and many others to suit your fishing style. Discover a wide range of heavy-duty fishing rod holders, rod holder bases, and catfishing accessories.[/vc_column_text][pbr_products title=”Rod Holder Types” categories=”rod-holders” type=”top_rate” columns_count=”4″][pbr_products title=”Rod Holder Bases” categories=”rod-holder-bases” columns_count=”4″ number=”8″ view_more_page=”bestsellers”][pbr_products type=”featured_product” columns_count=”2″][/vc_column][/vc_row][vc_row][vc_column][vc_single_image image=”8782″ img_size=”full” alignment=”center” onclick=”custom_link” css_animation=”effect-v3″ link=”/bestsellers/”][pbr_products title=”Other Monster Rod Holder Products” categories=”boat-accessories” columns_count=”4″ number=”8″ view_more_page=”bestsellers”][product_attribute per_page=”12″ columns=”4″ orderby=”title” order=”ASC” filter=””][/vc_column][/vc_ro[/vc_section]
 ```
-### Re: home page not rendering — WPBakery shortcodes (HEAD)
+### Re: home page not rendering — WPBakery shortcodes
 
 Found the cause. The home page `entry-content` is all raw WPBakery shortcodes:
 
@@ -143,7 +143,67 @@ scp -r /tmp/mrh-plugins/files/wp-content/plugins/js_composer root@50.28.2.199:/t
 `[vc_*]` layout blocks would render, but `[pbr_products]` product grids still won't (fishzone-specific). So even with WPBakery, products won't show without fishzone.
 
 **Recommendation:** Rebuild with Blocksy/Gutenberg. The page structure is simple — product category blocks replace `[pbr_products]`. Which approach?
-<!-- agent:boundary:0db06662 -->
+❯ Can you access the page source code using the WP api?
+❯ How can we get the WP site content into git?
+### Re: WP API + content into git (HEAD)
+
+**WP REST API — page source:**
+
+Yes. The REST API returns raw shortcode content. To see page raw content:
+
+```bash
+curl -s 'https://50.28.2.199.nip.io/wp-json/wp/v2/pages?per_page=100' | \
+  jq '.[] | {id, slug, title: .title.rendered, content: .content.raw}'
+```
+
+`content.raw` requires auth (`?context=edit` + application password):
+
+```bash
+curl -s -u 'admin:APPLICATION_PASSWORD' \
+  'https://50.28.2.199.nip.io/wp-json/wp/v2/pages?context=edit' | \
+  jq '.[] | {slug, raw: .content.raw}'
+```
+
+**Getting WP content into git:**
+
+WP content = database (posts/pages/settings) + theme files + uploads.
+
+```bash
+# 1. Export all content as WXR (WordPress eXtended RSS)
+docker compose -f /opt/monsterrodholders/app/docker-compose.yml run --rm wpcli \
+  wp export --dir=/var/www/html/wp-content/exports --filename_format=mrh-export.xml
+
+# 2. Copy export out
+docker cp $(docker compose -f /opt/monsterrodholders/app/docker-compose.yml ps -q wordpress):/var/www/html/wp-content/exports/mrh-export.xml \
+  /home/brian/work/rberkes/monsterrodholders/exports/
+
+# 3. Export DB (for full restore capability)
+docker compose -f /opt/monsterrodholders/app/docker-compose.yml run --rm wpcli \
+  wp db export /var/www/html/wp-content/exports/mrh-db.sql
+
+# 4. Theme files
+docker cp $(docker compose -f /opt/monsterrodholders/app/docker-compose.yml ps -q wordpress):/var/www/html/wp-content/themes/blocksy \
+  /home/brian/work/rberkes/monsterrodholders/themes/
+
+# 5. Uploads (use rsync; git-lfs if you want them tracked)
+rsync -avz root@50.28.2.199:/opt/monsterrodholders/uploads/ \
+  /home/brian/work/rberkes/monsterrodholders/uploads/
+```
+
+Suggested git repo layout:
+```
+monsterrodholders/
+├── docker-compose.yml       # infra
+├── exports/mrh-export.xml   # WP content (posts, pages, menus)
+├── exports/mrh-db.sql       # full DB dump
+├── themes/blocksy/          # theme customizations
+└── uploads/                 # .gitignore or git-lfs
+```
+
+The WXR is re-importable via `wp import mrh-export.xml --authors=create`. DB dump is ground truth for full restore.
+
+Do you want me to set up the git repo structure for `rberkes/monsterrodholders`?
+<!-- agent:boundary:226b0581 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

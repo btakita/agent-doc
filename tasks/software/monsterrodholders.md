@@ -991,7 +991,7 @@ total 8
 drwxr-xr-x    2 root     root          4096 Apr 10 02:07 .
 drwxr-xr-x    1 root     root          4096 Apr 10 02:07 ..
 ```
-### Re: certs mount is a host bind, certbot volume is empty (HEAD)
+### Re: certs mount is a host bind, certbot volume is empty
 
 Now it's clear:
 - nginx mounts `./certs:/etc/nginx/certs:ro` — host directory `/root/app/certs/`
@@ -1004,8 +1004,8 @@ The cert was issued at some point but the files didn't land where nginx expects 
 Check:
 
 ```bash
-ls -la /root/app/certs/
-cat /root/app/scripts/certbot-init.sh
+ls -la /opt/monsterrodholders/app/certs/
+cat /opt/monsterrodholders/scripts/certbot-init.sh
 ```
 
 Most likely fix: force certbot to re-issue and have it write to `/root/app/certs/`. Or, if certs exist in `/etc/letsencrypt/live/` from a previous certbot container run, copy them manually:
@@ -1014,15 +1014,50 @@ Most likely fix: force certbot to re-issue and have it write to `/root/app/certs
 # Find where they are:
 find /etc/letsencrypt /root/app -name "fullchain.pem" 2>/dev/null
 ```
-<!-- agent:boundary:4fe2cb34 -->
+
+```
+[root@oddball-business app]# ls -alh certs/fullchain.pem certs/privkey.pem
+lrwxrwxrwx 1 root root 54 Apr  9 22:12 certs/fullchain.pem -> /etc/letsencrypt/live/50.28.2.199.nip.io/fullchain.pem
+lrwxrwxrwx 1 root root 52 Apr  9 22:12 certs/privkey.pem -> /etc/letsencrypt/live/50.28.2.199.nip.io/privkey.pem
+[root@oddball-business app]# ls /etc/letsencrypt/live/50.28.2.199.nip.io/fullchain.pem
+ls: cannot access '/etc/letsencrypt/live/50.28.2.199.nip.io/fullchain.pem': No such file or directory
+```
+### Re: broken symlinks — certbot container filesystem is gone (HEAD)
+
+The symlinks in `./certs/` point to `/etc/letsencrypt/live/50.28.2.199.nip.io/` on the HOST, but that path doesn't exist. Certbot ran inside a temporary container and the cert files lived only in that container's ephemeral filesystem. Container exited → certs gone.
+
+The cert IS valid on Let's Encrypt's side (that's why "not yet due for renewal"), but the files need to land on the host.
+
+Fix: run certbot directly on the host, then copy real files (not symlinks) into `./certs/`:
+
+```bash
+# Stop stack to free port 80
+docker compose down
+
+# Install certbot on the host (Rocky/RHEL/CentOS)
+dnf install -y certbot
+
+# Issue cert — standalone mode binds port 80 temporarily
+certbot certonly --standalone -d 50.28.2.199.nip.io --non-interactive --agree-tos -m admin@monsterrodholders.com
+
+# Copy actual cert files (replacing the broken symlinks)
+cp /etc/letsencrypt/live/50.28.2.199.nip.io/fullchain.pem /opt/monsterrodholders/app/certs/fullchain.pem
+cp /etc/letsencrypt/live/50.28.2.199.nip.io/privkey.pem /opt/monsterrodholders/app/certs/privkey.pem
+
+# Restart the stack
+docker compose up -d
+docker compose logs nginx --tail=10
+```
+
+Note: certbot will say "not yet due for renewal" again — add `--force-renewal` if it skips issuance without writing files. But since the host `/etc/letsencrypt/` directory is empty, it should issue fresh.
+<!-- agent:boundary:40d1b591 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] `ls -la /root/app/certs/` + `cat /root/app/scripts/certbot-init.sh`
-- [ ] Get certs into `/root/app/certs/` (fix or re-run certbot-init.sh with `--force-renewal`)
-- [ ] Verify nginx comes up + test site on `https://50.28.2.199.nip.io`
+- [ ] `docker compose down` → `dnf install certbot` → issue cert → copy to `./certs/` → `docker compose up -d`
+- [ ] Verify nginx up + test `https://50.28.2.199.nip.io`
 - [ ] **Server step 10:** Transfer + import backup, `wp search-replace` domain
 - [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot
 - [ ] Clean spam comments post-import

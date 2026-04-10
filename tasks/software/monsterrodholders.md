@@ -942,7 +942,7 @@ The staging shop page shows products but with no sidebar at all.
 - Verified on server: `data-sidebar="left"` + `<aside class="ct-sidebar">` renders with both widgets ✓
 
 Note: sidebar is hidden on small/medium screens (`ct-hidden-sm ct-hidden-md`) by default — Blocksy's responsive behavior.
-<!-- agent:boundary:c2f4137e -->
+<!-- agent:boundary:c209422a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

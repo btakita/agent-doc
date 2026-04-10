@@ -7,7 +7,7 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
-Interview prep PDF generated at file:///tmp/filevine-interview-prep.pdf
+Draft pushed to Gmail Drafts (btak.dev) — properly threaded. Ready to send.
 <!-- /agent:status -->
 
 ## Exchange
@@ -101,7 +101,7 @@ Then push the draft:
 ❯ I lost the password when I converted my store. Help me recover by finding the app client_id
 ❯ >      Error: CORKY_GMAIL_CLIENT_ID command failed: Error: corky/gmail/client_id is not in the password store.
 
-### Re: Recovering corky/gmail/client_id (HEAD)
+### Re: Recovering corky/gmail/client_id
 
 Already resolved: `passage corky/gmail/client_id` returns the credential (`873280095295-brv8...`). Updated `mail/.corky.toml` to use `passage` instead of `pass` for all OAuth commands (gmail + linkedin + youtube).
 
@@ -112,7 +112,18 @@ The push is now unblocked — it just needs a one-time OAuth re-authorization si
 ```
 
 A browser window will open (or print a URL). Sign in as `btak.dev@gmail.com`, grant Gmail compose access, and the draft will land in your Gmail Drafts folder.
-<!-- agent:boundary:3d3964ce -->
+
+❯ The email draft was not properly threaded.
+### Re: Threading fix (HEAD)
+
+The draft was using the Gmail thread ID (`19d5467199f95043`) as `in_reply_to`, but that field requires the RFC 2822 Message-ID. Used `corky sync refetch` to re-fetch the thread and extract:
+
+```
+<IA6PR17MB75914071E950616FCD529092A95EA@IA6PR17MB7591.namprd17.prod.outlook.com>
+```
+
+Updated the draft and re-pushed. Draft is now in your `btak.dev` Gmail Drafts, properly threaded to Alexander's original email. Open Gmail to review and send.
+<!-- agent:boundary:ee12566f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

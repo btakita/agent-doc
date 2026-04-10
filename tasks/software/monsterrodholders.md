@@ -47,7 +47,7 @@ docker compose -f /opt/monsterrodholders/app/docker-compose.yml run --rm wpcli \
 ```
 
 Replace `astra` with `fishzone` if you prefer the original. Do you want both or just astra?
-<!-- agent:boundary:f574903b -->
+<!-- agent:boundary:cbf7019d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

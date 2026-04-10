@@ -297,22 +297,67 @@ docker compose restart wordpress
 
 After that, `wordpress/themes/blocksy/` is git-tracked and live in the container simultaneously.
 ❯ commit + push
-### Re: commit + push (HEAD)
+### Re: commit + push
 
 Done. Committed to `btakita/monsterrodholders-dev` and updated parent submodule pointer.
 
 Commit: `feat: add git↔WP sync (bind-mount themes/plugins, export/import scripts)`
 
 Next: bootstrap the theme files on the server so the bind mount picks them up.
-<!-- agent:boundary:cafc1810 -->
+
+❯ The ssh deployment uses a read only gh token.
+❯ I want to have the ssh deployment commit all of the pages + any other content that should be committed such as scripts.
+❯ Please create a bi-directional process where updates can occur from local git pushed to production or from the wordpress admin back into git.
+If wordpress has hooks for commit + push, use those.
+Pull + merge or rebase must be explicitly run by script or manually.
+### Re: bi-directional sync system (HEAD)
+
+Scaffolded and pushed. Two new scripts + server-setup.md updated.
+
+**`scripts/wp-to-git.sh`** — WP admin → GitHub:
+- Exports WXR → `wordpress/exports/mrh-export.xml`
+- `git commit` + `git push` using a write deploy key at `/root/.ssh/monsterrodholders_deploy_rw`
+- Theme/plugin file changes already appear via bind mount — no extra step needed
+
+**`scripts/git-to-wp.sh`** — GitHub → WP:
+- `git pull` (read-only key, works as-is)
+- `docker compose restart wordpress` (picks up bind-mounted theme/plugin changes)
+- Optional `--import-content` flag to also import WXR
+
+**One-time server setup required:**
+
+1. Generate the write deploy key and add to GitHub with write access:
+```bash
+ssh-keygen -t ed25519 -C "monsterrodholders-deploy-rw" \
+  -f /root/.ssh/monsterrodholders_deploy_rw -N ""
+cat /root/.ssh/monsterrodholders_deploy_rw.pub
+# → add to github.com/btakita/monsterrodholders-dev/settings/keys with write access checked
+```
+
+2. Bootstrap theme files (after `git pull` on server):
+```bash
+cd /opt/monsterrodholders/app
+git pull
+WP_CTR=$(docker compose ps -q wordpress)
+docker cp $WP_CTR:/var/www/html/wp-content/themes/blocksy ./wordpress/themes/
+docker compose restart wordpress
+```
+
+**Optional cron** (auto-sync WP → git every 15 min):
+```
+*/15 * * * * cd /opt/monsterrodholders/app && ./scripts/wp-to-git.sh >> /var/log/wp-sync.log 2>&1
+```
+
+Full docs in `docs/server-setup.md` § Write deploy key + Bi-directional sync.
+<!-- agent:boundary:cb59b198 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] On server: bootstrap theme files into wordpress/themes/blocksy/ (one-time, see above)
-- [ ] On server: git pull to get the new scripts + docker compose restart
-- [ ] Pull blocksy-companion-pro plugin files + commit to wordpress/plugins/
+- [ ] On server: generate write deploy key + add to GitHub (see server-setup.md)
+- [ ] On server: git pull + bootstrap theme files into wordpress/themes/blocksy/
+- [ ] (Optional) Set up cron for auto WP→git sync every 15min
 - [ ] Decision: rebuild home page in Blocksy, or install WPBakery?
 - [ ] When ready to go live: search-replace URLs → monsterrodholders.com, flip DNS, re-run certbot
 <!-- /agent:pending -->

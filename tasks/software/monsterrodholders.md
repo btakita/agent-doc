@@ -78,7 +78,7 @@ docker compose -f /opt/monsterrodholders/app/docker-compose.yml run --rm wpcli \
 ```
 
 **Step 4 — Enter license key** in WP Admin → Blocksy → License (unlocks pro features). Do you have the license key?
-<!-- agent:boundary:15b6a718 -->
+<!-- agent:boundary:c99d3647 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

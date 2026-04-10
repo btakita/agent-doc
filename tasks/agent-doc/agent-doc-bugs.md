@@ -146,7 +146,7 @@ Done. v0.31.29 shipped.
 - `Cargo.toml` + `pyproject.toml`: bumped to `0.31.29`
 
 765 tests pass, clippy clean. `cargo install v0.31.29` running locally.
-<!-- agent:boundary:1163342b -->
+<!-- agent:boundary:d8ed65c4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

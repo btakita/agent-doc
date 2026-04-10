@@ -719,7 +719,7 @@ docker compose up -d
 ```
 
 Then check logs for errors. What does `docker ps` show?
-<!-- agent:boundary:6cf71945 -->
+<!-- agent:boundary:33ec1a4f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

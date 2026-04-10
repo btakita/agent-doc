@@ -49,7 +49,7 @@ Sessions v0.31.18–v0.31.28. Key decisions and fixes:
 - Manual testing gate: confirm v0.31.28 auto-relocate in live session, then publish: crates.io → PyPI → GitHub Release.
 
 ❯ release
-### Re: release (HEAD)
+### Re: release
 
 v0.31.28 released:
 
@@ -231,7 +231,26 @@ v0.31.30 staged locally — awaiting manual testing gate.
 **Manual testing gate:** Edit `agent:pending` in a document that has an active exchange where a matching line exists. Confirm no `❯ ` prefix appears on the pending item after the write cycle.
 
 Once confirmed, I'll publish: `cargo publish` → manylinux Docker wheel → PyPI → tag + GitHub Release.
-<!-- agent:boundary:2a08c0f0 -->
+
+❯ I ran `Claim for Tmux Pane` on tasks/research/youtube.md. The last selected pane in tmux session 1 got swapped in. Why? We need to make sure this does not happen. Look vertically and horizontally.
+### Re: wrong pane swapped on `Claim for Tmux Pane` (HEAD)
+
+**Root cause:** `ClaimAction.kt` called `agent-doc claim <file> --window <windowId>` without `--position`. In `claim.rs`, when no `--pane` or `--position` is given, the fallback is `sessions::current_pane()` → the last active tmux pane (whichever pane the user clicked in last). That's the wrong pane. The subsequent `SyncLayoutAction.syncLayout()` then ran `swap-pane` to match the expected layout, which swapped the wrong pane in.
+
+**How `--position` works:** `sessions::pane_by_position_in_window("left", window)` queries tmux for all panes in the window and picks the one with the smallest `pane_left` coordinate. `"right"` picks the largest `pane_left + pane_width`. This is the correct positional anchor.
+
+**Fix — `ClaimAction.kt`:**
+- Before spawning the background thread, call `LayoutDetector.detectEditorLayout(project)` using `FileEditorManagerEx.getInstanceEx(project).windows`
+- Find which column index `relativePath` occupies in the detected layout
+- Map column 0 → `--position left`, last column → `--position right` (middle columns not yet supported)
+- Pass `--position <value>` to `agent-doc claim` when determined
+
+This means claim always lands on the geometrically correct tmux pane, and the subsequent sync has nothing to swap.
+
+**Single-file case:** If there's only one editor window, `detectEditorLayout` returns `null`, `position` is `null`, and the old fallback applies — no regression.
+
+**Plugin built:** `buildPlugin signPlugin` — `BUILD SUCCESSFUL`. Install from `editors/jetbrains/build/distributions/`.
+<!-- agent:boundary:9300d398 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -2102,7 +2102,7 @@ Done. Committed and pushed:
 - `docs/server-setup.md` — minor line-wrap fix (already in the working tree)
 
 Also updated the `agent-loop` submodule pointer.
-<!-- agent:boundary:f3b5ac8a -->
+<!-- agent:boundary:623ed6bf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

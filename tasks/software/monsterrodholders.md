@@ -894,7 +894,41 @@ GeoDirectory pages you can safely delete/unpublish: `add-listing` (19682), `loca
 **Akismet** — key already in the backup DB (`f8b7c7c89e10`). Copied it to `akismet_api_key` option so the plugin reads it. No need to generate a new one.
 
 Note: Akismet validates the key against the live domain. On staging (`50.28.2.199.nip.io`) it may show "invalid" in the WP dashboard — that's expected. It will activate properly once DNS flips to `monsterrodholders.com`.
-<!-- agent:boundary:8e69e22f -->
+
+❯ do
+❯ - [ ] Verify site renders at https://50.28.2.199.nip.io/ — home + product grids
+
+❯ See https://monsterrodholders.com/ The **All Category** should be on the left side. It is in the wrong location on the https://monsterrodholders.com/ website
+### Re: Verify staging renders + "All Category" position
+
+**Staging renders:** ✓
+
+- **Home page**: 181KB HTML, product grids confirmed — "Rod Holder Types" `columns-4` WooCommerce block renders, banner image loads. ✓
+- **Shop page**: 130KB HTML, products display in grid (Double Action 33/45, Talon 5/35, Slide Track 45, Economy Base 2). ✓
+
+**Screenshots:**
+
+Staging home — renders correctly:
+
+> Banner + "Rod Holder Types" product grid visible. No sidebar on shop (Blocksy theme).
+
+**Live site "All Category" issue:**
+
+Checked `https://monsterrodholders.com/shop/` — HTTP 200, "All Category" IS in the left column of the nav bar (col-lg-3, red button). On hover it drops a mega-menu with all categories.
+
+However, the **home page returns HTTP 500** — it renders a broken partial page showing the "All Category" dropdown stuck open over a mostly blank page.
+
+**Gap vs live:** The staging (Blocksy theme) is missing two things the live fishzone site has:
+1. **"All Category" mega menu** in the header nav (col-lg-3 of `pbr-massbottom-head`)
+2. **Left sidebar** on shop pages (price filter widget + category widgets)
+
+The staging shop page shows products but with no sidebar at all.
+
+**What needs investigation:**
+- Is the "wrong location" on monsterrodholders.com referring to the home page 500 (All Category dropdown rendering stuck-open over broken content)?
+- Or should the "All Category" be in a sidebar position below the header (left column alongside products), not just in the top nav bar?
+- Should I add a WooCommerce Product Categories widget to the staging's left sidebar to replicate the live site layout?
+<!-- agent:boundary:32021668 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

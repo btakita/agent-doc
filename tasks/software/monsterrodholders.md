@@ -1402,6 +1402,8 @@ if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROT
 }
 ```
 
+❯ Do I need to add this to all of my wordpress sites? Can I just have `$_SERVER['HTTPS'] = 'on';` always set?
+
 Without this, WordPress generates `http://` links on a page served over HTTPS → mixed content errors.
 
 **2. mod_proxy must be enabled** — verify:
@@ -1415,7 +1417,7 @@ Should show `proxy_module`, `proxy_http_module`. If missing: `LoadModule proxy_m
 Otherwise the architecture is solid — this is exactly how most WordPress + Docker + existing Apache setups work.
 
 ❯ Is this docker-compose setup safe to use with InterWorx?
-### Re: Is this docker-compose setup safe to use with InterWorx? (HEAD)
+### Re: Is this docker-compose setup safe to use with InterWorx?
 
 The docker-compose setup with `127.0.0.1:8080:80` is safe with InterWorx. Here's the breakdown:
 
@@ -1441,7 +1443,34 @@ ss -tlnp | grep ':80\|:443\|:8080'
 ```
 
 Otherwise: Docker + InterWorx on the same host is a common setup and works reliably when Docker stays off the controlled ports.
-<!-- agent:boundary:4e23b680 -->
+### Re: Do I need this on all WordPress sites? Can I just always set `$_SERVER['HTTPS'] = 'on'`? (HEAD)
+
+**Do you need it on all WordPress sites?** Only sites behind a reverse proxy that terminates SSL — i.e., where PHP/WordPress receives plain HTTP while Apache upstream serves HTTPS. WordPress sites where Apache directly handles SSL with mod_ssl don't need it.
+
+In this setup (all Docker WordPress sites proxied through Apache), yes — each Docker WP site needs it.
+
+**Can you just always set `$_SERVER['HTTPS'] = 'on'`?** For this specific setup it would work (all external traffic comes in via Apache HTTPS, nothing hits port 8080 directly from outside). But it's a bad habit:
+- Breaks local dev or staging running on plain HTTP
+- Breaks internal health checks over HTTP
+- The conditional check is zero cost — just use it
+
+**Cleaner approach if you have multiple WordPress sites:** Put it in an mu-plugin so you don't touch every `wp-config.php`:
+
+```php
+// /path/to/wordpress/wp-content/mu-plugins/proxy-https.php
+<?php
+if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
+    $_SERVER['HTTPS'] = 'on';
+}
+```
+
+And in Apache config (once, covering all vhosts):
+```apache
+RequestHeader set X-Forwarded-Proto "https"
+```
+
+That way it's configured once at the Apache layer and the mu-plugin handles the PHP side for every WP site automatically.
+<!-- agent:boundary:f630465e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

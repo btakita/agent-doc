@@ -60,7 +60,7 @@ Sessions v0.31.18–v0.31.26. Key decisions and fixes:
 - Runbook: `runbooks/plugin-install.md` must be consulted for any JB plugin change (version bump, uninstall protocol).
 
 ❯ release
-### Re: release (HEAD)
+### Re: release
 
 v0.31.26 released:
 
@@ -276,11 +276,139 @@ v0.31.27 released:
 - **PyPI:** manylinux wheel built and uploaded (`agent_doc-0.31.27-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl`)
 - **Tag:** `v0.31.27` pushed — CI building GitHub Release
 - **cargo install:** v0.31.27 running locally
-<!-- agent:boundary:2269f6ae -->
+
+❯ In tasks/software/mise.md, the `❯ How do I configure .mise.toml to read .env with shell expansion. See .env with $(pass ...)` was duplicated in the response patch.
+❯ Please find all cases where this can happen...vertically and horizontally.
+❯ Please add safeguards against this happening if nondeterminism is the cause.
+### Re: exchange duplication + recurring session drift (HEAD)
+
+**Root cause — mise.md duplication:**
+
+The skill's response patch included the user's prompt as the first line of the `<!-- patch:exchange -->` block. Since exchange is `patch=append`, `apply_mode("append", existing, patch_content)` simply concatenates:
+
+```
+existing:  "❯ How do I configure...\n"
+patch:     "❯ How do I configure...\n\n### Re: ...\n"
+result:    "❯ How do I configure...\n❯ How do I configure...\n\n### Re: ...\n"
+```
+
+`apply_mode` (template.rs:611) has no deduplication — it's a raw `format!("{}{}", existing, new_content)`. That's the bug.
+
+**All duplication paths — vertical:**
+
+| # | Trigger | Path |
+|---|---------|------|
+| V1 | **Agent echoes user prompt in patch** | `apply_mode("append")` concatenates existing + patch; duplicate if patch starts with content already at end of component |
+| V2 | **`append_with_boundary` misposition** | If boundary is at start of exchange (user typed after it), `append_with_boundary` inserts response BEFORE boundary, keeping user text after; then user text appears twice if patch also includes it |
+| V3 | **Streaming checkpoint baseline not re-saved** | Next checkpoint uses stale baseline → `content_ours` re-includes already-written content; 3-way merge may duplicate |
+| V4 | **IPC timeout + stale patch apply** | Binary exits 75 (timeout), but plugin still processes the patch file that was written. If binary retries (it doesn't in v0.31.26 — exits), but plugin applies stale patch on restart → double-apply |
+| V5 | **CRDT `fullContent` + exchange patch sent together** | Fixed in v0.31.24; but edge case: if `normalize_prefix_lines` is non-empty AND patches are present, `fullContent` is sent. Plugin applies `fullContent` (full replace), then also applies the targeted patch → content added twice. The "only fullContent when no patches" guard prevents this normally. |
+
+**All duplication paths — horizontal:**
+
+| # | Trigger | Path |
+|---|---------|------|
+| H1 | **Two panes registered for same document** | Both agents claim and write to same exchange; both appends succeed independently |
+| H2 | **Session drift → two writers** | A session-1 pane and a session-0 pane both registered for same doc; each write cycle appends |
+| H3 | **Recovery re-apply edge case** | `recover::run` fingerprints on first 3 non-empty non-marker lines — a short response or one that starts with a blank line could fool it |
+
+**Proposed safeguard — `dedup_adjacent_exchange_lines` (most targeted fix):**
+
+In `template.rs::apply_patches`, after all patches are applied, scan the exchange component for consecutive identical lines and remove the duplicates. This catches V1/V2 without any prior-knowledge of WHY the duplication happened.
+
+```rust
+/// After applying patches, remove consecutive identical lines in exchange component.
+/// Prevents agent echoes of user prompts from creating duplicates in append mode.
+fn dedup_exchange_adjacent_lines(doc: &str) -> String {
+    let Ok(comps) = component::parse(doc) else { return doc.to_string() };
+    let Some(exc) = comps.iter().find(|c| c.name == "exchange") else { return doc.to_string() };
+    let content = exc.content(doc);
+    let mut deduped = String::with_capacity(content.len());
+    let mut prev: Option<&str> = None;
+    for line in content.lines() {
+        // Only dedup non-blank lines (blank lines are intentional separators)
+        if !line.trim().is_empty() && prev == Some(line) {
+            continue; // skip exact duplicate adjacent line
+        }
+        deduped.push_str(line);
+        deduped.push('\n');
+        prev = Some(line); // safe: line lifetime = content lifetime
+    }
+    if !content.ends_with('\n') && deduped.ends_with('\n') {
+        deduped.pop();
+    }
+    exc.replace_content(doc, &deduped)
+}
+```
+
+Call after `apply_patches` returns in `run_stream`.
+
+**Additional V1 fix — patch prefix dedup in `apply_mode`:**
+
+```rust
+fn apply_mode(mode: &str, existing: &str, new_content: &str) -> String {
+    match mode {
+        "append" => {
+            // Strip prefix of new_content that duplicates the end of existing.
+            // Prevents agent echoes of user prompts from duplicating on append.
+            let stripped = strip_leading_overlap(existing, new_content);
+            format!("{}{}", existing, stripped)
+        }
+        ...
+    }
+}
+
+fn strip_leading_overlap(existing: &str, new_content: &str) -> &str {
+    // Check if new_content starts with the last non-blank line of existing.
+    // If so, strip that line + its trailing newline from new_content.
+    let last_nonempty = existing.lines()
+        .filter(|l| !l.trim().is_empty())
+        .last();
+    let Some(last) = last_nonempty else { return new_content };
+    let test = format!("{}\n", last);
+    if new_content.starts_with(&test) {
+        &new_content[test.len()..]
+    } else {
+        new_content
+    }
+}
+```
+
+**Recurring session drift — auto-relocate in `start.rs`:**
+
+The `start.rs` warning isn't enough — it fired but %77 still registered in session 1. Change from warn-only to **auto-relocate**:
+
+```rust
+if let Some(expected_session) = config::project_tmux_session() {
+    if let Ok(actual_session) = tmux.pane_session(&pane_id)
+        && actual_session != expected_session
+    {
+        eprintln!("[start] pane {} is in session '{}', expected '{}' — auto-relocating",
+            pane_id, actual_session, expected_session);
+        // Move the pane to the expected session before registering
+        if let Some(anchor) = sessions::any_live_pane_in_session(&expected_session) {
+            let _ = PaneMoveOp::new(&tmux, &pane_id, &anchor)
+                .allow_cross_session("auto-relocate to project session on start")
+                .join("-dh");
+        }
+    }
+}
+```
+
+This is the self-healing version of the pane_policy guard — instead of warning after the fact, it relocates silently and registers in the right session.
+
+**Summary — 3 tasks:**
+1. `dedup_exchange_adjacent_lines` in `template.rs` after `apply_patches` (V1/V2 fix)
+2. `strip_leading_overlap` in `apply_mode("append", ...)` (V1 fix, complementary)  
+3. `start.rs` auto-relocate instead of warn-only (H2 recurring drift fix)
+<!-- agent:boundary:38528354 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-(none)
+- [ ] Implement `dedup_exchange_adjacent_lines` in `template.rs`
+- [ ] Implement `strip_leading_overlap` in `apply_mode` for append mode
+- [ ] Change `start.rs` warn → auto-relocate via `PaneMoveOp`
+- [ ] Bump version to 0.31.28, update VERSIONS.md, test, publish
 <!-- /agent:pending -->

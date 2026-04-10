@@ -134,7 +134,7 @@ Step 3: (eliminated)
 **Checkpoint writes are unchanged** — no `--commit` on intermediate flushes. The SKILL.md diff is: final write gains `--commit`, step 3 is removed.
 ❯ do
 ❯ - [ ] Implement `agent-doc write --commit` flag + git-repo guard (awaiting approval)
-### Re: implement `agent-doc write --commit` (HEAD)
+### Re: implement `agent-doc write --commit`
 
 Done. v0.31.29 shipped.
 
@@ -146,7 +146,19 @@ Done. v0.31.29 shipped.
 - `Cargo.toml` + `pyproject.toml`: bumped to `0.31.29`
 
 765 tests pass, clippy clean. `cargo install v0.31.29` running locally.
-<!-- agent:boundary:d8ed65c4 -->
+❯ add tests
+add full lifecycle tests
+tasks/software/monsterrodholders.md had an uncommitted response patch.
+### Re: tests (HEAD)
+
+Added 3 tests to `git.rs` (768 total, up from 765):
+
+- **`is_in_git_repo_true_inside_repo`** — temp git repo, file inside → `true`
+- **`is_in_git_repo_false_outside_repo`** — plain `TempDir` (no `git init`) → `false`
+- **`write_commit_lifecycle`** — full lifecycle: init repo, create doc + snapshot, call `commit()`, verify `agent-doc(session):` appears in git log
+
+All 768 tests pass.
+<!-- agent:boundary:7ed2fe01 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

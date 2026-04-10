@@ -493,8 +493,8 @@ On the server:
 cd /opt/monsterrodholders/app && git pull && ./scripts/wp-to-git.sh
 ```
 
-I'm using monsterrodholders_deploy instead of monsterrodholders_deploy_rw.
-commit + push
+❯ I'm using monsterrodholders_deploy instead of monsterrodholders_deploy_rw.
+❯ commit + push
 ### Re: still not writable
 
 Both containers share the `wordpress_data` named volume, so the chown should have worked — but the write check kept failing. Root cause is likely that each `docker compose run` spawns a fresh container, and the writability check in WP-CLI inspects it differently. Simpler fix: export to `/tmp` and pipe stdout out in a single container run — no cross-container volume dependency:
@@ -511,16 +511,27 @@ On the server:
 ```bash
 cd /opt/monsterrodholders/app && git pull && ./scripts/wp-to-git.sh
 ```
-<!-- agent:boundary:3b25268e -->
+
+❯ I'm using monsterrodholders_deploy instead of monsterrodholders_deploy_rw.
+❯ commit + push
+### Re: deploy key rename + commit + push
+
+Script already used `monsterrodholders_deploy` in `GIT_SSH_COMMAND` — but the comment header and `docs/server-setup.md` still referenced `_rw`. Cleaned up both. Committed and pushed:
+
+```
+004725d fix: rename deploy key from monsterrodholders_deploy_rw to monsterrodholders_deploy
+```
+
+The server should now be able to run `./scripts/wp-to-git.sh` and push successfully with the key at `/root/.ssh/monsterrodholders_deploy`.
+<!-- agent:boundary:840f4517 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] On server: `git pull` + re-run `./scripts/wp-to-git.sh` (single-container export fix)
-- [ ] Verify commit + push succeeds (need write deploy key — see server-setup.md)
+- [ ] On server: run `git pull && ./scripts/wp-to-git.sh` to test full export → commit → push cycle
 - [ ] On server: bootstrap theme files into wordpress/themes/blocksy/
-- [ ] (Optional) Set up mu-plugin + inotify watcher for real-time sync
 - [ ] Decision: rebuild home page in Blocksy, or install WPBakery?
+- [ ] (Optional) Set up mu-plugin + inotify watcher for real-time sync
 - [ ] When ready to go live: search-replace URLs → monsterrodholders.com, flip DNS, re-run certbot
 <!-- /agent:pending -->

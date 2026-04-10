@@ -1893,7 +1893,7 @@ docker compose down && docker compose up -d
 # Now search-replace will work:
 docker compose run --rm wpcli wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables
 ```
-<!-- agent:boundary:ca3d19e0 -->
+<!-- agent:boundary:b1fe4b1a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

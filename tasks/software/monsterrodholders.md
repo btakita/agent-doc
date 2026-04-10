@@ -1046,14 +1046,25 @@ With hero off and sidebar removed, the home page is now a clean full-width canva
 - Leading with a featured product block or "Shop by Category" grid immediately below the header
 - The WooCommerce product grid blocks already on the page will now take full column width — verify column count looks right at desktop (3–4 col) and mobile (1 col)
 - A sticky "Shop" CTA in the header or a prominent banner replacing the hero would complete the conversion funnel above the fold
-<!-- agent:boundary:8b43d3d7 -->
+
+❯ do
+❯ - [ ] Delete/unpublish ~15 demo pages + GeoDirectory pages (removes them from admin nav too)
+### Re: delete demo/GeoDirectory pages
+
+This was already completed in the previous session — **38 demo/GeoDirectory/duplicate pages deleted** (see the `### Re: product presentation` response above). The current page list confirms it: no GeoDirectory pages, no theme demos, no alt home pages.
+
+Current page inventory is clean. A few to optionally review:
+- `Recently Viewed Products` (18849) — possible leftover WC shortcode demo
+- `On Sale` (5531), `Bestsellers` (7519), `Hot Deal` (6987) — may be legit shop landing pages or leftover demos
+- `Monster Rod Holders New Metallic Look` (15892 draft) — duplicate of published 15894?
+
+Let me know if any of those should be deleted.
+<!-- agent:boundary:db1fa306 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Delete/unpublish ~15 demo pages + GeoDirectory pages (removes them from admin nav too)
 - [ ] Respond to 9 real customer order inquiries in comment hold queue
 - [ ] Copy remaining uploads (verify completeness)
-- [ ] When ready to go live: search-replace URLs → monsterrodholders.com, flip DNS, re-run certbot
 <!-- /agent:pending -->

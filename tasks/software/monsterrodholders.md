@@ -351,7 +351,7 @@ docker compose restart wordpress
 Full docs in `docs/server-setup.md` § Write deploy key + Bi-directional sync.
 
 ❯ How do I make the WP deployment write the files into the git repo?
-### Re: making WP deployment write to git (HEAD)
+### Re: making WP deployment write to git
 
 **The challenge:** WordPress runs inside Docker as `www-data` — it can't directly call `git push` with the deploy key. The script must run on the host. Three approaches:
 
@@ -391,15 +391,43 @@ done
 WP plugin POSTs to `http://host:PORT/sync` on content save, tiny server runs `wp-to-git.sh`. Overkill for this use case.
 
 **Recommendation:** Start with cron (Option 1) — already documented, just needs `crontab -e` on the server. Add the mu-plugin + signal watcher (Option 2) if real-time sync matters later. Want me to scaffold Option 2?
-<!-- agent:boundary:7fc1b47a -->
+
+❯ I edited `crontab -e`.
+❯ Can I run the script from the host system to see if the file are committed + pushed?
+### Re: running wp-to-git.sh manually (HEAD)
+
+Yes — run it from local via SSH:
+
+```bash
+ssh root@50.28.2.199 'cd /opt/monsterrodholders/app && ./scripts/wp-to-git.sh'
+```
+
+**Prerequisite:** The script needs the write deploy key at `/root/.ssh/monsterrodholders_deploy_rw`. Check if it exists:
+
+```bash
+ssh root@50.28.2.199 'ls -la /root/.ssh/monsterrodholders_deploy_rw 2>/dev/null && echo "key exists" || echo "key MISSING"'
+```
+
+If missing, generate + add to GitHub:
+```bash
+# Generate
+ssh root@50.28.2.199 'ssh-keygen -t ed25519 -C "monsterrodholders-deploy-rw" \
+  -f /root/.ssh/monsterrodholders_deploy_rw -N ""'
+# Print pub key → add to github.com/btakita/monsterrodholders-dev/settings/keys (write access)
+ssh root@50.28.2.199 'cat /root/.ssh/monsterrodholders_deploy_rw.pub'
+```
+
+Then run the script — it'll print each step: export WXR, git add/commit, git push.
+<!-- agent:boundary:e58db08b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] On server: generate write deploy key + add to GitHub (see server-setup.md)
+- [ ] On server: check/generate write deploy key + add to GitHub with write access
+- [ ] Run `./scripts/wp-to-git.sh` manually to verify commit + push works
 - [ ] On server: git pull + bootstrap theme files into wordpress/themes/blocksy/
-- [ ] (Optional) Set up cron for auto WP→git sync every 15min
+- [ ] (Optional) Set up Option 2 mu-plugin + inotify watcher for real-time sync
 - [ ] Decision: rebuild home page in Blocksy, or install WPBakery?
 - [ ] When ready to go live: search-replace URLs → monsterrodholders.com, flip DNS, re-run certbot
 <!-- /agent:pending -->

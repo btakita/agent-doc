@@ -166,7 +166,7 @@ Confirmed — this is a live example of the gap class that `--commit` eliminates
 The write happened (`agent-doc write` ran, snapshot updated), but `agent-doc commit` was never called. Preflight's step 2 caught it at `11:04:40` and committed the response.
 
 With `--commit` on the final write, that gap window disappears — write and commit are atomic from the skill's perspective.
-<!-- agent:boundary:44866ee0 -->
+<!-- agent:boundary:1e325316 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

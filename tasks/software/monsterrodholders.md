@@ -128,7 +128,7 @@ WooCommerce store settings (`woocommerce_store_city`, `woocommerce_store_postcod
 Pushed to git: `ed86219`.
 
 ❯ Can we use the garderobe theme for this site?
-### Re: garderobe "theme" (HEAD)
+### Re: garderobe "theme"
 
 Garderobe is a **Blocksy starter site**, not a standalone WordPress theme — monsterrodholders already runs Blocksy, so there's no theme to switch to.
 
@@ -151,14 +151,43 @@ If you want a full garderobe-feel, I can:
 3. Add hover overlays to product cards matching their grid style
 
 This gets the aesthetic without the import risk. Want me to proceed?
-<!-- agent:boundary:6ce6c7f4 -->
+
+❯ Let's use more of garderobe on the site.
+❯ - sticky top navigation
+❯ - Add a banner at the above the top navigation. Add social media links. Put "Check out our universal stainless steel bases" Link to the bases section. 
+❯ - MonsterRodHolder logo only...Put "Monster Rod Holder" to the right of the logo.
+❯ - The top navigation should be shorter
+**The site footer needs to include links to all product categories and other areas of the website.**
+### Re: garderobe header — sticky nav, top bar, logo+title, compact height (HEAD)
+
+All 4 changes live ✓
+
+**Sticky navigation ✓**
+`#header { position: sticky; top: 0; z-index: 999; box-shadow: ... }` — the full header sticks on scroll.
+
+**Announcement bar above nav ✓**
+Added a top row (Blocksy header builder) with:
+- 🎣 "Check out our universal stainless steel bases" → links to `/product-category/rod-holder-bases/`
+- ▶ YouTube → `youtube.com/user/akwalung`
+Dark background (`#1a1a1a`) with gold link color (`#e8c84a`) — garderobe-inspired contrast bar.
+
+**Logo + "Monster Rod Holders" text ✓**
+`has_site_title: yes` enabled in the Blocksy logo element. The site name now appears to the right of the logo image. Logo height constrained to 50px via CSS so the ratio looks clean next to the text.
+
+**Shorter nav ✓**
+Middle row height reduced from 120px → 75px desktop (65px mobile). Top bar is 40px — total header is ~115px vs ~120px before, but visually much more compact since the main logo row is shorter.
+
+**Social links note:** Only YouTube was found on the site (`youtube.com/user/akwalung`). If there's a Facebook/Instagram, give me the URLs and I'll add them to the top bar.
+
+Pushed to git: `0c42ebb`.
+<!-- agent:boundary:7542c257 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Garderobe color/font/card-hover styling — pending user approval
-- [ ] Verify home page in browser — Cover block hero, Best Sellers, sold-out items hidden
+- [ ] Add Facebook/Instagram to top bar (need URLs from user)
+- [ ] Verify home page in browser — sticky nav, announcement bar, logo+title, compact height
 - [ ] Verify footer renders 33 links cleanly
 - [ ] Delete Recently Viewed Products page (18849)
 - [ ] DNS flip: point monsterrodholders.com → 50.28.2.199

@@ -2121,7 +2121,7 @@ Done — pushed `agent-loop` to remote. Had ~20 unpushed commits (all the agent-
 ❯ http://50.28.2.199.nip.io/ is back to the apache server.
 
 ❯ Please help me fix.
-### Re: HTTP → Apache + HTTPS → redirect (HEAD)
+### Re: HTTP → Apache + HTTPS → redirect
 
 Two separate issues:
 
@@ -2129,6 +2129,8 @@ Two separate issues:
 ```bash
 ssh root@50.28.2.199 "systemctl stop apache2 && systemctl disable apache2"
 ```
+
+❯ The server uses InterWorx. So this won't work. Need to setup apache rules.
 
 **2. HTTPS → redirects to monsterrodholders.com:** WordPress `siteurl`/`home` are still set to `monsterrodholders.com` — the `wp search-replace` was still pending. Run it:
 ```bash
@@ -2141,17 +2143,56 @@ ssh root@50.28.2.199 "cd /opt/monsterrodholders/app && docker compose run --rm w
 ```
 
 After both — verify `http://50.28.2.199.nip.io/` hits nginx and `https://50.28.2.199.nip.io/` loads without redirect.
-<!-- agent:boundary:8a9ebb2e -->
+
+❯ https://50.28.2.199.nip.io/ still redirects
+http://50.28.2.199.nip.io/ still hits apache
+http://50.28.2.199.nip.io/ should redirect https://50.28.2.199.nip.io/
+### Re: InterWorx Apache + HTTPS still redirects (HEAD)
+
+**HTTP → Apache (InterWorx):** Can't stop Apache — need to configure it as a reverse proxy to Docker nginx.
+
+First, check what port Docker nginx is bound to:
+```bash
+ssh root@50.28.2.199 "docker compose -f /opt/monsterrodholders/app/docker-compose.yml ps nginx"
+```
+
+Then add a VirtualHost proxy rule in Apache. Create `/etc/httpd/conf.d/monsterrodholders-proxy.conf` (or InterWorx custom include path):
+```apache
+<VirtualHost *:80>
+    ServerName 50.28.2.199.nip.io
+
+    ProxyPreserveHost On
+    ProxyPass / http://127.0.0.1:DOCKER_NGINX_PORT/
+    ProxyPassReverse / http://127.0.0.1:DOCKER_NGINX_PORT/
+</VirtualHost>
+```
+Replace `DOCKER_NGINX_PORT` with whatever port the nginx container exposes (likely 8080 or similar). Then `systemctl reload httpd`.
+
+**HTTPS still redirecting:** The `wp search-replace` and option updates haven't been run yet. Run these now:
+```bash
+ssh root@50.28.2.199 "cd /opt/monsterrodholders/app && docker compose run --rm wpcli wp option get siteurl"
+```
+
+If it still shows `monsterrodholders.com`, update it:
+```bash
+ssh root@50.28.2.199 "cd /opt/monsterrodholders/app && docker compose run --rm wpcli wp option update siteurl 'https://50.28.2.199.nip.io'"
+ssh root@50.28.2.199 "cd /opt/monsterrodholders/app && docker compose run --rm wpcli wp option update home 'https://50.28.2.199.nip.io'"
+```
+
+The HTTPS redirect is coming from WordPress itself — once `siteurl`/`home` point to `50.28.2.199.nip.io`, the redirect stops.
+<!-- agent:boundary:ad50519b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Stop Apache on host: `systemctl stop apache2 && systemctl disable apache2`
-- [ ] `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`
-- [ ] Update `siteurl` and `home` wp options to `https://50.28.2.199.nip.io`
-- [ ] Verify `http://50.28.2.199.nip.io/` loads via nginx (not Apache)
+- [ ] Check Docker nginx port: `docker compose ps nginx`
+- [ ] Create Apache proxy VirtualHost for `50.28.2.199.nip.io` → Docker nginx
+- [ ] `systemctl reload httpd` after adding VirtualHost
+- [ ] Update WordPress siteurl + home to `https://50.28.2.199.nip.io`
+- [ ] Verify `http://50.28.2.199.nip.io/` proxies through Apache to nginx
 - [ ] Verify `https://50.28.2.199.nip.io/` loads without redirect
+- [ ] `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`
 - [ ] Copy uploads into wordpress container (if not done)
 - [ ] Install + activate new theme
 <!-- /agent:pending -->

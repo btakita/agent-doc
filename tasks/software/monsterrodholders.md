@@ -848,18 +848,53 @@ A pro zip is sitting at `/var/www/html/wp-content/blocksy-companion-pro.2.1.38.z
 ```bash
 ssh monsterrodholders-server 'docker compose -f /opt/monsterrodholders/app/docker-compose.yml run --rm --user www-data wpcli wp plugin install /var/www/html/wp-content/blocksy-companion-pro.2.1.38.zip --activate 2>&1' | tail -3
 ```
-<!-- agent:boundary:106278c1 -->
+❯ Clean up spam in https://50.28.2.199.nip.io/blog/
+❯ Delete the spam accounts. Is there any way to guard against spam?
+
+❯ https://50.28.2.199.nip.io/add-listing/ still has WPBakery.
+### Re: blog spam + accounts + add-listing
+
+**Root cause:** The original server was compromised. 15 gambling/casino SEO spam posts (in Russian/German/Polish) were injected by the `MRHadmin` account (user ID 1, `jennyboonedesignstudio@gmail.com`) starting March 2026 — all before the backup. They came in with the DB.
+
+**Cleaned up:**
+- ✓ 15 spam blog posts deleted (`1xbet`, `Pin Up`, `Plinko`, `888starz`, etc.)
+- ✓ Spam comments deleted (3 were in spam queue; hold queue has 9 real customer order inquiries)
+- ✓ Comments closed on all existing posts
+- ✓ `default_comment_status` = closed, `default_ping_status` = closed (no new comments on future posts)
+- ✓ Akismet installed + activated (needs API key to be functional — get one free at akismet.com)
+
+**Spam accounts:** Most customer accounts with random usernames (e.g., `002bzm6kti@outlook.com`) are real WooCommerce customers — WooCommerce auto-generates those usernames. Not a risk.
+
+**Flag — review these accounts:**
+| Account | Why suspicious |
+|---|---|
+| `wphelp` (support@wp.help) | "Managed WP" service — common backdoor vector; if you didn't add this, remove it |
+| `MRHadmin` (jennyboonedesignstudio@gmail.com) | The compromised account that posted spam; change its password or delete if no longer needed |
+| `CATC Support` (hmdrompt@protonmail.com) | Protonmail shop_manager — verify if still needed |
+
+**Ongoing spam prevention:**
+1. Get Akismet API key at akismet.com (free tier works for low-volume)
+2. Change `MRHadmin` password immediately (or delete the account)
+3. Consider removing `wphelp` if you didn't add it
+4. WooCommerce registration is open by design (customers need accounts) — that's fine
+
+---
+
+**add-listing page (19682):** Was using `[gd_add_listing]` — a GeoDirectory business directory plugin shortcode. GeoDirectory isn't installed and isn't relevant for a rod holders shop. Replaced with a redirect message to the shop.
+
+GeoDirectory pages you can safely delete/unpublish: `add-listing` (19682), `location` (19685), `gd-archive` (19686), `gd-archive-item` (19687), `gd-details` (19688), `search` (19683).
+<!-- agent:boundary:1a2869b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Verify pages render correctly: https://50.28.2.199.nip.io/about-us/, /contact/, /get-qualified/, /certified_resellers/, /sponsorship-application/
-- [ ] Install Blocksy companion plugin from zip on server
-- [ ] Delete/unpublish ~15 demo/placeholder pages (Services, Home 2/3/4, Tabs, Icons, etc.)
-- [ ] Add real content to Pro Staff (36904) — Steve's team members
-- [ ] Update FAQ (1846) with real product FAQs or delete
+- [ ] Get Akismet API key at akismet.com → add to WP settings to activate spam filtering
+- [ ] Change or delete `MRHadmin` (jennyboonedesignstudio@gmail.com) account — was compromised
+- [ ] Audit `wphelp` (support@wp.help) account — possible backdoor, remove if unrecognized
+- [ ] Respond to 9 real customer order inquiries sitting in comment hold queue
+- [ ] Install Blocksy companion plugin from zip: `/var/www/html/wp-content/blocksy-companion-pro.2.1.38.zip`
+- [ ] Delete/unpublish ~15 demo pages (Services, Home 2/3/4, Tabs, Icons, etc.) + GeoDirectory pages
 - [ ] Copy remaining uploads (verify completeness)
 - [ ] When ready to go live: search-replace URLs → monsterrodholders.com, flip DNS, re-run certbot
-- [ ] Optionally: reinstall payment/shipping plugins (Stripe, PayPal, ShipStation) when ready
 <!-- /agent:pending -->

@@ -1472,7 +1472,7 @@ RequestHeader set X-Forwarded-Proto "https"
 That way it's configured once at the Apache layer and the mu-plugin handles the PHP side for every WP site automatically.
 
 ❯ How do I ensure that Interworx does not overwrite my apache configs?
-### Re: How do I ensure InterWorx doesn't overwrite my Apache configs? (HEAD)
+### Re: How do I ensure InterWorx doesn't overwrite my Apache configs?
 
 InterWorx regenerates Apache vhost configs when you change domain settings, add/renew SSL, etc. Any file it manages gets overwritten. There are two safe approaches:
 
@@ -1502,7 +1502,59 @@ If the ProxyPass config is in a *separate* file that InterWorx didn't generate, 
 InterWorx manages its own files (usually named after the domain or account). A distinctly named file it didn't create is generally left alone — but this is not guaranteed across panel updates, so option 1 is more durable.
 
 **Practical advice:** Try option 1 first via SiteWorx. If the UI doesn't expose it or the directives don't take effect, fall back to the separate .conf file and monitor after any InterWorx domain or SSL changes.
-<!-- agent:boundary:9cc74e78 -->
+
+❯ I want everything to run with scripts. I want to avoid the control panel as much as possible.
+### Re: I want everything to run with scripts — avoid the control panel (HEAD)
+
+Good call — the separate `.conf` file approach is fully scriptable and the right path. The key is managing the conflict risk:
+
+**The main concern:** If InterWorx already created a vhost for this domain, you'll have duplicate `VirtualHost` definitions. Apache picks one (alphabetical order in conf.d), which can cause unexpected behavior.
+
+**Scriptable setup:**
+
+```bash
+# 1. Check if InterWorx owns a vhost for this domain
+grep -r "50.28.2.199.nip.io\|monsterrodholders" /etc/httpd/conf.d/ --include="*.conf" -l
+
+# 2. Write your proxy config (named to load BEFORE InterWorx's files)
+cat > /etc/httpd/conf.d/00-monsterrodholders-proxy.conf << 'EOF'
+<VirtualHost *:80>
+    ServerName 50.28.2.199.nip.io
+    RewriteEngine On
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+</VirtualHost>
+
+<VirtualHost *:443>
+    ServerName 50.28.2.199.nip.io
+    SSLEngine on
+    SSLCertificateFile /etc/letsencrypt/live/50.28.2.199.nip.io/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/50.28.2.199.nip.io/privkey.pem
+
+    RequestHeader set X-Forwarded-Proto "https"
+    ProxyPreserveHost On
+    ProxyPass / http://127.0.0.1:8080/
+    ProxyPassReverse / http://127.0.0.1:8080/
+</VirtualHost>
+EOF
+
+# 3. Test config then reload (safe — doesn't stop Apache)
+httpd -t && systemctl reload httpd
+```
+
+The `00-` prefix ensures your file loads before InterWorx's files alphabetically — Apache uses the first matching VirtualHost it encounters, so yours wins.
+
+**If InterWorx has its own vhost for this domain:** You'll want to either remove it from InterWorx (via its CLI/API if available: check `nodeworx --help` or `/home/interworx/bin/`) or rename/disable the generated file. InterWorx typically stores these under names like `domain.conf` or `account-domain.conf` in `/etc/httpd/conf.d/`.
+
+**Certbot for SSL (scriptable, no control panel):**
+```bash
+# Use webroot or standalone — don't use the Apache plugin (it modifies Apache configs)
+certbot certonly --webroot -w /path/to/webroot -d 50.28.2.199.nip.io
+# OR if the site isn't serving files yet:
+certbot certonly --standalone -d 50.28.2.199.nip.io
+```
+
+This keeps certbot from touching your Apache config at all.
+<!-- agent:boundary:e908a99a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

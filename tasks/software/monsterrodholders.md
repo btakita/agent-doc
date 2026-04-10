@@ -779,7 +779,7 @@ Also — update the pass entry if the server password changed:
 ```bash
 pass edit monsterrodholders/SSH_PASSWD
 ```
-<!-- agent:boundary:737baf7e -->
+<!-- agent:boundary:076037ed -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

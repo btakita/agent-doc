@@ -124,18 +124,12 @@ The draft was using the Gmail thread ID (`19d5467199f95043`) as `in_reply_to`, b
 
 Updated the draft and re-pushed. Draft is now in your `btak.dev` Gmail Drafts, properly threaded to Alexander's original email. Open Gmail to review and send.
 ❯ The new draft is still unattached to the thread.
-### Re: Threading fix (take 2) (HEAD)
+### Re: Transfer (HEAD)
 
-The issue: the draft only had `in_reply_to` (the RFC 2822 Message-ID) but Gmail API also needs `thread_id` (the Gmail thread ID) to attach the draft to the existing thread. Both are required.
+Threading fix extracted to `tasks/software/corky.md` — the bug and fix are now tracked there for proper follow-up.
 
-Updated the draft with:
-```yaml
-thread_id: "19d5467199f95043"
-in_reply_to: "<IA6PR17MB75914071E950616FCD529092A95EA@IA6PR17MB7591.namprd17.prod.outlook.com>"
-```
-
-Re-pushed. The draft in your `btak.dev` Gmail Drafts should now be properly attached to the "Your Filevine Journey Continues!" thread.
-<!-- agent:boundary:78d42d52 -->
+**Summary of the fix:** `corky draft push` needs both `thread_id` (Gmail thread ID) and `in_reply_to` (RFC 2822 Message-ID) set in the draft YAML to properly attach a draft to an existing Gmail thread. Using only `in_reply_to` sets the email headers but doesn't tell the Gmail API which thread to attach to.
+<!-- agent:boundary:3e555813 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

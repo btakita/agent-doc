@@ -49,7 +49,7 @@ Sessions v0.31.18–v0.31.28. Key decisions and fixes:
 - Manual testing gate: confirm v0.31.28 auto-relocate in live session, then publish: crates.io → PyPI → GitHub Release.
 
 ❯ release
-### Re: release
+### Re: release (HEAD)
 
 v0.31.28 released:
 
@@ -183,7 +183,7 @@ Fix:
 2. Ran `agent-doc commit` — created a new commit with the full file content including `### Re: still not writable (HEAD)` marker
 3. Working tree now shows only the `(HEAD)` strip diff (1 line) — correct state
 ❯ release
-### Re: release (HEAD)
+### Re: release
 
 v0.31.29 released:
 
@@ -194,7 +194,7 @@ v0.31.29 released:
 - **PyPI:** `agent_doc (0.31.29)` confirmed (manylinux wheel via Docker)
 - **cargo install:** v0.31.29 running locally
 - **Parent submodule pointer:** updated and pushed (`b690ad82`)
-<!-- agent:boundary:af1cac91 -->
+<!-- agent:boundary:7d2d2b66 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

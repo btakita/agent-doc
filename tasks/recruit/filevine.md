@@ -114,7 +114,7 @@ The push is now unblocked — it just needs a one-time OAuth re-authorization si
 A browser window will open (or print a URL). Sign in as `btak.dev@gmail.com`, grant Gmail compose access, and the draft will land in your Gmail Drafts folder.
 
 ❯ The email draft was not properly threaded.
-### Re: Threading fix (HEAD)
+### Re: Threading fix
 
 The draft was using the Gmail thread ID (`19d5467199f95043`) as `in_reply_to`, but that field requires the RFC 2822 Message-ID. Used `corky sync refetch` to re-fetch the thread and extract:
 
@@ -123,7 +123,19 @@ The draft was using the Gmail thread ID (`19d5467199f95043`) as `in_reply_to`, b
 ```
 
 Updated the draft and re-pushed. Draft is now in your `btak.dev` Gmail Drafts, properly threaded to Alexander's original email. Open Gmail to review and send.
-<!-- agent:boundary:5c6c6270 -->
+❯ The new draft is still unattached to the thread.
+### Re: Threading fix (take 2) (HEAD)
+
+The issue: the draft only had `in_reply_to` (the RFC 2822 Message-ID) but Gmail API also needs `thread_id` (the Gmail thread ID) to attach the draft to the existing thread. Both are required.
+
+Updated the draft with:
+```yaml
+thread_id: "19d5467199f95043"
+in_reply_to: "<IA6PR17MB75914071E950616FCD529092A95EA@IA6PR17MB7591.namprd17.prod.outlook.com>"
+```
+
+Re-pushed. The draft in your `btak.dev` Gmail Drafts should now be properly attached to the "Your Filevine Journey Continues!" thread.
+<!-- agent:boundary:62898ead -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

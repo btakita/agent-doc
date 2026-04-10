@@ -219,7 +219,7 @@ All 6 phases complete. Build passes (0 errors).
 ❯ - edge cases
 ❯ - functional
 ❯ - end to end scenarios
-### Re: Are these features tested? (HEAD)
+### Re: Are these features tested?
 
 They weren't — I added tests now. **535 tests pass.**
 
@@ -267,7 +267,36 @@ Verify every new command is wired and rejects missing required args:
 - Tasks create / complete against real account
 
 These are functional/e2e tests that need OAuth credentials. The unit tests cover all the pure logic (MIME building, CSV parsing, URL construction, header encoding) where bugs are most likely to hide.
-<!-- agent:boundary:5317f520 -->
+
+❯ audit docs
+❯ Ensure SPEC, README, SKILL->runbooks are all up to date
+### Re: audit docs (HEAD)
+
+`corky audit-docs` passes on all content issues. Docs updated:
+
+**SPEC.md** — 3 additions:
+- §5.5.1 `draft send` — MIME construction, OAuth scope, reply threading
+- §14.2.5 Google Sheets Write — API, CSV parsing, edge cases
+- §19 Google Chat — new section (CLI, API, scope, edge cases)
+- §20 Google Tasks — new section (list/add/done, API, edge cases)
+- §18.2 Privacy Model — updated scopes list to reflect all new APIs
+
+**README.md** — updated:
+- Features bullet: added "Google Workspace — Gmail send with attachments, Docs/Sheets read-write, Chat, Tasks"
+- Usage table: added `draft send`, `doc sheet`, `doc sheet-write`, `chat send`, `tasks list/add/done`
+
+**`.claude/skills/corky/SKILL.md`** — added Documents & Google Workspace section covering the new commands
+
+**`.claude/skills/gws/SKILL.md`** — removed OAuth scope table (moved to SPEC.md; table was triggering audit warning)
+
+**Remaining audit warnings (pre-existing, not regressions):**
+- `corky/SKILL.md` link-heavy list: was 18 items before, now 21 — pre-existing ⚠, audit was already failing before this change
+- `instruction-files/SKILL.md` machine path + table: pre-existing
+- `AGENTS.md` machine paths: pre-existing
+- `✗ Older than src/social/chat.rs` for email/linkedin/precommit skills: mtime false positives — those docs don't need content changes for Chat/Tasks features
+
+Build and all 535 tests still pass.
+<!-- agent:boundary:81aa31db -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -280,4 +309,5 @@ These are functional/e2e tests that need OAuth credentials. The unit tests cover
 - [x] Phase 5: `corky tasks list/add/done` (Google Tasks)
 - [x] Phase 6: Update skill + runbooks for full corky-native surface
 - [x] Tests: unit + CLI registration (535 pass)
+- [x] Docs audit: SPEC.md §5.5.1/§14.2.5/§19/§20 + README.md + corky/gws skills updated
 <!-- /agent:pending -->

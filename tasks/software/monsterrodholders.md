@@ -796,15 +796,70 @@ Product category IDs: rod-holders=210, rod-holder-bases=533, boat-accessories=53
 All page slugs, titles, and Yoast meta untouched — SEO preserved.
 
 **Verify:** https://50.28.2.199.nip.io/ should show the home page with product grids.
-<!-- agent:boundary:a888da0b -->
+❯ Please crawl the pages on the site. Plan on converting the old WPBakery content with Gutenberg.
+### Re: crawl + WPBakery → Gutenberg migration
+
+**29 pages with WPBakery shortcodes found. 12 critical business pages migrated this session.**
+
+---
+
+#### Completed ✓
+
+| Page | ID | What was done |
+|---|----|---|
+| Home | 7503 | Columns layout + WC product shortcodes (rod-holders, rod-holder-bases, featured, boat-accessories) |
+| Bestsellers | 7519 | `[best_selling_products limit="8" columns="4"]` |
+| On Sale | 5531 | `[sale_products limit="8" columns="4"]` |
+| Hot Deal | 6987 | `[sale_products limit="12" columns="4"]` |
+| Catfish Dude Videos | 8719 | `<!-- wp:embed -->` YouTube block + `<!-- wp:buttons -->` |
+| About Us | 1780 | 2-col: founder photo + contact info left, Steve Douglas story right |
+| Product Catalog | 33015 | `<!-- wp:file -->` PDF embed block + Adobe Cloud link |
+| Contact Us | 24 | 2-col: Zoho support form (preserved as `<!-- wp:html -->`) + Google Maps iframe |
+| Monster Bonus Money | 8533 | 4 sections: Qualifications, Pay-Out, How to Claim, Sanctioned Tournaments |
+| Certified Resellers | 19292 | 3-col reseller grid + "Become a Reseller" registration section |
+| Sponsorship Application | 16342 | 3 sections: Application, Pro-Staff Application, Guide Service Application |
+| Pro Staff | 36904 | Cleared WPBakery placeholders (Lorem ipsum) — needs real team content |
+
+**Migration approach used for tabs-heavy pages:** WPBakery tabs → flat `<!-- wp:heading -->` sections with `<!-- wp:html -->` blocks. No tab plugin needed, content visible to Google crawlers.
+
+---
+
+#### Still has WPBakery — Action needed
+
+**Delete / unpublish (demo/placeholder content, never real business pages):**
+- Services (2058) — 50 shortcodes, all Lorem ipsum text
+- Home 2 (4557), Home 3 (7498), Home 4 (4420) — alternate homepage demos
+- Tabs (447), Pie chart (4120), Panel (4181), Table (4185), Icons (1884), Forms (1871), Typography (1861), Carousel (4132), My Flickr (4139), Goolge Map (4153), Elements Bootstrap (2315)
+- FAQ (1846) — accordion with Lorem ipsum placeholder, no real content
+- Checkout (54) — duplicate of WC Checkout (ID 8), wraps `[woocommerce_checkout]` in WPBakery
+
+**WooCommerce functional pages (keep as-is):**
+- Shop (6), Cart (7), Checkout (8), My Account (9), Wishlist (5) — use native WC shortcodes, working fine
+
+---
+
+#### WooCommerce category IDs (for reference)
+rod-holders=210 | rod-holder-bases=533 | boat-accessories=534 | monster-gear=660
+
+---
+
+#### Next: Blocksy companion plugin
+A pro zip is sitting at `/var/www/html/wp-content/blocksy-companion-pro.2.1.38.zip`. Install it:
+```bash
+ssh monsterrodholders-server 'docker compose -f /opt/monsterrodholders/app/docker-compose.yml run --rm --user www-data wpcli wp plugin install /var/www/html/wp-content/blocksy-companion-pro.2.1.38.zip --activate 2>&1' | tail -3
+```
+<!-- agent:boundary:505b04c9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Verify https://50.28.2.199.nip.io/ — home page with product grids renders correctly
-- [ ] Install Blocksy companion plugin (zip is at `/var/www/html/wp-content/blocksy-companion-pro.2.1.38.zip`)
+- [ ] Verify pages render correctly: https://50.28.2.199.nip.io/about-us/, /contact/, /get-qualified/, /certified_resellers/, /sponsorship-application/
+- [ ] Install Blocksy companion plugin from zip on server
+- [ ] Delete/unpublish ~15 demo/placeholder pages (Services, Home 2/3/4, Tabs, Icons, etc.)
+- [ ] Add real content to Pro Staff (36904) — Steve's team members
+- [ ] Update FAQ (1846) with real product FAQs or delete
 - [ ] Copy remaining uploads (verify completeness)
 - [ ] When ready to go live: search-replace URLs → monsterrodholders.com, flip DNS, re-run certbot
-- [ ] Optionally: reinstall other plugins (Stripe, PayPal, ShipStation, Affiliate WP) when ready
+- [ ] Optionally: reinstall payment/shipping plugins (Stripe, PayPal, ShipStation) when ready
 <!-- /agent:pending -->

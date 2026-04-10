@@ -1470,7 +1470,7 @@ RequestHeader set X-Forwarded-Proto "https"
 ```
 
 That way it's configured once at the Apache layer and the mu-plugin handles the PHP side for every WP site automatically.
-<!-- agent:boundary:f630465e -->
+<!-- agent:boundary:0f3bc5a0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

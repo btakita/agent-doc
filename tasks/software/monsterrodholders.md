@@ -753,7 +753,7 @@ If certbot DID succeed, share the `docker compose logs nginx` output.
 ❯ MONSTERRODHOLDERS_IP_ADDRESS="50.28.2.199"
 ❯ MONSTERRODHOLDERS_SSH_PASSWD="$(pass monsterrodholders/SSH_PASSWD)"
 
-### Re: remote diagnosis (HEAD)
+### Re: remote diagnosis
 
 Can't connect via SSH — `pass monsterrodholders/SSH_PASSWD` is failing auth (both password and keyboard-interactive). Password may have changed or the pass entry may be stale.
 
@@ -779,16 +779,66 @@ Also — update the pass entry if the server password changed:
 ```bash
 pass edit monsterrodholders/SSH_PASSWD
 ```
-<!-- agent:boundary:076037ed -->
+
+```
+[root@oddball-business restore]# docker ps --all
+CONTAINER ID   IMAGE                         COMMAND                  CREATED       STATUS                   PORTS      NAMES
+0ad9e51a3770   nginx:alpine                  "/docker-entrypoint.…"   3 hours ago   Exited (1) 3 hours ago              app-nginx-1
+343f0a86a4a2   wordpress:php8.3-fpm-alpine   "docker-entrypoint.s…"   3 hours ago   Up 3 hours               9000/tcp   app-wordpress-1
+8cfe407b1414   redis:alpine                  "docker-entrypoint.s…"   3 hours ago   Up 3 hours               6379/tcp   app-redis-1
+63f95dcdc125   mariadb:11                    "docker-entrypoint.s…"   3 hours ago   Up 3 hours               3306/tcp   app-db-1
+```
+
+❯ see /home/brian/work/btakita/agent-loop/tasks/software/monsterrodholders/docker-compose.log
+
+```
+[root@oddball-business app]# ls /etc/letsencrypt/live/
+ls: cannot access '/etc/letsencrypt/live/': No such file or directory
+```
+### Re: nginx exiting + no letsencrypt (HEAD)
+
+Confirmed: nginx is crashing because it expects SSL certs at `/etc/nginx/certs/fullchain.pem` but `/etc/letsencrypt/live/` doesn't exist. Certbot was never successfully completed — it got blocked by httpd + iptables, then docker was restarted but certbot-init.sh was never rerun.
+
+Fix sequence — run on the server:
+
+**1. Stop the stack:**
+```bash
+cd /root/app
+docker compose down
+```
+
+**2. Verify port 80 is free and docker is clean:**
+```bash
+systemctl is-active firewalld && systemctl stop firewalld
+ss -tlnp | grep :80   # should show nothing
+```
+
+**3. Run certbot to get the cert:**
+```bash
+./scripts/certbot-init.sh
+```
+
+**4. Confirm certs are there:**
+```bash
+ls /etc/letsencrypt/live/
+```
+
+**5. Bring the stack up:**
+```bash
+docker compose up -d
+docker compose ps
+```
+
+nginx should come up green. Paste any errors if it doesn't.
+<!-- agent:boundary:20dc5c02 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Diagnose nginx:** Paste `docker ps --all`, `docker compose logs nginx`, `ls /etc/letsencrypt/live/` output
-- [ ] Fix nginx startup (likely certbot incomplete)
+- [ ] Stop stack → run certbot-init.sh → restart stack
+- [ ] Verify nginx comes up and site serves on `https://50.28.2.199.nip.io`
 - [ ] **Server step 10:** Transfer + import backup, `wp search-replace` domain
-- [ ] Verify site on `https://50.28.2.199.nip.io`
 - [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot
 - [ ] Clean spam comments post-import
 - [ ] Plugin audit: delete `worker`, `wpmudev-updates`; pick TaxJar OR AvaTax

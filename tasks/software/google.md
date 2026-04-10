@@ -76,7 +76,7 @@ All tasks complete.
 **[done] `src/corky/.agent/runbooks/gws-docs-draft.md`** — created. Three workflows: read-from-Docs→send-via-corky, create-new-Doc, post-mortem/announcement recipes.
 
 **[done] Document gws prerequisite in corky AGENTS.md** — added `## Google Workspace Integration (gws)` section with install commands and when-to-use decision table.
-<!-- agent:boundary:b0428dbe -->
+<!-- agent:boundary:ab07afa6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -2147,7 +2147,7 @@ After both — verify `http://50.28.2.199.nip.io/` hits nginx and `https://50.28
 ❯ https://50.28.2.199.nip.io/ still redirects
 http://50.28.2.199.nip.io/ still hits apache
 http://50.28.2.199.nip.io/ should redirect https://50.28.2.199.nip.io/
-### Re: InterWorx Apache + HTTPS still redirects (HEAD)
+### Re: InterWorx Apache + HTTPS still redirects
 
 **HTTP → Apache (InterWorx):** Can't stop Apache — need to configure it as a reverse proxy to Docker nginx.
 
@@ -2180,17 +2180,49 @@ ssh root@50.28.2.199 "cd /opt/monsterrodholders/app && docker compose run --rm w
 ```
 
 The HTTPS redirect is coming from WordPress itself — once `siteurl`/`home` point to `50.28.2.199.nip.io`, the redirect stops.
-<!-- agent:boundary:016b08b4 -->
+
+```
+[root@oddball-business app]# cd /opt/monsterrodholders/app && docker compose run --rm wpcli wp option get siteurl
+WARN[0000] Found orphan containers ([app-nginx-1]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up.
+[+]  2/2t 2/22
+ ✔ Container app-db-1        Running                                                                                                                                                                                                       0.0s
+ ✔ Container app-wordpress-1 Running                                                                                                                                                                                                       0.0s
+Container app-wpcli-run-0476febcdaa6 Creating
+Container app-wpcli-run-0476febcdaa6 Created
+https://50.28.2.199.nip.io
+```
+### Re: siteurl already correct — redirect is in nginx config (HEAD)
+
+`siteurl` already shows `https://50.28.2.199.nip.io` — WordPress isn't causing the redirect. The redirect must be in the **nginx config** itself.
+
+Also notable: the output shows an **orphaned `app-nginx-1` container** (removed from compose but still running). That container may be the one actually handling HTTPS on port 443 with stale config that redirects to `monsterrodholders.com`.
+
+Check the active nginx container's config for hardcoded redirects:
+```bash
+ssh root@50.28.2.199 "docker exec app-nginx-1 cat /etc/nginx/conf.d/default.conf 2>/dev/null || docker exec app-nginx-1 cat /etc/nginx/nginx.conf"
+```
+
+And check what the orphan is doing:
+```bash
+ssh root@50.28.2.199 "docker inspect app-nginx-1 | grep -E 'Status|Ports' -A 2"
+```
+
+If the config has `return 301 https://monsterrodholders.com` or `server_name monsterrodholders.com`, that's the culprit. Once identified, update the nginx config file on disk and restart:
+```bash
+ssh root@50.28.2.199 "docker restart app-nginx-1"
+```
+<!-- agent:boundary:3ab8e0cb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Check Docker nginx port: `docker compose ps nginx`
-- [ ] Create Apache proxy VirtualHost for `50.28.2.199.nip.io` → Docker nginx
-- [ ] `systemctl reload httpd` after adding VirtualHost
-- [ ] Update WordPress siteurl + home to `https://50.28.2.199.nip.io`
-- [ ] Verify `http://50.28.2.199.nip.io/` proxies through Apache to nginx
+- [ ] Check nginx config for hardcoded redirect to `monsterrodholders.com`
+- [ ] Identify if `app-nginx-1` orphan is handling port 443
+- [ ] Update nginx config if redirect found, restart container
+- [ ] Update wp_options `home` (siteurl already correct)
+- [ ] Configure Apache proxy for HTTP (`50.28.2.199.nip.io` → Docker nginx)
+- [ ] Verify `http://50.28.2.199.nip.io/` loads via Apache proxy
 - [ ] Verify `https://50.28.2.199.nip.io/` loads without redirect
 - [ ] `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`
 - [ ] Copy uploads into wordpress container (if not done)

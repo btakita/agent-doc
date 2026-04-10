@@ -835,7 +835,7 @@ docker compose ps
 ```
 
 nginx should come up green. Paste any errors if it doesn't.
-### Re: httpd still on port 80 (HEAD)
+### Re: httpd still on port 80
 
 `systemctl stop firewalld` ran but httpd is still up. Stop it:
 
@@ -850,14 +850,42 @@ Then run certbot:
 ```bash
 ./scripts/certbot-init.sh
 ```
-<!-- agent:boundary:ef4149c8 -->
+
+```
+[root@oddball-business app]# ./scripts/certbot-init.sh
+Saving debug log to /var/log/letsencrypt/letsencrypt.log
+Certificate not yet due for renewal
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+Certificate not yet due for renewal; no action taken.
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+==> Certs provisioned. Start services with: docker compose up -d
+[root@oddball-business app]# ls /etc/letsencrypt/live/
+ls: cannot access '/etc/letsencrypt/live/': No such file or directory
+```
+### Re: certbot "not yet due for renewal" (HEAD)
+
+That's actually a success path — certbot found a cert from a previous attempt and it's still valid (doesn't need renewal). The script printed "Certs provisioned. Start services with: docker compose up -d" which is the success signal.
+
+The `ls /etc/letsencrypt/live/` check was on the **host** filesystem — certbot-init.sh likely runs certbot in a Docker container and stores certs in a named Docker volume, not on the host. That's why the host path is empty.
+
+Bring up the stack:
+
+```bash
+docker compose up -d
+docker compose ps
+docker compose logs nginx --tail=20
+```
+
+nginx should now find the cert via the volume mount.
+<!-- agent:boundary:2a63dd8b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Stop httpd → run certbot-init.sh → restart stack
-- [ ] Verify nginx comes up and site serves on `https://50.28.2.199.nip.io`
+- [ ] `docker compose up -d` → verify nginx comes up
+- [ ] Test site on `https://50.28.2.199.nip.io`
 - [ ] **Server step 10:** Transfer + import backup, `wp search-replace` domain
 - [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot
 - [ ] Clean spam comments post-import

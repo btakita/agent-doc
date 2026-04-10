@@ -1837,7 +1837,7 @@ grep -m1 'siteurl' /opt/monsterrodholders/restore/backup.sql
 ```
 Expected output: something like `'https://monsterrodholders.com'` — paste it and I'll fill in the exact search-replace command.
 ❯ Can I copy the container. Do the switch in the current container...then restore the old container?
-### Re: no need to snapshot — domain switch is reversible (HEAD)
+### Re: no need to snapshot — domain switch is reversible
 
 The domain is just two rows in `wp_options` (`siteurl` and `home`). `wp search-replace` rewrites them — run it in either direction:
 
@@ -1866,17 +1866,43 @@ docker run --rm \
   alpine tar xzf /backup/db_before_import.tar.gz -C /target
 docker compose up -d
 ```
-<!-- agent:boundary:bc308164 -->
+
+```
+Image wordpress:cli Pulled
+Container app-wpcli-run-be2a32ab87ee Creating
+Container app-wpcli-run-be2a32ab87ee Created
+Error: The site you have requested is not installed.
+Your table prefix is 'wp_'. Found installation with table prefix: wp_nxz1mfc9cg_.
+Or, run `wp core install` to create database tables.
+```
+### Re: table prefix mismatch (HEAD)
+
+Good news: the SQL imported successfully — the tables exist with prefix `wp_nxz1mfc9cg_`. The problem is `wp-config.php` defaults to `wp_`, so WP-CLI can't find the tables.
+
+**Fix — update table prefix in `.env`:**
+```bash
+# Edit /opt/monsterrodholders/app/.env — change or add:
+WORDPRESS_TABLE_PREFIX=wp_nxz1mfc9cg_
+```
+
+Then restart to regenerate `wp-config.php`:
+```bash
+cd /opt/monsterrodholders/app
+docker compose down && docker compose up -d
+
+# Now search-replace will work:
+docker compose run --rm wpcli wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables
+```
+<!-- agent:boundary:ca3d19e0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] (optional) Snapshot DB volume before import
-- [ ] Confirm old domain: `grep -m1 'siteurl' /opt/monsterrodholders/restore/backup.sql`
-- [ ] Import SQL: `docker compose exec -T db mariadb ... < /opt/monsterrodholders/restore/backup.sql`
-- [ ] Copy uploads into wordpress container
+- [ ] Update `.env`: `WORDPRESS_TABLE_PREFIX=wp_nxz1mfc9cg_`
+- [ ] `docker compose down && docker compose up -d`
 - [ ] `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`
+- [ ] Copy uploads into wordpress container (if not done)
 - [ ] Verify site at https://50.28.2.199.nip.io — content, images, pages
 - [ ] Install + activate new theme
 - [ ] Flip DNS → new server; run certbot for real cert

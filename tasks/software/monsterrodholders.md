@@ -1334,7 +1334,7 @@ Does this server have an InterWorx control panel URL you can log into, or is dir
 ❯ > InterWorx does not support containerized environments, including Docker or LXC.
 
 ❯ Does this mean I cannot use Docker at all with InterWorx? Have people successfully used Docker with InterWorx?
-### Re: InterWorx "no Docker" — support disclaimer, not a technical block (HEAD)
+### Re: InterWorx "no Docker" — support disclaimer, not a technical block
 
 That FAQ statement means InterWorx won't help you if Docker breaks something — not that Docker is prevented from running. Your Docker containers are already running on this server.
 
@@ -1375,7 +1375,45 @@ Result:
 - InterWorx remains happy — Apache still owns 80/443
 
 Want me to write out the full revised `docker-compose.yml` and nginx config for this architecture?
-<!-- agent:boundary:243d130c -->
+
+❯ Is this safe or can this cause problems?
+### Re: Is this safe or can this cause problems? (HEAD)
+
+Yes, this is safe — it's a standard reverse proxy pattern. A few things to watch:
+
+**Safe:**
+- Binding to `127.0.0.1:8080` means the port is unreachable from the internet — only Apache on the same host can connect
+- HTTP internally (loopback) is fine; traffic never leaves the server
+- Apache owns SSL, certbot manages certs on the host — clean separation
+
+**Watch for:**
+
+**1. WordPress HTTPS detection** — Apache terminates SSL then proxies plain HTTP to Docker, so WordPress won't see `$_SERVER['HTTPS'] = 'on'`. Fix with:
+
+In Apache config:
+```apache
+RequestHeader set X-Forwarded-Proto "https"
+```
+
+In `wp-config.php`:
+```php
+if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
+    $_SERVER['HTTPS'] = 'on';
+}
+```
+
+Without this, WordPress generates `http://` links on a page served over HTTPS → mixed content errors.
+
+**2. mod_proxy must be enabled** — verify:
+```bash
+httpd -M | grep proxy
+```
+Should show `proxy_module`, `proxy_http_module`. If missing: `LoadModule proxy_module ...` in httpd.conf.
+
+**3. InterWorx may regenerate Apache configs** — if InterWorx manages vhosts via its panel, it could overwrite `/etc/httpd/conf.d/monsterrodholders.conf`. Either add the domain through the InterWorx panel (if it has a reverse proxy option) or put the config somewhere InterWorx doesn't touch (check what directories it manages).
+
+Otherwise the architecture is solid — this is exactly how most WordPress + Docker + existing Apache setups work.
+<!-- agent:boundary:e8595bcb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

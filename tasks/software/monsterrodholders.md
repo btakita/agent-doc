@@ -99,7 +99,7 @@ Then complete WordPress install at `https://monsterrodholders.com`.
 4. Configure daily backup cron: `0 2 * * * cd /path && source .env && ./scripts/backup.sh`
 
 ❯ commit + push
-### Re: commit + push
+### Re: commit + push (HEAD)
 
 Done.
 
@@ -2113,10 +2113,10 @@ Done: `chmod 755 scripts/certbot-init.sh`, committed, pushed, and submodule poin
 On the server after deploying: `./scripts/certbot-init.sh` will work directly.
 
 ❯ commit + push
-### Re: commit + push (HEAD)
+### Re: commit + push
 
 Done — pushed `agent-loop` to remote. Had ~20 unpushed commits (all the agent-doc monsterrodholders session commits + two submodule pointer updates).
-<!-- agent:boundary:9ecd6664 -->
+<!-- agent:boundary:d61f2f57 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

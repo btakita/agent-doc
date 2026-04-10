@@ -1375,7 +1375,7 @@ Result:
 - InterWorx remains happy — Apache still owns 80/443
 
 Want me to write out the full revised `docker-compose.yml` and nginx config for this architecture?
-<!-- agent:boundary:3bbaa90c -->
+<!-- agent:boundary:243d130c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

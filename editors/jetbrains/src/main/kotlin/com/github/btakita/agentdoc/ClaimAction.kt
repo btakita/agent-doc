@@ -4,6 +4,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 
 /**
  * Action that claims the focused .md file and syncs the tmux layout.
@@ -29,6 +30,22 @@ class ClaimAction : AnAction() {
         val relativePath = TerminalUtil.relativePath(project, file)
         val windowId = TerminalUtil.projectWindowId(project)
 
+        // Determine position from editor layout so claim targets the correct tmux pane.
+        // Without --position, claim falls back to the last active tmux pane (wrong).
+        // LayoutDetector maps horizontal splits to left/right columns, vertical to same column.
+        val managerEx = FileEditorManagerEx.getInstanceEx(project)
+        val editorLayout = if (managerEx.windows.size > 1)
+            LayoutDetector.detectEditorLayout(project) else null
+        val position = editorLayout?.let { layout ->
+            val colIdx = layout.columns.indexOfFirst { col -> relativePath in col.files }
+            when {
+                colIdx < 0 -> null                         // file not found in layout
+                colIdx == 0 -> "left"
+                colIdx == layout.columns.size - 1 -> "right"
+                else -> null                               // middle column — skip for now
+            }
+        }
+
         Thread {
             try {
                 // Step 1: Claim the focused file (adds frontmatter if missing)
@@ -36,6 +53,9 @@ class ClaimAction : AnAction() {
                 val cmd = mutableListOf(agentDoc, "claim", relativePath)
                 if (windowId != null) {
                     cmd.addAll(listOf("--window", windowId))
+                }
+                if (position != null) {
+                    cmd.addAll(listOf("--position", position))
                 }
                 LOG.debug("claim: ${cmd.joinToString(" ")}")
                 val process = ProcessBuilder(cmd)

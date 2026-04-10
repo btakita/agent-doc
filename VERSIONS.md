@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.30
+
+- **Fix: `❯ ` prefix applied to `agent:pending` patches (regression in v0.31.29):** `normalize_patch_content` was called on all IPC patches, not just exchange patches. When `normalize_prefix_lines` contained a line that also appeared verbatim in the `agent:pending` patch content, that line incorrectly received the `❯ ` prefix. Fix: gate `normalize_patch_content` on `is_append_mode_component(&p.name)` at both the primary IPC write path and the IPC timeout fallback in `write.rs`. Replace-mode components (`pending`, `status`, etc.) now always pass patch content through unchanged.
+- **Test added:** `normalize_prefix_lines_skipped_for_replace_mode_components` — verifies that `agent:pending` content is not normalized.
+
 ## 0.31.29
 
 - **`agent-doc write --commit` flag:** Runs `git::commit` immediately after a successful write. Eliminates the separate `agent-doc commit` step — the final write in the SKILL.md skill now uses `--commit`. Silently skips commit if the document is not inside a git repo (`git rev-parse --is-inside-work-tree` guard). Streaming checkpoint writes do not use `--commit`; only the final write does.

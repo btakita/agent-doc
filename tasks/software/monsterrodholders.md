@@ -1702,7 +1702,7 @@ networks:
 
 ❯ do
 ❯ - [ ] Switch docker-compose to `wordpress:apache` (drop nginx service)
-### Re: switch docker-compose to wordpress:apache (HEAD)
+### Re: switch docker-compose to wordpress:apache
 
 Done. `docker-compose.yml` updated and pushed.
 
@@ -1725,17 +1725,48 @@ The wordpress container will now serve HTTP on host port 8080. Host Apache/Inter
 ```bash
 curl -s http://localhost:8080/ | head -5
 ```
-<!-- agent:boundary:fdbab5a9 -->
+
+❯ Looks like nginx would be better?
+```
+[root@oddball-business app]# docker compose up -d
+[+] up 28/28
+ ✔ Image wordpress:apache Pulled                                                                                                                                                                                                           8.6s
+ ✘ Network app_wp_net     Error Error response from daemon: Failed to Setup IP tables: Unable to enable ACCEPT OUTGOING rule:  (iptables failed: iptables --wait -t filter -A DOCKER-FORWARD -i br-48f62a99c14d -j ACCEPT: iptables: N...  0.0s
+failed to create network app_wp_net: Error response from daemon: Failed to Setup IP tables: Unable to enable ACCEPT OUTGOING rule:  (iptables failed: iptables --wait -t filter -A DOCKER-FORWARD -i br-48f62a99c14d -j ACCEPT: iptables: No chain/target/match by that name.
+ (exit status 1))
+```
+### Re: iptables error — not a nginx vs apache issue (HEAD)
+
+That error is a Docker/iptables problem, unrelated to the image choice. The `DOCKER-FORWARD` chain doesn't exist in the kernel's iptables, so Docker can't create the `app_wp_net` bridge network. This would fail identically with nginx.
+
+**Cause:** firewalld (which InterWorx uses) cleared Docker's iptables chains — happens after a firewalld reload or kernel update.
+
+**Fix — restart Docker:**
+```bash
+systemctl restart docker
+docker compose -f /opt/monsterrodholders/app/docker-compose.yml up -d
+docker compose -f /opt/monsterrodholders/app/docker-compose.yml ps
+```
+
+**If that fails — reload iptables modules:**
+```bash
+modprobe ip_tables iptable_filter iptable_nat
+systemctl restart docker
+docker compose -f /opt/monsterrodholders/app/docker-compose.yml up -d
+```
+<!-- agent:boundary:dda4507f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Pull updated docker-compose.yml on server + `docker compose up -d`
+- [ ] `systemctl restart docker` → `docker compose up -d` (fix iptables error)
+- [ ] Verify `docker compose ps` shows wordpress + db + redis Up
+- [ ] `curl -s http://localhost:8080/ | head -5` (confirm Apache serving)
 - [ ] Write Apache VirtualHost config at `/etc/httpd/conf.d/monsterrodholders.conf` (ProxyPass to 8080)
 - [ ] `systemctl reload httpd` and test `https://50.28.2.199.nip.io`
 - [ ] **Server step 10:** Transfer + import backup, `wp search-replace` domain
-- [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot for real domain
+- [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot
 - [ ] Clean spam comments post-import
 - [ ] Plugin audit: delete `worker`, `wpmudev-updates`; pick TaxJar OR AvaTax
 - [ ] Set up cron jobs (SSL renewal + daily backup)

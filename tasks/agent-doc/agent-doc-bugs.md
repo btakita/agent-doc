@@ -666,7 +666,7 @@ The error fired correctly — but it read `src/agent-doc/.agent-doc/config.toml`
 Drift cleared. `claude-code.md` is now registered in session 0.
 
 > **Note:** The CWD-sensitivity of `project_config_path()` is a latent issue — callers in different CWDs pick up different project configs. Not blocking for this fix, but worth a follow-up to anchor config resolution to the document's project root instead of CWD.
-<!-- agent:boundary:544b6aff -->
+<!-- agent:boundary:01d43c95 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

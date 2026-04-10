@@ -182,7 +182,7 @@ Covers:
 - Service coverage summary
 
 ❯ Implement src/corky/tasks/integrations/google-workspace.md
-### Re: Implement google-workspace.md (HEAD)
+### Re: Implement google-workspace.md
 
 All 6 phases complete. Build passes (0 errors).
 
@@ -215,7 +215,59 @@ All 6 phases complete. Build passes (0 errors).
 - `pub mod tasks` added to `lib.rs`
 
 **Phase 6 — Skills + runbooks** (done alongside Phase 1)
-<!-- agent:boundary:eb8de476 -->
+❯ Are all of these new features throughly tested...including:
+❯ - edge cases
+❯ - functional
+❯ - end to end scenarios
+### Re: Are these features tested? (HEAD)
+
+They weren't — I added tests now. **535 tests pass.**
+
+#### Unit tests (inline in source, no API access needed)
+
+**`src/draft/send.rs`** — 4 unit tests:
+- `test_encode_header_ascii` — ASCII subjects pass through unchanged
+- `test_encode_header_utf8` — non-ASCII subjects get RFC 2047 base64 encoded (`=?UTF-8?B?...?=`)
+- `test_build_mime_no_attachments` — verifies headers, Content-Type `text/plain`, no multipart
+- `test_build_mime_with_in_reply_to` — verifies `In-Reply-To` and `References` headers
+- `test_build_mime_with_attachment` — writes a temp file, verifies `multipart/mixed`, `base64` encoding, `Content-Disposition`
+
+**`src/doc/sheets.rs`** — 7 unit tests:
+- `test_parse_sheet_id_raw` / `test_parse_sheet_id_url` — ID extraction from bare ID and Drive URL
+- `test_encode_range` — `!` and `:` percent-encoding
+- `test_parse_csv_line_simple` / `_quoted` / `_escaped_quotes` / `_empty_fields` — CSV parser edge cases including quoted commas and `""` escaping
+- `test_format_csv_roundtrip` / `test_format_csv_with_commas` — output quoting
+
+**`src/social/chat.rs`** — 2 unit tests:
+- `test_normalize_space_with_prefix` — `spaces/ABCDEFG` → `ABCDEFG`
+- `test_normalize_space_without_prefix` — bare ID passes through
+
+#### CLI registration tests (`tests/test_cli.rs`) — 12 new tests
+
+Verify every new command is wired and rejects missing required args:
+
+| Test | What it checks |
+|------|---------------|
+| `test_cli_draft_send_requires_file` | `corky draft send` fails without `<FILE>` |
+| `test_cli_draft_send_help` | help output mentions `attachment` |
+| `test_cli_doc_sheet_write_requires_args` | fails without args |
+| `test_cli_doc_sheet_write_help` | help output mentions `range` |
+| `test_cli_chat_send_requires_args` | fails without space + message |
+| `test_cli_chat_send_help` | help output mentions `space` |
+| `test_cli_tasks_list_registered` | help output mentions `tasklist` |
+| `test_cli_tasks_add_requires_title` | fails without title |
+| `test_cli_tasks_add_help` | help output mentions `due` |
+| `test_cli_tasks_done_requires_task_id` | fails without task ID |
+
+#### What's not tested (requires live Google API)
+
+- Gmail send / attachment round-trip
+- Sheets write to a real spreadsheet
+- Google Chat message delivery
+- Tasks create / complete against real account
+
+These are functional/e2e tests that need OAuth credentials. The unit tests cover all the pure logic (MIME building, CSV parsing, URL construction, header encoding) where bugs are most likely to hide.
+<!-- agent:boundary:d26379b6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -227,4 +279,5 @@ All 6 phases complete. Build passes (0 errors).
 - [x] Phase 4: `corky chat send` (Google Chat)
 - [x] Phase 5: `corky tasks list/add/done` (Google Tasks)
 - [x] Phase 6: Update skill + runbooks for full corky-native surface
+- [x] Tests: unit + CLI registration (535 pass)
 <!-- /agent:pending -->

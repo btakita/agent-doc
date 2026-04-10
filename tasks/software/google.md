@@ -296,7 +296,7 @@ These are functional/e2e tests that need OAuth credentials. The unit tests cover
 - `✗ Older than src/social/chat.rs` for email/linkedin/precommit skills: mtime false positives — those docs don't need content changes for Chat/Tasks features
 
 Build and all 535 tests still pass.
-<!-- agent:boundary:81aa31db -->
+<!-- agent:boundary:ad3690b9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

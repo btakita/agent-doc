@@ -1216,7 +1216,7 @@ If WordPress loads (even if it looks like a fresh install or shows a DB error), 
 ❯ http://50.28.2.199.nip.io/ is still running apache
 
 Same with https://50.28.2.199.nip.io/
-### Re: http still hitting Apache (HEAD)
+### Re: http still hitting Apache
 
 Docker compose logs show nginx started clean — but HTTP is still hitting Apache. Something is still holding port 80. Diagnose on the server:
 
@@ -1227,6 +1227,48 @@ ss -tlnp | grep ':80'
 # Is httpd actually dead?
 systemctl status httpd
 ps aux | grep -E 'httpd|apache'
+```
+
+```
+[root@oddball-business app]# ss -tlnp | grep ':80'
+LISTEN 0      511                     *:80               *:*    users:(("httpd",pid=1145018,fd=4),("httpd",pid=1142304,fd=4),("httpd",pid=1142249,fd=4),("httpd",pid=1142203,fd=4),("httpd",pid=1142199,fd=4),("httpd",pid=1142170,fd=4))
+[root@oddball-business app]# systemctl status httpd
+● httpd.service - The Apache HTTP Server
+     Loaded: loaded (/usr/lib/systemd/system/httpd.service; disabled; preset: disabled)
+    Drop-In: /etc/systemd/system/httpd.service.d
+             └─php-fpm.conf, php74-php-fpm.conf, php81-php-fpm.conf, php82-php-fpm.conf
+     Active: active (running) since Thu 2026-04-09 22:25:02 EDT; 36min ago
+       Docs: man:httpd.service(8)
+   Main PID: 1142170 (httpd)
+     Status: "Total requests: 190; Idle/Busy workers 100/0;Requests/sec: 0.0875; Bytes served/sec: 440 B/sec"
+      Tasks: 231 (limit: 406328)
+     Memory: 188.0M (peak: 191.0M)
+        CPU: 1.570s
+     CGroup: /system.slice/httpd.service
+             ├─1142170 /usr/sbin/httpd -DFOREGROUND
+             ├─1142198 /usr/sbin/httpd -DFOREGROUND
+             ├─1142199 /usr/sbin/fcgi- -DFOREGROUND
+             ├─1142203 /usr/sbin/httpd -DFOREGROUND
+             ├─1142249 /usr/sbin/httpd -DFOREGROUND
+             ├─1142304 /usr/sbin/httpd -DFOREGROUND
+             └─1145018 /usr/sbin/httpd -DFOREGROUND
+
+Apr 09 22:25:01 oddball-business.metalseed.net systemd[1]: Starting The Apache HTTP Server...
+Apr 09 22:25:02 oddball-business.metalseed.net httpd[1142170]: Server configured, listening on: port 443, port 80
+Apr 09 22:25:02 oddball-business.metalseed.net systemd[1]: Started The Apache HTTP Server.
+[root@oddball-business app]# ps aux | grep -E 'httpd|apache'
+root      191515  0.0  0.0  19244 12120 ?        Ss   Apr07   0:01 /home/interworx/bin/iworx-web -f /home/interworx/etc/httpd/httpd.conf -DSSL
+iworx-w+  191518  0.0  0.0  19340  4664 ?        S    Apr07   0:00 /home/interworx/bin/fcgi-pm   -f /home/interworx/etc/httpd/httpd.conf -DSSL
+root     1142170  0.0  0.2 149996 136520 ?       Ss   22:25   0:00 /usr/sbin/httpd -DFOREGROUND
+apache   1142198  0.0  0.1 149556 122184 ?       S    22:25   0:00 /usr/sbin/httpd -DFOREGROUND
+apache   1142199  0.0  0.1 149652 121724 ?       S    22:25   0:00 /usr/sbin/fcgi- -DFOREGROUND
+apache   1142203  0.0  0.2 2550924 136124 ?      Sl   22:25   0:00 /usr/sbin/httpd -DFOREGROUND
+apache   1142249  0.0  0.2 2616396 150908 ?      Sl   22:25   0:00 /usr/sbin/httpd -DFOREGROUND
+apache   1142304  0.0  0.2 2485324 142316 ?      Sl   22:25   0:00 /usr/sbin/httpd -DFOREGROUND
+apache   1145018  0.0  0.2 2813004 146560 ?      Sl   22:28   0:00 /usr/sbin/httpd -DFOREGROUND
+iworx-w+ 1161802  0.0  0.0  19460  6104 ?        S    22:51   0:00 /home/interworx/bin/iworx-web -f /home/interworx/etc/httpd/httpd.conf -DSSL
+iworx-w+ 1166129  0.0  0.0  19460  6104 ?        S    22:57   0:00 /home/interworx/bin/iworx-web -f /home/interworx/etc/httpd/httpd.conf -DSSL
+root     1169157  0.0  0.0   6416  2588 pts/2    S+   23:01   0:00 grep --color=auto -E httpd|apache
 ```
 
 If httpd is truly stopped, docker's port mapping may not have taken effect. Check the nginx container is actually bound:
@@ -1250,13 +1292,52 @@ And if there's a socket unit keeping it alive:
 systemctl stop httpd.socket 2>/dev/null
 systemctl disable httpd.socket 2>/dev/null
 ```
-<!-- agent:boundary:41c11a16 -->
+
+❯ Nothing loads at https://50.28.2.199.nip.io
+### Re: InterWorx is managing httpd — it keeps restarting Apache (HEAD)
+
+Two things jump out from this output:
+
+1. **httpd is still running** despite `systemctl stop httpd` — because **InterWorx** (`/home/interworx/bin/iworx-web`) is managing httpd and restarting it automatically. InterWorx is a server control panel that owns the Apache process. `systemctl stop` won't stick — InterWorx brings it back.
+
+2. **Nothing loads at HTTPS** — nginx may have exited after Docker started, because `iworx-web` may also hold port 443. Need to verify.
+
+Check current state:
+
+```bash
+docker compose -f /opt/monsterrodholders/app/docker-compose.yml ps
+docker compose -f /opt/monsterrodholders/app/docker-compose.yml logs nginx --tail=20
+ss -tlnp | grep -E ':80|:443'
+```
+
+Likely: nginx crashed trying to bind 443 (held by iworx), container exited, port 80 released, InterWorx restarted httpd.
+
+**The right fix for an InterWorx server:** Don't fight InterWorx for ports 80/443. Instead, run Docker nginx on internal ports and have Apache reverse proxy to it.
+
+Change `docker-compose.yml` nginx ports from `80:80 / 443:443` to internal-only (no host port binding), and add an Apache VirtualHost in InterWorx that proxies to the Docker container:
+
+```apache
+# /etc/httpd/conf.d/monsterrodholders.conf
+<VirtualHost *:80>
+    ServerName 50.28.2.199.nip.io
+    ProxyPreserveHost On
+    ProxyPass / http://127.0.0.1:8080/
+    ProxyPassReverse / http://127.0.0.1:8080/
+</VirtualHost>
+```
+
+With nginx inside Docker exposed only on `127.0.0.1:8080:80` (no SSL in Docker — Apache/certbot handles SSL at the host level).
+
+Does this server have an InterWorx control panel URL you can log into, or is direct config editing the only option?
+<!-- agent:boundary:815f5a55 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Test `https://50.28.2.199.nip.io` — confirm site loads
+- [ ] Check current container state: `docker compose ps` + `docker compose logs nginx --tail=20` + `ss -tlnp | grep -E ':80|:443'`
+- [ ] Decide on architecture: Apache reverse proxy to Docker (recommended) OR fight InterWorx for ports
+- [ ] **If reverse proxy approach:** Update docker-compose nginx ports to `127.0.0.1:8080:80`, add Apache VirtualHost config
 - [ ] **Server step 10:** Transfer + import backup, `wp search-replace` domain
 - [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot for real domain
 - [ ] Clean spam comments post-import

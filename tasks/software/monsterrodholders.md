@@ -17,7 +17,7 @@ WordPress migration to Docker on InterWorx/Alma Linux (50.28.2.199). Stack: word
 ❯ Why is https://50.28.2.199.nip.io an empty site? I just restored the wordpress site without the theme. Just the data and the uploads.
 ❯ Can I extract the basic theme without extra plugins.
 ❯ Backup is at /home/brian/work/rberkes/monsterrodholders/MonsterRodholdersNETNEWcloud-040626-backup.zip
-### Re: empty site + extracting theme from backup (HEAD)
+### Re: empty site + extracting theme from backup
 
 **Why empty:** The theme wasn't copied — only DB + uploads were restored. WordPress has no active theme files, so it shows an empty/broken site. The DB still has `fishzone` set as the active theme, but the files aren't in the container.
 
@@ -47,15 +47,46 @@ docker compose -f /opt/monsterrodholders/app/docker-compose.yml run --rm wpcli \
 ```
 
 Replace `astra` with `fishzone` if you prefer the original. Do you want both or just astra?
-<!-- agent:boundary:cbf7019d -->
+
+❯ I just got the theme. How do I use this theme instead?
+❯ /home/brian/work/rberkes/monsterrodholders/blocksy-companion-pro.2.1.38.zip
+### Re: blocksy-companion-pro.2.1.38.zip (HEAD)
+
+That's the **Blocksy Companion Pro plugin** — not the theme itself. The Blocksy theme is separate and free on WordPress.org. The companion plugin adds pro features on top of the theme.
+
+**Install order:**
+
+**Step 1 — Install the Blocksy theme** (free, from WordPress.org):
+```bash
+docker compose -f /opt/monsterrodholders/app/docker-compose.yml run --rm wpcli \
+  wp theme install blocksy --activate
+```
+
+**Step 2 — Copy companion plugin to server:**
+```bash
+scp /home/brian/work/rberkes/monsterrodholders/blocksy-companion-pro.2.1.38.zip \
+  root@50.28.2.199:/tmp/
+```
+
+**Step 3 — Install + activate companion plugin on server:**
+```bash
+WP_CTR=$(docker compose -f /opt/monsterrodholders/app/docker-compose.yml ps -q wordpress)
+docker cp /tmp/blocksy-companion-pro.2.1.38.zip \
+  $WP_CTR:/var/www/html/wp-content/blocksy-companion-pro.2.1.38.zip
+docker compose -f /opt/monsterrodholders/app/docker-compose.yml run --rm wpcli \
+  wp plugin install /var/www/html/wp-content/blocksy-companion-pro.2.1.38.zip --activate
+```
+
+**Step 4 — Enter license key** in WP Admin → Blocksy → License (unlocks pro features). Do you have the license key?
+<!-- agent:boundary:15b6a718 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Decide: astra (new) or fishzone (original) theme
-- [ ] Copy theme from backup → server → container → activate
-- [ ] Verify in incognito: `https://50.28.2.199.nip.io/` loads WordPress with products
+- [ ] Install Blocksy theme via WP-CLI on server
+- [ ] Copy + install blocksy-companion-pro plugin
+- [ ] Enter Blocksy Pro license key in WP Admin
+- [ ] Verify site loads with Blocksy theme
 - [ ] Remove crash-looping `app-nginx-1` orphan container
-- [ ] Copy remaining uploads if incomplete
 <!-- /agent:pending -->

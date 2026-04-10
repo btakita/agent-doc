@@ -216,7 +216,7 @@ v0.31.29 released:
 **Test added:** `normalize_prefix_lines_skipped_for_replace_mode_components` — verifies that `agent:pending` content is not normalized even when `normalize_prefix_lines` contains a matching line.
 
 **Test results:** 780 tests pass. `send_keys_delivers_command_with_enter` remains flaky (passes in isolation — known ordering issue, not a regression).
-<!-- agent:boundary:1ee57bf8 -->
+<!-- agent:boundary:d0c1aef5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

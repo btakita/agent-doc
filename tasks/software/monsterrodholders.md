@@ -98,12 +98,35 @@ Blocksy will wrap these into columns automatically. If the layout needs 4 column
 
 All recent WP changes are now in git: home page (cover block, best sellers, bases layout), footer menu (33 items), out-of-stock hiding, page deletions.
 ❯ Remove the map to Steve's house in https://50.28.2.199.nip.io/contact/
-### Re: remove map from Contact page (HEAD)
+### Re: remove map from Contact page
 
 **Map removed ✓** — the Google Maps iframe (`777 KY-434, Lebanon Junction, KY 40150`) is gone from the Contact page. Kept the contact info text (address, phone, email) and the Zoho support form on the left.
 
 Pushed to git: `1ff234b sync: WP content 2026-04-10 18:17`.
-<!-- agent:boundary:0e123bf1 -->
+
+❯ Remove his address from anywhere on his website. "777 Hwy 434 Lebanon Jct KY 40150"
+### Re: remove address site-wide (HEAD)
+
+**Address removed from all public content ✓**
+
+Found and cleared multiple variants across pages and a widget:
+
+| Location | Variant removed |
+|---|---|
+| Contact Us (24) | `777 Hwy 434 Lebanon Jct KY 40150` |
+| About Us (1780) | `777 Hwy 434, Lebanon Junction, KY 40150` |
+| Warranty (8524) | `777 HWY 434, Lebanon Junction, KY 40150` |
+| Monster Bonus Money (8533) | `Lebanon Junction, KY 40150` |
+| Qualifications (19706) | `Lebanon Junction, KY 40150` |
+| How to Claim (24862) | `Lebanon Junction, KY 40150` |
+| Contact Us widget | `777 Hwy 434 Lebanon Junction KY 40150` |
+
+LSK Marine – MO page retained — that's `Lebanon, Mo.` (Missouri reseller, unrelated).
+
+WooCommerce store settings (`woocommerce_store_city`, `woocommerce_store_postcode`) still have the address internally — these are used for tax/shipping origin calculations and are not displayed publicly. Leave those unless you want to update the business address in WC settings.
+
+Pushed to git: `ed86219`.
+<!-- agent:boundary:1bbeea8a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

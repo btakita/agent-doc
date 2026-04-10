@@ -519,7 +519,7 @@ Then flip DNS.
 For now: test on nip.io → verify → flip to `monsterrodholders.com` → done. One domain, one site.
 
 ❯ Should I call `chmod a+x ./scripts/certbot-init.sh` or more strict permissions?
-### Re: certbot-init.sh permissions (HEAD)
+### Re: certbot-init.sh permissions
 
 Use `chmod 700`:
 
@@ -2064,19 +2064,42 @@ Options:
    ```bash
    ssh root@50.28.2.199 "chmod 600 /opt/monsterrodholders/scripts/certbot-init.sh"
    ```
+   
+❯ Problem is I have a dirty git tree on production. Can the change be ignored on the server so I can pull?
 
 2. **Add to deploy script or Makefile** so it's applied automatically on every deploy.
 
 3. **`chmod 700`** — owner-only execute; git stores as `755` in the index but `700` is applied locally. Same limitation: git doesn't round-trip 700 cleanly.
 
 If the goal is protecting sensitive content from other server users, option 1 is quickest. Want a Makefile `deploy` target that does the `chmod` automatically?
-<!-- agent:boundary:5b8546e3 -->
+### Re: dirty git tree on production (HEAD)
+
+Easiest options:
+
+**Option A — Skip git pull, just `scp`** (cleanest for production servers with local tweaks):
+```bash
+scp src/monsterrodholders-dev/docker-compose.yml root@50.28.2.199:/opt/monsterrodholders/app/docker-compose.yml
+```
+No git state to manage — file lands exactly where needed.
+
+**Option B — Stash, pull, pop:**
+```bash
+ssh root@50.28.2.199 "cd /opt/monsterrodholders/app && git stash && git pull && git stash pop"
+```
+
+**Option C — Discard dirty changes and pull** (only if the dirty changes are throwaway):
+```bash
+ssh root@50.28.2.199 "cd /opt/monsterrodholders/app && git checkout -- . && git pull"
+```
+
+Recommend Option A — production configs often have local tweaks that shouldn't be in git. The `scp` gives explicit control over what changes without touching git state.
+<!-- agent:boundary:0e0b4977 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] `scp` updated `docker-compose.yml` to server + recreate wordpress container
+- [ ] `scp docker-compose.yml` to server + recreate wordpress container
 - [ ] Verify prefix resolves to `wp_nxz1mfc9cg_` in container
 - [ ] `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`
 - [ ] `chmod 600 /opt/monsterrodholders/scripts/certbot-init.sh` on server

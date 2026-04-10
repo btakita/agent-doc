@@ -326,7 +326,7 @@ All 770 unit tests pass. Pre-existing flaky tmux test (`send_keys_delivers_comma
 **Version bumped to 0.31.31.** `cargo install --path .` done.
 
 Next: manual testing gate before release.
-<!-- agent:boundary:faa6a411 -->
+<!-- agent:boundary:fdc6c345 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

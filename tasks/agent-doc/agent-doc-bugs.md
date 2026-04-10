@@ -433,7 +433,7 @@ I'm not familiar enough with these editors to give accurate pros/cons or integra
 **Fallback: vscode Remote SSH.** If you want a GUI editor with zero config investment, VS Code Remote SSH is the most mature path and has the easiest plugin API for the agent-doc IPC integration.
 
 **Skip for this use case:** Zed (IPC extension path is uncertain), cursor (redundant AI), vim (lower ceiling than neovim for the same effort).
-<!-- agent:boundary:4b9adcd6 -->
+<!-- agent:boundary:c2b93587 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

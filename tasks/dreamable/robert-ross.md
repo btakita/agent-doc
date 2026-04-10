@@ -1196,7 +1196,21 @@ That leaves the **Build Party PRD**. Since it was an explicit Rob deliverable ("
 - It was deprioritized when direction shifted → confirm that so you don't carry it
 
 If you're not sure, a one-liner in the Slack message works: "Also — is the Build Party PRD still something you want me to evaluate for Apr 10, or is ClaudeScore the focus?"
-<!-- agent:boundary:cdc9ef6f -->
+
+❯ Please compress
+❯ - [2026-04-09 15-10-36.mp4](../../../../../Videos/2026-04-09%2015-10-36.mp4)
+❯ - [2026-04-09 19-22-02.mp4](../../../../../Videos/2026-04-09%2019-22-02.mp4)
+### Re: compress videos (HEAD)
+
+Both compressions running in background (ffmpeg, CRF 28, AAC 128k):
+
+| File | Original |
+|------|----------|
+| `2026-04-09 15-10-36.mp4` | 3.8 GB |
+| `2026-04-09 19-22-02.mp4` | 4.6 GB |
+
+Output files: `*-compressed.mp4` in the same `Videos/` directory. CRF 28 typically yields 60-80% size reduction for screen/meeting recordings while staying watchable. I'll report final sizes when done.
+<!-- agent:boundary:917251b2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

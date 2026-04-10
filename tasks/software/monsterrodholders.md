@@ -464,7 +464,7 @@ On the server:
 ```bash
 cd /opt/monsterrodholders/app && git pull && ./scripts/wp-to-git.sh
 ```
-<!-- agent:boundary:7a56c627 -->
+<!-- agent:boundary:27c1b57b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -60,7 +60,7 @@ Sessions v0.31.18–v0.31.26. Key decisions and fixes:
 - Runbook: `runbooks/plugin-install.md` must be consulted for any JB plugin change (version bump, uninstall protocol).
 
 ❯ release
-### Re: release
+### Re: release (HEAD)
 
 v0.31.26 released:
 
@@ -504,7 +504,7 @@ Extracted the guard into `pub(crate) fn relocate_if_wrong_session(tmux, pane_id,
 
 765 tests pass (all suites, including the new 3).
 ❯ release
-### Re: release (HEAD)
+### Re: release
 
 v0.31.28 prepped and installed locally:
 
@@ -514,7 +514,7 @@ v0.31.28 prepped and installed locally:
 - **`cargo install --path .`:** v0.31.28 running locally
 
 **Manual testing gate:** Please confirm the auto-relocate behavior works in a live session (or confirm you're satisfied with the test coverage), then I'll proceed to publish (crates.io → PyPI → GitHub Release).
-<!-- agent:boundary:b02d084f -->
+<!-- agent:boundary:b2d5a5ff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

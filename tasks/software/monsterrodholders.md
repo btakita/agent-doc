@@ -2391,7 +2391,7 @@ https://50.28.2.199.nip.io
     ProxyPassReverse / http://127.0.0.1:8080/
 </VirtualHost>
 ```
-### Re: proxy config already existed — verify it's working (HEAD)
+### Re: proxy config already existed — verify it's working
 
 The proxy config was already there, SSL cert paths are set, `home` and `siteurl` are both `https://50.28.2.199.nip.io`, and Apache was reloaded (Syntax OK). At this point the redirect should be fixed — let's verify.
 
@@ -2400,24 +2400,91 @@ Check the actual HTTP response to see if it's still redirecting, and where from:
 curl -vI https://50.28.2.199.nip.io/ 2>&1 | head -40
 ```
 
+❯ Try it yourself
+
 Dump active vhosts to confirm the config is loaded:
 ```bash
 ssh root@50.28.2.199 "apachectl -t -D DUMP_VHOSTS 2>&1 | head -50"
+```
+
+```
+[root@oddball-business app]# apachectl -t -D DUMP_VHOSTS 2>&1 | head -50
+Passing arguments to httpd using apachectl is no longer supported.
+You can only start/stop/restart httpd using this script.
+To pass extra arguments to httpd, see the httpd.service(8)
+man page.
 ```
 
 If still redirecting, check proxy modules are loaded:
 ```bash
 ssh root@50.28.2.199 "httpd -M | grep -E 'proxy|ssl'"
 ```
-<!-- agent:boundary:71831310 -->
+```
+[root@oddball-business app]# httpd -M | grep -E 'proxy|ssl'
+ proxy_module (shared)
+ proxy_ajp_module (shared)
+ proxy_balancer_module (shared)
+ proxy_connect_module (shared)
+ proxy_express_module (shared)
+ proxy_fcgi_module (shared)
+ proxy_fdpass_module (shared)
+ proxy_ftp_module (shared)
+ proxy_http_module (shared)
+ proxy_hcheck_module (shared)
+ proxy_scgi_module (shared)
+ proxy_uwsgi_module (shared)
+ proxy_wstunnel_module (shared)
+ ssl_module (shared)
+ proxy_http2_module (shared)
+```
+### Re: HTTPS fixed — HTTP returns 403 (HEAD)
+
+```
+HTTP/2 200 
+server: Apache/2.4.66 (Debian)
+link: <https://50.28.2.199.nip.io/wp-json/>; rel="https://api.w.org/"
+```
+
+**HTTPS is fixed** — HTTP/2 200, WordPress responding with correct nip.io URLs. The redirect to `monsterrodholders.com` is gone.
+
+**HTTP returns 403** — `Server: Apache` (the host Apache, not the WordPress container's "Apache/2.4.66 Debian"). The HTTP VirtualHost in the proxy config isn't matching, and a default vhost is serving 403 instead.
+
+Simplest fix: redirect HTTP → HTTPS (instead of proxying HTTP directly):
+
+```apache
+# /etc/httpd/conf.d/00-monsterrodholders-proxy.conf
+<VirtualHost *:80>
+    ServerName 50.28.2.199.nip.io
+    Redirect permanent / https://50.28.2.199.nip.io/
+</VirtualHost>
+
+<VirtualHost *:443>
+    ServerName 50.28.2.199.nip.io
+    SSLEngine on
+    SSLCertificateFile /etc/letsencrypt/live/50.28.2.199.nip.io/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/50.28.2.199.nip.io/privkey.pem
+
+    RequestHeader set X-Forwarded-Proto "https"
+    ProxyPreserveHost On
+    ProxyPass / http://127.0.0.1:8080/
+    ProxyPassReverse / http://127.0.0.1:8080/
+</VirtualHost>
+```
+
+Apply it:
+```bash
+ssh root@50.28.2.199 "vim /etc/httpd/conf.d/00-monsterrodholders-proxy.conf"
+ssh root@50.28.2.199 "apachectl configtest && systemctl reload httpd"
+```
+<!-- agent:boundary:39306acd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Verify `curl -vI https://50.28.2.199.nip.io/` — confirm no more redirect
-- [ ] Check `apachectl -t -D DUMP_VHOSTS` to confirm proxy conf is active
-- [ ] Verify `http://50.28.2.199.nip.io/` loads WordPress via Apache proxy
+- [ ] Update HTTP VirtualHost: replace ProxyPass with `Redirect permanent / https://50.28.2.199.nip.io/`
+- [ ] `apachectl configtest && systemctl reload httpd`
+- [ ] Verify `http://50.28.2.199.nip.io/` redirects to HTTPS (not 403)
 - [ ] Fix crash-looping `app-nginx-1` container (or remove from docker-compose)
 - [ ] `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`
 - [ ] Copy uploads into wordpress container (if not done)

@@ -1294,7 +1294,7 @@ systemctl disable httpd.socket 2>/dev/null
 ```
 
 ❯ Nothing loads at https://50.28.2.199.nip.io
-### Re: InterWorx is managing httpd — it keeps restarting Apache (HEAD)
+### Re: InterWorx is managing httpd — it keeps restarting Apache
 
 Two things jump out from this output:
 
@@ -1329,15 +1329,62 @@ Change `docker-compose.yml` nginx ports from `80:80 / 443:443` to internal-only 
 With nginx inside Docker exposed only on `127.0.0.1:8080:80` (no SSL in Docker — Apache/certbot handles SSL at the host level).
 
 Does this server have an InterWorx control panel URL you can log into, or is direct config editing the only option?
-<!-- agent:boundary:c2e78135 -->
+
+❯ https://appendix.interworx.com/current/faqs/general-faqs.html
+❯ > InterWorx does not support containerized environments, including Docker or LXC.
+
+❯ Does this mean I cannot use Docker at all with InterWorx? Have people successfully used Docker with InterWorx?
+### Re: InterWorx "no Docker" — support disclaimer, not a technical block (HEAD)
+
+That FAQ statement means InterWorx won't help you if Docker breaks something — not that Docker is prevented from running. Your Docker containers are already running on this server.
+
+The port conflict is the only real issue: InterWorx's Apache owns ports 80/443 and will always restart httpd to reclaim them. The solution is don't compete with Apache — run Docker on internal ports and proxy through Apache. This is a well-known and working pattern on InterWorx servers.
+
+**Revised architecture: Apache handles SSL + reverse proxies to Docker**
+
+**docker-compose.yml** — change nginx ports to internal only:
+```yaml
+nginx:
+  ports:
+    - "127.0.0.1:8080:80"   # internal only, no 443 — Apache handles SSL
+```
+
+**`/etc/httpd/conf.d/monsterrodholders.conf`**:
+```apache
+<VirtualHost *:80>
+    ServerName 50.28.2.199.nip.io
+    RewriteEngine On
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+</VirtualHost>
+
+<VirtualHost *:443>
+    ServerName 50.28.2.199.nip.io
+    SSLEngine on
+    SSLCertificateFile /etc/letsencrypt/live/50.28.2.199.nip.io/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/50.28.2.199.nip.io/privkey.pem
+
+    ProxyPreserveHost On
+    ProxyPass / http://127.0.0.1:8080/
+    ProxyPassReverse / http://127.0.0.1:8080/
+</VirtualHost>
+```
+
+Result:
+- nginx inside Docker serves HTTP only on `127.0.0.1:8080` (no SSL config needed in nginx at all)
+- Apache handles SSL termination and proxies to Docker
+- InterWorx remains happy — Apache still owns 80/443
+
+Want me to write out the full revised `docker-compose.yml` and nginx config for this architecture?
+<!-- agent:boundary:3bbaa90c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Check current container state: `docker compose ps` + `docker compose logs nginx --tail=20` + `ss -tlnp | grep -E ':80|:443'`
-- [ ] Decide on architecture: Apache reverse proxy to Docker (recommended) OR fight InterWorx for ports
-- [ ] **If reverse proxy approach:** Update docker-compose nginx ports to `127.0.0.1:8080:80`, add Apache VirtualHost config
+- [ ] Revise docker-compose nginx ports to `127.0.0.1:8080:80` (internal only)
+- [ ] Write Apache VirtualHost config at `/etc/httpd/conf.d/monsterrodholders.conf`
+- [ ] Simplify nginx config (HTTP-only, no SSL)
+- [ ] `systemctl reload httpd` and test `https://50.28.2.199.nip.io`
 - [ ] **Server step 10:** Transfer + import backup, `wp search-replace` domain
 - [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot for real domain
 - [ ] Clean spam comments post-import

@@ -605,7 +605,7 @@ Full cycle confirmed — export → commit → push succeeded.
 
 2. **Server config to set after next pull:**
 ```bash
-# On the server — run once (HEAD)
+# On the server — run once
 git config pull.rebase true
 git config user.name "monsterrodholders-deploy"
 git config user.email "deploy@monsterrodholders.com"
@@ -1059,7 +1059,7 @@ Current page inventory is clean. A few to optionally review:
 - `Monster Rod Holders New Metallic Look` (15892 draft) — duplicate of published 15894?
 
 Let me know if any of those should be deleted.
-<!-- agent:boundary:db1fa306 -->
+<!-- agent:boundary:7fd80e99 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

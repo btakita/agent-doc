@@ -81,7 +81,7 @@ The `### Re: "Score pending..."` response was written by a previous session (`ag
 **2 agent-doc runs in a row?** Possibly — second session's preflight would commit the first's gap. But the diff is clean, so no overlapping writes. More likely: the session ended (Ctrl+C, /clear, timeout) after `agent-doc write` but before `agent-doc commit`.
 
 **Not a bug** — preflight's gap commit is designed for exactly this. The `file is 176 bytes larger than snapshot` warning flagged it correctly. No data lost.
-<!-- agent:boundary:d23775b6 -->
+<!-- agent:boundary:eed3aff4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

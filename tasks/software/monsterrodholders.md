@@ -84,7 +84,7 @@ Added to Footer 2 (assigned to `footer` location):
 Existing 16 items kept: Shop, Rod Holders, Rod Holder Bases, Boat Accessories, About Us, Contact Us, Blog, Certified Resellers, Pro Staff, Sponsorship Application, My Account, Cart, Checkout, Rewards Program, Affiliate Area, Wildcatters TV
 
 Blocksy will wrap these into columns automatically. If the layout needs 4 columns instead of 3, adjust under Customize → Footer → Footer Columns.
-<!-- agent:boundary:7b1f0dea -->
+<!-- agent:boundary:b1d16664 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

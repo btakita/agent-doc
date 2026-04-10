@@ -888,7 +888,7 @@ Also fixed a pre-existing clippy lint in `doc/sheets.rs` (redundant closure → 
 - Deleted `.claude/skills/gws/SKILL.md` and the `gws/` directory
 - Deleted `.agent/runbooks/gws-docs-draft.md` and `gws-gmail-send.md`
 - Updated `AGENTS.md` command reference to use the new `corky docs` / `corky sheets` commands, removed the `See .claude/skills/gws/SKILL.md` pointer
-<!-- agent:boundary:2d20adbc -->
+<!-- agent:boundary:8d56c7c7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

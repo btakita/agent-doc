@@ -113,7 +113,7 @@ The commit step runs atomically after write completes — including after the IP
 - `agent-doc write` — no commit (safe for checkpoints and non-git dirs)
 - `agent-doc write --commit` — commit after write; silently skips if not in git repo
 - Skill step 3: final write always uses `--commit`; checkpoint writes do not
-<!-- agent:boundary:687b9969 -->
+<!-- agent:boundary:4317107c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

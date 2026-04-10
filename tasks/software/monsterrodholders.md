@@ -664,7 +664,7 @@ ssh root@50.28.2.199 'docker compose -f /opt/monsterrodholders/app/docker-compos
 ```
 
 Then I can build the Gutenberg HTML and update via `wp post update <ID> --post_content='...'` — in-place replacement, no URL changes, no redirects.
-<!-- agent:boundary:1951ee4f -->
+<!-- agent:boundary:8b142b5e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

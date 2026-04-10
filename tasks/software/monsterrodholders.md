@@ -349,7 +349,7 @@ docker compose restart wordpress
 ```
 
 Full docs in `docs/server-setup.md` § Write deploy key + Bi-directional sync.
-<!-- agent:boundary:cb59b198 -->
+<!-- agent:boundary:39ae5db7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

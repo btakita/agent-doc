@@ -519,7 +519,7 @@ Then flip DNS.
 For now: test on nip.io → verify → flip to `monsterrodholders.com` → done. One domain, one site.
 
 ❯ Should I call `chmod a+x ./scripts/certbot-init.sh` or more strict permissions?
-### Re: certbot-init.sh permissions
+### Re: certbot-init.sh permissions (HEAD)
 
 Use `chmod 700`:
 
@@ -2054,7 +2054,7 @@ ssh root@50.28.2.199 "cd /opt/monsterrodholders/app && docker compose run --rm w
 
 The verify step should print `wp_nxz1mfc9cg_` — if it does, the search-replace will work.
 ❯ Make certbot-init.sh have 600 permissions.
-### Re: certbot-init.sh permissions (HEAD)
+### Re: certbot-init.sh permissions
 
 Git can only track two modes: `644` (non-executable) or `755` (executable). It cannot store `600`. The file is currently `644` in git.
 
@@ -2070,7 +2070,7 @@ Options:
 3. **`chmod 700`** — owner-only execute; git stores as `755` in the index but `700` is applied locally. Same limitation: git doesn't round-trip 700 cleanly.
 
 If the goal is protecting sensitive content from other server users, option 1 is quickest. Want a Makefile `deploy` target that does the `chmod` automatically?
-<!-- agent:boundary:0d4da25d -->
+<!-- agent:boundary:5b8546e3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -47,6 +47,7 @@ Sessions v0.31.18–v0.31.28. Key decisions and fixes:
 
 **Open / Pending:**
 - Manual testing gate: confirm v0.31.28 auto-relocate in live session, then publish: crates.io → PyPI → GitHub Release.
+<!-- agent:boundary:f5193a06 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

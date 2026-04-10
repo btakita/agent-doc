@@ -49,7 +49,7 @@ Sessions v0.31.18–v0.31.28. Key decisions and fixes:
 - Manual testing gate: confirm v0.31.28 auto-relocate in live session, then publish: crates.io → PyPI → GitHub Release.
 
 ❯ release
-### Re: release (HEAD)
+### Re: release
 
 v0.31.28 released:
 
@@ -58,11 +58,17 @@ v0.31.28 released:
 - **PyPI:** manylinux wheel uploaded (`agent_doc-0.31.28-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl`)
 - **Tag:** `v0.31.28` pushed — CI building GitHub Release
 - **cargo install:** v0.31.28 running locally
-<!-- agent:boundary:d27a4fda -->
+
+❯ do
+❯ - [ ] Update parent submodule pointer (git add src/agent-doc && git commit in agent-loop)
+### Re: submodule pointer update (HEAD)
+
+Done. `git add src/agent-doc && git commit` in agent-loop — pointer updated to v0.31.28 HEAD and pushed.
+<!-- agent:boundary:a5829fb0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Update parent submodule pointer (git add src/agent-doc && git commit in agent-loop)
+(nothing pending)
 <!-- /agent:pending -->

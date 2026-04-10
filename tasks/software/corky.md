@@ -537,7 +537,7 @@ gws auth login
 ```
 
 After install, re-run `/agent-doc tasks/software/corky.md` with "read sheet" to test.
-<!-- agent:boundary:fa8b5f72 -->
+<!-- agent:boundary:af7498d2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

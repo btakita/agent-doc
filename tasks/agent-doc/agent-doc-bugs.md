@@ -290,7 +290,7 @@ v0.31.30 + JB plugin v0.2.55 released.
 - **cargo install:** already at v0.31.30 (installed earlier)
 - **JB plugin:** `agent-doc-jetbrains-0.2.55.zip` + `-signed.zip` in `build/distributions/`
 - **Parent submodule pointer:** updated and pushed (`4997649e`)
-<!-- agent:boundary:fee3a27a -->
+<!-- agent:boundary:9080b916 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

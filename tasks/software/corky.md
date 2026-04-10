@@ -99,7 +99,7 @@ claude_args: --dangerously-skip-permissions
 - Verify Google Sheets sharing / GCP test users for `brian.takita@gmail.com`
 - Re-test sheet read (403 on last attempt)
 - Manylinux binary wheel for PyPI (needs container/CI)
-do
+❯ do
 - Manylinux binary wheel (nice-to-have, needs container/CI)
 ### Re: Manylinux binary wheel — CI fixed
 
@@ -478,7 +478,7 @@ Last one worked.
 Please transfer bug fix to tasks/software/corky.md
 
 ❯ See tasks/software/google.com for new gcp skills in corky
-### Re: Threading bug fix (from filevine session) (HEAD)
+### Re: Threading bug fix (from filevine session)
 
 **Bug:** Gmail API requires *both* `thread_id` and `in_reply_to` to attach a draft to an existing thread. Setting only `in_reply_to` (RFC 2822 Message-ID) is insufficient — the draft creates a new thread instead.
 
@@ -487,7 +487,7 @@ Please transfer bug fix to tasks/software/corky.md
 - `thread_id` is the Gmail-internal ID (e.g. `"19d5467199f95043"`) from the `messages.list` or `threads.list` response
 - Both fields must be present in the `create draft` API call
 
-### Re: gws GCP skills added to corky (from google.md) (HEAD)
+### Re: gws GCP skills added to corky (from google.md)
 
 The Google Workspace integration is now in place:
 
@@ -496,13 +496,55 @@ The Google Workspace integration is now in place:
 - `src/corky/.agent/runbooks/gws-docs-draft.md` — read-from-Docs→send-via-corky, create-new-Doc, announcement recipes
 - corky `AGENTS.md` — `## Google Workspace Integration (gws)` section with install/auth steps
 
-**gws** is a Claude Code plugin (not a standalone CLI). Install: `claude plugin install gws`. Auth: `gws auth login`.
-<!-- agent:boundary:cff4a558 -->
+❯ **gws** is a Claude Code plugin (not a standalone CLI). Install: `claude plugin install gws`. Auth: `gws auth login`
+
+❯ do
+❯ - [ ] Implement threading fix in corky: set both `thread_id` + `in_reply_to` when drafting replies
+
+❯ read as a test:
+❯ - https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8eyCijtqqteslsWcvJ1JCM/edit?gid=210871523#gid=210871523
+
+Note I need to use the brian@dreamable.com account
+### Re: Implement threading fix (HEAD)
+
+Done. Added `--thread-id` option to `corky draft new`:
+
+**Changes:**
+- `src/cli.rs` — new `--thread-id: Option<String>` arg on `DraftCommands::New`
+- `src/main.rs` — passes `thread_id` through to `draft::new::run()`
+- `src/draft/new.rs` — `run()` and `render()` accept `thread_id`; emits `thread_id: "..."` in YAML when provided
+- `AGENTS.md` — updated threading docs: both `--in-reply-to` and `--thread-id` required for Gmail thread attachment
+
+**CLI usage:**
+```sh
+corky draft new "Re: Subject" \
+  --to recipient@example.com \
+  --in-reply-to "<msg-id-from-conversation>" \
+  --thread-id "gmail-thread-id-from-thread-id-line"
+```
+
+`make check` passes (47 tests, 0 errors).
+
+### Re: Read Google Sheet (gws test) (HEAD)
+
+`gws` plugin is not installed — `which gws` and `claude plugin list` both return nothing.
+
+Install steps:
+```bash
+claude plugin marketplace add https://github.com/WadeWarren/gws-claude-plugin
+claude plugin install gws
+gws auth login
+```
+
+After install, re-run `/agent-doc tasks/software/corky.md` with "read sheet" to test.
+<!-- agent:boundary:9b73c95c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Implement threading fix in corky: set both `thread_id` + `in_reply_to` when drafting replies
-- [ ] Monitor CI release run 24156432054 — confirm aarch64 now passes
+- [ ] Install gws plugin (`claude plugin marketplace add https://github.com/WadeWarren/gws-claude-plugin && claude plugin install gws && gws auth login`)
+- [ ] Re-test Google Sheet read after gws install
+- [ ] Monitor CI release run 24156432054 — confirm aarch64 passes
+- [ ] Release corky with threading fix (`--thread-id` flag)
 <!-- /agent:pending -->

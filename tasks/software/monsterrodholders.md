@@ -2437,7 +2437,7 @@ ssh root@50.28.2.199 "httpd -M | grep -E 'proxy|ssl'"
  ssl_module (shared)
  proxy_http2_module (shared)
 ```
-### Re: HTTPS fixed — HTTP returns 403 (HEAD)
+### Re: HTTPS fixed — HTTP returns 403
 
 ```
 HTTP/2 200 
@@ -2476,15 +2476,29 @@ Apply it:
 ssh root@50.28.2.199 "vim /etc/httpd/conf.d/00-monsterrodholders-proxy.conf"
 ssh root@50.28.2.199 "apachectl configtest && systemctl reload httpd"
 ```
-<!-- agent:boundary:5d21ce9b -->
+
+❯ http redirects to https
+❯ But https://50.28.2.199.nip.io/ still redirects to https://monsterrodholders.com
+### Re: server returns 200 — browser has cached redirect (HEAD)
+
+From here, `https://50.28.2.199.nip.io/` returns HTTP/2 200 with correct nip.io URLs. The server is not redirecting. This is a **browser cache** issue — the old 301 redirect to `monsterrodholders.com` is cached.
+
+Verify with curl (bypasses browser cache):
+```bash
+curl -I https://50.28.2.199.nip.io/ 2>&1 | grep -E 'HTTP|Location'
+```
+
+To fix in browser:
+- Open an **incognito/private window** and try again — quickest test
+- Or: Dev Tools → Network tab → check "Disable cache" → hard refresh
+- Or: clear site data for `50.28.2.199.nip.io` and `monsterrodholders.com` in browser settings
+<!-- agent:boundary:16fe7d0e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Update HTTP VirtualHost: replace ProxyPass with `Redirect permanent / https://50.28.2.199.nip.io/`
-- [ ] `apachectl configtest && systemctl reload httpd`
-- [ ] Verify `http://50.28.2.199.nip.io/` redirects to HTTPS (not 403)
+- [ ] Verify in incognito window: `https://50.28.2.199.nip.io/` should load WordPress directly
 - [ ] Fix crash-looping `app-nginx-1` container (or remove from docker-compose)
 - [ ] `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`
 - [ ] Copy uploads into wordpress container (if not done)

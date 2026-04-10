@@ -132,7 +132,7 @@ Step 3: (eliminated)
 ```
 
 **Checkpoint writes are unchanged** — no `--commit` on intermediate flushes. The SKILL.md diff is: final write gains `--commit`, step 3 is removed.
-<!-- agent:boundary:b705023d -->
+<!-- agent:boundary:9717f4c6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

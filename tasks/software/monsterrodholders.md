@@ -1203,7 +1203,7 @@ nginx-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/20-envsubst-on-
 nginx-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/30-tune-worker-processes.sh
 nginx-1  | /docker-entrypoint.sh: Configuration complete; ready for start up
 ```
-### Re: nginx is up (HEAD)
+### Re: nginx is up
 
 No certificate error in the logs — "Configuration complete; ready for start up" is the clean exit. All 4 containers running. The cert fix worked.
 
@@ -1212,7 +1212,45 @@ Test the site:
 - `http://50.28.2.199.nip.io` — should redirect to HTTPS
 
 If WordPress loads (even if it looks like a fresh install or shows a DB error), the stack is working. Next step is the backup import.
-<!-- agent:boundary:b09a6260 -->
+
+❯ http://50.28.2.199.nip.io/ is still running apache
+
+Same with https://50.28.2.199.nip.io/
+### Re: http still hitting Apache (HEAD)
+
+Docker compose logs show nginx started clean — but HTTP is still hitting Apache. Something is still holding port 80. Diagnose on the server:
+
+```bash
+# Who owns port 80?
+ss -tlnp | grep ':80'
+
+# Is httpd actually dead?
+systemctl status httpd
+ps aux | grep -E 'httpd|apache'
+```
+
+If httpd is truly stopped, docker's port mapping may not have taken effect. Check the nginx container is actually bound:
+
+```bash
+docker compose ps
+docker port app-nginx-1
+```
+
+If httpd is still running despite `systemctl stop`, force-kill it:
+
+```bash
+pkill -f httpd
+# then restart nginx container to pick up port 80:
+docker compose restart nginx
+```
+
+And if there's a socket unit keeping it alive:
+
+```bash
+systemctl stop httpd.socket 2>/dev/null
+systemctl disable httpd.socket 2>/dev/null
+```
+<!-- agent:boundary:4a86b8db -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

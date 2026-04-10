@@ -1818,8 +1818,7 @@ docker compose run --rm wpcli wp search-replace 'https://OLD-DOMAIN.com' 'https:
 
 What's the old domain on the SQL dump?
 ❯ Can I switch the domain back to monsterrodholders.com once we test?
-Can I copy the container. Do the switch in the 
-### Re: domain switching + backup path confirmed (HEAD)
+### Re: domain switching + backup path confirmed
 
 Yes — switching back to `monsterrodholders.com` is the standard flow:
 
@@ -1837,12 +1836,43 @@ The site is only on nip.io temporarily — users on the live site never see it.
 grep -m1 'siteurl' /opt/monsterrodholders/restore/backup.sql
 ```
 Expected output: something like `'https://monsterrodholders.com'` — paste it and I'll fill in the exact search-replace command.
-<!-- agent:boundary:fe4adf76 -->
+❯ Can I copy the container. Do the switch in the current container...then restore the old container?
+### Re: no need to snapshot — domain switch is reversible (HEAD)
+
+The domain is just two rows in `wp_options` (`siteurl` and `home`). `wp search-replace` rewrites them — run it in either direction:
+
+```bash
+# Switch to nip.io for testing
+docker compose run --rm wpcli wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables
+
+# Switch back when ready to go live
+docker compose run --rm wpcli wp search-replace 'https://50.28.2.199.nip.io' 'https://monsterrodholders.com' --all-tables
+```
+
+**If you want a rollback point for the full import** (wrong content, bad SQL, etc.), snapshot the DB volume before importing:
+
+```bash
+# Before import — save DB volume to disk
+docker run --rm \
+  -v app_db_data:/source \
+  -v /opt/monsterrodholders:/backup \
+  alpine tar czf /backup/db_before_import.tar.gz -C /source .
+
+# Restore if needed
+docker compose down
+docker run --rm \
+  -v app_db_data:/target \
+  -v /opt/monsterrodholders:/backup \
+  alpine tar xzf /backup/db_before_import.tar.gz -C /target
+docker compose up -d
+```
+<!-- agent:boundary:d55eb44f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] (optional) Snapshot DB volume before import
 - [ ] Confirm old domain: `grep -m1 'siteurl' /opt/monsterrodholders/restore/backup.sql`
 - [ ] Import SQL: `docker compose exec -T db mariadb ... < /opt/monsterrodholders/restore/backup.sql`
 - [ ] Copy uploads into wordpress container

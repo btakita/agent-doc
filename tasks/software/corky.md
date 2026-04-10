@@ -864,7 +864,7 @@ transfer what we have done to tasks/software/corky.md
 ❯ - [ ] Implement `corky docs read <url>` using `DOCS_SCOPE`
 ❯ - [ ] Remove gws skill + runbooks from corky, update AGENTS.md
 
-### Re: corky sheets read / docs read + gws cleanup (HEAD)
+### Re: corky sheets read / docs read + gws cleanup
 
 All three done. `make check` passes (47 tests, 0 errors).
 
@@ -888,11 +888,54 @@ Also fixed a pre-existing clippy lint in `doc/sheets.rs` (redundant closure → 
 - Deleted `.claude/skills/gws/SKILL.md` and the `gws/` directory
 - Deleted `.agent/runbooks/gws-docs-draft.md` and `gws-gmail-send.md`
 - Updated `AGENTS.md` command reference to use the new `corky docs` / `corky sheets` commands, removed the `See .claude/skills/gws/SKILL.md` pointer
-<!-- agent:boundary:c836aeb3 -->
+❯ Test reading https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8eyCijtqqteslsWcvJ1JCM/edit?gid=210871523#gid=210871523
+❯ Using corky with brian@dreamable.com account, read https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8eyCijtqqteslsWcvJ1JCM/edit?gid=210871523#gid=210871523
+❯ I lost some pass/passage keys. Please let me know what I need to define.
+### Re: corky doc sheet — brian@dreamable.com (HEAD)
+
+Two config problems found and fixed in `/home/brian/Documents/mail/.corky.toml`:
+
+**1. TOML parse error (youtube profile format changed)**
+
+Old format had `channel_id` but the current corky expects `handle` + `urn`:
+
+```toml
+# Before (broken — caused entire config to fail parsing)
+[profiles.btakita.youtube]
+channel_id = "UC3gg23rxm1sM43sQWRGKEqQ"
+
+# After (fixed)
+[profiles.btakita.youtube]
+handle = "briantakita"
+urn = "UC3gg23rxm1sM43sQWRGKEqQ"
+```
+
+Because the config failed to parse, `corky doc sheet` fell back to empty compile-time GCP credentials — that's why the OAuth URL had `client_id=`.
+
+**2. GCP credentials not wired to passage**
+
+The binary wasn't compiled with `CORKY_DEFAULT_GCP_CLIENT_ID` baked in, so the fallback chain needed a runtime override. Added `[gmail]` section:
+
+```toml
+[gmail]
+client_id_cmd = "passage show corky/gcp/client_id"
+client_secret_cmd = "passage show corky/gcp/client_secret"
+```
+
+No missing passage keys — `corky/gcp/client_id` and `corky/gcp/client_secret` both exist and contain values. `corky doctor` now shows `✓ Config loaded`.
+
+**To complete the `brian@dreamable.com` OAuth flow**, run in a terminal with a browser:
+
+```bash
+corky doc sheet "https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8eyCijtqqteslsWcvJ1JCM/edit?gid=210871523#gid=210871523" --account brian@dreamable.com
+```
+
+It will open a browser to the Google consent screen pre-filled with `brian@dreamable.com`. After auth, the token is cached in `~/.config/corky/tokens.json`.
+<!-- agent:boundary:b3e1a2f8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Commit and release v0.26.4
+- [ ] Complete OAuth flow for `brian@dreamable.com` (needs browser: run `corky doc sheet ... --account brian@dreamable.com`)
 <!-- /agent:pending -->

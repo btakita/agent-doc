@@ -697,7 +697,7 @@ systemctl status firewalld
 If it's active, firewalld and Docker are fighting over iptables. Either stop firewalld (`systemctl stop firewalld`) or configure Docker to use `iptables=false` and manage rules via firewalld — but stopping it is simpler for a single-admin server.
 
 ❯ http://50.28.2.199.nip.io/ is not serving the wordpress site
-### Re: site not serving (HEAD)
+### Re: site not serving
 
 Check the container state first:
 
@@ -719,16 +719,46 @@ docker compose up -d
 ```
 
 Then check logs for errors. What does `docker ps` show?
-<!-- agent:boundary:33ec1a4f -->
+```
+[root@oddball-business restore]# docker ps
+CONTAINER ID   IMAGE                         COMMAND                  CREATED       STATUS       PORTS      NAMES
+343f0a86a4a2   wordpress:php8.3-fpm-alpine   "docker-entrypoint.s…"   2 hours ago   Up 2 hours   9000/tcp   app-wordpress-1
+8cfe407b1414   redis:alpine                  "docker-entrypoint.s…"   2 hours ago   Up 2 hours   6379/tcp   app-redis-1
+63f95dcdc125   mariadb:11                    "docker-entrypoint.s…"   2 hours ago   Up 2 hours   3306/tcp   app-db-1
+```
+### Re: nginx missing (HEAD)
+
+Three containers running (wordpress-fpm, redis, mariadb) — but **no nginx**. The FPM container handles PHP, not HTTP. Without nginx there's nothing serving port 80/443.
+
+Check what happened to it:
+
+```bash
+docker compose ps --all          # show ALL containers including stopped/failed
+docker compose logs nginx        # nginx-specific logs
+```
+
+Most likely cause: nginx is failing to start because the SSL cert from certbot doesn't exist yet. If `certbot-init.sh` didn't complete successfully, the cert files aren't there, and nginx exits on startup.
+
+Confirm by checking:
+
+```bash
+ls /etc/letsencrypt/live/
+```
+
+If that directory is empty or doesn't have `50.28.2.199.nip.io/`, certbot didn't finish. You'd need to stop the stack, fix the certbot issue (restart docker, rerun certbot-init.sh), then bring everything back up.
+
+If certbot DID succeed, share the `docker compose logs nginx` output.
+<!-- agent:boundary:94ab0a8e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Server step 8:** Check `docker ps` + `docker compose logs`; run `docker compose up -d` if not running
-- [ ] **Server step 9:** Verify site at `https://50.28.2.199.nip.io/`
-- [ ] **Server step 10:** Transfer + import backup, then run `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`; remove WP Engine mu-plugins
-- [ ] Verify site on `50.28.2.199.nip.io`
+- [ ] **Diagnose nginx:** `docker compose ps --all` + `docker compose logs nginx` + `ls /etc/letsencrypt/live/`
+- [ ] If certbot incomplete: restart docker, rerun `certbot-init.sh`, then `docker compose up -d`
+- [ ] If certbot OK: fix nginx startup error from logs
+- [ ] **Server step 10:** Transfer + import backup, then `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`; remove WP Engine mu-plugins
+- [ ] Verify site on `https://50.28.2.199.nip.io`
 - [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot
 - [ ] Clean spam comments post-import
 - [ ] Plugin audit: delete `worker`, `wpmudev-updates`; pick TaxJar OR AvaTax

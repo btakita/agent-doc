@@ -691,6 +691,16 @@ Once I have the page IDs and the raw content, I'll build the full Gutenberg repl
 
 Yes — add a `~/.ssh/config` entry with `IdentitiesOnly yes` to pin which key to offer. That stops SSH from trying every agent key until the server rejects.
 
+❯ `~/.ssh/config` content
+```
+IdentitiesOnly yes
+Host github-monsterrodholders
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/monsterrodholders_deploy
+    IdentitiesOnly yes
+```
+
 **Check which key works:**
 ```bash
 ssh -v root@50.28.2.199 exit 2>&1 | grep "Offering\|Authenticated"
@@ -708,18 +718,44 @@ Host monsterrodholders
 After that, `ssh monsterrodholders` works cleanly and I can run server commands directly from this session.
 
 Paste `!cat ~/.ssh/config` here and I'll write the entry for you, or tell me which key file to use.
-<!-- agent:boundary:9edb4ea5 -->
+
+❯ Should I scp `~/.ssh/id_ed25519.pub` to the server?
+### Re: SSH config + authorize id_ed25519 on server
+
+The pasted config is the **server's** SSH config (for the deploy key to push to GitHub) — not the local one. Local `~/.ssh/config` only had the contabo entry.
+
+Added to local `~/.ssh/config`:
+```
+Host monsterrodholders-server 50.28.2.199
+    HostName 50.28.2.199
+    User root
+    IdentityFile ~/.ssh/id_ed25519
+    IdentitiesOnly yes
+```
+
+**Now authorize `id_ed25519` on the server** — run from your terminal:
+```bash
+ssh-copy-id -i ~/.ssh/id_ed25519.pub root@50.28.2.199
+```
+
+If that fails (key auth tries first), force password:
+```bash
+cat ~/.ssh/id_ed25519.pub | ssh -o PubkeyAuthentication=no root@50.28.2.199 'cat >> ~/.ssh/authorized_keys'
+```
+
+Once done, confirm with `! ssh monsterrodholders-server whoami` — should return `root` cleanly. Then I can run server commands from this session.
+<!-- agent:boundary:53e084e9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Add `~/.ssh/config` entry for 50.28.2.199 with IdentitiesOnly yes
+- [ ] Authorize id_ed25519.pub on server (ssh-copy-id)
+- [ ] Test: `ssh monsterrodholders-server whoami`
 - [ ] Pull page IDs + home page raw content from server
 - [ ] Build Gutenberg replacement HTML for home page (preserve all text/links)
 - [ ] Update page content via `wp post update`
 - [ ] Verify rendered output in browser
 - [ ] On server: `git config pull.rebase true && git config user.name/email`
-- [ ] On server: bootstrap blocksy theme files into wordpress/themes/blocksy/
 - [ ] When ready to go live: search-replace URLs → monsterrodholders.com, flip DNS, re-run certbot
 <!-- /agent:pending -->

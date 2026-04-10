@@ -268,7 +268,7 @@ wordpress/uploads/
 
 Want me to scaffold the scripts and updated `.gitignore` in `src/monsterrodholders-dev` now?
 ❯ yes
-### Re: scaffolded git↔WP sync (HEAD)
+### Re: scaffolded git↔WP sync
 
 Done. Changes in `src/monsterrodholders-dev`:
 
@@ -296,14 +296,22 @@ docker compose restart wordpress
 ```
 
 After that, `wordpress/themes/blocksy/` is git-tracked and live in the container simultaneously.
-<!-- agent:boundary:f78bb5e2 -->
+❯ commit + push
+### Re: commit + push (HEAD)
+
+Done. Committed to `btakita/monsterrodholders-dev` and updated parent submodule pointer.
+
+Commit: `feat: add git↔WP sync (bind-mount themes/plugins, export/import scripts)`
+
+Next: bootstrap the theme files on the server so the bind mount picks them up.
+<!-- agent:boundary:f2fec81a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Commit scaffolding in src/monsterrodholders-dev + push
-- [ ] On server: bootstrap theme files into wordpress/themes/blocksy/ (one-time)
+- [ ] On server: bootstrap theme files into wordpress/themes/blocksy/ (one-time, see above)
+- [ ] On server: git pull to get the new scripts + docker compose restart
 - [ ] Pull blocksy-companion-pro plugin files + commit to wordpress/plugins/
 - [ ] Decision: rebuild home page in Blocksy, or install WPBakery?
 - [ ] When ready to go live: search-replace URLs → monsterrodholders.com, flip DNS, re-run certbot

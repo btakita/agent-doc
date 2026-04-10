@@ -2211,7 +2211,7 @@ If the config has `return 301 https://monsterrodholders.com` or `server_name mon
 ```bash
 ssh root@50.28.2.199 "docker restart app-nginx-1"
 ```
-<!-- agent:boundary:3ab8e0cb -->
+<!-- agent:boundary:9706e996 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -165,7 +165,7 @@ run = "sops -d secrets.env.sops > .env.local"
 ```
 
 **Recommendation:** If you want to keep the `pass` UX, switch to `passage` (age backend). If you want zero-overhead per-call reads, `secret-tool` with GNOME Keyring is the fastest option on Linux.
-<!-- agent:boundary:8e4c2317 -->
+<!-- agent:boundary:bef25b04 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

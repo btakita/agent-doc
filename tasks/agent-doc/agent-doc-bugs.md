@@ -49,7 +49,7 @@ Sessions v0.31.18–v0.31.28. Key decisions and fixes:
 - Manual testing gate: confirm v0.31.28 auto-relocate in live session, then publish: crates.io → PyPI → GitHub Release.
 
 ❯ release
-### Re: release
+### Re: release (HEAD)
 
 v0.31.28 released:
 
@@ -218,7 +218,7 @@ v0.31.29 released:
 **Test results:** 780 tests pass. `send_keys_delivers_command_with_enter` remains flaky (passes in isolation — known ordering issue, not a regression).
 
 ❯ release
-### Re: release (HEAD)
+### Re: release
 
 v0.31.30 staged locally — awaiting manual testing gate.
 
@@ -231,7 +231,7 @@ v0.31.30 staged locally — awaiting manual testing gate.
 **Manual testing gate:** Edit `agent:pending` in a document that has an active exchange where a matching line exists. Confirm no `❯ ` prefix appears on the pending item after the write cycle.
 
 Once confirmed, I'll publish: `cargo publish` → manylinux Docker wheel → PyPI → tag + GitHub Release.
-<!-- agent:boundary:5b26fd64 -->
+<!-- agent:boundary:2a08c0f0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

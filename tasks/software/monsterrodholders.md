@@ -2272,7 +2272,7 @@ ssh root@50.28.2.199 "grep -r 'monsterrodholders' /etc/httpd/conf/ /etc/httpd/co
 ```
 [root@oddball-business app]# grep -r 'monsterrodholders' /etc/httpd/conf/ /etc/httpd/conf.d/ 2>/dev/null
 ```
-### Re: Apache owns 80 + 443 — need to find InterWorx vhost config (HEAD)
+### Re: Apache owns 80 + 443 — need to find InterWorx vhost config
 
 Now the picture is clear:
 
@@ -2287,11 +2287,13 @@ Find it:
 ```bash
 ssh root@50.28.2.199 "find /etc/httpd /home -name '*.conf' 2>/dev/null | xargs grep -l 'monsterrodholders' 2>/dev/null"
 ```
+❯ no result
 
 Also check InterWorx-specific paths:
 ```bash
 ssh root@50.28.2.199 "find /var/interworx /etc/interworx -name '*.conf' 2>/dev/null | head -30"
 ```
+❯ no result
 
 **The fix (once the vhost is found):** Add reverse proxy directives to route Apache → WordPress on `127.0.0.1:8080`:
 ```apache
@@ -2299,6 +2301,8 @@ ProxyPreserveHost On
 ProxyPass / http://127.0.0.1:8080/
 ProxyPassReverse / http://127.0.0.1:8080/
 ```
+
+❯ Do I add this to the root apache config?
 
 Add this to both the HTTP (:80) and SSL (:443) vhost blocks for the domain. Then:
 ```bash
@@ -2308,19 +2312,53 @@ ssh root@50.28.2.199 "apachectl configtest && systemctl reload httpd"
 No restart needed — `reload` is sufficient after config changes.
 
 **Re: Do I need to restart Apache?** Not yet — find the vhost file first.
-<!-- agent:boundary:831dc023 -->
+### Re: no vhost config found — check wp home + .htaccess (HEAD)
+
+No `monsterrodholders` config exists anywhere in the Apache tree. Two remaining suspects:
+
+**1. WordPress `home` option** (we only verified `siteurl`, not `home`):
+```bash
+ssh root@50.28.2.199 "cd /opt/monsterrodholders/app && docker compose run --rm wpcli wp option get home"
+```
+
+**2. `.htaccess`** in the WordPress container:
+```bash
+ssh root@50.28.2.199 "docker exec app-wordpress-1 cat /var/www/html/.htaccess"
+```
+
+**Re: adding to root Apache config** — Yes, create a new file `/etc/httpd/conf.d/monsterrodholders-proxy.conf` (don't edit `httpd.conf` directly). But first confirm the redirect source — if it's `home` or `.htaccess`, we need to fix those too (not just add the proxy).
+
+Template for the new conf file (fill in SSL cert paths after confirming):
+```apache
+<VirtualHost *:80>
+    ServerName 50.28.2.199.nip.io
+    ProxyPreserveHost On
+    ProxyPass / http://127.0.0.1:8080/
+    ProxyPassReverse / http://127.0.0.1:8080/
+</VirtualHost>
+
+<VirtualHost *:443>
+    ServerName 50.28.2.199.nip.io
+    SSLEngine on
+    # Add SSL cert paths here (from certbot or existing InterWorx cert)
+    ProxyPreserveHost On
+    ProxyPass / http://127.0.0.1:8080/
+    ProxyPassReverse / http://127.0.0.1:8080/
+</VirtualHost>
+```
+<!-- agent:boundary:aa137c74 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Find InterWorx vhost config: `find /etc/httpd /home -name '*.conf' | xargs grep -l 'monsterrodholders'`
-- [ ] Check InterWorx paths: `find /var/interworx /etc/interworx -name '*.conf'`
-- [ ] Add ProxyPass directives to HTTP + SSL vhosts → `127.0.0.1:8080`
+- [ ] Check `wp option get home` — may still be `monsterrodholders.com`
+- [ ] Check `.htaccess` in WordPress container for redirect rules
+- [ ] Create `/etc/httpd/conf.d/monsterrodholders-proxy.conf` with HTTP + HTTPS VirtualHosts
+- [ ] Find SSL cert paths for nip.io (certbot?)
 - [ ] `apachectl configtest && systemctl reload httpd`
-- [ ] Verify `http://50.28.2.199.nip.io/` loads WordPress via Apache proxy
-- [ ] Verify `https://50.28.2.199.nip.io/` loads without redirect
-- [ ] Fix crash-looping `app-nginx-1` (or remove from docker-compose)
+- [ ] Verify `http://50.28.2.199.nip.io/` and `https://50.28.2.199.nip.io/` load without redirect
+- [ ] Fix crash-looping `app-nginx-1` container (or remove from docker-compose)
 - [ ] `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`
 - [ ] Copy uploads into wordpress container (if not done)
 - [ ] Install + activate new theme

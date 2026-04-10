@@ -1989,12 +1989,14 @@ Error: The site you have requested is not installed.
 Your table prefix is 'wp_'. Found installation with table prefix: wp_nxz1mfc9cg_.
 Or, run `wp core install` to create database tables.
 ```
-### Re: `getenv_docker` — env var not set in container (HEAD)
+### Re: `getenv_docker` — env var not set in container
 
 The `sed` changed nothing because the pattern didn't match. The file already uses:
 ```
 $table_prefix = getenv_docker('WORDPRESS_TABLE_PREFIX', 'wp_');
 ```
+
+If it already uses `getenv_docker('WORDPRESS_TABLE_PREFIX', 'wp_');`, why do we need to hard code the prefix?
 
 `getenv_docker` reads `WORDPRESS_TABLE_PREFIX` from the container's environment. Neither the `wordpress` nor `wpcli` container has it set → falls back to `wp_`.
 
@@ -2023,16 +2025,45 @@ Then: `docker compose up -d --force-recreate wordpress`
 Note: the local `monsterrodholders-dev` compose has `WORDPRESS_TABLE_PREFIX: ${WORDPRESS_TABLE_PREFIX:-wp_}` for wordpress but is also missing it on wpcli — fix both when you update.
 
 Recommend Option 1 now to unblock, then Option 2 to clean up the compose files.
-<!-- agent:boundary:ed356021 -->
+
+❯ Do Option 2
+### Re: why hardcode, and doing Option 2 (HEAD)
+
+**Re the question:** `getenv_docker` would work if the env var was set in the container — but the production compose file's `wordpress` and `wpcli` services don't include `WORDPRESS_TABLE_PREFIX` in their `environment:` blocks, so the containers start without it and fall back to `wp_`. Option 2 fixes the root cause by properly passing the var through.
+
+**Done — local `monsterrodholders-dev/docker-compose.yml` updated:** Added `WORDPRESS_TABLE_PREFIX: ${WORDPRESS_TABLE_PREFIX:-wp_}` to the `wpcli` service (it was already on `wordpress`).
+
+Now deploy and recreate on the server:
+
+```bash
+# Copy updated compose file to server
+scp src/monsterrodholders-dev/docker-compose.yml root@50.28.2.199:/opt/monsterrodholders/app/docker-compose.yml
+
+# Verify .env has WORDPRESS_TABLE_PREFIX set
+ssh root@50.28.2.199 "grep WORDPRESS_TABLE_PREFIX /opt/monsterrodholders/app/.env"
+
+# Recreate wordpress container so it picks up the new env var
+ssh root@50.28.2.199 "cd /opt/monsterrodholders/app && docker compose up -d --force-recreate wordpress"
+
+# Verify wp-config.php resolves to correct prefix
+ssh root@50.28.2.199 "docker compose -f /opt/monsterrodholders/app/docker-compose.yml exec wordpress php -r \"require '/var/www/html/wp-config.php'; echo \\\$table_prefix;\""
+
+# Run the search-replace
+ssh root@50.28.2.199 "cd /opt/monsterrodholders/app && docker compose run --rm wpcli wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables"
+```
+
+The verify step should print `wp_nxz1mfc9cg_` — if it does, the search-replace will work.
+<!-- agent:boundary:e4e41fa8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Hardcode table prefix in `wp-config.php` via sed (Option 1)
-- [ ] Also fix `wpcli` service in both production compose + local monsterrodholders-dev
+- [ ] `scp` updated `docker-compose.yml` to server + recreate wordpress container
+- [ ] Verify prefix resolves to `wp_nxz1mfc9cg_` in container
 - [ ] `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`
 - [ ] Copy uploads into wordpress container (if not done)
 - [ ] Verify site at https://50.28.2.199.nip.io — content, images, pages
 - [ ] Install + activate new theme
+- [ ] Commit `monsterrodholders-dev` compose change
 <!-- /agent:pending -->

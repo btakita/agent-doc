@@ -961,7 +961,7 @@ Note: sidebar is hidden on small/medium screens (`ct-hidden-sm ct-hidden-md`) by
 - Save this somewhere safe (1Password, pass, etc.) — the old compromised password is now invalid
 
 Note: sendmail warning during password change is expected (no mail relay in Docker) — WP shows "Updated user 1" which confirms success. No notification email was sent.
-<!-- agent:boundary:12b92e4f -->
+<!-- agent:boundary:a711165b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

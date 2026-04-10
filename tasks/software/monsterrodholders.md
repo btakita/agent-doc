@@ -1212,7 +1212,7 @@ Test the site:
 - `http://50.28.2.199.nip.io` — should redirect to HTTPS
 
 If WordPress loads (even if it looks like a fresh install or shows a DB error), the stack is working. Next step is the backup import.
-<!-- agent:boundary:763e52ca -->
+<!-- agent:boundary:b09a6260 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

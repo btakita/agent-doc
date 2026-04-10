@@ -1921,7 +1921,7 @@ In `docker-compose.yml`, find the `wordpress:` service's `environment:` block an
 Or add `env_file: .env` to the wordpress service to pass all `.env` vars into the container automatically.
 
 After patching `wp-config.php`, WP-CLI should work without a restart. Then proceed with the search-replace.
-<!-- agent:boundary:8aabfbaf -->
+<!-- agent:boundary:430fb325 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

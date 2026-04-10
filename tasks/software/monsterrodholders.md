@@ -443,7 +443,7 @@ git pull
 ```
 
 `git pull` gets the updated script (which now runs `mkdir -p` before `wp export`), then re-run.
-<!-- agent:boundary:baf23d74 -->
+<!-- agent:boundary:2c876b66 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -2072,7 +2072,7 @@ Options:
 3. **`chmod 700`** — owner-only execute; git stores as `755` in the index but `700` is applied locally. Same limitation: git doesn't round-trip 700 cleanly.
 
 If the goal is protecting sensitive content from other server users, option 1 is quickest. Want a Makefile `deploy` target that does the `chmod` automatically?
-### Re: dirty git tree on production (HEAD)
+### Re: dirty git tree on production
 
 Easiest options:
 
@@ -2093,7 +2093,16 @@ ssh root@50.28.2.199 "cd /opt/monsterrodholders/app && git checkout -- . && git 
 ```
 
 Recommend Option A — production configs often have local tweaks that shouldn't be in git. The `scp` gives explicit control over what changes without touching git state.
-<!-- agent:boundary:4c7ca906 -->
+
+❯ commit and push monsterrodholders-dev
+### Re: commit and push monsterrodholders-dev (HEAD)
+
+Done. Committed and pushed:
+- `docker-compose.yml` — added `WORDPRESS_TABLE_PREFIX: ${WORDPRESS_TABLE_PREFIX:-wp_}` to `wpcli` service
+- `docs/server-setup.md` — minor line-wrap fix (already in the working tree)
+
+Also updated the `agent-loop` submodule pointer.
+<!-- agent:boundary:f3b5ac8a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -2106,5 +2115,4 @@ Recommend Option A — production configs often have local tweaks that shouldn't
 - [ ] Copy uploads into wordpress container (if not done)
 - [ ] Verify site at https://50.28.2.199.nip.io — content, images, pages
 - [ ] Install + activate new theme
-- [ ] Commit `monsterrodholders-dev` compose change
 <!-- /agent:pending -->

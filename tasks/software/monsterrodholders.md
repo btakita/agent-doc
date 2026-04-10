@@ -2027,7 +2027,7 @@ Note: the local `monsterrodholders-dev` compose has `WORDPRESS_TABLE_PREFIX: ${W
 Recommend Option 1 now to unblock, then Option 2 to clean up the compose files.
 
 ❯ Do Option 2
-### Re: why hardcode, and doing Option 2 (HEAD)
+### Re: why hardcode, and doing Option 2
 
 **Re the question:** `getenv_docker` would work if the env var was set in the container — but the production compose file's `wordpress` and `wpcli` services don't include `WORDPRESS_TABLE_PREFIX` in their `environment:` blocks, so the containers start without it and fall back to `wp_`. Option 2 fixes the root cause by properly passing the var through.
 
@@ -2053,7 +2053,24 @@ ssh root@50.28.2.199 "cd /opt/monsterrodholders/app && docker compose run --rm w
 ```
 
 The verify step should print `wp_nxz1mfc9cg_` — if it does, the search-replace will work.
-<!-- agent:boundary:4f37b36c -->
+❯ Make certbot-init.sh have 600 permissions.
+### Re: certbot-init.sh permissions (HEAD)
+
+Git can only track two modes: `644` (non-executable) or `755` (executable). It cannot store `600`. The file is currently `644` in git.
+
+Options:
+
+1. **`chmod 600` on the server after deploy** — protects from group/other read; call it with `bash scripts/certbot-init.sh` (no execute bit):
+   ```bash
+   ssh root@50.28.2.199 "chmod 600 /opt/monsterrodholders/scripts/certbot-init.sh"
+   ```
+
+2. **Add to deploy script or Makefile** so it's applied automatically on every deploy.
+
+3. **`chmod 700`** — owner-only execute; git stores as `755` in the index but `700` is applied locally. Same limitation: git doesn't round-trip 700 cleanly.
+
+If the goal is protecting sensitive content from other server users, option 1 is quickest. Want a Makefile `deploy` target that does the `chmod` automatically?
+<!-- agent:boundary:0d4da25d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -2062,6 +2079,7 @@ The verify step should print `wp_nxz1mfc9cg_` — if it does, the search-replace
 - [ ] `scp` updated `docker-compose.yml` to server + recreate wordpress container
 - [ ] Verify prefix resolves to `wp_nxz1mfc9cg_` in container
 - [ ] `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`
+- [ ] `chmod 600 /opt/monsterrodholders/scripts/certbot-init.sh` on server
 - [ ] Copy uploads into wordpress container (if not done)
 - [ ] Verify site at https://50.28.2.199.nip.io — content, images, pages
 - [ ] Install + activate new theme

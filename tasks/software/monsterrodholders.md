@@ -883,7 +883,7 @@ ssh monsterrodholders-server 'docker compose -f /opt/monsterrodholders/app/docke
 **add-listing page (19682):** Was using `[gd_add_listing]` — a GeoDirectory business directory plugin shortcode. GeoDirectory isn't installed and isn't relevant for a rod holders shop. Replaced with a redirect message to the shop.
 
 GeoDirectory pages you can safely delete/unpublish: `add-listing` (19682), `location` (19685), `gd-archive` (19686), `gd-archive-item` (19687), `gd-details` (19688), `search` (19683).
-<!-- agent:boundary:1a2869b5 -->
+<!-- agent:boundary:92648997 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

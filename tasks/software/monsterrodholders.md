@@ -918,7 +918,7 @@ nginx-1  | /docker-entrypoint.sh: Configuration complete; ready for start up
 nginx-1  | 2026/04/10 02:04:09 [emerg] 1#1: cannot load certificate "/etc/nginx/certs/fullchain.pem": BIO_new_file() failed (SSL: error:80000002:system library::No such file or directory:calling fopen(/etc/nginx/certs/fullchain.pem, r) error:10000080:BIO routines::no such file)
 nginx-1  | nginx: [emerg] cannot load certificate "/etc/nginx/certs/fullchain.pem": BIO_new_file() failed (SSL: error:80000002:system library::No such file or directory:calling fopen(/etc/nginx/certs/fullchain.pem, r) error:10000080:BIO routines::no such file)
 ```
-### Re: nginx still can't find certs (HEAD)
+### Re: nginx still can't find certs
 
 The certs aren't landing where nginx expects (`/etc/nginx/certs/fullchain.pem`). "Certificate not yet due for renewal" suggests certbot found stale state from a previous run but the actual cert files aren't accessible to nginx.
 
@@ -942,16 +942,87 @@ docker run --rm -v app_certbot_certs:/certs alpine ls -la /certs/ 2>/dev/null \
 ```
 
 The certbot script claimed certs are provisioned but nginx is still failing — the cert path or volume mount is mismatched.
-<!-- agent:boundary:54a2dd11 -->
+
+```
+[root@oddball-business app]# docker volume ls
+DRIVER    VOLUME NAME
+local     app_db_data
+local     app_wordpress_data
+[root@oddball-business app]# cat /root/app/docker-compose.yml
+cat: /root/app/docker-compose.yml: No such file or directory
+[root@oddball-business app]# cat docker-compose.yml
+services:
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - wordpress_data:/var/www/html:ro
+      - ./certs:/etc/nginx/certs:ro
+
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${WORDPRESS_DB_NAME:-wordpress}
+      MARIADB_USER: ${WORDPRESS_DB_USER:-wordpress}
+      MARIADB_PASSWORD: ${WORDPRESS_DB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./mysql:/etc/mysql/conf.d:ro
+    networks:
+      - wp_net
+
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+    networks:
+      - wp_net
+
+[root@oddball-business app]# docker run --rm -v app_certbot_certs:/certs alpine ls -la /certs/ 2>/dev/null \
+  || docker run --rm -v certbot_certs:/certs alpine ls -la /certs/ 2>/dev/null \
+  || echo "volume not found"
+total 8
+drwxr-xr-x    2 root     root          4096 Apr 10 02:07 .
+drwxr-xr-x    1 root     root          4096 Apr 10 02:07 ..
+```
+### Re: certs mount is a host bind, certbot volume is empty (HEAD)
+
+Now it's clear:
+- nginx mounts `./certs:/etc/nginx/certs:ro` — host directory `/root/app/certs/`
+- No certbot named volume exists (only `app_db_data` and `app_wordpress_data`)
+- `certbot_certs` volume is empty (just created, no files)
+- certbot said "not yet due for renewal" — it found a prior cert registration but **never copied files to `./certs/`**
+
+The cert was issued at some point but the files didn't land where nginx expects them.
+
+Check:
+
+```bash
+ls -la /root/app/certs/
+cat /root/app/scripts/certbot-init.sh
+```
+
+Most likely fix: force certbot to re-issue and have it write to `/root/app/certs/`. Or, if certs exist in `/etc/letsencrypt/live/` from a previous certbot container run, copy them manually:
+
+```bash
+# Find where they are:
+find /etc/letsencrypt /root/app -name "fullchain.pem" 2>/dev/null
+```
+<!-- agent:boundary:55b83b7d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Share `docker volume ls` + `cat /root/app/docker-compose.yml` output
-- [ ] Diagnose cert path mismatch between certbot output and nginx mount
-- [ ] Fix nginx to find certs → get stack running
-- [ ] Test site on `https://50.28.2.199.nip.io`
+- [ ] `ls -la /root/app/certs/` + `cat /root/app/scripts/certbot-init.sh`
+- [ ] Get certs into `/root/app/certs/` (fix or re-run certbot-init.sh with `--force-renewal`)
+- [ ] Verify nginx comes up + test site on `https://50.28.2.199.nip.io`
 - [ ] **Server step 10:** Transfer + import backup, `wp search-replace` domain
 - [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot
 - [ ] Clean spam comments post-import

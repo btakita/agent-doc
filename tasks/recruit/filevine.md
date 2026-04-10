@@ -77,7 +77,7 @@ Brian
 
 To send: save the above to `mail/conversations/your-filevine-journey-continues.md` as a reply draft (or use `corky reply`).
 ❯ corky reply
-### Re: corky reply (HEAD)
+### Re: corky reply
 
 Draft created at `mail/drafts/2026-04-10-re-your-filevine-journey-continues.md` and ready to push, but `btak.dev` Gmail API credentials are expired/missing:
 
@@ -97,7 +97,22 @@ Then push the draft:
 ```
 ! corky draft push mail/drafts/2026-04-10-re-your-filevine-journey-continues.md
 ```
-<!-- agent:boundary:be0feb69 -->
+
+❯ I lost the password when I converted my store. Help me recover by finding the app client_id
+❯ >      Error: CORKY_GMAIL_CLIENT_ID command failed: Error: corky/gmail/client_id is not in the password store.
+
+### Re: Recovering corky/gmail/client_id (HEAD)
+
+Already resolved: `passage corky/gmail/client_id` returns the credential (`873280095295-brv8...`). Updated `mail/.corky.toml` to use `passage` instead of `pass` for all OAuth commands (gmail + linkedin + youtube).
+
+The push is now unblocked — it just needs a one-time OAuth re-authorization since the stored token was revoked. Run:
+
+```
+! corky draft push mail/drafts/2026-04-10-re-your-filevine-journey-continues.md
+```
+
+A browser window will open (or print a URL). Sign in as `btak.dev@gmail.com`, grant Gmail compose access, and the draft will land in your Gmail Drafts folder.
+<!-- agent:boundary:e5653b03 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

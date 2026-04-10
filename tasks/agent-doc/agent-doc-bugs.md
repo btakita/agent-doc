@@ -541,7 +541,7 @@ agent-doc claim tasks/software/claude-code.md
 ```
 
 Or ignore it — the drift warning is informational. agent-doc still routes to the correct pane; it just flags the cross-session topology as unusual.
-<!-- agent:boundary:1ae3f21f -->
+<!-- agent:boundary:9ac8315f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

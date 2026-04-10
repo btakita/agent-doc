@@ -2180,7 +2180,7 @@ ssh root@50.28.2.199 "cd /opt/monsterrodholders/app && docker compose run --rm w
 ```
 
 The HTTPS redirect is coming from WordPress itself — once `siteurl`/`home` point to `50.28.2.199.nip.io`, the redirect stops.
-<!-- agent:boundary:ad50519b -->
+<!-- agent:boundary:f0b69cd5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -56,7 +56,7 @@ Current corky workflow: local files → Gmail/LinkedIn/YouTube APIs. If drafts l
 The `gws` CLI handles execution; the skill layer in corky orchestrates the workflow. No Rust code changes needed for an initial integration.
 
 **Next step:** Clone/review the gws plugin repo to confirm the CLI interface before writing the skill and runbooks.
-<!-- agent:boundary:97f04b0e -->
+<!-- agent:boundary:9639232f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

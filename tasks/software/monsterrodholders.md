@@ -431,7 +431,7 @@ Container app-wpcli-run-a3a653647a2d Creating
 Container app-wpcli-run-a3a653647a2d Created
 Error: The directory '/var/www/html/wp-content/exports' does not exist.
 ```
-### Re: exports directory missing (HEAD)
+### Re: exports directory missing
 
 The exports dir doesn't exist inside the container. Fixed `scripts/wp-to-git.sh` to create it automatically — committed and pushed.
 
@@ -443,13 +443,34 @@ git pull
 ```
 
 `git pull` gets the updated script (which now runs `mkdir -p` before `wp export`), then re-run.
-<!-- agent:boundary:2c876b66 -->
+
+```
+[root@oddball-business app]# cd /opt/monsterrodholders/app && ./scripts/wp-to-git.sh
+==> Ensuring exports directory exists...
+==> Exporting WordPress content (WXR)...
+WARN[0000] Found orphan containers ([app-nginx-1]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up.
+[+]  2/2t 2/22
+ ✔ Container app-db-1        Running                                                                                                                                                                                                       0.0s
+ ✔ Container app-wordpress-1 Running                                                                                                                                                                                                       0.0s
+Container app-wpcli-run-315d553ee878 Creating
+Container app-wpcli-run-315d553ee878 Created
+Error: The directory '/var/www/html/wp-content/exports' is not writable.
+```
+### Re: exports directory not writable (HEAD)
+
+`mkdir -p` created the dir but owned by root — wpcli (running as `www-data`) can't write it. Fixed: script now does `mkdir -p` + `chown www-data:www-data`. Committed and pushed.
+
+On the server:
+```bash
+cd /opt/monsterrodholders/app && git pull && ./scripts/wp-to-git.sh
+```
+<!-- agent:boundary:7a56c627 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] On server: `git pull` to get wp-to-git.sh fix, then re-run `./scripts/wp-to-git.sh`
+- [ ] On server: `git pull` + re-run `./scripts/wp-to-git.sh` (exports dir permissions fix)
 - [ ] Verify commit + push succeeds (need write deploy key — see server-setup.md)
 - [ ] On server: git pull + bootstrap theme files into wordpress/themes/blocksy/
 - [ ] (Optional) Set up Option 2 mu-plugin + inotify watcher for real-time sync

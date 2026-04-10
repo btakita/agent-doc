@@ -403,7 +403,7 @@ This is the self-healing version of the pane_policy guard — instead of warning
 3. `start.rs` auto-relocate instead of warn-only (H2 recurring drift fix)
 
 Why is the response patch not committed?
-### Re: why is the response patch not committed? (HEAD)
+### Re: why is the response patch not committed?
 
 The response IS committed. Here's what `agent-doc commit` actually does:
 
@@ -426,13 +426,34 @@ Before staging, `add_head_marker` appends ` (HEAD)` to the last shallow heading 
 ```
 
 The response body (the table, all analysis text) is identical between HEAD and working tree — no gutter marks on those lines. Only the `(HEAD)` heading line (blue, by design) and your new question (green, uncommitted) differ.
-<!-- agent:boundary:4ebb19c2 -->
+
+❯ do
+❯ - [ ] Implement `dedup_exchange_adjacent_lines` in `template.rs`
+### Re: `dedup_exchange_adjacent_lines` implemented (HEAD)
+
+Added to `template.rs` with 2 tests. 504 tests pass (1 flaky tmux test unrelated).
+
+**What was added:**
+
+`dedup_exchange_adjacent_lines(doc: &str) -> String` (template.rs:608):
+- Finds the exchange component, scans its content line by line
+- Removes consecutive identical non-blank lines (blank lines are intentional separators — never collapsed)
+- Short-circuits if no change occurred (returns original `doc` string untouched)
+- Called at the start of the post-patch block in `apply_patches_with_overrides`, before max_lines trimming
+
+**Tests:**
+- `apply_patches_dedup_exchange_adjacent_echo` — reproduces the mise.md bug exactly: agent echoes `❯ How do I configure .mise.toml?` as first patch line; asserts count == 1 after apply
+- `apply_patches_dedup_preserves_blank_lines` — blank lines between sections survive dedup
+
+**Updated `stream::tests::content_ours_exchange_duplicates_without_replace`:**
+- Was: assertion `count == 2` (documenting the bug)
+- Now: assertion `count == 1` (dedup makes append mode safe, replace override no longer required for echo prevention)
+<!-- agent:boundary:65873cbd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Implement `dedup_exchange_adjacent_lines` in `template.rs`
 - [ ] Implement `strip_leading_overlap` in `apply_mode` for append mode
 - [ ] Change `start.rs` warn → auto-relocate via `PaneMoveOp`
 - [ ] Bump version to 0.31.28, update VERSIONS.md, test, publish

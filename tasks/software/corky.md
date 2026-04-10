@@ -891,7 +891,7 @@ Also fixed a pre-existing clippy lint in `doc/sheets.rs` (redundant closure → 
 ❯ Test reading https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8eyCijtqqteslsWcvJ1JCM/edit?gid=210871523#gid=210871523
 ❯ Using corky with brian@dreamable.com account, read https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8eyCijtqqteslsWcvJ1JCM/edit?gid=210871523#gid=210871523
 ❯ I lost some pass/passage keys. Please let me know what I need to define.
-### Re: corky doc sheet — brian@dreamable.com (HEAD)
+### Re: corky doc sheet — brian@dreamable.com
 
 Two config problems found and fixed in `/home/brian/Documents/mail/.corky.toml`:
 
@@ -931,11 +931,37 @@ corky doc sheet "https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8e
 ```
 
 It will open a browser to the Google consent screen pre-filled with `brian@dreamable.com`. After auth, the token is cached in `~/.config/corky/tokens.json`.
-<!-- agent:boundary:2498b1a6 -->
+
+❯ Oauth went to a not found page when I went through Oauth
+❯ do
+❯ - [ ] Complete OAuth flow for `brian@dreamable.com` (needs browser: run `corky doc sheet ... --account brian@dreamable.com`)
+### Re: OAuth "not found" page (HEAD)
+
+The OAuth redirect hit a dead callback server — the corky process was killed (we freed port 8484 mid-flow) before Google sent the code back. Port 8484 is free now.
+
+**Fix:** run the command first, then complete the browser flow without interrupting the process:
+
+```bash
+corky doc sheet "https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8eyCijtqqteslsWcvJ1JCM/edit?gid=210871523#gid=210871523" --account brian@dreamable.com
+```
+
+When you see `Waiting for callback on http://127.0.0.1:8484/callback...`, complete the Google consent screen in the browser. It will capture the auth code and cache the token in `~/.config/corky/tokens.json`. After that, no more OAuth needed for that account.
+### Re: OAuth "not found" page (HEAD)
+
+The OAuth redirect hit a dead callback server — the corky process was killed (we freed port 8484 mid-flow) before Google sent the code back. Port 8484 is free now.
+
+**Fix:** run the command first, then complete the browser flow without interrupting the process:
+
+```bash
+corky doc sheet "https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8eyCijtqqteslsWcvJ1JCM/edit?gid=210871523#gid=210871523" --account brian@dreamable.com
+```
+
+When you see `Waiting for callback on http://127.0.0.1:8484/callback...`, complete the Google consent screen in the browser. It will capture the auth code and cache the token in `~/.config/corky/tokens.json`. After that, no more OAuth needed for that account.
+<!-- agent:boundary:ca186007 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Complete OAuth flow for `brian@dreamable.com` (needs browser: run `corky doc sheet ... --account brian@dreamable.com`)
+- [ ] Re-run OAuth for `brian@dreamable.com` — port 8484 is now free; run the doc sheet command and complete browser consent without killing the process
 <!-- /agent:pending -->

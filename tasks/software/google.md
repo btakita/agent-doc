@@ -171,7 +171,7 @@ After Phase 2-5, update skill and runbook files to document the complete corky-n
 
 Ready to start with Phase 1 (no code changes, just update skill/runbook files)?
 ❯ Write the plan into a spec md file.
-### Re: Write the plan into a spec md file (HEAD)
+### Re: Write the plan into a spec md file
 
 Written to `src/corky/tasks/integrations/google-workspace.md`.
 
@@ -180,16 +180,51 @@ Covers:
 - Phase 1–6 with file paths, API endpoints, function signatures, scope constants
 - Full OAuth scope table (existing ✅ vs. new)
 - Service coverage summary
-<!-- agent:boundary:7591110c -->
+
+❯ Implement src/corky/tasks/integrations/google-workspace.md
+### Re: Implement google-workspace.md (HEAD)
+
+All 6 phases complete. Build passes (0 errors).
+
+**Phase 1 — Skill + runbook cleanup:**
+- `src/corky/.claude/skills/gws/SKILL.md` — rewritten to document corky-native commands only; no gws plugin refs
+- `src/corky/.agent/runbooks/gws-gmail-send.md` → rewritten using `corky draft send`
+- `src/corky/.agent/runbooks/gws-docs-draft.md` → rewritten using `corky doc read/write`
+- `src/corky/AGENTS.md` — `## Google Workspace Integration` section replaced with corky-native command reference; plugin install instructions removed
+
+**Phase 2 — Gmail send with attachments:**
+- `src/corky/src/draft/send.rs` (new) — Gmail API send via `POST .../messages/send`; MIME multipart/mixed for attachments; base64url raw encoding; RFC 2047 subject encoding
+- `DraftCommands::Send { file, attachments, account }` added to cli.rs
+- Wired in `main.rs` → `corky::draft::send::run`
+
+**Phase 3 — Sheets write:**
+- `src/corky/src/doc/sheets.rs` — `write()` added; uses `SHEETS_SCOPE`; parses CSV with quoted-field support; `PUT .../values/{range}?valueInputOption=USER_ENTERED`
+- `DocCommands::SheetWrite { sheet, range, file, account }` added to cli.rs
+- `SHEETS_SCOPE` constant added to `gmail_auth.rs`
+
+**Phase 4 — Google Chat:**
+- `src/corky/src/social/chat.rs` (new) — `send()` via `POST .../spaces/{id}/messages`
+- `Commands::Chat(ChatCommands)` + `ChatCommands::Send` added to cli.rs
+- `CHAT_SCOPE` constant added to `gmail_auth.rs`
+- `pub mod chat` added to `social/mod.rs`
+
+**Phase 5 — Google Tasks:**
+- `src/corky/src/tasks/` (new module) — `mod.rs`, `list.rs`, `add.rs`, `done.rs`
+- `Commands::Tasks(TasksCommands)` + `TasksCommands::List/Add/Done` added to cli.rs
+- `TASKS_SCOPE` constant added to `gmail_auth.rs`
+- `pub mod tasks` added to `lib.rs`
+
+**Phase 6 — Skills + runbooks** (done alongside Phase 1)
+<!-- agent:boundary:f21690a1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Phase 1: Revise skill + runbooks to use corky CLI (no gws plugin refs)
-- [ ] Phase 2: `corky draft send --attachment` (Gmail send w/ attachments)
-- [ ] Phase 3: `corky doc sheet-write` (Sheets write)
-- [ ] Phase 4: `corky social chat send` (Google Chat)
-- [ ] Phase 5: `corky tasks list/add/done` (Google Tasks)
-- [ ] Phase 6: Update skill + runbooks for full corky-native surface
+- [x] Phase 1: Revise skill + runbooks to use corky CLI (no gws plugin refs)
+- [x] Phase 2: `corky draft send --attachment` (Gmail send w/ attachments)
+- [x] Phase 3: `corky doc sheet-write` (Sheets write)
+- [x] Phase 4: `corky chat send` (Google Chat)
+- [x] Phase 5: `corky tasks list/add/done` (Google Tasks)
+- [x] Phase 6: Update skill + runbooks for full corky-native surface
 <!-- /agent:pending -->

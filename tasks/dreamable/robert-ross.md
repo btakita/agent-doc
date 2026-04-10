@@ -1196,7 +1196,7 @@ That leaves the **Build Party PRD**. Since it was an explicit Rob deliverable ("
 - It was deprioritized when direction shifted → confirm that so you don't carry it
 
 If you're not sure, a one-liner in the Slack message works: "Also — is the Build Party PRD still something you want me to evaluate for Apr 10, or is ClaudeScore the focus?"
-<!-- agent:boundary:f309eecc -->
+<!-- agent:boundary:cdc9ef6f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

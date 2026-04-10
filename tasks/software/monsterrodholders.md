@@ -1504,7 +1504,7 @@ InterWorx manages its own files (usually named after the domain or account). A d
 **Practical advice:** Try option 1 first via SiteWorx. If the UI doesn't expose it or the directives don't take effect, fall back to the separate .conf file and monitor after any InterWorx domain or SSL changes.
 
 ❯ I want everything to run with scripts. I want to avoid the control panel as much as possible.
-### Re: I want everything to run with scripts — avoid the control panel (HEAD)
+### Re: I want everything to run with scripts — avoid the control panel
 
 Good call — the separate `.conf` file approach is fully scriptable and the right path. The key is managing the conflict risk:
 
@@ -1554,7 +1554,39 @@ certbot certonly --standalone -d 50.28.2.199.nip.io
 ```
 
 This keeps certbot from touching your Apache config at all.
-<!-- agent:boundary:0b87fa71 -->
+
+❯ http://50.28.2.199.nip.io/ did not win. https://50.28.2.199.nip.io/ has Service Unavailable
+### Re: http didn't redirect, https is Service Unavailable (HEAD)
+
+"Service Unavailable" on HTTPS means Apache's proxy is active but can't reach the backend on port 8080. Let's isolate:
+
+```bash
+# 1. Is Docker running and binding 8080?
+docker compose -f /opt/monsterrodholders/app/docker-compose.yml ps
+ss -tlnp | grep 8080
+
+# 2. Can Apache reach the backend directly?
+curl -v http://127.0.0.1:8080/ 2>&1 | head -30
+
+# 3. What is HTTP actually returning?
+curl -v http://50.28.2.199.nip.io/ 2>&1 | head -30
+
+# 4. Check Apache loaded your config and what vhosts are active
+httpd -t
+httpd -S 2>&1 | grep -E "50.28.2.199|8080|namevhost"
+
+# 5. Check Apache error log for proxy errors
+tail -30 /var/log/httpd/error_log
+```
+
+Most likely causes:
+- **Docker container not running** — `docker compose ps` will show it exited
+- **nginx still binding to `80:80` or `443:443`** in old docker-compose.yml — container fails to start
+- **Port 8080 not bound to 127.0.0.1** — check the ports line in docker-compose.yml is `127.0.0.1:8080:80`
+- **mod_proxy not enabled** — `httpd -t` would show a directive error
+
+Run those and share the output — the error log especially will pinpoint it.
+<!-- agent:boundary:61bf7ca9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

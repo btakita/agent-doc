@@ -744,14 +744,25 @@ cat ~/.ssh/id_ed25519.pub | ssh -o PubkeyAuthentication=no root@50.28.2.199 'cat
 ```
 
 Once done, confirm with `! ssh monsterrodholders-server whoami` — should return `root` cleanly. Then I can run server commands from this session.
-<!-- agent:boundary:be3a9a4c -->
+❯ I want to ssh to the server. Should we add to .ssh/authorized_keys
+### Re: add id_ed25519 to server authorized_keys
+
+Yes — `id_ed25519` is not yet in the server's `authorized_keys`. The verbose log shows it's being offered and rejected, not blocked by key count.
+
+Run from your terminal (forces password auth to bootstrap):
+```bash
+ssh-copy-id -i ~/.ssh/id_ed25519.pub -o PubkeyAuthentication=no root@50.28.2.199
+```
+
+After that, `ssh monsterrodholders-server` (or `ssh root@50.28.2.199`) will work from this session without a password prompt.
+<!-- agent:boundary:78e561f8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Authorize id_ed25519.pub on server (ssh-copy-id)
-- [ ] Test: `ssh monsterrodholders-server whoami`
+- [ ] Run: `ssh-copy-id -i ~/.ssh/id_ed25519.pub -o PubkeyAuthentication=no root@50.28.2.199`
+- [ ] Test: `! ssh monsterrodholders-server whoami` → should return `root`
 - [ ] Pull page IDs + home page raw content from server
 - [ ] Build Gutenberg replacement HTML for home page (preserve all text/links)
 - [ ] Update page content via `wp post update`

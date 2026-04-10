@@ -198,7 +198,7 @@ v0.31.29 released:
 ❯ In tasks/software/monsterrodholders.md, an edit to the agent:pending element had a `❯ ` prefix added. This should not apply to agent:pending.
 ❯ - [ ] Build Gutenberg replacement HTML for home page (preserve all text/links)
 
-### Re: `❯ ` prefix in agent:pending — root cause + fix (HEAD)
+### Re: `❯ ` prefix in agent:pending — root cause + fix
 
 **Root cause:** `normalize_patch_content` was called on ALL patches in `build_ipc_patches_json`, not just exchange patches. When the exchange `normalize_prefix_lines` set contained a line (e.g. `- [ ] Build Gutenberg replacement HTML for home page`) that also appeared in the `agent:pending` patch content, that line received an erroneous `❯ ` prefix before being sent to the plugin.
 
@@ -216,7 +216,22 @@ v0.31.29 released:
 **Test added:** `normalize_prefix_lines_skipped_for_replace_mode_components` — verifies that `agent:pending` content is not normalized even when `normalize_prefix_lines` contains a matching line.
 
 **Test results:** 780 tests pass. `send_keys_delivers_command_with_enter` remains flaky (passes in isolation — known ordering issue, not a regression).
-<!-- agent:boundary:d0c1aef5 -->
+
+❯ release
+### Re: release (HEAD)
+
+v0.31.30 staged locally — awaiting manual testing gate.
+
+**Changes:**
+- `write.rs`: `normalize_patch_content` now gated on `is_append_mode_component(&p.name)` at both IPC write path (line 1837) and IPC timeout fallback (line 927). Replace-mode patches (`pending`, `status`, etc.) skip normalization.
+- `VERSIONS.md`: `0.31.30` entry added
+- `Cargo.toml` + `pyproject.toml`: bumped to `0.31.30`
+- `cargo install v0.31.30` running locally
+
+**Manual testing gate:** Edit `agent:pending` in a document that has an active exchange where a matching line exists. Confirm no `❯ ` prefix appears on the pending item after the write cycle.
+
+Once confirmed, I'll publish: `cargo publish` → manylinux Docker wheel → PyPI → tag + GitHub Release.
+<!-- agent:boundary:5b26fd64 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

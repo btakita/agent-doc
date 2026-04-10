@@ -277,7 +277,7 @@ What IS the FFI boundary: the `--position left|right|top|bottom` flag in `claim.
 2. **3+ columns, middle column:** Returns `null` — tmux `--position` doesn't have a "center" concept. Fallback to active pane. Acceptable for now.
 
 **SKILL / runbook:** No changes needed. The SKILL's `/agent-doc claim <FILE>` path runs from a tmux terminal where `TMUX_PANE` is set — `current_pane()` returns the correct pane from `$TMUX_PANE`. The bug was specific to the JetBrains action running outside tmux. The SKILL path is unaffected.
-<!-- agent:boundary:cc07f8d8 -->
+<!-- agent:boundary:e4855077 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

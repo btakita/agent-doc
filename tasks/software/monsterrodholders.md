@@ -1596,7 +1596,7 @@ app-nginx-1       nginx:alpine                  "/docker-entrypoint.…"   nginx
 app-redis-1       redis:alpine                  "docker-entrypoint.s…"   redis       2 hours ago   Up 2 hours                      6379/tcp
 app-wordpress-1   wordpress:php8.3-fpm-alpine   "docker-entrypoint.s…"   wordpress   2 hours ago   Up 2 hours                      9000/tcp
 ```
-### Re: nginx is Restarting — crash loop (HEAD)
+### Re: nginx is Restarting — crash loop
 
 nginx is crash-looping — that's why you get 503. The other containers are fine. Need to see why:
 
@@ -1615,7 +1615,55 @@ grep -A5 'nginx:' /opt/monsterrodholders/app/docker-compose.yml | grep -A3 'port
 The most likely cause: **nginx config inside Docker still references SSL cert files that don't exist inside the container**, or it's trying to bind a port that's failing. Since WordPress is running PHP-FPM on port 9000, nginx inside Docker also needs to be configured as a FastCGI proxy (not just HTTP proxy).
 
 Share the logs output and I can pinpoint exactly what's wrong.
-<!-- agent:boundary:23963503 -->
+
+❯ Why are we using nginx if InterWorx uses Apache?
+
+```
+nginx-1  | 2026/04/10 04:35:59 [emerg] 1#1: host not found in upstream "wordpress" in /etc/nginx/conf.d/wordpress.conf:27
+nginx-1  | nginx: [emerg] host not found in upstream "wordpress" in /etc/nginx/conf.d/wordpress.conf:27
+nginx-1  | /docker-entrypoint.sh: /docker-entrypoint.d/ is not empty, will attempt to perform configuration
+nginx-1  | /docker-entrypoint.sh: Looking for shell scripts in /docker-entrypoint.d/
+nginx-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/10-listen-on-ipv6-by-default.sh
+nginx-1  | 10-listen-on-ipv6-by-default.sh: info: /etc/nginx/conf.d/default.conf is not a file or does not exist
+nginx-1  | /docker-entrypoint.sh: Sourcing /docker-entrypoint.d/15-local-resolvers.envsh
+nginx-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/20-envsubst-on-templates.sh
+nginx-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/30-tune-worker-processes.sh
+nginx-1  | /docker-entrypoint.sh: Configuration complete; ready for start up
+```
+### Re: Why nginx inside Docker? And the crash log (HEAD)
+
+**Why nginx inside Docker:** WordPress is running as PHP-FPM (`php8.3-fpm-alpine`) — it only speaks FastCGI, not HTTP. Something inside Docker must handle HTTP requests and proxy PHP files to FastCGI port 9000. That's nginx's role. The stack is:
+
+```
+Internet → Apache (SSL termination) → nginx:8080 (HTTP→FastCGI) → WordPress PHP-FPM:9000
+```
+
+**The crash cause:** `host not found in upstream "wordpress"` — nginx can't DNS-resolve the `wordpress` service name inside Docker. This means nginx and wordpress are either on different Docker networks, or the network isn't configured yet.
+
+Check the docker-compose.yml:
+```bash
+cat /opt/monsterrodholders/app/docker-compose.yml
+```
+
+The fix is usually adding an explicit shared network:
+```yaml
+networks:
+  default:
+    name: app-network
+
+services:
+  nginx:
+    # no explicit networks: needed — uses default
+  wordpress:
+    # no explicit networks: needed — uses default
+```
+
+Or verify all services use the same network. If docker-compose has explicit `networks:` keys that put nginx and wordpress on different networks, they can't reach each other.
+
+The nginx config at `/etc/nginx/conf.d/wordpress.conf:27` likely has `fastcgi_pass wordpress:9000;` — that syntax is correct. The problem is purely DNS resolution within Docker.
+
+**Alternative to simplify:** Replace `wordpress:php8.3-fpm-alpine` with `wordpress:apache` — then you don't need nginx inside Docker at all, just Apache inside Docker serving WordPress directly. Host Apache proxies to Docker Apache on 8080. Removes one moving part.
+<!-- agent:boundary:0a8e804d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

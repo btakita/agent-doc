@@ -61,10 +61,27 @@ v0.31.28 released:
 
 ❯ do
 ❯ - [ ] Update parent submodule pointer (git add src/agent-doc && git commit in agent-loop)
-### Re: submodule pointer update (HEAD)
+### Re: submodule pointer update
 
 Done. `git add src/agent-doc && git commit` in agent-loop — pointer updated to v0.31.28 HEAD and pushed.
-<!-- agent:boundary:155211e0 -->
+
+❯ Why does src/session-share/tasks/claudescore.md have an uncommitted response patch? What do the logs say?
+❯ Did I call 2 agent-doc runs in a row? Which caused a race condition?
+### Re: claudescore.md uncommitted patch — diagnosis (HEAD)
+
+**What happened — `agent-doc write` without `agent-doc commit`:**
+
+The `### Re: "Score pending..."` response was written by a previous session (`agent-doc write` ran, snapshot + file updated). But `agent-doc commit` was never called — snapshot had the content, git HEAD didn't. When THIS preflight ran at `10:38:31`, step 2 detected the gap and committed it at `10:38:43`.
+
+**Evidence:**
+- Git log: last real claudescore commit `09:48:31`, gap commit `10:38:43` (preflight step 2)
+- Snapshot mtime: `10:38:43.593` — same timestamp as gap commit
+- Diff content clean (52 insertions, no duplication) — no race, just a missed commit step
+
+**2 agent-doc runs in a row?** Possibly — second session's preflight would commit the first's gap. But the diff is clean, so no overlapping writes. More likely: the session ended (Ctrl+C, /clear, timeout) after `agent-doc write` but before `agent-doc commit`.
+
+**Not a bug** — preflight's gap commit is designed for exactly this. The `file is 176 bytes larger than snapshot` warning flagged it correctly. No data lost.
+<!-- agent:boundary:d23775b6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

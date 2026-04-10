@@ -1923,7 +1923,7 @@ Or add `env_file: .env` to the wordpress service to pass all `.env` vars into th
 ❯ `env_file: .env` seems simplest. Correct?
 
 After patching `wp-config.php`, WP-CLI should work without a restart. Then proceed with the search-replace.
-### Re: `env_file: .env` — yes, and one caveat (HEAD)
+### Re: `env_file: .env` — yes, and one caveat
 
 Yes, simplest. Add it to the wordpress service:
 
@@ -1933,6 +1933,8 @@ Yes, simplest. Add it to the wordpress service:
     environment:
       # ... existing vars still work, env_file fills in the rest
 ```
+
+❯ Do this in the monsterrodholders-dev repo...correct?
 
 Caveat: `env_file` passes **all** `.env` vars to the container (DB passwords, etc.) — fine for a private server, just broader than a targeted `environment:` entry.
 
@@ -1952,14 +1954,33 @@ Caveat: `env_file` passes **all** `.env` vars to the container (DB passwords, et
    ```
 
 Recommend option 1 (sed) — it's immediate and doesn't require a restart.
-<!-- agent:boundary:5f7b82f6 -->
+### Re: monsterrodholders-dev already handles this (HEAD)
+
+Good news — the local `monsterrodholders-dev/docker-compose.yml` **already has** `WORDPRESS_TABLE_PREFIX: ${WORDPRESS_TABLE_PREFIX:-wp_}` in the wordpress service's environment block. No change needed there.
+
+The production server's compose file at `/opt/monsterrodholders/app/docker-compose.yml` is what matters right now. Check if it matches:
+```bash
+grep -A 20 "wordpress:" /opt/monsterrodholders/app/docker-compose.yml
+```
+
+If the server's compose file is missing `WORDPRESS_TABLE_PREFIX`, copy the local one up:
+```bash
+scp src/monsterrodholders-dev/docker-compose.yml root@50.28.2.199:/opt/monsterrodholders/app/docker-compose.yml
+```
+
+**But the `sed` fix on `wp-config.php` is still required regardless** — the env var only takes effect when the container first generates `wp-config.php`. Since it already exists, patch it directly:
+```bash
+docker compose exec wordpress sed -i "s/\$table_prefix = 'wp_';/\$table_prefix = 'wp_nxz1mfc9cg_';/" /var/www/html/wp-config.php
+docker compose exec wordpress grep table_prefix /var/www/html/wp-config.php
+```
+<!-- agent:boundary:f032b601 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Patch `wp-config.php` table prefix (sed or delete+restart)
-- [ ] Add `env_file: .env` to wordpress service in `docker-compose.yml` (for future)
+- [ ] Patch `wp-config.php` table prefix on server (sed command above)
+- [ ] Verify production compose file has `WORDPRESS_TABLE_PREFIX` in wordpress environment
 - [ ] `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`
 - [ ] Copy uploads into wordpress container (if not done)
 - [ ] Verify site at https://50.28.2.199.nip.io — content, images, pages

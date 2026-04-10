@@ -1586,7 +1586,7 @@ Most likely causes:
 - **mod_proxy not enabled** — `httpd -t` would show a directive error
 
 Run those and share the output — the error log especially will pinpoint it.
-<!-- agent:boundary:61bf7ca9 -->
+<!-- agent:boundary:ad4e04a3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

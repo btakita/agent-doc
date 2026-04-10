@@ -50,7 +50,7 @@ Replace `astra` with `fishzone` if you prefer the original. Do you want both or 
 
 ❯ I just got the theme. How do I use this theme instead?
 ❯ /home/brian/work/rberkes/monsterrodholders/blocksy-companion-pro.2.1.38.zip
-### Re: blocksy-companion-pro.2.1.38.zip (HEAD)
+### Re: blocksy-companion-pro.2.1.38.zip
 
 That's the **Blocksy Companion Pro plugin** — not the theme itself. The Blocksy theme is separate and free on WordPress.org. The companion plugin adds pro features on top of the theme.
 
@@ -78,15 +78,31 @@ docker compose -f /opt/monsterrodholders/app/docker-compose.yml run --rm wpcli \
 ```
 
 **Step 4 — Enter license key** in WP Admin → Blocksy → License (unlocks pro features). Do you have the license key?
-<!-- agent:boundary:c99d3647 -->
+
+❯ Take a look at https://50.28.2.199.nip.io/
+### Re: site check — https://50.28.2.199.nip.io/ (HEAD)
+
+Site is up and working:
+
+- HTTP 200 — no redirect to `monsterrodholders.com`
+- **Blocksy theme is active** (`blocksy/static/bundle/main.min.css?ver=2.1.38` loading)
+- Title: "Monster Rod Holders – We are the reference for Heavy-Duty Fishing Rod Holders..."
+- All URLs correctly use `50.28.2.199.nip.io`
+
+Blocksy theme is already installed and serving content. If you want to also install the Blocksy Companion Pro plugin (step 2–4 from above), that unlocks pro customization features — but the site is functional without it.
+
+Next steps (when ready to go live):
+1. Run `wp search-replace 'https://50.28.2.199.nip.io' 'https://monsterrodholders.com' --all-tables`
+2. Flip DNS to `50.28.2.199`
+3. Run certbot for `monsterrodholders.com` SSL
+<!-- agent:boundary:e9c8f575 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Install Blocksy theme via WP-CLI on server
-- [ ] Copy + install blocksy-companion-pro plugin
-- [ ] Enter Blocksy Pro license key in WP Admin
-- [ ] Verify site loads with Blocksy theme
+- [ ] (Optional) Install blocksy-companion-pro plugin + license key
+- [ ] Verify products/WooCommerce pages load correctly
 - [ ] Remove crash-looping `app-nginx-1` orphan container
+- [ ] When ready to go live: search-replace URLs → monsterrodholders.com, flip DNS, re-run certbot
 <!-- /agent:pending -->

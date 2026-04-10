@@ -931,7 +931,7 @@ corky doc sheet "https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8e
 ```
 
 It will open a browser to the Google consent screen pre-filled with `brian@dreamable.com`. After auth, the token is cached in `~/.config/corky/tokens.json`.
-<!-- agent:boundary:b3e1a2f8 -->
+<!-- agent:boundary:094dc3f7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

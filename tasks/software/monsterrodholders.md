@@ -1666,7 +1666,7 @@ The nginx config at `/etc/nginx/conf.d/wordpress.conf:27` likely has `fastcgi_pa
 
 ❯ Why not just proxy pass to port 9000?
 ❯ Or have Nginx use port 8080
-### Re: proxy to port 9000 / nginx on 8080 (HEAD)
+### Re: proxy to port 9000 / nginx on 8080
 
 **Why not proxy-pass to port 9000?**
 
@@ -1684,15 +1684,30 @@ networks:
 ```
 
 **Simplest path if you want to skip debugging nginx:** Switch to `wordpress:apache` image. Apache inside Docker handles PHP + static files, listens on 80, map to host 8080, host Apache proxies to it. Eliminates FastCGI and the nginx DNS issue entirely.
-<!-- agent:boundary:6f39ac2f -->
+
+❯ How does it perform compared to the nginx solution?
+### Re: `wordpress:apache` vs nginx + PHP-FPM performance (HEAD)
+
+**nginx + PHP-FPM — faster at scale:**
+- Event-driven, low memory per connection
+- PHP workers only invoked for PHP requests — static files bypass PHP entirely
+- Better under high concurrency (hundreds of simultaneous requests)
+
+**`wordpress:apache` (mod_php) — adequate for this site:**
+- Apache prefork embeds PHP in every worker, including static file requests → higher per-worker memory
+- At low traffic, the difference is imperceptible
+- Zero FastCGI config, no nginx DNS debugging
+
+**For monsterrodholders:** Use `wordpress:apache`. The performance gap only matters at scale — thousands of concurrent visitors. A rod holders shop isn't in that range. The nginx + PHP-FPM setup is correct for high-traffic WooCommerce, but here it's complexity with no measurable return.
+<!-- agent:boundary:b0fbd955 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Switch docker-compose to `wordpress:apache` (drop nginx service)
 - [ ] Revise docker-compose nginx ports to `127.0.0.1:8080:80` (internal only)
 - [ ] Write Apache VirtualHost config at `/etc/httpd/conf.d/monsterrodholders.conf`
-- [ ] Simplify nginx config (HTTP-only, no SSL)
 - [ ] `systemctl reload httpd` and test `https://50.28.2.199.nip.io`
 - [ ] **Server step 10:** Transfer + import backup, `wp search-replace` domain
 - [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot for real domain

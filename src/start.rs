@@ -130,21 +130,12 @@ pub fn run(file: &Path) -> Result<()> {
 
     let pane_id = sessions::current_pane()?;
 
-    // Guard: warn if registering from a session that differs from the configured project session.
+    // Guard: auto-relocate if the current pane is in a different session than the project expects.
     // This is how cross-session drift happens — a terminal in session 1 claims a document,
     // permanently binding it to session 1 even though the project targets session 0.
     if let Some(expected_session) = config::project_tmux_session() {
         let tmux = sessions::Tmux::default_server();
-        if let Ok(actual_session) = tmux.pane_session(&pane_id)
-            && actual_session != expected_session
-        {
-            eprintln!(
-                "[start] WARNING: pane {} is in tmux session '{}', but project config expects '{}'. \
-                 This document will be registered to session '{}'. \
-                 To avoid session drift, run /agent-doc from a terminal in session '{}'.",
-                pane_id, actual_session, expected_session, actual_session, expected_session
-            );
-        }
+        relocate_if_wrong_session(&tmux, &pane_id, &expected_session);
     }
 
     // Register session → pane (with relative file path)
@@ -284,11 +275,96 @@ pub fn run(file: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Auto-relocate `pane_id` to `expected_session` if it is currently in a different session.
+/// Returns `true` if relocation succeeded or was unnecessary; `false` if relocation failed.
+/// Falls back to warn-only on failure so the start isn't aborted.
+pub(crate) fn relocate_if_wrong_session(
+    tmux: &sessions::Tmux,
+    pane_id: &str,
+    expected_session: &str,
+) -> bool {
+    let actual_session = match tmux.pane_session(pane_id) {
+        Ok(s) => s,
+        Err(_) => return true, // can't determine — let registration proceed
+    };
+    if actual_session == expected_session {
+        return true;
+    }
+    eprintln!(
+        "[start] pane {} is in session '{}', expected '{}' — auto-relocating to project session",
+        pane_id, actual_session, expected_session
+    );
+    if let Some(anchor) = tmux.active_pane(expected_session) {
+        match sessions::PaneMoveOp::new(tmux, pane_id, &anchor)
+            .allow_cross_session("auto-relocate to project session on start")
+            .join("-dh")
+        {
+            Ok(()) => {
+                eprintln!("[start] relocated pane {} → session '{}'", pane_id, expected_session);
+                true
+            }
+            Err(e) => {
+                eprintln!(
+                    "[start] WARNING: relocation failed ({}); pane {} will register in session '{}'",
+                    e, pane_id, actual_session
+                );
+                false
+            }
+        }
+    } else {
+        eprintln!(
+            "[start] WARNING: no active pane found in session '{}'; \
+             pane {} will register in session '{}'",
+            expected_session, pane_id, actual_session
+        );
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::hooks::fire_doc_hooks;
+    use crate::sessions::IsolatedTmux;
     use std::collections::HashMap;
+
+    // --- relocate_if_wrong_session tests ---
+
+    #[test]
+    fn relocate_noop_when_already_correct_session() {
+        let iso = IsolatedTmux::new("start-reloc-noop");
+        let pane = iso.new_session("sess-a", std::path::Path::new("/tmp")).unwrap();
+        // pane is already in sess-a; no relocation needed
+        let result = relocate_if_wrong_session(&iso, &pane, "sess-a");
+        assert!(result, "should return true (noop — already in correct session)");
+        // Verify pane is still in sess-a
+        let sess = iso.pane_session(&pane).unwrap();
+        assert_eq!(sess, "sess-a");
+    }
+
+    #[test]
+    fn relocate_succeeds_cross_session() {
+        let iso = IsolatedTmux::new("start-reloc-cross");
+        let _pane_a = iso.new_session("sess-a", std::path::Path::new("/tmp")).unwrap();
+        let pane_b = iso.new_session("sess-b", std::path::Path::new("/tmp")).unwrap();
+        // pane_b is in sess-b; expected is sess-a — should auto-relocate
+        let result = relocate_if_wrong_session(&iso, &pane_b, "sess-a");
+        assert!(result, "should return true after successful relocation");
+        let sess = iso.pane_session(&pane_b).unwrap();
+        assert_eq!(sess, "sess-a", "pane should be in sess-a after relocation");
+    }
+
+    #[test]
+    fn relocate_fails_gracefully_when_no_anchor() {
+        let iso = IsolatedTmux::new("start-reloc-noanchor");
+        let pane = iso.new_session("sess-a", std::path::Path::new("/tmp")).unwrap();
+        // Expected session "sess-nonexistent" has no active pane — relocation should fail gracefully
+        let result = relocate_if_wrong_session(&iso, &pane, "sess-nonexistent");
+        assert!(!result, "should return false when no anchor pane exists in expected session");
+        // pane should still be in original session
+        let sess = iso.pane_session(&pane).unwrap();
+        assert_eq!(sess, "sess-a", "pane should remain in original session on failure");
+    }
 
     #[test]
     fn fire_doc_hooks_substitutes_template_vars() {

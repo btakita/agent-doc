@@ -370,6 +370,10 @@ pub fn apply_patches_with_overrides(
         }
     }
 
+    // Post-patch: remove consecutive duplicate lines from exchange (prevents agent
+    // echo of user prompt when patch content starts with already-appended content).
+    result = dedup_exchange_adjacent_lines(&result);
+
     // Post-patch: apply max_lines trimming to components that have it configured.
     // Precedence: inline attr > components.toml > unlimited (0).
     // Re-parse after each replacement (offsets change) and iterate up to 3 times
@@ -605,12 +609,71 @@ fn limit_lines(content: &str, max_lines: usize) -> String {
     lines[lines.len() - max_lines..].join("\n")
 }
 
+/// Remove consecutive identical non-blank lines in the exchange component.
+///
+/// Prevents agent echoes of user prompts from creating duplicates when
+/// `apply_mode("append")` concatenates existing content that already ends
+/// with the first line(s) of the new patch content.
+///
+/// Only non-blank lines are subject to deduplication — blank lines are
+/// intentional separators and are never collapsed.
+fn dedup_exchange_adjacent_lines(doc: &str) -> String {
+    let Ok(components) = component::parse(doc) else {
+        return doc.to_string();
+    };
+    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
+        return doc.to_string();
+    };
+    let content = exchange.content(doc);
+    let mut deduped = String::with_capacity(content.len());
+    let mut prev_nonempty: Option<&str> = None;
+    for line in content.lines() {
+        if !line.trim().is_empty() && prev_nonempty == Some(line) {
+            // Skip exact duplicate adjacent non-blank line
+            continue;
+        }
+        deduped.push_str(line);
+        deduped.push('\n');
+        if !line.trim().is_empty() {
+            prev_nonempty = Some(line);
+        }
+    }
+    // Preserve original trailing-newline behaviour
+    if !content.ends_with('\n') && deduped.ends_with('\n') {
+        deduped.pop();
+    }
+    if deduped == content {
+        return doc.to_string();
+    }
+    exchange.replace_content(doc, &deduped)
+}
+
 /// Apply mode logic (replace/append/prepend).
 fn apply_mode(mode: &str, existing: &str, new_content: &str) -> String {
     match mode {
-        "append" => format!("{}{}", existing, new_content),
+        "append" => {
+            let stripped = strip_leading_overlap(existing, new_content);
+            format!("{}{}", existing, stripped)
+        }
         "prepend" => format!("{}{}", new_content, existing),
         _ => new_content.to_string(), // "replace" default
+    }
+}
+
+/// Strip the last non-blank line of `existing` from the start of `new_content` if present.
+///
+/// When an agent echoes the user's last prompt as the first line of its patch,
+/// append mode would duplicate that line. This strips the overlap before concatenation.
+fn strip_leading_overlap<'a>(existing: &str, new_content: &'a str) -> &'a str {
+    let last_nonempty = existing.lines().rfind(|l| !l.trim().is_empty());
+    let Some(last) = last_nonempty else {
+        return new_content;
+    };
+    let test = format!("{}\n", last);
+    if new_content.starts_with(test.as_str()) {
+        &new_content[test.len()..]
+    } else {
+        new_content
     }
 }
 
@@ -1420,5 +1483,79 @@ Some content.
         assert_eq!(patches[0].name, "output");
         assert_eq!(patches[0].attrs.get("mode"), Some(&"replace".to_string()));
         assert_eq!(patches[0].attrs.get("max_lines"), Some(&"50".to_string()));
+    }
+
+    #[test]
+    fn apply_patches_dedup_exchange_adjacent_echo() {
+        // Simulates the bug: agent echoes user prompt as first line of exchange patch.
+        // The existing exchange already ends with the prompt line.
+        // After apply_patches, the prompt should appear exactly once.
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = "\
+<!-- agent:exchange patch=append -->
+❯ How do I configure .mise.toml?
+<!-- /agent:exchange -->
+";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        // Agent echoes the prompt as first line of its response patch
+        let patches = vec![PatchBlock {
+            name: "exchange".to_string(),
+            content: "❯ How do I configure .mise.toml?\n\n### Re: configure .mise.toml\n\nUse `[env]` section.\n".to_string(),
+            attrs: Default::default(),
+        }];
+        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+
+        let count = result.matches("❯ How do I configure .mise.toml?").count();
+        assert_eq!(count, 1, "prompt line should appear exactly once, got:\n{result}");
+        assert!(result.contains("### Re: configure .mise.toml"), "response heading should be present");
+        assert!(result.contains("Use `[env]` section."), "response body should be present");
+    }
+
+    #[test]
+    fn apply_patches_dedup_preserves_blank_lines() {
+        // Blank lines between sections must not be collapsed by dedup.
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = "\
+<!-- agent:exchange patch=append -->
+Previous response.
+<!-- /agent:exchange -->
+";
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock {
+            name: "exchange".to_string(),
+            content: "\n\n### Re: something\n\nAnswer here.\n".to_string(),
+            attrs: Default::default(),
+        }];
+        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        assert!(result.contains("Previous response."), "existing content preserved");
+        assert!(result.contains("### Re: something"), "response heading present");
+        // Multiple blank lines should survive (dedup only targets non-blank)
+        assert!(result.contains('\n'), "blank lines preserved");
+    }
+
+    #[test]
+    fn apply_mode_append_strips_leading_overlap() {
+        // When new_content starts with the last non-blank line of existing,
+        // apply_mode("append") should not duplicate that line.
+        let existing = "❯ How do I configure .mise.toml?\n";
+        let new_content = "❯ How do I configure .mise.toml?\n\n### Re: configure\n\nUse `[env]`.\n";
+        let result = apply_mode("append", existing, new_content);
+        let count = result.matches("❯ How do I configure .mise.toml?").count();
+        assert_eq!(count, 1, "overlap line should appear exactly once");
+        assert!(result.contains("### Re: configure"));
+    }
+
+    #[test]
+    fn apply_mode_append_no_overlap_unchanged() {
+        // When new_content does NOT start with the last non-blank line of existing,
+        // apply_mode("append") should concatenate normally.
+        let existing = "Previous content.\n";
+        let new_content = "### Re: something\n\nAnswer.\n";
+        let result = apply_mode("append", existing, new_content);
+        assert_eq!(result, "Previous content.\n### Re: something\n\nAnswer.\n");
     }
 }

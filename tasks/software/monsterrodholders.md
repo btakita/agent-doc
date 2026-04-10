@@ -744,7 +744,7 @@ cat ~/.ssh/id_ed25519.pub | ssh -o PubkeyAuthentication=no root@50.28.2.199 'cat
 ```
 
 Once done, confirm with `! ssh monsterrodholders-server whoami` — should return `root` cleanly. Then I can run server commands from this session.
-<!-- agent:boundary:53e084e9 -->
+<!-- agent:boundary:be3a9a4c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

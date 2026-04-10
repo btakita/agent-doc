@@ -182,7 +182,7 @@ Fix:
 1. Updated the snapshot to match the current file content
 2. Ran `agent-doc commit` — created a new commit with the full file content including `### Re: still not writable (HEAD)` marker
 3. Working tree now shows only the `(HEAD)` strip diff (1 line) — correct state
-<!-- agent:boundary:71005535 -->
+<!-- agent:boundary:60da0c4d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

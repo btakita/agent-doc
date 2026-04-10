@@ -60,7 +60,7 @@ Sessions v0.31.18–v0.31.26. Key decisions and fixes:
 - Runbook: `runbooks/plugin-install.md` must be consulted for any JB plugin change (version bump, uninstall protocol).
 
 ❯ release
-### Re: release
+### Re: release (HEAD)
 
 v0.31.26 released:
 
@@ -261,7 +261,7 @@ tmux list-panes -a | grep %57
 `%57` (mattpocock.md) is now in tmux session 0. WrongSession detection + PaneMoveOp cross-session relocation is working end-to-end. Ready to publish v0.31.27.
 
 ❯ release
-### Re: release (HEAD)
+### Re: release
 
 v0.31.27 released:
 
@@ -276,7 +276,7 @@ v0.31.27 released:
 - **PyPI:** manylinux wheel built and uploaded (`agent_doc-0.31.27-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl`)
 - **Tag:** `v0.31.27` pushed — CI building GitHub Release
 - **cargo install:** v0.31.27 running locally
-<!-- agent:boundary:5f2b67f0 -->
+<!-- agent:boundary:2269f6ae -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

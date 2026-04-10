@@ -2104,14 +2104,19 @@ Done. Committed and pushed:
 Also updated the `agent-loop` submodule pointer.
 
 ❯ Can certbot-init.sh be a 755 permission?
-### Re: certbot-init.sh → 755 (HEAD)
+### Re: certbot-init.sh → 755
 
 Yes — `755` is correct for scripts. Git tracks the executable bit, so this is the right way to do it (unlike `600` or `700` which git can't store).
 
 Done: `chmod 755 scripts/certbot-init.sh`, committed, pushed, and submodule pointer updated.
 
 On the server after deploying: `./scripts/certbot-init.sh` will work directly.
-<!-- agent:boundary:0e509416 -->
+
+❯ commit + push
+### Re: commit + push (HEAD)
+
+Done — pushed `agent-loop` to remote. Had ~20 unpushed commits (all the agent-doc monsterrodholders session commits + two submodule pointer updates).
+<!-- agent:boundary:9ecd6664 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

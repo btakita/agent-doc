@@ -180,7 +180,7 @@ Covers:
 - Phase 1–6 with file paths, API endpoints, function signatures, scope constants
 - Full OAuth scope table (existing ✅ vs. new)
 - Service coverage summary
-<!-- agent:boundary:84075c01 -->
+<!-- agent:boundary:7591110c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

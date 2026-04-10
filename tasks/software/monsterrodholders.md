@@ -1502,7 +1502,7 @@ If the ProxyPass config is in a *separate* file that InterWorx didn't generate, 
 InterWorx manages its own files (usually named after the domain or account). A distinctly named file it didn't create is generally left alone — but this is not guaranteed across panel updates, so option 1 is more durable.
 
 **Practical advice:** Try option 1 first via SiteWorx. If the UI doesn't expose it or the directives don't take effect, fall back to the separate .conf file and monitor after any InterWorx domain or SSL changes.
-<!-- agent:boundary:0e234706 -->
+<!-- agent:boundary:9cc74e78 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

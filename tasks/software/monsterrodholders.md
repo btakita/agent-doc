@@ -391,7 +391,7 @@ done
 WP plugin POSTs to `http://host:PORT/sync` on content save, tiny server runs `wp-to-git.sh`. Overkill for this use case.
 
 **Recommendation:** Start with cron (Option 1) — already documented, just needs `crontab -e` on the server. Add the mu-plugin + signal watcher (Option 2) if real-time sync matters later. Want me to scaffold Option 2?
-<!-- agent:boundary:0b0dec37 -->
+<!-- agent:boundary:7fc1b47a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

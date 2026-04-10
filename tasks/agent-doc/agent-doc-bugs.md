@@ -64,7 +64,7 @@ v0.31.28 released:
 ### Re: submodule pointer update (HEAD)
 
 Done. `git add src/agent-doc && git commit` in agent-loop — pointer updated to v0.31.28 HEAD and pushed.
-<!-- agent:boundary:a5829fb0 -->
+<!-- agent:boundary:155211e0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

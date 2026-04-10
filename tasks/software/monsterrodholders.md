@@ -105,7 +105,7 @@ All recent WP changes are now in git: home page (cover block, best sellers, base
 Pushed to git: `1ff234b sync: WP content 2026-04-10 18:17`.
 
 ❯ Remove his address from anywhere on his website. "777 Hwy 434 Lebanon Jct KY 40150"
-### Re: remove address site-wide (HEAD)
+### Re: remove address site-wide
 
 **Address removed from all public content ✓**
 
@@ -126,12 +126,38 @@ LSK Marine – MO page retained — that's `Lebanon, Mo.` (Missouri reseller, un
 WooCommerce store settings (`woocommerce_store_city`, `woocommerce_store_postcode`) still have the address internally — these are used for tax/shipping origin calculations and are not displayed publicly. Leave those unless you want to update the business address in WC settings.
 
 Pushed to git: `ed86219`.
-<!-- agent:boundary:a271888d -->
+
+❯ Can we use the garderobe theme for this site?
+### Re: garderobe "theme" (HEAD)
+
+Garderobe is a **Blocksy starter site**, not a standalone WordPress theme — monsterrodholders already runs Blocksy, so there's no theme to switch to.
+
+**Two paths:**
+
+**Option A — Full starter site import (not recommended)**
+- Blocksy Companion → Starter Sites → search "garderobe" → Import
+- Overwrites all current customizer settings: colors, typography, header, footer layout
+- Also imports garderobe's demo pages/products — would trash the WC setup
+- Would roll back the home page work done this session
+
+**Option B — Cherry-pick garderobe design elements (recommended)**
+- Already underway — the cover block hero, Best Sellers above fold, and clean section structure this session were all modeled on garderobe's layout
+- What's left to borrow: color palette, typography, product card hover effects
+- All applicable via Customize → Colors / Typography without touching content
+
+If you want a full garderobe-feel, I can:
+1. Apply the garderobe color palette (muted neutrals + one accent) via Blocksy customizer
+2. Match their font pairing (typically serif display + clean sans-serif body)
+3. Add hover overlays to product cards matching their grid style
+
+This gets the aesthetic without the import risk. Want me to proceed?
+<!-- agent:boundary:4fc52d01 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Garderobe color/font/card-hover styling — pending user approval
 - [ ] Verify home page in browser — Cover block hero, Best Sellers, sold-out items hidden
 - [ ] Verify footer renders 33 links cleanly
 - [ ] Delete Recently Viewed Products page (18849)

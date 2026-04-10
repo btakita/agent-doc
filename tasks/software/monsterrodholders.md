@@ -310,7 +310,7 @@ Next: bootstrap the theme files on the server so the bind mount picks them up.
 ❯ Please create a bi-directional process where updates can occur from local git pushed to production or from the wordpress admin back into git.
 If wordpress has hooks for commit + push, use those.
 Pull + merge or rebase must be explicitly run by script or manually.
-### Re: bi-directional sync system (HEAD)
+### Re: bi-directional sync system
 
 Scaffolded and pushed. Two new scripts + server-setup.md updated.
 
@@ -349,7 +349,49 @@ docker compose restart wordpress
 ```
 
 Full docs in `docs/server-setup.md` § Write deploy key + Bi-directional sync.
-<!-- agent:boundary:acdf985e -->
+
+❯ How do I make the WP deployment write the files into the git repo?
+### Re: making WP deployment write to git (HEAD)
+
+**The challenge:** WordPress runs inside Docker as `www-data` — it can't directly call `git push` with the deploy key. The script must run on the host. Three approaches:
+
+**Option 1 — Cron (already scaffolded, simplest)**
+Already in `docs/server-setup.md`. Every 15 min:
+```
+*/15 * * * * cd /opt/monsterrodholders/app && ./scripts/wp-to-git.sh >> /var/log/wp-sync.log 2>&1
+```
+No WP hook needed. Good enough for most content workflows.
+
+**Option 2 — WP `save_post` hook → signal file → host watcher**
+
+Create a mu-plugin that writes a signal file when content is saved, then a host-side daemon watches it:
+
+```php
+# wordpress/mu-plugins/git-sync-trigger.php
+<?php
+function mrh_signal_git_sync($post_id) {
+    if (wp_is_post_revision($post_id) || wp_is_post_autosave($post_id)) return;
+    // Signal file in bind-mounted dir, visible on host
+    file_put_contents('/var/www/html/wp-content/git-sync-needed', time());
+}
+add_action('save_post', 'mrh_signal_git_sync');
+```
+
+Host-side watcher (systemd service):
+```bash
+# /opt/monsterrodholders/app/scripts/watch-sync-signal.sh
+while true; do
+    inotifywait -e close_write /opt/monsterrodholders/app/wp-content/git-sync-needed
+    sleep 5  # debounce for rapid saves
+    ./scripts/wp-to-git.sh >> /var/log/wp-sync.log 2>&1
+done
+```
+
+**Option 3 — WP REST API webhook → host endpoint**
+WP plugin POSTs to `http://host:PORT/sync` on content save, tiny server runs `wp-to-git.sh`. Overkill for this use case.
+
+**Recommendation:** Start with cron (Option 1) — already documented, just needs `crontab -e` on the server. Add the mu-plugin + signal watcher (Option 2) if real-time sync matters later. Want me to scaffold Option 2?
+<!-- agent:boundary:0b0dec37 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

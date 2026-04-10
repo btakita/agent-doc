@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-agent-doc v0.31.28 — released
+agent-doc v0.31.29 — released
 <!-- /agent:status -->
 
 ## Exchange
@@ -169,7 +169,7 @@ With `--commit` on the final write, that gap window disappears — write and com
 
 ❯ So it won't happen again?
 Please repair the file.
-### Re: won't happen again + repair (HEAD)
+### Re: won't happen again + repair
 
 **Won't happen again (for new sessions):** Yes — the updated SKILL.md now uses `--commit` on the final `agent-doc write`. Write and commit are a single command; the gap window is gone.
 
@@ -182,11 +182,23 @@ Fix:
 1. Updated the snapshot to match the current file content
 2. Ran `agent-doc commit` — created a new commit with the full file content including `### Re: still not writable (HEAD)` marker
 3. Working tree now shows only the `(HEAD)` strip diff (1 line) — correct state
-<!-- agent:boundary:60da0c4d -->
+❯ release
+### Re: release (HEAD)
+
+v0.31.29 released:
+
+- **768 tests pass** (flaky failure on `send_keys_delivers_command_with_enter` — passes in isolation and on re-run; test ordering issue, not a regression)
+- **Committed:** `Cargo.toml`, `pyproject.toml`, `VERSIONS.md`, `src/git.rs`, `src/main.rs`, `Cargo.lock` pushed to origin/main as `24c9d24`
+- **Tag:** `v0.31.29` pushed — CI building GitHub Release
+- **crates.io:** `agent-doc = "0.31.29"` confirmed
+- **PyPI:** `agent_doc (0.31.29)` confirmed (manylinux wheel via Docker)
+- **cargo install:** v0.31.29 running locally
+- **Parent submodule pointer:** updated and pushed (`b690ad82`)
+<!-- agent:boundary:af1cac91 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Manual testing gate: confirm `agent-doc write --commit` in a live session, then publish (crates.io → PyPI → GitHub Release)
+
 <!-- /agent:pending -->

@@ -267,7 +267,7 @@ Verify every new command is wired and rejects missing required args:
 - Tasks create / complete against real account
 
 These are functional/e2e tests that need OAuth credentials. The unit tests cover all the pure logic (MIME building, CSV parsing, URL construction, header encoding) where bugs are most likely to hide.
-<!-- agent:boundary:d26379b6 -->
+<!-- agent:boundary:5317f520 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

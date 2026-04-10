@@ -126,7 +126,7 @@ LSK Marine – MO page retained — that's `Lebanon, Mo.` (Missouri reseller, un
 WooCommerce store settings (`woocommerce_store_city`, `woocommerce_store_postcode`) still have the address internally — these are used for tax/shipping origin calculations and are not displayed publicly. Leave those unless you want to update the business address in WC settings.
 
 Pushed to git: `ed86219`.
-<!-- agent:boundary:1bbeea8a -->
+<!-- agent:boundary:a271888d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

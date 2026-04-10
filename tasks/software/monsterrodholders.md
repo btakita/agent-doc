@@ -97,7 +97,7 @@ Blocksy will wrap these into columns automatically. If the layout needs 4 column
 ```
 
 All recent WP changes are now in git: home page (cover block, best sellers, bases layout), footer menu (33 items), out-of-stock hiding, page deletions.
-<!-- agent:boundary:98319e18 -->
+<!-- agent:boundary:d04ed650 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

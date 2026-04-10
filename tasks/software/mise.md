@@ -32,7 +32,7 @@ export API_KEY="$(pass myapp/api-key)"
 ```
 
 The `export` prefix is required when using `_.source` (shell sourcing, not dotenv parsing).
-<!-- agent:boundary:61003d1a -->
+<!-- agent:boundary:a87a1132 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1046,7 +1046,7 @@ With hero off and sidebar removed, the home page is now a clean full-width canva
 - Leading with a featured product block or "Shop by Category" grid immediately below the header
 - The WooCommerce product grid blocks already on the page will now take full column width — verify column count looks right at desktop (3–4 col) and mobile (1 col)
 - A sticky "Shop" CTA in the header or a prominent banner replacing the hero would complete the conversion funnel above the fold
-<!-- agent:boundary:c50ba145 -->
+<!-- agent:boundary:8b43d3d7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -976,14 +976,48 @@ Note: sendmail warning during password change is expected (no mail relay in Dock
 **Fixed:** `data-sidebar="left"` confirmed in home page HTML. Product Categories widget renders in the left sidebar. ✓
 
 Note: sidebar is hidden on mobile/tablet (`ct-hidden-sm ct-hidden-md`) — same as the shop page.
-<!-- agent:boundary:fc70943a -->
+
+❯ Analyze the top bar. Remove links that should not be there such as the 404 page, Bait Cutting Board, Bargain Bin Specials, Add Listing.
+❯ Only include impactful links. The links a visitor and buyer would most likely want to navigate on the web site. Do not include pages with no content or deactivated features. Add heuristic to SKILL->runbook
+❯ Use the footer area as a generous space for links.
+### Re: top bar cleanup + footer nav
+
+**Root cause:** No custom menu was assigned to the `menu_1` (Header Menu 1) location — WordPress was falling back to auto-listing ALL pages alphabetically. Fixed by assigning the "Top Menu Header" menu.
+
+**Top nav — cleaned to 4 items:**
+
+| Link | URL |
+|---|---|
+| About Us | /about-us/ |
+| Shop | /shop/ |
+| Contact Us | /contact/ |
+| Blog | /blog/ |
+
+Also fixed typo "Product Catlog" → "Shop".
+
+Removed from top: My Account, Certified Resellers, Sponsorship Application, Affiliate Area, Wildcatters TV, Rewards Program → all moved to footer.
+
+**Footer menu (Footer 2 — assigned to `footer` location):**
+
+*Shop:* Shop, Bestsellers, Rod Holders, Rod Holder Bases, Boat Accessories, On Sale
+
+*Info:* About Us, Contact Us, Blog, Certified Resellers, Pro Staff, Sponsorship Application
+
+*Account & Programs:* My Account, Cart, Checkout, Rewards Program, Affiliate Area, Wildcatters TV
+
+---
+
+**Heuristic — top bar link selection:**
+
+> Include only the 4–6 links a first-time visitor needs to discover → evaluate → buy. That's: primary product entry point (Shop), editorial/guide content (Blog), trust/identity (About), support contact (Contact). Account links go in footer or header icon. Programs, resellers, affiliates, and sponsorships belong in footer. Never include: WP admin pages, plugin demo pages, placeholder/Lorem ipsum pages, GeoDirectory pages, duplicate checkout pages, deactivated features.
+<!-- agent:boundary:aca32d9c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Delete/unpublish ~15 demo pages + GeoDirectory pages (removes them from admin nav too)
 - [ ] Respond to 9 real customer order inquiries in comment hold queue
-- [ ] Delete/unpublish ~15 demo pages + GeoDirectory pages
 - [ ] Copy remaining uploads (verify completeness)
 - [ ] When ready to go live: search-replace URLs → monsterrodholders.com, flip DNS, re-run certbot
 <!-- /agent:pending -->

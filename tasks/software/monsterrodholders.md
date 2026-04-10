@@ -976,7 +976,7 @@ Note: sendmail warning during password change is expected (no mail relay in Dock
 **Fixed:** `data-sidebar="left"` confirmed in home page HTML. Product Categories widget renders in the left sidebar. ✓
 
 Note: sidebar is hidden on mobile/tablet (`ct-hidden-sm ct-hidden-md`) — same as the shop page.
-<!-- agent:boundary:f6c6e542 -->
+<!-- agent:boundary:fc70943a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

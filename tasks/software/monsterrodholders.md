@@ -63,7 +63,7 @@ Root cause: Imunify360 mod_security was blocking external access to wp-login.php
 Fix: added `<LocationMatch "^/wp-(login|admin)">` with `SecRuleEngine Off` to the Apache vhost config at `/etc/httpd/conf.d/00-monsterrodholders-proxy.conf`. Config backup saved as `.conf.bak`. Apache reloaded. Login returns 200 ✓.
 
 Note: this disables mod_security for `/wp-login.php` and `/wp-admin/*` only. The rest of the site stays protected. Once you go live on the real domain you may want to restrict wp-admin to your IP instead — see `imunify360-agent whitelist ip add <your-ip>`.
-<!-- agent:boundary:09149fd5 -->
+<!-- agent:boundary:bf14ac1b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

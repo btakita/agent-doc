@@ -55,7 +55,7 @@ Created a 1-page interview prep PDF at `file:///tmp/filevine-interview-prep.pdf`
 
 ❯ Please draft a reply for /home/brian/work/btakita/agent-loop/mail/conversations/your-filevine-journey-continues.md
 ❯ I'm pretty busy and want to delay to let things emerge a bit. Would Thursday be ok or should I give more options like Wed + Thu?
-### Re: Draft reply — Your Filevine Journey Continues (HEAD)
+### Re: Draft reply — Your Filevine Journey Continues
 
 Their original email (Apr 3) asked for Tue/Wed/Thu availability — those slots (Apr 7–9) have passed. Offering **Wed Apr 15 + Thu Apr 16** is the right call: two options smooths over the delay and makes scheduling easier on their end.
 
@@ -76,7 +76,28 @@ Brian
 ---
 
 To send: save the above to `mail/conversations/your-filevine-journey-continues.md` as a reply draft (or use `corky reply`).
-<!-- agent:boundary:b7181ac5 -->
+❯ corky reply
+### Re: corky reply (HEAD)
+
+Draft created at `mail/drafts/2026-04-10-re-your-filevine-journey-continues.md` and ready to push, but `btak.dev` Gmail API credentials are expired/missing:
+
+```
+Token refresh failed: CORKY_GMAIL_CLIENT_ID command failed:
+  corky/gmail/client_id is not in the password store.
+```
+
+To fix, re-auth for the btak.dev account:
+
+```
+! corky gmail auth --account btak.dev
+```
+
+Then push the draft:
+
+```
+! corky draft push mail/drafts/2026-04-10-re-your-filevine-journey-continues.md
+```
+<!-- agent:boundary:19971f0c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

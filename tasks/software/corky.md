@@ -570,18 +570,17 @@ Same `get_access_token_for_user(account, scope, login_hint)` pattern used for Gm
 **gws plugin:** Remove from `AGENTS.md` (Google Workspace Integration section). Delete `src/corky/.claude/skills/gws/` and the two gws runbooks — they add confusion with no value once corky handles it natively.
 
 Want me to implement `corky sheets read` now?
-<!-- agent:boundary:f99baf16 -->
 
 > **[TRANSFER from tasks/software/google.md]** (2026-04-10T19:42:21Z)
 >
 ❯ Please look at https://www.skills.google/
 ❯ Can we install the google skills to interact with google docs?
 Would corky benefit from the google skills?
-### Re: skills.google (HEAD)
+### Re: skills.google
 
 [skills.google](https://www.skills.google/) is Google's **cloud learning platform** — Vertex AI, Gemini, certifications, hands-on labs. It is not a plugin or MCP system; it offers no installable integrations.
 
-### Re: Can we install google skills to interact with Google Docs? (HEAD)
+### Re: Can we install google skills to interact with Google Docs?
 
 Not from skills.google — it's a training site, not an integration hub.
 
@@ -589,14 +588,14 @@ The correct path for Google Docs integration is the **Google Workspace MCP** or 
 
 To add Google Docs support you'd need to install or configure a Workspace MCP that covers Drive/Docs, then authenticate it similarly to Gmail.
 
-### Re: Would corky benefit from the google skills? (HEAD)
+### Re: Would corky benefit from the google skills?
 
 Corky handles correspondence: email (Gmail API), LinkedIn, YouTube. A Google Drive/Docs MCP would let corky read drafts or content directly from Google Docs — useful if you author correspondence or content in Docs before sending.
 
 Current corky workflow: local files → Gmail/LinkedIn/YouTube APIs. If drafts live in Google Docs rather than local files, the integration would be valuable. If not, the benefit is minimal.
 
 ❯ Lets add a feature to add useful skills + runbooks from https://github.com/WadeWarren/gws-claude-plugin into corky
-### Re: Add gws skills + runbooks into corky (HEAD)
+### Re: Add gws skills + runbooks into corky
 
 [WadeWarren/gws-claude-plugin](https://github.com/WadeWarren/gws-claude-plugin) wraps a `gws` CLI with 92 skills across 13 Google Workspace services (Gmail, Docs, Drive, Sheets, Slides, Calendar, Chat, Forms, Tasks, Keep, Meet, Classroom, Admin). Key gap it fills vs. native Claude: full Gmail send with attachments, full Docs/Sheets/Slides read-write, Google Chat/Tasks/Keep.
 
@@ -625,7 +624,7 @@ The `gws` CLI handles execution; the skill layer in corky orchestrates the workf
 ❯ - [ ] Add `src/corky/.agent/runbooks/gws-gmail-send.md`
 ❯ - [ ] Add `src/corky/.agent/runbooks/gws-docs-draft.md`
 ❯ - [ ] Document gws install prerequisite in corky AGENTS.md
-### Re: do (HEAD)
+### Re: do
 
 All tasks complete.
 
@@ -640,7 +639,7 @@ All tasks complete.
 **[done] Document gws prerequisite in corky AGENTS.md** — added `## Google Workspace Integration (gws)` section with install commands and when-to-use decision table.
 
 ❯ I don't want corky to depend on gws. I want corky to fork gws. Plan to implement SKILL->runbooks and binary Rust logic
-### Re: Fork gws into corky — implementation plan (HEAD)
+### Re: Fork gws into corky — implementation plan
 
 **Key finding:** Corky already has significant Google Workspace coverage:
 - `corky doc read/write` — Google Docs read + write ✅
@@ -733,7 +732,7 @@ After Phase 2-5, update skill and runbook files to document the complete corky-n
 
 Ready to start with Phase 1 (no code changes, just update skill/runbook files)?
 ❯ Write the plan into a spec md file.
-### Re: Write the plan into a spec md file (HEAD)
+### Re: Write the plan into a spec md file
 
 Written to `src/corky/tasks/integrations/google-workspace.md`.
 
@@ -744,7 +743,7 @@ Covers:
 - Service coverage summary
 
 ❯ Implement src/corky/tasks/integrations/google-workspace.md
-### Re: Implement google-workspace.md (HEAD)
+### Re: Implement google-workspace.md
 
 All 6 phases complete. Build passes (0 errors).
 
@@ -781,7 +780,7 @@ All 6 phases complete. Build passes (0 errors).
 ❯ - edge cases
 ❯ - functional
 ❯ - end to end scenarios
-### Re: Are these features tested? (HEAD)
+### Re: Are these features tested?
 
 They weren't — I added tests now. **535 tests pass.**
 
@@ -832,7 +831,7 @@ These are functional/e2e tests that need OAuth credentials. The unit tests cover
 
 ❯ audit docs
 ❯ Ensure SPEC, README, SKILL->runbooks are all up to date
-### Re: audit docs (HEAD)
+### Re: audit docs
 
 `corky audit-docs` passes on all content issues. Docs updated:
 
@@ -859,7 +858,7 @@ These are functional/e2e tests that need OAuth credentials. The unit tests cover
 
 Build and all 535 tests still pass.
 transfer what we have done to tasks/software/corky.md
-<!-- agent:boundary:81aa31db -->
+<!-- agent:boundary:b537958d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

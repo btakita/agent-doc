@@ -145,7 +145,7 @@ scp -r /tmp/mrh-plugins/files/wp-content/plugins/js_composer root@50.28.2.199:/t
 **Recommendation:** Rebuild with Blocksy/Gutenberg. The page structure is simple — product category blocks replace `[pbr_products]`. Which approach?
 ❯ Can you access the page source code using the WP api?
 ❯ How can we get the WP site content into git?
-### Re: WP API + content into git (HEAD)
+### Re: WP API + content into git
 
 **WP REST API — page source:**
 
@@ -203,12 +203,78 @@ monsterrodholders/
 The WXR is re-importable via `wp import mrh-export.xml --authors=create`. DB dump is ground truth for full restore.
 
 Do you want me to set up the git repo structure for `rberkes/monsterrodholders`?
-<!-- agent:boundary:5ab4cb35 -->
+
+❯ The git repo is at src/monsterrodholders-dev
+❯ Can we have git in sync with wordpress?
+### Re: git sync with WordPress (src/monsterrodholders-dev) (HEAD)
+
+Repo exists with infra code but no content sync yet. `wordpress/` only has `php.ini`.
+
+**Two directions to sync:**
+
+**1. WP → git (pull content + theme files):**
+
+```bash
+# On server: copy active theme out of container
+WP_CTR=$(docker compose -f /opt/monsterrodholders/app/docker-compose.yml ps -q wordpress)
+rsync -avz root@50.28.2.199:/opt/monsterrodholders/app/wp-content/themes/blocksy/ \
+  src/monsterrodholders-dev/wordpress/themes/blocksy/
+```
+
+Add `scripts/sync-from-wp.sh` to export content:
+```bash
+#!/usr/bin/env bash
+set -e
+SERVER=root@50.28.2.199
+COMPOSE=/opt/monsterrodholders/app/docker-compose.yml
+
+ssh $SERVER "docker compose -f $COMPOSE run --rm wpcli \
+  wp export --dir=/var/www/html/wp-content/exports \
+  --filename_format=mrh-export.xml --skip_comments"
+scp $SERVER:/opt/monsterrodholders/app/wp-content/exports/mrh-export.xml \
+  wordpress/exports/mrh-export.xml
+
+git add wordpress/exports/mrh-export.xml
+git diff --staged --quiet || git commit -m "chore: sync WP content export $(date +%Y-%m-%d)"
+```
+
+**2. git → WP (deploy theme changes):**
+
+Add `scripts/deploy-theme.sh`:
+```bash
+#!/usr/bin/env bash
+set -e
+SERVER=root@50.28.2.199
+rsync -avz wordpress/themes/blocksy/ \
+  $SERVER:/opt/monsterrodholders/app/wp-content/themes/blocksy/
+ssh $SERVER "docker exec \$(docker compose -f /opt/monsterrodholders/app/docker-compose.yml ps -q wordpress) \
+  chown -R www-data:www-data /var/www/html/wp-content/themes/blocksy"
+```
+
+**Recommended `wordpress/` layout:**
+```
+wordpress/
+├── php.ini                  # already there
+├── themes/blocksy/          # git-tracked theme files
+├── plugins/blocksy-companion/
+└── exports/mrh-export.xml   # WP content WXR
+```
+
+Add to `.gitignore`:
+```
+wordpress/exports/*.sql
+wordpress/uploads/
+```
+
+Want me to scaffold the scripts and updated `.gitignore` in `src/monsterrodholders-dev` now?
+<!-- agent:boundary:8f30ebbd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Scaffold sync scripts in src/monsterrodholders-dev (sync-from-wp.sh, deploy-theme.sh)
+- [ ] Copy theme files from server into repo
 - [ ] Decision: rebuild home page in Blocksy, or install WPBakery?
 - [ ] (Optional) Install blocksy-companion-pro plugin + license key
 - [ ] Remove crash-looping `app-nginx-1` orphan container

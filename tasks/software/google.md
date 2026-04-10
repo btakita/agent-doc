@@ -78,7 +78,7 @@ All tasks complete.
 **[done] Document gws prerequisite in corky AGENTS.md** — added `## Google Workspace Integration (gws)` section with install commands and when-to-use decision table.
 
 ❯ I don't want corky to depend on gws. I want corky to fork gws. Plan to implement SKILL->runbooks and binary Rust logic
-### Re: Fork gws into corky — implementation plan (HEAD)
+### Re: Fork gws into corky — implementation plan
 
 **Key finding:** Corky already has significant Google Workspace coverage:
 - `corky doc read/write` — Google Docs read + write ✅
@@ -170,7 +170,17 @@ After Phase 2-5, update skill and runbook files to document the complete corky-n
 | Admin | out of scope |
 
 Ready to start with Phase 1 (no code changes, just update skill/runbook files)?
-<!-- agent:boundary:619668d8 -->
+❯ Write the plan into a spec md file.
+### Re: Write the plan into a spec md file (HEAD)
+
+Written to `src/corky/tasks/integrations/google-workspace.md`.
+
+Covers:
+- Current state (what's already implemented + OAuth scopes)
+- Phase 1–6 with file paths, API endpoints, function signatures, scope constants
+- Full OAuth scope table (existing ✅ vs. new)
+- Service coverage summary
+<!-- agent:boundary:84075c01 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

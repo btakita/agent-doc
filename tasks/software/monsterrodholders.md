@@ -143,7 +143,7 @@ scp -r /tmp/mrh-plugins/files/wp-content/plugins/js_composer root@50.28.2.199:/t
 `[vc_*]` layout blocks would render, but `[pbr_products]` product grids still won't (fishzone-specific). So even with WPBakery, products won't show without fishzone.
 
 **Recommendation:** Rebuild with Blocksy/Gutenberg. The page structure is simple — product category blocks replace `[pbr_products]`. Which approach?
-<!-- agent:boundary:cbc7d3cc -->
+<!-- agent:boundary:0db06662 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

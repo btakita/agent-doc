@@ -1954,7 +1954,7 @@ Caveat: `env_file` passes **all** `.env` vars to the container (DB passwords, et
    ```
 
 Recommend option 1 (sed) — it's immediate and doesn't require a restart.
-### Re: monsterrodholders-dev already handles this (HEAD)
+### Re: monsterrodholders-dev already handles this
 
 Good news — the local `monsterrodholders-dev/docker-compose.yml` **already has** `WORDPRESS_TABLE_PREFIX: ${WORDPRESS_TABLE_PREFIX:-wp_}` in the wordpress service's environment block. No change needed there.
 
@@ -1973,14 +1973,64 @@ scp src/monsterrodholders-dev/docker-compose.yml root@50.28.2.199:/opt/monsterro
 docker compose exec wordpress sed -i "s/\$table_prefix = 'wp_';/\$table_prefix = 'wp_nxz1mfc9cg_';/" /var/www/html/wp-config.php
 docker compose exec wordpress grep table_prefix /var/www/html/wp-config.php
 ```
-<!-- agent:boundary:614c81b9 -->
+
+```
+[root@oddball-business app]# docker compose exec wordpress sed -i "s/\$table_prefix = 'wp_';/\$table_prefix = 'wp_nxz1mfc9cg_';/" /var/www/html/wp-config.php
+[root@oddball-business app]# docker compose exec wordpress grep table_prefix /var/www/html/wp-config.php
+$table_prefix = getenv_docker('WORDPRESS_TABLE_PREFIX', 'wp_');
+[root@oddball-business app]# docker compose run --rm wpcli wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables
+WARN[0000] Found orphan containers ([app-nginx-1]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up.
+[+]  2/2t 2/22
+ ✔ Container app-db-1        Running                                                                                                                                                                                                       0.0s
+ ✔ Container app-wordpress-1 Running                                                                                                                                                                                                       0.0s
+Container app-wpcli-run-8fc99f9ab543 Creating
+Container app-wpcli-run-8fc99f9ab543 Created
+Error: The site you have requested is not installed.
+Your table prefix is 'wp_'. Found installation with table prefix: wp_nxz1mfc9cg_.
+Or, run `wp core install` to create database tables.
+```
+### Re: `getenv_docker` — env var not set in container (HEAD)
+
+The `sed` changed nothing because the pattern didn't match. The file already uses:
+```
+$table_prefix = getenv_docker('WORDPRESS_TABLE_PREFIX', 'wp_');
+```
+
+`getenv_docker` reads `WORDPRESS_TABLE_PREFIX` from the container's environment. Neither the `wordpress` nor `wpcli` container has it set → falls back to `wp_`.
+
+**Option 1 — Hardcode in `wp-config.php` (fastest, no restart):**
+```bash
+docker compose exec wordpress sed -i "s/getenv_docker('WORDPRESS_TABLE_PREFIX', 'wp_')/'wp_nxz1mfc9cg_'/" /var/www/html/wp-config.php
+docker compose exec wordpress grep table_prefix /var/www/html/wp-config.php
+```
+
+**Option 2 — Fix the production compose file + recreate (durable fix):**
+
+Edit `/opt/monsterrodholders/app/docker-compose.yml` on the server — add `WORDPRESS_TABLE_PREFIX` to both `wordpress` AND `wpcli` services:
+```yaml
+  wordpress:
+    environment:
+      WORDPRESS_TABLE_PREFIX: wp_nxz1mfc9cg_
+      # ...
+
+  wpcli:
+    environment:
+      WORDPRESS_TABLE_PREFIX: wp_nxz1mfc9cg_
+      # ...
+```
+Then: `docker compose up -d --force-recreate wordpress`
+
+Note: the local `monsterrodholders-dev` compose has `WORDPRESS_TABLE_PREFIX: ${WORDPRESS_TABLE_PREFIX:-wp_}` for wordpress but is also missing it on wpcli — fix both when you update.
+
+Recommend Option 1 now to unblock, then Option 2 to clean up the compose files.
+<!-- agent:boundary:e1c55959 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Patch `wp-config.php` table prefix on server (sed command above)
-- [ ] Verify production compose file has `WORDPRESS_TABLE_PREFIX` in wordpress environment
+- [ ] Hardcode table prefix in `wp-config.php` via sed (Option 1)
+- [ ] Also fix `wpcli` service in both production compose + local monsterrodholders-dev
 - [ ] `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`
 - [ ] Copy uploads into wordpress container (if not done)
 - [ ] Verify site at https://50.28.2.199.nip.io — content, images, pages

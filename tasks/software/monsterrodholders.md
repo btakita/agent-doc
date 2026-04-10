@@ -928,7 +928,7 @@ The staging shop page shows products but with no sidebar at all.
 - Is the "wrong location" on monsterrodholders.com referring to the home page 500 (All Category dropdown rendering stuck-open over broken content)?
 - Or should the "All Category" be in a sidebar position below the header (left column alongside products), not just in the top nav bar?
 - Should I add a WooCommerce Product Categories widget to the staging's left sidebar to replicate the live site layout?
-<!-- agent:boundary:32021668 -->
+<!-- agent:boundary:ded6f0e5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

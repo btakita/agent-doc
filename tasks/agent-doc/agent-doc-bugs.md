@@ -49,7 +49,7 @@ Sessions v0.31.18–v0.31.28. Key decisions and fixes:
 - Manual testing gate: confirm v0.31.28 auto-relocate in live session, then publish: crates.io → PyPI → GitHub Release.
 
 ❯ release
-### Re: release (HEAD)
+### Re: release
 
 v0.31.28 released:
 
@@ -194,7 +194,29 @@ v0.31.29 released:
 - **PyPI:** `agent_doc (0.31.29)` confirmed (manylinux wheel via Docker)
 - **cargo install:** v0.31.29 running locally
 - **Parent submodule pointer:** updated and pushed (`b690ad82`)
-<!-- agent:boundary:7d2d2b66 -->
+
+❯ In tasks/software/monsterrodholders.md, an edit to the agent:pending element had a `❯ ` prefix added. This should not apply to agent:pending.
+❯ - [ ] Build Gutenberg replacement HTML for home page (preserve all text/links)
+
+### Re: `❯ ` prefix in agent:pending — root cause + fix (HEAD)
+
+**Root cause:** `normalize_patch_content` was called on ALL patches in `build_ipc_patches_json`, not just exchange patches. When the exchange `normalize_prefix_lines` set contained a line (e.g. `- [ ] Build Gutenberg replacement HTML for home page`) that also appeared in the `agent:pending` patch content, that line received an erroneous `❯ ` prefix before being sent to the plugin.
+
+**Two call sites were affected:**
+- Primary IPC path: `build_ipc_patches_json` in `write.rs:1837`
+- IPC timeout fallback path: `write.rs:927`
+
+**Fix:** Gate `normalize_patch_content` on `is_append_mode_component(&p.name)` at both sites. Only exchange (and findings) patches are append-mode; pending, status, and other replace-mode components skip normalization.
+
+```diff
+-  Some(prefix_lines) if !prefix_lines.is_empty() => {
++  Some(prefix_lines) if !prefix_lines.is_empty() && is_append_mode_component(&p.name) => {
+```
+
+**Test added:** `normalize_prefix_lines_skipped_for_replace_mode_components` — verifies that `agent:pending` content is not normalized even when `normalize_prefix_lines` contains a matching line.
+
+**Test results:** 780 tests pass. `send_keys_delivers_command_with_enter` remains flaky (passes in isolation — known ordering issue, not a regression).
+<!-- agent:boundary:1ee57bf8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

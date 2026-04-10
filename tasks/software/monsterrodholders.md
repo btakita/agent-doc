@@ -99,7 +99,7 @@ Then complete WordPress install at `https://monsterrodholders.com`.
 4. Configure daily backup cron: `0 2 * * * cd /path && source .env && ./scripts/backup.sh`
 
 ❯ commit + push
-### Re: commit + push (HEAD)
+### Re: commit + push
 
 Done.
 
@@ -2116,16 +2116,42 @@ On the server after deploying: `./scripts/certbot-init.sh` will work directly.
 ### Re: commit + push
 
 Done — pushed `agent-loop` to remote. Had ~20 unpushed commits (all the agent-doc monsterrodholders session commits + two submodule pointer updates).
-<!-- agent:boundary:d61f2f57 -->
+
+❯ https://50.28.2.199.nip.io/ redirects to https://monsterrodholders.com/
+❯ http://50.28.2.199.nip.io/ is back to the apache server.
+
+❯ Please help me fix.
+### Re: HTTP → Apache + HTTPS → redirect (HEAD)
+
+Two separate issues:
+
+**1. HTTP → Apache:** Apache (host service) is still running on port 80 and intercepting requests before Docker nginx. Stop it:
+```bash
+ssh root@50.28.2.199 "systemctl stop apache2 && systemctl disable apache2"
+```
+
+**2. HTTPS → redirects to monsterrodholders.com:** WordPress `siteurl`/`home` are still set to `monsterrodholders.com` — the `wp search-replace` was still pending. Run it:
+```bash
+ssh root@50.28.2.199 "cd /opt/monsterrodholders/app && docker compose run --rm wpcli wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables"
+```
+
+Also set the options directly (belt + suspenders):
+```bash
+ssh root@50.28.2.199 "cd /opt/monsterrodholders/app && docker compose run --rm wpcli wp option update siteurl 'https://50.28.2.199.nip.io' && docker compose run --rm wpcli wp option update home 'https://50.28.2.199.nip.io'"
+```
+
+After both — verify `http://50.28.2.199.nip.io/` hits nginx and `https://50.28.2.199.nip.io/` loads without redirect.
+<!-- agent:boundary:f40782e9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] `scp docker-compose.yml` to server + recreate wordpress container
-- [ ] Verify prefix resolves to `wp_nxz1mfc9cg_` in container
+- [ ] Stop Apache on host: `systemctl stop apache2 && systemctl disable apache2`
 - [ ] `wp search-replace 'https://monsterrodholders.com' 'https://50.28.2.199.nip.io' --all-tables`
+- [ ] Update `siteurl` and `home` wp options to `https://50.28.2.199.nip.io`
+- [ ] Verify `http://50.28.2.199.nip.io/` loads via nginx (not Apache)
+- [ ] Verify `https://50.28.2.199.nip.io/` loads without redirect
 - [ ] Copy uploads into wordpress container (if not done)
-- [ ] Verify site at https://50.28.2.199.nip.io — content, images, pages
 - [ ] Install + activate new theme
 <!-- /agent:pending -->

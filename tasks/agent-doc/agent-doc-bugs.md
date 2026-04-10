@@ -493,7 +493,7 @@ Implemented. `start.rs:133-165` — the warn-only block is now an auto-relocate 
 5. On failure (no anchor or join fails): falls back to warn-only so the start isn't aborted
 
 `cargo check` clean. 501 tests pass. 2 pre-existing flaky tmux pane tests unrelated.
-<!-- agent:boundary:e9a5aab1 -->
+<!-- agent:boundary:49ca3ff6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -942,7 +942,7 @@ docker run --rm -v app_certbot_certs:/certs alpine ls -la /certs/ 2>/dev/null \
 ```
 
 The certbot script claimed certs are provisioned but nginx is still failing — the cert path or volume mount is mismatched.
-<!-- agent:boundary:edc22d64 -->
+<!-- agent:boundary:54a2dd11 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

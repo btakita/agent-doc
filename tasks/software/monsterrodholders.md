@@ -795,7 +795,7 @@ CONTAINER ID   IMAGE                         COMMAND                  CREATED   
 [root@oddball-business app]# ls /etc/letsencrypt/live/
 ls: cannot access '/etc/letsencrypt/live/': No such file or directory
 ```
-### Re: nginx exiting + no letsencrypt (HEAD)
+### Re: nginx exiting + no letsencrypt
 
 Confirmed: nginx is crashing because it expects SSL certs at `/etc/nginx/certs/fullchain.pem` but `/etc/letsencrypt/live/` doesn't exist. Certbot was never successfully completed — it got blocked by httpd + iptables, then docker was restarted but certbot-init.sh was never rerun.
 
@@ -811,6 +811,11 @@ docker compose down
 ```bash
 systemctl is-active firewalld && systemctl stop firewalld
 ss -tlnp | grep :80   # should show nothing
+```
+
+```
+[root@oddball-business app]# ss -tlnp | grep :80
+LISTEN 0      511                     *:80               *:*    users:(("httpd",pid=1006953,fd=4),("httpd",pid=1006393,fd=4),("httpd",pid=1006336,fd=4),("httpd",pid=1006290,fd=4),("httpd",pid=1006286,fd=4),("httpd",pid=1006186,fd=4))
 ```
 
 **3. Run certbot to get the cert:**
@@ -830,13 +835,28 @@ docker compose ps
 ```
 
 nginx should come up green. Paste any errors if it doesn't.
-<!-- agent:boundary:b509141b -->
+### Re: httpd still on port 80 (HEAD)
+
+`systemctl stop firewalld` ran but httpd is still up. Stop it:
+
+```bash
+systemctl stop httpd
+systemctl disable httpd
+ss -tlnp | grep :80   # should now be empty
+```
+
+Then run certbot:
+
+```bash
+./scripts/certbot-init.sh
+```
+<!-- agent:boundary:e3077c2b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Stop stack → run certbot-init.sh → restart stack
+- [ ] Stop httpd → run certbot-init.sh → restart stack
 - [ ] Verify nginx comes up and site serves on `https://50.28.2.199.nip.io`
 - [ ] **Server step 10:** Transfer + import backup, `wp search-replace` domain
 - [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot

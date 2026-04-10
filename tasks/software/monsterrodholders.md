@@ -1735,7 +1735,7 @@ curl -s http://localhost:8080/ | head -5
 failed to create network app_wp_net: Error response from daemon: Failed to Setup IP tables: Unable to enable ACCEPT OUTGOING rule:  (iptables failed: iptables --wait -t filter -A DOCKER-FORWARD -i br-48f62a99c14d -j ACCEPT: iptables: No chain/target/match by that name.
  (exit status 1))
 ```
-### Re: iptables error — not a nginx vs apache issue (HEAD)
+### Re: iptables error — not a nginx vs apache issue
 
 That error is a Docker/iptables problem, unrelated to the image choice. The `DOCKER-FORWARD` chain doesn't exist in the kernel's iptables, so Docker can't create the `app_wp_net` bridge network. This would fail identically with nginx.
 
@@ -1754,19 +1754,37 @@ modprobe ip_tables iptable_filter iptable_nat
 systemctl restart docker
 docker compose -f /opt/monsterrodholders/app/docker-compose.yml up -d
 ```
-<!-- agent:boundary:4235221f -->
+
+❯ Do I need to install wordpress?
+❯ https://50.28.2.199.nip.io/wp-admin/install.php
+### Re: WordPress installer at nip.io (HEAD)
+
+Docker is running and host Apache is proxying correctly — good.
+
+**Whether to run the installer depends on backup format:**
+
+**All-in-One WP Migration (`.wpress` file):**
+Yes — run the installer first (any temp credentials, any title). Then:
+1. Install + activate the All-in-One WP Migration plugin
+2. Go to All-in-One WP Migration → Import → upload the `.wpress` file
+3. The import overwrites the database, wp-content, and wp-config credentials entirely
+
+**Raw SQL dump + wp-content folder:**
+Skip the installer. Import the SQL directly, copy wp-content, done.
+
+What format is the backup?
+<!-- agent:boundary:ed709049 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] `systemctl restart docker` → `docker compose up -d` (fix iptables error)
-- [ ] Verify `docker compose ps` shows wordpress + db + redis Up
-- [ ] `curl -s http://localhost:8080/ | head -5` (confirm Apache serving)
-- [ ] Write Apache VirtualHost config at `/etc/httpd/conf.d/monsterrodholders.conf` (ProxyPass to 8080)
-- [ ] `systemctl reload httpd` and test `https://50.28.2.199.nip.io`
-- [ ] **Server step 10:** Transfer + import backup, `wp search-replace` domain
-- [ ] `wp search-replace` back to `monsterrodholders.com`, update `.env`, flip DNS, re-run certbot
+- [ ] Confirm backup format (.wpress vs SQL dump)
+- [ ] If .wpress: run minimal installer → install All-in-One WP Migration plugin → import
+- [ ] If SQL dump: skip installer, import database directly + copy wp-content
+- [ ] `wp search-replace 'old-domain.com' 'monsterrodholders.com'` after import
+- [ ] Write Apache VirtualHost config at `/etc/httpd/conf.d/monsterrodholders.conf` (if not done)
+- [ ] Flip DNS when ready, re-run certbot for real domain
 - [ ] Clean spam comments post-import
 - [ ] Plugin audit: delete `worker`, `wpmudev-updates`; pick TaxJar OR AvaTax
 - [ ] Set up cron jobs (SSL renewal + daily backup)

@@ -101,9 +101,11 @@ The commit step runs atomically after write completes — including after the IP
 3. Update SKILL.md step 3 to use `--commit` on the final write (checkpoint writes stay as-is)
 
 ❯ Should we have `agent-doc write` do `--commit` by default? Can it check if we are in git repo? If not, ignore the commit?
-### Re: commit-by-default? (HEAD)
+### Re: commit-by-default?
 
 **The streaming checkpoint problem is the blocker.** Template mode sessions flush partial responses mid-response. Commit-by-default would create a git commit per checkpoint — noisy and wrong. The skill would need `--no-commit` on every checkpoint write, which is more friction, not less.
+
+❯ When would the skill call `--commit`?
 
 **Keep `--commit` as opt-in.** The skill uses it on the final write; checkpoints omit it.
 
@@ -113,7 +115,24 @@ The commit step runs atomically after write completes — including after the IP
 - `agent-doc write` — no commit (safe for checkpoints and non-git dirs)
 - `agent-doc write --commit` — commit after write; silently skips if not in git repo
 - Skill step 3: final write always uses `--commit`; checkpoint writes do not
-<!-- agent:boundary:4317107c -->
+### Re: when would the skill call `--commit`? (HEAD)
+
+On the **final `agent-doc write` in step 2** — replacing the separate step 3.
+
+**Current:**
+```
+Step 2: agent-doc write FILE --baseline-file B --stream --origin skill
+Step 3: agent-doc commit FILE
+```
+
+**Proposed:**
+```
+Step 2: agent-doc write FILE --baseline-file B --stream --origin skill --commit
+Step 3: (eliminated)
+```
+
+**Checkpoint writes are unchanged** — no `--commit` on intermediate flushes. The SKILL.md diff is: final write gains `--commit`, step 3 is removed.
+<!-- agent:boundary:b705023d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

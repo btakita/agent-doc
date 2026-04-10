@@ -215,7 +215,7 @@ All 6 phases complete. Build passes (0 errors).
 - `pub mod tasks` added to `lib.rs`
 
 **Phase 6 — Skills + runbooks** (done alongside Phase 1)
-<!-- agent:boundary:f21690a1 -->
+<!-- agent:boundary:eb8de476 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

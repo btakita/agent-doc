@@ -159,14 +159,30 @@ Added 3 tests to `git.rs` (768 total, up from 765):
 
 All 768 tests pass.
 tasks/software/monsterrodholders.md had an uncommitted response patch.
-### Re: monsterrodholders.md uncommitted patch (HEAD)
+### Re: monsterrodholders.md uncommitted patch
 
 Confirmed — this is a live example of the gap class that `--commit` eliminates.
 
 The write happened (`agent-doc write` ran, snapshot updated), but `agent-doc commit` was never called. Preflight's step 2 caught it at `11:04:40` and committed the response.
 
 With `--commit` on the final write, that gap window disappears — write and commit are atomic from the skill's perspective.
-<!-- agent:boundary:1e325316 -->
+
+❯ So it won't happen again?
+Please repair the file.
+### Re: won't happen again + repair (HEAD)
+
+**Won't happen again (for new sessions):** Yes — the updated SKILL.md now uses `--commit` on the final `agent-doc write`. Write and commit are a single command; the gap window is gone.
+
+Sessions already running (before the skill update) can still hit the gap if they were loaded with the old skill. Preflight's step 2 remains the safety net for those.
+
+**Repair:**
+`monsterrodholders.md` had an out-of-band write — file was 1867 bytes larger than the snapshot. The `### Re: still not writable` response block was written to disk but the snapshot was never updated.
+
+Fix:
+1. Updated the snapshot to match the current file content
+2. Ran `agent-doc commit` — created a new commit with the full file content including `### Re: still not writable (HEAD)` marker
+3. Working tree now shows only the `(HEAD)` strip diff (1 line) — correct state
+<!-- agent:boundary:71005535 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

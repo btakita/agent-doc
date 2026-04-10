@@ -15,7 +15,7 @@ agent_doc_write: crdt
 ❯ How do I configure .mise.toml to read .env with shell expansion. See .env with $(pass ...) 
 ❯ How do I configure .mise.toml to read .env with shell expansion. See .env with $(pass ...) 
 
-### Re: `.env` with shell expansion
+### Re: `.env` with shell expansion (HEAD)
 
 Use `_.source` — it executes the file as a shell script, so `$(pass ...)` expands normally. `_.file` parses dotenv format and treats `$(...)` as a literal string.
 
@@ -39,7 +39,7 @@ The `export` prefix is required when using `_.source` (shell sourcing, not doten
 ```
 How do I configure .mise.toml to read .env with shell expansion. See .env with $(pass ...) 
 
-### Re: `.env` with shell expansion (HEAD)
+### Re: `.env` with shell expansion
 
 Use `_.source` — it executes the file as a shell script, so `$(pass ...)` expands normally. `_.file` parses dotenv format and treats `$(...)` as a literal string.
 
@@ -99,7 +99,7 @@ printf 'API_KEY=%s\n' "$(pass myapp/api-key)" >> .env.local
 ```
 
 Add `.env.local` to `.gitignore`. Run `mise run gen-env` once per session (or after credential rotation). No more continuous gpg-agent calls.
-<!-- agent:boundary:07240315 -->
+<!-- agent:boundary:35433c24 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

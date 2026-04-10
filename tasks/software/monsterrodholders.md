@@ -1663,7 +1663,7 @@ Or verify all services use the same network. If docker-compose has explicit `net
 The nginx config at `/etc/nginx/conf.d/wordpress.conf:27` likely has `fastcgi_pass wordpress:9000;` — that syntax is correct. The problem is purely DNS resolution within Docker.
 
 **Alternative to simplify:** Replace `wordpress:php8.3-fpm-alpine` with `wordpress:apache` — then you don't need nginx inside Docker at all, just Apache inside Docker serving WordPress directly. Host Apache proxies to Docker Apache on 8080. Removes one moving part.
-<!-- agent:boundary:0a8e804d -->
+<!-- agent:boundary:4cf6ddf1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

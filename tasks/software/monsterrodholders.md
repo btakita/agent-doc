@@ -418,7 +418,7 @@ ssh root@50.28.2.199 'cat /root/.ssh/monsterrodholders_deploy_rw.pub'
 ```
 
 Then run the script — it'll print each step: export WXR, git add/commit, git push.
-<!-- agent:boundary:e58db08b -->
+<!-- agent:boundary:4b16669b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -58,7 +58,7 @@ v0.31.28 released:
 - **PyPI:** manylinux wheel uploaded (`agent_doc-0.31.28-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl`)
 - **Tag:** `v0.31.28` pushed — CI building GitHub Release
 - **cargo install:** v0.31.28 running locally
-<!-- agent:boundary:0e51dc19 -->
+<!-- agent:boundary:d27a4fda -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -461,6 +461,23 @@ Committed `52a20ee`, retagged v0.26.3. New Release run: [24156432054](https://gi
 
 Two runs active (user also pushed another fix simultaneously). Either one passing confirms the direction.
 <!-- agent:boundary:a7af83d3 -->
+> **[EXTRACT from tasks/recruit/filevine.md]** (2026-04-10T15:37:57Z)
+>
+### Re: Threading fix (take 2) (HEAD)
+
+The issue: the draft only had `in_reply_to` (the RFC 2822 Message-ID) but Gmail API also needs `thread_id` (the Gmail thread ID) to attach the draft to the existing thread. Both are required.
+
+Updated the draft with:
+```yaml
+thread_id: "19d5467199f95043"
+in_reply_to: "<IA6PR17MB75914071E950616FCD529092A95EA@IA6PR17MB7591.namprd17.prod.outlook.com>"
+```
+
+Re-pushed. The draft in your `btak.dev` Gmail Drafts should now be properly attached to the "Your Filevine Journey Continues!" thread.
+
+Last one worked.
+Please transfer bug fix to tasks/software/corky.md
+<!-- agent:boundary:62898ead -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -83,7 +83,7 @@ The `### Re: "Score pending..."` response was written by a previous session (`ag
 **Not a bug** — preflight's gap commit is designed for exactly this. The `file is 176 bytes larger than snapshot` warning flagged it correctly. No data lost.
 
 Why do `agent-doc write` + `agent-doc commit` need to be separate? Can be part of the same agent-doc operation instead? 
-### Re: merge write + commit (HEAD)
+### Re: merge write + commit
 
 **Why they're currently separate:**
 
@@ -99,11 +99,25 @@ The commit step runs atomically after write completes — including after the IP
 1. Add `--commit` bool flag to the `write` subcommand
 2. After `run_stream` returns successfully, call `commit::run(file, opts)`
 3. Update SKILL.md step 3 to use `--commit` on the final write (checkpoint writes stay as-is)
-<!-- agent:boundary:db6301b1 -->
+
+❯ Should we have `agent-doc write` do `--commit` by default? Can it check if we are in git repo? If not, ignore the commit?
+### Re: commit-by-default? (HEAD)
+
+**The streaming checkpoint problem is the blocker.** Template mode sessions flush partial responses mid-response. Commit-by-default would create a git commit per checkpoint — noisy and wrong. The skill would need `--no-commit` on every checkpoint write, which is more friction, not less.
+
+**Keep `--commit` as opt-in.** The skill uses it on the final write; checkpoints omit it.
+
+**Git repo check:** Yes — `commit::run` gates on `git rev-parse --is-inside-work-tree`. If not in a repo, logs `[commit] skipped (not in git repo)` and returns `Ok(())`. Makes `--commit` safe everywhere without call-site error handling.
+
+**Proposed behavior:**
+- `agent-doc write` — no commit (safe for checkpoints and non-git dirs)
+- `agent-doc write --commit` — commit after write; silently skips if not in git repo
+- Skill step 3: final write always uses `--commit`; checkpoint writes do not
+<!-- agent:boundary:687b9969 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Implement `--commit` flag on `agent-doc write` (awaiting user approval)
+- [ ] Implement `agent-doc write --commit` flag + git-repo guard (awaiting approval)
 <!-- /agent:pending -->

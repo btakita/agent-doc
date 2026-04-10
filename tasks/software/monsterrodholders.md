@@ -206,7 +206,7 @@ Do you want me to set up the git repo structure for `rberkes/monsterrodholders`?
 
 ❯ The git repo is at src/monsterrodholders-dev
 ❯ Can we have git in sync with wordpress?
-### Re: git sync with WordPress (src/monsterrodholders-dev) (HEAD)
+### Re: git sync with WordPress (src/monsterrodholders-dev)
 
 Repo exists with infra code but no content sync yet. `wordpress/` only has `php.ini`.
 
@@ -267,16 +267,44 @@ wordpress/uploads/
 ```
 
 Want me to scaffold the scripts and updated `.gitignore` in `src/monsterrodholders-dev` now?
-<!-- agent:boundary:56ddc703 -->
+❯ yes
+### Re: scaffolded git↔WP sync (HEAD)
+
+Done. Changes in `src/monsterrodholders-dev`:
+
+**`docker-compose.yml`** — added bind mounts for themes/plugins (auto-sync):
+```yaml
+- ./wordpress/themes:/var/www/html/wp-content/themes
+- ./wordpress/plugins:/var/www/html/wp-content/plugins
+```
+Changes to theme files in the container appear directly in git-tracked dirs and vice versa.
+
+**`scripts/export-content.sh`** — dumps WXR from WP to `wordpress/exports/mrh-export.xml` (run on server when content changes)
+
+**`scripts/import-content.sh`** — imports WXR back into WP (after `git pull` on server)
+
+**`.gitignore`** — excludes `*.sql` dumps and `uploads/`
+
+**`wordpress/themes/`, `wordpress/plugins/`, `wordpress/exports/`** — directories created
+
+**One-time bootstrap on the server** — pull blocksy files out of the volume into the bind-mount path:
+```bash
+cd /opt/monsterrodholders/app
+WP_CTR=$(docker compose ps -q wordpress)
+docker cp $WP_CTR:/var/www/html/wp-content/themes/blocksy ./wordpress/themes/
+docker compose restart wordpress
+```
+
+After that, `wordpress/themes/blocksy/` is git-tracked and live in the container simultaneously.
+<!-- agent:boundary:9efd9d6c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Scaffold sync scripts in src/monsterrodholders-dev (sync-from-wp.sh, deploy-theme.sh)
-- [ ] Copy theme files from server into repo
+- [ ] Commit scaffolding in src/monsterrodholders-dev + push
+- [ ] On server: bootstrap theme files into wordpress/themes/blocksy/ (one-time)
+- [ ] Pull blocksy-companion-pro plugin files + commit to wordpress/plugins/
 - [ ] Decision: rebuild home page in Blocksy, or install WPBakery?
-- [ ] (Optional) Install blocksy-companion-pro plugin + license key
-- [ ] Remove crash-looping `app-nginx-1` orphan container
 - [ ] When ready to go live: search-replace URLs → monsterrodholders.com, flip DNS, re-run certbot
 <!-- /agent:pending -->

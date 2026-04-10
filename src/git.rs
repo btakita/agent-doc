@@ -111,6 +111,23 @@ fn git_toplevel_at(dir: &Path) -> Option<std::path::PathBuf> {
         })
 }
 
+/// Check if `file` is inside a git repository.
+/// Returns `true` if the file's directory (or any ancestor) is a git repo.
+/// Returns `false` if git is not available or the path is not tracked.
+pub(crate) fn is_in_git_repo(file: &Path) -> bool {
+    let dir = if file.is_absolute() {
+        file.parent().unwrap_or(Path::new("/")).to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default()
+    };
+    Command::new("git")
+        .current_dir(&dir)
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 /// Commit a file with an auto-generated message. Skips hooks.
 /// Relative paths are resolved against the git root (superproject if in a submodule).
 /// Git commands run from the resolved git root, so this works even when CWD is a submodule.
@@ -1014,6 +1031,80 @@ mod tests {
         assert!(
             crate::write::is_stale_baseline(old_baseline, current_snapshot),
             "baseline missing committed response should be stale"
+        );
+    }
+
+    #[test]
+    fn is_in_git_repo_true_inside_repo() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+
+        let doc = root.join("doc.md");
+        fs::write(&doc, "# test\n").unwrap();
+
+        assert!(is_in_git_repo(&doc), "file inside git repo should return true");
+    }
+
+    #[test]
+    fn is_in_git_repo_false_outside_repo() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "# test\n").unwrap();
+
+        assert!(!is_in_git_repo(&doc), "file outside git repo should return false");
+    }
+
+    #[test]
+    fn write_commit_lifecycle() {
+        // Full lifecycle: git repo + snapshot + commit → verify commit in log.
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        // Set up git repo
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+
+        // Create and commit an initial file so HEAD exists
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+
+        // Create a document and snapshot
+        let doc = root.join("session.md");
+        let doc_content = "---\nagent_doc_session: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nResponse\n\n## User\n\n";
+        fs::write(&doc, doc_content).unwrap();
+
+        let snap_path = crate::snapshot::path_for(&doc).unwrap();
+        let snap_abs = root.join(&snap_path);
+        fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
+        fs::write(&snap_abs, doc_content).unwrap();
+
+        // Stage + initial commit so the file is tracked
+        Command::new("git").current_dir(root).args(["add", "session.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "add doc", "--no-verify"]).output().unwrap();
+
+        // Now call commit (simulating what --commit does after write)
+        commit(&doc).expect("commit should succeed");
+
+        // Verify a new commit exists with the agent-doc message
+        let log = Command::new("git")
+            .current_dir(root)
+            .args(["log", "--oneline", "-3"])
+            .output()
+            .unwrap();
+        let log_str = String::from_utf8_lossy(&log.stdout);
+        assert!(
+            log_str.contains("agent-doc(session):"),
+            "git log should contain agent-doc commit, got:\n{log_str}"
         );
     }
 

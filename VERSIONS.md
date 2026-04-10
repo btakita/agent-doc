@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.31.29
+
+- **`agent-doc write --commit` flag:** Runs `git::commit` immediately after a successful write. Eliminates the separate `agent-doc commit` step — the final write in the SKILL.md skill now uses `--commit`. Silently skips commit if the document is not inside a git repo (`git rev-parse --is-inside-work-tree` guard). Streaming checkpoint writes do not use `--commit`; only the final write does.
+- **`git::is_in_git_repo` helper:** New `pub(crate)` function that checks whether a file path is inside a git repository.
+- **SKILL.md updated:** Step 2a/2b final writes now use `--commit`; step 3 updated to reflect merged write+commit.
+
 ## 0.31.28
 
 - **`start.rs` auto-relocate:** When claiming a pane from a terminal in a different tmux session than the project expects, automatically relocates the pane to the correct session before registration (was warn-only). Falls back to warn-only if no anchor pane exists in the expected session.

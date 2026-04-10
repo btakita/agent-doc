@@ -1210,7 +1210,7 @@ Both compressions running in background (ffmpeg, CRF 28, AAC 128k):
 | `2026-04-09 19-22-02.mp4` | 4.6 GB |
 
 Output files: `*-compressed.mp4` in the same `Videos/` directory. CRF 28 typically yields 60-80% size reduction for screen/meeting recordings while staying watchable. I'll report final sizes when done.
-<!-- agent:boundary:917251b2 -->
+<!-- agent:boundary:6244c59b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-agent-doc v0.31.27 — released
+agent-doc v0.31.28 — released
 <!-- /agent:status -->
 
 ## Exchange
@@ -47,11 +47,22 @@ Sessions v0.31.18–v0.31.28. Key decisions and fixes:
 
 **Open / Pending:**
 - Manual testing gate: confirm v0.31.28 auto-relocate in live session, then publish: crates.io → PyPI → GitHub Release.
-<!-- agent:boundary:f5193a06 -->
+
+❯ release
+### Re: release (HEAD)
+
+v0.31.28 released:
+
+- **Committed:** 7 files (Cargo.toml, pyproject.toml, VERSIONS.md, src/start.rs, src/stream.rs, src/template.rs, Cargo.lock) pushed to origin/main
+- **crates.io:** `agent-doc v0.31.28` published
+- **PyPI:** manylinux wheel uploaded (`agent_doc-0.31.28-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl`)
+- **Tag:** `v0.31.28` pushed — CI building GitHub Release
+- **cargo install:** v0.31.28 running locally
+<!-- agent:boundary:0e51dc19 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] User confirms v0.31.28 — then publish crates.io + PyPI + GitHub Release
+- [ ] Update parent submodule pointer (git add src/agent-doc && git commit in agent-loop)
 <!-- /agent:pending -->

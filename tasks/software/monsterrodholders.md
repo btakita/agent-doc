@@ -2111,7 +2111,7 @@ Yes — `755` is correct for scripts. Git tracks the executable bit, so this is 
 Done: `chmod 755 scripts/certbot-init.sh`, committed, pushed, and submodule pointer updated.
 
 On the server after deploying: `./scripts/certbot-init.sh` will work directly.
-<!-- agent:boundary:90f86f85 -->
+<!-- agent:boundary:0e509416 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

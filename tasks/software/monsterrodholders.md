@@ -86,7 +86,7 @@ Existing 16 items kept: Shop, Rod Holders, Rod Holder Bases, Boat Accessories, A
 Blocksy will wrap these into columns automatically. If the layout needs 4 columns instead of 3, adjust under Customize → Footer → Footer Columns.
 
 ❯ Deploy updates. Use ssh with my default ssh key to login to make updates. Ensure the changes are in the git repo.
-### Re: deploy to git (HEAD)
+### Re: deploy to git
 
 `wp-to-git.sh` ran and pushed ✓
 
@@ -97,7 +97,13 @@ Blocksy will wrap these into columns automatically. If the layout needs 4 column
 ```
 
 All recent WP changes are now in git: home page (cover block, best sellers, bases layout), footer menu (33 items), out-of-stock hiding, page deletions.
-<!-- agent:boundary:d04ed650 -->
+❯ Remove the map to Steve's house in https://50.28.2.199.nip.io/contact/
+### Re: remove map from Contact page (HEAD)
+
+**Map removed ✓** — the Google Maps iframe (`777 KY-434, Lebanon Junction, KY 40150`) is gone from the Contact page. Kept the contact info text (address, phone, email) and the Zoho support form on the left.
+
+Pushed to git: `1ff234b sync: WP content 2026-04-10 18:17`.
+<!-- agent:boundary:fcaed07e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -49,7 +49,7 @@ Sessions v0.31.18–v0.31.28. Key decisions and fixes:
 - Manual testing gate: confirm v0.31.28 auto-relocate in live session, then publish: crates.io → PyPI → GitHub Release.
 
 ❯ release
-### Re: release
+### Re: release (HEAD)
 
 v0.31.28 released:
 
@@ -897,7 +897,7 @@ That's the restart loop that actually launches `claude` and reconnects the sessi
 
 (Your message was cut off at "When I ran `Claim for Tmux Pane`, I saw" — if there was more, feel free to continue.)
 ❯ release
-### Re: release (HEAD)
+### Re: release
 
 Released v0.31.31:
 
@@ -907,7 +907,7 @@ Released v0.31.31:
 - crates.io ✓ — `agent-doc v0.31.31` published
 - PyPI ✓ — `agent_doc-0.31.31-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl` uploaded
 - GitHub Release ✓ — https://github.com/btakita/agent-doc/releases/tag/v0.31.31 with binary
-<!-- agent:boundary:caf1016e -->
+<!-- agent:boundary:40a98f65 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

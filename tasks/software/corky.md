@@ -960,7 +960,7 @@ When you see `Waiting for callback on http://127.0.0.1:8484/callback...`, comple
 
 ❯ do
 ❯ - [ ] Re-run OAuth for `brian@dreamable.com` — port 8484 is now free; run the doc sheet command and complete browser consent without killing the process
-### Re: OAuth + Sheets API (HEAD)
+### Re: OAuth + Sheets API
 
 OAuth completed — token is cached. But hit a new error:
 
@@ -979,12 +979,26 @@ Click **Enable**, wait ~1 minute, then rerun (no OAuth prompt — token already 
 ```bash
 corky doc sheet "https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8eyCijtqqteslsWcvJ1JCM/edit?gid=210871523#gid=210871523" --account brian@dreamable.com
 ```
-<!-- agent:boundary:7bbe1e82 -->
+
+❯ do
+❯ - [ ] Enable Google Sheets API on GCP project 718955483040: https://console.developers.google.com/apis/api/sheets.googleapis.com/overview?project=718955483040
+### Re: Enable Sheets API (HEAD)
+
+Browser automation (Chrome DevTools MCP) is not reachable from this session — it times out consistently. Need you to enable it manually:
+
+1. Visit: https://console.developers.google.com/apis/api/sheets.googleapis.com/overview?project=718955483040
+2. Click **Enable**
+3. Wait ~1 minute
+4. Rerun (token already cached, no OAuth prompt):
+   ```bash
+   corky doc sheet "https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8eyCijtqqteslsWcvJ1JCM/edit?gid=210871523#gid=210871523" --account brian@dreamable.com
+   ```
+<!-- agent:boundary:1f346dcb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Enable Google Sheets API on GCP project 718955483040: https://console.developers.google.com/apis/api/sheets.googleapis.com/overview?project=718955483040
-- [ ] Rerun `corky doc sheet ... --account brian@dreamable.com` after API is enabled (token already cached)
+- [ ] Enable Google Sheets API manually: https://console.developers.google.com/apis/api/sheets.googleapis.com/overview?project=718955483040 (browser automation unavailable)
+- [ ] Rerun `corky doc sheet ... --account brian@dreamable.com` after enabling
 <!-- /agent:pending -->

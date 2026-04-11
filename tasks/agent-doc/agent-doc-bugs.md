@@ -84,7 +84,7 @@ The binary would check usage against the threshold and return `recommended_model
 Want to spec this out as a feature?
 ❯ Yes. I also want to account for codex and other harnesses with different available models.
 ❯ What would you recommend? Having a general name (low, med, high)?
-### Re: Model tier spec (HEAD)
+### Re: Model tier spec
 
 **Tier names: `low | med | high`**
 
@@ -135,7 +135,32 @@ agent_doc_model_tier: auto | low | med | high
 **Harness detection:** Binary can detect from env vars (`CLAUDE_CODE_SESSION`, `CODEX_SESSION`, etc.) or a `harness` field in config.
 
 Want me to draft the spec file for this feature (in `tasks/agent-doc/`)?
-<!-- agent:boundary:d50f53b9 -->
+❯ Would some harnesses have more than 3 tiers? Should we use a numeric system?
+### Re: More than 3 tiers? (HEAD)
+
+Some harnesses do have more granularity (OpenAI has gpt-4o-mini, gpt-4o, o1-mini, o3-mini, o3), but that doesn't argue for more tiers in the recommendation system.
+
+**The key question is:** what does the recommendation system need to decide? It's classifying task complexity: small / medium / hard. That's 3 meaningful levels. More than 3 starts requiring sub-distinctions that are hard to heuristically detect.
+
+**For harnesses with 4-5 models:** the user picks which 3 buckets to map to. OpenAI example:
+
+```toml
+[model.tiers.codex]
+low = "gpt-4o-mini"
+med = "gpt-4o"
+high = "o3"          # or "o1" depending on preference
+```
+
+o1-mini and o3-mini are available for manual frontmatter override (`agent_doc_model_tier: o1-mini`) but not auto-selected.
+
+**Against numeric (1-10):**
+- The heuristic can only reliably distinguish ~3 complexity levels from diff analysis
+- A numeric scale would be arbitrary with no real precision gain
+- Named tiers (`low/med/high`) have semantic meaning; `3` out of `7` doesn't
+- Extra complexity without benefit
+
+**Conclusion:** Keep `low/med/high`. If a 4th tier proves necessary (e.g., reasoning models for planning), we can add `reasoning` at that point. Don't over-engineer for a hypothetical.
+<!-- agent:boundary:f563dd9c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

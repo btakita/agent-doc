@@ -1520,7 +1520,7 @@ I'll SSH into the server, customize the shop page template in WordPress, and con
 - Racks and T-Bars
 
 The section uses WooCommerce `product_categories` shortcode with 4-column layout, matching the homepage pattern. Changes are live at 50.28.2.199.
-<!-- agent:boundary:ee2a5ade -->
+<!-- agent:boundary:62d59303 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

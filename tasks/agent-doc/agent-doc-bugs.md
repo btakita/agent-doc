@@ -293,9 +293,12 @@ All five fixes landed. Tests green.
 **Not yet done:** version bump, VERSIONS.md, `cargo install --path .`, manual testing gate, publish. Per release process these wait for your "go" after end-to-end verification in a live submodule session.
 ❯ agent-doc run does not write response patches back into src/session-share/tasks/claudescore.md
 ❯ This regression was introduced yesterday. Why is this happening?
-### Re: claudescore.md regression — stale binary (HEAD)
+### Re: claudescore.md regression — stale binary
 
 **Root cause: the 5/5 fixes are in source but not in the running binary.** The release binary is two hours older than the fix.
+
+❯ Why are we getting the stale binary problem? Plan a fix so we can test agent-doc updates and **always** use the most recent binary.
+❯ The stale binary is a recent regression. Started happening yesterday.
 
 **Evidence:**
 ```
@@ -328,18 +331,87 @@ cargo install --path .         # refresh ~/.cargo/bin/agent-doc
 Then re-run `/agent-doc src/session-share/tasks/claudescore.md` and verify the patch lands in `agent-loop/.agent-doc/patches/` instead of the submodule's local dir. Only after that green signal: commit the 04:58 source edits, bump VERSIONS.md, publish.
 
 Want me to run the build + install now so you can verify in a live session?
-<!-- agent:boundary:794f21cb -->
+### Re: Why stale binary is a recent regression — and the fix plan (HEAD)
+
+**Why now (the regression story):**
+
+Nothing in the build pipeline broke yesterday. What changed is the **workflow pattern**: agent-doc fixes moved from a tight edit→publish loop into multi-hour "write fix → manual testing gate → publish" cycles. Inside that gate window, source is ahead of every installed binary. Previously this window didn't exist.
+
+Concretely:
+- **Before:** edit `write.rs` → bump Cargo.toml → `cargo publish` → `cargo install --path .` (mandated by memory note). Source and binary were coherent because every edit cycle ended with a publish.
+- **Yesterday:** the submodule-routing investigation was large enough to warrant the `.agent/runbooks/prerelease.md` step 8 "manual testing gate" — explicitly *defer* the publish until the user confirms behavior in a live session. That step says `cargo install --path .` "is fine for local testing" but doesn't **gate on it**. No gate = no rebuild.
+- Compounding: `.bin/agent-doc → target/release/agent-doc`. Nothing ever runs `cargo build --release` automatically, so the symlink can point at arbitrarily-old bits while `~/.cargo/bin/agent-doc` is even older. **The skill invoked `.bin/agent-doc` 10+ times today against the 02:58 binary** while the source had been at 04:58 the whole morning.
+
+So yesterday's regression = new workflow pattern (longer gate window) + no mtime-aware rebuild trigger. It will recur every time a non-trivial agent-doc fix needs a manual testing gate.
+
+**Fix plan — "always run the most recent binary":**
+
+Goal: make it structurally impossible for `.bin/agent-doc` to be older than `src/agent-doc/src/**/*.rs`.
+
+#### Phase 1 — immediate gate (today, ~15 min)
+
+Add a single pre-preflight stanza to `.claude/skills/agent-doc/SKILL.md` step 0. Runs before `agent-doc preflight`:
+
+```bash
+# stale-binary guard
+bin=/home/brian/work/btakita/agent-loop/.bin/agent-doc
+src_dir=/home/brian/work/btakita/agent-loop/src/agent-doc
+newest_src=$(find "$src_dir/src" "$src_dir/Cargo.toml" -type f -printf '%T@\n' | sort -nr | head -1)
+bin_mtime=$(stat -c '%Y' "$bin" 2>/dev/null || echo 0)
+if awk "BEGIN{exit !(${newest_src} > ${bin_mtime})}"; then
+    echo "[agent-doc] source newer than binary — rebuilding"
+    (cd "$src_dir" && make build-release) || exit 1
+fi
+```
+
+Why this is the right first move:
+- **Deterministic:** before any `agent-doc` subcommand runs, binary matches source.
+- **Cheap:** `cargo build --release` on incremental edits is ~2–5s; no-op when nothing changed.
+- **Doesn't touch the binary's own code**, so it works even when the binary is broken.
+- **Refreshes the symlink via `make build-release`** (already correct target).
+
+#### Phase 2 — harden the prerelease runbook (today, ~5 min)
+
+`.agent/runbooks/prerelease.md` step 8 currently says `cargo install --path .` "is fine." Change to:
+
+> **Before entering the manual testing gate:** `make build-release && cargo install --path .`. Both must complete. Do not invoke the new behavior via `.bin/agent-doc` or `~/.cargo/bin/agent-doc` before these succeed — you will test the old build.
+
+This turns a suggestion into a gate condition. Memory note `feedback_cargo_install_on_release` already captures the intent; the runbook just needs to match.
+
+#### Phase 3 — dev-loop watcher (this week, ~30 min)
+
+Start a `cargo watch` pane whenever editing agent-doc source. Options, cheapest first:
+
+1. **tmux-router overlay:** add an `agent-doc-watch` service that runs `cd src/agent-doc && cargo watch -x 'build --release'` in a named pane. Start it once at the beginning of any agent-doc-editing session.
+2. **Makefile target:** `make watch` → `cargo watch -x 'build --release' -s 'ln -sf target/release/agent-doc ../../.bin/agent-doc'`. User runs it in a side pane.
+3. **Skill auto-start:** if the skill detects edits but no watcher process (`pgrep -f 'cargo watch.*agent-doc'`), prompt to start one.
+
+Watcher catches the "long gate window" case without relying on the skill remembering to rebuild.
+
+#### Phase 4 — defense in depth (optional)
+
+Add a **version suffix** to the binary output that includes source mtime or git dirty state:
+
+```
+$ agent-doc --version
+agent-doc 0.32.0 (src mtime 2026-04-11T04:58Z, dirty)
+```
+
+Preflight can compare the `src mtime` in `--version` output against its own source-tree stat and refuse to run if they disagree. This makes stale-binary failures impossible to ignore even if Phases 1–3 are bypassed.
+
+**Recommendation:** implement Phase 1 + 2 today (highest leverage, lowest risk). Phase 3 when the next agent-doc dev session starts. Phase 4 only if Phase 1's mtime guard turns out to be unreliable (e.g. filesystems without mtime granularity, CI containers).
+
+**Not fixing:** the *current* stale binary. You asked for a plan, not a rebuild. Say "do phase 1+2" and I'll land the skill edit + runbook edit, then rebuild so the 5/5 fixes are actually live.
+<!-- agent:boundary:8630b532 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- ✅ Bug 1: `resolve_to_git_root` absolute-path branch tries superproject (`git.rs:58–72`) *(source only, uncommitted)*
-- ✅ Bug 2: outer write uses `resolve_ipc_project_root` (`write.rs:177` + 6 call sites) *(source only, uncommitted)*
-- ✅ Bug 3: timeout fallback includes `normalize_prefix_lines` + writes `content_ours` to disk *(source only, uncommitted)*
-- ✅ Regression test: real submodule via `git submodule add`, asserts file resolves to parent root *(source only, uncommitted)*
-- 🔴 **Running binary is stale** — `target/release/agent-doc` mtime 02:58 < source mtime 04:58. Every skill call still executes pre-fix code. Submodule patches continue to land in `src/session-share/.agent-doc/patches/`.
-- → `cd src/agent-doc && cargo build --release && cargo install --path .` — rebuild before any further manual testing
+- ✅ Bug 1–5: submodule routing fixes live in working tree (git.rs, write.rs, Cargo.toml uncommitted)
+- 🔴 **Running binary is stale** — `.bin/agent-doc` mtime 02:58 < source mtime 04:58. Every skill call still executes pre-fix code.
+- 🆕 **Stale-binary guard planned** — Phase 1 (skill pre-check), Phase 2 (prerelease runbook gate), Phase 3 (cargo-watch dev loop), Phase 4 (version-string mtime). Awaiting "do" to land Phase 1+2.
+- → `cd src/agent-doc && make build-release && cargo install --path .` — rebuild before any further manual testing
 - → Manual testing gate: verify `❯ ` preservation + working-tree consistency on live `src/session-share/tasks/claudescore.md`
 - → Commit the 04:58 source edits (git.rs, write.rs, Cargo.toml) once live-tested
 - → Bump version, update VERSIONS.md, publish (crates/PyPI/GitHub Release)

@@ -984,7 +984,7 @@ No more `-` as the entire CSS block. Full CSS is rendering.
 - **NEW: Inner container `padding-top: 1.5rem`** for title breathing room ✓
 
 Check `https://50.28.2.199.nip.io/` — the hero logo/title should now clear the sticky navbar. If the clearance looks off (too much or too little), let me know and I'll tweak `--header-height` fallback or the `+ 2rem` offset.
-<!-- agent:boundary:06d9c1ac -->
+<!-- agent:boundary:bb4a2eeb -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

@@ -1218,7 +1218,7 @@ Output files: `*-compressed.mp4` in the same `Videos/` directory. CRF 28 typical
 | `2026-04-09 19-22-02.mp4` | 4.6 GB | 13.8 MB | 99.7% |
 
 Output: `*-compressed.mp4` in `~/Videos/`. Originals untouched.
-<!-- agent:boundary:ffb45a05 -->
+<!-- agent:boundary:6d72f333 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

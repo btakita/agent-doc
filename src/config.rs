@@ -56,7 +56,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Execution mode for skill-level parallelism.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -211,7 +211,25 @@ pub fn update_project_tmux_session(new_session: &str) -> Result<()> {
 }
 
 fn project_config_path() -> PathBuf {
-    PathBuf::from(".agent-doc").join("config.toml")
+    // Walk up from CWD to find the .agent-doc/ project root. This avoids
+    // CWD-sensitivity when subcommands run from a subdirectory (e.g., a
+    // submodule that changed directory mid-session).
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut current: &Path = &cwd;
+        loop {
+            if current.join(".agent-doc").is_dir() {
+                return current.join(".agent-doc").join("config.toml");
+            }
+            match current.parent() {
+                Some(p) => current = p,
+                None => break,
+            }
+        }
+        // No .agent-doc/ found walking up — fall back to CWD (uninitialized project).
+        cwd.join(".agent-doc").join("config.toml")
+    } else {
+        PathBuf::from(".agent-doc").join("config.toml")
+    }
 }
 
 #[cfg(test)]

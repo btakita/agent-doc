@@ -32,6 +32,12 @@
 //!   writes the UUID back to disk if it was freshly generated.
 //! - Pane resolution priority: explicit `--pane` > `--position` (scoped to
 //!   effective window if set) > `TMUX_PANE` / active pane.
+//! - **Session validation:** After resolving `pane_id`, checks that the pane belongs to
+//!   the project's configured tmux session (`project_tmux_session()`). If the pane is in
+//!   the wrong session, `claim` exits with an error unless `--force` is passed.
+//!   `--force` allows cross-session claims with a warning. This prevents the
+//!   stash/rescue routing dance that fires whenever a document's pane is in the wrong
+//!   session (`pane_session != target_session` in `route.rs`).
 //! - Sets `agent_doc_format=template` and `agent_doc_write=crdt` in frontmatter when
 //!   neither `format`, `write_mode`, nor legacy `mode` is present.
 //! - Scaffolds default `## Status` and `## Exchange` component sections when the
@@ -159,6 +165,35 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
     // Session targeting now uses current_tmux_session() at route time.
     let tmux = sessions::Tmux::default_server();
 
+    // Validate claiming pane is in the configured target session.
+    // Reject cross-session claims unless --force is passed.
+    if tmux.pane_alive(&pane_id) {
+        let pane_tmux_session = tmux
+            .cmd()
+            .args(["display-message", "-t", &pane_id, "-p", "#{session_name}"])
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+        if let Some(configured) = crate::config::project_tmux_session()
+            && !pane_tmux_session.is_empty()
+            && pane_tmux_session != configured
+        {
+            if !force {
+                eprintln!(
+                    "error: pane {} is in tmux session '{}' but project session is '{}'.\n\
+                     Switch to session '{}' and re-run, or use --force to override.",
+                    pane_id, pane_tmux_session, configured, configured
+                );
+                anyhow::bail!("session mismatch: cross-session claim rejected");
+            }
+            eprintln!(
+                "warning [--force]: registering cross-session pane {} (session '{}', configured '{}')",
+                pane_id, pane_tmux_session, configured
+            );
+        }
+    }
+
     // Check if pane is already claimed by a different session.
     // Per the Binding invariant (SPEC §8.5): "document drives pane resolution —
     // find existing OR provision new, NEVER commandeer another document's pane."
@@ -254,28 +289,6 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
     // Register session → pane (use the pane's actual PID, not our short-lived CLI PID)
     let pane_pid = sessions::pane_pid(&pane_id).unwrap_or(std::process::id());
     sessions::register_with_pid(&session_id, &pane_id, &file_str, pane_pid)?;
-
-    // Log if pane is in a different session than configured — but do NOT
-    // auto-update config.toml. The configured session is the source of truth;
-    // overwriting it causes cascading session migration bugs.
-    if tmux.pane_alive(&pane_id) {
-        let pane_session = tmux
-            .cmd()
-            .args(["display-message", "-t", &pane_id, "-p", "#{session_name}"])
-            .output()
-            .ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .unwrap_or_default();
-        if !pane_session.is_empty() {
-            let configured = crate::config::project_tmux_session();
-            if configured.as_deref() != Some(&pane_session) {
-                eprintln!(
-                    "note: pane {} is in session '{}' but config says '{}' — config unchanged",
-                    pane_id, pane_session, configured.as_deref().unwrap_or("(none)")
-                );
-            }
-        }
-    }
 
     // Focus the claimed pane (select-window + select-pane for cross-window support)
     if tmux.pane_alive(&pane_id) {

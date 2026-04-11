@@ -938,14 +938,19 @@ fn main() -> anyhow::Result<()> {
                     write::run(&file, baseline.as_deref())
                 }
             };
-            result?;
+            // Fix 2: attempt commit even when run_stream returns Err — a partial write
+            // may have already saved the snapshot, and we want it tracked before
+            // propagating the error.
             if do_commit {
                 if git::is_in_git_repo(&file) {
-                    git::commit(&file)?;
+                    if let Err(e) = git::commit(&file) {
+                        eprintln!("[commit] warning: {}", e);
+                    }
                 } else {
                     eprintln!("[commit] skipped (not in git repo)");
                 }
             }
+            result?;
             Ok(())
         }
         Commands::Stream { file, interval, agent, model, no_git } => {

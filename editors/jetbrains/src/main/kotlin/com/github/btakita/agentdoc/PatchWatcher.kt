@@ -444,6 +444,11 @@ class PatchWatcher(private val project: Project) : Disposable {
         // Save the document to disk (so snapshot can read it)
         FileDocumentManager.getInstance().saveDocument(document)
         writeAckContent(patch.patchId, document.text)
+        // Fix 4: post-apply commit via FFI — defense-in-depth against shell-side commit skips.
+        AgentDocLib.get()?.let { lib ->
+            val committed = lib.agent_doc_commit(patch.file)
+            if (!committed) LOG.warn("[commit] agent_doc_commit failed for ${patch.file}")
+        }
         return true
     }
 

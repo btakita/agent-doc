@@ -340,7 +340,7 @@ Done ✓ — page 13 (`/contact-2/`) now has the same content as page 24 (`/cont
 Pushed: `9e498b4`.
 
 ❯ Readd products at the bottom of /contact-2/
-### Re: products at bottom of /contact-2/ (HEAD)
+### Re: products at bottom of /contact-2/
 
 Done ✓ — appended to page 13:
 
@@ -349,7 +349,42 @@ Done ✓ — appended to page 13:
 - WooCommerce product collection block (8 products, ordered by popularity, 4-column grid)
 
 `https://50.28.2.199.nip.io/contact-2/` → 200 ✓. Pushed: `dc103a4`.
-<!-- agent:boundary:cf0aab04 -->
+
+❯ Remove the products listings from /contact-2/
+❯ We need an extensive site footer. All of the product categories **must** be in the site footer.
+### Re: remove products from /contact-2/ + complete footer categories (HEAD)
+
+**Products removed from /contact-2/ ✓**
+
+Stripped the separator + "Shop Our Products" block �� page 13 is back to just the contact form and contact info.
+
+**All product categories now in footer ✓**
+
+The 3 missing categories were added to **Footer Col1 - Products** (menu 687):
+- Accessories → `/product-category/accessories/`
+- Monster Gear → `/product-category/monster-gear/`
+- Bargain Bin → `/product-category/bargain-bin/`
+
+Full coverage across both product columns:
+
+| Col1 — Products (11) | Col2 — Specialty (8) |
+|---|---|
+| Shop | Kayak Products |
+| Rod Holders | Bank Products |
+| Rod Holder Bases | Rod Transport Solutions |
+| Boat Accessories | Bait & Tackle |
+| Racks and T-Bars | River Anchors |
+| Draggin Master | Apparel & Decals |
+| Mounting Hardware | Gift Cards |
+| HydroWeb Landing Nets | Rigging Deals |
+| Accessories | |
+| Monster Gear | |
+| Bargain Bin | |
+
+Also fixed: Contact Us link in Col3 was `/?page_id=24` → `/contact/`.
+
+Pushed: `fb659cc`.
+<!-- agent:boundary:c2566ad1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

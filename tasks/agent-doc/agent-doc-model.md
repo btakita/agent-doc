@@ -559,7 +559,7 @@ Executed all 8 layers successfully. Status:
 **Test coverage:** 48 unit tests in `model_tier.rs` (tier enum ordering, config round-trip, harness detection, component parse, diff scanner with guards, heuristic path boosts, composition precedence, JSON serialization).
 
 **Next step:** Per CLAUDE.md release process, gate is manual testing: `cargo install --path .` then verify the feature in a live session before publishing upstream to crates.io / PyPI / GitHub Releases.
-<!-- agent:boundary:92e2b7ee -->
+<!-- agent:boundary:369c5a90 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

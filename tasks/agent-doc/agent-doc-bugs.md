@@ -828,7 +828,7 @@ Added **Step 2d** to `preflight.rs` between the primary commit (step 2) and the 
 #### Build + tests
 
 `cargo build` clean. 513 tests pass; 1 pre-existing tmux integration failure (`route::send_keys_delivers_command_with_enter`) requires live tmux session — unrelated to these changes.
-<!-- agent:boundary:3176401d -->
+<!-- agent:boundary:09b6f984 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

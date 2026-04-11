@@ -227,7 +227,7 @@ Pushed to git: `cfa739a`.
 Found the original MonsterRodHolders hero — `slide-1.jpg` from the original 2016 site (ID 7971, `wp-content/uploads/2016/06/slide-1.jpg`). Updated its `guid` to point to the current server URL and swapped it into the home page cover block.
 
 Pushed to git: `55aaf08`.
-<!-- agent:boundary:58bc4ee4 -->
+<!-- agent:boundary:208b41d9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

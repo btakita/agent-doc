@@ -442,7 +442,7 @@ Verify live at: `https://50.28.2.199.nip.io/`
 Covers both Blocksy's `[data-products]` grid and classic WooCommerce loops. 480px threshold targets phones — wider viewports keep the 4-column desktop layout (tablet breakpoint at 691-1000px was already in place).
 
 **Verified live** — CSS confirmed in post 86030. Pushed: `7a5bf4e`
-<!-- agent:boundary:1b6395f5 -->
+<!-- agent:boundary:52ccb5b6 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

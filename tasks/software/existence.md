@@ -128,12 +128,14 @@ The pending component with checkboxes is well-structured. All four items are rea
 - **chromium-bridge SKILL.md** — CSS `:hover` limitation likely came from browser automation constraints (can't inject hover state without JS)
 
 No blockers identified. These can be tackled in any order — the philosophy docs are conceptual while the SKILL.md update is operational.
-<!-- agent:boundary:3056b91c -->
+❯ create github actions to build `curl | sh` platform releases.
+<!-- agent:boundary:af649c86 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built (HEAD)
 
 <!-- agent:pending -->
+- [ ] Create GitHub Actions workflow: build + release binaries (Linux gnu/musl, macOS x86_64/aarch64)
 - [ ] Update philosophy/CLAUDE.md with precision + bounded/unbounded guidance
 - [ ] Create philosophy/src/pneuma.md, noumena.md, phenomena.md
 - [ ] Enrich philosophy/src/permaculture.md with universal applicability analysis

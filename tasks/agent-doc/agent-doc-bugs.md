@@ -160,7 +160,7 @@ o1-mini and o3-mini are available for manual frontmatter override (`agent_doc_mo
 - Extra complexity without benefit
 
 **Conclusion:** Keep `low/med/high`. If a 4th tier proves necessary (e.g., reasoning models for planning), we can add `reasoning` at that point. Don't over-engineer for a hypothetical.
-<!-- agent:boundary:f563dd9c -->
+<!-- agent:boundary:af40a4e7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

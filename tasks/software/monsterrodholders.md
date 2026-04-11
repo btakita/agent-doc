@@ -1049,7 +1049,7 @@ Done. Added a mobile-only rule to post 86030:
 3. **Hero cover** — should now span the full width; the inline 80px padding from the block editor still applies vertically.
 
 Check `https://50.28.2.199.nip.io/` on a phone or DevTools device mode and let me know which blocks (if any) need readable-text padding restored.
-<!-- agent:boundary:94cde5c5 -->
+<!-- agent:boundary:15007e48 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

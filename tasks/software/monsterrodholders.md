@@ -310,7 +310,7 @@ What should the previous hero image be?
 Once you clarify, I can update the home page Blocksy cover block to use the correct image.
 
 **Pushed:** `9d4ba48` (via `wp-to-git.sh`)
-<!-- agent:boundary:fb115607 -->
+<!-- agent:boundary:aec301ea -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

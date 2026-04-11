@@ -1232,7 +1232,7 @@ Summary of the call:
 - **Scoring API confusion:** Rob was conflating "Brian's score" with the "scoring API" service. Brian clarified: the task was to run the scoring API against Brian's session transcript + CLAUDE.md, compare output to expected 82/100, then diff factor-by-factor to identify miscalibrated eval prompts.
 - **Two scoring methodologies:** Rob has his own set of factors; Brian has his (from the original rubric). ~100 factors each. Rob's phrasing ("two factors") was imprecise — Brian corrected: two sets of scoring methodologies, not two individual factors.
 - **Call cut short:** Rob had another call come in at ~4:46 and had to drop. They ended roughly aligned ("I think we're in agreement").
-<!-- agent:boundary:79de4687 -->
+<!-- agent:boundary:269edf74 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

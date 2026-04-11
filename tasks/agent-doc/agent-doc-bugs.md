@@ -170,7 +170,7 @@ Detailed design written to: `docs/superpowers/specs/2026-04-11-submodule-patch-r
 **Changes needed:**
 1. `src/agent-doc/src/write.rs` — modify `try_ipc()` to resolve superproject root for patches directory
 2. Tests — unit tests for patch directory resolution, integration test end-to-end
-<!-- agent:boundary:528042c0 -->
+<!-- agent:boundary:912426a7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

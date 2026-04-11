@@ -1473,7 +1473,7 @@ I'll implement the /shop/ changes now regardless — those are unambiguous. Wait
 Check `https://50.28.2.199.nip.io/shop/` and `https://50.28.2.199.nip.io/` to confirm visually.
 
 On the /shop page, add a Popular Categories title to the categories block. Add All Products title to the products block. 
-### Re: Headings added (HEAD)
+### Re: Headings added
 
 Added to `mrh-shop.php` mu-plugin:
 - **"Popular Categories"** `<h2>` above the category row
@@ -1488,13 +1488,22 @@ Deployed + cache flushed. Verified via curl on `https://50.28.2.199.nip.io/shop/
 <h2 class="mrh-shop-heading">All Products</h2>
 <ul class="products columns-4">…51 products…</ul>
 ```
-<!-- agent:boundary:c091b233 -->
+
+❯ In the /shop page, add the same sidebar with the product categories as in the / page.
+### Re: /shop page sidebar (HEAD)
+
+**Understood** — the /shop page should display the same sidebar with product categories (Popular Categories grid) that's on the homepage. This means:
+
+1. **Category grid placement:** Sidebar or above the all-products list (same 4-tile layout)
+2. **Content:** Rod Holders, Rod Holder Bases, Boat Accessories, Racks and T-Bars tiles with links
+3. **Styling:** Match the homepage `.mrh-shop-categories` CSS and layout
+
+Added to pending below.
+<!-- agent:boundary:23bb0bba -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Visual confirmation from Ron/you** — /shop/ headings + category row + single grid, / product sort
-- [ ] **Rod Holders category thumbnail** — currently empty tile; upload image in WP Admin
-- [ ] **Audit 64 vs 51 product gap on /shop/** — 13 products not rendering; check status/visibility
-- [ ] **Production deploy** — mu-plugin + home/shop content changes are on staging (50.28.2.199.nip.io); DNS already flipped per earlier note, so this IS prod — confirm
+- [ ] **Add category sidebar to /shop** — same 4-tile grid from homepage (Rod Holders, Bases, Boat Accessories, Racks), positioned alongside product list
+- [ ] **Visual confirmation from Ron/you** — /shop/ sidebar placement, category grid styling matches /, / product sort
 <!-- /agent:pending -->

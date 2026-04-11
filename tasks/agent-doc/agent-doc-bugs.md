@@ -402,7 +402,7 @@ Preflight can compare the `src mtime` in `--version` output against its own sour
 **Recommendation:** implement Phase 1 + 2 today (highest leverage, lowest risk). Phase 3 when the next agent-doc dev session starts. Phase 4 only if Phase 1's mtime guard turns out to be unreliable (e.g. filesystems without mtime granularity, CI containers).
 
 **Not fixing:** the *current* stale binary. You asked for a plan, not a rebuild. Say "do phase 1+2" and I'll land the skill edit + runbook edit, then rebuild so the 5/5 fixes are actually live.
-<!-- agent:boundary:a306f9b0 -->
+<!-- agent:boundary:541769f1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

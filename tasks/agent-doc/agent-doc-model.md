@@ -235,7 +235,60 @@ The skill checks the gate before responding:
 This is a simple comparison, not semantic reasoning. Even haiku executes it reliably.
 
 **The semantic override step is fragile and should be minimized.** Push as much intelligence as possible into the binary's structural analysis. The agent's semantic judgment is only for genuinely ambiguous cases structural signals can't resolve — and even then, the safe default is `med`, not `low`.
-<!-- agent:boundary:02e9d2ca -->
+
+❯ Can we have a high model evaluate the diff and be instructed to dispatch subagents for tasks?
+### Re: Orchestrator pattern — dispatching subagents (HEAD)
+
+Yes — that's the orchestrator pattern. It fits tasks where the work is decomposable into parallel subtasks.
+
+**The orchestrator role:**
+
+A "thin" high-model pass evaluates the diff + document context and produces a dispatch plan — not a full response. It answers: "What subtasks does this spawn? Which can run in parallel?" Then specialist subagents execute. The orchestrator's output is small (a task list), so it's fast and cheap relative to full generation.
+
+```
+diff + doc context
+      ↓
+ [orchestrator] (high model, fast — produces dispatch plan)
+      ↓
+ ┌────────────┬────────────┬────────────┐
+ [subagent A] [subagent B] [subagent C]   (parallel)
+      └─────────────┬───────────┘
+               [merge results]
+                    ↓
+              [write back]
+```
+
+**When this is worth the overhead:**
+- Task has 2+ clearly independent subtasks (research + implementation, analysis + spec-writing)
+- Each subtask is >5 minutes of work (parallelism saves real time)
+- Task is naturally "fan out, then fan in"
+
+**When it's NOT worth it:**
+- Single linear task → just run the high model directly
+- Ambiguous command needing clarification first
+- Sequential tasks where output A feeds input B
+
+**Implementation sketch:**
+
+Preflight adds `"dispatch_candidate": true` when it detects high complexity + ambiguous command (pending items >5, code changes, architecture tasks). The skill checks this flag:
+
+1. If `dispatch_candidate == true` and current tier is `high`, skill does a quick orchestration pass (not a full response) — generates a subagent plan
+2. Subagents run via the `Agent` tool (already available in Claude Code skills)
+3. Results merge and write back via `agent-doc write`
+
+**Inside vs. outside orchestration:**
+- Inside (Claude Code's Agent tool): simpler, already available in skills, no extra coordination
+- Outside (spawning separate `/agent-doc` sessions): better isolation, more overhead
+
+Inside is the right default.
+
+**Gating:** Only activate when all three hold:
+- `suggested_tier == High`
+- `dispatch_candidate == true`
+- frontmatter `agent_doc_dispatch: auto | true`
+
+Default off — most tasks don't need it.
+<!-- agent:boundary:87d805d3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

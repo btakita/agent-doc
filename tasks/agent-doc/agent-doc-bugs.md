@@ -222,7 +222,7 @@ git submodule update --init src/session-share
 ```
 
 The fix should now route patches from `src/session-share/.agent-doc/patches/` → `agent-loop/.agent-doc/patches/`, which the JetBrains plugin monitors.
-<!-- agent:boundary:127b38f8 -->
+<!-- agent:boundary:4a9df900 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

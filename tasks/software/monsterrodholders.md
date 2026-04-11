@@ -738,7 +738,36 @@ Next steps:
 4. Run Lighthouse audit to confirm scores: Performance >95, SEO >95, A11y >95
 
 **Expected improvements**: Performance 89→98, SEO 85→95+, A11y 91→95+
-<!-- agent:boundary:91a795f8 -->
+
+❯ The website is down https://50.28.2.199.nip.io/  Why?
+### Re: Website down — Containers restarted ✓ (HEAD)
+
+**Root cause:** WordPress and nginx containers were stopped during my certbot attempt (to free port 80). Restarted both.
+
+**Status:**
+- ✓ app-wordpress-1 (HTTP) — Running, responding normally on 127.0.0.1:8080
+- ⏸ app-nginx-1 (HTTPS reverse proxy) — Failing to start due to missing SSL certificates
+
+**Why nginx is down:**
+```
+[emerg] cannot load certificate "/etc/nginx/certs/fullchain.pem": 
+  BIO_new_file() failed (SSL: error:80000002)
+```
+
+**Next step to fix:** DNS must propagate to 50.28.2.199 first. Check:
+```bash
+dig +short monsterrodholders.com A
+```
+
+Once DNS shows **50.28.2.199** (not 151.101.66.159), run:
+```bash
+ssh root@50.28.2.199 "certbot certonly --standalone -d monsterrodholders.com -d www.monsterrodholders.com"
+```
+
+This will create `/etc/nginx/certs/fullchain.pem` and nginx will start automatically on the next `docker compose up`.
+
+**Temporary access:** WordPress is live at `http://127.0.0.1:8080/` (HTTP-only, no SSL) for development/verification until DNS propagates.
+<!-- agent:boundary:81a29cdd -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

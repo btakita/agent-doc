@@ -953,7 +953,7 @@ So the `padding-top:140px` rule was dropped at 13:32 (before my turn), and then 
 3. Drop `tasks/software/monsterrodholders/img_6.png` into the repo if you want it captured — the `img_6.png` link in the exchange above currently has no file on disk (`ls tasks/software/img_6.png` → missing). Not blocking; just flagging.
 
 No writes to the live site until you green-light.
-<!-- agent:boundary:b73e1921 -->
+<!-- agent:boundary:a7de975d -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

@@ -235,7 +235,7 @@ The skill checks the gate before responding:
 This is a simple comparison, not semantic reasoning. Even haiku executes it reliably.
 
 **The semantic override step is fragile and should be minimized.** Push as much intelligence as possible into the binary's structural analysis. The agent's semantic judgment is only for genuinely ambiguous cases structural signals can't resolve — and even then, the safe default is `med`, not `low`.
-<!-- agent:boundary:8e899172 -->
+<!-- agent:boundary:02e9d2ca -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

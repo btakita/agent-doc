@@ -550,7 +550,7 @@ My preload was outputting `http://` (because siteurl was http://). The browser f
 - LCP: big improvement expected — 10KB logo vs the 800KB+ full-size render
 
 Re-run Lighthouse and send `img_6.png` when ready.
-<!-- agent:boundary:3a228ebe -->
+<!-- agent:boundary:319d2b4b -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

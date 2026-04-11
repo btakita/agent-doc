@@ -615,7 +615,7 @@ gh release create v0.32.0 --generate-notes bin/agent-doc
 - Test coverage: 262 lib tests, 823 total (all passing)
 
 **Breaking change:** None. Tier fields default to `None` in JSON; frontmatter field optional. Why is the response patch uncommitted in src/session-share/tasks/claudescore.md? 
-### Re: claudescore.md uncommitted patch (HEAD)
+### Re: claudescore.md uncommitted patch
 
 It was uncommitted because no active agent-doc session was running on that file. Agent-doc commits are per-document, scoped to preflight/write cycles of the session that owns that document. A response written into `src/session-share/tasks/claudescore.md` earlier sat in the working tree until *some* session ran preflight and the sweep picked it up.
 
@@ -624,23 +624,23 @@ This preflight's sweep just committed it as `b6cc77f agent-doc(claudescore): 202
 **Mechanism:** `preflight step 2` commits the current document first, then sweeps *related docs* with pending agent-doc changes across the workspace and commits them too. So an orphaned patch survives until the next preflight on any session touches the sweep path.
 
 **If you want faster commits on claudescore.md specifically:** run `/agent-doc tasks/claudescore.md` briefly (even with no edits) — its own preflight will commit in step 2. Or rely on the sweep like now.
-<!-- agent:boundary:c6aedb7a -->
+
+Add a agent-doc preflight command 
+### Re: agent-doc preflight command (HEAD)
+
+`agent-doc preflight` already exists (v0.32.0). It:
+- Recovers orphaned responses (step 1)
+- Commits current doc + sweeps related docs (step 2)
+- Reads + truncates claims log (step 3)
+- Computes unified diff with comment stripping (step 4)
+- Returns JSON with baseline path, diff, and tier info
+
+**What's missing from model docs?** Should I add it to the SKILL.md runbooks, or add to VERSIONS.md as a feature entry?
+<!-- agent:boundary:9291adf3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Layer 0: `Tier` enum + config `[model.tiers.<harness>]` + harness detection
-- [x] Layer 1: `agent_doc_model_tier` frontmatter parsing
-- [x] Layer 2: `&lt;!-- agent:model --&gt;` component read in preflight layout check
-- [x] Layer 3: inline `/model <x>` diff scanner with code-fence/blockquote guards, strip from diff
-- [x] Layer 4: diff heuristic `suggested_tier` from `diff_type` + path
-- [x] Layer 5: `effective_tier` composition + preflight JSON fields
-- [x] Layer 6: skill gate logic in SKILL.md (`effective_tier` comparison)
-- [x] Layer 7: docs, VERSIONS.md entry, version bump, final `make check`
-- [x] Plan written to `src/agent-doc/plan.md` ([done])
-- [x] Integration test: `agent_doc_model_tier: low` frontmatter gate works
-- [ ] Step 1: `cargo install --path .` from src/agent-doc
-- [ ] Step 2: Verify feature in live session
-- [ ] Step 3: Tag, publish (crates.io, PyPI, GitHub)
+- [ ] Add `agent-doc preflight` to docs (runbooks vs VERSIONS.md?)
 <!-- /agent:pending -->

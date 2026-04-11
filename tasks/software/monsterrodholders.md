@@ -1013,7 +1013,7 @@ Check `https://50.28.2.199.nip.io/` and let me know:
 - If 70px still feels too small, I can push it to 80–90px (the navbar will grow to fit, or I can also add `min-height` to the header row to control that)
 - If it's clipping on mobile or the sticky scroll version, say the word — Blocksy also has separate `--logo-max-height` overrides for `[data-sticky]` and mobile breakpoints that I can add
 The pages should take the entire viewport width for mobile widths. See ![img_8.png](img_8.png) 
-### Re: mobile full-bleed viewport width ✓ (HEAD)
+### Re: mobile full-bleed viewport width ✓
 
 Done. Added a mobile-only rule to post 86030:
 
@@ -1049,15 +1049,56 @@ Done. Added a mobile-only rule to post 86030:
 3. **Hero cover** — should now span the full width; the inline 80px padding from the block editor still applies vertically.
 
 Check `https://50.28.2.199.nip.io/` on a phone or DevTools device mode and let me know which blocks (if any) need readable-text padding restored.
-<!-- agent:boundary:15007e48 -->
+
+❯ We still have the cropping issue on https://50.28.2.199.nip.io/
+❯ See ![2026-04-11_14-39.png](../../../../../Pictures/agent-loop/2026-04-11_14-39.png)
+### Re: mobile cropping — root cause was WP's CSS sanitizer ✗→✓ (HEAD)
+
+**Root cause — not your CSS, my comment.** The mobile full-bleed CSS never made it to the browser. I put `<=689px` inside a CSS comment, and WordPress's custom_css sanitizer (invoked by `wp_update_custom_css_post`) treats `<` as the start of an HTML tag and truncates everything after it. The comment got chopped mid-sentence, which in turn chopped the `@media` rule that followed it. Verified via:
+
+```bash
+curl -sk https://50.28.2.199.nip.io/ | sed -n '/wp-custom-css/,/\/style/p'
+# → On mobile (		</style>
+```
+
+The post body on disk still had the full CSS (I checked via `wp post get 86030 --field=post_content`), but the rendered `<style id="wp-custom-css">` block was truncated at the `<`. Textbook sanitizer-escape bug.
+
+**Fix.** Rewrote the comment to avoid `<`, `<=`, or any HTML-looking sequence — now reads `Mobile full-bleed content up to 689px breakpoint`. Republished post 86030. Verified the full `@media (max-width: 689px)` block now reaches the browser via the same curl.
+
+**Lesson learned.** Custom CSS posts go through `wp_kses`-adjacent sanitization. Never put `<`, `>`, or `&` raw in comments or selectors — use unicode equivalents (`≤`, `≥`) or reword.
+
+**What's live now** (hit cache-bust Cmd/Ctrl+Shift+R):
+
+```css
+@media (max-width: 689px) {
+    .ct-container,
+    .ct-container-fluid,
+    main.site-main,
+    .entry-content,
+    .wp-site-blocks {
+        max-width: 100% !important;
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+    }
+    :root, body {
+        --content-spacing: 0px;
+        --container-spacing: 0px;
+    }
+}
+```
+
+Also added a redundant `body { --container-spacing: 0px; }` because Blocksy sometimes sets these custom properties on `body` with higher specificity than `:root`.
+
+**Verify on mobile:** reload `https://50.28.2.199.nip.io/` in DevTools device mode (or a phone) at ≤689px and the hero cover should now span edge-to-edge. If it still looks cropped, send another screenshot and I'll inspect the computed styles — there may be a `.wp-block-cover` `align=` constraint I need to override too.
+<!-- agent:boundary:ad1d3d13 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Verify mobile full-bleed visually** — check that text blocks aren't too flush against edges on phone; may need padding restored on paragraphs/lists
-- [ ] **Verify logo size visually** — confirm 70px logo height is legible; bump to 80–90px or tune sticky/mobile variants if needed
+- [ ] **Re-verify mobile full-bleed** — hard-refresh `https://50.28.2.199.nip.io/` at ≤689px and confirm the hero + content now span the full viewport width
 - [ ] **Lighthouse perf >95 plan** — P0: self-host IBM Plex Mono (OMGF), defer jQuery, nginx Cache-Control headers, fetchpriority=high on cover image, preload LCP image
 - [ ] **Verify hero clearance visually** — confirm logo/title clears the sticky navbar; tweak fallback or offset if needed
+- [ ] **Verify logo size visually** — confirm 70px logo height is legible; bump to 80–90px or tune sticky/mobile variants if needed
 - [ ] **Verify `wp-to-git.sh` captures DB-side fixes** — confirm sync script picks up the custom_css post edit and theme_mods_blocksy copyright patch on next run
 - [ ] **Certbot run after DNS flips to 50.28.2.199** — `ssh root@50.28.2.199 "certbot --apache -d monsterrodholders.com -d www.monsterrodholders.com"`
 - [ ] **Remove broken `app-nginx-1` from docker-compose** — host Apache is the real reverse proxy; Docker nginx is dead code

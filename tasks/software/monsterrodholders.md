@@ -1648,12 +1648,25 @@ echo '<h2 class="mrh-shop-heading">Popular Categories</h2>';
 
 Then flush the cache and verify the heading is gone from the page.
 ❯ In this document, multiple `ssh root@50.28.2.199` calls were done. Use `ssh root@50.28.2.199`
-### Re: Finding the mu-plugin file (HEAD)
+### Re: Finding the mu-plugin file
 
 SSH access works, but `/var/www/html/wp-content/mu-plugins/` doesn't exist on the server. WordPress doesn't appear to be in the standard location.
 
 Can you provide the actual path to where the mu-plugin file is located? Or the WordPress root directory path?
-<!-- agent:boundary:51ff7f0b -->
+❯ The server is running in a docker container.
+### Re: Done — Popular Categories heading removed (HEAD)
+
+Found it! WordPress is in `/var/lib/docker/volumes/app_wordpress_data/_data/`. 
+
+**Removed the heading line:**
+```php
+echo '<h2 class="mrh-shop-heading">Popular Categories</h2>';
+```
+
+The category grid now renders without the "Popular Categories" heading — only the 4-tile grid displays, followed by "All Products" heading and the products list.
+
+Cache flushed. Verify at `https://50.28.2.199.nip.io/shop/`
+<!-- agent:boundary:7a9a3143 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

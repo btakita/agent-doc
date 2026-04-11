@@ -1697,7 +1697,7 @@ Cache flushed. Verified — mu-plugin now renders:
 The first one is still in the Shop page's block content (the hero/`.page-description` area). If you want only one, I can remove the page-content `<h2>` via a direct DB update over SSH (`wp post get <id>` / `wp post update`). Want me to do that?
 
 **Clarification on "All Categories":** I didn't find an `All Categories` heading anywhere on the page — only `All Products` (which I removed). I assumed you meant `All Products`. If there's a different `All Categories` you're seeing, screenshot or point me at it.
-<!-- agent:boundary:ee36ffd5 -->
+<!-- agent:boundary:3105fa14 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

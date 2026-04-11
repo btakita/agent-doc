@@ -492,7 +492,7 @@ The four checklist items are the complete implementation spec. Confirming scope:
 Priority encoded in `effective_tier`: inline command resolves first (and strips from diff), then component overrides frontmatter, then frontmatter overrides heuristic. Skill only needs `effective_tier` for gating; the individual fields are for debugging/transparency.
 
 ❯ write to plan md
-### Re: Wrote implementation plan (HEAD)
+### Re: Wrote implementation plan
 
 Wrote the model-tier implementation plan to `src/agent-doc/plan.md` (replacing the previous concurrent-session-safeguards plan, which was stale). Now running on opus.
 
@@ -521,19 +521,59 @@ Each layer has a `make check` gate. Tests are specified per layer (frontmatter p
 - Skill gate is pure comparison (`effective_tier > current_tier`) — no semantic reasoning required, so haiku-tier models execute the gate reliably
 
 Ready to execute layer-by-layer on your signal, or tweak the plan first.
-<!-- agent:boundary:31452d46 -->
+❯ do
+❯ - [ ] Layer 0: `Tier` enum + config `[model.tiers.<harness>]` + harness detection
+❯ - [ ] Layer 1: `agent_doc_model_tier` frontmatter parsing
+❯ - [ ] Layer 2: `&lt;!-- agent:model --&gt;` component read in preflight layout check
+❯ - [ ] Layer 3: inline `/model <x>` diff scanner with code-fence/blockquote guards, strip from diff
+❯ - [ ] Layer 4: diff heuristic `suggested_tier` from `diff_type` + path
+❯ - [ ] Layer 5: `effective_tier` composition + preflight JSON fields
+❯ - [ ] Layer 6: skill gate logic in SKILL.md (`effective_tier` comparison)
+❯ - [ ] Layer 7: docs, VERSIONS.md entry, version bump, final `make check`
+
+❯ Write response patch
+
+### Re: All 8 layers complete ✅ (HEAD)
+
+Executed all 8 layers successfully. Status:
+
+**Layers 0–5 Implementation:**
+- **Layer 0:** `Tier` enum (Auto < Low < Med < High) + `[model.tiers.<harness>]` config maps (claude-code → haiku/sonnet/opus, codex → gpt-4o-mini/gpt-4o/o3, default built-in). Harness detection reads `CLAUDE_CODE_SESSION` / `CLAUDECODE` / `CODEX_SESSION` env vars.
+- **Layer 1:** `agent_doc_model_tier: auto | low | med | high` frontmatter field with serde aliases and `skip_serializing_if = "Option::is_none"`.
+- **Layer 2:** `extract_model_component(content)` reads `&lt;!-- agent:model --&gt;` component + `component_value_to_tier()` resolves it to tier.
+- **Layer 3:** `scan_model_switch(diff, harness, config)` scans added lines for `/model <x>` pattern (tier names or concrete model names), guards against code-fence and blockquote, strips matched lines from diff before downstream classification. Returns `ModelSwitchScan { model_switch, model_switch_tier, stripped_diff }`.
+- **Layer 4:** `suggested_tier(diff_type, lines_added, doc_path)` heuristic bumps one tier for paths (`tasks/software/`, `/specs/`, `/plan.md`, `plan-`, `agent-doc-bugs`) or substantial diffs (approval/implementation/architecture with 50+ lines).
+- **Layer 5:** `compose_effective_tier(model_switch_tier, component_tier, frontmatter_tier, suggested)` precedence chain: first non-auto wins. Preflight JSON adds 5 fields: `effective_tier`, `required_tier`, `suggested_tier`, `model_switch`, `model_switch_tier`.
+
+**Layer 6 — SKILL.md Gate Logic:**
+- Step 0c added: "Model tier gate (harness-agnostic)" section.
+- Skill reads `effective_tier` and gates: if `required_tier` set and lower than current session tier, ask user to `/model` and re-invoke. Otherwise, proceed (advisory if `effective_tier > current_tier` for substantial tasks).
+- Updated JSON sample in step 0 docs.
+
+**Layer 7 — Release:**
+- Version bumped: `0.31.31 → 0.32.0` (Cargo.toml, pyproject.toml, SKILL.md frontmatter).
+- VERSIONS.md entry added (summarizes all 5 features + 48 tests).
+- CLAUDE.md module layout updated with `model_tier.rs` line.
+- Final `make check`: 262 lib tests, 823 total tests, all passing, clippy clean.
+
+**Test coverage:** 48 unit tests in `model_tier.rs` (tier enum ordering, config round-trip, harness detection, component parse, diff scanner with guards, heuristic path boosts, composition precedence, JSON serialization).
+
+**Next step:** Per CLAUDE.md release process, gate is manual testing: `cargo install --path .` then verify the feature in a live session before publishing upstream to crates.io / PyPI / GitHub Releases.
+<!-- agent:boundary:fc8d68e0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Layer 0: `Tier` enum + config `[model.tiers.<harness>]` + harness detection
-- [ ] Layer 1: `agent_doc_model_tier` frontmatter parsing
-- [ ] Layer 2: `&lt;!-- agent:model --&gt;` component read in preflight layout check
-- [ ] Layer 3: inline `/model <x>` diff scanner with code-fence/blockquote guards, strip from diff
-- [ ] Layer 4: diff heuristic `suggested_tier` from `diff_type` + path
-- [ ] Layer 5: `effective_tier` composition + preflight JSON fields
-- [ ] Layer 6: skill gate logic in SKILL.md (`effective_tier` comparison)
-- [ ] Layer 7: docs, VERSIONS.md entry, version bump, final `make check`
-- [ ] Plan written to `src/agent-doc/plan.md` ([done])
+- [x] Layer 0: `Tier` enum + config `[model.tiers.<harness>]` + harness detection
+- [x] Layer 1: `agent_doc_model_tier` frontmatter parsing
+- [x] Layer 2: `&lt;!-- agent:model --&gt;` component read in preflight layout check
+- [x] Layer 3: inline `/model <x>` diff scanner with code-fence/blockquote guards, strip from diff
+- [x] Layer 4: diff heuristic `suggested_tier` from `diff_type` + path
+- [x] Layer 5: `effective_tier` composition + preflight JSON fields
+- [x] Layer 6: skill gate logic in SKILL.md (`effective_tier` comparison)
+- [x] Layer 7: docs, VERSIONS.md entry, version bump, final `make check`
+- [x] Plan written to `src/agent-doc/plan.md` ([done])
+- [ ] Manual testing gate: `cargo install --path .` in live session
+- [ ] Publish to crates.io / PyPI / GitHub Releases
 <!-- /agent:pending -->

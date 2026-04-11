@@ -1409,7 +1409,7 @@ What would you like to try? I'd recommend checking the browser console first (op
 
 ❯ The home page `/` needs to have the product grid sorted by most purchased items desc, excluding sold out items.
 
-### Re: /shop/ cleanup + category row + home sort (HEAD)
+### Re: /shop/ cleanup + category row + home sort
 
 **Confirmed root cause of "multiple grids" on /shop/:**
 Page 6 content is `[products]` shortcode, but WooCommerce also renders its archive loop. `curl /shop/` shows **two** `<ul class="products columns-4">` — one from the shortcode, one from the archive template. They're duplicates.
@@ -1444,12 +1444,40 @@ Your ask: *"the home page needs the product grid sorted by most purchased desc, 
 **Which do you want — A or B?** If (A), do you still want to keep the hero image and "Best Sellers" heading, or just one unlabeled grid?
 
 I'll implement the /shop/ changes now regardless — those are unambiguous. Waiting on your answer for home page.
-<!-- agent:boundary:bccd9d42 -->
+
+❯ do
+❯ - [ ] **/shop/ cleanup** — empty page 6 content; add category row via mu-plugin; keep all 64 products on the shop page for now
+❯ - [ ] **Home page sort decision** — awaiting A/B answer from user (single grid vs. fix existing sections): Option B
+❯ - [ ] **Verify /shop/ responsive grid visually** — confirm 4-col desktop, sensible tablet/mobile, pagination working
+### Re: Done — /shop/ rebuilt + home sorts fixed (HEAD)
+
+**/shop/ — live on staging:**
+1. Page 6 content emptied (removed `[products]` shortcode → no more duplicate grid).
+2. `mrh-shop.php` mu-plugin updated with:
+   - `woocommerce_before_shop_loop` hook renders a 4-col category row (Rod Holders, Rod Holder Bases, HydroWeb Landing Nets, River Anchors).
+   - Auto-pulls category thumbnails from WP when set; falls back to empty placeholder otherwise (Rod Holders has no thumbnail currently — easy to add).
+   - `wp_head` injects scoped CSS (grid 4-col → 2-col tablet → 1-col mobile).
+   - `loop_shop_per_page = -1` preserved per your ask (all products on one page, no pagination).
+3. Verified via `curl`: single `<ul class="products columns-4">`, 51 product `<li>` elements, category row present above.
+
+**Home (`/`) — Option B applied:**
+- Best Sellers: `[products ids="..." orderby="include"]` → `[products per_page="5" columns="5" orderby="popularity" order="DESC"]` (now driven by actual sales data, not hardcoded IDs).
+- Rod Holders section: `orderby="rating"` → `orderby="popularity"`.
+- Rod Holder Bases + More Monster Gear: already `orderby="popularity"` — no change needed.
+- Out-of-stock hidden globally (`woocommerce_hide_out_of_stock_items = yes`) — all sections already exclude them.
+
+**Missing category thumbnails:** Rod Holders category renders empty tile. To fix, upload a category image in WP Admin → Products → Categories → Rod Holders → Thumbnail. Same for any other categories showing empty tiles. (Rod Holder Bases, HydroWeb, River Anchors all have thumbnails already.)
+
+**Caveat:** Only 51 of 64 products render on /shop/ (13 missing). Likely hidden or non-published status — want me to audit the gap?
+
+Check `https://50.28.2.199.nip.io/shop/` and `https://50.28.2.199.nip.io/` to confirm visually.
+<!-- agent:boundary:8cd42cfc -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **/shop/ cleanup** — empty page 6 content; add category row via mu-plugin; switch `loop_shop_per_page` from -1 to 24
-- [ ] **Home page sort decision** — awaiting A/B answer from user (single grid vs. fix existing sections)
-- [ ] **Verify /shop/ responsive grid visually** — confirm 4-col desktop, sensible tablet/mobile, pagination working
+- [ ] **Visual confirmation from Ron/you** — /shop/ category row + single grid, / product sort
+- [ ] **Rod Holders category thumbnail** — currently empty tile; upload image in WP Admin
+- [ ] **Audit 64 vs 51 product gap on /shop/** — 13 products not rendering; check status/visibility
+- [ ] **Production deploy** — mu-plugin + home/shop content changes are on staging (50.28.2.199.nip.io); DNS already flipped per earlier note, so this IS prod — confirm
 <!-- /agent:pending -->

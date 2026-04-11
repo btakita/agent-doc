@@ -1176,7 +1176,7 @@ docker compose down --remove-orphans
 This removes any containers not defined in the current compose file. Since you only have `wordpress`, `db`, `redis`, and `wpcli` defined, orphans like `app-nginx-1` will be pruned.
 
 Once you confirm this works, I can update the pending task to mark the cleanup done.
-<!-- agent:boundary:d5f84bab -->
+<!-- agent:boundary:a6223091 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

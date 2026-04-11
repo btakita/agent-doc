@@ -298,7 +298,7 @@ Binary stays at v0.31.31 — no Rust changes needed.
 ### Re: Extracted model tier discussion (HEAD)
 
 Model tier design (low/med/high, harness config, complexity heuristics, haiku deferral) extracted to [agent-doc-model.md](agent-doc-model.md).
-<!-- agent:boundary:83ca53e3 -->
+<!-- agent:boundary:24619938 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -486,7 +486,7 @@ Fixed ✓ — updated CSS to force exactly 4 columns using `!important`:
 This overrides WooCommerce's default width calculations and locks each product to 25% width.
 
 Pushed: `8ad61cd`.
-<!-- agent:boundary:b4a19a52 -->
+<!-- agent:boundary:13b3d485 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

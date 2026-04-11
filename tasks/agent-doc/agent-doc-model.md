@@ -521,7 +521,7 @@ Each layer has a `make check` gate. Tests are specified per layer (frontmatter p
 - Skill gate is pure comparison (`effective_tier > current_tier`) — no semantic reasoning required, so haiku-tier models execute the gate reliably
 
 Ready to execute layer-by-layer on your signal, or tweak the plan first.
-<!-- agent:boundary:c9f3f36e -->
+<!-- agent:boundary:31452d46 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

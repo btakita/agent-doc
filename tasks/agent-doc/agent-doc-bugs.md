@@ -82,7 +82,7 @@ The binary would check usage against the threshold and return `recommended_model
 **Concrete next step:** Add `recommended_model: Option<String>` to preflight JSON (based on diff complexity + frontmatter), and have the skill surface it when it differs from the current session model. Usage integration can be a follow-on once we know where Claude Code writes usage data.
 
 Want to spec this out as a feature?
-<!-- agent:boundary:f5ddf3a2 -->
+<!-- agent:boundary:e27d6c29 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

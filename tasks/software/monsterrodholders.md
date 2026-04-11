@@ -1957,7 +1957,7 @@ No CSS changes needed — removed the need for `.home .entry-content { margin-to
 Hard-refresh `/` and confirm — the hero should start flush below the opaque header row, same vertical rhythm as `/about-us/`.
 
 ❯ The aside on each page should be sticky underneath the header. Meaning, as someone scrolls down the page, the aside should remain in the same position in the viewport.
-### Re: Sticky sidebar enabled ✓ (HEAD)
+### Re: Sticky sidebar enabled ✓
 
 Two changes to make the aside sticky underneath the header on all pages.
 
@@ -2001,7 +2001,32 @@ The header has `data-sticky="shrink"`, so `--header-sticky-height` is live and t
 Cache flushed. Scroll `/`, `/shop/`, `/blog/` — the aside should pin to the top of the viewport (offset by the sticky header) and stay visible while `<main>` scrolls past it.
 
 If `--sidebar-offset` needs tuning (currently defaulting to 50px — that's additional gap below the header), let me know and I'll add an override.
-<!-- agent:boundary:8f0f0250 -->
+
+❯ On /shop/, remove the .widget-title element with "Product Categories" in the aside.
+### Re: Product Categories widget title removed ✓ (HEAD)
+
+The "Product Categories" heading came from widget instance `woocommerce_product_categories-13` stored in the `widget_woocommerce_product_categories` option. Cleared the `title` field on that instance:
+
+```bash
+# Fetched JSON, emptied title on instance 13, wrote back
+wp option get widget_woocommerce_product_categories --format=json
+# → "13": {"title": "Product Categories", ...}
+wp option update widget_woocommerce_product_categories --format=json < /tmp/updated.json
+# → "13": {"title": "", ...}
+wp cache flush
+```
+
+**Verified** — `/shop/` source now emits the widget without the `<h3 class="widget-title">`:
+
+```html
+<div class="ct-widget woocommerce widget_product_categories" id="woocommerce_product_categories-13">
+  <ul class="product-categories">
+    <li>Accessories</li>
+    ...
+```
+
+Zero occurrences of "Product Categories" remain on the page (previously the h3 was the only one). The category list itself is unchanged.
+<!-- agent:boundary:f7813f71 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

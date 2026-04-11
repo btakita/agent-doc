@@ -16,6 +16,7 @@ agent-doc v0.31.31 — JB plugin v0.2.56 fix pending install
 
 <!-- agent:exchange patch=append -->
 v0.31.18–v0.31.31 bug fixes + IDE comparison + model tier design (extracted to agent-doc-model.md) + IPC post-write commit no-op fix (JB plugin v0.2.56). Open: plugin install pending, neovim integration decision pending.
+<!-- agent:boundary:e26c3a0f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

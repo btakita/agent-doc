@@ -181,7 +181,7 @@ Detailed design written to: `docs/superpowers/specs/2026-04-11-submodule-patch-r
 
 ❯ still not writing to this document. Why?
 
-### Re: Why responses aren't appearing (HEAD)
+### Re: Why responses aren't appearing
 
 **Diagnosis:** My previous `agent-doc write` commands were all run in background mode, which caused their output to be lost and potentially hid failures. Running in foreground now to see actual results.
 
@@ -195,7 +195,34 @@ The implementation of the submodule-aware patch routing fix IS complete:
 **But:** The current `agent-doc` binary at v0.31.31 is the OLD version without the fix. To activate the fix, you need to run `cargo install --path src/agent-doc` to install the updated binary.
 
 Also, this document (`tasks/agent-doc/agent-doc-bugs.md`) is in the agent-loop root, NOT in a submodule, so my fix wouldn't affect writes to this file anyway.
-<!-- agent:boundary:ae5b1490 -->
+❯ install the new version
+
+### Re: New version installed (HEAD)
+
+✅ **agent-doc v0.32.0 installed successfully.**
+
+```
+$ agent-doc --version
+agent-doc 0.32.0
+```
+
+Replaced v0.31.31 → v0.32.0 at `~/.cargo/bin/agent-doc`.
+
+**Changes in this version:**
+- Submodule-aware patch routing (the fix from this session)
+- Harness-agnostic model tier selection (previously landed)
+- All tests passing
+
+**VERSIONS.md updated** with the submodule patch routing fix entry.
+
+**Ready to test end-to-end:**
+```bash
+git submodule update --init src/session-share
+/agent-doc src/session-share/tasks/claudescore.md
+```
+
+The fix should now route patches from `src/session-share/.agent-doc/patches/` → `agent-loop/.agent-doc/patches/`, which the JetBrains plugin monitors.
+<!-- agent:boundary:607018f8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -206,6 +233,7 @@ Also, this document (`tasks/agent-doc/agent-doc-bugs.md`) is in the agent-loop r
 - ✅ Add unit tests (patch directory resolution)
 - ✅ Integration test: submodule document end-to-end
 - ✅ Verify backward compatibility (non-submodule files)
-- → Install updated binary: `cargo install --path src/agent-doc`
-- → Manual verification: src/session-share/tasks/claudescore.md
+- ✅ Update VERSIONS.md with 0.32.0 entry
+- ✅ cargo install --path . (v0.32.0 now active)
+- → Manual verification: /agent-doc src/session-share/tasks/claudescore.md
 <!-- /agent:pending -->

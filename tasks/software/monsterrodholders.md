@@ -286,7 +286,7 @@ Changed from 100px → 140px in custom CSS (post 86030). Live on `https://50.28.
 ❯ Look in the history of the monsterrodholders-dev repo. Use the previous hero image on the home page instead of the current hero image.
 ❯ write response to this file
 **Pushed:** `9d4ba48` (via `wp-to-git.sh`)
-### Re: previous hero image lookup (HEAD)
+### Re: previous hero image lookup
 
 **Searched monsterrodholders-dev history:**
 
@@ -310,7 +310,40 @@ What should the previous hero image be?
 Once you clarify, I can update the home page Blocksy cover block to use the correct image.
 
 **Pushed:** `9d4ba48` (via `wp-to-git.sh`)
-<!-- agent:boundary:0765ed97 -->
+❯ Print all of the available image urls
+### Re: all available image URLs (HEAD)
+
+**1,646 original images** found in the uploads volume. Full list saved to:
+
+[tasks/software/monsterrodholders-image-urls.txt](monsterrodholders-image-urls.txt)
+
+**Likely hero/banner candidates** (filtered for slide, banner, feature):
+
+```
+https://50.28.2.199.nip.io/wp-content/uploads/2015/01/banner-2.jpg
+https://50.28.2.199.nip.io/wp-content/uploads/2015/01/banner-3.jpg
+https://50.28.2.199.nip.io/wp-content/uploads/2016/06/slide-1.jpg  ← current hero
+https://50.28.2.199.nip.io/wp-content/uploads/2017/09/ANCHOR-BLACK-FEATURE.jpg
+https://50.28.2.199.nip.io/wp-content/uploads/2017/09/MONSTER-ROD-HOLDERS-O.G.-FEATURE-1.jpg
+https://50.28.2.199.nip.io/wp-content/uploads/2017/09/MONSTER-ROD-HOLDERS-O.G.-FEATURE-2.jpg
+https://50.28.2.199.nip.io/wp-content/uploads/2017/09/MONSTER-ROD-HOLDERS-O.G.-FEATURE.jpg
+https://50.28.2.199.nip.io/wp-content/uploads/2019/09/Monster-Rod-Holders-Banner-2-Monster-Cat-Base.jpg
+https://50.28.2.199.nip.io/wp-content/uploads/2019/09/Monster-Rod-Holders-Banner-Monster-Cat-Base.jpg
+https://50.28.2.199.nip.io/wp-content/uploads/2019/10/Monster-Rod-Holders-Banner-33-45-tandem-pack-1.jpg
+https://50.28.2.199.nip.io/wp-content/uploads/2019/10/Monster-Rod-Holders-Banner-33-45-tandem-pack.jpg
+https://50.28.2.199.nip.io/wp-content/uploads/2019/11/Monster-Rod-Holders-Banner-free-shipping.jpg
+https://50.28.2.199.nip.io/wp-content/uploads/2020/04/MONSTER-ROD-HOLDER-TALON-SERIES-FEATURE-1.jpg
+https://50.28.2.199.nip.io/wp-content/uploads/2020/04/MONSTER-ROD-HOLDER-TALON-SERIES-FEATURE-2-1.jpg
+https://50.28.2.199.nip.io/wp-content/uploads/2020/04/MONSTER-ROD-HOLDER-TALON-SERIES-FEATURE-2.jpg
+https://50.28.2.199.nip.io/wp-content/uploads/2020/04/MONSTER-ROD-HOLDER-TALON-SERIES-FEATURE.jpg
+https://50.28.2.199.nip.io/wp-content/uploads/2020/06/banner.jpg
+https://50.28.2.199.nip.io/wp-content/uploads/2020/08/Free-Shipping-Banner-MRH-Product-1000x200-1.jpg
+https://50.28.2.199.nip.io/wp-content/uploads/2020/08/Free-Shipping-Banner-MRH-Product-1000x200-2.jpg
+https://50.28.2.199.nip.io/wp-content/uploads/2020/08/Monster-Rod-Holders-Banner-free-shipping.jpg
+```
+
+Which one do you want to use as the home page hero?
+<!-- agent:boundary:b1b0d9d7 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

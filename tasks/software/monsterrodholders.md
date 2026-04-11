@@ -1211,7 +1211,7 @@ Let me know how you'd like to proceed, and I'll complete the removal.
 
 ❯ do over ssh
 ❯ - [ ] **Remove News page and navbar item** — delete `/news/` page and News menu item from top navbar
-### Re: News Page & Navbar Item Removed (HEAD)
+### Re: News Page & Navbar Item Removed
 
 **Completed!** Successfully deleted the News page and menu item via Docker + WP-CLI:
 
@@ -1223,7 +1223,23 @@ Let me know how you'd like to proceed, and I'll complete the removal.
 5. Verified: `/news/` now returns 404 "Page not found"
 
 The top navbar no longer shows the News link, and the page is fully removed from the site.
-<!-- agent:boundary:f7fb344c -->
+
+❯ Restore the blog content on /blog
+### Re: Restore the blog content on /blog (HEAD)
+
+Root cause: `page_for_posts` was set to `0` — WordPress had no page designated for the blog posts index, even though the "Blog" page (ID 22, slug `blog`) existed and was published.
+
+Fix applied:
+
+```bash
+wp option update page_for_posts 22   # point blog roll to /blog/
+wp rewrite flush                      # rebuild permalink rules
+```
+
+**Verified:** `https://monsterrodholders.com/blog/` → `HTTP/2 200` ✓
+
+Posts are now served at `/blog/`. The Footer "Blog" link (Col3 Company) already pointed to `/blog/` so no menu changes needed.
+<!-- agent:boundary:1981543c -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

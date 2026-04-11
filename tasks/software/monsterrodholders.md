@@ -1303,7 +1303,7 @@ If you want different breakpoints (e.g. 2 cols on tablet instead of 3), send a s
 **Verify:** Hard-refresh `https://monsterrodholders.com/shop/` — all 57 products should appear sorted by sales volume, no pagination, no sold-out items.
 
 ❯ No products are showing up on https://50.28.2.199.nip.io/shop/
-### Re: No products showing on staging /shop/ (HEAD)
+### Re: No products showing on staging /shop/
 
 The changes I made were on the production site (`monsterrodholders.com`). The staging environment (`50.28.2.199.nip.io`) likely isn't synced yet or is missing the critical piece: **the mu-plugin** at `/var/www/html/wp-content/mu-plugins/mrh-shop.php` that enables showing all products.
 
@@ -1331,7 +1331,27 @@ The changes I made were on the production site (`monsterrodholders.com`). The st
 **Next steps:** 
 - Share the page source or the output from those WordPress commands, and I'll pinpoint the exact issue.
 - If staging needs a fresh WooCommerce config or the mu-plugin deployed, I can walk through that setup.
-<!-- agent:boundary:e600c564 -->
+
+❯ Use ssh to do this yourself.
+### Re: No products on staging — ROOT CAUSE FOUND & FIXED (HEAD)
+
+**The problem:** WooCommerce was configured to use the wrong shop page.
+
+- `woocommerce_shop_page_id = 81` (a page called "Products" at `/products/`)
+- But the actual shop page is `ID 6` (called "Shop" at `/shop/`)
+- When users visit `/shop/`, WooCommerce doesn't recognize it as the shop and doesn't render the products loop
+
+**The fix:** Updated WooCommerce to use the correct shop page:
+
+```bash
+docker exec app-wordpress-1 wp option update woocommerce_shop_page_id 6 --allow-root
+docker exec app-wordpress-1 wp rewrite flush --allow-root
+```
+
+**Verified:** Reloading `https://50.28.2.199.nip.io/shop/` now shows 64 products in a 4-column grid, sorted by popularity (most sold), with sold-out items hidden. ✓
+
+This should also be resolved on production once DNS switches fully to 50.28.2.199.
+<!-- agent:boundary:44e0ed08 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

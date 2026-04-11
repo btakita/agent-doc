@@ -15,7 +15,7 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange patch=append -->
 WordPress migration, Docker stack, layout refinements (hero, grids, sticky sidebar), DNS flip pending certbot
-<!-- agent:boundary:1009c13e -->
+<!-- agent:boundary:d1bbf22b -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

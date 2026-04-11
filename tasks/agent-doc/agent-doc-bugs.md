@@ -144,7 +144,7 @@ cd src/session-share && git add tasks/claudescore.md && git commit -m "agent-doc
    Then configure agent-doc to write there for submodules.
 
 **Recommendation:** Option 1 (binary change) is cleanest. Have agent-doc detect submodule context and write patches to parent, tagged with submodule path so plugin can route them correctly.
-<!-- agent:boundary:0e0aff99 -->
+<!-- agent:boundary:09e2ba4c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

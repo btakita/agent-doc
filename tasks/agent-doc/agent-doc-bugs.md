@@ -786,12 +786,23 @@ When preflight runs for any document, scan all tracked docs in the same project 
 
 Fix 1, 2, 3 are low-effort and eliminate the known cases. Fix 5 is the reliable backstop — even if a new edge case appears, the next preflight cleans it up.
 ❯ Extract to a spec md file.
-### Re: Extract to spec (HEAD)
+### Re: Extract to spec
 
 Done — `tasks/agent-doc/spec-commit-reliability.md`
 
 Covers: all 4 failure modes (IPC timeout hard-exit, `result?` short-circuit, git lock race, session interruption), all 5 fixes with code snippets, and a priority table. Fix 1+2+3 are a single small PR; Fix 5 is a sweep backstop follow-up.
-<!-- agent:boundary:c37d195c -->
+
+❯ do tasks/agent-doc/spec-commit-reliability.md
+### Re: do tasks/agent-doc/spec-commit-reliability.md (HEAD)
+
+Implemented Fixes 1–3 from the spec:
+
+- **Fix 1** (`write.rs`) — snapshot + `git::commit` before `process::exit(75)`. Agent response is now committed even when the plugin patch is pending.
+- **Fix 2** (`main.rs`) — commit runs before `result?` propagates, so partial writes that saved the snapshot are always tracked.
+- **Fix 3** (`git.rs`) — retry loop (3x, 100/200/400ms backoff) on `index.lock` contention from concurrent sessions.
+
+Build: clean. Fixes 4 and 5 deferred per spec priority table.
+<!-- agent:boundary:0eb39919 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

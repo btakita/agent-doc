@@ -27,7 +27,7 @@ v0.31.18–v0.31.31 bug fixes + IDE comparison + model tier design (extracted to
 git submodule update --init src/session-share
 /agent-doc src/session-share/tasks/claudescore.md
 ```
-<!-- agent:boundary:b730624e -->
+<!-- agent:boundary:9949dc19 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

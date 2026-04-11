@@ -1092,7 +1092,7 @@ Also added a redundant `body { --container-spacing: 0px; }` because Blocksy some
 **Verify on mobile:** reload `https://50.28.2.199.nip.io/` in DevTools device mode (or a phone) at ≤689px and the hero cover should now span edge-to-edge. If it still looks cropped, send another screenshot and I'll inspect the computed styles — there may be a `.wp-block-cover` `align=` constraint I need to override too.
 
 ❯ The mobile site is still cropped. Please use chromium-bridge to iterate until the cropping is removed.
-### Re: mobile hero cropping — root cause was 90vw container width (HEAD)
+### Re: mobile hero cropping — root cause was 90vw container width
 
 **Root cause found.** Blocksy sets `--theme-container-width: min(100%, calc(90vw - 0px*2))`, meaning the `.ct-container` is always 90% of viewport width (not 100%). At 390px mobile, the container was only 351px wide, leaving ~20px empty on each side — that's the cropping.
 
@@ -1131,11 +1131,34 @@ The previous CSS fix set `max-width: 100% !important` but missed `width: 100% !i
 Key change: added `width: 100% !important` (was missing) and `--theme-container-width: 100%` to override the 90vw variable. Desktop layout is unchanged.
 
 **Verified:** Simulated mobile conditions in the browser — hero fills `heroX: 0, heroW: viewport` with `heroFillsViewport: true`. Desktop screenshot confirms no regression. Hard-refresh `https://50.28.2.199.nip.io/` on mobile and the hero should now be edge-to-edge.
-<!-- agent:boundary:fbfd78e8 -->
+
+❯ On mobile layout, please add some spacing so the hamburger menu has some space from the right side of the viewpane
+❯ ![img_9.png](img_9.png)
+### Re: mobile header gutter ✓ (HEAD)
+
+Added a mobile-only rule to post 86030 that restores 12px horizontal padding on the header rows only (not content containers, so the hero stays full-bleed):
+
+```css
+/* Mobile header gutter: restore small padding so hamburger/logo aren't flush to viewport edge */
+@media (max-width: 689px) {
+    .ct-header [data-row] {
+        padding-left: 12px !important;
+        padding-right: 12px !important;
+    }
+}
+```
+
+**Why `.ct-header [data-row]` specifically:** Blocksy's header wraps each row (`top`/`middle`/`bottom`) in a `[data-row]` div that sits *outside* `.ct-container`. Padding here gives the logo and hamburger breathing room from both viewport edges without touching the content `.ct-container` rules that the previous fix zeroed out. Hero/product grid full-bleed is unchanged.
+
+**Verified live:** `curl -sk https://50.28.2.199.nip.io/` shows the new rule at line 225 of `<style id="wp-custom-css">`. Hard-refresh on mobile and the hamburger should now sit ~12px from the right edge; the logo matches on the left.
+
+If 12px feels too tight or too loose once you see it, say the number and I'll dial it in (common alternatives: 8px, 16px, or `env(safe-area-inset-right)` if you want iOS notch awareness).
+<!-- agent:boundary:8a5ac565 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] **Verify mobile header gutter visually** — confirm ~12px breathing room on hamburger/logo at ≤689px
 - [ ] **Verify hero full-bleed on actual mobile** — load `https://50.28.2.199.nip.io/` on a phone or DevTools ≤689px and confirm hero spans edge-to-edge
 - [ ] **Lighthouse perf >95 plan** — P0: self-host IBM Plex Mono (OMGF), defer jQuery, nginx Cache-Control headers, fetchpriority=high on cover image, preload LCP image
 - [ ] **Verify hero clearance visually** — confirm logo/title clears the sticky navbar; tweak fallback or offset if needed

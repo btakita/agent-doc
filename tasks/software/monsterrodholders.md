@@ -1669,7 +1669,7 @@ Cache flushed. Verify at `https://50.28.2.199.nip.io/shop/`
 
 ❯ You got it backwards. "Popular Categories" should be a title above the categories block.
 "All Categories" should be removed from the page.
-### Re: Swapped — Popular Categories restored, All Products removed (HEAD)
+### Re: Swapped — Popular Categories restored, All Products removed
 
 Fixed the mu-plugin (`mrh-shop.php`):
 
@@ -1697,7 +1697,32 @@ Cache flushed. Verified — mu-plugin now renders:
 The first one is still in the Shop page's block content (the hero/`.page-description` area). If you want only one, I can remove the page-content `<h2>` via a direct DB update over SSH (`wp post get <id>` / `wp post update`). Want me to do that?
 
 **Clarification on "All Categories":** I didn't find an `All Categories` heading anywhere on the page — only `All Products` (which I removed). I assumed you meant `All Products`. If there's a different `All Categories` you're seeing, screenshot or point me at it.
-<!-- agent:boundary:3105fa14 -->
+
+"All Categories" was changed to "Popular Categories" in the Hero section. Remove this instance of "Popular Categories".
+❯ ![img_10.png](img_10.png)
+### Re: Hero Popular Categories removed (HEAD)
+
+Got it — the hero `<h2>` (previously `All Categories`, renamed to `Popular Categories`) was in the Shop page's block content, not the mu-plugin. Removed it via `wp post update 6`.
+
+**Before:**
+```html
+<!-- wp:heading {"textAlign":"center"} -->
+<h2 class="wp-block-heading has-text-align-center">Popular Categories</h2>
+<!-- /wp:heading -->
+<!-- wp:shortcode -->[product_categories ids="..." columns="4"]<!-- /wp:shortcode -->
+```
+
+**After:** heading block deleted, shortcode kept.
+
+Cache flushed. Page now renders one `Popular Categories` heading — the mu-plugin one above the 4-tile grid:
+
+```
+<h1 class="page-title">Shop</h1>
+<h2 class="mrh-shop-heading">Popular Categories</h2>   ← only instance
+```
+
+Verify: `https://50.28.2.199.nip.io/shop/`
+<!-- agent:boundary:dbd250f0 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
@@ -1705,6 +1730,5 @@ The first one is still in the Shop page's block content (the hero/`.page-descrip
 - [x] **Add category sidebar to /shop** — fixed category display via mu-plugins/mrh-shop.php, showing Rod Holders, Bases, Boat Accessories, Racks
 - [x] **Restore `Popular Categories` heading above grid** in mrh-shop.php
 - [x] **Remove `All Products` heading** from mrh-shop.php
-- [ ] **Remove duplicate `Popular Categories`** from Shop page block content (hero / `.page-description`) — pending user confirmation
-- [ ] **Clarify `All Categories`** reference — no such heading found on page
+- [x] **Remove duplicate `Popular Categories`** from Shop page block content (hero) via `wp post update 6`
 <!-- /agent:pending -->

@@ -384,7 +384,7 @@ Full coverage across both product columns:
 Also fixed: Contact Us link in Col3 was `/?page_id=24` → `/contact/`.
 
 Pushed: `fb659cc`.
-<!-- agent:boundary:2cc64d82 -->
+<!-- agent:boundary:f88d3e02 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1018,7 +1018,7 @@ Compressing `/home/brian/Videos/2026-04-08 15-07-35.mp4` (2.1 GB) → `2026-04-0
 - **Path:** `/home/brian/Videos/2026-04-08 15-07-35-compact.mp4`
 
 transcribe + diarize [2026-04-08 15-07-35-compact.mp4](../../../../../Videos/2026-04-08%2015-07-35-compact.mp4): Brian + robert-ross
-### Re: transcribe + diarize
+### Re: transcribe + diarize (HEAD)
 
 Running `corky transcribe` with diarization on `2026-04-08 15-07-35-compact.mp4` (46:34, speakers: Brian + Robert Ross). GPU transcription in background — will complete in a few minutes.
 
@@ -1219,7 +1219,7 @@ Output files: `*-compressed.mp4` in the same `Videos/` directory. CRF 28 typical
 
 Output: `*-compressed.mp4` in `~/Videos/`. Originals untouched.
 ❯ transcribe + diarize /home/brian/work/btakita/agent-loop/mail/contacts/robert-ross/recordings/phone_20260410-214753_4156839775.m4a
-### Re: transcribe + diarize (HEAD)
+### Re: transcribe + diarize
 
 Transcript written to: [tasks/dreamable/transcripts/phone_20260410-214753_4156839775.md](transcripts/phone_20260410-214753_4156839775.md)
 
@@ -1232,7 +1232,7 @@ Summary of the call:
 - **Scoring API confusion:** Rob was conflating "Brian's score" with the "scoring API" service. Brian clarified: the task was to run the scoring API against Brian's session transcript + CLAUDE.md, compare output to expected 82/100, then diff factor-by-factor to identify miscalibrated eval prompts.
 - **Two scoring methodologies:** Rob has his own set of factors; Brian has his (from the original rubric). ~100 factors each. Rob's phrasing ("two factors") was imprecise — Brian corrected: two sets of scoring methodologies, not two individual factors.
 - **Call cut short:** Rob had another call come in at ~4:46 and had to drop. They ended roughly aligned ("I think we're in agreement").
-<!-- agent:boundary:f960e242 -->
+<!-- agent:boundary:664c5131 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

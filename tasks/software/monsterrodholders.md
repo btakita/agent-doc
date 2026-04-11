@@ -769,7 +769,7 @@ This will create `/etc/nginx/certs/fullchain.pem` and nginx will start automatic
 **Temporary access:** WordPress is live at `http://127.0.0.1:8080/` (HTTP-only, no SSL) for development/verification until DNS propagates.
 
 ❯ https://50.28.2.199.nip.io/ is down
-### Re: nip.io down — Fixed ✓ (HEAD)
+### Re: nip.io down — Fixed ✓
 
 **Root cause:** Earlier I ran `pkill -9 httpd` to free port 80 for certbot. That killed the **host Apache** — which turned out to be the actual HTTPS reverse proxy serving `https://50.28.2.199.nip.io/`. I mistakenly thought the Docker nginx container was the proxy, but that container has been in a restart loop for separate reasons (upstream DNS + missing certs for monsterrodholders.com).
 
@@ -790,24 +790,54 @@ Site is fully back online. Sorry for the outage — bad assumption about the pro
 - **Docker WordPress** (`app-wordpress-1`) → origin on 127.0.0.1:8080
 
 When DNS propagates and certbot runs, certificates will go to host Apache via `certbot --apache`, not the Docker nginx.
-<!-- agent:boundary:dcdbb8f4 -->
+
+❯ The fonts are all white and not visible right now at https://50.28.2.199.nip.io/
+
+❯ Edit "Copyright © 2026 - WordPress Theme by CreativeThemes" to "Copyright © 2026 - monsterrodholders.com"
+### Re: fonts are all white and copyright edit (HEAD)
+
+Both fixed live on `https://50.28.2.199.nip.io/`. Cache-bust to verify in your browser.
+
+**Root cause of the white fonts.** Custom CSS post `86030` had this `:root` override:
+
+```css
+:root {
+  --theme-text-color: rgba(255, 255, 255, 0.95); /* Improved from 0.5 for better contrast */
+  --theme-heading-color: #fff;
+}
+nav a { color: #ffffff; background-color: transparent; }
+footer { color: #ffffff; background-color: #333333; }
+```
+
+A prior session mistook the default Blocksy text token (`var(--theme-palette-color-3)` = `#687279`) for "low contrast 0.5 alpha" and rewrote it to near-white. With the site background being `--theme-palette-color-8` (`#ffffff`), that made body copy and headings invisible. The scoped `nav a` and `footer` rules compounded it.
+
+**Fix.** Removed the `:root`, `nav a`, and `footer` blocks entirely via `wp post update 86030`. Kept the rules that are actually scoped correctly:
+- `.wp-block-button__link` — yellow button, black text
+- `[data-products]` — 4-column product grid override
+- `.wp-block-cover` — hero min-height
+
+Body text now resolves to Blocksy's default `var(--theme-palette-color-3)` (#687279), headings to `var(--theme-palette-color-4)` (#131117) — both WCAG-readable on white.
+
+**Copyright edit.** The "WordPress Theme by CreativeThemes" string was Blocksy's default (the `copyright_text` field wasn't set on the footer builder item, so `view.php` fell back to `__('Copyright &copy; {current_year} - WordPress Theme by {theme_author}', 'blocksy')`). Patched `theme_mods_blocksy.footer_placements.sections[0].items.copyright.values.copyright_text` to:
+
+```
+Copyright &copy; {current_year} - monsterrodholders.com
+```
+
+`{current_year}` is a Blocksy token that expands server-side, so it won't need updating in 2027. Live HTML now renders:
+
+```html
+Copyright © 2026 - monsterrodholders.com
+```
+
+**Caveat — not committed to the source tree.** Both changes live in the WordPress DB (`wp_options` and the `custom_css` post), not in `src/monsterrodholders-dev/`. They'll survive restarts but will NOT be reproduced if the DB is restored from an older dump. If you want these persisted to git, the `wp-to-git.sh` sync script should pick up the changed options on its next run — worth verifying.
+<!-- agent:boundary:1556a674 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] **Lighthouse perf >95 plan** — P0: self-host IBM Plex Mono (OMGF), defer jQuery, nginx Cache-Control headers, fetchpriority=high on cover image, preload LCP image
-- [ ] **Lighthouse polish** — P1: WebP/AVIF conversion, combine Blocksy CSS bundles
-- [ ] **SEO 85→95** — add homepage meta description (Blocksy SEO or Yoast)
-- [ ] **A11y 91→95** — fix color-contrast + missing image-alt flagged in report
-- [ ] Add Facebook/Instagram to top bar (need URLs from Ron)
-- [ ] Delete Recently Viewed Products page (18849)
-- [ ] DNS propagating → run certbot when `dig monsterrodholders.com` returns 50.28.2.199
-- [ ] Respond to 9 real customer order inquiries in comment hold queue
-- [ ] Copy remaining uploads (verify completeness)
-- [ ] padding-top: 140px live — verify navbar overlap resolved after DNS flip
-- [ ] Re-run Lighthouse after perf fixes land
-- [x] Mobile 1-column product grid ✓ (7a5bf4e)
-- [x] SEO noindex fix ✓ (50 → 85, `blog_public=1`)
-- [x] Site URL http→https ✓ (41,985 DB replacements, b04bc36)
-- [x] Logo sizes fix ✓ (2048w → 300w variant via `wp_calculate_image_sizes` filter)
+- [ ] **Verify `wp-to-git.sh` captures DB-side fixes** — confirm the sync script picks up the `custom_css` post edit and `theme_mods_blocksy` copyright patch on next run; otherwise these fixes are not reproducible from source
+- [ ] **Certbot run after DNS flips to 50.28.2.199** — `ssh root@50.28.2.199 "certbot --apache -d monsterrodholders.com -d www.monsterrodholders.com"`
+- [ ] **Remove broken `app-nginx-1` from docker-compose** — host Apache is the real reverse proxy; Docker nginx is dead code
 <!-- /agent:pending -->

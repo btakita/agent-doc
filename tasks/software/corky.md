@@ -979,7 +979,7 @@ Click **Enable**, wait ~1 minute, then rerun (no OAuth prompt — token already 
 ```bash
 corky doc sheet "https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8eyCijtqqteslsWcvJ1JCM/edit?gid=210871523#gid=210871523" --account brian@dreamable.com
 ```
-<!-- agent:boundary:ba25d2c6 -->
+<!-- agent:boundary:7bbe1e82 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

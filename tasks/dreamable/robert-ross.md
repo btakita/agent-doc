@@ -1210,7 +1210,7 @@ Both compressions running in background (ffmpeg, CRF 28, AAC 128k):
 | `2026-04-09 19-22-02.mp4` | 4.6 GB |
 
 Output files: `*-compressed.mp4` in the same `Videos/` directory. CRF 28 typically yields 60-80% size reduction for screen/meeting recordings while staying watchable. I'll report final sizes when done.
-### Re: compress complete (HEAD)
+### Re: compress complete
 
 | File | Original | Compressed | Reduction |
 |------|----------|------------|-----------|
@@ -1218,7 +1218,21 @@ Output files: `*-compressed.mp4` in the same `Videos/` directory. CRF 28 typical
 | `2026-04-09 19-22-02.mp4` | 4.6 GB | 13.8 MB | 99.7% |
 
 Output: `*-compressed.mp4` in `~/Videos/`. Originals untouched.
-<!-- agent:boundary:6d72f333 -->
+❯ transcribe + diarize /home/brian/work/btakita/agent-loop/mail/contacts/robert-ross/recordings/phone_20260410-214753_4156839775.m4a
+### Re: transcribe + diarize (HEAD)
+
+Transcript written to: [tasks/dreamable/transcripts/phone_20260410-214753_4156839775.md](transcripts/phone_20260410-214753_4156839775.md)
+
+**4:52 call, 2 speakers detected (Brian + Rob)**
+
+Summary of the call:
+
+- **Rob's calibration suggestion:** Use more calibration points beyond just Brian's session — e.g., repos like the Axon winner and Gary Tan's. Rob suggested iterating on scores.
+- **Brian's plan:** Implement recalibration, run it against those other repos, see how it lands.
+- **Scoring API confusion:** Rob was conflating "Brian's score" with the "scoring API" service. Brian clarified: the task was to run the scoring API against Brian's session transcript + CLAUDE.md, compare output to expected 82/100, then diff factor-by-factor to identify miscalibrated eval prompts.
+- **Two scoring methodologies:** Rob has his own set of factors; Brian has his (from the original rubric). ~100 factors each. Rob's phrasing ("two factors") was imprecise — Brian corrected: two sets of scoring methodologies, not two individual factors.
+- **Call cut short:** Rob had another call come in at ~4:46 and had to drop. They ended roughly aligned ("I think we're in agreement").
+<!-- agent:boundary:f960e242 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

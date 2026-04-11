@@ -1351,7 +1351,30 @@ docker exec app-wordpress-1 wp rewrite flush --allow-root
 **Verified:** Reloading `https://50.28.2.199.nip.io/shop/` now shows 64 products in a 4-column grid, sorted by popularity (most sold), with sold-out items hidden. ✓
 
 This should also be resolved on production once DNS switches fully to 50.28.2.199.
-<!-- agent:boundary:44e0ed08 -->
+**CORRECTION — Products still not showing. Deeper issue found.**
+
+I updated the shop page ID to the correct page (6), but products still aren't rendering. Investigation shows:
+
+**What's working:**
+- 64 products exist in DB  
+- WooCommerce plugin is active  
+- Config is correct (4 cols, sorted by popularity, hide out-of-stock=yes)
+- mu-plugin is working (`loop_shop_per_page` returns `-1`)
+
+**What's broken:**
+- The shop page HTML has NO products `<li>` elements at all
+- No WooCommerce loop/template being called
+- Page renders header/footer/nav but empty main content
+
+**Root cause:** The page (ID 6) needs a Products block or shortcode to display items. In WordPress/Blocksy, empty shop pages don't auto-render the product list — they need explicit template/block content.
+
+**Next step:** Check whether:
+1. Blocksy has a "Shop" page template that auto-loads products (needs to be assigned to page 6)
+2. Or page 6 needs a `[products]` shortcode added to its content
+3. Or there's a Blocksy-specific WooCommerce integration setting
+
+Can you check the Blocksy theme settings or let me add a Products block to page 6?
+<!-- agent:boundary:367658dc -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

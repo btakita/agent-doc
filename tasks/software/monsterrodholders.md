@@ -1186,7 +1186,7 @@ Once you confirm this works, I can update the pending task to mark the cleanup d
 **Context:** Your production setup (50.28.2.199) runs Apache directly on the server — no Docker. The `docker-compose.yml` in `src/monsterrodholders-dev/` is for local development only and isn't currently running. The broken `app-nginx-1` reference was likely from an old compose configuration that's no longer used.
 
 **Action:** This pending task is not applicable. I'll mark it as skipped.
-<!-- agent:boundary:2fd43d8d -->
+<!-- agent:boundary:bbe2309b -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

@@ -55,7 +55,7 @@ Fix: `wp theme mod set single_page_structure type-4` — aside count on home pag
 Verified: `curl https://50.28.2.199.nip.io/ | grep -c '<aside'` → 0 ✓
 
 Pushed to git: `5caa475`.
-<!-- agent:boundary:c86ea913 -->
+<!-- agent:boundary:7b411597 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

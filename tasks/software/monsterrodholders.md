@@ -1789,7 +1789,7 @@ aside {
     }
 }
 ```
-### Re: Match home layout on /shop/ and /blog/ (HEAD)
+### Re: Match home layout on /shop/ and /blog/
 
 Done. Enabled the Blocksy sidebar on both listing pages and replaced the home-only sidebar CSS with a global rule.
 
@@ -1846,7 +1846,52 @@ Verify in the browser:
 **Notes on `<article>` wrapping:**
 - `/` (home) and `/blog/` both emit `<article>` wrappers (page body + per-post cards respectively) — unchanged.
 - `/shop/` (WooCommerce category archive) does not wrap the product loop in `<article>`; Blocksy/Woo emits a `<div class="products">` grid inside `<main>`. The sidebar layout now matches the home page, but the product listing itself is still a product grid rather than an article element — that's a WooCommerce structural choice, not a theme-mod toggle. Let me know if you want the products grid wrapped in an `<article>` via a template override.
-<!-- agent:boundary:ae08f109 -->
+
+❯ Remove the padding-top custom css for the aside on all pages. The aside content should be flush with the top of its container element.
+❯ The home page needs a different treatment. The .entry-content on the home page always needs to be below the top navbar. `margin-top: 100px` seems reasonable.
+### Re: Flush aside, home-only entry-content margin (HEAD)
+
+Done. Swapped the sidebar padding rule for a home-scoped `.entry-content` margin.
+
+**Custom CSS (post 86030):**
+
+Removed:
+```css
+/* Global aside padding-top */
+.sidebar-wrapper,
+aside {
+    padding-top: 75px;
+}
+@media (max-width: 768px) {
+    .sidebar-wrapper,
+    aside { padding-top: 65px; }
+}
+
+/* Home hero clearance (no longer needed — covered by .entry-content margin) */
+.home .wp-site-blocks > .wp-block-cover:first-of-type,
+.home .entry-content > .wp-block-cover:first-of-type {
+    padding-top: calc(var(--header-height, 140px) + 2rem) !important;
+}
+.home .wp-block-cover:first-of-type .wp-block-cover__inner-container {
+    padding-top: 1.5rem;
+}
+```
+
+Added:
+```css
+/* Home page only: push entry-content below sticky navbar */
+.home .entry-content {
+    margin-top: 100px;
+}
+```
+
+Kept the sticky-widgets top-reset rule untouched.
+
+Cache flushed. Verify:
+- https://50.28.2.199.nip.io/ (hero pushed down 100px)
+- https://50.28.2.199.nip.io/shop/ (aside flush with top)
+- https://50.28.2.199.nip.io/blog/ (aside flush with top)
+<!-- agent:boundary:cd7cc453 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
@@ -1858,6 +1903,7 @@ Verify in the browser:
 - [x] **Restore `All Products` heading** above products list
 - [x] **Remove duplicate hero `Popular Categories`** from Shop page block content
 - [x] **Enable Blocksy sidebar on /shop/ and /blog/** (left, matching home page layout)
-- [x] **Global `aside` padding-top CSS** (75px desktop, 65px mobile) replacing `.home`-scoped rule
+- [x] **Remove global aside padding-top** — aside now flush with container top
+- [x] **Home `.entry-content` margin-top: 100px** to clear sticky navbar
 - [ ] *(Optional)* Wrap shop product grid in `<article>` via template override if strict article+aside parity is required
 <!-- /agent:pending -->

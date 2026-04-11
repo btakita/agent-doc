@@ -1268,7 +1268,7 @@ wp post delete 560 557 554 185 182 86034 --force       # attachments
 ```
 
 Remaining posts are all legitimate MRH content (IDs 15864–79564 + Pro Tandem Pac / Catfish Cook Off). `/blog/` now shows only real posts.
-<!-- agent:boundary:d13a096a -->
+<!-- agent:boundary:674aef21 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

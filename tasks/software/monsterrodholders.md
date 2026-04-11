@@ -2001,7 +2001,7 @@ The header has `data-sticky="shrink"`, so `--header-sticky-height` is live and t
 Cache flushed. Scroll `/`, `/shop/`, `/blog/` — the aside should pin to the top of the viewport (offset by the sticky header) and stay visible while `<main>` scrolls past it.
 
 If `--sidebar-offset` needs tuning (currently defaulting to 50px — that's additional gap below the header), let me know and I'll add an override.
-<!-- agent:boundary:e59a1254 -->
+<!-- agent:boundary:8f0f0250 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

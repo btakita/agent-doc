@@ -1239,7 +1239,7 @@ wp rewrite flush                      # rebuild permalink rules
 **Verified:** `https://monsterrodholders.com/blog/` → `HTTP/2 200` ✓
 
 Posts are now served at `/blog/`. The Footer "Blog" link (Col3 Company) already pointed to `/blog/` so no menu changes needed.
-<!-- agent:boundary:1981543c -->
+<!-- agent:boundary:645a7d44 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

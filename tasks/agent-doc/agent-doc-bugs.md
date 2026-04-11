@@ -237,7 +237,7 @@ The skill already reads the document before responding. It looks at:
 - Is "do" adjacent to a plan with numbered steps? → high
 
 **Key split:** binary suggests (from structure), agent decides (from semantics). For short imperatives specifically, the binary defaults to `med` since it can't know the implied scope.
-<!-- agent:boundary:4a96af3a -->
+<!-- agent:boundary:ec6a2dc2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

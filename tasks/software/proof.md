@@ -190,7 +190,7 @@ The overlay would work through the **sync skill**, not by modifying agent-doc's 
 4. You run `/proof sync proof.md` — response + comment reply pushed to Proof
 
 The key design choice: Proof comments are **transient imports** in agent-doc, not permanent storage. The source of truth for comments stays in Proof's marks system. The local annotations are just a bridge for the agent-doc diff cycle.
-<!-- agent:boundary:1697e694 -->
+<!-- agent:boundary:4ad6ed0c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

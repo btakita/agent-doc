@@ -835,5 +835,5 @@ If your primary goal is **building a startup around agent-doc**, approach Nathan
 If your primary goal is **financial stability + working on interesting problems**, option 1 is lower risk and you'd be working on adjacent technology. But you'd be giving up the entrepreneur path.
 
 **The relationship matters more than the pitch.** Since you already know Nathan, lead with the demo, not the ask. Show him what agent-doc does, get his reaction, then discuss which structure makes sense. His response will tell you which option is realistic.
-<!-- agent:boundary:892b7b9c -->
+<!-- agent:boundary:dc976c92 -->
 <!-- /agent:exchange -->

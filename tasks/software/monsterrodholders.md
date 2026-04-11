@@ -1895,7 +1895,7 @@ Cache flushed. Verify:
 ❯ The top banner is now too tall. It should remain 1 small row like it used to be. Remove the custom css and take a screenshot.
 ❯ The main element should be entirely below the header. The top of the aside should be below the header. 
 ❯ ![img_11.png](img_11.png)
-### Re: Remove custom CSS, verify with screenshots (HEAD)
+### Re: Remove custom CSS, verify with screenshots
 
 Done. Removed `.home .entry-content { margin-top: 100px }` from post 86030. Cache flushed.
 
@@ -1917,7 +1917,45 @@ Blog — `./monsterrodholders/blog-after.png`:
 - On `/` the hero image and aside both start flush with the bottom of the header — no overlap
 
 If anything still looks off (e.g. at a different viewport width, or the aside creeping into the header region in your browser), let me know which breakpoint and I'll chase it — from the 1400-wide headless render, the layout matches what you asked for.
-<!-- agent:boundary:d6beb540 -->
+
+❯ The about page main, aside, article are rendered below the header.
+❯ ![img_12.png](img_12.png)
+
+❯ The home page main, aside, article are rendered behind the header. The home page main should also be below the header. Please fix.
+❯ ![img_13.png](img_13.png)
+
+### Re: Home transparent header disabled ✓ (HEAD)
+
+Root cause: the home page (post_id=2) had Blocksy's **transparent header** enabled via a page-id condition. That's why `<header>` rendered with `data-transparent=""` on `/` and opaque on `/about-us/`, `/shop/`, `/blog/` — the transparent variant overlays content, so `<main>`/`<aside>`/`<article>` appeared to sit "behind" the header.
+
+**Found in `theme_mods_blocksy`:**
+```json
+"header_placements": {
+  "sections": [{
+    "settings": {
+      "has_transparent_header": "yes",
+      "transparent_conditions": [
+        {"type":"include","rule":"page_ids","payload":{"post_id":2}}
+      ],
+      "transparent_behaviour": {"desktop": true, "mobile": true}
+    }
+  }]
+}
+```
+
+**Fix** — flipped `has_transparent_header` to `"no"`:
+```bash
+# Dumped theme_mods_blocksy, flipped the flag in Python, wrote back:
+wp option update theme_mods_blocksy --format=json < /tmp/mrh-mods-new.json
+wp cache flush
+```
+
+**Verified** — curl of `https://50.28.2.199.nip.io/` no longer emits `data-transparent=""` on the header div. Header now renders opaque above `<main>` on home, matching about/shop/blog.
+
+No CSS changes needed — removed the need for `.home .entry-content { margin-top }` entirely. The layout is now consistent across all four pages.
+
+Hard-refresh `/` and confirm — the hero should start flush below the opaque header row, same vertical rhythm as `/about-us/`.
+<!-- agent:boundary:a1c22edb -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

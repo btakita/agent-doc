@@ -791,7 +791,7 @@ Fix 1, 2, 3 are low-effort and eliminate the known cases. Fix 5 is the reliable 
 Done — `tasks/agent-doc/spec-commit-reliability.md`
 
 Covers: all 4 failure modes (IPC timeout hard-exit, `result?` short-circuit, git lock race, session interruption), all 5 fixes with code snippets, and a priority table. Fix 1+2+3 are a single small PR; Fix 5 is a sweep backstop follow-up.
-<!-- agent:boundary:34ea84d6 -->
+<!-- agent:boundary:c37d195c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -143,7 +143,7 @@ The padding-top approach didn't work. This suggests either:
 Alternatively, if the navbar is z-index stacking, we might need a different approach (e.g., margin-top on a different element, or adjusting the navbar's positioning).
 
 Once I see the actual DOM, I can provide the correct CSS rule.
-<!-- agent:boundary:88e6c07c -->
+<!-- agent:boundary:8899a2e7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

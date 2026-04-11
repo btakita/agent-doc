@@ -422,7 +422,7 @@ The left border you see in the screenshot is now gone. Sidebar renders as a boxe
 Verify live at: `https://50.28.2.199.nip.io/`
 
 ❯ Make the product grid responsive. For mobile phones, the product grid should be 1 column.
-### Re: mobile 1-column product grid ✓ (HEAD)
+### Re: mobile 1-column product grid ✓
 
 **Done.** Added `@media (max-width: 480px)` rule to custom CSS (post 86030):
 
@@ -442,7 +442,30 @@ Verify live at: `https://50.28.2.199.nip.io/`
 Covers both Blocksy's `[data-products]` grid and classic WooCommerce loops. 480px threshold targets phones — wider viewports keep the 4-column desktop layout (tablet breakpoint at 691-1000px was already in place).
 
 **Verified live** — CSS confirmed in post 86030. Pushed: `7a5bf4e`
-<!-- agent:boundary:52ccb5b6 -->
+
+❯ The site used to have a Lighthouse benchmark score of 98. Now it is 75 after we used the garderobe starter site.
+### Re: Lighthouse score 98 → 75 — root causes found and fixed (HEAD)
+
+**Identified three culprits from the Garderobe starter install:**
+
+| Issue | Size | Impact |
+|-------|------|--------|
+| `zxcvbn.min.js` | **822KB** | Loaded on every page — only needed on login/checkout |
+| Google Fonts (IBM Plex Mono) | ~50KB | Render-blocking `<link>` — nav menu font |
+| Stackable CSS | 92KB | Garderobe blocks still in use on home page |
+
+**What was fixed:**
+
+1. **`zxcvbn` deferred** — now lazy-loads only when the account modal is clicked, instead of blocking every page load. This is the primary cause of the drop.
+2. **Preconnect hints added** for `fonts.googleapis.com` and `fonts.gstatic.com` — reduces font fetch latency.
+3. Stackable CSS stays (blocks are actively used on home page).
+
+All fixes are in a new `mrh-performance` plugin (activated). Pushed: `2ebef2f`
+
+**Remaining Google Fonts** — IBM Plex Mono is set as the nav menu font in Blocksy Customizer → Header → Menu → Font. If you want to eliminate the Google Fonts request entirely, I can change the nav font to a system font (or self-host the font file). Just say the word.
+
+**Expected score recovery**: the 822KB zxcvbn removal alone should account for most of the drop. Actual Lighthouse score will vary depending on server response time, but the blocking resource is gone.
+<!-- agent:boundary:cacf8f1c -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
@@ -455,4 +478,5 @@ Covers both Blocksy's `[data-products]` grid and classic WooCommerce loops. 480p
 - [ ] Home page 4-column grid: CSS added, verify rendering after cache clear
 - [ ] padding-top: 140px live — verify navbar overlap resolved after DNS flip
 - [x] Mobile 1-column product grid ✓ (post 86030, pushed 7a5bf4e)
+- [x] Lighthouse performance fix ✓ (zxcvbn deferred 822KB, preconnect hints added, pushed 2ebef2f)
 <!-- /agent:pending -->

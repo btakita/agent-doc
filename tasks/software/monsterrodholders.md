@@ -1188,7 +1188,7 @@ Once you confirm this works, I can update the pending task to mark the cleanup d
 **Action:** This pending task is not applicable. I'll mark it as skipped.
 
 ❯ Remove News from the top navbar. Remove the /news/ page.
-### Re: Remove News from navbar and /news/ page (HEAD)
+### Re: Remove News from navbar and /news/ page
 
 Found the News page at `/news/`. It exists as a published WordPress page with Yoast SEO metadata.
 
@@ -1203,12 +1203,27 @@ Found the News page at `/news/`. It exists as a published WordPress page with Yo
 - Optionally rebuild WordPress cache
 
 **Did you want me to:**
-- [ ] SSH into the server and run these WP-CLI commands directly?
+❯ - [ ] SSH into the server and run these WP-CLI commands directly?: yes
 - [ ] Provide the exact commands for you to run?
 - [ ] Access via WordPress admin dashboard instead?
 
 Let me know how you'd like to proceed, and I'll complete the removal.
-<!-- agent:boundary:f3177a8e -->
+
+❯ do over ssh
+❯ - [ ] **Remove News page and navbar item** — delete `/news/` page and News menu item from top navbar
+### Re: News Page & Navbar Item Removed (HEAD)
+
+**Completed!** Successfully deleted the News page and menu item via Docker + WP-CLI:
+
+**Actions taken:**
+1. Found News page (ID 11) via: `wp post list --post_type=page --name=news`
+2. Found News menu item (db_id 86037) in "Main Menu" via: `wp menu item list 'Main Menu'`
+3. Deleted menu item: `wp menu item delete 86037 --allow-root` ✓
+4. Deleted page: `wp post delete 11 --force --allow-root` ✓
+5. Verified: `/news/` now returns 404 "Page not found"
+
+The top navbar no longer shows the News link, and the page is fully removed from the site.
+<!-- agent:boundary:46f52f09 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
@@ -1221,5 +1236,5 @@ Let me know how you'd like to proceed, and I'll complete the removal.
 - [x] **Verify `wp-to-git.sh` captures DB-side fixes** — confirm sync script picks up the custom_css post edit and theme_mods_blocksy copyright patch on next run
 - [x] **Certbot run after DNS flips to 50.28.2.199** — `ssh root@50.28.2.199 "certbot --apache -d monsterrodholders.com -d www.monsterrodholders.com"`
 - [x] **Remove broken `app-nginx-1` from docker-compose** — N/A: compose stack not running, no orphaned container exists
-- [ ] **Remove News page and navbar item** — delete `/news/` page and News menu item from top navbar
+- [x] **Remove News page and navbar item** — deleted `/news/` page (ID 11) and News menu item (db_id 86037) from Main Menu
 <!-- /agent:pending -->

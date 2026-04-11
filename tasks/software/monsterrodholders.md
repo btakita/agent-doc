@@ -655,7 +655,7 @@ TBT/CLS/SI are already ~perfect. The 11 points are all in **FCP (3.2)** and **LC
 Want me to start implementing? The fastest route is: (1) install OMGF + Performance Lab plugins, (2) add the nginx cache block, (3) enable Blocksy's Delay JS for jQuery. That's ~15 minutes of work and should land us past 95.
 
 ❯ Write the report to a analysis + plan to a md file
-### Re: Lighthouse Performance Plan (HEAD)
+### Re: Lighthouse Performance Plan
 
 Created detailed implementation plan: **tasks/software/monsterrodholders/lighthouse-perf-plan.md**
 
@@ -673,7 +673,15 @@ The document covers:
 - **Checklist & timeline** for implementation
 
 Ready to execute P0 when you give the signal. Should hit 95+ easily with just plugin installs + one nginx edit.
-<!-- agent:boundary:567a0815 -->
+
+❯ Publish to a secret gist
+### Re: Gist Created (HEAD)
+
+Published to secret gist:
+**https://gist.github.com/btakita/7ded46e63b91b83fe8083fcb761ccec0**
+
+Lighthouse Performance Optimization Plan is now shareable (secret gist — only accessible with link).
+<!-- agent:boundary:88876792 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

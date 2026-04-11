@@ -62,7 +62,7 @@ The first command initializes the `.agent-doc/` directory and config in the subm
 When `src/session-share` lacks `.agent-doc/`, the write fails at step 2: no directory to queue the IPC patch. The plugin can't read it → IPC timeout.
 
 **Architecture:** Snapshots centralize (parent), patches localize (submodule). This allows independent submodule sessions while keeping a unified snapshot history in the parent.
-<!-- agent:boundary:103b76d4 -->
+<!-- agent:boundary:9f206937 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

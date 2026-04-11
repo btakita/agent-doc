@@ -41,7 +41,7 @@ gtk-cursor-theme-size=32
 **Fix 3 — KDE Plasma:** System Settings → Appearance → Cursors → set size there
 
 Log out and back in after editing `/etc/environment` — browsers pick it up on next launch.
-<!-- agent:boundary:0e0648b7 -->
+<!-- agent:boundary:3858c809 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

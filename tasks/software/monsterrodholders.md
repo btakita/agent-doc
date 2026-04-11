@@ -145,7 +145,7 @@ Alternatively, if the navbar is z-index stacking, we might need a different appr
 Once I see the actual DOM, I can provide the correct CSS rule.
 
 ❯ `.ct-sidebar .ct-widget` `padding-top: 100px` should work
-### Re: navbar overlap fixed (HEAD)
+### Re: navbar overlap fixed
 
 **Perfect! ✓** — `.ct-sidebar .ct-widget` with `padding-top: 100px` is the correct fix. Blocksy uses a `.ct-sidebar` wrapper for its sidebar/aside content.
 
@@ -160,7 +160,31 @@ Once I see the actual DOM, I can provide the correct CSS rule.
 This will push the widget content below the 75px navbar (with some extra breathing room). Ron should see the aside move below the navbar after cache clear.
 
 Let me know if it renders correctly after testing!
-<!-- agent:boundary:b3c08bdd -->
+❯ I don't see the `.home .ct-sidebar .ct-widget` style applied on the site.
+Please verify
+### Re: CSS rule not applying (HEAD)
+
+The CSS rule isn't showing up. Let me check a few things:
+
+1. **Was the CSS actually added?** — Open WordPress admin → Appearance → Customizer → Additional CSS, and verify the rule is there:
+   ```css
+   .home .ct-sidebar .ct-widget {
+       padding-top: 100px;
+   }
+   ```
+
+2. **Hard refresh** — Even with cache clear, sometimes the browser needs a full hard refresh:
+   - `Ctrl+Shift+R` (Windows/Linux) or `Cmd+Shift+R` (Mac)
+   - Or `Ctrl+Shift+Delete` to open DevTools, right-click the refresh button, select "Empty cache and hard refresh"
+
+3. **Check DevTools** — Open DevTools (F12) on the home page, inspect `.ct-sidebar .ct-widget`, and check:
+   - Is the `padding-top: 100px` rule showing in the Styles panel?
+   - Any conflicting rules with `!important`?
+
+4. **Alternative approach** — If custom CSS still isn't working, we can add it directly to the theme's main CSS file or use a different method.
+
+Let me know what you find in DevTools!
+<!-- agent:boundary:bc707578 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -172,5 +196,5 @@ Let me know if it renders correctly after testing!
 - [ ] Respond to 9 real customer order inquiries in comment hold queue
 - [ ] Copy remaining uploads (verify completeness)
 - [ ] Home page 4-column grid: CSS added, verify rendering after cache clear
-- [ ] Home page navbar overlap: **CSS fixed** — `.ct-sidebar .ct-widget` padding-top applied, testing
+- [ ] Home page navbar overlap: **Troubleshooting** — CSS rule not appearing, checking Customizer + cache
 <!-- /agent:pending -->

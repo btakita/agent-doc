@@ -1535,7 +1535,7 @@ Found the issue: the `/shop` sidebar was already implemented via a must-use plug
 Changes are live. The sidebar displays as a styled grid above the all-products section with category images and hover effects.
 
 ❯ Remove "Popular Categories" from the /shop hero section.
-### Re: Remove Popular Categories heading (HEAD)
+### Re: Remove Popular Categories heading
 
 **Done.** Updated the mu-plugin to remove the "Popular Categories" heading while keeping the category grid below it.
 
@@ -1592,7 +1592,19 @@ This is a WordPress block that's part of the Shop page content itself (not from 
 5. Publish
 
 The heading is custom page content that needs to be removed from the page editor. Once deleted, only the category grid will remain.
-<!-- agent:boundary:50827c48 -->
+
+❯ Remove it
+### Re: Popular Categories heading removed (HEAD)
+
+**Done.** Removed the "Popular Categories" heading block from the Shop page in WordPress.
+
+The page now displays:
+- Category sidebar grid (Rod Holders, Bases, Boat Accessories, Racks) 
+- "All Products" heading
+- Product list
+
+Verify at `https://50.28.2.199.nip.io/shop/`
+<!-- agent:boundary:446c6f2b -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

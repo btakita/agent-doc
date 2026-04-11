@@ -343,7 +343,7 @@ https://50.28.2.199.nip.io/wp-content/uploads/2020/08/Monster-Rod-Holders-Banner
 ```
 
 Which one do you want to use as the home page hero?
-<!-- agent:boundary:f0ccba12 -->
+<!-- agent:boundary:78e18b55 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

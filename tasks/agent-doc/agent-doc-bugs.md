@@ -49,7 +49,7 @@ agent-doc init src/session-share
 The first command initializes the `.agent-doc/` directory and config in the submodule. Then agent-doc writes will work.
 
 ❯ .agent-doc/ is in agent-loop. Does the claudescore.md snapshot live there?
-### Re: Snapshot location for submodule files (HEAD)
+### Re: Snapshot location for submodule files
 
 **Snapshot location:** Yes, claudescore.md's snapshot will live in `agent-loop/.agent-doc/snapshots/` (computed from the **canonical absolute path** `/home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore.md`).
 
@@ -62,12 +62,22 @@ The first command initializes the `.agent-doc/` directory and config in the subm
 When `src/session-share` lacks `.agent-doc/`, the write fails at step 2: no directory to queue the IPC patch. The plugin can't read it → IPC timeout.
 
 **Architecture:** Snapshots centralize (parent), patches localize (submodule). This allows independent submodule sessions while keeping a unified snapshot history in the parent.
-<!-- agent:boundary:9f206937 -->
+❯ do
+❯ - Run `agent-doc init src/session-share` to create `.agent-doc/patches/` in submodule
+❯ - Then `/agent-doc src/session-share/tasks/claudescore.md` will succeed (snapshot writes to parent, patches queue locally)
+### Re: Initialization and next step (HEAD)
+
+✅ Created `.agent-doc/` structure in submodule:
+- `src/session-share/.agent-doc/{snapshots,patches,baselines,archives}`
+- Copied `components.toml` from parent
+
+Next: Run `/agent-doc src/session-share/tasks/claudescore.md` (Claude Code slash command, not a shell command) to execute the session. That will write back the pending response that failed before.
+<!-- agent:boundary:1dc10c7f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Run `agent-doc init src/session-share` to create `.agent-doc/patches/` in submodule
-- Then `/agent-doc src/session-share/tasks/claudescore.md` will succeed (snapshot writes to parent, patches queue locally)
+- ✅ Initialize `.agent-doc/` in src/session-share ([done])
+- Run `/agent-doc src/session-share/tasks/claudescore.md` to write back the pending response
 <!-- /agent:pending -->

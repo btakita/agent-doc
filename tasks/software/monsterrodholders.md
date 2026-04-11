@@ -429,7 +429,7 @@ Pushed: `40e754d`.
 ❯ Remove `<aside>` from layout.
 
 ❯ On home page, center product grid items.
-### Re: remove `<aside>` + center home page product grid (HEAD)
+### Re: remove `<aside>` + center home page product grid
 
 **`<aside>` removed ✓**
 
@@ -454,7 +454,24 @@ Added to Custom CSS (post 86030):
 ```
 
 Pushed: `bbe512f`.
-<!-- agent:boundary:b3295966 -->
+
+❯ On the home page, the product grid should have 4 rows.
+### Re: product grid layout (HEAD)
+
+**4-column layout added ✓**
+
+Added CSS to force each product item to 25% width (4 per row):
+```css
+/* Force 4-column product grid on home page */
+.woocommerce ul.products li {
+    flex: 0 1 calc(25% - 1em);
+}
+```
+
+This applies to all product grids on the home page (Best Sellers, Rod Holders, Rod Holder Bases, More Monster Gear).
+
+Pushed: `c3ad82a`.
+<!-- agent:boundary:62d31de6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

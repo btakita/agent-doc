@@ -72,7 +72,7 @@ When `src/session-share` lacks `.agent-doc/`, the write fails at step 2: no dire
 - Copied `components.toml` from parent
 
 Next: Run `/agent-doc src/session-share/tasks/claudescore.md` (Claude Code slash command, not a shell command) to execute the session. That will write back the pending response that failed before.
-<!-- agent:boundary:1dc10c7f -->
+<!-- agent:boundary:259fd502 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

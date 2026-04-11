@@ -248,7 +248,7 @@ Open that link in your browser, set a new password, and you'll be in.
 ❯ The About Us pages should be "Meet the Founder of Monster Rod Holders"...not the starter site page.
 ### Re: About Us page redesign
 
-**Done ✓**3
+❯ **Done ✓**3****
 
 - Page at `/about-us` (ID 1780) rebuilt with the Garderobe Stackable layout from `/about-us-2` but filled with real MRH content:
   - Hero: "Meet the Founder of Monster Rod Holders" (h2, 56px)
@@ -261,7 +261,7 @@ Open that link in your browser, set a new password, and you'll be in.
 Pushed: `aaa38a9`.
 
 ❯ Deploy to the website
-### Re: deploy to the website (HEAD)
+### Re: deploy to the website
 
 Server is ready. DNS flip is the one remaining manual step.
 
@@ -289,7 +289,17 @@ This issues the real SSL cert and updates the Apache config. Site will be live w
 Then visit `https://monsterrodholders.com/` (accept the cert warning — temp cert).
 
 Pushed: `0665625`.
-<!-- agent:boundary:e760e5be -->
+❯ No...we are still testing http://50.28.2.199.nip.io/. monsterrodholders.com DNS is not moved yet
+### Re: URL revert — still on nip.io (HEAD)
+
+Got it — premature. Reverted:
+
+- `search-replace monsterrodholders.com → 50.28.2.199.nip.io` (41,998 replacements total)
+- `siteurl` and `home` confirmed back to `http://50.28.2.199.nip.io`
+- Pushed to git: `9babf20`
+
+The DNS flip + URL swap remains a pending step when you're actually ready to go live.
+<!-- agent:boundary:b5c5cbbb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -297,9 +307,8 @@ Pushed: `0665625`.
 <!-- agent:pending patch=replace -->
 - [ ] Add Facebook/Instagram to top bar (need URLs from user)
 - [ ] Verify home page in browser — sticky nav, announcement bar, logo+title, compact height
-- [ ] Verify footer renders 33 links cleanly
 - [ ] Delete Recently Viewed Products page (18849)
-- [ ] DNS flip: point monsterrodholders.com → 50.28.2.199
+- [ ] DNS flip: point monsterrodholders.com → 50.28.2.199 (then re-run URL swap + certbot)
 - [ ] Respond to 9 real customer order inquiries in comment hold queue
 - [ ] Copy remaining uploads (verify completeness)
 <!-- /agent:pending -->

@@ -1917,7 +1917,7 @@ Blog — `./monsterrodholders/blog-after.png`:
 - On `/` the hero image and aside both start flush with the bottom of the header — no overlap
 
 If anything still looks off (e.g. at a different viewport width, or the aside creeping into the header region in your browser), let me know which breakpoint and I'll chase it — from the 1400-wide headless render, the layout matches what you asked for.
-<!-- agent:boundary:531ed218 -->
+<!-- agent:boundary:d6beb540 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

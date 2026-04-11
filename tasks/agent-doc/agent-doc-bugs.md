@@ -785,7 +785,7 @@ When preflight runs for any document, scan all tracked docs in the same project 
 | Fix 4 (plugin post-apply commit) | Low — defense-in-depth | Medium — IPC handler change |
 
 Fix 1, 2, 3 are low-effort and eliminate the known cases. Fix 5 is the reliable backstop — even if a new edge case appears, the next preflight cleans it up.
-<!-- agent:boundary:1f598e95 -->
+<!-- agent:boundary:5dc8d159 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

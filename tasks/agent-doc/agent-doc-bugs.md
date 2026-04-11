@@ -86,7 +86,7 @@ This is expected agent-doc gutter behavior. The `(HEAD)` marker shows "git commi
 **Why it still shows modified:** The preflight did run `agent-doc commit` on claudescore.md (via the sweep), and it succeeded. But the working tree file reflects the boundary state. The next `/agent-doc` run on claudescore.md will clean this up by computing a new boundary.
 
 No action needed — this is correct behavior. The response is safely committed.
-<!-- agent:boundary:7cdadd78 -->
+<!-- agent:boundary:b73df71e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

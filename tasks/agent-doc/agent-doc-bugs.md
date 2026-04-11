@@ -120,7 +120,7 @@ cd src/session-share && git add tasks/claudescore.md && git commit -m "agent-doc
 **Clean state achieved.** The submodule is now ready for `/agent-doc src/session-share/tasks/claudescore.md` to write responses without working tree conflicts. Responses will now land cleanly in the exchange component.
 
 ❯ Still not patching the response
-### Re: Patches not being applied to claudescore.md (HEAD)
+### Re: Patches not being applied to claudescore.md
 
 **Root cause:** The JetBrains plugin only watches the **parent repo's** `.agent-doc/patches/` directory for IPC messages. When you run agent-doc on a submodule file, it writes patches to the **submodule's local** `.agent-doc/patches/`, which the plugin never sees.
 
@@ -144,12 +144,43 @@ cd src/session-share && git add tasks/claudescore.md && git commit -m "agent-doc
    Then configure agent-doc to write there for submodules.
 
 **Recommendation:** Option 1 (binary change) is cleanest. Have agent-doc detect submodule context and write patches to parent, tagged with submodule path so plugin can route them correctly.
-<!-- agent:boundary:cccffef9 -->
+
+❯ do option 1
+❯ write response to this document
+
+### Re: Option 1 Design & Spec (HEAD)
+
+✅ **Design approved and spec written.**
+
+Detailed design written to: `docs/superpowers/specs/2026-04-11-submodule-patch-routing-design.md`
+
+**Key points:**
+- Detect submodule context using `git::resolve_to_git_root()` — returns superproject for submodules
+- Route IPC patches from submodules to parent's `.agent-doc/patches/` directory
+- JSON payload already includes canonical file path, so plugin identification is transparent
+- Both socket and file-based IPC paths affected (only directory changes, not payload)
+- No plugin changes required; no breaking changes to non-submodule files
+
+**Why this works:**
+- Plugin only watches parent `.agent-doc/patches/` — no additional monitoring needed
+- Submodule sessions automatically route patches upward
+- IPC JSON includes absolute file path for targeting
+- Backward compatible
+
+**Changes needed:**
+1. `src/agent-doc/src/write.rs` — modify `try_ipc()` to resolve superproject root for patches directory
+2. Tests — unit tests for patch directory resolution, integration test end-to-end
+<!-- agent:boundary:62d85e35 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Fix agent-doc to write submodule patches to parent `.agent-doc/patches/` with submodule-aware routing
-- Or configure plugin to watch submodule-local `.agent-doc/patches/` directories
+- ✅ Design complete (spec written)
+- Write implementation plan
+- Implement patch routing in write.rs
+- Add unit tests (patch directory resolution)
+- Integration test: submodule document end-to-end
+- Verify backward compatibility (non-submodule files)
+- Manual verification: src/session-share/tasks/claudescore.md
 <!-- /agent:pending -->

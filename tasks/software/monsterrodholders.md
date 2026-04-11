@@ -1647,7 +1647,7 @@ echo '<h2 class="mrh-shop-heading">Popular Categories</h2>';
 ```
 
 Then flush the cache and verify the heading is gone from the page.
-<!-- agent:boundary:a3515995 -->
+<!-- agent:boundary:728d3213 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

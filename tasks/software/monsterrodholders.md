@@ -1535,7 +1535,7 @@ Found the issue: the `/shop` sidebar was already implemented via a must-use plug
 Changes are live. The sidebar displays as a styled grid above the all-products section with category images and hover effects.
 
 ❯ Remove "Popular Categories" from the /shop hero section.
-### Re: Remove Popular Categories heading
+### Re: Remove Popular Categories heading (HEAD)
 
 **Done.** Updated the mu-plugin to remove the "Popular Categories" heading while keeping the category grid below it.
 
@@ -1574,7 +1574,7 @@ Can you confirm: Is the heading in the Blocksy page title area, or embedded in c
 </div>		</header>
 	</div>
 ```
-### Re: Remove Popular Categories heading (HEAD)
+### Re: Remove Popular Categories heading
 
 **Found it!** The heading is in the page-description custom content section:
 
@@ -1592,7 +1592,7 @@ This is a WordPress block that's part of the Shop page content itself (not from 
 5. Publish
 
 The heading is custom page content that needs to be removed from the page editor. Once deleted, only the category grid will remain.
-<!-- agent:boundary:adf2c612 -->
+<!-- agent:boundary:50827c48 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

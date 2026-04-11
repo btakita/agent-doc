@@ -420,7 +420,7 @@ Which do you prefer?
 The left border you see in the screenshot is now gone. Sidebar renders as a boxed section with background color instead of a line separator.
 
 Verify live at: `https://50.28.2.199.nip.io/`
-<!-- agent:boundary:06eedfb8 -->
+<!-- agent:boundary:a7d017e8 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

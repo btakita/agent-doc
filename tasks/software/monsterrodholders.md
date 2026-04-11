@@ -182,7 +182,7 @@ Middle row height reduced from 120px → 75px desktop (65px mobile). Top bar is 
 Pushed to git: `0c42ebb`.
 ❯ Read /home/brian/work/btakita/agent-loop/mail/contacts/ron-berkes/ron-berkes-sms.txt for the latest instructions.
 ❯ We want to use the garderobe starter app to redesign the website. Will customize from there.
-### Re: garderobe starter site import (HEAD)
+### Re: garderobe starter site import
 
 Read Ron's SMS — confirmed Garderobe import path. Ran the full Garderobe starter site install via Blocksy's WP-CLI (`wp blocksy demo install Garderobe`). Design applied.
 
@@ -220,7 +220,14 @@ Pushed to git: `cfa739a`.
 - Facebook/Instagram links for top bar (need URLs from Ron)
 - Color palette tweak for Monster brand (Garderobe is muted neutrals — may want to add accent color)
 - Product card hover effects (Garderobe has a clean overlay — can apply to WC product grid)
-<!-- agent:boundary:62e78610 -->
+
+❯ Use the original hero image on the home page.
+### Re: original hero image (HEAD)
+
+Found the original MonsterRodHolders hero — `slide-1.jpg` from the original 2016 site (ID 7971, `wp-content/uploads/2016/06/slide-1.jpg`). Updated its `guid` to point to the current server URL and swapped it into the home page cover block.
+
+Pushed to git: `55aaf08`.
+<!-- agent:boundary:58bc4ee4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

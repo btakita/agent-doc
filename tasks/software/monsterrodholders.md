@@ -1449,7 +1449,7 @@ I'll implement the /shop/ changes now regardless — those are unambiguous. Wait
 ❯ - [ ] **/shop/ cleanup** — empty page 6 content; add category row via mu-plugin; keep all 64 products on the shop page for now
 ❯ - [ ] **Home page sort decision** — awaiting A/B answer from user (single grid vs. fix existing sections): Option B
 ❯ - [ ] **Verify /shop/ responsive grid visually** — confirm 4-col desktop, sensible tablet/mobile, pagination working
-### Re: Done — /shop/ rebuilt + home sorts fixed (HEAD)
+### Re: Done — /shop/ rebuilt + home sorts fixed
 
 **/shop/ — live on staging:**
 1. Page 6 content emptied (removed `[products]` shortcode → no more duplicate grid).
@@ -1471,12 +1471,29 @@ I'll implement the /shop/ changes now regardless — those are unambiguous. Wait
 **Caveat:** Only 51 of 64 products render on /shop/ (13 missing). Likely hidden or non-published status — want me to audit the gap?
 
 Check `https://50.28.2.199.nip.io/shop/` and `https://50.28.2.199.nip.io/` to confirm visually.
-<!-- agent:boundary:644baa7a -->
+
+On the /shop page, add a Popular Categories title to the categories block. Add All Products title to the products block. 
+### Re: Headings added (HEAD)
+
+Added to `mrh-shop.php` mu-plugin:
+- **"Popular Categories"** `<h2>` above the category row
+- **"All Products"** `<h2>` above the products grid
+- Scoped CSS for `.mrh-shop-heading` (28px, bold, left-aligned, 40px top / 20px bottom margin; first heading gets no top margin)
+
+Deployed + cache flushed. Verified via curl on `https://50.28.2.199.nip.io/shop/` — both headings render in the correct order:
+
+```
+<h2 class="mrh-shop-heading">Popular Categories</h2>
+<div class="mrh-shop-categories">…4 tiles…</div>
+<h2 class="mrh-shop-heading">All Products</h2>
+<ul class="products columns-4">…51 products…</ul>
+```
+<!-- agent:boundary:a911cefd -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Visual confirmation from Ron/you** — /shop/ category row + single grid, / product sort
+- [ ] **Visual confirmation from Ron/you** — /shop/ headings + category row + single grid, / product sort
 - [ ] **Rod Holders category thumbnail** — currently empty tile; upload image in WP Admin
 - [ ] **Audit 64 vs 51 product gap on /shop/** — 13 products not rendering; check status/visibility
 - [ ] **Production deploy** — mu-plugin + home/shop content changes are on staging (50.28.2.199.nip.io); DNS already flipped per earlier note, so this IS prod — confirm

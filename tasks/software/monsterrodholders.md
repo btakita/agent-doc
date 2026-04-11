@@ -767,7 +767,7 @@ ssh root@50.28.2.199 "certbot certonly --standalone -d monsterrodholders.com -d 
 This will create `/etc/nginx/certs/fullchain.pem` and nginx will start automatically on the next `docker compose up`.
 
 **Temporary access:** WordPress is live at `http://127.0.0.1:8080/` (HTTP-only, no SSL) for development/verification until DNS propagates.
-<!-- agent:boundary:81a29cdd -->
+<!-- agent:boundary:e74e36ef -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

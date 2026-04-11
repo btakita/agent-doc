@@ -432,7 +432,7 @@ Preflight reads the component during layout check (step 0). Behavior identical t
 Priority: Option 3 (component) > Option 2 (frontmatter) > Option 1 (inline command) > diff heuristic
 
 All three feed the same `required_tier` / `suggested_tier` fields in preflight JSON. The skill only sees the resolved fields — no need to know which option set them.
-<!-- agent:boundary:72f0cde2 -->
+<!-- agent:boundary:05acb950 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

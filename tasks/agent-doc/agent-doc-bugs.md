@@ -197,7 +197,7 @@ The implementation of the submodule-aware patch routing fix IS complete:
 Also, this document (`tasks/agent-doc/agent-doc-bugs.md`) is in the agent-loop root, NOT in a submodule, so my fix wouldn't affect writes to this file anyway.
 ❯ install the new version
 
-### Re: New version installed (HEAD)
+### Re: New version installed
 
 ✅ **agent-doc v0.32.0 installed successfully.**
 
@@ -222,18 +222,69 @@ git submodule update --init src/session-share
 ```
 
 The fix should now route patches from `src/session-share/.agent-doc/patches/` → `agent-loop/.agent-doc/patches/`, which the JetBrains plugin monitors.
-<!-- agent:boundary:4a9df900 -->
+
+❯ agent-doc run on src/session-share/tasks/claudescore.md strips out the `❯ ` from `do`. Also, an entire response patch has an uncommitted deletion. Why?
+### Re: `❯ ` stripped + uncommitted response deletion (HEAD)
+
+**Both bugs share one root cause:** the v0.32.0 submodule routing fix is incomplete. Patches still land in `src/session-share/.agent-doc/patches/` (NOT the parent), the plugin never applies them, and `agent-doc commit` then stages the snapshot directly into HEAD via `hash-object + update-index` — leaving the working tree untouched. The working tree shows everything the snapshot contains as "deleted."
+
+**Evidence (live in this repo right now):**
+- Stale patch: `src/session-share/.agent-doc/patches/dffaf6f3…json` (66KB, mtime `04:30:46` — same second as commit `8bab63f`)
+- Parent `.agent-doc/patches/`: empty
+- That JSON's keys: `['baseline', 'file', 'patch_id', 'patches', 'unmatched']` — **no `normalize_prefix_lines` field**
+- Its `baseline` contains BOTH `do` (stripped) and `❯ do` (unstripped) — proof the file diverged from snapshot before the write started
+
+**Three concrete bugs in the binary:**
+
+#### 1. `resolve_to_git_root()` doesn't resolve superproject for absolute paths
+
+`src/agent-doc/src/git.rs:58–65` — the absolute-path branch calls `git_toplevel_at(parent)` which returns the **submodule's** toplevel. Only the relative-path branch (line 67–80) calls `git rev-parse --show-superproject-working-tree`. Since callers (preflight, the skill, IDE plugin) all pass canonical absolute paths, the v0.32.0 fix in `try_ipc()` (line 1390) silently routes to the submodule.
+
+**Fix:** absolute branch should also try `--show-superproject-working-tree` first, then fall back to `git_toplevel_at`.
+
+#### 2. Outer write code uses `find_project_root`, not `resolve_to_git_root`
+
+`src/agent-doc/src/write.rs:813–816` — chooses `patches_dir` via `find_project_root()` which walks up looking for `.agent-doc/`. Because we initialized `src/session-share/.agent-doc/` earlier this session, it stops there instead of climbing to parent. The timeout-fallback path at `write.rs:915–967` then writes the stale patch file into the submodule's dir, which the IDE plugin doesn't watch.
+
+**Fix:** outer write should call `resolve_to_git_root()` (post-fix #1) so both the primary and fallback IPC paths target the same parent dir.
+
+#### 3. Timeout fallback drops `normalize_prefix_lines` AND never updates the working tree
+
+`src/agent-doc/src/write.rs:946–967` builds its own `ipc_payload` that omits `normalize_prefix_lines` entirely (compare to `try_ipc()` at `write.rs:1534–1547` which includes it). Then `write.rs:973` saves `content_ours` as snapshot and commits — but **never writes `content_ours` to the file on disk**. So:
+
+- Snapshot = baseline + response + restored `❯ ` prefixes
+- HEAD = snapshot + `(HEAD)` marker (via `hash-object + update-index`)
+- Working tree = pre-write content (no prefixes, no response) ← unchanged
+- `git diff HEAD` shows the entire response + prefix restorations as "deletions"
+
+**Fix:** timeout fallback (and the no-plugin disk path) must atomically write `content_ours` to the file. Otherwise snapshot/file divergence is guaranteed every time the plugin isn't responsive.
+
+**Why the user sees both symptoms together:** the same write cycle (a) restores `❯ ` prefixes in `content_ours`, (b) appends the new `### Re:` section, (c) saves snapshot, (d) commits via index trick, (e) writes a stale patch file to the wrong directory, (f) exits 75. The plugin never sees it. The file on disk remains stuck at step (a)'s input. Both the prefix restorations and the entire response section show as "uncommitted deletions" in `git diff HEAD`.
+
+**Recommended fix order:**
+1. `git.rs` superproject resolution for absolute paths (smallest, unblocks #2)
+2. `write.rs` outer path uses `resolve_to_git_root` (uses #1)
+3. Factor a single `build_ipc_payload()` helper so the primary and fallback paths can't drift on `normalize_prefix_lines` again
+4. Timeout fallback writes `content_ours` to the file before exit(75)
+5. Add a regression test: write to a submodule file with no plugin running → assert (a) patch lands in parent dir, (b) working tree matches snapshot after commit
+
+I can implement these in order if you want — say "do" and I'll start with #1.
+<!-- agent:boundary:f2e89060 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - ✅ Design complete (spec written)
-- ✅ Implement patch routing in write.rs
+- ✅ Implement patch routing in write.rs (v0.32.0 — incomplete, see bugs below)
 - ✅ Add unit tests (patch directory resolution)
 - ✅ Integration test: submodule document end-to-end
 - ✅ Verify backward compatibility (non-submodule files)
 - ✅ Update VERSIONS.md with 0.32.0 entry
 - ✅ cargo install --path . (v0.32.0 now active)
-- → Manual verification: /agent-doc src/session-share/tasks/claudescore.md
+- → **Bug 1**: `resolve_to_git_root` absolute-path branch doesn't try superproject (`git.rs:58–65`)
+- → **Bug 2**: outer write uses `find_project_root` not `resolve_to_git_root` (`write.rs:813`)
+- → **Bug 3**: timeout fallback drops `normalize_prefix_lines` + never writes `content_ours` to disk (`write.rs:946–973`)
+- → Factor `build_ipc_payload()` to prevent primary/fallback drift
+- → Regression test: submodule write with no plugin → patch in parent + WT == snapshot
 <!-- /agent:pending -->

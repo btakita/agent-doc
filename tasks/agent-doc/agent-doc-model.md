@@ -581,7 +581,7 @@ This validates:
 Unit tests (48) already cover: tier enum, frontmatter round-trip, component read, diff scanner guards, heuristic precedence, JSON serialization. This live test confirms the full pipeline.
 
 Ready for manual publish gate: `cargo install --path .`, then push to crates.io / PyPI / GitHub.
-<!-- agent:boundary:b13a6b38 -->
+<!-- agent:boundary:8e747f8e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -45,7 +45,7 @@ ssh root@50.28.2.199 "certbot --apache -d monsterrodholders.com -d www.monsterro
 ```
 
 I can run it for you — just say "run certbot" when DNS is live. Check propagation: `dig +short monsterrodholders.com A`
-<!-- agent:boundary:26f797e6 -->
+<!-- agent:boundary:93d70b42 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

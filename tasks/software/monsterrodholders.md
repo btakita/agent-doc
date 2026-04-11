@@ -301,7 +301,7 @@ Got it — premature. Reverted:
 The DNS flip + URL swap remains a pending step when you're actually ready to go live.
 
 /Use the content in /about-us/ in /about-us-2/
-### Re: /about-us-2 + site access fix (HEAD)
+### Re: /about-us-2 + site access fix
 
 **`/about-us-2` updated ✓**
 
@@ -319,7 +319,19 @@ Verified:
 - `https://50.28.2.199.nip.io/about-us-2/` → 200 ✓
 
 Pushed to git: `6e8f795`.
-<!-- agent:boundary:00506032 -->
+
+❯ Move /about-us-2/ to /about-us/
+### Re: move /about-us-2/ → /about-us/ (HEAD)
+
+Done ✓
+
+- Deleted old page 1780 (`/about-us/`)
+- Renamed page 203 slug: `about-us-2` → `about-us`
+- `https://50.28.2.199.nip.io/about-us/` → 200 ✓
+- `https://50.28.2.199.nip.io/about-us-2/` → 404 (gone) ✓
+
+Pushed: `accb4e9`.
+<!-- agent:boundary:6b17be9a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

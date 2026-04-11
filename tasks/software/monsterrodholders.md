@@ -1560,7 +1560,7 @@ Verify at `https://50.28.2.199.nip.io/shop/`
 The category sidebar grid below is correct — only the hero heading needs to be removed.
 
 Can you confirm: Is the heading in the Blocksy page title area, or embedded in custom shop page content? This will help me pinpoint the exact removal location.
-<!-- agent:boundary:a858a264 -->
+<!-- agent:boundary:8471151a -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

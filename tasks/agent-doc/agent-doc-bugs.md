@@ -841,7 +841,7 @@ Added tests for Fix 4 and Fix 5:
 - `preflight_sweep_commits_other_tracked_docs` — integration test: sets up two docs + a `sessions.json`, makes secondary's snapshot newer than its file (simulating an uncommitted agent write), runs `preflight::run()` on the primary, asserts git log contains `agent-doc(secondary):` — confirming the sweep fired
 
 All 3 pass. Full suite: 515 pass, 1 pre-existing tmux failure.
-<!-- agent:boundary:3ffdb80b -->
+<!-- agent:boundary:44d90e26 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

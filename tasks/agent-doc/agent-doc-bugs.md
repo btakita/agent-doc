@@ -135,7 +135,7 @@ agent_doc_model_tier: auto | low | med | high
 **Harness detection:** Binary can detect from env vars (`CLAUDE_CODE_SESSION`, `CODEX_SESSION`, etc.) or a `harness` field in config.
 
 Want me to draft the spec file for this feature (in `tasks/agent-doc/`)?
-<!-- agent:boundary:e90b0f3a -->
+<!-- agent:boundary:d50f53b9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

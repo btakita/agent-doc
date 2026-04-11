@@ -237,7 +237,7 @@ This is a simple comparison, not semantic reasoning. Even haiku executes it reli
 **The semantic override step is fragile and should be minimized.** Push as much intelligence as possible into the binary's structural analysis. The agent's semantic judgment is only for genuinely ambiguous cases structural signals can't resolve — and even then, the safe default is `med`, not `low`.
 
 ❯ Can we have a high model evaluate the diff and be instructed to dispatch subagents for tasks?
-### Re: Orchestrator pattern — dispatching subagents (HEAD)
+### Re: Orchestrator pattern — dispatching subagents
 
 Yes — that's the orchestrator pattern. It fits tasks where the work is decomposable into parallel subtasks.
 
@@ -288,7 +288,49 @@ Inside is the right default.
 - frontmatter `agent_doc_dispatch: auto | true`
 
 Default off — most tasks don't need it.
-<!-- agent:boundary:e4dea29a -->
+
+/model opus: Can we have the user instruct agent-doc to run a model such as here?  
+### Re: User-instructed model switch via inline `/model` command (HEAD)
+
+**Builtin note:** `/model` is a Claude Code built-in — cannot be executed from within the skill. To switch models interactively, run `/model opus` at the terminal.
+
+**The design question:** Can agent-doc recognize inline `/model <x>` in the document and act on it?
+
+Not directly — the skill can't invoke CC built-ins. But there are three viable paths:
+
+**Option 1: Preflight emits a `model_switch` field**
+
+Preflight recognizes `/model <name>` in the diff, strips it from the diff (not content), and returns:
+```json
+{ "model_switch": "opus", "model_switch_reason": "user inline command" }
+```
+Skill writes a gated note to the document:
+> "Document requested opus. Run `/model opus` at the terminal and re-invoke `/agent-doc`."
+
+This surfaces the request but can't auto-execute. Still useful — user sees a clear action in the document.
+
+**Option 2: Native `agent_doc_model_tier` frontmatter**
+
+Skip inline commands. User writes in frontmatter:
+```yaml
+agent_doc_model_tier: high
+```
+Preflight reads this and emits `recommended_tier: high`. Skill compares against current model, gates if mismatch. This persists across all cycles (not one-shot like an inline command), and works across all harnesses.
+
+**Option 3: `&lt;!-- agent:model --&gt;` component**
+
+A named component that the user edits:
+```markdown
+&lt;!-- agent:model --&gt;
+high
+&lt;!-- /agent:model --&gt;
+```
+Preflight reads it as the tier override. Can be updated by either user or agent. Works without frontmatter editing.
+
+**Recommended:** Option 2 (frontmatter) for persistent tier, Option 1 (preflight flag) for one-shot inline overrides. Option 3 is ergonomic but adds component complexity.
+
+**For this specific use case (user wants opus for a session):** frontmatter `agent_doc_model_tier: high` is the cleanest — set once, respected every cycle, persists in git history.
+<!-- agent:boundary:8db68e84 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

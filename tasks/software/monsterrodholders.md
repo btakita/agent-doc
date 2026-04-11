@@ -468,7 +468,7 @@ All fixes are in a new `mrh-performance` plugin (activated). Pushed: `2ebef2f`
 
 ❯ Please analyze
 ❯ ![img_4.png](img_4.png)
-### Re: Lighthouse analysis — scores 78 / 92 / 77 / 50 (HEAD)
+### Re: Lighthouse analysis — scores 78 / 92 / 77 / 50
 
 **Performance 78** (up from 75 — zxcvbn fix worked). Three additional fixes applied:
 
@@ -499,7 +499,58 @@ The `preconnect` hints for `fonts.googleapis.com` + `fonts.gstatic.com` are in `
 **Pushed:** `adbbbea`
 
 **Note on LCP ceiling:** The server is a bare VPS running Docker (no CDN, no page cache, no object cache). The TTFB likely accounts for ~1–1.5s of the LCP. Once DNS flips to the live domain and you add Cloudflare in front (free tier), expect another 1–2s improvement from edge caching alone. The current numbers are a soft ceiling for this dev setup.
-<!-- agent:boundary:d1013190 -->
+
+❯ Performance got worse
+❯ ![img_5.png](img_5.png)
+### Re: Performance regression — diagnosed actual root causes (HEAD)
+
+**The SEO fix worked: 50 → 85 ✓**. Performance dropped because my preload was broken and I missed a much bigger problem.
+
+**What I found when I dug deeper:**
+
+#### 1. Site URL was `http://` in WordPress
+
+`siteurl` and `home` options were stored as `http://50.28.2.199.nip.io`. Every single asset URL WordPress generated (including my preload) was `http://`, forcing the browser to do HTTP→HTTPS redirect round trips on every resource. This alone was a huge penalty.
+
+**Fixed:**
+```bash
+wp option update siteurl 'https://50.28.2.199.nip.io'
+wp option update home 'https://50.28.2.199.nip.io'
+wp search-replace 'http://50.28.2.199.nip.io' 'https://50.28.2.199.nip.io' --skip-columns=guid
+# 41,985 replacements across 9 tables
+```
+
+#### 2. Logo is 2048×1331 pixels and was loading full-size
+
+The site logo (`monster-rod-holder-logo-2023.png`, 2048×1331) had WordPress's default `sizes="(max-width: 2048px) 100vw, 2048px"`, which tells the browser *"load the full 2048px version"*. The logo displays at ~75px tall in the header — it was loading 27× the needed size.
+
+Worse: WordPress marks the logo as `fetchpriority="high"`, so it was probably the **actual LCP element**, competing with the hero image. My preload of the hero was fighting for bandwidth against a 2048×1331 PNG.
+
+**Fixed** via plugin v1.2 (uploaded via scp this time):
+```php
+add_filter('wp_calculate_image_sizes', function($sizes, $size, $src, $meta, $attachment_id) {
+    if ($attachment_id == 69673) return '75px';  // logo
+    return $sizes;
+}, 10, 5);
+```
+
+Now the browser picks the 300w variant from srcset (~10KB) instead of the 2048w original.
+
+#### 3. The broken hero preload
+
+My preload was outputting `http://` (because siteurl was http://). The browser fetched it, got redirected, wasted the round trip. I removed the preload entirely in v1.2 — once the logo sizes issue is fixed, the browser's native priority hints should handle LCP correctly.
+
+---
+
+**All fixes pushed:** `b04bc36`
+
+**Expected scores next run:**
+- Performance: should recover from 70 back up, likely past 78 (no more http→https redirects + smaller logo)
+- SEO: stays at 85 (noindex is gone)
+- LCP: big improvement expected — 10KB logo vs the 800KB+ full-size render
+
+Re-run Lighthouse and send `img_6.png` when ready.
+<!-- agent:boundary:c78ca464 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
@@ -510,6 +561,9 @@ The `preconnect` hints for `fonts.googleapis.com` + `fonts.gstatic.com` are in `
 - [ ] Respond to 9 real customer order inquiries in comment hold queue
 - [ ] Copy remaining uploads (verify completeness)
 - [ ] padding-top: 140px live — verify navbar overlap resolved after DNS flip
-- [x] Mobile 1-column product grid ✓ (post 86030, pushed 7a5bf4e)
-- [x] Lighthouse: noindex fixed (SEO 50→~90+), hero preload (LCP), preconnect (FCP) — pushed adbbbea
+- [ ] Re-run Lighthouse after b04bc36 to verify recovery
+- [x] Mobile 1-column product grid ✓ (7a5bf4e)
+- [x] SEO noindex fix ✓ (50 → 85, `blog_public=1`)
+- [x] Site URL http→https ✓ (41,985 DB replacements, b04bc36)
+- [x] Logo sizes fix ✓ (2048w → 300w variant via `wp_calculate_image_sizes` filter)
 <!-- /agent:pending -->

@@ -328,7 +328,7 @@ cargo install --path .         # refresh ~/.cargo/bin/agent-doc
 Then re-run `/agent-doc src/session-share/tasks/claudescore.md` and verify the patch lands in `agent-loop/.agent-doc/patches/` instead of the submodule's local dir. Only after that green signal: commit the 04:58 source edits, bump VERSIONS.md, publish.
 
 Want me to run the build + install now so you can verify in a live session?
-<!-- agent:boundary:f11413f0 -->
+<!-- agent:boundary:3aff7aff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

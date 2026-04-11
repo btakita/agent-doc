@@ -270,7 +270,7 @@ The fix should now route patches from `src/session-share/.agent-doc/patches/` �
 
 I can implement these in order if you want — say "do" and I'll start with #1.
 ❯ do
-### Re: Implementation complete (5/5) (HEAD)
+### Re: Implementation complete (5/5)
 
 All five fixes landed. Tests green.
 
@@ -291,18 +291,56 @@ All five fixes landed. Tests green.
 - Two previously-broken tests (`try_ipc_succeeds_when_plugin_consumes`, `try_ipc_snapshot_saves_disk_state`) now pass — they were broken by an earlier draft of `resolve_ipc_project_root` that fell through to CWD; the final version uses `find_project_root` as the non-git fallback so tempdir-based tests stay inside their tempdir.
 
 **Not yet done:** version bump, VERSIONS.md, `cargo install --path .`, manual testing gate, publish. Per release process these wait for your "go" after end-to-end verification in a live submodule session.
-<!-- agent:boundary:a181080e -->
+❯ agent-doc run does not write response patches back into src/session-share/tasks/claudescore.md
+❯ This regression was introduced yesterday. Why is this happening?
+### Re: claudescore.md regression — stale binary (HEAD)
+
+**Root cause: the 5/5 fixes are in source but not in the running binary.** The release binary is two hours older than the fix.
+
+**Evidence:**
+```
+src/git.rs      mtime 04:58:07  (5/5 fixes written)
+src/write.rs    mtime 04:58:07  (5/5 fixes written)
+Cargo.toml      mtime 04:58:07  (M)
+target/release/agent-doc  mtime 02:58:29  ← built BEFORE the fixes
+```
+
+- `.bin/agent-doc` symlinks to `target/release/agent-doc`, so every skill invocation runs the 02:58 binary — an earlier v0.32.0 draft that still routes submodule patches to the submodule's local `.agent-doc/patches/`.
+- `git status` in `src/agent-doc`: `M Cargo.toml`, `M src/git.rs`, `M src/write.rs` — the fixes were never committed.
+- Fresh stale patch: `src/session-share/.agent-doc/patches/dffaf6f3…json` mtime `13:12:19` (just now). Parent `agent-loop/.agent-doc/patches/` still empty. Exactly the v0.31-era behavior the fix was meant to eliminate.
+
+**This is the failure mode called out in `CLAUDE.local.md`:**
+> always run `cargo build --release` inside the submodule after publishing. The `.bin/agent-doc` symlink points to `src/agent-doc/target/release/agent-doc` — without a release build, the symlink target stays stale.
+
+And the 04:58 code edits were never followed by either `cargo build --release` or `cargo install --path .`, so:
+- `~/.cargo/bin/agent-doc` — still old v0.32.0 draft (02:58-era)
+- `.bin/agent-doc` → `target/release/agent-doc` — still old v0.32.0 draft (02:58-era)
+
+The previous "5/5 Implementation complete" response described the code changes accurately, but the release-build step at the end of the fix cycle was skipped. Nothing installed → no regression fix in the running binary → patches still land in the submodule dir → plugin never sees them → working tree diverges from snapshot.
+
+**Fix (manual testing gate, per release runbook):**
+```bash
+cd src/agent-doc
+cargo build --release          # refresh .bin/agent-doc
+cargo install --path .         # refresh ~/.cargo/bin/agent-doc
+```
+
+Then re-run `/agent-doc src/session-share/tasks/claudescore.md` and verify the patch lands in `agent-loop/.agent-doc/patches/` instead of the submodule's local dir. Only after that green signal: commit the 04:58 source edits, bump VERSIONS.md, publish.
+
+Want me to run the build + install now so you can verify in a live session?
+<!-- agent:boundary:f11413f0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- ✅ Bug 1: `resolve_to_git_root` absolute-path branch tries superproject (`git.rs:58–72`)
-- ✅ Bug 2: outer write uses `resolve_ipc_project_root` (`write.rs:177` + 6 call sites)
-- ✅ Bug 3: timeout fallback includes `normalize_prefix_lines` + writes `content_ours` to disk (`write.rs:915–987`)
-- ✅ `git_superproject_at` / `git_toplevel_at` made `pub(crate)` for direct use
-- ✅ Regression test: real submodule via `git submodule add`, asserts file resolves to parent root
-- ✅ Full test suite green except pre-existing route flake (verified via `git stash -u`)
-- → Manual testing gate: verify `❯ ` preservation + working-tree consistency in a live `src/session-share` session
-- → Bump version, update VERSIONS.md, `cargo install --path .`, publish (crates/PyPI/GitHub Release)
+- ✅ Bug 1: `resolve_to_git_root` absolute-path branch tries superproject (`git.rs:58–72`) *(source only, uncommitted)*
+- ✅ Bug 2: outer write uses `resolve_ipc_project_root` (`write.rs:177` + 6 call sites) *(source only, uncommitted)*
+- ✅ Bug 3: timeout fallback includes `normalize_prefix_lines` + writes `content_ours` to disk *(source only, uncommitted)*
+- ✅ Regression test: real submodule via `git submodule add`, asserts file resolves to parent root *(source only, uncommitted)*
+- 🔴 **Running binary is stale** — `target/release/agent-doc` mtime 02:58 < source mtime 04:58. Every skill call still executes pre-fix code. Submodule patches continue to land in `src/session-share/.agent-doc/patches/`.
+- → `cd src/agent-doc && cargo build --release && cargo install --path .` — rebuild before any further manual testing
+- → Manual testing gate: verify `❯ ` preservation + working-tree consistency on live `src/session-share/tasks/claudescore.md`
+- → Commit the 04:58 source edits (git.rs, write.rs, Cargo.toml) once live-tested
+- → Bump version, update VERSIONS.md, publish (crates/PyPI/GitHub Release)
 <!-- /agent:pending -->

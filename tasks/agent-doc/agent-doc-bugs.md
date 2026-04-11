@@ -136,7 +136,7 @@ agent_doc_model_tier: auto | low | med | high
 
 Want me to draft the spec file for this feature (in `tasks/agent-doc/`)?
 ❯ Would some harnesses have more than 3 tiers? Should we use a numeric system?
-### Re: More than 3 tiers? (HEAD)
+### Re: More than 3 tiers?
 
 Some harnesses do have more granularity (OpenAI has gpt-4o-mini, gpt-4o, o1-mini, o3-mini, o3), but that doesn't argue for more tiers in the recommendation system.
 
@@ -160,7 +160,48 @@ o1-mini and o3-mini are available for manual frontmatter override (`agent_doc_mo
 - Extra complexity without benefit
 
 **Conclusion:** Keep `low/med/high`. If a 4th tier proves necessary (e.g., reasoning models for planning), we can add `reasoning` at that point. Don't over-engineer for a hypothetical.
-<!-- agent:boundary:af40a4e7 -->
+
+❯ Ok...how would the complexity be determined? By the default running model?
+### Re: How is complexity determined? (HEAD)
+
+Complexity is determined from signals already computed in preflight — the running model isn't involved. The assessment is about the task, not the model.
+
+**Primary signal: `diff_type`** (already computed by preflight)
+
+| `diff_type` | Tier |
+|---|---|
+| `simple_question` | low |
+| `content_addition` < 10 lines | low |
+| `content_addition` > 10 lines | med |
+| `multi_section` | med |
+| `code_change` / debugging | high |
+| `architecture_change` | high |
+
+**Secondary signals:**
+
+- **Document path:** `tasks/professional/` → low; `tasks/research/` → med; `tasks/software/` → high
+- **Diff size:** line count as a tiebreaker
+- **Frontmatter override:** `agent_doc_model_tier: low|med|high` locks it regardless of heuristics
+
+**Sketch:**
+
+```rust
+fn recommended_tier(diff: &Diff, doc_path: &Path, fm: &Frontmatter) -> Tier {
+    // Frontmatter wins
+    if let Some(t) = fm.agent_doc_model_tier { if t != Auto { return t; } }
+
+    // Diff type is primary
+    match diff.diff_type {
+        SimpleQuestion | SmallContentAddition => Low,
+        ContentAddition | MultiSection => Med,
+        CodeChange | ArchitectureChange => High,
+        _ => Med, // safe default
+    }
+}
+```
+
+The running model is irrelevant to the assessment — `low` means "this task doesn't need a powerful model" regardless of what's currently active. The point is to recommend a switch when the task tier doesn't match the current model.
+<!-- agent:boundary:55d238f6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

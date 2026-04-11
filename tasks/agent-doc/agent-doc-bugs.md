@@ -50,7 +50,7 @@ Compared neovim, vim, zed, vscode (code-server), cursor, for agent-doc integrati
 - IDE integration: decision pending on which editor to implement next for AWS server use
 
 ❯ How can we make agent-doc more intelligent about selecting the optimal model for a particular task. Also taking into account /usage to avoid limits.
-### Re: Intelligent model selection (HEAD)
+### Re: Intelligent model selection
 
 **Model selection signals:**
 
@@ -82,7 +82,60 @@ The binary would check usage against the threshold and return `recommended_model
 **Concrete next step:** Add `recommended_model: Option<String>` to preflight JSON (based on diff complexity + frontmatter), and have the skill surface it when it differs from the current session model. Usage integration can be a follow-on once we know where Claude Code writes usage data.
 
 Want to spec this out as a feature?
-<!-- agent:boundary:e27d6c29 -->
+❯ Yes. I also want to account for codex and other harnesses with different available models.
+❯ What would you recommend? Having a general name (low, med, high)?
+### Re: Model tier spec (HEAD)
+
+**Tier names: `low | med | high`**
+
+Simple, unambiguous, harness-agnostic. The config maps tiers to concrete model names per harness:
+
+```toml
+# .agent-doc/config.toml
+[model]
+auto = true
+budget_threshold = 0.8  # fraction of daily limit; switch to low when exceeded
+
+[model.tiers.claude-code]
+low = "haiku"
+med = "sonnet"
+high = "opus"
+
+[model.tiers.codex]
+low = "gpt-4o-mini"
+med = "gpt-4o"
+high = "o3"
+
+[model.tiers.default]
+low = "haiku"
+med = "sonnet"
+high = "opus"
+```
+
+**Preflight returns tier, not model name:**
+```json
+{
+  "recommended_tier": "low",
+  "recommended_tier_reason": "small diff, content_addition"
+}
+```
+
+The skill resolves tier → concrete model via config + detected harness. This way the recommendation logic lives in the binary (harness-agnostic), and model resolution lives in config (harness-specific).
+
+**Frontmatter override:**
+```yaml
+agent_doc_model_tier: auto | low | med | high
+```
+
+**Tier assignment heuristics:**
+- `low`: `diff_type = content_addition`, small diff (<20 lines), notes/status docs
+- `med`: multi-section edits, planning/feature docs, moderate diff
+- `high`: complex debugging, architecture decisions, large diffs with code changes
+
+**Harness detection:** Binary can detect from env vars (`CLAUDE_CODE_SESSION`, `CODEX_SESSION`, etc.) or a `harness` field in config.
+
+Want me to draft the spec file for this feature (in `tasks/agent-doc/`)?
+<!-- agent:boundary:e90b0f3a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1399,7 +1399,7 @@ C. **Create a custom template** — Add a shop.php template to override the defa
 D. **Check if WooCommerce Blocks plugin is active** — May be conflicting
 
 What would you like to try? I'd recommend checking the browser console first (option A) to see if there are any JavaScript errors that might explain why nothing's rendering.
-<!-- agent:boundary:cd2f9db8 -->
+<!-- agent:boundary:112f625f -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

@@ -29,7 +29,7 @@ git submodule update --init src/session-share
 ```
 
 ❯ Please evaluate why the response patch did not occur to /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore.md
-### Re: claudescore.md write failure (analysis) (HEAD)
+### Re: claudescore.md write failure (analysis)
 
 **Root cause:** The `src/session-share` submodule doesn't have a `.agent-doc/` directory initialized.
 
@@ -47,12 +47,27 @@ agent-doc init src/session-share
 ```
 
 The first command initializes the `.agent-doc/` directory and config in the submodule. Then agent-doc writes will work.
-<!-- agent:boundary:3fba845c -->
+
+❯ .agent-doc/ is in agent-loop. Does the claudescore.md snapshot live there?
+### Re: Snapshot location for submodule files (HEAD)
+
+**Snapshot location:** Yes, claudescore.md's snapshot will live in `agent-loop/.agent-doc/snapshots/` (computed from the **canonical absolute path** `/home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore.md`).
+
+**Why submodules need `.agent-doc/` initialized:**
+
+1. **Snapshots** → parent repo's `.agent-doc/snapshots/` (hash-based lookup, always centralized)
+2. **IPC patches** → **submodule's** `.agent-doc/patches/` (writes the JSON that plugin consumes)
+3. **Baselines** → parent repo's `.agent-doc/baselines/` (temp snapshots for diff computation)
+
+When `src/session-share` lacks `.agent-doc/`, the write fails at step 2: no directory to queue the IPC patch. The plugin can't read it → IPC timeout.
+
+**Architecture:** Snapshots centralize (parent), patches localize (submodule). This allows independent submodule sessions while keeping a unified snapshot history in the parent.
+<!-- agent:boundary:103b76d4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Initialize `.agent-doc/` in src/session-share submodule via `agent-doc init src/session-share`
-- Re-run `/agent-doc src/session-share/tasks/claudescore.md` to write the response
+- Run `agent-doc init src/session-share` to create `.agent-doc/patches/` in submodule
+- Then `/agent-doc src/session-share/tasks/claudescore.md` will succeed (snapshot writes to parent, patches queue locally)
 <!-- /agent:pending -->

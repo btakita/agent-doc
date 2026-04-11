@@ -1955,7 +1955,7 @@ wp cache flush
 No CSS changes needed — removed the need for `.home .entry-content { margin-top }` entirely. The layout is now consistent across all four pages.
 
 Hard-refresh `/` and confirm — the hero should start flush below the opaque header row, same vertical rhythm as `/about-us/`.
-<!-- agent:boundary:a1c22edb -->
+<!-- agent:boundary:4f976974 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

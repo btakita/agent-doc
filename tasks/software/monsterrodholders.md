@@ -1153,7 +1153,7 @@ Added a mobile-only rule to post 86030 that restores 12px horizontal padding on 
 **Verified live:** `curl -sk https://50.28.2.199.nip.io/` shows the new rule at line 225 of `<style id="wp-custom-css">`. Hard-refresh on mobile and the hamburger should now sit ~12px from the right edge; the logo matches on the left.
 
 If 12px feels too tight or too loose once you see it, say the number and I'll dial it in (common alternatives: 8px, 16px, or `env(safe-area-inset-right)` if you want iOS notch awareness).
-<!-- agent:boundary:8a5ac565 -->
+<!-- agent:boundary:6f171652 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

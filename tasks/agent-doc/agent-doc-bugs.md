@@ -852,7 +852,7 @@ focused pane %102
 Claimed /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore.md for pane %102 (session 143cbb97)
 Watch daemon started.
 ```
-### Re: anchor project_config_path() to document project root (HEAD)
+### Re: anchor project_config_path() to document project root
 
 Done. Changed `project_config_path()` in `config.rs` to walk up from CWD finding `.agent-doc/`, instead of always returning the bare relative path:
 
@@ -878,7 +878,7 @@ fn project_config_path() -> PathBuf {
 
 Same walk-up pattern as `snapshot::find_project_root`. Falls back to CWD if no `.agent-doc/` found (uninitialized project). `cargo build` clean.
 
-### Re: claiming tmux pane not restarting Claude session (HEAD)
+### Re: claiming tmux pane not restarting Claude session
 
 Two separate things happen when you run those commands:
 
@@ -896,12 +896,22 @@ agent-doc start src/session-share/tasks/claudescore.md
 That's the restart loop that actually launches `claude` and reconnects the session.
 
 (Your message was cut off at "When I ran `Claim for Tmux Pane`, I saw" — if there was more, feel free to continue.)
-<!-- agent:boundary:b09ddd8f -->
+❯ release
+### Re: release (HEAD)
+
+Released v0.31.31:
+
+- Fixed 2 clippy errors before publishing (`preflight.rs` map iteration, `write.rs` collapsible if)
+- Updated VERSIONS.md with all 5 commit-reliability fixes + `project_config_path` CWD anchor
+- `cargo install --path .` ✓
+- crates.io ✓ — `agent-doc v0.31.31` published
+- PyPI ✓ — `agent_doc-0.31.31-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl` uploaded
+- GitHub Release ✓ — https://github.com/btakita/agent-doc/releases/tag/v0.31.31 with binary
+<!-- agent:boundary:caf1016e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Manual testing gate: verify session-0 routing no longer triggers stash/rescue for `tasks/software/claude-code.md`
-- [ ] Release v0.31.32: `cargo publish`, `maturin publish`, GitHub Release with binary
+
 <!-- /agent:pending -->

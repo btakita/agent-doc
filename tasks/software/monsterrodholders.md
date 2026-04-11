@@ -220,7 +220,7 @@ Pushed to git: `cfa739a`.
 - Facebook/Instagram links for top bar (need URLs from Ron)
 - Color palette tweak for Monster brand (Garderobe is muted neutrals — may want to add accent color)
 - Product card hover effects (Garderobe has a clean overlay — can apply to WC product grid)
-<!-- agent:boundary:d09668d2 -->
+<!-- agent:boundary:62e78610 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

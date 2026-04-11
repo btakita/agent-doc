@@ -88,7 +88,7 @@ This is expected agent-doc gutter behavior. The `(HEAD)` marker shows "git commi
 No action needed — this is correct behavior. The response is safely committed.
 
 ❯ Response patches are still not being written to claudescore.md. Why?
-### Re: Response patches to claudescore.md (HEAD)
+### Re: Response patches to claudescore.md
 
 They ARE being written — commit `8c93148` landed 50 lines of agent response (the "Universal Solution", "Short-term Workaround", etc. sections). 
 
@@ -106,12 +106,23 @@ git commit -m "agent-doc(claudescore): pending implementation note"
 ```
 
 Then `/agent-doc src/session-share/tasks/claudescore.md` will see a clean state.
-<!-- agent:boundary:80980c6a -->
+
+❯ do
+❯ - Commit pending note in claudescore.md to clear working tree state
+❯ - Then responses will write cleanly to the submodule document
+### Re: Commit pending note (HEAD)
+
+✅ Executed:
+```bash
+cd src/session-share && git add tasks/claudescore.md && git commit -m "agent-doc(claudescore): pending implementation note"
+```
+
+**Clean state achieved.** The submodule is now ready for `/agent-doc src/session-share/tasks/claudescore.md` to write responses without working tree conflicts. Responses will now land cleanly in the exchange component.
+<!-- agent:boundary:762748c2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- Commit pending note in claudescore.md to clear working tree state
-- Then responses will write cleanly to the submodule document
+
 <!-- /agent:pending -->

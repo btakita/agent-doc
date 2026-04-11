@@ -499,7 +499,7 @@ The `preconnect` hints for `fonts.googleapis.com` + `fonts.gstatic.com` are in `
 **Pushed:** `adbbbea`
 
 **Note on LCP ceiling:** The server is a bare VPS running Docker (no CDN, no page cache, no object cache). The TTFB likely accounts for ~1–1.5s of the LCP. Once DNS flips to the live domain and you add Cloudflare in front (free tier), expect another 1–2s improvement from edge caching alone. The current numbers are a soft ceiling for this dev setup.
-<!-- agent:boundary:4a37372d -->
+<!-- agent:boundary:d1013190 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

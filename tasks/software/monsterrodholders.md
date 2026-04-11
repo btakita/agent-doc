@@ -387,7 +387,7 @@ https://50.28.2.199.nip.io/wp-content/uploads/2026/04/MONSTER-ROD-HOLDER-HEADER-
 **Note:** DNS still points to old server (`dig monsterrodholders.com` → 151.101.66.159). Once Ron flips DNS to 50.28.2.199, the live site will show the new hero.
 
 **Pushed:** via WP-CLI direct update (not wp-to-git.sh)
-<!-- agent:boundary:ec382b9c -->
+<!-- agent:boundary:01614034 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

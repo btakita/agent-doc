@@ -106,7 +106,7 @@ git commit -m "agent-doc(claudescore): pending implementation note"
 ```
 
 Then `/agent-doc src/session-share/tasks/claudescore.md` will see a clean state.
-<!-- agent:boundary:9bdba8ad -->
+<!-- agent:boundary:80980c6a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

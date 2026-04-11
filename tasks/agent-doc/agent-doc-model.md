@@ -1,9 +1,10 @@
 ---
-agent_doc_session: null
+agent_doc_session: 66ad9274-0ae0-473e-9043-7c67f6d98c78
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 ---
+
 
 ## Status
 

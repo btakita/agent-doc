@@ -2,7 +2,7 @@
 agent_doc_session: 66ad9274-0ae0-473e-9043-7c67f6d98c78
 agent_doc_format: template
 agent_doc_write: crdt
-agent_doc_model_tier: low
+agent_doc_model_tier: high
 claude_args: --dangerously-skip-permissions
 ---
 
@@ -583,7 +583,7 @@ Unit tests (48) already cover: tier enum, frontmatter round-trip, component read
 Ready for manual publish gate: `cargo install --path .`, then push to crates.io / PyPI / GitHub.
 ❯ release
 
-### Re: Release prep ✅ (HEAD)
+### Re: Release prep ✅
 
 **Ready for release.** Per CLAUDE.md release process:
 
@@ -614,8 +614,17 @@ gh release create v0.32.0 --generate-notes bin/agent-doc
 - Version: 0.31.31 → 0.32.0
 - Test coverage: 262 lib tests, 823 total (all passing)
 
-**Breaking change:** None. Tier fields default to `None` in JSON; frontmatter field optional.
-<!-- agent:boundary:4677cb44 -->
+**Breaking change:** None. Tier fields default to `None` in JSON; frontmatter field optional. Why is the response patch uncommitted in src/session-share/tasks/claudescore.md? 
+### Re: claudescore.md uncommitted patch (HEAD)
+
+It was uncommitted because no active agent-doc session was running on that file. Agent-doc commits are per-document, scoped to preflight/write cycles of the session that owns that document. A response written into `src/session-share/tasks/claudescore.md` earlier sat in the working tree until *some* session ran preflight and the sweep picked it up.
+
+This preflight's sweep just committed it as `b6cc77f agent-doc(claudescore): 2026-04-11 03:21:35` (along with agent-doc-bugs and monsterrodholders). That's why `git status` now shows clean for the submodule internals — only the parent pointer bump remains.
+
+**Mechanism:** `preflight step 2` commits the current document first, then sweeps *related docs* with pending agent-doc changes across the workspace and commits them too. So an orphaned patch survives until the next preflight on any session touches the sweep path.
+
+**If you want faster commits on claudescore.md specifically:** run `/agent-doc tasks/claudescore.md` briefly (even with no edits) — its own preflight will commit in step 2. Or rely on the sweep like now.
+<!-- agent:boundary:e52b65f8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

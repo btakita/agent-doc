@@ -465,7 +465,7 @@ All fixes are in a new `mrh-performance` plugin (activated). Pushed: `2ebef2f`
 **Remaining Google Fonts** — IBM Plex Mono is set as the nav menu font in Blocksy Customizer → Header → Menu → Font. If you want to eliminate the Google Fonts request entirely, I can change the nav font to a system font (or self-host the font file). Just say the word.
 
 **Expected score recovery**: the 822KB zxcvbn removal alone should account for most of the drop. Actual Lighthouse score will vary depending on server response time, but the blocking resource is gone.
-<!-- agent:boundary:cacf8f1c -->
+<!-- agent:boundary:24582205 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

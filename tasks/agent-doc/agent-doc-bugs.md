@@ -239,7 +239,7 @@ The skill already reads the document before responding. It looks at:
 **Key split:** binary suggests (from structure), agent decides (from semantics). For short imperatives specifically, the binary defaults to `med` since it can't know the implied scope.
 
 ❯ Would a haiku model know to defer to sonnet or opus for an ambiguous diff with complex contex?
-### Re: Can haiku recognize when to defer? (HEAD)
+### Re: Can haiku recognize when to defer?
 
 No — and that's the crux of the problem. If haiku is already running, you can't rely on it to recognize when it's out of its depth. The semantic override approach is a reliability gap.
 
@@ -271,7 +271,7 @@ This is a simple comparison, not semantic reasoning. Even haiku executes it reli
 **The semantic override step is fragile and should be minimized.** Push as much intelligence as possible into the binary's structural analysis. The agent's semantic judgment is only for genuinely ambiguous cases structural signals can't resolve — and even then, the safe default is `med`, not `low`.
 
 Why did the last task have an uncommitted response patch?
-### Re: Uncommitted response patch (HEAD)
+### Re: Uncommitted response patch
 
 Looking at that session's output: the `agent-doc write` went through IPC (plugin consumed the patch, snapshot updated) but the subsequent `agent-doc commit` produced no output — no `[main ...]` line, no "repositioned boundary" message. That's a no-op commit.
 
@@ -281,7 +281,7 @@ The current preflight caught it via the step 2 sweep.
 
 **Fix direction:** `agent-doc commit` should detect this case — compare document content to HEAD, not snapshot mtime. Or the IPC write path should mark the document as needing a git commit separately from snapshot sync. The preflight sweep is the safety net, but the post-write commit should always produce a real commit.
 We should fix this now.
-### Re: Fix implemented — plugin v0.2.56 (HEAD)
+### Re: Fix implemented — plugin v0.2.56
 
 **Root cause confirmed:** `PatchWatcher.kt` called `agent_doc_commit` FFI synchronously post-apply (line 448), within the 300ms IPC window. This committed the working tree file before the skill's `agent-doc commit` ran. Binary commit → no-op every time on IPC path.
 
@@ -294,7 +294,11 @@ We should fix this now.
 Install via IDEA → Settings → Plugins → gear → Install from Disk → select the signed zip.
 
 Binary stays at v0.31.31 — no Rust changes needed.
-<!-- agent:boundary:412c4782 -->
+❯ extract agent-doc-model.md for the low,med,high discussion
+### Re: Extracted model tier discussion (HEAD)
+
+Model tier design (low/med/high, harness config, complexity heuristics, haiku deferral) extracted to [agent-doc-model.md](agent-doc-model.md).
+<!-- agent:boundary:2ae78b97 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

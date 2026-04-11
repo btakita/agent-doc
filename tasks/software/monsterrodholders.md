@@ -1331,7 +1331,7 @@ The changes I made were on the production site (`monsterrodholders.com`). The st
 **Next steps:** 
 - Share the page source or the output from those WordPress commands, and I'll pinpoint the exact issue.
 - If staging needs a fresh WooCommerce config or the mu-plugin deployed, I can walk through that setup.
-<!-- agent:boundary:ab6b5956 -->
+<!-- agent:boundary:e600c564 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

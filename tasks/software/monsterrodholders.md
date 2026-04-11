@@ -790,7 +790,7 @@ Site is fully back online. Sorry for the outage — bad assumption about the pro
 - **Docker WordPress** (`app-wordpress-1`) → origin on 127.0.0.1:8080
 
 When DNS propagates and certbot runs, certificates will go to host Apache via `certbot --apache`, not the Docker nginx.
-<!-- agent:boundary:753e1bb2 -->
+<!-- agent:boundary:dcdbb8f4 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

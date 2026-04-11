@@ -1546,7 +1546,7 @@ Deployed + cache flushed. The /shop page now shows:
 - "All Products" heading above the products list
 
 Verify at `https://50.28.2.199.nip.io/shop/`
-<!-- agent:boundary:d5629cc4 -->
+<!-- agent:boundary:8dc212b1 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

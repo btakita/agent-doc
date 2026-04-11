@@ -1924,7 +1924,7 @@ If anything still looks off (e.g. at a different viewport width, or the aside cr
 ❯ The home page main, aside, article are rendered behind the header. The home page main should also be below the header. Please fix.
 ❯ ![img_13.png](img_13.png)
 
-### Re: Home transparent header disabled ✓ (HEAD)
+### Re: Home transparent header disabled ✓
 
 Root cause: the home page (post_id=2) had Blocksy's **transparent header** enabled via a page-id condition. That's why `<header>` rendered with `data-transparent=""` on `/` and opaque on `/about-us/`, `/shop/`, `/blog/` — the transparent variant overlays content, so `<main>`/`<aside>`/`<article>` appeared to sit "behind" the header.
 
@@ -1955,7 +1955,53 @@ wp cache flush
 No CSS changes needed — removed the need for `.home .entry-content { margin-top }` entirely. The layout is now consistent across all four pages.
 
 Hard-refresh `/` and confirm — the hero should start flush below the opaque header row, same vertical rhythm as `/about-us/`.
-<!-- agent:boundary:4f976974 -->
+
+❯ The aside on each page should be sticky underneath the header. Meaning, as someone scrolls down the page, the aside should remain in the same position in the viewport.
+### Re: Sticky sidebar enabled ✓ (HEAD)
+
+Two changes to make the aside sticky underneath the header on all pages.
+
+**1. Enabled Blocksy's sticky sidebar** (theme mod, applies globally):
+```json
+// theme_mods_blocksy
+"has_sticky_sidebar": "yes"   // was "no"
+```
+This adds `data-sticky="sidebar"` to `.ct-sidebar`, which activates Blocksy's built-in rule from `sidebar.min.css`:
+```css
+@media (min-width: 1000px) {
+  :is(.ct-sidebar[data-sticky=sidebar], .ct-sticky-widgets) {
+    position: sticky;
+    top: calc(
+      var(--sidebar-offset, 50px)
+      + var(--admin-bar, 0px)
+      + var(--theme-frame-size, 0px)
+      + var(--header-sticky-height, 0px) * var(--sticky-shrink, 100) / 100
+    );
+  }
+}
+```
+The header has `data-sticky="shrink"`, so `--header-sticky-height` is live and the aside sticks flush beneath it as you scroll.
+
+**2. Removed a CSS override that was breaking sticky** (custom CSS, post 86030):
+```css
+/* DELETED — this was nullifying the sticky top offset */
+@media (min-width: 1000px) {
+    :is(.ct-sidebar[data-sticky=sidebar], .ct-sticky-widgets) {
+        top: unset !important;
+    }
+}
+```
+`top: unset` defeats `position: sticky` — without a top value, the element never "sticks." The rule was left over from the early transparent-header era when the aside was overlapping the navbar; now that transparent header is off, it's pure interference.
+
+**Verified via curl on `/`:**
+```html
+<div class="ct-sidebar" data-sticky="sidebar">
+```
+
+Cache flushed. Scroll `/`, `/shop/`, `/blog/` — the aside should pin to the top of the viewport (offset by the sticky header) and stay visible while `<main>` scrolls past it.
+
+If `--sidebar-offset` needs tuning (currently defaulting to 50px — that's additional gap below the header), let me know and I'll add an override.
+<!-- agent:boundary:e59a1254 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

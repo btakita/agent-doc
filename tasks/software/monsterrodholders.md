@@ -333,12 +333,23 @@ Done ✓
 Pushed: `accb4e9`.
 
 ❯ Fill /contact-2/ with the content from /contact/
-### Re: fill /contact-2/ with /contact/ content (HEAD)
+### Re: fill /contact-2/ with /contact/ content
 
 Done ✓ — page 13 (`/contact-2/`) now has the same content as page 24 (`/contact/`). `https://50.28.2.199.nip.io/contact-2/` → 200 ✓
 
 Pushed: `9e498b4`.
-<!-- agent:boundary:85c0640f -->
+
+❯ Readd products at the bottom of /contact-2/
+### Re: products at bottom of /contact-2/ (HEAD)
+
+Done ✓ — appended to page 13:
+
+- Horizontal separator
+- "Shop Our Products" centered h2
+- WooCommerce product collection block (8 products, ordered by popularity, 4-column grid)
+
+`https://50.28.2.199.nip.io/contact-2/` → 200 ✓. Pushed: `dc103a4`.
+<!-- agent:boundary:70093e06 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1301,7 +1301,7 @@ Remaining posts are all legitimate MRH content (IDs 15864–79564 + Pro Tandem P
 If you want different breakpoints (e.g. 2 cols on tablet instead of 3), send a screenshot and I'll add targeted CSS.
 
 **Verify:** Hard-refresh `https://monsterrodholders.com/shop/` — all 57 products should appear sorted by sales volume, no pagination, no sold-out items.
-<!-- agent:boundary:0d491bdf -->
+<!-- agent:boundary:7cc3a8cc -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

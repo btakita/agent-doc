@@ -48,7 +48,41 @@ Compared neovim, vim, zed, vscode (code-server), cursor, for agent-doc integrati
 **Open items:**
 - /model haiku: switch model to haiku (run /model haiku in the terminal — cannot execute Claude Code built-ins from within the session)
 - IDE integration: decision pending on which editor to implement next for AWS server use
-<!-- agent:boundary:3947f7fa -->
+
+❯ How can we make agent-doc more intelligent about selecting the optimal model for a particular task. Also taking into account /usage to avoid limits.
+### Re: Intelligent model selection (HEAD)
+
+**Model selection signals:**
+
+1. **Diff complexity** — preflight already computes `diff_type`. Small content additions → haiku; complex multi-section restructuring or code debugging → sonnet/opus. The binary could return a `recommended_model` field in preflight JSON.
+
+2. **Document/task type** — frontmatter `agent_doc_model: auto | haiku | sonnet | opus`. With `auto`, heuristics apply. Research/planning docs → sonnet; status/notes docs → haiku.
+
+3. **Usage awareness** — harder. `/usage` is a Claude Code built-in, not callable from within a session. But the Anthropic API exposes usage programmatically. Alternatively, Claude Code writes usage data somewhere on disk — if we can locate and parse it, the binary could read it and apply a budget threshold.
+
+**How the model switch would work:**
+
+The binary can't switch models mid-session (that's a Claude Code built-in). Options:
+- Preflight returns `recommended_model` → skill surfaces it as a note in the document: "For this task, haiku is sufficient. Run `/model haiku` to switch."
+- Or write it to `.agent-doc/session.toml` so the next invocation of `/agent-doc` starts with a prompt to switch.
+
+**Usage limits → budget mode:**
+
+`.agent-doc/config.toml` could have a `[model]` section:
+```toml
+[model]
+auto = true
+budget_threshold = 0.8  # switch to haiku when >80% of limit consumed
+preferred = "sonnet"
+budget_fallback = "haiku"
+```
+
+The binary would check usage against the threshold and return `recommended_model` accordingly.
+
+**Concrete next step:** Add `recommended_model: Option<String>` to preflight JSON (based on diff complexity + frontmatter), and have the skill surface it when it differs from the current session model. Usage integration can be a follow-on once we know where Claude Code writes usage data.
+
+Want to spec this out as a feature?
+<!-- agent:boundary:f5ddf3a2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

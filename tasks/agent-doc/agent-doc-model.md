@@ -490,7 +490,7 @@ The four checklist items are the complete implementation spec. Confirming scope:
 ```
 
 Priority encoded in `effective_tier`: inline command resolves first (and strips from diff), then component overrides frontmatter, then frontmatter overrides heuristic. Skill only needs `effective_tier` for gating; the individual fields are for debugging/transparency.
-<!-- agent:boundary:a6fe3eb7 -->
+<!-- agent:boundary:d64c94cd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

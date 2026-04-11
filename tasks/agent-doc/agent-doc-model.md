@@ -288,7 +288,7 @@ Inside is the right default.
 - frontmatter `agent_doc_dispatch: auto | true`
 
 Default off — most tasks don't need it.
-<!-- agent:boundary:6e92bb80 -->
+<!-- agent:boundary:e4dea29a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1488,7 +1488,7 @@ Deployed + cache flushed. Verified via curl on `https://50.28.2.199.nip.io/shop/
 <h2 class="mrh-shop-heading">All Products</h2>
 <ul class="products columns-4">…51 products…</ul>
 ```
-<!-- agent:boundary:a911cefd -->
+<!-- agent:boundary:c091b233 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

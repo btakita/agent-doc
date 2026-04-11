@@ -907,7 +907,7 @@ Released v0.31.31:
 - crates.io ✓ — `agent-doc v0.31.31` published
 - PyPI ✓ — `agent_doc-0.31.31-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl` uploaded
 - GitHub Release ✓ — https://github.com/btakita/agent-doc/releases/tag/v0.31.31 with binary
-<!-- agent:boundary:ee741dc9 -->
+<!-- agent:boundary:f7845b6a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

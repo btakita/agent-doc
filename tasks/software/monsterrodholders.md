@@ -352,7 +352,7 @@ Done ✓ — appended to page 13:
 
 ❯ Remove the products listings from /contact-2/
 ❯ We need an extensive site footer. All of the product categories **must** be in the site footer.
-### Re: remove products from /contact-2/ + complete footer categories (HEAD)
+### Re: remove products from /contact-2/ + complete footer categories
 
 **Products removed from /contact-2/ ✓**
 
@@ -384,7 +384,34 @@ Full coverage across both product columns:
 Also fixed: Contact Us link in Col3 was `/?page_id=24` → `/contact/`.
 
 Pushed: `fb659cc`.
-<!-- agent:boundary:f88d3e02 -->
+
+❯ There is still nothing in the `<footer>` element in the site template. Add the product category links...and the rest of the site links into the `<footer>` element in the site template.
+### Re: footer `<footer>` element — actually populated now (HEAD)
+
+Root cause: the footer widget blocks had `ref:687–690` pointing to classic menu term IDs, but `wp:navigation` requires `wp_navigation` CPT post IDs. The nav blocks rendered an empty hamburger shell with no content.
+
+Fix: created 4 new `wp_navigation` posts (IDs 86123–86126) with all links hardcoded, then updated each footer widget block to reference the correct post IDs.
+
+**Footer now renders in `<footer>` ✓**
+
+| Col1 — Products (11) | Col2 — Specialty (8) | Col3 — Company (11) | Col4 — Account (6) |
+|---|---|---|---|
+| Shop | Kayak Products | About Us | My Account |
+| Rod Holders | Bank Products | Blog | Cart |
+| Rod Holder Bases | Rod Transport Solutions | Contact Us | Checkout |
+| Boat Accessories | Bait & Tackle | FAQ | Rewards Program |
+| Racks and T-Bars | River Anchors | Warranty | Affiliate Area |
+| Draggin Master | Apparel & Decals | Pro Staff | Monster Bonus Money |
+| Mounting Hardware | Gift Cards | Certified Resellers | |
+| HydroWeb Landing Nets | Rigging Deals | Sponsorship | |
+| Accessories | | Wildcatters TV | |
+| Monster Gear | | Privacy Policy | |
+| Bargain Bin | | Shipping & Returns | |
+
+Verified: product-category links, about-us, contact, my-account, blog, warranty all present in live `<footer>` HTML.
+
+Pushed: `f0cfe55`.
+<!-- agent:boundary:144a5e09 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

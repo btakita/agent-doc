@@ -269,7 +269,7 @@ The fix should now route patches from `src/session-share/.agent-doc/patches/` �
 5. Add a regression test: write to a submodule file with no plugin running → assert (a) patch lands in parent dir, (b) working tree matches snapshot after commit
 
 I can implement these in order if you want — say "do" and I'll start with #1.
-<!-- agent:boundary:2f5ad26b -->
+<!-- agent:boundary:7f179294 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

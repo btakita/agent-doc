@@ -802,7 +802,7 @@ Implemented Fixes 1–3 from the spec:
 - **Fix 3** (`git.rs`) — retry loop (3x, 100/200/400ms backoff) on `index.lock` contention from concurrent sessions.
 
 Build: clean. Fixes 4 and 5 deferred per spec priority table.
-<!-- agent:boundary:0eb39919 -->
+<!-- agent:boundary:b105bc7c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

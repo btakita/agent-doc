@@ -129,7 +129,7 @@ Updated the draft and re-pushed. Draft is now in your `btak.dev` Gmail Drafts, p
 Threading fix extracted to `tasks/software/corky.md` — the bug and fix are now tracked there for proper follow-up.
 
 **Summary of the fix:** `corky draft push` needs both `thread_id` (Gmail thread ID) and `in_reply_to` (RFC 2822 Message-ID) set in the draft YAML to properly attach a draft to an existing Gmail thread. Using only `in_reply_to` sets the email headers but doesn't tell the Gmail API which thread to attach to.
-<!-- agent:boundary:397fe53a -->
+<!-- agent:boundary:bffdaa8b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

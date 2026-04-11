@@ -230,7 +230,7 @@ Give me 2 mins to SSH in and verify.
 **Got it.** — I'll remove the hardcoded `top: 70` and let it compute dynamically with the navbar height. This prevents the sidebar from overlapping the navbar when it becomes sticky.
 
 Updating the custom CSS now to use the calculated offset instead.
-### Re: sticky sidebar top removed ✓ (HEAD)
+### Re: sticky sidebar top removed ✓
 
 **Done.** — Added CSS override in custom CSS (post 86030) to remove the `top` offset from the sticky sidebar rule:
 
@@ -243,12 +243,49 @@ Updating the custom CSS now to use the calculated offset instead.
 }
 ```
 
+❯ Why top: unset?
+
 **Verified live** on `https://50.28.2.199.nip.io/` — custom CSS block includes the new override. Removing `top` from a `position: sticky` element effectively disables sticky behavior (the browser needs a `top` value to know where to anchor it).
 
 **Note:** DNS is still pointing to `151.101.66.159` (old server). `monsterrodholders.com` won't reflect this until Ron flips DNS to `50.28.2.199`.
 
 **Pushed:** `a0c6ed3` (via `wp-to-git.sh`)
-<!-- agent:boundary:2bca6304 -->
+
+❯ Make
+```css
+/* Home page: push aside below sticky navbar */
+.home .ct-sidebar .ct-widget {
+    padding-top: 140px;
+}
+```
+### Re: why top: unset + padding-top 140px ✓ (HEAD)
+
+**Why `top: unset`?**
+
+Blocksy's theme CSS generates this rule:
+```css
+@media (min-width: 1000px) {
+    :is(.ct-sidebar[data-sticky=sidebar],.ct-sticky-widgets) {
+        position: sticky;
+        top: calc(var(--sidebar-offset, 50px) + var(--admin-bar, 0px) + ...);
+    }
+}
+```
+
+`position: sticky` only activates when `top` (or `bottom`) is set. By overriding with `top: unset !important`, we strip Blocksy's computed anchor — the sidebar no longer sticks. This means it scrolls naturally with the page content instead of locking in place below the navbar offset.
+
+**padding-top: 140px — updated and verified ✓**
+
+Changed from 100px → 140px in custom CSS (post 86030). Live on `https://50.28.2.199.nip.io/`:
+```css
+/* Home page: push aside below sticky navbar */
+.home .ct-sidebar .ct-widget {
+    padding-top: 140px;
+}
+```
+
+**Pushed:** `9d4ba48` (via `wp-to-git.sh`)
+<!-- agent:boundary:0e012916 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
@@ -259,5 +296,5 @@ Updating the custom CSS now to use the calculated offset instead.
 - [ ] Respond to 9 real customer order inquiries in comment hold queue
 - [ ] Copy remaining uploads (verify completeness)
 - [ ] Home page 4-column grid: CSS added, verify rendering after cache clear
-- [ ] Sticky sidebar top offset removed — verify navbar overlap behavior after DNS flip
+- [ ] padding-top: 140px live — verify navbar overlap resolved after DNS flip
 <!-- /agent:pending -->

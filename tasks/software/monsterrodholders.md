@@ -222,12 +222,27 @@ Pushed to git: `cfa739a`.
 - Product card hover effects (Garderobe has a clean overlay — can apply to WC product grid)
 
 ❯ Use the original hero image on the home page.
-### Re: original hero image (HEAD)
+### Re: original hero image
 
 Found the original MonsterRodHolders hero — `slide-1.jpg` from the original 2016 site (ID 7971, `wp-content/uploads/2016/06/slide-1.jpg`). Updated its `guid` to point to the current server URL and swapped it into the home page cover block.
 
 Pushed to git: `55aaf08`.
-<!-- agent:boundary:208b41d9 -->
+
+❯ I cannot login to the admin
+### Re: cannot login (HEAD)
+
+Login page returns 200 and admin users are intact — looks like a password mismatch after the Garderobe import.
+
+**Password reset link for `btak`:**
+
+```
+https://50.28.2.199.nip.io/wp-login.php?action=rp&key=lcSYjp2KhBg34c1mUFya&login=btak
+```
+
+Open that link in your browser, set a new password, and you'll be in.
+
+(This is a one-time use link — once you set the password it expires.)
+<!-- agent:boundary:b2610476 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

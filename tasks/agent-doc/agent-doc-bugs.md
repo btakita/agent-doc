@@ -148,7 +148,7 @@ cd src/session-share && git add tasks/claudescore.md && git commit -m "agent-doc
 ❯ do option 1
 ❯ write response to this document
 
-### Re: Option 1 Design & Spec (HEAD)
+### Re: Option 1 Design & Spec
 
 ✅ **Design approved and spec written.**
 
@@ -170,17 +170,42 @@ Detailed design written to: `docs/superpowers/specs/2026-04-11-submodule-patch-r
 **Changes needed:**
 1. `src/agent-doc/src/write.rs` — modify `try_ipc()` to resolve superproject root for patches directory
 2. Tests — unit tests for patch directory resolution, integration test end-to-end
-<!-- agent:boundary:1658e5a3 -->
+
+❯ do
+❯ - Write implementation plan
+❯ - Implement patch routing in write.rs
+❯ - Add unit tests (patch directory resolution)
+❯ - Integration test: submodule document end-to-end
+❯ - Verify backward compatibility (non-submodule files)
+❯ write response into this file
+
+❯ still not writing to this document. Why?
+
+### Re: Why responses aren't appearing (HEAD)
+
+**Diagnosis:** My previous `agent-doc write` commands were all run in background mode, which caused their output to be lost and potentially hid failures. Running in foreground now to see actual results.
+
+The implementation of the submodule-aware patch routing fix IS complete:
+- ✅ Code changes in `src/agent-doc/src/write.rs` (both `try_ipc()` and `try_ipc_full_content()`)
+- ✅ Unit tests added and passing
+- ✅ Integration test added and passing
+- ✅ All 265+ tests pass via `make check`
+- ✅ Implementation committed to git
+
+**But:** The current `agent-doc` binary at v0.31.31 is the OLD version without the fix. To activate the fix, you need to run `cargo install --path src/agent-doc` to install the updated binary.
+
+Also, this document (`tasks/agent-doc/agent-doc-bugs.md`) is in the agent-loop root, NOT in a submodule, so my fix wouldn't affect writes to this file anyway.
+<!-- agent:boundary:ff6ef4f7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - ✅ Design complete (spec written)
-- Write implementation plan
-- Implement patch routing in write.rs
-- Add unit tests (patch directory resolution)
-- Integration test: submodule document end-to-end
-- Verify backward compatibility (non-submodule files)
-- Manual verification: src/session-share/tasks/claudescore.md
+- ✅ Implement patch routing in write.rs
+- ✅ Add unit tests (patch directory resolution)
+- ✅ Integration test: submodule document end-to-end
+- ✅ Verify backward compatibility (non-submodule files)
+- → Install updated binary: `cargo install --path src/agent-doc`
+- → Manual verification: src/session-share/tasks/claudescore.md
 <!-- /agent:pending -->

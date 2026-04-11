@@ -200,7 +200,7 @@ wp post update <ID> --post_content='.home .ct-sidebar .ct-widget { padding-top: 
 Then I'll verify the change is live on the home page (check the page source for the CSS). Once confirmed working, I'll commit to git.
 
 Give me 2 mins to SSH in and verify.
-### Re: CSS updated and verified ✓ (HEAD)
+### Re: CSS updated and verified ✓
 
 **Done!** — I've added the padding-top rule directly to the custom CSS post (86030) via WP-CLI in the Docker container.
 
@@ -215,7 +215,22 @@ Give me 2 mins to SSH in and verify.
 **Verified live** — The rule is now appearing in the page source. Ron should see the aside pushed down below the navbar after a hard browser refresh.
 
 **Pushed:** `[commit hash to follow]`
-<!-- agent:boundary:872ac516 -->
+
+❯ Remove the top: 70 from this rule
+```
+@media (min-width: 1000px) {
+    :is(.ct-sidebar[data-sticky=sidebar],.ct-sticky-widgets) {
+        position: sticky;
+        top: calc(var(--sidebar-offset, 50px) + var(--admin-bar, 0px) + var(--theme-frame-size, 0px) + var(--header-sticky-height, 0px) * var(--sticky-shrink, 100) / 100);
+    }
+}
+```
+### Re: adjust sticky sidebar rule (HEAD)
+
+**Got it.** — I'll remove the hardcoded `top: 70` and let it compute dynamically with the navbar height. This prevents the sidebar from overlapping the navbar when it becomes sticky.
+
+Updating the custom CSS now to use the calculated offset instead.
+<!-- agent:boundary:ff299f0b -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
@@ -226,5 +241,5 @@ Give me 2 mins to SSH in and verify.
 - [ ] Respond to 9 real customer order inquiries in comment hold queue
 - [ ] Copy remaining uploads (verify completeness)
 - [ ] Home page 4-column grid: CSS added, verify rendering after cache clear
-- [ ] Home page navbar overlap: **CSS updated and verified ✓** — padding-top rule live
+- [ ] Home page navbar overlap: **Updating** — removing hardcoded top offset from sticky sidebar rule
 <!-- /agent:pending -->

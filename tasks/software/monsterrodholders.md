@@ -27,7 +27,7 @@ Content changes: Address removed site-wide (7 locations + widget). Map removed f
 Security: wp-login.php 403 fixed (SecRuleEngine Off for wp-login+wp-admin in vhost). Password reset issued after Garderobe import.
 
 DNS status: Ron has flipped DNS monsterrodholders.com → 50.28.2.199. Next step: run certbot --apache -d monsterrodholders.com -d www.monsterrodholders.com on server.
-### Re: compact exchange + DNS flip (HEAD)
+### Re: compact exchange + DNS flip
 
 **Exchange compacted ✓** — full history archived to `.agent-doc/archives/`. Summary embedded above.
 
@@ -45,7 +45,17 @@ ssh root@50.28.2.199 "certbot --apache -d monsterrodholders.com -d www.monsterro
 ```
 
 I can run it for you — just say "run certbot" when DNS is live. Check propagation: `dig +short monsterrodholders.com A`
-<!-- agent:boundary:93d70b42 -->
+❯ The `<aside>` came back. Remove it. Make sure the change is committed to git.
+### Re: `<aside>` came back — fixed ✓ (HEAD)
+
+Root cause: the Garderobe import reset the Blocksy **theme mod** `single_page_structure` to `type-2` (with sidebar). The previous fix updated a WP option with the same name, which Blocksy ignores when a theme mod is set.
+
+Fix: `wp theme mod set single_page_structure type-4` — aside count on home page dropped to 0.
+
+Verified: `curl https://50.28.2.199.nip.io/ | grep -c '<aside'` → 0 ✓
+
+Pushed to git: `5caa475`.
+<!-- agent:boundary:c86ea913 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

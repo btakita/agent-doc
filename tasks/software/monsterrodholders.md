@@ -116,7 +116,7 @@ Pushed: `34b57e5`.
 If the aside selector differs (e.g., `.home-aside` or different class), let me know the actual DOM structure and I'll refine the rule. Ron can test after cache clear (hard refresh + WordPress cache clear).
 
 Pushed when ready.
-<!-- agent:boundary:64c02e5e -->
+<!-- agent:boundary:2aa4d1f8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

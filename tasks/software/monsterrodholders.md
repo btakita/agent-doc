@@ -1090,7 +1090,7 @@ The post body on disk still had the full CSS (I checked via `wp post get 86030 -
 Also added a redundant `body { --container-spacing: 0px; }` because Blocksy sometimes sets these custom properties on `body` with higher specificity than `:root`.
 
 **Verify on mobile:** reload `https://50.28.2.199.nip.io/` in DevTools device mode (or a phone) at ≤689px and the hero cover should now span edge-to-edge. If it still looks cropped, send another screenshot and I'll inspect the computed styles — there may be a `.wp-block-cover` `align=` constraint I need to override too.
-<!-- agent:boundary:ad1d3d13 -->
+<!-- agent:boundary:ad19148a -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

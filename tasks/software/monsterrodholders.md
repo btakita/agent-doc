@@ -180,7 +180,7 @@ Middle row height reduced from 120px → 75px desktop (65px mobile). Top bar is 
 **Social links note:** Only YouTube was found on the site (`youtube.com/user/akwalung`). If there's a Facebook/Instagram, give me the URLs and I'll add them to the top bar.
 
 Pushed to git: `0c42ebb`.
-<!-- agent:boundary:1b6560df -->
+<!-- agent:boundary:9e0fd018 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

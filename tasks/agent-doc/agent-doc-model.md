@@ -455,7 +455,7 @@ Updating the spec accordingly.
 ❯ - [ ] Option 2: parse `agent_doc_model_tier` from frontmatter; emit `required_tier` in preflight JSON; add gate logic to skill
 ❯ - [ ] Option 3: read `&lt;!-- agent:model --&gt;` component in preflight layout check; same `required_tier` output; skill gate identical to Option 2
 ❯ - [ ] Priority: inline command (1st) > component (2nd) > frontmatter (3rd) > heuristic (4th); single `effective_tier` in preflight JSON
-### Re: Implementation checklist (HEAD)
+### Re: Implementation checklist
 
 `use opus` noted — run `/model opus` at the terminal and re-invoke `/agent-doc` to execute on opus. Continuing on sonnet since the model switch can't be executed from within the skill.
 
@@ -490,14 +490,50 @@ The four checklist items are the complete implementation spec. Confirming scope:
 ```
 
 Priority encoded in `effective_tier`: inline command resolves first (and strips from diff), then component overrides frontmatter, then frontmatter overrides heuristic. Skill only needs `effective_tier` for gating; the individual fields are for debugging/transparency.
-<!-- agent:boundary:d64c94cd -->
+
+❯ write to plan md
+### Re: Wrote implementation plan (HEAD)
+
+Wrote the model-tier implementation plan to `src/agent-doc/plan.md` (replacing the previous concurrent-session-safeguards plan, which was stale). Now running on opus.
+
+**Plan structure — 8 layers:**
+
+| Layer | Scope |
+|---|---|
+| 0 | `Tier` enum + `[model.tiers.<harness>]` config + harness detection |
+| 1 | `agent_doc_model_tier` frontmatter |
+| 2 | `&lt;!-- agent:model --&gt;` component read in preflight layout check |
+| 3 | Inline `/model <x>` diff scanner + strip from diff |
+| 4 | Diff heuristic `suggested_tier` |
+| 5 | `effective_tier` composition + preflight JSON output |
+| 6 | Skill gate logic in `SKILL.md` |
+| 7 | Docs, `VERSIONS.md`, version bump |
+
+Each layer has a `make check` gate. Tests are specified per layer (frontmatter parse, tier ordering, diff scanner fenced-code guard, JSON precedence fixtures, etc.).
+
+**Key design decisions baked into the plan:**
+
+- `Tier` lives in its own `model_tier.rs` module (not `config.rs`) so it can be imported by `frontmatter.rs`, `preflight.rs`, and `config.rs` without cycles
+- `Tier` derives `PartialOrd` with ordering `Auto < Low < Med < High` — gating becomes a simple `>` comparison
+- `/model <x>` scanner accepts both tier names (`low|med|high`) and concrete model names (`opus|sonnet|haiku`), resolved via config reverse-lookup
+- Code fence and blockquote guards on the `/model` scanner prevent false matches in documented examples (critical — this document itself has dozens of `/model opus` references in code blocks)
+- `effective_tier` is computed as `first_non_auto(model_switch_tier, required_tier, suggested_tier)` — single field for skill to read, individual fields retained for debugging
+- Skill gate is pure comparison (`effective_tier > current_tier`) — no semantic reasoning required, so haiku-tier models execute the gate reliably
+
+Ready to execute layer-by-layer on your signal, or tweak the plan first.
+<!-- agent:boundary:2e147e22 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Option 1: add `/model <x>` detection to preflight diff scanner; emit `model_switch` + `model_switch_tier`; strip command line from diff
-- [ ] Option 2: parse `agent_doc_model_tier` from frontmatter; emit `required_tier` in preflight JSON; add gate logic to skill
-- [ ] Option 3: read `&lt;!-- agent:model --&gt;` component in preflight layout check; same `required_tier` output; skill gate identical to Option 2
-- [ ] Priority: inline command (1st) > component (2nd) > frontmatter (3rd) > heuristic (4th); single `effective_tier` in preflight JSON
+- [ ] Layer 0: `Tier` enum + config `[model.tiers.<harness>]` + harness detection
+- [ ] Layer 1: `agent_doc_model_tier` frontmatter parsing
+- [ ] Layer 2: `&lt;!-- agent:model --&gt;` component read in preflight layout check
+- [ ] Layer 3: inline `/model <x>` diff scanner with code-fence/blockquote guards, strip from diff
+- [ ] Layer 4: diff heuristic `suggested_tier` from `diff_type` + path
+- [ ] Layer 5: `effective_tier` composition + preflight JSON fields
+- [ ] Layer 6: skill gate logic in SKILL.md (`effective_tier` comparison)
+- [ ] Layer 7: docs, VERSIONS.md entry, version bump, final `make check`
+- [ ] Plan written to `src/agent-doc/plan.md` ([done])
 <!-- /agent:pending -->

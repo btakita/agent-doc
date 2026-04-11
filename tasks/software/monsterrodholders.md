@@ -456,7 +456,7 @@ Added to Custom CSS (post 86030):
 Pushed: `bbe512f`.
 
 ❯ On the home page, the product grid should have 4 rows.
-### Re: product grid layout (HEAD)
+### Re: product grid layout
 
 **4-column layout added ✓**
 
@@ -471,7 +471,22 @@ Added CSS to force each product item to 25% width (4 per row):
 This applies to all product grids on the home page (Best Sellers, Rod Holders, Rod Holder Bases, More Monster Gear).
 
 Pushed: `c3ad82a`.
-<!-- agent:boundary:cdc00250 -->
+❯ I see a 3 column grid on desktop. Please make this a 4 column grid.
+### Re: 4-column grid on desktop (HEAD)
+
+Fixed ✓ — updated CSS to force exactly 4 columns using `!important`:
+
+```css
+.woocommerce ul.products li {
+    width: 25% !important;
+    flex: 0 0 25% !important;
+}
+```
+
+This overrides WooCommerce's default width calculations and locks each product to 25% width.
+
+Pushed: `8ad61cd`.
+<!-- agent:boundary:b4a19a52 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

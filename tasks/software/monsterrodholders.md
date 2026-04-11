@@ -2,6 +2,8 @@
 agent_doc_session: a9421282-fd96-4943-9af5-3561ed5cb799
 agent_doc_format: template
 agent_doc_write: crdt
+agent_doc_model_tier: low
+claude_args: --dangerously-skip-permissions
 ---
 
 ## Status
@@ -413,7 +415,7 @@ Verified: product-category links, about-us, contact, my-account, blog, warranty 
 Pushed: `f0cfe55`.
 
 ❯ use haiku: move /contact-2/ to /contact/
-### Re: move /contact-2/ → /contact/ (HEAD)
+### Re: move /contact-2/ → /contact/
 
 Done ✓
 
@@ -423,7 +425,36 @@ Done ✓
 - `https://50.28.2.199.nip.io/contact-2/` → 404 (gone) ✓
 
 Pushed: `40e754d`.
-<!-- agent:boundary:41cf8db8 -->
+
+❯ Remove `<aside>` from layout.
+
+❯ On home page, center product grid items.
+### Re: remove `<aside>` + center home page product grid (HEAD)
+
+**`<aside>` removed ✓**
+
+Set all page/post structure types to `type-4` (no sidebar) and disabled woo sidebar:
+- `single_page_structure` → `type-4`
+- `product_structure` → `type-4`
+- `single_blog_post_structure` → `type-4`
+- `woo_categories_has_sidebar` → `no`
+
+Verified: `<aside>` count = 0 on home, shop, product pages.
+
+**Product grid items centered ✓**
+
+Added to Custom CSS (post 86030):
+```css
+/* Center product grid items */
+.woocommerce ul.products {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+```
+
+Pushed: `bbe512f`.
+<!-- agent:boundary:9f5a8052 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

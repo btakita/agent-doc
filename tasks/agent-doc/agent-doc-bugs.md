@@ -48,6 +48,7 @@ Compared neovim, vim, zed, vscode (code-server), cursor, for agent-doc integrati
 **Open items:**
 - /model haiku: switch model to haiku (run /model haiku in the terminal — cannot execute Claude Code built-ins from within the session)
 - IDE integration: decision pending on which editor to implement next for AWS server use
+<!-- agent:boundary:3947f7fa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

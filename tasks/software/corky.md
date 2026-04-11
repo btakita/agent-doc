@@ -957,7 +957,7 @@ corky doc sheet "https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8e
 ```
 
 When you see `Waiting for callback on http://127.0.0.1:8484/callback...`, complete the Google consent screen in the browser. It will capture the auth code and cache the token in `~/.config/corky/tokens.json`. After that, no more OAuth needed for that account.
-<!-- agent:boundary:ca186007 -->
+<!-- agent:boundary:cdf3ca50 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -290,7 +290,7 @@ Inside is the right default.
 Default off — most tasks don't need it.
 
 /model opus: Can we have the user instruct agent-doc to run a model such as here?  
-### Re: User-instructed model switch via inline `/model` command (HEAD)
+### Re: User-instructed model switch via inline `/model` command
 
 **Builtin note:** `/model` is a Claude Code built-in — cannot be executed from within the skill. To switch models interactively, run `/model opus` at the terminal.
 
@@ -330,11 +330,116 @@ Preflight reads it as the tier override. Can be updated by either user or agent.
 **Recommended:** Option 2 (frontmatter) for persistent tier, Option 1 (preflight flag) for one-shot inline overrides. Option 3 is ergonomic but adds component complexity.
 
 **For this specific use case (user wants opus for a session):** frontmatter `agent_doc_model_tier: high` is the cleanest — set once, respected every cycle, persists in git history.
-<!-- agent:boundary:553d62d6 -->
+❯ /model opus do all 3 options
+### Re: All 3 options — detailed specs (HEAD)
+
+*Note: `/model opus` can't execute from within the skill — run it at the terminal. Speccing all 3 options below.*
+
+---
+
+#### Option 1 — Preflight `model_switch` detection (inline command)
+
+**Binary behavior:**
+
+Preflight scans user-added diff lines for `/model <name|tier>`:
+```
+/model opus          → model_switch: "opus", tier: "high"
+/model high          → model_switch_tier: "high"
+/model haiku         → model_switch: "haiku", tier: "low"
+```
+
+- Strip the `/model <x>` line from the diff (it's a command, not content)
+- Emit in preflight JSON:
+  ```json
+  { "model_switch": "opus", "model_switch_tier": "high" }
+  ```
+- The remaining `do all 3 options` text stays in the diff as the actual user instruction
+
+**Skill behavior:**
+
+```
+if preflight.model_switch_tier != current_model_tier:
+    write to document: "⚠ Model switch requested: opus. Run `/model opus` at terminal and re-invoke /agent-doc."
+    stop
+else:
+    proceed normally with the task (the /model line was stripped from diff)
+```
+
+If the model already matches, skip the note and proceed — the `/model` was a no-op confirmation.
+
+---
+
+#### Option 2 — `agent_doc_model_tier` frontmatter (persistent)
+
+**Frontmatter field:**
+```yaml
+agent_doc_model_tier: auto | low | med | high
+```
+
+**Binary behavior:**
+
+Preflight reads frontmatter and emits:
+```json
+{
+  "required_tier": "high",      // from frontmatter (gates if mismatch)
+  "suggested_tier": "med",      // from diff heuristics (advisory)
+  "effective_tier": "high"      // max(required, suggested)
+}
+```
+
+`required_tier` is a hard gate — skill stops if current model is below it.
+`suggested_tier` is advisory — skill notes it but continues.
+
+**Skill behavior:**
+```
+if required_tier > current_model_tier:
+    write: "This document requires tier 'high'. Run `/model opus` and re-invoke."
+    stop
+elif suggested_tier > current_model_tier:
+    note: "Suggested tier is 'high' for this task — consider /model opus."
+    continue
+```
+
+**Use case:** Long-running planning sessions where the user always wants opus. Set once in frontmatter, enforced every cycle.
+
+---
+
+#### Option 3 — `&lt;!-- agent:model --&gt;` component (inline, persistent)
+
+**Component format:**
+```markdown
+&lt;!-- agent:model --&gt;
+high
+&lt;!-- /agent:model --&gt;
+```
+
+Accepts: `auto`, `low`, `med`, `high`, or a concrete model name (`opus`, `sonnet`, `haiku`).
+
+**Binary behavior:**
+
+Preflight reads the component during layout check (step 0). Behavior identical to Option 2's `required_tier` — component content overrides diff heuristics. Emits same `required_tier` / `suggested_tier` / `effective_tier` fields.
+
+**Skill behavior:** Identical to Option 2.
+
+**Advantage over frontmatter:** User can switch models mid-session by editing the component — no YAML frontmatter editing. Agent can also update it (e.g., auto-downgrade to `low` after completing a complex task).
+
+**Component mode:** `patch=replace` — agent writes back the resolved tier name after each cycle if it changed.
+
+---
+
+#### Interaction between options
+
+Priority: Option 3 (component) > Option 2 (frontmatter) > Option 1 (inline command) > diff heuristic
+
+All three feed the same `required_tier` / `suggested_tier` fields in preflight JSON. The skill only sees the resolved fields — no need to know which option set them.
+<!-- agent:boundary:72f0cde2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-
+- [ ] Option 1: add `/model <x>` detection to preflight diff scanner; emit `model_switch` + `model_switch_tier`; strip command line from diff
+- [ ] Option 2: parse `agent_doc_model_tier` from frontmatter; emit `required_tier` in preflight JSON; add gate logic to skill
+- [ ] Option 3: read `&lt;!-- agent:model --&gt;` component in preflight layout check; same `required_tier` output; skill gate identical to Option 2
+- [ ] Unified: define priority: component > frontmatter > inline command > heuristic; single `effective_tier` field in preflight JSON
 <!-- /agent:pending -->

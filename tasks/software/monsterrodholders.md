@@ -229,7 +229,7 @@ Found the original MonsterRodHolders hero — `slide-1.jpg` from the original 20
 Pushed to git: `55aaf08`.
 
 ❯ I cannot login to the admin
-### Re: cannot login (HEAD)
+### Re: cannot login
 
 Login page returns 200 and admin users are intact — looks like a password mismatch after the Garderobe import.
 
@@ -242,7 +242,24 @@ https://50.28.2.199.nip.io/wp-login.php?action=rp&key=lcSYjp2KhBg34c1mUFya&login
 Open that link in your browser, set a new password, and you'll be in.
 
 (This is a one-time use link — once you set the password it expires.)
-<!-- agent:boundary:870da5da -->
+
+❯ Have the content in /about-us use the format of /about-us-2
+❯ About Us should point to /about-us
+❯ The About Us pages should be "Meet the Founder of Monster Rod Holders"...not the starter site page.
+### Re: About Us page redesign (HEAD)
+
+**Done ✓**
+
+- Page at `/about-us` (ID 1780) rebuilt with the Garderobe Stackable layout from `/about-us-2` but filled with real MRH content:
+  - Hero: "Meet the Founder of Monster Rod Holders" (h2, 56px)
+  - Dark section (Garderobe palette-color-4 background):
+    - Left column: Steve Douglas's photo (`stevedd.jpg`, floating up from the hero), name + title "Founder & Owner", phone + email
+    - Right column: "How It All Started" heading + the 3-paragraph catfish tournament story + "Shop Rod Holders" button
+- Trashed the duplicate page 203 (was at `/about-us-2`, old Garderobe demo layout)
+- Nav "About Us" link updated from `/about-us-2/` → `/about-us/`
+
+Pushed: `aaa38a9`.
+<!-- agent:boundary:cf793173 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

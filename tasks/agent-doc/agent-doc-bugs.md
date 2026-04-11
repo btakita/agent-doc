@@ -9,7 +9,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-agent-doc v0.32.0+fix — 5/5 submodule routing bugs fixed, awaiting manual test gate
+agent-doc v0.32.0+fix — Phase 1+2 guard gates deployed, binary fresh, ready for manual testing
 <!-- /agent:status -->
 
 ## Exchange
@@ -331,7 +331,7 @@ cargo install --path .         # refresh ~/.cargo/bin/agent-doc
 Then re-run `/agent-doc src/session-share/tasks/claudescore.md` and verify the patch lands in `agent-loop/.agent-doc/patches/` instead of the submodule's local dir. Only after that green signal: commit the 04:58 source edits, bump VERSIONS.md, publish.
 
 Want me to run the build + install now so you can verify in a live session?
-### Re: Why stale binary is a recent regression — and the fix plan (HEAD)
+### Re: Why stale binary is a recent regression — and the fix plan
 
 **Why now (the regression story):**
 
@@ -402,17 +402,46 @@ Preflight can compare the `src mtime` in `--version` output against its own sour
 **Recommendation:** implement Phase 1 + 2 today (highest leverage, lowest risk). Phase 3 when the next agent-doc dev session starts. Phase 4 only if Phase 1's mtime guard turns out to be unreliable (e.g. filesystems without mtime granularity, CI containers).
 
 **Not fixing:** the *current* stale binary. You asked for a plan, not a rebuild. Say "do phase 1+2" and I'll land the skill edit + runbook edit, then rebuild so the 5/5 fixes are actually live.
-<!-- agent:boundary:f4d3721e -->
+
+❯ do
+❯ - ✅ Bug 1–5: submodule routing fixes live in working tree (git.rs, write.rs, Cargo.toml uncommitted)
+❯ - 🔴 **Running binary is stale** — `.bin/agent-doc` mtime 02:58 < source mtime 04:58. Every skill call still executes pre-fix code.
+❯ - 🆕 **Stale-binary guard planned** — Phase 1 (skill pre-check), Phase 2 (prerelease runbook gate), Phase 3 (cargo-watch dev loop), Phase 4 (version-string mtime). Awaiting "do" to land Phase 1+2.
+❯ - → `cd src/agent-doc && make build-release && cargo install --path .` — rebuild before any further manual testing
+
+
+### Re: Phase 1+2 implementation (done) (HEAD)
+
+✅ **Phase 1 — SKILL.md stale-binary guard**
+- Added pre-preflight stanza to `.claude/skills/agent-doc/SKILL.md` step 0
+- Guard runs before any `agent-doc` subcommand
+- Detects source mtime > binary mtime and auto-rebuilds via `make build-release`
+- No action needed on next skill invocation — guard is transparent
+
+✅ **Phase 2 — prerelease.md hardened gate**
+- Updated `.agent/runbooks/prerelease.md` step 8
+- Now requires both `make build-release` AND `cargo install --path .` to complete
+- Blocks manual testing gate until both succeed
+- Prevents testing against stale binary
+
+✅ **Binary rebuilt & installed**
+- `cargo install --path .` completed successfully
+- `.bin/agent-doc` → target/release/agent-doc (fresh)
+- `~/.cargo/bin/agent-doc` updated
+- All 5 bug fixes from prior session are now live
+
+**Status:** Binary is fresh. Phase 1+2 guards are active. Ready for manual testing gate.
+
+**Next:** Test the 5 bugs on live `src/session-share/tasks/claudescore.md` to verify ❯ preservation + working-tree consistency.
+<!-- agent:boundary:1d9b3e2b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- ✅ Bug 1–5: submodule routing fixes live in working tree (git.rs, write.rs, Cargo.toml uncommitted)
-- 🔴 **Running binary is stale** — `.bin/agent-doc` mtime 02:58 < source mtime 04:58. Every skill call still executes pre-fix code.
-- 🆕 **Stale-binary guard planned** — Phase 1 (skill pre-check), Phase 2 (prerelease runbook gate), Phase 3 (cargo-watch dev loop), Phase 4 (version-string mtime). Awaiting "do" to land Phase 1+2.
-- → `cd src/agent-doc && make build-release && cargo install --path .` — rebuild before any further manual testing
-- → Manual testing gate: verify `❯ ` preservation + working-tree consistency on live `src/session-share/tasks/claudescore.md`
+- ✅ Bug 1–5: submodule routing fixes live in working tree + rebuilt binary
+- ✅ **Stale-binary guard Phase 1+2 deployed** — skill guard + prerelease gate active
+- 🆕 Manual testing gate: verify ❯ preservation + working-tree consistency on live src/session-share/tasks/claudescore.md
 - → Commit the 04:58 source edits (git.rs, write.rs, Cargo.toml) once live-tested
 - → Bump version, update VERSIONS.md, publish (crates/PyPI/GitHub Release)
 <!-- /agent:pending -->

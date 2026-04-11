@@ -128,7 +128,7 @@ The pending component with checkboxes is well-structured. All four items are rea
 - **chromium-bridge SKILL.md** — CSS `:hover` limitation likely came from browser automation constraints (can't inject hover state without JS)
 
 No blockers identified. These can be tackled in any order — the philosophy docs are conceptual while the SKILL.md update is operational.
-<!-- agent:boundary:169a9281 -->
+<!-- agent:boundary:094dbe84 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built (HEAD)

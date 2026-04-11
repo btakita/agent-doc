@@ -40,6 +40,21 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 
 Do not proceed with the normal document session workflow after handling compact.
 
+**Stale-binary guard:** Before running any `agent-doc` subcommand, ensure the binary is current. Check if source tree is newer than binary:
+
+```bash
+bin=/home/brian/work/btakita/agent-loop/.bin/agent-doc
+src_dir=/home/brian/work/btakita/agent-loop/src/agent-doc
+newest_src=$(find "$src_dir/src" "$src_dir/Cargo.toml" -type f -printf '%T@\n' | sort -nr | head -1)
+bin_mtime=$(stat -c '%Y' "$bin" 2>/dev/null || echo 0)
+if awk "BEGIN{exit !(${newest_src} > ${bin_mtime})}"; then
+    echo "[agent-doc] source newer than binary — rebuilding"
+    (cd "$src_dir" && make build-release) || exit 1
+fi
+```
+
+If the guard triggers, the binary is rebuilt automatically. No further action needed — preflight will use the fresh binary.
+
 **Auto-update skill:** Run `agent-doc --version` and compare against the `agent-doc-version` in this file's frontmatter. If the binary version is newer, run `agent-doc skill install --reload compact` to update this SKILL.md. If the output contains `SKILL_RELOAD=compact`, use `AskUserQuestion` to prompt the user: "SKILL.md was updated. Run /compact to reload the skill, then re-run /agent-doc." Stop and do not proceed with the document session. If `agent-doc` is not installed or the version matches, skip this step.
 
 **Run preflight:** Execute `agent-doc preflight <FILE>` via Bash. This single command handles:
@@ -47,7 +62,6 @@ Do not proceed with the normal document session workflow after handling compact.
 - Committing previous cycle changes (git gutter management)
 - Reading and truncating the claims log
 - Computing the diff (with comment stripping)
-- Reading the document HEAD
 
 The command outputs JSON to stdout:
 ```json
@@ -57,7 +71,7 @@ The command outputs JSON to stdout:
   "claims": [],
   "diff": "unified diff text or null",
   "no_changes": false,
-  "document": "full document content",
+  "baseline_file": "/path/to/.agent-doc/baselines/<hash>.md",
   "slash_commands": [],
   "builtin_commands": []
 }
@@ -65,9 +79,10 @@ The command outputs JSON to stdout:
 
 - If `no_changes` is `true`, tell the user nothing changed and stop
 - Print any `claims` entries to the console as a record
-- The `document` field contains the full HEAD content (no separate `Read` needed)
 - The `diff` field contains the user's changes since the last snapshot
-- **Do NOT read the snapshot file directly** — the preflight output provides everything needed
+- **`baseline_file`** — use this path as `--baseline-file` when calling `agent-doc write`. It is taken AFTER preflight commits any gap, so it always reflects the stable pre-response file state. Do NOT save your own baseline before preflight — a pre-preflight copy may be stale if a concurrent write occurred between the copy and preflight.
+- **First cycle only:** if the document is not yet in context, run `agent-doc read <FILE>` to fetch HEAD content before responding
+- **Do NOT read the snapshot file directly** — use `agent-doc read <FILE>` if HEAD content is needed
 
 ### 0b. Execute slash commands (if any)
 
@@ -193,11 +208,13 @@ The agent responds with **patch blocks** that target specific components.
 **IMPORTANT:** Do NOT use the Edit tool for write-back. Use `agent-doc write` via Bash.
 The Edit tool is prone to "file modified since read" errors when the user edits concurrently.
 
-**Baseline file:** Before generating your response (step 1), save the current document to a temp file:
+**Baseline file:** Use the `baseline_file` path from the preflight JSON output as `--baseline-file`. Do NOT save your own baseline before preflight — a pre-preflight copy may be stale if the file was modified concurrently between the copy and preflight. The preflight-saved baseline is always taken at a stable post-commit point.
+
+For streaming checkpoints, re-save the baseline after each flush:
 ```bash
 cp <FILE> /tmp/agent-doc-baseline-$$.md
 ```
-Then pass it as `--baseline-file` so the 3-way merge can detect user edits accurately.
+Pass this updated copy as `--baseline-file` for subsequent checkpoint writes.
 
 ### 3. Git integration
 

@@ -1700,7 +1700,7 @@ The first one is still in the Shop page's block content (the hero/`.page-descrip
 
 "All Categories" was changed to "Popular Categories" in the Hero section. Remove this instance of "Popular Categories".
 ❯ ![img_10.png](img_10.png)
-### Re: Hero Popular Categories removed (HEAD)
+### Re: Hero Popular Categories removed
 
 Got it — the hero `<h2>` (previously `All Categories`, renamed to `Popular Categories`) was in the Shop page's block content, not the mu-plugin. Removed it via `wp post update 6`.
 
@@ -1722,13 +1722,62 @@ Cache flushed. Page now renders one `Popular Categories` heading — the mu-plug
 ```
 
 Verify: `https://50.28.2.199.nip.io/shop/`
-<!-- agent:boundary:af6a5a3e -->
+
+❯ On `https://50.28.2.199.nip.io/shop/`, the Rod Holders category is missing an image.
+❯ There are 2 incorrect categories. Replace:
+❯ - Boat Accsseories with [HydroWeb Landing Nets](/product-category/hydroweb-landing-nets/)
+❯ - Racks and T-Bars with [River Anchors](/product-category/anchors/)
+
+❯ The All products block is missing a title. The title should say "All Products".
+
+❯ see
+❯ ![2026-04-11_17-36.png](../../../../../Pictures/agent-loop/2026-04-11_17-36.png)
+### Re: Categories swapped + Rod Holders image + All Products title restored (HEAD)
+
+Four fixes:
+
+**1. Rod Holders thumbnail** — was `thumbnail_id=0`. Set to `77336` (featured image of "Monster Rod Holders Pro Series Rod Holders", a product in the Rod Holders category):
+```
+wp term meta update 210 thumbnail_id 77336
+```
+
+**2. Category swap in `mrh-shop.php`:**
+```php
+$cats = [
+    [ 'name' => 'Rod Holders',          'slug' => 'rod-holders' ],
+    [ 'name' => 'Rod Holder Bases',     'slug' => 'rod-holder-bases' ],
+    [ 'name' => 'HydroWeb Landing Nets','slug' => 'hydroweb-landing-nets' ],  // was Boat Accessories
+    [ 'name' => 'River Anchors',        'slug' => 'anchors' ],                 // was Racks and T-Bars
+];
+```
+
+**3. Restored `All Products` heading** — re-added the echo below the grid:
+```php
+echo '</div>';
+echo '<h2 class="mrh-shop-heading">All Products</h2>';
+```
+
+(I had removed this in the previous cycle assuming you meant it when you said "All Categories" — my mistake, that was the hero block, not this one.)
+
+**4. Cache flushed + PHP lint clean.**
+
+Verified on `https://50.28.2.199.nip.io/shop/`:
+```
+<h1>Shop</h1>
+<h2 class="mrh-shop-heading">Popular Categories</h2>
+  [Rod Holders] [Rod Holder Bases] [HydroWeb Landing Nets] [River Anchors]   ← all 4 with images
+<h2 class="mrh-shop-heading">All Products</h2>
+  <product grid>
+```
+<!-- agent:boundary:6a885b7b -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **Add category sidebar to /shop** — fixed category display via mu-plugins/mrh-shop.php, showing Rod Holders, Bases, Boat Accessories, Racks
-- [x] **Restore `Popular Categories` heading above grid** in mrh-shop.php
-- [x] **Remove `All Products` heading** from mrh-shop.php
-- [x] **Remove duplicate `Popular Categories`** from Shop page block content (hero) via `wp post update 6`
+- [x] **Add category sidebar to /shop** — 4-tile grid via mu-plugin
+- [x] **Swap Boat Accessories → HydroWeb Landing Nets**
+- [x] **Swap Racks and T-Bars → River Anchors**
+- [x] **Fix Rod Holders category image** (term 210 thumbnail_id → 77336)
+- [x] **Restore `All Products` heading** above products list
+- [x] **Remove duplicate hero `Popular Categories`** from Shop page block content
 <!-- /agent:pending -->

@@ -1374,7 +1374,7 @@ I updated the shop page ID to the correct page (6), but products still aren't re
 3. Or there's a Blocksy-specific WooCommerce integration setting
 
 Can you check the Blocksy theme settings or let me add a Products block to page 6?
-## Investigation Summary (HEAD)
+## Investigation Summary
 
 **Issue:** Shop page shows no products on either staging or production.
 
@@ -1399,10 +1399,57 @@ C. **Create a custom template** — Add a shop.php template to override the defa
 D. **Check if WooCommerce Blocks plugin is active** — May be conflicting
 
 What would you like to try? I'd recommend checking the browser console first (option A) to see if there are any JavaScript errors that might explain why nothing's rendering.
-<!-- agent:boundary:112f625f -->
+
+❯ The layout of the /shop/ page needs to be clean. Similar to how the products on the home page `/` are laid out. There should only be 1 paginated product grid on `/shop/`. There seems to be multiple product grids right now.
+❯ Above the product block, we need a separate & distinct block of 1 row for 4 product categories:
+❯ - [Rod Holders](/product-category/rod-holders/)
+❯ - [Rod Holder Bases](/product-category/rod-holder-bases/)
+❯ - [HydroWeb Landing Nets](/product-category/hydroweb-landing-nets/)
+❯ - [River Anchors](/product-category/anchors/)
+
+❯ The home page `/` needs to have the product grid sorted by most purchased items desc, excluding sold out items.
+
+### Re: /shop/ cleanup + category row + home sort (HEAD)
+
+**Confirmed root cause of "multiple grids" on /shop/:**
+Page 6 content is `[products]` shortcode, but WooCommerce also renders its archive loop. `curl /shop/` shows **two** `<ul class="products columns-4">` — one from the shortcode, one from the archive template. They're duplicates.
+
+**Shop plan (concrete):**
+
+1. **Empty page 6 content** → removes the shortcode-rendered grid, leaves only the archive loop (single, paginated).
+2. **Add category row via mu-plugin** → hook `woocommerce_before_shop_loop` (or `woocommerce_archive_description`) to render a 4-col row above the products grid on `/shop/` only:
+   - Rod Holders → `/product-category/rod-holders/`
+   - Rod Holder Bases → `/product-category/rod-holder-bases/`
+   - HydroWeb Landing Nets → `/product-category/hydroweb-landing-nets/`
+   - River Anchors → `/product-category/anchors/`
+3. **Restore pagination** → current mu-plugin sets `loop_shop_per_page = -1` (all 64 on one page). Change to something sane like `24` so pagination actually works.
+4. **Out-of-stock already hidden** → `woocommerce_hide_out_of_stock_items = yes` is set, so the archive loop already excludes them.
+5. **Sort by popularity already active** → `woocommerce_catalog_orderby = popularity` (most purchased desc).
+
+Category row will be a plain flex/grid of 4 cards (image + label + link), responsive: 4 cols desktop, 2 cols tablet, 1 col mobile.
+
+**Home page (`/`) — need to clarify scope before implementing:**
+
+Current home has 4 distinct sections:
+- "Best Sellers" → `[products ids="8642,22608,8581,8635,8633" columns="5" orderby="include"]` (5 hardcoded IDs)
+- "Rod Holders" → `[product_category category="rod-holders" per_page="8" orderby="rating"]`
+- "Rod Holder Bases" → `[product_category category="rod-holder-bases" per_page="12" orderby="popularity"]`
+- "More Monster Gear" → `[products per_page="8" columns="4" orderby="popularity" order="DESC"]`
+
+Your ask: *"the home page needs the product grid sorted by most purchased desc, excluding sold out"*. Two interpretations:
+
+- **(A) Replace all 4 sections with a single grid** sorted by popularity desc, no OOS. Simpler, cleaner, matches the "clean like home" comparison you made for /shop/. Would this collapse the page into hero + one grid?
+- **(B) Keep the 4 sections, just fix them** — change Best Sellers to `orderby="popularity"` (remove hardcoded IDs), Rod Holders from `rating` to `popularity`. OOS is already hidden globally, so all sections already exclude them.
+
+**Which do you want — A or B?** If (A), do you still want to keep the hero image and "Best Sellers" heading, or just one unlabeled grid?
+
+I'll implement the /shop/ changes now regardless — those are unambiguous. Waiting on your answer for home page.
+<!-- agent:boundary:3b9b4d16 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Verify /shop/ responsive grid visually** — confirm 4-col desktop, sensible tablet/mobile, all 57 products visible
+- [ ] **/shop/ cleanup** — empty page 6 content; add category row via mu-plugin; switch `loop_shop_per_page` from -1 to 24
+- [ ] **Home page sort decision** — awaiting A/B answer from user (single grid vs. fix existing sections)
+- [ ] **Verify /shop/ responsive grid visually** — confirm 4-col desktop, sensible tablet/mobile, pagination working
 <!-- /agent:pending -->

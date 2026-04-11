@@ -1604,7 +1604,7 @@ The page now displays:
 - Product list
 
 Verify at `https://50.28.2.199.nip.io/shop/`
-<!-- agent:boundary:446c6f2b -->
+<!-- agent:boundary:29a96867 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

@@ -110,7 +110,7 @@ Then `/agent-doc src/session-share/tasks/claudescore.md` will see a clean state.
 ❯ do
 ❯ - Commit pending note in claudescore.md to clear working tree state
 ❯ - Then responses will write cleanly to the submodule document
-### Re: Commit pending note (HEAD)
+### Re: Commit pending note
 
 ✅ Executed:
 ```bash
@@ -118,11 +118,38 @@ cd src/session-share && git add tasks/claudescore.md && git commit -m "agent-doc
 ```
 
 **Clean state achieved.** The submodule is now ready for `/agent-doc src/session-share/tasks/claudescore.md` to write responses without working tree conflicts. Responses will now land cleanly in the exchange component.
-<!-- agent:boundary:dbb1a99d -->
+
+❯ Still not patching the response
+### Re: Patches not being applied to claudescore.md (HEAD)
+
+**Root cause:** The JetBrains plugin only watches the **parent repo's** `.agent-doc/patches/` directory for IPC messages. When you run agent-doc on a submodule file, it writes patches to the **submodule's local** `.agent-doc/patches/`, which the plugin never sees.
+
+**Evidence:** 
+- Patch exists: `src/session-share/.agent-doc/patches/dffaf6f39bd8b7f498...json` (57KB)
+- Plugin doesn't see it: parent `.agent-doc/patches/` is empty
+- Result: patch accumulates but never applies
+
+**Architecture gap:** This assumes submodule sessions write patches to the parent (wrong), but the binary actually writes them locally (correct for isolation, but breaks IPC).
+
+**Fix options:**
+
+1. **Binary change:** Have agent-doc write submodule patches to the parent's `.agent-doc/patches/` with a submodule-aware path prefix. Plugin reads and applies based on the file being edited.
+
+2. **Plugin change:** Register an additional IPC listener at `<submodule>/.agent-doc/patches/` when the editor is in a submodule context.
+
+3. **Symlink workaround (temporary):** Link the submodule's patches to the parent:
+   ```bash
+   ln -s ../../../.agent-doc/patches src/session-share/.agent-doc/patches-parent-link
+   ```
+   Then configure agent-doc to write there for submodules.
+
+**Recommendation:** Option 1 (binary change) is cleanest. Have agent-doc detect submodule context and write patches to parent, tagged with submodule path so plugin can route them correctly.
+<!-- agent:boundary:04aa43b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-
+- Fix agent-doc to write submodule patches to parent `.agent-doc/patches/` with submodule-aware routing
+- Or configure plugin to watch submodule-local `.agent-doc/patches/` directories
 <!-- /agent:pending -->

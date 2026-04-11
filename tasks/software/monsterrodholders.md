@@ -345,7 +345,7 @@ https://50.28.2.199.nip.io/wp-content/uploads/2020/08/Monster-Rod-Holders-Banner
 Which one do you want to use as the home page hero?
 ❯ We may have lost the hero image. Look in the backup zip file for missing images.
 ❯ See /home/brian/work/rberkes/monsterrodholders/MonsterRodholdersNETNEWcloud-040626-backup.zip
-### Re: backup zip search for missing hero image (HEAD)
+### Re: backup zip search for missing hero image
 
 **Checked the backup** (`MonsterRodholdersNETNEWcloud-040626-backup.zip`, 647MB):
 
@@ -368,13 +368,32 @@ Since we can't recover a lost image, would you like to pick a different one from
 - `MONSTER-ROD-HOLDER-TALON-SERIES-FEATURE.jpg` (2020)
 - `banner.jpg` (2020)
 - `HYDROWEB-150-STEVE-AD-2024.jpg` (2017)
-<!-- agent:boundary:0fd4ea9f -->
+
+❯ Use /home/brian/work/btakita/agent-loop/tmp/MONSTER-ROD-HOLDER-HEADER-25.jpg for the hero image.
+### Re: hero image updated ✓ (HEAD)
+
+**Done.** Uploaded and deployed `MONSTER-ROD-HOLDER-HEADER-25.jpg` (1060×352, 64KB) as the new home page hero.
+
+**Steps taken:**
+1. Copied file to server: `/var/www/html/wp-content/uploads/2026/04/`
+2. Updated home page (post ID 2) cover block to use new image
+3. Verified live: `https://50.28.2.199.nip.io/` now displays the new header
+
+**New hero URL:**
+```
+https://50.28.2.199.nip.io/wp-content/uploads/2026/04/MONSTER-ROD-HOLDER-HEADER-25.jpg
+```
+
+**Note:** DNS still points to old server (`dig monsterrodholders.com` → 151.101.66.159). Once Ron flips DNS to 50.28.2.199, the live site will show the new hero.
+
+**Pushed:** via WP-CLI direct update (not wp-to-git.sh)
+<!-- agent:boundary:ec382b9c -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Choose hero image for home page (options above, or keep slide-1.jpg)
-- [ ] Update home page hero block with chosen image URL
+- [x] Choose hero image for home page ✓ (MONSTER-ROD-HOLDER-HEADER-25.jpg deployed)
+- [x] Update home page hero block with chosen image URL ✓
 - [ ] Add Facebook/Instagram to top bar (need URLs from Ron)
 - [ ] Delete Recently Viewed Products page (18849)
 - [ ] DNS propagating → run certbot when `dig monsterrodholders.com` returns 50.28.2.199

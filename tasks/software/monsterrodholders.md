@@ -502,7 +502,7 @@ The `preconnect` hints for `fonts.googleapis.com` + `fonts.gstatic.com` are in `
 
 ❯ Performance got worse
 ❯ ![img_5.png](img_5.png)
-### Re: Performance regression — diagnosed actual root causes (HEAD)
+### Re: Performance regression — diagnosed actual root causes
 
 **The SEO fix worked: 50 → 85 ✓**. Performance dropped because my preload was broken and I missed a much bigger problem.
 
@@ -550,18 +550,125 @@ My preload was outputting `http://` (because siteurl was http://). The browser f
 - LCP: big improvement expected — 10KB logo vs the 800KB+ full-size render
 
 Re-run Lighthouse and send `img_6.png` when ready.
-<!-- agent:boundary:319d2b4b -->
+
+❯ The Performance score used to be 98. We should be >95 for performance. Please do an analysis on the lighthouse report. Plan the necessary fixes.
+❯ The lighthouse report is at /home/brian/work/btakita/agent-loop/tasks/software/monsterrodholders/50.28.2.199.nip.io-20260411T131610.json
+### Re: Lighthouse 89 → target >95 (analysis + plan)
+
+**Current breakdown (perf 89):**
+
+| Metric | Value | Score | Weight | Contribution |
+|---|---|---|---|---|
+| FCP | 2.5 s | 0.68 | 10 | 6.8 |
+| LCP | 3.2 s | 0.72 | 25 | 18.0 |
+| TBT | 0 ms | 1.00 | 30 | 30.0 |
+| CLS | 0.044 | 0.99 | 25 | 24.75 |
+| SI  | 2.5 s | 0.98 | 10 | 9.8 |
+| **Total** | | | | **89.35** |
+
+TBT/CLS/SI are already ~perfect. The 11 points are all in **FCP (3.2)** and **LCP (7)**. To get >95 we need FCP ≥ 1.8 s and LCP ≤ 2.5 s.
+
+**Root causes (ranked by impact):**
+
+1. **Render-blocking requests — est savings 1,510 ms FCP** (the biggest single lever)
+   - 17 render-blocking resources in `<head>`. Worst offenders:
+     - `fonts.googleapis.com/css2?family=IBM Plex Mono` — **779 ms wasted** (blocking external font CSS)
+     - `jquery.min.js` — 450 ms (loaded synchronously in head)
+     - `stackable/frontend_blocks.css` — 300 ms
+     - `blocksy/main.min.css` + `woocommerce.min.css` + `wc-blocks.css` — 150 ms each
+   - Plus ~10 smaller Blocksy/WP core CSS files.
+
+2. **Cache lifetime = 0 — est savings 700 ms LCP, 304 KiB**
+   - Every `/wp-content/*` and `/wp-includes/*` response has **no `Cache-Control` header** (`cacheLifetimeMs: 0`). This is an nginx config issue — WordPress static assets should be served with a long `max-age` (30-365 days). On repeat visits nothing is cached, which also hurts the Lighthouse cache audit.
+
+3. **LCP image missing `fetchpriority="high"` — LCP discovery insight score 0**
+   - LCP element is the cover image: `img.wp-block-cover__image-background` (MONSTER-ROD-HOLDER-HEADER-25.jpg, 66 KB).
+   - Lighthouse confirms: discoverable ✓, not lazy ✓, **but `fetchpriority=high` NOT applied**.
+   - The browser doesn't know this image is critical and queues it behind the render-blocking CSS/JS.
+
+4. **Image delivery — est savings 300 ms LCP / 71 KiB**
+   - Some product thumbnails still served larger than displayed (`m-3345-black-1-768x768.jpg`, the two Economy Base thumbs). Likely sizing/format (JPEG vs WebP/AVIF).
+
+---
+
+## Fix plan (ordered by impact ÷ effort) (HEAD)
+
+### P0 — Quick wins (should push us to ~96-98)
+
+1. **Defer/async jQuery** — add jquery to Blocksy's "delay loading" list, or use a plugin setting that emits `defer` on `jquery.min.js`. Blocksy Pro has a Performance panel with "Delay JS" / "Async JS" options — enable for jQuery.
+
+2. **Self-host IBM Plex Mono** (or swap to system font for display copy)
+   - The single worst offender is the Google Fonts stylesheet (779 ms). Options in order of preference:
+     - Self-host with `font-display: swap` via a plugin like OMGF (Host Google Fonts Locally) — one-click fix on WordPress.
+     - If IBM Plex Mono is only used as an accent, swap to `ui-monospace, SFMono-Regular, Menlo, monospace` and drop the Google Fonts request entirely.
+
+3. **Add `Cache-Control` headers in nginx** for WP static assets. One block:
+   ```nginx
+   location ~* \.(jpg|jpeg|png|gif|webp|avif|svg|woff2?|css|js|ico)$ {
+       expires 30d;
+       add_header Cache-Control "public, max-age=2592000, immutable";
+       access_log off;
+   }
+   ```
+   Drop this in the `server {}` block for monsterrodholders. Immediate win on the cache audit (~+700 ms LCP on repeat loads; also helps first-visit sub-resources via resource-timing hints).
+
+4. **Add `fetchpriority="high"` to the LCP cover image**
+   - In Blocksy / WP this usually means filtering the first hero image output. Two paths:
+     - **Plugin:** install "Fetch Priority" / "Performance Lab" (WP core's official plugin) — auto-tags the LCP image.
+     - **Code:** add a `render_block` filter in the theme's `functions.php`:
+       ```php
+       add_filter('render_block_core/cover', function($block_content, $block) {
+           static $done = false;
+           if ($done) return $block_content;
+           $done = true;
+           return preg_replace('/<img /', '<img fetchpriority="high" ', $block_content, 1);
+       }, 10, 2);
+       ```
+     - Also check the cover block's `loading` attribute — should be `eager` on the first one (already is per the report, `data-object-fit="cover"` with no `loading="lazy"` ✓).
+
+5. **Preload the LCP image** in the `<head>` to shave more LCP:
+   ```html
+   <link rel="preload" as="image" href="/wp-content/uploads/2026/04/MONSTER-ROD-HOLDER-HEADER-25.jpg" fetchpriority="high">
+   ```
+   Blocksy Pro → Performance → Preloads, or via `wp_head` action.
+
+### P1 — Polish (gets us to 98-100)
+
+6. **Convert LCP image + thumbnails to WebP/AVIF** — `cwebp` or a plugin (WebP Express, EWWW). Saves the 71 KiB image-delivery Lighthouse flagged.
+
+7. **Defer or combine Blocksy CSS bundles** — Blocksy Pro has a "Combine CSS" toggle. Combining the 15 small CSS files into one reduces render-blocking request count dramatically (request overhead, not bytes).
+
+### Non-perf fixes from the same report
+- **SEO 85 → 90+**: Missing meta description on homepage. Set it in Blocksy → SEO or Yoast.
+- **Accessibility 91 → 95+**: `color-contrast` and `image-alt` failures — need alt text on a product image and a contrast tweak on one element.
+
+---
+
+**Predicted outcome after P0 only:**
+
+| Metric | Current | After P0 | New score |
+|---|---|---|---|
+| FCP | 2.5 s | ~0.9 s | 1.00 (+3.2) |
+| LCP | 3.2 s | ~1.8 s | 0.98 (+6.5) |
+| **Perf** | **89** | **~98** | |
+
+Want me to start implementing? The fastest route is: (1) install OMGF + Performance Lab plugins, (2) add the nginx cache block, (3) enable Blocksy's Delay JS for jQuery. That's ~15 minutes of work and should land us past 95.
+<!-- agent:boundary:52cd4a7e -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] **Lighthouse perf >95 plan** — P0: self-host IBM Plex Mono (OMGF), defer jQuery, nginx Cache-Control headers, fetchpriority=high on cover image, preload LCP image
+- [ ] **Lighthouse polish** — P1: WebP/AVIF conversion, combine Blocksy CSS bundles
+- [ ] **SEO 85→95** — add homepage meta description (Blocksy SEO or Yoast)
+- [ ] **A11y 91→95** — fix color-contrast + missing image-alt flagged in report
 - [ ] Add Facebook/Instagram to top bar (need URLs from Ron)
 - [ ] Delete Recently Viewed Products page (18849)
 - [ ] DNS propagating → run certbot when `dig monsterrodholders.com` returns 50.28.2.199
 - [ ] Respond to 9 real customer order inquiries in comment hold queue
 - [ ] Copy remaining uploads (verify completeness)
 - [ ] padding-top: 140px live — verify navbar overlap resolved after DNS flip
-- [ ] Re-run Lighthouse after b04bc36 to verify recovery
+- [ ] Re-run Lighthouse after perf fixes land
 - [x] Mobile 1-column product grid ✓ (7a5bf4e)
 - [x] SEO noindex fix ✓ (50 → 85, `blog_public=1`)
 - [x] Site URL http→https ✓ (41,985 DB replacements, b04bc36)

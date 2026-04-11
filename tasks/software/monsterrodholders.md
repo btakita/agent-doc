@@ -653,7 +653,7 @@ TBT/CLS/SI are already ~perfect. The 11 points are all in **FCP (3.2)** and **LC
 | **Perf** | **89** | **~98** | |
 
 Want me to start implementing? The fastest route is: (1) install OMGF + Performance Lab plugins, (2) add the nginx cache block, (3) enable Blocksy's Delay JS for jQuery. That's ~15 minutes of work and should land us past 95.
-<!-- agent:boundary:52cd4a7e -->
+<!-- agent:boundary:d4e30eae -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

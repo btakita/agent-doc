@@ -138,3 +138,18 @@ When preflight runs for any document, scan all tracked documents in the same pro
 | Fix 4 (plugin post-apply) | Low — defense-in-depth | Medium — FFI + Kotlin | Do last |
 
 Fixes 1–3 are a single small PR. Fix 5 is a follow-up. Fix 4 is optional defense-in-depth.
+
+<!-- agent:exchange -->
+Implemented Fixes 1–3 (single PR scope):
+
+**Fix 1** (`write.rs:969`) — Before `process::exit(75)`, now saves snapshot + calls `git::commit`. The agent response is tracked in git even while the plugin patch is pending.
+
+**Fix 2** (`main.rs:941`) — Reordered: commit attempt runs before `result?` propagates. A partial write that saved the snapshot is now committed even when `run_stream` returns `Err`.
+
+**Fix 3** (`git.rs:248`) — Added retry loop (up to 3x, exponential backoff 100/200/400ms) on `index.lock` stderr. Concurrent sessions no longer drop commits silently.
+
+Build: clean (`cargo build` passed, 1 crate compiled).
+
+Fixes 4 and 5 deferred per spec priority table.
+<!-- agent:boundary:ffea77d4-ccf4-4b17-9b36-3fa0cecf3992 -->
+<!-- /agent:exchange -->

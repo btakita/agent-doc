@@ -568,7 +568,12 @@ fn truncate_for_log(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
     } else {
-        format!("{}...", &s[..max])
+        // Find the last char boundary at or before `max` bytes
+        let mut truncated = max;
+        while truncated > 0 && !s.is_char_boundary(truncated) {
+            truncated -= 1;
+        }
+        format!("{}...", &s[..truncated])
     }
 }
 

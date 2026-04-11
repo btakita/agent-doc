@@ -74,7 +74,7 @@ When `src/session-share` lacks `.agent-doc/`, the write fails at step 2: no dire
 Next: Run `/agent-doc src/session-share/tasks/claudescore.md` (Claude Code slash command, not a shell command) to execute the session. That will write back the pending response that failed before.
 
 ❯ src/session-share/tasks/claudescore.md has an uncommitted response patch. Why?
-### Re: claudescore.md uncommitted response patch (HEAD)
+### Re: claudescore.md uncommitted response patch
 
 **Not actually uncommitted.** The response WAS written and committed (commit `8c93148`, +50 lines). The "modified" status in git is due to the `(HEAD)` boundary marker:
 
@@ -86,11 +86,32 @@ This is expected agent-doc gutter behavior. The `(HEAD)` marker shows "git commi
 **Why it still shows modified:** The preflight did run `agent-doc commit` on claudescore.md (via the sweep), and it succeeded. But the working tree file reflects the boundary state. The next `/agent-doc` run on claudescore.md will clean this up by computing a new boundary.
 
 No action needed — this is correct behavior. The response is safely committed.
-<!-- agent:boundary:b73df71e -->
+
+❯ Response patches are still not being written to claudescore.md. Why?
+### Re: Response patches to claudescore.md (HEAD)
+
+They ARE being written — commit `8c93148` landed 50 lines of agent response (the "Universal Solution", "Short-term Workaround", etc. sections). 
+
+The "modified" status shows two things:
+1. **`(HEAD)` boundary marker removed** (expected after commit)
+2. **New uncommitted line added:** `implement Scoring API: extend sampler...` — this is user-added content, not part of the agent response
+
+The agent response is safely in git. The working tree shows modified because of user edits AFTER the agent wrote back. This is the correct workflow: agent writes → agent commits → user adds follow-up notes.
+
+To clean up the working tree and start fresh for the next response:
+```bash
+cd src/session-share
+git add tasks/claudescore.md
+git commit -m "agent-doc(claudescore): pending implementation note"
+```
+
+Then `/agent-doc src/session-share/tasks/claudescore.md` will see a clean state.
+<!-- agent:boundary:71ddbf42 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-
+- Commit pending note in claudescore.md to clear working tree state
+- Then responses will write cleanly to the submodule document
 <!-- /agent:pending -->

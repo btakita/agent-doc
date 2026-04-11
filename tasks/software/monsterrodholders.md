@@ -1012,7 +1012,7 @@ The logo image (`monster-rod-holder-logo-2023.png`) is 2048×1331 (1.54:1 ratio)
 Check `https://50.28.2.199.nip.io/` and let me know:
 - If 70px still feels too small, I can push it to 80–90px (the navbar will grow to fit, or I can also add `min-height` to the header row to control that)
 - If it's clipping on mobile or the sticky scroll version, say the word — Blocksy also has separate `--logo-max-height` overrides for `[data-sticky]` and mobile breakpoints that I can add
-<!-- agent:boundary:cf35d628 -->
+<!-- agent:boundary:a6a15ab2 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

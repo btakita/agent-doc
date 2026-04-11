@@ -16,7 +16,7 @@ agent_doc_write: crdt
 ### Re: transfer to corky.md (HEAD)
 
 Done. Full exchange (all phases + tests + audit) transferred to `tasks/software/corky.md`.
-<!-- agent:boundary:7c23f768 -->
+<!-- agent:boundary:50cac8bc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

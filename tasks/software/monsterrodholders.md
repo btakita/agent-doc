@@ -1490,7 +1490,7 @@ Deployed + cache flushed. Verified via curl on `https://50.28.2.199.nip.io/shop/
 ```
 
 ❯ In the /shop page, add the same sidebar with the product categories as in the / page.
-### Re: /shop page sidebar (HEAD)
+### Re: /shop page sidebar
 
 **Understood** — the /shop page should display the same sidebar with product categories (Popular Categories grid) that's on the homepage. This means:
 
@@ -1499,11 +1499,22 @@ Deployed + cache flushed. Verified via curl on `https://50.28.2.199.nip.io/shop/
 3. **Styling:** Match the homepage `.mrh-shop-categories` CSS and layout
 
 Added to pending below.
-<!-- agent:boundary:0992fb81 -->
+❯ do
+❯ - [ ] **Add category sidebar to /shop** — same 4-tile grid from homepage (Rod Holders, Bases, Boat Accessories, Racks), positioned alongside product list
+
+### Re: Implement /shop category sidebar (HEAD)
+
+**Starting implementation.** I'll add the category sidebar grid to the /shop page to match the homepage layout. This involves:
+
+1. Accessing the Blocksy theme customizer for the shop template
+2. Adding a "Popular Categories" section with the same 4-tile grid
+3. Ensuring CSS styling matches the homepage `.mrh-shop-categories` component
+
+I'll SSH into the server, customize the shop page template in WordPress, and confirm the changes are live.
+<!-- agent:boundary:45569271 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Add category sidebar to /shop** — same 4-tile grid from homepage (Rod Holders, Bases, Boat Accessories, Racks), positioned alongside product list
-- [ ] **Visual confirmation from Ron/you** — /shop/ sidebar placement, category grid styling matches /, / product sort
+- [ ] **[In Progress] Add category sidebar to /shop** — implementing via Blocksy theme customizer, adding 4-tile grid
 <!-- /agent:pending -->

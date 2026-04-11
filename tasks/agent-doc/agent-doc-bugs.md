@@ -195,7 +195,7 @@ The implementation of the submodule-aware patch routing fix IS complete:
 **But:** The current `agent-doc` binary at v0.31.31 is the OLD version without the fix. To activate the fix, you need to run `cargo install --path src/agent-doc` to install the updated binary.
 
 Also, this document (`tasks/agent-doc/agent-doc-bugs.md`) is in the agent-loop root, NOT in a submodule, so my fix wouldn't affect writes to this file anyway.
-<!-- agent:boundary:ff6ef4f7 -->
+<!-- agent:boundary:ae5b1490 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

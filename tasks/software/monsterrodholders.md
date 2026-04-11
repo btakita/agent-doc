@@ -1052,7 +1052,7 @@ Check `https://50.28.2.199.nip.io/` on a phone or DevTools device mode and let m
 
 ❯ We still have the cropping issue on https://50.28.2.199.nip.io/
 ❯ See ![2026-04-11_14-39.png](../../../../../Pictures/agent-loop/2026-04-11_14-39.png)
-### Re: mobile cropping — root cause was WP's CSS sanitizer ✗→✓ (HEAD)
+### Re: mobile cropping — root cause was WP's CSS sanitizer ✗→✓
 
 **Root cause — not your CSS, my comment.** The mobile full-bleed CSS never made it to the browser. I put `<=689px` inside a CSS comment, and WordPress's custom_css sanitizer (invoked by `wp_update_custom_css_post`) treats `<` as the start of an HTML tag and truncates everything after it. The comment got chopped mid-sentence, which in turn chopped the `@media` rule that followed it. Verified via:
 
@@ -1090,12 +1090,53 @@ The post body on disk still had the full CSS (I checked via `wp post get 86030 -
 Also added a redundant `body { --container-spacing: 0px; }` because Blocksy sometimes sets these custom properties on `body` with higher specificity than `:root`.
 
 **Verify on mobile:** reload `https://50.28.2.199.nip.io/` in DevTools device mode (or a phone) at ≤689px and the hero cover should now span edge-to-edge. If it still looks cropped, send another screenshot and I'll inspect the computed styles — there may be a `.wp-block-cover` `align=` constraint I need to override too.
-<!-- agent:boundary:58eccfc3 -->
+
+❯ The mobile site is still cropped. Please use chromium-bridge to iterate until the cropping is removed.
+### Re: mobile hero cropping — root cause was 90vw container width (HEAD)
+
+**Root cause found.** Blocksy sets `--theme-container-width: min(100%, calc(90vw - 0px*2))`, meaning the `.ct-container` is always 90% of viewport width (not 100%). At 390px mobile, the container was only 351px wide, leaving ~20px empty on each side — that's the cropping.
+
+The previous CSS fix set `max-width: 100% !important` but missed `width: 100% !important`. The container's `width` property pulled from `var(--theme-container-width)` = 90vw, which bypassed the max-width override entirely.
+
+**What I found via browser inspection:**
+
+- `.ct-container` CSS: `width: var(--theme-container-width)` where the variable = `min(100%, 90vw)`
+- `.ct-container` also has `data-sidebar="left"` — a 2-column grid at ≥1000px (sidebar + content), but this collapses to single column at <1000px automatically via Blocksy's own CSS
+- The sidebar grid is not the issue on mobile — it already collapses correctly. The 90vw width is the only blocker.
+
+**Fix applied** (post 86030 updated, cache flushed):
+
+```css
+/* Mobile full-bleed: force container to 100% width (Blocksy uses 90vw by default) */
+@media (max-width: 689px) {
+    .ct-container,
+    .ct-container-fluid,
+    main.site-main,
+    .entry-content,
+    .wp-site-blocks {
+        width: 100% !important;
+        max-width: 100% !important;
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+    }
+
+    :root, body {
+        --theme-container-width: 100%;
+        --content-spacing: 0px;
+        --container-spacing: 0px;
+    }
+}
+```
+
+Key change: added `width: 100% !important` (was missing) and `--theme-container-width: 100%` to override the 90vw variable. Desktop layout is unchanged.
+
+**Verified:** Simulated mobile conditions in the browser — hero fills `heroX: 0, heroW: viewport` with `heroFillsViewport: true`. Desktop screenshot confirms no regression. Hard-refresh `https://50.28.2.199.nip.io/` on mobile and the hero should now be edge-to-edge.
+<!-- agent:boundary:3b10a263 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Re-verify mobile full-bleed** — hard-refresh `https://50.28.2.199.nip.io/` at ≤689px and confirm the hero + content now span the full viewport width
+- [ ] **Verify hero full-bleed on actual mobile** — load `https://50.28.2.199.nip.io/` on a phone or DevTools ≤689px and confirm hero spans edge-to-edge
 - [ ] **Lighthouse perf >95 plan** — P0: self-host IBM Plex Mono (OMGF), defer jQuery, nginx Cache-Control headers, fetchpriority=high on cover image, preload LCP image
 - [ ] **Verify hero clearance visually** — confirm logo/title clears the sticky navbar; tweak fallback or offset if needed
 - [ ] **Verify logo size visually** — confirm 70px logo height is legible; bump to 80–90px or tune sticky/mobile variants if needed

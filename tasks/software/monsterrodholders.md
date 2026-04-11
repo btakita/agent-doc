@@ -119,14 +119,31 @@ Pushed when ready.
 ❯ fix block error
 ❯ ![img_2.png](img_2.png)
 
-### Re: block error fixed (HEAD)
+### Re: block error fixed
 
 **Confirmed ✓** — The padding-top CSS fix resolved the navbar overlap. Content is now properly positioned below the sticky navbar on the home page.
 
 Is the layout rendering correctly now on both desktop and mobile views? If any refinement is needed (padding amount, selector adjustment), just let me know.
 
 Next: Ron can verify the 4-column product grid is also displaying correctly after the cache clear. Both CSS fixes should now be live.
-<!-- agent:boundary:e7a407f8 -->
+
+❯ The aside is still covered by the top navbar
+### Re: aside still covered by navbar (HEAD)
+
+The padding-top approach didn't work. This suggests either:
+1. The selector (`.home aside`) doesn't match the actual element
+2. The aside is absolutely/fixed positioned (padding won't help)
+3. The element structure is different than expected
+
+**To debug:** Can Ron open the browser DevTools (F12) on the home page and:
+- Right-click on the covered aside area → Inspect
+- Tell me the actual HTML structure (tag name, class names, id)
+- Check if it has `position: absolute`, `position: fixed`, or `display: flex/grid` in the computed styles
+
+Alternatively, if the navbar is z-index stacking, we might need a different approach (e.g., margin-top on a different element, or adjusting the navbar's positioning).
+
+Once I see the actual DOM, I can provide the correct CSS rule.
+<!-- agent:boundary:88e6c07c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -138,5 +155,5 @@ Next: Ron can verify the 4-column product grid is also displaying correctly afte
 - [ ] Respond to 9 real customer order inquiries in comment hold queue
 - [ ] Copy remaining uploads (verify completeness)
 - [ ] Home page 4-column grid: CSS added, verify rendering after cache clear
-- [ ] Home page navbar overlap: CSS fix applied and verified ✓
+- [ ] Home page navbar overlap: **Debugging** — selector or element structure mismatch, need actual DOM for correct fix
 <!-- /agent:pending -->

@@ -162,7 +162,7 @@ This will push the widget content below the 75px navbar (with some extra breathi
 Let me know if it renders correctly after testing!
 ❯ I don't see the `.home .ct-sidebar .ct-widget` style applied on the site.
 Please verify
-### Re: CSS rule not applying (HEAD)
+### Re: CSS rule not applying
 
 The CSS rule isn't showing up. Let me check a few things:
 
@@ -184,9 +184,24 @@ The CSS rule isn't showing up. Let me check a few things:
 4. **Alternative approach** — If custom CSS still isn't working, we can add it directly to the theme's main CSS file or use a different method.
 
 Let me know what you find in DevTools!
-<!-- agent:boundary:ce28e8c7 -->
-<!-- /agent:exchange -->
 
+❯ I don't see the change. Please update the site. Verify.
+### Re: pushing the update directly (HEAD)
+
+**Got it — I'll add the CSS directly via WP-CLI and verify it applies.**
+
+Let me SSH in and add the custom CSS with WP-CLI:
+```bash
+ssh root@50.28.2.199 "wp option get 'custom_css_post_id' && \
+wp post get <ID> --field=post_content && \
+wp post update <ID> --post_content='.home .ct-sidebar .ct-widget { padding-top: 100px; }' --porcelain"
+```
+
+Then I'll verify the change is live on the home page (check the page source for the CSS). Once confirmed working, I'll commit to git.
+
+Give me 2 mins to SSH in and verify.
+<!-- agent:boundary:3f3968bf -->
+<!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
@@ -196,5 +211,5 @@ Let me know what you find in DevTools!
 - [ ] Respond to 9 real customer order inquiries in comment hold queue
 - [ ] Copy remaining uploads (verify completeness)
 - [ ] Home page 4-column grid: CSS added, verify rendering after cache clear
-- [ ] Home page navbar overlap: **Troubleshooting** — CSS rule not appearing, checking Customizer + cache
+- [ ] Home page navbar overlap: **Direct update via WP-CLI** — adding CSS now, will verify
 <!-- /agent:pending -->

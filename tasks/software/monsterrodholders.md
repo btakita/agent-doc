@@ -1247,7 +1247,7 @@ Posts are now served at `/blog/`. The Footer "Blog" link (Col3 Company) already 
 ❯ - Malesuada Bibendum Arcu Elementum Laoreet
 
 ❯ Remove the garderobe starter site blog post assets including images.
-### Re: Remove garderobe starter blog posts + assets (HEAD)
+### Re: Remove garderobe starter blog posts + assets
 
 Found 6 Latin-title starter posts (not 4 — two more slipped through):
 
@@ -1268,18 +1268,43 @@ wp post delete 560 557 554 185 182 86034 --force       # attachments
 ```
 
 Remaining posts are all legitimate MRH content (IDs 15864–79564 + Pro Tandem Pac / Catfish Cook Off). `/blog/` now shows only real posts.
-<!-- agent:boundary:674aef21 -->
+
+❯ On the /shop/ page, show all the products. Use a responsive 4 column grid. Order by most sold desc. Exclude any sold out products.
+### Re: /shop/ — all products, 4-col grid, sorted by most sold, no sold-out (HEAD)
+
+**What was already configured correctly:**
+- `woocommerce_catalog_columns = 4` (WooCommerce renders `<ul class="products columns-4">`)
+- `woocommerce_hide_out_of_stock_items = yes` (sold-out products already excluded)
+
+**What I changed:**
+
+1. **Sort order → popularity (most sold):**
+   ```bash
+   wp option update woocommerce_catalog_orderby popularity
+   ```
+   WooCommerce's `popularity` orderby sorts by `total_sales` meta descending — exactly "most sold desc".
+
+2. **Show all 57 products (no pagination):** Added a must-use plugin:
+   ```
+   /var/www/html/wp-content/mu-plugins/mrh-shop.php
+   ```
+   ```php
+   add_filter( 'loop_shop_per_page', function() { return -1; }, 999 );
+   ```
+   The previous setting was 4 cols × 4 rows = 16 per page. The filter returning `-1` overrides that and WooCommerce shows all products. Verified: `wp eval 'echo apply_filters("loop_shop_per_page", 16);'` → `-1`.
+
+**Responsive grid:** Blocksy's WooCommerce integration inherits the `columns-4` class. The default responsive cascade is:
+- Desktop (>768px): 4 columns
+- Tablet (480–768px): 3 columns (WooCommerce default)
+- Mobile (<480px): 2 columns
+
+If you want different breakpoints (e.g. 2 cols on tablet instead of 3), send a screenshot and I'll add targeted CSS.
+
+**Verify:** Hard-refresh `https://monsterrodholders.com/shop/` — all 57 products should appear sorted by sales volume, no pagination, no sold-out items.
+<!-- agent:boundary:0d491bdf -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **Verify mobile header gutter visually** — confirm ~12px breathing room on hamburger/logo at ≤689px
-- [x] **Verify hero full-bleed on actual mobile** — load `https://50.28.2.199.nip.io/` on a phone or DevTools ≤689px and confirm hero spans edge-to-edge
-- [x] **Lighthouse perf >95 plan** — P0: self-host IBM Plex Mono (OMGF), defer jQuery, nginx Cache-Control headers, fetchpriority=high on cover image, preload LCP image
-- [x] **Verify hero clearance visually** — confirm logo/title clears the sticky navbar; tweak fallback or offset if needed
-- [x] **Verify logo size visually** — confirm 70px logo height is legible; bump to 80–90px or tune sticky/mobile variants if needed
-- [x] **Verify `wp-to-git.sh` captures DB-side fixes** — confirm sync script picks up the custom_css post edit and theme_mods_blocksy copyright patch on next run
-- [x] **Certbot run after DNS flips to 50.28.2.199** — `ssh root@50.28.2.199 "certbot --apache -d monsterrodholders.com -d www.monsterrodholders.com"`
-- [x] **Remove broken `app-nginx-1` from docker-compose** — N/A: compose stack not running, no orphaned container exists
-- [x] **Remove News page and navbar item** — deleted `/news/` page (ID 11) and News menu item (db_id 86037) from Main Menu
+- [ ] **Verify /shop/ responsive grid visually** — confirm 4-col desktop, sensible tablet/mobile, all 57 products visible
 <!-- /agent:pending -->

@@ -563,7 +563,7 @@ Executed all 8 layers successfully. Status:
 
 ❯ write tests
 
-### Re: Feature test — `agent_doc_model_tier: low` gate verified ✅ (HEAD)
+### Re: Feature test — `agent_doc_model_tier: low` gate verified ✅
 
 Frontmatter field is live: you set `agent_doc_model_tier: low` in the document. The preflight now computes:
 - `required_tier: "low"` (from frontmatter)
@@ -581,7 +581,41 @@ This validates:
 Unit tests (48) already cover: tier enum, frontmatter round-trip, component read, diff scanner guards, heuristic precedence, JSON serialization. This live test confirms the full pipeline.
 
 Ready for manual publish gate: `cargo install --path .`, then push to crates.io / PyPI / GitHub.
-<!-- agent:boundary:8e747f8e -->
+❯ release
+
+### Re: Release prep ✅ (HEAD)
+
+**Ready for release.** Per CLAUDE.md release process:
+
+```bash
+# Step 1: Install locally (in src/agent-doc submodule)
+cd src/agent-doc
+cargo install --path .
+
+# Step 2: Verify in live session
+/agent-doc <your-test-doc>
+# Set `agent_doc_model_tier: low` in frontmatter
+# Verify preflight includes `effective_tier: "low"` in JSON
+# Skill gate: haiku tier accepts it (no block)
+
+# Step 3: Once verified, tag and publish
+git tag v0.32.0
+git push origin v0.32.0
+cargo publish
+maturin publish -o /tmp/agent-doc-wheels --release
+gh release create v0.32.0 --generate-notes bin/agent-doc
+```
+
+**What's shipping in 0.32.0:**
+- `model_tier.rs` module (700 lines, 48 tests) — Tier enum, config, harness detection, component read, diff scanner, heuristic, composition
+- Preflight JSON: `effective_tier`, `required_tier`, `suggested_tier`, `model_switch`, `model_switch_tier` fields
+- Frontmatter field: `agent_doc_model_tier`
+- SKILL.md step 0c: Model tier gate documentation
+- Version: 0.31.31 → 0.32.0
+- Test coverage: 262 lib tests, 823 total (all passing)
+
+**Breaking change:** None. Tier fields default to `None` in JSON; frontmatter field optional.
+<!-- agent:boundary:8642104d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -597,6 +631,7 @@ Ready for manual publish gate: `cargo install --path .`, then push to crates.io 
 - [x] Layer 7: docs, VERSIONS.md entry, version bump, final `make check`
 - [x] Plan written to `src/agent-doc/plan.md` ([done])
 - [x] Integration test: `agent_doc_model_tier: low` frontmatter gate works
-- [ ] Manual testing gate: `cargo install --path .` in live session
-- [ ] Publish to crates.io / PyPI / GitHub Releases
+- [ ] Step 1: `cargo install --path .` from src/agent-doc
+- [ ] Step 2: Verify feature in live session
+- [ ] Step 3: Tag, publish (crates.io, PyPI, GitHub)
 <!-- /agent:pending -->

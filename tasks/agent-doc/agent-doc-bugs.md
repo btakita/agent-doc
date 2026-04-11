@@ -291,7 +291,7 @@ All five fixes landed. Tests green.
 - Two previously-broken tests (`try_ipc_succeeds_when_plugin_consumes`, `try_ipc_snapshot_saves_disk_state`) now pass — they were broken by an earlier draft of `resolve_ipc_project_root` that fell through to CWD; the final version uses `find_project_root` as the non-git fallback so tempdir-based tests stay inside their tempdir.
 
 **Not yet done:** version bump, VERSIONS.md, `cargo install --path .`, manual testing gate, publish. Per release process these wait for your "go" after end-to-end verification in a live submodule session.
-<!-- agent:boundary:a38443d7 -->
+<!-- agent:boundary:d814cf13 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -118,7 +118,7 @@ cd src/session-share && git add tasks/claudescore.md && git commit -m "agent-doc
 ```
 
 **Clean state achieved.** The submodule is now ready for `/agent-doc src/session-share/tasks/claudescore.md` to write responses without working tree conflicts. Responses will now land cleanly in the exchange component.
-<!-- agent:boundary:762748c2 -->
+<!-- agent:boundary:dbb1a99d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1769,7 +1769,7 @@ Verified on `https://50.28.2.199.nip.io/shop/`:
 <h2 class="mrh-shop-heading">All Products</h2>
   <product grid>
 ```
-<!-- agent:boundary:6a885b7b -->
+<!-- agent:boundary:a5435593 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

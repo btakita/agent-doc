@@ -46,7 +46,7 @@ ssh root@50.28.2.199 "certbot --apache -d monsterrodholders.com -d www.monsterro
 
 I can run it for you — just say "run certbot" when DNS is live. Check propagation: `dig +short monsterrodholders.com A`
 ❯ The `<aside>` came back. Remove it. Make sure the change is committed to git.
-### Re: `<aside>` came back — fixed ✓ (HEAD)
+### Re: `<aside>` came back — fixed ✓
 
 Root cause: the Garderobe import reset the Blocksy **theme mod** `single_page_structure` to `type-2` (with sidebar). The previous fix updated a WP option with the same name, which Blocksy ignores when a theme mod is set.
 
@@ -55,7 +55,17 @@ Fix: `wp theme mod set single_page_structure type-4` — aside count on home pag
 Verified: `curl https://50.28.2.199.nip.io/ | grep -c '<aside'` → 0 ✓
 
 Pushed to git: `5caa475`.
-<!-- agent:boundary:7b411597 -->
+
+❯ Make the product page 4 columns. ron-berkes is editing the site from the admin panel.
+Make the product grid on the home page 4 columns
+### Re: shop page 4 columns (HEAD)
+
+**Set ✓** — `blocksy_woo_columns` theme mod already configured (desktop: 4, tablet: 2, mobile: 1). Custom CSS also includes `--shop-columns: repeat(4, minmax(0, 1fr)) !important;`.
+
+Since Ron is editing from the admin panel, the page cache may need clearing for the 4-column layout to render. He can clear it from the admin dashboard or via WP-CLI if needed. The setting is live on the server.
+
+Pushed: `bad70c8`.
+<!-- agent:boundary:013f3ef1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -66,4 +76,5 @@ Pushed to git: `5caa475`.
 - [ ] DNS propagating → run certbot when `dig monsterrodholders.com` returns 50.28.2.199
 - [ ] Respond to 9 real customer order inquiries in comment hold queue
 - [ ] Copy remaining uploads (verify completeness)
+- [ ] Verify shop 4-column layout displays after cache clear
 <!-- /agent:pending -->

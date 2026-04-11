@@ -982,7 +982,7 @@ corky doc sheet "https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8e
 
 ❯ do
 ❯ - [ ] Enable Google Sheets API on GCP project 718955483040: https://console.developers.google.com/apis/api/sheets.googleapis.com/overview?project=718955483040
-### Re: Enable Sheets API (HEAD)
+### Re: Enable Sheets API
 
 Browser automation (Chrome DevTools MCP) is not reachable from this session — it times out consistently. Need you to enable it manually:
 
@@ -993,12 +993,23 @@ Browser automation (Chrome DevTools MCP) is not reachable from this session — 
    ```bash
    corky doc sheet "https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8eyCijtqqteslsWcvJ1JCM/edit?gid=210871523#gid=210871523" --account brian@dreamable.com
    ```
-<!-- agent:boundary:e0171e48 -->
+   
+❯ continue
+### Re: corky doc sheet — working (HEAD)
+
+`corky doc sheet` now works with `brian@dreamable.com`. Retrieved the ClaudeScore sprint tracker (25 tasks, Sprints 1-4):
+
+- **Sprint 1:** Fork/configure Claudebin, rubric v1.0, AgentShield integration, Stop hook asset capture
+- **Sprint 2:** DeepEval G-Eval, 4-pillar scoring, signal extraction, recommendation engine, credential tier assignment
+- **Sprint 3:** Supabase RLS, shareable URLs, session sharing, public profiles
+- **Sprint 4:** Score report UI, domain scores, public repo pipeline, production deploy
+
+Most Sprint 2 tasks are "Started" with 0 actual hours — signal extraction (2.3) and credential tier (2.5) are the active next steps.
+<!-- agent:boundary:9e305f37 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Enable Google Sheets API manually: https://console.developers.google.com/apis/api/sheets.googleapis.com/overview?project=718955483040 (browser automation unavailable)
-- [ ] Rerun `corky doc sheet ... --account brian@dreamable.com` after enabling
+
 <!-- /agent:pending -->

@@ -47,7 +47,7 @@ agent-doc init src/session-share
 ```
 
 The first command initializes the `.agent-doc/` directory and config in the submodule. Then agent-doc writes will work.
-<!-- agent:boundary:6dbcd438 -->
+<!-- agent:boundary:3fba845c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -935,7 +935,7 @@ It will open a browser to the Google consent screen pre-filled with `brian@dream
 ❯ Oauth went to a not found page when I went through Oauth
 ❯ do
 ❯ - [ ] Complete OAuth flow for `brian@dreamable.com` (needs browser: run `corky doc sheet ... --account brian@dreamable.com`)
-### Re: OAuth "not found" page (HEAD)
+### Re: OAuth "not found" page
 
 The OAuth redirect hit a dead callback server — the corky process was killed (we freed port 8484 mid-flow) before Google sent the code back. Port 8484 is free now.
 
@@ -946,7 +946,7 @@ corky doc sheet "https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8e
 ```
 
 When you see `Waiting for callback on http://127.0.0.1:8484/callback...`, complete the Google consent screen in the browser. It will capture the auth code and cache the token in `~/.config/corky/tokens.json`. After that, no more OAuth needed for that account.
-### Re: OAuth "not found" page (HEAD)
+### Re: OAuth "not found" page
 
 The OAuth redirect hit a dead callback server — the corky process was killed (we freed port 8484 mid-flow) before Google sent the code back. Port 8484 is free now.
 
@@ -957,11 +957,34 @@ corky doc sheet "https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8e
 ```
 
 When you see `Waiting for callback on http://127.0.0.1:8484/callback...`, complete the Google consent screen in the browser. It will capture the auth code and cache the token in `~/.config/corky/tokens.json`. After that, no more OAuth needed for that account.
-<!-- agent:boundary:cdf3ca50 -->
+
+❯ do
+❯ - [ ] Re-run OAuth for `brian@dreamable.com` — port 8484 is now free; run the doc sheet command and complete browser consent without killing the process
+### Re: OAuth + Sheets API (HEAD)
+
+OAuth completed — token is cached. But hit a new error:
+
+```
+Error: Sheets API error (HTTP 403): Google Sheets API has not been used in project 718955483040 before or it is disabled.
+```
+
+The GCP project has the OAuth app but the **Sheets API is not enabled**. Enable it:
+
+```
+https://console.developers.google.com/apis/api/sheets.googleapis.com/overview?project=718955483040
+```
+
+Click **Enable**, wait ~1 minute, then rerun (no OAuth prompt — token already cached):
+
+```bash
+corky doc sheet "https://docs.google.com/spreadsheets/d/1Jmr9rYxkmT2DKB6UX1CrC8eyCijtqqteslsWcvJ1JCM/edit?gid=210871523#gid=210871523" --account brian@dreamable.com
+```
+<!-- agent:boundary:ba25d2c6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Re-run OAuth for `brian@dreamable.com` — port 8484 is now free; run the doc sheet command and complete browser consent without killing the process
+- [ ] Enable Google Sheets API on GCP project 718955483040: https://console.developers.google.com/apis/api/sheets.googleapis.com/overview?project=718955483040
+- [ ] Rerun `corky doc sheet ... --account brian@dreamable.com` after API is enabled (token already cached)
 <!-- /agent:pending -->

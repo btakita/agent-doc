@@ -413,21 +413,40 @@ The pseudo-element sits at `inset-inline-start: 0` (the left edge of the aside) 
 
 Which do you prefer?
 ❯ type-4
-### Re: type-4 sidebar (HEAD)
+### Re: type-4 sidebar
 
 ✅ **Done.** Sidebar switched from `type-3` (border line) to `type-4` (background fill).
 
 The left border you see in the screenshot is now gone. Sidebar renders as a boxed section with background color instead of a line separator.
 
 Verify live at: `https://50.28.2.199.nip.io/`
-<!-- agent:boundary:786d96fb -->
+
+❯ Make the product grid responsive. For mobile phones, the product grid should be 1 column.
+### Re: mobile 1-column product grid ✓ (HEAD)
+
+**Done.** Added `@media (max-width: 480px)` rule to custom CSS (post 86030):
+
+```css
+/* Mobile: 1-column product grid */
+@media (max-width: 480px) {
+    [data-products] {
+        grid-template-columns: 1fr !important;
+    }
+
+    .woocommerce ul.products {
+        grid-template-columns: 1fr !important;
+    }
+}
+```
+
+Covers both Blocksy's `[data-products]` grid and classic WooCommerce loops. 480px threshold targets phones — wider viewports keep the 4-column desktop layout (tablet breakpoint at 691-1000px was already in place).
+
+**Verified live** — CSS confirmed in post 86030. Pushed: `7a5bf4e`
+<!-- agent:boundary:1b6395f5 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] Choose hero image for home page ✓ (MONSTER-ROD-HOLDER-HEADER-25.jpg deployed)
-- [x] Update home page hero block with chosen image URL ✓
-- [x] Fix sidebar left border ✓ (type-3 → type-4)
 - [ ] Add Facebook/Instagram to top bar (need URLs from Ron)
 - [ ] Delete Recently Viewed Products page (18849)
 - [ ] DNS propagating → run certbot when `dig monsterrodholders.com` returns 50.28.2.199
@@ -435,4 +454,5 @@ Verify live at: `https://50.28.2.199.nip.io/`
 - [ ] Copy remaining uploads (verify completeness)
 - [ ] Home page 4-column grid: CSS added, verify rendering after cache clear
 - [ ] padding-top: 140px live — verify navbar overlap resolved after DNS flip
+- [x] Mobile 1-column product grid ✓ (post 86030, pushed 7a5bf4e)
 <!-- /agent:pending -->

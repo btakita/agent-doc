@@ -171,6 +171,16 @@ interface AgentDocLib : Library {
     /** Get the library version (e.g. "0.26.1"). Caller must free result. */
     fun agent_doc_version(): Pointer?
 
+    /**
+     * Commit the document at [filePath] to git.
+     * Call after successfully applying a patch as a defense-in-depth guarantee
+     * that the agent response is tracked even if the shell-side --commit was skipped.
+     *
+     * @param filePath  absolute path to the document file
+     * @return true on success, false on failure
+     */
+    fun agent_doc_commit(filePath: String): Boolean
+
     /** Free a string returned by any agent_doc_* function. */
     fun agent_doc_free_string(ptr: Pointer?)
 

@@ -401,6 +401,45 @@ pub fn run(file: &Path) -> Result<()> {
         }
     }
 
+    // Step 2d: Cross-document sweep (Fix 5) — commit any other tracked docs in the same
+    // project that have uncommitted snapshot content. Turns preflight into a catch-all
+    // backstop: even if a previous session's commit was skipped, the next preflight
+    // from any document in the project will pick it up.
+    {
+        let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+        if let Some(root) = snapshot::find_project_root(&canonical) {
+            let sessions_path = root.join(".agent-doc/sessions.json");
+            if let Ok(content) = std::fs::read_to_string(&sessions_path)
+                && let Ok(registry) = serde_json::from_str::<std::collections::HashMap<String, serde_json::Value>>(&content)
+            {
+                for entry in registry.values() {
+                    let tracked_file = entry.get("file").and_then(|v| v.as_str()).unwrap_or("");
+                    if tracked_file.is_empty() { continue; }
+                    let doc_path = root.join(tracked_file);
+                    if doc_path == canonical { continue; } // already committed in step 2
+                    if !doc_path.exists() { continue; }
+                    // snapshot mtime > last commit? Call commit (idempotent — git skips if clean).
+                    let snap_is_newer = snapshot::path_for(&doc_path)
+                        .ok()
+                        .and_then(|snap_rel| {
+                            let snap_abs = root.join(&snap_rel);
+                            let snap_mtime = std::fs::metadata(&snap_abs).ok()?.modified().ok()?;
+                            let doc_mtime = std::fs::metadata(&doc_path).ok()?.modified().ok()?;
+                            // Proxy: snap newer than doc means an agent write landed without commit
+                            Some(snap_mtime > doc_mtime)
+                        })
+                        .unwrap_or(true); // if uncertain, try commit anyway
+                    if snap_is_newer {
+                        match git::commit(&doc_path) {
+                            Ok(()) => eprintln!("[preflight] sweep: committed {}", doc_path.display()),
+                            Err(e) => eprintln!("[preflight] sweep: warning for {}: {}", doc_path.display(), e),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Step 3: Read and truncate the claims log.
     eprintln!("[preflight] step 3: claims");
     let claims = read_and_truncate_claims(file);
@@ -1400,5 +1439,71 @@ mod tests {
         }
         // Diff itself is allowed to contain the content
         assert!(diff_str.contains(&large_content));
+    }
+
+    // --- Fix 5: cross-document sweep ---
+
+    #[test]
+    fn preflight_sweep_commits_other_tracked_docs() {
+        use std::fs;
+        let dir = setup_project();
+        let root = dir.path();
+
+        // Create initial commit so HEAD exists
+        let readme = root.join("README.md");
+        fs::write(&readme, "# project\n").unwrap();
+        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+
+        // Primary doc (the one preflight runs on)
+        let primary = root.join("primary.md");
+        let primary_content = "---\nagent_doc_session: primary\n---\n\n## User\n\nHello\n\n## Assistant\n\nReply\n\n## User\n\n";
+        fs::write(&primary, primary_content).unwrap();
+        snapshot::save(&primary, primary_content).unwrap();
+        Command::new("git").current_dir(root).args(["add", "primary.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "add primary", "--no-verify"]).output().unwrap();
+
+        // Secondary doc (tracked in sessions.json, snapshot newer than file — needs sweep)
+        let secondary = root.join("secondary.md");
+        let secondary_content = "---\nagent_doc_session: secondary\n---\n\n## User\n\nHi\n\n## Assistant\n\nResponse\n\n## User\n\n";
+        fs::write(&secondary, secondary_content).unwrap();
+        snapshot::save(&secondary, secondary_content).unwrap();
+        Command::new("git").current_dir(root).args(["add", "secondary.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "add secondary", "--no-verify"]).output().unwrap();
+
+        // Touch snapshot to make it newer than the file (simulates agent write without commit)
+        let snap_rel = snapshot::path_for(&secondary).unwrap();
+        let snap_abs = root.join(&snap_rel);
+        let new_snap = format!("{}\n<!-- agent updated -->", secondary_content);
+        fs::write(&snap_abs, &new_snap).unwrap();
+
+        // Write sessions.json with secondary tracked
+        let sessions_path = root.join(".agent-doc/sessions.json");
+        let sessions = serde_json::json!({
+            "secondary-session": {
+                "pane": "%1",
+                "pid": 9999,
+                "cwd": root.to_string_lossy(),
+                "started": "2026-01-01",
+                "file": "secondary.md",
+                "window": "@1"
+            }
+        });
+        fs::write(&sessions_path, serde_json::to_string_pretty(&sessions).unwrap()).unwrap();
+
+        // Run preflight on primary — sweep should commit secondary
+        run(&primary).unwrap();
+
+        // Verify secondary was committed by the sweep
+        let log = Command::new("git")
+            .current_dir(root)
+            .args(["log", "--oneline", "-4"])
+            .output()
+            .unwrap();
+        let log_str = String::from_utf8_lossy(&log.stdout);
+        assert!(
+            log_str.contains("agent-doc(secondary):"),
+            "preflight sweep should have committed secondary.md, got:\n{log_str}"
+        );
     }
 }

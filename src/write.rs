@@ -967,6 +967,16 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             )?;
 
             eprintln!("[write] IPC timeout — response saved as patch, awaiting plugin");
+            // Fix 1: save snapshot + commit before exit so the agent response is tracked
+            // even if the plugin applies the patch minutes later. Preflight won't see
+            // uncommitted content on the next cycle.
+            if let Err(e) = snapshot::save(file, &content_ours) {
+                eprintln!("[write] WARNING: snapshot save before exit(75) failed: {}", e);
+            }
+            if crate::git::is_in_git_repo(file)
+                && let Err(e) = crate::git::commit(file) {
+                    eprintln!("[commit] warning: commit before exit(75) failed: {}", e);
+                }
             std::process::exit(75); // EX_TEMPFAIL
         }
     }

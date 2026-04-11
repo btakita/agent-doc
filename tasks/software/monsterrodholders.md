@@ -1653,7 +1653,7 @@ Then flush the cache and verify the heading is gone from the page.
 SSH access works, but `/var/www/html/wp-content/mu-plugins/` doesn't exist on the server. WordPress doesn't appear to be in the standard location.
 
 Can you provide the actual path to where the mu-plugin file is located? Or the WordPress root directory path?
-<!-- agent:boundary:014090cf -->
+<!-- agent:boundary:51ff7f0b -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

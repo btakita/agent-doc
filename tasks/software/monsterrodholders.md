@@ -290,7 +290,7 @@ Then visit `https://monsterrodholders.com/` (accept the cert warning — temp ce
 
 Pushed: `0665625`.
 ❯ No...we are still testing http://50.28.2.199.nip.io/. monsterrodholders.com DNS is not moved yet
-### Re: URL revert — still on nip.io (HEAD)
+### Re: URL revert — still on nip.io
 
 Got it — premature. Reverted:
 
@@ -299,7 +299,27 @@ Got it — premature. Reverted:
 - Pushed to git: `9babf20`
 
 The DNS flip + URL swap remains a pending step when you're actually ready to go live.
-<!-- agent:boundary:92845a39 -->
+
+/Use the content in /about-us/ in /about-us-2/
+### Re: /about-us-2 + site access fix (HEAD)
+
+**`/about-us-2` updated ✓**
+
+Page 203 (which was still live, not fully deleted) is now updated with the same content as `/about-us/` — Steve Douglas bio, catfish story, founder layout. Both URLs show identical content.
+
+**Site access was broken — fixed ✓**
+
+Root cause: the "deploy" session modified the HTTP vhost to redirect `50.28.2.199.nip.io` → `https://monsterrodholders.com/`, but WP siteurl was reverted to `http://50.28.2.199.nip.io` — mismatch caused 403/404s everywhere.
+
+Fix: split the HTTP redirect into two separate vhosts — nip.io redirects to `https://50.28.2.199.nip.io/`, not to `monsterrodholders.com`. Apache reloaded.
+
+Verified:
+- `https://50.28.2.199.nip.io/` → 200 ✓
+- `https://50.28.2.199.nip.io/about-us/` → 200 ✓
+- `https://50.28.2.199.nip.io/about-us-2/` → 200 ✓
+
+Pushed to git: `6e8f795`.
+<!-- agent:boundary:be3a4d35 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

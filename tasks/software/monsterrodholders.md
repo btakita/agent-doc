@@ -311,7 +311,7 @@ Once you clarify, I can update the home page Blocksy cover block to use the corr
 
 **Pushed:** `9d4ba48` (via `wp-to-git.sh`)
 ❯ Print all of the available image urls
-### Re: all available image URLs (HEAD)
+### Re: all available image URLs
 
 **1,646 original images** found in the uploads volume. Full list saved to:
 
@@ -343,14 +343,38 @@ https://50.28.2.199.nip.io/wp-content/uploads/2020/08/Monster-Rod-Holders-Banner
 ```
 
 Which one do you want to use as the home page hero?
-<!-- agent:boundary:bc9b49d0 -->
+❯ We may have lost the hero image. Look in the backup zip file for missing images.
+❯ See /home/brian/work/rberkes/monsterrodholders/MonsterRodholdersNETNEWcloud-040626-backup.zip
+### Re: backup zip search for missing hero image (HEAD)
+
+**Checked the backup** (`MonsterRodholdersNETNEWcloud-040626-backup.zip`, 647MB):
+
+**Findings:**
+- Backup has 1,596 original images; server has 1,646 — server has **more** images than the backup (newer uploads)
+- **No images are in the backup that are missing from the server** — the backup is a subset
+- Home page (post ID 2) has `slide-1.jpg` as the hero in **both** the backup SQL and the current live DB
+- `slide-2.jpg` through `slide-9.jpg` appear in the SQL but reference a `localhost/wp/wp-outdoors/` path — these are from an old Smart Slider demo install, never uploaded to the actual site
+- `background-2-1.jpg` is referenced in old product posts but the original file is missing in both backup and server (only thumbnails survived: `-180x180` and `-600x600`)
+
+**Conclusion:** `slide-1.jpg` has been the home page hero since at least the backup date (Apr 6, 2026). There's no evidence of a different previous hero image in the backup or database.
+
+**The current hero (`slide-1.jpg`):**
+```
+https://50.28.2.199.nip.io/wp-content/uploads/2016/06/slide-1.jpg
+```
+
+Since we can't recover a lost image, would you like to pick a different one from the available uploads? The feature/banner images are the most likely candidates for a hero:
+- `MONSTER-ROD-HOLDERS-O.G.-FEATURE.jpg` (2017)
+- `MONSTER-ROD-HOLDER-TALON-SERIES-FEATURE.jpg` (2020)
+- `banner.jpg` (2020)
+- `HYDROWEB-150-STEVE-AD-2024.jpg` (2017)
+<!-- agent:boundary:4599ae39 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Clarify which image to use for hero (previous version not found in git history)
-- [ ] Update home page hero block with correct image URL
-- [ ] Verify hero image displays correctly on home page
+- [ ] Choose hero image for home page (options above, or keep slide-1.jpg)
+- [ ] Update home page hero block with chosen image URL
 - [ ] Add Facebook/Instagram to top bar (need URLs from Ron)
 - [ ] Delete Recently Viewed Products page (18849)
 - [ ] DNS propagating → run certbot when `dig monsterrodholders.com` returns 50.28.2.199

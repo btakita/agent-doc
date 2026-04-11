@@ -215,7 +215,7 @@ Give me 2 mins to SSH in and verify.
 **Verified live** — The rule is now appearing in the page source. Ron should see the aside pushed down below the navbar after a hard browser refresh.
 
 **Pushed:** `[commit hash to follow]`
-<!-- agent:boundary:69117b23 -->
+<!-- agent:boundary:872ac516 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

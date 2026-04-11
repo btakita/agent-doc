@@ -368,7 +368,7 @@ Since we can't recover a lost image, would you like to pick a different one from
 - `MONSTER-ROD-HOLDER-TALON-SERIES-FEATURE.jpg` (2020)
 - `banner.jpg` (2020)
 - `HYDROWEB-150-STEVE-AD-2024.jpg` (2017)
-<!-- agent:boundary:4599ae39 -->
+<!-- agent:boundary:831f0c8c -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

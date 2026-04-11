@@ -175,7 +175,33 @@ All saved to `mail/contacts/ron-berkes/recordings/`.
 - Ron downloaded **33,000 customer email addresses** from WordPress.
 - Ron had 4-hour job interview -- may get work, reduces cash pressure.
 - Consolidation: Ron excited about acquiring RealWeeds + MonsterOutdoors into one platform.
-<!-- agent:boundary:344699bc -->
+
+❯ transcribe + diarize in datetime order
+❯ [phone_20260409-165105_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260409-165105_6504368181.m4a)
+❯ [phone_20260409-110304_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260409-110304_6504368181.m4a)
+❯ [phone_20260409-184331_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260409-184331_6504368181.m4a)
+❯ [phone_20260409-190304_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260409-190304_6504368181.m4a)
+❯ [phone_20260406-111448_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260406-111448_6504368181.m4a)
+❯ [phone_20260408-102634_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260408-102634_6504368181.m4a)
+❯ [phone_20260410-151908_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260410-151908_6504368181.m4a)
+❯ [phone_20260409-210622_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260409-210622_6504368181.m4a)
+❯ [phone_20260407-143139_6504368181.m4a](../../mail/contacts/ron-berkes/recordings/phone_20260407-143139_6504368181.m4a)
+### Re: transcribe + diarize (HEAD)
+
+All 9 recordings transcribed with diarization (speakers: Brian, Ron) in datetime order:
+
+| Date/Time | Transcript | Size |
+|-----------|-----------|------|
+| Apr 6, 11:14 | [phone_20260406-111448.md](transcripts/ron-berkes/phone_20260406-111448.md) | 14.5K |
+| Apr 7, 14:31 | [phone_20260407-143139.md](transcripts/ron-berkes/phone_20260407-143139.md) | 7.4K |
+| Apr 8, 10:26 | [phone_20260408-102634.md](transcripts/ron-berkes/phone_20260408-102634.md) | 10.1K |
+| Apr 9, 11:03 | [phone_20260409-110304.md](transcripts/ron-berkes/phone_20260409-110304.md) | 39.4K |
+| Apr 9, 16:51 | [phone_20260409-165105.md](transcripts/ron-berkes/phone_20260409-165105.md) | 36.9K |
+| Apr 9, 18:43 | [phone_20260409-184331.md](transcripts/ron-berkes/phone_20260409-184331.md) | 18.0K |
+| Apr 9, 19:03 | [phone_20260409-190304.md](transcripts/ron-berkes/phone_20260409-190304.md) | 1.7K |
+| Apr 9, 21:06 | [phone_20260409-210622.md](transcripts/ron-berkes/phone_20260409-210622.md) | 7.9K |
+| Apr 10, 15:19 | [phone_20260410-151908.md](transcripts/ron-berkes/phone_20260410-151908.md) | 9.6K |
+<!-- agent:boundary:dfbc60e2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

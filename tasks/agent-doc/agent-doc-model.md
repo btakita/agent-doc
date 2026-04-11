@@ -331,7 +331,7 @@ Preflight reads it as the tier override. Can be updated by either user or agent.
 
 **For this specific use case (user wants opus for a session):** frontmatter `agent_doc_model_tier: high` is the cleanest — set once, respected every cycle, persists in git history.
 ❯ /model opus do all 3 options
-### Re: All 3 options — detailed specs (HEAD)
+### Re: All 3 options — detailed specs
 
 *Note: `/model opus` can't execute from within the skill — run it at the terminal. Speccing all 3 options below.*
 
@@ -431,8 +431,26 @@ Preflight reads the component during layout check (step 0). Behavior identical t
 
 Priority: Option 3 (component) > Option 2 (frontmatter) > Option 1 (inline command) > diff heuristic
 
+❯ Priority: Option 1 (inline command) > Option 3 (component) > Option 2 (frontmatter) > diff heuristic
+
 All three feed the same `required_tier` / `suggested_tier` fields in preflight JSON. The skill only sees the resolved fields — no need to know which option set them.
-<!-- agent:boundary:05acb950 -->
+### Re: Priority correction — inline command is highest (HEAD)
+
+Agreed. Inline command > component > frontmatter > heuristic.
+
+**Rationale:**
+
+| Priority | Option | Why |
+|---|---|---|
+| 1st | Inline `/model opus` | Most immediate — user is actively overriding for this specific task |
+| 2nd | Component `&lt;!-- agent:model --&gt;` | In-document, session-level, editable mid-session |
+| 3rd | Frontmatter `agent_doc_model_tier` | Project-level default, requires YAML edit — lowest specificity |
+| 4th | Diff heuristic | Automatic inference, no user signal |
+
+The inline command is ephemeral (stripped after processing) — it fires once and returns to the persistent setting. This is exactly the right semantics: "run THIS task on opus, then go back to whatever the document is configured to."
+
+Updating the spec accordingly.
+<!-- agent:boundary:0e28c780 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -441,5 +459,5 @@ All three feed the same `required_tier` / `suggested_tier` fields in preflight J
 - [ ] Option 1: add `/model <x>` detection to preflight diff scanner; emit `model_switch` + `model_switch_tier`; strip command line from diff
 - [ ] Option 2: parse `agent_doc_model_tier` from frontmatter; emit `required_tier` in preflight JSON; add gate logic to skill
 - [ ] Option 3: read `&lt;!-- agent:model --&gt;` component in preflight layout check; same `required_tier` output; skill gate identical to Option 2
-- [ ] Unified: define priority: component > frontmatter > inline command > heuristic; single `effective_tier` field in preflight JSON
+- [ ] Priority: inline command (1st) > component (2nd) > frontmatter (3rd) > heuristic (4th); single `effective_tier` in preflight JSON
 <!-- /agent:pending -->

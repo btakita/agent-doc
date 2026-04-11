@@ -1722,7 +1722,7 @@ Cache flushed. Page now renders one `Popular Categories` heading — the mu-plug
 ```
 
 Verify: `https://50.28.2.199.nip.io/shop/`
-<!-- agent:boundary:dbd250f0 -->
+<!-- agent:boundary:af6a5a3e -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

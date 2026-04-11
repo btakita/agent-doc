@@ -158,7 +158,7 @@ This gets the aesthetic without the import risk. Want me to proceed?
 ❯ - MonsterRodHolder logo only...Put "Monster Rod Holder" to the right of the logo.
 ❯ - The top navigation should be shorter
 **The site footer needs to include links to all product categories and other areas of the website.**
-### Re: garderobe header — sticky nav, top bar, logo+title, compact height (HEAD)
+### Re: garderobe header — sticky nav, top bar, logo+title, compact height
 
 All 4 changes live ✓
 
@@ -180,7 +180,47 @@ Middle row height reduced from 120px → 75px desktop (65px mobile). Top bar is 
 **Social links note:** Only YouTube was found on the site (`youtube.com/user/akwalung`). If there's a Facebook/Instagram, give me the URLs and I'll add them to the top bar.
 
 Pushed to git: `0c42ebb`.
-<!-- agent:boundary:9e0fd018 -->
+❯ Read /home/brian/work/btakita/agent-loop/mail/contacts/ron-berkes/ron-berkes-sms.txt for the latest instructions.
+❯ We want to use the garderobe starter app to redesign the website. Will customize from there.
+### Re: garderobe starter site import (HEAD)
+
+Read Ron's SMS — confirmed Garderobe import path. Ran the full Garderobe starter site install via Blocksy's WP-CLI (`wp blocksy demo install Garderobe`). Design applied.
+
+**What changed:**
+
+*Garderobe design applied ✓*
+- Color palette, typography, and layout (Garderobe's clean product-store aesthetic)
+- Sticky header — already enabled by Garderobe (no extra config needed)
+- Announcement bar + social icons row above nav (Garderobe's default top-row structure)
+- Transparent header on home page (Garderobe default, will layer over hero)
+
+*Demo content cleaned out ✓*
+- Deleted 9 fashion demo products (Elegant Bag, Brown Cap, Quartz Watch, Sneakers, etc.)
+- Deleted 3 Garderobe fashion categories (Jackets, Sneakers, T-Shirts)
+- Trashed Garderobe demo Services page (86035)
+
+*MonsterRodHolders content restored ✓*
+- Announcement bar text updated: "🎣 Check out our universal stainless steel bases" → `/product-category/rod-holder-bases/`
+- Header socials: YouTube only (awaiting Facebook/Instagram URLs)
+- Logo + "Monster Rod Holders" site title text re-enabled
+- Header height: 75px desktop / 65px mobile (compact)
+- Main nav fixed: Products → Shop, Services removed, Blog added
+- 4-column footer rebuilt with all 34 product + company links
+
+*Home page rebuilt in Garderobe aesthetic ✓*
+- Full-width cover hero: rod holders pack image + "Monster Rod Holders" heading + "Premium Fishing Rod Holders — Made in the USA" + **Shop Now** CTA button
+- Best Sellers (top 5 by sales: 33/45 O.G., Talon 5/35, Slide Track 45, Economy Base 2, Economy Base 4)
+- Rod Holders (8 products, ordered by rating)
+- Rod Holder Bases with compatibility subtitle (fits pontoons, jon boats, SeaArk, Versa Track, round/square rail) — 12 products
+- More Monster Gear (8 products by popularity)
+
+Pushed to git: `cfa739a`.
+
+**Still to customize from Garderobe base:**
+- Facebook/Instagram links for top bar (need URLs from Ron)
+- Color palette tweak for Monster brand (Garderobe is muted neutrals — may want to add accent color)
+- Product card hover effects (Garderobe has a clean overlay — can apply to WC product grid)
+<!-- agent:boundary:d09668d2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

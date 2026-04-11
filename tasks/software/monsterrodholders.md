@@ -1666,7 +1666,7 @@ echo '<h2 class="mrh-shop-heading">Popular Categories</h2>';
 The category grid now renders without the "Popular Categories" heading — only the 4-tile grid displays, followed by "All Products" heading and the products list.
 
 Cache flushed. Verify at `https://50.28.2.199.nip.io/shop/`
-<!-- agent:boundary:7a9a3143 -->
+<!-- agent:boundary:0822c2cb -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

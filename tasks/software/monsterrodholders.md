@@ -1444,7 +1444,7 @@ Your ask: *"the home page needs the product grid sorted by most purchased desc, 
 **Which do you want — A or B?** If (A), do you still want to keep the hero image and "Best Sellers" heading, or just one unlabeled grid?
 
 I'll implement the /shop/ changes now regardless — those are unambiguous. Waiting on your answer for home page.
-<!-- agent:boundary:3b9b4d16 -->
+<!-- agent:boundary:bccd9d42 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

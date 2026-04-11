@@ -1846,7 +1846,7 @@ Verify in the browser:
 **Notes on `<article>` wrapping:**
 - `/` (home) and `/blog/` both emit `<article>` wrappers (page body + per-post cards respectively) — unchanged.
 - `/shop/` (WooCommerce category archive) does not wrap the product loop in `<article>`; Blocksy/Woo emits a `<div class="products">` grid inside `<main>`. The sidebar layout now matches the home page, but the product listing itself is still a product grid rather than an article element — that's a WooCommerce structural choice, not a theme-mod toggle. Let me know if you want the products grid wrapped in an `<article>` via a template override.
-<!-- agent:boundary:3c36099d -->
+<!-- agent:boundary:ae08f109 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

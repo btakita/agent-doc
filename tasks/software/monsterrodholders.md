@@ -1522,7 +1522,7 @@ I'll SSH into the server, customize the shop page template in WordPress, and con
 The section uses WooCommerce `product_categories` shortcode with 4-column layout, matching the homepage pattern. Changes are live at 50.28.2.199.
 
 ❯ I don't see the sidebar on https://50.28.2.199.nip.io/shop/
-### Re: Sidebar visibility — FIXED (HEAD)
+### Re: Sidebar visibility — FIXED
 
 Found the issue: the `/shop` sidebar was already implemented via a must-use plugin (`mu-plugins/mrh-shop.php`), but it was displaying incorrect categories. 
 
@@ -1533,7 +1533,20 @@ Found the issue: the `/shop` sidebar was already implemented via a must-use plug
 4. Racks and T-Bars
 
 Changes are live. The sidebar displays as a styled grid above the all-products section with category images and hover effects.
-<!-- agent:boundary:dd286e42 -->
+
+❯ Remove "Popular Categories" from the /shop hero section.
+### Re: Remove Popular Categories heading (HEAD)
+
+**Done.** Updated the mu-plugin to remove the "Popular Categories" heading while keeping the category grid below it.
+
+The change: removed the `echo '<h2 class="mrh-shop-heading">Popular Categories</h2>';` line from `mrh-shop.php`, so now only the 4-tile category grid displays without the heading.
+
+Deployed + cache flushed. The /shop page now shows:
+- Category grid (Rod Holders, Bases, Boat Accessories, Racks) — no heading
+- "All Products" heading above the products list
+
+Verify at `https://50.28.2.199.nip.io/shop/`
+<!-- agent:boundary:d5629cc4 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

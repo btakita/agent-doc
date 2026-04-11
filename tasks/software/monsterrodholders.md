@@ -953,7 +953,7 @@ So the `padding-top:140px` rule was dropped at 13:32 (before my turn), and then 
 3. Drop `tasks/software/monsterrodholders/img_6.png` into the repo if you want it captured — the `img_6.png` link in the exchange above currently has no file on disk (`ls tasks/software/img_6.png` → missing). Not blocking; just flagging.
 
 No writes to the live site until you green-light.
-### Re: post 86030 restored + hero clearance live ✓ (HEAD)
+### Re: post 86030 restored + hero clearance live ✓
 
 Done. Post 86030 updated cleanly (no heredoc bug — wrote CSS to `/tmp/mrh-custom-86030.css`, docker-cp'd into the container, passed via `$(cat file)`).
 
@@ -984,13 +984,42 @@ No more `-` as the entire CSS block. Full CSS is rendering.
 - **NEW: Inner container `padding-top: 1.5rem`** for title breathing room ✓
 
 Check `https://50.28.2.199.nip.io/` — the hero logo/title should now clear the sticky navbar. If the clearance looks off (too much or too little), let me know and I'll tweak `--header-height` fallback or the `+ 2rem` offset.
-<!-- agent:boundary:bb4a2eeb -->
+
+❯ In the top navbar, remove "Monster Rod Holders" text under the logo so the logo can expand to the full height of the top navbar. The logo has "Monster Rod Holders" rendered in it. But the logo needs to be bigger to read it. 
+❯ ![img_7.png](img_7.png)
+### Re: logo enlarged + site title hidden ✓ (HEAD)
+
+Done. Post 86030 updated. Two CSS rules added:
+
+```css
+/* Hide redundant site title text */
+.ct-header [data-id="logo"] .site-title {
+    display: none !important;
+}
+
+/* Override Blocksy's --logo-max-height:50px → 70px */
+[data-header*="type-1"] .ct-header [data-id="logo"] .site-logo-container {
+    --logo-max-height: 70px;
+}
+```
+
+**What changed:**
+- "Monster Rod Holders" text label next to the logo → hidden
+- Logo image height: 50px → **70px** (40% larger)
+
+The logo image (`monster-rod-holder-logo-2023.png`) is 2048×1331 (1.54:1 ratio), so at 70px tall it renders at ~108px wide — should be much more legible.
+
+Check `https://50.28.2.199.nip.io/` and let me know:
+- If 70px still feels too small, I can push it to 80–90px (the navbar will grow to fit, or I can also add `min-height` to the header row to control that)
+- If it's clipping on mobile or the sticky scroll version, say the word — Blocksy also has separate `--logo-max-height` overrides for `[data-sticky]` and mobile breakpoints that I can add
+<!-- agent:boundary:cf35d628 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] **Verify logo size visually** — check `https://50.28.2.199.nip.io/` and confirm 70px logo height is legible; bump to 80–90px or tune sticky/mobile variants if needed
 - [ ] **Lighthouse perf >95 plan** — P0: self-host IBM Plex Mono (OMGF), defer jQuery, nginx Cache-Control headers, fetchpriority=high on cover image, preload LCP image
-- [ ] **Verify hero clearance visually** — check `https://50.28.2.199.nip.io/` and confirm logo/title clears the sticky navbar; tweak `--header-height` fallback or `+ 2rem` offset if needed
+- [ ] **Verify hero clearance visually** — confirm logo/title clears the sticky navbar; tweak fallback or offset if needed
 - [ ] **Verify `wp-to-git.sh` captures DB-side fixes** — confirm sync script picks up the custom_css post edit and theme_mods_blocksy copyright patch on next run
 - [ ] **Certbot run after DNS flips to 50.28.2.199** — `ssh root@50.28.2.199 "certbot --apache -d monsterrodholders.com -d www.monsterrodholders.com"`
 - [ ] **Remove broken `app-nginx-1` from docker-compose** — host Apache is the real reverse proxy; Docker nginx is dead code

@@ -434,7 +434,7 @@ Priority: Option 3 (component) > Option 2 (frontmatter) > Option 1 (inline comma
 ❯ Priority: Option 1 (inline command) > Option 3 (component) > Option 2 (frontmatter) > diff heuristic
 
 All three feed the same `required_tier` / `suggested_tier` fields in preflight JSON. The skill only sees the resolved fields — no need to know which option set them.
-### Re: Priority correction — inline command is highest (HEAD)
+### Re: Priority correction — inline command is highest
 
 Agreed. Inline command > component > frontmatter > heuristic.
 
@@ -450,7 +450,47 @@ Agreed. Inline command > component > frontmatter > heuristic.
 The inline command is ephemeral (stripped after processing) — it fires once and returns to the persistent setting. This is exactly the right semantics: "run THIS task on opus, then go back to whatever the document is configured to."
 
 Updating the spec accordingly.
-<!-- agent:boundary:fc8c973e -->
+❯ use opus
+❯ - [ ] Option 1: add `/model <x>` detection to preflight diff scanner; emit `model_switch` + `model_switch_tier`; strip command line from diff
+❯ - [ ] Option 2: parse `agent_doc_model_tier` from frontmatter; emit `required_tier` in preflight JSON; add gate logic to skill
+❯ - [ ] Option 3: read `&lt;!-- agent:model --&gt;` component in preflight layout check; same `required_tier` output; skill gate identical to Option 2
+❯ - [ ] Priority: inline command (1st) > component (2nd) > frontmatter (3rd) > heuristic (4th); single `effective_tier` in preflight JSON
+### Re: Implementation checklist (HEAD)
+
+`use opus` noted — run `/model opus` at the terminal and re-invoke `/agent-doc` to execute on opus. Continuing on sonnet since the model switch can't be executed from within the skill.
+
+The four checklist items are the complete implementation spec. Confirming scope:
+
+**Option 1 — preflight diff scanner:**
+- Scan user-added lines for `/model <name|tier>` pattern
+- Emit `model_switch` (concrete name) + `model_switch_tier` (resolved tier)
+- Strip matched line from diff before heuristic analysis
+- Skill: if resolved tier > current tier → write gate note, stop; if tier matches → proceed silently
+
+**Option 2 — frontmatter:**
+- Read `agent_doc_model_tier: auto | low | med | high` in preflight
+- Emit `required_tier` (hard gate from frontmatter/component) alongside `suggested_tier` (heuristic)
+- Skill: gates on `required_tier`; advises on `suggested_tier`
+
+**Option 3 — `&lt;!-- agent:model --&gt;` component:**
+- Read during preflight layout check (before diff)
+- Same `required_tier` output as Option 2
+- Skill behavior identical to Option 2
+- Component is user-editable and agent-writable mid-session
+
+**Single `effective_tier` in preflight JSON:**
+```json
+{
+  "effective_tier": "high",        // max(required_tier, suggested_tier)
+  "required_tier": "high",         // from component/frontmatter (hard gate)
+  "suggested_tier": "med",         // from diff heuristic (advisory)
+  "model_switch": "opus",          // from inline command (Option 1), if present
+  "model_switch_tier": "high"      // resolved tier for inline command
+}
+```
+
+Priority encoded in `effective_tier`: inline command resolves first (and strips from diff), then component overrides frontmatter, then frontmatter overrides heuristic. Skill only needs `effective_tier` for gating; the individual fields are for debugging/transparency.
+<!-- agent:boundary:f35c7a48 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

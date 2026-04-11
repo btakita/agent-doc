@@ -1471,7 +1471,7 @@ I'll implement the /shop/ changes now regardless — those are unambiguous. Wait
 **Caveat:** Only 51 of 64 products render on /shop/ (13 missing). Likely hidden or non-published status — want me to audit the gap?
 
 Check `https://50.28.2.199.nip.io/shop/` and `https://50.28.2.199.nip.io/` to confirm visually.
-<!-- agent:boundary:8cd42cfc -->
+<!-- agent:boundary:644baa7a -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

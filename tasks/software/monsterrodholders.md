@@ -591,7 +591,7 @@ TBT/CLS/SI are already ~perfect. The 11 points are all in **FCP (3.2)** and **LC
 
 ---
 
-## Fix plan (ordered by impact ÷ effort) (HEAD)
+## Fix plan (ordered by impact ÷ effort)
 
 ### P0 — Quick wins (should push us to ~96-98)
 
@@ -653,7 +653,27 @@ TBT/CLS/SI are already ~perfect. The 11 points are all in **FCP (3.2)** and **LC
 | **Perf** | **89** | **~98** | |
 
 Want me to start implementing? The fastest route is: (1) install OMGF + Performance Lab plugins, (2) add the nginx cache block, (3) enable Blocksy's Delay JS for jQuery. That's ~15 minutes of work and should land us past 95.
-<!-- agent:boundary:826b400a -->
+
+❯ Write the report to a analysis + plan to a md file
+### Re: Lighthouse Performance Plan (HEAD)
+
+Created detailed implementation plan: **tasks/software/monsterrodholders/lighthouse-perf-plan.md**
+
+The document covers:
+- **Current metrics**: Perf 89, FCP 2.5s, LCP 3.2s
+- **Root causes**: Google Fonts 779ms, missing cache headers, unpriorityized LCP image, jQuery not deferred
+- **P0 steps** (15 mins to 95+):
+  1. Install OMGF plugin (self-host fonts) — FCP –1.0s
+  2. Add nginx Cache-Control block — LCP –700ms (repeat visits)
+  3. Enable Blocksy "Delay JavaScript" for jQuery — FCP –300ms
+  4. Performance Lab plugin + preload for LCP image — LCP –400ms
+- **Expected result**: Perf ~98, FCP ~0.9s, LCP ~1.8s ✓
+- **P1 items** (optional polish): WebP/AVIF conversion, CSS combine
+- **Related fixes**: SEO meta description, A11y contrast + alt text
+- **Checklist & timeline** for implementation
+
+Ready to execute P0 when you give the signal. Should hit 95+ easily with just plugin installs + one nginx edit.
+<!-- agent:boundary:871a0a13 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

@@ -995,7 +995,7 @@ Browser automation (Chrome DevTools MCP) is not reachable from this session — 
    ```
    
 ❯ continue
-### Re: corky doc sheet — working (HEAD)
+### Re: corky doc sheet — working
 
 `corky doc sheet` now works with `brian@dreamable.com`. Retrieved the ClaudeScore sprint tracker (25 tasks, Sprints 1-4):
 
@@ -1005,7 +1005,25 @@ Browser automation (Chrome DevTools MCP) is not reachable from this session — 
 - **Sprint 4:** Score report UI, domain scores, public repo pipeline, production deploy
 
 Most Sprint 2 tasks are "Started" with 0 actual hours — signal extraction (2.3) and credential tier (2.5) are the active next steps.
-<!-- agent:boundary:af820456 -->
+❯ release
+### Re: corky v0.27.0 released (HEAD)
+
+**✓ crates.io** — `corky = "0.27.0"` live  
+**✓ PyPI** — `corky 0.27.0` live (manylinux_2_28_x86_64 wheel)  
+**✓ GitHub Release** — https://github.com/btakita/corky/releases/tag/v0.27.0  
+**✓ Local install** — running in background (`cargo install --path . --features transcribe-cuda,diarize`)  
+**✓ Submodule pointer** — parent agent-loop updated
+
+**What shipped:**
+- `corky docs read/write` — Google Docs
+- `corky sheets read/write` — Google Sheets (top-level aliases)
+- `corky chat send` — Google Chat
+- `corky tasks list/add/done` — Google Tasks
+- `corky draft send` — Gmail API send with file attachments
+- `corky draft new --thread-id` — attach drafts to existing Gmail threads
+
+**PyPI wheel note:** Built with `manylinux_2_28` (Ubuntu-based) — manylinux2014 (CentOS 7) can't build this crate because it needs OpenSSL ≥ 1.1.0 and the transcription feature needs libclang. Used `quay.io/pypa/manylinux_2_28_x86_64` with `--no-default-features`. Updating `prerelease.md` runbook.
+<!-- agent:boundary:c96fa5d1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

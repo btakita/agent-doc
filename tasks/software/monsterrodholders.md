@@ -184,7 +184,7 @@ The CSS rule isn't showing up. Let me check a few things:
 4. **Alternative approach** — If custom CSS still isn't working, we can add it directly to the theme's main CSS file or use a different method.
 
 Let me know what you find in DevTools!
-<!-- agent:boundary:7ecdd375 -->
+<!-- agent:boundary:ce28e8c7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -829,7 +829,7 @@ Added **Step 2d** to `preflight.rs` between the primary commit (step 2) and the 
 
 `cargo build` clean. 513 tests pass; 1 pre-existing tmux integration failure (`route::send_keys_delivers_command_with_enter`) requires live tmux session — unrelated to these changes.
 ❯ add tests
-### Re: add tests (HEAD)
+### Re: add tests
 
 Added tests for Fix 4 and Fix 5:
 
@@ -841,7 +841,62 @@ Added tests for Fix 4 and Fix 5:
 - `preflight_sweep_commits_other_tracked_docs` — integration test: sets up two docs + a `sessions.json`, makes secondary's snapshot newer than its file (simulating an uncommitted agent write), runs `preflight::run()` on the primary, asserts git log contains `agent-doc(secondary):` — confirming the sweep fired
 
 All 3 pass. Full suite: 515 pass, 1 pre-existing tmux failure.
-<!-- agent:boundary:44d90e26 -->
+
+❯ do
+❯ - [ ] Follow-up: anchor `project_config_path()` to document project root, not CWD (latent CWD-sensitivity issue)
+❯ I closed the claude session in the claiming tmux pane for src/session-share/tasks/claudescore.md. I cannot get it restarted. I ran `Claim for Tmux Pane` and agent-doc sync. Neither restarted the claude session. Why?
+When I ran `Clain for Tmux Pane`, I saw a prompt
+```
+[tmux] select_pane %102 → session:window 0:0
+focused pane %102
+Claimed /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore.md for pane %102 (session 143cbb97)
+Watch daemon started.
+```
+### Re: anchor project_config_path() to document project root (HEAD)
+
+Done. Changed `project_config_path()` in `config.rs` to walk up from CWD finding `.agent-doc/`, instead of always returning the bare relative path:
+
+```rust
+fn project_config_path() -> PathBuf {
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut current: &Path = &cwd;
+        loop {
+            if current.join(".agent-doc").is_dir() {
+                return current.join(".agent-doc").join("config.toml");
+            }
+            match current.parent() {
+                Some(p) => current = p,
+                None => break,
+            }
+        }
+        cwd.join(".agent-doc").join("config.toml")
+    } else {
+        PathBuf::from(".agent-doc").join("config.toml")
+    }
+}
+```
+
+Same walk-up pattern as `snapshot::find_project_root`. Falls back to CWD if no `.agent-doc/` found (uninitialized project). `cargo build` clean.
+
+### Re: claiming tmux pane not restarting Claude session (HEAD)
+
+Two separate things happen when you run those commands:
+
+**`Claim for Tmux Pane`** (i.e., `agent-doc claim <file>`) — registers the pane-to-document mapping in `sessions.json`. It does **not** start Claude. It's just a routing hint.
+
+**`agent-doc sync`** — auto-starts Claude if the session UUID has **no alive pane** registered. But if the tmux pane itself is still alive (you only exited Claude within the pane, not the pane), `sync` sees a live pane and skips auto-start.
+
+**Why it didn't restart:** The pane was still alive after you closed Claude — so `has_alive_pane` returned `true` and `auto_start` was skipped. Claiming re-registered the pane, but neither command actually launches `claude` in an existing live pane.
+
+**How to restart:** In that tmux pane, run:
+```
+agent-doc start src/session-share/tasks/claudescore.md
+```
+
+That's the restart loop that actually launches `claude` and reconnects the session.
+
+(Your message was cut off at "When I ran `Claim for Tmux Pane`, I saw" — if there was more, feel free to continue.)
+<!-- agent:boundary:fa12445b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -849,5 +904,4 @@ All 3 pass. Full suite: 515 pass, 1 pre-existing tmux failure.
 <!-- agent:pending patch=replace -->
 - [ ] Manual testing gate: verify session-0 routing no longer triggers stash/rescue for `tasks/software/claude-code.md`
 - [ ] Release v0.31.32: `cargo publish`, `maturin publish`, GitHub Release with binary
-- [ ] Follow-up: anchor `project_config_path()` to document project root, not CWD (latent CWD-sensitivity issue)
 <!-- /agent:pending -->

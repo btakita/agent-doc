@@ -804,7 +804,7 @@ Implemented Fixes 1–3 from the spec:
 Build: clean. Fixes 4 and 5 deferred per spec priority table.
 ❯ Add tests
 ❯ Implement 4 + 5
-### Re: Add tests / Implement 4 + 5 (HEAD)
+### Re: Add tests / Implement 4 + 5
 
 #### Tests (Fixes 1–3)
 
@@ -828,7 +828,20 @@ Added **Step 2d** to `preflight.rs` between the primary commit (step 2) and the 
 #### Build + tests
 
 `cargo build` clean. 513 tests pass; 1 pre-existing tmux integration failure (`route::send_keys_delivers_command_with_enter`) requires live tmux session — unrelated to these changes.
-<!-- agent:boundary:09b6f984 -->
+❯ add tests
+### Re: add tests (HEAD)
+
+Added tests for Fix 4 and Fix 5:
+
+**Fix 4** (`ffi.rs`):
+- `agent_doc_commit_returns_false_for_null` — null pointer guard
+- `ffi_git_commit_commits_staged_file` — full git lifecycle in a temp repo: creates file, calls `ffi_git_commit`, verifies `agent-doc(session):` appears in git log
+
+**Fix 5** (`preflight.rs`):
+- `preflight_sweep_commits_other_tracked_docs` — integration test: sets up two docs + a `sessions.json`, makes secondary's snapshot newer than its file (simulating an uncommitted agent write), runs `preflight::run()` on the primary, asserts git log contains `agent-doc(secondary):` — confirming the sweep fired
+
+All 3 pass. Full suite: 515 pass, 1 pre-existing tmux failure.
+<!-- agent:boundary:3ffdb80b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

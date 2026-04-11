@@ -1654,7 +1654,7 @@ SSH access works, but `/var/www/html/wp-content/mu-plugins/` doesn't exist on th
 
 Can you provide the actual path to where the mu-plugin file is located? Or the WordPress root directory path?
 ❯ The server is running in a docker container.
-### Re: Done — Popular Categories heading removed (HEAD)
+### Re: Done — Popular Categories heading removed
 
 Found it! WordPress is in `/var/lib/docker/volumes/app_wordpress_data/_data/`. 
 
@@ -1666,10 +1666,45 @@ echo '<h2 class="mrh-shop-heading">Popular Categories</h2>';
 The category grid now renders without the "Popular Categories" heading — only the 4-tile grid displays, followed by "All Products" heading and the products list.
 
 Cache flushed. Verify at `https://50.28.2.199.nip.io/shop/`
-<!-- agent:boundary:0822c2cb -->
+
+❯ You got it backwards. "Popular Categories" should be a title above the categories block.
+"All Categories" should be removed from the page.
+### Re: Swapped — Popular Categories restored, All Products removed (HEAD)
+
+Fixed the mu-plugin (`mrh-shop.php`):
+
+**Added back** above the grid:
+```php
+echo '<h2 class="mrh-shop-heading">Popular Categories</h2>';
+```
+
+**Removed** from below the grid:
+```php
+echo '<h2 class="mrh-shop-heading">All Products</h2>';
+```
+
+Cache flushed. Verified — mu-plugin now renders:
+- `<h2 class="mrh-shop-heading">Popular Categories</h2>` ← above the 4-tile grid
+- (no `All Products` heading after the grid)
+
+**Heads up — there's now a duplicate `Popular Categories`:**
+
+```
+<h2 class="wp-block-heading has-text-align-center">Popular Categories</h2>  ← page content (hero)
+<h2 class="mrh-shop-heading">Popular Categories</h2>                        ← mu-plugin (above grid)
+```
+
+The first one is still in the Shop page's block content (the hero/`.page-description` area). If you want only one, I can remove the page-content `<h2>` via a direct DB update over SSH (`wp post get <id>` / `wp post update`). Want me to do that?
+
+**Clarification on "All Categories":** I didn't find an `All Categories` heading anywhere on the page — only `All Products` (which I removed). I assumed you meant `All Products`. If there's a different `All Categories` you're seeing, screenshot or point me at it.
+<!-- agent:boundary:ee36ffd5 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **Add category sidebar to /shop** — fixed category display via mu-plugins/mrh-shop.php, showing Rod Holders, Bases, Boat Accessories, Racks
+- [x] **Restore `Popular Categories` heading above grid** in mrh-shop.php
+- [x] **Remove `All Products` heading** from mrh-shop.php
+- [ ] **Remove duplicate `Popular Categories`** from Shop page block content (hero / `.page-description`) — pending user confirmation
+- [ ] **Clarify `All Categories`** reference — no such heading found on page
 <!-- /agent:pending -->

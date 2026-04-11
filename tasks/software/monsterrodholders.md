@@ -1499,7 +1499,7 @@ Deployed + cache flushed. Verified via curl on `https://50.28.2.199.nip.io/shop/
 3. **Styling:** Match the homepage `.mrh-shop-categories` CSS and layout
 
 Added to pending below.
-<!-- agent:boundary:23bb0bba -->
+<!-- agent:boundary:0992fb81 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

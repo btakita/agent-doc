@@ -258,7 +258,7 @@ Updating the custom CSS now to use the calculated offset instead.
     padding-top: 140px;
 }
 ```
-### Re: why top: unset + padding-top 140px ✓ (HEAD)
+### Re: why top: unset + padding-top 140px ✓
 
 **Why `top: unset`?**
 
@@ -283,13 +283,41 @@ Changed from 100px → 140px in custom CSS (post 86030). Live on `https://50.28.
     padding-top: 140px;
 }
 ```
+❯ Look in the history of the monsterrodholders-dev repo. Use the previous hero image on the home page instead of the current hero image.
+❯ write response to this file
+**Pushed:** `9d4ba48` (via `wp-to-git.sh`)
+### Re: previous hero image lookup (HEAD)
+
+**Searched monsterrodholders-dev history:**
+
+I've thoroughly searched the repo for previous hero images:
+- ✓ Git log: Only "sync: WP content" commits (no manual image changes tracked)
+- ✓ Deleted files: No deleted image files in history
+- ✓ Live site (50.28.2.199.nip.io): Only `slide-1.jpg` currently referenced
+- ✓ WordPress export: No other slide images found in media library
+- ✓ Repo structure: Only plugin/theme images, no custom hero images stored in git
+
+**The issue:** Uploads are stored in Docker volume (`wordpress_data:`), not in git. So I can't see the upload history from git alone.
+
+**To proceed, I need clarification:**
+
+What should the previous hero image be?
+1. **Do you have a specific image filename/URL?** (e.g., hero-old.jpg, slide-2.jpg)
+2. **Should I check the live server's uploads directory?** (requires SSH access to `/var/www/html/wp-content/uploads/`)
+3. **Is there a backup or old WordPress export I should reference?**
+4. **Or do you want me to use a placeholder image for now?**
+
+Once you clarify, I can update the home page Blocksy cover block to use the correct image.
 
 **Pushed:** `9d4ba48` (via `wp-to-git.sh`)
-<!-- agent:boundary:f93f0550 -->
+<!-- agent:boundary:fb115607 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Clarify which image to use for hero (previous version not found in git history)
+- [ ] Update home page hero block with correct image URL
+- [ ] Verify hero image displays correctly on home page
 - [ ] Add Facebook/Instagram to top bar (need URLs from Ron)
 - [ ] Delete Recently Viewed Products page (18849)
 - [ ] DNS propagating → run certbot when `dig monsterrodholders.com` returns 50.28.2.199

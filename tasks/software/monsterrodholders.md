@@ -1732,7 +1732,7 @@ Verify: `https://50.28.2.199.nip.io/shop/`
 
 ❯ see
 ❯ ![2026-04-11_17-36.png](../../../../../Pictures/agent-loop/2026-04-11_17-36.png)
-### Re: Categories swapped + Rod Holders image + All Products title restored (HEAD)
+### Re: Categories swapped + Rod Holders image + All Products title restored
 
 Four fixes:
 
@@ -1769,7 +1769,84 @@ Verified on `https://50.28.2.199.nip.io/shop/`:
 <h2 class="mrh-shop-heading">All Products</h2>
   <product grid>
 ```
-<!-- agent:boundary:a5435593 -->
+❯ These pages must have their layout corrected to match the rest of the website. These pages need to match the home page layout. Meaning the article + aside tags.
+❯ - /shop/
+❯ - /blog/
+
+❯ The aside on all pages should have the same padding-top as the home page. So the custom css should be changed to:
+
+```css
+/* push aside below sticky navbar */
+.sidebar-wrapper,
+aside {
+    padding-top: 75px;
+}
+
+@media (max-width: 768px) {
+    .sidebar-wrapper,
+    aside {
+        padding-top: 65px;
+    }
+}
+```
+### Re: Match home layout on /shop/ and /blog/ (HEAD)
+
+Done. Enabled the Blocksy sidebar on both listing pages and replaced the home-only sidebar CSS with a global rule.
+
+**Theme mods set (wp theme mod set):**
+```
+woo_categories_has_sidebar      = yes
+woo_categories_sidebar_position = left
+blog_has_sidebar                = yes
+blog_sidebar_position           = left
+```
+
+Blocksy's `blocksy_sidebar_position_unfiltered()` reads these per prefix — `woo_categories` for the shop archive and `blog` for the posts index. With `has_sidebar=yes`, the theme renders `<main>` → content + `<aside id="sidebar">`, matching the home page (`single_page_structure=type-2`, left sidebar).
+
+**Custom CSS (post 86030) — replaced the home-scoped rule:**
+
+Before:
+```css
+/* Home sidebar clearance for sticky navbar */
+.home .ct-sidebar .ct-widget {
+    padding-top: 140px;
+}
+```
+
+After:
+```css
+/* Home page: push aside below sticky navbar */
+.sidebar-wrapper,
+aside {
+    padding-top: 75px;
+}
+
+@media (max-width: 768px) {
+    .sidebar-wrapper,
+    aside {
+        padding-top: 65px;
+    }
+}
+```
+
+Cache flushed.
+
+**Verified — `<aside id="sidebar">` now renders on all three pages:**
+```
+/       → 1 aside
+/shop/  → 1 aside
+/blog/  → 1 aside
+```
+
+Verify in the browser:
+- https://50.28.2.199.nip.io/
+- https://50.28.2.199.nip.io/shop/
+- https://50.28.2.199.nip.io/blog/
+
+**Notes on `<article>` wrapping:**
+- `/` (home) and `/blog/` both emit `<article>` wrappers (page body + per-post cards respectively) — unchanged.
+- `/shop/` (WooCommerce category archive) does not wrap the product loop in `<article>`; Blocksy/Woo emits a `<div class="products">` grid inside `<main>`. The sidebar layout now matches the home page, but the product listing itself is still a product grid rather than an article element — that's a WooCommerce structural choice, not a theme-mod toggle. Let me know if you want the products grid wrapped in an `<article>` via a template override.
+<!-- agent:boundary:3c36099d -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
@@ -1780,4 +1857,7 @@ Verified on `https://50.28.2.199.nip.io/shop/`:
 - [x] **Fix Rod Holders category image** (term 210 thumbnail_id → 77336)
 - [x] **Restore `All Products` heading** above products list
 - [x] **Remove duplicate hero `Popular Categories`** from Shop page block content
+- [x] **Enable Blocksy sidebar on /shop/ and /blog/** (left, matching home page layout)
+- [x] **Global `aside` padding-top CSS** (75px desktop, 65px mobile) replacing `.home`-scoped rule
+- [ ] *(Optional)* Wrap shop product grid in `<article>` via template override if strict article+aside parity is required
 <!-- /agent:pending -->

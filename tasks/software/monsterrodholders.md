@@ -370,7 +370,7 @@ Since we can't recover a lost image, would you like to pick a different one from
 - `HYDROWEB-150-STEVE-AD-2024.jpg` (2017)
 
 ❯ Use /home/brian/work/btakita/agent-loop/tmp/MONSTER-ROD-HOLDER-HEADER-25.jpg for the hero image.
-### Re: hero image updated ✓ (HEAD)
+### Re: hero image updated ✓
 
 **Done.** Uploaded and deployed `MONSTER-ROD-HOLDER-HEADER-25.jpg` (1060×352, 64KB) as the new home page hero.
 
@@ -387,7 +387,32 @@ https://50.28.2.199.nip.io/wp-content/uploads/2026/04/MONSTER-ROD-HOLDER-HEADER-
 **Note:** DNS still points to old server (`dig monsterrodholders.com` → 151.101.66.159). Once Ron flips DNS to 50.28.2.199, the live site will show the new hero.
 
 **Pushed:** via WP-CLI direct update (not wp-to-git.sh)
-<!-- agent:boundary:01614034 -->
+
+❯ What is the border on the left side of the aside?
+❯ ![img_3.png](img_3.png)
+### Re: left border on aside (HEAD)
+
+That's a **Blocksy sidebar design separator** — `aside[data-type=type-3]` uses a CSS `:after` pseudo-element at the left edge of the sidebar to draw `border-right: var(--theme-border)`.
+
+From `sidebar.min.css`:
+```css
+aside[data-type=type-3]:after { border-right: var(--theme-border) }
+[data-sidebar=right] > [data-type=type-3]:after { inset-inline-start: 0 }
+```
+
+The pseudo-element sits at `inset-inline-start: 0` (the left edge of the aside) and draws a right border — making it look like a left border on the sidebar.
+
+**To remove it**, either:
+1. Switch sidebar type to `type-4` in Customize → Layout → Sidebar → Sidebar Type (type-4 uses a background fill instead of a border line)
+2. Or add custom CSS:
+   ```css
+   aside[data-type=type-3]:after {
+     border-right: none;
+   }
+   ```
+
+Which do you prefer?
+<!-- agent:boundary:bbc9a231 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

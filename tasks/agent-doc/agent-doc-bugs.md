@@ -668,7 +668,7 @@ Drift cleared. `claude-code.md` is now registered in session 0.
 > **Note:** The CWD-sensitivity of `project_config_path()` is a latent issue — callers in different CWDs pick up different project configs. Not blocking for this fix, but worth a follow-up to anchor config resolution to the document's project root instead of CWD.
 
 ❯ tasks/software/corky.md has an uncommitted response patch. Why? This keeps on happening. We need to fix **all** cases where this can happen. Think like an expert architect.
-### Re: Uncommitted response patch — root cause and all fixes (HEAD)
+### Re: Uncommitted response patch — root cause and all fixes
 
 **Confirmed cause from `cycles.jsonl`:** corky.md had no commit log entry between 18:50:15 and 19:10:22. The commit was never attempted for the OAuth response — not a lock failure, not a CWD bug. The `git::commit` call was simply never reached.
 
@@ -785,7 +785,13 @@ When preflight runs for any document, scan all tracked docs in the same project 
 | Fix 4 (plugin post-apply commit) | Low — defense-in-depth | Medium — IPC handler change |
 
 Fix 1, 2, 3 are low-effort and eliminate the known cases. Fix 5 is the reliable backstop — even if a new edge case appears, the next preflight cleans it up.
-<!-- agent:boundary:5dc8d159 -->
+❯ Extract to a spec md file.
+### Re: Extract to spec (HEAD)
+
+Done — `tasks/agent-doc/spec-commit-reliability.md`
+
+Covers: all 4 failure modes (IPC timeout hard-exit, `result?` short-circuit, git lock race, session interruption), all 5 fixes with code snippets, and a priority table. Fix 1+2+3 are a single small PR; Fix 5 is a sweep backstop follow-up.
+<!-- agent:boundary:34ea84d6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1533,7 +1533,7 @@ Found the issue: the `/shop` sidebar was already implemented via a must-use plug
 4. Racks and T-Bars
 
 Changes are live. The sidebar displays as a styled grid above the all-products section with category images and hover effects.
-<!-- agent:boundary:57cd624f -->
+<!-- agent:boundary:dd286e42 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

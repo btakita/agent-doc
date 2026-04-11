@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-agent-doc v0.31.29 — released
+agent-doc v0.31.31 — JB plugin v0.2.56 fix pending install
 <!-- /agent:status -->
 
 ## Exchange
@@ -203,7 +203,7 @@ fn recommended_tier(diff: &Diff, doc_path: &Path, fm: &Frontmatter) -> Tier {
 The running model is irrelevant to the assessment — `low` means "this task doesn't need a powerful model" regardless of what's currently active. The point is to recommend a switch when the task tier doesn't match the current model.
 
 ❯ Sometimes a simple word such as `do` can mean implementing a complex task. How would this be determined?
-### Re: Short diffs hiding complex intent (HEAD)
+### Re: Short diffs hiding complex intent
 
 Good edge case. The binary is blind to semantics — "do" is structurally a 1-word diff, same as "ok". But the agent (skill) has full document context.
 
@@ -237,7 +237,64 @@ The skill already reads the document before responding. It looks at:
 - Is "do" adjacent to a plan with numbered steps? → high
 
 **Key split:** binary suggests (from structure), agent decides (from semantics). For short imperatives specifically, the binary defaults to `med` since it can't know the implied scope.
-<!-- agent:boundary:ec6a2dc2 -->
+
+❯ Would a haiku model know to defer to sonnet or opus for an ambiguous diff with complex contex?
+### Re: Can haiku recognize when to defer? (HEAD)
+
+No — and that's the crux of the problem. If haiku is already running, you can't rely on it to recognize when it's out of its depth. The semantic override approach is a reliability gap.
+
+**Better architecture: front-load the decision into the binary**
+
+Instead of relying on the agent to semantically override, push more signal into the binary's structural analysis so `suggested_tier` is already correct before any model runs:
+
+```rust
+if diff_type == AmbiguousCommand {
+    // Structural signals the binary CAN check:
+    if document.pending_item_count() > 3 { return Tier::High; }
+    if document.path.contains("tasks/software/") { return Tier::High; }
+    return Tier::Med;
+}
+```
+
+The binary can count pending items, inspect document path, check for code blocks in recent content — structural, not semantic. This makes `suggested_tier` reliable without depending on the running model's judgment.
+
+**Gate before generation:**
+
+The skill checks the gate before responding:
+1. Preflight returns `suggested_tier: "high"`
+2. Skill detects current model is haiku (lower than `high`)
+3. Skill writes to document: "Switch to sonnet for this task. Run `/model sonnet` and re-run."
+4. **Stop** — no generation attempt
+
+This is a simple comparison, not semantic reasoning. Even haiku executes it reliably.
+
+**The semantic override step is fragile and should be minimized.** Push as much intelligence as possible into the binary's structural analysis. The agent's semantic judgment is only for genuinely ambiguous cases structural signals can't resolve — and even then, the safe default is `med`, not `low`.
+
+Why did the last task have an uncommitted response patch?
+### Re: Uncommitted response patch (HEAD)
+
+Looking at that session's output: the `agent-doc write` went through IPC (plugin consumed the patch, snapshot updated) but the subsequent `agent-doc commit` produced no output — no `[main ...]` line, no "repositioned boundary" message. That's a no-op commit.
+
+The current preflight caught it via the step 2 sweep.
+
+**Likely cause:** when the write goes through IPC, the plugin updates the snapshot on its side. By the time `agent-doc commit` runs immediately after, the snapshot file may already be in sync with HEAD from git's perspective — so staging finds nothing to stage. The IPC path and the commit-after-write race against each other.
+
+**Fix direction:** `agent-doc commit` should detect this case — compare document content to HEAD, not snapshot mtime. Or the IPC write path should mark the document as needing a git commit separately from snapshot sync. The preflight sweep is the safety net, but the post-write commit should always produce a real commit.
+We should fix this now.
+### Re: Fix implemented — plugin v0.2.56 (HEAD)
+
+**Root cause confirmed:** `PatchWatcher.kt` called `agent_doc_commit` FFI synchronously post-apply (line 448), within the 300ms IPC window. This committed the working tree file before the skill's `agent-doc commit` ran. Binary commit → no-op every time on IPC path.
+
+**Fix:** Removed `agent_doc_commit` call from `PatchWatcher.kt`. Comment explains why. The preflight sweep (Fix 5 from v0.31.31) handles missed commits as a backstop for interrupted sessions.
+
+**Plugin bumped to v0.2.56, built and signed:**
+- `agent-doc-jetbrains-0.2.56.zip` (163K)
+- `agent-doc-jetbrains-0.2.56-signed.zip` (165K)
+
+Install via IDEA → Settings → Plugins → gear → Install from Disk → select the signed zip.
+
+Binary stays at v0.31.31 — no Rust changes needed.
+<!-- agent:boundary:412c4782 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

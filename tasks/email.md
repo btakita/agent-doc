@@ -741,7 +741,7 @@ Rename all of the labels in the emails to/from btak.dev@gmail.com
 compact exchange
 **Compacted exchange** — prior conversation covered:
 
-### Account Setup (btak.dev)
+### Account Setup (btak.dev) (HEAD)
 - Added `btak.dev` account to `mail/.corky.toml` with `provider = "gmail-api"`, OAuth2 auth
 - Password stored at `pass email/btak.dev`
 - Added `btak.dev@gmail.com` as OAuth test user in Google Cloud Console

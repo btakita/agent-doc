@@ -35,7 +35,7 @@ cat ~/.claude/projects/<project>/<session-uuid>.jsonl \
 **Path encoding:** `/home/brian/work/btakita/agent-loop` → `-home-brian-work-btakita-agent-loop` (slashes become hyphens, leading `-` added).
 
 **Semantic search:** Use `/mem-search` (claude-mem skill) for cross-session topic search — better than exact string matching when you don't know the exact phrasing.
-<!-- agent:boundary:734872e2 -->
+<!-- agent:boundary:bc2a57e5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -109,11 +109,33 @@ Context: While drafting a LinkedIn reply to John Cassel (Principal Software Engi
 4. Multiple bounding scopes per system, each expressible in domain ontology
 5. Human-agent alignment — ontology creates alignment and exposes misalignment through iteration
 
-#### Pending changes identified (HEAD)
+Add a `curl | sh` installs for all platforms. 
 
-- Update philosophy/CLAUDE.md with precision + bounded/unbounded guidance
-- Create philosophy/src/pneuma.md, noumena.md, phenomena.md
-- Enrich philosophy/src/permaculture.md with universal applicability analysis
-- Update chromium-bridge SKILL.md with CSS :hover limitation
-<!-- agent:boundary:0f405372 -->
+### Re: Installation and pending work
+
+Good reorganization. The `curl | sh` installs across platforms is a valuable addition — it mirrors standard project init patterns (e.g., `curl https://sh.rustup.rs | sh`). This would:
+
+1. Detect OS/arch (Linux, macOS, Windows-via-WSL, etc.)
+2. Download prebuilt binary to `~/.existence/bin/`
+3. Write shell source line to `.bashrc`/`.zshrc`/PowerShell profile
+
+**Platform detection hints:** Check `uname -s` (Linux/Darwin) and `uname -m` (arch). For Windows, WSL exposes Linux env. The install script can live in `.github/install.sh` or `install/existence.sh` in the main repo.
+
+The pending component with checkboxes is well-structured. All four items are reasonable next steps:
+- **philosophy/CLAUDE.md update** — codify the precision + bounded/unbounded guidance you extracted from the John Cassel conversation
+- **pneuma/noumena/phenomena docs** — these are deep concepts that deserve their own philosophy nodes
+- **permaculture enrichment** — apply Universal Applicability to permaculture (zones, guilds, succession stages all have perspective/scope/context)
+- **chromium-bridge SKILL.md** — CSS `:hover` limitation likely came from browser automation constraints (can't inject hover state without JS)
+
+No blockers identified. These can be tackled in any order — the philosophy docs are conceptual while the SKILL.md update is operational.
+<!-- agent:boundary:af649c86 -->
 <!-- /agent:exchange -->
+
+## Pending / Not Built (HEAD)
+
+<!-- agent:pending -->
+- [ ] Update philosophy/CLAUDE.md with precision + bounded/unbounded guidance
+- [ ] Create philosophy/src/pneuma.md, noumena.md, phenomena.md
+- [ ] Enrich philosophy/src/permaculture.md with universal applicability analysis
+- [ ] Update chromium-bridge SKILL.md with CSS :hover limitation
+<!-- /agent:pending -->

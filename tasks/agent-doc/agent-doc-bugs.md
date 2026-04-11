@@ -896,7 +896,7 @@ agent-doc start src/session-share/tasks/claudescore.md
 That's the restart loop that actually launches `claude` and reconnects the session.
 
 (Your message was cut off at "When I ran `Claim for Tmux Pane`, I saw" — if there was more, feel free to continue.)
-<!-- agent:boundary:09c41de6 -->
+<!-- agent:boundary:b09ddd8f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

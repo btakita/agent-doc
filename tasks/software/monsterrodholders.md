@@ -1225,7 +1225,7 @@ Let me know how you'd like to proceed, and I'll complete the removal.
 The top navbar no longer shows the News link, and the page is fully removed from the site.
 
 ❯ Restore the blog content on /blog
-### Re: Restore the blog content on /blog (HEAD)
+### Re: Restore the blog content on /blog
 
 Root cause: `page_for_posts` was set to `0` — WordPress had no page designated for the blog posts index, even though the "Blog" page (ID 22, slug `blog`) existed and was published.
 
@@ -1239,7 +1239,36 @@ wp rewrite flush                      # rebuild permalink rules
 **Verified:** `https://monsterrodholders.com/blog/` → `HTTP/2 200` ✓
 
 Posts are now served at `/blog/`. The Footer "Blog" link (Col3 Company) already pointed to `/blog/` so no menu changes needed.
-<!-- agent:boundary:645a7d44 -->
+
+❯ Remove all blog posts that came with the garderobe starter site. Titles include:
+❯ - Lobortis Elementum Nibhtellus Molestie Mauris
+❯ - Condimentum Odvenenatis Vestibulum Dapibus
+❯ - Accumsan Tortor Posuere Acut Consequat
+❯ - Malesuada Bibendum Arcu Elementum Laoreet
+
+❯ Remove the garderobe starter site blog post assets including images.
+### Re: Remove garderobe starter blog posts + assets (HEAD)
+
+Found 6 Latin-title starter posts (not 4 — two more slipped through):
+
+| ID | Title |
+|----|-------|
+| 1 | Tristique Senectus Etnetus Otmalesuada |
+| 181 | Consequat Semper Viverra Nam Libero |
+| 184 | Malesuada Bibendum Arcu Elementum Laoreet |
+| 553 | Accumsan Tortor Posuere Acut Consequat |
+| 556 | Condimentum Odvenenatis Vestibulum Dapibus |
+| 559 | Lobortis Elementum Nibhtellus Molestie Mauris |
+
+Each had one attached image (blog-article-thumb-N_optimized). All deleted with `--force`:
+
+```bash
+wp post delete 1 181 184 553 556 559 --force          # posts
+wp post delete 560 557 554 185 182 86034 --force       # attachments
+```
+
+Remaining posts are all legitimate MRH content (IDs 15864–79564 + Pro Tandem Pac / Catfish Cook Off). `/blog/` now shows only real posts.
+<!-- agent:boundary:d13a096a -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

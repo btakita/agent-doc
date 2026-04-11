@@ -444,11 +444,11 @@ class PatchWatcher(private val project: Project) : Disposable {
         // Save the document to disk (so snapshot can read it)
         FileDocumentManager.getInstance().saveDocument(document)
         writeAckContent(patch.patchId, document.text)
-        // Fix 4: post-apply commit via FFI — defense-in-depth against shell-side commit skips.
-        AgentDocLib.get()?.let { lib ->
-            val committed = lib.agent_doc_commit(patch.file)
-            if (!committed) LOG.warn("[commit] agent_doc_commit failed for ${patch.file}")
-        }
+        // Note: do NOT call agent_doc_commit here. The plugin committing within the IPC
+        // window races with the skill's `agent-doc commit` call, causing the binary commit
+        // to be a no-op (FFI already committed). The binary's git::commit handles boundary
+        // markers and HEAD repositioning; the FFI commit skips all of that. The preflight
+        // sweep (Fix 5) handles missed commits as a backstop for interrupted sessions.
         return true
     }
 

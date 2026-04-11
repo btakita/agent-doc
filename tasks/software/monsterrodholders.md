@@ -1849,7 +1849,7 @@ Verify in the browser:
 
 ❯ Remove the padding-top custom css for the aside on all pages. The aside content should be flush with the top of its container element.
 ❯ The home page needs a different treatment. The .entry-content on the home page always needs to be below the top navbar. `margin-top: 100px` seems reasonable.
-### Re: Flush aside, home-only entry-content margin (HEAD)
+### Re: Flush aside, home-only entry-content margin
 
 Done. Swapped the sidebar padding rule for a home-scoped `.entry-content` margin.
 
@@ -1891,7 +1891,33 @@ Cache flushed. Verify:
 - https://50.28.2.199.nip.io/ (hero pushed down 100px)
 - https://50.28.2.199.nip.io/shop/ (aside flush with top)
 - https://50.28.2.199.nip.io/blog/ (aside flush with top)
-<!-- agent:boundary:32e51024 -->
+
+❯ The top banner is now too tall. It should remain 1 small row like it used to be. Remove the custom css and take a screenshot.
+❯ The main element should be entirely below the header. The top of the aside should be below the header. 
+❯ ![img_11.png](img_11.png)
+### Re: Remove custom CSS, verify with screenshots (HEAD)
+
+Done. Removed `.home .entry-content { margin-top: 100px }` from post 86030. Cache flushed.
+
+**Screenshots (headless Chromium, 1400x900):**
+
+Home — `./monsterrodholders/home-after.png`:
+![home](./monsterrodholders/home-after.png)
+
+Shop — `./monsterrodholders/shop-after.png`:
+![shop](./monsterrodholders/shop-after.png)
+
+Blog — `./monsterrodholders/blog-after.png`:
+![blog](./monsterrodholders/blog-after.png)
+
+**Observations against your criteria:**
+- Top banner = 1 small header row + announce bar (not tall) ✓
+- `<main>` sits entirely below the header on all three pages ✓
+- Top of `<aside>` is below the header on `/shop/` and `/blog/` ✓
+- On `/` the hero image and aside both start flush with the bottom of the header — no overlap
+
+If anything still looks off (e.g. at a different viewport width, or the aside creeping into the header region in your browser), let me know which breakpoint and I'll chase it — from the 1400-wide headless render, the layout matches what you asked for.
+<!-- agent:boundary:531ed218 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
@@ -1903,7 +1929,6 @@ Cache flushed. Verify:
 - [x] **Restore `All Products` heading** above products list
 - [x] **Remove duplicate hero `Popular Categories`** from Shop page block content
 - [x] **Enable Blocksy sidebar on /shop/ and /blog/** (left, matching home page layout)
-- [x] **Remove global aside padding-top** — aside now flush with container top
-- [x] **Home `.entry-content` margin-top: 100px** to clear sticky navbar
+- [x] **Remove custom layout CSS** — header compact, main below header, aside below header
 - [ ] *(Optional)* Wrap shop product grid in `<article>` via template override if strict article+aside parity is required
 <!-- /agent:pending -->

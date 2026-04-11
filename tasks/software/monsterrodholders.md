@@ -1621,7 +1621,7 @@ The "Popular Categories" heading (`<h2 class="wp-block-heading">`) in the `.page
 4. Save/Publish
 
 I cannot execute this remotely — it requires manual WordPress Admin editing. Once you remove it there and publish, the heading will be gone.
-<!-- agent:boundary:b31d790c -->
+<!-- agent:boundary:b69ec581 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

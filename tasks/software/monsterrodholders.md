@@ -2026,7 +2026,7 @@ wp cache flush
 ```
 
 Zero occurrences of "Product Categories" remain on the page (previously the h3 was the only one). The category list itself is unchanged.
-<!-- agent:boundary:f7813f71 -->
+<!-- agent:boundary:99a4cfbe -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

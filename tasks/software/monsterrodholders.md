@@ -390,7 +390,7 @@ https://50.28.2.199.nip.io/wp-content/uploads/2026/04/MONSTER-ROD-HOLDER-HEADER-
 
 ❯ What is the border on the left side of the aside?
 ❯ ![img_3.png](img_3.png)
-### Re: left border on aside (HEAD)
+### Re: left border on aside
 
 That's a **Blocksy sidebar design separator** — `aside[data-type=type-3]` uses a CSS `:after` pseudo-element at the left edge of the sidebar to draw `border-right: var(--theme-border)`.
 
@@ -412,13 +412,22 @@ The pseudo-element sits at `inset-inline-start: 0` (the left edge of the aside) 
    ```
 
 Which do you prefer?
-<!-- agent:boundary:3da58aff -->
+❯ type-4
+### Re: type-4 sidebar (HEAD)
+
+✅ **Done.** Sidebar switched from `type-3` (border line) to `type-4` (background fill).
+
+The left border you see in the screenshot is now gone. Sidebar renders as a boxed section with background color instead of a line separator.
+
+Verify live at: `https://50.28.2.199.nip.io/`
+<!-- agent:boundary:3e924433 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] Choose hero image for home page ✓ (MONSTER-ROD-HOLDER-HEADER-25.jpg deployed)
 - [x] Update home page hero block with chosen image URL ✓
+- [x] Fix sidebar left border ✓ (type-3 → type-4)
 - [ ] Add Facebook/Instagram to top bar (need URLs from Ron)
 - [ ] Delete Recently Viewed Products page (18849)
 - [ ] DNS propagating → run certbot when `dig monsterrodholders.com` returns 50.28.2.199

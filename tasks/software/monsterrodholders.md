@@ -831,7 +831,7 @@ Copyright © 2026 - monsterrodholders.com
 ```
 
 **Caveat — not committed to the source tree.** Both changes live in the WordPress DB (`wp_options` and the `custom_css` post), not in `src/monsterrodholders-dev/`. They'll survive restarts but will NOT be reproduced if the DB is restored from an older dump. If you want these persisted to git, the `wp-to-git.sh` sync script should pick up the changed options on its next run — worth verifying.
-<!-- agent:boundary:1556a674 -->
+<!-- agent:boundary:784d8d44 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

@@ -330,7 +330,7 @@ Preflight reads it as the tier override. Can be updated by either user or agent.
 **Recommended:** Option 2 (frontmatter) for persistent tier, Option 1 (preflight flag) for one-shot inline overrides. Option 3 is ergonomic but adds component complexity.
 
 **For this specific use case (user wants opus for a session):** frontmatter `agent_doc_model_tier: high` is the cleanest — set once, respected every cycle, persists in git history.
-<!-- agent:boundary:40187d66 -->
+<!-- agent:boundary:553d62d6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

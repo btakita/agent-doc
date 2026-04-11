@@ -160,7 +160,7 @@ Once I see the actual DOM, I can provide the correct CSS rule.
 This will push the widget content below the 75px navbar (with some extra breathing room). Ron should see the aside move below the navbar after cache clear.
 
 Let me know if it renders correctly after testing!
-<!-- agent:boundary:387fad04 -->
+<!-- agent:boundary:b3c08bdd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

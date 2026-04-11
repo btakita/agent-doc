@@ -246,9 +246,9 @@ Open that link in your browser, set a new password, and you'll be in.
 ❯ Have the content in /about-us use the format of /about-us-2
 ❯ About Us should point to /about-us
 ❯ The About Us pages should be "Meet the Founder of Monster Rod Holders"...not the starter site page.
-### Re: About Us page redesign (HEAD)
+### Re: About Us page redesign
 
-**Done ✓**
+**Done ✓**3
 
 - Page at `/about-us` (ID 1780) rebuilt with the Garderobe Stackable layout from `/about-us-2` but filled with real MRH content:
   - Hero: "Meet the Founder of Monster Rod Holders" (h2, 56px)
@@ -259,7 +259,37 @@ Open that link in your browser, set a new password, and you'll be in.
 - Nav "About Us" link updated from `/about-us-2/` → `/about-us/`
 
 Pushed: `aaa38a9`.
-<!-- agent:boundary:f7054d8a -->
+
+❯ Deploy to the website
+### Re: deploy to the website (HEAD)
+
+Server is ready. DNS flip is the one remaining manual step.
+
+**What's done on the server:**
+- Apache vhost updated: handles `monsterrodholders.com` + `www.monsterrodholders.com` (using temp nip.io cert until real cert is issued)
+- WordPress URLs swapped: 61,661 replacements from `50.28.2.199.nip.io` → `monsterrodholders.com` (skipped `guid` column to preserve media paths)
+- Site tested at new URL — 200 ✓ (verified via local resolve)
+
+**DNS flip — Ron's action required:**
+
+1. Log in to your DNS provider (where monsterrodholders.com is registered)
+2. Change the **A record** for `monsterrodholders.com` and `www.monsterrodholders.com` from `151.101.66.159` → **`50.28.2.199`**
+3. Wait for DNS to propagate (typically 5–30 min, up to a few hours)
+
+**After DNS propagates — run this once:**
+```bash
+ssh root@50.28.2.199 "certbot --apache -d monsterrodholders.com -d www.monsterrodholders.com"
+```
+This issues the real SSL cert and updates the Apache config. Site will be live with valid HTTPS.
+
+**Preview now:** Add this to `/etc/hosts` on your machine to see it before DNS flip:
+```
+50.28.2.199  monsterrodholders.com www.monsterrodholders.com
+```
+Then visit `https://monsterrodholders.com/` (accept the cert warning — temp cert).
+
+Pushed: `0665625`.
+<!-- agent:boundary:c1732a24 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1005,7 +1005,7 @@ Browser automation (Chrome DevTools MCP) is not reachable from this session — 
 - **Sprint 4:** Score report UI, domain scores, public repo pipeline, production deploy
 
 Most Sprint 2 tasks are "Started" with 0 actual hours — signal extraction (2.3) and credential tier (2.5) are the active next steps.
-<!-- agent:boundary:3562a8f8 -->
+<!-- agent:boundary:2bf7a21c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

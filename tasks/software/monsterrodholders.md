@@ -15,7 +15,7 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange patch=append -->
 WordPress migration, Docker stack, layout refinements (hero, grids, sticky sidebar), DNS flip pending certbot
-<!-- agent:boundary:3c88e032 -->
+❯ The product .wp-post-image elements need to all have the same height. Resize the image so entire image is visible within the .wp-post-image.
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
@@ -28,5 +28,6 @@ WordPress migration, Docker stack, layout refinements (hero, grids, sticky sideb
 - [x] **Remove duplicate hero `Popular Categories`** from Shop page block content
 - [x] **Enable Blocksy sidebar on /shop/ and /blog/** (left, matching home page layout)
 - [x] **Remove custom layout CSS** — header compact, main below header, aside below header
+- [x] **Fix product image heights** — consistent height with full visibility via object-fit
 - [ ] *(Optional)* Wrap shop product grid in `<article>` via template override if strict article+aside parity is required
 <!-- /agent:pending -->

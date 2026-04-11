@@ -450,7 +450,7 @@ Agreed. Inline command > component > frontmatter > heuristic.
 The inline command is ephemeral (stripped after processing) — it fires once and returns to the persistent setting. This is exactly the right semantics: "run THIS task on opus, then go back to whatever the document is configured to."
 
 Updating the spec accordingly.
-<!-- agent:boundary:b5952b52 -->
+<!-- agent:boundary:fc8c973e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

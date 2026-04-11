@@ -386,7 +386,7 @@ Also fixed: Contact Us link in Col3 was `/?page_id=24` → `/contact/`.
 Pushed: `fb659cc`.
 
 ❯ There is still nothing in the `<footer>` element in the site template. Add the product category links...and the rest of the site links into the `<footer>` element in the site template.
-### Re: footer `<footer>` element — actually populated now (HEAD)
+### Re: footer `<footer>` element — actually populated now
 
 Root cause: the footer widget blocks had `ref:687–690` pointing to classic menu term IDs, but `wp:navigation` requires `wp_navigation` CPT post IDs. The nav blocks rendered an empty hamburger shell with no content.
 
@@ -411,7 +411,19 @@ Fix: created 4 new `wp_navigation` posts (IDs 86123–86126) with all links hard
 Verified: product-category links, about-us, contact, my-account, blog, warranty all present in live `<footer>` HTML.
 
 Pushed: `f0cfe55`.
-<!-- agent:boundary:9280a803 -->
+
+❯ use haiku: move /contact-2/ to /contact/
+### Re: move /contact-2/ → /contact/ (HEAD)
+
+Done ✓
+
+- Deleted old page 24 (`/contact/`)
+- Renamed page 13 slug: `contact-2` → `contact`
+- `https://50.28.2.199.nip.io/contact/` → 200 ✓
+- `https://50.28.2.199.nip.io/contact-2/` → 404 (gone) ✓
+
+Pushed: `40e754d`.
+<!-- agent:boundary:95259725 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

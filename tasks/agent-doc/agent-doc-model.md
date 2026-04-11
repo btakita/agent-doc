@@ -615,7 +615,7 @@ gh release create v0.32.0 --generate-notes bin/agent-doc
 - Test coverage: 262 lib tests, 823 total (all passing)
 
 **Breaking change:** None. Tier fields default to `None` in JSON; frontmatter field optional.
-<!-- agent:boundary:91c0dd71 -->
+<!-- agent:boundary:61c5cccf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

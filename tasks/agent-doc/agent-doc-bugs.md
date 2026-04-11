@@ -65,19 +65,32 @@ When `src/session-share` lacks `.agent-doc/`, the write fails at step 2: no dire
 ❯ do
 ❯ - Run `agent-doc init src/session-share` to create `.agent-doc/patches/` in submodule
 ❯ - Then `/agent-doc src/session-share/tasks/claudescore.md` will succeed (snapshot writes to parent, patches queue locally)
-### Re: Initialization and next step (HEAD)
+### Re: Initialization and next step
 
 ✅ Created `.agent-doc/` structure in submodule:
 - `src/session-share/.agent-doc/{snapshots,patches,baselines,archives}`
 - Copied `components.toml` from parent
 
 Next: Run `/agent-doc src/session-share/tasks/claudescore.md` (Claude Code slash command, not a shell command) to execute the session. That will write back the pending response that failed before.
-<!-- agent:boundary:da7d1b21 -->
+
+❯ src/session-share/tasks/claudescore.md has an uncommitted response patch. Why?
+### Re: claudescore.md uncommitted response patch (HEAD)
+
+**Not actually uncommitted.** The response WAS written and committed (commit `8c93148`, +50 lines). The "modified" status in git is due to the `(HEAD)` boundary marker:
+
+- **Committed version:** `### Re: ... (HEAD)` ← marker added at boundary
+- **Working tree:** `### Re: ...` ← marker removed after commit
+
+This is expected agent-doc gutter behavior. The `(HEAD)` marker shows "git committed up to here." After the commit lands, the file shows modified because the marker is removed on-disk but stays in the snapshot.
+
+**Why it still shows modified:** The preflight did run `agent-doc commit` on claudescore.md (via the sweep), and it succeeded. But the working tree file reflects the boundary state. The next `/agent-doc` run on claudescore.md will clean this up by computing a new boundary.
+
+No action needed — this is correct behavior. The response is safely committed.
+<!-- agent:boundary:7cdadd78 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- ✅ Initialize `.agent-doc/` in src/session-share ([done])
-- Run `/agent-doc src/session-share/tasks/claudescore.md` to write back the pending response
+
 <!-- /agent:pending -->

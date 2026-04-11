@@ -842,7 +842,7 @@ Copyright © 2026 - monsterrodholders.com
 
 ❯ Recommend a change to the home page hero so the top navbar does not partially cover the logo and so the title has some space from the top navbar.
 ❯ ![img_6.png](img_6.png)
-### Re: missing padding-top:140px and hero navbar clearance (HEAD)
+### Re: missing padding-top:140px and hero navbar clearance
 
 **Not Ron's Blocksy options.** Blocksy customizer options live in `wp_options.theme_mods_blocksy`. The Additional CSS you're asking about lives in `wp_posts` post `86030` (`post_type=custom_css`, name `blocksy`). They're independent stores — toggling Blocksy header/sidebar settings cannot mutate the custom_css post.
 
@@ -948,20 +948,50 @@ So the `padding-top:140px` rule was dropped at 13:32 (before my turn), and then 
 
 **What I need from you.**
 
-1. Confirm you want me to run `wp post update 86030` with the CSS above (one shot, no `-`-in-heredoc bug this time — I'll write to a file on the server and pass `--post_content="$(cat file)"`).
-2. Confirm the hero clearance rule is the behavior you want, vs. the inner-container-only alternative.
+❯ 1. Confirm you want me to run `wp post update 86030` with the CSS above (one shot, no `-`-in-heredoc bug this time — I'll write to a file on the server and pass `--post_content="$(cat file)"`).: yes
+❯ 2. Confirm the hero clearance rule is the behavior you want, vs. the inner-container-only alternative.: hero clearance rule is fine. I want it to look good. So we can test.
 3. Drop `tasks/software/monsterrodholders/img_6.png` into the repo if you want it captured — the `img_6.png` link in the exchange above currently has no file on disk (`ls tasks/software/img_6.png` → missing). Not blocking; just flagging.
 
 No writes to the live site until you green-light.
-<!-- agent:boundary:a7de975d -->
+### Re: post 86030 restored + hero clearance live ✓ (HEAD)
+
+Done. Post 86030 updated cleanly (no heredoc bug — wrote CSS to `/tmp/mrh-custom-86030.css`, docker-cp'd into the container, passed via `$(cat file)`).
+
+**Verified live on `https://50.28.2.199.nip.io/`:**
+
+```
+<style id="wp-custom-css">
+/* ===== restored from rev 86181, bad blocks removed ===== */
+
+/* Button contrast */
+.wp-block-button__link {
+    color: #000 !important;
+...
+```
+
+No more `-` as the entire CSS block. Full CSS is rendering.
+
+**What's now in post 86030:**
+- Button contrast (yellow/black) ✓
+- 4-column desktop product grid ✓
+- WooCommerce classic loop grid ✓
+- Tablet 3-col final-sale-home-cta override ✓
+- Mobile 1-col grid ✓
+- Hero min-height 400px ✓
+- Home sidebar padding-top: 140px ✓
+- Sticky sidebar `top: unset` on desktop ✓
+- **NEW: Home hero clearance — `padding-top: calc(var(--header-height, 140px) + 2rem)` on `.home .wp-block-cover:first-of-type`** ✓
+- **NEW: Inner container `padding-top: 1.5rem`** for title breathing room ✓
+
+Check `https://50.28.2.199.nip.io/` — the hero logo/title should now clear the sticky navbar. If the clearance looks off (too much or too little), let me know and I'll tweak `--header-height` fallback or the `+ 2rem` offset.
+<!-- agent:boundary:06d9c1ac -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Restore post 86030 custom_css** — current live content is literally `-` (my bug from 13:49). Awaiting user OK on the restore CSS in the exchange above, then run `wp post update 86030` using a file-on-server approach (no heredoc). P0 — site is currently serving zero custom CSS.
-- [ ] **Home hero navbar clearance** — pending approval on `.home .wp-block-cover:first-of-type` padding rule vs inner-container-only variant
 - [ ] **Lighthouse perf >95 plan** — P0: self-host IBM Plex Mono (OMGF), defer jQuery, nginx Cache-Control headers, fetchpriority=high on cover image, preload LCP image
-- [ ] **Verify `wp-to-git.sh` captures DB-side fixes** — confirm the sync script picks up the `custom_css` post edit and `theme_mods_blocksy` copyright patch on next run; otherwise these fixes are not reproducible from source
+- [ ] **Verify hero clearance visually** — check `https://50.28.2.199.nip.io/` and confirm logo/title clears the sticky navbar; tweak `--header-height` fallback or `+ 2rem` offset if needed
+- [ ] **Verify `wp-to-git.sh` captures DB-side fixes** — confirm sync script picks up the custom_css post edit and theme_mods_blocksy copyright patch on next run
 - [ ] **Certbot run after DNS flips to 50.28.2.199** — `ssh root@50.28.2.199 "certbot --apache -d monsterrodholders.com -d www.monsterrodholders.com"`
 - [ ] **Remove broken `app-nginx-1` from docker-compose** — host Apache is the real reverse proxy; Docker nginx is dead code
 <!-- /agent:pending -->

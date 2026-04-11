@@ -411,7 +411,7 @@ Fix: created 4 new `wp_navigation` posts (IDs 86123–86126) with all links hard
 Verified: product-category links, about-us, contact, my-account, blog, warranty all present in live `<footer>` HTML.
 
 Pushed: `f0cfe55`.
-<!-- agent:boundary:09675da2 -->
+<!-- agent:boundary:8b90ae4b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -230,7 +230,7 @@ Give me 2 mins to SSH in and verify.
 **Got it.** — I'll remove the hardcoded `top: 70` and let it compute dynamically with the navbar height. This prevents the sidebar from overlapping the navbar when it becomes sticky.
 
 Updating the custom CSS now to use the calculated offset instead.
-<!-- agent:boundary:ff299f0b -->
+<!-- agent:boundary:5ebe2f2b -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

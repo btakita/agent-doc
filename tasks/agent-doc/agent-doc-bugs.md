@@ -201,7 +201,7 @@ fn recommended_tier(diff: &Diff, doc_path: &Path, fm: &Frontmatter) -> Tier {
 ```
 
 The running model is irrelevant to the assessment — `low` means "this task doesn't need a powerful model" regardless of what's currently active. The point is to recommend a switch when the task tier doesn't match the current model.
-<!-- agent:boundary:55d238f6 -->
+<!-- agent:boundary:a8eab33e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

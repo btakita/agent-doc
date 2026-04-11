@@ -162,7 +162,7 @@ o1-mini and o3-mini are available for manual frontmatter override (`agent_doc_mo
 **Conclusion:** Keep `low/med/high`. If a 4th tier proves necessary (e.g., reasoning models for planning), we can add `reasoning` at that point. Don't over-engineer for a hypothetical.
 
 ❯ Ok...how would the complexity be determined? By the default running model?
-### Re: How is complexity determined? (HEAD)
+### Re: How is complexity determined?
 
 Complexity is determined from signals already computed in preflight — the running model isn't involved. The assessment is about the task, not the model.
 
@@ -201,7 +201,43 @@ fn recommended_tier(diff: &Diff, doc_path: &Path, fm: &Frontmatter) -> Tier {
 ```
 
 The running model is irrelevant to the assessment — `low` means "this task doesn't need a powerful model" regardless of what's currently active. The point is to recommend a switch when the task tier doesn't match the current model.
-<!-- agent:boundary:3bd31238 -->
+
+❯ Sometimes a simple word such as `do` can mean implementing a complex task. How would this be determined?
+### Re: Short diffs hiding complex intent (HEAD)
+
+Good edge case. The binary is blind to semantics — "do" is structurally a 1-word diff, same as "ok". But the agent (skill) has full document context.
+
+**Two-stage approach:**
+
+1. **Binary: structural heuristics → `suggested_tier`**
+   - Short imperative diffs ("do", "yes", "implement", "go") → flag as `ambiguous_command` diff type
+   - Binary can't resolve ambiguous commands semantically, so it returns `suggested_tier: "med"` as a safe default (not `low`)
+
+2. **Agent: semantic override → final tier**
+   - The skill reads the full document. It sees "do" and knows what it refers to.
+   - If the document has a pending section with 8 implementation items, the agent knows this is high complexity and acts accordingly.
+   - The skill can note: "Treating as high-complexity task (pending section has N items)."
+
+**Binary-side heuristic:**
+
+```rust
+if diff.lines_added <= 3 {
+    let words: Vec<_> = diff.added_text.split_whitespace().collect();
+    if is_imperative_command(&words) { // "do", "go", "yes", "implement", "fix"...
+        return DiffType::AmbiguousCommand; // → suggested_tier: Med
+    }
+}
+```
+
+**Agent-side resolution:**
+
+The skill already reads the document before responding. It looks at:
+- Does `agent:pending` have items? → high if many
+- Is this doc in `tasks/software/`? → high
+- Is "do" adjacent to a plan with numbered steps? → high
+
+**Key split:** binary suggests (from structure), agent decides (from semantics). For short imperatives specifically, the binary defaults to `med` since it can't know the implied scope.
+<!-- agent:boundary:4a96af3a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

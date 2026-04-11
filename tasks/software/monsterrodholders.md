@@ -794,7 +794,7 @@ When DNS propagates and certbot runs, certificates will go to host Apache via `c
 ❯ The fonts are all white and not visible right now at https://50.28.2.199.nip.io/
 
 ❯ Edit "Copyright © 2026 - WordPress Theme by CreativeThemes" to "Copyright © 2026 - monsterrodholders.com"
-### Re: fonts are all white and copyright edit (HEAD)
+### Re: fonts are all white and copyright edit
 
 Both fixed live on `https://50.28.2.199.nip.io/`. Cache-bust to verify in your browser.
 
@@ -831,11 +831,135 @@ Copyright © 2026 - monsterrodholders.com
 ```
 
 **Caveat — not committed to the source tree.** Both changes live in the WordPress DB (`wp_options` and the `custom_css` post), not in `src/monsterrodholders-dev/`. They'll survive restarts but will NOT be reproduced if the DB is restored from an older dump. If you want these persisted to git, the `wp-to-git.sh` sync script should pick up the changed options on its next run — worth verifying.
-<!-- agent:boundary:784d8d44 -->
+
+❯ Why was this css removed? Ron disabled some Blocksy options. Did that affect this?
+```css
+/* Home page: push aside below sticky navbar */
+.home .ct-sidebar .ct-widget {
+    padding-top: 140px;
+}
+```
+
+❯ Recommend a change to the home page hero so the top navbar does not partially cover the logo and so the title has some space from the top navbar.
+❯ ![img_6.png](img_6.png)
+### Re: missing padding-top:140px and hero navbar clearance (HEAD)
+
+**Not Ron's Blocksy options.** Blocksy customizer options live in `wp_options.theme_mods_blocksy`. The Additional CSS you're asking about lives in `wp_posts` post `86030` (`post_type=custom_css`, name `blocksy`). They're independent stores — toggling Blocksy header/sidebar settings cannot mutate the custom_css post.
+
+**What actually happened — two bad writes, both from earlier agent sessions.**
+
+Revision history for post 86030 (today):
+
+| Rev | Time | Note |
+|---|---|---|
+| 86181 | 11:54 | Last known-good — had `padding-top:140px`, mobile 1-col grid, woocommerce loops, sticky-sidebar `top:unset`, final-sale-home-cta rules |
+| 86182 | 13:32 | **First regression** — an earlier session rewrote the whole post. Added the broken `:root { --theme-text-color: rgba(255,255,255,.95) }` + `nav a`/`footer` white-text overrides, kept only button/data-products/wp-block-cover, **dropped everything else including `.home .ct-sidebar .ct-widget { padding-top:140px }`** |
+| 86183 | 13:49 | **Second regression — mine.** When I patched post 86030 earlier this cycle to remove the `:root`/`nav a`/`footer` blocks, the `wp post update` ended up writing literally `-` as the entire post body. The live `<style id="wp-custom-css">` block on the page currently renders just `-`. I verified with `curl -sk https://50.28.2.199.nip.io/` — line 126 is `-`. That's my bug. I owe you a clean restore. |
+
+So the `padding-top:140px` rule was dropped at 13:32 (before my turn), and then my 13:49 write made it worse by blanking the whole post. Mea culpa on the second one.
+
+**Restoration plan.** Reassemble from rev 86181 minus the three bad blocks (`:root`, `nav a`, `footer`), plus the hero-clearance rule you're asking about. I'd rather show the exact content and get your OK before running `wp post update 86030` again, since I've burned two chances already.
+
+```css
+/* ===== restored from rev 86181, bad blocks removed ===== */
+
+/* Button contrast */
+.wp-block-button__link {
+    color: #000 !important;
+    background-color: #ffc107 !important;
+}
+
+/* 4-column product grid on desktop */
+[data-products] {
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 1.5em !important;
+}
+[data-products] [class*="product"] {
+    grid-column: span 1 !important;
+}
+
+/* Classic WooCommerce loops */
+.woocommerce ul.products {
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 1em;
+}
+.woocommerce ul.products li {
+    width: auto !important;
+    flex: none !important;
+}
+
+/* Tablet final-sale-home-cta override */
+@media (min-width: 691px) and (max-width: 1000px) {
+    .final-sale-home-cta [data-products] {
+        --shop-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+/* Mobile: 1-column product grid */
+@media (max-width: 480px) {
+    [data-products],
+    .woocommerce ul.products {
+        grid-template-columns: 1fr !important;
+    }
+}
+
+/* Hero image min-height */
+.wp-block-cover {
+    min-height: 400px;
+}
+
+/* Home sidebar: clear sticky navbar */
+.home .ct-sidebar .ct-widget {
+    padding-top: 140px;
+}
+@media (min-width: 1000px) {
+    :is(.ct-sidebar[data-sticky=sidebar], .ct-sticky-widgets) {
+        top: unset !important;
+    }
+}
+
+/* ===== NEW: home hero clearance under sticky navbar ===== */
+/*
+ * The sticky header (.ct-header[data-sticky]) is position:fixed on scroll
+ * AND sits in normal flow at page-top, so it overlaps the first .wp-block-cover
+ * (which contains the logo + title). Push the first home cover below the
+ * header and give the title breathing room from the top edge.
+ */
+.home .wp-site-blocks > .wp-block-cover:first-of-type,
+.home .entry-content > .wp-block-cover:first-of-type {
+    padding-top: calc(var(--header-height, 140px) + 2rem) !important;
+}
+
+.home .wp-block-cover:first-of-type .wp-block-cover__inner-container {
+    padding-top: 1.5rem;
+}
+```
+
+**Why this approach for the hero and not a global offset.**
+
+1. **Scoped to `.home` + `:first-of-type`.** Only the first hero on the home page needs to clear the sticky nav. Other covers (feature strips, category headers) don't — they're already below the fold.
+2. **`calc(var(--header-height, 140px) + 2rem)`.** Blocksy exposes `--header-height` as a CSS custom property from the header builder. If Ron adjusts the header height in the customizer, this rule tracks it automatically; the `140px` fallback only fires if the variable is missing. The `+ 2rem` is the breathing room you asked for between the navbar's bottom edge and the title.
+3. **`!important` only on the outer padding.** `.wp-block-cover` has inline padding from the block editor (`style="padding-top:80px"`). Without `!important` the inline style wins. The inner-container rule doesn't need it because nothing else sets it.
+4. **Alternative I considered and rejected:** pushing `.wp-site-blocks` down globally with `scroll-padding-top` or `padding-top` on `<body>`. That breaks every other page and interferes with Blocksy's transparent-header mode. Hero-scoped is safer.
+
+**If you prefer a different strategy** — e.g., you want the nav to stay fully transparent over the hero image and only have the *title text* pushed down — say the word and I'll swap the rule set to target only `.wp-block-cover__inner-container` padding without touching the cover's outer padding. That keeps the visual overlap but prevents the text from being covered.
+
+**What I need from you.**
+
+1. Confirm you want me to run `wp post update 86030` with the CSS above (one shot, no `-`-in-heredoc bug this time — I'll write to a file on the server and pass `--post_content="$(cat file)"`).
+2. Confirm the hero clearance rule is the behavior you want, vs. the inner-container-only alternative.
+3. Drop `tasks/software/monsterrodholders/img_6.png` into the repo if you want it captured — the `img_6.png` link in the exchange above currently has no file on disk (`ls tasks/software/img_6.png` → missing). Not blocking; just flagging.
+
+No writes to the live site until you green-light.
+<!-- agent:boundary:b73e1921 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] **Restore post 86030 custom_css** — current live content is literally `-` (my bug from 13:49). Awaiting user OK on the restore CSS in the exchange above, then run `wp post update 86030` using a file-on-server approach (no heredoc). P0 — site is currently serving zero custom CSS.
+- [ ] **Home hero navbar clearance** — pending approval on `.home .wp-block-cover:first-of-type` padding rule vs inner-container-only variant
 - [ ] **Lighthouse perf >95 plan** — P0: self-host IBM Plex Mono (OMGF), defer jQuery, nginx Cache-Control headers, fetchpriority=high on cover image, preload LCP image
 - [ ] **Verify `wp-to-git.sh` captures DB-side fixes** — confirm the sync script picks up the `custom_css` post edit and `theme_mods_blocksy` copyright patch on next run; otherwise these fixes are not reproducible from source
 - [ ] **Certbot run after DNS flips to 50.28.2.199** — `ssh root@50.28.2.199 "certbot --apache -d monsterrodholders.com -d www.monsterrodholders.com"`

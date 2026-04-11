@@ -624,7 +624,7 @@ This preflight's sweep just committed it as `b6cc77f agent-doc(claudescore): 202
 **Mechanism:** `preflight step 2` commits the current document first, then sweeps *related docs* with pending agent-doc changes across the workspace and commits them too. So an orphaned patch survives until the next preflight on any session touches the sweep path.
 
 **If you want faster commits on claudescore.md specifically:** run `/agent-doc tasks/claudescore.md` briefly (even with no edits) — its own preflight will commit in step 2. Or rely on the sweep like now.
-<!-- agent:boundary:e52b65f8 -->
+<!-- agent:boundary:c6aedb7a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

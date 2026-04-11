@@ -1270,7 +1270,7 @@ wp post delete 560 557 554 185 182 86034 --force       # attachments
 Remaining posts are all legitimate MRH content (IDs 15864–79564 + Pro Tandem Pac / Catfish Cook Off). `/blog/` now shows only real posts.
 
 ❯ On the /shop/ page, show all the products. Use a responsive 4 column grid. Order by most sold desc. Exclude any sold out products.
-### Re: /shop/ — all products, 4-col grid, sorted by most sold, no sold-out (HEAD)
+### Re: /shop/ — all products, 4-col grid, sorted by most sold, no sold-out
 
 **What was already configured correctly:**
 - `woocommerce_catalog_columns = 4` (WooCommerce renders `<ul class="products columns-4">`)
@@ -1301,7 +1301,37 @@ Remaining posts are all legitimate MRH content (IDs 15864–79564 + Pro Tandem P
 If you want different breakpoints (e.g. 2 cols on tablet instead of 3), send a screenshot and I'll add targeted CSS.
 
 **Verify:** Hard-refresh `https://monsterrodholders.com/shop/` — all 57 products should appear sorted by sales volume, no pagination, no sold-out items.
-<!-- agent:boundary:7cc3a8cc -->
+
+❯ No products are showing up on https://50.28.2.199.nip.io/shop/
+### Re: No products showing on staging /shop/ (HEAD)
+
+The changes I made were on the production site (`monsterrodholders.com`). The staging environment (`50.28.2.199.nip.io`) likely isn't synced yet or is missing the critical piece: **the mu-plugin** at `/var/www/html/wp-content/mu-plugins/mrh-shop.php` that enables showing all products.
+
+**Diagnosis needed:**
+
+1. **Check what's actually rendering:** Open https://50.28.2.199.nip.io/shop/ and check the page source (Ctrl+U or right-click → View Page Source). Look for:
+   - Is there a `<ul class="products">` element anywhere? (should contain `<li>` items)
+   - Or is the content completely empty where products should be?
+
+2. **Check staging WordPress config:** If you have access to staging WordPress CLI:
+   ```bash
+   # Do products exist in staging?
+   wp post count --post_type=product
+   
+   # Are the shop options configured?
+   wp option get woocommerce_catalog_orderby
+   wp option get woocommerce_hide_out_of_stock_items
+   
+   # Does the mu-plugin exist?
+   ls -la wp-content/mu-plugins/
+   ```
+
+3. **Most likely issue:** The mu-plugin wasn't deployed to staging. If staging and prod don't share the same `/var/www/html` directory, you'll need to copy `mrh-shop.php` to staging's mu-plugins folder.
+
+**Next steps:** 
+- Share the page source or the output from those WordPress commands, and I'll pinpoint the exact issue.
+- If staging needs a fresh WooCommerce config or the mu-plugin deployed, I can walk through that setup.
+<!-- agent:boundary:ab6b5956 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

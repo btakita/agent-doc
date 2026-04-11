@@ -987,7 +987,7 @@ Check `https://50.28.2.199.nip.io/` — the hero logo/title should now clear the
 
 ❯ In the top navbar, remove "Monster Rod Holders" text under the logo so the logo can expand to the full height of the top navbar. The logo has "Monster Rod Holders" rendered in it. But the logo needs to be bigger to read it. 
 ❯ ![img_7.png](img_7.png)
-### Re: logo enlarged + site title hidden ✓ (HEAD)
+### Re: logo enlarged + site title hidden ✓
 
 Done. Post 86030 updated. Two CSS rules added:
 
@@ -1012,12 +1012,50 @@ The logo image (`monster-rod-holder-logo-2023.png`) is 2048×1331 (1.54:1 ratio)
 Check `https://50.28.2.199.nip.io/` and let me know:
 - If 70px still feels too small, I can push it to 80–90px (the navbar will grow to fit, or I can also add `min-height` to the header row to control that)
 - If it's clipping on mobile or the sticky scroll version, say the word — Blocksy also has separate `--logo-max-height` overrides for `[data-sticky]` and mobile breakpoints that I can add
-<!-- agent:boundary:a6a15ab2 -->
+The pages should take the entire viewport width for mobile widths. See ![img_8.png](img_8.png) 
+### Re: mobile full-bleed viewport width ✓ (HEAD)
+
+Done. Added a mobile-only rule to post 86030:
+
+```css
+@media (max-width: 689px) {
+    .ct-container,
+    .ct-container-fluid,
+    main.site-main,
+    .entry-content,
+    .wp-site-blocks {
+        max-width: 100% !important;
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+    }
+
+    :root {
+        --content-spacing: 0px;
+        --container-spacing: 0px;
+    }
+}
+```
+
+**What this does:**
+- At ≤689px (Blocksy's mobile breakpoint), zeroes horizontal padding and max-width on all content containers
+- Also zeroes Blocksy's `--content-spacing` and `--container-spacing` CSS custom properties, which govern section side gutters site-wide
+- Pages now render edge-to-edge on mobile — images, hero covers, product grids all span the full viewport width
+
+**Not touched:** tablet (690–999px) and desktop (≥1000px) layouts are unchanged. If you want tablet to also go full-bleed, say the word and I'll extend the breakpoint to `max-width: 999px`.
+
+**Heads up — things to visually verify on mobile:**
+1. **Text content** — paragraphs and headings will now hug the screen edge. Some blocks (paragraphs, lists) may need inner padding so text isn't flush against the screen. If that's too tight, I can add `padding: 0 1rem` back to just text blocks while keeping images/covers full-bleed.
+2. **Product cards** — WooCommerce loop items will touch edges. Usually looks fine but worth checking.
+3. **Hero cover** — should now span the full width; the inline 80px padding from the block editor still applies vertically.
+
+Check `https://50.28.2.199.nip.io/` on a phone or DevTools device mode and let me know which blocks (if any) need readable-text padding restored.
+<!-- agent:boundary:94cde5c5 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Verify logo size visually** — check `https://50.28.2.199.nip.io/` and confirm 70px logo height is legible; bump to 80–90px or tune sticky/mobile variants if needed
+- [ ] **Verify mobile full-bleed visually** — check that text blocks aren't too flush against edges on phone; may need padding restored on paragraphs/lists
+- [ ] **Verify logo size visually** — confirm 70px logo height is legible; bump to 80–90px or tune sticky/mobile variants if needed
 - [ ] **Lighthouse perf >95 plan** — P0: self-host IBM Plex Mono (OMGF), defer jQuery, nginx Cache-Control headers, fetchpriority=high on cover image, preload LCP image
 - [ ] **Verify hero clearance visually** — confirm logo/title clears the sticky navbar; tweak fallback or offset if needed
 - [ ] **Verify `wp-to-git.sh` captures DB-side fixes** — confirm sync script picks up the custom_css post edit and theme_mods_blocksy copyright patch on next run

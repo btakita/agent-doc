@@ -1637,7 +1637,7 @@ You're right — a previous session added that heading. I need to be direct: I d
 
 What's easier for you?
 ❯ You can ssh into the server
-### Re: SSH to remove heading (HEAD)
+### Re: SSH to remove heading
 
 Attempting SSH — I need the right credentials. What's the SSH command or key I should use? My attempt with the default key path failed.
 
@@ -1647,7 +1647,13 @@ echo '<h2 class="mrh-shop-heading">Popular Categories</h2>';
 ```
 
 Then flush the cache and verify the heading is gone from the page.
-<!-- agent:boundary:728d3213 -->
+❯ In this document, multiple `ssh root@50.28.2.199` calls were done. Use `ssh root@50.28.2.199`
+### Re: Finding the mu-plugin file (HEAD)
+
+SSH access works, but `/var/www/html/wp-content/mu-plugins/` doesn't exist on the server. WordPress doesn't appear to be in the standard location.
+
+Can you provide the actual path to where the mu-plugin file is located? Or the WordPress root directory path?
+<!-- agent:boundary:014090cf -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

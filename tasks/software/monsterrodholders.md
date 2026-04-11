@@ -1131,7 +1131,7 @@ The previous CSS fix set `max-width: 100% !important` but missed `width: 100% !i
 Key change: added `width: 100% !important` (was missing) and `--theme-container-width: 100%` to override the 90vw variable. Desktop layout is unchanged.
 
 **Verified:** Simulated mobile conditions in the browser — hero fills `heroX: 0, heroW: viewport` with `heroFillsViewport: true`. Desktop screenshot confirms no regression. Hard-refresh `https://50.28.2.199.nip.io/` on mobile and the hero should now be edge-to-edge.
-<!-- agent:boundary:3b10a263 -->
+<!-- agent:boundary:fbfd78e8 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

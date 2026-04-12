@@ -159,7 +159,7 @@ No blockers identified. These can be tackled in any order — the philosophy doc
 **Usage:** `curl -fsSL https://raw.githubusercontent.com/existence-lang/existence/main/install.sh | sh`
 
 Committed to submodule and updated parent pointer. Ready for the next release tag (`v0.4.0` or later).
-<!-- agent:boundary:1b4b13ff -->
+<!-- agent:boundary:6386f4cf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

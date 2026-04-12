@@ -81,7 +81,7 @@ Contents: full sitemap comparison table, root cause (Yoast vs WP core), structur
 Secret gists are unlisted but anyone with the URL can view — don't share the link publicly if any of the content is sensitive. Nothing in the report exposes credentials or internal infra beyond what's already in the task doc.
 
 ❯ /wp-sitemap.xml, /sitemap.xml, and /sitemap_index.xml all have 404s. Fix this.
-### Re: Sitemap 404s — can't reproduce, need host (HEAD)
+### Re: Sitemap 404s — can't reproduce, need host
 
 Just probed both hosts from here. Current reality:
 
@@ -117,13 +117,55 @@ Once I know which host, the fix is straightforward:
 - **DNS-resolved-to-staging scenario**: I can add Apache rewrites on our Docker server so that when Host=`monsterrodholders.com`, `/sitemap_index.xml` is served locally by the container (Yoast) instead of being proxied to Flywheel. Would eliminate the 404 you'd see during a partial/split DNS state.
 
 Let me know which host and I'll apply the actual fix.
-<!-- agent:boundary:17087069 -->
+❯ 404s
+❯ - http://50.28.2.199.nip.io/sitemap.xml
+❯ - http://50.28.2.199.nip.io/wp-sitemap.xml
+❯ - http://50.28.2.199.nip.io/sitemap_index.xml
+### Re: HTTP (port 80) sitemap 404s — fixed (HEAD)
+
+You were right, and I was looking at the wrong scheme. All three URLs were 404 over **http://** (port 80) on the nip.io host. HTTPS worked fine, which is why my first probe missed it.
+
+**Root cause:** Apache vhost binding precedence.
+
+Our `/etc/httpd/conf.d/00-monsterrodholders-proxy.conf` had the port-80 redirect vhosts declared as `<VirtualHost *:80>`, but the InterWorx-managed `vhost_000_defaults.conf` has an IP-specific vhost on `<VirtualHost 50.28.2.199:80>` (serving `interworx-default-sites.com` from `/var/www/html`). Apache prefers IP-specific vhosts over wildcard `*:80` when matching a request, so every HTTP request to 50.28.2.199:80 was hitting the InterWorx default — which has no docroot for sitemap files, hence 403 on `/` and 404 for everything else. Our `Redirect permanent / https://…` rules were never reached.
+
+`httpd -S` confirmed the split:
+```
+50.28.2.199:80   interworx-default-sites.com (vhost_000_defaults.conf:14)
+*:80             default server 50.28.2.199.nip.io (00-monsterrodholders-proxy.conf:2)
+                 port 80 namevhost monsterrodholders.com
+```
+
+**Fix applied:** Changed both port-80 vhosts in `00-monsterrodholders-proxy.conf` from `<VirtualHost *:80>` to `<VirtualHost 50.28.2.199:80>`. That puts them on the same IP-bind as the InterWorx default, and since `00-*` loads before `vhost_000_*` alphabetically, our `50.28.2.199.nip.io` vhost becomes the default for 50.28.2.199:80 and name-based matching resolves `monsterrodholders.com` and `www.monsterrodholders.com` correctly. `interworx-default-sites.com` still works by ServerName.
+
+Sequence:
+```bash
+cp 00-monsterrodholders-proxy.conf 00-monsterrodholders-proxy.conf.bak-20260412
+sed -i 's|<VirtualHost \*:80>|<VirtualHost 50.28.2.199:80>|g' 00-monsterrodholders-proxy.conf
+httpd -t  # Syntax OK
+systemctl reload httpd
+```
+
+**Verification:**
+```
+http://50.28.2.199.nip.io/                  → 301 → https://50.28.2.199.nip.io/
+http://50.28.2.199.nip.io/sitemap.xml       → 301 → https://50.28.2.199.nip.io/sitemap.xml
+http://50.28.2.199.nip.io/wp-sitemap.xml    → 301 → https://50.28.2.199.nip.io/wp-sitemap.xml
+http://50.28.2.199.nip.io/sitemap_index.xml → 301 → https://50.28.2.199.nip.io/sitemap_index.xml
+```
+Following any of them lands at `https://50.28.2.199.nip.io/sitemap_index.xml` → 200 (Yoast).
+
+**Side effect to be aware of:** `http://monsterrodholders.com/` and `http://www.monsterrodholders.com/` will also now redirect to https via our vhost **if and only if** DNS points the host at 50.28.2.199. Today DNS still points to Flywheel, so prod HTTP traffic is unaffected — Flywheel handles its own HTTP→HTTPS. After the DNS flip, our vhost will correctly 301 HTTP to HTTPS for both nip.io and the apex.
+
+Backup is at `/etc/httpd/conf.d/00-monsterrodholders-proxy.conf.bak-20260412` in case you want to revert.
+
+One more thing worth noting: the user-side symptom for the three URLs was 404 (not 403), which was because `mod_rewrite` on the InterWorx default would try to serve the literal path `/sitemap.xml` out of `/var/www/html` and fail. Root hit 403 because `/var/www/html` has directory listing disabled and no index file. Both symptoms traced back to the same vhost-selection bug.
+<!-- agent:boundary:e3233d22 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - **Test Venmo button (if possible)** — ask a team member or tester to click the Venmo button and confirm approval flow; or check modsec audit log for zero 933120 hits on `form_encoded` when attempted. (blocked by: user password reset)
 - **Rotate DB passwords** — `MARIADB_ROOT_PASSWORD` + `MARIADB_PASSWORD` still on the previous values in `docker-compose.yml` / `.env`; update `wp-config.php`, `docker compose up -d --force-recreate`.
-- **Sitemap 404 investigation** — awaiting host clarification from user; current evidence shows only prod `/sitemap_index.xml` returns 404 (expected, Yoast not installed on Flywheel).
 - **Livestream VOD trim** — the Stripe settings dump segment still needs manual trim in post-production.
 <!-- /agent:pending -->

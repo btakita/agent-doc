@@ -413,7 +413,7 @@ Done. mrh-performance **v1.5** is live on production with the footer-logo seed, 
 - Future resets or fresh DB imports will self-heal on next page load as long as `mrh_footer_logo_seed_version` differs from the option value
 
 **Hard-refresh the homepage/footer** (Cmd/Ctrl+Shift+R) to bust browser cache and confirm visually.
-<!-- agent:boundary:525e0f68 -->
+<!-- agent:boundary:527a3dab -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

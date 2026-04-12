@@ -230,23 +230,54 @@ The plan covers: callback protocol spec (request/response JSON), callback types 
 
 See: `tasks/agent-doc/plan-bidirectional-ipc.md`
 
-do
+❯ do
 - **Config consolidation** — merge `components.toml` into `config.toml`. Decision made, needs implementation.
 
-Add missing tests for this feature and the recently implemented features.
-Also, we need a way to migrate existing .agent-doc/components.toml files into .agent-doc/config.toml.
-<!-- agent:boundary:50e2df0d -->
+❯ Add missing tests for this feature and the recently implemented features.
+❯ Also, we need a way to migrate existing .agent-doc/components.toml files into .agent-doc/config.toml.
+❯ do
+❯ Add missing tests for this feature and the recently implemented features.
+❯ Also, we need a way to migrate existing .agent-doc/components.toml files into .agent-doc/config.toml.
+### Re: Config consolidation tests + migration (HEAD)
+
+Done. Four changes shipped:
+
+**1. Fixed broken `patch.rs` tests** — Updated `write_config()` helper and all callers to use `.agent-doc/config.toml` with `[components.x]` TOML sections instead of the deleted `COMPONENTS_FILENAME` constant with flat `[x]` sections.
+
+**2. Added `components.toml` → `config.toml` migration** — `load_project()` now auto-detects a sibling `components.toml`, merges its entries under `[components]` in `config.toml` (existing config.toml entries take precedence), then deletes the legacy file. One-time migration on first load. Found 3 legacy files in the wild:
+- `agent-loop/.agent-doc/components.toml`
+- `src/session-share/.agent-doc/components.toml`
+- `~/work/quant-science/.agent-doc/components.toml`
+
+**3. Added `project_config.rs` unit tests** (6 tests):
+- `load_missing_config_returns_defaults`
+- `load_valid_config`
+- `save_and_reload_roundtrip`
+- `migrate_components_toml`
+- `migrate_preserves_existing_config`
+- `update_tmux_session_roundtrip`
+
+Used explicit-path variants (`load_project_from`, `save_project_to`) to avoid CWD race conditions in parallel test execution.
+
+**4. Added frontmatter tests for `no_mcp` and `enable_tool_search`** (3 tests):
+- `parse_no_mcp_field`
+- `parse_enable_tool_search_field`
+- `parse_missing_flags_default_none`
+
+**Bonus fix:** `load_component_configs()` in `template.rs` and `load_configs()` in `patch.rs` now resolve config relative to the document path (walking up to find `.agent-doc/`), not just CWD. This fixes config resolution for documents in subdirectories/tempdir test setups. Also fixed 4 template.rs tests that were writing config to a malformed filename `config.toml ([components] section)`.
+
+All 270 unit tests pass. 522/523 integration tests pass (1 flaky tmux timing test, pre-existing). Binary rebuilt.
+<!-- agent:boundary:b0ef3881 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Config consolidation** — merge `components.toml` into `config.toml`. Decision made, needs implementation.
 - **Bidirectional IPC** — plan written at `tasks/agent-doc/plan-bidirectional-ipc.md`. Review and refine.
 - **`agent-doc pending` subcommands** — add/remove/prune/list. Blocked on IPC design (pending_curate callback type).
 - **`agent-doc cleanup`** — umbrella command replacing `compact`. Spec'd in plan doc.
 <!-- /agent:pending -->
-## Assistant (HEAD)
+## Assistant
 
 ### Re: Config consolidation — merge components.toml into config.toml
 
@@ -271,4 +302,4 @@ patch = "replace"
 
 See `src/agent-doc/src/project_config.rs` for the new module structure.
 
-## User (HEAD)
+## User

@@ -374,7 +374,7 @@ Done. Swapped Arderobe logo-dark.svg with monsterrodholders logo.
 - Cache flushed, verified on live site ✅
 
 Footer now displays the monsterrodholders logo instead of the Arderobe branding.
-<!-- agent:boundary:9b5530e6 -->
+<!-- agent:boundary:498d41ce -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

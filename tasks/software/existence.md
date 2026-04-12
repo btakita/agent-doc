@@ -134,7 +134,7 @@ No blockers identified. These can be tackled in any order — the philosophy doc
 ❯ - [ ] Create GitHub Actions workflow: build + release binaries (Linux gnu/musl, macOS x86_64/aarch64)
 
 
-### Re: GitHub Actions + install script — DONE (HEAD)
+### Re: GitHub Actions + install script — DONE
 
 ✓ **release.yml**: Expanded to 6-target matrix
 - Linux: x86_64-gnu, aarch64-gnu, x86_64-musl, aarch64-musl (aarch64/musl via `cross` v0.2.5)
@@ -159,7 +159,35 @@ No blockers identified. These can be tackled in any order — the philosophy doc
 **Usage:** `curl -fsSL https://raw.githubusercontent.com/existence-lang/existence/main/install.sh | sh`
 
 Committed to submodule and updated parent pointer. Ready for the next release tag (`v0.4.0` or later).
-<!-- agent:boundary:6386f4cf -->
+
+❯ I don't see any new builds in https://github.com/existence-lang/existence/actions Why?
+
+### Re: No builds yet — need to push a tag (HEAD)
+
+The release workflow only triggers on **git tags** matching `v*`. We've committed the workflow + install.sh + Makefile to main, but the Actions won't run until you push a tag.
+
+**To trigger the workflow:**
+
+From the submodule directory:
+```bash
+cd src/existence-lang/existence
+git tag v0.4.0
+git push origin v0.4.0
+```
+
+(Or use `make release` from the submodule, which does this automatically after clippy/test pass.)
+
+Once the tag is pushed, the Actions workflow will:
+1. Trigger on the tag
+2. Build 6 targets (in parallel: Linux gnu/musl x86_64/aarch64, macOS x86_64/aarch64)
+3. Upload artifacts to GitHub Releases
+4. Run `cargo publish` to crates.io
+5. Create the release page with generated notes
+
+**Watch it here:** https://github.com/existence-lang/existence/actions
+
+The workflow will show up immediately after the tag push. Each target job takes ~2-5 minutes (Linux musl/aarch64 are slower via `cross`). Builds appear in the "Release" workflow run.
+<!-- agent:boundary:dbe11ab7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

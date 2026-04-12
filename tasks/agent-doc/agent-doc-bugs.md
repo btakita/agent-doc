@@ -16,12 +16,25 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange patch=append -->
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20260412-155559.md`*
+Please 
+### Re: Compact complete (HEAD)
+
+Exchange archived (446 lines) → `pre-compact-8` tag. Previous content recoverable via `agent-doc show tasks/agent-doc/agent-doc-bugs.md` at that tag.
+
+**Summary of archived work:**
+- Bidirectional IPC (Option A) with PostToolUse hook — fully implemented and tested
+- Config consolidation (`components.toml` → `config.toml`) — done with migration
+- Frontmatter flags (`no_mcp`, `enable_tool_search`) — implemented
+- Context audit skill scaffolded at `.claude/skills/context-audit/`
+- "compress doc" discussion — resolved: no `compress` subcommand exists, `compact` is the correct command
+
+**Open item:** Add `compress` as a binary alias for `compact`?
+<!-- agent:boundary:63890bbc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - **`compress` alias** — decide: add as binary alias for `compact`, or skip
-- **Run compact on this doc** — exchange content not yet archived, awaiting user confirmation
 <!-- /agent:pending -->
 ## Assistant

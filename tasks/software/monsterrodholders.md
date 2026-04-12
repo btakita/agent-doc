@@ -1497,7 +1497,7 @@ Replacement token: `[REDACTED_MARIADB_PW]`. Verification pass (`grep -r` for the
 **Follow-up action (still on you):** rotate `MARIADB_ROOT_PASSWORD` + `MARIADB_PASSWORD` in `docker-compose.yml` / `.env`, update `wp-config.php`, `docker compose up -d --force-recreate`. Now that the passwords are in passage, you can reference them via `$(passage btak/monsterrodholders/MARIADB_PASSWORD)` in future compose env files instead of inlining.
 
 ❯ A /checkout with the test product is getting a "No shipping method has been selected. Please double check your address, or contact us if you need any help." error. Please add $0 shipping to the test product.
-### Re: Shipping method error on /checkout (HEAD)
+### Re: Shipping method error on /checkout
 
 Diagnosed and fixed. Root cause wasn't the test product — it was the shipping zone config.
 
@@ -1530,15 +1530,34 @@ Then flushed `wp cache flush` and `wp transient delete --all` so WC rebuilds the
 - **Rotate DB passwords** — `MARIADB_ROOT_PASSWORD` + `MARIADB_PASSWORD` still on the previous values in `docker-compose.yml` / `.env`; update `wp-config.php`, `docker compose up -d --force-recreate`.
 - **Livestream VOD trim** — the Stripe settings dump segment still needs manual trim in post-production.
 - **Decide on real shipping strategy** — Free Shipping is fine for testing; when going live, add Flat Rate / carrier rates above it.
-<!-- agent:boundary:6176b0f4 -->
+PayPal seems to be missing. I don't see it as a payment option. Could you readd PayPal? 
+### Re: PayPal missing from checkout (HEAD)
+
+Reactivated. The `woocommerce-paypal-payments` plugin was inactive (I'd deactivated it earlier when we thought it was misconfigured) — turns out the onboarding was actually intact. Full merchant connection was still in the DB:
+
+- Merchant: `5SC55CERHJ8VJ` (`monsterrodholders@gmail.com`)
+- `use_sandbox: false` (live mode)
+- `merchant_connected: true`
+- `client_id` matches `passage btak/monsterrodholders/paypal/client_id`
+- Gateway `ppcp-gateway` (PayPal) `enabled=yes`
+
+Actions taken:
+
+- `wp plugin activate woocommerce-paypal-payments`
+- `wp cache flush` + `wp transient delete --all`
+
+**Please retry /checkout** — PayPal, plus the Pay Later / Venmo / Apple Pay / Google Pay smart buttons should render alongside Stripe (Credit/Debit Card). Stripe remains enabled as the card gateway.
+
+Note: the installed PPCP plugin is `3.4.1` with `4.0.2` available. I left it on 3.4.1 to avoid introducing unrelated changes during the checkout debug cycle — we can bump it after we've confirmed checkout works end-to-end.
+<!-- agent:boundary:e64429ac -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Retry checkout in browser** — confirm 931100 fix clears the spinner. Needs a real browser with valid nonce (curl probe can't reproduce because WC rejects nonceless AJAX with 403 regardless of WAF).
-- **Rotate MARIADB passwords** — both root + user leaked to livestream. Both now stored in `passage` at `btak/monsterrodholders/MARIADB_{ROOT_,}PASSWORD`. Rotate → update `docker-compose.yml` / `.env` → update `wp-config.php` → `docker compose up -d --force-recreate` → trim VOD.
-- **DNS flip checklist** — when cutover happens: `wp search-replace 'https://50.28.2.199.nip.io' 'https://monsterrodholders.com' --skip-columns=guid`, update `siteurl`/`home`, update Stripe webhook endpoint (both in WP option and Stripe Dashboard), add domain to Cloudflare, re-run `/contact/` + `/checkout/` verification. The 931100 + 933120 exclusions become no-ops but stay in place for defense-in-depth.
-- **Add 931100 to wp-liquidweb-ops skill** — the rule dictionary currently documents 933120 only. Same false-positive family, same fix shape, belongs in the skill so future projects land with both exclusions pre-configured.
-- **wp-cli memory wrapper** — update `./scripts/wp.sh` to pass `php -d memory_limit=512M` per SPEC note. Low priority now that WPForms is gone.
-- **Stripe key rotation (optional, higher effort)** — consider given DB password exposure. Requires Stripe Dashboard webhook re-registration.
+- **Retry /checkout with PayPal visible** — confirm PayPal smart buttons render alongside Stripe card form. (user action)
+- **Retry /checkout with test product** — confirm Free Shipping renders at $0.00 after the zone fix. (user action)
+- **Rotate DB passwords** — `MARIADB_ROOT_PASSWORD` + `MARIADB_PASSWORD` still on the previous values in `docker-compose.yml` / `.env`; update `wp-config.php`, `docker compose up -d --force-recreate`.
+- **Livestream VOD trim** — the Stripe settings dump segment still needs manual trim in post-production.
+- **Decide on real shipping strategy** — Free Shipping is fine for testing; when going live, add Flat Rate / carrier rates above it.
+- **Bump PPCP plugin 3.4.1 → 4.0.2** — defer until checkout is confirmed working end-to-end.
 <!-- /agent:pending -->

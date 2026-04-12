@@ -59,7 +59,7 @@ Design choices:
 - No educational guide content (PDF) — that's separate marketing material
 
 ❯ Add a no-mcp or no_mcp frontmatter to add add `--no-mcp` to the `claude` call. So `claude --no-mcp`
-### Re: `no_mcp` frontmatter (HEAD)
+### Re: `no_mcp` frontmatter
 
 Added `no_mcp` frontmatter field. When set to `true`, it passes `--no-mcp` to the `claude` process on startup.
 
@@ -75,7 +75,25 @@ no_mcp: true
 - `start.rs` — checks `fm.no_mcp.unwrap_or(false)` and appends `--no-mcp` to the command after `claude_args`
 
 Binary rebuilt. The field works alongside `claude_args` — both are applied.
-<!-- agent:boundary:0bb5efa8 -->
+Add `enable_tool_search` option frontmatter...which will enable tool search for claude code.**** 
+
+### Re: `enable_tool_search` frontmatter (HEAD)
+
+Added `enable_tool_search` frontmatter field. When set to `true`, it passes `--enable-tool-search` to the `claude` process on startup.
+
+**Usage:**
+```yaml
+---
+enable_tool_search: true
+---
+```
+
+**Implementation:**
+- `frontmatter.rs` — added `enable_tool_search: Option<bool>` field with serde defaults
+- `start.rs` — checks `fm.enable_tool_search.unwrap_or(false)` and appends `--enable-tool-search` to the command after `--no-mcp`
+
+Binary rebuilt and tested. All 262 unit tests pass. The field works alongside `no_mcp` — both are applied independently when set.
+<!-- agent:boundary:d2a21b35 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -84,4 +102,5 @@ Binary rebuilt. The field works alongside `claude_args` — both are applied.
 - ✅ **Release v0.32.1 complete** (crates.io + GitHub)
 - ✅ **Context-audit skill scaffolded** — `.claude/skills/context-audit/` with SKILL.md + runbook
 - ✅ **`no_mcp` frontmatter** — passes `--no-mcp` to claude when `no_mcp: true`
+- ✅ **`enable_tool_search` frontmatter** — passes `--enable-tool-search` to claude when `enable_tool_search: true`
 <!-- /agent:pending -->

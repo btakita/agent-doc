@@ -589,7 +589,7 @@ I notice you've added a duplicate line — removed one copy below. ✓
 **Decision needed:** Proceed with all three, or test one first (cart is the highest-traffic candidate)?
 
 Also: yes, I'll add the CLAUDE.local.md note about stripe secrets. Should I also document this migration pattern there so future sessions know the playbook?
-<!-- agent:boundary:215e838a -->
+<!-- agent:boundary:ed1a5e56 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

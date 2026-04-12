@@ -44,7 +44,7 @@ Structure:
 ```
 
 ❯ Want me to scaffold this? Yes
-### Re: Scaffolding complete (HEAD)
+### Re: Scaffolding complete
 
 Created `.claude/skills/context-audit/`:
 - **SKILL.md** (28 lines) — trigger description, `/context` gate, pointer to runbook
@@ -57,7 +57,25 @@ Design choices:
 - Five filters (Default, Contradiction, Redundancy, Bandaid, Vague) live in the runbook
 - Scoring and report format are self-contained in the runbook
 - No educational guide content (PDF) — that's separate marketing material
-<!-- agent:boundary:98138b19 -->
+
+❯ Add a no-mcp or no_mcp frontmatter to add add `--no-mcp` to the `claude` call. So `claude --no-mcp`
+### Re: `no_mcp` frontmatter (HEAD)
+
+Added `no_mcp` frontmatter field. When set to `true`, it passes `--no-mcp` to the `claude` process on startup.
+
+**Usage:**
+```yaml
+---
+no_mcp: true
+---
+```
+
+**Implementation:**
+- `frontmatter.rs` — added `no_mcp: Option<bool>` field with serde defaults
+- `start.rs` — checks `fm.no_mcp.unwrap_or(false)` and appends `--no-mcp` to the command after `claude_args`
+
+Binary rebuilt. The field works alongside `claude_args` — both are applied.
+<!-- agent:boundary:e835d670 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -65,4 +83,5 @@ Design choices:
 <!-- agent:pending patch=replace -->
 - ✅ **Release v0.32.1 complete** (crates.io + GitHub)
 - ✅ **Context-audit skill scaffolded** — `.claude/skills/context-audit/` with SKILL.md + runbook
+- ✅ **`no_mcp` frontmatter** — passes `--no-mcp` to claude when `no_mcp: true`
 <!-- /agent:pending -->

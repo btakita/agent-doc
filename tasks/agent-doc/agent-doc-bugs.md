@@ -156,7 +156,7 @@ The skill instructions specify: "Items completed during this response → remove
 
 This is a skill-layer behavior, not a binary feature. The `agent-doc` binary applies whatever the agent writes to `<!-- patch:pending -->` verbatim. Cleaning up now.
 ❯ Can we move this behavior to the agent-doc binary?
-### Re: Moving pending cleanup to the binary (HEAD)
+### Re: Moving pending cleanup to the binary
 
 Possible, but there's a design tension. The binary currently treats pending as opaque markdown — `patch=replace` without interpreting content. Clean separation: binary handles delivery, agent handles content.
 
@@ -174,11 +174,48 @@ Possible, but there's a design tension. The binary currently treats pending as o
 - `--prune-completed` flag on `agent-doc write` that the skill opts into
 
 The root issue: the skill already instructs the agent to prune — it just wasn't followed. A binary safety net helps, but the agent still needs to curate semantically (reprioritize, add new items).
-<!-- agent:boundary:a5941d9b -->
+
+❯ Should .agent-doc/components.toml be .agent-doc/settings.toml or .agent-doc.toml?
+
+❯ Can the agent-doc binary handle **all** adding/removing agent:pending items? The SKILL->runbook can call a agent-doc command to add or remove agent:pending items. `cleanup exchange` should be `cleanup doc` instead. Should this also an agent-doc binary command? Can the agent-doc binary handle calling back to the claude session for summarization or spawn a subagent to summarize the content?
+### Re: Config file naming (HEAD)
+
+Currently two files: `components.toml` (component modes) and `config.toml` (runtime). Recommend merging into `settings.toml` inside `.agent-doc/` — one file with `[components.exchange]` and `[runtime]` sections. The directory isn't going away (snapshots, baselines, etc.), so a root-level `.agent-doc.toml` doesn't eliminate it.
+
+### Re: Binary handling all pending operations (HEAD)
+
+Viable and cleaner. The binary already handles component patching — pending subcommands are a natural extension:
+
+```bash
+agent-doc pending add <FILE> "implement feature X"
+agent-doc pending remove <FILE> "implement feature"  # pattern match
+agent-doc pending prune <FILE>                       # remove ✅/[done]/[x] items
+agent-doc pending list <FILE>                        # show current items
+```
+
+Moves "what does completed look like" into one place (the binary) instead of depending on each agent session.
+
+### Re: `cleanup exchange` → `cleanup doc` (HEAD)
+
+Agree. `agent-doc cleanup <FILE>` as umbrella — handles exchange compaction, pending pruning, status refresh, stale component cleanup. Component-specific flags if needed (`--exchange-only`).
+
+### Re: Binary calling back to Claude for summarization (HEAD)
+
+Two approaches:
+
+1. **Binary spawns subagent** — `agent-doc cleanup` spawns `claude --print` with a summarization prompt. Buildable today. Downside: new session = new cost, no current context.
+
+2. **Binary calls back to running session** — IPC to the claiming pane's Claude session. Reuses context (cheaper, coherent) but needs bidirectional IPC (currently one-way: skill → binary).
+
+Option 1 is buildable now. Option 2 is more elegant but needs new infrastructure.
+<!-- agent:boundary:3e89c8cc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Pending cleanup in binary** — design decision: preflight warning vs auto-prune vs `--prune-completed` flag. Awaiting direction.
+- **Config consolidation** — merge `components.toml` + `config.toml` → `settings.toml`. Awaiting direction.
+- **`agent-doc pending` subcommands** — add/remove/prune/list. Design approved concept, needs implementation.
+- **`agent-doc cleanup` umbrella** — rename from `compact`, broaden scope. Needs design spec.
+- **Summarization callback** — option 1 (spawn subagent) vs option 2 (bidirectional IPC). Awaiting direction.
 <!-- /agent:pending -->

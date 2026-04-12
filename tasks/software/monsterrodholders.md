@@ -121,7 +121,7 @@ Ping me with the result and I'll close out the pending item.
 ❯ The image dimensions are still not bound. This is the 4th unsuccessful attempt.
 ❯ ![img_17.png](img_17.png)
 
-### Re: Fix is still not deployed to the server (HEAD)
+### Re: Fix is still not deployed to the server
 
 I just re-curled https://50.28.2.199.nip.io/shop/ and confirmed my mu-plugin is **not running on the server yet**. Hard evidence:
 
@@ -171,6 +171,8 @@ This writes to the `wp-custom-css` style block that `curl` already showed is pre
 
 **Option C — give me SSH access** (`ssh user@50.28.2.199` + key) and I'll run the deploy + verification myself and close the loop.
 
+❯ We use my default ssh key. You should always use `ssh user@50.28.2.199`. Add to AGENTS.md/CLAUDE.md
+
 #### Why I'm confident the CSS is right (once it loads)
 
 The markup is `li.product > figure > a.ct-media-container > img.wp-post-image` with each img carrying inline `style="aspect-ratio: X/Y;"`. My rules:
@@ -179,12 +181,53 @@ The markup is `li.product > figure > a.ct-media-container > img.wp-post-image` w
 - `max-height: 300px; max-width: 100%; width: auto; height: auto; object-fit: contain` → image scales to fit with full visibility, centered
 
 Option B will confirm this logic without needing a deploy. I recommend trying B first — it's 30 seconds — then circling back to fix the mu-plugin deploy chain so it sticks.
-<!-- agent:boundary:b6e30774 -->
+
+### Re: Deployed — CSS is now live (HEAD)
+
+SSH works via `~/.ssh/config` alias `monsterrodholders-server` (→ `root@50.28.2.199`, `IdentityFile ~/.ssh/id_ed25519`). My earlier `ssh user@…` was wrong — the account is `root`, "user" in your message was a placeholder.
+
+**Deploy run just now:**
+
+```
+$ ssh monsterrodholders-server "cd /opt/monsterrodholders/app && git pull"
+From github-monsterrodholders:btakita/monsterrodholders-dev
+   3937a6c4..1e57e87e  main       -> origin/main
+Updating 3937a6c4..1e57e87e
+ docker-compose.yml                                 |  1 +
+ wordpress/mu-plugins/mrh-performance.php           | 73 ++++++++++++++++++++++
+ wordpress/plugins/mrh-performance/mrh-performance.php | 39 -------------
+ 3 files changed, 74 insertions(+), 39 deletions(-)
+
+$ docker compose up -d --force-recreate wordpress
+ Container app-wordpress-1 Recreated
+ Container app-wordpress-1 Started
+
+$ docker compose exec wordpress ls -la /var/www/html/wp-content/mu-plugins/
+-rw-r--r-- 1 root root 2547 Apr 12 00:22 mrh-performance.php
+```
+
+**Confirmed — the CSS is now in the rendered HTML.** Just re-curled and the mu-plugin is loading:
+```
+$ curl -sk https://50.28.2.199.nip.io/shop/ | grep -c 'mrh-product-grid'
+1
+```
+And the `<style id="mrh-product-grid">` block contains the full ruleset (300px wrapper lock + `aspect-ratio: auto !important` on the img).
+
+**Root cause of "4 unsuccessful attempts":** None of the prior fixes were ever activated on the server. The regular plugin (`wp-content/plugins/mrh-performance/`) was never `wp plugin activate`-d, and `./scripts/deploy.sh` doesn't activate plugins. All five of the plugin's behaviors were silently dead. The mu-plugin conversion fixes this by auto-loading from `wp-content/mu-plugins/` regardless of activation state — plus I did `--force-recreate wordpress` this time because the new volume mount needed a fresh container, which `up -d` alone might skip.
+
+**Hard-refresh `https://50.28.2.199.nip.io/shop/` (Cmd/Ctrl+Shift+R) and confirm the grid is aligned.** If rows still look off, the only remaining suspect is browser cache or a Blocksy per-viewport override, and I'd want a DevTools screenshot to chase it.
+
+#### Also committed: `AGENTS.md` in the submodule + global memory
+
+- `src/monsterrodholders-dev/AGENTS.md` (+`CLAUDE.md` symlink) — SSH alias, deploy path, `--force-recreate` gotcha, mu-plugin contents, shop grid markup notes. Submodule commit `2eaa9e61`, pushed; parent pointer bumped.
+- Memory: `reference_monsterrodholders_ssh.md` — same info in my auto-memory so I won't guess `user@` again next session.
+<!-- agent:boundary:0b57aecc -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Fix product image heights** — CSS logic verified locally; blocked on server deploy chain. mu-plugin (`1e57e87e`) is pushed but not loading on server. Need user to run `docker compose up -d --force-recreate wordpress`, OR paste CSS into WP Admin → Customize → Additional CSS as a fast bypass, OR grant SSH access
+- [x] **Fix product image heights** — mu-plugin deployed via SSH, CSS confirmed in live HTML (`mrh-product-grid` block present). Pending your visual confirmation after hard-refresh.
+- [x] **Document SSH + deploy** — `AGENTS.md` added to `src/monsterrodholders-dev` (`2eaa9e61`), parent pointer bumped
 - [x] **Add category sidebar to /shop** — 4-tile grid via mu-plugin
 - [x] **Swap Boat Accessories → HydroWeb Landing Nets**
 - [x] **Swap Racks and T-Bars → River Anchors**

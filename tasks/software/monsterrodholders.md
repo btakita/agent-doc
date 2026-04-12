@@ -16,6 +16,7 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange patch=append -->
 Exchange compaction: consolidates shop page layout iterations (v1.8-v1.17), Popular categories section fixes, sidebar styling, and PayPal/CRS investigation. Preserved: design decisions (hook-based rendering vs post_content), markup fixes (ul removal), CSS selectors, and open testing item.
+<!-- agent:boundary:1912e0bd -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

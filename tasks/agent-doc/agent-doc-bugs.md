@@ -368,8 +368,7 @@ Yes, a 5s timeout would result in frequent misses when the agent is busy. Here's
 
 **Better timeout:** 15-30 seconds gives the agent enough time to finish a typical response cycle AND process the callback. The 120s max is conservative — most callbacks should resolve in under 20s when the agent is actively being used.
 pleas revert the changes
-
-<!-- agent:boundary:419c10e2 -->
+<!-- agent:boundary:2b7aac24 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

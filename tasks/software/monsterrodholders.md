@@ -1549,7 +1549,7 @@ Actions taken:
 **Please retry /checkout** — PayPal, plus the Pay Later / Venmo / Apple Pay / Google Pay smart buttons should render alongside Stripe (Credit/Debit Card). Stripe remains enabled as the card gateway.
 
 Note: the installed PPCP plugin is `3.4.1` with `4.0.2` available. I left it on 3.4.1 to avoid introducing unrelated changes during the checkout debug cycle — we can bump it after we've confirmed checkout works end-to-end.
-<!-- agent:boundary:e64429ac -->
+<!-- agent:boundary:84d71cfa -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

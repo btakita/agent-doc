@@ -400,7 +400,7 @@ callback request → check-callbacks (pending) → read → respond → check-ca
 ```
 
 270 unit tests pass, release binary built.
-<!-- agent:boundary:ba36be83 -->
+<!-- agent:boundary:e83f2045 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

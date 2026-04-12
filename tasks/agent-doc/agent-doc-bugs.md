@@ -83,7 +83,7 @@ This creates a fresh CRDT document from the post-compact text and saves it. The 
 
 ❯ Add tests
 
-### Re: Add tests — clarification needed (HEAD)
+### Re: Add tests — clarification needed
 
 I see you've added "Add tests" at the end — this likely refers to the remaining manual testing gates. Let me clarify what testing is already in place vs. what still needs to be done:
 
@@ -100,7 +100,44 @@ I see you've added "Add tests" at the end — this likely refers to the remainin
 - Both
 
 Let me know which direction you'd like and I'll implement it.
-<!-- agent:boundary:e5211455 -->
+
+❯ Add automated tests. The manual testing seems to work.
+
+### Re: Add automated tests — implemented (HEAD)
+
+**Automated tests added to src/agent-doc/src/compact.rs:**
+
+1. **`crdt_compact_preserves_pending_with_state_refresh`** — Core test for the CRDT fix
+   - Creates a template doc with `exchange` + `pending` components in CRDT mode
+   - Runs `run_component_compact(..., is_crdt=true)`
+   - Asserts pending items survive the compact operation
+   - Validates the fix: `save_crdt()` call with post-compact content prevents stale CRDT from clobbering non-target components
+
+2. **`compact_preserves_boundary_marker`** — Tests ❯ marker preservation
+   - Creates a doc with status component containing `❯ Critical item`
+   - Runs compact on exchange component
+   - Asserts ❯ marker survives in non-target component (status)
+
+3. **`compact_working_tree_consistency`** — Tests disk consistency
+   - Runs compact, then verifies file == snapshot (no stale state)
+   - Confirms document was actually modified
+
+**Test coverage:**
+- All 3 new tests pass
+- Full suite: 262 tests pass (no regressions)
+- Binary rebuilt (v0.32.0)
+
+**What this validates:**
+- Manual gate ✅ "Run `agent-doc compact` on a CRDT doc with pending items and verify pending survives" — now automated
+- Manual gate ✅ "Verify ❯ preservation + working-tree consistency" — now automated
+- No new manual testing gates needed — all gates are now unit-tested
+
+**Next steps:**
+- ✅ Automated tests live in binary
+- → Commit source changes
+- → Bump version, update VERSIONS.md
+- → Publish (crates/PyPI/GitHub Release)
+<!-- agent:boundary:90e78bff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -109,9 +146,9 @@ Let me know which direction you'd like and I'll implement it.
 - ✅ compact.rs CRDT state refresh — bug fixed, regression test added, binary rebuilt
 - ✅ Runbook hardened with Safety Invariants + pre/post verification steps
 - ✅ Memory note saved for compact-must-not-touch-pending invariant
-- 🆕 Manual testing gate: test compact on CRDT doc with pending items
-- 🆕 Manual testing gate: verify ❯ preservation + working-tree consistency on live src/session-share/tasks/claudescore.md
-- ❓ Add tests — awaiting clarification on scope (automated vs manual vs both)
-- → Commit source edits once live-tested
+- ✅ Manual testing gate: test compact on CRDT doc with pending items → **AUTOMATED**
+- ✅ Manual testing gate: verify ❯ preservation + working-tree consistency → **AUTOMATED**
+- 🟢 Ready to commit + release
+- → Commit source edits
 - → Bump version, update VERSIONS.md, publish (crates/PyPI/GitHub Release)
 <!-- /agent:pending -->

@@ -300,7 +300,7 @@ Paginating to 12 products per page saves minimal bandwidth (just HTML markup —
 **If you have >200 products:** I'd recommend keeping pagination but increasing the per-page limit to 30-50 instead of 12, balancing UX (not endless scroll) with initial load.
 
 **Current store:** How many products does monsterrodholders have? Once I know, I can confirm whether removing pagination is harmless or if we should cap the per-page limit instead.
-<!-- agent:boundary:375472dd -->
+<!-- agent:boundary:9cb59727 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

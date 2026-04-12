@@ -191,7 +191,7 @@ Yes — keep Steve's author archive. For a creator-driven blog, `/author/steve-d
 5. **Noindex anything that isn't Steve.** If you end up with one or two staff accounts with posts you don't want indexed, use `wpseo_sitemap_exclude_author` + add them to `noindex` via a `wpseo_robots` filter for their author URLs.
 
 **Bottom line:** the earlier "disable author archives" advice assumed a generic commerce storefront. With a 119k-sub creator attached, author archives flip from footprint to moat — keep them, just make sure only Steve shows up.
-<!-- agent:boundary:b65ebf6a -->
+<!-- agent:boundary:7ea14fca -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

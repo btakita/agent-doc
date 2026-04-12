@@ -155,7 +155,7 @@ All tests pass, binary rebuilt.
 The skill instructions specify: "Items completed during this response → remove or mark `([done])`". The `agent:pending` component uses `patch=replace`, so each cycle the agent writes a complete replacement. The agent *should* prune completed items, but in this document the previous responses kept accumulating `✅` markers instead of removing finished work.
 
 This is a skill-layer behavior, not a binary feature. The `agent-doc` binary applies whatever the agent writes to `<!-- patch:pending -->` verbatim. Cleaning up now.
-<!-- agent:boundary:6ec8f204 -->
+<!-- agent:boundary:865189a6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

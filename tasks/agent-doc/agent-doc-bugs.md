@@ -459,7 +459,7 @@ Leaning toward option 1 since you naturally reached for "compress."
 ```bash
 agent-doc compact tasks/agent-doc/agent-doc-bugs.md
 ```
-<!-- agent:boundary:bf34c085 -->
+<!-- agent:boundary:705ef415 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -152,7 +152,7 @@ env:
 Ready for you to test in a live session. The binary is installed — try adding `env:` to a document's frontmatter and running `/agent-doc` on it.
 
 ❯ Will the env variables be applied to the Claude Code session when the JB plugin run `Claim for Tmux Pane` on the document or when Sync is called where new terminal is opened?
-### Re: Env vars in Claim vs Sync flows (HEAD)
+### Re: Env vars in Claim vs Sync flows
 
 **Claim (`Claim for Tmux Pane`)** — No. Claim just registers the pane-to-document mapping in `sessions.json`. It doesn't start Claude or set any environment.
 
@@ -168,14 +168,57 @@ Ready for you to test in a live session. The binary is installed — try adding 
 | `agent-doc stream` | Not yet | Would need separate wiring |
 
 Want me to also wire env into the stream path?
-<!-- agent:boundary:4bfd0e56 -->
+❯ Yes. **all** ways of running claude or any other tool should include the env variables.
+❯ Make sure we have a running list of every place where agent-doc uses tmux send-keys.
+### Re: Env in all paths + tmux send-keys audit (HEAD)
+
+**Every place agent-doc uses tmux send-keys:**
+
+| # | File | Line | What it sends | Flow / Trigger |
+|---|------|------|---------------|----------------|
+| 1 | `start.rs:268` | `/agent-doc <file>` + Enter | `--continue` restart auto-trigger (raw `Command::new("tmux")`, bypasses Tmux struct) |
+| 2 | `route.rs:394` | `/agent-doc <file>` + Enter | `send_command()` — routes slash command to existing Claude pane via `tmux.send_keys()` |
+| 3 | `route.rs:434` | `Enter` only | `send_command()` retry loop — re-sends Enter if command text still visible in pane |
+| 4 | `route.rs:733` | `agent-doc start <file>` + Enter | `auto_start_in_session()` — launches agent-doc in a newly split pane |
+| 5 | `parallel.rs:166` | `claude -p --output-format json < prompt.md > result.json 2>task.log; exit` | `parallel` fan-out — launches Claude CLI in each worker pane |
+| 6 | `prompt.rs:219,225,232` | Up / Down / Enter keys | TUI navigation for permission prompts (via `sessions::send_key()`) |
+
+**Env var coverage status across all code paths:**
+
+| Path | Has env? | Mechanism | What to wire |
+|------|----------|-----------|-------------|
+| `start.rs` (interactive Claude) | **Yes** | `expand_env_values()` → `cmd.env()` | Already done |
+| `/agent-doc` skill | **Yes** | Preflight JSON → shell `export` | Already done (step 0c2 in SKILL.md) |
+| `stream.rs` (streaming Claude) | **No** | Agent spawned via `Claude::send_streaming()` → `Command::new("claude")` | Need to pass expanded env to `StreamingAgent` |
+| `parallel.rs` (fan-out) | **No** | Sends raw command string via `tmux send-keys` | Need to prepend exports to the send-keys command |
+| `route.rs` auto_start | **Indirect** | Sends `agent-doc start <file>` → start.rs handles env | Already covered (start.rs reads frontmatter) |
+| `route.rs` send_command | **Indirect** | Sends `/agent-doc <file>` → skill handles env | Already covered (skill exports from preflight) |
+
+**Implementation plan for the two missing paths:**
+
+**1. `stream.rs` — thread env through the agent trait:**
+- Add `env: Vec<(String, String)>` parameter to `StreamingAgent::send_streaming()` (and `Agent::send()` for consistency)
+- In `claude.rs`, apply env pairs via `cmd.env(key, value)` on the spawned `Command`
+- In `stream.rs::run()`, read `fm.env`, call `expand_env_values()` (move it to a shared module or make it `pub(crate)`), pass expanded pairs to `send_streaming()`
+
+**2. `parallel.rs` — prepend exports to the send-keys command:**
+- Read frontmatter env from the document
+- Build an export prefix: `export K1=V1 && export K2=V2 && <existing command>`
+- Values should be **unexpanded** shell expressions (like `$(passage ...)`) since the target pane's shell will expand them — same pattern as start.rs auto-trigger
+
+**Shared refactor:** Move `expand_env_values()` from `start.rs` to a new location (either `frontmatter.rs` or a small `env.rs` module) so both `start.rs` and `stream.rs` can call it.
+
+Ready to implement?
+<!-- agent:boundary:111a6ae9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - **`env` frontmatter** — ([done]) implemented in frontmatter.rs, preflight.rs, start.rs, SKILL.md
-- **`env` in stream path** — wire `expand_env_values` into `stream.rs` for `agent-doc stream` sessions
+- **`env` in stream path** — wire `expand_env_values` into `stream.rs` → `StreamingAgent` trait
+- **`env` in parallel path** — prepend unexpanded exports to tmux send-keys command string in `parallel.rs`
+- **Refactor `expand_env_values`** — move from `start.rs` to shared location (`frontmatter.rs` or `env.rs`)
 - **`compress` alias** — decide: add as binary alias for `compact`, or skip
 <!-- /agent:pending -->
 ## Assistant

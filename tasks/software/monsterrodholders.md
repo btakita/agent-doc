@@ -1311,7 +1311,7 @@ Both existing forms have zero shortcode references anywhere in content. They're 
 Which do you want — A, B, or C? And give me the go on steps 1–5 and I'll execute.
 
 ❯ How is https://50.28.2.199.nip.io/contact/ implemented?
-### Re: How is /contact/ implemented? (HEAD)
+### Re: How is /contact/ implemented?
 
 Page ID 13, post_type=page, template=default. The form itself is a raw `<!-- wp:html -->` block containing a **Zoho Desk Web-to-Case** form. Key facts:
 
@@ -1326,16 +1326,28 @@ Page ID 13, post_type=page, template=default. The form itself is a raw `<!-- wp:
 **So the "real" contact form is already plugin-free** — it's an HTML→Zoho form, no WordPress involvement on submit. WPForms Lite is not used here at all. This confirms **option A is correct**: just delete WPForms Lite, no replacement needed. The two orphaned forms in the database (156, 157) were never wired anywhere.
 
 One thing worth cleaning up regardless of the WPForms decision: the `returnURL` should be updated from the `50.28.2.199.nip.io` staging value to `https://monsterrodholders.com`. Want me to fix that as part of this pass?
-<!-- agent:boundary:cabc2c77 -->
+
+❯ do
+❯ - **WPForms Lite is the actual OOM trigger** — field class autoload eats 128M budget on every request. Remove plugin + purge orphaned forms (ID 156, 157) + bump memory_limit to 256M + purge CF cache for /checkout*. Awaiting user go.
+❯ - **Option A confirmed viable** — /contact/ page uses a hardcoded Zoho Desk Web-to-Case HTML form, no WP plugin, no WPForms. No replacement needed on WPForms removal.
+
+### Re: do — executing full WPForms removal + ops fixes (HEAD)
+
+On it. Executing in this order on `monsterrodholders-server`:
+
+1. `wp plugin deactivate wpforms-lite && wp plugin delete wpforms-lite` — removes the autoload bloat
+2. `wp post delete 156 157 --force` — purge orphaned form CPTs
+3. Check for `wp_wpforms_*` tables / `wpforms_*` options and purge
+4. Bump `memory_limit` to `256M` (wp-config.php + php.ini if available)
+5. Update Zoho contact form `returnURL` from `50.28.2.199.nip.io` → `https://monsterrodholders.com`
+6. Cloudflare purge `/checkout*` + `/contact*`
+7. Verify: `wp eval 'echo ini_get("memory_limit");'` + `curl -I` on /checkout/ and /contact/
+
+Will report results inline.
+<!-- agent:boundary:eb83fca6 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **WPForms Lite is the actual OOM trigger** — field class autoload eats 128M budget on every request. Remove plugin + purge orphaned forms (ID 156, 157) + bump memory_limit to 256M + purge CF cache for /checkout*. Awaiting user go.
-- **Option A confirmed viable** — /contact/ page uses a hardcoded Zoho Desk Web-to-Case HTML form, no WP plugin, no WPForms. No replacement needed on WPForms removal.
-- Fix `returnURL` hidden field on /contact/ page (ID 13): `https://50.28.2.199.nip.io` → `https://monsterrodholders.com`. Small cleanup, unrelated to checkout.
-- (done) Diagnose checkout 404 — identified WPForms Lite field autoload as OOM trigger (not generic worker memory as previously claimed); correction logged to exchange.
-- (done) WPForms Lite orphan audit — 2 forms in DB, 0 shortcode references in any published/draft content. Safe to remove.
-- (done) /contact/ page implementation audit — hardcoded Zoho Desk Web-to-Case form in wp:html block, plugin-free.
-- Fix `src/session-share/tasks/claude-auto-ruberic.md` layout issue — preflight sweep keeps erroring on "appears as both a file and as a directory". Likely a stale index entry; needs `git rm --cached` + reconcile inside session-share submodule.
+- **EXECUTING NOW** — WPForms removal + memory bump + returnURL fix + CF purge. See exchange for step list.
 <!-- /agent:pending -->

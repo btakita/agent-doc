@@ -117,7 +117,7 @@ Once I know which host, the fix is straightforward:
 - **DNS-resolved-to-staging scenario**: I can add Apache rewrites on our Docker server so that when Host=`monsterrodholders.com`, `/sitemap_index.xml` is served locally by the container (Yoast) instead of being proxied to Flywheel. Would eliminate the 404 you'd see during a partial/split DNS state.
 
 Let me know which host and I'll apply the actual fix.
-<!-- agent:boundary:9b81b995 -->
+<!-- agent:boundary:17087069 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

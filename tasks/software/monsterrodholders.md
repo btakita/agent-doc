@@ -569,7 +569,7 @@ Want me to add a CLAUDE.local.md note for monsterrodholders so future sessions a
 
 ❯ migrate
 ❯ - [ ] **(Optional) Follow-up: migrate cart-2 → cart, my-account-2 → my-account, home-2 → home** — same pattern, needs approval
-### Re: Follow-up migrations (cart-2, my-account-2, home-2) (HEAD)
+### Re: Follow-up migrations (cart-2, my-account-2, home-2)
 
 I notice you've added a duplicate line — removed one copy below. ✓
 
@@ -580,7 +580,11 @@ I notice you've added a duplicate line — removed one copy below. ✓
 3. **Search-replace old URLs** in content, meta, nav menus
 4. **Flush caches** and test redirects
 
+❯ confirm
+
 **Key question: do the old pages (cart-2, my-account-2, home-2) have permalink redirects set up?** If WordPress has 301/302 configured or Cloudflare redirect rules, existing links stay working. If not, old URLs will 404 and SEO takes a hit.
+
+❯ This is a new instance. We are migrating https://monsterrodholders.com. Check with the current https://monsterrodholders.com implementation. We need to keep the same site structure for SEO. Use 301 redirects as needed.
 
 **Scope:**
 - ~5 min per page to flip the option + delete the page
@@ -589,7 +593,41 @@ I notice you've added a duplicate line — removed one copy below. ✓
 **Decision needed:** Proceed with all three, or test one first (cart is the highest-traffic candidate)?
 
 Also: yes, I'll add the CLAUDE.local.md note about stripe secrets. Should I also document this migration pattern there so future sessions know the playbook?
-<!-- agent:boundary:ed1a5e56 -->
+
+❯ Yes. This seems to be wordpress specific.
+### Re: Confirm — proceed with all three migrations + SEO preservation (HEAD)
+
+✓ **Understood.** This is a new instance fresh migration. We need 301 redirects to preserve SEO equity from the live site.
+
+**Action plan for cart-2 → cart, my-account-2 → my-account, home-2 → home:**
+
+1. **Flip WooCommerce options** (3 options, 2 minutes total):
+   - `wp option update woocommerce_cart_page_id 7`
+   - `wp option update woocommerce_myaccount_page_id 9`
+   - `wp option update page_on_front 7503`
+
+2. **Add 301 redirects** (Cloudflare or WordPress):
+   - `/cart-2/` → `/cart/`
+   - `/my-account-2/` → `/my-account/`
+   - `/home-2/` → `/` (homepage)
+   
+   Which would you prefer — Cloudflare rules (if you have direct access) or WordPress `.htaccess` / WP Redirect plugin?
+
+3. **Delete old pages** (after redirects confirmed working):
+   - Delete pages 82 (`cart-2`), 84 (`my-account-2`), ID TBD (`home-2`)
+   - Or mark as draft first, then delete after 48h SEO bake time
+
+4. **Verify and flush caches:**
+   - Test each redirect with `curl -I https://monsterrodholders.com/cart-2/` → should see 301
+   - Flush object cache: `wp cache flush`
+   - Flush Cloudflare: `wp cloudflare flush` (if WP plugin installed)
+
+5. **Search-replace old URLs:**
+   - Menus, widget content, meta fields
+   - `wp search-replace '/cart-2/' '/cart/' --skip-columns=guid` (etc.)
+
+**Also: I'll add the WordPress migration pattern + secrets hygiene to CLAUDE.local.md so future sessions know the playbook.** ✓
+<!-- agent:boundary:f0e5295a -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
@@ -600,9 +638,9 @@ Also: yes, I'll add the CLAUDE.local.md note about stripe secrets. Should I also
 - [x] **Store Stripe + PayPal keys in passage** — `btak/monsterrodholders/{stripe,paypal}/*`
 - [x] **Redact leaked Stripe secret from local session logs** — 10 files scrubbed (main + observer jsonl + tool-result caches)
 - [ ] **Browser QA of `/checkout/`** — add $1 test product, verify form unlocks, complete real live transaction, refund after
-- [ ] **(Optional) Follow-up: migrate cart-2 → cart, my-account-2 → my-account, home-2 → home** — same pattern, check for redirects + approval
+- [ ] **Migrate cart-2 → cart, my-account-2 → my-account, home-2 → home** — 301 redirects, option flips, test redirects, delete old pages
+- [ ] **Add WordPress migration pattern to CLAUDE.local.md** — secrets hygiene + page option migration playbook
 - [ ] **(Optional) Audit duplicated Privacy Policy + Refund/Returns pages** — multiple copies exist
 - [ ] **(Optional) Livestream scrollback cleanup** — trim ~1m window where Stripe JSON was printed
-- [ ] **(Optional) Document stripe secrets hygiene + migration pattern in CLAUDE.local.md**
 - [x] **"Popular" categories block in .ct-container on /shop/** — woocommerce_before_shop_loop hook, 4-column strict order, mrh-performance v1.10
 <!-- /agent:pending -->

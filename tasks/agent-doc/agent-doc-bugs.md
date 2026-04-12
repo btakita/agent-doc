@@ -209,7 +209,7 @@ Want me to also wire env into the stream path?
 **Shared refactor:** Move `expand_env_values()` from `start.rs` to a new location (either `frontmatter.rs` or a small `env.rs` module) so both `start.rs` and `stream.rs` can call it.
 
 Ready to implement?
-<!-- agent:boundary:7716c222 -->
+<!-- agent:boundary:58fa37ff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

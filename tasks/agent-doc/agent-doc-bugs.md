@@ -137,7 +137,7 @@ Let me know which direction you'd like and I'll implement it.
 - → Commit source changes
 - → Bump version, update VERSIONS.md
 - → Publish (crates/PyPI/GitHub Release)
-<!-- agent:boundary:21b7fa31 -->
+<!-- agent:boundary:e9d317e4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

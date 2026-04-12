@@ -1075,7 +1075,7 @@ Most of these are things we've hit on monsterrodholders in the last week — the
 
 Want me to start on step 1–4 now? It's ~30min of writing and the content already exists — I'd be moving it, not inventing it.
 ❯ go
-### Re: Skill + runbooks landed (HEAD)
+### Re: Skill + runbooks landed
 
 Created `.claude/skills/wp-liquidweb-ops/` at the agent-loop root. Four files, all content ported from SPEC.md + memory + this document — no new writing, just moved and generalized.
 
@@ -1104,17 +1104,48 @@ Created `.claude/skills/wp-liquidweb-ops/` at the agent-loop root. Four files, a
 **Extraction path, restated for the record:** currently N=1 site. When site #2 lands, `git mv .claude/skills/wp-liquidweb-ops/ src/wp-liquidweb-ops/skill/` + add `.claude/settings.json` with `skillPaths` pointing at the new location from any consuming site repo. Runbooks reference `SPEC.md` but don't bake in any monsterrodholders specifics, so the extraction is purely mechanical.
 
 **What's still on you:** the manual `$1` Stripe transaction QA — everything chromium-bridge can verify is green, but the card-entry happy path needs a human hand. Want me to drive a chromium-bridge flow with a Stripe test card (4242…) to prove the place-order → payment_intent → thank-you page chain end-to-end? That stops short of real money but exercises the full code path.
-<!-- agent:boundary:e2b079e3 -->
+
+❯ There was an error processing the order.
+❯ Red banner says "There was an error processing your order. Please check for any charges in your payment method and review your"
+
+❯ ![img_28.png](img_28.png)
+
+❯ Please look in the logs and diagnose the issue.
+### Re: "There was an error processing your order" (HEAD)
+
+Checked container logs on monsterrodholders-server (app-wordpress-1) for the full 60-minute window around your click. Three load-bearing facts:
+
+**1. Zero place-order POST in the logs.** Between 19:04 and 19:23 UTC I see dozens of `POST /?wc-ajax=update_order_review` (all 200) and the usual `get_refreshed_fragments` noise, but **no `POST /?wc-ajax=checkout`** and **no `POST /wp-json/wc/store/v1/checkout`**. If the place-order click had reached WP, one of those two would be there. It is not.
+
+**2. Zero PHP errors, zero Stripe logs.** `docker compose logs wordpress | grep -i 'PHP (Warning|Fatal|Error)'` → empty for the whole window. `wc-content/uploads/wc-logs/` is empty (only `index.html`) — Stripe's `logging` flag is off, so even if the gateway had failed there'd be nothing to read. Nothing in the WP layer screamed.
+
+**3. There was a WAF-ish burst earlier.** At 18:29, 18:45, 18:46, 18:47 I see roughly 20 `POST /?wc-ajax=update_order_review HTTP/1.1" 403` responses (~866 bytes each, all from your IP 32.216.61.249). They stopped at 18:48 and everything after that returned 200. This matches the shape of either (a) a nonce expired mid-session, or (b) host-level ModSecurity transiently blocking the payload — same 933120 class of symptom we've been chasing. It's not the current error, but it's a hint the checkout path is on a tripwire.
+
+**So where's the red banner actually coming from?** Two live hypotheses:
+
+- **(A) Client-side JS never submitted.** The place-order button handler threw before the POST fired — most likely a Stripe.js / UPE element validation error (card not mounted, postal code mismatch, confirmCardPayment rejection), and the notice you see is Stripe's error-to-WC-notice bridge rendering into the DOM without a server round-trip. The banner phrasing is WC's generic `woocommerce_order_failed_payment_notice`, which the gateway JS also injects client-side on Stripe Elements validation failures.
+- **(B) Upstream 403 from host Apache / ModSecurity before reaching Docker.** If Liquidweb's host-level mod_security 403'd the POST, the Docker container never sees it. The access log I'm reading is from the container — blind to host-edge blocks. The 18:47 403 burst was logged (host mod_security also falls through to Docker in that config), but an edge block at nginx before the proxy pass would be invisible here.
+
+**What I need from you to disambiguate (30 seconds):**
+
+1. Open DevTools → Network → reproduce the red banner → tell me: did a `checkout` or `/wp-json/wc/store/v1/checkout` request fire? What status? Screenshot of the Network row + response body.
+2. DevTools → Console → any red errors around the click? Especially Stripe.js complaints.
+
+**Parallel unblocks I can run right now without waiting on you:**
+
+- Enable Stripe gateway debug logging (`wp option patch update woocommerce_stripe_settings logging yes`) — next attempt would drop a log at `wp-content/uploads/wc-logs/woocommerce-gateway-stripe-*.log` and we'd see exactly what the gateway thought happened.
+- Turn on WP_DEBUG + WP_DEBUG_LOG in `wp-config.php` so any PHP warning from the checkout path hits `debug.log` instead of vanishing.
+- Check the host (outside Docker) for `/var/log/apache2/modsec_audit.log` or similar around the submit timestamp — if (B) is the answer, that's where the 403 would be.
+
+I can't run `wp-cli` inside the container (it's vanilla `wordpress:apache`, no wp binary), so Stripe-settings reads/writes need to go via a `wordpress:cli` sidecar or direct DB. Want me to spin up a one-shot `wp-cli` sidecar against the same db/volume so we have a real `wp` command for the rest of this session?
+<!-- agent:boundary:93a7fe85 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Stripe test-card end-to-end dry run** — drive chromium-bridge with `4242 4242 4242 4242` through place-order, payment_intent confirmation, and thank-you page. Proves checkout works without burning a real $1.
-- **Real-browser $1 Stripe transaction QA** — live card entry on `https://50.28.2.199.nip.io/checkout/`, verify order completes, refund from Stripe dashboard. Human-in-the-loop.
-- **Re-evaluate PPCP decision** — either onboard PayPal Payments with real creds or `wp plugin delete woocommerce-paypal-payments` entirely.
-- **Rotate Stripe live secret** — `sk_live_518eq7…` leaked earlier; rotate via Stripe dashboard, update webhook, store new value in `passage btak/monsterrodholders/stripe/secret_key`.
-- **Audit + remove WPForms Lite** — 2 orphaned forms, no published references; grep theme/widgets before `wp plugin delete wpforms-lite`.
-- **Fix `./scripts/wp.sh`** — add `php -d memory_limit=512M` (moot if WPForms Lite removed).
-- **Audit duplicate Privacy Policy and Refund/Returns Policy pages** — same `-2` pattern may apply.
-- **Audit other WAF-blocked endpoints** — `grep -E 'id "9(33|41|42|92|93|94)' /var/log/httpd/error_log` to surface other silently-blocked requests.
+- **Diagnose "There was an error processing your order" red banner** — waiting on DevTools Network + Console output from reproduction. Two live hypotheses: (A) client-side Stripe.js validation blocked the submit, (B) upstream host-level WAF 403 before Docker.
+- **Enable Stripe gateway debug logging** — `woocommerce_stripe_settings.logging=yes` so wc-logs captures gateway-level failures next reproduction. Blocked on needing a wp-cli sidecar or DB path.
+- **Spin up wordpress:cli sidecar** — one-shot `wp-cli` service on the same db/volume for option reads/writes this session. Currently no `wp` binary in the app container.
+- **Check host mod_security audit log** — grep `/var/log/apache2/modsec_audit.log` on the Liquidweb host around the submit timestamp to rule out edge-WAF 403 invisible to Docker access logs.
+- **Stripe test-card end-to-end dry run** — drive chromium-bridge with `4242 4242 4242 4242` through place-order, payment_intent confirmation, and thank-you page. Proves checkout works without burning a real $1. (Deferred until banner diagnosed.)
 <!-- /agent:pending -->

@@ -1138,7 +1138,7 @@ Checked container logs on monsterrodholders-server (app-wordpress-1) for the ful
 - Check the host (outside Docker) for `/var/log/apache2/modsec_audit.log` or similar around the submit timestamp — if (B) is the answer, that's where the 403 would be.
 
 I can't run `wp-cli` inside the container (it's vanilla `wordpress:apache`, no wp binary), so Stripe-settings reads/writes need to go via a `wordpress:cli` sidecar or direct DB. Want me to spin up a one-shot `wp-cli` sidecar against the same db/volume so we have a real `wp` command for the rest of this session?
-<!-- agent:boundary:93a7fe85 -->
+<!-- agent:boundary:ad153f5f -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

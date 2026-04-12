@@ -1111,7 +1111,7 @@ Created `.claude/skills/wp-liquidweb-ops/` at the agent-loop root. Four files, a
 ❯ ![img_28.png](img_28.png)
 
 ❯ Please look in the logs and diagnose the issue.
-### Re: "There was an error processing your order" (HEAD)
+### Re: "There was an error processing your order"
 
 Checked container logs on monsterrodholders-server (app-wordpress-1) for the full 60-minute window around your click. Three load-bearing facts:
 
@@ -1125,6 +1125,7 @@ Checked container logs on monsterrodholders-server (app-wordpress-1) for the ful
 
 - **(A) Client-side JS never submitted.** The place-order button handler threw before the POST fired — most likely a Stripe.js / UPE element validation error (card not mounted, postal code mismatch, confirmCardPayment rejection), and the notice you see is Stripe's error-to-WC-notice bridge rendering into the DOM without a server round-trip. The banner phrasing is WC's generic `woocommerce_order_failed_payment_notice`, which the gateway JS also injects client-side on Stripe Elements validation failures.
 - **(B) Upstream 403 from host Apache / ModSecurity before reaching Docker.** If Liquidweb's host-level mod_security 403'd the POST, the Docker container never sees it. The access log I'm reading is from the container — blind to host-edge blocks. The 18:47 403 burst was logged (host mod_security also falls through to Docker in that config), but an edge block at nginx before the proxy pass would be invisible here.
+❯ See /home/brian/work/btakita/agent-loop/tasks/software/monsterrodholders/checkout-issue.txt
 
 **What I need from you to disambiguate (30 seconds):**
 
@@ -1138,14 +1139,68 @@ Checked container logs on monsterrodholders-server (app-wordpress-1) for the ful
 - Check the host (outside Docker) for `/var/log/apache2/modsec_audit.log` or similar around the submit timestamp — if (B) is the answer, that's where the 403 would be.
 
 I can't run `wp-cli` inside the container (it's vanilla `wordpress:apache`, no wp binary), so Stripe-settings reads/writes need to go via a `wordpress:cli` sidecar or direct DB. Want me to spin up a one-shot `wp-cli` sidecar against the same db/volume so we have a real `wp` command for the rest of this session?
-<!-- agent:boundary:ad153f5f -->
+### Re: checkout-issue.txt — it's a 404, not a 403 (HEAD)
+
+Huge clue. Killing hypothesis (A) and (B) both. The actual failure:
+
+```
+POST https://50.28.2.199.nip.io/?wc-ajax=checkout
+→ 404 Not Found
+content-type: text/html
+```
+
+This means:
+- **The JS *did* fire the request** — (A) dead. Stripe.js assembled a PM (`wc-stripe-payment-method=pm_1TLTl8LCV3FCu1CN3d1UJlKU`), built the form body, and POSTed it.
+- **The server accepted and processed the request** — it's not a WAF/edge block, it's a WordPress 404 template (`content-type: text/html`, full WP response headers with `link: <.../wp-json/>; rel="https://api.w.org/"`). WP handled it. (B) dead.
+- **WooCommerce's `wc-ajax=checkout` handler never fired** — it fell through to WP's 404.
+
+`WC_AJAX::do_wc_ajax()` hooks `init` priority 0 and dispatches on `isset($_GET['wc-ajax'])`. A 404 here means one of:
+
+1. **WooCommerce isn't loading** — fatal error during plugin init, or plugin deactivated. Most likely given the migration churn.
+2. **`init` hook never reaches priority 0** — another plugin fatal-erroring earlier in the chain.
+3. **Rewrite / permalinks corruption** — the `/?wc-ajax=checkout` query isn't being parsed into `$_GET` by the time `init` runs. Unlikely but possible if `.htaccess` or nginx rewrote the query string.
+4. **`page_on_front` pointing at a deleted page** — you recently migrated homepage. If the new front-page ID is stale, `/` 404s before WC-ajax dispatch. But WC-ajax should still intercept on `init`... unless a fatal is cascading.
+
+The session cookies prove WC *was* alive earlier this session (`wp_woocommerce_session_*`, `woocommerce_items_in_cart=1`, `__stripe_sid`), so something regressed between session start and the place-order click. Smells like a plugin/page migration side effect.
+
+**30-second triage (run on the server):**
+
+```bash
+ssh monsterrodholders-server
+cd /opt/monsterrodholders/app
+
+# 1. Is WC active and loading cleanly?
+docker compose exec wordpress wp plugin status woocommerce
+docker compose exec wordpress wp plugin list --status=active --format=csv | grep -i -E 'woo|stripe'
+
+# 2. Any fatal errors in PHP?
+docker compose exec wordpress tail -n 100 /var/www/html/wp-content/debug.log 2>/dev/null
+docker compose logs --tail=100 wordpress | grep -i -E 'fatal|error|notice' | tail -30
+
+# 3. Reproduce the 404 with curl (bypass browser cache/cookies)
+curl -sI 'https://50.28.2.199.nip.io/?wc-ajax=checkout' -X POST \
+  -H 'content-type: application/x-www-form-urlencoded' \
+  --data 'foo=bar' | head -5
+
+# 4. Flush rewrites (cheap, reversible)
+docker compose exec wordpress wp rewrite flush --hard
+
+# 5. Does / itself 404 now?
+curl -sI 'https://50.28.2.199.nip.io/' | head -3
+docker compose exec wordpress wp option get page_on_front
+docker compose exec wordpress wp post get $(docker compose exec -T wordpress wp option get page_on_front) --field=post_status
+```
+
+**Most likely root cause** given the migration timeline: a plugin fatal during load (maybe triggered by the homepage/cart/my-account migrations if anything referenced deleted page IDs in hooked callbacks), or WC got deactivated in the churn. `wp plugin status woocommerce` + the debug.log tail will settle it in one shot.
+
+Run #1–#3 first and paste the output. I'll point at the exact fix from there.
+<!-- agent:boundary:824fd321 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Diagnose "There was an error processing your order" red banner** — waiting on DevTools Network + Console output from reproduction. Two live hypotheses: (A) client-side Stripe.js validation blocked the submit, (B) upstream host-level WAF 403 before Docker.
-- **Enable Stripe gateway debug logging** — `woocommerce_stripe_settings.logging=yes` so wc-logs captures gateway-level failures next reproduction. Blocked on needing a wp-cli sidecar or DB path.
-- **Spin up wordpress:cli sidecar** — one-shot `wp-cli` service on the same db/volume for option reads/writes this session. Currently no `wp` binary in the app container.
-- **Check host mod_security audit log** — grep `/var/log/apache2/modsec_audit.log` on the Liquidweb host around the submit timestamp to rule out edge-WAF 403 invisible to Docker access logs.
-- **Stripe test-card end-to-end dry run** — drive chromium-bridge with `4242 4242 4242 4242` through place-order, payment_intent confirmation, and thank-you page. Proves checkout works without burning a real $1. (Deferred until banner diagnosed.)
+- (active) Diagnose checkout 404 — POST `/?wc-ajax=checkout` returns 404 text/html, not 403. WC-ajax handler not firing. Need `wp plugin status woocommerce`, debug.log tail, and curl reproduce.
+- (blocked-on-user) Server-side triage commands (plugin status, debug.log, rewrite flush, page_on_front sanity check) — see exchange
+- (followup) Once plugin load is confirmed clean, verify Stripe gateway is still registered: `wp plugin status woocommerce-gateway-stripe`
+- (followup) Check if homepage/cart/my-account page migrations left stale references in plugin options that could cascade-fatal on init
 <!-- /agent:pending -->

@@ -698,7 +698,7 @@ With user 3 cleared, the blocking decision queue shrinks:
 6. **Post-flip:** bulk 410/noindex for spam slugs on new host.
 
 **Still pending: your go/no-go on steps 1–5.** I can execute all five in the next cycle if you say "do 1-5".
-<!-- agent:boundary:59fb9aeb -->
+<!-- agent:boundary:b03f926e -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

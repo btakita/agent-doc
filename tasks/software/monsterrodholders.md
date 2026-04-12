@@ -1420,7 +1420,7 @@ I'd also recommend rotating proactively since you also have the full `woocommerc
 ❯ Still getting the error.
 ❯ Run `passage insert monsterrodholders/MARIADB_ROOT_PASSWORD` with the password. Scrub it from logs.
 
-### Re: root cause of "still getting the error" → CRS 931100 (HEAD)
+### Re: root cause of "still getting the error" → CRS 931100
 
 Found it in `/var/log/httpd/error_log` — a **different** CRS rule is firing on the same WC Order Attribution payload. Same family as 933120 but different rule.
 
@@ -1462,7 +1462,7 @@ Once DNS flips to `monsterrodholders.com`, this exclusion becomes a no-op (URL n
 
 This is the same CRS false-positive pattern the wp-liquidweb-ops skill already documents. I should add 931100 to the skill's rule dictionary — filing as a follow-up.
 
-### Re: MARIADB passwords in passage (HEAD)
+### Re: MARIADB passwords in passage
 
 Stored both passwords without re-exposing their values:
 
@@ -1475,7 +1475,7 @@ Technique: `ssh ... docker compose exec -T db printenv MARIADB_ROOT_PASSWORD` pi
 
 I stored the user-level `MARIADB_PASSWORD` as well because it leaked in the same env dump — you'll want to rotate both together.
 
-### Re: log scrub (HEAD)
+### Re: log scrub
 
 Scrubbed the verbatim password bytes from Claude Code session state:
 
@@ -1495,7 +1495,42 @@ Replacement token: `[REDACTED_MARIADB_PW]`. Verification pass (`grep -r` for the
 - **claudescore / cloud-side session storage** — if this session is being shared to claudescore.com or any other remote log destination, the scrub only covers the local disk copy. Check with the skill owner.
 
 **Follow-up action (still on you):** rotate `MARIADB_ROOT_PASSWORD` + `MARIADB_PASSWORD` in `docker-compose.yml` / `.env`, update `wp-config.php`, `docker compose up -d --force-recreate`. Now that the passwords are in passage, you can reference them via `$(passage btak/monsterrodholders/MARIADB_PASSWORD)` in future compose env files instead of inlining.
-<!-- agent:boundary:f00a2e15 -->
+
+❯ A /checkout with the test product is getting a "No shipping method has been selected. Please double check your address, or contact us if you need any help." error. Please add $0 shipping to the test product.
+### Re: Shipping method error on /checkout (HEAD)
+
+Diagnosed and fixed. Root cause wasn't the test product — it was the shipping zone config.
+
+**What I found (on `monsterrodholders-server`, via `docker compose --profile tools run --rm wpcli wp ...`):**
+
+```
+Zone 1 (United States):
+  instance_id=2  id=free_shipping  enabled=no
+  settings: requires=min_amount, min_amount=0.01
+```
+
+So there was exactly one shipping method on the US zone, it was **disabled**, and even if enabled it required a $0.01 minimum spend. Nothing else existed — hence "No shipping method has been selected." WooCommerce had literally no enabled method to offer.
+
+**Fix applied (two changes, one transaction):**
+
+1. **Enabled the method** in `wp_woocommerce_shipping_zone_methods` (`is_enabled=1` for `instance_id=2`).
+2. **Removed the minimum requirement** in `woocommerce_free_shipping_2_settings`:
+   - `requires` → `""` (no requirement — always applies)
+   - `min_amount` → `"0"`
+
+Then flushed `wp cache flush` and `wp transient delete --all` so WC rebuilds the shipping cache on the next request.
+
+**Why this instead of a product-level override:** WooCommerce doesn't have "free shipping for this one product" as a first-class concept — shipping is zone-scoped, not product-scoped. The closest product-level lever is shipping classes + a per-class rate on a Flat Rate method, which would have required adding a Flat Rate method to the zone and a new class on the product. Enabling the already-configured Free Shipping method is the minimal change, and it's exactly what you want for a test store anyway (you're not actually shipping physical rods yet).
+
+**If you later want real shipping rates:** leave Free Shipping on as a fallback and add a Flat Rate or carrier method above it with a higher `order` value. WC will offer whichever matches; customer picks at checkout.
+
+**Please retry /checkout now** — shipping should render as "Free shipping" at $0.00 and the "No shipping method" error should be gone. If it still fails, tell me and I'll check whether the test product is marked as a virtual/downloadable (which suppresses the shipping step entirely) or whether there's a second zone catching the address first.
+<!-- patch:pending -->
+- **Retry /checkout with test product** — confirm Free Shipping renders at $0.00 after the zone fix. (user action)
+- **Rotate DB passwords** — `MARIADB_ROOT_PASSWORD` + `MARIADB_PASSWORD` still on the previous values in `docker-compose.yml` / `.env`; update `wp-config.php`, `docker compose up -d --force-recreate`.
+- **Livestream VOD trim** — the Stripe settings dump segment still needs manual trim in post-production.
+- **Decide on real shipping strategy** — Free Shipping is fine for testing; when going live, add Flat Rate / carrier rates above it.
+<!-- agent:boundary:c23eea4b -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

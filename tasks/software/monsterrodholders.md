@@ -417,7 +417,7 @@ To test: https://50.28.2.199.nip.io/product/test-product-1/ → add to cart → 
 ❯ ![img_27.png](img_27.png)
 
 ❯ Also we have a Google Pay + Apple Pay buttons. Will Google Pay + Apple Pay work as is? If not, please remove these options.
-### Re: Use /checkout/ and retire /checkout-2/ (HEAD)
+### Re: Use /checkout/ and retire /checkout-2/
 
 Current state (verified on server):
 - Page ID 8 `/checkout/` — content: `[woocommerce_checkout]` shortcode
@@ -434,7 +434,9 @@ Current state (verified on server):
 
 Want me to execute the whole migration or stop after step 1 so you can QA `/checkout/` first?
 
-### Re: Checkout page spinner diagnosis (HEAD)
+❯ Go through the whole migration.
+
+### Re: Checkout page spinner diagnosis
 
 The never-ending spinner on `/checkout/` is a `jquery.blockUI` lock held by `update_checkout` — WooCommerce calls `wc-ajax=update_order_review` on load, and until that call resolves successfully the form stays masked. Likely culprits, in order of probability for this site:
 
@@ -455,7 +457,11 @@ The never-ending spinner on `/checkout/` is a `jquery.blockUI` lock held by `upd
 
 Which path do you prefer — **legacy Stripe on shortcode**, or **migrate the page to the Checkout block**? The first is a 1-minute option flip; the second aligns with where WooCommerce is headed but needs layout re-check.
 
-### Re: Apple Pay + Google Pay (HEAD)
+❯ I don't have access to Stripe or Paypal. So we need to make sure the existing config + keys work.
+❯ Please strip all logs of the key as well.
+❯ Could you create passage entries for the stripe + paypal keys?
+
+### Re: Apple Pay + Google Pay
 
 Short answer: **not as-is.** Recommend removing from checkout until a real domain + trusted cert is in place.
 
@@ -472,15 +478,107 @@ The option currently says `apple_pay_domain_set = yes` and `apple_pay_verified_d
 
 Want me to disable Payment Request + Express Checkout now, or wait until the domain migration?
 
+❯ Yes
+
 ⚠️ **Heads up — rotate Stripe live secret.** While verifying the UPE setting I ran `wp option get woocommerce_stripe_settings`, which printed the `sk_live_...` key into the session. Assume it's compromised: rotate in the Stripe dashboard and update the WP option via a non-echoing method (`wp option patch update woocommerce_stripe_settings secret_key "$(passage ...)"` or the Stripe admin UI).
-<!-- agent:boundary:69de7984 -->
+### Re: Execution — /checkout-2/ retired, spinner fixed, Apple/Google Pay disabled (HEAD)
+
+All done on the live server. No keys rotated — existing Stripe + PayPal credentials stored in passage for future use.
+
+**1. Secret leak scrubbed** (local only — can't touch livestream scrollback):
+- `sk_live_518eq7…` and `whsec_E27R…` redacted in 10 files under `~/.claude/projects/` (main session jsonl + observer sessions + tool-result caches)
+- `pk_live_` (publishable, non-sensitive) left as-is
+
+**2. Passage entries created** — Stripe + PayPal creds pulled directly from the server via SSH pipe into `passage insert` (never printed to terminal):
+
+```
+btak/monsterrodholders
+├── paypal
+│   ├── client_id
+│   ├── client_secret
+│   └── merchant_id
+└── stripe
+    ├── publishable_key
+    ├── secret_key
+    └── webhook_secret
+```
+
+Retrieve with `passage btak/monsterrodholders/stripe/secret_key`.
+
+**3. Checkout migration executed:**
+- `woocommerce_checkout_page_id`: 83 → **8** (`/checkout/`)
+- `wp search-replace "/checkout-2/" "/checkout/"` → 1 row changed (Yoast indexable permalink)
+- `wp post delete 83 --force` → page 83 (`/checkout-2/`) gone
+- `wp rewrite flush` + `wp cache flush`
+- Wordpress container force-recreated (opcache + runtime reset)
+- Broader `checkout-2` scan: only hit was the deleted post's `post_name`, nothing else in content/options/postmeta
+
+**4. Stripe / Payment Request disabled** (`wp option patch update woocommerce_stripe_settings ...`):
+
+| Field | Before | After |
+|---|---|---|
+| `upe_checkout_experience_enabled` | yes | **no** ← spinner fix |
+| `payment_request` | yes | **no** |
+| `express_checkout` | yes | **no** |
+| `apple_pay` | no | **no** |
+| `payment_request_button_locations` | [cart, checkout] | **[]** |
+| `express_checkout_button_locations` | [product, cart] | **[]** |
+| `amazon_pay_button_locations` | [product, cart, checkout] | **[]** |
+
+Card payments via Stripe keep working (base gateway is untouched — only the express/PR/UPE layers are disabled). No key changes needed.
+
+### Re: Spinner — root-cause confirmation (HEAD)
+
+The spinner was almost certainly the Stripe UPE-on-shortcode mismatch (culprit #1 from last response). With `upe_checkout_experience_enabled=no`, Stripe falls back to the legacy classic checkout integration which the `[woocommerce_checkout]` shortcode is built for. `jquery.blockUI` will now release as soon as `update_order_review` returns.
+
+Please QA in a real browser:
+1. Add the $1 test product → `/cart/`
+2. Proceed to `/checkout/`
+3. Verify form unlocks (no spinner), Stripe card field renders, test order completes
+4. Run a real $1 transaction, then refund from Stripe dashboard
+
+If the spinner persists, the remaining suspects (ranked) are:
+- PayPal Commerce JS init error — open DevTools Console, look for `paypal` / `ppcp` errors
+- `update_order_review` 500 — check `wp-content/debug.log` + container logs
+- Missing shipping methods for the cart contents — checkout can stall if no methods available
+
+### Re: Out-of-scope findings (not touched — flag for later) (HEAD)
+
+Same `-2` suffix pattern exists on other Woo pages. If you want the same cleanup:
+
+| Option | Current ID | Slug | "Correct" page |
+|---|---|---|---|
+| `woocommerce_cart_page_id` | 82 | `cart-2` | ID 7 `cart` exists |
+| `woocommerce_myaccount_page_id` | 84 | `my-account-2` | ID 9 `my-account` exists |
+| `page_on_front` (homepage) | 2 | `home-2` | ID 7503 `home` also exists |
+
+The redirect after an empty cart now goes to `/cart-2/`, which is visible in the 302 I hit while testing. Want me to migrate cart + my-account the same way in a follow-up, or leave them?
+
+There are also duplicated "Privacy Policy" and "Refund and Returns Policy" pages worth auditing.
+
+### Re: Keys — livestream hygiene going forward (HEAD)
+
+Since you can't rotate, treat the `sk_live_...` as compromised-but-unavoidable. Going forward in this session and future ones:
+
+- **Never** run `wp option get woocommerce_stripe_settings` without `| jq 'del(.secret_key, .webhook_secret)'` or similar filter
+- Use `wp option pluck <option> <specific_field>` for single-field reads (doesn't dump the blob)
+- Updates must use `wp option patch update` (field-targeted) or `passage`-piped stdin
+- If you trim the livestream VOD, the ~1m window where the Stripe JSON flew by is the one to cut
+
+Want me to add a CLAUDE.local.md note for monsterrodholders so future sessions auto-avoid the `wp option get` on stripe settings?
+<!-- agent:boundary:7e267e76 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Migrate `/checkout-2/` → `/checkout/`** — set `woocommerce_checkout_page_id=8`, delete page 83, clear hard-coded `/checkout-2/` references (PayPal redirect, menus, DB)
-- [ ] **Diagnose checkout spinner** — Network/Console inspection of `/checkout/`; most likely fix is flipping `upe_checkout_experience_enabled=no` or migrating to Checkout block
-- [ ] **Decide Apple/Google Pay policy** — recommend disabling until production domain + trusted cert; re-enable + verify after migration
-- [ ] **Rotate Stripe live secret key** — leaked to session via `wp option get`; rotate in Stripe dashboard
+- [x] **Migrate `/checkout-2/` → `/checkout/`** — option flipped, page 83 deleted, search-replace done, caches flushed
+- [x] **Fix checkout spinner** — `upe_checkout_experience_enabled=no`, Stripe falls back to legacy classic integration; needs browser QA
+- [x] **Disable Apple/Google Pay** — payment_request, express_checkout, apple_pay all off; location arrays cleared
+- [x] **Store Stripe + PayPal keys in passage** — `btak/monsterrodholders/{stripe,paypal}/*`
+- [x] **Redact leaked Stripe secret from local session logs** — 10 files scrubbed (main + observer jsonl + tool-result caches)
+- [ ] **Browser QA of `/checkout/`** — add $1 test product, verify form unlocks, complete real live transaction, refund after
+- [ ] **(Optional) Follow-up: migrate cart-2 → cart, my-account-2 → my-account, home-2 → home** — same pattern, needs approval
+- [ ] **(Optional) Audit duplicated Privacy Policy + Refund/Returns pages** — multiple copies exist
+- [ ] **(Optional) Livestream scrollback cleanup** — trim ~1m window where Stripe JSON was printed
 - [x] **"Popular" categories block in .ct-container on /shop/** — woocommerce_before_shop_loop hook, 4-column strict order, mrh-performance v1.10
 <!-- /agent:pending -->

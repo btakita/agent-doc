@@ -1621,7 +1621,7 @@ So if PayPal works after your `/checkout` retry, the same fix unblocks Venmo.
 Since you can't initiate a Venmo payment, you could ask someone with access (partner, tester, etc.) to try clicking the Venmo button during checkout and confirming they're redirected to Venmo's approval page. Alternatively, check the modsec audit log the moment someone tries Venmo and confirm there are zero rule 933120 hits in the `form_encoded` arg — that proves the exclusion is working.
 
 **Next step:** After you confirm PayPal works, flag this for a team member to test the Venmo flow, or leave it in pending as a known test gap to fill before go-live.
-<!-- agent:boundary:d3e4682e -->
+<!-- agent:boundary:5d0dba81 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

@@ -327,7 +327,7 @@ Note the 9 staging-only pages (`/change-password`, `/checkout-pay`, `/edit-my-ad
 6. **Delete `/product/test-product-1`** on staging before flip.
 
 All raw sitemap files are at `/tmp/mrh-sitemap/` on this host if you want to poke at them directly.
-<!-- agent:boundary:707acac0 -->
+<!-- agent:boundary:34f8bdf5 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

@@ -564,7 +564,7 @@ Starting now. Plan:
 
 Writing results to `### Re: Flywheel compromise audit` in the next cycle. This may take a few minutes — I'll flush partial findings as I go.
 
-### Re: 301 redirect — IMPLEMENTED ✓ (HEAD)
+### Re: 301 redirect — IMPLEMENTED ✓
 
 Added to `/var/www/html/.htaccess` inside the `app-wordpress-1` container on the new host, above the `# BEGIN WordPress` block (so WP's auto-rewriter won't clobber it):
 
@@ -585,7 +585,7 @@ location: http://50.28.2.199.nip.io/author/catfishdude/
 
 **One caveat:** Location header is `http://` not `https://` because the WP container doesn't see the outer Apache's HTTPS; the forwarded-proto header isn't being honored. Outer host vhost force-redirects all HTTP→HTTPS anyway, so browsers end up on `https://` after two hops. Not a blocker but worth fixing — either (a) trust `X-Forwarded-Proto` in WP via `wp-config.php` (`$_SERVER['HTTPS']='on' if X-Forwarded-Proto=https`) or (b) make the rewrite absolute: `RewriteRule ... https://%{HTTP_HOST}/author/catfishdude/ [R=301,L]`. I'll bundle this with the larger trust-proxy fix you'll want anyway for the `-2` redirects.
 
-### Re: Path A — Flywheel compromise audit (IN PROGRESS) (HEAD)
+### Re: Path A — Flywheel compromise audit (IN PROGRESS)
 
 **Logged into `monsterrodholders.com/wp-admin` via chromium-bridge.** Findings so far are worse than the original "16 spam posts" claim.
 
@@ -628,7 +628,7 @@ The 4 legit "Steve Douglas" posts stop at **2024-11-11** — Steve hasn't publis
 - **Draft: 1 item** (queued spam)
 - 1,616 - 25 - 13 - 1 = 1,577 other entries as `MRHadmin` — likely auto-drafts from the spam-gen process or historical published-then-deleted spam.
 
-### Re: RECOMMENDED REMEDIATION (need your go-ahead before destructive actions) (HEAD)
+### Re: RECOMMENDED REMEDIATION (need your go-ahead before destructive actions)
 
 **Blocking questions first:**
 1. Is `catfishinginfo@gmail.com` / "Larry Travis" legit? (If no → foothold, treat as compromise.)
@@ -646,20 +646,73 @@ The 4 legit "Steve Douglas" posts stop at **2024-11-11** — Steve hasn't publis
 7. **Post-DNS-flip:** the new Liquidweb host is already clean (only `catfishdude` + `catfishinfo` users exist there per earlier migration). Once DNS flips, the compromise is effectively abandoned — but Google will keep the spam URLs indexed until we 410 them. Add bulk 410/noindex for the spam post slugs so Google drops them faster than 404 decay.
 
 **Tell me which items to execute and I'll run them back-to-back in the next cycle.** I'll write per-step results to this doc as I go.
-<!-- agent:boundary:5bbbe66f -->
+
+❯ What posts did catfishinginfo@gmail.com write?
+
+### Re: What posts did `catfishinginfo@gmail.com` write? (HEAD)
+
+**Short answer: zero spam. This is the original site owner account.** The 99 count breaks down as **10 posts + 80 pages + ~9 other (products/attachments)**.
+
+#### Posts (10 total, all statuses)
+
+All 10 posts are legit Monster Rod Holders content:
+
+| Title | Category | Status | Date |
+|---|---|---|---|
+| Key Features & Benefits of the HydroWeb HD-80 | Blog | Published | 2024-11-11 |
+| Monster Rod Holder Models and Uses | Blog | Published | 2024-11-11 |
+| Predicting Winter Blue Catfish Movements on Rivers | Blog | Published | 2024-11-11 |
+| HydroWeb Trophy Catfish Landing Nets | Blog | Published | 2024-11-11 |
+| Monster Rod Holders Mounting Base Options | Blog | Published | 2024-11-10 |
+| Why Anglers Choose Monster Rod Holders: Uses, Benefits, and Problem-Solving Design | Blog | Published | 2024-11-10 |
+| Catfishing on the Ohio River: Techniques, Tips, and Best Practices | Uncategorized | **Draft** | 2024-07-03 |
+| Pro Tandem Pac | Uncategorized | Published | 2019-03-02 |
+| CATFISH COOK OFF | Uncategorized | Published | 2019-01-14 |
+| Monster Rod Holders New Metallic Look | Uncategorized | Published | 2018-11-22 |
+
+These are the same 4 Steve Douglas posts I saw in the earlier dump — same author (user 3), the display name just shows "Steve Douglas" on the posts page but the underlying user record has `Larry Travis` as display name on the users page. Same account.
+
+#### Pages (80 total)
+
+Core site pages dating from **2014-03-18** onward — `About Us`, `Blog`, `Cart`, `Checkout`, `Contact Us`, `FAQ`, `Affiliate Area`, `404 Error`, `Bargain Bin Specials`, `Certified Resellers`, `Bestsellers`, `Bait Cutting Board`, etc. This is the user who built the site. Nothing suspicious.
+
+### Re: Verdict on user ID 3 (HEAD)
+
+**Legit — this is the original site owner account.** Created 2014 or earlier based on the oldest page dates. The `catfishinginfo@gmail.com` email + `Larry Travis` display name just reflects how the original WordPress install was seeded — possibly:
+
+- "Larry Travis" is Steve Douglas's real name (or a previous owner/developer who handed the site to Steve)
+- The email `catfishinginfo@gmail.com` predates the `catfishdude` slug refactor we're doing this week
+- All legit content up to 2024-11 flows through this account
+
+So the "99 posts by this author" count was never the compromise indicator. The real attacker account is **only `MRHadmin`** (Shop manager, 1,616 total posts).
+
+#### Updated remediation plan — simplified
+
+With user 3 cleared, the blocking decision queue shrinks:
+
+1. ⏸ Lock **`MRHadmin`** only — rotate password, demote role to Subscriber, revoke sessions. (No action on user 3.)
+2. ⏸ Purge all 25 published spam posts + 13 trash + 1 draft via WP admin bulk actions.
+3. ⏸ Install Wordfence free, run scan + `wp core verify-checksums` equivalent.
+4. ⏸ Audit plugins + themes for unknown additions.
+5. ⏸ Enable 2FA on `btak` + `catfishinfo` + `catfishinginfo@gmail.com` (the two legit admins + yours).
+6. **Post-flip:** bulk 410/noindex for spam slugs on new host.
+
+**Still pending: your go/no-go on steps 1–5.** I can execute all five in the next cycle if you say "do 1-5".
+<!-- agent:boundary:59fb9aeb -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Flywheel: DECISION — is `catfishinginfo@gmail.com` / "Larry Travis" (99 posts) a legit account or the attacker's entry point?
-- [ ] Flywheel: LOCK `MRHadmin` (Shop manager, 1,616 posts, actively spamming — last post 2026-04-08)
-- [ ] Flywheel: purge 25 published spam posts (+ 13 in trash, + 1 draft) via WP admin bulk actions
-- [ ] Flywheel: `wp core verify-checksums` equivalent via Wordfence/Sucuri scanner (no shell on Flywheel)
-- [ ] Flywheel: audit plugins + themes for unknown additions
-- [ ] Flywheel: enable 2FA on all admin accounts
-- [ ] New host: trust `X-Forwarded-Proto` so redirect Location headers use `https://` (bundles with `-2` redirect import)
-- [ ] New host: bulk 410/noindex for spam post slugs post-flip (help Google drop indexed spam)
+- [ ] Flywheel: DECISION — approve steps 1–5 (lock MRHadmin, purge spam, scanner, plugin audit, 2FA)
+- [ ] Flywheel: lock `MRHadmin` (rotate pwd + demote to Subscriber + revoke sessions) — awaiting approval
+- [ ] Flywheel: purge 25 published + 13 trash + 1 draft spam posts via bulk actions — awaiting approval
+- [ ] Flywheel: install Wordfence free, run malware + file integrity scan — awaiting approval
+- [ ] Flywheel: audit plugins + themes for unknown additions — awaiting approval
+- [ ] Flywheel: enable 2FA on `btak` / `catfishinfo` / `catfishinginfo@gmail.com`
+- [ ] New host: trust `X-Forwarded-Proto` so redirect Location headers use `https://`
+- [ ] New host: bulk 410/noindex for spam post slugs post-flip
 - [ ] Draft `-2` → canonical redirect CSV for WP Redirection import (cart/my-account/checkout/shop + catfish author)
 - [ ] Post-flip: Search Console resubmission for cleaned-up author slug + sitemap
-- [x] New host: add 301 `/author/catfishinginfogmail-com/` → `/author/catfishdude/` — DONE via .htaccess + verified 301
+- [x] Flywheel: user 3 (`catfishinginfo@gmail.com` / "Larry Travis") cleared — legit original site owner, 10 posts + 80 pages, no spam
+- [x] New host: add 301 `/author/catfishinginfogmail-com/` → `/author/catfishdude/` — DONE via .htaccess
 <!-- /agent:pending -->

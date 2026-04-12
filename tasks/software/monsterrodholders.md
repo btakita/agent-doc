@@ -345,7 +345,7 @@ Files at `/tmp/mrh-favicon*`.
 ```
 
 Hard-refresh any page to confirm the tab icon updates.
-<!-- agent:boundary:cbd43183 -->
+<!-- agent:boundary:bc1fd7ea -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

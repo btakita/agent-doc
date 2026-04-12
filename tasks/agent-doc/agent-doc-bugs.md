@@ -182,6 +182,8 @@ The root issue: the skill already instructs the agent to prune — it just wasn'
 
 Currently two files: `components.toml` (component modes) and `config.toml` (runtime). Recommend merging into `settings.toml` inside `.agent-doc/` — one file with `[components.exchange]` and `[runtime]` sections. The directory isn't going away (snapshots, baselines, etc.), so a root-level `.agent-doc.toml` doesn't eliminate it.
 
+❯ Merge `components.toml` into `config.toml`. Since we already have `config.toml`, we don't need `settings.toml`
+
 ### Re: Binary handling all pending operations
 
 Viable and cleaner. The binary already handles component patching — pending subcommands are a natural extension:
@@ -208,14 +210,33 @@ Two approaches:
 2. **Binary calls back to running session** — IPC to the claiming pane's Claude session. Reuses context (cheaper, coherent) but needs bidirectional IPC (currently one-way: skill → binary).
 
 Option 1 is buildable now. Option 2 is more elegant but needs new infrastructure.
-<!-- agent:boundary:1f6ada4a -->
+❯ Plan Option 2 in a md document.
+### Re: Config consolidation (HEAD)
+
+Acknowledged. Will merge `components.toml` into `config.toml` — keeps the existing file, adds component config under a `[components]` section.
+
+### Re: Bidirectional IPC plan (HEAD)
+
+Created `tasks/agent-doc/plan-bidirectional-ipc.md` with four design options:
+
+- **Option A: File-based callback** — binary writes request, skill picks up on next cycle. Simplest, works today.
+- **Option B: Socket-based** — real-time but needs skill to maintain a listener.
+- **Option C: Hook-based** — uses Claude Code's PostToolUse hooks. Clean but indirect.
+- **Option D: tmux send-keys** — injection into claiming pane. Fragile.
+
+**Recommended:** Option A for v1 with a hybrid twist — `agent-doc cleanup` writes a callback request AND spawns `claude --print` as fallback. Whichever responds first wins (in-session is cheaper, subagent is immediate).
+
+The plan covers: callback protocol spec (request/response JSON), callback types (summarize, pending_curate, status_update), implementation tasks, and open questions.
+
+See: `tasks/agent-doc/plan-bidirectional-ipc.md`
+<!-- agent:boundary:f496afcc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Config consolidation** — merge `components.toml` + `config.toml` → `settings.toml`. Awaiting direction.
-- **`agent-doc pending` subcommands** — add/remove/prune/list. Design approved concept, needs implementation.
-- **`agent-doc cleanup` umbrella** — rename from `compact`, broaden scope. Needs design spec.
-- **Summarization callback** — option 1 (spawn subagent) vs option 2 (bidirectional IPC). Awaiting direction.
+- **Config consolidation** — merge `components.toml` into `config.toml`. Decision made, needs implementation.
+- **Bidirectional IPC** — plan written at `tasks/agent-doc/plan-bidirectional-ipc.md`. Review and refine.
+- **`agent-doc pending` subcommands** — add/remove/prune/list. Blocked on IPC design (pending_curate callback type).
+- **`agent-doc cleanup`** — umbrella command replacing `compact`. Spec'd in plan doc.
 <!-- /agent:pending -->

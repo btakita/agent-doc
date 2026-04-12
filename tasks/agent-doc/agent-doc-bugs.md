@@ -108,7 +108,7 @@ Yes — this is a real risk. If the binary does `tmux send-keys "export OPENROUT
 **Best approach:** Option 1. Pass the unexpanded shell expression through send-keys. The target shell handles expansion internally. This matches your existing `passage` subshell pattern and keeps secrets out of both the tmux visual layer and the binary's argument list.
 
 For the skill flow (preflight JSON), the same principle applies — return the unexpanded `$(passage ...)` strings and let the skill's Bash call expand them. Secrets never appear in JSON output or tool results.
-<!-- agent:boundary:ac400f4c -->
+<!-- agent:boundary:4ed83af6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

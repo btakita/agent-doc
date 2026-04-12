@@ -1553,7 +1553,7 @@ Note: the installed PPCP plugin is `3.4.1` with `4.0.2` available. I left it on 
 ❯ Checkout with PayPal got a "Something went wrong. Please try again or choose another payment source.".
 ❯ See tasks/software/monsterrodholders/paypal-error.txt
 ❯ Please look into logs.
-### Re: PayPal 404s — CRS 933120 on `form_encoded` (HEAD)
+### Re: PayPal 404s — CRS 933120 on `form_encoded`
 
 Root cause: same OWASP CRS 933120 false positive we hit on classic checkout, but this time the arg name is different so the prior exclusion didn't cover it.
 
@@ -1601,12 +1601,33 @@ SecRuleUpdateTargetById 931100 "!ARGS:form_encoded"
 **Please retry /checkout → PayPal**. The JSON wc-ajax POSTs should now reach PHP, PPCP should create the PayPal order, and you should get redirected to the PayPal approval flow.
 
 Also folding this into the `wp-liquidweb-ops` skill knowledge: the 933120 exclusion pattern is now a two-case rule — `post_data` for classic checkout, `form_encoded` for PPCP's JSON body wrapper. I'll update the runbook when we confirm the fix sticks.
-<!-- agent:boundary:2860758a -->
+
+❯ Can we verify if the Venmo /checkout process will work? I am unable to test due to not being able to reset my Venmo password.
+
+### Re: Venmo checkout verification (HEAD)
+
+**TL;DR:** Yes, Venmo should work — the `form_encoded` exclusion covers all PPCP smart buttons.
+
+**Why:** Venmo, PayPal, Apple Pay, and Google Pay are all rendered by the same `woocommerce-paypal-payments` plugin as "smart payment buttons" — they use the same PPCP API and send requests with identical structure. The WAF rule we just added (`SecRuleUpdateTargetById 933120 "!ARGS:form_encoded"`) is **global and method-agnostic** — it doesn't check which button was clicked; it just allows `form_encoded` POST args through for rule 933120 regardless of which endpoint processes it.
+
+When you click any of those buttons (PayPal, Venmo, Apple Pay, Google Pay), PPCP:
+1. Sends `wc_ajax_ppc-save-checkout-form` POST with the same `application/json` body structure containing `form_encoded`
+2. The WAF now skips rule 933120 for that `form_encoded` arg
+3. PHP processes it and redirects to the approval flow (or Apple/Google sign-in)
+
+So if PayPal works after your `/checkout` retry, the same fix unblocks Venmo.
+
+**Workaround for testing without Venmo password reset:**
+Since you can't initiate a Venmo payment, you could ask someone with access (partner, tester, etc.) to try clicking the Venmo button during checkout and confirming they're redirected to Venmo's approval page. Alternatively, check the modsec audit log the moment someone tries Venmo and confirm there are zero rule 933120 hits in the `form_encoded` arg — that proves the exclusion is working.
+
+**Next step:** After you confirm PayPal works, flag this for a team member to test the Venmo flow, or leave it in pending as a known test gap to fill before go-live.
+<!-- agent:boundary:d3e4682e -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - **Retry /checkout → PayPal** — confirm PayPal order creation reaches the approval flow after the `form_encoded` exclusion. (user action)
+- **Test Venmo button (if possible)** — ask a team member or tester to click the Venmo button and confirm approval flow; or check modsec audit log for zero 933120 hits on `form_encoded` when attempted. (blocked by: user password reset)
 - **Retry /checkout with test product + Stripe** — confirm Free Shipping / card path still works (regression check after CRS reload). (user action)
 - **Update wp-liquidweb-ops runbook** — add `form_encoded` as second 933120 exclusion pattern alongside `post_data`; document the `.noindex.html` → 404 symptom that hides the 403.
 - **Rotate DB passwords** — `MARIADB_ROOT_PASSWORD` + `MARIADB_PASSWORD` still on the previous values in `docker-compose.yml` / `.env`; update `wp-config.php`, `docker compose up -d --force-recreate`.

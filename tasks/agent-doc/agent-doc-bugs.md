@@ -136,7 +136,7 @@ if fm.enable_tool_search.unwrap_or(false) {
 ```
 
 Want me to apply this fix?
-<!-- agent:boundary:9e38fcf4 -->
+<!-- agent:boundary:cd16eefd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

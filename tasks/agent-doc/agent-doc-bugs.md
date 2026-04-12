@@ -103,7 +103,7 @@ Let me know which direction you'd like and I'll implement it.
 
 ❯ Add automated tests. The manual testing seems to work.
 
-### Re: Add automated tests — implemented (HEAD)
+### Re: Add automated tests — implemented
 
 **Automated tests added to src/agent-doc/src/compact.rs:**
 
@@ -137,7 +137,18 @@ Let me know which direction you'd like and I'll implement it.
 - → Commit source changes
 - → Bump version, update VERSIONS.md
 - → Publish (crates/PyPI/GitHub Release)
-<!-- agent:boundary:e9d317e4 -->
+❯ publish
+### Re: publish signal received — proceeding with release (HEAD)
+
+**Release checklist:**
+1. Commit source changes
+2. Bump version + update VERSIONS.md
+3. Manual testing gate (per CLAUDE.local.md)
+4. Publish (crates.io, PyPI, GitHub Release)
+5. `cargo install --path .` (update live binary per memory)
+
+Running now...
+<!-- agent:boundary:34d6b640 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

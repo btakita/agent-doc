@@ -1601,7 +1601,7 @@ SecRuleUpdateTargetById 931100 "!ARGS:form_encoded"
 **Please retry /checkout → PayPal**. The JSON wc-ajax POSTs should now reach PHP, PPCP should create the PayPal order, and you should get redirected to the PayPal approval flow.
 
 Also folding this into the `wp-liquidweb-ops` skill knowledge: the 933120 exclusion pattern is now a two-case rule — `post_data` for classic checkout, `form_encoded` for PPCP's JSON body wrapper. I'll update the runbook when we confirm the fix sticks.
-<!-- agent:boundary:ed26a30a -->
+<!-- agent:boundary:2860758a -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

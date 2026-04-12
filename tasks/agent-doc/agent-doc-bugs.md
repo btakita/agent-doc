@@ -235,7 +235,7 @@ do
 
 Add missing tests for this feature and the recently implemented features.
 Also, we need a way to migrate existing .agent-doc/components.toml files into .agent-doc/config.toml.
-<!-- agent:boundary:f496afcc -->
+<!-- agent:boundary:c3544115 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

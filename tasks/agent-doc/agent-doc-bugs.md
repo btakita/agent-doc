@@ -137,7 +137,7 @@ if fm.enable_tool_search.unwrap_or(false) {
 
 Want me to apply this fix?
 ❯ yes. And enable_tool_search: true should be in the frontmatter of the default agent document template.
-### Re: Fix applied (HEAD)
+### Re: Fix applied
 
 Done. Two changes:
 
@@ -146,14 +146,20 @@ Done. Two changes:
 2. **`init.rs`** — Added `enable_tool_search: true` to the template-mode document scaffold. New documents created with `agent-doc init <file> --mode template` will have tool search enabled by default.
 
 All tests pass, binary rebuilt.
-<!-- agent:boundary:72c2f617 -->
+
+❯ In this document, the completed agent:pending tasks are not removed when they were completed. When would agent-doc remove complete agent:pending items?
+### Re: Pending item cleanup (HEAD)
+
+**agent-doc doesn't automatically remove completed pending items** — that's the agent's (Claude's) responsibility during each response cycle.
+
+The skill instructions specify: "Items completed during this response → remove or mark `([done])`". The `agent:pending` component uses `patch=replace`, so each cycle the agent writes a complete replacement. The agent *should* prune completed items, but in this document the previous responses kept accumulating `✅` markers instead of removing finished work.
+
+This is a skill-layer behavior, not a binary feature. The `agent-doc` binary applies whatever the agent writes to `<!-- patch:pending -->` verbatim. Cleaning up now.
+<!-- agent:boundary:6ec8f204 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- ✅ **Release v0.32.1 complete** (crates.io + GitHub)
-- ✅ **Context-audit skill scaffolded** — `.claude/skills/context-audit/` with SKILL.md + runbook
-- ✅ **`no_mcp` frontmatter** — passes `--no-mcp` to claude when `no_mcp: true`
-- ✅ **`enable_tool_search` frontmatter** — fixed: uses `ENABLE_TOOL_SEARCH` env var + added to default template
+*No pending items — all tasks from this session are complete.*
 <!-- /agent:pending -->

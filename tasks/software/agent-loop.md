@@ -57,7 +57,7 @@ Run `/context` to see the breakdown. Typical heavy hitters:
 ```
 
 Want me to audit your `~/.claude/settings.json` and `MEMORY.md` for trim opportunities? I can identify which MCP servers / plugins are heaviest.
-<!-- agent:boundary:f6129364 -->
+<!-- agent:boundary:bcc82750 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

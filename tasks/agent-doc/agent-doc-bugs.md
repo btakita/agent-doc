@@ -38,7 +38,7 @@ env:
   ANTHROPIC_MODEL: "qwen/qwen3.6-plus"
   ANTHROPIC_SMALL_FAST_MODEL: "qwen/qwen3.6-plus"
 ```
-### Re: `env` frontmatter feature request (HEAD)
+### Re: `env` frontmatter feature request
 
 This is a solid feature — it cleanly separates per-document environment config from the global shell. Here's how I'd approach it:
 
@@ -60,15 +60,36 @@ This is a solid feature — it cleanly separates per-document environment config
 4. **Security** — values go through `passage` (your secret manager), so cleartext secrets never appear in the document. The expanded values should only exist in process memory, never logged.
 
 **Questions before building:**
-- Should env vars apply to **all** Bash tool calls in the session, or only to agent-doc-spawned subprocesses?
-- Should `agent-doc preflight` output the expanded env in its JSON (so the skill can `export` them), or should `agent-doc` handle this when spawning sessions via tmux?
-<!-- agent:boundary:4b4aa6e8 -->
+❯ - Should env vars apply to **all** Bash tool calls in the session, or only to agent-doc-spawned subprocesses?: What do you suggest? I'm inclined to apply to **all** bash tool calls by default. We could have an override frontmatter option to opt out of this behavior.
+❯ - Should `agent-doc preflight` output the expanded env in its JSON (so the skill can `export` them), or should `agent-doc` handle this when spawning sessions via tmux?: Explain the differences.
+### Re: Env scope and injection point (HEAD)
+
+**All Bash tool calls — agreed.** The whole point of setting `ANTHROPIC_MODEL` etc. is to affect the session globally. Making it all-by-default with an opt-out (`env_scope: subprocess` or similar) is the right call.
+
+**Preflight JSON vs. binary-side — the differences:**
+
+| | Preflight JSON (skill exports) | Binary-side (tmux spawn) |
+|---|---|---|
+| **How it works** | `preflight` returns `"env": {"KEY": "expanded_value"}` in its JSON. The SKILL.md reads these and runs `export KEY=value` before subsequent tool calls. | `agent-doc` expands env vars itself and sets them in the tmux pane environment when spawning a Claude session (`tmux send-keys "export KEY=value && claude ..."`) |
+| **Applies to** | Current Claude session's Bash tool calls (the skill runs `export` in the shell) | Only the spawned subprocess tree (the tmux pane) |
+| **Requires skill changes** | Yes — SKILL.md needs a new step after preflight to parse and export env vars | No skill changes — binary handles everything |
+| **Secrets exposure** | Expanded values appear in preflight JSON output (visible in tool call results). But since `--dangerously-skip-permissions` is on, tool results aren't shown to viewers... except during livestreams where console is visible | Expanded values only exist in the tmux pane environment — never in Claude's tool output |
+| **Works for /agent-doc skill** | Yes — the skill can export before any Bash call | Partially — only affects tmux-spawned sessions, not the current interactive session |
+| **Works for tmux spawn** | No — preflight runs inside the already-spawned session | Yes — this is its primary use case |
+
+**Recommendation:** Use **both**, serving different flows:
+
+- **Preflight JSON** for the `/agent-doc` skill flow (interactive session). The skill exports env vars into the current shell. For security, the JSON should contain the **unexpanded shell commands** (e.g., `$(passage btak/OPENROUTER_API_KEY)`) so the skill runs the expansion inside a Bash call — the expanded secret value never appears in JSON output.
+- **Binary-side** for the `agent-doc spawn` flow (tmux session creation). The binary expands and sets env vars in the new pane's environment.
+
+This way `env:` works regardless of how the session starts.
+<!-- agent:boundary:a0e72c31 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **`env` frontmatter** — add env map to frontmatter, shell-expand values, inject into session environment
+- **`env` frontmatter** — add env map to frontmatter; scope: all Bash calls by default, opt-out via `env_scope`; dual injection: preflight JSON (unexpanded) for skill flow + binary-side expansion for tmux spawn
 - **`compress` alias** — decide: add as binary alias for `compact`, or skip
 <!-- /agent:pending -->
 ## Assistant

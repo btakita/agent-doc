@@ -365,7 +365,7 @@ curl -sI https://50.28.2.199.nip.io/wp-content/uploads/2017/09/mrh-favicon.ico  
 The 404 was because the files hadn't been uploaded to the server yet. All sizes confirmed serving.
 
 ❯ Create a test product for $1. We need to test the woocommerce shopping cart + order system.
-### Re: Test product created (HEAD)
+### Re: Test product created
 
 Created **"Test Product - $1"** (product ID 86212) on the live site.
 
@@ -382,7 +382,42 @@ Product page returns HTTP 200. You can now test the full cart + checkout flow:
 The product appears in the shop page alongside the existing inventory (sorted by popularity, so it'll be near the bottom as a new product with 0 sales).
 
 When testing is done, I can delete product 86212 to clean up.
-<!-- agent:boundary:394d7b71 -->
+❯ Please transfer the stripe + paypal keys from https://monsterrodholders.com/ over to https://50.28.2.199.nip.io/? Also add any other necessary woocommerce configurations that are needed to successfully process an order.
+❯ The current https://monsterrodholders.com/ admin credentials are:
+❯ login: btak
+❯ password: "$(passage monsterrodholders/admin/password)"
+### Re: Transfer Stripe + PayPal keys (HEAD)
+
+The payment gateway settings were already in the staging database from the production backup import. What was missing were the **plugins themselves**. Installed and activated both from the backup files at `/opt/monsterrodholders/restore/files/wp-content/plugins/`.
+
+**Plugins installed:**
+- `woocommerce-gateway-stripe` v10.5.3
+- `woocommerce-paypal-payments` v3.4.1
+
+**Stripe configuration (verified from DB):**
+- Live keys present (pk_live / sk_live)
+- Webhook secret configured
+- Webhook URL: `https://50.28.2.199.nip.io/?wc-api=wc_stripe` (already points to staging)
+- Statement descriptor: "Monster Rod Holders"
+- Express checkout enabled (product + cart pages)
+- Test mode: **off** (live keys)
+
+**PayPal Commerce Platform (verified from DB):**
+- ppcp-gateway: enabled
+- Webhook: `https://50.28.2.199.nip.io/wp-json/paypal/v1/incoming` (already points to staging)
+- Merchant connection: intact from production backup (OAuth-based)
+
+**Other WooCommerce checkout config (verified):**
+- Currency: USD, Country: US:KY
+- Tax calculation: enabled
+- Guest checkout: enabled
+- Cart (ID 82), Checkout (ID 83), My Account (ID 84): all published
+- Shipping: Free for US (min $0.01)
+
+**Note:** Stripe is in **live mode**. The $1 test product will process a real charge. You can refund from Stripe Dashboard after, or I can switch to test mode first.
+
+To test: https://50.28.2.199.nip.io/product/test-product-1/ → add to cart → checkout.
+<!-- agent:boundary:33d34159 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
@@ -399,5 +434,6 @@ When testing is done, I can delete product 86212 to clean up.
 - [x] **Hide "New Cloth Technologies" aside column on /shop/** — mrh-performance v1.7
 - [x] **Hide WooCommerce price filter widget + shrink block headings** — correct selectors, mrh-performance v1.17
 - [x] **Test product created** — "Test Product - $1" (ID 86212), $1.00, published at /product/test-product-1/
+- [x] **Stripe + PayPal gateways installed** — plugins from backup, both activated, live keys in DB
 - [ ] **Test WooCommerce cart + checkout flow** — awaiting user testing
 <!-- /agent:pending -->

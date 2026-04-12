@@ -1364,7 +1364,7 @@ I'm continuing execution using `docker compose exec db env` piped directly into 
 - ⚠️ `wp plugin delete wpforms-lite` hung (WPForms uninstall hook); killed the stuck wpcli container and `rm -rf`'d `/opt/monsterrodholders/app/wordpress/plugins/wpforms-lite` directly. Plugin now absent from both host mount and container `/var/www/html/wp-content/plugins/`.
 - ⏳ Next: purge `wp_posts` entries for form IDs 156/157 + any `wpforms_*` options + `wpforms_*` tables via direct SQL.
 
-### Re: done — full execution report (HEAD)
+### Re: done — full execution report
 
 All 6 operations complete. Verified on `https://50.28.2.199.nip.io/` (prod domain DNS hasn't flipped yet — SPEC note stands).
 
@@ -1416,13 +1416,94 @@ I'd also recommend rotating proactively since you also have the full `woocommerc
 - `woocommerce_stripe_settings` → webhook URL likely references nip.io; update during cutover
 - 12 other pages contain `nip.io` in `post_content` → run `wp search-replace` during cutover (per CLAUDE.local.md page migration runbook)
 - `monsterrodholders_custom_code` option → check for hardcoded nip.io references
-<!-- agent:boundary:b8ec3629 -->
+
+❯ Still getting the error.
+❯ Run `passage insert monsterrodholders/MARIADB_ROOT_PASSWORD` with the password. Scrub it from logs.
+
+### Re: root cause of "still getting the error" → CRS 931100 (HEAD)
+
+Found it in `/var/log/httpd/error_log` — a **different** CRS rule is firing on the same WC Order Attribution payload. Same family as 933120 but different rule.
+
+**Rule 931100** ("Possible Remote File Inclusion (RFI) Attack: URL Parameter using IP Address", `REQUEST-931-APPLICATION-ATTACK-RFI.conf` line 56) matches URL-shaped args that begin with `scheme://<ipv4>`. Because the staging hostname `50.28.2.199.nip.io` literally starts with an IPv4, every WC checkout AJAX trips the rule. The regex engine doesn't care that `.nip.io` follows — it only checks the prefix.
+
+Two args were hit in the 16:46 entries:
+```
+ARGS:wc_order_attribution_session_entry = https://50.28.2.199.nip.io/
+ARGS:wc_order_attribution_referrer      = https://50.28.2.199.nip.io/contact-2/
+```
+
+Each match scores +5 (CRITICAL), so two matches → 10 → crosses 949110's threshold → 403 → `/.noindex.html` → browser sees spinner-that-never-clears. Identical failure mode to the 933120 issue, different rule.
+
+**Fix applied** — extended `/etc/httpd/modsecurity.d/local_rules/woocommerce-crs-exclusions.conf` with a narrow exclusion for 931100 against all `wc_order_attribution_*` URL-shaped fields:
+
+```apache
+SecRuleUpdateTargetById 931100 "!ARGS:wc_order_attribution_session_entry"
+SecRuleUpdateTargetById 931100 "!ARGS:wc_order_attribution_session_pages"
+SecRuleUpdateTargetById 931100 "!ARGS:wc_order_attribution_referrer"
+SecRuleUpdateTargetById 931100 "!ARGS:wc_order_attribution_utm_source"
+SecRuleUpdateTargetById 931100 "!ARGS:wc_order_attribution_utm_medium"
+SecRuleUpdateTargetById 931100 "!ARGS:wc_order_attribution_utm_campaign"
+SecRuleUpdateTargetById 931100 "!ARGS:wc_order_attribution_utm_content"
+SecRuleUpdateTargetById 931100 "!ARGS:wc_order_attribution_utm_term"
+SecRuleUpdateTargetById 931100 "!ARGS:wc_order_attribution_utm_id"
+```
+
+- Backed up the original to `woocommerce-crs-exclusions.conf.bak-20260412`
+- `apachectl configtest` → `Syntax OK`
+- `systemctl reload httpd` → reloaded at 16:52
+
+**Post-fix verification:**
+- `grep 'id "931100"'` since reload → **0 hits** (last was 16:46:48 before the fix)
+- Only WAF activity since 16:52 is unrelated 920350 warnings on internal-IP health checks from Liquidweb's monitoring
+
+**Please retry checkout in the browser now** — load `/checkout/`, the spinner should clear and Stripe UPE should mount.
+
+Once DNS flips to `monsterrodholders.com`, this exclusion becomes a no-op (URL no longer starts with an IP), but I left it in place for defense-in-depth against future nip.io-style staging domains. Same rationale applies to the 933120 exclusion. **Both exclusions stay.**
+
+This is the same CRS false-positive pattern the wp-liquidweb-ops skill already documents. I should add 931100 to the skill's rule dictionary — filing as a follow-up.
+
+### Re: MARIADB passwords in passage (HEAD)
+
+Stored both passwords without re-exposing their values:
+
+```
+btak/monsterrodholders/MARIADB_ROOT_PASSWORD
+btak/monsterrodholders/MARIADB_PASSWORD
+```
+
+Technique: `ssh ... docker compose exec -T db printenv MARIADB_ROOT_PASSWORD` piped straight into `passage insert -m`. The value flowed SSH → stdin → passage → gpg encryption. Nothing hit stdout. Same for the user-level password. Both inserts exited 0, `passage ls btak/monsterrodholders` now shows the two new entries.
+
+I stored the user-level `MARIADB_PASSWORD` as well because it leaked in the same env dump — you'll want to rotate both together.
+
+### Re: log scrub (HEAD)
+
+Scrubbed the verbatim password bytes from Claude Code session state:
+
+| Directory | Files scrubbed |
+|---|---|
+| `~/.claude/projects/-home-brian-work-btakita-agent-loop/` | 6 session JSONL files |
+| `~/.claude/projects/-home-brian--claude-mem-observer-sessions/` | 8 observer JSONL files |
+| **Total** | **14 files** |
+
+Replacement token: `[REDACTED_MARIADB_PW]`. Verification pass (`grep -r` for the raw password across `~/.claude/` + `/tmp/claude-1000/`) now returns **0 matches**. Both the root password and the user password were scrubbed in the same pass.
+
+**Coverage caveats — what I could NOT scrub from this machine:**
+- **Current conversation context in Claude Code's running process memory** — the running agent already has the password in its working set. You may want to `/compact` or `/clear` this conversation when convenient to drop it from the live context window. I'll avoid re-fetching or re-echoing the value from this point forward.
+- **rtk/claude-mem SQLite DBs** — searched for `*.sqlite*` under `~/.claude/` and `~/.local/share/claude-mem/`, found none. If a DB exists elsewhere it's untouched. Check `~/.local/share/` and `~/.cache/` if paranoid.
+- **Livestream VOD** — I can't edit recorded video. That segment still needs manual trimming in post-production (per CLAUDE.local.md Stripe secrets hygiene pattern).
+- **Any shell history on your end** — `~/.zsh_history` and `~/.bash_history` were scanned but contained no matches (you're driving via Claude Code, not a raw shell, so nothing landed there).
+- **claudescore / cloud-side session storage** — if this session is being shared to claudescore.com or any other remote log destination, the scrub only covers the local disk copy. Check with the skill owner.
+
+**Follow-up action (still on you):** rotate `MARIADB_ROOT_PASSWORD` + `MARIADB_PASSWORD` in `docker-compose.yml` / `.env`, update `wp-config.php`, `docker compose up -d --force-recreate`. Now that the passwords are in passage, you can reference them via `$(passage btak/monsterrodholders/MARIADB_PASSWORD)` in future compose env files instead of inlining.
+<!-- agent:boundary:be280521 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **DNS flip checklist** — when cutover happens: `wp search-replace 'https://50.28.2.199.nip.io' 'https://monsterrodholders.com' --skip-columns=guid`, update `siteurl`/`home`, update Stripe webhook endpoint (both in WP option and Stripe Dashboard), add domain to Cloudflare, re-run `/contact/` + `/checkout/` verification.
-- **DB credential rotation (livestream leak)** — rotate `MARIADB_PASSWORD` + `MARIADB_ROOT_PASSWORD`, update `wp-config.php`, `docker compose up -d --force-recreate`, trim VOD.
-- **wp-cli memory wrapper** — update `./scripts/wp.sh` to always pass `php -d memory_limit=512M` per SPEC note. Low priority now that WPForms is gone.
-- **Stripe key rotation (optional, higher effort)** — consider given DB password exposure co-locates Stripe settings. Requires webhook re-registration.
+- **Retry checkout in browser** — confirm 931100 fix clears the spinner. Needs a real browser with valid nonce (curl probe can't reproduce because WC rejects nonceless AJAX with 403 regardless of WAF).
+- **Rotate MARIADB passwords** — both root + user leaked to livestream. Both now stored in `passage` at `btak/monsterrodholders/MARIADB_{ROOT_,}PASSWORD`. Rotate → update `docker-compose.yml` / `.env` → update `wp-config.php` → `docker compose up -d --force-recreate` → trim VOD.
+- **DNS flip checklist** — when cutover happens: `wp search-replace 'https://50.28.2.199.nip.io' 'https://monsterrodholders.com' --skip-columns=guid`, update `siteurl`/`home`, update Stripe webhook endpoint (both in WP option and Stripe Dashboard), add domain to Cloudflare, re-run `/contact/` + `/checkout/` verification. The 931100 + 933120 exclusions become no-ops but stay in place for defense-in-depth.
+- **Add 931100 to wp-liquidweb-ops skill** — the rule dictionary currently documents 933120 only. Same false-positive family, same fix shape, belongs in the skill so future projects land with both exclusions pre-configured.
+- **wp-cli memory wrapper** — update `./scripts/wp.sh` to pass `php -d memory_limit=512M` per SPEC note. Low priority now that WPForms is gone.
+- **Stripe key rotation (optional, higher effort)** — consider given DB password exposure. Requires Stripe Dashboard webhook re-registration.
 <!-- /agent:pending -->

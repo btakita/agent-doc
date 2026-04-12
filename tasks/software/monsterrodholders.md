@@ -1074,7 +1074,7 @@ Most of these are things we've hit on monsterrodholders in the last week — the
 5. When site #2 lands, extract to `src/wp-liquidweb-ops/` with submodule or skillPaths
 
 Want me to start on step 1–4 now? It's ~30min of writing and the content already exists — I'd be moving it, not inventing it.
-<!-- agent:boundary:a07551fd -->
+<!-- agent:boundary:73f96fec -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

@@ -148,18 +148,37 @@ Done. Two changes:
 All tests pass, binary rebuilt.
 
 ❯ In this document, the completed agent:pending tasks are not removed when they were completed. When would agent-doc remove complete agent:pending items?
-### Re: Pending item cleanup (HEAD)
+### Re: Pending item cleanup
 
 **agent-doc doesn't automatically remove completed pending items** — that's the agent's (Claude's) responsibility during each response cycle.
 
 The skill instructions specify: "Items completed during this response → remove or mark `([done])`". The `agent:pending` component uses `patch=replace`, so each cycle the agent writes a complete replacement. The agent *should* prune completed items, but in this document the previous responses kept accumulating `✅` markers instead of removing finished work.
 
 This is a skill-layer behavior, not a binary feature. The `agent-doc` binary applies whatever the agent writes to `<!-- patch:pending -->` verbatim. Cleaning up now.
-<!-- agent:boundary:865189a6 -->
+❯ Can we move this behavior to the agent-doc binary?
+### Re: Moving pending cleanup to the binary (HEAD)
+
+Possible, but there's a design tension. The binary currently treats pending as opaque markdown — `patch=replace` without interpreting content. Clean separation: binary handles delivery, agent handles content.
+
+**What the binary could do:**
+- `pending_auto_prune` option (in `components.toml` or frontmatter) — strip lines matching `✅`, `[done]`, `[x]` after each write
+- Retention policy: keep completed items for N cycles, then auto-remove
+
+**The tricky part:**
+- Binary would need to parse markdown list items and recognize completion markers — content semantics leaking into the delivery layer
+- Different docs might use different "done" conventions
+- Sometimes keeping completed items visible is intentional (showing what just finished alongside what's next)
+
+**Cleaner middle ground:**
+- Preflight warning when pending has stale completed items (✅ items surviving >1 cycle)
+- `--prune-completed` flag on `agent-doc write` that the skill opts into
+
+The root issue: the skill already instructs the agent to prune — it just wasn't followed. A binary safety net helps, but the agent still needs to curate semantically (reprioritize, add new items).
+<!-- agent:boundary:b5605d79 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-*No pending items — all tasks from this session are complete.*
+- **Pending cleanup in binary** — design decision: preflight warning vs auto-prune vs `--prune-completed` flag. Awaiting direction.
 <!-- /agent:pending -->

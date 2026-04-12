@@ -680,7 +680,7 @@ Applied to both nip.io and `monsterrodholders.com` vhosts. `apachectl configtest
 **Note on `wp` memory limit:** WPForms Lite plugin blows the default 128M PHP memory limit on any wp-cli invocation. Had to invoke via `docker compose run --rm wpcli php -d memory_limit=512M /usr/local/bin/wp --allow-root ...` — the `./scripts/wp.sh` wrapper doesn't set this and fails. Worth fixing in the wrapper.
 
 **Pending:** Browser QA of `/cart/`, `/my-account/`, and `/` on `https://50.28.2.199.nip.io/`. The 301s and 200s are healthy; real test is click-through from menus and a guest → cart → checkout flow.
-<!-- agent:boundary:a8762a61 -->
+<!-- agent:boundary:64a921ba -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

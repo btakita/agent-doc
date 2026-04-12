@@ -1104,7 +1104,7 @@ Created `.claude/skills/wp-liquidweb-ops/` at the agent-loop root. Four files, a
 **Extraction path, restated for the record:** currently N=1 site. When site #2 lands, `git mv .claude/skills/wp-liquidweb-ops/ src/wp-liquidweb-ops/skill/` + add `.claude/settings.json` with `skillPaths` pointing at the new location from any consuming site repo. Runbooks reference `SPEC.md` but don't bake in any monsterrodholders specifics, so the extraction is purely mechanical.
 
 **What's still on you:** the manual `$1` Stripe transaction QA — everything chromium-bridge can verify is green, but the card-entry happy path needs a human hand. Want me to drive a chromium-bridge flow with a Stripe test card (4242…) to prove the place-order → payment_intent → thank-you page chain end-to-end? That stops short of real money but exercises the full code path.
-<!-- agent:boundary:d9a80015 -->
+<!-- agent:boundary:e2b079e3 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

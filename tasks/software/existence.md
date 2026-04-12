@@ -214,7 +214,7 @@ Then users can install with:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/existence-lang/existence/main/install.sh | sh
 ```
-<!-- agent:boundary:4f7fb5b3 -->
+<!-- agent:boundary:d500a6e1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

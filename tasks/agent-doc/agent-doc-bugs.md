@@ -9,7 +9,7 @@ claude_args: --dangerously-skip-permissions
 ## Status
 
 <!-- agent:status patch=replace -->
-✅ agent-doc v0.32.1 — CRDT compact fix released, all tests passing, live in production
+✅ agent-doc v0.32.1 — env frontmatter wired into all Claude-spawning paths (start / run / stream / parallel). Build clean, 42 targeted tests passing. Ready for live test.
 <!-- /agent:status -->
 
 ## Exchange
@@ -170,7 +170,7 @@ Ready for you to test in a live session. The binary is installed — try adding 
 Want me to also wire env into the stream path?
 ❯ Yes. **all** ways of running claude or any other tool should include the env variables.
 ❯ Make sure we have a running list of every place where agent-doc uses tmux send-keys.
-### Re: Env in all paths + tmux send-keys audit (HEAD)
+### Re: Env in all paths + tmux send-keys audit
 
 **Every place agent-doc uses tmux send-keys:**
 
@@ -209,16 +209,68 @@ Want me to also wire env into the stream path?
 **Shared refactor:** Move `expand_env_values()` from `start.rs` to a new location (either `frontmatter.rs` or a small `env.rs` module) so both `start.rs` and `stream.rs` can call it.
 
 Ready to implement?
-<!-- agent:boundary:37ba3c28 -->
+❯ yes
+### Re: Env wired into all paths (HEAD)
+
+Done. Summary of changes:
+
+**1. New shared module `src/env.rs`:**
+- `expand_values(env)` — moved from `start.rs`, now shared. Early-returns empty Vec on empty input (no shell spawn).
+- `shell_export_prefix(env)` — new. Returns an `export K="V" && ...` string using **unexpanded** values, suitable for prepending to tmux send-keys commands. Quotes in values are escaped. 8 tests, all passing.
+
+**2. `Claude` agent struct (`src/agent/claude.rs`):**
+- Added `env: Vec<(String, String)>` field with a `with_env()` builder method.
+- Both `send()` (non-streaming) and `send_streaming()` now call `cmd.env(k, v)` for each pair before spawning the child process.
+
+**3. Non-streaming path (`src/run.rs`):**
+- `agent::resolve()` now takes `env: Vec<(String, String)>` as a third parameter.
+- `run.rs` expands `fm.env` via `crate::env::expand_values()` before resolving the backend and passes the expanded pairs through.
+
+**4. Streaming path (`src/stream.rs`):**
+- `resolve_streaming()` now takes `env` as a third parameter.
+- `run()` expands `fm.env` and passes it through. On expansion failure, logs a warning and continues with empty env (non-fatal).
+
+**5. Parallel fan-out (`src/parallel.rs`):**
+- Command string now prepended with `crate::env::shell_export_prefix(&fm.env)`.
+- Values pass through **unexpanded** so the target pane's shell resolves `$(passage ...)` internally — secrets never appear in tmux send-keys args or scrollback.
+
+**6. `start.rs`:**
+- Local `expand_env_values()` removed; now calls `crate::env::expand_values()`.
+- Tests moved to `env.rs`.
+
+**Env var coverage — final state:**
+
+| Path | Status |
+|------|--------|
+| `start.rs` (interactive Claude via tmux) | Yes (via `env::expand_values` → `cmd.env`) |
+| `run.rs` (non-streaming submit → Agent::send) | Yes (via `agent::resolve(..., env)`) |
+| `stream.rs` (streaming submit → StreamingAgent::send_streaming) | Yes (via `resolve_streaming(..., env)`) |
+| `parallel.rs` (fan-out via tmux send-keys) | Yes (via `shell_export_prefix` — unexpanded, safe for send-keys) |
+| `/agent-doc` skill (existing Claude session) | Yes (already done — preflight JSON → shell `export`) |
+| `route.rs` send_command (`/agent-doc` to existing pane) | Indirect — skill handles env in that pane |
+| `route.rs` auto_start (`agent-doc start <file>`) | Indirect — `start.rs` handles env |
+
+**Build + tests:**
+- `cargo build` — clean (only pre-existing warnings in `project_config.rs` / `template.rs`, not in new code)
+- `cargo build --release` — clean
+- `cargo install --path .` — installed to `~/.cargo/bin/agent-doc`
+- 42 tests passing across `env::`, `agent::`, `stream::`, `parallel::`, `run::`, `frontmatter::` modules
+- 8 new `env::` tests (expand values: plain / shell expansion / cross-ref / empty; shell prefix: empty / basic / quoted value / unexpanded passage)
+- 43 pre-existing `resync::` + `route::` failures are tmux-isolation test infrastructure issues, unrelated
+
+**Ready for manual testing.** The binary is installed. Add `env:` to a document's frontmatter and try each path (start / run / stream / parallel) to confirm.
+<!-- agent:boundary:55c62932 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - **`env` frontmatter** — ([done]) implemented in frontmatter.rs, preflight.rs, start.rs, SKILL.md
-- **`env` in stream path** — wire `expand_env_values` into `stream.rs` → `StreamingAgent` trait
-- **`env` in parallel path** — prepend unexpanded exports to tmux send-keys command string in `parallel.rs`
-- **Refactor `expand_env_values`** — move from `start.rs` to shared location (`frontmatter.rs` or `env.rs`)
+- **`env` in stream path** — ([done]) `stream.rs` → `resolve_streaming(..., env)` → `Claude::with_env()`
+- **`env` in run path (non-streaming)** — ([done]) `run.rs` → `agent::resolve(..., env)` → `Claude::with_env()`
+- **`env` in parallel path** — ([done]) `parallel.rs` prepends `shell_export_prefix` to tmux send-keys command
+- **Refactor `expand_env_values`** — ([done]) moved to `src/env.rs` as `expand_values`
+- **Manual testing** — validate each path (start / run / stream / parallel) with a real env-bearing document
 - **`compress` alias** — decide: add as binary alias for `compact`, or skip
 <!-- /agent:pending -->
 ## Assistant

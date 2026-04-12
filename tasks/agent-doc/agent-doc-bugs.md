@@ -433,7 +433,7 @@ Preflight can compare the `src mtime` in `--version` output against its own sour
 **Status:** Binary is fresh. Phase 1+2 guards are active. Ready for manual testing gate.
 
 **Next:** Test the 5 bugs on live `src/session-share/tasks/claudescore.md` to verify ❯ preservation + working-tree consistency.
-<!-- agent:boundary:c04c69b3 -->
+<!-- agent:boundary:76d9b2fd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

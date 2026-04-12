@@ -80,7 +80,7 @@ This creates a fresh CRDT document from the post-compact text and saves it. The 
 **Binary rebuilt:** `.bin/agent-doc` is now fresh with the fix.
 
 **Ready for manual testing gate:** Run `agent-doc compact` on a CRDT doc with pending items and verify pending survives.
-<!-- agent:boundary:3844e131 -->
+<!-- agent:boundary:e51c1d29 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

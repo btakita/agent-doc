@@ -55,9 +55,13 @@ Rebuilt the block fresh (no trace in recent homepage revisions) and deployed rep
 **Self-healing behavior:** If the homepage post gets reset (DB import, admin-UI edit wipe), bumping `MRH_HOME_POPULAR_SEED_VERSION` in the mu-plugin re-injects the block on next page load. Same pattern as the footer-logo seeder.
 
 Hard-refresh the homepage (Cmd/Ctrl+Shift+R) to confirm visually.
-### Re: Moved Popular block to /shop/ with strict order (HEAD)
+### Re: Moved Popular block to /shop/ with strict order
 
 Fixed. Reverted the homepage edit and put the block on the shop page (WooCommerce `woocommerce_shop_page_id` → post 6) with strict category ordering via 4-column layout.
+
+❯ You put "Popular" in the wrong place. Put it in a section in .ct-container...not in .hero-section.
+
+❯ ![img_21.png](img_21.png)
 
 **Why the columns layout:** WooCommerce's `[product_categories]` shortcode has an `orderby` parameter but it only accepts `name|count|id|slug|menu_order` — none of which honor the `ids` list order. To guarantee the user-specified sequence, I use a `wp:columns` block with one `[product_categories ids="N"]` shortcode per column. The columns layout preserves source order regardless of WC's internal sort.
 
@@ -86,12 +90,58 @@ Fixed. Reverted the homepage edit and put the block on the shop page (WooCommerc
 Sequence is correct — the 4 tiles render in the requested order between the "Popular" heading and the product loop. Hard-refresh `/shop/` to confirm visually.
 
 **Note on the shop page layout:** WooCommerce renders the page's `post_content` via `woocommerce_archive_description` before the product loop, so the Popular block appears above the product grid. The product grid (51 products, no pagination from v1.4) continues below.
-<!-- agent:boundary:e7542f24 -->
+### Re: Popular moved out of .hero-section into .ct-container (HEAD)
+
+Fixed. Root cause: Blocksy renders the shop page's `post_content` via `woocommerce_archive_description` which lives inside `.hero-section`, so seeding the shop page DB content put the Popular block in the wrong container regardless of what it looked like in the editor.
+
+**New approach — render via `woocommerce_before_shop_loop` hook:**
+
+Instead of seeding `post_content`, the mu-plugin now hooks `woocommerce_before_shop_loop` (priority 5) and echoes the Popular section HTML directly. This hook fires inside `.ct-container` main content, above the product grid — exactly where you want it.
+
+**What shipped (mrh-performance v1.10):**
+
+1. **Removed** the shop-page post_content seeder entirely — no more DB editing of post 6
+2. **Cleared** the shop page `post_content` on the server (empty string)
+3. **Deleted** `mrh_shop_popular_seed_version` option (stale)
+4. **Added** `woocommerce_before_shop_loop` action that renders:
+   ```html
+   <section class="mrh-popular-categories">
+     <h2 class="mrh-popular-categories__title">Popular</h2>
+     <div class="mrh-popular-categories__grid">
+       <div class="mrh-popular-categories__item">[product_categories ids="210" ...]</div>
+       <div class="mrh-popular-categories__item">[product_categories ids="533" ...]</div>
+       <div class="mrh-popular-categories__item">[product_categories ids="631" ...]</div>
+       <div class="mrh-popular-categories__item">[product_categories ids="642" ...]</div>
+     </div>
+   </section>
+   ```
+5. **Added** CSS grid rules scoped to `.mrh-popular-categories`: 4-column desktop, 2-column <1000px, 1-column <600px. Overrides the WC default `ul.products` grid inside each tile so each category renders as a single block.
+
+**Live verification (`curl https://50.28.2.199.nip.io/shop/`):**
+
+- `<section class="mrh-popular-categories">` position: **138366**
+- Last `hero-section` position: 100745 (well before)
+- Nearest `ct-container` position: **138223** (immediately before — section sits inside it) ✓
+- Category order in section (by `/product-category/<slug>/` href):
+  1. `rod-holders`
+  2. `rod-holder-bases`
+  3. `hydroweb-landing-nets`
+  4. `anchors` (River Anchors)
+
+**Repo/deploy state:**
+
+- Submodule `a681a18d` on `main`, pushed
+- Parent `agent-loop` pointer bumped
+- Server pulled, wordpress container force-recreated, cache flushed
+- No post_content manipulation — behavior now lives entirely in the mu-plugin, so it's self-healing against DB imports and admin-UI wipes
+
+Hard-refresh `/shop/` to confirm visually. The Popular row should now appear in the main content column (where the product grid lives), not in the hero band at the top of the page.
+<!-- agent:boundary:ecf7e49e -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **"Popular" categories block on /shop/** — 4-column strict-order layout (Rod Holders, Rod Holder Bases, HydroWeb Landing Nets, River Anchors), mrh-performance v1.9 seeder, deployed and verified
+- [x] **"Popular" categories block in .ct-container on /shop/** — woocommerce_before_shop_loop hook, 4-column strict order (Rod Holders, Rod Holder Bases, HydroWeb Landing Nets, River Anchors), mrh-performance v1.10, deployed and verified
 - [x] **Match footer logo size to header (~75px)** — CSS cap + srcset sizes fix in mrh-performance v1.6, deployed and verified
 - [x] **Hide "New Cloth Technologies" aside column on /shop/** — mrh-performance v1.7, deployed and verified
 <!-- /agent:pending -->

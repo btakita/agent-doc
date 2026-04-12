@@ -1345,7 +1345,7 @@ On it. Executing in this order on `monsterrodholders-server`:
 
 Will report results inline.
 
-### Re: ⚠️ SECURITY — MariaDB password leaked to livestream (HEAD)
+### Re: ⚠️ SECURITY — MariaDB password leaked to livestream
 
 While inspecting env vars to find the DB credentials for direct SQL access, `docker compose exec db env` printed `MARIADB_ROOT_PASSWORD`, `MARIADB_PASSWORD`, `MARIADB_USER`, `MARIADB_DATABASE` to stdout. The values went to the livestream tool-call output. This is a rotation-worthy leak.
 
@@ -1358,15 +1358,71 @@ While inspecting env vars to find the DB credentials for direct SQL access, `doc
 
 I'm continuing execution using `docker compose exec db env` piped directly into `bash -c` without re-printing — won't re-leak.
 
-### Progress so far (HEAD)
+### Progress so far
 
 - ✅ `wpforms-lite` deactivated via wp-cli (first call succeeded)
 - ⚠️ `wp plugin delete wpforms-lite` hung (WPForms uninstall hook); killed the stuck wpcli container and `rm -rf`'d `/opt/monsterrodholders/app/wordpress/plugins/wpforms-lite` directly. Plugin now absent from both host mount and container `/var/www/html/wp-content/plugins/`.
 - ⏳ Next: purge `wp_posts` entries for form IDs 156/157 + any `wpforms_*` options + `wpforms_*` tables via direct SQL.
-<!-- agent:boundary:e3e5f1ae -->
+
+### Re: done — full execution report (HEAD)
+
+All 6 operations complete. Verified on `https://50.28.2.199.nip.io/` (prod domain DNS hasn't flipped yet — SPEC note stands).
+
+**1. WPForms Lite removal**
+- `wp plugin deactivate wpforms-lite` → Success
+- `wp plugin delete wpforms-lite` hung on the uninstall hook (WPForms runs schema teardown + option cleanup inside a single PHP process and blew past even the 512M wp-cli limit). Killed the stuck wpcli container and removed the plugin directory directly: `rm -rf /opt/monsterrodholders/app/wordpress/plugins/wpforms-lite`. Host mount empty, container `/var/www/html/wp-content/plugins/wpforms-lite` absent, active plugin list no longer includes it.
+
+**2. Database purge (direct SQL, table prefix `wp_nxz1mfc9cg_`)**
+- Deleted 2 `wpforms` posts (IDs 156 "Simple Contact Form", 157 "Newsletter Signup Form") + their postmeta
+- Deleted 20 `wpforms_*` / `_wpforms_*` options (settings, transients, crypto_secret_key, widget registration, version tracking, notifications)
+- Dropped 4 WPForms tables: `wpforms_logs`, `wpforms_payments`, `wpforms_payment_meta`, `wpforms_tasks_meta`
+- Post-purge counts: `wpforms_posts_remaining=0`, `wpforms_options_remaining=0`, no `%wpforms%` tables
+
+**3. Memory limit**
+- `php -r 'echo ini_get("memory_limit")'` inside `app-wordpress-1`: **256M** (already at target — `wordpress/php.ini` was already set, no change needed)
+- wp-cli SAPI still falls back to compiled 128M default — SPEC note about `./scripts/wp.sh` wrapper needing `-d memory_limit=512M` is still accurate for future runs
+
+**4. Zoho returnURL fix**
+- Page ID 13 (`/contact/`) — found `<input name="returnURL" type="hidden" value="https://50.28.2.199.nip.io" />`
+- SQL REPLACE on `post_content` → `value="https://monsterrodholders.com"`
+- Regex verify post-update: `returnURL[^>]*monsterrodholders\.com=1`, `returnURL[^>]*nip\.io=0`
+- Live verify: `curl -s /contact/ | grep returnURL` → `returnURL" type="hidden" value="https://monsterrodholders.com"` ✓
+
+**5. Cache purge**
+- Cloudflare: zone not present for `monsterrodholders.com` (DNS hasn't flipped to CF yet). CF purge is a no-op until the flip.
+- WP object cache: `wp cache flush` → Success
+- Transients: `wp transient delete --all` → 147 deleted
+
+**6. Live verification**
+- `curl -I https://50.28.2.199.nip.io/checkout/` → **HTTP 302** (WC redirect to `/cart/` because empty cart — expected default, not an error)
+- `curl -I https://50.28.2.199.nip.io/contact/` → **HTTP 200**
+- Active plugins: 8 (akismet, blocksy-companion-pro, host-webfonts-local, stackable-ultimate-gutenberg-blocks, woocommerce, woocommerce-gateway-stripe, woocommerce-legacy-rest-api, wordpress-seo) — wpforms-lite absent, woocommerce-paypal-payments also absent from active list (pre-existing state, not touched)
+
+**⚠️ SECURITY FOLLOW-UP (livestream exposure)**
+
+`docker compose exec db env` printed `MARIADB_USER`, `MARIADB_PASSWORD`, `MARIADB_ROOT_PASSWORD`, `MARIADB_DATABASE` to the terminal earlier in this session. Treat those values as leaked. Action items:
+
+- [ ] Rotate `MARIADB_PASSWORD` and `MARIADB_ROOT_PASSWORD` (update `docker-compose.yml` or `.env`)
+- [ ] Update `wp-config.php` `DB_PASSWORD` to match
+- [ ] `docker compose up -d --force-recreate db wordpress`
+- [ ] Verify WP still connects (`wp option get siteurl`)
+- [ ] Trim that segment from the livestream VOD in post-production
+- [ ] Move DB creds into `passage` at `btak/monsterrodholders/db/{user,password,root_password}` and source via env file
+
+I'd also recommend rotating proactively since you also have the full `woocommerce_stripe_settings` option row (contains `secret_key`, `webhook_secret`) co-located in the same DB — if someone got the DB creds, they could dump that row. Rotating Stripe keys is a bigger job (webhook endpoint re-registration in Stripe Dashboard), so it's a judgment call whether to do it now or just make sure the DB rotation goes through cleanly first.
+
+**Other nip.io references still in the DB** (not touched, flagging for the DNS flip):
+- `siteurl` and `home` options → still point to `50.28.2.199.nip.io` (correct for now; flip to prod domain during the DNS cutover)
+- `woocommerce_stripe_settings` → webhook URL likely references nip.io; update during cutover
+- 12 other pages contain `nip.io` in `post_content` → run `wp search-replace` during cutover (per CLAUDE.local.md page migration runbook)
+- `monsterrodholders_custom_code` option → check for hardcoded nip.io references
+<!-- agent:boundary:8fe428f7 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **EXECUTING NOW** — WPForms removal + memory bump + returnURL fix + CF purge. See exchange for step list.
+- **DNS flip checklist** — when cutover happens: `wp search-replace 'https://50.28.2.199.nip.io' 'https://monsterrodholders.com' --skip-columns=guid`, update `siteurl`/`home`, update Stripe webhook endpoint (both in WP option and Stripe Dashboard), add domain to Cloudflare, re-run `/contact/` + `/checkout/` verification.
+- **DB credential rotation (livestream leak)** — rotate `MARIADB_PASSWORD` + `MARIADB_ROOT_PASSWORD`, update `wp-config.php`, `docker compose up -d --force-recreate`, trim VOD.
+- **wp-cli memory wrapper** — update `./scripts/wp.sh` to always pass `php -d memory_limit=512M` per SPEC note. Low priority now that WPForms is gone.
+- **Stripe key rotation (optional, higher effort)** — consider given DB password exposure co-locates Stripe settings. Requires webhook re-registration.
 <!-- /agent:pending -->

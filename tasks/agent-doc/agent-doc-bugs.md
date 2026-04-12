@@ -44,7 +44,7 @@ Structure:
 ```
 
 Want me to scaffold this?
-<!-- agent:boundary:2ead1741 -->
+<!-- agent:boundary:7e98be0b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -21,6 +21,7 @@ Operational task document for agent-loop workspace management.
 
 <!-- agent:exchange patch=append -->
 Completed releases: corky v0.26.3 (7-platform GitHub Release, fixed CI through 5 iterations: OpenSSL, host libssl-dev, aarch64 features), agent-kit v0.4.0 (GitHub Release). All submodules committed and pushed (84b98b52). Pending: litellm proxy + local model testing.
+<!-- agent:boundary:3a2f3520 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

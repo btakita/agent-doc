@@ -298,7 +298,7 @@ Hard-refresh `/shop/` to confirm the sidebar changes are visible.
 ❯ Make `.ct-widget.widget_block .wp-block-heading` smaller.
 ❯ ![img_26.png](img_26.png)
 
-### Re: Correct sidebar filter selectors (HEAD)
+### Re: Correct sidebar filter selectors
 
 Fixed. Deployed mrh-performance v1.17. The previous Haiku attempt used wrong selectors.
 
@@ -318,7 +318,34 @@ Fixed. Deployed mrh-performance v1.17. The previous Haiku attempt used wrong sel
 **Verified live:** Both CSS rules present in `<style id="mrh-product-grid">` on `/shop/`. The `widget_price_filter` widget (id `woocommerce_price_filter-9`) is in the DOM but hidden by the rule.
 
 Hard-refresh `/shop/` to confirm.
-<!-- agent:boundary:af4df2d1 -->
+❯ Generate a favicon of https://50.28.2.199.nip.io/wp-content/uploads/2017/09/monster-rod-holder-logo-2023.png
+❯ add the response to this document
+### Re: Generate favicon (HEAD)
+
+Generated 4 favicon sizes from the logo (2048x1331 PNG):
+
+| File | Size | Purpose |
+|------|------|---------|
+| `favicon.ico` | 31.3K | Multi-size (16, 32, 48, 64px) - IE/legacy |
+| `favicon-16.png` | 1KB | Browser tab icon |
+| `favicon-32.png` | 1.8K | Standard favicon PNG |
+| `favicon-192.png` | 15.2K | Apple touch / PWA |
+
+Files at `/tmp/mrh-favicon*`.
+
+**To deploy:**
+1. Upload all 4 files to `/wp-content/uploads/2017/09/` on the server (or wherever other media live)
+2. Add to the WordPress `<head>` (via `header.php` or a snippet plugin):
+
+```html
+<link rel="icon" type="image/x-icon" href="/wp-content/uploads/2017/09/mrh-favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="/wp-content/uploads/2017/09/mrh-favicon-32.png" sizes="32x32">
+<link rel="icon" type="image/png" href="/wp-content/uploads/2017/09/mrh-favicon-16.png" sizes="16x16">
+<link rel="apple-touch-icon" type="image/png" href="/wp-content/uploads/2017/09/mrh-favicon-192.png" sizes="192x192">
+```
+
+Hard-refresh any page to confirm the tab icon updates.
+<!-- agent:boundary:cbd43183 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

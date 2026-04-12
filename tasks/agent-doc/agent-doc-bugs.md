@@ -111,7 +111,7 @@ For the skill flow (preflight JSON), the same principle applies — return the u
 
 ❯ do
 ❯ - **`env` frontmatter** — add env map to frontmatter; scope: all Bash calls by default; dual injection: preflight JSON (unexpanded) for skill flow + send-keys with unexpanded `$(passage ...)` for tmux spawn
-### Re: Implementing `env` frontmatter (HEAD)
+### Re: Implementing `env` frontmatter
 
 Done. Here's what was built:
 
@@ -150,13 +150,32 @@ env:
 ```
 
 Ready for you to test in a live session. The binary is installed — try adding `env:` to a document's frontmatter and running `/agent-doc` on it.
-<!-- agent:boundary:9688cf4e -->
+
+❯ Will the env variables be applied to the Claude Code session when the JB plugin run `Claim for Tmux Pane` on the document or when Sync is called where new terminal is opened?
+### Re: Env vars in Claim vs Sync flows (HEAD)
+
+**Claim (`Claim for Tmux Pane`)** — No. Claim just registers the pane-to-document mapping in `sessions.json`. It doesn't start Claude or set any environment.
+
+**Sync (new terminal opened)** — Yes. The chain: Sync → `route.rs` → `auto_start_in_session()` → `tmux send-keys "agent-doc start <FILE>"` → `start.rs` reads frontmatter `env:`, expands values via shell, sets them on the `claude` child process via `cmd.env()`.
+
+**`/agent-doc` skill (existing session)** — Yes. The skill reads `env` from preflight JSON and runs `export` commands in the Bash tool.
+
+| Flow | Env applied? | How |
+|------|-------------|-----|
+| `Claim for Tmux Pane` | No | Just registers pane |
+| Sync (new terminal) | Yes | `start.rs` expands + sets on child |
+| `/agent-doc` skill | Yes | Skill exports from preflight JSON |
+| `agent-doc stream` | Not yet | Would need separate wiring |
+
+Want me to also wire env into the stream path?
+<!-- agent:boundary:5169f4c6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - **`env` frontmatter** — ([done]) implemented in frontmatter.rs, preflight.rs, start.rs, SKILL.md
+- **`env` in stream path** — wire `expand_env_values` into `stream.rs` for `agent-doc stream` sessions
 - **`compress` alias** — decide: add as binary alias for `compact`, or skip
 <!-- /agent:pending -->
 ## Assistant

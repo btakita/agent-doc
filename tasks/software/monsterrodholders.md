@@ -595,7 +595,7 @@ I notice you've added a duplicate line — removed one copy below. ✓
 Also: yes, I'll add the CLAUDE.local.md note about stripe secrets. Should I also document this migration pattern there so future sessions know the playbook?
 
 ❯ Yes. This seems to be wordpress specific.
-### Re: Confirm — proceed with all three migrations + SEO preservation (HEAD)
+### Re: Confirm — proceed with all three migrations + SEO preservation
 
 ✓ **Understood.** This is a new instance fresh migration. We need 301 redirects to preserve SEO equity from the live site.
 
@@ -627,20 +627,69 @@ Also: yes, I'll add the CLAUDE.local.md note about stripe secrets. Should I also
    - `wp search-replace '/cart-2/' '/cart/' --skip-columns=guid` (etc.)
 
 **Also: I'll add the WordPress migration pattern + secrets hygiene to CLAUDE.local.md so future sessions know the playbook.** ✓
-<!-- agent:boundary:ad8d01aa -->
+
+❯ Do
+❯ - [ ] **Migrate cart-2 → cart, my-account-2 → my-account, home-2 → home** — 301 redirects, option flips, test redirects, delete old pages
+### Re: Migration executed — cart-2, my-account-2, home-2 (HEAD)
+
+All three migrations done on the new instance (`50.28.2.199.nip.io`). Verified end-to-end.
+
+**1. 301 redirects at edge** (host Apache proxy vhost `/etc/httpd/conf.d/00-monsterrodholders-proxy.conf`):
+
+First tried `RedirectMatch` — it no-opped because `mod_proxy` locks the URL before `mod_alias` fires. Switched to `RewriteRule [R=301,L]` placed before `ProxyPass`, which runs in the translate phase and beats the proxy handler:
+
+```apache
+RewriteEngine On
+RewriteRule ^/cart-2/?$ /cart/ [R=301,L]
+RewriteRule ^/my-account-2/?$ /my-account/ [R=301,L]
+RewriteRule ^/home-2/?$ / [R=301,L]
+```
+
+Applied to both nip.io and `monsterrodholders.com` vhosts. `apachectl configtest` clean, `systemctl reload httpd`.
+
+**2. WooCommerce options flipped:**
+
+| Option | Before | After |
+|---|---|---|
+| `woocommerce_cart_page_id` | 82 (`cart-2`) | **7** (`cart`) |
+| `woocommerce_myaccount_page_id` | 84 (`my-account-2`) | **9** (`my-account`) |
+| `page_on_front` | 2 (`home-2`) | **7503** (`home`) |
+
+**3. Search-replace old URLs in DB:**
+- `/cart-2/` → `/cart/` — 1 replacement (postmeta)
+- `/my-account-2/` → `/my-account/` — 13 replacements (1 commentmeta + 2 postmeta + 10 usermeta)
+- `/home-2/` → `/` — 0 replacements (already clean)
+
+**4. Deleted old pages:** `wp post delete 82 84 2 --force` — all three gone.
+
+**5. Flushed caches:** `wp cache flush` + `wp rewrite flush`.
+
+**6. End-to-end verification** (`curl -sk -o /dev/null -w "%{http_code} -> %{redirect_url}"`):
+
+| URL | Status |
+|---|---|
+| `/cart-2/` | **301 → /cart/** ✓ |
+| `/my-account-2/` | **301 → /my-account/** ✓ |
+| `/home-2/` | **301 → /** ✓ |
+| `/cart/` | 200 ✓ |
+| `/my-account/` | 200 ✓ |
+| `/` | 200 ✓ |
+
+**Important context discovered:** The docker-compose only runs `wordpress:apache` (container) + db + redis — there's **no nginx service**, and the `nginx/conf.d/wordpress.conf` file in the app directory is dead code (a leftover from a prior config). The real reverse proxy is **host-level Apache** with a `ProxyPass / http://127.0.0.1:8080/` vhost. I initially patched the unused nginx file and had to revert — worth noting in the runbook so future sessions don't chase phantom config.
+
+**Note on `wp` memory limit:** WPForms Lite plugin blows the default 128M PHP memory limit on any wp-cli invocation. Had to invoke via `docker compose run --rm wpcli php -d memory_limit=512M /usr/local/bin/wp --allow-root ...` — the `./scripts/wp.sh` wrapper doesn't set this and fails. Worth fixing in the wrapper.
+
+**Pending:** Browser QA of `/cart/`, `/my-account/`, and `/` on `https://50.28.2.199.nip.io/`. The 301s and 200s are healthy; real test is click-through from menus and a guest → cart → checkout flow.
+<!-- agent:boundary:a8762a61 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **Migrate `/checkout-2/` → `/checkout/`** — option flipped, page 83 deleted, search-replace done, caches flushed
-- [x] **Fix checkout spinner** — `upe_checkout_experience_enabled=no`, Stripe falls back to legacy classic integration; needs browser QA
-- [x] **Disable Apple/Google Pay** — payment_request, express_checkout, apple_pay all off; location arrays cleared
-- [x] **Store Stripe + PayPal keys in passage** — `btak/monsterrodholders/{stripe,paypal}/*`
-- [x] **Redact leaked Stripe secret from local session logs** — 10 files scrubbed (main + observer jsonl + tool-result caches)
-- [ ] **Browser QA of `/checkout/`** — add $1 test product, verify form unlocks, complete real live transaction, refund after
-- [ ] **Migrate cart-2 → cart, my-account-2 → my-account, home-2 → home** — 301 redirects, option flips, test redirects, delete old pages
-- [ ] **Add WordPress migration pattern to CLAUDE.local.md** — secrets hygiene + page option migration playbook
-- [ ] **(Optional) Audit duplicated Privacy Policy + Refund/Returns pages** — multiple copies exist
-- [ ] **(Optional) Livestream scrollback cleanup** — trim ~1m window where Stripe JSON was printed
-- [x] **"Popular" categories block in .ct-container on /shop/** — woocommerce_before_shop_loop hook, 4-column strict order, mrh-performance v1.10
+- [x] **Migrate `/cart-2/`, `/my-account-2/`, `/home-2/`** — 301 redirects via Apache `RewriteRule`, options flipped (82→7, 84→9, 2→7503), 14 DB replacements, old pages deleted, caches flushed, end-to-end verified
+- [ ] **Fix checkout spinner** — `upe_checkout_experience_enabled=no`, Stripe falls back to legacy classic integration; needs browser QA
+- [ ] **Browser QA on nip.io** — click-through `/cart/`, `/my-account/`, `/` + guest checkout flow on `https://50.28.2.199.nip.io/`
+- [ ] **Fix `./scripts/wp.sh`** — add `php -d memory_limit=512M` to work around WPForms Lite memory exhaustion
+- [ ] **Audit duplicate Privacy Policy and Refund/Returns Policy pages** — same `-2` pattern may apply
+- [ ] **Rotate Stripe live secret** — `sk_live_518eq7…` leaked in earlier `wp option get`; treat as compromised
 <!-- /agent:pending -->

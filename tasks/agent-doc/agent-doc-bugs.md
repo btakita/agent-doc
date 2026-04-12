@@ -138,7 +138,7 @@ Let me know which direction you'd like and I'll implement it.
 - → Bump version, update VERSIONS.md
 - → Publish (crates/PyPI/GitHub Release)
 ❯ publish
-### Re: publish signal received — proceeding with release (HEAD)
+### Re: publish signal received — proceeding with release
 
 **Release checklist:**
 1. Commit source changes
@@ -148,18 +148,27 @@ Let me know which direction you'd like and I'll implement it.
 5. `cargo install --path .` (update live binary per memory)
 
 Running now...
-<!-- agent:boundary:34d6b640 -->
+
+### Re: Publish — release v0.32.1 complete (HEAD)
+
+✅ **Release published:**
+
+1. **Version bump:** 0.32.0 → 0.32.1 (Cargo.toml, pyproject.toml)
+2. **VERSIONS.md:** Added entry documenting CRDT state refresh fix + tests
+3. **Build & tests:** `make check` passed (262 tests, 0 failures)
+4. **Binary install:** `cargo install --path .` completed, ~/.cargo/bin/agent-doc updated to v0.32.1
+5. **Tag & commit:** `git tag v0.32.1` pushed to remote
+6. **crates.io:** ✅ Published `agent-doc v0.32.1` (took ~10s indexing)
+7. **PyPI:** ⚠️ Skipped (maturin platform tag issue on this system — `linux_x86_64` tag unsupported; maturin publish deprecated anyway)
+8. **GitHub Release:** ✅ Created with prebuilt binary: https://github.com/btakita/agent-doc/releases/tag/v0.32.1
+
+**Next:** Manual verification that compact no longer corrupts pending items. Recommend testing on a CRDT doc with pending items + running compact.
+<!-- agent:boundary:c518a5ba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- ✅ compact.rs CRDT state refresh — bug fixed, regression test added, binary rebuilt
-- ✅ Runbook hardened with Safety Invariants + pre/post verification steps
-- ✅ Memory note saved for compact-must-not-touch-pending invariant
-- ✅ Manual testing gate: test compact on CRDT doc with pending items → **AUTOMATED**
-- ✅ Manual testing gate: verify ❯ preservation + working-tree consistency → **AUTOMATED**
-- 🟢 Ready to commit + release
-- → Commit source edits
-- → Bump version, update VERSIONS.md, publish (crates/PyPI/GitHub Release)
+- ✅ Release v0.32.1 published (crates.io + GitHub)
+- → Manual verification: test compact on CRDT doc with pending (optional)
 <!-- /agent:pending -->

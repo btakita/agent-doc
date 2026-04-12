@@ -57,7 +57,7 @@ Design choices:
 - Five filters (Default, Contradiction, Redundancy, Bandaid, Vague) live in the runbook
 - Scoring and report format are self-contained in the runbook
 - No educational guide content (PDF) — that's separate marketing material
-<!-- agent:boundary:8572a4e8 -->
+<!-- agent:boundary:98138b19 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

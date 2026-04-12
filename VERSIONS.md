@@ -4,6 +4,30 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.32.1
+
+- **Fix: CRDT state not refreshed after `agent-doc compact`:** When a template-mode document with CRDT write strategy ran `compact`, the binary correctly rewrote the file and snapshot on disk, but the CRDT state in `.agent-doc/crdt/<hash>.yrs` was stale. On the next `agent-doc write` or `stream`, the 3-way merge loaded the stale CRDT (containing pre-compact exchange AND pre-compact pending), causing non-target components (like `agent:pending`) to be clobbered by old CRDT view of pending items. Fix: After `run_component_compact` or `run_component_compact_partial`, when `is_crdt`, refresh CRDT state by creating a new `CrdtDoc` from the post-compact content and saving it to `.agent-doc/crdt/<hash>.yrs`. This resets the CRDT to a fresh state, discarding pre-compact history (appropriate since compact is a "new epoch" operation).
+- **Runbook hardened:** `.claude/skills/agent-doc/runbooks/compact-exchange.md` now explicitly forbids mutations to non-target components. Added Safety Invariants section and pre/post verification steps using git snapshots.
+- **Tests added:** `crdt_compact_preserves_pending_with_state_refresh` (verifies fix), `compact_preserves_boundary_marker` (tests ❯ preservation in non-target component), `compact_working_tree_consistency` (disk/snapshot consistency).
+
+## 0.32.0
+
+- **Fix: Submodule-aware patch routing:** `try_ipc()` and `try_ipc_full_content()` in `write.rs` now use `git::resolve_to_git_root()` to detect submodule context. When a session document lives inside a git submodule, IPC patches are routed to the **superproject's** `.agent-doc/patches/` directory instead of the submodule's local `.agent-doc/patches/`. Previously, patches written to submodule documents (e.g. `src/session-share/tasks/claudescore.md`) would land in `<submodule>/.agent-doc/patches/` where the JetBrains plugin (which only watches the parent repo) never saw them. The fix falls back to `find_project_root()` if git resolution fails, preserving backward compatibility for non-git and non-submodule cases.
+- **Tests added:** `try_ipc_routes_to_superproject_when_available` (creates a real git submodule structure and verifies patches route to parent), `try_ipc_falls_back_to_find_project_root_when_not_in_git` (fallback behavior), and `test_submodule_write_patches_dir_structure` (integration-level directory layout validation).
+
+- **Feature: Harness-agnostic model tier selection:** New `model_tier` module defines a `Tier` enum (`auto | low | med | high`) and composes an `effective_tier` from four sources, highest precedence first:
+  1. Inline `/model <x>` command in the diff (stripped from downstream diff/classifier)
+  2. `<!-- agent:model -->` component content
+  3. `agent_doc_model_tier` frontmatter field
+  4. Diff heuristic (`suggested_tier`) based on `diff_type` + document path
+- **Config: `[model.tiers.<harness>]` maps** let users customize tier→model mappings per harness (`claude-code`, `codex`, `default`). Built-in defaults: claude-code → haiku/sonnet/opus, codex → gpt-4o-mini/gpt-4o/o3.
+- **Harness detection:** `detect_harness()` checks `CLAUDE_CODE_SESSION` / `CLAUDECODE` / `CODEX_SESSION` env vars and returns `claude-code | codex | default`.
+- **Preflight JSON additions:** `effective_tier`, `required_tier`, `suggested_tier`, `model_switch`, `model_switch_tier` fields.
+- **Diff scanner strips `/model` lines:** `scan_model_switch` runs before classification, so downstream classifier/slash-command parser never see `/model`.
+- **SKILL.md step 0c (Model tier gate):** Documents how skills should read `effective_tier` / `required_tier` and either proceed, acknowledge a `/model` switch, or ask the user to `/model` before re-invoking.
+- **Frontmatter field:** `agent_doc_model_tier: low | med | high | auto` on session documents.
+- **Tests added:** 48 tests in `model_tier.rs` covering tier parse/resolve, harness detection, component read, scanner guards (code fence, blockquote), heuristic path boosts, composition precedence, and JSON serialization.
+
 ## 0.31.31
 
 - **Fix: Commit-reliability — snapshot committed even on IPC timeout exit(75):** `write.rs` now saves snapshot + calls `git::commit` before `process::exit(75)`, so agent responses are preserved even when the IDE plugin doesn't ACK the patch in time.

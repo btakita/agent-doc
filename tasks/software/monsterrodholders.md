@@ -53,6 +53,9 @@ Exchange compaction: consolidates shop page layout iterations (v1.8-v1.17), Popu
 
 2. **Author archives leak**: Yoast's `author-sitemap.xml` exposes author user slugs (typically `brookebrodack` or similar). This is a minor privacy/security footprint and an SEO no-op for a storefront. **Recommend disabling author archives in Yoast** (SEO → Search Appearance → Archives → Author archives: Disabled) before the flip, or excluding author-sitemap via Yoast filter. That also 404s `/author/<slug>/` pages, which is what you want for a commerce site.
 
+❯ The author has a blog the website. Given we have a blog of a popular YouTube channel, should we keep the author slug?
+❯ https://www.youtube.com/@SteveDouglastheCatfishDude (119k subscribers)
+
 3. **Search Console re-submission**: after the DNS flip, submit `https://monsterrodholders.com/sitemap_index.xml` in Search Console (or add `Sitemap: https://monsterrodholders.com/sitemap_index.xml` to robots.txt so Google autodiscovers it). This is the cleanest signal that the sitemap location has moved.
 
 4. **Canonical domain**: current staging XSL stylesheet is protocol-relative (`//50.28.2.199.nip.io/...`) because Yoast generates URLs from the request `Host` header. Since `ProxyPreserveHost On` is set in the Apache vhost, after the DNS flip Yoast will automatically emit `monsterrodholders.com` URLs without any config change. **No action needed here**; the proxy already does the right thing.
@@ -121,7 +124,7 @@ Let me know which host and I'll apply the actual fix.
 ❯ - http://50.28.2.199.nip.io/sitemap.xml
 ❯ - http://50.28.2.199.nip.io/wp-sitemap.xml
 ❯ - http://50.28.2.199.nip.io/sitemap_index.xml
-### Re: HTTP (port 80) sitemap 404s — fixed (HEAD)
+### Re: HTTP (port 80) sitemap 404s — fixed
 
 You were right, and I was looking at the wrong scheme. All three URLs were 404 over **http://** (port 80) on the nip.io host. HTTPS worked fine, which is why my first probe missed it.
 
@@ -160,7 +163,35 @@ Following any of them lands at `https://50.28.2.199.nip.io/sitemap_index.xml` �
 Backup is at `/etc/httpd/conf.d/00-monsterrodholders-proxy.conf.bak-20260412` in case you want to revert.
 
 One more thing worth noting: the user-side symptom for the three URLs was 404 (not 403), which was because `mod_rewrite` on the InterWorx default would try to serve the literal path `/sitemap.xml` out of `/var/www/html` and fail. Root hit 403 because `/var/www/html` has directory listing disabled and no index file. Both symptoms traced back to the same vhost-selection bug.
-<!-- agent:boundary:be605d04 -->
+
+Are there any 
+### Re: author slug for a 119k-sub YouTuber's blog (HEAD)
+
+Yes — keep Steve's author archive. For a creator-driven blog, `/author/steve-douglas/` is an SEO **asset**, not a leak: it's a topical landing page Google can rank for "Steve Douglas catfish" queries, and it concentrates E-E-A-T signals (author → posts → channel) that product/category pages can't.
+
+**What to do:**
+
+1. **Audit WP users first.** Run `wp user list --role=author,editor,administrator --fields=ID,user_login,display_name,user_email`. The concern I flagged earlier (`brookebrodack` slug leak) only matters if dev/staff accounts are also authoring posts. If Steve is the only public byline, you're fine.
+
+2. **Clean the slug.** Set his `user_nicename` to `steve-douglas` (or `catfishdude` to match the channel handle) so the URL is `/author/steve-douglas/` not `/author/stevedouglas123/`:
+   ```bash
+   wp user update <id> --user_nicename=steve-douglas
+   ```
+
+3. **Exclude non-Steve authors from the sitemap** instead of disabling author archives globally. Two options:
+   - Yoast → SEO → Search Appearance → Archives → Author archives: **Enabled**, then "Show archives for users without posts: Disabled" (hides brookebrodack/admin if they have zero published posts).
+   - Or a `wpseo_sitemap_exclude_author` filter that returns all user IDs except Steve's.
+
+4. **Wire up E-E-A-T signals on his author page.** Edit his WP profile:
+   - Bio: short intro mentioning the YouTube channel by name
+   - Website: `https://www.youtube.com/@SteveDouglastheCatfishDude`
+   - Add `rel="me"` link in the theme's author template pointing to the channel (helps Google connect entity → channel → storefront)
+   - Optional: Yoast → Schema → Person, mark him as the site's Person entity so `Article` schema on blog posts cites him as author
+
+5. **Noindex anything that isn't Steve.** If you end up with one or two staff accounts with posts you don't want indexed, use `wpseo_sitemap_exclude_author` + add them to `noindex` via a `wpseo_robots` filter for their author URLs.
+
+**Bottom line:** the earlier "disable author archives" advice assumed a generic commerce storefront. With a 119k-sub creator attached, author archives flip from footprint to moat — keep them, just make sure only Steve shows up.
+<!-- agent:boundary:b65ebf6a -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

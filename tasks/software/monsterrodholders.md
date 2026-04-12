@@ -714,7 +714,7 @@ Short answer: **nothing on this site is actively using it.** It came along with 
 
 Or just delete it and fix anything that breaks afterward — your call.
 ❯ Add to pending. We need to fix the checkout page. The spinners are still there. Can you access the logs to see why the checkout page is stuck with the spinners?
-### Re: Checkout spinner — diagnosed and fixed (PayPal Payments with no credentials) (HEAD)
+### Re: Checkout spinner — diagnosed and fixed (PayPal Payments with no credentials)
 
 **TL;DR: PayPal Payments (PPCP) plugin was `active + enabled=yes` but had zero credentials configured.** Its `ppcp-button-js-button.js` got enqueued on `/checkout/`, tried to fetch the PayPal SDK with an empty `client_id`, threw on init, and left WooCommerce's `blockUI` overlay stuck on the form. I deactivated the plugin — spinner cause removed.
 
@@ -780,18 +780,144 @@ PPCP is fully unhooked from the checkout pipeline. Stripe's classic integration 
 4. Before testing, confirm `/checkout/` still loads cleanly (the bad state we just escaped from was onboarding=completed but credentials=empty)
 
 Or if you'd rather not use PayPal at all, I can `wp plugin delete woocommerce-paypal-payments` once you confirm.
-<!-- agent:boundary:7fac2ecc -->
+
+❯ The spinner is still there. Why? Please test using chrome-bridge. Keep on iterating until you can verify that https://50.28.2.199.nip.io/product/test-product-1/ is loaded into the cart, navigate to the checkout page. The spinner should resolve.
+### Re: Checkout spinner — real root cause (NOT PPCP). OWASP CRS rule 933120 kills `update_order_review`
+
+**TL;DR: Host Apache mod_security (Imunify360 + OWASP CRS 3.3.5) is blocking the `update_order_review` AJAX because WooCommerce's order-attribution JS posts a `wc_order_attribution_user_agent=Mozilla/5.0...` field, which CRS rule 933120 flags as a PHP injection attempt.** The PPCP fix was a red herring — the real block happens at the WAF, not in the browser.
+
+**How I got there** (chrome-bridge end-to-end, not guessing):
+
+**1. Full browser reproduction via chromium-bridge.** I drove a real browser from chromium-bridge:
+- Navigated to `/product/test-product-1/`, clicked `button[name="add-to-cart"]`
+- Cart went from 1 → 2 items ✓
+- Navigated to `/checkout/`
+- DOM state: **6 `.blockUI` overlays stuck** (3 on `.shop_table.woocommerce-checkout-review-order-table`, 3 on `#payment.woocommerce-checkout-payment`)
+- `.wc-stripe-upe-element` container present but `childElementCount = 0`, `innerHTML.length = 0`, no iframe
+- `jQuery.active === 0` — nothing pending, blocks just never got released
+
+So the spinner is real, the UPE element never mounts, and no AJAX is in flight.
+
+**2. Config check.** `Stripe === "function"` (Stripe.js loaded), `wc_stripe_upe_params.isUPEEnabled === "1"`, `key` starts with `pk_live`, `paymentMethodsConfig = {card: {...}}`, `cartTotal === "200"` ($2.00, 2 items), `isPaymentNeeded === "1"`. Gateway config is fine.
+
+**3. Hooked `jQuery.ajax` globally, then triggered `update_checkout`:**
+```js
+ajaxSend   → /?wc-ajax=update_order_review
+ajaxError  → status: 404
+ajaxComplete → status: 404, readyState: 4
+```
+
+**WC's own call to `update_order_review` returns 404.** That's the whole bug — WC blocks the UI, fires the AJAX, gets 404 back, fails silently (no fragments applied, no `updated_checkout` fired, no `unblock`). Overlay stays forever. Stripe UPE never mounts because its init is gated on `updated_checkout`.
+
+**4. But a minimal manual POST to the same URL returns 200.** `fetch("/?wc-ajax=update_order_review", {body: "security=<nonce>&payment_method=stripe&country=US..."})` → `200 application/json`, healthy fragments response. So the endpoint works — something about WC's specific payload trips a block.
+
+**5. Binary-searched the payload.** Captured WC's actual serialized body (1776 bytes) and replayed subsets via `fetch`. The trigger is the `post_data` field containing the order-attribution user-agent:
+```
+post_data=wc_order_attribution_user_agent=Mozilla/5.0 (X11; Linux x86_64)...
+```
+Even stripping the parens, slashes, semicolons, everything except the literal `user_agent=` substring still 404s. Narrowing further:
+- `&x=user_agent` → 200 ✓
+- `&x=user_agent=foo` → **404** ✗  (value contains `user_agent=`)
+- `&foo=user_agent=bar` → **404** ✗
+- `&user_agent=foo` (as top-level key) → 200 ✓
+
+So it's specifically `user_agent=<value>` appearing inside a parameter's **value**.
+
+**6. Confirmed at the WAF layer.** Direct-to-backend (`curl http://127.0.0.1:8080/` from the server bypassing the host Apache proxy) returns a different status — WC's own 403/`-1` nonce fail when no cookies — not the 404. Only when going through the host Apache proxy does the payload produce 404. Checked host Apache modules:
+```
+security2_module (shared)
+/etc/httpd/conf.d/90-imunify-modsec.conf
+/etc/httpd/modsecurity.d/{activated_rules,crs-setup.conf,local_rules}
+```
+Imunify360 + OWASP CRS 3.3.5 loaded on host Apache.
+
+**7. Found the rule in `/var/log/httpd/error_log`:**
+```
+ModSecurity: Warning. Matched phrase "=" at ARGS:x.
+  [file "REQUEST-933-APPLICATION-ATTACK-PHP.conf"]
+  [line "131"] [id "933120"]
+  [msg "PHP Injection Attack: Configuration Directive Found"]
+  [data "Matched Data: = found within ARGS:x: user_agent=foo"]
+  [severity "CRITICAL"] [ver "OWASP_CRS/3.3.5"]
+  [tag "paranoia-level/1"] [tag "attack-injection-php"]
+
+ModSecurity: Access denied with code 403 (phase 2).
+  Operator GE matched 5 at TX:anomaly_score.
+  [file "REQUEST-949-BLOCKING-EVALUATION.conf"]
+  [id "949110"]
+  [msg "Inbound Anomaly Score Exceeded (Total Score: 5)"]
+  [uri "/.noindex.html"]
+```
+
+**The rule: OWASP CRS 933120 — "PHP Injection Attack: Configuration Directive Found"** in `REQUEST-933-APPLICATION-ATTACK-PHP.conf`. It's a paranoia-level-1 rule that matches PHP `.ini` directive names (`user_agent`, `allow_url_fopen`, `auto_prepend_file`, etc.) appearing as `name=value` inside request arguments — classic defense against `php://input` / RFI / superglobal pollution. When it fires it adds 5 to the anomaly score, and 949110 blocks at score ≥ 5.
+
+Action when blocked: mod_security rewrites to `/.noindex.html`, Apache proxies that path to the Docker backend, WP returns 404 for the unknown URL. That's why the response looks like it came from PHP with `Server: Apache/2.4.66 (Debian)` — it did, after the WAF hijacked the URL.
+
+**WooCommerce 8.5+ ships "Order Attribution" as a core feature**, which adds a hidden `wc-order-attribution-inputs` block to the checkout form including `wc_order_attribution_user_agent`. That field name contains `user_agent` and its value is the browser UA string — a perfect match for CRS 933120. This is a known incompatibility between WooCommerce Order Attribution and the OWASP CRS default ruleset. **Every WooCommerce checkout on this host is broken** for this reason, not just yours.
+
+---
+
+## Fix options (HEAD)
+
+All of these resolve the spinner. Pick one:
+
+**Option A: Add a local mod_security rule exclusion (recommended, targeted).** Add this to `/etc/httpd/modsecurity.d/local_rules/monsterrodholders.conf` (create if missing), then `apachectl configtest && systemctl reload httpd`:
+
+```apache
+# WooCommerce Order Attribution sends `wc_order_attribution_user_agent=<UA>`
+# inside post_data, which trips CRS 933120. Exclude for this vhost + endpoint.
+<LocationMatch "wc-ajax=update_order_review">
+    SecRuleRemoveById 933120
+</LocationMatch>
+```
+
+Scoped to `update_order_review` AJAX only, so the rest of the site keeps its PHP-injection protection. Downside: every Imunify360 ruleset update may need re-applying if the local rules dir gets wiped. Test with a live browser checkout after reload.
+
+**Option B: Disable WooCommerce Order Attribution entirely.** WC 8.5+ exposes it as a toggleable feature. You lose attribution data (UTM source, referrer, user agent tracking on orders) but the JS stops emitting the poisoned field name:
+
+```bash
+# via mu-plugin — cleanest, survives WC updates
+cat > wordpress/wp-content/mu-plugins/disable-order-attribution.php <<'PHP'
+<?php
+add_filter('woocommerce_order_attribution_enabled', '__return_false');
+PHP
+```
+
+Or in WC settings → Advanced → Features → "Order Attribution" → disable.
+
+**Option C: Drop the UA field from the submitted payload.** Filter `woocommerce_order_attribution_fields` (or use a small JS filter on `form.checkout` submit) to unset the `wc_order_attribution_user_agent` input before serialization. More surgical than Option B but more fragile — any WC update that renames the field breaks the filter.
+
+**Option D: Rule exclusion via `SecRuleUpdateTargetById` targeting only the `post_data` arg.** Cleaner than removing the rule wholesale:
+```apache
+SecRuleUpdateTargetById 933120 "!ARGS:post_data"
+```
+(Applied globally, but only exempts the `post_data` parameter — everything else still protected.)
+
+---
+
+## My recommendation (HEAD)
+
+**Option A or D, applied to the host Apache config on `monsterrodholders-server`.** The cost: ~2 minutes, one file edit, one `systemctl reload httpd`. The benefit: checkout works, Order Attribution keeps sending data for your analytics, the rest of the WAF stays intact.
+
+Then Option B as a fallback if you'd rather not touch mod_security — but I'd keep attribution because it's useful for ad-spend ROAS.
+
+**About my previous "fix":** deactivating `woocommerce-paypal-payments` was not wrong per se (PPCP really was enabled with empty credentials, and re-enabling it would cause its own client-side break), but it didn't unblock the spinner. I claimed the cause before I tested a live checkout flow in a real browser — that was premature. Apologies for the false "diagnosed and fixed." The chromium-bridge end-to-end run is now the ground truth.
+
+**Next step waiting on you:** which option do you want me to implement? I can apply A now (it's a local config edit + reload, low blast radius, no data loss).
+<!-- agent:boundary:0dd5ba4d -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **Migrate `/checkout-2/` → `/checkout/`** — option flipped, page 83 deleted, search-replace done, caches flushed
 - [x] **Migrate `/cart-2/`, `/my-account-2/`, `/home-2/`** — 301 redirects via Apache `RewriteRule`, options flipped (82→7, 84→9, 2→7503), 14 DB replacements, old pages deleted, caches flushed, end-to-end verified
-- [x] **Diagnose + fix checkout spinner** — root cause: PPCP plugin active + enabled with empty credentials, broke `blockUI`. Fix: `wp plugin deactivate woocommerce-paypal-payments`. Verified 15→0 PPCP refs in `/checkout/` HTML. Needs real-browser QA.
-- [ ] **Browser QA: checkout unblocked** — real $1 Stripe transaction on `https://50.28.2.199.nip.io/checkout/`, verify no spinner, Stripe card field mounts, order completes, refund from dashboard
-- [ ] **PayPal decision** — either (a) onboard PPCP properly with real `client_id`/`merchant_id`, or (b) `wp plugin delete woocommerce-paypal-payments` to remove entirely
+- [x] **Diagnose checkout spinner — REAL root cause** — OWASP CRS rule 933120 (`REQUEST-933-APPLICATION-ATTACK-PHP.conf`) blocks `update_order_review` because WooCommerce Order Attribution posts `post_data=wc_order_attribution_user_agent=Mozilla/5.0...`. Match adds anomaly score 5, rule 949110 denies with 403, host Apache rewrites to `/.noindex.html`, backend returns 404. Verified end-to-end via chromium-bridge + `/var/log/httpd/error_log`.
+- [ ] **Fix checkout spinner — apply WAF exclusion (awaiting approval)** — Option A: `SecRuleRemoveById 933120` in `<LocationMatch "wc-ajax=update_order_review">` at `/etc/httpd/modsecurity.d/local_rules/monsterrodholders.conf`. Or Option D: `SecRuleUpdateTargetById 933120 "!ARGS:post_data"`. Then verify with live browser checkout + $1 Stripe txn.
+- [ ] **Re-evaluate PPCP decision** — PPCP deactivation was NOT the spinner fix. Still the right call because it had no credentials, but the original incident (spinner) will recur on re-enable unless WAF fix is applied first. Decide: (a) onboard PPCP with real creds, or (b) `wp plugin delete woocommerce-paypal-payments` to remove entirely.
+- [ ] **Browser QA: $1 Stripe transaction** — after WAF fix, via real browser on `https://50.28.2.199.nip.io/checkout/`, verify no spinner, Stripe card field mounts, order completes, refund from dashboard
 - [ ] **Audit + remove WPForms Lite** — 2 orphaned forms, no published references; needs theme/widget grep before `wp plugin delete wpforms-lite`
 - [ ] **Fix `./scripts/wp.sh`** — add `php -d memory_limit=512M` (becomes unnecessary if WPForms Lite is removed)
 - [ ] **Audit duplicate Privacy Policy and Refund/Returns Policy pages** — same `-2` pattern may apply
 - [ ] **Rotate Stripe live secret** — `sk_live_518eq7…` leaked in earlier `wp option get`; treat as compromised
+- [ ] **Investigate other WAF-blocked endpoints** — if 933120 blocks `update_order_review`, it may also block other WC AJAX endpoints that forward `post_data`. Worth a `grep 933120 /var/log/httpd/error_log` audit.
 <!-- /agent:pending -->

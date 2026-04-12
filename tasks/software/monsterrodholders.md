@@ -416,7 +416,7 @@ Done. mrh-performance **v1.5** is live on production with the footer-logo seed, 
 
 The footer logo is too big...it should be the same size as the header logo.
 ❯ ![2026-04-11_22-36.png](../../../../../Pictures/agent-loop/2026-04-11_22-36.png)
-### Re: Footer logo size matched to header (HEAD)
+### Re: Footer logo size matched to header
 
 Fixed. The footer widget was rendering the full-width 2048w image at column width. Constrained it via CSS + srcset hint to match the header (~75px tall).
 
@@ -441,25 +441,32 @@ Fixed. The footer widget was rendering the full-width 2048w image at column widt
 - Submodule `a8c32cf0` pushed; parent pointer bumped; container force-recreated and cache flushed
 
 **Hard-refresh** (Cmd/Ctrl+Shift+R) and the footer logo should now match the header. If it still looks off, let me know the exact pixel size you want and I'll tune the cap.
-<!-- agent:boundary:727c210f -->
+
+❯ Remove the aside item that contains the text "New Cloth Technologies"
+❯ ![img_20.png](img_20.png)
+### Re: Remove "New Cloth Technologies" aside (HEAD)
+
+Found it: shop page has a Stackable column `.stk-3ef9764` containing `h4#new-cloth-technologies` + Mauris-lorem text + image. Hidden it via CSS in `mrh-performance.php` v1.7:
+
+```css
+.wp-block-stackable-column:has(#new-cloth-technologies),
+.stk-3ef9764 { display: none !important; }
+```
+
+`:has()` is the stable selector (tied to the block id); `.stk-3ef9764` is a fallback in case `:has()` is unavailable.
+
+**Deployed:**
+- mrh-performance v1.7 pushed → submodule `58101086`
+- Server pulled, wordpress container force-recreated, cache flushed
+- Verified rendered HTML contains the hide rule
+- Parent pointer bumped
+
+Hard-refresh `/shop/` and the "New Cloth Technologies" aside should be gone.
+<!-- agent:boundary:faaaa8c2 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **Match footer logo size to header (~75px)** — CSS cap + srcset sizes fix in mrh-performance v1.6, deployed and verified
-- [x] **Restore footer logo (round 2)** — `widget_block[9]` repopulated with image 69673; seed logic in `mrh-performance.php` v1.5 so it self-heals after resets
-- [ ] *(Optional)* Audit 13 excluded products (7 non-published + 6 hidden via `catalog_visibility`) if you expected all 64 to appear
-- [x] **Remove pagination from /shop/** — mrh-performance v1.4 deployed (`loop_shop_per_page = -1`)
-- [x] **Fix product image heights** — mu-plugin deployed, CSS confirmed in live HTML
-- [x] **Document SSH + deploy** — `AGENTS.md` added to `src/monsterrodholders-dev`
-- [x] **Replace footer logo Arderobe → MonsterRodHolders** — done and hardened via seed + size cap
-- [x] **Add category sidebar to /shop** — 4-tile grid via mu-plugin
-- [x] **Swap Boat Accessories → HydroWeb Landing Nets**
-- [x] **Swap Racks and T-Bars → River Anchors**
-- [x] **Fix Rod Holders category image** (term 210 thumbnail_id → 77336)
-- [x] **Restore `All Products` heading** above products list
-- [x] **Remove duplicate hero `Popular Categories`** from Shop page block content
-- [x] **Enable Blocksy sidebar on /shop/ and /blog/**
-- [x] **Remove custom layout CSS** — header compact, main below header, aside below header
-- [ ] *(Optional)* Wrap shop product grid in `<article>` via template override if strict article+aside parity is required
+- [x] **Hide "New Cloth Technologies" aside column on /shop/** — mrh-performance v1.7, deployed and verified
 <!-- /agent:pending -->

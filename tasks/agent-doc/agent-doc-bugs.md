@@ -16,7 +16,7 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange patch=append -->
 CRDT compact fix released (v0.32.1). Root cause: stale CRDT state after compact operation. Fix: refresh CRDT from post-compact content. Automated tests: 262 pass (compact_preserves_pending, boundary_marker_preservation, working_tree_consistency). All deliverables shipped: crates.io, GitHub Release, binary installed.
-<!-- agent:boundary:d0641654 -->
+<!-- agent:boundary:0172083d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -179,7 +179,7 @@ The markup is `li.product > figure > a.ct-media-container > img.wp-post-image` w
 - `max-height: 300px; max-width: 100%; width: auto; height: auto; object-fit: contain` → image scales to fit with full visibility, centered
 
 Option B will confirm this logic without needing a deploy. I recommend trying B first — it's 30 seconds — then circling back to fix the mu-plugin deploy chain so it sticks.
-<!-- agent:boundary:1fc10775 -->
+<!-- agent:boundary:b6e30774 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

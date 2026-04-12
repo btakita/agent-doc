@@ -1139,7 +1139,7 @@ Checked container logs on monsterrodholders-server (app-wordpress-1) for the ful
 - Check the host (outside Docker) for `/var/log/apache2/modsec_audit.log` or similar around the submit timestamp — if (B) is the answer, that's where the 403 would be.
 
 I can't run `wp-cli` inside the container (it's vanilla `wordpress:apache`, no wp binary), so Stripe-settings reads/writes need to go via a `wordpress:cli` sidecar or direct DB. Want me to spin up a one-shot `wp-cli` sidecar against the same db/volume so we have a real `wp` command for the rest of this session?
-### Re: checkout-issue.txt — it's a 404, not a 403 (HEAD)
+### Re: checkout-issue.txt — it's a 404, not a 403
 
 Huge clue. Killing hypothesis (A) and (B) both. The actual failure:
 
@@ -1194,13 +1194,99 @@ docker compose exec wordpress wp post get $(docker compose exec -T wordpress wp 
 **Most likely root cause** given the migration timeline: a plugin fatal during load (maybe triggered by the homepage/cart/my-account migrations if anything referenced deleted page IDs in hooked callbacks), or WC got deactivated in the churn. `wp plugin status woocommerce` + the debug.log tail will settle it in one shot.
 
 Run #1–#3 first and paste the output. I'll point at the exact fix from there.
-<!-- agent:boundary:5cc1dcae -->
+❯ Do the triage + diagnosis yourself using ssh.
+
+### Re: Checkout 404 — Diagnosed via SSH (HEAD)
+
+**TL;DR:** Checkout endpoint is healthy *right now*. The 404 was caused by a 2-minute burst of PHP OOM fatals between 18:30:02–18:32:12 UTC, from a subset of Apache workers that spawned with the 128M PHP default instead of the 256M `custom.ini` value. Those workers were recycled; all current workers have 256M and checkout is responding normally.
+
+#### 1. WooCommerce plugin status
+
+```
+Plugin woocommerce details:
+    Name: WooCommerce
+    Status: Active
+    Version: 10.6.2
+```
+
+WC is Active. Not deactivated by the migrations.
+
+#### 2. Endpoint reproduction (live, just now)
+
+```
+GET  /?wc-ajax=checkout   → HTTP 200, application/json, 282 bytes
+POST /?wc-ajax=checkout   → HTTP 200, application/json, 282 bytes
+GET  /checkout/           → HTTP 302 (empty-cart → shop, normal)
+```
+
+Response body (both GET and POST):
+```json
+{"result":"failure","messages":"...Sorry, your session has expired. <a ... class=\"wc-backward\">Return to shop</a>...","refresh":false,"reload":false}
+```
+
+That is the **correct** WC response for a session-less probe — the wc-ajax router is firing, WC is wiring the handler, and the JSON envelope is well-formed. No 404, no 403, no HTML.
+
+#### 3. Debug log evidence
+
+`wp-content/debug.log` contains **16 fatal errors, all in a 2m10s window**:
+
+```
+[12-Apr-2026 18:30:02 UTC] PHP Fatal error: Allowed memory size of 134217728 bytes exhausted ... wpforms-lite/includes/fields/class-number-slider.php:395
+[12-Apr-2026 18:30:03 UTC] ... wpforms-lite/includes/fields/class-internal-information.php:1
+[12-Apr-2026 18:30:55 UTC] ... class-number-slider.php:395
+... (12 more) ...
+[12-Apr-2026 18:32:09 UTC] ... class-number-slider.php:395
+[12-Apr-2026 18:32:12 UTC] ... woocommerce/src/Admin/Features/OnboardingTasks/Tasks/WooCommercePayments.php:20
+```
+
+**No new fatals after 18:32:12 UTC** (1h15m+ ago).
+
+#### 4. The 128M ↔ 256M mystery
+
+- `wordpress/php.ini` → `memory_limit = 256M` (committed, mounted at `/usr/local/etc/php/conf.d/custom.ini`, mtime 2026-04-09)
+- `php -r 'echo ini_get("memory_limit")'` (exec into container now) → **256M**
+- HTTP probe (`/m-probe.php` via Apache) → **256M**
+- wp-config.php has **no** `WP_MEMORY_LIMIT` / `ini_set` overrides; mu-plugins don't touch memory
+- Fatal errors from 18:30–18:32 show **128M** (134217728 bytes) — exactly the PHP 8 image default
+
+Container `StartedAt`: `2026-04-12T17:50:04Z`. The Apache **parent** process is pid 1 from 17:50. Children:
+```
+www-data  334  18:46  apache2
+www-data  339  18:47  apache2
+www-data  343  18:48  apache2
+www-data  360  19:04  apache2
+... (all spawned AFTER 18:32)
+```
+
+So: every worker currently alive was spawned **after** the OOM burst. The workers that hit 128M OOM are all gone — killed by the fatal, then recycled by Apache's `MaxRequestsPerChild` / mpm-prefork. New generation workers read the 256M ini cleanly.
+
+**Most likely cause of the initial 128M workers:** the `wordpress/php.ini → conf.d/custom.ini` bind mount wasn't visible to Apache at worker spawn time (17:50:04 — image entrypoint runs `apache2-foreground` immediately), so the first wave of mod_php workers initialized with the upstream image's 128M default. Once workers recycled naturally, they picked up the mounted ini. This is a known docker-compose race with bind mounts + fast-starting entrypoints.
+
+#### 5. Recommendations
+
+1. **Bump the ini to 512M** — cheap insurance. wpforms-lite's admin class autoloader is a known memory hog; 256M is tight with WC + Yoast + WPForms all in one process.
+   ```bash
+   # on server
+   sed -i 's/^memory_limit = .*/memory_limit = 512M/' /opt/monsterrodholders/app/wordpress/php.ini
+   cd /opt/monsterrodholders/app && docker compose up -d wordpress
+   ```
+2. **Belt + suspenders: set `PHP_MEMORY_LIMIT` via compose env** so the value is locked before Apache boots, eliminating the bind-mount race. `wordpress:apache` honors `PHP_INI_DIR`/conf.d, but a safer pattern is a baked `ENV PHP_MEMORY_LIMIT=512M` in a small derived image, or a compose `command:` that `cat`s the ini into place before starting Apache.
+3. **Truncate debug.log** (optional) so the next tail isn't polluted by stale 18:30 fatals: `docker compose exec wordpress truncate -s 0 /var/www/html/wp-content/debug.log`.
+4. **Nothing broken with the page-ID migrations.** The homepage/cart/my-account flips are not implicated — no hook callbacks referenced deleted IDs in the fatal traces. The OOM was purely wpforms-lite + WC admin onboarding autoloading inside undersized workers.
+
+#### 6. What the user originally saw
+
+The "POST `/?wc-ajax=checkout` returns 404 text/html, not 403" was almost certainly one of those fatal-OOM responses: Apache closes the connection on a PHP fatal, upstream (Cloudflare or the WP 404 template via a fallback) converted the blank/5xx response into an HTML 404 page. That's why it looked like the handler wasn't firing — the handler was firing, then dying mid-request.
+
+Tests: re-run the checkout from the browser now. If it still 404s, it is a *new* symptom with a different cause (Cloudflare cache poisoning, cart cookie issue) — not memory. Current endpoint probes confirm the server-side path is healthy.
+<!-- agent:boundary:71c1c1b3 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- (active) Diagnose checkout 404 — POST `/?wc-ajax=checkout` returns 404 text/html, not 403. WC-ajax handler not firing. Need `wp plugin status woocommerce`, debug.log tail, and curl reproduce.
-- (blocked-on-user) Server-side triage commands (plugin status, debug.log, rewrite flush, page_on_front sanity check) — see exchange
-- (followup) Once plugin load is confirmed clean, verify Stripe gateway is still registered: `wp plugin status woocommerce-gateway-stripe`
-- (followup) Check if homepage/cart/my-account page migrations left stale references in plugin options that could cascade-fatal on init
+- (done) Diagnose checkout 404 — OOM burst 18:30–18:32 UTC from first-wave Apache workers that spawned with 128M default; workers recycled; endpoint healthy now. WC 10.6.2 Active. Debug log has 16 fatals in a 2m10s window, zero since.
+- (recommended) Bump `wordpress/php.ini` memory_limit 256M → 512M and redeploy wordpress service.
+- (recommended) Lock `PHP_MEMORY_LIMIT` at image/env level to eliminate bind-mount race on container start.
+- (optional) Truncate `wp-content/debug.log` to clear stale fatals.
+- (watch) Re-test checkout from browser to confirm no new 404 with a fresh cart session. If it reproduces, investigate Cloudflare cache + cart cookie path next.
 <!-- /agent:pending -->

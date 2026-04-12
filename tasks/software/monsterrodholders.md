@@ -1495,7 +1495,7 @@ Replacement token: `[REDACTED_MARIADB_PW]`. Verification pass (`grep -r` for the
 - **claudescore / cloud-side session storage** — if this session is being shared to claudescore.com or any other remote log destination, the scrub only covers the local disk copy. Check with the skill owner.
 
 **Follow-up action (still on you):** rotate `MARIADB_ROOT_PASSWORD` + `MARIADB_PASSWORD` in `docker-compose.yml` / `.env`, update `wp-config.php`, `docker compose up -d --force-recreate`. Now that the passwords are in passage, you can reference them via `$(passage btak/monsterrodholders/MARIADB_PASSWORD)` in future compose env files instead of inlining.
-<!-- agent:boundary:be280521 -->
+<!-- agent:boundary:f00a2e15 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

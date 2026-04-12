@@ -780,7 +780,7 @@ PPCP is fully unhooked from the checkout pipeline. Stripe's classic integration 
 4. Before testing, confirm `/checkout/` still loads cleanly (the bad state we just escaped from was onboarding=completed but credentials=empty)
 
 Or if you'd rather not use PayPal at all, I can `wp plugin delete woocommerce-paypal-payments` once you confirm.
-<!-- agent:boundary:b2204398 -->
+<!-- agent:boundary:7fac2ecc -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

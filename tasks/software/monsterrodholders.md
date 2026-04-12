@@ -281,7 +281,7 @@ ssh monsterrodholders-server "cd /opt/monsterrodholders/app && git pull && docke
 **Recommendation:** Try **Option A first** — it's instant, reversible, and doesn't require a redeploy. If you prefer it permanent in code, go with **Option C**.
 
 Which approach works for you?
-<!-- agent:boundary:303a9bf3 -->
+<!-- agent:boundary:68f2ea16 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

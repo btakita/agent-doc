@@ -359,7 +359,7 @@ wp post list --post_type=product --meta_key=_visibility --fields=ID,post_title,p
 ```
 
 Otherwise, pagination is done. Hard-refresh `/shop/` to confirm visually.
-<!-- agent:boundary:bfcc4c91 -->
+<!-- agent:boundary:e7bb657f -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

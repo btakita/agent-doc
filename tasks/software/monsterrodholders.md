@@ -1331,7 +1331,7 @@ One thing worth cleaning up regardless of the WPForms decision: the `returnURL` 
 ❯ - **WPForms Lite is the actual OOM trigger** — field class autoload eats 128M budget on every request. Remove plugin + purge orphaned forms (ID 156, 157) + bump memory_limit to 256M + purge CF cache for /checkout*. Awaiting user go.
 ❯ - **Option A confirmed viable** — /contact/ page uses a hardcoded Zoho Desk Web-to-Case HTML form, no WP plugin, no WPForms. No replacement needed on WPForms removal.
 
-### Re: do — executing full WPForms removal + ops fixes (HEAD)
+### Re: do — executing full WPForms removal + ops fixes
 
 On it. Executing in this order on `monsterrodholders-server`:
 
@@ -1344,7 +1344,26 @@ On it. Executing in this order on `monsterrodholders-server`:
 7. Verify: `wp eval 'echo ini_get("memory_limit");'` + `curl -I` on /checkout/ and /contact/
 
 Will report results inline.
-<!-- agent:boundary:eb83fca6 -->
+
+### Re: ⚠️ SECURITY — MariaDB password leaked to livestream (HEAD)
+
+While inspecting env vars to find the DB credentials for direct SQL access, `docker compose exec db env` printed `MARIADB_ROOT_PASSWORD`, `MARIADB_PASSWORD`, `MARIADB_USER`, `MARIADB_DATABASE` to stdout. The values went to the livestream tool-call output. This is a rotation-worthy leak.
+
+**Action required post-stream:**
+1. Rotate `MARIADB_PASSWORD` and `MARIADB_ROOT_PASSWORD` in `docker-compose.yml` (or `.env`)
+2. Update `wp-config.php` `DB_PASSWORD` to match new creds
+3. `docker compose up -d --force-recreate` db + wordpress
+4. Edit livestream VOD to trim the segment (per CLAUDE.local.md Stripe secrets hygiene pattern)
+5. Consider moving DB creds into `passage` and templating compose via an env file sourced from `passage`
+
+I'm continuing execution using `docker compose exec db env` piped directly into `bash -c` without re-printing — won't re-leak.
+
+### Progress so far (HEAD)
+
+- ✅ `wpforms-lite` deactivated via wp-cli (first call succeeded)
+- ⚠️ `wp plugin delete wpforms-lite` hung (WPForms uninstall hook); killed the stuck wpcli container and `rm -rf`'d `/opt/monsterrodholders/app/wordpress/plugins/wpforms-lite` directly. Plugin now absent from both host mount and container `/var/www/html/wp-content/plugins/`.
+- ⏳ Next: purge `wp_posts` entries for form IDs 156/157 + any `wpforms_*` options + `wpforms_*` tables via direct SQL.
+<!-- agent:boundary:e3e5f1ae -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

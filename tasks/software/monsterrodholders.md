@@ -713,7 +713,7 @@ Short answer: **nothing on this site is actively using it.** It came along with 
 - (c) replace any found footer newsletter signup with a minimal native form or a lighter plugin (e.g., a plain `<form>` POSTing to a Mailchimp/MailerLite endpoint)?
 
 Or just delete it and fix anything that breaks afterward — your call.
-<!-- agent:boundary:227618d1 -->
+<!-- agent:boundary:c9eb17fc -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

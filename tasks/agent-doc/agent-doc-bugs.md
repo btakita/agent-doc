@@ -308,7 +308,7 @@ Contrast this with Option A (file-based + preflight): preflight checks for pendi
 Option C's strength (no polling, integrates with existing infrastructure) is offset by making the binary a **passive requester** instead of an **active orchestrator**. With Option A, `agent-doc cleanup` is a single blocking command that guarantees a result before returning. With Option C, it becomes "plant a seed and hope the garden grows" — the binary writes the request and waits.
 
 **Hybrid mitigation:** Option C + timeout fallback. After writing the callback request, `agent-doc cleanup` starts a 5-second timer. If no response appears (detected via the hook writing `response.json`), it falls back to spawning `claude --print` for the summarization. This gives you the best of both: cheap in-session processing when the hook fires fast, reliable subagent fallback when it doesn't.
-<!-- agent:boundary:1dcf3328 -->
+<!-- agent:boundary:103a1383 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

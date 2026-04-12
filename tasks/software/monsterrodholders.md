@@ -1011,7 +1011,7 @@ That playbook is now in SPEC.md + memory. You shouldn't have to teach me this tw
 ---
 
 **Next real-browser QA to close out the fix:** run a real $1 Stripe transaction end-to-end on `https://50.28.2.199.nip.io/checkout/`, confirm order completes, then refund from the Stripe dashboard. Everything I can verify from chromium-bridge is green; the remaining validation is human-in-the-loop card entry. Want me to walk through it with chromium-bridge driving a test card?
-<!-- agent:boundary:1e491740 -->
+<!-- agent:boundary:94bec5ed -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

@@ -163,7 +163,7 @@ Running now...
 8. **GitHub Release:** ✅ Created with prebuilt binary: https://github.com/btakita/agent-doc/releases/tag/v0.32.1
 
 **Next:** Manual verification that compact no longer corrupts pending items. Recommend testing on a CRDT doc with pending items + running compact.
-<!-- agent:boundary:6f673709 -->
+<!-- agent:boundary:07031595 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

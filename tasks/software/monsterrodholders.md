@@ -293,7 +293,7 @@ aside#sidebar .woocommerce-widget-price-filter:last-of-type .price-filter-amount
 - Cache flushed
 
 Hard-refresh `/shop/` to confirm the sidebar changes are visible.
-<!-- agent:boundary:282becb5 -->
+<!-- agent:boundary:83667dcd -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

@@ -29,7 +29,7 @@ Exchange archived (446 lines) → `pre-compact-8` tag. Previous content recovera
 - "compress doc" discussion — resolved: no `compress` subcommand exists, `compact` is the correct command
 
 **Open item:** Add `compress` as a binary alias for `compact`?
-<!-- agent:boundary:63890bbc -->
+<!-- agent:boundary:5b90a255 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

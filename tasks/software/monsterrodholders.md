@@ -30,7 +30,7 @@ Exchange compaction: consolidates shop page layout iterations (v1.8-v1.17), Popu
 ❯ - **Livestream VOD trim** — the Stripe settings dump segment still needs manual trim in post-production.
 
 
-### Re: Sitemap comparison + SEO safety for transition (HEAD)
+### Re: Sitemap comparison + SEO safety for transition
 
 **Test results** (staging is HTTPS only — http://50.28.2.199.nip.io redirects to https://):
 
@@ -64,10 +64,22 @@ Exchange compaction: consolidates shop page layout iterations (v1.8-v1.17), Popu
 
 **My recommendation**: keep Yoast, disable author archives, and add `Sitemap: https://monsterrodholders.com/sitemap_index.xml` to robots.txt once the flip is done. Net SEO impact during transition: neutral to positive (Yoast generally improves schema markup and meta coverage vs core-only).
 
-### Re: Livestream VOD trim (HEAD)
+❯ write the SEO report to a private gist
+
+### Re: Livestream VOD trim
 
 Noted — that's a manual post-production step on your end. I've left it in pending.
-<!-- agent:boundary:e41d90bd -->
+
+### Re: SEO report → private gist (HEAD)
+
+Created as a secret gist:
+
+**https://gist.github.com/btakita/f02a1aba87607629ca158c4098b4a39a**
+
+Contents: full sitemap comparison table, root cause (Yoast vs WP core), structural diff, 4-point SEO risk assessment (indexed URLs, author archives leak, Search Console resubmission, canonical domain handling), recommendation, and action items. Local copy at `/tmp/monsterrodholders-sitemap-seo-report.md`.
+
+Secret gists are unlisted but anyone with the URL can view — don't share the link publicly if any of the content is sensitive. Nothing in the report exposes credentials or internal infra beyond what's already in the task doc.
+<!-- agent:boundary:e477386f -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

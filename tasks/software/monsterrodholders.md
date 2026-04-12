@@ -1416,7 +1416,7 @@ I'd also recommend rotating proactively since you also have the full `woocommerc
 - `woocommerce_stripe_settings` → webhook URL likely references nip.io; update during cutover
 - 12 other pages contain `nip.io` in `post_content` → run `wp search-replace` during cutover (per CLAUDE.local.md page migration runbook)
 - `monsterrodholders_custom_code` option → check for hardcoded nip.io references
-<!-- agent:boundary:8fe428f7 -->
+<!-- agent:boundary:b8ec3629 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

@@ -168,7 +168,7 @@ Ready for you to test in a live session. The binary is installed — try adding 
 | `agent-doc stream` | Not yet | Would need separate wiring |
 
 Want me to also wire env into the stream path?
-<!-- agent:boundary:5169f4c6 -->
+<!-- agent:boundary:4bfd0e56 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

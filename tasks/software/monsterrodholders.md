@@ -303,7 +303,7 @@ Paginating to 12 products per page saves minimal bandwidth (just HTML markup —
 
 ❯ 64 Products. Remove pagination by setting loop_shop_per_page to -1?
 
-### Re: `loop_shop_per_page = -1` (HEAD)
+### Re: `loop_shop_per_page = -1`
 
 Yes — `-1` is the standard "no limit" sentinel in WP_Query / WooCommerce and works in the `loop_shop_per_page` filter. With 64 products it's safe: one page, no pagination UI, no cap to maintain as inventory grows.
 
@@ -323,12 +323,49 @@ That single filter is sufficient — when `posts_per_page = -1`, WooCommerce ret
 3. SSH deploy via `docker compose up -d --force-recreate wordpress`
 
 Say "go" and I'll do all three.
-<!-- agent:boundary:f5457381 -->
+❯ go
+
+### Re: Deployed (HEAD)
+
+Done. mrh-performance v1.4 is live on production with `loop_shop_per_page = -1`.
+
+**What shipped:**
+- `src/monsterrodholders-dev/wordpress/mu-plugins/mrh-performance.php` — added `loop_shop_per_page` filter returning `-1`
+- Submodule commit: `db89dba4` — pushed to origin
+- Parent pointer bumped
+- Server rebased `/opt/monsterrodholders/app` and ran `docker compose up -d --force-recreate wordpress`
+- `wp cache flush` ran clean
+
+**Live verification (`curl https://50.28.2.199.nip.io/shop/`):**
+- `woocommerce-pagination` / `page-numbers` markup: **absent** ✅
+- `type-product` li entries rendered: **51** on a single page ✅
+
+**About the count (51 on page vs 64 you mentioned):**
+
+wp-cli breakdown:
+- `wp post list --post_type=product` (all statuses): **64** ← your number
+- `wp post list --post_type=product --post_status=publish`: **57**
+- Rendered on `/shop/`: **51**
+
+So of your 64 total:
+- 7 are draft/private/trash/pending (not published)
+- 6 more are published but hidden from the catalog (WooCommerce `catalog_visibility` = `hidden` or `search`)
+- 51 are the published, catalog-visible products — all now on one page
+
+If you expected all 64 to appear, the remaining 13 are intentionally excluded via WooCommerce's own visibility settings, not by pagination. Want me to audit which products are hidden and why? I can run:
+
+```bash
+wp post list --post_type=product --meta_key=_visibility --fields=ID,post_title,post_status,meta_value
+```
+
+Otherwise, pagination is done. Hard-refresh `/shop/` to confirm visually.
+<!-- agent:boundary:7f8add00 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Remove pagination from /shop/** — approach chosen: `loop_shop_per_page` filter returning `-1` in mrh-performance mu-plugin. Awaiting "go" to implement + deploy.
+- [ ] *(Optional)* Audit 13 excluded products (7 non-published + 6 hidden via `catalog_visibility`) if you expected all 64 to appear
+- [x] **Remove pagination from /shop/** — mrh-performance v1.4 deployed (`loop_shop_per_page = -1`). All 51 published+visible products render on one page; pagination markup absent. Submodule `db89dba4`, parent pointer bumped.
 - [x] **Fix product image heights** — mu-plugin deployed via SSH, CSS confirmed in live HTML (`mrh-product-grid` block present). Pending your visual confirmation after hard-refresh.
 - [x] **Document SSH + deploy** — `AGENTS.md` added to `src/monsterrodholders-dev` (`2eaa9e61`), parent pointer bumped
 - [x] **Add category sidebar to /shop** — 4-tile grid via mu-plugin

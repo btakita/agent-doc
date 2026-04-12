@@ -22,7 +22,7 @@ Operational task document for agent-loop workspace management.
 <!-- agent:exchange patch=append -->
 Completed releases: corky v0.26.3 (7-platform GitHub Release, fixed CI through 5 iterations: OpenSSL, host libssl-dev, aarch64 features), agent-kit v0.4.0 (GitHub Release). All submodules committed and pushed (84b98b52). Pending: litellm proxy + local model testing.
 ❯ I want to avoid bloating my context. Please help me optimize my /context. If I disable all plugins, can I have the installed plugins activate on demand?
-### Re: optimizing /context, plugins on demand (HEAD)
+### Re: optimizing /context, plugins on demand
 
 **Short answer:** Plugins themselves can't "activate on demand" — they load at session start. BUT individual *tools* and *skills* within plugins already use lazy loading patterns. The big wins come from disabling MCP servers and unused plugins, not from on-demand activation.
 
@@ -57,11 +57,17 @@ Run `/context` to see the breakdown. Typical heavy hitters:
 ```
 
 Want me to audit your `~/.claude/settings.json` and `MEMORY.md` for trim opportunities? I can identify which MCP servers / plugins are heaviest.
-<!-- agent:boundary:c60b529f -->
+❯ yes
+### Re: context audit (HEAD)
+
+Starting the audit. I need one thing from you first:
+
+**Run `/context` in this terminal** and let me know when you're done. I can't run slash commands myself, but once I see the breakdown I'll audit everything — settings.json, MCP servers, plugins, MEMORY.md, CLAUDE.md files.
+<!-- agent:boundary:e2bb42e3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Audit ~/.claude/settings.json for unused MCP servers and plugins (context optimization)
+- [>] **Context audit**: waiting for `/context` output from user
 - [ ] Investigate deferred-tools config — confirm whether it's enabled in settings.json or session-default
 - [ ] Run litellm proxy pointing at vllm
 - [ ] Test `claude` against local model via `ANTHROPIC_BASE_URL`

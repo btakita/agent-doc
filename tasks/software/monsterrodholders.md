@@ -160,7 +160,7 @@ Following any of them lands at `https://50.28.2.199.nip.io/sitemap_index.xml` â†
 Backup is at `/etc/httpd/conf.d/00-monsterrodholders-proxy.conf.bak-20260412` in case you want to revert.
 
 One more thing worth noting: the user-side symptom for the three URLs was 404 (not 403), which was because `mod_rewrite` on the InterWorx default would try to serve the literal path `/sitemap.xml` out of `/var/www/html` and fail. Root hit 403 because `/var/www/html` has directory listing disabled and no index file. Both symptoms traced back to the same vhost-selection bug.
-<!-- agent:boundary:e3233d22 -->
+<!-- agent:boundary:be605d04 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

@@ -496,6 +496,8 @@ Verification against new host (nip.io):
 - `https://50.28.2.199.nip.io/author/catfishdude/` → **200** ✓
 - `https://50.28.2.199.nip.io/author/catfishinginfogmail-com/` → **404** ✓
 
+❯ Is this url active on the old site? If yes, we should do a 301 to /catfishdude/
+
 Against the live Flywheel site, both URLs still return 200 because Flywheel is a separate install that we haven't touched. When you flip DNS, the new host's nicename will be live and the email-derived slug won't exist.
 
 **Secondary catfish user for context:** there's also user ID `66923` (`catfishinfo`, `berkes06@yahoo.com`) with nicename `catfishinfo` — that's a different person and already has a clean slug. No action needed on that one.
@@ -508,6 +510,8 @@ You asked earlier about a brief-window 301 from the old slug to the new one. Sin
 
 Low priority — Google handles 404-author-archive cleanup reasonably quickly.
 
+❯ Do it.
+
 ### Re: Investigate live Flywheel site (compromise claim)
 
 The 16-spam-posts claim came from the old audit of the Flywheel site. To investigate that:
@@ -517,18 +521,57 @@ The 16-spam-posts claim came from the old audit of the Flywheel site. To investi
 **Path B — Flywheel dashboard:** Flywheel has its own terminal and wp-cli via their web UI, but that needs your Flywheel account login (different from the WP admin login). If you give me the Flywheel terminal URL I can use that path instead — faster and scriptable.
 
 I lean **Path A** since you explicitly said "Use chromium-bridge or wp api if possible" and gave me the passage keys for the WP admin creds.
-<!-- agent:boundary:30f22eca -->
+
+❯ Do Path A
+
+### Re: Old author URL active on live Flywheel? (HEAD)
+
+**Yes — 200 on the live site, user ID 3.**
+
+```
+$ curl -sI https://monsterrodholders.com/author/catfishinginfogmail-com/
+HTTP/2 200
+link: <https://monsterrodholders.com/wp-json/wp/v2/users/3>; rel="alternate"
+x-fw-server: Flywheel/5.1.0
+```
+
+And `/author/catfishdude/` returns **404** on the live site (that nicename only exists on the new host). So the 301 is genuinely useful post-flip — Google has the email-derived slug indexed, and we want to redirect it to the clean one rather than 404.
+
+### Re: Implement the 301 (HEAD)
+
+Queuing via WP Redirection on the new host now (works independent of DNS — fires when a request hits WordPress, which it will after the flip). Running next:
+
+```bash
+ssh monsterrodholders-server 'cd /opt/monsterrodholders/app && docker compose exec -T wp wp --allow-root redirection add \
+  --source="/author/catfishinginfogmail-com/" \
+  --target="/author/catfishdude/" \
+  --code=301 \
+  --group=1'
+```
+
+If the `redirection` wp-cli subcommand isn't available (plugin not installed / wp-cli extension missing), fallback: add to `.htaccess` inside the container or bundle into the same WP Redirection CSV import I'm already building for the `-2` page redirects.
+
+### Re: Path A — chromium-bridge login to Flywheel WP admin (HEAD)
+
+Starting now. Plan:
+
+1. Pull creds: `passage btak/monsterrodholders/wp-admin/{user,password}`
+2. `chromium-bridge` → navigate to `https://monsterrodholders.com/wp-login.php`
+3. Fill login form, submit
+4. Navigate to `Posts → All`, filter by `post_status=publish`, then by `category=casino` if that category exists
+5. Also check `Users → All` for unknown admins, and `Plugins` for anything unexpected
+6. Screenshot + structured list of findings back to this doc
+
+Writing results to `### Re: Flywheel compromise audit` in the next cycle. This may take a few minutes — I'll flush partial findings as I go.
+<!-- agent:boundary:c21b02d8 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Flywheel: login via chromium-bridge to `monsterrodholders.com/wp-admin` and audit real spam posts / compromise vector
-- [ ] Flywheel: check `wp core verify-checksums` + `.htaccess` + `wp-config.php` mtime (blocked on Flywheel terminal access or chromium-bridge)
-- [ ] New host: delete orphan `category/casino` taxonomy term (ID 677, count=0)
-- [ ] Draft inbound-traffic map for 48 theme-demo slugs before deletion (`home-2/3/4`, `carousel`, `typography`, etc.)
-- [ ] Draft `-2` → canonical redirect CSV for WP Redirection import (cart/my-account/checkout/shop)
-- [ ] Post-flip: add 301 `/author/catfishinginfogmail-com/` → `/author/catfishdude/` on new host
-- [ ] Clarify cut-off instruction #1 ("Use the ...") — current read: "Use the wp-admin login" = Path A above
-- [x] Rename user 3 nicename → `catfishdude` on new host
-- [x] Set `test-product-1` (ID 86212) to Yoast noindex + exclude-from-catalog/search on new host
+- [ ] Flywheel: chromium-bridge login to `monsterrodholders.com/wp-admin` — IN PROGRESS this cycle
+- [ ] Flywheel: audit real spam posts / compromise vector (depends on login)
+- [ ] Flywheel: check `wp core verify-checksums` + `.htaccess` + `wp-config.php` mtime (blocked on terminal or chromium-bridge)
+- [ ] New host: add WP Redirection rule `/author/catfishinginfogmail-com/` → `/author/catfishdude/` (301) — executing this cycle
+- [ ] Draft `-2` → canonical redirect CSV for WP Redirection import (cart/my-account/checkout/shop + catfish author)
+- [ ] Post-flip: Search Console resubmission for cleaned-up author slug + sitemap
 <!-- /agent:pending -->

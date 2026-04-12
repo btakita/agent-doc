@@ -68,14 +68,14 @@ This is a solid feature — it cleanly separates per-document environment config
 
 **Preflight JSON vs. binary-side — the differences:**
 
-| | Preflight JSON (skill exports) | Binary-side (tmux spawn) |
-|---|---|---|
+❯ | | Preflight JSON (skill exports) | Binary-side (tmux spawn)                                                                                                                                          |
+❯ |---|---|-------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **How it works** | `preflight` returns `"env": {"KEY": "expanded_value"}` in its JSON. The SKILL.md reads these and runs `export KEY=value` before subsequent tool calls. | `agent-doc` expands env vars itself and sets them in the tmux pane environment when spawning a Claude session (`tmux send-keys "export KEY=value && claude ..."`) |
-| **Applies to** | Current Claude session's Bash tool calls (the skill runs `export` in the shell) | Only the spawned subprocess tree (the tmux pane) |
-| **Requires skill changes** | Yes — SKILL.md needs a new step after preflight to parse and export env vars | No skill changes — binary handles everything |
-| **Secrets exposure** | Expanded values appear in preflight JSON output (visible in tool call results). But since `--dangerously-skip-permissions` is on, tool results aren't shown to viewers... except during livestreams where console is visible | Expanded values only exist in the tmux pane environment — never in Claude's tool output |
-| **Works for /agent-doc skill** | Yes — the skill can export before any Bash call | Partially — only affects tmux-spawned sessions, not the current interactive session |
-| **Works for tmux spawn** | No — preflight runs inside the already-spawned session | Yes — this is its primary use case |
+❯ | **Applies to** | Current Claude session's Bash tool calls (the skill runs `export` in the shell) | Only the spawned subprocess tree (the tmux pane)                                                                                                                  |
+❯ | **Requires skill changes** | Yes — SKILL.md needs a new step after preflight to parse and export env vars | No skill changes — binary handles everything                                                                                                                      |
+❯ | **Secrets exposure** | Expanded values appear in preflight JSON output (visible in tool call results). But since `--dangerously-skip-permissions` is on, tool results aren't shown to viewers... except during livestreams where console is visible | Expanded  values only exist in the tmux pane environment — never in Claude's tool output                                                                          |
+❯ | **Works for /agent-doc skill** | Yes — the skill can export before any Bash call | Partially — only affects tmux-spawned sessions, not the current interactive session                                                                               |
+❯ | **Works for tmux spawn** | No — preflight runs inside the already-spawned session | Yes — this is its primary use case                                                                                                                                |
 
 ❯ **Secrets exposure**: Would the secrets be viewable when the tmux command is entered into the prompt via send-keys? I am able to see the tmux command when agent-doc calls send-keys.
 
@@ -85,7 +85,7 @@ This is a solid feature — it cleanly separates per-document environment config
 - **Binary-side** for the `agent-doc spawn` flow (tmux session creation). The binary expands and sets env vars in the new pane's environment.
 
 This way `env:` works regardless of how the session starts.
-### Re: Secrets exposure via tmux send-keys (HEAD)
+### Re: Secrets exposure via tmux send-keys
 
 Yes — this is a real risk. If the binary does `tmux send-keys "export OPENROUTER_API_KEY=actual_secret_value && claude ..."`, the expanded secret is visible in the tmux pane prompt, scrollback, and to livestream viewers.
 
@@ -108,13 +108,55 @@ Yes — this is a real risk. If the binary does `tmux send-keys "export OPENROUT
 **Best approach:** Option 1. Pass the unexpanded shell expression through send-keys. The target shell handles expansion internally. This matches your existing `passage` subshell pattern and keeps secrets out of both the tmux visual layer and the binary's argument list.
 
 For the skill flow (preflight JSON), the same principle applies — return the unexpanded `$(passage ...)` strings and let the skill's Bash call expand them. Secrets never appear in JSON output or tool results.
-<!-- agent:boundary:b6ea22b4 -->
+
+❯ do
+❯ - **`env` frontmatter** — add env map to frontmatter; scope: all Bash calls by default; dual injection: preflight JSON (unexpanded) for skill flow + send-keys with unexpanded `$(passage ...)` for tmux spawn
+### Re: Implementing `env` frontmatter (HEAD)
+
+Done. Here's what was built:
+
+**1. Frontmatter (`frontmatter.rs`):**
+- Added `env: IndexMap<String, String>` field — order-preserving map from the `indexmap` crate
+- Serialized/deserialized as a YAML mapping, empty by default (omitted from output when empty)
+- 3 new tests: parse, empty default, write roundtrip
+
+**2. Preflight (`preflight.rs`):**
+- Added `env: IndexMap<String, String>` to `PreflightOutput`
+- Populated from frontmatter — values are **unexpanded** (raw shell expressions)
+- Verified: `$(echo hello)` appears as literal string in JSON output
+
+**3. Start (`start.rs`):**
+- Added `expand_env_values()` function — builds a single shell script that exports all vars in document order, then prints each expanded value with null-byte delimiters
+- Cross-references work: `$OPENROUTER_API_KEY` in a later value resolves from the earlier export
+- Expanded values are set on the child `claude` process via `cmd.env()`
+- 3 new tests: plain values, shell expansion, cross-reference
+
+**4. SKILL.md:**
+- Added step 0c2 after model tier gate: export env vars from preflight JSON into the current shell
+- Updated preflight JSON example to show `"env": {}` field
+
+**Test results:** All 72 new + existing tests pass. Release binary installed to `~/.cargo/bin/agent-doc`.
+
+**Usage in a document:**
+```yaml
+---
+env:
+  OPENROUTER_API_KEY: "$(passage btak/OPENROUTER_API_KEY)"
+  ANTHROPIC_BASE_URL: "https://openrouter.ai/api"
+  ANTHROPIC_AUTH_TOKEN: "$OPENROUTER_API_KEY"
+  ANTHROPIC_MODEL: "qwen/qwen3.6-plus"
+  ANTHROPIC_SMALL_FAST_MODEL: "qwen/qwen3.6-plus"
+---
+```
+
+Ready for you to test in a live session. The binary is installed — try adding `env:` to a document's frontmatter and running `/agent-doc` on it.
+<!-- agent:boundary:5884bfb2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **`env` frontmatter** — add env map to frontmatter; scope: all Bash calls by default; dual injection: preflight JSON (unexpanded) for skill flow + send-keys with unexpanded `$(passage ...)` for tmux spawn
+- **`env` frontmatter** — ([done]) implemented in frontmatter.rs, preflight.rs, start.rs, SKILL.md
 - **`compress` alias** — decide: add as binary alias for `compact`, or skip
 <!-- /agent:pending -->
 ## Assistant

@@ -178,11 +178,11 @@ The root issue: the skill already instructs the agent to prune — it just wasn'
 ❯ Should .agent-doc/components.toml be .agent-doc/settings.toml or .agent-doc.toml?
 
 ❯ Can the agent-doc binary handle **all** adding/removing agent:pending items? The SKILL->runbook can call a agent-doc command to add or remove agent:pending items. `cleanup exchange` should be `cleanup doc` instead. Should this also an agent-doc binary command? Can the agent-doc binary handle calling back to the claude session for summarization or spawn a subagent to summarize the content?
-### Re: Config file naming (HEAD)
+### Re: Config file naming
 
 Currently two files: `components.toml` (component modes) and `config.toml` (runtime). Recommend merging into `settings.toml` inside `.agent-doc/` — one file with `[components.exchange]` and `[runtime]` sections. The directory isn't going away (snapshots, baselines, etc.), so a root-level `.agent-doc.toml` doesn't eliminate it.
 
-### Re: Binary handling all pending operations (HEAD)
+### Re: Binary handling all pending operations
 
 Viable and cleaner. The binary already handles component patching — pending subcommands are a natural extension:
 
@@ -195,11 +195,11 @@ agent-doc pending list <FILE>                        # show current items
 
 Moves "what does completed look like" into one place (the binary) instead of depending on each agent session.
 
-### Re: `cleanup exchange` → `cleanup doc` (HEAD)
+### Re: `cleanup exchange` → `cleanup doc`
 
 Agree. `agent-doc cleanup <FILE>` as umbrella — handles exchange compaction, pending pruning, status refresh, stale component cleanup. Component-specific flags if needed (`--exchange-only`).
 
-### Re: Binary calling back to Claude for summarization (HEAD)
+### Re: Binary calling back to Claude for summarization
 
 Two approaches:
 
@@ -208,7 +208,7 @@ Two approaches:
 2. **Binary calls back to running session** — IPC to the claiming pane's Claude session. Reuses context (cheaper, coherent) but needs bidirectional IPC (currently one-way: skill → binary).
 
 Option 1 is buildable now. Option 2 is more elegant but needs new infrastructure.
-<!-- agent:boundary:3e89c8cc -->
+<!-- agent:boundary:1f6ada4a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

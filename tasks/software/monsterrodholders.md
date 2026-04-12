@@ -439,7 +439,7 @@ Starting the browser session in the next step.
 ❯ Use chromium-bridge or wp api if possible.
 ❯ - [ ] Login to monsterrodholders.com/wp-admin via browser (credentials from passage)
 ❯ - [ ] Investigate 16 spam posts: authors, timestamps, injection vector
-### Re: Environment discovery (important — reframes everything) (HEAD)
+### Re: Environment discovery (important — reframes everything)
 
 I SSH'd into `monsterrodholders-server` (50.28.2.199, Liquidweb) and hit two surprises:
 
@@ -448,7 +448,7 @@ I SSH'd into `monsterrodholders-server` (50.28.2.199, Liquidweb) and hit two sur
 
 This means every action I take "on prod" via SSH is landing on the **new host**, which is correct for pre-flip hygiene — but the earlier audit's claim of "16 spam posts / active malware" was most likely observed against the **Flywheel live site**, not this new box. The new box is effectively a freshly-imported clone.
 
-### Re: Spam / compromise investigation on new host — false alarm (HEAD)
+### Re: Spam / compromise investigation on new host — false alarm
 
 Findings on 50.28.2.199 (the new host):
 
@@ -467,7 +467,7 @@ Recommend cleaning up the orphan:
 wp term delete category 677  # casino — empty, safe to delete
 ```
 
-### Re: test-product-1 → noindex — DONE (on new host) (HEAD)
+### Re: test-product-1 → noindex — DONE (on new host)
 
 Product ID resolved: `86212` (`test-product-1`, status=`publish`). Applied on 50.28.2.199:
 
@@ -482,7 +482,7 @@ Verification:
 - `product_visibility` terms = `exclude-from-catalog`, `exclude-from-search` ✓
 - `https://50.28.2.199.nip.io/product/test-product-1/` still returns 200 (URL-accessible for your checkout smoke-tests, just hidden from catalog + search + Google)
 
-### Re: Rename nicename → catfishdude — DONE (on new host) (HEAD)
+### Re: Rename nicename → catfishdude — DONE (on new host)
 
 User ID resolved: `3` (`catfishinginfo@gmail.com`, old nicename `catfishinginfogmail-com`). Applied on 50.28.2.199:
 
@@ -500,7 +500,7 @@ Against the live Flywheel site, both URLs still return 200 because Flywheel is a
 
 **Secondary catfish user for context:** there's also user ID `66923` (`catfishinfo`, `berkes06@yahoo.com`) with nicename `catfishinfo` — that's a different person and already has a clean slug. No action needed on that one.
 
-### Re: 301 for old author URL (HEAD)
+### Re: 301 for old author URL
 
 You asked earlier about a brief-window 301 from the old slug to the new one. Since the old slug doesn't exist on the new host (404), there's nothing to redirect at the WP level. If you want Google to drop the old URL faster than an organic 404, add a WP Redirection rule on the new host after flip:
 
@@ -508,7 +508,7 @@ You asked earlier about a brief-window 301 from the old slug to the new one. Sin
 
 Low priority — Google handles 404-author-archive cleanup reasonably quickly.
 
-### Re: Investigate live Flywheel site (compromise claim) (HEAD)
+### Re: Investigate live Flywheel site (compromise claim)
 
 The 16-spam-posts claim came from the old audit of the Flywheel site. To investigate that:
 
@@ -517,7 +517,7 @@ The 16-spam-posts claim came from the old audit of the Flywheel site. To investi
 **Path B — Flywheel dashboard:** Flywheel has its own terminal and wp-cli via their web UI, but that needs your Flywheel account login (different from the WP admin login). If you give me the Flywheel terminal URL I can use that path instead — faster and scriptable.
 
 I lean **Path A** since you explicitly said "Use chromium-bridge or wp api if possible" and gave me the passage keys for the WP admin creds.
-<!-- agent:boundary:5c71fba1 -->
+<!-- agent:boundary:30f22eca -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

@@ -260,7 +260,7 @@ Fixed. Deployed mrh-performance v1.15.
 Removed the CSS rules that were hiding `#sidebar` and `aside` on the shop page. The sidebar is now visible again. The "New Cloth Technologies" column remains hidden via its separate `.stk-3ef9764` rule.
 
 Hard-refresh `/shop/` to confirm.
-<!-- agent:boundary:ac6944e8 -->
+<!-- agent:boundary:4e7e1a6c -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

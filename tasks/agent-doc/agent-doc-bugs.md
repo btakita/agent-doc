@@ -367,7 +367,9 @@ Yes, a 5s timeout would result in frequent misses when the agent is busy. Here's
 **What we need:** The notification mechanism must be *preemptive* — the running session must see the request even mid-response. In Claude Code, the hook output only becomes visible between tool calls, not during text generation. A 5s timeout would mean the running agent almost never responds in time, making the fallback the primary path 90% of the time.
 
 **Better timeout:** 15-30 seconds gives the agent enough time to finish a typical response cycle AND process the callback. The 120s max is conservative — most callbacks should resolve in under 20s when the agent is actively being used.
-<!-- agent:boundary:76ff28dc -->
+pleas revert the changes
+
+<!-- agent:boundary:419c10e2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

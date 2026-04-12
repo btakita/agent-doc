@@ -857,7 +857,7 @@ Action when blocked: mod_security rewrites to `/.noindex.html`, Apache proxies t
 
 ---
 
-## Fix options (HEAD)
+## Fix options
 
 All of these resolve the spinner. Pick one:
 
@@ -895,7 +895,7 @@ SecRuleUpdateTargetById 933120 "!ARGS:post_data"
 
 ---
 
-## My recommendation (HEAD)
+## My recommendation
 
 **Option A or D, applied to the host Apache config on `monsterrodholders-server`.** The cost: ~2 minutes, one file edit, one `systemctl reload httpd`. The benefit: checkout works, Order Attribution keeps sending data for your analytics, the rest of the WAF stays intact.
 
@@ -904,20 +904,129 @@ Then Option B as a fallback if you'd rather not touch mod_security — but I'd k
 **About my previous "fix":** deactivating `woocommerce-paypal-payments` was not wrong per se (PPCP really was enabled with empty credentials, and re-enabling it would cause its own client-side break), but it didn't unblock the spinner. I claimed the cause before I tested a live checkout flow in a real browser — that was premature. Apologies for the false "diagnosed and fixed." The chromium-bridge end-to-end run is now the ground truth.
 
 **Next step waiting on you:** which option do you want me to implement? I can apply A now (it's a local config edit + reload, low blast radius, no data loss).
-<!-- agent:boundary:b3c44305 -->
+❯ Yes. Please add SPEC. We need to document all of these configurations.
+❯ Will we need to remember this rule? Could this same issue occur elsewhere where we need to implement Option A again?
+### Re: Fix applied + SPEC written + memory saved — spinner is gone (HEAD)
+
+**TL;DR: Applied the CRS exclusion, verified checkout in a real browser (Stripe UPE mounts, no spinner, place order enabled), wrote `tasks/software/monsterrodholders/SPEC.md` as the living config inventory, and saved the WAF rule to auto-memory so future sessions catch this pattern instantly.**
+
+**1. Applied the fix (Option D, narrow form).** Instead of `SecRuleRemoveById 933120` under a `LocationMatch` (which can't match query strings cleanly), I used a global target exclusion that removes only `post_data` from the rule's target list. Every other argument in every other request is still fully protected by CRS 933120. Wrote to `/etc/httpd/modsecurity.d/local_rules/woocommerce-crs-exclusions.conf`:
+
+```apache
+SecRuleUpdateTargetById 933120 "!ARGS:post_data"
+```
+
+The file has a heredoc header explaining *why* it exists, citing the rule ID, the symptom, and the date — so the next sysadmin / AI session finds context before deleting it. Then:
+
+```bash
+sudo apachectl configtest   # Syntax OK
+sudo systemctl reload httpd # reloaded
+```
+
+No restart needed, so zero downtime for the live proxy.
+
+**2. Verified via chromium-bridge end-to-end.**
+- Navigated to `https://50.28.2.199.nip.io/checkout/`
+- Waited for `form.checkout`, settled 3s
+- DOM snapshot:
+
+```json
+{
+  "blocked": 0,
+  "stripeIframe": 1,
+  "upeChildren": 1,
+  "placeOrderEnabled": true,
+  "payMethod": "stripe"
+}
+```
+
+- `blocked: 0` — no blockUI overlays ✓
+- `stripeIframe: 1` — Stripe UPE successfully mounted an iframe in `.wc-stripe-upe-element` ✓
+- `upeChildren: 1` — element has a child (the Stripe card input) ✓
+- `placeOrderEnabled: true` — button is ready to click ✓
+- `payMethod: "stripe"` — gateway selected ✓
+
+**Checkout is functional end-to-end.** You can now run a real $1 transaction.
+
+**3. Created `tasks/software/monsterrodholders/SPEC.md`** — the living inventory of every non-default configuration on the server and the site. Sections:
+
+- **Host Apache vhost** (`00-monsterrodholders-proxy.conf`) — redirects, rewrite rules for legacy paths, `ProxyPreserveHost`, `X-Forwarded-Proto`, `SecRuleEngine Off` for `/wp-(login|admin)`, and the note about why `RedirectMatch` no-ops against `mod_proxy`
+- **Host mod_security** — the new `woocommerce-crs-exclusions.conf` with full diagnostic writeup, the rule ID, the symptom, and the "could this recur" analysis (answer: yes, explained below)
+- **Docker compose** — the dead `nginx/conf.d/wordpress.conf`, the `memory_limit=256M` in `wordpress/php.ini`, the wp-cli `-d memory_limit=512M` workaround, `--force-recreate` guidance
+- **WordPress key settings** — the page-ID table for cart/my-account/checkout/home, static front page, active plugins list, PPCP deactivation note
+- **Stripe** — test mode off, key storage in `passage`, the compromised `sk_live_518eq7…` that needs rotating, UPE config
+- **Paths, logs, and diagnostics** — quick reference table for where to look next time
+
+It's the kind of doc that should answer "what happens if I rebuild this server from scratch and need to re-apply everything?"
+
+**4. Saved to auto-memory as a reference.** New memory file: `reference_monsterrodholders_waf_933120.md`, indexed in `MEMORY.md` under References. It captures the symptom, root cause, fix command, diagnostic checklist, and the list of places this can recur. Future sessions hitting a "WC checkout spinner" bug will find this on first search.
+
+---
+
+### Re: Could this same issue occur elsewhere? (HEAD)
+
+**Yes — and the fix generalizes. The short answer: anywhere WooCommerce 8.5+ runs behind OWASP CRS 3.3.5.**
+
+Breakdown of where the pattern can reappear:
+
+**A. Any WC AJAX endpoint on THIS host.** `update_order_review` is the one that breaks visibly because it runs on checkout page load. But the full form (including `post_data` with the attribution user-agent field) is also sent to:
+- `?wc-ajax=checkout` — order submission
+- `?wc-ajax=update_shipping_method` — shipping selection changes
+- `?wc-ajax=apply_coupon` / `remove_coupon` — coupon flow
+- `?wc-ajax=update_order_review` — the one we just fixed
+
+The `SecRuleUpdateTargetById 933120 "!ARGS:post_data"` exclusion is global, so it covers all of them. No per-endpoint work needed.
+
+**B. Any new server we migrate to.** If monsterrodholders.com eventually moves off Liquid Web, and the new host runs:
+- Imunify360 (CloudLinux default)
+- ModSecurity CRS 3.3.x on nginx (common on managed WP hosts)
+- Cloudflare WAF with OWASP managed rules
+- Plesk with mod_security enabled
+- InterWorx / cPanel with the default WAF bundle
+
+…expect the same failure on day one. The fix is identical (same directive, same file location pattern). The SPEC doc has the exact commands ready to paste. The memory entry has the signature symptoms so future-me recognizes it before burning an hour on PPCP red herrings.
+
+**C. Any other WooCommerce site we touch.** You've mentioned several e-commerce projects in the pipeline. If any of them run WC 8.5+ and land behind CRS, this is the first thing to check after "does the checkout page load at all?" Symptom triage:
+
+1. Checkout page loads 200 ✓
+2. Spinner overlays appear and never clear
+3. `jQuery.active === 0` (no AJAX in flight)
+4. No Stripe element mounted
+5. `grep 933120 /var/log/httpd/error_log` → match
+
+→ paste the same SecRuleUpdateTargetById line.
+
+**D. Other CRS rules in the 933 family.** Rules 933100–933210 all use the OWASP "PHP config directive / PHP function" dictionary. If another plugin posts a field named like `allow_url_fopen`, `auto_prepend_file`, `include_path`, `open_basedir`, etc. as a value inside a serialized param, a different 933* rule can fire. The fix pattern is the same — target exclusion on the specific parameter — but the rule ID will differ. The diagnostic playbook in SPEC.md says to grep `REQUEST-933` in the error log, not just `933120`, so future investigators cast a wide enough net.
+
+**E. Non-WC cases worth knowing about.** Other WordPress plugins that post form payloads including serialized form data with user-chosen field names — Gravity Forms, WPForms (if we ever bring it back), Contact Form 7 with dynamic fields, Elementor Pro forms — can trip the same rule if a user names a form field `user_agent` or the plugin inserts one as a honeypot/analytics field. If a non-checkout form suddenly stops submitting on this host, check CRS 933* before blaming the plugin.
+
+**The meta-lesson worth remembering:** when a WooCommerce / WordPress front-end action silently fails with "looks like JS is broken but isn't," the debugging order on a managed host should be:
+1. Browser: is the AJAX firing? What status does it return?
+2. If 404/403: direct-to-backend test (bypassing the host proxy) with the same payload. If the backend returns 200, the WAF is hiding a block as a 404.
+3. `tail -f /var/log/httpd/error_log | grep ModSecurity` and repeat the failing action.
+4. Match the rule ID → apply a targeted exclusion, not a wholesale disable.
+
+That playbook is now in SPEC.md + memory. You shouldn't have to teach me this twice.
+
+---
+
+**Next real-browser QA to close out the fix:** run a real $1 Stripe transaction end-to-end on `https://50.28.2.199.nip.io/checkout/`, confirm order completes, then refund from the Stripe dashboard. Everything I can verify from chromium-bridge is green; the remaining validation is human-in-the-loop card entry. Want me to walk through it with chromium-bridge driving a test card?
+<!-- agent:boundary:1e491740 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **Migrate `/checkout-2/` → `/checkout/`** — option flipped, page 83 deleted, search-replace done, caches flushed
 - [x] **Migrate `/cart-2/`, `/my-account-2/`, `/home-2/`** — 301 redirects via Apache `RewriteRule`, options flipped (82→7, 84→9, 2→7503), 14 DB replacements, old pages deleted, caches flushed, end-to-end verified
-- [x] **Diagnose checkout spinner — REAL root cause** — OWASP CRS rule 933120 (`REQUEST-933-APPLICATION-ATTACK-PHP.conf`) blocks `update_order_review` because WooCommerce Order Attribution posts `post_data=wc_order_attribution_user_agent=Mozilla/5.0...`. Match adds anomaly score 5, rule 949110 denies with 403, host Apache rewrites to `/.noindex.html`, backend returns 404. Verified end-to-end via chromium-bridge + `/var/log/httpd/error_log`.
-- [ ] **Fix checkout spinner — apply WAF exclusion (awaiting approval)** — Option A: `SecRuleRemoveById 933120` in `<LocationMatch "wc-ajax=update_order_review">` at `/etc/httpd/modsecurity.d/local_rules/monsterrodholders.conf`. Or Option D: `SecRuleUpdateTargetById 933120 "!ARGS:post_data"`. Then verify with live browser checkout + $1 Stripe txn.
-- [ ] **Re-evaluate PPCP decision** — PPCP deactivation was NOT the spinner fix. Still the right call because it had no credentials, but the original incident (spinner) will recur on re-enable unless WAF fix is applied first. Decide: (a) onboard PPCP with real creds, or (b) `wp plugin delete woocommerce-paypal-payments` to remove entirely.
-- [ ] **Browser QA: $1 Stripe transaction** — after WAF fix, via real browser on `https://50.28.2.199.nip.io/checkout/`, verify no spinner, Stripe card field mounts, order completes, refund from dashboard
+- [x] **Diagnose checkout spinner — real root cause** — OWASP CRS 933120 blocks WC Order Attribution `user_agent=` in `post_data`. Verified via chromium-bridge + `/var/log/httpd/error_log`.
+- [x] **Fix checkout spinner — apply WAF exclusion** — `SecRuleUpdateTargetById 933120 "!ARGS:post_data"` written to `/etc/httpd/modsecurity.d/local_rules/woocommerce-crs-exclusions.conf`, configtest OK, httpd reloaded, chromium-bridge verification passed: `blocked:0, stripeIframe:1, upeChildren:1, placeOrderEnabled:true`.
+- [x] **Write SPEC doc** — `tasks/software/monsterrodholders/SPEC.md` created, covers host Apache, mod_security, Docker, WP settings, Stripe, diagnostic paths. Living inventory of every non-default config.
+- [x] **Save WAF rule to memory** — `reference_monsterrodholders_waf_933120.md` + MEMORY.md index updated. Future sessions catch this pattern instantly.
+- [ ] **Real-browser $1 Stripe transaction QA** — live card entry on `https://50.28.2.199.nip.io/checkout/`, verify order completes, refund from Stripe dashboard. chromium-bridge has verified everything up to card entry.
+- [ ] **Re-evaluate PPCP decision** — PPCP currently deactivated. Was not the spinner cause. Decide: (a) onboard with real creds via WC → Settings → Payments → PayPal → Connect, or (b) `wp plugin delete woocommerce-paypal-payments` to remove entirely
+- [ ] **Rotate Stripe live secret** — `sk_live_518eq7…` leaked in earlier `wp option get`; treat as compromised, rotate via Stripe dashboard, update webhook, store new value in `passage btak/monsterrodholders/stripe/secret_key`
 - [ ] **Audit + remove WPForms Lite** — 2 orphaned forms, no published references; needs theme/widget grep before `wp plugin delete wpforms-lite`
 - [ ] **Fix `./scripts/wp.sh`** — add `php -d memory_limit=512M` (becomes unnecessary if WPForms Lite is removed)
 - [ ] **Audit duplicate Privacy Policy and Refund/Returns Policy pages** — same `-2` pattern may apply
-- [ ] **Rotate Stripe live secret** — `sk_live_518eq7…` leaked in earlier `wp option get`; treat as compromised
-- [ ] **Investigate other WAF-blocked endpoints** — if 933120 blocks `update_order_review`, it may also block other WC AJAX endpoints that forward `post_data`. Worth a `grep 933120 /var/log/httpd/error_log` audit.
+- [ ] **Audit other WAF-blocked endpoints** — `grep -E 'id "9(33|41|42|92|93|94)' /var/log/httpd/error_log` to surface any other silently-blocked requests while we're here
 <!-- /agent:pending -->

@@ -77,7 +77,7 @@ no_mcp: true
 Binary rebuilt. The field works alongside `claude_args` — both are applied.
 Add `enable_tool_search` option frontmatter...which will enable tool search for claude code.**** 
 
-### Re: `enable_tool_search` frontmatter (HEAD)
+### Re: `enable_tool_search` frontmatter
 
 Added `enable_tool_search` frontmatter field. When set to `true`, it passes `--enable-tool-search` to the `claude` process on startup.
 
@@ -93,7 +93,20 @@ enable_tool_search: true
 - `start.rs` — checks `fm.enable_tool_search.unwrap_or(false)` and appends `--enable-tool-search` to the command after `--no-mcp`
 
 Binary rebuilt and tested. All 262 unit tests pass. The field works alongside `no_mcp` — both are applied independently when set.
-<!-- agent:boundary:c74d4680 -->
+
+❯ What does enable_tool_search do when starting a claude session?
+
+### Re: `--enable-tool-search` flag (HEAD)
+
+I don't have the specific documentation for what `--enable-tool-search` does in Claude Code's CLI. The flag name suggests it enables tool discovery/search capabilities, but without the actual documentation I shouldn't speculate on the exact behavior.
+
+**To find out:**
+- Run `claude --help` and search for `enable-tool-search` in the output
+- Check the Claude Code repo's CLI documentation or CHANGELOG for recent features
+- Ask in the Claude Code docs/settings if there's contextual help
+
+Once you know what it does, the frontmatter support is already in place — just set `enable_tool_search: true` in your document and it will pass the flag on session startup.
+<!-- agent:boundary:b7457686 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -103,4 +116,5 @@ Binary rebuilt and tested. All 262 unit tests pass. The field works alongside `n
 - ✅ **Context-audit skill scaffolded** — `.claude/skills/context-audit/` with SKILL.md + runbook
 - ✅ **`no_mcp` frontmatter** — passes `--no-mcp` to claude when `no_mcp: true`
 - ✅ **`enable_tool_search` frontmatter** — passes `--enable-tool-search` to claude when `enable_tool_search: true`
+- ⏳ **Waiting:** clarify what `--enable-tool-search` does in Claude Code
 <!-- /agent:pending -->

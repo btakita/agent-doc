@@ -129,13 +129,43 @@ The pending component with checkboxes is well-structured. All four items are rea
 
 No blockers identified. These can be tackled in any order — the philosophy docs are conceptual while the SKILL.md update is operational.
 ❯ create github actions to build `curl | sh` platform releases.
-<!-- agent:boundary:860ed844 -->
+
+❯ do
+❯ - [ ] Create GitHub Actions workflow: build + release binaries (Linux gnu/musl, macOS x86_64/aarch64)
+
+
+### Re: GitHub Actions + install script — DONE (HEAD)
+
+✓ **release.yml**: Expanded to 6-target matrix
+- Linux: x86_64-gnu, aarch64-gnu, x86_64-musl, aarch64-musl (aarch64/musl via `cross` v0.2.5)
+- macOS: x86_64 (macos-14), aarch64 (macos-latest)
+- Packages both `existence` + `xist` binaries per target as `existence-{target}.tar.gz`
+- Uses `gh release create` with idempotent guard (won't re-create existing release)
+- Publishes to crates.io in parallel
+
+✓ **install.sh**: Download + extract installer
+- Detects OS/arch → Rust target triple
+- Resolves latest version from GitHub Releases API
+- Downloads from GitHub Releases, extracts both binaries
+- Installs to `~/.cargo/bin` or `~/.local/bin`
+- Verifies with `--version` check for both `existence` and `xist`
+- Guides user to add directory to PATH if needed
+
+✓ **Makefile**: Local dev targets
+- `make check` → clippy + test + fmt check (gates release)
+- `make build-release` → build release binary
+- `make release` → check + tag + push + cargo install (CI handles the rest)
+
+**Usage:** `curl -fsSL https://raw.githubusercontent.com/existence-lang/existence/main/install.sh | sh`
+
+Committed to submodule and updated parent pointer. Ready for the next release tag (`v0.4.0` or later).
+<!-- agent:boundary:13684d11 -->
 <!-- /agent:exchange -->
 
-## Pending / Not Built (HEAD)
+## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] Create GitHub Actions workflow: build + release binaries (Linux gnu/musl, macOS x86_64/aarch64)
+- [x] Create GitHub Actions workflow: build + release binaries (Linux gnu/musl, macOS x86_64/aarch64)
 - [ ] Update philosophy/CLAUDE.md with precision + bounded/unbounded guidance
 - [ ] Create philosophy/src/pneuma.md, noumena.md, phenomena.md
 - [ ] Enrich philosophy/src/permaculture.md with universal applicability analysis

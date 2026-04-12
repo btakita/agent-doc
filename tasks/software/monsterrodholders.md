@@ -16,7 +16,7 @@ claude_args: --dangerously-skip-permissions
 <!-- agent:exchange patch=append -->
 WordPress migration, Docker stack, layout refinements (hero, grids, sticky sidebar), DNS flip pending certbot
 ❯ The product .wp-post-image elements need to all have the same height. Resize the image so entire image is visible within the .wp-post-image.
-<!-- agent:boundary:9b571775 -->
+<!-- agent:boundary:c63a513e -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

@@ -370,7 +370,7 @@ Yes, a 5s timeout would result in frequent misses when the agent is busy. Here's
 pleas revert the changes
 
 ❯ Implement Let's do Option A with "the hook fires `agent-doc check-callbacks`".
-### Re: Implement Option A with hook-based check-callbacks (HEAD)
+### Re: Implement Option A with hook-based check-callbacks
 
 Done. Option A (file-based callback protocol) with PostToolUse hook notification is implemented end-to-end.
 
@@ -400,16 +400,28 @@ callback request → check-callbacks (pending) → read → respond → check-ca
 ```
 
 270 unit tests pass, release binary built.
-<!-- agent:boundary:e83f2045 -->
+compress doc
+### Re: Compress doc (HEAD)
+
+**Summary of completed work:**
+
+Option A (file-based callback protocol) with PostToolUse hook is fully implemented:
+
+✅ **Binary** — `callback read/respond` subcommands, preflight scans pending_callbacks, fallback agent calls `claude --print` for summarization, hook fires `agent-doc hook check-callbacks` after each Bash tool use.
+
+✅ **Hook** — PostToolUse configured in ~/.claude/settings.json to detect callbacks in real-time.
+
+✅ **Skill** — Step 0d added to SKILL.md: read request → process operations → write response. Covers both preflight and hook detection.
+
+✅ **Testing** — End-to-end flow verified: request → read → respond → check-callbacks shows empty (responded). All 270 unit tests pass.
+
+**Architecture:** Binary handles deterministic callback protocol (request/response JSON, TTL, request_id verification). Skill handles content generation (summarization, pending curation). `agent-doc cleanup` polls for response with fallback to subagent on 120s timeout. This decouples orchestration (binary) from content generation (skill).
+<!-- agent:boundary:764133c3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Bidirectional IPC (Option A)** — ✅ Implemented: callback.rs read/respond, preflight integration, PostToolUse hook, SKILL.md step 0d, fallback agent. Binary built.
-- **`agent-doc cleanup`** — Works end-to-end: writes request, polls, fallback via `claude --print`. Ready for use.
-- **`agent-doc pending` subcommands** — add/remove/prune/list fully implemented.
-- **Hook `check-callbacks`** — PostToolUse hook configured in settings.json. Detects and outputs pending requests.
-- **Config consolidation** — `components.toml` merged into `config.toml` with auto-migration. Shipped in v0.32.x.
+- **Bidirectional IPC (Option A)** — ✅ Complete: callback.rs public read_request() + write_response(), main.rs subcommands, preflight integration, PostToolUse hook, SKILL.md step 0d, fallback agent via `claude --print`.
 <!-- /agent:pending -->
 ## Assistant

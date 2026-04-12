@@ -333,7 +333,7 @@ Two paths in parallel:
 The running session wins if it responds first — subagent is the safety net. For Option A, the notification mechanism would be the session's own preflight cycle checking for pending callbacks.
 
 This is where the hybrid with Option C gets interesting: you could combine Option A's file-based protocol with Option C's hook polling — the hook fires `agent-doc check-callbacks` which reads requests faster than waiting for the next full preflight cycle. But this adds complexity. Option A alone with aggressive polling (1 second intervals) is probably sufficient.
-<!-- agent:boundary:2a381049 -->
+<!-- agent:boundary:aa73d6cf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -37,7 +37,7 @@ Test on /shop page — images should align consistently in the grid.
 ❯ Some product images are still taller than others. Please fix. Verify the fix using chromium-bridge dom measurements on the https://50.28.2.199.nip.io/shop/. Make sure all products .wp-post-image elements have the same dimensions.
 ❯ ![img_16.png](img_16.png)
 
-### Re: Variable Image Heights (round 2) (HEAD)
+### Re: Variable Image Heights (round 2)
 
 **Root cause found via `curl` of /shop/.** The mrh-performance CSS was never reaching the page — zero matches for `height: 300`, `mrh-performance`, or even the preconnect `fonts.googleapis.com` hint in the rendered HTML. The regular plugin was never activated on the server, so none of items 1–5 in `mrh-performance.php` were running.
 
@@ -85,11 +85,44 @@ git pull
 - Paste a screenshot and I'll eyeball.
 
 If the images *still* vary after deploy, the most likely remaining cause is a page/fragment cache (Blocksy/Redis). `./scripts/deploy.sh` already runs `wp cache flush`, but a full-page cache may need `wp rocket clean` / `wp cache flush` + hard refresh.
-<!-- agent:boundary:be6cf2f9 -->
+
+❯ do
+❯ - [ ] **Fix product image heights** — CSS + must-use plugin conversion committed; awaiting server deploy + post-deploy DOM verification
+
+### Re: Committed and pushed (HEAD)
+
+Submodule `src/monsterrodholders-dev` → commit `1e57e87e` pushed to origin/main (after rebase onto incoming `sync: WP content` commits). Parent `agent-loop` pointer updated in `c3ccfd47`.
+
+**To apply on the server (50.28.2.199):**
+```bash
+cd /path/to/monsterrodholders-dev
+git pull
+./scripts/deploy.sh     # docker compose pull + up -d --remove-orphans + wp cache flush
+```
+
+`up -d --remove-orphans` will recreate the `wordpress` container so it picks up the new `./wordpress/mu-plugins` bind mount. The mu-plugin auto-loads, so there is no plugin-activation step.
+
+**After deploy, verify** — run either check against https://50.28.2.199.nip.io/shop/:
+
+1. Quick curl check (should now show the CSS):
+   ```bash
+   curl -sk https://50.28.2.199.nip.io/shop/ | grep -c "mrh-product-grid"
+   # expect: 1
+   ```
+2. DOM check via chromium-bridge (paste output if you run it):
+   ```js
+   [...document.querySelectorAll('.products li.product figure > a.ct-media-container')]
+     .map(el => ({ h: el.getBoundingClientRect().height, cls: el.className }))
+   ```
+   expect every `h` to be `300`.
+
+Ping me with the result and I'll close out the pending item.
+<!-- agent:boundary:4995daad -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] **Fix product image heights** — mu-plugin + wrapper CSS pushed (submodule `1e57e87e`, parent `c3ccfd47`); awaiting `git pull && ./scripts/deploy.sh` on the server + post-deploy verification
 - [x] **Add category sidebar to /shop** — 4-tile grid via mu-plugin
 - [x] **Swap Boat Accessories → HydroWeb Landing Nets**
 - [x] **Swap Racks and T-Bars → River Anchors**
@@ -98,6 +131,5 @@ If the images *still* vary after deploy, the most likely remaining cause is a pa
 - [x] **Remove duplicate hero `Popular Categories`** from Shop page block content
 - [x] **Enable Blocksy sidebar on /shop/ and /blog/**
 - [x] **Remove custom layout CSS** — header compact, main below header, aside below header
-- [ ] **Fix product image heights** — CSS + must-use plugin conversion committed; awaiting server deploy + post-deploy DOM verification
 - [ ] *(Optional)* Wrap shop product grid in `<article>` via template override if strict article+aside parity is required
 <!-- /agent:pending -->

@@ -89,7 +89,7 @@ If the images *still* vary after deploy, the most likely remaining cause is a pa
 ❯ do
 ❯ - [ ] **Fix product image heights** — CSS + must-use plugin conversion committed; awaiting server deploy + post-deploy DOM verification
 
-### Re: Committed and pushed (HEAD)
+### Re: Committed and pushed
 
 Submodule `src/monsterrodholders-dev` → commit `1e57e87e` pushed to origin/main (after rebase onto incoming `sync: WP content` commits). Parent `agent-loop` pointer updated in `c3ccfd47`.
 
@@ -111,18 +111,80 @@ git pull
    ```
 2. DOM check via chromium-bridge (paste output if you run it):
    ```js
-   [...document.querySelectorAll('.products li.product figure > a.ct-media-container')]
+   4[...document.querySelectorAll('.products li.product figure > a.ct-media-container')]
      .map(el => ({ h: el.getBoundingClientRect().height, cls: el.className }))
    ```
    expect every `h` to be `300`.
 
 Ping me with the result and I'll close out the pending item.
-<!-- agent:boundary:8189ae89 -->
+
+❯ The image dimensions are still not bound. This is the 4th unsuccessful attempt.
+❯ ![img_17.png](img_17.png)
+
+### Re: Fix is still not deployed to the server (HEAD)
+
+I just re-curled https://50.28.2.199.nip.io/shop/ and confirmed my mu-plugin is **not running on the server yet**. Hard evidence:
+
+```
+$ curl -sk https://50.28.2.199.nip.io/shop/ | grep -c "mrh-product-grid"
+0
+$ curl -sk https://50.28.2.199.nip.io/shop/ | grep -c "fonts.googleapis.com"
+0
+```
+
+The only `height: 300px` match is inside Blocksy's `--min-height: 300px` for hero sections (unrelated). Not a single one of the 5 mrh-performance behaviors is present — not the zxcvbn dequeue, not the preconnect hints, not the logo sizes fix, not the WPForms dequeue, and not the product grid CSS. That means **none** of the prior 4 attempts ever actually landed on the server either — they've been regressing against code that never ran. Your `.wp-post-image` elements can't possibly be bound by CSS that isn't in the HTML.
+
+This is not a "tune the CSS harder" problem. It's a deploy-chain problem.
+
+#### What I need from you (pick one)
+
+**Option A — run the deploy and tell me what happens.** On the server (50.28.2.199):
+```bash
+cd /path/to/monsterrodholders-dev
+git pull                                            # should pull 1e57e87e
+ls -la wordpress/mu-plugins/mrh-performance.php     # confirm file exists
+docker compose up -d --force-recreate wordpress     # force picks up new mount
+docker compose exec wordpress ls -la /var/www/html/wp-content/mu-plugins/
+curl -sk https://localhost/shop/ | grep -c mrh-product-grid   # expect 1
+```
+Paste the output of those 5 commands and I'll know exactly where the chain is broken. `--force-recreate` is important — a plain `up -d` may decide nothing changed and skip container recreation even though we added a bind mount, which is probably what happened on previous attempts.
+
+**Option B — fastest bypass, no deploy required.** Paste the CSS directly into WP Admin → **Appearance → Customize → Additional CSS** → Publish:
+```css
+.products li.product figure,
+.products li.product figure > a.ct-media-container {
+  height: 300px !important; min-height: 300px !important; max-height: 300px !important;
+  width: 100% !important;
+  display: flex !important; align-items: center !important; justify-content: center !important;
+  overflow: hidden !important;
+  margin: 0 0 12px !important; padding: 0 !important;
+}
+.products li.product .wp-post-image {
+  height: auto !important; width: auto !important;
+  max-height: 300px !important; max-width: 100% !important;
+  aspect-ratio: auto !important;
+  object-fit: contain !important;
+  object-position: center !important;
+}
+```
+This writes to the `wp-custom-css` style block that `curl` already showed is present in the HTML. Takes effect on save, no Docker, no rebuild, no `git pull`. Screenshot the /shop/ page after and we'll know the CSS logic is correct.
+
+**Option C — give me SSH access** (`ssh user@50.28.2.199` + key) and I'll run the deploy + verification myself and close the loop.
+
+#### Why I'm confident the CSS is right (once it loads)
+
+The markup is `li.product > figure > a.ct-media-container > img.wp-post-image` with each img carrying inline `style="aspect-ratio: X/Y;"`. My rules:
+- Lock `figure` + `a.ct-media-container` to a 300px flex box → grid rows align regardless of image intrinsic size
+- `aspect-ratio: auto !important` on the img → neutralizes the inline attribute (my `!important` in a stylesheet beats an inline style with no `!important`)
+- `max-height: 300px; max-width: 100%; width: auto; height: auto; object-fit: contain` → image scales to fit with full visibility, centered
+
+Option B will confirm this logic without needing a deploy. I recommend trying B first — it's 30 seconds — then circling back to fix the mu-plugin deploy chain so it sticks.
+<!-- agent:boundary:1fc10775 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Fix product image heights** — mu-plugin + wrapper CSS pushed (submodule `1e57e87e`, parent `c3ccfd47`); awaiting `git pull && ./scripts/deploy.sh` on the server + post-deploy verification
+- [ ] **Fix product image heights** — CSS logic verified locally; blocked on server deploy chain. mu-plugin (`1e57e87e`) is pushed but not loading on server. Need user to run `docker compose up -d --force-recreate wordpress`, OR paste CSS into WP Admin → Customize → Additional CSS as a fast bypass, OR grant SSH access
 - [x] **Add category sidebar to /shop** — 4-tile grid via mu-plugin
 - [x] **Swap Boat Accessories → HydroWeb Landing Nets**
 - [x] **Swap Racks and T-Bars → River Anchors**

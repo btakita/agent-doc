@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc"
-version = "0.31.31"
+version = "0.32.1"
 edition = "2024"
 description = "Interactive document sessions with AI agents"
 license = "MIT"

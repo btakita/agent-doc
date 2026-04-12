@@ -271,7 +271,7 @@ Added a new subsection under Axiology (before Epistemology):
 - Closing thesis: the discipline's strength comes from refusing to collapse bounded and unbounded modes
 
 **Next step:** commit inside `philosophy/`, then update the parent submodule pointer.
-<!-- agent:boundary:3aacb015 -->
+<!-- agent:boundary:5cbf18ce -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

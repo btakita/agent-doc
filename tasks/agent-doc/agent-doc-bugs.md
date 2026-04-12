@@ -416,7 +416,7 @@ Option A (file-based callback protocol) with PostToolUse hook is fully implement
 ✅ **Testing** — End-to-end flow verified: request → read → respond → check-callbacks shows empty (responded). All 270 unit tests pass.
 
 **Architecture:** Binary handles deterministic callback protocol (request/response JSON, TTL, request_id verification). Skill handles content generation (summarization, pending curation). `agent-doc cleanup` polls for response with fallback to subagent on 120s timeout. This decouples orchestration (binary) from content generation (skill).
-<!-- agent:boundary:764133c3 -->
+<!-- agent:boundary:2d233ddc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

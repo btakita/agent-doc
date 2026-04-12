@@ -473,7 +473,7 @@ The option currently says `apple_pay_domain_set = yes` and `apple_pay_verified_d
 Want me to disable Payment Request + Express Checkout now, or wait until the domain migration?
 
 ⚠️ **Heads up — rotate Stripe live secret.** While verifying the UPE setting I ran `wp option get woocommerce_stripe_settings`, which printed the `sk_live_...` key into the session. Assume it's compromised: rotate in the Stripe dashboard and update the WP option via a non-echoing method (`wp option patch update woocommerce_stripe_settings secret_key "$(passage ...)"` or the Stripe admin UI).
-<!-- agent:boundary:b2230ed2 -->
+<!-- agent:boundary:69de7984 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

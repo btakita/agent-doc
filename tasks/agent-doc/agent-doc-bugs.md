@@ -335,7 +335,7 @@ The running session wins if it responds first — subagent is the safety net. Fo
 This is where the hybrid with Option C gets interesting: you could combine Option A's file-based protocol with Option C's hook polling — the hook fires `agent-doc check-callbacks` which reads requests faster than waiting for the next full preflight cycle. But this adds complexity. Option A alone with aggressive polling (1 second intervals) is probably sufficient.
 
 ❯ Let's do Option A with "the hook fires `agent-doc check-callbacks`".
-### Re: Option A + hook-based notification (HEAD)
+### Re: Option A + hook-based notification
 
 Great choice. Here's how it works end-to-end:
 
@@ -348,14 +348,34 @@ Great choice. Here's how it works end-to-end:
 7. **Apply result** — reads the patch content from response, applies it to the document
 
 The hook gives you ~1-5 second detection latency (fastest next tool use), while the CLI poll gives determinism. Worst case: 120s fallback to subagent.
-<!-- agent:boundary:1d220678 -->
+
+❯ Would reducing the timeout to 5s result in misses to the running agent? What happens if the agent is busy?
+### Re: 5s timeout and busy agent (HEAD)
+
+Yes, a 5s timeout would result in frequent misses when the agent is busy. Here's why:
+
+**The hook fires regardless of agent state** — PostToolUse fires after every tool use, but the hook output becomes part of the model's *next available context window*. If the model is mid-response (generating text, not calling tools), the hook doesn't fire at all. If it just fired and the model is generating its 2000-word response, the callback instruction sits in the tool result but the model won't see it until the response is done and another tool call happens.
+
+**Busy agent scenario:**
+1. `agent-doc cleanup` writes request.json
+2. Hook fires, outputs "callback pending"
+3. Model is in the middle of writing a 3-paragraph response... it won't see the hook output until after the response completes
+4. 5s timeout expires → spawns fallback subagent
+5. Model finishes, sees hook output, tries to process callback
+6. Now you have TWO summarizations running for the same request (wasteful)
+
+**What we need:** The notification mechanism must be *preemptive* — the running session must see the request even mid-response. In Claude Code, the hook output only becomes visible between tool calls, not during text generation. A 5s timeout would mean the running agent almost never responds in time, making the fallback the primary path 90% of the time.
+
+**Better timeout:** 15-30 seconds gives the agent enough time to finish a typical response cycle AND process the callback. The 120s max is conservative — most callbacks should resolve in under 20s when the agent is actively being used.
+<!-- agent:boundary:76ff28dc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Bidirectional IPC** — Option A + hook notification confirmed. Planning complete, ready to implement.
-- **`agent-doc cleanup`** — umbrella command that orchestrates the callback flow.
-- **`agent-doc pending` subcommands** — add/remove/prune/list.
+- **Bidirectional IPC** — Implementation complete: `callback.rs`, `pending_cmd.rs`, `cleanup_cmd.rs` wired into CLI. 15 new tests, 270 pass total. Binary built.
+- **`agent-doc cleanup`** — Works: writes request, polls, fallback stub. Missing: full `claude --print` fallback implementation.
+- **`agent-doc pending` subcommands** — add/remove/prune/list fully implemented.
+- **Hook `check-callbacks`** — Detects pending requests, outputs JSON. SKILL.md needs update to handle hook output.
 <!-- /agent:pending -->
 ## Assistant

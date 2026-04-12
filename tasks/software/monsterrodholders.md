@@ -85,7 +85,7 @@ git pull
 - Paste a screenshot and I'll eyeball.
 
 If the images *still* vary after deploy, the most likely remaining cause is a page/fragment cache (Blocksy/Redis). `./scripts/deploy.sh` already runs `wp cache flush`, but a full-page cache may need `wp rocket clean` / `wp cache flush` + hard refresh.
-<!-- agent:boundary:49d65012 -->
+<!-- agent:boundary:be6cf2f9 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

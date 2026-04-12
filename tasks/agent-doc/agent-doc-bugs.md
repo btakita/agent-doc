@@ -314,7 +314,7 @@ Option C's strength (no polling, integrates with existing infrastructure) is off
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Bidirectional IPC** — plan written at `tasks/agent-doc/plan-bidirectional-ipc.md`. Review and refine.
+- **Bidirectional IPC** — Option C expanded with detailed hook timing/interpretation analysis in plan doc. Awaiting decision on approach.
 - **`agent-doc pending` subcommands** — add/remove/prune/list. Blocked on IPC design (pending_curate callback type).
 - **`agent-doc cleanup`** — umbrella command replacing `compact`. Spec'd in plan doc.
 <!-- /agent:pending -->

@@ -106,7 +106,7 @@ I don't have the specific documentation for what `--enable-tool-search` does in 
 - Ask in the Claude Code docs/settings if there's contextual help
 
 Once you know what it does, the frontmatter support is already in place — just set `enable_tool_search: true` in your document and it will pass the flag on session startup.
-<!-- agent:boundary:b7457686 -->
+<!-- agent:boundary:1ac32e69 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

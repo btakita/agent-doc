@@ -33,7 +33,7 @@ All product images should now display at uniform **300px height** with full visi
 **File:** `src/monsterrodholders-dev/wordpress/plugins/mrh-performance/mrh-performance.php`
 
 Test on /shop page — images should align consistently in the grid.
-<!-- agent:boundary:55d335f1 -->
+<!-- agent:boundary:2628ccb4 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

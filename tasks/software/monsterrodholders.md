@@ -1531,7 +1531,7 @@ Then flushed `wp cache flush` and `wp transient delete --all` so WC rebuilds the
 - **Livestream VOD trim** — the Stripe settings dump segment still needs manual trim in post-production.
 - **Decide on real shipping strategy** — Free Shipping is fine for testing; when going live, add Flat Rate / carrier rates above it.
 PayPal seems to be missing. I don't see it as a payment option. Could you readd PayPal? 
-### Re: PayPal missing from checkout (HEAD)
+### Re: PayPal missing from checkout
 
 Reactivated. The `woocommerce-paypal-payments` plugin was inactive (I'd deactivated it earlier when we thought it was misconfigured) — turns out the onboarding was actually intact. Full merchant connection was still in the DB:
 
@@ -1549,13 +1549,66 @@ Actions taken:
 **Please retry /checkout** — PayPal, plus the Pay Later / Venmo / Apple Pay / Google Pay smart buttons should render alongside Stripe (Credit/Debit Card). Stripe remains enabled as the card gateway.
 
 Note: the installed PPCP plugin is `3.4.1` with `4.0.2` available. I left it on 3.4.1 to avoid introducing unrelated changes during the checkout debug cycle — we can bump it after we've confirmed checkout works end-to-end.
-<!-- agent:boundary:84d71cfa -->
+
+❯ Checkout with PayPal got a "Something went wrong. Please try again or choose another payment source.".
+❯ See tasks/software/monsterrodholders/paypal-error.txt
+❯ Please look into logs.
+### Re: PayPal 404s — CRS 933120 on `form_encoded` (HEAD)
+
+Root cause: same OWASP CRS 933120 false positive we hit on classic checkout, but this time the arg name is different so the prior exclusion didn't cover it.
+
+What the log actually shows (`modsec_audit.log` section H):
+
+```
+Message: Warning. Matched phrase "=" at ARGS:form_encoded.
+  [id "933120"] [msg "PHP Injection Attack: Configuration Directive Found"]
+  [data "Matched Data: = found within ARGS:form_encoded:
+    wc_order_attribution_source_type=typein&...wc_order_attribution_utm_campaign=(none)&..."]
+Message: Access denied with code 403 (phase 2).
+  [id "949110"] [msg "Inbound Anomaly Score Exceeded (Total Score: 5)"]
+  [... PHPI=5 ...]
+  [uri "/.noindex.html"]
+```
+
+- ModSec trips CRS 933120 (+5, CRITICAL) → 949110 blocks with 403
+- Imunify rewrites the intercepted request to `/.noindex.html` → backend renders the theme's 404 page (132KB)
+- Browser sees HTTP 404 on both `ppc-save-checkout-form` and `ppc-create-order`, so PPCP throws "Something went wrong…"
+
+Why the existing exclusion didn't catch it:
+
+- Classic checkout wraps the form in an arg named `post_data` — we already have `SecRuleUpdateTargetById 933120 "!ARGS:post_data"` from the earlier fix.
+- PPCP sends `application/json` with `{"nonce": "...", "form_encoded": "<url-encoded form>", ...}`. ModSec's JSON body processor exposes the string as `ARGS:form_encoded`. Different arg name → not excluded → fires.
+
+The verification that WP itself is fine:
+
+- `wc_ajax_ppc-create-order` / `ppc-save-checkout-form` hooks are registered (confirmed via `wp eval`).
+- Direct `curl` from host → `127.0.0.1:8080` returns 200 with JSON (`Could not validate nonce.` — endpoint exists).
+- Only via `https://50.28.2.199.nip.io` (Apache + ModSec) does it become 404.
+
+Fix applied:
+
+Extended `/etc/httpd/modsecurity.d/local_rules/woocommerce-crs-exclusions.conf` with the same narrow-scope treatment:
+
+```
+SecRuleUpdateTargetById 933120 "!ARGS:form_encoded"
+SecRuleUpdateTargetById 931100 "!ARGS:form_encoded"
+```
+
+- 933120 is the one that actually fired. 931100 is preemptive — the same URL-shaped `wc_order_attribution_*` fields that tripped 931100 on `post_data` are present inside `form_encoded` as well, so it'll fire the moment 933120 stops eating the request. Adding both in one pass avoids a second round-trip.
+- Backup saved at `woocommerce-crs-exclusions.conf.bak-paypal-<timestamp>`.
+- `apachectl configtest` → Syntax OK; `systemctl reload httpd` → clean.
+
+**Please retry /checkout → PayPal**. The JSON wc-ajax POSTs should now reach PHP, PPCP should create the PayPal order, and you should get redirected to the PayPal approval flow.
+
+Also folding this into the `wp-liquidweb-ops` skill knowledge: the 933120 exclusion pattern is now a two-case rule — `post_data` for classic checkout, `form_encoded` for PPCP's JSON body wrapper. I'll update the runbook when we confirm the fix sticks.
+<!-- agent:boundary:ed26a30a -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Retry /checkout with PayPal visible** — confirm PayPal smart buttons render alongside Stripe card form. (user action)
-- **Retry /checkout with test product** — confirm Free Shipping renders at $0.00 after the zone fix. (user action)
+- **Retry /checkout → PayPal** — confirm PayPal order creation reaches the approval flow after the `form_encoded` exclusion. (user action)
+- **Retry /checkout with test product + Stripe** — confirm Free Shipping / card path still works (regression check after CRS reload). (user action)
+- **Update wp-liquidweb-ops runbook** — add `form_encoded` as second 933120 exclusion pattern alongside `post_data`; document the `.noindex.html` → 404 symptom that hides the 403.
 - **Rotate DB passwords** — `MARIADB_ROOT_PASSWORD` + `MARIADB_PASSWORD` still on the previous values in `docker-compose.yml` / `.env`; update `wp-config.php`, `docker compose up -d --force-recreate`.
 - **Livestream VOD trim** — the Stripe settings dump segment still needs manual trim in post-production.
 - **Decide on real shipping strategy** — Free Shipping is fine for testing; when going live, add Flat Rate / carrier rates above it.

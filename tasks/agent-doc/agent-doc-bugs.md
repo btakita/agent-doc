@@ -93,7 +93,7 @@ enable_tool_search: true
 - `start.rs` — checks `fm.enable_tool_search.unwrap_or(false)` and appends `--enable-tool-search` to the command after `--no-mcp`
 
 Binary rebuilt and tested. All 262 unit tests pass. The field works alongside `no_mcp` — both are applied independently when set.
-<!-- agent:boundary:d2a21b35 -->
+<!-- agent:boundary:c74d4680 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

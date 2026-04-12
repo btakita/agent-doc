@@ -146,7 +146,7 @@ Done. Two changes:
 2. **`init.rs`** — Added `enable_tool_search: true` to the template-mode document scaffold. New documents created with `agent-doc init <file> --mode template` will have tool search enabled by default.
 
 All tests pass, binary rebuilt.
-<!-- agent:boundary:cb0a39b4 -->
+<!-- agent:boundary:72c2f617 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

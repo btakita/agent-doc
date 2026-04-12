@@ -272,7 +272,7 @@ All 270 unit tests pass. 522/523 integration tests pass (1 flaky tmux timing tes
 ❯ - **Bidirectional IPC** — plan written at `tasks/agent-doc/plan-bidirectional-ipc.md`. Review and refine.
 
 ❯ I'm considering Option C. Please go more into "Hook output interpretation is indirect, timing depends on tool use frequency"
-### Re: Option C deep-dive — Hook-based callback (HEAD)
+### Re: Option C deep-dive — Hook-based callback
 
 Let me unpack both cons.
 
@@ -308,13 +308,26 @@ Contrast this with Option A (file-based + preflight): preflight checks for pendi
 Option C's strength (no polling, integrates with existing infrastructure) is offset by making the binary a **passive requester** instead of an **active orchestrator**. With Option A, `agent-doc cleanup` is a single blocking command that guarantees a result before returning. With Option C, it becomes "plant a seed and hope the garden grows" — the binary writes the request and waits.
 
 **Hybrid mitigation:** Option C + timeout fallback. After writing the callback request, `agent-doc cleanup` starts a 5-second timer. If no response appears (detected via the hook writing `response.json`), it falls back to spawning `claude --print` for the summarization. This gives you the best of both: cheap in-session processing when the hook fires fast, reliable subagent fallback when it doesn't.
-<!-- agent:boundary:103a1383 -->
+
+If we use Option A with the integrated preflight, the flow would be completely deterministic?
+### Re: Option A + integrated preflight = deterministic? (HEAD)
+
+Yes, exactly. With **Option A + integrated preflight**, the flow becomes a traditional synchronous request-response:
+
+1. `agent-doc cleanup <FILE>` writes `request.json`
+2. **Immediately** starts polling for `response.json` (not waiting for next `/agent-doc` cycle)
+3. If the running session picks it up (via whatever notification mechanism), response arrives
+4. If timeout → spawn `claude --print` as fallback
+5. Read result → apply changes → return
+
+No hooks, no tool-use-frequency dependency — just a blocking command with a defined timeout. The only non-deterministic part is *which* path satisfies the request (running session vs spawned subagent), but the overall flow is guaranteed to complete within a known time window.
+<!-- agent:boundary:61e06cd9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Bidirectional IPC** — Option C expanded with detailed hook timing/interpretation analysis in plan doc. Awaiting decision on approach.
+- **Bidirectional IPC** — Option A confirmed as deterministic approach. Decision made.
 - **`agent-doc pending` subcommands** — add/remove/prune/list. Blocked on IPC design (pending_curate callback type).
 - **`agent-doc cleanup`** — umbrella command replacing `compact`. Spec'd in plan doc.
 <!-- /agent:pending -->

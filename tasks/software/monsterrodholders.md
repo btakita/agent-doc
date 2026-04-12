@@ -90,7 +90,7 @@ Fixed. Reverted the homepage edit and put the block on the shop page (WooCommerc
 Sequence is correct — the 4 tiles render in the requested order between the "Popular" heading and the product loop. Hard-refresh `/shop/` to confirm visually.
 
 **Note on the shop page layout:** WooCommerce renders the page's `post_content` via `woocommerce_archive_description` before the product loop, so the Popular block appears above the product grid. The product grid (51 products, no pagination from v1.4) continues below.
-### Re: Popular moved out of .hero-section into .ct-container (HEAD)
+### Re: Popular moved out of .hero-section into .ct-container
 
 Fixed. Root cause: Blocksy renders the shop page's `post_content` via `woocommerce_archive_description` which lives inside `.hero-section`, so seeding the shop page DB content put the Popular block in the wrong container regardless of what it looked like in the editor.
 
@@ -136,12 +136,50 @@ Instead of seeding `post_content`, the mu-plugin now hooks `woocommerce_before_s
 - No post_content manipulation — behavior now lives entirely in the mu-plugin, so it's self-healing against DB imports and admin-UI wipes
 
 Hard-refresh `/shop/` to confirm visually. The Popular row should now appear in the main content column (where the product grid lives), not in the hero band at the top of the page.
-<!-- agent:boundary:c966edfe -->
+
+❯ Remove the misplaced "Popular" section in the .hero-section.
+❯ Fix the styling if the "Popular" section in .ct-container.
+❯ ![img_22.png](img_22.png)
+### Re: Remove misplaced Popular + fix styling (HEAD)
+
+Fixed both issues. Deployed as mrh-performance v1.11.
+
+**Root cause of duplicate Popular:**
+The shop page `post_content` (post 6) was never actually cleared — it still had the `wp:columns` block from v1.9. WooCommerce renders `post_content` via `woocommerce_archive_description` inside the `.hero-section` header area, so the old block showed above the page title area. The hook-based Popular (v1.10) rendered correctly in `.ct-container` below it — creating the duplicate.
+
+**Root cause of styling issues:**
+The shop page had `data-sidebar="left"` — Blocksy's Product Categories widget was rendering a sidebar that squeezed the main content column, making the Popular grid and product tiles cramped.
+
+**What shipped (v1.11):**
+
+1. **Cleared shop page `post_content`** on server (`wp post update 6 --post_content=""`) — removes the stale Popular block from `.hero-section`
+2. **Added CSS to hide sidebar on shop page:**
+   ```css
+   body.post-type-archive-product .ct-container[data-sidebar] #sidebar,
+   body.post-type-archive-product .ct-container[data-sidebar] aside {
+       display: none !important;
+   }
+   body.post-type-archive-product .ct-container[data-sidebar] > section {
+       width: 100% !important;
+       max-width: 100% !important;
+   }
+   ```
+3. Server pulled, container force-recreated, cache flushed
+
+**Verification (`curl`):**
+- `>Popular<` count: **1** (only the hook-based one in `.ct-container`) ✓
+- Sidebar-hide CSS present in `<style id="mrh-product-grid">` ✓
+- `mrh-popular-categories` section renders with 4 category tiles ✓
+
+Hard-refresh `/shop/` (Ctrl+Shift+R) to confirm visually. The Popular section should now be full-width with no sidebar, and there should be only one "Popular" heading on the page.
+<!-- agent:boundary:034b8bb6 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **"Popular" categories block in .ct-container on /shop/** — woocommerce_before_shop_loop hook, 4-column strict order (Rod Holders, Rod Holder Bases, HydroWeb Landing Nets, River Anchors), mrh-performance v1.10, deployed and verified
+- [x] **Remove duplicate Popular from .hero-section** — cleared stale post_content from shop page (post 6), mrh-performance v1.11
+- [x] **Fix Popular styling / hide sidebar** — CSS hides sidebar widget on shop archive, full-width layout, mrh-performance v1.11
 - [x] **Match footer logo size to header (~75px)** — CSS cap + srcset sizes fix in mrh-performance v1.6, deployed and verified
 - [x] **Hide "New Cloth Technologies" aside column on /shop/** — mrh-performance v1.7, deployed and verified
 <!-- /agent:pending -->

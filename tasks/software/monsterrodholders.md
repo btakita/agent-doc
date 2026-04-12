@@ -21,7 +21,7 @@ WordPress migration, Docker stack, layout refinements (hero, grids, sticky sideb
 ❯ ![img_15.png](img_15.png)
 ❯ ![img_14.png](img_14.png)
 
-### Re: Variable Image Heights (HEAD)
+### Re: Variable Image Heights
 
 Fixed — the CSS priority was too low. Updated the fix to:
 - Add `!important` to all image rules (overrides theme styles)
@@ -33,7 +33,59 @@ All product images should now display at uniform **300px height** with full visi
 **File:** `src/monsterrodholders-dev/wordpress/plugins/mrh-performance/mrh-performance.php`
 
 Test on /shop page — images should align consistently in the grid.
-<!-- agent:boundary:2628ccb4 -->
+
+❯ Some product images are still taller than others. Please fix. Verify the fix using chromium-bridge dom measurements on the https://50.28.2.199.nip.io/shop/. Make sure all products .wp-post-image elements have the same dimensions.
+❯ ![img_16.png](img_16.png)
+
+### Re: Variable Image Heights (round 2) (HEAD)
+
+**Root cause found via `curl` of /shop/.** The mrh-performance CSS was never reaching the page — zero matches for `height: 300`, `mrh-performance`, or even the preconnect `fonts.googleapis.com` hint in the rendered HTML. The regular plugin was never activated on the server, so none of items 1–5 in `mrh-performance.php` were running.
+
+**Secondary cause in the markup.** Blocksy wraps each tile as `li.product > figure > a.ct-media-container > img.wp-post-image`, and every `img` carries an inline `style="aspect-ratio: X/Y;"` (1/1, 250/183, 556/427, 800/1067, 2048/1331…). Even if the old `.wp-post-image { height: 300px }` rule had loaded, the wrappers `figure` and `a.ct-media-container` would still collapse to the image's natural aspect-ratio box, so grid rows still wouldn't align.
+
+**Fix (two parts):**
+
+1. **Convert to a must-use plugin so activation is not required.** Moved `wordpress/plugins/mrh-performance/mrh-performance.php` → `wordpress/mu-plugins/mrh-performance.php`. Must-use plugins auto-load on every request — no admin step, survives plugin-list wipes. Added the mount to `docker-compose.yml`:
+   ```yaml
+   - ./wordpress/mu-plugins:/var/www/html/wp-content/mu-plugins
+   ```
+
+2. **Stronger CSS targeting the wrapper chain + clearing inline aspect-ratio:**
+   ```css
+   .products li.product figure,
+   .products li.product figure > a.ct-media-container {
+       height: 300px !important; min-height: 300px !important; max-height: 300px !important;
+       width: 100% !important;
+       display: flex !important; align-items: center !important; justify-content: center !important;
+       overflow: hidden !important;
+   }
+   .products li.product .wp-post-image {
+       height: auto !important; width: auto !important;
+       max-height: 300px !important; max-width: 100% !important;
+       aspect-ratio: auto !important;   /* overrides inline style */
+       object-fit: contain !important;
+   }
+   ```
+   The wrapper is locked to a 300px flex box; the img inside scales down to fit with full visibility; `aspect-ratio: auto !important` neutralizes the inline attribute.
+
+**Files changed (in `src/monsterrodholders-dev/`):**
+- `wordpress/mu-plugins/mrh-performance.php` (new, v1.3)
+- `wordpress/plugins/mrh-performance/mrh-performance.php` (deleted)
+- `docker-compose.yml` (added mu-plugins volume)
+
+**Deploy (on the server, `/path/to/monsterrodholders-dev/`):**
+```bash
+git pull
+./scripts/deploy.sh   # docker compose pull + up -d --remove-orphans + cache flush
+```
+`up -d` picks up the new `mu-plugins` volume mount. No plugin activation step needed.
+
+**Verification I could not do from here.** You asked me to verify via chromium-bridge DOM measurements. The `chrome-devtools` MCP timed out on every call (`Network.enable timed out`), and the nip.io host is on the remote server, not locally reachable via Docker. I verified only the *current* state via `curl`, not the post-deploy state. After deploying, please either:
+- Run `chromium-bridge` again against https://50.28.2.199.nip.io/shop/ and check all `.wp-post-image` wrappers (`figure > a.ct-media-container`) have `getBoundingClientRect().height === 300`, or
+- Paste a screenshot and I'll eyeball.
+
+If the images *still* vary after deploy, the most likely remaining cause is a page/fragment cache (Blocksy/Redis). `./scripts/deploy.sh` already runs `wp cache flush`, but a full-page cache may need `wp rocket clean` / `wp cache flush` + hard refresh.
+<!-- agent:boundary:7a870d62 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
@@ -44,8 +96,8 @@ Test on /shop page — images should align consistently in the grid.
 - [x] **Fix Rod Holders category image** (term 210 thumbnail_id → 77336)
 - [x] **Restore `All Products` heading** above products list
 - [x] **Remove duplicate hero `Popular Categories`** from Shop page block content
-- [x] **Enable Blocksy sidebar on /shop/ and /blog/** (left, matching home page layout)
+- [x] **Enable Blocksy sidebar on /shop/ and /blog/**
 - [x] **Remove custom layout CSS** — header compact, main below header, aside below header
-- [x] **Fix product image heights** — consistent 300px height with !important CSS override
+- [ ] **Fix product image heights** — CSS + must-use plugin conversion committed; awaiting server deploy + post-deploy DOM verification
 - [ ] *(Optional)* Wrap shop product grid in `<article>` via template override if strict article+aside parity is required
 <!-- /agent:pending -->

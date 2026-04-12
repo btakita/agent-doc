@@ -382,7 +382,7 @@ Product page returns HTTP 200. You can now test the full cart + checkout flow:
 The product appears in the shop page alongside the existing inventory (sorted by popularity, so it'll be near the bottom as a new product with 0 sales).
 
 When testing is done, I can delete product 86212 to clean up.
-<!-- agent:boundary:4074f02d -->
+<!-- agent:boundary:a77b82c7 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

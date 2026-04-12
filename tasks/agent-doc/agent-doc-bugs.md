@@ -436,7 +436,7 @@ agent-doc compact tasks/agent-doc/agent-doc-bugs.md --message "Summary of comple
 ```
 
 Should we add `compress` as an alias for `compact`? Or did you mean something different — like a new command that compresses and replaces the exchange with the agent's last response?
-<!-- agent:boundary:85d2d051 -->
+<!-- agent:boundary:b7feb99e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -441,7 +441,7 @@ Fixed. The footer widget was rendering the full-width 2048w image at column widt
 - Submodule `a8c32cf0` pushed; parent pointer bumped; container force-recreated and cache flushed
 
 **Hard-refresh** (Cmd/Ctrl+Shift+R) and the footer logo should now match the header. If it still looks off, let me know the exact pixel size you want and I'll tune the cap.
-<!-- agent:boundary:96e6a383 -->
+<!-- agent:boundary:215da313 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

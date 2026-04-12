@@ -350,7 +350,7 @@ Great choice. Here's how it works end-to-end:
 The hook gives you ~1-5 second detection latency (fastest next tool use), while the CLI poll gives determinism. Worst case: 120s fallback to subagent.
 
 ❯ Would reducing the timeout to 5s result in misses to the running agent? What happens if the agent is busy?
-### Re: 5s timeout and busy agent (HEAD)
+### Re: 5s timeout and busy agent
 
 Yes, a 5s timeout would result in frequent misses when the agent is busy. Here's why:
 
@@ -368,15 +368,48 @@ Yes, a 5s timeout would result in frequent misses when the agent is busy. Here's
 
 **Better timeout:** 15-30 seconds gives the agent enough time to finish a typical response cycle AND process the callback. The 120s max is conservative — most callbacks should resolve in under 20s when the agent is actively being used.
 pleas revert the changes
-<!-- agent:boundary:2b7aac24 -->
+
+❯ Implement Let's do Option A with "the hook fires `agent-doc check-callbacks`".
+### Re: Implement Option A with hook-based check-callbacks (HEAD)
+
+Done. Option A (file-based callback protocol) with PostToolUse hook notification is implemented end-to-end.
+
+**Binary changes (4 files):**
+
+1. **`callback.rs`** — Made `read_request()` public. Added `write_response()` that validates `request_id` matches the pending request before writing `response.json`.
+
+2. **`main.rs`** — Added `Read` and `Respond` variants to `CallbackAction`:
+   - `agent-doc callback read <FILE>` — returns full request JSON
+   - `agent-doc callback respond <FILE> --request-id <id> --summary "text"` — writes response with request_id verification
+
+3. **`preflight.rs`** — Added `pending_callbacks` field to `PreflightOutput`. Preflight now scans for pending callbacks so the skill detects them at cycle start.
+
+4. **`cleanup_cmd.rs`** — Fleshed out `spawn_fallback_agent()` to call `claude --print --model <model>` with a summarization prompt (30K char truncation for context limits).
+
+**Hook (`~/.claude/settings.json`):**
+- PostToolUse hook matching `Bash` runs `agent-doc hook check-callbacks 2>/dev/null || true`
+- Fires after every Bash tool use, outputs pending callbacks as JSON
+
+**SKILL.md (step 0d):**
+- "Handle pending callbacks" section: read request → process operations → write response
+- Covers both preflight and hook detection paths
+
+**End-to-end verified:**
+```
+callback request → check-callbacks (pending) → read → respond → check-callbacks (empty)
+```
+
+270 unit tests pass, release binary built.
+<!-- agent:boundary:ba36be83 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Bidirectional IPC** — Implementation complete: `callback.rs`, `pending_cmd.rs`, `cleanup_cmd.rs` wired into CLI. 15 new tests, 270 pass total. Binary built.
-- **`agent-doc cleanup`** — Works: writes request, polls, fallback stub. Missing: full `claude --print` fallback implementation.
+- **Bidirectional IPC (Option A)** — ✅ Implemented: callback.rs read/respond, preflight integration, PostToolUse hook, SKILL.md step 0d, fallback agent. Binary built.
+- **`agent-doc cleanup`** — Works end-to-end: writes request, polls, fallback via `claude --print`. Ready for use.
 - **`agent-doc pending` subcommands** — add/remove/prune/list fully implemented.
-- **Hook `check-callbacks`** — Detects pending requests, outputs JSON. SKILL.md needs update to handle hook output.
+- **Hook `check-callbacks`** — PostToolUse hook configured in settings.json. Detects and outputs pending requests.
+- **Config consolidation** — `components.toml` merged into `config.toml` with auto-migration. Shipped in v0.32.x.
 <!-- /agent:pending -->
 ## Assistant

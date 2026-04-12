@@ -221,7 +221,7 @@ And the `<style id="mrh-product-grid">` block contains the full ruleset (300px w
 
 - `src/monsterrodholders-dev/AGENTS.md` (+`CLAUDE.md` symlink) — SSH alias, deploy path, `--force-recreate` gotcha, mu-plugin contents, shop grid markup notes. Submodule commit `2eaa9e61`, pushed; parent pointer bumped.
 - Memory: `reference_monsterrodholders_ssh.md` — same info in my auto-memory so I won't guess `user@` again next session.
-<!-- agent:boundary:0b57aecc -->
+<!-- agent:boundary:1ef4c7f3 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

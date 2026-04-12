@@ -252,7 +252,7 @@ No `ul`, no `li`, no `.woocommerce` wrapper. Clean semantic markup with clickabl
 - Container force-recreated, cache flushed
 
 Hard-refresh `/shop/` to confirm.
-<!-- agent:boundary:b8c5198d -->
+<!-- agent:boundary:dfd6e1c1 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

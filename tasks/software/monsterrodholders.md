@@ -202,7 +202,7 @@ Deployed mrh-performance v1.12. Three changes:
 - 7 sold-out items visible ✓
 
 Hard-refresh `/shop/` to confirm visually.
-<!-- agent:boundary:94044698 -->
+<!-- agent:boundary:46ce38a9 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

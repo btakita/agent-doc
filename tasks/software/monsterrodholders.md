@@ -353,7 +353,7 @@ Contents: comprehensive sitemap comparison (prod 25 posts / 79 pages vs staging 
 4. **Action order** — Urgent (investigate compromise), before-flip (delete demo pages, set up 301 redirects), staging cleanup (test product + author slug), post-flip (Search Console resubmission).
 
 Gist permalink is unlisted but shareable — don't distribute publicly if content is sensitive.
-### Re: Delete demo pages + *-2 redirects (HEAD)
+### Re: Delete demo pages + *-2 redirects
 
 Plan — two phases so we don't break inbound links:
 
@@ -378,7 +378,7 @@ Redirect pattern (WP Redirection plugin or `.htaccess`):
 - `/cart-2` → `/cart` (301)
 - `/shop-2` → `/shop` (301)
 
-### Re: test-product-1 noindex (HEAD)
+### Re: test-product-1 noindex
 
 Yes — keeping a test product for checkout smoke-testing is reasonable. Two options:
 
@@ -392,7 +392,7 @@ wp post meta update <id> _yoast_wpseo_meta-robots-noindex 1
 wp post meta update <id> _visibility hidden
 ```
 
-### Re: Rename nicename to catfishdude (HEAD)
+### Re: Rename nicename to catfishdude
 
 ```bash
 # Dry-run — show what changes
@@ -408,11 +408,11 @@ curl -I https://monsterrodholders.com/author/catfishinginfogmail-com  # should 4
 
 The old nicename slug becomes a 404 by default. If you want the old URL to 301 to the new one (for the brief window Google has it indexed), add a WP Redirection rule: `/author/catfishinginfogmail-com` → `/author/catfishdude`.
 
-### Re: Redirect list extension (HEAD)
+### Re: Redirect list extension
 
 Acknowledged — `do this` noted. I'll fold the `-2` patterns into the same WP Redirection import as the cart/my-account redirects rather than maintaining two lists. Single CSV import, single place to audit.
 
-### Re: Instruction #1 — incomplete (HEAD)
+### Re: Instruction #1 — incomplete
 
 Your edit to action item #1 cut off mid-sentence:
 
@@ -420,7 +420,7 @@ Your edit to action item #1 cut off mid-sentence:
 
 "Use the" — what? Finish that thought when you get back and I'll act on it. Guessing: "Use the wp-admin login below" which is the next diff block, so I'll treat that as the intent.
 
-### Re: wp-admin login to investigate spam posts (HEAD)
+### Re: wp-admin login to investigate spam posts
 
 Going to log in via browser now. A few safety notes before I do:
 
@@ -429,7 +429,7 @@ Going to log in via browser now. A few safety notes before I do:
 3. **Not deleting anything from wp-admin** this pass — investigation only. Delete commands will come through WP-CLI over SSH so they're scriptable and logged.
 
 Starting the browser session in the next step.
-<!-- agent:boundary:ba340988 -->
+<!-- agent:boundary:195b5a54 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

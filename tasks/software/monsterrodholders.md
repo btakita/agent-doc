@@ -566,7 +566,30 @@ Since you can't rotate, treat the `sk_live_...` as compromised-but-unavoidable. 
 - If you trim the livestream VOD, the ~1m window where the Stripe JSON flew by is the one to cut
 
 Want me to add a CLAUDE.local.md note for monsterrodholders so future sessions auto-avoid the `wp option get` on stripe settings?
-<!-- agent:boundary:b0fe9647 -->
+
+❯ migrate
+❯ - [ ] **(Optional) Follow-up: migrate cart-2 → cart, my-account-2 → my-account, home-2 → home** — same pattern, needs approval
+### Re: Follow-up migrations (cart-2, my-account-2, home-2) (HEAD)
+
+I notice you've added a duplicate line — removed one copy below. ✓
+
+**Pattern confirmed.** We have solid precedent from the checkout-2→checkout work:
+
+1. **Flip the WooCommerce option** (`woocommerce_cart_page_id` / `woocommerce_myaccount_page_id` / `page_on_front`)
+2. **Delete the old `-2` pages** (or mark as draft if needed for historical audit)
+3. **Search-replace old URLs** in content, meta, nav menus
+4. **Flush caches** and test redirects
+
+**Key question: do the old pages (cart-2, my-account-2, home-2) have permalink redirects set up?** If WordPress has 301/302 configured or Cloudflare redirect rules, existing links stay working. If not, old URLs will 404 and SEO takes a hit.
+
+**Scope:**
+- ~5 min per page to flip the option + delete the page
+- ~10 min to verify no broken navigation or menu references
+
+**Decision needed:** Proceed with all three, or test one first (cart is the highest-traffic candidate)?
+
+Also: yes, I'll add the CLAUDE.local.md note about stripe secrets. Should I also document this migration pattern there so future sessions know the playbook?
+<!-- agent:boundary:215e838a -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
@@ -577,8 +600,9 @@ Want me to add a CLAUDE.local.md note for monsterrodholders so future sessions a
 - [x] **Store Stripe + PayPal keys in passage** — `btak/monsterrodholders/{stripe,paypal}/*`
 - [x] **Redact leaked Stripe secret from local session logs** — 10 files scrubbed (main + observer jsonl + tool-result caches)
 - [ ] **Browser QA of `/checkout/`** — add $1 test product, verify form unlocks, complete real live transaction, refund after
-- [ ] **(Optional) Follow-up: migrate cart-2 → cart, my-account-2 → my-account, home-2 → home** — same pattern, needs approval
+- [ ] **(Optional) Follow-up: migrate cart-2 → cart, my-account-2 → my-account, home-2 → home** — same pattern, check for redirects + approval
 - [ ] **(Optional) Audit duplicated Privacy Policy + Refund/Returns pages** — multiple copies exist
 - [ ] **(Optional) Livestream scrollback cleanup** — trim ~1m window where Stripe JSON was printed
+- [ ] **(Optional) Document stripe secrets hygiene + migration pattern in CLAUDE.local.md**
 - [x] **"Popular" categories block in .ct-container on /shop/** — woocommerce_before_shop_loop hook, 4-column strict order, mrh-performance v1.10
 <!-- /agent:pending -->

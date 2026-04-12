@@ -79,7 +79,7 @@ Created as a secret gist:
 Contents: full sitemap comparison table, root cause (Yoast vs WP core), structural diff, 4-point SEO risk assessment (indexed URLs, author archives leak, Search Console resubmission, canonical domain handling), recommendation, and action items. Local copy at `/tmp/monsterrodholders-sitemap-seo-report.md`.
 
 Secret gists are unlisted but anyone with the URL can view — don't share the link publicly if any of the content is sensitive. Nothing in the report exposes credentials or internal infra beyond what's already in the task doc.
-<!-- agent:boundary:e477386f -->
+<!-- agent:boundary:206f251b -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

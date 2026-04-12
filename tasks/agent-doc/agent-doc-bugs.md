@@ -321,7 +321,7 @@ Yes, exactly. With **Option A + integrated preflight**, the flow becomes a tradi
 5. Read result → apply changes → return
 
 No hooks, no tool-use-frequency dependency — just a blocking command with a defined timeout. The only non-deterministic part is *which* path satisfies the request (running session vs spawned subagent), but the overall flow is guaranteed to complete within a known time window.
-<!-- agent:boundary:61e06cd9 -->
+<!-- agent:boundary:7e8effe5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

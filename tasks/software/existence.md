@@ -129,7 +129,7 @@ The pending component with checkboxes is well-structured. All four items are rea
 
 No blockers identified. These can be tackled in any order — the philosophy docs are conceptual while the SKILL.md update is operational.
 ❯ create github actions to build `curl | sh` platform releases.
-<!-- agent:boundary:16c9b92c -->
+<!-- agent:boundary:51e9671f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built (HEAD)

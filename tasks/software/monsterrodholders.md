@@ -226,7 +226,7 @@ And the `<style id="mrh-product-grid">` block contains the full ruleset (300px w
 
 ❯ Please remove pagination. All of the products should appear on the /shop/ page.
 
-### Re: Remove pagination from /shop/ (HEAD)
+### Re: Remove pagination from /shop/
 
 **Option A — Fastest (WP Admin):**
 
@@ -281,12 +281,31 @@ ssh monsterrodholders-server "cd /opt/monsterrodholders/app && git pull && docke
 **Recommendation:** Try **Option A first** — it's instant, reversible, and doesn't require a redeploy. If you prefer it permanent in code, go with **Option C**.
 
 Which approach works for you?
-<!-- agent:boundary:a7612d31 -->
+❯ Was pagination added for page performance?
+
+Which approach works for you?
+❯ Was pagination added for page performance?
+
+### Re: About the pagination (HEAD)
+
+No — pagination was likely the default Blocksy theme setting, not intentional performance tuning. WooCommerce and Blocksy default to 12-16 products per page out of the box.
+
+**If you have <100 products:** Removing pagination won't hurt. Load time on /shop/ is typically:
+- Blocksy HTML structure + CSS
+- Product image optimization (which we already fixed with mu-plugins)
+- WooCommerce REST queries
+
+Paginating to 12 products per page saves minimal bandwidth (just HTML markup — images lazy-load either way).
+
+**If you have >200 products:** I'd recommend keeping pagination but increasing the per-page limit to 30-50 instead of 12, balancing UX (not endless scroll) with initial load.
+
+**Current store:** How many products does monsterrodholders have? Once I know, I can confirm whether removing pagination is harmless or if we should cap the per-page limit instead.
+<!-- agent:boundary:375472dd -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Remove pagination from /shop/** — awaiting implementation choice (WP Admin vs code)
+- [ ] **Remove pagination from /shop/** — awaiting: (1) choice of implementation method, (2) product count to confirm load impact
 - [x] **Fix product image heights** — mu-plugin deployed via SSH, CSS confirmed in live HTML (`mrh-product-grid` block present). Pending your visual confirmation after hard-refresh.
 - [x] **Document SSH + deploy** — `AGENTS.md` added to `src/monsterrodholders-dev` (`2eaa9e61`), parent pointer bumped
 - [x] **Add category sidebar to /shop** — 4-tile grid via mu-plugin

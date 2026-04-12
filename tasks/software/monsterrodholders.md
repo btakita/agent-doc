@@ -1279,7 +1279,7 @@ So: every worker currently alive was spawned **after** the OOM burst. The worker
 The "POST `/?wc-ajax=checkout` returns 404 text/html, not 403" was almost certainly one of those fatal-OOM responses: Apache closes the connection on a PHP fatal, upstream (Cloudflare or the WP 404 template via a fallback) converted the blank/5xx response into an HTML 404 page. That's why it looked like the handler wasn't firing — the handler was firing, then dying mid-request.
 
 Tests: re-run the checkout from the browser now. If it still 404s, it is a *new* symptom with a different cause (Cloudflare cache poisoning, cart cookie issue) — not memory. Current endpoint probes confirm the server-side path is healthy.
-<!-- agent:boundary:71c1c1b3 -->
+<!-- agent:boundary:26eb23f3 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

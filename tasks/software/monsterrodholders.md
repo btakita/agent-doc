@@ -1194,7 +1194,7 @@ docker compose exec wordpress wp post get $(docker compose exec -T wordpress wp 
 **Most likely root cause** given the migration timeline: a plugin fatal during load (maybe triggered by the homepage/cart/my-account migrations if anything referenced deleted page IDs in hooked callbacks), or WC got deactivated in the churn. `wp plugin status woocommerce` + the debug.log tail will settle it in one shot.
 
 Run #1–#3 first and paste the output. I'll point at the exact fix from there.
-<!-- agent:boundary:824fd321 -->
+<!-- agent:boundary:5cc1dcae -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

@@ -31,7 +31,7 @@ Diagnosed and fixed agent-doc submodule patch routing regression:
   - Phase 2: Hardened prerelease.md step 8 to require both make build-release AND cargo install before testing gate
 - **Status:** All 5 fixes live in rebuilt binary, Phase 1+2 guards active
 - **Next:** Manual testing gate on src/session-share/tasks/claudescore.md to verify ❯ preservation and working-tree consistency
-<!-- agent:boundary:9b37d726 -->
+<!-- agent:boundary:03d968a3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

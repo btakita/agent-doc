@@ -1281,7 +1281,7 @@ The "POST `/?wc-ajax=checkout` returns 404 text/html, not 403" was almost certai
 Tests: re-run the checkout from the browser now. If it still 404s, it is a *new* symptom with a different cause (Cloudflare cache poisoning, cart cookie issue) — not memory. Current endpoint probes confirm the server-side path is healthy.
 
 ❯ Still got the error. Let's remove WPForms Lite. Replace with an efficient implementation. Ideally without plugins.
-### Re: Checkout still broken + WPForms Lite removal (HEAD)
+### Re: Checkout still broken + WPForms Lite removal
 
 **Correction to my earlier diagnosis.** I said "OOM from 128M workers, transient, gone now." I was half right. Re-reading `debug.log`: **every single fatal** in the 18:30–18:32 UTC burst points at `wp-content/plugins/wpforms-lite/includes/fields/class-number-slider.php`, `class-internal-information.php`, or `class-number.php`. It's not a generic WP memory blip — WPForms Lite is autoloading its entire field class tree on every request and that alone eats the 128M worker budget. Checkout is where it lands because checkout is the heaviest path.
 
@@ -1309,14 +1309,33 @@ Both existing forms have zero shortcode references anywhere in content. They're 
 - **C. Newsletter signup.** If you want this, I'd wire it straight to Mailchimp/Buttondown/etc. via their REST API from the same mu-plugin pattern — skip WP entirely for list management.
 
 Which do you want — A, B, or C? And give me the go on steps 1–5 and I'll execute.
-<!-- agent:boundary:3dd6de82 -->
+
+❯ How is https://50.28.2.199.nip.io/contact/ implemented?
+### Re: How is /contact/ implemented? (HEAD)
+
+Page ID 13, post_type=page, template=default. The form itself is a raw `<!-- wp:html -->` block containing a **Zoho Desk Web-to-Case** form. Key facts:
+
+- It's hardcoded HTML sitting inside the page content — no shortcode, no WP plugin, no PHP handler.
+- The `<form action="https://desk.zoho.com/support/WebToCase" method="POST" enctype="multipart/form-data">` posts **directly to Zoho Desk** (bypassing WordPress entirely).
+- Hidden fields `xnQsjsdp` / `xmIwtLD` are Zoho's portal/module IDs for `WYGPY73YH1OdRhQQlIwaCw2019658` (MRH portal).
+- Loads one external script: `https://d17nz991552y2g.cloudfront.net/app/js/jqueryandencoder.ffa5afd5124fbedceea9.js` (Zoho's encoder bundle).
+- `returnURL` hidden field is set to `https://50.28.2.199.nip.io` — looks like a staging leftover. On prod it should be `https://monsterrodholders.com`. Worth fixing.
+- Fields: First Name, Last Name (required), Phone (required), Email (required), Subject (required), Description. Submissions create a Case in Zoho Desk.
+- Right column is plain text/markup: phone `270-215-2070`, email `support@monsterrodholders.com`.
+
+**So the "real" contact form is already plugin-free** — it's an HTML→Zoho form, no WordPress involvement on submit. WPForms Lite is not used here at all. This confirms **option A is correct**: just delete WPForms Lite, no replacement needed. The two orphaned forms in the database (156, 157) were never wired anywhere.
+
+One thing worth cleaning up regardless of the WPForms decision: the `returnURL` should be updated from the `50.28.2.199.nip.io` staging value to `https://monsterrodholders.com`. Want me to fix that as part of this pass?
+<!-- agent:boundary:d49126f4 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - **WPForms Lite is the actual OOM trigger** — field class autoload eats 128M budget on every request. Remove plugin + purge orphaned forms (ID 156, 157) + bump memory_limit to 256M + purge CF cache for /checkout*. Awaiting user go.
-- Decide on form replacement: (A) delete-and-skip, (B) mu-plugin REST endpoint + plain HTML, (C) direct-to-Mailchimp/Buttondown. Need user choice.
+- **Option A confirmed viable** — /contact/ page uses a hardcoded Zoho Desk Web-to-Case HTML form, no WP plugin, no WPForms. No replacement needed on WPForms removal.
+- Fix `returnURL` hidden field on /contact/ page (ID 13): `https://50.28.2.199.nip.io` → `https://monsterrodholders.com`. Small cleanup, unrelated to checkout.
 - (done) Diagnose checkout 404 — identified WPForms Lite field autoload as OOM trigger (not generic worker memory as previously claimed); correction logged to exchange.
 - (done) WPForms Lite orphan audit — 2 forms in DB, 0 shortcode references in any published/draft content. Safe to remove.
+- (done) /contact/ page implementation audit — hardcoded Zoho Desk Web-to-Case form in wp:html block, plugin-free.
 - Fix `src/session-share/tasks/claude-auto-ruberic.md` layout issue — preflight sweep keeps erroring on "appears as both a file and as a directory". Likely a stale index entry; needs `git rm --cached` + reconcile inside session-share submodule.
 <!-- /agent:pending -->

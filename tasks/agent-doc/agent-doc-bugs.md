@@ -267,7 +267,7 @@ Used explicit-path variants (`load_project_from`, `save_project_to`) to avoid CW
 **Bonus fix:** `load_component_configs()` in `template.rs` and `load_configs()` in `patch.rs` now resolve config relative to the document path (walking up to find `.agent-doc/`), not just CWD. This fixes config resolution for documents in subdirectories/tempdir test setups. Also fixed 4 template.rs tests that were writing config to a malformed filename `config.toml ([components] section)`.
 
 All 270 unit tests pass. 522/523 integration tests pass (1 flaky tmux timing test, pre-existing). Binary rebuilt.
-<!-- agent:boundary:b0ef3881 -->
+<!-- agent:boundary:a04a58b8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

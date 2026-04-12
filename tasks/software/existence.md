@@ -237,7 +237,7 @@ The workflow will now:
 3. Attempt `cargo publish` → succeed if new version, gracefully continue if already published ✓
 
 Next time `v0.4.0` is released (or when moving to v0.5.0), the build will complete without the publish error.
-<!-- agent:boundary:3f11bacb -->
+<!-- agent:boundary:fb9b4dc3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

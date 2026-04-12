@@ -235,7 +235,7 @@ wp option get stylesheet
 Dump both to files and `diff -u prod-plugins.txt staging-plugins.txt` etc. That gives you a definitive structural delta.
 
 **Blocker:** if you're still locked out of prod admin (password reset pending from earlier in this doc), you'd need to run these as the root `wp` user via SSH on the prod host. Want me to write a one-shot script that SSHes into prod, pulls all three inventories, does the same against the staging container, and diffs them?
-<!-- agent:boundary:ad2ae6d1 -->
+<!-- agent:boundary:1269ad9b -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

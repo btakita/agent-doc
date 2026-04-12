@@ -323,7 +323,7 @@ That single filter is sufficient — when `posts_per_page = -1`, WooCommerce ret
 3. SSH deploy via `docker compose up -d --force-recreate wordpress`
 
 Say "go" and I'll do all three.
-<!-- agent:boundary:8260e9cf -->
+<!-- agent:boundary:f5457381 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

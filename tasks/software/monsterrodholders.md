@@ -1014,7 +1014,7 @@ That playbook is now in SPEC.md + memory. You shouldn't have to teach me this tw
 ---
 
 **Next real-browser QA to close out the fix:** run a real $1 Stripe transaction end-to-end on `https://50.28.2.199.nip.io/checkout/`, confirm order completes, then refund from the Stripe dashboard. Everything I can verify from chromium-bridge is green; the remaining validation is human-in-the-loop card entry. Want me to walk through it with chromium-bridge driving a test card?
-### Re: SKILL→runbook instead of memory, extractable later (HEAD)
+### Re: SKILL→runbook instead of memory, extractable later
 
 Yes — better than memory for this. Memory is good for "recognize the pattern next time I stumble into it"; a skill with runbooks is good for "I have a WordPress-on-Liquidweb site and I need to do X." Different surfaces, and the skill is the one you'll actually reach for when onboarding a second site.
 
@@ -1074,13 +1074,43 @@ Most of these are things we've hit on monsterrodholders in the last week — the
 5. When site #2 lands, extract to `src/wp-liquidweb-ops/` with submodule or skillPaths
 
 Want me to start on step 1–4 now? It's ~30min of writing and the content already exists — I'd be moving it, not inventing it.
-<!-- agent:boundary:73f96fec -->
+❯ go
+### Re: Skill + runbooks landed (HEAD)
+
+Created `.claude/skills/wp-liquidweb-ops/` at the agent-loop root. Four files, all content ported from SPEC.md + memory + this document — no new writing, just moved and generalized.
+
+**Layout:**
+
+```
+.claude/skills/wp-liquidweb-ops/
+├── SKILL.md                                     # decision tree + scope rules
+└── runbooks/
+    ├── waf-933120-order-attribution.md          # the exact fix (with comment-header storage pattern)
+    ├── checkout-spinner-diagnose.md             # triage playbook, steps 1–6
+    └── waf-crs-exclusions.md                    # generic CRS-narrowing template + known recurrences (941*, 942*, 920350)
+```
+
+**What each one does:**
+
+- **`SKILL.md`** — symptom → runbook table + ASCII decision tree for "checkout broken." Includes the scope rule: transferable knowledge goes in the skill, site identifiers (IPs, SSH aliases, plugin lists) stay in the consuming repo's `SPEC.md`. That boundary is what makes the later extraction to `src/wp-liquidweb-ops/` a `git mv` instead of a rewrite.
+- **`waf-933120-order-attribution.md`** — the full writeup of why CRS 933120 collides with WC 8.5+ Order Attribution, the affected endpoint list (`update_order_review`, `checkout`, `update_shipping_method`, `apply_coupon`), and copy-pasteable `ssh` one-liner for Apache, an nginx block, and Cloudflare WAF UI steps. Includes the comment-header pattern so the next sysadmin knows not to delete the file during cleanup.
+- **`checkout-spinner-diagnose.md`** — 6-step triage from "is JS firing?" down through browser DevTools → chromium-bridge equivalent → WAF error log grep → backend bypass test → plugin-side causes. Ordering reflects the real-world likelihood on a managed host (WAF first, plugins last), which is the lesson I got wrong the first time on monsterrodholders.
+- **`waf-crs-exclusions.md`** — the generic template. `SecRuleUpdateTargetById` cheat sheet, workflow for narrowing any new false positive, storage pattern, and a "known recurring false positives" section for rules 941* (XSS on editor content), 942* (SQLi on search args), 920350 (backend health-check Host header). Calls out 949110 as "scroll up, this is the denial not the match."
+
+**Memory updated.** `reference_monsterrodholders_waf_933120.md` no longer duplicates the fix — it's a pointer to the skill with a list of trigger phrases ("WC checkout spinner never clears", "Stripe UPE not mounting", "`id "933120"` in Apache error log") so future-me retrieves the skill instead of re-reading the memory. `MEMORY.md` index entry rewritten to match.
+
+**Skill is discoverable now.** It showed up in the skill list after the write (`wp-liquidweb-ops: WordPress + WooCommerce operations on Liquidweb / InterWorx / Imunify360...`) — Claude Code picked it up from the agent-loop root without a reload.
+
+**Extraction path, restated for the record:** currently N=1 site. When site #2 lands, `git mv .claude/skills/wp-liquidweb-ops/ src/wp-liquidweb-ops/skill/` + add `.claude/settings.json` with `skillPaths` pointing at the new location from any consuming site repo. Runbooks reference `SPEC.md` but don't bake in any monsterrodholders specifics, so the extraction is purely mechanical.
+
+**What's still on you:** the manual `$1` Stripe transaction QA — everything chromium-bridge can verify is green, but the card-entry happy path needs a human hand. Want me to drive a chromium-bridge flow with a Stripe test card (4242…) to prove the place-order → payment_intent → thank-you page chain end-to-end? That stops short of real money but exercises the full code path.
+<!-- agent:boundary:d9a80015 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **SKILL+runbook extraction (`wp-liquidweb-ops`)** — port 933120 fix + checkout-spinner diagnostic playbook + CRS exclusion template into `.claude/skills/wp-liquidweb-ops/` at agent-loop root. Update memory reference to point at skill. Awaiting go.
-- **Real-browser $1 Stripe transaction QA** — live card entry on `https://50.28.2.199.nip.io/checkout/`, verify order completes, refund from Stripe dashboard. chromium-bridge has verified everything up to the card-entry step.
+- **Stripe test-card end-to-end dry run** — drive chromium-bridge with `4242 4242 4242 4242` through place-order, payment_intent confirmation, and thank-you page. Proves checkout works without burning a real $1.
+- **Real-browser $1 Stripe transaction QA** — live card entry on `https://50.28.2.199.nip.io/checkout/`, verify order completes, refund from Stripe dashboard. Human-in-the-loop.
 - **Re-evaluate PPCP decision** — either onboard PayPal Payments with real creds or `wp plugin delete woocommerce-paypal-payments` entirely.
 - **Rotate Stripe live secret** — `sk_live_518eq7…` leaked earlier; rotate via Stripe dashboard, update webhook, store new value in `passage btak/monsterrodholders/stripe/secret_key`.
 - **Audit + remove WPForms Lite** — 2 orphaned forms, no published references; grep theme/widgets before `wp plugin delete wpforms-lite`.

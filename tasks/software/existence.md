@@ -187,7 +187,7 @@ Once the tag is pushed, the Actions workflow will:
 **Watch it here:** https://github.com/existence-lang/existence/actions
 
 The workflow will show up immediately after the tag push. Each target job takes ~2-5 minutes (Linux musl/aarch64 are slower via `cross`). Builds appear in the "Release" workflow run.
-<!-- agent:boundary:dbe11ab7 -->
+<!-- agent:boundary:4b5c2e98 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

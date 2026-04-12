@@ -74,7 +74,7 @@ CI was failing through 5 iterations. Root causes found and fixed:
 #### agent-loop pushed
 
 All submodule pointer updates committed and pushed → `84b98b52`.
-<!-- agent:boundary:f8ef3d25 -->
+<!-- agent:boundary:d38d24c5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

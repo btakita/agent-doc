@@ -96,7 +96,7 @@ Binary rebuilt and tested. All 262 unit tests pass. The field works alongside `n
 
 ❯ What does enable_tool_search do when starting a claude session?
 
-### Re: `--enable-tool-search` flag (HEAD)
+### Re: `--enable-tool-search` flag
 
 I don't have the specific documentation for what `--enable-tool-search` does in Claude Code's CLI. The flag name suggests it enables tool discovery/search capabilities, but without the actual documentation I shouldn't speculate on the exact behavior.
 
@@ -106,7 +106,37 @@ I don't have the specific documentation for what `--enable-tool-search` does in 
 - Ask in the Claude Code docs/settings if there's contextual help
 
 Once you know what it does, the frontmatter support is already in place — just set `enable_tool_search: true` in your document and it will pass the flag on session startup.
-<!-- agent:boundary:1ac32e69 -->
+
+❯ We just implemented enable_tool_search. This should mimic setting `"enable_tool_search": true` in ~/.claude.json or the `ENABLE_TOOL_SEARCH=true` env variable. Does the current agent-doc enable_tool_search frontmatter do this when starting a claude session?
+### Re: `enable_tool_search` — current implementation is broken (HEAD)
+
+No. The current implementation passes `--enable-tool-search` as a CLI argument, but **that flag doesn't exist** in Claude Code's CLI. I checked `claude --help` — there's no `--enable-tool-search` option.
+
+`enable_tool_search` is a **settings key**, not a CLI flag. Your `~/.claude.json` already has `"enable_tool_search": true` in it. There are two ways to set it per-session:
+
+1. **Environment variable:** `ENABLE_TOOL_SEARCH=true` (set on the spawned process)
+2. **`--settings` flag:** `--settings '{"enable_tool_search": true}'`
+
+The env variable approach is cleaner — it mirrors `no_mcp` in spirit (a simple toggle) and doesn't require JSON escaping.
+
+**Fix needed in `start.rs:181-184`:**
+
+Replace:
+```rust
+if fm.enable_tool_search.unwrap_or(false) {
+    cmd.arg("--enable-tool-search");
+}
+```
+
+With:
+```rust
+if fm.enable_tool_search.unwrap_or(false) {
+    cmd.env("ENABLE_TOOL_SEARCH", "true");
+}
+```
+
+Want me to apply this fix?
+<!-- agent:boundary:9e38fcf4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -115,6 +145,5 @@ Once you know what it does, the frontmatter support is already in place — just
 - ✅ **Release v0.32.1 complete** (crates.io + GitHub)
 - ✅ **Context-audit skill scaffolded** — `.claude/skills/context-audit/` with SKILL.md + runbook
 - ✅ **`no_mcp` frontmatter** — passes `--no-mcp` to claude when `no_mcp: true`
-- ✅ **`enable_tool_search` frontmatter** — passes `--enable-tool-search` to claude when `enable_tool_search: true`
-- ⏳ **Waiting:** clarify what `--enable-tool-search` does in Claude Code
+- 🔴 **`enable_tool_search` frontmatter** — passes non-existent `--enable-tool-search` CLI flag. Needs fix: use `cmd.env("ENABLE_TOOL_SEARCH", "true")` instead of `cmd.arg("--enable-tool-search")`
 <!-- /agent:pending -->

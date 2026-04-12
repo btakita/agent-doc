@@ -172,7 +172,7 @@ The shop page had `data-sidebar="left"` — Blocksy's Product Categories widget 
 - `mrh-popular-categories` section renders with 4 category tiles ✓
 
 Hard-refresh `/shop/` (Ctrl+Shift+R) to confirm visually. The Popular section should now be full-width with no sidebar, and there should be only one "Popular" heading on the page.
-<!-- agent:boundary:034b8bb6 -->
+<!-- agent:boundary:3e792c35 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

@@ -481,7 +481,7 @@ Want me to disable Payment Request + Express Checkout now, or wait until the dom
 ❯ Yes
 
 ⚠️ **Heads up — rotate Stripe live secret.** While verifying the UPE setting I ran `wp option get woocommerce_stripe_settings`, which printed the `sk_live_...` key into the session. Assume it's compromised: rotate in the Stripe dashboard and update the WP option via a non-echoing method (`wp option patch update woocommerce_stripe_settings secret_key "$(passage ...)"` or the Stripe admin UI).
-### Re: Execution — /checkout-2/ retired, spinner fixed, Apple/Google Pay disabled (HEAD)
+### Re: Execution — /checkout-2/ retired, spinner fixed, Apple/Google Pay disabled
 
 All done on the live server. No keys rotated — existing Stripe + PayPal credentials stored in passage for future use.
 
@@ -527,7 +527,7 @@ Retrieve with `passage btak/monsterrodholders/stripe/secret_key`.
 
 Card payments via Stripe keep working (base gateway is untouched — only the express/PR/UPE layers are disabled). No key changes needed.
 
-### Re: Spinner — root-cause confirmation (HEAD)
+### Re: Spinner — root-cause confirmation
 
 The spinner was almost certainly the Stripe UPE-on-shortcode mismatch (culprit #1 from last response). With `upe_checkout_experience_enabled=no`, Stripe falls back to the legacy classic checkout integration which the `[woocommerce_checkout]` shortcode is built for. `jquery.blockUI` will now release as soon as `update_order_review` returns.
 
@@ -542,7 +542,7 @@ If the spinner persists, the remaining suspects (ranked) are:
 - `update_order_review` 500 — check `wp-content/debug.log` + container logs
 - Missing shipping methods for the cart contents — checkout can stall if no methods available
 
-### Re: Out-of-scope findings (not touched — flag for later) (HEAD)
+### Re: Out-of-scope findings (not touched — flag for later)
 
 Same `-2` suffix pattern exists on other Woo pages. If you want the same cleanup:
 
@@ -556,7 +556,7 @@ The redirect after an empty cart now goes to `/cart-2/`, which is visible in the
 
 There are also duplicated "Privacy Policy" and "Refund and Returns Policy" pages worth auditing.
 
-### Re: Keys — livestream hygiene going forward (HEAD)
+### Re: Keys — livestream hygiene going forward
 
 Since you can't rotate, treat the `sk_live_...` as compromised-but-unavoidable. Going forward in this session and future ones:
 
@@ -566,7 +566,7 @@ Since you can't rotate, treat the `sk_live_...` as compromised-but-unavoidable. 
 - If you trim the livestream VOD, the ~1m window where the Stripe JSON flew by is the one to cut
 
 Want me to add a CLAUDE.local.md note for monsterrodholders so future sessions auto-avoid the `wp option get` on stripe settings?
-<!-- agent:boundary:7e267e76 -->
+<!-- agent:boundary:b0fe9647 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

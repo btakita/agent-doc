@@ -770,7 +770,7 @@ Same 5 steps as before, unchanged — `MRHadmin` (user 1) is the sole compromise
 ❯ - rberkes@gmail.com
 ❯ - brian.takita@gmail.com
 
-### Re: jennyboonedesignstudio@gmail.com on staging (HEAD)
+### Re: jennyboonedesignstudio@gmail.com on staging
 
 **That email IS MRHadmin (user ID=1)** — the original site admin account from 2017-08-18. Not an attacker creation, but almost certainly the primary compromise target you've been chasing.
 
@@ -797,7 +797,7 @@ MITRE is not Jenny Boone's home ISP in her Virginia town. Either (a) someone wit
 
 **Does this account have any orders?** No — zero in both legacy order meta and HPOS tables. MRHadmin is a staff account, not a customer. So losing it doesn't lose order history, just admin actions in the audit log.
 
-### Re: Are there strong enough password requirements? (HEAD)
+### Re: Are there strong enough password requirements?
 
 **No. Staging has essentially zero password policy enforcement.**
 
@@ -813,7 +813,7 @@ Recommended minimum before re-enabling any staff login:
 3. Add a password policy plugin (or Wordfence Premium's password audit) requiring 14+ chars, mixed case, digit, symbol, and blocking the Wordfence "leaked password" list
 4. Set `DISABLE_XMLRPC` or restrict `xmlrpc.php` (historical brute-force vector — matters because MRHadmin is the default "known good" login name every bot tries)
 
-### Re: Deactivate passwords for users with write permissions (except rberkes/brian.takita) (HEAD)
+### Re: Deactivate passwords for users with write permissions (except rberkes/brian.takita)
 
 **Full write-permission roster on staging (15 accounts):**
 
@@ -847,7 +847,7 @@ Three possibilities:
 
 **Please confirm which email to exclude** before I proceed.
 
-### Proposed deactivation procedure (once you confirm) (HEAD)
+### Proposed deactivation procedure (once you confirm)
 
 For every user in the table above EXCEPT the two you name, atomically:
 
@@ -874,7 +874,7 @@ I will **NOT** touch `user_email` or `user_login` — only the credentials — s
 
 **Critical caveat:** This is staging (`50.28.2.199`). If the same compromise exists on **prod**, this only hardens the copy we don't ship from. Prod needs the same treatment (and Wordfence must be activated there too). Flagging so this doesn't become a false sense of security.
 
-### Re: Jenny's session from the MITRE IP (HEAD)
+### Re: Jenny's session from the MITRE IP
 
 Separate from the deactivation sweep, you should probably:
 1. Preserve the session_tokens blob for MRHadmin before we wipe it (forensic record of IP/UA/timestamp)
@@ -882,7 +882,7 @@ Separate from the deactivation sweep, you should probably:
 3. Check `wp_nxz1mfc9cg_usermeta` for `wfls-*` keys on user 1 (Wordfence Login Security leaves a trail even when the main plugin is disabled — the `wfls_last_role_change` option in my query suggests Wordfence was active at some point)
 
 Want me to pull the wfls meta and any audit-trail breadcrumbs for user 1 in the next cycle?
-<!-- agent:boundary:0cba2ee4 -->
+<!-- agent:boundary:aad6f6c3 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

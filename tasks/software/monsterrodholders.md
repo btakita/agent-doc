@@ -649,7 +649,7 @@ The 4 legit "Steve Douglas" posts stop at **2024-11-11** — Steve hasn't publis
 
 ❯ What posts did catfishinginfo@gmail.com write?
 
-### Re: What posts did `catfishinginfo@gmail.com` write? (HEAD)
+### Re: What posts did `catfishinginfo@gmail.com` write?
 
 **Short answer: zero spam. This is the original site owner account.** The 99 count breaks down as **10 posts + 80 pages + ~9 other (products/attachments)**.
 
@@ -676,7 +676,7 @@ These are the same 4 Steve Douglas posts I saw in the earlier dump — same auth
 
 Core site pages dating from **2014-03-18** onward — `About Us`, `Blog`, `Cart`, `Checkout`, `Contact Us`, `FAQ`, `Affiliate Area`, `404 Error`, `Bargain Bin Specials`, `Certified Resellers`, `Bestsellers`, `Bait Cutting Board`, etc. This is the user who built the site. Nothing suspicious.
 
-### Re: Verdict on user ID 3 (HEAD)
+### Re: Verdict on user ID 3
 
 **Legit — this is the original site owner account.** Created 2014 or earlier based on the oldest page dates. The `catfishinginfo@gmail.com` email + `Larry Travis` display name just reflects how the original WordPress install was seeded — possibly:
 
@@ -698,21 +698,85 @@ With user 3 cleared, the blocking decision queue shrinks:
 6. **Post-flip:** bulk 410/noindex for spam slugs on new host.
 
 **Still pending: your go/no-go on steps 1–5.** I can execute all five in the next cycle if you say "do 1-5".
-<!-- agent:boundary:b03f926e -->
+
+❯ What posts did jennyboonedesignstudio@gmail.com write?
+
+### Re: What posts did `jennyboonedesignstudio@gmail.com` (MRHadmin, user 1) write? (HEAD)
+
+**All 16 post-type entries are casino spam, 2026-03-26 → 2026-04-08.** But the account itself has a legit history — it's the original WooCommerce admin, just compromised in late March.
+
+#### Posts (16 total, all spam) — this is the damage
+
+Every single one is `post_type=post`, dated within the past 17 days, all `Uncategorized` except one `casino`, all no-tags, all under user 1:
+
+| Date | Title | Lang |
+|---|---|---|
+| 2026-04-08 | Aviator ️ Oyna Və Qazan Rəsmi Sayti Aviator Azerbaycan | Azerbaijani |
+| 2026-04-01 | 1xbet App ᐉ Get 1xbet Mobile 1xbet Apk Android & Ios | English |
+| 2026-03-31 | Где безопасно хранить свои учетные данные для входа в Pin Up? | Russian |
+| 2026-03-30 | Обзор Пин Ап казино: официальный сайт с актуальной информацией | Russian |
+| 2026-03-30 | Побеждай с новой игрой в Пинап и выигрывай прогрессивный джекпот! | Russian |
+| 2026-03-29 | Обзор Pin Up мобильного приложения | Russian |
+| 2026-03-29 | Пинап КЗ: Авиатор условия игры, бонусы и акции для новичков | Russian |
+| 2026-03-29 | Пинап бетинг в Телеграм | Russian |
+| 2026-03-28 | Plinko Casinos 2026: On The Web Casinos Mit Unserem Plink Game | German/English |
+| 2026-03-28 | Spielen Sie Plinko Um Geld 2026 | German |
+| 2026-03-27 | Пошаговое руководство: Как работает вывод средств через 1xBet вход? | Russian |
+| 2026-03-27 | Najlepsze aplikacje do zakładów sportowych za darmo (**casino** cat) | Polish |
+| 2026-03-26 | Wie registriere ich mich für Sportwetten ohne Oasis? | German |
+| 2026-03-26 | Wettgeschichten und die Übersicht über Sportwetten ohne Lugas | German |
+| 2026-03-26 | Beliebte Sportarten der Deutschen und Online-Wetten ohne OASIS | German |
+| 2026-03-26 | Beliebte Sportarten der Deutschen bei Sportwetten ohne Oasis | German |
+
+**All 16 are the spam.** These are what the "1,616 posts by this author" badge in `users.php` was counting — I was misreading that number. The actual count is **16 posts** (total post-type-post), not 1,616. The badge likely concatenated `16 posts` with something else in my selector output.
+
+#### Other content authored by user 1 (legit, historical) — explains why the account exists
+
+| Post type | Count | Age | Status |
+|---|---|---|---|
+| `product` | 25 | All published 2017-09-06 | Legit core Monster Rod Holders products (rod holder packages, bases, T-shirts, etc.) |
+| `page` | 3 | Older | `Recently Viewed Products`, `Refund and Returns Policy`, `Unsubscribe` — boilerplate WooCommerce pages |
+| `post` | 16 | **2026-03-26 → 2026-04-08** | **100% spam — the compromise** |
+
+#### Interpretation
+
+**`jennyboonedesignstudio@gmail.com` is almost certainly the original agency that built the store in 2017** ("Jenny Boone Design Studio") — this account imported the 25 core WooCommerce products on 2017-09-06 as a single batch. The account has been dormant for years, then **something reactivated it on 2026-03-26** and it's been publishing casino spam daily since.
+
+The role is `Shop manager` — enough to publish posts and manage products but not enough to change users/plugins. This is either:
+
+1. **Credential stuffing on an old dormant account** with a weak/reused password from the Jenny Boone agency days (most likely — agency credentials from 2017 are often in breach dumps)
+2. **A plugin vulnerability** that lets an unauthenticated attacker author posts as an existing Shop manager user
+3. **A backdoor** planted earlier that schedules posts via wp-cron as user 1
+
+No matter which, the remediation is the same — lock the account, kill sessions, scan for persistence, then clean up.
+
+### Re: Corrected remediation plan (HEAD)
+
+Same 5 steps as before, unchanged — `MRHadmin` (user 1) is the sole compromised account. User 3 stays legit. Awaiting your "do 1-5".
+
+**One addition to step 4:** when auditing plugins, specifically check for:
+
+- Any plugin named something like `wp-file-manager`, `elementor`, `wpbakery`, or anything with known 2024-2025 RCE CVEs
+- Any plugin with mtime after 2026-03-20 (pre-dating the first spam post by ~6 days)
+- Any mu-plugin (`wp-content/mu-plugins/`) — attackers love dropping persistence here
+- `wp-config.php` mtime and contents diff vs a fresh WP install
+<!-- agent:boundary:d44f8428 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Flywheel: DECISION — approve steps 1–5 (lock MRHadmin, purge spam, scanner, plugin audit, 2FA)
-- [ ] Flywheel: lock `MRHadmin` (rotate pwd + demote to Subscriber + revoke sessions) — awaiting approval
-- [ ] Flywheel: purge 25 published + 13 trash + 1 draft spam posts via bulk actions — awaiting approval
-- [ ] Flywheel: install Wordfence free, run malware + file integrity scan — awaiting approval
-- [ ] Flywheel: audit plugins + themes for unknown additions — awaiting approval
+- [ ] Flywheel: DECISION — approve steps 1–5 (lock MRHadmin, purge 16 spam posts, scanner, plugin audit, 2FA)
+- [ ] Flywheel: lock `MRHadmin` user 1 (rotate pwd, demote to Subscriber, revoke sessions)
+- [ ] Flywheel: purge 16 published spam posts + 13 trash + 1 draft via bulk actions
+- [ ] Flywheel: install Wordfence free, run malware + file integrity scan
+- [ ] Flywheel: audit plugins + mu-plugins for mtime > 2026-03-20, unknown additions, known-CVE names
+- [ ] Flywheel: diff `wp-config.php` + `.htaccess` against fresh WP install
 - [ ] Flywheel: enable 2FA on `btak` / `catfishinfo` / `catfishinginfo@gmail.com`
 - [ ] New host: trust `X-Forwarded-Proto` so redirect Location headers use `https://`
-- [ ] New host: bulk 410/noindex for spam post slugs post-flip
-- [ ] Draft `-2` → canonical redirect CSV for WP Redirection import (cart/my-account/checkout/shop + catfish author)
+- [ ] New host: bulk 410/noindex for 16 spam slugs post-flip (help Google drop indexed spam)
+- [ ] Draft `-2` → canonical redirect CSV for WP Redirection import
 - [ ] Post-flip: Search Console resubmission for cleaned-up author slug + sitemap
-- [x] Flywheel: user 3 (`catfishinginfo@gmail.com` / "Larry Travis") cleared — legit original site owner, 10 posts + 80 pages, no spam
-- [x] New host: add 301 `/author/catfishinginfogmail-com/` → `/author/catfishdude/` — DONE via .htaccess
+- [x] Flywheel: user 1 audit — 16 posts (all spam 2026-03-26 → 2026-04-08), 25 legit products (2017), 3 legit pages; account = compromised original WC admin
+- [x] Flywheel: user 3 audit — legit original site owner, 10 posts + 80 pages, no spam
+- [x] New host: 301 `/author/catfishinginfogmail-com/` → `/author/catfishdude/` — DONE via .htaccess
 <!-- /agent:pending -->

@@ -462,7 +462,7 @@ Found it: shop page has a Stackable column `.stk-3ef9764` containing `h4#new-clo
 - Parent pointer bumped
 
 Hard-refresh `/shop/` and the "New Cloth Technologies" aside should be gone.
-<!-- agent:boundary:faaaa8c2 -->
+<!-- agent:boundary:2858990e -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

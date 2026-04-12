@@ -192,7 +192,7 @@ Yes — keep Steve's author archive. For a creator-driven blog, `/author/steve-d
 **Bottom line:** the earlier "disable author archives" advice assumed a generic commerce storefront. With a 119k-sub creator attached, author archives flip from footprint to moat — keep them, just make sure only Steve shows up.
 
 ❯ Are there any differences of site structures between monsterrodholders.com and the staging site?
-### Re: site structure diff — prod vs staging (HEAD)
+### Re: site structure diff — prod vs staging
 
 **I don't know the full diff without crawling both** — I can only tell you what's surfaced in this session so far. Here's what I know and a concrete way to get the rest.
 
@@ -235,7 +235,99 @@ wp option get stylesheet
 Dump both to files and `diff -u prod-plugins.txt staging-plugins.txt` etc. That gives you a definitive structural delta.
 
 **Blocker:** if you're still locked out of prod admin (password reset pending from earlier in this doc), you'd need to run these as the root `wp` user via SSH on the prod host. Want me to write a one-shot script that SSHes into prod, pulls all three inventories, does the same against the staging container, and diffs them?
-<!-- agent:boundary:1269ad9b -->
+
+❯ Can you compare the staging sitemap with monsterrodholders.com/wp-sitemap.xml? Make sure the urls all match.
+### Re: sitemap URL diff — prod vs staging (HEAD)
+
+Fetched both sitemap indices and all child sitemaps, extracted every `<loc>`, normalized hosts, and diffed the URL sets. **The sitemaps do NOT match** — there are meaningful drifts in three categories, some of which are actually good (staging is cleaner), and two of which are red flags on prod that need cleanup before the DNS flip.
+
+**Summary:**
+
+| Category | Prod | Staging | Common | Drift |
+|---|---|---|---|---|
+| posts | 25 | 10 | 9 | 🔴 16 prod-only, 1 staging-only |
+| pages | 79 | 40 | 31 | 🟡 48 prod-only, 9 staging-only |
+| products | 57 | 59 | 57 | 🟢 2 staging-only (test + /shop) |
+| category | 3 | 2 | 2 | 🔴 1 prod-only (`/category/casino`) |
+| post_tag | 11 | 11 | 11 | ✅ match |
+| product_cat | 17 | 17 | 17 | ✅ match |
+| product_tag | 220 | 220 | 220 | ✅ match |
+| product_shipping_class | 2 | 2 | 2 | ✅ match |
+| author | — | 1 | — | Yoast-only, needs slug cleanup |
+
+**Taxonomies are clean:** product_cat (17), product_tag (220), post_tag (11), product_shipping_class (2), and most of the category taxonomy are identical. All 57 prod products exist on staging. That's the good news — the commerce catalog is in sync.
+
+**🔴 RED FLAG #1 — prod has 16 SEO-spam blog posts that staging lacks:**
+
+```
+/2026/03/26/beliebte-sportarten-der-deutschen-bei-sportwetten-ohne-oasis-...
+/2026/03/26/wettgeschichten-und-die-ubersicht-uber-sportwetten-ohne-lugas
+/2026/03/27/najlepsze-aplikacje-do-zakladow-sportowych-za-darmo
+/2026/03/27/poshagovoe-rukovodstvo-kak-rabotaet-vyvod-sredstv-cherez-1xbet-vkhod
+/2026/03/28/plinko-casinos-2026-on-the-web-casinos-mit-unserem-plink-game-...
+/2026/03/28/spielen-sie-plinko-um-geld-2026
+/2026/03/29/obzor-pin-up-mobilnogo-prilozheniia-igraite-v-onlain-igru-...
+/2026/03/29/pinap-beting-v-telegram-usloviia-igry-bonusy-i-aktsii-...
+/2026/03/29/pinap-kz-aviator-usloviia-igry-bonusy-i-aktsii-...
+/2026/03/30/obzor-pin-ap-kazino-ofitsialnyi-sait-s-aktualnoi-informatsiei-...
+/2026/03/30/pobezhdai-s-novoi-igroi-v-pinap-i-vyigryvai-progressivnyi-dzhekpot
+/2026/03/31/gde-bezopasno-khranit-svoi-uchetnye-dannye-dlia-vkhoda-v-pin-up
+/2026/04/01/1xbet-app-i-get-1xbet-mobile-1xbet-apk-android-ios-i-1xbet-fi
+/2026/04/08/aviator-oyna-v-qazan-rsmi-sayti-aviator-azerbaycan
+```
+
+These are **injected casino/sportsbook SEO spam** in German, Polish, Russian, and Azerbaijani — dated 2026-03-26 through 2026-04-08 (recent, ongoing). Translations: "Plinko casinos 2026", "Pin-Up casino review", "1xBet app download", "Aviator game Azerbaijan", etc. This is a classic Japanese/pharma-hack pattern adapted for gambling affiliate farms — someone has persistent write access to the prod WP database (compromised admin, vulnerable plugin, or a backdoor in the theme/uploads). **The fact that staging is clean strongly suggests the prod compromise is either database-side or via an auth vector that the staging container doesn't share.**
+
+**This is urgent and independent of the DNS flip:**
+- Do NOT flip DNS until you've confirmed the compromise vector, otherwise the attacker may re-inject into staging once it's live.
+- On prod: `wp post list --post_type=post --post_status=publish --fields=ID,post_date,post_title,post_author | grep -iE 'plinko|pinap|aviator|1xbet|sportwetten|wetten|oasis|lugas'` — find the author account(s) used.
+- Check `wp user list --role=administrator,editor,author,contributor` for unexpected accounts.
+- `wp plugin list` and look for unknown or recently-modified plugins.
+- Check `wp-content/uploads/` and theme files for PHP backdoors: `find wp-content -name "*.php" -newer /tmp/ref -mtime -60`.
+- After cleanup: reset all admin passwords (you already have one pending), rotate secret keys in `wp-config.php`, and audit `wp_options` for injected `autoload` rows.
+
+Also tied to this: prod has a `/category/casino` taxonomy term that staging doesn't. That's the category these spam posts are filed under — deleting the posts should cascade, but double-check.
+
+**🟡 RED FLAG #2 — prod has 48 theme-demo pages in the sitemap:**
+
+```
+/add-listing /alert-box /bestsellers /blog /carousel /cart-2 /checkout-2
+/checkout-2/checkout-pay /checkout-2/order-received /elements-boostrap
+/featured-products /forms /gd-archive /gd-archive-item /gd-details
+/goolge-map /home-2 /home-3 /home-4 /hot-deal-2 /icons /list-color
+/location /my-account-2 /my-account-2/change-password /my-account-2/edit-my-address
+/my-account-2/logout /my-account-2/lost-password /my-account-2/track-your-order
+/my-account-2/view-order /on-sale /panel /pie-chart /products-by-sku
+/recent-products /sale-products /sample-page /search /services /shop-2
+/tab /table /testimonials /top-rated-products /typography /wctz
+/wishlist-2 /woocommerce-to-zoho-inventory-plugin
+```
+
+These are **theme/plugin demo pages** that shipped with whatever premium theme is installed (`home-2/3/4`, `carousel`, `typography`, `alert-box`, `pie-chart`, `tab`, `table`, `icons`, `elements-boostrap` [sic — typo baked into theme]). Plus `my-account-2/*`, `cart-2`, `checkout-2`, `shop-2` which look like **duplicate commerce pages** from an aborted migration (the `-2` suffix is what WooCommerce does when you "install pages" twice). `sample-page` is WP's default. `woocommerce-to-zoho-inventory-plugin` and `wctz` look like plugin config pages that shouldn't be public.
+
+**These should be deleted or noindexed before the flip** — they're dead weight in Google's index and make the site look unfinished. Staging is already cleaner (40 pages vs 79) because you've presumably been housekeeping there.
+
+Note the 9 staging-only pages (`/change-password`, `/checkout-pay`, `/edit-my-address`, `/logout`, `/lost-password`, `/order-received`, `/track-your-order`, `/view-order`, `/products`) are the **cleaned-up versions** of the prod `my-account-2/*` and `checkout-2/*` sub-pages — these are the new canonical WooCommerce account/checkout endpoints from your earlier migration. Good. After the flip, you'll need 301s from the old `/my-account-2/*` and `/checkout-2/*` URLs to these clean slugs (you already planned cart/my-account redirects earlier in this doc — extend the list to cover all of these).
+
+**🟢 Minor: staging-only extras**
+
+- `/product/test-product-1` — test product, delete before flip
+- `/shop` — WooCommerce shop page, prod doesn't have it in sitemap (probably marked noindex on prod or not assigned as the shop page); staging correctly surfaces it
+- `/blog` — staging has it as a post URL (odd — probably because a post was created with that slug); prod has `/blog` as a page instead
+
+**Author archive:** staging's Yoast sitemap exposes `/author/catfishinginfogmail-com` — that slug is the user's email address with `@` and `.` stripped, which is exactly the leak I warned about in the previous response. **Rename before the flip:** `wp user update <id> --user_nicename=steve-douglas` (or `catfishdude`).
+
+**Bottom line and action order:**
+
+1. **URGENT — investigate prod compromise.** The 16 spam posts are active malware, not just cruft. Don't flip DNS until the injection vector is closed, or you'll inherit the problem on staging.
+2. **Delete the spam posts + `/category/casino`** from prod.
+3. **Delete the 48 theme-demo pages** on prod (or at minimum noindex them in Yoast). Most of these are safe `wp post delete`s — none should have inbound traffic worth preserving.
+4. **Rename Steve's user_nicename** on staging so the author sitemap doesn't leak the email-derived slug post-flip.
+5. **Extend the redirect list** to cover `/my-account-2/*` → `/my-account/*`, `/checkout-2/*` → `/checkout/*`, `/shop-2` → `/shop` in addition to the cart/my-account redirects you already planned.
+6. **Delete `/product/test-product-1`** on staging before flip.
+
+All raw sitemap files are at `/tmp/mrh-sitemap/` on this host if you want to poke at them directly.
+<!-- agent:boundary:707acac0 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

@@ -627,7 +627,7 @@ Also: yes, I'll add the CLAUDE.local.md note about stripe secrets. Should I also
    - `wp search-replace '/cart-2/' '/cart/' --skip-columns=guid` (etc.)
 
 **Also: I'll add the WordPress migration pattern + secrets hygiene to CLAUDE.local.md so future sessions know the playbook.** ✓
-<!-- agent:boundary:d1b20174 -->
+<!-- agent:boundary:ad8d01aa -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

@@ -140,7 +140,7 @@ Hard-refresh `/shop/` to confirm visually. The Popular row should now appear in 
 ❯ Remove the misplaced "Popular" section in the .hero-section.
 ❯ Fix the styling if the "Popular" section in .ct-container.
 ❯ ![img_22.png](img_22.png)
-### Re: Remove misplaced Popular + fix styling (HEAD)
+### Re: Remove misplaced Popular + fix styling
 
 Fixed both issues. Deployed as mrh-performance v1.11.
 
@@ -172,14 +172,47 @@ The shop page had `data-sidebar="left"` — Blocksy's Product Categories widget 
 - `mrh-popular-categories` section renders with 4 category tiles ✓
 
 Hard-refresh `/shop/` (Ctrl+Shift+R) to confirm visually. The Popular section should now be full-width with no sidebar, and there should be only one "Popular" heading on the page.
-<!-- agent:boundary:257b7de0 -->
+
+❯ The Popular section should match the style format at the "All Products" section.
+❯ Add "All Products" title above the All Products grid. The All Products grid should be sorted by most popular desc. Include Sold Out items.
+❯ ![img_23.png](img_23.png)
+### Re: Match Popular styling to product grid + All Products heading (HEAD)
+
+Deployed mrh-performance v1.12. Three changes:
+
+**1. Popular section image sizing — matches product grid:**
+- 300px height flex box with `object-fit: contain` (same as product cards)
+- Category names centered, single-line with ellipsis overflow
+- Count badges (e.g. "(3)") hidden — cleaner look
+- Images now fill the same visual space as the product grid below
+
+**2. "All Products" heading above product grid:**
+- Rendered via `woocommerce_before_shop_loop` at priority 35 (after toolbar, before product loop)
+- Same 32px/700 weight styling as "Popular" heading
+
+**3. Sort by popularity + include sold-out items:**
+- `woocommerce_default_catalog_orderby` → `popularity` (sorts by `total_sales` desc)
+- `pre_option_woocommerce_hide_out_of_stock_items` → `no` on shop page
+- Verified: 7 out-of-stock items now visible; product order changed from alphabetical to popularity
+
+**Verification:**
+- 1x "Popular" heading (no duplicates) ✓
+- "All Products" heading renders between Popular and product grid ✓
+- Product sort is popularity-based (Double Action 33/45 first) ✓
+- 7 sold-out items visible ✓
+
+Hard-refresh `/shop/` to confirm visually.
+<!-- agent:boundary:bda5715a -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **"Popular" categories block in .ct-container on /shop/** — woocommerce_before_shop_loop hook, 4-column strict order (Rod Holders, Rod Holder Bases, HydroWeb Landing Nets, River Anchors), mrh-performance v1.10, deployed and verified
-- [x] **Remove duplicate Popular from .hero-section** — cleared stale post_content from shop page (post 6), mrh-performance v1.11
-- [x] **Fix Popular styling / hide sidebar** — CSS hides sidebar widget on shop archive, full-width layout, mrh-performance v1.11
-- [x] **Match footer logo size to header (~75px)** — CSS cap + srcset sizes fix in mrh-performance v1.6, deployed and verified
-- [x] **Hide "New Cloth Technologies" aside column on /shop/** — mrh-performance v1.7, deployed and verified
+- [x] **"Popular" categories block in .ct-container on /shop/** — woocommerce_before_shop_loop hook, 4-column strict order, mrh-performance v1.10
+- [x] **Remove duplicate Popular from .hero-section** — cleared stale post_content, mrh-performance v1.11
+- [x] **Hide sidebar on shop page** — CSS hides sidebar widget, full-width layout, mrh-performance v1.11
+- [x] **Popular styling matches product grid** — 300px image box, centered text, hidden counts, mrh-performance v1.12
+- [x] **"All Products" heading above product grid** — woocommerce_before_shop_loop priority 35, mrh-performance v1.12
+- [x] **Sort by popularity desc + include sold-out items** — total_sales ordering, show out-of-stock, mrh-performance v1.12
+- [x] **Match footer logo size to header (~75px)** — CSS cap + srcset sizes fix in mrh-performance v1.6
+- [x] **Hide "New Cloth Technologies" aside column on /shop/** — mrh-performance v1.7
 <!-- /agent:pending -->

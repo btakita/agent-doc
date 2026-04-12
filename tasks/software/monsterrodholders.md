@@ -346,7 +346,7 @@ Contents: comprehensive sitemap comparison (prod 25 posts / 79 pages vs staging 
 4. **Action order** — Urgent (investigate compromise), before-flip (delete demo pages, set up 301 redirects), staging cleanup (test product + author slug), post-flip (Search Console resubmission).
 
 Gist permalink is unlisted but shareable — don't distribute publicly if content is sensitive.
-<!-- agent:boundary:f0400530 -->
+<!-- agent:boundary:48136413 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

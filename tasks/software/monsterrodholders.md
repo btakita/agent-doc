@@ -176,7 +176,7 @@ Hard-refresh `/shop/` (Ctrl+Shift+R) to confirm visually. The Popular section sh
 ❯ The Popular section should match the style format at the "All Products" section.
 ❯ Add "All Products" title above the All Products grid. The All Products grid should be sorted by most popular desc. Include Sold Out items.
 ❯ ![img_23.png](img_23.png)
-### Re: Match Popular styling to product grid + All Products heading (HEAD)
+### Re: Match Popular styling to product grid + All Products heading
 
 Deployed mrh-performance v1.12. Three changes:
 
@@ -202,7 +202,29 @@ Deployed mrh-performance v1.12. Three changes:
 - 7 sold-out items visible ✓
 
 Hard-refresh `/shop/` to confirm visually.
-<!-- agent:boundary:46ce38a9 -->
+
+❯ Popular Categories still has the same layout issue.
+❯ - /home/brian/work/btakita/agent-loop/tasks/software/monsterrodholders/popular-categories.html
+❯ - /home/brian/work/btakita/agent-loop/tasks/software/monsterrodholders/all-products.html
+
+❯ ![img_24.png](img_24.png)
+### Re: Popular Categories layout fix (HEAD)
+
+Deployed mrh-performance v1.13. Two CSS fixes:
+
+**1. Images now fill the 300px container:**
+The images had `height: auto; width: auto` which kept them at their natural size — the HydroWeb logo is only 73px tall, anchors-topper is 87px. Changed to `height: 100%; width: 100%` with `object-fit: contain` so they scale up to fill the box while maintaining aspect ratio.
+
+**2. Category names no longer truncated:**
+Removed `white-space: nowrap; overflow: hidden; text-overflow: ellipsis` so "Rod Holders", "HydroWeb Landing Nets" etc. display fully instead of "Rod ...", "Hydr...".
+
+**Verification:**
+- v1.13 CSS is live on `/shop/` (confirmed `height: 100% !important` in rendered `<style>`)
+- Popular section renders with 4 category tiles in correct order
+- Submodule pushed, parent pointer bumped, container force-recreated, cache flushed
+
+Hard-refresh `/shop/` (Ctrl+Shift+R) to confirm visually.
+<!-- agent:boundary:a460d42c -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
@@ -213,6 +235,7 @@ Hard-refresh `/shop/` to confirm visually.
 - [x] **Popular styling matches product grid** — 300px image box, centered text, hidden counts, mrh-performance v1.12
 - [x] **"All Products" heading above product grid** — woocommerce_before_shop_loop priority 35, mrh-performance v1.12
 - [x] **Sort by popularity desc + include sold-out items** — total_sales ordering, show out-of-stock, mrh-performance v1.12
+- [x] **Popular images fill container + text unwrapped** — height/width 100% with object-fit contain, mrh-performance v1.13
 - [x] **Match footer logo size to header (~75px)** — CSS cap + srcset sizes fix in mrh-performance v1.6
 - [x] **Hide "New Cloth Technologies" aside column on /shop/** — mrh-performance v1.7
 <!-- /agent:pending -->

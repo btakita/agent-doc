@@ -86,7 +86,7 @@ Fixed. Reverted the homepage edit and put the block on the shop page (WooCommerc
 Sequence is correct — the 4 tiles render in the requested order between the "Popular" heading and the product loop. Hard-refresh `/shop/` to confirm visually.
 
 **Note on the shop page layout:** WooCommerce renders the page's `post_content` via `woocommerce_archive_description` before the product loop, so the Popular block appears above the product grid. The product grid (51 products, no pagination from v1.4) continues below.
-<!-- agent:boundary:2d7e9548 -->
+<!-- agent:boundary:7daa6bfd -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

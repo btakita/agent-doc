@@ -164,8 +164,7 @@ Backup is at `/etc/httpd/conf.d/00-monsterrodholders-proxy.conf.bak-20260412` in
 
 One more thing worth noting: the user-side symptom for the three URLs was 404 (not 403), which was because `mod_rewrite` on the InterWorx default would try to serve the literal path `/sitemap.xml` out of `/var/www/html` and fail. Root hit 403 because `/var/www/html` has directory listing disabled and no index file. Both symptoms traced back to the same vhost-selection bug.
 
-Are there any 
-### Re: author slug for a 119k-sub YouTuber's blog (HEAD)
+### Re: author slug for a 119k-sub YouTuber's blog
 
 Yes — keep Steve's author archive. For a creator-driven blog, `/author/steve-douglas/` is an SEO **asset**, not a leak: it's a topical landing page Google can rank for "Steve Douglas catfish" queries, and it concentrates E-E-A-T signals (author → posts → channel) that product/category pages can't.
 
@@ -191,7 +190,52 @@ Yes — keep Steve's author archive. For a creator-driven blog, `/author/steve-d
 5. **Noindex anything that isn't Steve.** If you end up with one or two staff accounts with posts you don't want indexed, use `wpseo_sitemap_exclude_author` + add them to `noindex` via a `wpseo_robots` filter for their author URLs.
 
 **Bottom line:** the earlier "disable author archives" advice assumed a generic commerce storefront. With a 119k-sub creator attached, author archives flip from footprint to moat — keep them, just make sure only Steve shows up.
-<!-- agent:boundary:7ea14fca -->
+
+❯ Are there any differences of site structures between monsterrodholders.com and the staging site?
+### Re: site structure diff — prod vs staging (HEAD)
+
+**I don't know the full diff without crawling both** — I can only tell you what's surfaced in this session so far. Here's what I know and a concrete way to get the rest.
+
+**Known differences (from this session's work):**
+
+1. **Sitemap plugin:** staging has Yoast active and emits `/sitemap_index.xml`; prod is on WP-core `/wp-sitemap.xml` with Yoast either inactive or not configured to take over. This is the only confirmed content-surface difference.
+2. **Author archives:** tied to #1 — staging exposes `/author/<slug>/` via Yoast's author-sitemap; prod behavior depends on whether author archives are enabled in the WP core generator.
+3. **Host/proxy plumbing:** staging is fronted by `50.28.2.199.nip.io` via Apache `ProxyPreserveHost` to the Docker container. Prod presumably terminates `monsterrodholders.com` directly. Not a *site structure* difference, but it affects how canonical URLs render.
+
+**What I don't know (and can't infer without data):**
+
+- Whether prod and staging have the same **pages** (cart, my-account, checkout, homepage) with the same IDs and slugs. Earlier in this doc you migrated cart and my-account on staging — unclear if prod was ever migrated the same way.
+- Whether the **product catalog, categories, and menus** are in sync, or if staging has drifted (test products, renamed categories, etc.).
+- Whether **active plugins** match (Yoast is one known delta; there may be others).
+- Whether **theme / template overrides** differ.
+- Whether **permalink structure** matches.
+
+**How to get a real diff in ~5 minutes:**
+
+Run these three commands on both sides and `diff` the outputs. You can hit staging via the Docker container and prod via `ssh monsterrodholders-server` (prod) — or use `wp` over SSH if you have credentials for both.
+
+```bash
+# 1. Active plugins
+wp plugin list --status=active --fields=name,version > plugins.txt
+
+# 2. Page inventory (post_type=page, published)
+wp post list --post_type=page --post_status=publish --fields=ID,post_title,post_name > pages.txt
+
+# 3. Key WooCommerce / homepage options
+wp option get woocommerce_cart_page_id
+wp option get woocommerce_checkout_page_id
+wp option get woocommerce_myaccount_page_id
+wp option get page_on_front
+wp option get show_on_front
+wp option get permalink_structure
+wp option get template
+wp option get stylesheet
+```
+
+Dump both to files and `diff -u prod-plugins.txt staging-plugins.txt` etc. That gives you a definitive structural delta.
+
+**Blocker:** if you're still locked out of prod admin (password reset pending from earlier in this doc), you'd need to run these as the root `wp` user via SSH on the prod host. Want me to write a one-shot script that SSHes into prod, pulls all three inventories, does the same against the staging container, and diffs them?
+<!-- agent:boundary:ad2ae6d1 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

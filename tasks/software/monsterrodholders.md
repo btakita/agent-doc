@@ -1530,7 +1530,7 @@ Then flushed `wp cache flush` and `wp transient delete --all` so WC rebuilds the
 - **Rotate DB passwords** — `MARIADB_ROOT_PASSWORD` + `MARIADB_PASSWORD` still on the previous values in `docker-compose.yml` / `.env`; update `wp-config.php`, `docker compose up -d --force-recreate`.
 - **Livestream VOD trim** — the Stripe settings dump segment still needs manual trim in post-production.
 - **Decide on real shipping strategy** — Free Shipping is fine for testing; when going live, add Flat Rate / carrier rates above it.
-<!-- agent:boundary:c23eea4b -->
+<!-- agent:boundary:6176b0f4 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

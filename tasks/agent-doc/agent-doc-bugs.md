@@ -75,7 +75,7 @@ no_mcp: true
 - `start.rs` — checks `fm.no_mcp.unwrap_or(false)` and appends `--no-mcp` to the command after `claude_args`
 
 Binary rebuilt. The field works alongside `claude_args` — both are applied.
-<!-- agent:boundary:e835d670 -->
+<!-- agent:boundary:0bb5efa8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

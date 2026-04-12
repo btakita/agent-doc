@@ -382,7 +382,7 @@ Footer now displays the monsterrodholders logo instead of the Arderobe branding.
 ❯ /wp-content/uploads/2017/09/monster-rod-holder-logo-2023.png
 
 ❯ Make sure these changes are also committed to the repo.
-### Re: Footer logo regression + repo-backed seed (HEAD)
+### Re: Footer logo regression + repo-backed seed
 
 Fixed. Investigated and found `widget_block[9].content` was empty on the server — the previous cycle's DB edit either never persisted or got reverted (cache/container-state). The block reference was still wired to `ct-footer-sidebar-5` but had nothing in it, hence the missing image.
 
@@ -398,7 +398,22 @@ Fixed. Investigated and found `widget_block[9].content` was empty on the server 
    This makes the fix **idempotent and repo-backed**: fresh DB imports, container recreates, or accidental admin-UI wipes will self-heal on next page load. Bump `MRH_FOOTER_LOGO_SEED_VERSION` in the mu-plugin to re-seed.
 
 **Deploying now** — pushing submodule, bumping parent pointer, force-recreating the wordpress container so the new mu-plugin code is loaded.
-<!-- agent:boundary:0e309400 -->
+### Re: Deployed + verified (HEAD)
+
+Done. mrh-performance **v1.5** is live on production with the footer-logo seed, and `widget_block[9]` has been re-seeded automatically on first load after the container recreate.
+
+**Verification (just ran on the server):**
+- `wp option get mrh_footer_logo_seed_version` → `2026-04-11-1` ✅ (seed executed)
+- `wp option pluck widget_block 9` → contains the `wp:image` block pointing at `/wp-content/uploads/2017/09/monster-rod-holder-logo-2023.png` with `wp-image-69673` class ✅
+- `curl -sk https://50.28.2.199.nip.io/ | grep -c 'monster-rod-holder-logo-2023'` → **4 hits** (header + footer + any responsive srcset) ✅
+
+**Repo state:**
+- `src/monsterrodholders-dev` submodule → `2cb72e5c` on `main`, pushed
+- `agent-loop` parent → submodule pointer bumped in a fresh commit
+- Future resets or fresh DB imports will self-heal on next page load as long as `mrh_footer_logo_seed_version` differs from the option value
+
+**Hard-refresh the homepage/footer** (Cmd/Ctrl+Shift+R) to bust browser cache and confirm visually.
+<!-- agent:boundary:525e0f68 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

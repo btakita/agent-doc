@@ -356,7 +356,7 @@ curl -sI https://50.28.2.199.nip.io/wp-content/uploads/2017/09/mrh-favicon.ico  
 ```
 
 The 404 was because the files hadn't been uploaded to the server yet. All sizes confirmed serving.
-<!-- agent:boundary:84f49448 -->
+<!-- agent:boundary:f50fc0a8 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

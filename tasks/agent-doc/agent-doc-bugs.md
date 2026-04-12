@@ -417,7 +417,7 @@ Option A (file-based callback protocol) with PostToolUse hook is fully implement
 
 **Architecture:** Binary handles deterministic callback protocol (request/response JSON, TTL, request_id verification). Skill handles content generation (summarization, pending curation). `agent-doc cleanup` polls for response with fallback to subagent on 120s timeout. This decouples orchestration (binary) from content generation (skill).
 ❯ I ran `compress doc` on this document. The agent-doc binary should have archived the agent:exchange content and populated the agent:exchange with the agent response.
-### Re: `compress doc` (HEAD)
+### Re: `compress doc`
 
 There's no `compress` subcommand in agent-doc. The available commands are:
 
@@ -436,12 +436,36 @@ agent-doc compact tasks/agent-doc/agent-doc-bugs.md --message "Summary of comple
 ```
 
 Should we add `compress` as an alias for `compact`? Or did you mean something different — like a new command that compresses and replaces the exchange with the agent's last response?
-<!-- agent:boundary:b7feb99e -->
+❯ In this document above I typed in:
+❯ > compress doc
+
+❯ The agent interpreted the "compress doc" diff as `compact`. I don't know if this was due to a memory or SKILL. Should have aliases of `compress` as an agent-doc SKILL->runbook or would the alias not be raised? I don't want to bloat SKILL too much with aliases.
+
+Either way, the `agent-doc compact` interaction resulted in an append, not a replace. I don't know if the agent:exchange content was archived. Could you check? 
+### Re: "compress doc" — what happened (HEAD)
+
+**No compact was executed.** The previous agent (me, last cycle) saw "compress doc" as a text edit in the diff and responded explaining that `compress` isn't a valid subcommand. It did NOT run `agent-doc compact`. The exchange content was NOT archived — everything is still inline.
+
+**Why:** The SKILL detects `compact` only as a first argument to `/agent-doc` (e.g., `/agent-doc compact <FILE>`). Freeform text inside the document goes through the normal diff → respond flow. There's no mechanism to interpret "compress doc" as a command from within the exchange.
+
+**On the alias question — two options:**
+
+1. **Binary alias** — add `compress` as a CLI alias for `compact` in `main.rs`. Then `agent-doc compress <FILE>` works from the terminal. Cheap, no SKILL bloat.
+2. **Do nothing** — `compact` is the canonical term. Adding aliases can create confusion.
+
+Leaning toward option 1 since you naturally reached for "compress."
+
+**Want me to run the actual compact now?**
+```bash
+agent-doc compact tasks/agent-doc/agent-doc-bugs.md
+```
+<!-- agent:boundary:bf34c085 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **`compress` alias or new command** — User typed `compress doc`; clarify intent (alias for `compact` or new behavior?)
+- **`compress` alias** — decide: add as binary alias for `compact`, or skip
+- **Run compact on this doc** — exchange content not yet archived, awaiting user confirmation
 <!-- /agent:pending -->
 ## Assistant

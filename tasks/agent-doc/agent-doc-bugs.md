@@ -23,7 +23,7 @@ CRDT compact fix released (v0.32.1). Root cause: stale CRDT state after compact 
 
 ❯ How can we convert this into a SKILL->runbook?
 Where should this live? In its own package? In agent-doc?
-### Re: Context audit → SKILL + runbook (HEAD)
+### Re: Context audit → SKILL + runbook
 
 **SKILL→runbook split:**
 - **SKILL.md (~30 lines)** — description, trigger phrases, `/context` gate (requires user interaction, so stays in skill). Pointer to runbook for the procedure.
@@ -43,13 +43,26 @@ Structure:
     └── context-audit.md  # the full audit procedure
 ```
 
-Want me to scaffold this?
-<!-- agent:boundary:7e98be0b -->
+❯ Want me to scaffold this? Yes
+### Re: Scaffolding complete (HEAD)
+
+Created `.claude/skills/context-audit/`:
+- **SKILL.md** (28 lines) — trigger description, `/context` gate, pointer to runbook
+- **runbooks/context-audit.md** (112 lines) — full audit procedure: MCP servers, CLAUDE.md filters, skills, settings, file permissions, scoring matrix, report format, fix offers
+
+The skill is live — shows up in the skills list. Run `/context-audit` to try it.
+
+Design choices:
+- SKILL.md handles only the `/context` gate then delegates to the runbook
+- Five filters (Default, Contradiction, Redundancy, Bandaid, Vague) live in the runbook
+- Scoring and report format are self-contained in the runbook
+- No educational guide content (PDF) — that's separate marketing material
+<!-- agent:boundary:8572a4e8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - ✅ **Release v0.32.1 complete** (crates.io + GitHub)
-- 🔲 **Context-audit skill** — scaffold SKILL.md + runbook from tmp/context-audit/ content (awaiting approval)
+- ✅ **Context-audit skill scaffolded** — `.claude/skills/context-audit/` with SKILL.md + runbook
 <!-- /agent:pending -->

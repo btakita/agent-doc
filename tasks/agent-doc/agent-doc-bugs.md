@@ -174,7 +174,7 @@ Possible, but there's a design tension. The binary currently treats pending as o
 - `--prune-completed` flag on `agent-doc write` that the skill opts into
 
 The root issue: the skill already instructs the agent to prune — it just wasn't followed. A binary safety net helps, but the agent still needs to curate semantically (reprioritize, add new items).
-<!-- agent:boundary:b5605d79 -->
+<!-- agent:boundary:a5941d9b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

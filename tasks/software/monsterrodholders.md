@@ -264,7 +264,7 @@ Hard-refresh `/shop/` to confirm.
 ❯ On the /shop/ aside, remove the top "Filter by Price".
 ❯ Keep the bottom "Filter by Price". Make the bottom "Filter by Price" text smaller.
 ❯ ![img_25.png](img_25.png)
-### Re: Sidebar filter styling (HEAD)
+### Re: Sidebar filter styling
 
 Deployed mrh-performance v1.16. Modified the sidebar filter styling:
 
@@ -293,7 +293,32 @@ aside#sidebar .woocommerce-widget-price-filter:last-of-type .price-filter-amount
 - Cache flushed
 
 Hard-refresh `/shop/` to confirm the sidebar changes are visible.
-<!-- agent:boundary:83667dcd -->
+
+❯ Please do this again. The Haiku attempt failed. Remove `.ct-widget.woocommerce.widget_price_filter`
+❯ Make `.ct-widget.widget_block .wp-block-heading` smaller.
+❯ ![img_26.png](img_26.png)
+
+### Re: Correct sidebar filter selectors (HEAD)
+
+Fixed. Deployed mrh-performance v1.17. The previous Haiku attempt used wrong selectors.
+
+**Corrected CSS:**
+```css
+/* Hide the WooCommerce price filter widget entirely */
+.ct-widget.woocommerce.widget_price_filter {
+    display: none !important;
+}
+/* Shrink block widget headings (e.g. "Filter by Price") */
+.ct-widget.widget_block .wp-block-heading {
+    font-size: 14px !important;
+    line-height: 1.4 !important;
+}
+```
+
+**Verified live:** Both CSS rules present in `<style id="mrh-product-grid">` on `/shop/`. The `widget_price_filter` widget (id `woocommerce_price_filter-9`) is in the DOM but hidden by the rule.
+
+Hard-refresh `/shop/` to confirm.
+<!-- agent:boundary:02a05d0b -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
@@ -308,4 +333,5 @@ Hard-refresh `/shop/` to confirm the sidebar changes are visible.
 - [x] **Remove ul/li wrapper from Popular tiles** — direct rendering via get_term(), mrh-performance v1.14
 - [x] **Match footer logo size to header (~75px)** — CSS cap + srcset sizes fix in mrh-performance v1.6
 - [x] **Hide "New Cloth Technologies" aside column on /shop/** — mrh-performance v1.7
+- [x] **Hide WooCommerce price filter widget + shrink block headings** — correct selectors, mrh-performance v1.17
 <!-- /agent:pending -->

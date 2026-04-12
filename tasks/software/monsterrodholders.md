@@ -208,7 +208,7 @@ Hard-refresh `/shop/` to confirm visually.
 ❯ - /home/brian/work/btakita/agent-loop/tasks/software/monsterrodholders/all-products.html
 
 ❯ ![img_24.png](img_24.png)
-### Re: Popular Categories layout fix (HEAD)
+### Re: Popular Categories layout fix
 
 Deployed mrh-performance v1.13. Two CSS fixes:
 
@@ -224,7 +224,35 @@ Removed `white-space: nowrap; overflow: hidden; text-overflow: ellipsis` so "Rod
 - Submodule pushed, parent pointer bumped, container force-recreated, cache flushed
 
 Hard-refresh `/shop/` (Ctrl+Shift+R) to confirm visually.
-<!-- agent:boundary:fe8c52ad -->
+❯ You messed up again. There is a ul in each of the Popular Category columns.
+❯ Extract the content out of the ul and remove the ul.
+❯ ![2026-04-12_00-29.png](../../../../../Pictures/agent-loop/2026-04-12_00-29.png)
+### Re: Remove ul wrapper from Popular Categories (HEAD)
+
+Fixed. Deployed mrh-performance v1.14.
+
+**Root cause:** The `[product_categories]` shortcode always wraps output in `<div class="woocommerce"><ul class="products"><li class="product-category">...</li></ul></div>`. That `ul` adds default list styling (bullets, padding, margin) that broke the grid layout.
+
+**Fix:** Replaced the shortcode with direct rendering using `get_term()` + `wp_get_attachment_image()`. Each category tile is now:
+```html
+<div class="mrh-popular-categories__item">
+  <a href="/product-category/rod-holders/" class="mrh-popular-categories__link">
+    <figure class="mrh-popular-categories__figure"><img ...></figure>
+    <h3 class="mrh-popular-categories__name">Rod Holders</h3>
+  </a>
+</div>
+```
+
+No `ul`, no `li`, no `.woocommerce` wrapper. Clean semantic markup with clickable tiles.
+
+**Verification:**
+- 4 category tiles render with direct markup (no `ul` in Popular section)
+- All 4 categories link to correct category pages
+- CSS updated to match new class names
+- Container force-recreated, cache flushed
+
+Hard-refresh `/shop/` to confirm.
+<!-- agent:boundary:b8c5198d -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
@@ -236,6 +264,7 @@ Hard-refresh `/shop/` (Ctrl+Shift+R) to confirm visually.
 - [x] **"All Products" heading above product grid** — woocommerce_before_shop_loop priority 35, mrh-performance v1.12
 - [x] **Sort by popularity desc + include sold-out items** — total_sales ordering, show out-of-stock, mrh-performance v1.12
 - [x] **Popular images fill container + text unwrapped** — height/width 100% with object-fit contain, mrh-performance v1.13
+- [x] **Remove ul/li wrapper from Popular tiles** — direct rendering via get_term(), mrh-performance v1.14
 - [x] **Match footer logo size to header (~75px)** — CSS cap + srcset sizes fix in mrh-performance v1.6
 - [x] **Hide "New Cloth Technologies" aside column on /shop/** — mrh-performance v1.7
 <!-- /agent:pending -->

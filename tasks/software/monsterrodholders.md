@@ -906,7 +906,7 @@ Then Option B as a fallback if you'd rather not touch mod_security — but I'd k
 **Next step waiting on you:** which option do you want me to implement? I can apply A now (it's a local config edit + reload, low blast radius, no data loss).
 ❯ Yes. Please add SPEC. We need to document all of these configurations.
 ❯ Will we need to remember this rule? Could this same issue occur elsewhere where we need to implement Option A again?
-### Re: Fix applied + SPEC written + memory saved — spinner is gone (HEAD)
+### Re: Fix applied + SPEC written + memory saved — spinner is gone
 
 **TL;DR: Applied the CRS exclusion, verified checkout in a real browser (Stripe UPE mounts, no spinner, place order enabled), wrote `tasks/software/monsterrodholders/SPEC.md` as the living config inventory, and saved the WAF rule to auto-memory so future sessions catch this pattern instantly.**
 
@@ -963,7 +963,7 @@ It's the kind of doc that should answer "what happens if I rebuild this server f
 
 ---
 
-### Re: Could this same issue occur elsewhere? (HEAD)
+### Re: Could this same issue occur elsewhere?
 
 **Yes — and the fix generalizes. The short answer: anywhere WooCommerce 8.5+ runs behind OWASP CRS 3.3.5.**
 
@@ -1008,25 +1008,83 @@ The `SecRuleUpdateTargetById 933120 "!ARGS:post_data"` exclusion is global, so i
 
 That playbook is now in SPEC.md + memory. You shouldn't have to teach me this twice.
 
+❯ Instead of a memory, we should have a SKILL->runbook.
+❯ If this SKILL + runbook were to live in monsterrodholders-dev for now, can we later extract it to another library or repo to allow to to manage multiple WordPress sites on the common denominator (e.g. Liquidweb)?
+
 ---
 
 **Next real-browser QA to close out the fix:** run a real $1 Stripe transaction end-to-end on `https://50.28.2.199.nip.io/checkout/`, confirm order completes, then refund from the Stripe dashboard. Everything I can verify from chromium-bridge is green; the remaining validation is human-in-the-loop card entry. Want me to walk through it with chromium-bridge driving a test card?
-<!-- agent:boundary:94bec5ed -->
+### Re: SKILL→runbook instead of memory, extractable later (HEAD)
+
+Yes — better than memory for this. Memory is good for "recognize the pattern next time I stumble into it"; a skill with runbooks is good for "I have a WordPress-on-Liquidweb site and I need to do X." Different surfaces, and the skill is the one you'll actually reach for when onboarding a second site.
+
+**Proposed structure (lives in `src/monsterrodholders-dev/` for now):**
+
+```
+src/monsterrodholders-dev/
+├── .claude/
+│   └── skills/
+│       └── wp-liquidweb-ops/          # skill name = common denominator
+│           ├── SKILL.md                # when to invoke, decision tree
+│           └── runbooks/
+│               ├── waf-933120-order-attribution.md   # the fix we just did
+│               ├── checkout-spinner-diagnose.md      # diagnostic playbook
+│               ├── crs-exclusion-template.md         # how to narrow any CRS rule
+│               ├── wp-cli-memory-limit.md            # the wp.sh / FPM SAPI gotcha
+│               └── apache-mod-rewrite-vs-proxy.md    # the RedirectMatch note
+└── SPEC.md                             # site-specific: IPs, paths, plugin list
+```
+
+The split is deliberate: **skill+runbooks = knowledge** (transferable), **SPEC.md = inventory** (site-specific). A runbook never names `50.28.2.199` or `/opt/monsterrodholders/app` — it reads those from the current repo's `SPEC.md` or takes them as arguments. That's the line that makes extraction cheap later.
+
+**Extraction path — concrete:**
+
+1. **Now (N=1 site):** skill lives at `src/monsterrodholders-dev/.claude/skills/wp-liquidweb-ops/`. No abstraction tax — it just works for this one site. Auto-memory reference stays as a "this skill exists, go use it" pointer, not a duplicate of the content.
+
+2. **When a 2nd Liquidweb/WP site lands:** extract to a new repo `src/wp-liquidweb-ops/` (or broader `src/wp-ops/` if the common denominator turns out to be "WordPress on docker behind OWASP CRS 3.3.5," which covers Liquidweb, Plesk, cPanel, and nginx+modsec too). Each site repo adds the shared skill via:
+   - **Option A — git submodule:** `src/site-x-dev/.claude/skills/wp-liquidweb-ops` as a submodule pointing at `src/wp-liquidweb-ops`. Version-locked per site, explicit upgrades.
+   - **Option B — symlink at project root:** `src/site-x-dev/.claude/skills/wp-liquidweb-ops -> ../../../wp-liquidweb-ops/skill`. Always-latest, no lock, simpler.
+   - **Option C — `.claude/settings.json` `skillPaths`:** tell Claude Code to load skills from a sibling repo. No filesystem gymnastics inside each site repo.
+
+   I'd lean C for living-inside-agent-loop where all site repos are sibling submodules of the same parent — no per-site git churn when the shared skill updates.
+
+3. **What makes extraction safe:** if each runbook is written to `read ./SPEC.md` and `ssh $(jq -r .ssh_alias SPEC.json)` instead of hardcoding, the skill is already multi-site on day one — extraction becomes a `git mv` and a README edit, not a rewrite.
+
+**Common denominator for "Liquidweb WordPress management" — what the shared skill should cover:**
+
+| Layer | Pattern | Runbook it becomes |
+|---|---|---|
+| InterWorx + Imunify360 | OWASP CRS 3.3.5 paranoia 1 false positives | `waf-crs-exclusions.md` (generalize 933120 fix into "narrow any CRS rule") |
+| Host Apache → Docker WP | mod_proxy vs mod_rewrite ordering | `apache-proxy-rewrite-order.md` |
+| Docker WP image | FPM vs wp-cli SAPI php.ini split | `wp-cli-memory-limit.md` |
+| WC checkout stack | spinner / UPE mount failure decision tree | `checkout-spinner-diagnose.md` |
+| Stripe + WC | secret rotation, UPE config | `stripe-key-rotation.md` |
+| Cloudflare WAF | managed rules false positives (same CRS dictionary) | shares `waf-crs-exclusions.md` |
+| Page migrations | `-2` legacy pattern + 301 redirect dance | `wc-page-migration.md` (already documented in `CLAUDE.local.md`) |
+
+Most of these are things we've hit on monsterrodholders in the last week — they're already half-written in scattered places (CLAUDE.local.md, SPEC.md, memory, this document). The skill extraction is mostly **gathering** what exists, not new writing.
+
+**Tradeoff to name:** putting it in `src/monsterrodholders-dev/.claude/skills/` means Claude Code only discovers it when CWD is that submodule or a child. If you invoke `/agent-doc` from `agent-loop/` root (which you usually do), the skill isn't visible. Fix is either (a) symlink `src/monsterrodholders-dev/.claude/skills/wp-liquidweb-ops → agent-loop/.claude/skills/wp-liquidweb-ops` so it's visible from both project scopes, or (b) put it in `agent-loop/.claude/skills/` directly from day one and just *document* it as "owned by the monsterrodholders-dev project for now." Option (b) is simpler and matches how `agent-doc`, `chromium-bridge`, `dev`, `livestream` already live at the agent-loop root. I'd go (b).
+
+**Recommendation:**
+1. Create `.claude/skills/wp-liquidweb-ops/` at the **agent-loop root** (not inside the submodule — keeps it discoverable everywhere and avoids the symlink dance)
+2. Port the 933120 fix into `runbooks/waf-933120-order-attribution.md` with the diagnostic playbook from SPEC.md
+3. Write `SKILL.md` as the decision tree: "WC checkout broken? → checkout-spinner-diagnose.md. WAF denying valid requests? → waf-crs-exclusions.md."
+4. Update the auto-memory reference to point at the skill instead of duplicating content
+5. When site #2 lands, extract to `src/wp-liquidweb-ops/` with submodule or skillPaths
+
+Want me to start on step 1–4 now? It's ~30min of writing and the content already exists — I'd be moving it, not inventing it.
+<!-- agent:boundary:a07551fd -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] **Migrate `/checkout-2/` → `/checkout/`** — option flipped, page 83 deleted, search-replace done, caches flushed
-- [x] **Migrate `/cart-2/`, `/my-account-2/`, `/home-2/`** — 301 redirects via Apache `RewriteRule`, options flipped (82→7, 84→9, 2→7503), 14 DB replacements, old pages deleted, caches flushed, end-to-end verified
-- [x] **Diagnose checkout spinner — real root cause** — OWASP CRS 933120 blocks WC Order Attribution `user_agent=` in `post_data`. Verified via chromium-bridge + `/var/log/httpd/error_log`.
-- [x] **Fix checkout spinner — apply WAF exclusion** — `SecRuleUpdateTargetById 933120 "!ARGS:post_data"` written to `/etc/httpd/modsecurity.d/local_rules/woocommerce-crs-exclusions.conf`, configtest OK, httpd reloaded, chromium-bridge verification passed: `blocked:0, stripeIframe:1, upeChildren:1, placeOrderEnabled:true`.
-- [x] **Write SPEC doc** — `tasks/software/monsterrodholders/SPEC.md` created, covers host Apache, mod_security, Docker, WP settings, Stripe, diagnostic paths. Living inventory of every non-default config.
-- [x] **Save WAF rule to memory** — `reference_monsterrodholders_waf_933120.md` + MEMORY.md index updated. Future sessions catch this pattern instantly.
-- [ ] **Real-browser $1 Stripe transaction QA** — live card entry on `https://50.28.2.199.nip.io/checkout/`, verify order completes, refund from Stripe dashboard. chromium-bridge has verified everything up to card entry.
-- [ ] **Re-evaluate PPCP decision** — PPCP currently deactivated. Was not the spinner cause. Decide: (a) onboard with real creds via WC → Settings → Payments → PayPal → Connect, or (b) `wp plugin delete woocommerce-paypal-payments` to remove entirely
-- [ ] **Rotate Stripe live secret** — `sk_live_518eq7…` leaked in earlier `wp option get`; treat as compromised, rotate via Stripe dashboard, update webhook, store new value in `passage btak/monsterrodholders/stripe/secret_key`
-- [ ] **Audit + remove WPForms Lite** — 2 orphaned forms, no published references; needs theme/widget grep before `wp plugin delete wpforms-lite`
-- [ ] **Fix `./scripts/wp.sh`** — add `php -d memory_limit=512M` (becomes unnecessary if WPForms Lite is removed)
-- [ ] **Audit duplicate Privacy Policy and Refund/Returns Policy pages** — same `-2` pattern may apply
-- [ ] **Audit other WAF-blocked endpoints** — `grep -E 'id "9(33|41|42|92|93|94)' /var/log/httpd/error_log` to surface any other silently-blocked requests while we're here
+- **SKILL+runbook extraction (`wp-liquidweb-ops`)** — port 933120 fix + checkout-spinner diagnostic playbook + CRS exclusion template into `.claude/skills/wp-liquidweb-ops/` at agent-loop root. Update memory reference to point at skill. Awaiting go.
+- **Real-browser $1 Stripe transaction QA** — live card entry on `https://50.28.2.199.nip.io/checkout/`, verify order completes, refund from Stripe dashboard. chromium-bridge has verified everything up to the card-entry step.
+- **Re-evaluate PPCP decision** — either onboard PayPal Payments with real creds or `wp plugin delete woocommerce-paypal-payments` entirely.
+- **Rotate Stripe live secret** — `sk_live_518eq7…` leaked earlier; rotate via Stripe dashboard, update webhook, store new value in `passage btak/monsterrodholders/stripe/secret_key`.
+- **Audit + remove WPForms Lite** — 2 orphaned forms, no published references; grep theme/widgets before `wp plugin delete wpforms-lite`.
+- **Fix `./scripts/wp.sh`** — add `php -d memory_limit=512M` (moot if WPForms Lite removed).
+- **Audit duplicate Privacy Policy and Refund/Returns Policy pages** — same `-2` pattern may apply.
+- **Audit other WAF-blocked endpoints** — `grep -E 'id "9(33|41|42|92|93|94)' /var/log/httpd/error_log` to surface other silently-blocked requests.
 <!-- /agent:pending -->

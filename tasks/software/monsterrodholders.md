@@ -136,7 +136,7 @@ Instead of seeding `post_content`, the mu-plugin now hooks `woocommerce_before_s
 - No post_content manipulation — behavior now lives entirely in the mu-plugin, so it's self-healing against DB imports and admin-UI wipes
 
 Hard-refresh `/shop/` to confirm visually. The Popular row should now appear in the main content column (where the product grid lives), not in the hero band at the top of the page.
-<!-- agent:boundary:817dde44 -->
+<!-- agent:boundary:c966edfe -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

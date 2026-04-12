@@ -1646,7 +1646,7 @@ Done. Updated two files under `.claude/skills/wp-liquidweb-ops/runbooks/`:
 **`waf-crs-exclusions.md`** — updated the `933120` entry in the "Known recurring false positives" table of contents to list both wrappers, flag the PPCP requirement, and cross-link to the full runbook.
 
 **Key insight captured:** the fix is not WC-version-specific or gateway-specific — it's a three-way collision between (a) WC Order Attribution's fixed field naming, (b) OWASP CRS's PHP-ini-directive dictionary including `user_agent`, and (c) the arg wrapper varying by AJAX path. Any site running `woocommerce-paypal-payments` behind OWASP CRS 3.3.x will hit this.
-<!-- agent:boundary:08c640ae -->
+<!-- agent:boundary:8823b71d -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

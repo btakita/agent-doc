@@ -4,6 +4,13 @@ agent_doc_format: template
 agent_doc_write: crdt
 agent_doc_model_tier: low
 claude_args: --dangerously-skip-permissions
+env:
+  OPENROUTER_API_KEY: "$(passage btak/OPENROUTER_API_KEY)"
+  ANTHROPIC_BASE_URL: "https://openrouter.ai/api"
+  ANTHROPIC_AUTH_TOKEN: "$OPENROUTER_API_KEY"
+  ANTHROPIC_API_KEY: ""
+  ANTHROPIC_MODEL: "qwen/qwen3.6-plus"
+  ANTHROPIC_SMALL_FAST_MODEL: "qwen/qwen3.6-plus"
 ---
 
 ## Status
@@ -346,7 +353,7 @@ Files at `/tmp/mrh-favicon*`.
 
 Hard-refresh any page to confirm the tab icon updates.
 ❯ https://50.28.2.199.nip.io/wp-content/uploads/2017/09/mrh-favicon.ico responded with a 404. Use `ssh 50.28.2.199` to deploy the change. Note that the wordpress servers are running in docker.
-### Re: Deploy favicon (HEAD)
+### Re: Deploy favicon
 
 Favicon files deployed and live. Uploaded all 4 files to the WordPress uploads directory via:
 
@@ -356,7 +363,26 @@ curl -sI https://50.28.2.199.nip.io/wp-content/uploads/2017/09/mrh-favicon.ico  
 ```
 
 The 404 was because the files hadn't been uploaded to the server yet. All sizes confirmed serving.
-<!-- agent:boundary:f50fc0a8 -->
+
+❯ Create a test product for $1. We need to test the woocommerce shopping cart + order system.
+### Re: Test product created (HEAD)
+
+Created **"Test Product - $1"** (product ID 86212) on the live site.
+
+- **Price:** $1.00
+- **Status:** Published
+- **URL:** `https://50.28.2.199.nip.io/product/test-product-1/`
+
+Product page returns HTTP 200. You can now test the full cart + checkout flow:
+1. Visit the product page
+2. Add to cart
+3. Proceed to checkout
+4. Place order
+
+The product appears in the shop page alongside the existing inventory (sorted by popularity, so it'll be near the bottom as a new product with 0 sales).
+
+When testing is done, I can delete product 86212 to clean up.
+<!-- agent:boundary:4074f02d -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
@@ -372,4 +398,6 @@ The 404 was because the files hadn't been uploaded to the server yet. All sizes 
 - [x] **Match footer logo size to header (~75px)** — CSS cap + srcset sizes fix in mrh-performance v1.6
 - [x] **Hide "New Cloth Technologies" aside column on /shop/** — mrh-performance v1.7
 - [x] **Hide WooCommerce price filter widget + shrink block headings** — correct selectors, mrh-performance v1.17
+- [x] **Test product created** — "Test Product - $1" (ID 86212), $1.00, published at /product/test-product-1/
+- [ ] **Test WooCommerce cart + checkout flow** — awaiting user testing
 <!-- /agent:pending -->

@@ -62,7 +62,7 @@ This is a solid feature — it cleanly separates per-document environment config
 **Questions before building:**
 - Should env vars apply to **all** Bash tool calls in the session, or only to agent-doc-spawned subprocesses?
 - Should `agent-doc preflight` output the expanded env in its JSON (so the skill can `export` them), or should `agent-doc` handle this when spawning sessions via tmux?
-<!-- agent:boundary:6dd8ea7e -->
+<!-- agent:boundary:4b4aa6e8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

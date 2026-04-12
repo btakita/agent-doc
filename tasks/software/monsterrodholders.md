@@ -417,7 +417,7 @@ The payment gateway settings were already in the staging database from the produ
 **Note:** Stripe is in **live mode**. The $1 test product will process a real charge. You can refund from Stripe Dashboard after, or I can switch to test mode first.
 
 To test: https://50.28.2.199.nip.io/product/test-product-1/ → add to cart → checkout.
-<!-- agent:boundary:f4cf8464 -->
+<!-- agent:boundary:b7069177 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

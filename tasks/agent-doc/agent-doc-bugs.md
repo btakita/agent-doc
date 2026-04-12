@@ -229,7 +229,7 @@ Created `tasks/agent-doc/plan-bidirectional-ipc.md` with four design options:
 The plan covers: callback protocol spec (request/response JSON), callback types (summarize, pending_curate, status_update), implementation tasks, and open questions.
 
 See: `tasks/agent-doc/plan-bidirectional-ipc.md`
-<!-- agent:boundary:e11396be -->
+<!-- agent:boundary:d0fc5fc2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

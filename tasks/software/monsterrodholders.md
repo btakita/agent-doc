@@ -630,7 +630,7 @@ Also: yes, I'll add the CLAUDE.local.md note about stripe secrets. Should I also
 
 ❯ Do
 ❯ - [ ] **Migrate cart-2 → cart, my-account-2 → my-account, home-2 → home** — 301 redirects, option flips, test redirects, delete old pages
-### Re: Migration executed — cart-2, my-account-2, home-2 (HEAD)
+### Re: Migration executed — cart-2, my-account-2, home-2
 
 All three migrations done on the new instance (`50.28.2.199.nip.io`). Verified end-to-end.
 
@@ -679,17 +679,51 @@ Applied to both nip.io and `monsterrodholders.com` vhosts. `apachectl configtest
 
 **Note on `wp` memory limit:** WPForms Lite plugin blows the default 128M PHP memory limit on any wp-cli invocation. Had to invoke via `docker compose run --rm wpcli php -d memory_limit=512M /usr/local/bin/wp --allow-root ...` — the `./scripts/wp.sh` wrapper doesn't set this and fails. Worth fixing in the wrapper.
 
+❯ Why are we using WPForms Lite?
+
 **Pending:** Browser QA of `/cart/`, `/my-account/`, and `/` on `https://50.28.2.199.nip.io/`. The 301s and 200s are healthy; real test is click-through from menus and a guest → cart → checkout flow.
-<!-- agent:boundary:64a921ba -->
+### Re: WPForms Lite — inherited, effectively unused (HEAD)
+
+Short answer: **nothing on this site is actively using it.** It came along with the migration from the live WordPress site.
+
+**What I found** (DB audit on `50.28.2.199.nip.io`):
+
+- **2 forms defined**: `Simple Contact Form` (156), `Newsletter Signup Form` (157) — both `publish`
+- **0 live pages/posts reference them**. The only `post_content` hit for "wpforms" is a trashed revision of the old `Services` page
+- **0 `postmeta` references** (rules out Elementor / block editor embeds)
+- **0 `[wpforms id=...]` shortcodes** in any published content
+- Plugin status: `active` (loaded on every request — which is why it blows the 128M PHP memory limit during wp-cli runs)
+
+**Why it's here:** the plugin was installed on the production WordPress site and got carried forward during the migration. No one audited which plugins were actually needed. It's sitting in `wordpress/plugins/` as a live volume mount.
+
+**Recommendation: deactivate and delete it.** Upside:
+
+1. `./scripts/wp.sh` stops blowing up — no more `php -d memory_limit=512M` workaround
+2. One fewer plugin to maintain / security-patch
+3. Frontend page weight drops (WPForms enqueues CSS/JS on every page by default)
+
+**Before deletion, two things to check:**
+
+1. **Newsletter signup** — the front-end likely has a signup form somewhere (footer?). If the theme uses `[wpforms id=157]` rendered via a widget or theme template (not `post_content`), my DB query misses it. I should grep the theme files.
+2. **Contact page** — the `Contact` page (ID 13) is published. Let me verify it doesn't render a WPForms form via a widget / template hook.
+
+**Want me to:**
+- (a) grep theme + widget data for `wpforms_render` / `[wpforms` / form ID references,
+- (b) if clean, `wp plugin deactivate wpforms-lite && wp plugin delete wpforms-lite`,
+- (c) replace any found footer newsletter signup with a minimal native form or a lighter plugin (e.g., a plain `<form>` POSTing to a Mailchimp/MailerLite endpoint)?
+
+Or just delete it and fix anything that breaks afterward — your call.
+<!-- agent:boundary:227618d1 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **Migrate `/checkout-2/` → `/checkout/`** — option flipped, page 83 deleted, search-replace done, caches flushed
 - [x] **Migrate `/cart-2/`, `/my-account-2/`, `/home-2/`** — 301 redirects via Apache `RewriteRule`, options flipped (82→7, 84→9, 2→7503), 14 DB replacements, old pages deleted, caches flushed, end-to-end verified
+- [ ] **Audit + remove WPForms Lite** — 2 orphaned forms, no published references; needs theme/widget grep before `wp plugin delete wpforms-lite`
 - [ ] **Fix checkout spinner** — `upe_checkout_experience_enabled=no`, Stripe falls back to legacy classic integration; needs browser QA
 - [ ] **Browser QA on nip.io** — click-through `/cart/`, `/my-account/`, `/` + guest checkout flow on `https://50.28.2.199.nip.io/`
-- [ ] **Fix `./scripts/wp.sh`** — add `php -d memory_limit=512M` to work around WPForms Lite memory exhaustion
+- [ ] **Fix `./scripts/wp.sh`** — add `php -d memory_limit=512M` (becomes unnecessary if WPForms Lite is removed)
 - [ ] **Audit duplicate Privacy Policy and Refund/Returns Policy pages** — same `-2` pattern may apply
 - [ ] **Rotate Stripe live secret** — `sk_live_518eq7…` leaked in earlier `wp option get`; treat as compromised
 <!-- /agent:pending -->

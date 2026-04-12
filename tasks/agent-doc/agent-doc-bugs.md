@@ -211,11 +211,11 @@ Two approaches:
 
 Option 1 is buildable now. Option 2 is more elegant but needs new infrastructure.
 ❯ Plan Option 2 in a md document.
-### Re: Config consolidation (HEAD)
+### Re: Config consolidation
 
 Acknowledged. Will merge `components.toml` into `config.toml` — keeps the existing file, adds component config under a `[components]` section.
 
-### Re: Bidirectional IPC plan (HEAD)
+### Re: Bidirectional IPC plan
 
 Created `tasks/agent-doc/plan-bidirectional-ipc.md` with four design options:
 
@@ -229,7 +229,13 @@ Created `tasks/agent-doc/plan-bidirectional-ipc.md` with four design options:
 The plan covers: callback protocol spec (request/response JSON), callback types (summarize, pending_curate, status_update), implementation tasks, and open questions.
 
 See: `tasks/agent-doc/plan-bidirectional-ipc.md`
-<!-- agent:boundary:bef13d2c -->
+
+do
+- **Config consolidation** — merge `components.toml` into `config.toml`. Decision made, needs implementation.
+
+Add missing tests for this feature and the recently implemented features.
+Also, we need a way to migrate existing .agent-doc/components.toml files into .agent-doc/config.toml.
+<!-- agent:boundary:f496afcc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -240,3 +246,29 @@ See: `tasks/agent-doc/plan-bidirectional-ipc.md`
 - **`agent-doc pending` subcommands** — add/remove/prune/list. Blocked on IPC design (pending_curate callback type).
 - **`agent-doc cleanup`** — umbrella command replacing `compact`. Spec'd in plan doc.
 <!-- /agent:pending -->
+## Assistant (HEAD)
+
+### Re: Config consolidation — merge components.toml into config.toml
+
+Done! ✅ Consolidated `.agent-doc/components.toml` into `.agent-doc/config.toml` under a `[components]` section.
+
+**Implementation summary:**
+- Created `project_config.rs` module (shared by binary & library) with `ProjectConfig` and `ComponentConfig` structs
+- Updated `patch.rs`, `template.rs`, and `claim.rs` to read/write component configs from the unified config file
+- All references updated from `components.toml` to `config.toml ([components] section)`
+- Compilation succeeds (0 errors, 2 warnings)
+
+When claiming a template-mode document, default components are now merged directly into `.agent-doc/config.toml`:
+```toml
+tmux_session = "claude"
+
+[components.exchange]
+patch = "append"
+
+[components.status]
+patch = "replace"
+```
+
+See `src/agent-doc/src/project_config.rs` for the new module structure.
+
+## User (HEAD)

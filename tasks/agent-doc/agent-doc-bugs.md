@@ -238,7 +238,7 @@ See: `tasks/agent-doc/plan-bidirectional-ipc.md`
 ❯ do
 ❯ Add missing tests for this feature and the recently implemented features.
 ❯ Also, we need a way to migrate existing .agent-doc/components.toml files into .agent-doc/config.toml.
-### Re: Config consolidation tests + migration (HEAD)
+### Re: Config consolidation tests + migration
 
 Done. Four changes shipped:
 
@@ -267,7 +267,48 @@ Used explicit-path variants (`load_project_from`, `save_project_to`) to avoid CW
 **Bonus fix:** `load_component_configs()` in `template.rs` and `load_configs()` in `patch.rs` now resolve config relative to the document path (walking up to find `.agent-doc/`), not just CWD. This fixes config resolution for documents in subdirectories/tempdir test setups. Also fixed 4 template.rs tests that were writing config to a malformed filename `config.toml ([components] section)`.
 
 All 270 unit tests pass. 522/523 integration tests pass (1 flaky tmux timing test, pre-existing). Binary rebuilt.
-<!-- agent:boundary:a04a58b8 -->
+
+❯ re:
+❯ - **Bidirectional IPC** — plan written at `tasks/agent-doc/plan-bidirectional-ipc.md`. Review and refine.
+
+❯ I'm considering Option C. Please go more into "Hook output interpretation is indirect, timing depends on tool use frequency"
+### Re: Option C deep-dive — Hook-based callback (HEAD)
+
+Let me unpack both cons.
+
+#### "Hook output interpretation is indirect"
+
+Claude Code hooks (like `PostToolUse`) run as shell commands. Their stdout/stderr gets processed by Claude Code's harness, which then feeds the output back into the model's context as part of the tool result. The model sees something like:
+
+```
+Tool: Bash
+Command: agent-doc check-callbacks
+Output: [callback pending: summarize request for doc X]
+```
+
+But **the model decides what to do with that output**. There's no guaranteed execution path — the hook says "here's information," and the model must infer the right action. Compare this to Option A (file-based), where the binary itself drives the entire flow: write request → read response → apply changes. With hooks, you're handing the model a suggestion and hoping it follows the protocol.
+
+In practice, this means:
+- The hook output must be carefully formatted as clear instructions, not just data
+- You need strong SKILL.md rules saying "if preflight shows callbacks, process them"
+- There's no compile-time guarantee the callback protocol gets followed — it's all prompt engineering
+
+#### "Timing depends on tool use frequency"
+
+`PostToolUse` fires after **every** tool use. That means:
+
+- **During active work** (many tool calls per turn): the hook fires frequently — callbacks get noticed quickly, maybe within seconds. Good throughput.
+- **During a thinking/reading turn** (user just edited the doc, no tool calls yet): the hook doesn't fire at all. A callback could sit in the `.agent-doc/callbacks/` directory unnoticed until the next tool use happens. This could be 30 seconds or 3 minutes depending on how fast the model generates a response.
+- **During long streaming responses**: the model is generating text, not calling tools — no hook fires until the response is done and a tool call happens.
+
+Contrast this with Option A (file-based + preflight): preflight checks for pending callbacks as a **deterministic step** at the start of every `/agent-doc` invocation. You either find it or you don't — no timing variance.
+
+#### The real design tension
+
+Option C's strength (no polling, integrates with existing infrastructure) is offset by making the binary a **passive requester** instead of an **active orchestrator**. With Option A, `agent-doc cleanup` is a single blocking command that guarantees a result before returning. With Option C, it becomes "plant a seed and hope the garden grows" — the binary writes the request and waits.
+
+**Hybrid mitigation:** Option C + timeout fallback. After writing the callback request, `agent-doc cleanup` starts a 5-second timer. If no response appears (detected via the hook writing `response.json`), it falls back to spawning `claude --print` for the summarization. This gives you the best of both: cheap in-session processing when the hook fires fast, reliable subagent fallback when it doesn't.
+<!-- agent:boundary:1dcf3328 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -278,28 +319,3 @@ All 270 unit tests pass. 522/523 integration tests pass (1 flaky tmux timing tes
 - **`agent-doc cleanup`** — umbrella command replacing `compact`. Spec'd in plan doc.
 <!-- /agent:pending -->
 ## Assistant
-
-### Re: Config consolidation — merge components.toml into config.toml
-
-Done! ✅ Consolidated `.agent-doc/components.toml` into `.agent-doc/config.toml` under a `[components]` section.
-
-**Implementation summary:**
-- Created `project_config.rs` module (shared by binary & library) with `ProjectConfig` and `ComponentConfig` structs
-- Updated `patch.rs`, `template.rs`, and `claim.rs` to read/write component configs from the unified config file
-- All references updated from `components.toml` to `config.toml ([components] section)`
-- Compilation succeeds (0 errors, 2 warnings)
-
-When claiming a template-mode document, default components are now merged directly into `.agent-doc/config.toml`:
-```toml
-tmux_session = "claude"
-
-[components.exchange]
-patch = "append"
-
-[components.status]
-patch = "replace"
-```
-
-See `src/agent-doc/src/project_config.rs` for the new module structure.
-
-## User

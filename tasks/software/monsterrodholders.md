@@ -1604,7 +1604,7 @@ Also folding this into the `wp-liquidweb-ops` skill knowledge: the 933120 exclus
 
 ❯ Can we verify if the Venmo /checkout process will work? I am unable to test due to not being able to reset my Venmo password.
 
-### Re: Venmo checkout verification (HEAD)
+### Re: Venmo checkout verification
 
 **TL;DR:** Yes, Venmo should work — the `form_encoded` exclusion covers all PPCP smart buttons.
 
@@ -1621,7 +1621,32 @@ So if PayPal works after your `/checkout` retry, the same fix unblocks Venmo.
 Since you can't initiate a Venmo payment, you could ask someone with access (partner, tester, etc.) to try clicking the Venmo button during checkout and confirming they're redirected to Venmo's approval page. Alternatively, check the modsec audit log the moment someone tries Venmo and confirm there are zero rule 933120 hits in the `form_encoded` arg — that proves the exclusion is working.
 
 **Next step:** After you confirm PayPal works, flag this for a team member to test the Venmo flow, or leave it in pending as a known test gap to fill before go-live.
-<!-- agent:boundary:e8503926 -->
+❯ do
+❯ - **Update wp-liquidweb-ops runbook** — add `form_encoded` as second 933120 exclusion pattern alongside `post_data`; document the `.noindex.html` → 404 symptom that hides the 403.
+
+### Re: Updated wp-liquidweb-ops runbook — form_encoded + .noindex.html (HEAD)
+
+Done. Updated two files under `.claude/skills/wp-liquidweb-ops/runbooks/`:
+
+**`waf-933120-order-attribution.md`** — expanded from a single-case (`post_data`) runbook to a two-case runbook covering both WC checkout paths:
+
+1. **Headline + one-liner** — now mentions both arg wrappers upfront
+2. **New "The 404 red herring" section** — documents the Imunify360 behavior where a denied 403 gets rewritten to `/.noindex.html`, which the backend serves as a themed 404 page. Explains the diagnostic signature: direct-to-backend `curl` returns 200 but through-the-proxy returns 404 → go straight to `modsec_audit.log`, don't chase the 404.
+3. **Case 1: Classic checkout (`post_data`)** — existing content, rewritten as Case 1
+4. **Case 2: PPCP smart buttons (`form_encoded`)** — new section. Explains:
+   - PPCP (`woocommerce-paypal-payments`) posts `application/json` with `form_encoded` wrapping the URL-encoded form
+   - ModSec's JSON body processor flattens it to `ARGS:form_encoded`, so the same 933120 rule fires on a different arg name
+   - **All four smart buttons (PayPal, Venmo, Apple Pay, Google Pay) are affected** because they share the same PPCP checkout API
+   - If a `post_data` exclusion is already in place, PPCP still breaks — both exclusions are needed
+5. **Affected endpoints** — split into two subsections, one per wrapper. PPCP endpoints: `ppc-save-checkout-form`, `ppc-create-order`, and other `ppc-*` JSON endpoints
+6. **Fix section** — now installs four `SecRuleUpdateTargetById` directives in one pass (`933120` + `931100`, each excluding both `post_data` and `form_encoded`). Added a subsection explaining why `931100` is the preemptive companion — the same `wc_order_attribution_referrer=https://...` URL-shaped field fires RFI as soon as 933120 stops eating the request.
+7. **Comment header in the tee'd config** — now documents both wrappers and the rule pairing so the next admin doesn't delete half the exclusions during cleanup
+8. **Diagnostic signature** — now lists both cases with their distinguishing symptoms, plus the "don't chase the 404" insight
+
+**`waf-crs-exclusions.md`** — updated the `933120` entry in the "Known recurring false positives" table of contents to list both wrappers, flag the PPCP requirement, and cross-link to the full runbook.
+
+**Key insight captured:** the fix is not WC-version-specific or gateway-specific — it's a three-way collision between (a) WC Order Attribution's fixed field naming, (b) OWASP CRS's PHP-ini-directive dictionary including `user_agent`, and (c) the arg wrapper varying by AJAX path. Any site running `woocommerce-paypal-payments` behind OWASP CRS 3.3.x will hit this.
+<!-- agent:boundary:08c640ae -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
@@ -1629,7 +1654,6 @@ Since you can't initiate a Venmo payment, you could ask someone with access (par
 - **Retry /checkout → PayPal** — confirm PayPal order creation reaches the approval flow after the `form_encoded` exclusion. (user action)
 - **Test Venmo button (if possible)** — ask a team member or tester to click the Venmo button and confirm approval flow; or check modsec audit log for zero 933120 hits on `form_encoded` when attempted. (blocked by: user password reset)
 - **Retry /checkout with test product + Stripe** — confirm Free Shipping / card path still works (regression check after CRS reload). (user action)
-- **Update wp-liquidweb-ops runbook** — add `form_encoded` as second 933120 exclusion pattern alongside `post_data`; document the `.noindex.html` → 404 symptom that hides the 403.
 - **Rotate DB passwords** — `MARIADB_ROOT_PASSWORD` + `MARIADB_PASSWORD` still on the previous values in `docker-compose.yml` / `.env`; update `wp-config.php`, `docker compose up -d --force-recreate`.
 - **Livestream VOD trim** — the Stripe settings dump segment still needs manual trim in post-production.
 - **Decide on real shipping strategy** — Free Shipping is fine for testing; when going live, add Flat Rate / carrier rates above it.

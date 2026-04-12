@@ -224,7 +224,7 @@ Removed `white-space: nowrap; overflow: hidden; text-overflow: ellipsis` so "Rod
 - Submodule pushed, parent pointer bumped, container force-recreated, cache flushed
 
 Hard-refresh `/shop/` (Ctrl+Shift+R) to confirm visually.
-<!-- agent:boundary:a460d42c -->
+<!-- agent:boundary:fe8c52ad -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

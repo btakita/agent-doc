@@ -310,7 +310,7 @@ Option C's strength (no polling, integrates with existing infrastructure) is off
 **Hybrid mitigation:** Option C + timeout fallback. After writing the callback request, `agent-doc cleanup` starts a 5-second timer. If no response appears (detected via the hook writing `response.json`), it falls back to spawning `claude --print` for the summarization. This gives you the best of both: cheap in-session processing when the hook fires fast, reliable subagent fallback when it doesn't.
 
 If we use Option A with the integrated preflight, the flow would be completely deterministic?
-### Re: Option A + integrated preflight = deterministic? (HEAD)
+### Re: Option A + integrated preflight = deterministic?
 
 Yes, exactly. With **Option A + integrated preflight**, the flow becomes a traditional synchronous request-response:
 
@@ -321,13 +321,25 @@ Yes, exactly. With **Option A + integrated preflight**, the flow becomes a tradi
 5. Read result → apply changes → return
 
 No hooks, no tool-use-frequency dependency — just a blocking command with a defined timeout. The only non-deterministic part is *which* path satisfies the request (running session vs spawned subagent), but the overall flow is guaranteed to complete within a known time window.
-<!-- agent:boundary:7e8effe5 -->
+Would the summarization happen in the running claude session or would this be from a subagent?
+### Re: Running session vs subagent for summarization (HEAD)
+
+Two paths in parallel:
+
+1. **Running Claude session** (primary, preferred) — the session detects the callback request file during its next cycle and writes the summary response. This reuses the existing context (knows the document history, what matters, what to compress). More coherent summary, no new session cost.
+
+2. **Subagent fallback** — if timeout expires before the session responds (e.g., session is idle, not running `/agent-doc` cycles), spawn `claude --print -p "Summarize this exchange..."`. Higher cost, no context, but guarantees completion.
+
+The running session wins if it responds first — subagent is the safety net. For Option A, the notification mechanism would be the session's own preflight cycle checking for pending callbacks.
+
+This is where the hybrid with Option C gets interesting: you could combine Option A's file-based protocol with Option C's hook polling — the hook fires `agent-doc check-callbacks` which reads requests faster than waiting for the next full preflight cycle. But this adds complexity. Option A alone with aggressive polling (1 second intervals) is probably sufficient.
+<!-- agent:boundary:196ea0cd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Bidirectional IPC** — Option A confirmed as deterministic approach. Decision made.
+- **Bidirectional IPC** — Option A confirmed. Summarization: running session (primary) + subagent (timeout fallback). Design complete.
 - **`agent-doc pending` subcommands** — add/remove/prune/list. Blocked on IPC design (pending_curate callback type).
 - **`agent-doc cleanup`** — umbrella command replacing `compact`. Spec'd in plan doc.
 <!-- /agent:pending -->

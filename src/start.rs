@@ -174,6 +174,14 @@ pub fn run(file: &Path) -> Result<()> {
                 cmd.arg(arg);
             }
         }
+        // Add --no-mcp if frontmatter sets no_mcp: true
+        if fm.no_mcp.unwrap_or(false) {
+            cmd.arg("--no-mcp");
+        }
+        // Add --enable-tool-search if frontmatter sets enable_tool_search: true
+        if fm.enable_tool_search.unwrap_or(false) {
+            cmd.arg("--enable-tool-search");
+        }
         let auto_trigger = if !first_run {
             // After first run, continue the previous session
             cmd.arg("--continue");

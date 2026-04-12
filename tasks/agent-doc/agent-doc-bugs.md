@@ -150,7 +150,7 @@ env:
 ```
 
 Ready for you to test in a live session. The binary is installed — try adding `env:` to a document's frontmatter and running `/agent-doc` on it.
-<!-- agent:boundary:5884bfb2 -->
+<!-- agent:boundary:9688cf4e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

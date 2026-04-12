@@ -760,7 +760,7 @@ Same 5 steps as before, unchanged — `MRHadmin` (user 1) is the sole compromise
 - Any plugin with mtime after 2026-03-20 (pre-dating the first spam post by ~6 days)
 - Any mu-plugin (`wp-content/mu-plugins/`) — attackers love dropping persistence here
 - `wp-config.php` mtime and contents diff vs a fresh WP install
-<!-- agent:boundary:d44f8428 -->
+<!-- agent:boundary:981eac5d -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

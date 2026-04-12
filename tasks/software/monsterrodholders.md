@@ -253,21 +253,54 @@ No `ul`, no `li`, no `.woocommerce` wrapper. Clean semantic markup with clickabl
 
 Hard-refresh `/shop/` to confirm.
 ❯ Now the entire aside is gone. Please readd the aside.
-### Re: Restore sidebar (HEAD)
+### Re: Restore sidebar
 
 Fixed. Deployed mrh-performance v1.15.
 
 Removed the CSS rules that were hiding `#sidebar` and `aside` on the shop page. The sidebar is now visible again. The "New Cloth Technologies" column remains hidden via its separate `.stk-3ef9764` rule.
 
 Hard-refresh `/shop/` to confirm.
-<!-- agent:boundary:4e7e1a6c -->
+
+❯ On the /shop/ aside, remove the top "Filter by Price".
+❯ Keep the bottom "Filter by Price". Make the bottom "Filter by Price" text smaller.
+❯ ![img_25.png](img_25.png)
+### Re: Sidebar filter styling (HEAD)
+
+Deployed mrh-performance v1.16. Modified the sidebar filter styling:
+
+**1. Hidden top "Filter by Price":**
+Added CSS rule to hide the first `woocommerce-widget-price-filter` in the sidebar:
+```css
+aside#sidebar .woocommerce-widget-price-filter:first-of-type {
+    display: none !important;
+}
+```
+
+**2. Smaller text for bottom "Filter by Price":**
+Reduced font size on the last (bottom) filter to 13px:
+```css
+aside#sidebar .woocommerce-widget-price-filter:last-of-type .widget-title,
+aside#sidebar .woocommerce-widget-price-filter:last-of-type .price-filter-amount {
+    font-size: 13px !important;
+    line-height: 1.4 !important;
+}
+```
+
+**Deployment:**
+- Submodule v1.16 committed and pushed
+- Parent pointer bumped
+- Container force-recreated on server
+- Cache flushed
+
+Hard-refresh `/shop/` to confirm the sidebar changes are visible.
+<!-- agent:boundary:282becb5 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **"Popular" categories block in .ct-container on /shop/** — woocommerce_before_shop_loop hook, 4-column strict order, mrh-performance v1.10
 - [x] **Remove duplicate Popular from .hero-section** — cleared stale post_content, mrh-performance v1.11
-- [ ] **Restore sidebar on shop page** — removed sidebar-hiding CSS, mrh-performance v1.15
+- [x] **Restore sidebar on shop page** — removed sidebar-hiding CSS, mrh-performance v1.15
 - [x] **Popular styling matches product grid** — 300px image box, centered text, hidden counts, mrh-performance v1.12
 - [x] **"All Products" heading above product grid** — woocommerce_before_shop_loop priority 35, mrh-performance v1.12
 - [x] **Sort by popularity desc + include sold-out items** — total_sales ordering, show out-of-stock, mrh-performance v1.12

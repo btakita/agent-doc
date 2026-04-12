@@ -15,6 +15,7 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange patch=append -->
 Resolved shop page issues: (1) image heights via mu-plugin CSS + force-recreate (2) pagination removal with loop_shop_per_page=-1 (3) footer logo size matching (4) New Cloth Technologies aside hiding. All deployed to production, verified. Key insight: must-use plugins auto-load; regular plugins need admin activation.
+<!-- agent:boundary:7a5c98a0 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

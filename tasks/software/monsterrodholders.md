@@ -227,7 +227,7 @@ Hard-refresh `/shop/` (Ctrl+Shift+R) to confirm visually.
 ❯ You messed up again. There is a ul in each of the Popular Category columns.
 ❯ Extract the content out of the ul and remove the ul.
 ❯ ![2026-04-12_00-29.png](../../../../../Pictures/agent-loop/2026-04-12_00-29.png)
-### Re: Remove ul wrapper from Popular Categories (HEAD)
+### Re: Remove ul wrapper from Popular Categories
 
 Fixed. Deployed mrh-performance v1.14.
 
@@ -252,14 +252,22 @@ No `ul`, no `li`, no `.woocommerce` wrapper. Clean semantic markup with clickabl
 - Container force-recreated, cache flushed
 
 Hard-refresh `/shop/` to confirm.
-<!-- agent:boundary:dfd6e1c1 -->
+❯ Now the entire aside is gone. Please readd the aside.
+### Re: Restore sidebar (HEAD)
+
+Fixed. Deployed mrh-performance v1.15.
+
+Removed the CSS rules that were hiding `#sidebar` and `aside` on the shop page. The sidebar is now visible again. The "New Cloth Technologies" column remains hidden via its separate `.stk-3ef9764` rule.
+
+Hard-refresh `/shop/` to confirm.
+<!-- agent:boundary:ac6944e8 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [x] **"Popular" categories block in .ct-container on /shop/** — woocommerce_before_shop_loop hook, 4-column strict order, mrh-performance v1.10
 - [x] **Remove duplicate Popular from .hero-section** — cleared stale post_content, mrh-performance v1.11
-- [x] **Hide sidebar on shop page** — CSS hides sidebar widget, full-width layout, mrh-performance v1.11
+- [ ] **Restore sidebar on shop page** — removed sidebar-hiding CSS, mrh-performance v1.15
 - [x] **Popular styling matches product grid** — 300px image box, centered text, hidden counts, mrh-performance v1.12
 - [x] **"All Products" heading above product grid** — woocommerce_before_shop_loop priority 35, mrh-performance v1.12
 - [x] **Sort by popularity desc + include sold-out items** — total_sales ordering, show out-of-stock, mrh-performance v1.12

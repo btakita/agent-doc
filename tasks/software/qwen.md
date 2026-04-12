@@ -28,7 +28,7 @@ If you're using Qwen through Alibaba's DashScope API, web search is not a built-
 If you're asking about web search *within Claude Code* — the `WebSearch` and `WebFetch` tools are available regardless of which model you're chatting with in your own sessions. But if you're using Qwen directly (outside Claude Code), web search is not something the model has built-in access to.
 
 **Bottom line:** Qwen doesn't have native web search as a built-in capability. You need to wire it up yourself via function calling or external API calls.
-<!-- agent:boundary:930f419a -->
+<!-- agent:boundary:a2a639b0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

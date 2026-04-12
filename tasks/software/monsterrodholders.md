@@ -318,7 +318,7 @@ Fixed. Deployed mrh-performance v1.17. The previous Haiku attempt used wrong sel
 **Verified live:** Both CSS rules present in `<style id="mrh-product-grid">` on `/shop/`. The `widget_price_filter` widget (id `woocommerce_price_filter-9`) is in the DOM but hidden by the rule.
 
 Hard-refresh `/shop/` to confirm.
-<!-- agent:boundary:6cbe20cf -->
+<!-- agent:boundary:4ed54f9c -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

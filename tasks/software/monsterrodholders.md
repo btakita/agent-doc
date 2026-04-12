@@ -524,7 +524,7 @@ I lean **Path A** since you explicitly said "Use chromium-bridge or wp api if po
 
 ❯ Do Path A
 
-### Re: Old author URL active on live Flywheel? (HEAD)
+### Re: Old author URL active on live Flywheel?
 
 **Yes — 200 on the live site, user ID 3.**
 
@@ -537,7 +537,7 @@ x-fw-server: Flywheel/5.1.0
 
 And `/author/catfishdude/` returns **404** on the live site (that nicename only exists on the new host). So the 301 is genuinely useful post-flip — Google has the email-derived slug indexed, and we want to redirect it to the clean one rather than 404.
 
-### Re: Implement the 301 (HEAD)
+### Re: Implement the 301
 
 Queuing via WP Redirection on the new host now (works independent of DNS — fires when a request hits WordPress, which it will after the flip). Running next:
 
@@ -551,7 +551,7 @@ ssh monsterrodholders-server 'cd /opt/monsterrodholders/app && docker compose ex
 
 If the `redirection` wp-cli subcommand isn't available (plugin not installed / wp-cli extension missing), fallback: add to `.htaccess` inside the container or bundle into the same WP Redirection CSV import I'm already building for the `-2` page redirects.
 
-### Re: Path A — chromium-bridge login to Flywheel WP admin (HEAD)
+### Re: Path A — chromium-bridge login to Flywheel WP admin
 
 Starting now. Plan:
 
@@ -563,15 +563,103 @@ Starting now. Plan:
 6. Screenshot + structured list of findings back to this doc
 
 Writing results to `### Re: Flywheel compromise audit` in the next cycle. This may take a few minutes — I'll flush partial findings as I go.
-<!-- agent:boundary:c21b02d8 -->
+
+### Re: 301 redirect — IMPLEMENTED ✓ (HEAD)
+
+Added to `/var/www/html/.htaccess` inside the `app-wordpress-1` container on the new host, above the `# BEGIN WordPress` block (so WP's auto-rewriter won't clobber it):
+
+```apache
+# BEGIN monsterrodholders custom redirects
+RewriteEngine On
+RewriteRule ^author/catfishinginfogmail-com/?$ /author/catfishdude/ [R=301,L]
+# END monsterrodholders custom redirects
+```
+
+Backup saved as `.htaccess.bak.<timestamp>`. Verified:
+
+```
+$ curl -sI https://50.28.2.199.nip.io/author/catfishinginfogmail-com/
+HTTP/2 301
+location: http://50.28.2.199.nip.io/author/catfishdude/
+```
+
+**One caveat:** Location header is `http://` not `https://` because the WP container doesn't see the outer Apache's HTTPS; the forwarded-proto header isn't being honored. Outer host vhost force-redirects all HTTP→HTTPS anyway, so browsers end up on `https://` after two hops. Not a blocker but worth fixing — either (a) trust `X-Forwarded-Proto` in WP via `wp-config.php` (`$_SERVER['HTTPS']='on' if X-Forwarded-Proto=https`) or (b) make the rewrite absolute: `RewriteRule ... https://%{HTTP_HOST}/author/catfishdude/ [R=301,L]`. I'll bundle this with the larger trust-proxy fix you'll want anyway for the `-2` redirects.
+
+### Re: Path A — Flywheel compromise audit (IN PROGRESS) (HEAD)
+
+**Logged into `monsterrodholders.com/wp-admin` via chromium-bridge.** Findings so far are worse than the original "16 spam posts" claim.
+
+#### Administrator accounts (3)
+
+| Username | Email | Posts | Status |
+|---|---|---|---|
+| `btak` | brian.takita@gmail.com | 0 | Your account ✓ |
+| `catfishinfo` | berkes06@yahoo.com | 0 | Legit (per earlier research — separate person with clean slug) ✓ |
+| `catfishinginfo@gmail.com` | catfishinginfo@gmail.com | 99 | Display name: "Larry Travis". **Verify this is legit** — the display name doesn't match "Steve Douglas / catfishdude". Could be a staff/contractor account, or could be the real compromise entry point. |
+
+**Action needed from you:** Is `catfishinginginfo@gmail.com` / "Larry Travis" a known contributor? If no, this is the attacker's foothold and needs immediate deauth + password rotation + 2FA audit.
+
+#### The actual spam author — **`MRHadmin`** 🚨
+
+- **Role:** `Shop manager` (WooCommerce role — can author posts, manage products, see orders)
+- **Email:** `jennyboonedesignstudio@gmail.com`
+- **Posts:** **1,616 posts total by this author** (across all post statuses)
+
+Currently 25 published under this account; most of the 1,616 are presumably auto-drafts / revisions / trashed. But the attacker is still actively publishing — **posts as recent as 2026-04-08** (4 days ago).
+
+#### Recent published spam (20 of 25 visible, all `MRHadmin`)
+
+Dates range 2026-03-26 → 2026-04-08. Content languages: Russian, German, Polish, Azerbaijani, English. Categories: mostly `Uncategorized`, one tagged `casino`.
+
+Sample titles:
+- "1xbet App ᐉ Get 1xbet Mobile 1xbet Apk Android & Ios" (2026-04-01)
+- "Plinko Casinos 2026: On The Web Casinos Mit Unserem Plink Game" (2026-03-28)
+- "Пинап КЗ: Авиатор условия игры, бонусы и акции для новичков" (2026-03-29)
+- "Wie registriere ich mich für Sportwetten ohne Oasis?" (2026-03-26)
+- "Najlepsze aplikacje do zakładów sportowych za darmo" (2026-03-27)
+
+(Full list + screenshot saved — `/tmp/mrh-mrhadmin-user.png`.)
+
+The 4 legit "Steve Douglas" posts stop at **2024-11-11** — Steve hasn't published anything in ~17 months. Everything newer on the live site is spam.
+
+#### Scope also includes
+
+- **Trash: 13 items** (additional spam that was moved to trash but not emptied)
+- **Draft: 1 item** (queued spam)
+- 1,616 - 25 - 13 - 1 = 1,577 other entries as `MRHadmin` — likely auto-drafts from the spam-gen process or historical published-then-deleted spam.
+
+### Re: RECOMMENDED REMEDIATION (need your go-ahead before destructive actions) (HEAD)
+
+**Blocking questions first:**
+1. Is `catfishinginfo@gmail.com` / "Larry Travis" legit? (If no → foothold, treat as compromise.)
+2. Is `jennyboonedesignstudio@gmail.com` / `MRHadmin` legit? (Almost certainly not — but confirm it's not a dormant staff account someone reactivated.)
+3. Do we care about preserving the 1,616 post records for forensics, or can I bulk-purge?
+
+**Proposed actions (in order, pause-points marked ⏸):**
+
+1. ⏸ **Lock attacker accounts** — rotate password + revoke sessions for `MRHadmin`; demote role from Shop manager to Subscriber (reversible). Same for `catfishinginfo@gmail.com` if confirmed malicious.
+2. ⏸ **Scan for persistence** — `wp core verify-checksums`, check `mu-plugins/` for dropped files, check `.htaccess` + `wp-config.php` mtime, check active plugins for unknown additions. Flywheel doesn't give us shell access so this has to be done via WP admin's File Editor or a scanner plugin (Wordfence / Sucuri free).
+3. ⏸ **Purge spam** — bulk move all 25 published spam posts to trash, then empty trash. Do this via WP admin bulk actions (chromium-bridge driven). Leave `MRHadmin`'s auto-drafts alone — they'll orphan on user deletion.
+4. ⏸ **Delete `MRHadmin` user** — reassign any remaining legit content to `btak` (there shouldn't be any).
+5. ⏸ **Audit plugins + themes** — disable anything you don't recognize; reinstall the rest from fresh WordPress.org downloads.
+6. ⏸ **Enable 2FA on all admins** (you already have the 2FA plugin visible in the user row actions).
+7. **Post-DNS-flip:** the new Liquidweb host is already clean (only `catfishdude` + `catfishinfo` users exist there per earlier migration). Once DNS flips, the compromise is effectively abandoned — but Google will keep the spam URLs indexed until we 410 them. Add bulk 410/noindex for the spam post slugs so Google drops them faster than 404 decay.
+
+**Tell me which items to execute and I'll run them back-to-back in the next cycle.** I'll write per-step results to this doc as I go.
+<!-- agent:boundary:c38edfad -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Flywheel: chromium-bridge login to `monsterrodholders.com/wp-admin` — IN PROGRESS this cycle
-- [ ] Flywheel: audit real spam posts / compromise vector (depends on login)
-- [ ] Flywheel: check `wp core verify-checksums` + `.htaccess` + `wp-config.php` mtime (blocked on terminal or chromium-bridge)
-- [ ] New host: add WP Redirection rule `/author/catfishinginfogmail-com/` → `/author/catfishdude/` (301) — executing this cycle
+- [ ] Flywheel: DECISION — is `catfishinginfo@gmail.com` / "Larry Travis" (99 posts) a legit account or the attacker's entry point?
+- [ ] Flywheel: LOCK `MRHadmin` (Shop manager, 1,616 posts, actively spamming — last post 2026-04-08)
+- [ ] Flywheel: purge 25 published spam posts (+ 13 in trash, + 1 draft) via WP admin bulk actions
+- [ ] Flywheel: `wp core verify-checksums` equivalent via Wordfence/Sucuri scanner (no shell on Flywheel)
+- [ ] Flywheel: audit plugins + themes for unknown additions
+- [ ] Flywheel: enable 2FA on all admin accounts
+- [ ] New host: trust `X-Forwarded-Proto` so redirect Location headers use `https://` (bundles with `-2` redirect import)
+- [ ] New host: bulk 410/noindex for spam post slugs post-flip (help Google drop indexed spam)
 - [ ] Draft `-2` → canonical redirect CSV for WP Redirection import (cart/my-account/checkout/shop + catfish author)
 - [ ] Post-flip: Search Console resubmission for cleaned-up author slug + sitemap
+- [x] New host: add 301 `/author/catfishinginfogmail-com/` → `/author/catfishdude/` — DONE via .htaccess + verified 301
 <!-- /agent:pending -->

@@ -108,7 +108,7 @@ I don't have the specific documentation for what `--enable-tool-search` does in 
 Once you know what it does, the frontmatter support is already in place — just set `enable_tool_search: true` in your document and it will pass the flag on session startup.
 
 ❯ We just implemented enable_tool_search. This should mimic setting `"enable_tool_search": true` in ~/.claude.json or the `ENABLE_TOOL_SEARCH=true` env variable. Does the current agent-doc enable_tool_search frontmatter do this when starting a claude session?
-### Re: `enable_tool_search` — current implementation is broken (HEAD)
+### Re: `enable_tool_search` — current implementation is broken
 
 No. The current implementation passes `--enable-tool-search` as a CLI argument, but **that flag doesn't exist** in Claude Code's CLI. I checked `claude --help` — there's no `--enable-tool-search` option.
 
@@ -136,7 +136,17 @@ if fm.enable_tool_search.unwrap_or(false) {
 ```
 
 Want me to apply this fix?
-<!-- agent:boundary:cd16eefd -->
+❯ yes. And enable_tool_search: true should be in the frontmatter of the default agent document template.
+### Re: Fix applied (HEAD)
+
+Done. Two changes:
+
+1. **`start.rs`** — Changed `cmd.arg("--enable-tool-search")` → `cmd.env("ENABLE_TOOL_SEARCH", "true")`. Now sets the environment variable on the spawned `claude` process instead of passing a non-existent CLI flag.
+
+2. **`init.rs`** — Added `enable_tool_search: true` to the template-mode document scaffold. New documents created with `agent-doc init <file> --mode template` will have tool search enabled by default.
+
+All tests pass, binary rebuilt.
+<!-- agent:boundary:cb0a39b4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -145,5 +155,5 @@ Want me to apply this fix?
 - ✅ **Release v0.32.1 complete** (crates.io + GitHub)
 - ✅ **Context-audit skill scaffolded** — `.claude/skills/context-audit/` with SKILL.md + runbook
 - ✅ **`no_mcp` frontmatter** — passes `--no-mcp` to claude when `no_mcp: true`
-- 🔴 **`enable_tool_search` frontmatter** — passes non-existent `--enable-tool-search` CLI flag. Needs fix: use `cmd.env("ENABLE_TOOL_SEARCH", "true")` instead of `cmd.arg("--enable-tool-search")`
+- ✅ **`enable_tool_search` frontmatter** — fixed: uses `ENABLE_TOOL_SEARCH` env var + added to default template
 <!-- /agent:pending -->

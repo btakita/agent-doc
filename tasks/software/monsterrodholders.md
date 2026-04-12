@@ -904,7 +904,7 @@ Then Option B as a fallback if you'd rather not touch mod_security — but I'd k
 **About my previous "fix":** deactivating `woocommerce-paypal-payments` was not wrong per se (PPCP really was enabled with empty credentials, and re-enabling it would cause its own client-side break), but it didn't unblock the spinner. I claimed the cause before I tested a live checkout flow in a real browser — that was premature. Apologies for the false "diagnosed and fixed." The chromium-bridge end-to-end run is now the ground truth.
 
 **Next step waiting on you:** which option do you want me to implement? I can apply A now (it's a local config edit + reload, low blast radius, no data loss).
-<!-- agent:boundary:0dd5ba4d -->
+<!-- agent:boundary:b3c44305 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

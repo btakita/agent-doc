@@ -216,7 +216,7 @@ curl -fsSL https://raw.githubusercontent.com/existence-lang/existence/main/insta
 ```
 
 ❯ Fix the gh actions build https://github.com/existence-lang/existence/actions/runs/24294991144
-### Re: Fix GitHub Actions publish failure (HEAD)
+### Re: Fix GitHub Actions publish failure
 
 **Root cause:** The v0.4.0 publish failed because the version **already exists on crates.io**. All 6 build jobs succeeded, but `cargo publish` returned:
 
@@ -237,7 +237,41 @@ The workflow will now:
 3. Attempt `cargo publish` → succeed if new version, gracefully continue if already published ✓
 
 Next time `v0.4.0` is released (or when moving to v0.5.0), the build will complete without the publish error.
-<!-- agent:boundary:fb9b4dc3 -->
+
+❯ do
+❯ - [ ] Update philosophy/CLAUDE.md with precision + bounded/unbounded guidance
+❯ - [ ] Create philosophy/src/pneuma.md, noumena.md, phenomena.md
+❯ - [ ] Enrich philosophy/src/permaculture.md with universal applicability analysis
+### Re: Philosophy enrichments (HEAD)
+
+All three tasks done in the `philosophy/` submodule.
+
+**1. `philosophy/CLAUDE.md` (→ `AGENTS.md`) — Precision + Bounded/Unbounded guidance**
+
+Added a new section after Universal Applicability Principle:
+
+- References `src/precision.md` — precision trades reach for detail
+- Defines bounded vs. unbounded scope (limits declared vs. not)
+- Five guidance rules: name scope first; match precision to boundedness; precision is lost through abstraction; bounded ≠ small; scope mismatch is the usual source of ontology confusion
+
+**2. New ontology nodes**
+
+- `src/pneuma.md` — Greek πνεῦμα, the animating signal that makes a system living rather than inert. Stoic/Christian/medical roots; pattern expression covers respiration, running processes, community energy, conversational flow.
+- `src/noumena.md` — Kantian thing-in-itself; the limit of every scope. Grounds epistemic humility and guards against scientism. Pattern expression: wavefunction/substrate, logs-as-partial-view, other minds, ontology nodes themselves.
+- `src/phenomena.md` — appearances as experienced by some perspective. All data is phenomenal; systems are known phenomenally; patterns are cross-phenomenal invariants. Intersubjective validity as the health check for a conceptual system.
+
+All three follow `SPEC.md` (Ontology / Axiology / Epistemology + Cultural Definition + Pattern Expression).
+
+**3. `src/permaculture.md` — Universal Applicability Analysis**
+
+Added a new subsection under Axiology (before Epistemology):
+
+- 15-row table mapping every kernel term (Existence → Story + Precision) to how it applies to permaculture
+- Bounded vs. unbounded scope breakdown: sites/seasons/guilds are bounded; the ethical triad and twelve principles are unbounded, and their imprecision is what makes them transferable
+- Closing thesis: the discipline's strength comes from refusing to collapse bounded and unbounded modes
+
+**Next step:** commit inside `philosophy/`, then update the parent submodule pointer.
+<!-- agent:boundary:3aacb015 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -245,8 +279,9 @@ Next time `v0.4.0` is released (or when moving to v0.5.0), the build will comple
 <!-- agent:pending -->
 - [x] Create GitHub Actions workflow: build + release binaries (Linux gnu/musl, macOS x86_64/aarch64)
 - [x] Run the builds for v0.4.0
-- [ ] Update philosophy/CLAUDE.md with precision + bounded/unbounded guidance
-- [ ] Create philosophy/src/pneuma.md, noumena.md, phenomena.md
-- [ ] Enrich philosophy/src/permaculture.md with universal applicability analysis
+- [x] Update philosophy/CLAUDE.md with precision + bounded/unbounded guidance
+- [x] Create philosophy/src/pneuma.md, noumena.md, phenomena.md
+- [x] Enrich philosophy/src/permaculture.md with universal applicability analysis
+- [ ] Commit philosophy submodule + update parent pointer
 - [ ] Update chromium-bridge SKILL.md with CSS :hover limitation
 <!-- /agent:pending -->

@@ -1309,7 +1309,7 @@ Both existing forms have zero shortcode references anywhere in content. They're 
 - **C. Newsletter signup.** If you want this, I'd wire it straight to Mailchimp/Buttondown/etc. via their REST API from the same mu-plugin pattern — skip WP entirely for list management.
 
 Which do you want — A, B, or C? And give me the go on steps 1–5 and I'll execute.
-<!-- agent:boundary:58a08637 -->
+<!-- agent:boundary:3dd6de82 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

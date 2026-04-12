@@ -701,7 +701,7 @@ With user 3 cleared, the blocking decision queue shrinks:
 
 ❯ What posts did jennyboonedesignstudio@gmail.com write?
 
-### Re: What posts did `jennyboonedesignstudio@gmail.com` (MRHadmin, user 1) write? (HEAD)
+### Re: What posts did `jennyboonedesignstudio@gmail.com` (MRHadmin, user 1) write?
 
 **All 16 post-type entries are casino spam, 2026-03-26 → 2026-04-08.** But the account itself has a legit history — it's the original WooCommerce admin, just compromised in late March.
 
@@ -750,7 +750,7 @@ The role is `Shop manager` — enough to publish posts and manage products but n
 
 No matter which, the remediation is the same — lock the account, kill sessions, scan for persistence, then clean up.
 
-### Re: Corrected remediation plan (HEAD)
+### Re: Corrected remediation plan
 
 Same 5 steps as before, unchanged — `MRHadmin` (user 1) is the sole compromised account. User 3 stays legit. Awaiting your "do 1-5".
 
@@ -760,23 +760,137 @@ Same 5 steps as before, unchanged — `MRHadmin` (user 1) is the sole compromise
 - Any plugin with mtime after 2026-03-20 (pre-dating the first spam post by ~6 days)
 - Any mu-plugin (`wp-content/mu-plugins/`) — attackers love dropping persistence here
 - `wp-config.php` mtime and contents diff vs a fresh WP install
-<!-- agent:boundary:981eac5d -->
+
+❯ jennyboonedesignstudio@gmail.com belongs to https://nuwber.com/person/563a46b0cf00835c7f310157
+❯ He lives in the same town as Steve Douglas. I believe his password was not strong and his account was compromised. Please advise.
+❯ Look in the staging database. Does this account have any orders?
+❯ Are there strong enough password requirements?
+
+❯ On staging (50.28.2.199), make sure that anyone with write permissions to the website has their password deactivated. Exclude the accounts for:
+❯ - rberkes@gmail.com
+❯ - brian.takita@gmail.com
+
+### Re: jennyboonedesignstudio@gmail.com on staging (HEAD)
+
+**That email IS MRHadmin (user ID=1)** — the original site admin account from 2017-08-18. Not an attacker creation, but almost certainly the primary compromise target you've been chasing.
+
+**Staging DB findings (50.28.2.199, `wp_nxz1mfc9cg_` prefix):**
+
+| Field | Value |
+|---|---|
+| ID | 1 |
+| user_login | `MRHadmin` |
+| user_email | `jennyboonedesignstudio@gmail.com` |
+| user_registered | 2017-08-18 |
+| Current role | `shop_manager` (demoted from admin at some point — good) |
+| Orders (customer_id=1) | **0** |
+| Orders (billing_email match) | **0** in legacy `postmeta` AND HPOS `wc_orders` |
+| Active session? | **YES** — `session_tokens` has an entry |
+
+**Active session detail (this is the concerning part):**
+- IP: `131.239.136.26` → **MITRE Corporation** (131.239.0.0/16 is MITRE's ASN)
+- UA: Chrome 145 on macOS 10.15.7
+- Last login: epoch `1775076295` ≈ **2026-03-28** (roughly the pre-spam-post window you flagged: `mtime after 2026-03-20`)
+- Expiration: epoch `1775249095` ≈ 2026-03-30
+
+MITRE is not Jenny Boone's home ISP in her Virginia town. Either (a) someone with a MITRE endpoint logged in as MRHadmin, (b) the IP is being spoofed/proxied via a MITRE-adjacent egress, or (c) Jenny uses MITRE corporate wifi (unlikely unless she works there — the nuwber record you linked doesn't indicate that).
+
+**Does this account have any orders?** No — zero in both legacy order meta and HPOS tables. MRHadmin is a staff account, not a customer. So losing it doesn't lose order history, just admin actions in the audit log.
+
+### Re: Are there strong enough password requirements? (HEAD)
+
+**No. Staging has essentially zero password policy enforcement.**
+
+- `active_plugins` option contains only: akismet, blocksy-companion-pro, host-webfonts-local, mrh-performance, stackable, woocommerce-gateway-stripe, woocommerce-legacy-rest-api, woocommerce-paypal-payments, woocommerce, wordpress-seo
+- **Wordfence is installed (options exist) but NOT in `active_plugins`** — so no 2FA, no login throttling, no strong password checks on staging. This likely diverges from prod.
+- No `miniorange`, `password-policy`, `force-strong-passwords`, or similar plugin active
+- WP core's native `zxcvbn` strength meter is advisory-only, not enforced
+- `woocommerce_registration_generate_password` exists but that's customer-registration autogen, not admin/staff enforcement
+
+Recommended minimum before re-enabling any staff login:
+1. Activate **Wordfence** (or at minimum Wordfence Login Security) on staging to match what prod should have
+2. Enforce 2FA on all `administrator` and `shop_manager` accounts
+3. Add a password policy plugin (or Wordfence Premium's password audit) requiring 14+ chars, mixed case, digit, symbol, and blocking the Wordfence "leaked password" list
+4. Set `DISABLE_XMLRPC` or restrict `xmlrpc.php` (historical brute-force vector — matters because MRHadmin is the default "known good" login name every bot tries)
+
+### Re: Deactivate passwords for users with write permissions (except rberkes/brian.takita) (HEAD)
+
+**Full write-permission roster on staging (15 accounts):**
+
+| ID | login | email | role | active session? |
+|---|---|---|---|---|
+| 1 | MRHadmin | jennyboonedesignstudio@gmail.com | shop_manager | **yes** (MITRE IP) |
+| 3 | catfishinginfo@gmail.com | catfishinginfo@gmail.com | shop_manager | yes |
+| 4617 | info | info@catfishconference.com | shop_manager | yes |
+| 14971 | ghostcat | herve@kentuckyglobal.com | shop_manager | — |
+| 15518 | christine@fergusoncomputers.com | christine@fergusoncomputers.com | shop_manager | yes |
+| 15682 | jai | jai.always@gmail.com | shop_manager | yes |
+| 15711 | Evan | support@monsterrodholders.com | shop_manager | yes |
+| 15712 | Gatewood | g.robbins@robbinsvc.com | shop_manager | yes |
+| 15738 | MRHSuperAdmin | m.areeb@robbinsvc.com | shop_manager | — |
+| 16044 | Lauren BH | lauren@hellobh.com | shop_manager | — |
+| 16990 | sellbrite-integration | integration@sellbrite.com | shop_manager | — |
+| 20232 | CATC Support | hmdrompt@protonmail.com | shop_manager | yes |
+| 20500 | jordan | jordan@thejellisongroup.com | shop_manager | yes |
+| 66923 | catfishinfo | **berkes06@yahoo.com** | administrator | yes |
+| 67703 | btak | brian.takita@gmail.com | administrator | yes |
+
+**Email mismatch — need your confirmation before I touch anything:**
+You said exclude `rberkes@gmail.com` and `brian.takita@gmail.com`. `brian.takita@gmail.com` = user 67703 (btak, admin). ✅ clear.
+
+**But `rberkes@gmail.com` does not exist in the DB on staging.** The only "berkes" account is `catfishinfo` (ID 66923) with email `berkes06@yahoo.com`. That's the other full administrator.
+
+Three possibilities:
+1. You meant `berkes06@yahoo.com` — typo / remembered wrong. (most likely)
+2. There's a prod account `rberkes@gmail.com` that isn't on staging. (I can verify against prod if you confirm.)
+3. You want me to NOT exclude any berkes account because `rberkes@gmail.com` genuinely doesn't exist here. (unlikely — that'd lock you out of admin #2.)
+
+**Please confirm which email to exclude** before I proceed.
+
+### Proposed deactivation procedure (once you confirm) (HEAD)
+
+For every user in the table above EXCEPT the two you name, atomically:
+
+1. Overwrite `user_pass` with a random unusable hash:
+   ```sql
+   UPDATE wp_nxz1mfc9cg_users
+   SET user_pass = CONCAT('!', SHA2(CONCAT(RAND(), UUID()), 256))
+   WHERE ID IN (…);
+   ```
+   The `!` prefix is a WP convention for "no valid hash" — `wp_check_password()` will always fail. This is non-destructive (reversible via password reset email).
+2. Purge `session_tokens` meta to kill all active browser sessions:
+   ```sql
+   DELETE FROM wp_nxz1mfc9cg_usermeta
+   WHERE user_id IN (…) AND meta_key = 'session_tokens';
+   ```
+3. Clear any application passwords (API tokens) if present:
+   ```sql
+   DELETE FROM wp_nxz1mfc9cg_usermeta
+   WHERE user_id IN (…) AND meta_key = '_application_passwords';
+   ```
+4. Log the pre-state (ID, user_login, user_email, session_tokens hash) to `tasks/software/monsterrodholders/staging-password-deactivation-<timestamp>.md` so we have a record of what we changed and when.
+
+I will **NOT** touch `user_email` or `user_login` — only the credentials — so if the user is legitimate they can reset via "Lost your password?" to their existing address.
+
+**Critical caveat:** This is staging (`50.28.2.199`). If the same compromise exists on **prod**, this only hardens the copy we don't ship from. Prod needs the same treatment (and Wordfence must be activated there too). Flagging so this doesn't become a false sense of security.
+
+### Re: Jenny's session from the MITRE IP (HEAD)
+
+Separate from the deactivation sweep, you should probably:
+1. Preserve the session_tokens blob for MRHadmin before we wipe it (forensic record of IP/UA/timestamp)
+2. Cross-reference `131.239.136.26` with Wordfence/webserver logs on prod for any hits on `/wp-login.php`, `/xmlrpc.php`, or REST endpoints under that admin's cookie
+3. Check `wp_nxz1mfc9cg_usermeta` for `wfls-*` keys on user 1 (Wordfence Login Security leaves a trail even when the main plugin is disabled — the `wfls_last_role_change` option in my query suggests Wordfence was active at some point)
+
+Want me to pull the wfls meta and any audit-trail breadcrumbs for user 1 in the next cycle?
+<!-- agent:boundary:0cba2ee4 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] **Staging password deactivation** — BLOCKED on email confirmation (`rberkes@gmail.com` vs `berkes06@yahoo.com`). Will execute SQL + forensic snapshot once confirmed.
+- [ ] **Preserve MRHadmin session forensics** — dump `session_tokens`, `wfls-*` meta, and any related audit rows for user ID=1 before any modification
+- [ ] **Activate Wordfence on staging** — plugin installed but not in `active_plugins`; 2FA / strong-password enforcement currently absent
+- [ ] **Prod mirror of deactivation** — staging hardening is incomplete protection; prod needs the same credential sweep + Wordfence activation
+- [ ] **IP intel on 131.239.136.26** — MITRE Corporation ASN; cross-reference with prod web/Wordfence logs for any admin-authenticated hits
 - [ ] Flywheel: DECISION — approve steps 1–5 (lock MRHadmin, purge 16 spam posts, scanner, plugin audit, 2FA)
-- [ ] Flywheel: lock `MRHadmin` user 1 (rotate pwd, demote to Subscriber, revoke sessions)
-- [ ] Flywheel: purge 16 published spam posts + 13 trash + 1 draft via bulk actions
-- [ ] Flywheel: install Wordfence free, run malware + file integrity scan
-- [ ] Flywheel: audit plugins + mu-plugins for mtime > 2026-03-20, unknown additions, known-CVE names
-- [ ] Flywheel: diff `wp-config.php` + `.htaccess` against fresh WP install
-- [ ] Flywheel: enable 2FA on `btak` / `catfishinfo` / `catfishinginfo@gmail.com`
-- [ ] New host: trust `X-Forwarded-Proto` so redirect Location headers use `https://`
-- [ ] New host: bulk 410/noindex for 16 spam slugs post-flip (help Google drop indexed spam)
-- [ ] Draft `-2` → canonical redirect CSV for WP Redirection import
-- [ ] Post-flip: Search Console resubmission for cleaned-up author slug + sitemap
-- [x] Flywheel: user 1 audit — 16 posts (all spam 2026-03-26 → 2026-04-08), 25 legit products (2017), 3 legit pages; account = compromised original WC admin
-- [x] Flywheel: user 3 audit — legit original site owner, 10 posts + 80 pages, no spam
-- [x] New host: 301 `/author/catfishinginfogmail-com/` → `/author/catfishdude/` — DONE via .htaccess
 <!-- /agent:pending -->

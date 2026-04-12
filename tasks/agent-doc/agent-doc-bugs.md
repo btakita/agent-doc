@@ -401,7 +401,7 @@ callback request → check-callbacks (pending) → read → respond → check-ca
 
 270 unit tests pass, release binary built.
 compress doc
-### Re: Compress doc (HEAD)
+### Re: Compress doc
 
 **Summary of completed work:**
 
@@ -416,12 +416,32 @@ Option A (file-based callback protocol) with PostToolUse hook is fully implement
 ✅ **Testing** — End-to-end flow verified: request → read → respond → check-callbacks shows empty (responded). All 270 unit tests pass.
 
 **Architecture:** Binary handles deterministic callback protocol (request/response JSON, TTL, request_id verification). Skill handles content generation (summarization, pending curation). `agent-doc cleanup` polls for response with fallback to subagent on 120s timeout. This decouples orchestration (binary) from content generation (skill).
-<!-- agent:boundary:2d233ddc -->
+❯ I ran `compress doc` on this document. The agent-doc binary should have archived the agent:exchange content and populated the agent:exchange with the agent response.
+### Re: `compress doc` (HEAD)
+
+There's no `compress` subcommand in agent-doc. The available commands are:
+
+- **`agent-doc compact <FILE>`** — archives old exchange content (creates a git tag checkpoint, then replaces content with a `--message` summary or removes old sections per `--keep N`)
+- **`agent-doc cleanup <FILE>`** — orchestrates compact + pending prune + callback results
+
+If you typed `compress doc` inside the document as text, it was captured as a content edit rather than executed as a command. To compact this document, run in the terminal:
+
+```bash
+agent-doc compact tasks/agent-doc/agent-doc-bugs.md
+```
+
+Or with a summary message:
+```bash
+agent-doc compact tasks/agent-doc/agent-doc-bugs.md --message "Summary of completed work..."
+```
+
+Should we add `compress` as an alias for `compact`? Or did you mean something different — like a new command that compresses and replaces the exchange with the agent's last response?
+<!-- agent:boundary:85d2d051 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Bidirectional IPC (Option A)** — ✅ Complete: callback.rs public read_request() + write_response(), main.rs subcommands, preflight integration, PostToolUse hook, SKILL.md step 0d, fallback agent via `claude --print`.
+- **`compress` alias or new command** — User typed `compress doc`; clarify intent (alias for `compact` or new behavior?)
 <!-- /agent:pending -->
 ## Assistant

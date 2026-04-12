@@ -44,7 +44,7 @@ Agreed — this is a critical invariant. Runbook + memory updated.
 **Memory:** saved `feedback_compact_exchange_pending_invariant.md` + indexed in `MEMORY.md`.
 
 **Binary-level concern:** this points at a likely `agent-doc compact` bug — `replace_content()` should be scoped to a single named component, so pending should be untouchable. Worth investigating `src/agent-doc/src/compact.rs` to confirm the component scope is correct, and adding a test that asserts non-target components are byte-identical before/after compact. Adding to pending.
-<!-- agent:boundary:1d1c0394 -->
+<!-- agent:boundary:c1523952 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

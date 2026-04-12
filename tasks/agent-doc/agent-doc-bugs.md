@@ -83,7 +83,7 @@ This is a solid feature — it cleanly separates per-document environment config
 - **Binary-side** for the `agent-doc spawn` flow (tmux session creation). The binary expands and sets env vars in the new pane's environment.
 
 This way `env:` works regardless of how the session starts.
-<!-- agent:boundary:a0e72c31 -->
+<!-- agent:boundary:5023b95d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

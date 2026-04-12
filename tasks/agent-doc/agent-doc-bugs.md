@@ -322,7 +322,7 @@ Yes, exactly. With **Option A + integrated preflight**, the flow becomes a tradi
 
 No hooks, no tool-use-frequency dependency — just a blocking command with a defined timeout. The only non-deterministic part is *which* path satisfies the request (running session vs spawned subagent), but the overall flow is guaranteed to complete within a known time window.
 Would the summarization happen in the running claude session or would this be from a subagent?
-### Re: Running session vs subagent for summarization (HEAD)
+### Re: Running session vs subagent for summarization
 
 Two paths in parallel:
 
@@ -333,14 +333,29 @@ Two paths in parallel:
 The running session wins if it responds first — subagent is the safety net. For Option A, the notification mechanism would be the session's own preflight cycle checking for pending callbacks.
 
 This is where the hybrid with Option C gets interesting: you could combine Option A's file-based protocol with Option C's hook polling — the hook fires `agent-doc check-callbacks` which reads requests faster than waiting for the next full preflight cycle. But this adds complexity. Option A alone with aggressive polling (1 second intervals) is probably sufficient.
-<!-- agent:boundary:93a669bf -->
+
+❯ Let's do Option A with "the hook fires `agent-doc check-callbacks`".
+### Re: Option A + hook-based notification (HEAD)
+
+Great choice. Here's how it works end-to-end:
+
+1. **Write request** — `agent-doc cleanup <FILE>` creates `.agent-doc/callbacks/<doc_hash>/request.json`
+2. **Hook fires** — Claude's PostToolUse hook runs `agent-doc hook check-callbacks` after every tool call
+3. **Hook detects** — scans `.agent-doc/callbacks/*/request.json` for valid (unexpired, unresponded) requests, outputs JSON to stdout
+4. **Claude processes** — the model sees the hook output, reads the request, generates the summary, writes `response.json`
+5. **Poll for response** — `cleanup` polls for `response.json` every 1 second with a 120s timeout
+6. **Fallback** — if no response within timeout, spawns `claude --print --model sonnet` for summarization
+7. **Apply result** — reads the patch content from response, applies it to the document
+
+The hook gives you ~1-5 second detection latency (fastest next tool use), while the CLI poll gives determinism. Worst case: 120s fallback to subagent.
+<!-- agent:boundary:1d220678 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Bidirectional IPC** — Option A confirmed. Summarization: running session (primary) + subagent (timeout fallback). Design complete.
-- **`agent-doc pending` subcommands** — add/remove/prune/list. Blocked on IPC design (pending_curate callback type).
-- **`agent-doc cleanup`** — umbrella command replacing `compact`. Spec'd in plan doc.
+- **Bidirectional IPC** — Option A + hook notification confirmed. Planning complete, ready to implement.
+- **`agent-doc cleanup`** — umbrella command that orchestrates the callback flow.
+- **`agent-doc pending` subcommands** — add/remove/prune/list.
 <!-- /agent:pending -->
 ## Assistant

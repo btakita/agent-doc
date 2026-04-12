@@ -76,6 +76,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
 
+use crate::model_tier::Tier;
+
 /// Document format: controls document structure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum AgentDocFormat {
@@ -250,6 +252,12 @@ pub struct Frontmatter {
     /// Space-separated string (e.g., "--dangerously-skip-permissions").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_args: Option<String>,
+    /// When true, passes `--no-mcp` to the `claude` process.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_mcp: Option<bool>,
+    /// When true, passes `--enable-tool-search` to the `claude` process.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enable_tool_search: Option<bool>,
     /// Debounce duration in milliseconds for preflight mtime settling.
     /// Default: 2000ms. Set to 0 to disable debounce (run immediately).
     #[serde(
@@ -271,6 +279,16 @@ pub struct Frontmatter {
         rename = "agent_doc_auto_compact"
     )]
     pub auto_compact: Option<usize>,
+    /// Required model tier for this document. When set, preflight emits this as
+    /// `required_tier`, which the skill uses as a hard gate: if the running model's
+    /// tier is below this value, the skill writes a switch prompt and stops.
+    /// Values: `auto | low | med | high`. Default: absent (no gate).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_model_tier"
+    )]
+    pub model_tier: Option<Tier>,
     /// Document-level lifecycle hooks: shell commands executed at key events.
     ///
     /// Supported events: `session_start`, `post_write`, `post_commit`.
@@ -509,6 +527,60 @@ mod tests {
     }
 
     #[test]
+    fn parse_model_tier_high() {
+        let content = "---\nagent_doc_model_tier: high\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.model_tier, Some(Tier::High));
+    }
+
+    #[test]
+    fn parse_model_tier_low() {
+        let content = "---\nagent_doc_model_tier: low\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.model_tier, Some(Tier::Low));
+    }
+
+    #[test]
+    fn parse_model_tier_med() {
+        let content = "---\nagent_doc_model_tier: med\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.model_tier, Some(Tier::Med));
+    }
+
+    #[test]
+    fn parse_model_tier_auto() {
+        let content = "---\nagent_doc_model_tier: auto\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.model_tier, Some(Tier::Auto));
+    }
+
+    #[test]
+    fn parse_model_tier_absent() {
+        let content = "---\nagent: claude\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.model_tier, None);
+    }
+
+    #[test]
+    fn parse_model_tier_invalid_rejected() {
+        let content = "---\nagent_doc_model_tier: ultra\n---\nBody\n";
+        let result = parse(content);
+        assert!(result.is_err(), "invalid tier value should fail to parse");
+    }
+
+    #[test]
+    fn write_model_tier_roundtrip() {
+        let fm = Frontmatter {
+            model_tier: Some(Tier::High),
+            ..Default::default()
+        };
+        let doc = write(&fm, "Body\n").unwrap();
+        let (parsed, _) = parse(&doc).unwrap();
+        assert_eq!(parsed.model_tier, Some(Tier::High));
+        assert!(doc.contains("agent_doc_model_tier: high"));
+    }
+
+    #[test]
     fn parse_null_fields() {
         let content = "---\nsession: null\nagent: null\nmodel: null\nbranch: null\n---\nBody\n";
         let (fm, body) = parse(content).unwrap();
@@ -556,9 +628,12 @@ mod tests {
             write_mode: None,
             stream_config: None,
             claude_args: None,
+            no_mcp: None,
+            enable_tool_search: None,
             debounce_ms: None,
             links: vec![],
             auto_compact: None,
+            model_tier: None,
             hooks: std::collections::HashMap::new(),
         };
         let body = "# Hello\n\nBody text.\n";

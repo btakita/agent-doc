@@ -237,7 +237,7 @@ Dump both to files and `diff -u prod-plugins.txt staging-plugins.txt` etc. That 
 **Blocker:** if you're still locked out of prod admin (password reset pending from earlier in this doc), you'd need to run these as the root `wp` user via SSH on the prod host. Want me to write a one-shot script that SSHes into prod, pulls all three inventories, does the same against the staging container, and diffs them?
 
 ❯ Can you compare the staging sitemap with monsterrodholders.com/wp-sitemap.xml? Make sure the urls all match.
-### Re: sitemap URL diff — prod vs staging (HEAD)
+### Re: sitemap URL diff — prod vs staging
 
 Fetched both sitemap indices and all child sitemaps, extracted every `<loc>`, normalized hosts, and diffed the URL sets. **The sitemaps do NOT match** — there are meaningful drifts in three categories, some of which are actually good (staging is cleaner), and two of which are red flags on prod that need cleanup before the DNS flip.
 
@@ -327,12 +327,32 @@ Note the 9 staging-only pages (`/change-password`, `/checkout-pay`, `/edit-my-ad
 6. **Delete `/product/test-product-1`** on staging before flip.
 
 All raw sitemap files are at `/tmp/mrh-sitemap/` on this host if you want to poke at them directly.
-<!-- agent:boundary:34f8bdf5 -->
+
+❯ Write the sitemap audit to a private gist.
+### Re: Sitemap audit → private gist (HEAD)
+
+Created as a secret gist:
+
+**https://gist.github.com/btakita/260df34b107cc0a09fb87f0af70375ae**
+
+Contents: comprehensive sitemap comparison (prod 25 posts / 79 pages vs staging 10 posts / 40 pages), taxonomy inventory (product_cat, product_tag, post_tag all matching), structural analysis identifying:
+
+1. **RED FLAG #1 (URGENT)** — 16 active malware posts (casino/sportsbook SEO spam, dated 2026-03-26 through 2026-04-08, multilingual: German, Polish, Russian, Azerbaijani). Injection pattern indicates prod-only compromise (staging is clean), likely via unpatched plugin, older theme version, or database-level access. Includes detection commands (`wp post list` grep, author account lookup, backdoor scan) and remediation steps. **Do not flip DNS until the injection vector is closed.**
+
+2. **RED FLAG #2 (MEDIUM)** — 48 theme demo pages + 9 abandoned `-2` migration remnants (`/my-account-2/*`, `/checkout-2/*`, `/shop-2`, `/cart-2`, etc.). Noise in sitemap, SEO footprint. Staging is clean; can be bulk-deleted with confirmation.
+
+3. **Minor fixes** — `/product/test-product-1` (test product, delete), author slug leak (`/author/catfishinginfogmail-com` — rename to `steve-douglas`), `/shop` page (correct, prod is missing).
+
+4. **Action order** — Urgent (investigate compromise), before-flip (delete demo pages, set up 301 redirects), staging cleanup (test product + author slug), post-flip (Search Console resubmission).
+
+Gist permalink is unlisted but shareable — don't distribute publicly if content is sensitive.
+<!-- agent:boundary:f0400530 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - **Test Venmo button (if possible)** — ask a team member or tester to click the Venmo button and confirm approval flow; or check modsec audit log for zero 933120 hits on `form_encoded` when attempted. (blocked by: user password reset)
+- **URGENT — Investigate prod malware injection** — identify compromise vector (plugin, theme, or DB access); delete 16 spam posts and `/category/casino`; reset passwords and secret keys; confirm closure before DNS flip. (See sitemap audit gist.)
 - **Rotate DB passwords** — `MARIADB_ROOT_PASSWORD` + `MARIADB_PASSWORD` still on the previous values in `docker-compose.yml` / `.env`; update `wp-config.php`, `docker compose up -d --force-recreate`.
 - **Livestream VOD trim** — the Stripe settings dump segment still needs manual trim in post-production.
 <!-- /agent:pending -->

@@ -48,7 +48,7 @@ Rebuilt the block fresh (no trace in recent homepage revisions) and deployed rep
 **Self-healing behavior:** If the homepage post gets reset (DB import, admin-UI edit wipe), bumping `MRH_HOME_POPULAR_SEED_VERSION` in the mu-plugin re-injects the block on next page load. Same pattern as the footer-logo seeder.
 
 Hard-refresh the homepage (Cmd/Ctrl+Shift+R) to confirm visually.
-<!-- agent:boundary:da53f2a0 -->
+<!-- agent:boundary:55d5ad25 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

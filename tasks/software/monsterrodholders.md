@@ -286,7 +286,7 @@ Which approach works for you?
 Which approach works for you?
 ❯ Was pagination added for page performance?
 
-### Re: About the pagination (HEAD)
+### Re: About the pagination
 
 No — pagination was likely the default Blocksy theme setting, not intentional performance tuning. WooCommerce and Blocksy default to 12-16 products per page out of the box.
 
@@ -300,12 +300,35 @@ Paginating to 12 products per page saves minimal bandwidth (just HTML markup —
 **If you have >200 products:** I'd recommend keeping pagination but increasing the per-page limit to 30-50 instead of 12, balancing UX (not endless scroll) with initial load.
 
 **Current store:** How many products does monsterrodholders have? Once I know, I can confirm whether removing pagination is harmless or if we should cap the per-page limit instead.
-<!-- agent:boundary:9cb59727 -->
+
+❯ 64 Products. Remove pagination by setting loop_shop_per_page to -1?
+
+### Re: `loop_shop_per_page = -1` (HEAD)
+
+Yes — `-1` is the standard "no limit" sentinel in WP_Query / WooCommerce and works in the `loop_shop_per_page` filter. With 64 products it's safe: one page, no pagination UI, no cap to maintain as inventory grows.
+
+**Minimal mu-plugin patch:**
+
+```php
+add_filter( 'loop_shop_per_page', function() {
+    return -1;
+}, 99 );
+```
+
+That single filter is sufficient — when `posts_per_page = -1`, WooCommerce returns all products in one query and the pagination nav renders as a single page (effectively hidden). No need for the separate `woocommerce_pagination_args` filter from Option C.
+
+**Want me to:**
+1. Add it to `src/monsterrodholders-dev/wordpress/mu-plugins/mrh-performance.php`
+2. Commit + push the submodule
+3. SSH deploy via `docker compose up -d --force-recreate wordpress`
+
+Say "go" and I'll do all three.
+<!-- agent:boundary:8260e9cf -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Remove pagination from /shop/** — awaiting: (1) choice of implementation method, (2) product count to confirm load impact
+- [ ] **Remove pagination from /shop/** — approach chosen: `loop_shop_per_page` filter returning `-1` in mrh-performance mu-plugin. Awaiting "go" to implement + deploy.
 - [x] **Fix product image heights** — mu-plugin deployed via SSH, CSS confirmed in live HTML (`mrh-product-grid` block present). Pending your visual confirmation after hard-refresh.
 - [x] **Document SSH + deploy** — `AGENTS.md` added to `src/monsterrodholders-dev` (`2eaa9e61`), parent pointer bumped
 - [x] **Add category sidebar to /shop** — 4-tile grid via mu-plugin

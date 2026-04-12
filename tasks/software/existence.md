@@ -187,13 +187,41 @@ Once the tag is pushed, the Actions workflow will:
 **Watch it here:** https://github.com/existence-lang/existence/actions
 
 The workflow will show up immediately after the tag push. Each target job takes ~2-5 minutes (Linux musl/aarch64 are slower via `cross`). Builds appear in the "Release" workflow run.
-<!-- agent:boundary:4b5c2e98 -->
+
+❯ Run the builds for v0.4.0. This should include the `curl | sh` builds.
+
+✓ **v0.4.0 tag pushed and builds triggered**
+
+- Moved tag from old commit (2241ec5) to HEAD (e6727a0) with `git tag -d v0.4.0 && git tag v0.4.0 && git push origin v0.4.0 --force`
+- `cargo install --path .` completed — both `existence` and `xist` v0.4.0 now in `~/.cargo/bin`
+- GitHub Actions release workflow is now running: https://github.com/existence-lang/existence/actions
+
+Watch for 6 parallel builds:
+- Linux x86_64-gnu (direct, ~2 min)
+- Linux aarch64-gnu (via cross, ~4 min)
+- Linux x86_64-musl (via cross, ~4 min)
+- Linux aarch64-musl (via cross, ~4 min)
+- macOS x86_64 (macos-14, ~2 min)
+- macOS aarch64 (macos-latest, ~2 min)
+
+Once all builds complete, the release job will:
+1. Download all 6 artifacts
+2. Create GitHub Release with generated notes
+3. Attach the tarballs
+4. Publish to crates.io
+
+Then users can install with:
+```bash
+curl -fsSL https://raw.githubusercontent.com/existence-lang/existence/main/install.sh | sh
+```
+<!-- agent:boundary:e862361b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
 - [x] Create GitHub Actions workflow: build + release binaries (Linux gnu/musl, macOS x86_64/aarch64)
+- [x] Run the builds for v0.4.0
 - [ ] Update philosophy/CLAUDE.md with precision + bounded/unbounded guidance
 - [ ] Create philosophy/src/pneuma.md, noumena.md, phenomena.md
 - [ ] Enrich philosophy/src/permaculture.md with universal applicability analysis

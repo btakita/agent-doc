@@ -325,7 +325,7 @@ That single filter is sufficient — when `posts_per_page = -1`, WooCommerce ret
 Say "go" and I'll do all three.
 ❯ go
 
-### Re: Deployed (HEAD)
+### Re: Deployed
 
 Done. mrh-performance v1.4 is live on production with `loop_shop_per_page = -1`.
 
@@ -359,11 +359,27 @@ wp post list --post_type=product --meta_key=_visibility --fields=ID,post_title,p
 ```
 
 Otherwise, pagination is done. Hard-refresh `/shop/` to confirm visually.
-<!-- agent:boundary:e7bb657f -->
+
+❯ Replace Arderobe logo with monsterrodholders logo in the site footer.
+❯ ![img_18.png](img_18.png)
+
+### Re: Footer logo replaced (HEAD)
+
+Done. Swapped Arderobe logo-dark.svg with monsterrodholders logo.
+
+**What changed:**
+- Footer Widget Area 5 (`ct-footer-sidebar-5`) — stackable/image block updated
+- Image ID: 24 (dead ref) → **69673** (monster-rod-holder-logo-2023.png)
+- URL: `/uploads/2021/12/logo-dark.svg` → `/uploads/2017/09/monster-rod-holder-logo-2023.png`
+- Cache flushed, verified on live site ✅
+
+Footer now displays the monsterrodholders logo instead of the Arderobe branding.
+<!-- agent:boundary:9b5530e6 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [x] **Replace footer logo Arderobe → MonsterRodHolders** — widget ID block-9 updated to use image 69673 (monster-rod-holder-logo-2023.png). Cache flushed and verified live.
 - [ ] *(Optional)* Audit 13 excluded products (7 non-published + 6 hidden via `catalog_visibility`) if you expected all 64 to appear
 - [x] **Remove pagination from /shop/** — mrh-performance v1.4 deployed (`loop_shop_per_page = -1`). All 51 published+visible products render on one page; pagination markup absent. Submodule `db89dba4`, parent pointer bumped.
 - [x] **Fix product image heights** — mu-plugin deployed via SSH, CSS confirmed in live HTML (`mrh-product-grid` block present). Pending your visual confirmation after hard-refresh.

@@ -177,7 +177,7 @@ Release cycle v0.32.1 is finalized. All deliverables shipped:
 - ✅ Runbook hardened with safety invariants
 
 The CRDT state refresh fix is live in production. Compact no longer corrupts pending items on CRDT documents.
-<!-- agent:boundary:bcff6ad3 -->
+<!-- agent:boundary:2d8d84c5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

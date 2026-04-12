@@ -646,7 +646,7 @@ The 4 legit "Steve Douglas" posts stop at **2024-11-11** — Steve hasn't publis
 7. **Post-DNS-flip:** the new Liquidweb host is already clean (only `catfishdude` + `catfishinfo` users exist there per earlier migration). Once DNS flips, the compromise is effectively abandoned — but Google will keep the spam URLs indexed until we 410 them. Add bulk 410/noindex for the spam post slugs so Google drops them faster than 404 decay.
 
 **Tell me which items to execute and I'll run them back-to-back in the next cycle.** I'll write per-step results to this doc as I go.
-<!-- agent:boundary:c38edfad -->
+<!-- agent:boundary:5bbbe66f -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

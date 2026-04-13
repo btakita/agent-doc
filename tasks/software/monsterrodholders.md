@@ -1174,15 +1174,44 @@ The SSH-server-clone concern is legitimate. If monsterrodholders-dev is cloned a
 **My recommendation:** Private Gist for this one document. If you end up writing more security docs (incident runbooks, forensic reports, post-mortems), create `monsterrodholders-security` as a separate private repo and keep it off the production server entirely.
 
 Want me to create the gist now? I'll need you to confirm `gh auth status` is pointing at the right account first — the gist will be owned by whichever GitHub user `gh` is authenticated as.
-<!-- agent:boundary:2e8af598 -->
+
+❯ Create the secret gist. Will delete it after short period.
+### Re: Create the secret gist (HEAD)
+
+Done. Owner: `btakita` (confirmed `gh auth status` before creating — `gist` scope present).
+
+**Gist URL:**
+
+```
+https://gist.github.com/btakita/7151ff6b944d525fa4f8f0c00f4261f8
+```
+
+**Type:** Secret gist. Unguessable URL, not indexed, only reachable by people you send the link to. Anyone with the URL can read it — treat the URL itself as a secret.
+
+**Share with ron-berkes:** Send the URL over a trusted channel (Signal, 1Password share, encrypted email). Do NOT paste into a public Slack or unencrypted email.
+
+**To delete when done:**
+
+```bash
+gh gist delete 7151ff6b944d525fa4f8f0c00f4261f8
+```
+
+Or via web UI at the gist URL → Delete button. Since you plan to delete after a short period, set a reminder — the URL is technically accessible until deletion.
+
+**Note on edits:** If you update `tasks/software/monsterrodholders/security-findings-gist-draft.md` locally, the gist does NOT auto-sync. To push updates:
+
+```bash
+gh gist edit 7151ff6b944d525fa4f8f0c00f4261f8 tasks/software/monsterrodholders/security-findings-gist-draft.md
+```
+<!-- agent:boundary:1a10c32e -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] Send gist URL `https://gist.github.com/btakita/7151ff6b944d525fa4f8f0c00f4261f8` to ron-berkes via trusted channel (Signal / encrypted email)
+- [ ] Delete gist after Ron has reviewed: `gh gist delete 7151ff6b944d525fa4f8f0c00f4261f8`
 - [ ] Purchase + install Solid Security Pro on monsterrodholders.com WP; enable Hide Backend, 2FA, Password Requirements
 - [ ] Install Wordfence Free alongside, disable its firewall, keep only malware scanner
-- [ ] Confirm `gh auth status` identity before creating private gist for security findings
-- [ ] Create private gist from `tasks/software/monsterrodholders/security-findings-gist-draft.md` and share URL with ron-berkes
 - [ ] Decide: dedicated `monsterrodholders-security` private repo for ongoing security docs, or stick with gists
 - [ ] Move DNS to Cloudflare (orange cloud apex + www)
 - [ ] Apply Cloudflare rules from `tasks/software/monsterrodholders/cloudflare-security-rules.md` in documented rollout order

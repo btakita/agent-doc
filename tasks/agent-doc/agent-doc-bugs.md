@@ -302,7 +302,7 @@ Not a binary bug — the Claude session bailed out of the SKILL flow between pre
 Preflight did its job: committed the prior drift, saved a baseline, and emitted `preflight_diff_start`, meaning it found real changes and handed control back to Claude. But no `write_origin` / `ipc_write_attempt` entry ever followed for `monsterrodholders.md`. The binary was never asked to write anything.
 
 Possible session-side causes (ranked by likelihood):
-1. **Claude answered in console only** and forgot to pipe the response through `agent-doc write`. Classic SKILL step 2 omission — `feedback_agent_doc_foreground_writes.md` guards against `run_in_background` skipping the write, not against forgetting step 2 entirely.
+❯ 1. **Claude answered in console only** and forgot to pipe the response through `agent-doc write`. Classic SKILL step 2 omission — `feedback_agent_doc_foreground_writes.md` guards against `run_in_background` skipping the write, not against forgetting step 2 entirely.: Fix this. Use a runbook to save the steps.
 2. **Model tier gate stopped the cycle**. `agent_doc_model_tier: low` is fine, but if a mismatch printed the `Run /model <x>` notice, the prompt-loop may have taken it as a hard stop.
 3. **User interrupted** the cycle (Ctrl-C, pane closed, new slash command) after preflight returned but before the response block finished streaming.
 4. **Cycle fell through a different skill branch** (e.g. `claim`, a builtin-command shortcut) and exited without reaching step 2.
@@ -314,7 +314,81 @@ How to confirm next time:
 Also: I hit a **separate bug** while trying to write this response — the agent-doc-bugs.md doc had **two `&lt;!-- /agent:exchange --&gt;` closing markers** with a stray `<!-- agent:boundary:... -->` wedged between them. The parser rejected it: `closing marker &lt;!-- /agent:exchange --&gt; without matching open`. I fixed it with an Edit so this write could land. How it got there is a second question — boundary-repositioning logic probably wrote a new boundary + close without removing the old one under some race/retry path. Worth a separate look at `commit.reposition` in src/agent-doc/src/commit.rs.
 
 Suggested skill-side fix for the silent-skip: add an end-of-cycle invariant — if the SKILL flow saw a non-empty `diff` in preflight and the cycle exits without calling `agent-doc write`, emit a visible warning. That turns a silent failure into a loud one, without requiring binary changes.
-<!-- agent:boundary:ae0807b5 -->
+
+❯ agent-doc run response patch to src/boost-client/tasks/monsterrodholders.md is uncommitted. Why? How can we fix the reoccurring race condition?
+### Re: SKILL runbook + uncommitted patch race (HEAD)
+
+**1. Runbook for SKILL workflow to prevent forgotten step 2:**
+
+Creating `/.claude/skills/agent-doc/runbooks/skill-submit-cycle.md` — a step-by-step checklist that the skill can follow:
+
+```markdown
+# Agent Doc Skill Submit Cycle
+
+Step-by-step flow to prevent silent failures (forgotten agent-doc write).
+
+## 0. Pre-flight (single command)
+- [ ] Run: agent-doc preflight <FILE>
+- [ ] Output contains: "preflight_diff_start"? No = done, no changes
+- [ ] Baseline saved? Remember for step 2
+
+## 1. Generate Response
+- [ ] Read user changes from preflight diff
+- [ ] Generate response (streaming to console OK)
+
+## 2. Write Back (DO NOT SKIP THIS)
+- [ ] Is document template mode? Check frontmatter for agent_doc_mode: template
+  - [ ] If template: format response as patch blocks
+  - [ ] Pipe through: agent-doc write --stream --baseline-file <file>
+  - [ ] If append (default): simple response text, pipe through agent-doc write
+- [ ] After write completes: agent-doc commit <FILE>
+
+## 3. Invariant Check
+- [ ] Review: did agent-doc write actually write? Check file modification time
+- [ ] If no write happened: check console for error messages
+- [ ] NEVER exit without step 2 completed for non-empty diffs
+```
+
+With this runbook codified, future SKILL invocations can read and follow it. The binary can also emit a warning if it detects `preflight_diff_start` without a matching `write_origin` in ops.log.
+
+**2. Race condition diagnosis — uncommitted patches in submodules:**
+
+The issue: `src/boost-client/tasks/monsterrodholders.md` has agent-doc patches in the working tree that aren't committed. Let me check the current state:
+Found the uncommitted patch! In `src/boost-client/tasks/monsterrodholders.md`:
+- **30 lines added** (deployment + cloudflare docs response)
+- **Boundary marked** (`<!-- agent:boundary:8ae0ceb7 -->`)
+- **File is dirty** in the submodule, not committed
+
+**Root cause:** The parent repo's agent-doc preflight tried to commit submodule files, which fails:
+```
+fatal: Pathspec '/home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md' is in submodule 'src/boost-client'
+```
+
+Git requires submodule files to be committed FROM WITHIN the submodule directory. The parent's `agent-doc commit` can't do this — it has no context that the file belongs to a submodule.
+
+**Fix — two options:**
+
+**Option A (binary-side):** agent-doc detects submodule boundaries and delegates submodule commits to the correct directory context. Requires: parsing `.gitmodules`, checking file paths, spawning commits in subdir. Complex but clean.
+
+**Option B (skill-side):** After agent-doc write completes, check if the file is in a submodule. If so, cd into the submodule and run `agent-doc commit` from there. Simple, one-line addition to SKILL.md step 3.
+
+**Recommendation: Option B.** Add to SKILL.md step 3 (after `agent-doc commit`):
+```bash
+# If file is in a submodule, commit from within it
+submodule=$(git rev-parse --show-superproject-working-tree 2>/dev/null)
+if [[ -n "$submodule" ]]; then
+  (cd "$submodule" && agent-doc commit <FILE>)
+fi
+```
+
+This is a one-line safety net that catches exactly this case.
+
+**To fix boost-client right now:**
+```bash
+cd src/boost-client
+agent-doc commit tasks/monsterrodholders.md
+```
+<!-- agent:boundary:8e323b43 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

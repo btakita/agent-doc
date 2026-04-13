@@ -1544,7 +1544,7 @@ claude --resume 817bcb48-1789-45af-934c-4a5b9c7b684a
 Claude exited cleanly.
 Press Enter to restart, or 'q' to exit.
 ```
-### Re: "I thought we built that supervisor already" (HEAD)
+### Re: "I thought we built that supervisor already"
 
 That prompt comes from `agent-doc start` — `src/agent-doc/src/start.rs:273`. It's a **supervisor-lite**, not the full supervisor from my previous response.
 
@@ -1567,7 +1567,38 @@ So the "do we build the supervisor?" question is really: **do we extend `start.r
 The SKILL.md `cd` fix (Option C→A from my previous response) is orthogonal to `start.rs` — it runs inside the already-launched claude session, so it doesn't care whether start.rs is lite or full.
 
 Still recommending: ship `cd` this release, write `specs/supervisor.md` to decide whether start.rs graduates into a full supervisor or stays lite.
-<!-- agent:boundary:fc4a792d -->
+
+❯ start.rs should graduate into a full supervisor. Let's jump to the supervisor.
+### Re: graduate start.rs into a full supervisor (HEAD)
+
+Drafted `src/agent-doc/specs/supervisor.md`. Summary of what it commits to:
+
+**Architecture:** one supervisor process per session, owns claude behind a `portable-pty` pty pair, runs three threads (stdin→pty, pty→stdout, IPC accept loop), holds a per-session Unix socket at `.agent-doc/supervisor/<session>.sock`.
+
+**Five hard parts — resolved:**
+1. **Pty** — `portable-pty` for cross-platform; claude gets the slave as its tty, supervisor gets the master for I/O + injection.
+2. **CWD** — resolved once per (re)start from `--cwd` flag > frontmatter `agent_doc_cwd` > project root (walk up to `.agent-doc/`) > doc parent. Set on the child process **and** via `cd` inside the pty so shell tools see the same `$PWD`. Re-resolved on every restart (not cached).
+3. **Crash recovery** — state machine (Healthy → Transient → Flapping → Halted) with a 10-slot exit ring buffer. Flap detection via `exits_in_last_60s >= 3` → 30s cooldown. 5 consecutive Flapping → Halted, requires explicit resume.
+4. **External control** — Unix socket, length-prefixed JSON (same frame format as `ipc_socket.rs`, reusable FFI client). Four methods: `restart`, `inject`, `state`, `stop`. Replaces the `tmux send-keys` + 5s-sleep hack in `start.rs:229`.
+5. **IPC lifecycle** — supervisor owns socket for its lifetime; stale-socket detection via pid liveness check in `sessions.json` on register.
+
+**Migration — three phases:**
+- **Phase 1 (additive):** `agent-doc start --supervised` opts into the new code path. Default unchanged. Goal: ship without breaking current sessions.
+- **Phase 2 (default):** flip to supervised by default, `--no-supervised` as escape hatch. Editor plugins start using the IPC socket. SKILL.md `cd` fix becomes redundant for new sessions but stays as a fallback.
+- **Phase 3 (removal):** delete `--no-supervised`, old restart loop, and SKILL.md `cd` fallback.
+
+**Module layout:** new `src/supervisor/` module (not a new crate) with `mod.rs`, `pty.rs`, `ipc.rs`, `state.rs`, `cwd.rs`. Keeps everything in the `agent-doc` binary, reuses existing frontmatter/sessions/log infrastructure.
+
+**Open questions in the spec** (please weigh in):
+1. **Subcommand vs flag:** `agent-doc start --supervised` (spec assumes this) vs dedicated `agent-doc supervisor run`. Flag is smaller blast radius; subcommand is cleaner long-term.
+2. **SIGWINCH forwarding:** `signal-hook` thread vs polling `TIOCGWINSZ`. Signal-based is cleaner but adds a handler thread.
+3. **Logging:** one file with `[supervisor]` tag prefix (preferred) vs separate `logs/supervisor/<session>.log`.
+4. **Windows:** is ConPTY support required? If not, we can drop `portable-pty` for `nix::pty` (smaller binary, simpler code).
+
+Read the full spec: [`src/agent-doc/specs/supervisor.md`](../../src/agent-doc/specs/supervisor.md).
+
+Next step after you review: I'll start Phase 1 implementation — `supervisor/cwd.rs` + `supervisor/pty.rs` behind `--supervised`, with unit tests for CWD resolution priority and the crash classifier. Want me to answer the four open questions myself with defaults and proceed, or wait for your input first?
+<!-- agent:boundary:3ff35e68 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

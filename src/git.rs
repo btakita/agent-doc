@@ -50,7 +50,7 @@
 
 use anyhow::Result;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Resolve a relative path against the git root (superproject root if in a submodule).
@@ -135,6 +135,91 @@ pub(crate) fn git_superproject_at(dir: &Path) -> Option<std::path::PathBuf> {
         })
 }
 
+/// If `file` lives inside a submodule of `super_root`, return the submodule's
+/// own git toplevel and `true`. Otherwise return `super_root` unchanged.
+///
+/// This lets `commit()` run git operations from within the submodule (where
+/// they're valid) instead of the parent repo (where the file appears as both
+/// a submodule entry and a tracked path, causing `update-index --cacheinfo`
+/// and `git add` to refuse the path with "appears as both a file and as a
+/// directory" / "Pathspec ... is in submodule" errors).
+pub(crate) fn narrow_to_submodule(super_root: &Path, file: &Path) -> (PathBuf, bool) {
+    let parent = file.parent().unwrap_or(Path::new("/"));
+    if let Some(inner) = git_toplevel_at(parent)
+        && inner != super_root
+        && inner.starts_with(super_root)
+    {
+        return (inner, true);
+    }
+    (super_root.to_path_buf(), false)
+}
+
+/// After a successful commit inside a submodule, stage and partial-commit the
+/// updated submodule pointer in the superproject. Uses an explicit pathspec on
+/// the commit so any other staged files in the parent index are preserved.
+fn update_parent_submodule_pointer(super_root: &Path, submodule_root: &Path, msg: &str) {
+    let rel = match submodule_root.strip_prefix(super_root) {
+        Ok(r) => r,
+        Err(_) => {
+            eprintln!("[commit] cannot compute submodule relative path; skipping pointer update");
+            return;
+        }
+    };
+    let rel_str = rel.to_string_lossy().to_string();
+
+    let add = Command::new("git")
+        .current_dir(super_root)
+        .args(["add", "--", &rel_str])
+        .output();
+    match add {
+        Ok(o) if o.status.success() => {}
+        Ok(o) => {
+            eprintln!(
+                "[commit] parent git add for submodule pointer failed: {}",
+                String::from_utf8_lossy(&o.stderr).trim()
+            );
+            return;
+        }
+        Err(e) => {
+            eprintln!("[commit] parent git add error: {}", e);
+            return;
+        }
+    }
+
+    let parent_msg = format!("{} (submodule pointer)", msg);
+    let commit = Command::new("git")
+        .current_dir(super_root)
+        .args(["commit", "-m", &parent_msg, "--no-verify", "--", &rel_str])
+        .output();
+    match commit {
+        Ok(o) if o.status.success() => {
+            for line in String::from_utf8_lossy(&o.stdout).lines() {
+                let t = line.trim();
+                if t.starts_with('[') && t.contains(']') {
+                    eprintln!("{}", line);
+                }
+            }
+            eprintln!("[commit] parent submodule pointer updated for {}", rel_str);
+        }
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            // "nothing to commit" / "no changes added" is fine — pointer was already current.
+            if stderr.contains("nothing to commit")
+                || stdout.contains("nothing to commit")
+                || stderr.contains("no changes added")
+            {
+                return;
+            }
+            eprintln!(
+                "[commit] parent submodule pointer commit failed: {}",
+                stderr.trim()
+            );
+        }
+        Err(e) => eprintln!("[commit] parent submodule pointer commit error: {}", e),
+    }
+}
+
 /// Check if `file` is inside a git repository.
 /// Returns `true` if the file's directory (or any ancestor) is a git repo.
 /// Returns `false` if git is not available or the path is not tracked.
@@ -158,7 +243,23 @@ pub(crate) fn is_in_git_repo(file: &Path) -> bool {
 pub fn commit(file: &Path) -> Result<()> {
     let t_total = std::time::Instant::now();
 
-    let (git_root, resolved) = resolve_to_git_root(file)?;
+    let (super_root, resolved) = resolve_to_git_root(file)?;
+    // If the file lives inside a submodule, run git ops in the submodule itself.
+    // The parent repo refuses to stage/commit paths that cross a submodule boundary
+    // (`update-index --cacheinfo` and `git add` both fail with "appears as both a
+    // file and as a directory" / "Pathspec ... is in submodule"). Routing the commit
+    // through the submodule's own repo sidesteps the boundary entirely.
+    let (git_root, in_submodule) = narrow_to_submodule(&super_root, &resolved);
+    if in_submodule {
+        eprintln!(
+            "[commit] file is in submodule {} — running git ops there",
+            git_root.display()
+        );
+        crate::ops_log::log_op(file, &format!(
+            "submodule_route file={} submodule={}",
+            file.display(), git_root.display()
+        ));
+    }
     let timestamp = chrono_timestamp();
     let doc_name = file
         .file_stem()
@@ -186,6 +287,12 @@ pub fn commit(file: &Path) -> Result<()> {
     // that bypassed the agent-doc write pipeline (snapshot not updated).
     if snap_len > 0 && file_len > snap_len {
         let drift = file_len - snap_len;
+        // Always log out-of-band drift (any positive delta) for aggregation and
+        // root-cause analysis — classifies small/frequent vs large/rare gaps.
+        crate::ops_log::log_op(file, &format!(
+            "out_of_band_write file={} drift={} snap_len={} file_len={}",
+            file.display(), drift, snap_len, file_len
+        ));
         if drift > 100 {
             eprintln!(
                 "[commit] WARNING: file is {} bytes larger than snapshot for {} — possible out-of-band write (snap={}, file={})",
@@ -401,6 +508,12 @@ pub fn commit(file: &Path) -> Result<()> {
                         Err(e) => eprintln!("[commit] VCS refresh signal failed: {} (non-fatal)", e),
                     }
                 }
+            }
+
+            // Submodule pointer update: if we just committed inside a submodule,
+            // stage the new submodule HEAD in the parent and partial-commit it.
+            if in_submodule {
+                update_parent_submodule_pointer(&super_root, &git_root, &msg);
             }
     }
 
@@ -1286,6 +1399,120 @@ mod tests {
     // The actual exit path in write::run_stream calls snapshot::save before process::exit(75).
     // We verify this by checking that snapshot::save is callable at that point.
     // Full integration testing requires IPC infrastructure; unit coverage is in write.rs.
+
+    // --- Submodule-aware commit routing ---
+
+    #[test]
+    fn commit_in_submodule_routes_through_submodule_repo() {
+        use std::fs;
+        let outer_dir = tempfile::TempDir::new().unwrap();
+        let outer = outer_dir.path();
+
+        // Initialize a "submodule" repo inside a temp dir
+        let sub_dir = tempfile::TempDir::new().unwrap();
+        let sub_origin = sub_dir.path();
+        Command::new("git").current_dir(sub_origin).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(sub_origin).args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(sub_origin).args(["config", "user.name", "Test"]).output().unwrap();
+        // Allow file:// transport inside this test invocation
+        Command::new("git").current_dir(sub_origin).args(["config", "protocol.file.allow", "always"]).output().unwrap();
+        fs::write(sub_origin.join("README.md"), "# sub\n").unwrap();
+        Command::new("git").current_dir(sub_origin).args(["add", "README.md"]).output().unwrap();
+        Command::new("git").current_dir(sub_origin).args(["commit", "-m", "init sub", "--no-verify"]).output().unwrap();
+
+        // Initialize the outer repo
+        Command::new("git").current_dir(outer).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(outer).args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(outer).args(["config", "user.name", "Test"]).output().unwrap();
+        Command::new("git").current_dir(outer).args(["config", "protocol.file.allow", "always"]).output().unwrap();
+        fs::write(outer.join("README.md"), "# outer\n").unwrap();
+        Command::new("git").current_dir(outer).args(["add", "README.md"]).output().unwrap();
+        Command::new("git").current_dir(outer).args(["commit", "-m", "init outer", "--no-verify"]).output().unwrap();
+
+        // Add the submodule
+        let sub_url = format!("file://{}", sub_origin.display());
+        let sub_status = Command::new("git")
+            .current_dir(outer)
+            .args(["-c", "protocol.file.allow=always", "submodule", "add", &sub_url, "src/sub"])
+            .output()
+            .unwrap();
+        assert!(
+            sub_status.status.success(),
+            "submodule add failed: {}",
+            String::from_utf8_lossy(&sub_status.stderr)
+        );
+        Command::new("git").current_dir(outer).args(["commit", "-m", "add submodule", "--no-verify"]).output().unwrap();
+
+        let submodule_path = outer.join("src/sub");
+        // Configure the checked-out submodule for committing
+        Command::new("git").current_dir(&submodule_path).args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(&submodule_path).args(["config", "user.name", "Test"]).output().unwrap();
+
+        // Sanity: narrow_to_submodule returns the submodule path, not the outer
+        let doc = submodule_path.join("session.md");
+        let content = "---\nagent_doc_session: test\n---\n\n## Assistant\n\nresponse\n\n## User\n\n";
+        fs::write(&doc, content).unwrap();
+        let (narrowed, in_sub) = narrow_to_submodule(outer, &doc);
+        assert!(in_sub, "doc inside src/sub should be detected as submodule");
+        assert_eq!(narrowed, submodule_path, "narrowed root should be the submodule toplevel");
+
+        // Stage + commit the file inside the submodule so it's tracked
+        Command::new("git").current_dir(&submodule_path).args(["add", "session.md"]).output().unwrap();
+        Command::new("git").current_dir(&submodule_path).args(["commit", "-m", "add doc", "--no-verify"]).output().unwrap();
+
+        // Modify the file (simulate an agent response landing) and create snapshot
+        let new_content = "---\nagent_doc_session: test\n---\n\n## Assistant\n\nresponse\n\n## Assistant\n\nupdated\n\n## User\n\n";
+        fs::write(&doc, new_content).unwrap();
+        let snap_rel = crate::snapshot::path_for(&doc).unwrap();
+        // The snapshot path is computed against the project root (walks for .agent-doc).
+        // For this test, ensure the .agent-doc dir exists at the outer root and write the snapshot there.
+        let project_root = crate::snapshot::find_project_root(&doc.canonicalize().unwrap())
+            .unwrap_or_else(|| outer.to_path_buf());
+        let snap_abs = project_root.join(&snap_rel);
+        fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
+        fs::write(&snap_abs, new_content).unwrap();
+
+        // Run commit() — should route through the submodule, succeed, and update parent pointer
+        let result = commit(&doc);
+        assert!(result.is_ok(), "commit should succeed for submodule file: {:?}", result.err());
+
+        // Verify the submodule has a new agent-doc commit
+        let sub_log = Command::new("git")
+            .current_dir(&submodule_path)
+            .args(["log", "--oneline", "-5"])
+            .output()
+            .unwrap();
+        let sub_log_str = String::from_utf8_lossy(&sub_log.stdout);
+        assert!(
+            sub_log_str.contains("agent-doc(session)"),
+            "submodule git log should contain agent-doc commit, got:\n{sub_log_str}"
+        );
+
+        // Verify the parent has a submodule-pointer commit
+        let outer_log = Command::new("git")
+            .current_dir(outer)
+            .args(["log", "--oneline", "-5"])
+            .output()
+            .unwrap();
+        let outer_log_str = String::from_utf8_lossy(&outer_log.stdout);
+        assert!(
+            outer_log_str.contains("(submodule pointer)"),
+            "parent git log should contain pointer-update commit, got:\n{outer_log_str}"
+        );
+    }
+
+    #[test]
+    fn narrow_to_submodule_returns_super_root_for_non_submodule_file() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        let doc = root.join("session.md");
+        fs::write(&doc, "x").unwrap();
+        let (narrowed, in_sub) = narrow_to_submodule(root, &doc);
+        assert!(!in_sub, "non-submodule file should not be detected as in-submodule");
+        assert_eq!(narrowed, root);
+    }
 
     #[test]
     fn is_stale_baseline_write_path_replace_edits_ignored() {

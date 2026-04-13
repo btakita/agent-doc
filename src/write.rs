@@ -459,6 +459,75 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
     exchange.replace_content(content, &new_exc_content)
 }
 
+/// Maximum number of `❯ `-prefix lines a single normalization cycle may add.
+///
+/// A legitimate user input rarely produces more than a few dozen prefixed lines
+/// in one write cycle. When this threshold is exceeded, it indicates snapshot/
+/// baseline divergence (stale baseline, boundary misalignment, or snapshot
+/// reset) rather than genuine user input — applying the prefix would corrupt
+/// the file at scale. See `normalize_user_prompts_in_exchange_safe`.
+pub const MAX_NORMALIZE_USER_LINES: usize = 50;
+
+/// Safe wrapper around [`normalize_user_prompts_in_exchange`] that adds:
+///
+/// 1. **Forensic logging** — every call writes `normalize_user_prompts`
+///    metrics (`snap_len`, `base_len`, `applied`) to `ops.log` so divergence
+///    incidents can be caught in the wild.
+/// 2. **Safety rail** — if more than [`MAX_NORMALIZE_USER_LINES`] prefixes
+///    would be applied, the normalization is discarded (content passes
+///    through unchanged) and an event is logged.
+/// 3. **Auto-commit recovery** — on overrun, `git::commit(file)` is invoked
+///    to absorb the current working-tree state into the snapshot, giving
+///    the next cycle a clean baseline to diff against.
+///
+/// This is the call-site-facing entry point for the write path. Tests and
+/// callers that need the pure normalization behavior should continue to
+/// use [`normalize_user_prompts_in_exchange`].
+pub fn normalize_user_prompts_in_exchange_safe(
+    content: &str,
+    baseline: &str,
+    snapshot: &str,
+    file: &std::path::Path,
+) -> String {
+    let normalized = normalize_user_prompts_in_exchange(content, baseline, snapshot);
+
+    // Count `❯ ` prefixes before/after to measure how many lines this call applied.
+    // Note: also count a prefix at offset 0 (no leading newline).
+    fn count_prefixes(s: &str) -> usize {
+        let mut n = s.matches("\n❯ ").count();
+        if s.starts_with("❯ ") {
+            n += 1;
+        }
+        n
+    }
+    let before = count_prefixes(content);
+    let after = count_prefixes(&normalized);
+    let applied = after.saturating_sub(before);
+
+    crate::ops_log::log_op(file, &format!(
+        "normalize_user_prompts snap_len={} base_len={} applied={}",
+        snapshot.len(), baseline.len(), applied
+    ));
+
+    if applied > MAX_NORMALIZE_USER_LINES {
+        eprintln!(
+            "[normalize] WARN: {} ❯-prefixes would be applied, exceeds threshold {} for {} — \
+             suspected snapshot/baseline divergence. Force-committing current file to absorb drift; \
+             skipping ❯ prefix application this cycle.",
+            applied, MAX_NORMALIZE_USER_LINES, file.display()
+        );
+        crate::ops_log::log_op(file, &format!(
+            "normalize_threshold_exceeded applied={} threshold={} action=force_commit_and_passthrough",
+            applied, MAX_NORMALIZE_USER_LINES
+        ));
+        if let Err(e) = crate::git::commit(file) {
+            eprintln!("[normalize] WARN: force-commit failed: {}", e);
+        }
+        return content.to_string();
+    }
+
+    normalized
+}
 
 /// Detect whether a baseline is stale relative to the current snapshot.
 ///
@@ -895,7 +964,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             let normalize_prefix_lines: Vec<String> =
                 if let Ok(Some(ref snap)) = snapshot::load(file) {
                     let before = content_ours.clone();
-                    content_ours = normalize_user_prompts_in_exchange(&content_ours, base, snap);
+                    content_ours = normalize_user_prompts_in_exchange_safe(&content_ours, base, snap, file);
                     extract_normalization_targets(&before, &content_ours)
                 } else {
                     vec![]
@@ -1086,7 +1155,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     // Normalize user input in exchange: add ❯  prefix to user-added lines.
     // Load snapshot to identify which lines are new (user-typed this cycle).
     if let Ok(Some(snap)) = snapshot::load(file) {
-        content_ours = normalize_user_prompts_in_exchange(&content_ours, base, &snap);
+        content_ours = normalize_user_prompts_in_exchange_safe(&content_ours, base, &snap, file);
     }
 
     // Acquire advisory lock
@@ -3043,6 +3112,68 @@ mod tests {
         assert!(!result.contains("\ndo\n"), "bare do line must not remain without prefix: {}", result);
         // ❯ done must not be double-prefixed
         assert!(!result.contains("❯ ❯"), "no double-prefix: {}", result);
+    }
+
+    // ── safety rail: normalize_user_prompts_in_exchange_safe ────────────────
+
+    #[test]
+    fn normalize_safe_passes_through_under_threshold() {
+        // Small diff (1 user-added line) — should behave exactly like the pure function.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = tmp.path().join("doc.md");
+        std::fs::write(&file, "").unwrap();
+
+        let snapshot = "<!-- agent:exchange patch=append -->\nOld.\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\nOld.\nHello\n<!-- /agent:exchange -->\n";
+        let content = "<!-- agent:exchange patch=append -->\nOld.\nHello\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
+
+        let result = normalize_user_prompts_in_exchange_safe(content, baseline, snapshot, &file);
+        assert!(result.contains("❯ Hello"), "under threshold, ❯ prefix should still be applied: {result}");
+    }
+
+    #[test]
+    fn normalize_safe_bails_over_threshold() {
+        // Construct a baseline with >50 unique "user-added" lines relative to the snapshot.
+        // The safety rail should refuse to apply ❯ prefix and return content unchanged.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = tmp.path().join("doc.md");
+        std::fs::write(&file, "").unwrap();
+
+        let mut baseline_lines = String::new();
+        let mut content_lines = String::new();
+        for i in 0..60 {
+            baseline_lines.push_str(&format!("user line {i}\n"));
+            content_lines.push_str(&format!("user line {i}\n"));
+        }
+        let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
+        let baseline = format!("<!-- agent:exchange patch=append -->\n{baseline_lines}<!-- /agent:exchange -->\n");
+        let content = format!("<!-- agent:exchange patch=append -->\n{content_lines}<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n");
+
+        let result = normalize_user_prompts_in_exchange_safe(&content, &baseline, snapshot, &file);
+        // No ❯ prefix should be applied — content should be returned unchanged.
+        assert_eq!(result, content, "over threshold, content should pass through unchanged");
+        assert!(!result.contains("❯ user line"), "no ❯ prefix should be applied when threshold exceeded");
+    }
+
+    #[test]
+    fn normalize_safe_threshold_exact_boundary() {
+        // Exactly 50 lines — at threshold, still applies prefix (strictly greater-than check).
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = tmp.path().join("doc.md");
+        std::fs::write(&file, "").unwrap();
+
+        let mut lines = String::new();
+        for i in 0..50 {
+            lines.push_str(&format!("line {i}\n"));
+        }
+        let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
+        let baseline = format!("<!-- agent:exchange patch=append -->\n{lines}<!-- /agent:exchange -->\n");
+        let content = format!("<!-- agent:exchange patch=append -->\n{lines}<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n");
+
+        let result = normalize_user_prompts_in_exchange_safe(&content, &baseline, snapshot, &file);
+        // At exactly 50, prefix should be applied (> is strict).
+        assert!(result.contains("❯ line 0"), "at threshold, first line should get prefix: {result}");
+        assert!(result.contains("❯ line 49"), "at threshold, last line should get prefix: {result}");
     }
 }
 

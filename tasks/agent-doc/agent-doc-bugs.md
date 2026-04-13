@@ -40,7 +40,7 @@ Dogfooded Phase 1 kickoff. Outcomes captured in `src/agent-doc/specs/supervisor.
 
 Ready to proceed with `supervisor/pty.rs` whenever you give the go-ahead.
 ❯ proceed
-### Re: supervisor/pty.rs landed (#a17b done) (HEAD)
+### Re: supervisor/pty.rs landed (#a17b done)
 
 `src/agent-doc/src/supervisor/pty.rs` — pty allocation + child spawn + optional stdin/stdout forwarding threads. Registered in `supervisor/mod.rs`. `portable-pty = "0.8"` added to `Cargo.toml`. Build clean, clippy clean, 6 targeted tests passing.
 
@@ -78,7 +78,80 @@ Ready to proceed with `supervisor/pty.rs` whenever you give the go-ahead.
 **Not in scope for this landing** (deliberately): SIGWINCH plumbing, crash classifier, IPC socket, `start.rs` integration. Each gets its own PR per the phase 1 status table in `specs/supervisor.md`.
 
 Next: `supervisor/resize.rs` when you give the go-ahead — `signal-hook` for Unix SIGWINCH → `PtySession::resize`, Windows stub deferred.
-<!-- agent:boundary:52b6919a -->
+❯ I do want ENV variables from the parent shell. Mainly to control claude or other agent harnesses. agent-doc supports `env` frontmatter. I want the `env` frontmatter to support overriding env variables. A pending features is to unset `env` in the frontmatter.
+❯ Is this parent env cascade in alignment with your plan?
+### Re: parent env cascade — yes, aligned, but one layer up from pty.rs (HEAD)
+
+Short answer: yes, fully compatible with where `pty.rs` landed — but the cascade logic belongs **above** `pty.rs`, not inside it. `pty.rs` stays strict ("caller hands me the complete env"), and a sibling module builds the merged env before calling `PtySession::spawn`. Here is why and what it looks like.
+
+**Why not put the cascade inside `PtySpawnConfig`:** if `pty.rs` owns the cascade (inherit + overlay + unset), then two things get worse:
+
+1. Testing — every pty test needs to reason about which parent vars leaked in. The `env_is_not_inherited_from_parent` test exists specifically to lock that boundary; weakening it means the next refactor can silently regrow the "mystery env" problem.
+2. Reuse — `state.rs` will eventually restart the child on crash. If the cascade lives in `pty.rs`, every restart re-reads `std::env::vars()` at the moment of spawn, so a parent-env change between spawns silently changes child behavior. That's a real footgun for long-running supervisors.
+
+Keeping `pty.rs` deterministic means the merged env is **computed once** (at supervisor startup, from frontmatter + the parent env captured at that instant) and reused on every restart. Deterministic restarts > ergonomic construction.
+
+**Proposed sibling — `supervisor/env.rs`:**
+
+```rust
+pub struct EnvSpec {
+    /// Whether to start from std::env::vars() (the parent shell).
+    pub inherit_parent: bool,
+    /// Frontmatter env field: Name -> Some(value) sets, None unsets.
+    pub overrides: IndexMap<String, Option<String>>,
+}
+
+impl EnvSpec {
+    /// Resolve to the final HashMap<String, String> passed to PtySpawnConfig.
+    /// Parent env is captured at call time — call once per supervisor lifetime.
+    pub fn resolve(&self) -> HashMap<String, String> { ... }
+
+    /// Parse from frontmatter. Supports three forms:
+    ///   env:
+    ///     FOO: bar           # set
+    ///     BAZ: null          # unset (maps to None)
+    ///     QUX: "${HOME}/x"   # shell-style expansion against parent env
+    pub fn from_frontmatter(fm: &Frontmatter) -> Result<Self> { ... }
+}
+```
+
+Then `start.rs` does roughly:
+
+```rust
+let env_spec = EnvSpec::from_frontmatter(&fm)?;   // parse once
+let resolved_env = env_spec.resolve();            // capture parent once
+let cfg = PtySpawnConfig {
+    program, args,
+    cwd: resolved_cwd.path,
+    env: resolved_env,                            // complete, frozen
+    size,
+};
+PtySession::spawn(cfg)?;
+```
+
+**What this gives you:**
+
+- **Inherit** — default `inherit_parent: true` (matches your stated preference), falsifiable via a frontmatter flag if a document ever wants a sealed env.
+- **Override** — any key in frontmatter `env:` wins over the parent.
+- **Unset** — `KEY: null` in frontmatter drops `KEY` from the parent env entirely. The existing "unset via frontmatter" pending feature you mentioned falls out for free.
+- **Expansion** — `${HOME}/.config/foo` style expansion runs against the parent env **at resolve time**, so values like `$TMUX` or `$PATH` work the way a shell user expects.
+- **Restart determinism** — `resolve()` is called once; the captured map is reused across every `state.rs` restart, so a parent-env mutation mid-run cannot silently reshape the child.
+- **pty.rs unchanged** — the `env_is_not_inherited_from_parent` invariant stays load-bearing because `pty.rs` never touches the parent.
+
+**Open question for you before I build it:**
+
+Where does `EnvSpec::from_frontmatter` live relative to the existing `agent-doc` env handling? You already have the v0.32.2 `env` frontmatter feature wired into `claude_args` expansion (per the status line) — is that parser in `frontmatter.rs`? If so, `env.rs` should reuse the same parse path (maybe lift the shared type into `frontmatter.rs` and have `env.rs` be a thin resolver). I do not want to fork the frontmatter schema.
+
+If you confirm the structure is aligned, I will:
+
+1. Read the existing `frontmatter.rs` env handling to find the natural seam.
+2. Land `supervisor/env.rs` as a sibling to `cwd.rs` and `pty.rs` (module doc, invariants pinned, tests for inherit/override/unset/expansion/restart-determinism).
+3. Drop the "decide env passthrough policy" pending item (it will be answered by this module).
+
+And **not** do `resize.rs` yet — env.rs is a smaller, tighter dependency of `start.rs` wire-up than resize is, so it makes sense to land first.
+
+Confirm and I will go.
+<!-- agent:boundary:69e392d8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -103,7 +176,6 @@ Next: `supervisor/resize.rs` when you give the go-ahead — `signal-hook` for Un
 - [ ] [#64mb] Investigate double commit_staging race: ops.log at 1776095605 shows two back-to-back commit_staging/out_of_band_write pairs for the same file within the same second.
 - [ ] [#tw4a] claim: cd into document's .agent-doc root (nearest git repo) when claiming a pane. Fixes relative-path ambiguity and makes git ops naturally target the correct repo.
 - [ ] [#8jzg] claim --isolate: spawn a fresh Claude Code process in the submodule root so CLAUDE.md, memory, and skills load scoped to that repo. Only real fix for cross-project context leakage (mid-session cd does not reload context).
-- [x] [#a17b] supervisor/pty.rs: portable-pty allocation, stdin/pty forwarding threads, fake-claude shell-script integration test
 - [ ] [#jg0d] supervisor/resize.rs: SIGWINCH unix path via signal-hook; Windows ConPTY stub for phase 1
 - [ ] [#b486] supervisor/state.rs: crash classifier, ring buffer, Healthy->Transient->Flapping->Halted state machine
 - [ ] [#40ct] supervisor/ipc.rs: Unix-domain socket accept loop, reuse length-prefixed JSON frame from ipc_socket.rs

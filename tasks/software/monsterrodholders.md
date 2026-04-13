@@ -1312,7 +1312,7 @@ If I run `git submodule deinit src/monsterrodholders-dev && git rm src/monsterro
 3. **Do you want me to push anything up to `monsterrodholders-dev` origin first** (none of the local state appears to be real content — it's just the mis-targeted commit), or is it safe to abandon local HEAD?
 
 I'll wait for your direction rather than guess. Everything else in the restructure runbook still applies once these are settled.
-<!-- agent:boundary:0296a84c -->
+<!-- agent:boundary:36e9a11d -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

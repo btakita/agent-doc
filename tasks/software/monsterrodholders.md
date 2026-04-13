@@ -1216,7 +1216,7 @@ Done:
 3. **Invited collaborator**: rberkes invited with write (push) permission ✓
 
 rberkes will receive an invitation email for the boost-client repo. Once accepted, they'll have full read+write access to the monsterrodholders-dev submodule from within the boost-client workspace.
-<!-- agent:boundary:ca8ccaf3 -->
+<!-- agent:boundary:53587a0e -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

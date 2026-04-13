@@ -1598,7 +1598,7 @@ Drafted `src/agent-doc/specs/supervisor.md`. Summary of what it commits to:
 Read the full spec: [`src/agent-doc/specs/supervisor.md`](../../src/agent-doc/specs/supervisor.md).
 
 Next step after you review: I'll start Phase 1 implementation — `supervisor/cwd.rs` + `supervisor/pty.rs` behind `--supervised`, with unit tests for CWD resolution priority and the crash classifier. Want me to answer the four open questions myself with defaults and proceed, or wait for your input first?
-<!-- agent:boundary:3ff35e68 -->
+<!-- agent:boundary:b34a22ad -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

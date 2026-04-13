@@ -698,7 +698,7 @@ One more primitive worth considering: `--pending-reorder <id1,id2,...>` to move 
 3. **Enforcement:** preflight errors if it sees a `patch:pending` block in the outgoing payload (symmetric to the current "missing patch:pending" error, but inverted).
 
 Sound good? If yes, I'll start on the Rust side.
-### Re: checkbox convention (HEAD)
+### Re: checkbox convention
 
 **Markdown `- [ ]` / `- [x]`** (GFM task list). Agreed — reasons:
 
@@ -730,7 +730,9 @@ This gives the user **three parallel ways** to mark done, all equivalent:
 - Runbook calls `agent-doc write --pending-done <id>` → immediate
 - Delete the bullet outright → preflight sees the diff, also fine
 
-### Re: reorder detection (HEAD)
+❯ agreed
+
+### Re: reorder detection
 
 Agreed, add `--pending-reorder <id1,id2,...>` to the write command surface, and make preflight reorder-aware:
 
@@ -742,7 +744,7 @@ Agreed, add `--pending-reorder <id1,id2,...>` to the write command surface, and 
 
 **Edge:** User reorders AND adds a brand-new unhashed bullet in the same cycle. Lazy backfill assigns a hash first (O(n) pass), then the reorder-diff runs and sees the new id as "inserted at position N." Both signals get recorded cleanly.
 
-### Revised plan (v2) (HEAD)
+### Revised plan (v2)
 
 1. **Rust — commands:** `--pending-add`, `--pending-done <id>`, `--pending-edit <id>`, `--pending-clear`, `--pending-reorder <ids>`.
 2. **Rust — preflight:**
@@ -754,7 +756,59 @@ Agreed, add `--pending-reorder <id1,id2,...>` to the write command surface, and 
 4. **Enforcement:** preflight errors if outgoing payload contains `patch:pending` (inverted from current rule).
 
 Good? If yes I'll start on step 1.
-<!-- agent:boundary:39289e97 -->
+
+❯ Add a specs/ directory. Add this as an approved/pending spec that we will implement. Break up SPEC.md into individual specs that are done.
+### Re: specs/ directory + SPEC.md breakup (HEAD)
+
+Created the pending-system spec:
+
+- **New:** `src/agent-doc/specs/pending-system.md` — status: approved, pending implementation. Captures everything from this exchange: stable hash IDs, GFM checkboxes, lazy backfill in preflight, granular `--pending-*` flags (rejects `--pending-replace`), reorder detection, inverted enforcement (pending flag forbids `patch:pending` blocks).
+- **Created:** `src/agent-doc/specs/done/` directory (empty so far) as the destination for extracted SPEC.md sections.
+- **Existing:** `src/agent-doc/specs/pane-groups.md` stays where it is — it's approved/partially-built, not "done" yet. Format of that file is what I used as the template for `pending-system.md`.
+
+**SPEC.md breakup — proposed plan.** SPEC.md is 977 lines / 22 top-level sections, and most of it is built. Rather than do a big-bang rewrite, I want to confirm the structure before the mechanical work:
+
+```
+src/agent-doc/specs/
+├── README.md                   # Index: links to each spec, status table
+├── pending-system.md           # approved / pending (just created)
+├── pane-groups.md              # approved / partial
+└── done/
+    ├── 01-overview.md          # from SPEC.md §1
+    ├── 02-document-format.md   # §2 (frontmatter, components, marker syntax)
+    ├── 03-snapshot-system.md   # §3
+    ├── 04-diff-computation.md  # §4
+    ├── 05-agent-backend.md     # §5 (trait, Claude backend, Junie)
+    ├── 06-config.md            # §6
+    ├── 07-commands.md          # §7 — or split further by subcommand
+    ├── 08-session-routing.md   # §8
+    ├── 09-git-integration.md   # §9 (includes hook system §9.5)
+    ├── 10-security.md          # §10
+    └── 11-debounce-gaps.md     # §11
+```
+
+**Questions before I start extracting:**
+
+1. **Split §7 or keep it monolithic?** §7 is huge — it runs from line 175 to 685 and contains every subcommand (submit, init, reset, diff, commit, watch, write, stream, claim, focus, layout, compact, extract, sync, preflight, route, session, resync, plugin, …). Options:
+   - **(a)** One file per subcommand: `done/commands/preflight.md`, `done/commands/stream.md`, etc. Best long-term — each command's spec is independently editable. ~25 files.
+   - **(b)** Keep §7 as one `07-commands.md` file. Faster migration, less churn.
+   - **(c)** Hybrid: one file per subcommand group (`done/commands/write-stream.md`, `done/commands/sync-resync.md`). Middle ground.
+   - My recommendation: **(a)**. The spec file count is fine (specs/ is browseable), and per-subcommand files map cleanly to the `src/*.rs` module layout already in CLAUDE.md.
+
+2. **What replaces the root `SPEC.md`?** Two options:
+   - **(a)** Delete it. `specs/README.md` becomes the index.
+   - **(b)** Leave `SPEC.md` as a thin pointer to `specs/README.md` — preserves backlinks from older docs, cargo package metadata, etc.
+   - My recommendation: **(b)**. SPEC.md is referenced in several places (package includes, docs); replacing the content with a pointer is less disruptive than removing the file.
+
+3. **Preserve §-numbering in filenames?** I proposed `01-overview.md`, `02-document-format.md`, etc. Alternative: drop the numeric prefix and let alphabetic sort (`agent-backend.md`, `commands/`, `config.md`, `diff-computation.md`, …). Numeric preserves the SPEC.md reading order, alphabetic is cleaner long-term.
+
+4. **Done sections that turn out to not be done.** Some of §7 describes features that might be partially implemented or in-flight. As I extract each section, should I:
+   - **(a)** Move everything to `done/` as-is, and let the next cycle flag gaps?
+   - **(b)** Verify each section against the code before moving, and push anything unbuilt back to `specs/` root as approved/pending?
+   - My recommendation: **(a)** — fast, mechanical. If we find a drift later we can reclassify individual files. Verification is a separate pass.
+
+If you like this structure, confirm and I'll start the extraction. If you want a different layout, tell me what to change before I touch any of it — I'd rather re-cut the plan than re-cut 25 files.
+<!-- agent:boundary:69cabd7f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

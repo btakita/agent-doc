@@ -839,7 +839,7 @@ Benefits over the `done/` subdirectory:
 **Spec-of-a-spec:** agreed, defer. Once we have 5-6 specs in the flat layout the shape of the meta-spec will be obvious. Premature to write it against one example.
 
 **Action:** I'll skip creating `specs/done/` in the SPEC.md breakup plan and instead add `status:` frontmatter to each extracted section. `pending-system.md` already exists without frontmatter — I'll add it when I touch that file next.
-<!-- agent:boundary:021b1d98 -->
+<!-- agent:boundary:b1312aae -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

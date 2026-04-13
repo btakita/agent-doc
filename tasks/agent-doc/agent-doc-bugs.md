@@ -808,7 +808,7 @@ src/agent-doc/specs/
    - My recommendation: **(a)** — fast, mechanical. If we find a drift later we can reclassify individual files. Verification is a separate pass.
 
 If you like this structure, confirm and I'll start the extraction. If you want a different layout, tell me what to change before I touch any of it — I'd rather re-cut the plan than re-cut 25 files.
-<!-- agent:boundary:69cabd7f -->
+<!-- agent:boundary:41e9e2cb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

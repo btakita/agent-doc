@@ -580,7 +580,7 @@ Done. `mv .claude/skills/agent-doc/runbooks/cycle-steps.md .claude/skills/agent-
 My mistake — not a determinism failure, an operator failure. I didn't include a `<!-- patch:pending -->` block in the previous response. SKILL.md step 1b says "every response MUST include a `<!-- patch:pending -->` block" — I skipped it. The binary only rewrites pending when a patch block exists; absent that, the old list stays verbatim.
 
 Fixing it this cycle: pending now removes the completed item. Also worth adding to `skill-submit-cycle.md` — the existing runbook is about write-back (step 4), but step 1b (pending update) has the same silent-skip failure mode and deserves the same self-check treatment. Want me to add a "Pending update" checkpoint to the runbook?
-<!-- agent:boundary:e70a297b -->
+<!-- agent:boundary:f69bc010 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

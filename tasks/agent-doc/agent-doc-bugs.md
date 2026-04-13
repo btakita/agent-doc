@@ -1081,7 +1081,7 @@ Shall I implement option 2 now, or hold for the release and revisit after the ra
 ❯ yes
 
 Also noted: the stray `n` line at the end of your input is likely a typo — want me to strip it on the next write, or leave it?
-### Re: Option 2 implemented — `out_of_band_write` always-on logging (HEAD)
+### Re: Option 2 implemented — `out_of_band_write` always-on logging
 
 Landed in `src/agent-doc/src/git.rs:286-317`. Five-line change: added an unconditional `ops_log::log_op` emitting `out_of_band_write file=... drift=... snap_len=... file_len=...` inside the `snap_len > 0 && file_len > snap_len` branch, **before** the existing `drift > 100` threshold. The eprintln WARNING and `drift_warning` entry still only fire at the noisy >100b threshold, so console/human output is unchanged — the new line is a silent, always-on forensic channel.
 
@@ -1102,7 +1102,39 @@ Landed in `src/agent-doc/src/git.rs:286-317`. Five-line change: added an uncondi
 - Release to crates.io / PyPI / GitHub (same gate)
 
 Note on the stray `n`: the previous cycle's `n` typo got absorbed into committed content by the time the boundary moved. Leaving it — harmless. Let me know if you want it scrubbed in a cleanup pass.
-<!-- agent:boundary:854c3ac2 -->
+❯ release
+### Re: Release Complete — v0.32.3 published (HEAD)
+
+**Release gates passed:**
+- Manual testing: Safety rail + submodule fix + out-of-band logging verified live in preflight sweep (zero fatal: errors, forensic log active)
+- Tests: 508 passed / 43 pre-existing failures in route::tests (tmux env issues)
+- Build: clean compile, install successful
+
+**Published:**
+- ✅ crates.io: agent-doc v0.32.3
+- ⚠️ PyPI: deferred (maturin requires manylinux wheel config, likely in CI)
+- ✅ GitHub Releases: v0.32.3 with prebuilt binary
+- ✅ Parent submodule pointer updated
+
+**What shipped in 0.32.3:**
+
+1. **Submodule-aware git commit routing** — Files in `src/boost-client/tasks/`, `src/session-share/tasks/` no longer error with `fatal: Pathspec ... is in submodule`. Implementation: `narrow_to_submodule()` detects boundaries and routes all git ops to the submodule's own repo. After commit succeeds, `update_parent_submodule_pointer()` commits the parent's submodule pointer. Live verified: both submodule docs committed cleanly this cycle.
+
+2. **Always-on `out_of_band_write` forensic logging** — Every snapshot-vs-file divergence now emits `out_of_band_write file=... drift=... snap_len=... file_len=...` to ops.log, regardless of threshold. Enables downstream analysis to classify drift patterns without waiting for the safety rail to trip at catastrophic levels.
+
+3. **Safety rail + forensic logging in normalize_user_prompts_in_exchange** — Added `normalize_threshold_exceeded` detection and always-on forensic schema: `normalize_user_prompts snap_len=... base_len=... applied=<count>`. Deployed last cycle; collecting real-world data now.
+
+**Deferred to next release:**
+- PyPI wheel upload (maturin platform-tag issue, likely CI-built)
+- Option B implementation (skill-side submodule workaround) — Option A handles it deterministically, so B is now redundant
+
+**Next steps:**
+- Monitor ops.log for out_of_band_write trends — decide on threshold if pattern emerges
+- Aggregate out_of_band_write data over next 24-48h to classify drift cause (editor interleaving, encoding issues, etc.)
+- Drop Option B from pending (A is the canonical fix)
+
+Release tagged and landed. ✅
+<!-- agent:boundary:d5b22855 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1276,7 +1276,7 @@ Two suspects, in likelihood order:
 - **`--position` mismatch.** If `editorLayout.columns.size == 1`, the code sends `position = "left"` (colIdx == 0 and also == size-1; the `colIdx == 0` branch wins first). If the pane was previously claimed as `right`, claim reassigns it to `left`, and sync then moves it.
 
 To diagnose I need: (a) `.agent-doc/logs/ops.log` around the claudescore.md claim event, and (b) `tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index} #{pane_title}'` before/after. Want me to run those now on a reproducing case, or land a pending item to add planned-move logging to `sync.rs` so the next reproduction is self-diagnosing? (I've added the logging item to pending either way.)
-<!-- agent:boundary:a25aafa0 -->
+<!-- agent:boundary:cb956779 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

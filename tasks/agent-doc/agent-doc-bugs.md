@@ -15,7 +15,7 @@ claude_args: --dangerously-skip-permissions
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-### Supervisor Phase 1 session (2026-04-13) (HEAD)
+### Supervisor Phase 1 session (2026-04-13)
 
 Dogfooded Phase 1 kickoff. Outcomes captured in `src/agent-doc/specs/supervisor.md`:
 
@@ -26,6 +26,20 @@ Dogfooded Phase 1 kickoff. Outcomes captured in `src/agent-doc/specs/supervisor.
 - **Question answered:** supervisor works outside tmux architecturally (owns its own pty), but every current consumer — livestream setup, `/agent-doc` cross-pane routing, claim system, focus — assumes tmux. Dropping tmux is a separate spec cycle.
 
 **Next submodule:** `supervisor/pty.rs` — awaiting user go-ahead to proceed.
+### Re: Context written to specs + pending, exchange compacted (HEAD)
+
+**Spec updates (`src/agent-doc/specs/supervisor.md`):**
+
+1. **Phase 1 Implementation Status table** added after Motivation — tracks cwd (landed) vs pty/resize/state/ipc/start.rs wire-up (not started) in the sequence subsequent PRs will land. Notes the `#![allow(dead_code)]` gate in `supervisor/mod.rs` stays until `start.rs` consumes the module.
+2. **CWD determinism invariants** — added an "Implementation invariants" block under Core Invariants pinning the four non-obvious decisions from this session: relative-path bases differ by source, misconfigured paths hard-error, `find_project_root` duplicated for module self-containment, `CwdSource::as_str()` tags locked.
+3. **Non-tmux Mode (Future) section** (from earlier this cycle) — four requirements + non-goals + explicit "not in phase 1" scope gate, so the idea survives future refactors.
+
+**Pending items added** for the remaining phase 1 submodules, each with enough context to pick up cold: `pty.rs`, `resize.rs`, `state.rs`, `ipc.rs`, `start.rs` wire-up, plus the manual smoke test from the release checklist.
+
+**Exchange compacted** via `agent-doc compact` with a summary-message pointer. 1693 lines archived to `.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20260413-195807.md` — nothing lost, just moved off the hot path.
+
+Ready to proceed with `supervisor/pty.rs` whenever you give the go-ahead.
+<!-- agent:boundary:09c94601 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -50,5 +64,11 @@ Dogfooded Phase 1 kickoff. Outcomes captured in `src/agent-doc/specs/supervisor.
 - [ ] [#64mb] Investigate double commit_staging race: ops.log at 1776095605 shows two back-to-back commit_staging/out_of_band_write pairs for the same file within the same second.
 - [ ] [#tw4a] claim: cd into document's .agent-doc root (nearest git repo) when claiming a pane. Fixes relative-path ambiguity and makes git ops naturally target the correct repo.
 - [ ] [#8jzg] claim --isolate: spawn a fresh Claude Code process in the submodule root so CLAUDE.md, memory, and skills load scoped to that repo. Only real fix for cross-project context leakage (mid-session cd does not reload context).
+- [ ] [#a17b] supervisor/pty.rs: portable-pty allocation, stdin/pty forwarding threads, fake-claude shell-script integration test
+- [ ] [#jg0d] supervisor/resize.rs: SIGWINCH unix path via signal-hook; Windows ConPTY stub for phase 1
+- [ ] [#b486] supervisor/state.rs: crash classifier, ring buffer, Healthy->Transient->Flapping->Halted state machine
+- [ ] [#40ct] supervisor/ipc.rs: Unix-domain socket accept loop, reuse length-prefixed JSON frame from ipc_socket.rs
+- [ ] [#vnp0] supervisor: wire into start.rs (replace existing restart loop, remove #[allow(dead_code)])
+- [ ] [#f7d5] supervisor: smoke test — real claude under supervisor in a tmux pane, verify restart + inject + CWD invariant end-to-end
 <!-- /agent:pending -->
 ## Assistant

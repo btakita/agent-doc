@@ -1007,7 +1007,7 @@ Both files sit inside submodules, parent `agent-doc commit` sweep can't stage th
 2. **Option A next** (per the draft at line 392+) — deterministic binary behavior, replaces B once shipped
 
 Want me to implement B immediately, then continue into A? Or A-only if you'd rather not have a transient skill workaround.
-<!-- agent:boundary:108dca8e -->
+<!-- agent:boundary:63d88a47 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

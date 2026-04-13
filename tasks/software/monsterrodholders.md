@@ -980,7 +980,7 @@ All three depend on Wordfence being active (2FA via `wfls`; password-leak check 
 2. **Confirmation** whether to install Wordfence on staging as a dry-run (low value IMO, skip) or go straight to prod
 3. **Jenny out-of-band verification** — her gmail needs to be confirmed secure before her MRHadmin account can be restored
 4. **Sellbrite rotation window** — do you want me to pre-generate a new WC REST API key before killing the prod `sellbrite-integration` login, or accept a brief sync gap
-<!-- agent:boundary:1b70a81d -->
+<!-- agent:boundary:c88d21d8 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

@@ -1655,12 +1655,58 @@ What would need to change to drop tmux:
 
 Want me to add a short "Non-tmux mode (future)" section to `specs/supervisor.md` capturing those four requirements, so it's not lost?
 ❯ Yes
-### Re: Added "Non-tmux Mode (Future)" section (HEAD)
+### Re: Added "Non-tmux Mode (Future)" section
 
 Inserted after the WSL caveat in `src/agent-doc/specs/supervisor.md`, before the Logging section. Captures the four requirements (entry gate, resize source, IPC discoverability, claim/binding model) plus a non-goals note that visual multiplexing stays tmux's job. The section explicitly frames this as "not in phase 1" so the release scope is preserved.
 
 Ready to proceed with Phase 1 implementation whenever you are — starting with `supervisor/cwd.rs` + unit tests as planned.
-<!-- agent:boundary:68aa058d -->
+❯ Proceed with Phase 1
+### Re: Phase 1 — `supervisor/cwd.rs` landed (HEAD)
+
+First piece of the supervisor module is in:
+
+- `src/agent-doc/src/supervisor/mod.rs` — module shell, gates dead-code warnings until `start.rs` wires it up
+- `src/agent-doc/src/supervisor/cwd.rs` — CWD resolver + unit tests
+- `src/agent-doc/src/frontmatter.rs` — added `agent_doc_cwd: Option<String>` field (serde rename, skip_if_none, backfilled the test fixture)
+- `src/agent-doc/src/main.rs` — registered `mod supervisor;`
+
+**Resolver contract:**
+
+```rust
+pub fn resolve(
+    cli_cwd: Option<&Path>,
+    frontmatter_cwd: Option<&str>,
+    document: &Path,
+) -> Result<ResolvedCwd>
+```
+
+Priority chain matches the spec exactly — CLI flag > frontmatter > `.agent-doc/` walk > doc parent. Returns `ResolvedCwd { path, source: CwdSource }` so the supervisor can log `cwd_resolved source=cli_flag` style. `CwdSource::as_str()` gives stable tags (`cli_flag`, `frontmatter`, `project_root`, `document_parent`).
+
+**Key design decisions worth flagging:**
+
+1. **Relative-path bases differ by source.** `--cwd` is resolved against the process CWD (standard canonicalize behavior, so `agent-doc start --cwd .` does what users expect). `agent_doc_cwd` is resolved against the **document's parent directory**, so `..` in the frontmatter means "parent of the folder the doc lives in," not "parent of wherever the user happened to invoke the binary." The tests pin both behaviors.
+2. **Misconfigured paths hard-error instead of falling through.** If `--cwd /bogus` is passed or `agent_doc_cwd: nowhere` is in frontmatter, the resolver returns an error rather than silently dropping to project-root detection. Silent fall-through would mask typos and make debugging CWD drift harder than it already is.
+3. **`find_project_root` is duplicated (not reused from `snapshot.rs`).** The supervisor module needs to stay self-contained — a supervisor process may run before any snapshot path is computed, and I didn't want a circular dependency on `snapshot` from a lifecycle-level module. The walk is six lines and won't drift.
+4. **Document must exist.** `canonicalize()` is called first on the document path; a missing doc is a hard error with a clear message.
+
+**Tests (11, all passing under `cargo test --bin agent-doc supervisor::cwd`):**
+
+- `cli_flag_wins_over_everything`
+- `frontmatter_wins_when_no_cli_flag`
+- `frontmatter_absolute_path_is_respected`
+- `project_root_wins_when_no_cli_or_frontmatter`
+- `document_parent_fallback_when_no_project_root`
+- `cli_flag_nonexistent_path_is_hard_error`
+- `cli_flag_file_not_directory_is_hard_error`
+- `frontmatter_nonexistent_does_not_fall_through_to_project_root`
+- `document_must_exist`
+- `source_tag_strings_are_stable`
+- `deeply_nested_document_still_finds_project_root`
+
+**Clippy:** `cargo clippy --all-targets` clean on the supervisor module (the 30 other warnings are pre-existing, untouched by this change).
+
+**Next up:** `supervisor/pty.rs` — `portable-pty` allocation, stdin/pty forwarding threads, and the first integration test that spawns a shell-script fake-claude and asserts bytes flow both directions. Want me to proceed, or review this cwd piece first?
+<!-- agent:boundary:c7d81fa2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

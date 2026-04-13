@@ -1103,7 +1103,7 @@ What's **redacted** from the draft:
 3. **Don't use gist — use a different channel** — e.g., private GitHub repo, passage-encrypted file, encrypted email attachment to the relevant party. Tell me who the recipient is and I'll propose a fit.
 
 My default recommendation is #1 **only if the intended audience is inside your trust circle** (you, Flywheel ops, the legitimate account owner's team). If any of this might reach the attacker — don't gist.
-### Re: WP security now (DNS hasn't moved) — Wordfence Free or Solid Security Pro? (HEAD)
+### Re: WP security now (DNS hasn't moved) — Wordfence Free or Solid Security Pro?
 
 Given DNS is still on Liquidweb (no Cloudflare edge yet), the WP-layer plugin is doing more work than it would post-cut-over. That changes the recommendation.
 
@@ -1123,7 +1123,7 @@ Why, for *this specific moment*:
 
 ---
 
-### Re: Cloudflare rules spec — put in separate md doc (HEAD)
+### Re: Cloudflare rules spec — put in separate md doc
 
 Done. Spec is at:
 
@@ -1143,7 +1143,7 @@ This is the doc I'll reference when you're ready to apply rules post-DNS-cutover
 
 ---
 
-### Re: Strong password — which is the best option? (HEAD)
+### Re: Strong password — which is the best option?
 
 For a live e-commerce site with active attack pressure, the answer depends on whether you're already buying Solid Security Pro.
 
@@ -1157,7 +1157,7 @@ For a live e-commerce site with active attack pressure, the answer depends on wh
 
 ---
 
-### Re: Sharing the gist with ron-berkes — repo is cloned on ssh server (HEAD)
+### Re: Sharing the gist with ron-berkes — repo is cloned on ssh server
 
 The SSH-server-clone concern is legitimate. If monsterrodholders-dev is cloned at `/opt/monsterrodholders/app` and any shell user on that box can read the working tree, then committing the security findings to that repo means anyone with SSH access to the server can read your forensic analysis, IP lists, and attacker TTPs. That's the opposite of what you want.
 
@@ -1174,7 +1174,7 @@ The SSH-server-clone concern is legitimate. If monsterrodholders-dev is cloned a
 **My recommendation:** Private Gist for this one document. If you end up writing more security docs (incident runbooks, forensic reports, post-mortems), create `monsterrodholders-security` as a separate private repo and keep it off the production server entirely.
 
 Want me to create the gist now? I'll need you to confirm `gh auth status` is pointing at the right account first — the gist will be owned by whichever GitHub user `gh` is authenticated as.
-<!-- agent:boundary:1f2318b8 -->
+<!-- agent:boundary:39394076 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

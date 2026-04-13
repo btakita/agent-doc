@@ -15,7 +15,7 @@ agent_doc_write: crdt
 ❯ How can someone look in the claude code history to find the exact session that contained a topic?
 ❯ How can someone look in the claude code history to find the exact session that contained a topic?
 
-### Re: Finding a session by topic (HEAD)
+### Re: Finding a session by topic
 
 Sessions are stored as JSONL files in `~/.claude/projects/<encoded-project-path>/`.
 
@@ -35,7 +35,7 @@ cat ~/.claude/projects/<project>/<session-uuid>.jsonl \
 **Path encoding:** `/home/brian/work/btakita/agent-loop` → `-home-brian-work-btakita-agent-loop` (slashes become hyphens, leading `-` added).
 
 **Semantic search:** Use `/mem-search` (claude-mem skill) for cross-session topic search — better than exact string matching when you don't know the exact phrasing.
-<!-- agent:boundary:e0bff49f -->
+<!-- agent:boundary:b008724c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

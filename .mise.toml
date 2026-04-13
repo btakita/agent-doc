@@ -1,5 +1,5 @@
 [env]
-_.file = [".env"]
+_.source = ".env"
 _.path = [".bin", ".venv/bin"]
 
 [tools]

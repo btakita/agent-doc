@@ -15,7 +15,7 @@ agent_doc_write: crdt
 ❯ On my system, the cursor in the browser is very small. The cursor is much bigger with other apps. Why is it small for browsers?
 ❯ On my system, the cursor in the browser is very small. The cursor is much bigger with other apps. Why is it small for browsers?
 
-### Re: Small browser cursor (HEAD)
+### Re: Small browser cursor
 
 Classic HiDPI/cursor scaling issue. Browsers bypass the system cursor size settings that native GTK/Qt apps respect.
 
@@ -41,7 +41,7 @@ gtk-cursor-theme-size=32
 **Fix 3 — KDE Plasma:** System Settings → Appearance → Cursors → set size there
 
 Log out and back in after editing `/etc/environment` — browsers pick it up on next launch.
-<!-- agent:boundary:cab749a4 -->
+<!-- agent:boundary:2bf12dfa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

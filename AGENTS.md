@@ -89,8 +89,8 @@ agent-loop/
 
 **NEVER inline cleartext secrets in commands.** This user livestreams — tool call output is visible to viewers.
 
-- Use `pass <path>` via subshell: `CARGO_REGISTRY_TOKEN="$(pass crates.io/token)" cargo publish`
-- Use `--token "$(pass ...)"` when CLIs accept token flags
+- Use `pass <path>` via subshell: `CARGO_REGISTRY_TOKEN="$(passage crates.io/token)" cargo publish`
+- Use `--token "$(passage ...)"` when CLIs accept token flags
 - If a command requires a secret, always wrap it with `pass` or reference an env var that's set in the shell profile
 - Never echo, print, or log secrets — not even in error messages
 - If you're unsure whether a value is secret, treat it as secret

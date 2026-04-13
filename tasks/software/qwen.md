@@ -30,7 +30,7 @@ If you're asking about web search *within Claude Code* — the `WebSearch` and `
 **Bottom line:** Qwen doesn't have native web search as a built-in capability. You need to wire it up yourself via function calling or external API calls.
 ❯ I'm using claude code. Why did the claudescore.md session not find WebSearch? Is this due to me using agent-doc?
 
-### Re: Why claudescore.md couldn't use WebSearch (HEAD)
+### Re: Why claudescore.md couldn't use WebSearch
 
 The "Web search was unavailable (model access issue)" in claudescore.md refers to the **agent instance that was working on that document**, not this session. That session was likely running with a model or API configuration that didn't support the `WebSearch` tool.
 
@@ -45,7 +45,7 @@ This session has `WebSearch` and `WebFetch` available (I can confirm they're in 
 If you want to **verify** whether it's available in the current session, I can run a quick web search right now — want me to search for something as a smoke test?
 Why is the previous response patch uncommitted?
 
-### Re: Enabling web search with Open WebUI + Qwen (and Claude access) (HEAD)
+### Re: Enabling web search with Open WebUI + Qwen (and Claude access)
 
 **Open WebUI web search works with Qwen — it's model-agnostic.**
 
@@ -67,7 +67,7 @@ Anthropic's API is not OpenAI-compatible, so there's no direct provider config f
 2. **LiteLLM proxy** — Run a local LiteLLM server with your Anthropic API key, point Open WebUI's OpenAI endpoint at it
 
 Either way, web search works automatically with Claude models too — same preprocessing pipeline.
-<!-- agent:boundary:3fb5c4b4 -->
+<!-- agent:boundary:04eeb98f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

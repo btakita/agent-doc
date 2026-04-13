@@ -174,7 +174,7 @@ When projects depend on each other, releases must follow dependency order. The s
 ### 7.1 Secret Resolution
 
 Secrets are resolved through a secret manager (e.g., `pass`, `1password-cli`, `vault`). The skill:
-1. Wraps publish commands with secret manager subshells: `TOKEN="$(pass path/to/token)" cmd`
+1. Wraps publish commands with secret manager subshells: `TOKEN="$(passage path/to/token)" cmd`
 2. Maintains a registry of known secret paths per publication target
 3. If a secret path is unknown, searches or asks the user — never guesses
 

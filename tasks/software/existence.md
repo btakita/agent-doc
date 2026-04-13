@@ -274,7 +274,7 @@ Added a new subsection under Axiology (before Epistemology):
 ❯ do
 ❯ - [ ] Commit philosophy submodule + update parent pointer
 
-### Re: Commit done (HEAD)
+### Re: Commit done
 
 Already completed in the previous cycle — philosophy committed (`20a7b33`) and parent pointer updated (`33bec355`).
 

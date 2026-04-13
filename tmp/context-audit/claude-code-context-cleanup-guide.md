@@ -167,7 +167,7 @@ session. Everything else goes into reference files with one-line pointers:
 
 MARKDOWN
 
-# CLAUDE.md (core -- keep this lean) (HEAD)
+# CLAUDE.md (core -- keep this lean)
 
 For API conventions, read docs/api-standards.md.
 
@@ -345,3 +345,4 @@ cal.com/bradley-bonanno/ai-strategy-call
 BUILT WITH CLAUDE CODE | 2026
 
 07
+

@@ -2,7 +2,7 @@
 description: Submit a session document to an AI agent and append the response
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.31.5"
+agent-doc-version: "0.32.0"
 ---
 
 # agent-doc
@@ -40,21 +40,6 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`)
 
 Do not proceed with the normal document session workflow after handling compact.
 
-**Stale-binary guard:** Before running any `agent-doc` subcommand, ensure the binary is current. Check if source tree is newer than binary:
-
-```bash
-bin=/home/brian/work/btakita/agent-loop/.bin/agent-doc
-src_dir=/home/brian/work/btakita/agent-loop/src/agent-doc
-newest_src=$(find "$src_dir/src" "$src_dir/Cargo.toml" -type f -printf '%T@\n' | sort -nr | head -1)
-bin_mtime=$(stat -c '%Y' "$bin" 2>/dev/null || echo 0)
-if awk "BEGIN{exit !(${newest_src} > ${bin_mtime})}"; then
-    echo "[agent-doc] source newer than binary — rebuilding"
-    (cd "$src_dir" && make build-release) || exit 1
-fi
-```
-
-If the guard triggers, the binary is rebuilt automatically. No further action needed — preflight will use the fresh binary.
-
 **Auto-update skill:** Run `agent-doc --version` and compare against the `agent-doc-version` in this file's frontmatter. If the binary version is newer, run `agent-doc skill install --reload compact` to update this SKILL.md. If the output contains `SKILL_RELOAD=compact`, use `AskUserQuestion` to prompt the user: "SKILL.md was updated. Run /compact to reload the skill, then re-run /agent-doc." Stop and do not proceed with the document session. If `agent-doc` is not installed or the version matches, skip this step.
 
 **Run preflight:** Execute `agent-doc preflight <FILE>` via Bash. This single command handles:
@@ -73,7 +58,13 @@ The command outputs JSON to stdout:
   "no_changes": false,
   "baseline_file": "/path/to/.agent-doc/baselines/<hash>.md",
   "slash_commands": [],
-  "builtin_commands": []
+  "builtin_commands": [],
+  "effective_tier": "med",
+  "required_tier": null,
+  "suggested_tier": "med",
+  "model_switch": null,
+  "model_switch_tier": null,
+  "env": {}
 }
 ```
 
@@ -100,6 +91,69 @@ If preflight returns a non-empty `slash_commands` or `builtin_commands` array, h
 - All other built-ins → log to console and skip (cannot execute Claude Code built-ins from within the session)
 
 **Guards:** `parse_slash_commands` already filtered out code-fenced lines, blockquotes, and non-added lines — trust the output. Do not re-validate.
+
+### 0c. Model tier gate (harness-agnostic)
+
+Preflight composes an `effective_tier` (`low | med | high`) from these sources, highest precedence first:
+
+1. Inline `/model <x>` command in the diff (stripped from downstream diff)
+2. `<!-- agent:model -->` component content
+3. `agent_doc_model_tier` frontmatter field
+4. Diff heuristic (`suggested_tier`)
+
+Use the tier to gate execution:
+
+- If `model_switch` is set (user typed `/model <x>`), acknowledge the switch in your response and proceed. The user explicitly chose this tier.
+- If `required_tier` is set (from component or frontmatter) and the current session's tier is **lower** than `required_tier`, tell the user:
+  > "This document requires `<required_tier>` tier. Run `/model <x>` in your terminal, then re-run `/agent-doc`."
+  and stop. Do not generate a response.
+- Otherwise, compare `effective_tier` against the current session model. If you (the running agent) are a lower tier than `effective_tier` and the task looks substantial (`diff_type` ∈ {`approval`, `implementation`, `architecture`}, or long diff), suggest escalating in the response but still proceed best-effort.
+- `effective_tier = auto` means "no preference" — always proceed.
+
+The tier comparison is advisory within a session — the skill cannot switch the running model, but it can surface the mismatch so the user can `/model` and re-invoke.
+
+### 0c2. Export frontmatter env vars
+
+If preflight returns a non-empty `env` object, export each key-value pair into the current shell **before** generating your response. Values may contain shell expressions (`$(command)`, `$VAR`) — the shell expands them during export.
+
+Run a single Bash tool call with sequential exports:
+```bash
+export KEY1=value1
+export KEY2="$(passage btak/SOME_KEY)"
+export KEY3="$KEY1"
+```
+
+This ensures later values can reference earlier keys. The expanded values apply to all subsequent Bash tool calls in this session.
+
+**Security:** Values are returned **unexpanded** from preflight (e.g., `$(passage ...)`). The shell evaluates them at export time — expanded secrets never appear in JSON output or tool call results.
+
+### 0d. Handle pending callbacks
+
+If preflight returns a non-empty `pending_callbacks` array, another process (e.g., `agent-doc cleanup`) is waiting for this session to respond. Handle each callback **before** generating your normal response.
+
+For each pending callback:
+
+1. **Read the full request:**
+   ```bash
+   agent-doc callback read <doc_path>
+   ```
+   This returns JSON with `request_id`, `operations`, `context`, and `ttl_secs`.
+
+2. **Process the requested operations** (common types):
+   - `compact` — summarize the exchange content into a concise paragraph
+   - `prune-pending` — review pending items, remove completed ones
+   - `summary` — generate a status summary from current document state
+
+3. **Write the response:**
+   ```bash
+   agent-doc callback respond <doc_path> --request-id <id> --summary "Your response text here"
+   ```
+
+4. Log to console: `[callback] processed <operations> for <doc_path>`
+
+**The PostToolUse hook also fires `agent-doc hook check-callbacks`** after every Bash tool use. If the hook output contains `pending_callbacks` with entries, handle them the same way — read, process, respond. This gives faster detection than waiting for the next preflight cycle.
+
+**Timing:** Callbacks have a TTL (default 120-300s). If you see one, process it promptly. The requesting process is polling for your response.
 
 ### 1. Respond (with streaming checkpoints for template mode)
 

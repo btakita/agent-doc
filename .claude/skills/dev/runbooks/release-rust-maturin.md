@@ -9,8 +9,8 @@ Publication targets: crates.io + PyPI + GitHub Release + binary install
 3. Commit from within the submodule (never from parent)
 4. Tag: `git tag v<version>`
 5. Push: `git push && git push origin v<version>`
-6. Publish to crates.io: `CARGO_REGISTRY_TOKEN="$(pass btak/CARGO_REGISTRY_TOKEN)" cargo publish`
-7. Publish to PyPI: `MATURIN_PYPI_TOKEN="$(pass pypi/publish_token)" maturin publish --no-sdist`
+6. Publish to crates.io: `CARGO_REGISTRY_TOKEN="$(passage btak/CARGO_REGISTRY_TOKEN)" cargo publish`
+7. Publish to PyPI: `MATURIN_PYPI_TOKEN="$(passage pypi/publish_token)" maturin publish --no-sdist`
 8. Create GitHub Release: `gh release create v<version> --generate-notes` with prebuilt binary
 9. Rebuild local binary: `make release` or `cargo build --release`
 10. Install to cargo bin: `cargo install --path .`

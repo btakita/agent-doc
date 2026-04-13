@@ -14,7 +14,7 @@ agent_doc_write: crdt
 <!-- agent:exchange patch=append -->
 ❯ brooke-brodack had her youtube channel autodeleted.
 ❯ Is there any way to recover her videos?
-### Re: Recovering brooke-brodack's autodeleted YouTube channel (HEAD)
+### Re: Recovering brooke-brodack's autodeleted YouTube channel
 
 The options depend on **why** the channel was autodeleted and how much time has passed.
 
@@ -54,7 +54,7 @@ Sources:
 - [YouTube Channel Recovery: Proven Tips to Restore in 2026](https://www.outrightcrm.com/blog/youtube-channel-recovery/)
 - [Brooke Brodack - Wikipedia](https://en.wikipedia.org/wiki/Brooke_Brodack)
 - [Brookers videos (and old YouTube in general) — Lost Media Wiki Forums](https://forums.lostmediawiki.com/thread/5112/brookers-videos-old-youtube-general)
-<!-- agent:boundary:473065ef -->
+<!-- agent:boundary:19e7c295 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

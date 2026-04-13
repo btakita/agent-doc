@@ -15,7 +15,7 @@ agent_doc_write: crdt
 ❯ rob-ross is seeing the following when I share my screen on zoom.
 ❯ How can I properly share my screen, without the overlay, so Rob can see my screen.
 ❯ ![img.png](img.png)
-### Re: Zoom screen sharing overlay (HEAD)
+### Re: Zoom screen sharing overlay
 
 Looking at the screenshot, Rob sees mostly a dark screen with a green border. This is the classic "sharing your whole screen while Zoom is on it" problem.
 
@@ -30,6 +30,8 @@ Looking at the screenshot, Rob sees mostly a dark screen with a green border. Th
 3. **Advanced > Portion of Screen**: Drag a rectangle over just the content area, avoiding the Zoom window.
 
 On Linux: the green border is Zoom's capture region indicator shown to you — Rob doesn't see the border itself. The dark area Rob sees is your desktop background behind the Zoom window.
+
+Look at my OS and zoom version. Can I share my entire screen and display 
 <!-- agent:boundary:52ddc533 -->
 <!-- /agent:exchange -->
 

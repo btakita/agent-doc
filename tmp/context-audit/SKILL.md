@@ -140,7 +140,7 @@ Fix: {One-line actionable fix}
 Score labels: 90-100 CLEAN, 70-89 NEEDS WORK, 50-69 BLOATED, 0-49 CRITICAL.
 Severity: CRITICAL > 10pts, WARNING 5-10pts, INFO < 5pts.
 
-## Step 4: Offer to Fix (HEAD)
+## Step 4: Offer to Fix
 
 After the report:
 

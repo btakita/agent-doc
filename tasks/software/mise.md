@@ -305,7 +305,7 @@ If you want shell expansion at source time, stay with `_.source`. If you're movi
 ❯ If I comment out an env variable in .env, how do I have it removed from the shell env?
 ❯ If I comment out an env variable in .env, how do I have it removed from the shell env?
 
-### Re: removing env vars when commented out (HEAD)
+### Re: removing env vars when commented out
 
 You can't — `_.source` just runs the file as a shell script. Mise re-sources it on each prompt hook, but sourcing is additive: it sets vars but doesn't unset ones that were previously set and are now absent.
 

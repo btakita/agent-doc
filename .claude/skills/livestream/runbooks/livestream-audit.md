@@ -28,7 +28,7 @@ Scan Claude Code session transcripts or files for exposed secrets.
 
 ## Safe Patterns (skip)
 
-- `$(pass ...)` subshell references
+- `$(passage ...)` subshell references
 - `Bearer redacted`, `Bearer test-token`
 - Code comments and documentation references
 - Placeholder values like `YOUR_TOKEN_HERE`

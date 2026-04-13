@@ -23,12 +23,12 @@ Operational guardrails for livestreamed coding sessions — secret protection, a
 Sets session-wide guardrails. When livestream mode is active:
 
 **Secret Protection (CRITICAL):**
-- **NEVER** inline cleartext secrets in Bash commands. Always use `pass` subshell: `"$(pass path/to/secret)"`
+- **NEVER** inline cleartext secrets in Bash commands. Always use `pass` subshell: `"$(passage path/to/secret)"`
 - **NEVER** read files that contain secrets (`tokens.json`, `.env`, credential files). If a workflow requires reading a token file, refuse and suggest an alternative (e.g., `pass` or env var).
 - **NEVER** echo, print, cat, or log secret values — not even in error handling.
 - **NEVER** show Bearer tokens, API keys, OAuth tokens, or refresh tokens in tool output.
 - Redact any secret that appears in tool output before presenting to the user.
-- When a command requires a secret, always wrap with `pass`: `CARGO_REGISTRY_TOKEN="$(pass btak/CARGO_REGISTRY_TOKEN)" cargo publish`
+- When a command requires a secret, always wrap with `pass`: `CARGO_REGISTRY_TOKEN="$(passage btak/CARGO_REGISTRY_TOKEN)" cargo publish`
 
 **Audience-Safe Output:**
 - Avoid showing full file paths that reveal private directory structure when unnecessary.

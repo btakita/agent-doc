@@ -3,7 +3,6 @@ agent_doc_session: be20dd6e-31ce-4f16-93ed-42c9c2a21b98
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
-agent_doc_auto_compact: 250
 ---
 
 # agent-loop operations
@@ -58,7 +57,7 @@ Run `/context` to see the breakdown. Typical heavy hitters:
 
 Want me to audit your `~/.claude/settings.json` and `MEMORY.md` for trim opportunities? I can identify which MCP servers / plugins are heaviest.
 ❯ yes
-### Re: context audit (HEAD)
+### Re: context audit
 
 Starting the audit. I need one thing from you first:
 

@@ -626,7 +626,7 @@ This preflight's sweep just committed it as `b6cc77f agent-doc(claudescore): 202
 **If you want faster commits on claudescore.md specifically:** run `/agent-doc tasks/claudescore.md` briefly (even with no edits) — its own preflight will commit in step 2. Or rely on the sweep like now.
 
 Add a agent-doc preflight command 
-### Re: agent-doc preflight command (HEAD)
+### Re: agent-doc preflight command
 
 `agent-doc preflight` already exists (v0.32.0). It:
 - Recovers orphaned responses (step 1)
@@ -636,7 +636,7 @@ Add a agent-doc preflight command
 - Returns JSON with baseline path, diff, and tier info
 
 **What's missing from model docs?** Should I add it to the SKILL.md runbooks, or add to VERSIONS.md as a feature entry?
-<!-- agent:boundary:38847067 -->
+<!-- agent:boundary:9291adf3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

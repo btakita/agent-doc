@@ -191,7 +191,7 @@ Monthly public attestations by independent accountants for USDP and PYUSD.
 **No other currency reserves** — all stablecoins are USD-denominated. PAXG is the only non-USD asset they tokenize (gold). No EUR, GBP, or multi-currency stablecoins currently under the Paxos brand (Membrane Finance, their EU acquisition, handles MiCA-compliant EUR stablecoin territory).
 
 ❯ compress [2026-04-08 17-00-21.mp4](../../../../../Videos/2026-04-08%2017-00-21.mp4)
-### Re: Video compression (HEAD)
+### Re: Video compression
 
 Compressing `Videos/2026-04-08 17-00-21.mp4` (2.3 GB, 1080p, ~53 min) in background.
 

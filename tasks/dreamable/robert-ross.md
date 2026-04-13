@@ -1018,7 +1018,7 @@ Compressing `/home/brian/Videos/2026-04-08 15-07-35.mp4` (2.1 GB) → `2026-04-0
 - **Path:** `/home/brian/Videos/2026-04-08 15-07-35-compact.mp4`
 
 transcribe + diarize [2026-04-08 15-07-35-compact.mp4](../../../../../Videos/2026-04-08%2015-07-35-compact.mp4): Brian + robert-ross
-### Re: transcribe + diarize (HEAD)
+### Re: transcribe + diarize
 
 Running `corky transcribe` with diarization on `2026-04-08 15-07-35-compact.mp4` (46:34, speakers: Brian + Robert Ross). GPU transcription in background — will complete in a few minutes.
 
@@ -1232,7 +1232,7 @@ Summary of the call:
 - **Scoring API confusion:** Rob was conflating "Brian's score" with the "scoring API" service. Brian clarified: the task was to run the scoring API against Brian's session transcript + CLAUDE.md, compare output to expected 82/100, then diff factor-by-factor to identify miscalibrated eval prompts.
 - **Two scoring methodologies:** Rob has his own set of factors; Brian has his (from the original rubric). ~100 factors each. Rob's phrasing ("two factors") was imprecise — Brian corrected: two sets of scoring methodologies, not two individual factors.
 - **Call cut short:** Rob had another call come in at ~4:46 and had to drop. They ended roughly aligned ("I think we're in agreement").
-<!-- agent:boundary:0c1b114e -->
+<!-- agent:boundary:f960e242 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

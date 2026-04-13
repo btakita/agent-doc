@@ -127,7 +127,7 @@ When preflight runs for any document, scan all tracked documents in the same pro
 
 ---
 
-## Priority (HEAD)
+## Priority
 
 | Fix | Impact | Complexity | Notes |
 |-----|--------|------------|-------|

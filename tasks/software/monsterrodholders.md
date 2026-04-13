@@ -1203,7 +1203,7 @@ Or via web UI at the gist URL → Delete button. Since you plan to delete after 
 ```bash
 gh gist edit 7151ff6b944d525fa4f8f0c00f4261f8 tasks/software/monsterrodholders/security-findings-gist-draft.md
 ```
-<!-- agent:boundary:1a10c32e -->
+<!-- agent:boundary:a7fbc9af -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

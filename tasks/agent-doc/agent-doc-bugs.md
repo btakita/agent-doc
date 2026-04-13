@@ -1353,7 +1353,7 @@ I also noticed a separate oddity in `ops.log`: at timestamp `1776095605` there a
 ❯ When `Claim for Tmux Pane` is called on a document, Should agent-doc detect what the .agent-doc root directory is and `cd` into that directory? This will fix some of command tool errors and would fix the ops log issue.
 ❯ However, would be lose context with the rest of the agent-loop monorepo? If yes, that may be ok just to have repository hygene. I notice that there is the potential of context from other projects to leak into session-share. For example monsterrodholders leaked into session-share.
 
-### Re: should `claim` cd into the `.agent-doc` root? (HEAD)
+### Re: should `claim` cd into the `.agent-doc` root?
 
 Yes for path/git hygiene, no for context leakage — those are two different problems and only one is fixed by `cd`.
 
@@ -1387,7 +1387,40 @@ That's a bigger change — it means `claim` grows a mode like `--isolate` that s
 Mostly no — and that's the point. The value of the monorepo is filesystem proximity for cross-submodule edits (e.g., `agent-doc` touching files in `instruction-files` and `presence`). But when you're in a **session document** that lives inside one submodule, you almost always want to stay inside that submodule. Cross-submodule work should happen from the workspace root; submodule-scoped work should be process-isolated. `claim` is the natural place to draw that line because that's exactly when the document's identity gets bound to a pane.
 
 **Recommendation:** ship the `cd`-on-claim change first (small, immediately fixes path/git noise), then design `claim --isolate` as a follow-up once the first one is proven.
-<!-- agent:boundary:a1eac519 -->
+❯ Would `claim --isolate` fire at the same time as `cd`-on-claim? If yes, let's implement both at the same time.
+
+### Re: would `claim --isolate` fire at the same time as `cd`-on-claim? (HEAD)
+
+They're at different layers and mostly mutually exclusive — doing them together doesn't save much work, and I'd still split them.
+
+**What each one actually does:**
+
+| | `cd`-on-claim | `claim --isolate` |
+|---|---|---|
+| Scope | Mutates current shell's CWD | Spawns a **new** `claude` process in the submodule root |
+| Old Claude Code process | Keeps running | Detached or exited |
+| CLAUDE.md / memory / skills | Unchanged (already loaded) | Re-loaded scoped to submodule |
+| Implementation size | ~10 lines in `claim.rs` (resolve git root, `std::env::set_current_dir`) | Process lifecycle, tmux pane handoff, `sessions.json` migration, flag to prevent recursion, decide what happens to the old pane |
+| When it applies | Every claim | Opt-in via `--isolate` |
+
+**Why they're mutually exclusive in practice:** if `--isolate` spawns a new Claude Code process, that new process already starts with `cwd = submodule root` — no `cd` needed inside it. And in the old process, we're walking away, so `cd` there is pointless. The only case where `cd` and `--isolate` would fire together is if you want the old process to also relocate for its remaining pane state, which I don't think you do.
+
+**Shared code:** basically just the "find `.git` above document" helper, which the binary already has (`compute_project_root` or equivalent — that's what drives `.agent-doc/` placement). So combining them doesn't save real work.
+
+**Why I'd still split them:**
+
+- `cd`-on-claim is ~10 lines, low risk, solves today's out-of-band drift noise immediately.
+- `--isolate` has real design questions I don't want to rush:
+  1. Does the old Claude Code process exit, detach, or keep running headless?
+  2. If it keeps running, does it lose its registered panes? `sessions.json` is workspace-root-scoped — the new process would have a different `.agent-doc/` root and a different `sessions.json`. Migration or dual-registry?
+  3. How does `/agent-doc claim <doc>` on a second submodule document behave — spawn a third process? Or do we maintain a single "dispatcher" Claude Code at the workspace root that shells out to per-submodule workers?
+  4. What about cross-submodule work? Once you isolate, you can't touch files outside the submodule. Is there an escape hatch or does the user manually switch?
+  5. How does the user return to workspace-root context without losing session history?
+
+Shipping `cd` first lets us validate that path/git hygiene actually improves in practice. Then we have real evidence for whether process-level isolation is worth the design complexity, or whether `cd` + being disciplined about context already closes 80% of the gap.
+
+**My recommendation stands:** ship `cd`-on-claim now, keep `--isolate` in pending as a Phase 2 that gets its own design doc. If you want to accelerate `--isolate`, the next step is a design sketch in `src/agent-doc/specs/` covering the five questions above before writing any code.
+<!-- agent:boundary:4a591ce0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

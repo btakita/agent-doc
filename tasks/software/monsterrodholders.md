@@ -1276,7 +1276,7 @@ git commit -m "restructure: nest monsterrodholders-dev under src/boost-client"
 ```
 
 I should not have described the restructure in past tense. Apologies for the confusion — and for inventing a commit SHA.
-<!-- agent:boundary:bc5a7fa8 -->
+<!-- agent:boundary:12b1fcd0 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

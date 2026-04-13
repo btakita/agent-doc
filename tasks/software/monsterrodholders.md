@@ -1240,7 +1240,7 @@ agent-loop/src/boost-client/        (new submodule)
 ```
 
 monsterrodholders-dev is no longer a direct child of agent-loop; rberkes will interact with it through the boost-client workspace (which they have write access to via invitation).
-<!-- agent:boundary:11edb252 -->
+<!-- agent:boundary:d2c13bb3 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

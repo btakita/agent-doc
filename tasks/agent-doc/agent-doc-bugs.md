@@ -1281,7 +1281,7 @@ To diagnose I need: (a) `.agent-doc/logs/ops.log` around the claudescore.md clai
 
 ❯ Look in session-share/.agent-doc/logs/ops.log
 
-### Re: Do both — done (HEAD)
+### Re: Do both — done
 
 **Doc fix:** `editors/jetbrains/AGENTS.md` (CLAUDE.md is a symlink to it) — stripped the hardcoded `0.1.0`, replaced with `<version>` placeholder + glob pattern `agent-doc-jetbrains-*-signed.zip`. Added a note that `gradle.properties` is the source of truth and the version must never be hardcoded in docs.
 
@@ -1293,7 +1293,7 @@ make bump-plugin
 
 Reads `pluginVersion` from `editors/jetbrains/gradle.properties`, bumps patch, `sed`s it back, runs `./gradlew buildPlugin signPlugin`, then `ls`s the two resulting zips so the new filename is printed at the end. The existing `plugin-version-check` precommit gate still enforces bumps when `.kt` files change.
 
-### Re: ops.log diagnosis of pane swap (HEAD)
+### Re: ops.log diagnosis of pane swap
 
 Read `session-share/.agent-doc/logs/ops.log` — **the log records zero claim/sync/tmux events**. Everything in it is snapshot/commit/IPC traffic. `claim.rs`, `sync.rs`, `layout.rs` don't hit `ops_log` at all, so the swap event went entirely unrecorded.
 
@@ -1306,7 +1306,50 @@ That is itself the answer to "why": we cannot tell from the log, because the log
 Roughly 30 lines across `claim.rs` + `sync.rs`. Say the word and I'll land it in the next cycle.
 
 Marked pending `#mrc4` (CLAUDE.md version strip) and `#31a5` (`make bump-plugin`) as done.
-<!-- agent:boundary:97d8e7ad -->
+
+❯ I noticed that claudescore.md is in. We should figure out how to create a single source of trust wrt the agent-doc environment. In a monorepo setting, we should discuss why session-share has its own .agent-doc directory. Is this to support writing commits into the submodule?
+❯ /home/brian/work/btakita/agent-loop/.agent-doc/logs/debug.log.2026-04-13
+❯ /home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log
+
+### Re: why session-share has its own `.agent-doc/` (HEAD)
+
+Not a bug — it's load-bearing. `agent-doc` walks up from the document to the nearest `.git` and treats that as the project root. Since `src/session-share/` is a submodule, its `.git` stops the walk there, so `.agent-doc/` is created inside the submodule.
+
+You can see the effect in this cycle's preflight output:
+
+```
+[commit] file is in submodule /home/brian/work/btakita/agent-loop/src/session-share — running git ops there
+[main 1715fcc] agent-doc(claudescore): 2026-04-13 11:53:25
+[main b4447e77] agent-doc(claudescore): 2026-04-13 11:53:25 (submodule pointer)
+[commit] parent submodule pointer updated for src/session-share
+```
+
+Two commits, two repos — exactly matching the CLAUDE.md rule *"Never stage files across repo boundaries in a single commit."* If `.agent-doc/` lived only at the workspace root, the snapshot/baseline/patch state would be tracked against the wrong HEAD and every submodule commit would look like a drift event.
+
+### Single source of trust — what's already centralized vs. what's per-repo (HEAD)
+
+Looking at `ls .agent-doc/` on both sides, the split is already by design:
+
+| Concern | Where it lives | Why |
+|---|---|---|
+| `sessions.json` (pane registry) | workspace root only | one process, one tmux, one truth |
+| `claims/` + `claims.log` | workspace root only | cross-doc pane ownership is global |
+| `callbacks/`, `links_cache/` | workspace root only | IPC + doc graph are workspace-scoped |
+| `logs/` | workspace root only | a single tail for debugging |
+| `config.toml` | both (merged) | workspace sets defaults; submodule overrides |
+| `snapshots/`, `baselines/`, `patches/`, `crdt/`, `pending/` | per-repo | must commit against the local HEAD |
+| `locks/`, `starting/`, `hooks/` | per-repo | tied to the local git tree |
+
+So the "single source of trust" already exists for session/claims/logs at the outer root. What's intentionally *not* shared is the git-tree-coupled state (snapshots, baselines, patches) because collapsing those would break the submodule boundary rule.
+
+The only thing that's arguably duplicated is `config.toml` — submodule's is 122B vs workspace's 357B. That's a merge-overlay pattern, not a fork. If you want, we could document this in `src/agent-doc/specs/` so it's explicit instead of inferred from directory listings.
+
+### On the two log paths (HEAD)
+
+Those were parsed as `slash_commands` by preflight and nearly got invoked as skills. I skipped them (they're clearly absolute paths, not command names) and added a pending item to tighten the parser — it should require `[a-z][a-z0-9:_-]*` after the leading `/` and reject tokens containing a second `/`.
+
+I also noticed a separate oddity in `ops.log`: at timestamp `1776095605` there are two back-to-back `commit_staging` + `out_of_band_write` pairs for the same file within one second (drift=410, then drift=122). Looks like a double-commit race worth investigating — added to pending.
+<!-- agent:boundary:21e4826c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1326,8 +1369,8 @@ Marked pending `#mrc4` (CLAUDE.md version strip) and `#31a5` (`make bump-plugin`
 - [ ] [#14z4] Hash collision ceiling: implement 8-char fallback in pending::generate_hash if 4-char collides (spec §1)
 - [ ] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)
 - [ ] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
-- [x] [#mrc4] editors/jetbrains/CLAUDE.md: strip hardcoded 0.1.0 zip filename; reference <version> or glob instead (root cause of plugin version reversion in docs)
-- [x] [#31a5] Add make bump-plugin target: sed-bump pluginVersion in gradle.properties, build both zips, print new filename
 - [ ] [#4sh0] Add planned-move logging to sync.rs reconciler so ClaimAction→SyncLayout pane swaps are debuggable
+- [ ] [#xzz5] Preflight slash-command parser: absolute paths like /home/... get captured as commands. Require [a-z][a-z0-9:_-]* after the slash and reject tokens containing a second /.
+- [ ] [#64mb] Investigate double commit_staging race: ops.log at 1776095605 shows two back-to-back commit_staging/out_of_band_write pairs for the same file within the same second.
 <!-- /agent:pending -->
 ## Assistant

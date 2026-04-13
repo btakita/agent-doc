@@ -1058,7 +1058,7 @@ Both files committed in their own submodule repos and the parent's submodule poi
 
 ❯ do
 ❯ - **🔴 Investigate boundary/baseline divergence root cause** — wait for `normalize_threshold_exceeded` entries in `ops.log`.
-### Re: Boundary/baseline divergence — ops.log check (HEAD)
+### Re: Boundary/baseline divergence — ops.log check
 
 Checked `ops.log` (28,084 lines, 2.7MB):
 
@@ -1078,26 +1078,50 @@ My recommendation: **option 2**. It's ~5 lines, doesn't weaken the rail, and sta
 
 Shall I implement option 2 now, or hold for the release and revisit after the rail has had time to collect real-world data?
 
+❯ yes
+
 Also noted: the stray `n` line at the end of your input is likely a typo — want me to strip it on the next write, or leave it?
-<!-- agent:boundary:5617c79f -->
+### Re: Option 2 implemented — `out_of_band_write` always-on logging (HEAD)
+
+Landed in `src/agent-doc/src/git.rs:286-317`. Five-line change: added an unconditional `ops_log::log_op` emitting `out_of_band_write file=... drift=... snap_len=... file_len=...` inside the `snap_len > 0 && file_len > snap_len` branch, **before** the existing `drift > 100` threshold. The eprintln WARNING and `drift_warning` entry still only fire at the noisy >100b threshold, so console/human output is unchanged — the new line is a silent, always-on forensic channel.
+
+**Schema:**
+```
+[ts] out_of_band_write file=<path> drift=<bytes> snap_len=<N> file_len=<N>
+```
+
+**Build/test:** `make check` — clean compile, **508 passed / 0 failed** in the modules I touched (git, snapshot, commit, component, template, etc.). 43 failures are all in `route::tests` — pre-existing tmux-session-env dependencies, untouched by this change. Release build clean.
+
+**Installed:** `cargo install --path .` + `cargo build --release` (so both `~/.cargo/bin/agent-doc` and the `.bin/agent-doc` → `target/release/` symlink are up to date).
+
+**Verification plan for this cycle:** next `agent-doc preflight` on any doc with a ≥1b gap should emit the new entry. We already know this document has recurring ~135b gaps between cycles, so the next preflight after you read this will prove it live. I'll grep `ops.log` for `out_of_band_write` in the next cycle and report the dataset (count, distribution, correlated operations).
+
+**Not done — deferred per release checklist:**
+- `VERSIONS.md` entry (waiting on manual-testing gate for rail + submodule fix + this)
+- Version bump `Cargo.toml` / `pyproject.toml` (same gate)
+- Release to crates.io / PyPI / GitHub (same gate)
+
+Note on the stray `n`: the previous cycle's `n` typo got absorbed into committed content by the time the boundary moved. Leaving it — harmless. Let me know if you want it scrubbed in a cleanup pass.
+<!-- agent:boundary:2f30e184 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **🔴 Investigate boundary/baseline divergence root cause** — `normalize_threshold_exceeded` count in ops.log: **0**. Rail not yet tripped. Recurring 135b-class out-of-band gaps observed but under threshold. ← awaiting decision: option 2 (always-on `out_of_band_write` log line) or keep waiting.
-- **Safety rail + forensic log in normalize_user_prompts_in_exchange** — ✅ landed, tested, installed. Live-verified passive (no threshold_exceeded entries yet — rail silent is expected when deltas are small).
-- **Submodule pathspec fix (Option A)** — ✅ landed, tested, verified live in preflight sweep. ← done prior cycle
+- **🔴 Investigate boundary/baseline divergence root cause** — `out_of_band_write` always-on log line landed (`git.rs:286`). Next preflight will emit first entry; aggregate after 1 day of real-world cycles to classify drift patterns.
+- **Safety rail + forensic log in normalize_user_prompts_in_exchange** — ✅ landed, tested, installed. Awaiting large-drift trip to produce `normalize_threshold_exceeded` telemetry.
+- **Submodule pathspec fix (Option A)** — ✅ landed, tested, verified live. ← done
 - **Drop or implement Option B (skill-side submodule workaround)** — A handles it deterministically; B is redundant. ← awaiting decision
 - **Investigate the 1062 pre-existing `❯` lines across 46 snapshots** — legitimate or prior corruption? Diff against git history to classify.
 - **Investigate duplicated `/agent:exchange` closing marker** — likely same root cause class as mass-prefix bug.
-- **Release agent-doc with safety rail + submodule fix** — bump version in `Cargo.toml` + `pyproject.toml`, add VERSIONS.md entry, publish after manual-testing gate.
-- **Implement Layer 2: required pending declaration** — ← awaiting ack on id strategy (option 3: stable hash ids w/ lazy preflight migration)
+- **Release agent-doc with safety rail + submodule fix + out_of_band_write log** — bump `Cargo.toml` + `pyproject.toml`, add VERSIONS.md entry (include the new `out_of_band_write` ops.log schema), publish after manual-testing gate.
+- **Implement Layer 2: required pending declaration** — ← awaiting ack on option 3 (stable hash ids + lazy preflight migration)
 - **Update SKILL.md + skill-submit-cycle.md** — document new pending declaration contract as part of Layer 2 PR.
 - **Integration tests for pending enforcement**
 - **PostToolUse hook for agent-doc write** (layer 3, optional)
 - **Add end-of-cycle write invariant** — warn if `preflight_diff_start` was emitted but `ipc_write_attempt` was not, within the cycle.
 - **Expose `agent-doc session-check <FILE>`** — returns non-zero if last ops.log entry for doc is `preflight_diff_start`.
 - **SPEC.md breakup** — flat `specs/*.md` extraction, mechanical only.
+- **Session drift noted:** preflight layout check reported `registered panes span 2 tmux sessions: 1, 4`. Not fixed this cycle — flag for resync if it keeps appearing.
 <!-- /agent:pending -->
 ## Assistant

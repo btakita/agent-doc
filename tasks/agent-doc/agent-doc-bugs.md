@@ -877,7 +877,7 @@ Got it — mechanical cut only. Extract SPEC.md sections into flat `specs/*.md`,
 **Recommendation for durable fix:** Strip leading `❯ ` (and optionally other common prompt glyphs: `$ `, `> `, `% `) at the ingestion boundary in `write.rs` before applying patches. This is defensive but catches the entire class. Separately, find and remove the capture-pane source.
 
 Want me to implement the stripping fix in `write.rs` now?
-<!-- agent:boundary:0d6de636 -->
+<!-- agent:boundary:81b1c158 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

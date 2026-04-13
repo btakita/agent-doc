@@ -316,7 +316,7 @@ Also: I hit a **separate bug** while trying to write this response — the agent
 Suggested skill-side fix for the silent-skip: add an end-of-cycle invariant — if the SKILL flow saw a non-empty `diff` in preflight and the cycle exits without calling `agent-doc write`, emit a visible warning. That turns a silent failure into a loud one, without requiring binary changes.
 
 ❯ agent-doc run response patch to src/boost-client/tasks/monsterrodholders.md is uncommitted. Why? How can we fix the reoccurring race condition?
-### Re: SKILL runbook + uncommitted patch race (HEAD)
+### Re: SKILL runbook + uncommitted patch race
 
 **1. Runbook for SKILL workflow to prevent forgotten step 2:**
 
@@ -394,9 +394,10 @@ agent-doc commit tasks/monsterrodholders.md
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Investigate duplicated `/agent:exchange` closing marker** — doc had two close markers with an orphan boundary between them; parser rejected the write. Look at `commit.reposition` and any path that emits `<!-- agent:boundary:... -->\n&lt;!-- /agent:exchange --&gt;`
+- **Create SKILL runbook** (`.claude/skills/agent-doc/runbooks/skill-submit-cycle.md`) — codify the 3 steps (preflight → respond → write+commit) to prevent silent failures when step 2 is forgotten
+- **Fix submodule commit race** — add submodule-aware commit logic to SKILL.md step 3. After `agent-doc commit`, check if file is in a submodule and re-commit from within it. See diagnosed issue in boost-client/tasks/monsterrodholders.md (30 lines uncommitted)
+- **Investigate duplicated `/agent:exchange` closing marker** — doc had two close markers with an orphan boundary between them; parser rejected the write. Look at `commit.reposition` and any path that emits `<!-- agent:boundary:... -->\n<!-- /agent:exchange -->`
 - **Add end-of-cycle write invariant** — warn if `preflight_diff_start` was emitted but `ipc_write_attempt` was not, for the same doc, within the cycle
 - **Expose `agent-doc session-check <FILE>`** — returns non-zero if last ops.log entry for doc is `preflight_diff_start`, giving the skill a self-diagnosis hook
-- **Audit `ops.log` historically** — count how often `preflight_diff_start` has no paired `write_origin`; gives a baseline for silent-skip rate
 <!-- /agent:pending -->
 ## Assistant

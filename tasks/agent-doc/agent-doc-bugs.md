@@ -979,7 +979,7 @@ All 12 existing `normalize_user_prompts_*` tests still pass — the pure functio
 **Manual testing gate:** this is in the live `~/.cargo/bin/agent-doc` now. Next `/agent-doc` cycle will exercise the safe path. The forensic log line `normalize_user_prompts snap_len=... base_len=... applied=...` should appear in `.agent-doc/logs/ops.log` on every write. If you see a `normalize_threshold_exceeded` entry at any point, we caught a divergence in the wild.
 
 Confirm the safety rail works as expected in a live session, and I can take the next step (either root-cause investigation or another pending item).
-<!-- agent:boundary:4be03217 -->
+<!-- agent:boundary:882c0258 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

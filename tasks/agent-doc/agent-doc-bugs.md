@@ -878,7 +878,7 @@ Got it — mechanical cut only. Extract SPEC.md sections into flat `specs/*.md`,
 
 Want me to implement the stripping fix in `write.rs` now?
 ❯ yes
-### Re: correction before implementing (HEAD)
+### Re: correction before implementing
 
 **I need to retract my previous hypothesis.** Reading `write.rs::normalize_user_prompts_in_exchange` (lines 283-460), the `❯ ` prefix is **intentional, not an artifact**. The binary deliberately prefixes user-added exchange lines as a visual marker for the user region. Stripping `❯ ` at ingestion would actively break the feature.
 
@@ -930,24 +930,38 @@ This is a **regression catchall**. It doesn't fix the underlying divergence, but
 I'd recommend **B** — safety rail stops the bleeding, forensic logging gives us data to catch it in the wild. Both are small.
 
 Sorry for the earlier misdirection on "prompt glyph stripping" — I jumped to conclusions before reading the actual normalization code.
-<!-- agent:boundary:5f62bf04 -->
+❯ Yes B. We also need a way for agent-doc to commit the current document in case the uncommitted changeset that is too big.
+### Re: plan B + auto-commit on big changeset (HEAD)
+
+Got it. Expanding scope: when the safety rail detects a big changeset, also force-commit the current doc so the drift becomes the new snapshot and the next cycle starts clean. This is consistent with what `preflight` already does when it warns `file is N bytes larger than snapshot — possible out-of-band write` — but lifts that behavior up to apply at normalization time too.
+
+**Final plan:**
+
+1. **Forensic log (unconditional)** in `normalize_user_prompts_in_exchange`: log `snap_len`, `baseline_len`, `user_added.len()`, file path to ops.log.
+2. **Safety rail at threshold 50:** if `user_added.len() > 50`, emit a WARN line, then:
+   - Force-commit the current file (absorb the drift into the snapshot)
+   - Pass the content through unchanged (no `❯` prefix application)
+   - Next cycle will start from a clean snapshot == file state
+3. **Unit tests:** (a) threshold reached → content unchanged, (b) below threshold → normal prefixing, (c) threshold reached → commit side-effect happens.
+
+Implementing now.
+<!-- agent:boundary:6073e6d8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **🔴 CORRUPTION: boundary/baseline divergence triggers mass `❯ `-prefixing** — Root cause is NOT tmux capture-pane (earlier hypothesis was wrong). `normalize_user_prompts_in_exchange` in write.rs diffs snapshot↔baseline; when those diverge pathologically (stale baseline, boundary mismatch, snapshot reset), every line gets classified as user-added and prefixed. Likely same root cause as the "duplicated `/agent:exchange` closing marker" pending item. **← P0, awaiting ack on fix strategy A/B/C**
-- **Safety rail: threshold in normalize_user_prompts_in_exchange** — refuse to apply `❯ ` prefix if `user_added.len() > 50`; log a warning and pass content through unchanged. Prevents silent corruption at scale. **← proposed, recommend landing now**
-- **Forensic logging in normalize_user_prompts_in_exchange** — log `snap_len`, `baseline_len`, `user_added.len()`, file path to ops.log on every call. Gives us data to catch divergence in the wild. **← proposed as part of same PR**
-- **Investigate the 1062 pre-existing `❯` lines across 46 snapshots** — are they legitimate (real user input) or prior corruption from the same bug? Diff against git history to classify.
-- **Investigate duplicated `/agent:exchange` closing marker** — doc had two close markers with an orphan boundary between them. Likely same root cause as the mass-prefix bug — malformed boundary breaks region alignment.
-- **Implement Layer 2: required pending declaration** — `agent-doc write` errors when `agent:pending` exists in doc but no `--pending-done` / `--pending-none` / `patch:pending` block is provided. **← awaiting ack on id strategy (option 1: exact text match)**
+- **🔴 Implement safety rail + auto-commit in normalize_user_prompts_in_exchange** — threshold=50, forensic log, force-commit on overrun. **← active, implementing now**
+- **🔴 Investigate boundary/baseline divergence root cause** — after safety rail lands, use forensic log data to find the actual divergence trigger.
+- **Investigate the 1062 pre-existing `❯` lines across 46 snapshots** — legitimate or prior corruption? Diff against git history to classify.
+- **Investigate duplicated `/agent:exchange` closing marker** — likely same root cause as mass-prefix bug.
+- **Implement Layer 2: required pending declaration** — **← awaiting ack on id strategy (option 1: exact text match)**
 - **Update SKILL.md + skill-submit-cycle.md** — document the new pending declaration contract as part of Layer 2 PR.
-- **Integration tests for pending enforcement** — verify write fails without declaration and succeeds via each of three paths.
-- **PostToolUse hook for agent-doc write** (layer 3, optional) — redundant with layer 1/2 but enforces at Claude Code boundary.
-- **Choose submodule fix strategy** — Option A (deterministic binary-side) vs Option B (one-liner skill-side workaround). Leaning toward Option A.
-- **Add end-of-cycle write invariant** — warn if `preflight_diff_start` was emitted but `ipc_write_attempt` was not, for the same doc, within the cycle.
+- **Integration tests for pending enforcement**
+- **PostToolUse hook for agent-doc write** (layer 3, optional)
+- **Choose submodule fix strategy** — Option A (deterministic binary-side) vs Option B (one-liner skill-side workaround). Leaning A.
+- **Add end-of-cycle write invariant** — warn if `preflight_diff_start` was emitted but `ipc_write_attempt` was not, within the cycle.
 - **Expose `agent-doc session-check <FILE>`** — returns non-zero if last ops.log entry for doc is `preflight_diff_start`.
-- **SPEC.md breakup** — flat `specs/*.md` extraction, mechanical only, no frontmatter/status work yet.
+- **SPEC.md breakup** — flat `specs/*.md` extraction, mechanical only.
 <!-- /agent:pending -->
 ## Assistant

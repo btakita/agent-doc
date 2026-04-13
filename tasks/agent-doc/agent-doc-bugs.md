@@ -847,7 +847,7 @@ Got it — mechanical cut only. Extract SPEC.md sections into flat `specs/*.md`,
 
 ❯ agent-doc run is messing up src/boost-client/tasks/monsterrodholders.md
 ❯ We need an immediate fix.
-### Re: monsterrodholders.md ❯-prefix corruption (HEAD)
+### Re: monsterrodholders.md ❯-prefix corruption
 
 **Fixed (immediate).** Working tree of `src/boost-client/tasks/monsterrodholders.md` was stashed and restored to HEAD.
 
@@ -877,21 +877,75 @@ Got it — mechanical cut only. Extract SPEC.md sections into flat `specs/*.md`,
 **Recommendation for durable fix:** Strip leading `❯ ` (and optionally other common prompt glyphs: `$ `, `> `, `% `) at the ingestion boundary in `write.rs` before applying patches. This is defensive but catches the entire class. Separately, find and remove the capture-pane source.
 
 Want me to implement the stripping fix in `write.rs` now?
-<!-- agent:boundary:653c4d8d -->
+❯ yes
+### Re: correction before implementing (HEAD)
+
+**I need to retract my previous hypothesis.** Reading `write.rs::normalize_user_prompts_in_exchange` (lines 283-460), the `❯ ` prefix is **intentional, not an artifact**. The binary deliberately prefixes user-added exchange lines as a visual marker for the user region. Stripping `❯ ` at ingestion would actively break the feature.
+
+**What's actually happening in the monsterrodholders corruption:**
+
+The normalizer computes `TextDiff::from_lines(snap_stripped, baseline_stripped)` and collects all `Insert` lines as "user additions" (write.rs:384-421). It then adds `❯ ` to those lines in the content_user_region (write.rs:427-456).
+
+For 543 lines to get prefixed, the `snapshot → baseline` diff returned **543 Insert lines**. That only happens if one of these broke:
+
+1. **Baseline and snapshot diverged catastrophically** — e.g., `--baseline-file` pointed to a stale/empty/wrong file so the diff saw "everything is new"
+2. **Boundary stripping mismatch** — if snapshot had boundary markers at different positions than baseline, similar's line diff can't align the regions and marks them all as Insert
+3. **Snapshot was reset or rewritten** while baseline (working tree) still contained full history
+
+The existing pending item **"duplicated `/agent:exchange` closing marker — doc had two close markers with an orphan boundary between them"** is probably the same class of bug — malformed boundary markers breaking region alignment.
+
+**Real durable fix — safety rail at normalization:**
+
+In `normalize_user_prompts_in_exchange`, after building `user_added`, check a sanity threshold:
+
+```rust
+// Safety rail: if the diff claims more than N lines are user-added,
+// the snapshot/baseline have diverged pathologically. Bail rather than
+// apply massive mis-prefixing that corrupts the file.
+const MAX_NORMALIZE_LINES: usize = 50;
+if user_added.len() > MAX_NORMALIZE_LINES {
+    eprintln!(
+        "[normalize] WARN: user_added={} exceeds threshold {} — refusing to apply ❯ prefix. \
+         Snapshot/baseline likely diverged (stale baseline, boundary mismatch, or snapshot reset). \
+         File: {}",
+        user_added.len(), MAX_NORMALIZE_LINES, file.display()
+    );
+    return content.to_string(); // pass through unchanged
+}
+```
+
+This is a **regression catchall**. It doesn't fix the underlying divergence, but it prevents silent corruption at scale. A legitimate session never produces 50+ `❯ `-prefixed lines in one write — human typing caps out far below that.
+
+**Root-cause investigation plan (separate from the safety rail):**
+
+1. **Add forensic logging** — log `snap_len`, `baseline_len`, `user_added.len()` from every `normalize_user_prompts_in_exchange` call to `ops.log`. This tells us when divergence happens.
+2. **Reproduce:** I'd need to find a case where `preflight` saves a baseline and then `agent-doc write` gets a different one. The stashed corruption (`stash@{0}`) has the exact corrupted file — I can diff it against the clean snapshot to count exactly which lines got prefixed and look for a structural clue (e.g., "everything between boundaries X and Y").
+3. **Check the duplicated-close-marker pending item** — likely same root cause.
+
+**Question before I implement:** Want me to:
+- (A) Land just the safety rail now (5-line change, prevents future corruption), and file a separate investigation task for root cause?
+- (B) Add both the safety rail AND the forensic logging in one PR?
+- (C) Dig into root cause first (slower, higher confidence) before landing anything?
+
+I'd recommend **B** — safety rail stops the bleeding, forensic logging gives us data to catch it in the wild. Both are small.
+
+Sorry for the earlier misdirection on "prompt glyph stripping" — I jumped to conclusions before reading the actual normalization code.
+<!-- agent:boundary:2ed69cf5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **🔴 CORRUPTION: `❯ `-prefix write artifact is systemic** — 46 snapshot files, 1062 affected lines workspace-wide. monsterrodholders.md hit 543 corrupted lines in a single working-tree write. Hypothesis: tmux pane capture output being piped into `agent-doc write` stdin. **← escalated from "investigate" — this is now P0**
-- **Durable fix: strip prompt glyphs at write.rs ingestion** — strip leading `❯ `, `$ `, `> `, `% ` from patch content before apply. Defensive catchall for the entire class. **← proposed, awaiting ack**
-- **Find the capture-pane source** — audit skill runbooks, hooks, and any path in the binary that might shell-capture pane state into stdin. Separate from the stripping fix.
+- **🔴 CORRUPTION: boundary/baseline divergence triggers mass `❯ `-prefixing** — Root cause is NOT tmux capture-pane (earlier hypothesis was wrong). `normalize_user_prompts_in_exchange` in write.rs diffs snapshot↔baseline; when those diverge pathologically (stale baseline, boundary mismatch, snapshot reset), every line gets classified as user-added and prefixed. Likely same root cause as the "duplicated `/agent:exchange` closing marker" pending item. **← P0, awaiting ack on fix strategy A/B/C**
+- **Safety rail: threshold in normalize_user_prompts_in_exchange** — refuse to apply `❯ ` prefix if `user_added.len() > 50`; log a warning and pass content through unchanged. Prevents silent corruption at scale. **← proposed, recommend landing now**
+- **Forensic logging in normalize_user_prompts_in_exchange** — log `snap_len`, `baseline_len`, `user_added.len()`, file path to ops.log on every call. Gives us data to catch divergence in the wild. **← proposed as part of same PR**
+- **Investigate the 1062 pre-existing `❯` lines across 46 snapshots** — are they legitimate (real user input) or prior corruption from the same bug? Diff against git history to classify.
+- **Investigate duplicated `/agent:exchange` closing marker** — doc had two close markers with an orphan boundary between them. Likely same root cause as the mass-prefix bug — malformed boundary breaks region alignment.
 - **Implement Layer 2: required pending declaration** — `agent-doc write` errors when `agent:pending` exists in doc but no `--pending-done` / `--pending-none` / `patch:pending` block is provided. **← awaiting ack on id strategy (option 1: exact text match)**
 - **Update SKILL.md + skill-submit-cycle.md** — document the new pending declaration contract as part of Layer 2 PR.
 - **Integration tests for pending enforcement** — verify write fails without declaration and succeeds via each of three paths.
 - **PostToolUse hook for agent-doc write** (layer 3, optional) — redundant with layer 1/2 but enforces at Claude Code boundary.
 - **Choose submodule fix strategy** — Option A (deterministic binary-side) vs Option B (one-liner skill-side workaround). Leaning toward Option A.
-- **Investigate duplicated `/agent:exchange` closing marker** — doc had two close markers with an orphan boundary between them.
 - **Add end-of-cycle write invariant** — warn if `preflight_diff_start` was emitted but `ipc_write_attempt` was not, for the same doc, within the cycle.
 - **Expose `agent-doc session-check <FILE>`** — returns non-zero if last ops.log entry for doc is `preflight_diff_start`.
 - **SPEC.md breakup** — flat `specs/*.md` extraction, mechanical only, no frontmatter/status work yet.

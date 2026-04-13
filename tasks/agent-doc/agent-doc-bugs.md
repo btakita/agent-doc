@@ -810,7 +810,7 @@ src/agent-doc/specs/
    - My recommendation: **(a)** — fast, mechanical. If we find a drift later we can reclassify individual files. Verification is a separate pass.
 
 If you like this structure, confirm and I'll start the extraction. If you want a different layout, tell me what to change before I touch any of it — I'd rather re-cut the plan than re-cut 25 files.
-### Re: specs/done directory (HEAD)
+### Re: specs/done directory
 
 Agreed — flat directory with frontmatter status is the better shape. Concretely:
 
@@ -839,7 +839,12 @@ Benefits over the `done/` subdirectory:
 **Spec-of-a-spec:** agreed, defer. Once we have 5-6 specs in the flat layout the shape of the meta-spec will be obvious. Premature to write it against one example.
 
 **Action:** I'll skip creating `specs/done/` in the SPEC.md breakup plan and instead add `status:` frontmatter to each extracted section. `pending-system.md` already exists without frontmatter — I'll add it when I touch that file next.
-<!-- agent:boundary:b1312aae -->
+
+❯ Just a simple extraction for now.
+### Re: simple extraction (HEAD)
+
+Got it — mechanical cut only. Extract SPEC.md sections into flat `specs/*.md`, no frontmatter, no status tagging, no `done/` subdir. Frontmatter can come later once the shape settles.
+<!-- agent:boundary:7ecb6a8f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -854,6 +859,6 @@ Benefits over the `done/` subdirectory:
 - **Investigate duplicated `/agent:exchange` closing marker** — doc had two close markers with an orphan boundary between them; parser rejected the write. Look at `commit.reposition` and any path that emits `<!-- agent:boundary:... -->\n&lt;!-- /agent:exchange --&gt;`
 - **Add end-of-cycle write invariant** — warn if `preflight_diff_start` was emitted but `ipc_write_attempt` was not, for the same doc, within the cycle
 - **Expose `agent-doc session-check <FILE>`** — returns non-zero if last ops.log entry for doc is `preflight_diff_start`, giving the skill a self-diagnosis hook
-- **Add `status:` frontmatter to specs/*.md** — skip `specs/done/` subdir; use flat layout with `status: draft|approved|built|superseded`. Apply when touching `pending-system.md` next. **← added this cycle**
+- **SPEC.md breakup** — flat `specs/*.md` extraction, mechanical only, no frontmatter/status work yet. **← confirmed this cycle**
 <!-- /agent:pending -->
 ## Assistant

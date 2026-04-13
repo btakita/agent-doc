@@ -151,7 +151,7 @@ If you confirm the structure is aligned, I will:
 And **not** do `resize.rs` yet — env.rs is a smaller, tighter dependency of `start.rs` wire-up than resize is, so it makes sense to land first.
 
 Confirm and I will go.
-<!-- agent:boundary:69e392d8 -->
+<!-- agent:boundary:da2e6b1f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

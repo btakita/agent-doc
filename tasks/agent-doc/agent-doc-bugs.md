@@ -558,7 +558,7 @@ The file is now readable in the exchange — no more prefix artifacts. Staged an
 ❯ do
 ❯ - **Create SKILL runbook** (`.claude/skills/agent-doc/runbooks/skill-submit-cycle.md`) — codify the 3 steps (preflight → respond → write+commit) to prevent silent failures when step 2 is forgotten
 
-### Re: Create SKILL runbook for submit cycle (HEAD)
+### Re: Create SKILL runbook for submit cycle
 
 Heads up: `.claude/skills/agent-doc/runbooks/cycle-steps.md` already exists (untracked) and codifies exactly this — 5 steps (preflight → gate checks → compose → write-back → commit), plus a self-check list and failure-mode fingerprints. It's a superset of the 3 steps you asked for.
 
@@ -569,7 +569,11 @@ Two options — your call:
 3. **Create a separate** terser `skill-submit-cycle.md` with just the 3-step version, linking to `cycle-steps.md` for the full detail.
 
 Which? I'd lean #1 — `skill-submit-cycle.md` is the more descriptive name and the existing content is already well-scoped.
-<!-- agent:boundary:457de606 -->
+❯ do #1
+### Re: Rename cycle-steps.md → skill-submit-cycle.md (HEAD)
+
+Done. `mv .claude/skills/agent-doc/runbooks/cycle-steps.md .claude/skills/agent-doc/runbooks/skill-submit-cycle.md`. Grepped for `cycle-steps` across the skill directory — no references to update. The runbook is now at the requested path with its original 5-step content (preflight → gate checks → compose → write-back → commit) plus self-check list and failure-mode fingerprints intact.
+<!-- agent:boundary:06f18147 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

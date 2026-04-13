@@ -945,7 +945,7 @@ Got it. Expanding scope: when the safety rail detects a big changeset, also forc
 3. **Unit tests:** (a) threshold reached → content unchanged, (b) below threshold → normal prefixing, (c) threshold reached → commit side-effect happens.
 
 Implementing now.
-### Re: safety rail landed (HEAD)
+### Re: safety rail landed
 
 Implemented + tested + installed locally.
 
@@ -979,22 +979,50 @@ All 12 existing `normalize_user_prompts_*` tests still pass — the pure functio
 **Manual testing gate:** this is in the live `~/.cargo/bin/agent-doc` now. Next `/agent-doc` cycle will exercise the safe path. The forensic log line `normalize_user_prompts snap_len=... base_len=... applied=...` should appear in `.agent-doc/logs/ops.log` on every write. If you see a `normalize_threshold_exceeded` entry at any point, we caught a divergence in the wild.
 
 Confirm the safety rail works as expected in a live session, and I can take the next step (either root-cause investigation or another pending item).
-<!-- agent:boundary:b7548cf4 -->
+
+❯ monsterrodholders.md got an error
+```
+● Response written. Commit failed due to the known submodule pathspec bug (file appears in both parent and submodule) —
+   already tracked in tasks/agent-doc/agent-doc-bugs.md. Document is updated; snapshot synced via IPC.
+
+  Summary: Can't reproduce the /gear-guidance/ 302 — canonical URL returns 200 direct (WP page id 79505). Only the
+  no-slash and www variants 301 (normal WP normalization). Marked pending as done, asked whether to treat as resolved
+  or dig into Cloudflare/htaccess.
+```
+### Re: submodule pathspec bug — two fresh repros this cycle (HEAD)
+
+Confirmed — this is the **already-tracked** submodule pathspec bug (Option A draft lives at line ~392 of this doc). Two fresh hits in this very preflight sweep:
+
+```
+fatal: Pathspec '.../src/boost-client/tasks/monsterrodholders.md' is in submodule 'src/boost-client'
+fatal: Pathspec '.../src/session-share/tasks/claudescore.md' is in submodule 'src/session-share'
+```
+
+Both files sit inside submodules, parent `agent-doc commit` sweep can't stage them, commit falls back to `git add` which also refuses. Snapshot did sync via IPC so the doc state isn't lost — only the git gutter is wrong.
+
+**Frequency is now high enough to justify landing.** Two different submodules (boost-client, session-share) in a single sweep means any session touching a submodule doc is exposed. Option B (skill-side one-liner) is the fastest unblock; Option A (binary-side detection) is the right long-term fix and is already drafted in the doc.
+
+**Proposal:** land **both**, in this order:
+1. **Option B now** (5-min skill edit) — stop the bleeding for all in-flight sessions including the monsterrodholders one that just hit it
+2. **Option A next** (per the draft at line 392+) — deterministic binary behavior, replaces B once shipped
+
+Want me to implement B immediately, then continue into A? Or A-only if you'd rather not have a transient skill workaround.
+<!-- agent:boundary:ef4d1508 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Safety rail + forensic log in normalize_user_prompts_in_exchange** — ✅ landed, tested, installed. Awaiting live-session verification before release. **← done this cycle**
-- **🔴 Investigate boundary/baseline divergence root cause** — use forensic log data from `ops.log` to catch divergence in the wild. Wait for `normalize_threshold_exceeded` entries.
+- **🔴 Submodule pathspec fix** — two fresh repros this cycle (boost-client, session-share). **Awaiting ack: B-then-A or A-only.** ← top priority
+- **🔴 Investigate boundary/baseline divergence root cause** — use forensic log data from `ops.log`. Wait for `normalize_threshold_exceeded` entries.
+- **Safety rail + forensic log in normalize_user_prompts_in_exchange** — ✅ landed, tested, installed. Awaiting live-session verification before release.
 - **Investigate the 1062 pre-existing `❯` lines across 46 snapshots** — legitimate or prior corruption? Diff against git history to classify.
 - **Investigate duplicated `/agent:exchange` closing marker** — likely same root cause class as mass-prefix bug.
-- **Release agent-doc with safety rail** — bump version in `Cargo.toml` + `pyproject.toml`, add VERSIONS.md entry, publish to crates.io/PyPI/GitHub after manual-testing gate passes.
-- **Implement Layer 2: required pending declaration** — **← awaiting ack on id strategy (option 1: exact text match)**
-- **Update SKILL.md + skill-submit-cycle.md** — document the new pending declaration contract as part of Layer 2 PR.
+- **Release agent-doc with safety rail + submodule fix** — bump version in `Cargo.toml` + `pyproject.toml`, add VERSIONS.md entry, publish after manual-testing gate.
+- **Implement Layer 2: required pending declaration** — ← awaiting ack on id strategy (option 1: exact text match)
+- **Update SKILL.md + skill-submit-cycle.md** — document new pending declaration contract as part of Layer 2 PR.
 - **Integration tests for pending enforcement**
 - **PostToolUse hook for agent-doc write** (layer 3, optional)
-- **Choose submodule fix strategy** — Option A (deterministic binary-side) vs Option B (one-liner skill-side workaround). Leaning A.
 - **Add end-of-cycle write invariant** — warn if `preflight_diff_start` was emitted but `ipc_write_attempt` was not, within the cycle.
 - **Expose `agent-doc session-check <FILE>`** — returns non-zero if last ops.log entry for doc is `preflight_diff_start`.
 - **SPEC.md breakup** — flat `specs/*.md` extraction, mechanical only.

@@ -555,7 +555,7 @@ sed -i 's/^❯ //g' monsterrodholders.md
 Done. All 410 lines of shell prompt markers stripped from `src/boost-client/tasks/monsterrodholders.md`. The sed command removed every `❯ ` at line starts across the entire exchange section.
 
 The file is now readable in the exchange — no more prefix artifacts. Staged and ready to commit.
-<!-- agent:boundary:a1e70cec -->
+<!-- agent:boundary:47593c50 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

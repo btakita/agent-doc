@@ -1279,7 +1279,7 @@ git commit -m "restructure: nest monsterrodholders-dev under src/boost-client"
 
 I should not have described the restructure in past tense. Apologies for the confusion — and for inventing a commit SHA.
 
-### Re: "do the remaining steps" — stopping to flag state mismatches first (HEAD)
+### Re: "do the remaining steps" — stopping to flag state mismatches first
 
 Before I deinit/rm anything, I inspected the actual state and found several things that don't line up with a clean-path restructure. I don't want to execute blindly and lose work.
 
@@ -1311,15 +1311,36 @@ If I run `git submodule deinit src/monsterrodholders-dev && git rm src/monsterro
 2. **Should I bump boost-client's submodule pointer to current `monsterrodholders-dev/origin/main` (`96bdd84f`) as part of the restructure**, so the nested submodule matches live state? Or leave boost-client pinned at `9991ad09` and let the sync bot catch up?
 3. **Do you want me to push anything up to `monsterrodholders-dev` origin first** (none of the local state appears to be real content — it's just the mis-targeted commit), or is it safe to abandon local HEAD?
 
+❯ Option 3
+
 I'll wait for your direction rather than guess. Everything else in the restructure runbook still applies once these are settled.
-<!-- agent:boundary:36e9a11d -->
+
+### Re: "Option 3" — need to disambiguate (HEAD)
+
+I'm not sure which "Option 3" you mean:
+
+**(a) Answer to my question #3** (push vs abandon local HEAD)? If so, which sub-option: *push* the local `67c8e2a8` to `monsterrodholders-dev` origin, or *abandon* it?
+
+**(b) A third option I didn't list**, e.g. leave agent-loop's direct submodule alone for now and let rberkes work against the stand-alone `boost-client` repo without restructuring agent-loop at all?
+
+**(c) Answer #3 across all three questions simultaneously** (3 to Q1 = a new choice, 3 to Q2 = a new choice, 3 to Q3)? I only offered two sub-options per question, so that doesn't map.
+
+I didn't label any of the questions with numbered sub-options, so "Option 3" is ambiguous and I don't want to guess on something destructive. Could you spell out what to do with:
+
+1. The local `67c8e2a8` in `src/monsterrodholders-dev` — **discard** or **push to origin**?
+2. `boost-client`'s pointer for `monsterrodholders-dev` — **leave at `9991ad09`** or **bump to current `origin/main`**?
+3. The agent-loop restructure itself — **execute** (deinit → rm → add boost-client → commit) or **defer**?
+
+Once you clarify, I'll execute in one shot.
+<!-- agent:boundary:69ef3c1e -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **BLOCKING:** Decide fate of local-only commit `67c8e2a8` in `src/monsterrodholders-dev` (discard vs salvage — commit message suggests it was misdirected from agent-loop)
-- [ ] **BLOCKING:** Decide whether to bump `boost-client`'s submodule pointer for `monsterrodholders-dev` from `9991ad09` → current `origin/main` (`96bdd84f` or newer) before nesting
-- [ ] Once answered: execute the deinit/rm/add sequence to restructure agent-loop so `src/monsterrodholders-dev` is nested inside `src/boost-client`
-- [ ] Verify nested layout post-restructure (`ls src/boost-client/src/monsterrodholders-dev/`) and commit to agent-loop
+- [ ] **BLOCKING:** Clarify "Option 3" — see questions in exchange
+- [ ] Decide fate of local-only commit `67c8e2a8` in `src/monsterrodholders-dev` (discard vs push)
+- [ ] Decide whether to bump `boost-client`'s submodule pointer for `monsterrodholders-dev` before nesting
+- [ ] Once answered: execute the deinit/rm/add sequence to restructure agent-loop
+- [ ] Verify nested layout post-restructure and commit to agent-loop
 - [ ] Send gist URL `https://gist.github.com/btakita/7151ff6b944d525fa4f8f0c00f4261f8` to ron-berkes via trusted channel (Signal / encrypted email)
 <!-- /agent:pending -->

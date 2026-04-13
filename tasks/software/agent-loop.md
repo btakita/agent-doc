@@ -116,7 +116,7 @@ This would be CLI-side filtering, not agent-doc itself. But worth exploring.
 **What's already solved:** Deferred tools are active in your session. MCP schemas don't load by default — they're on-demand via ToolSearch. The next win is disabling unused MCP servers in settings.json.
 
 Ready for `/context` output when you are. I'll identify the heaviest servers and MEMORY.md sections to trim.
-<!-- agent:boundary:5a4cdf84 -->
+<!-- agent:boundary:1d0f538b -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

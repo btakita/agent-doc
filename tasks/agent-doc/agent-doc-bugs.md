@@ -657,7 +657,7 @@ Downside: long args. Solution: repeat the flag (`--pending-done "text1" --pendin
 **Practical note:** in 90% of cycles the skill will use the `patch:pending` block path (full state replace), not `--pending-done`. The flag is a shortcut for "I only want to remove item X and don't want to re-state the whole list." For the common case (rewriting the full list), ids don't matter — text matching only applies to the `--pending-done` shortcut path.
 
 Sound good? If yes, I'll start on the rust side with option 1.
-<!-- agent:boundary:b382660b -->
+<!-- agent:boundary:2da46e9b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

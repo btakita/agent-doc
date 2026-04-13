@@ -1136,7 +1136,7 @@ Note on the stray `n`: the previous cycle's `n` typo got absorbed into committed
 Release tagged and landed. ✅
 ❯ do
 ❯ - **Implement Layer 2: required pending declaration** — ← awaiting ack on option 3 (stable hash ids + lazy preflight migration)
-### Re: Starting Layer 2 implementation (HEAD)
+### Re: Starting Layer 2 implementation
 
 On it. Spec at `src/agent-doc/specs/pending-system.md` is the source of truth. Executing the full plan now:
 
@@ -1147,7 +1147,59 @@ On it. Spec at `src/agent-doc/specs/pending-system.md` is the source of truth. E
 5. Tests for each primitive + end-to-end migration
 
 Delegating Rust work to a focused subagent to keep this context clean. Will report back with build/test results and the SKILL edits in one summary.
-<!-- agent:boundary:eb5819ad -->
+### Re: Layer 2 landed — granular pending ops + lazy backfill (HEAD)
+
+Implementation complete and installed. Dogfooding it on this very write — `--pending-done a007 a008 a009` + three `--pending-add` calls instead of a `patch:pending` block. (The binary would now reject a `patch:pending` block with a clear error.)
+
+**Rust — new module `src/pending.rs` (~515 lines, 23 unit tests):**
+- `PendingItem` struct, `parse_items` / `render_items` round-trip
+- `generate_hash(text, doc_id, counter)` — 4-char base32 via `sha2::Sha256` (no new deps, crockford-ish alphabet `0-9a-z` minus `ilou`)
+- `backfill(body, doc_id, existing_ids)` — idempotent lazy upgrade of legacy bullets → `[ ] [#xxxx] text`
+- `reap(body)` — removes `- [x]` lines, returns the reaped ids
+- `detect_reorder(snap, curr)` — returns `Some(new_order)` iff id set unchanged but order differs
+- `op_add / op_done / op_edit / op_clear / op_reorder` — pure, return new body
+
+**Rust — preflight (`src/preflight.rs`):**
+- New step 2e `run_pending_maintenance`: backfill → reap → reorder-detect, between the cross-doc sweep and claims step
+- Added `pending_reordered: bool` to `PreflightOutput` JSON
+- Mutations are committed via the existing commit path (git tree stays clean entering step 4)
+
+**Rust — write enforcement (`src/write.rs`):**
+- `enforce_no_patch_pending()` helper called after all four `parse_patches` sites (template / IPC / stream-IPC / stream-disk)
+- Errors with: `ERR: patch:pending block forbidden — use --pending-add/done/edit/clear/reorder. See specs/pending-system.md.`
+- Gated by env var `AGENT_DOC_REJECT_PATCH_PENDING` set in main.rs dispatch — single-threaded CLI, safe
+- Hidden `--allow-patch-pending` escape hatch for compaction / migration / tests
+
+**Rust — CLI (`src/main.rs`):**
+- `Write` struct: `--pending-add`, `--pending-done` (repeatable), `--pending-edit "id=text"`, `--pending-clear`, `--pending-reorder <csv>`, `--allow-patch-pending`
+- `PendingAction` enum: new `Backfill / Done / Edit / Clear / Reorder / Reap` variants alongside legacy `Add / Remove / Prune / List`
+- Dispatch order: `clear → add → edit → done → reorder`, then patch application
+
+**Tests — all new code passing:**
+- `pending.rs` unit tests: 23/23 ✅
+- `tests/pending_integration.rs`: 12/12 ✅ (legacy migration, enforcement rejection, escape-hatch allow, `--pending-done`/`--pending-add`, reorder-detect end-to-end)
+- `preflight`: 30/30 ✅
+- Full suite: **531 passed** (up from 508), 43 pre-existing `route::` / `resync::` tmux-env failures unrelated
+
+**SKILL.md + runbook updated:**
+- `§1b. Update pending (template mode)` rewritten — documents the hash id / checkbox schema, the five flags, and the `pending_reordered` one-cycle respect rule. Working example of a combined write call.
+- `runbooks/skill-submit-cycle.md` — new step 4 "Decide pending mutations", explicit self-check list item: "If the response contains a `patch:pending` block: REMOVE IT and convert to flags. The binary will error otherwise."
+- Ban on `patch:pending` is explicit in both files.
+
+**Install status:** `cargo install --path .` succeeded during implementation. Live verified this cycle — binary shows all five flags in `agent-doc write --help`, and the pending ids (`#a001`–`#a014`) from this session's first write are now being mutated in place via flags.
+
+**Deferred per release checklist (not shipped yet):**
+- VERSIONS.md entry + version bump (still on 0.32.3 locally)
+- Manual testing gate: this very cycle is the live test. If this write lands cleanly with the flags (it should — you're reading it), that confirms the feature.
+- Release to crates.io / GitHub after your go-ahead
+
+**Design deltas from spec (flagged for review):**
+- Hash collision handling uses counter bump instead of 5/6/8-char extension. Added to pending as `#new` follow-up.
+- `detect_reorder` runs on the post-backfill body (spec §5 step 4 says "apply adds/removes first" — same intent).
+- Enforcement toggled by env var rather than plumbing a bool through four write entry points. Single-threaded CLI so this is safe; cleaner to refactor later if needed.
+
+Your call on next steps: release v0.32.4, or queue more work first?
+<!-- agent:boundary:edad6fd0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1159,13 +1211,16 @@ Delegating Rust work to a focused subagent to keep this context clean. Will repo
 - [ ] [#a004] Drop Option B (skill-side submodule workaround) — A handles it deterministically; B redundant.
 - [ ] [#a005] Investigate 1062 pre-existing `❯` lines across 46 snapshots — legitimate or prior corruption?
 - [ ] [#a006] Investigate duplicated `/agent:exchange` closing marker — likely same class as mass-prefix bug.
-- [ ] [#a007] Layer 2: required pending declaration — **in progress this cycle**.
-- [ ] [#a008] Update SKILL.md + skill-submit-cycle.md — part of Layer 2 PR.
-- [ ] [#a009] Integration tests for pending enforcement.
+- [x] [#a007] Layer 2: required pending declaration — **in progress this cycle**.
+- [x] [#a008] Update SKILL.md + skill-submit-cycle.md — part of Layer 2 PR.
+- [x] [#a009] Integration tests for pending enforcement.
 - [ ] [#a010] PostToolUse hook for agent-doc write (layer 3, optional).
 - [ ] [#a011] End-of-cycle write invariant — warn if `preflight_diff_start` without `ipc_write_attempt`.
 - [ ] [#a012] Expose `agent-doc session-check <FILE>` — nonzero if last ops.log entry is `preflight_diff_start`.
 - [ ] [#a013] SPEC.md breakup — flat `specs/*.md` mechanical extraction.
 - [ ] [#a014] Session drift: `registered panes span 2 tmux sessions: 1, 4` — resync if recurring.
+- [ ] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release after manual-testing gate
+- [ ] [#14z4] Hash collision ceiling: implement 8-char fallback in pending::generate_hash if 4-char collides (spec §1)
+- [ ] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)
 <!-- /agent:pending -->
 ## Assistant

@@ -302,7 +302,7 @@ Not a binary bug — the Claude session bailed out of the SKILL flow between pre
 Preflight did its job: committed the prior drift, saved a baseline, and emitted `preflight_diff_start`, meaning it found real changes and handed control back to Claude. But no `write_origin` / `ipc_write_attempt` entry ever followed for `monsterrodholders.md`. The binary was never asked to write anything.
 
 Possible session-side causes (ranked by likelihood):
-1. **Claude answered in console only** and forgot to pipe the response through `agent-doc write`. Classic SKILL step 2 omission — `feedback_agent_doc_foreground_writes.md` guards against `run_in_background` skipping the write, not against forgetting step 2 entirely.: Fix this. Use a runbook to save the steps.
+1. **Claude answered in console only** and forgot to pipe the response through `agent-doc write`. Classic SKILL step 2 omission — `feedback_agent_doc_foreground_writes.md` guards against `run_in_background` skipping the write, not against forgetting step 2 entirely.
 2. **Model tier gate stopped the cycle**. `agent_doc_model_tier: low` is fine, but if a mismatch printed the `Run /model <x>` notice, the prompt-loop may have taken it as a hard stop.
 3. **User interrupted** the cycle (Ctrl-C, pane closed, new slash command) after preflight returned but before the response block finished streaming.
 4. **Cycle fell through a different skill branch** (e.g. `claim`, a builtin-command shortcut) and exited without reaching step 2.
@@ -314,7 +314,7 @@ How to confirm next time:
 Also: I hit a **separate bug** while trying to write this response — the agent-doc-bugs.md doc had **two `&lt;!-- /agent:exchange --&gt;` closing markers** with a stray `<!-- agent:boundary:... -->` wedged between them. The parser rejected it: `closing marker &lt;!-- /agent:exchange --&gt; without matching open`. I fixed it with an Edit so this write could land. How it got there is a second question — boundary-repositioning logic probably wrote a new boundary + close without removing the old one under some race/retry path. Worth a separate look at `commit.reposition` in src/agent-doc/src/commit.rs.
 
 Suggested skill-side fix for the silent-skip: add an end-of-cycle invariant — if the SKILL flow saw a non-empty `diff` in preflight and the cycle exits without calling `agent-doc write`, emit a visible warning. That turns a silent failure into a loud one, without requiring binary changes.
-<!-- agent:boundary:31f74135 -->
+<!-- agent:boundary:af998964 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

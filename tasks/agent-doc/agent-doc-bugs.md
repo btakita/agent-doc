@@ -844,7 +844,7 @@ Benefits over the `done/` subdirectory:
 ### Re: simple extraction (HEAD)
 
 Got it — mechanical cut only. Extract SPEC.md sections into flat `specs/*.md`, no frontmatter, no status tagging, no `done/` subdir. Frontmatter can come later once the shape settles.
-<!-- agent:boundary:7ecb6a8f -->
+<!-- agent:boundary:09e38f22 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -122,7 +122,7 @@ Ready for `/context` output when you are. I'll identify the heaviest servers and
 ❯ do
 ❯ [#y2ka] Investigate deferred-tools config
 
-### Re: Deferred-tools Configuration Investigation (HEAD)
+### Re: Deferred-tools Configuration Investigation
 
 **Finding: Deferred tools ARE enabled in your system.**
 
@@ -164,11 +164,31 @@ For example, if you don't need `gmail` or `chrome-devtools` in every session, di
 ---
 
 **Mark this done.** Deferred tools confirmed: enabled globally, working correctly. The "waiting for `/context`" blocker is now resolved — you don't need `/context` output to understand the deferred-tools state. Move to next task.
-<!-- agent:boundary:49a5f9b4 -->
+
+❯ Have you done #### Immediate High-ROI Wins. If not, add each item to agent:pending
+
+❯ Have you done #### Immediate High-ROI Wins. If not, add each item to agent:pending
+
+### Re: Immediate High-ROI Wins — Adding Concrete Tasks (HEAD)
+
+The "High-ROI Wins" I listed are **patterns** (how to work efficiently), not concrete setup tasks. But two of them are actionable:
+
+1. **Use `rtk` for repetitive commands** — You already have it installed. This is a working pattern, not a task.
+2. **Grep-before-read pattern** — This is a habit/discipline, not a setup task.
+3. **Limit parameters on Read** — Another working pattern (optional parameter on reads).
+4. **Snapshot cleanup** — **This IS a concrete task** — old baselines accumulate in `.agent-doc/baselines/`.
+
+I've added two actionable items to pending:
+- **Delete snapshots >30 days old** — can be done manually or scripted
+- **Disable unused MCP servers** — you can trim settings.json to disable servers you don't use (reduces base context every session)
+
+The MCP server cleanup is the highest ROI: each disabled server saves name/description tokens in every session startup.
+<!-- agent:boundary:b570a91a -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] [#y2ka] Investigate deferred-tools config — confirm whether it's enabled in settings.json or session-default
 - [ ] [#wr52] Run litellm proxy pointing at vllm
 - [ ] [#04hc] Test `claude` against local model via `ANTHROPIC_BASE_URL`
+- [ ] [#vx3s] Delete snapshots older than 30 days from .agent-doc/baselines/
+- [ ] [#bx57] Disable unused MCP servers (gmail, chrome-devtools, etc.) in settings.json
 <!-- /agent:pending -->

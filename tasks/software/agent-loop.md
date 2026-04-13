@@ -3,6 +3,7 @@ agent_doc_session: be20dd6e-31ce-4f16-93ed-42c9c2a21b98
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
+agent_doc_auto_compact: 250
 ---
 
 # agent-loop operations
@@ -62,7 +63,7 @@ Want me to audit your `~/.claude/settings.json` and `MEMORY.md` for trim opportu
 Starting the audit. I need one thing from you first:
 
 **Run `/context` in this terminal** and let me know when you're done. I can't run slash commands myself, but once I see the breakdown I'll audit everything — settings.json, MCP servers, plugins, MEMORY.md, CLAUDE.md files.
-<!-- agent:boundary:e2bb42e3 -->
+<!-- agent:boundary:75cd21d9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

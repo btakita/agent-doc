@@ -1103,7 +1103,7 @@ Landed in `src/agent-doc/src/git.rs:286-317`. Five-line change: added an uncondi
 
 Note on the stray `n`: the previous cycle's `n` typo got absorbed into committed content by the time the boundary moved. Leaving it — harmless. Let me know if you want it scrubbed in a cleanup pass.
 ❯ release
-### Re: Release Complete — v0.32.3 published (HEAD)
+### Re: Release Complete — v0.32.3 published
 
 **Release gates passed:**
 - Manual testing: Safety rail + submodule fix + out-of-band logging verified live in preflight sweep (zero fatal: errors, forensic log active)
@@ -1134,26 +1134,38 @@ Note on the stray `n`: the previous cycle's `n` typo got absorbed into committed
 - Drop Option B from pending (A is the canonical fix)
 
 Release tagged and landed. ✅
-<!-- agent:boundary:d54d9214 -->
+❯ do
+❯ - **Implement Layer 2: required pending declaration** — ← awaiting ack on option 3 (stable hash ids + lazy preflight migration)
+### Re: Starting Layer 2 implementation (HEAD)
+
+On it. Spec at `src/agent-doc/specs/pending-system.md` is the source of truth. Executing the full plan now:
+
+1. Rust — new `pending.rs` module + CLI flags (`--pending-add/done/edit/clear/reorder`) in `write.rs`
+2. Rust — preflight lazy backfill (hash IDs + GFM `[ ]` checkboxes), reap `- [x]`, reorder detection → `pending_reordered` in JSON
+3. Enforcement — reject `patch:pending` blocks in write payload
+4. SKILL.md §1b + `runbooks/skill-submit-cycle.md` rewritten for granular flags
+5. Tests for each primitive + end-to-end migration
+
+Delegating Rust work to a focused subagent to keep this context clean. Will report back with build/test results and the SKILL edits in one summary.
+<!-- agent:boundary:086928dc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **🔴 Investigate boundary/baseline divergence root cause** — `out_of_band_write` always-on log line landed (`git.rs:286`). Next preflight will emit first entry; aggregate after 1 day of real-world cycles to classify drift patterns.
-- **Safety rail + forensic log in normalize_user_prompts_in_exchange** — ✅ landed, tested, installed. Awaiting large-drift trip to produce `normalize_threshold_exceeded` telemetry.
-- **Submodule pathspec fix (Option A)** — ✅ landed, tested, verified live. ← done
-- **Drop or implement Option B (skill-side submodule workaround)** — A handles it deterministically; B is redundant. ← awaiting decision
-- **Investigate the 1062 pre-existing `❯` lines across 46 snapshots** — legitimate or prior corruption? Diff against git history to classify.
-- **Investigate duplicated `/agent:exchange` closing marker** — likely same root cause class as mass-prefix bug.
-- **Release agent-doc with safety rail + submodule fix + out_of_band_write log** — bump `Cargo.toml` + `pyproject.toml`, add VERSIONS.md entry (include the new `out_of_band_write` ops.log schema), publish after manual-testing gate.
-- **Implement Layer 2: required pending declaration** — ← awaiting ack on option 3 (stable hash ids + lazy preflight migration)
-- **Update SKILL.md + skill-submit-cycle.md** — document new pending declaration contract as part of Layer 2 PR.
-- **Integration tests for pending enforcement**
-- **PostToolUse hook for agent-doc write** (layer 3, optional)
-- **Add end-of-cycle write invariant** — warn if `preflight_diff_start` was emitted but `ipc_write_attempt` was not, within the cycle.
-- **Expose `agent-doc session-check <FILE>`** — returns non-zero if last ops.log entry for doc is `preflight_diff_start`.
-- **SPEC.md breakup** — flat `specs/*.md` extraction, mechanical only.
-- **Session drift noted:** preflight layout check reported `registered panes span 2 tmux sessions: 1, 4`. Not fixed this cycle — flag for resync if it keeps appearing.
+- [ ] [#a001] 🔴 Investigate boundary/baseline divergence root cause — `out_of_band_write` always-on log line landed (`git.rs:286`); aggregate after 1 day.
+- [ ] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
+- [x] [#a003] Submodule pathspec fix (Option A) — ✅ landed, verified live, shipped in v0.32.3.
+- [ ] [#a004] Drop Option B (skill-side submodule workaround) — A handles it deterministically; B redundant.
+- [ ] [#a005] Investigate 1062 pre-existing `❯` lines across 46 snapshots — legitimate or prior corruption?
+- [ ] [#a006] Investigate duplicated `/agent:exchange` closing marker — likely same class as mass-prefix bug.
+- [ ] [#a007] Layer 2: required pending declaration — **in progress this cycle**.
+- [ ] [#a008] Update SKILL.md + skill-submit-cycle.md — part of Layer 2 PR.
+- [ ] [#a009] Integration tests for pending enforcement.
+- [ ] [#a010] PostToolUse hook for agent-doc write (layer 3, optional).
+- [ ] [#a011] End-of-cycle write invariant — warn if `preflight_diff_start` without `ipc_write_attempt`.
+- [ ] [#a012] Expose `agent-doc session-check <FILE>` — nonzero if last ops.log entry is `preflight_diff_start`.
+- [ ] [#a013] SPEC.md breakup — flat `specs/*.md` mechanical extraction.
+- [ ] [#a014] Session drift: `registered panes span 2 tmux sessions: 1, 4` — resync if recurring.
 <!-- /agent:pending -->
 ## Assistant

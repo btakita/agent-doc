@@ -1306,7 +1306,7 @@ That is itself the answer to "why": we cannot tell from the log, because the log
 Roughly 30 lines across `claim.rs` + `sync.rs`. Say the word and I'll land it in the next cycle.
 
 Marked pending `#mrc4` (CLAUDE.md version strip) and `#31a5` (`make bump-plugin`) as done.
-<!-- agent:boundary:8e6f8909 -->
+<!-- agent:boundary:97d8e7ad -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

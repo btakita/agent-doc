@@ -550,12 +550,26 @@ cd src/boost-client/tasks
 sed -i 's/^❯ //g' monsterrodholders.md
 ```
 ❯ do it
-### Re: Strip `❯ ` prefixes from monsterrodholders.md (HEAD)
+### Re: Strip `❯ ` prefixes from monsterrodholders.md
 
 Done. All 410 lines of shell prompt markers stripped from `src/boost-client/tasks/monsterrodholders.md`. The sed command removed every `❯ ` at line starts across the entire exchange section.
 
 The file is now readable in the exchange — no more prefix artifacts. Staged and ready to commit.
-<!-- agent:boundary:47593c50 -->
+❯ do
+❯ - **Create SKILL runbook** (`.claude/skills/agent-doc/runbooks/skill-submit-cycle.md`) — codify the 3 steps (preflight → respond → write+commit) to prevent silent failures when step 2 is forgotten
+
+### Re: Create SKILL runbook for submit cycle (HEAD)
+
+Heads up: `.claude/skills/agent-doc/runbooks/cycle-steps.md` already exists (untracked) and codifies exactly this — 5 steps (preflight → gate checks → compose → write-back → commit), plus a self-check list and failure-mode fingerprints. It's a superset of the 3 steps you asked for.
+
+Two options — your call:
+
+1. **Rename** `cycle-steps.md` → `skill-submit-cycle.md` (keeps the name you specified, single file, no dup).
+2. **Keep** `cycle-steps.md` as-is and skip creating a new file (the runbook already prevents the silent-skip bug you're targeting).
+3. **Create a separate** terser `skill-submit-cycle.md` with just the 3-step version, linking to `cycle-steps.md` for the full detail.
+
+Which? I'd lean #1 — `skill-submit-cycle.md` is the more descriptive name and the existing content is already well-scoped.
+<!-- agent:boundary:2587a83a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

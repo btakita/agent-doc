@@ -286,9 +286,7 @@ The `env` frontmatter feature is fully wired across all paths:
 
 Manual testing complete ✓ Feature ready for live use in sessions.
 
-<!-- agent:boundary:68d45024 -->
 <!-- /agent:exchange -->
-<!-- agent:boundary:74fcb4e7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

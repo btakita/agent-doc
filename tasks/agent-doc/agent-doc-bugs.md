@@ -1221,7 +1221,7 @@ Got it. The claim error is the project session (`6`) being stale after restart �
 
 Want me to implement phase 1 now, or skip straight to phase 2?
 Go straight to phase 2. Also hook up the JB Plugin `Refresh Agent Doc Environment`. 
-### Re: Phase 2 — JBPopup session picker landed (HEAD)
+### Re: Phase 2 — JBPopup session picker landed
 
 Implemented in `RefreshEnvironmentAction.kt`. Plugin builds clean (`./gradlew buildPlugin signPlugin` — BUILD SUCCESSFUL).
 
@@ -1244,8 +1244,39 @@ Implemented in `RefreshEnvironmentAction.kt`. Plugin builds clean (`./gradlew bu
 - `build/distributions/agent-doc-jetbrains-0.1.0.zip` (unsigned)
 - `build/distributions/agent-doc-jetbrains-0.1.0-signed.zip` (signed)
 
+❯ bump the JB Plugin version. You sometimes revert back to v0.1.0. I believe there is a SKILL->runbook to prevent this. Please advise on making the correct behavior reliable. Should we have a script?
+
+❯ When I call `Claim for Tmux Pane`, the tmux pane for the agent doc is swapped out of the tmux window. This happened on the last agent doc run on session-share/tasks/claudescore.md. Why?
+
 **Next step (manual testing gate per release checklist):** Install the rebuilt zip — IDEA → Settings → Plugins → gear → Install Plugin from Disk. Structural changes to the class (new helper methods, new data class) — per your memory rules, full uninstall → restart → install → restart is the safe path if hot-reload misbehaves. Then hit Ctrl+Shift+Alt+R on this doc and confirm the picker lists your sessions and binds correctly. Once that works, I'll commit.
-<!-- agent:boundary:b8fb3fa9 -->
+
+### Re: JB plugin version reverting to v0.1.0 (HEAD)
+
+The *real* version lives in `editors/jetbrains/gradle.properties` (`pluginVersion = 0.2.56`). Gradle picks it up via `version = providers.gradleProperty("pluginVersion").get()`. The reversion isn't in code — it's in **docs**:
+
+- `editors/jetbrains/CLAUDE.md` hardcodes `agent-doc-jetbrains-0.1.0.zip` as example output
+- The exchange in this doc still says `0.1.0` in the "Artifacts" block
+
+Every time I regenerate docs/runbooks from that CLAUDE.md, `0.1.0` gets repeated. Two fixes, pick one:
+
+1. **Strip the literal version from CLAUDE.md.** Change to `agent-doc-jetbrains-<version>.zip` or reference `build/distributions/agent-doc-jetbrains-*-signed.zip`. Simple, removes the source of drift.
+2. **Add `make bump-plugin`** that sed-replaces `pluginVersion` in gradle.properties, bumps patch, builds both zips, and prints the new filename. A runbook step that *reads* `gradle.properties` instead of hardcoding ensures the right number gets quoted.
+
+Recommendation: do both — fix the doc (1 line) and add a `bump-plugin` target so the runbook becomes `make bump-plugin && ./gradlew buildPlugin signPlugin`. Pending items added.
+
+### Re: Claim for Tmux Pane swaps pane out of window (HEAD)
+
+`ClaimAction.kt:49-78` runs two steps on a background thread:
+1. `agent-doc claim <file> --window <id> --position <left|right>`
+2. `SyncLayoutAction.syncLayout(project, notify=false)`
+
+Two suspects, in likelihood order:
+
+- **Layout reconciler moves the pane.** Step 2 calls `sync.rs` which rebuilds tmux layout from the IDEA editor layout. If `LayoutDetector` misreads columns (e.g., the just-claimed file isn't yet in a detected column, or window focus is elsewhere), the reconciler picks a "wrong" target and swaps the pane out. Per `src/agent-doc/CLAUDE.md`: "reconciler always runs, no early exits" — so there is no guard against running with partial layout data.
+- **`--position` mismatch.** If `editorLayout.columns.size == 1`, the code sends `position = "left"` (colIdx == 0 and also == size-1; the `colIdx == 0` branch wins first). If the pane was previously claimed as `right`, claim reassigns it to `left`, and sync then moves it.
+
+To diagnose I need: (a) `.agent-doc/logs/ops.log` around the claudescore.md claim event, and (b) `tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index} #{pane_title}'` before/after. Want me to run those now on a reproducing case, or land a pending item to add planned-move logging to `sync.rs` so the next reproduction is self-diagnosing? (I've added the logging item to pending either way.)
+<!-- agent:boundary:a25aafa0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1264,8 +1295,9 @@ Implemented in `RefreshEnvironmentAction.kt`. Plugin builds clean (`./gradlew bu
 - [ ] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release after manual-testing gate
 - [ ] [#14z4] Hash collision ceiling: implement 8-char fallback in pending::generate_hash if 4-char collides (spec §1)
 - [ ] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)
-- [x] [#mdbs] RefreshEnvironmentAction: bind project tmux session to last-attached session (plus later: popup picker)
-- [x] [#89g4] RefreshEnvironmentAction: bind project tmux session to last-attached session (plus later: popup picker)
 - [ ] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
+- [ ] [#mrc4] editors/jetbrains/CLAUDE.md: strip hardcoded 0.1.0 zip filename; reference <version> or glob instead (root cause of plugin version reversion in docs)
+- [ ] [#31a5] Add make bump-plugin target: sed-bump pluginVersion in gradle.properties, build both zips, print new filename
+- [ ] [#4sh0] Add planned-move logging to sync.rs reconciler so ClaimAction→SyncLayout pane swaps are debuggable
 <!-- /agent:pending -->
 ## Assistant

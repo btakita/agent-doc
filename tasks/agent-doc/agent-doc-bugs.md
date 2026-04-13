@@ -569,7 +569,7 @@ Two options — your call:
 3. **Create a separate** terser `skill-submit-cycle.md` with just the 3-step version, linking to `cycle-steps.md` for the full detail.
 
 Which? I'd lean #1 — `skill-submit-cycle.md` is the more descriptive name and the existing content is already well-scoped.
-<!-- agent:boundary:2587a83a -->
+<!-- agent:boundary:d50d3150 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

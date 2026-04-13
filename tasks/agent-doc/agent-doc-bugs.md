@@ -513,18 +513,52 @@ impl CommitCmd {
 - ⚠️ **Testing burden** — need tests for submodule detection + recursive commit
 - ⚠️ **Spawn overhead** — spawns a child `agent-doc` process for submodule files
 
+❯ Why is a child agent-doc process need to be spawned?
+
 **Implementation effort:** ~3 hours (parsing `.gitmodules`, handling edge cases, testing with real submodule structure)
 
 **Would you want me to implement Option A, or stick with Option B (skill-side workaround)?** Option A is more elegant but Option B is simpler and solves the immediate problem with a one-liner in SKILL.md.
-<!-- agent:boundary:e6a7b699 -->
+
+❯ I have another issue with monsterrodholders.md. The entire agent response has `❯ ` prefixes.
+### Re: Submodule child process spawning (HEAD)
+
+The spawn happens because git commands must execute in their repo's context. When `agent-doc commit` is called from the agent-loop root for a submodule file:
+
+1. **Parent context** has agent-loop's `.git/`
+2. **Submodule file** needs to stage/commit in `src/boost-client`'s `.git/`
+3. **Single process can't do both** — git's state is per-working-tree
+4. **Solution:** spawn a child `agent-doc commit` with `cwd = submodule_root`
+
+The child runs in the submodule's git context, stages + commits, then returns. The parent then updates its submodule pointer. This is how git itself handles submodule operations (you don't commit a file in a submodule from the parent repo — you commit it in the submodule, then update the parent's pointer).
+
+The "spawn overhead" is small and necessary — it's the correct way to handle nested repos.
+
+### Re: monsterrodholders.md `❯ ` prefix issue (HEAD)
+
+**Confirmed.** Lines 18-42 all have shell prompt `❯ ` prefixes on every line. This is a write artifact — the response was appended with prompt markers included.
+
+**Likely cause:** `agent-doc write` is capturing or injecting prompts during stream writes. Need to check:
+1. Whether `--stream` mode is stripping ANSI control codes properly
+2. Whether the response pipe is including shell prompt markers
+3. Whether this happened during a live stream (markers visible to viewers)
+
+**Action:** Add diagnostic logging to `write.rs` to capture what's being written in template mode. Also check if this is reproducible with `--origin skill` vs other origins.
+
+For now, the workaround is to manually strip the prefix:
+```bash
+cd src/boost-client/tasks
+sed -i 's/^❯ //g' monsterrodholders.md
+```
+<!-- agent:boundary:7d27e2d2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - **Create SKILL runbook** (`.claude/skills/agent-doc/runbooks/skill-submit-cycle.md`) — codify the 3 steps (preflight → respond → write+commit) to prevent silent failures when step 2 is forgotten
-- **Fix submodule commit race** — add submodule-aware commit logic to SKILL.md step 3. After `agent-doc commit`, check if file is in a submodule and re-commit from within it. See diagnosed issue in boost-client/tasks/monsterrodholders.md (30 lines uncommitted)
-- **Investigate duplicated `/agent:exchange` closing marker** — doc had two close markers with an orphan boundary between them; parser rejected the write. Look at `commit.reposition` and any path that emits `<!-- agent:boundary:... -->\n<!-- /agent:exchange -->`
+- **Choose submodule fix strategy** — Option A (deterministic binary-side) vs Option B (one-liner skill-side workaround). Leaning toward Option A (child process is correct semantic). Would you like me to implement it?
+- **Investigate `❯ ` prefix write artifact** — lines in monsterrodholders.md responses have shell prompts. Check stream mode, control code stripping, and origin handling in write.rs.
+- **Investigate duplicated `/agent:exchange` closing marker** — doc had two close markers with an orphan boundary between them; parser rejected the write. Look at `commit.reposition` and any path that emits `<!-- agent:boundary:... -->\n&lt;!-- /agent:exchange --&gt;`
 - **Add end-of-cycle write invariant** — warn if `preflight_diff_start` was emitted but `ipc_write_attempt` was not, for the same doc, within the cycle
 - **Expose `agent-doc session-check <FILE>`** — returns non-zero if last ops.log entry for doc is `preflight_diff_start`, giving the skill a self-diagnosis hook
 <!-- /agent:pending -->

@@ -930,7 +930,7 @@ This is a **regression catchall**. It doesn't fix the underlying divergence, but
 I'd recommend **B** — safety rail stops the bleeding, forensic logging gives us data to catch it in the wild. Both are small.
 
 Sorry for the earlier misdirection on "prompt glyph stripping" — I jumped to conclusions before reading the actual normalization code.
-<!-- agent:boundary:4ee8f272 -->
+<!-- agent:boundary:5f62bf04 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

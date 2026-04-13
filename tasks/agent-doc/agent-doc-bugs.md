@@ -638,7 +638,7 @@ agent-doc write <FILE> --stream --origin skill \
 2. **Matching strategy for `--pending-done`**: prefix match on bullet text is fragile (drift as wording changes). Do you want me to add stable ids (`- [#a3f] text`) as part of this PR, or keep it prefix-match-only for v1 and add ids later?
 
 Give me the call on those two and I'll implement. ~60-80 lines in Rust + the docs updates. Estimated one cycle.
-<!-- agent:boundary:cde0b61e -->
+<!-- agent:boundary:098df460 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

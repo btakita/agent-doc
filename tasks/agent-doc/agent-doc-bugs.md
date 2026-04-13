@@ -1311,7 +1311,7 @@ Marked pending `#mrc4` (CLAUDE.md version strip) and `#31a5` (`make bump-plugin`
 ❯ /home/brian/work/btakita/agent-loop/.agent-doc/logs/debug.log.2026-04-13
 ❯ /home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log
 
-### Re: why session-share has its own `.agent-doc/` (HEAD)
+### Re: why session-share has its own `.agent-doc/`
 
 Not a bug — it's load-bearing. `agent-doc` walks up from the document to the nearest `.git` and treats that as the project root. Since `src/session-share/` is a submodule, its `.git` stops the walk there, so `.agent-doc/` is created inside the submodule.
 
@@ -1326,7 +1326,7 @@ You can see the effect in this cycle's preflight output:
 
 Two commits, two repos — exactly matching the CLAUDE.md rule *"Never stage files across repo boundaries in a single commit."* If `.agent-doc/` lived only at the workspace root, the snapshot/baseline/patch state would be tracked against the wrong HEAD and every submodule commit would look like a drift event.
 
-### Single source of trust — what's already centralized vs. what's per-repo (HEAD)
+### Single source of trust — what's already centralized vs. what's per-repo
 
 Looking at `ls .agent-doc/` on both sides, the split is already by design:
 
@@ -1344,12 +1344,50 @@ So the "single source of trust" already exists for session/claims/logs at the ou
 
 The only thing that's arguably duplicated is `config.toml` — submodule's is 122B vs workspace's 357B. That's a merge-overlay pattern, not a fork. If you want, we could document this in `src/agent-doc/specs/` so it's explicit instead of inferred from directory listings.
 
-### On the two log paths (HEAD)
+### On the two log paths
 
 Those were parsed as `slash_commands` by preflight and nearly got invoked as skills. I skipped them (they're clearly absolute paths, not command names) and added a pending item to tighten the parser — it should require `[a-z][a-z0-9:_-]*` after the leading `/` and reject tokens containing a second `/`.
 
 I also noticed a separate oddity in `ops.log`: at timestamp `1776095605` there are two back-to-back `commit_staging` + `out_of_band_write` pairs for the same file within one second (drift=410, then drift=122). Looks like a double-commit race worth investigating — added to pending.
-<!-- agent:boundary:6987b272 -->
+
+❯ When `Claim for Tmux Pane` is called on a document, Should agent-doc detect what the .agent-doc root directory is and `cd` into that directory? This will fix some of command tool errors and would fix the ops log issue.
+❯ However, would be lose context with the rest of the agent-loop monorepo? If yes, that may be ok just to have repository hygene. I notice that there is the potential of context from other projects to leak into session-share. For example monsterrodholders leaked into session-share.
+
+### Re: should `claim` cd into the `.agent-doc` root? (HEAD)
+
+Yes for path/git hygiene, no for context leakage — those are two different problems and only one is fixed by `cd`.
+
+**What `cd` actually fixes** (worth doing):
+
+1. **Relative path ambiguity.** Right now the skill runs `agent-doc preflight tasks/agent-doc/agent-doc-bugs.md` from whatever CWD the pane happened to start in. If CWD drifted to a submodule, that relative path silently resolves to the wrong file. A `cd` on claim pins CWD to the document's project root.
+2. **Git ops land in the right repo by default.** `git status`, `git log`, `rg`, `make` — all of these implicitly scope to CWD. Running them from the submodule root matches what agent-doc is already doing internally when it detects the submodule boundary for commits.
+3. **Drift warnings from concurrent writers.** Some of the `out_of_band_write` noise comes from multiple processes (plugin + CLI + sweep) operating on the same file from different CWDs with slightly different canonicalization paths. Pinning CWD reduces that surface.
+
+This is a cheap win — added to pending.
+
+**What `cd` does NOT fix: cross-project context leakage**
+
+The monsterrodholders-into-session-share leak is a *process-level* problem, not a CWD problem. Here's why a mid-session `cd` won't help:
+
+- Claude Code's CLAUDE.md, memory (`~/.claude/projects/...`), and skill set are loaded **once at process startup** based on the initial working directory. `cd` later in the session doesn't reload any of that.
+- The conversation already carries whatever facts about monsterrodholders / corky / agent-loop the assistant learned before you opened the session-share doc. Those facts persist in the context window regardless of CWD.
+- Memory files like `MEMORY.md` at `/home/brian/.claude/projects/-home-brian-work-btakita-agent-loop/memory/` are keyed on the agent-loop root directory. A session-share-only process would key on a different path and get a clean slate.
+
+So the **real** isolation fix is process-level: `claim` would need to detect "this document's project root ≠ my process's root" and **spawn a fresh Claude Code instance** in the submodule. That new process:
+
+- Loads only `src/session-share/CLAUDE.md` and its ancestors
+- Gets its own memory directory keyed on the submodule path
+- Sees only skills enabled at that level
+- Has no residue from monsterrodholders / drmanny / corky work
+
+That's a bigger change — it means `claim` grows a mode like `--isolate` that shells out to `claude` in the submodule root and hands it the document path. Added to pending as the "real fix" counterpart to the cheap `cd` win.
+
+**Is losing monorepo context a problem?**
+
+Mostly no — and that's the point. The value of the monorepo is filesystem proximity for cross-submodule edits (e.g., `agent-doc` touching files in `instruction-files` and `presence`). But when you're in a **session document** that lives inside one submodule, you almost always want to stay inside that submodule. Cross-submodule work should happen from the workspace root; submodule-scoped work should be process-isolated. `claim` is the natural place to draw that line because that's exactly when the document's identity gets bound to a pane.
+
+**Recommendation:** ship the `cd`-on-claim change first (small, immediately fixes path/git noise), then design `claim --isolate` as a follow-up once the first one is proven.
+<!-- agent:boundary:b2e8c23c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1372,5 +1410,7 @@ I also noticed a separate oddity in `ops.log`: at timestamp `1776095605` there a
 - [ ] [#4sh0] Add planned-move logging to sync.rs reconciler so ClaimAction→SyncLayout pane swaps are debuggable
 - [ ] [#xzz5] Preflight slash-command parser: absolute paths like /home/... get captured as commands. Require [a-z][a-z0-9:_-]* after the slash and reject tokens containing a second /.
 - [ ] [#64mb] Investigate double commit_staging race: ops.log at 1776095605 shows two back-to-back commit_staging/out_of_band_write pairs for the same file within the same second.
+- [ ] [#tw4a] claim: cd into document's .agent-doc root (nearest git repo) when claiming a pane. Fixes relative-path ambiguity and makes git ops naturally target the correct repo.
+- [ ] [#8jzg] claim --isolate: spawn a fresh Claude Code process in the submodule root so CLAUDE.md, memory, and skills load scoped to that repo. Only real fix for cross-project context leakage (mid-session cd does not reload context).
 <!-- /agent:pending -->
 ## Assistant

@@ -160,7 +160,10 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
             "< {} > {} 2>{}; exit",
             PROMPT_FILENAME, RESULT_FILENAME, LOG_FILENAME
         ));
-        let cmd_str = cmd_parts.join(" ");
+        // Prepend frontmatter env exports (unexpanded — target shell handles $(passage ...)
+        // so secrets never appear in the tmux send-keys argument list or scrollback).
+        let env_prefix = crate::env::shell_export_prefix(&fm.env);
+        let cmd_str = format!("{}{}", env_prefix, cmd_parts.join(" "));
 
         // Send the command to the pane
         tmux.send_keys(&pane_id, &cmd_str)

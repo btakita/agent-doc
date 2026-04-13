@@ -113,9 +113,10 @@ pub fn run(
         }
 
         let target = component_name.unwrap_or("exchange");
+        let is_crdt = resolved.is_crdt();
         return match keep {
-            Some(n) => run_component_compact_partial(file, &content, target, n, message),
-            None => run_component_compact(file, &content, target, message),
+            Some(n) => run_component_compact_partial(file, &content, target, n, message, is_crdt),
+            None => run_component_compact(file, &content, target, message, is_crdt),
         };
     } // else: append mode — continue
 
@@ -174,6 +175,7 @@ fn run_component_compact(
     content: &str,
     target: &str,
     message: Option<&str>,
+    is_crdt: bool,
 ) -> Result<()> {
     let components = component::parse(content)?;
     let comp = components
@@ -206,6 +208,15 @@ fn run_component_compact(
     crate::write::atomic_write_pub(file, &compacted)?;
     snapshot::save(file, &compacted)?;
 
+    // Refresh CRDT state to match post-compact content. Without this, the stale
+    // CRDT (pre-compact) can clobber non-target components (e.g. pending) on the
+    // next merge.
+    if is_crdt {
+        let new_crdt = crate::crdt::CrdtDoc::from_text(&compacted).encode_state();
+        snapshot::save_crdt(file, &new_crdt)?;
+        eprintln!("[compact] CRDT state refreshed from post-compact content");
+    }
+
     let line_count = old_content.lines().count();
     eprintln!(
         "[compact] Archived {} lines from component '{}' to {}",
@@ -227,6 +238,7 @@ fn run_component_compact_partial(
     target: &str,
     keep: usize,
     message: Option<&str>,
+    is_crdt: bool,
 ) -> Result<()> {
     let components = component::parse(content)?;
     let comp = components
@@ -300,6 +312,12 @@ fn run_component_compact_partial(
     let compacted = comp.replace_content(content, &new_content);
     crate::write::atomic_write_pub(file, &compacted)?;
     snapshot::save(file, &compacted)?;
+
+    if is_crdt {
+        let new_crdt = crate::crdt::CrdtDoc::from_text(&compacted).encode_state();
+        snapshot::save_crdt(file, &new_crdt)?;
+        eprintln!("[compact] CRDT state refreshed from post-compact content");
+    }
 
     eprintln!(
         "[compact] Archived {} topic(s) from component '{}' to {}",
@@ -800,5 +818,252 @@ mod tests {
         let (preamble, sections) = parse_topic_sections(content);
         assert!(preamble.contains("Just preamble text."));
         assert_eq!(sections.len(), 0);
+    }
+
+    #[test]
+    fn component_compact_preserves_non_target_components() {
+        let doc = concat!(
+            "---\nagent_doc_session: test-123\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Status: active\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic one\n\nLong response about topic one.\n\n",
+            "### Re: topic two\n\nLong response about topic two.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Pending\n\n",
+            "<!-- agent:pending patch=replace -->\n",
+            "- Task A: do something important\n",
+            "- Task B: do something else\n",
+            "- Task C: critical item\n",
+            "<!-- /agent:pending -->\n",
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, doc).unwrap();
+
+        // Set up .agent-doc dirs
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        snapshot::save(&file, doc).unwrap();
+
+        // Capture pending content before compact
+        let components_before = component::parse(doc).unwrap();
+        let pending_before = components_before
+            .iter()
+            .find(|c| c.name == "pending")
+            .unwrap()
+            .content(doc)
+            .to_string();
+        let status_before = components_before
+            .iter()
+            .find(|c| c.name == "status")
+            .unwrap()
+            .content(doc)
+            .to_string();
+
+        // Run compact on exchange only
+        run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false)
+            .unwrap();
+
+        // Read the result and verify non-target components are byte-identical
+        let result = std::fs::read_to_string(&file).unwrap();
+        let components_after = component::parse(&result).unwrap();
+        let pending_after = components_after
+            .iter()
+            .find(|c| c.name == "pending")
+            .unwrap()
+            .content(&result)
+            .to_string();
+        let status_after = components_after
+            .iter()
+            .find(|c| c.name == "status")
+            .unwrap()
+            .content(&result)
+            .to_string();
+
+        assert_eq!(
+            pending_before, pending_after,
+            "pending component must be byte-identical after compact"
+        );
+        assert_eq!(
+            status_before, status_after,
+            "status component must be byte-identical after compact"
+        );
+
+        // Verify exchange was actually compacted
+        let exchange_after = components_after
+            .iter()
+            .find(|c| c.name == "exchange")
+            .unwrap()
+            .content(&result)
+            .to_string();
+        assert!(exchange_after.contains("Compacted summary."));
+        assert!(!exchange_after.contains("### Re: topic one"));
+    }
+
+    #[test]
+    fn crdt_compact_preserves_pending_with_state_refresh() {
+        // Test that CRDT state refresh prevents pending items from being lost
+        let doc = concat!(
+            "---\nagent_doc_session: test-crdt-123\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic one\n\nResponse one.\n\n",
+            "### Re: topic two\n\nResponse two.\n\n",
+            "### Re: topic three\n\nResponse three.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Pending\n\n",
+            "<!-- agent:pending patch=replace -->\n",
+            "- ✅ completed task\n",
+            "- 🔄 in-progress work\n",
+            "- 🆕 new task to add\n",
+            "<!-- /agent:pending -->\n",
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, doc).unwrap();
+
+        // Set up .agent-doc dirs and save initial CRDT state
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        snapshot::save(&file, doc).unwrap();
+
+        // Create and save initial CRDT state
+        let initial_crdt = crate::crdt::CrdtDoc::from_text(doc).encode_state();
+        snapshot::save_crdt(&file, &initial_crdt).unwrap();
+
+        // Capture pending before compact
+        let components_before = component::parse(doc).unwrap();
+        let pending_before = components_before
+            .iter()
+            .find(|c| c.name == "pending")
+            .unwrap()
+            .content(doc)
+            .to_string();
+
+        // Run compact with CRDT mode enabled (is_crdt=true)
+        run_component_compact(&file, doc, "exchange", Some("Compacted."), true)
+            .unwrap();
+
+        // Read result and verify pending survives
+        let result = std::fs::read_to_string(&file).unwrap();
+        let components_after = component::parse(&result).unwrap();
+        let pending_after = components_after
+            .iter()
+            .find(|c| c.name == "pending")
+            .unwrap()
+            .content(&result)
+            .to_string();
+
+        assert_eq!(
+            pending_before, pending_after,
+            "pending component must survive CRDT state refresh during compact"
+        );
+        assert!(pending_after.contains("completed task"));
+        assert!(pending_after.contains("in-progress work"));
+        assert!(pending_after.contains("new task to add"));
+    }
+
+    #[test]
+    fn compact_preserves_boundary_marker() {
+        // Test that boundary markers (❯) survive compact operations
+        let doc = concat!(
+            "---\nagent_doc_session: test-boundary\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: first topic\n\nResponse one.\n\n",
+            "### Re: second topic\n\nResponse two.\n",
+            "<!-- agent:boundary:abc123def456 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "❯ Critical item: verify preservation\n",
+            "<!-- /agent:status -->\n",
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, doc).unwrap();
+
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        snapshot::save(&file, doc).unwrap();
+
+        // Capture status with ❯ before compact
+        let components_before = component::parse(doc).unwrap();
+        let status_before = components_before
+            .iter()
+            .find(|c| c.name == "status")
+            .unwrap()
+            .content(doc)
+            .to_string();
+
+        run_component_compact(&file, doc, "exchange", Some("Archived."), false)
+            .unwrap();
+
+        // Verify ❯ marker preserved in non-target component
+        let result = std::fs::read_to_string(&file).unwrap();
+        let components_after = component::parse(&result).unwrap();
+        let status_after = components_after
+            .iter()
+            .find(|c| c.name == "status")
+            .unwrap()
+            .content(&result)
+            .to_string();
+
+        assert_eq!(status_before, status_after);
+        assert!(status_after.contains("❯"));
+        assert!(status_after.contains("Critical item"));
+    }
+
+    #[test]
+    fn compact_working_tree_consistency() {
+        // Test that compact leaves working tree in consistent state
+        // (file unchanged vs disk, snapshot updated, no stale CRDT)
+        let doc = concat!(
+            "---\nagent_doc_session: test-wt\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic A\n\nResponse A.\n\n",
+            "### Re: topic B\n\nResponse B.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, doc).unwrap();
+
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        snapshot::save(&file, doc).unwrap();
+
+        let file_before = std::fs::read_to_string(&file).unwrap();
+
+        run_component_compact(&file, doc, "exchange", Some("Summary."), false)
+            .unwrap();
+
+        // After compact: file and snapshot should match
+        let file_after = std::fs::read_to_string(&file).unwrap();
+        let snap_path = snapshot::path_for(&file).unwrap();
+        let snapshot_content = std::fs::read_to_string(&snap_path).unwrap();
+
+        assert_eq!(
+            file_after, snapshot_content,
+            "file and snapshot must match after compact"
+        );
+
+        // Verify the document was actually modified
+        assert_ne!(file_before, file_after);
+        assert!(file_after.contains("Summary."));
     }
 }

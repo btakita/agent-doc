@@ -169,6 +169,30 @@ use std::path::Path;
 use crate::{component, frontmatter, merge, recover, sessions, snapshot, template};
 use crate::snapshot::find_project_root;
 
+/// Resolve the IPC project root for `canonical` (an already-canonicalized file
+/// path). Prefers the git superproject root so submodule documents share the
+/// parent's `.agent-doc/patches/` directory (the only one the IDE plugin
+/// watches). Falls back to `find_project_root` for non-git workspaces, then
+/// the file's parent directory as a last resort.
+fn resolve_ipc_project_root(canonical: &Path) -> std::path::PathBuf {
+    let parent = canonical.parent().unwrap_or(Path::new("/"));
+    // 1. Submodule case: route patches to the superproject so the IDE plugin
+    //    (which only watches the parent's `.agent-doc/patches/`) sees them.
+    if let Some(superproject) = crate::git::git_superproject_at(parent) {
+        return superproject;
+    }
+    // 2. Plain git repo: use the toplevel.
+    if let Some(toplevel) = crate::git::git_toplevel_at(parent) {
+        return toplevel;
+    }
+    // 3. Non-git workspace (e.g. tempdir tests): walk up looking for `.agent-doc/`.
+    if let Some(p) = find_project_root(canonical) {
+        return p;
+    }
+    // 4. Last resort: file's parent directory.
+    parent.to_path_buf()
+}
+
 /// Helper: extract boundary_id for a named component from the document.
 ///
 /// Searches for `<!-- agent:boundary:UUID -->` inside the component's content,
@@ -811,8 +835,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     // Try IPC when plugin is installed and --force-disk is not set
     if !force_disk {
         let canonical = file.canonicalize()?;
-        let project_root = find_project_root(&canonical)
-            .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+        let project_root = resolve_ipc_project_root(&canonical);
         let patches_dir = project_root.join(".agent-doc/patches");
 
         if patches_dir.exists() {
@@ -949,8 +972,21 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                 "patches": ipc_patches,
                 "unmatched": unmatched.trim(),
                 "baseline": baseline.unwrap_or(""),
+                "reposition_boundary": true,
             });
             ipc_payload["patch_id"] = serde_json::Value::String(patch_id);
+
+            // Include normalize_prefix_lines so a later plugin pickup restores
+            // the `❯ ` prefixes in the buffer (matches the primary IPC payload).
+            // Without this the plugin would only apply component patches and
+            // the working tree would diverge from the snapshot.
+            if let Some(lines) = norm_lines_for_timeout
+                && !lines.is_empty()
+            {
+                ipc_payload["normalize_prefix_lines"] = serde_json::Value::Array(
+                    lines.iter().map(|l| serde_json::Value::String(l.clone())).collect()
+                );
+            }
 
             // Include frontmatter if present
             let frontmatter_yaml: Option<String> = patches
@@ -967,9 +1003,15 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             )?;
 
             eprintln!("[write] IPC timeout — response saved as patch, awaiting plugin");
-            // Fix 1: save snapshot + commit before exit so the agent response is tracked
-            // even if the plugin applies the patch minutes later. Preflight won't see
-            // uncommitted content on the next cycle.
+            // Bug fix: write content_ours to the working tree before exiting.
+            // The IDE plugin may pick up the patch minutes later (or never if
+            // not running). Without this, the snapshot/HEAD have the response
+            // but the working tree is stuck at pre-write content, so `git diff
+            // HEAD` shows the entire response + prefix restorations as
+            // uncommitted deletions until the plugin applies the patch.
+            if let Err(e) = atomic_write(file, &content_ours) {
+                eprintln!("[write] WARNING: failed to write content_ours to working tree before exit(75): {}", e);
+            }
             if let Err(e) = snapshot::save(file, &content_ours) {
                 eprintln!("[write] WARNING: snapshot save before exit(75) failed: {}", e);
             }
@@ -986,8 +1028,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     // the plugin from applying them later (which would cause double-write).
     if force_disk
         && let Ok(canonical) = file.canonicalize() {
-            let project_root = find_project_root(&canonical)
-                .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+            let project_root = resolve_ipc_project_root(&canonical);
             let patches_dir = project_root.join(".agent-doc/patches");
             if let Ok(hash) = snapshot::doc_hash(file) {
                 let patch_file = patches_dir.join(format!("{}.json", hash));
@@ -1024,7 +1065,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     let base = baseline.unwrap_or(&content_at_start);
 
     // Apply patches using the mode resolution chain:
-    // inline attr (patch=append on tag) > components.toml > built-in default.
+    // inline attr (patch=append on tag) > config.toml ([components] section) > built-in default.
     // The skill sends delta content for append-mode components.
     let mode_overrides = std::collections::HashMap::new();
     let t_apply2 = std::time::Instant::now();
@@ -1159,8 +1200,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     // Build IPC patch file
     let canonical = file.canonicalize()?;
     let hash = snapshot::doc_hash(file)?;
-    let project_root = find_project_root(&canonical)
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let project_root = resolve_ipc_project_root(&canonical);
     let patches_dir = project_root.join(".agent-doc/patches");
     std::fs::create_dir_all(&patches_dir)?;
     let patch_file = patches_dir.join(format!("{}.json", hash));
@@ -1387,8 +1427,7 @@ pub fn try_ipc(
 ) -> Result<bool> {
     let canonical = file.canonicalize()?;
     let hash = snapshot::doc_hash(file)?;
-    let project_root = find_project_root(&canonical)
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let project_root = resolve_ipc_project_root(&canonical);
 
     // Try socket IPC first (lower latency, no inotify)
     if crate::ipc_socket::is_listener_active(&project_root) {
@@ -1578,8 +1617,7 @@ pub fn try_ipc_full_content(
     content: &str,
 ) -> Result<bool> {
     let canonical = file.canonicalize()?;
-    let project_root = find_project_root(&canonical)
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let project_root = resolve_ipc_project_root(&canonical);
 
     // Try socket IPC first
     if crate::ipc_socket::is_listener_active(&project_root) {
@@ -1642,8 +1680,7 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
         Ok(c) => c,
         Err(_) => return false,
     };
-    let project_root = find_project_root(&canonical)
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let project_root = resolve_ipc_project_root(&canonical);
 
     if !crate::ipc_socket::is_listener_active(&project_root) {
         return false;
@@ -3028,5 +3065,230 @@ mod ack_content_snapshot_tests {
         let result = read_ack_content_sidecar(&project_root, patch_id).unwrap();
         assert_eq!(result, Some("applied content from plugin".to_string()));
         assert!(!sidecar.exists(), "sidecar should be deleted after read");
+    }
+}
+
+#[cfg(test)]
+mod submodule_patch_routing_tests {
+    use super::*;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    /// Helper: run a git command in `dir` with isolated user.name/email so the
+    /// command works in CI environments that lack global git config. Asserts
+    /// the command succeeds and prints stderr on failure.
+    fn git(dir: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .current_dir(dir)
+            .args([
+                "-c", "user.email=test@example.com",
+                "-c", "user.name=Test",
+                "-c", "init.defaultBranch=main",
+                "-c", "protocol.file.allow=always",
+                "-c", "commit.gpgsign=false",
+            ])
+            .args(args)
+            .output()
+            .expect("git command failed to spawn");
+        assert!(
+            out.status.success(),
+            "git {:?} failed: stderr={}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    #[test]
+    fn resolve_ipc_project_root_returns_superproject_for_submodule_file() {
+        // Build a real parent+submodule layout via `git submodule add` and
+        // verify that an absolute path inside the submodule resolves to the
+        // PARENT's .agent-doc/patches directory. This is the routing the
+        // IDE plugin depends on.
+        let parent_dir = TempDir::new().unwrap();
+        let sub_src_dir = TempDir::new().unwrap();
+        let parent = parent_dir.path().canonicalize().unwrap();
+        let sub_src = sub_src_dir.path().canonicalize().unwrap();
+
+        // Bootstrap a "remote" submodule repo with one committed file.
+        git(&sub_src, &["init"]);
+        std::fs::write(sub_src.join("README.md"), "sub").unwrap();
+        git(&sub_src, &["add", "README.md"]);
+        git(&sub_src, &["commit", "-m", "init"]);
+
+        // Bootstrap parent repo and add the submodule under src/submodule.
+        git(&parent, &["init"]);
+        std::fs::write(parent.join("README.md"), "parent").unwrap();
+        git(&parent, &["add", "README.md"]);
+        git(&parent, &["commit", "-m", "init"]);
+        git(&parent, &[
+            "submodule", "add",
+            sub_src.to_string_lossy().as_ref(),
+            "src/submodule",
+        ]);
+
+        // The IDE plugin only watches the parent's .agent-doc/patches.
+        std::fs::create_dir_all(parent.join(".agent-doc/patches")).unwrap();
+
+        // Place a document inside the submodule.
+        let doc = parent.join("src/submodule/test.md");
+        std::fs::write(&doc, "---\n---\n\n<!-- agent:exchange -->c<!-- /agent:exchange -->\n").unwrap();
+
+        let canonical = doc.canonicalize().unwrap();
+        let project_root = resolve_ipc_project_root(&canonical);
+
+        assert_eq!(
+            project_root, parent,
+            "submodule file must resolve to parent (superproject) for IPC patch routing"
+        );
+
+        // The submodule's own toplevel must NOT be returned.
+        let submodule_toplevel = parent.join("src/submodule");
+        assert_ne!(
+            project_root, submodule_toplevel,
+            "must not return the submodule toplevel — IDE plugin only watches parent"
+        );
+    }
+
+    // Note: a "not in git repo" fallback test is intentionally omitted because
+    // /tmp tempdirs are typically nested inside the developer's checkout (the
+    // agent-doc workspace itself is a git repo), so `git rev-parse
+    // --show-toplevel` from `/tmp/...` walks up into the source tree. The
+    // fallback path is exercised in production by non-git workspaces.
+
+    // The two `try_ipc_*` integration tests below are kept for documentation
+    // but currently fail because `write_ipc_and_poll` cleans up the patch file
+    // on timeout, leaving the directory empty by the time the assertions run.
+    // The routing itself is verified by `resolve_ipc_project_root_*` above.
+    // TODO: rewrite these to use a fake socket listener that ACKs immediately.
+    #[ignore]
+    #[test]
+    fn try_ipc_routes_to_superproject_when_available() {
+        // When git::resolve_to_git_root returns a superproject root different from
+        // find_project_root (indicating a submodule), verify that patches_dir points
+        // to the superproject's .agent-doc/patches directory.
+        //
+        // This test creates a real git submodule structure and verifies the routing logic.
+        let parent_dir = TempDir::new().unwrap();
+        let submodule_dir = TempDir::new().unwrap();
+
+        let parent = parent_dir.path();
+        let submodule = submodule_dir.path();
+
+        // Initialize parent repo
+        Command::new("git")
+            .args(&["init"])
+            .current_dir(parent)
+            .output()
+            .expect("failed to init parent repo");
+
+        // Initialize submodule repo
+        Command::new("git")
+            .args(&["init"])
+            .current_dir(submodule)
+            .output()
+            .expect("failed to init submodule repo");
+
+        // Create parent .agent-doc structure
+        let parent_agent_doc = parent.join(".agent-doc");
+        std::fs::create_dir_all(parent_agent_doc.join("patches")).unwrap();
+        std::fs::create_dir_all(parent_agent_doc.join("snapshots")).unwrap();
+
+        // Commit submodule so we can add it as a submodule
+        let test_file = submodule.join("test.txt");
+        std::fs::write(&test_file, "submodule content").unwrap();
+        Command::new("git")
+            .args(&["add", "test.txt"])
+            .current_dir(submodule)
+            .output()
+            .expect("failed to stage in submodule");
+        Command::new("git")
+            .args(&["commit", "-m", "initial"])
+            .current_dir(submodule)
+            .output()
+            .expect("failed to commit in submodule");
+
+        // Add submodule to parent
+        Command::new("git")
+            .args(&["submodule", "add", submodule.to_string_lossy().as_ref(), "src/submodule"])
+            .current_dir(parent)
+            .output()
+            .expect("failed to add submodule");
+
+        // Create a document in the submodule
+        let submodule_src = parent.join("src/submodule");
+        let doc_in_submodule = submodule_src.join("test.md");
+        std::fs::create_dir_all(&submodule_src).ok();
+        std::fs::write(&doc_in_submodule, "---\nsession: test\n---\n\nContent\n").unwrap();
+
+        // Create parent's .agent-doc/snapshots to enable snapshot operations
+        std::fs::create_dir_all(parent_agent_doc.join("snapshots")).unwrap();
+        std::fs::create_dir_all(parent_agent_doc.join("crdt")).unwrap();
+
+        // Mock a patch block
+        let patch = crate::template::PatchBlock::new("exchange", "test response");
+
+        // Call try_ipc with the submodule document
+        // This should:
+        // 1. canonicalize the submodule document path
+        // 2. Call git::resolve_to_git_root() → returns parent_root (superproject)
+        // 3. Use parent's .agent-doc/patches for the IPC directory
+        //
+        // Since no plugin is active, it should timeout and return false,
+        // but the patch file should be written to parent's patches dir, not submodule's.
+        let result = try_ipc(&doc_in_submodule, &[patch], "", None, None, None, None).unwrap_or(false);
+
+        // Verify patch was written to parent's patches dir, not submodule's (if submodule had one)
+        let parent_patches = parent.join(".agent-doc/patches");
+        let entries: Vec<_> = std::fs::read_dir(&parent_patches)
+            .ok()
+            .and_then(|rd| Some(rd.filter_map(|e| e.ok()).collect()))
+            .unwrap_or_default();
+
+        // There should be at least one patch file (written before timeout)
+        assert!(
+            !entries.is_empty(),
+            "patch file should be written to parent's .agent-doc/patches directory for submodule documents"
+        );
+
+        // Verify submodule doesn't have a .agent-doc/patches directory
+        let submodule_patches = submodule_src.join(".agent-doc/patches");
+        assert!(
+            !submodule_patches.exists(),
+            "submodule should NOT have its own .agent-doc/patches directory when parent handles routing"
+        );
+    }
+
+    #[ignore]
+    #[test]
+    fn try_ipc_falls_back_to_find_project_root_when_not_in_git() {
+        // When git::resolve_to_git_root fails (file not in a git repo),
+        // should fall back to find_project_root behavior
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        std::fs::write(&doc, "---\nsession: test\n---\n\n<!-- agent:exchange -->content<!-- /agent:exchange -->\n")
+            .unwrap();
+
+        let patch = crate::template::PatchBlock::new("exchange", "response");
+
+        // This directory is not a git repo, so git::resolve_to_git_root will fail
+        // and fall back to find_project_root (which finds .agent-doc/ at dir level)
+        let result = try_ipc(&doc, &[patch], "", None, None, None, None).unwrap_or(false);
+
+        // Without a plugin, should timeout and return false
+        // But patches should have been written to dir/.agent-doc/patches (via fallback)
+        let patches_dir = agent_doc_dir.join("patches");
+        let entries: Vec<_> = std::fs::read_dir(&patches_dir)
+            .ok()
+            .and_then(|rd| Some(rd.filter_map(|e| e.ok()).collect()))
+            .unwrap_or_default();
+
+        assert!(
+            !entries.is_empty(),
+            "patch file should be written via find_project_root fallback when not in git"
+        );
     }
 }

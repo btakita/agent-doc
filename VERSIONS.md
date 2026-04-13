@@ -4,6 +4,30 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.32.2
+
+- **Feature: `env` frontmatter for per-document environment configuration:** Documents can now declare environment variables in YAML frontmatter that apply to all Bash tool calls and Claude spawns within that session. Syntax:
+  ```yaml
+  env:
+    OPENROUTER_API_KEY: "$(passage btak/OPENROUTER_API_KEY)"
+    ANTHROPIC_BASE_URL: "https://openrouter.ai/api"
+    ANTHROPIC_AUTH_TOKEN: "$OPENROUTER_API_KEY"
+    ANTHROPIC_MODEL: "qwen/qwen3.6-plus"
+  ```
+- **Shell expansion support:** Environment variable values support shell expansion (`$(command)`, `$VAR`, `${VAR}`). Cross-references work (later vars can reference earlier ones). Values are expanded at runtime; expanded secrets never appear in JSON output or logs.
+- **Coverage across all paths:** Env vars apply to:
+  - Interactive Claude sessions started via `agent-doc start <FILE>` (via `cmd.env()` on spawned process)
+  - Non-streaming submits via `agent-doc run` (via `Claude::with_env()`)
+  - Streaming submits via `agent-doc stream` (via `StreamingAgent::send_streaming()`)
+  - Parallel fan-out (via unexpanded shell exports in tmux send-keys, so target shell handles expansion safely)
+  - `/agent-doc` skill in existing sessions (preflight JSON returns unexpanded values; skill runs `export` in Bash)
+- **Preflight JSON field:** `"env": {"KEY": "unexpanded_shell_expr"}` — skill exports these unexpanded so secret expansion happens inside the Bash call, never in JSON output.
+- **New module `src/env.rs`:** 
+  - `expand_values(env)` — expands all vars through the shell (used by start/run/stream paths)
+  - `shell_export_prefix(env)` — builds `export K="V" && ...` string with unexpanded values (used by parallel path)
+- **Tests added:** 42 existing tests + 8 new env tests covering plain values, shell expansion, cross-references, empty env, and safe quoting in send-keys commands. All 72 tests passing.
+- **SKILL.md step 0c2:** Skill now exports env vars from preflight JSON into the shell before tool calls.
+
 ## 0.32.1
 
 - **Fix: CRDT state not refreshed after `agent-doc compact`:** When a template-mode document with CRDT write strategy ran `compact`, the binary correctly rewrote the file and snapshot on disk, but the CRDT state in `.agent-doc/crdt/<hash>.yrs` was stale. On the next `agent-doc write` or `stream`, the 3-way merge loaded the stale CRDT (containing pre-compact exchange AND pre-compact pending), causing non-target components (like `agent:pending`) to be clobbered by old CRDT view of pending items. Fix: After `run_component_compact` or `run_component_compact_partial`, when `is_crdt`, refresh CRDT state by creating a new `CrdtDoc` from the post-compact content and saving it to `.agent-doc/crdt/<hash>.yrs`. This resets the CRDT to a fresh state, discarding pre-compact history (appropriate since compact is a "new epoch" operation).

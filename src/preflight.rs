@@ -95,7 +95,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
 
-use crate::{diff, frontmatter, git, recover, sessions, snapshot};
+use crate::{config, diff, frontmatter, git, recover, sessions, snapshot};
 
 /// A change detected in a related document since the last cycle.
 #[derive(Serialize)]
@@ -108,7 +108,7 @@ pub struct RelatedDocChange {
     pub exists: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Default)]
 pub struct PreflightOutput {
     /// Tmux layout issues found (empty = healthy).
     pub layout_issues: Vec<String>,
@@ -147,6 +147,42 @@ pub struct PreflightOutput {
     /// These affect Claude Code session state and cannot be invoked via the Skill tool.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub builtin_commands: Vec<String>,
+    /// Resolved model tier the skill should use to gate this cycle.
+    /// Computed from (in precedence order): inline `/model` command,
+    /// `<!-- agent:model -->` component, `agent_doc_model_tier` frontmatter,
+    /// diff heuristic. Single field for skill consumption — gating is a simple
+    /// `>` comparison against the running model's tier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_tier: Option<String>,
+    /// Hard-gate tier from `<!-- agent:model -->` component or `agent_doc_model_tier`
+    /// frontmatter. The skill should refuse to proceed if the running model's tier is
+    /// below this value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_tier: Option<String>,
+    /// Advisory tier computed from diff structural signals (diff type, lines added,
+    /// document path). The skill may surface this as a suggestion but should not gate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_tier: Option<String>,
+    /// Concrete model name from an inline `/model <x>` command in the diff
+    /// (e.g., `"opus"`). Set when the user wrote `/model opus` (or `/model high`,
+    /// resolved via the harness's tier map). The corresponding diff line is
+    /// stripped from `diff` and `annotated_diff` so it does not propagate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_switch: Option<String>,
+    /// Resolved tier for `model_switch` (e.g., `"high"` for `opus`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_switch_tier: Option<String>,
+    /// Pending callback requests from `agent-doc cleanup` or other IPC callers.
+    /// Non-empty when another process wrote a request and is waiting for this
+    /// session to respond.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_callbacks: Vec<crate::callback::PendingCallback>,
+    /// Environment variables from frontmatter `env` field (unexpanded).
+    /// Values may contain shell expressions like `$(passage ...)` or `$VAR`.
+    /// The skill should expand these via `export` in a Bash tool call.
+    /// Order is preserved from the document for sequential evaluation.
+    #[serde(default, skip_serializing_if = "indexmap::IndexMap::is_empty")]
+    pub env: indexmap::IndexMap<String, String>,
 }
 
 /// Check tmux layout health for the current session.
@@ -516,8 +552,23 @@ pub fn run(file: &Path) -> Result<()> {
             file.display(), snap_len, file_len
         ));
     }
-    let diff_result = diff::compute(file)?;
-    let no_changes = diff_result.is_none();
+    let raw_diff = diff::compute(file)?;
+    let no_changes = raw_diff.is_none();
+
+    // Step 4a: Scan diff for inline `/model <x>` command and strip the matching
+    // line(s) before downstream classification. The strip prevents `/model` from
+    // double-emitting in `builtin_commands`.
+    let global_config = config::load().unwrap_or_default();
+    let harness = agent_doc::model_tier::detect_harness();
+    let model_scan = raw_diff.as_ref().map(|d| {
+        agent_doc::model_tier::scan_model_switch(d, &harness, &global_config.model)
+    });
+    let diff_result: Option<String> = if let Some(scan) = model_scan.as_ref() {
+        // Use the stripped diff for downstream consumers.
+        Some(scan.stripped_diff.clone())
+    } else {
+        raw_diff.clone()
+    };
 
     // Step 4b: Classify the diff for skill routing.
     let classification = diff_result.as_ref().map(|d| diff::classify_diff(d));
@@ -536,6 +587,61 @@ pub fn run(file: &Path) -> Result<()> {
     let slash_commands = parsed_commands.skill_commands;
     let builtin_commands = parsed_commands.builtin_commands;
 
+    // Step 4e: Resolve model tier sources and compose effective_tier.
+    // Sources (highest precedence first): inline /model command, <!-- agent:model --> component,
+    // agent_doc_model_tier frontmatter, diff heuristic.
+    let (frontmatter_tier, component_tier_value, frontmatter_env) = match std::fs::read_to_string(file) {
+        Ok(content) => {
+            let (fm_tier, env_map) = frontmatter::parse(&content)
+                .ok()
+                .map(|(fm, _)| (fm.model_tier, fm.env))
+                .unwrap_or_default();
+            let comp_value = agent_doc::model_tier::extract_model_component(&content);
+            (fm_tier, comp_value, env_map)
+        }
+        Err(_) => (None, None, Default::default()),
+    };
+    let component_tier = component_tier_value.as_deref().and_then(|v| {
+        agent_doc::model_tier::component_value_to_tier(v, &harness, &global_config.model)
+    });
+
+    // Diff heuristic — counts user-added lines (excluding +++ headers).
+    let lines_added = diff_result
+        .as_ref()
+        .map(|d| {
+            d.lines()
+                .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
+                .count()
+        })
+        .unwrap_or(0);
+    let diff_type_str: Option<String> = classification.as_ref().and_then(|c| {
+        serde_json::to_value(&c.diff_type)
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+    });
+    let suggested = agent_doc::model_tier::suggested_tier(
+        diff_type_str.as_deref(),
+        lines_added,
+        file,
+    );
+
+    let model_switch_name = model_scan.as_ref().and_then(|s| s.model_switch.clone());
+    let model_switch_tier = model_scan.as_ref().and_then(|s| s.model_switch_tier);
+    let required_tier_value = component_tier.or(frontmatter_tier);
+    let effective_tier_value = agent_doc::model_tier::compose_effective_tier(
+        model_switch_tier,
+        component_tier,
+        frontmatter_tier,
+        suggested,
+    );
+
+    // Step 5: Scan for pending callback requests from other processes.
+    let pending_callbacks = crate::callback::scan_pending_callbacks(None)
+        .unwrap_or_default();
+    if !pending_callbacks.is_empty() {
+        eprintln!("[preflight] found {} pending callback(s)", pending_callbacks.len());
+    }
+
     let output = PreflightOutput {
         layout_issues,
         recovered,
@@ -545,14 +651,18 @@ pub fn run(file: &Path) -> Result<()> {
         no_changes,
         linked_changes,
         baseline_file,
-        diff_type: classification
-            .as_ref()
-            .and_then(|c| serde_json::to_value(&c.diff_type).ok())
-            .and_then(|v| v.as_str().map(|s| s.to_string())),
+        diff_type: diff_type_str.clone(),
         diff_type_reason: classification.map(|c| c.diff_type_reason),
         annotated_diff,
         slash_commands,
         builtin_commands,
+        effective_tier: Some(effective_tier_value.to_string()),
+        required_tier: required_tier_value.map(|t| t.to_string()),
+        suggested_tier: Some(suggested.to_string()),
+        model_switch: model_switch_name,
+        model_switch_tier: model_switch_tier.map(|t| t.to_string()),
+        pending_callbacks,
+        env: frontmatter_env,
     };
 
     let json = serde_json::to_string_pretty(&output)
@@ -969,6 +1079,7 @@ mod tests {
             annotated_diff: None,
             slash_commands: vec![],
             builtin_commands: vec![],
+            ..Default::default()
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -997,6 +1108,7 @@ mod tests {
             annotated_diff: None,
             slash_commands: vec![],
             builtin_commands: vec![],
+            ..Default::default()
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1035,6 +1147,7 @@ mod tests {
             annotated_diff: None,
             slash_commands: vec![],
             builtin_commands: vec![],
+            ..Default::default()
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1223,6 +1336,7 @@ mod tests {
             annotated_diff: None,
             slash_commands: vec![],
             builtin_commands: vec![],
+            ..Default::default()
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1245,6 +1359,7 @@ mod tests {
             annotated_diff: None,
             slash_commands: vec![],
             builtin_commands: vec![],
+            ..Default::default()
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1267,6 +1382,7 @@ mod tests {
             annotated_diff: None,
             slash_commands: vec![],
             builtin_commands: vec![],
+            ..Default::default()
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1290,6 +1406,7 @@ mod tests {
             annotated_diff: None,
             slash_commands: vec![],
             builtin_commands: vec![],
+            ..Default::default()
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1313,6 +1430,7 @@ mod tests {
             annotated_diff: Some("[user+] line".to_string()),
             slash_commands: vec![],
             builtin_commands: vec![],
+            ..Default::default()
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1335,6 +1453,7 @@ mod tests {
             annotated_diff: None,
             slash_commands: vec![],
             builtin_commands: vec![],
+            ..Default::default()
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1360,6 +1479,7 @@ mod tests {
             annotated_diff: None,
             slash_commands: parsed_cmds.skill_commands,
             builtin_commands: parsed_cmds.builtin_commands,
+            ..Default::default()
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1387,6 +1507,7 @@ mod tests {
             annotated_diff: None,
             slash_commands: vec![],
             builtin_commands: vec![],
+            ..Default::default()
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1416,6 +1537,7 @@ mod tests {
             annotated_diff: None,
             slash_commands: vec![],
             builtin_commands: vec![],
+            ..Default::default()
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();

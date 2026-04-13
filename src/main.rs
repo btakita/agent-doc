@@ -45,18 +45,23 @@ mod annotate;
 mod audit_docs;
 mod autoclaim;
 mod boundary;
+mod callback;
 mod claim;
 mod clean;
+mod cleanup_cmd;
 mod commands;
 mod compact;
 mod config;
 mod convert;
+mod pending_cmd;
+mod project_config;
 mod gc;
 mod parallel;
 mod preflight;
 mod read;
 mod dedupe;
 mod diff;
+mod env;
 mod extract;
 mod focus;
 mod git;
@@ -608,6 +613,32 @@ enum Commands {
         #[command(subcommand)]
         action: HookAction,
     },
+    /// Clean up document: compact, prune pending, apply callback results
+    Cleanup {
+        /// Path to the session document
+        file: PathBuf,
+        /// Timeout waiting for Claude session response (seconds)
+        #[arg(long, default_value_t = 120)]
+        timeout: u64,
+        /// Polling interval for callback response (milliseconds)
+        #[arg(long, default_value_t = 1000)]
+        poll_interval: u64,
+        /// Model for fallback agent (default: sonnet)
+        #[arg(long, default_value = "sonnet")]
+        fallback_model: String,
+    },
+    /// Manage the agent:pending component
+    Pending {
+        /// Path to the session document
+        file: PathBuf,
+        #[command(subcommand)]
+        action: PendingAction,
+    },
+    /// Manage bidirectional IPC callbacks
+    Callback {
+        #[command(subcommand)]
+        action: CallbackAction,
+    },
     /// Show or change the configured tmux session
     Session {
         #[command(subcommand)]
@@ -648,6 +679,75 @@ enum HookAction {
         root: Option<String>,
     },
     /// Clean up expired events
+    Gc {
+        /// Project root directory
+        #[arg(long)]
+        root: Option<String>,
+    },
+    /// Check for pending callback requests (called by PostToolUse hooks)
+    CheckCallbacks {
+        /// Project root directory
+        #[arg(long)]
+        root: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum PendingAction {
+    /// Add an item to the pending component
+    Add {
+        /// The pending item description
+        item: String,
+    },
+    /// Remove an item from the pending component
+    Remove {
+        /// Content to match
+        target: String,
+        /// Treat target as a substring match
+        #[arg(long, short)]
+        contains: bool,
+    },
+    /// Remove completed items
+    Prune,
+    /// List current pending items
+    List,
+}
+
+#[derive(Subcommand)]
+enum CallbackAction {
+    /// Create a callback request for a document
+    Request {
+        /// Path to the session document
+        file: PathBuf,
+        /// Operations requested (comma-separated: compact,prune-pending,summary)
+        operations: String,
+        /// Optional additional context
+        #[arg(long)]
+        context: Option<String>,
+        /// TTL in seconds before the request expires
+        #[arg(long, default_value_t = 300)]
+        ttl: u64,
+    },
+    /// Read the pending callback request for a document
+    Read {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Write a callback response for a document
+    Respond {
+        /// Path to the session document
+        file: PathBuf,
+        /// The request_id to respond to (must match the pending request)
+        #[arg(long)]
+        request_id: String,
+        /// Response status: "success" or "error"
+        #[arg(long, default_value = "success")]
+        status: String,
+        /// Summary text
+        #[arg(long)]
+        summary: String,
+    },
+    /// Clean up expired callback requests
     Gc {
         /// Project root directory
         #[arg(long)]
@@ -1054,6 +1154,55 @@ fn main() -> anyhow::Result<()> {
             }
             HookAction::Gc { root } => {
                 hook_cmd::gc(root.as_deref())
+            }
+            HookAction::CheckCallbacks { root } => {
+                let pending = callback::scan_pending_callbacks(root.as_deref())?;
+                let json = serde_json::to_string_pretty(
+                    &serde_json::json!({"pending_callbacks": pending})
+                )?;
+                println!("{}", json);
+                Ok(())
+            }
+        },
+        Commands::Cleanup { file, timeout, poll_interval, fallback_model } => {
+            cleanup_cmd::run(&file, timeout, poll_interval, &fallback_model)
+        }
+        Commands::Pending { file, action } => match action {
+            PendingAction::Add { item } => pending_cmd::add(&file, &item),
+            PendingAction::Remove { target, contains } => pending_cmd::remove(&file, &target, contains),
+            PendingAction::Prune => pending_cmd::prune(&file),
+            PendingAction::List => pending_cmd::list(&file),
+        },
+        Commands::Callback { action } => match action {
+            CallbackAction::Request { file, operations, context, ttl } => {
+                let ops: Vec<&str> = operations.split(',').map(|s| s.trim()).collect();
+                let request = callback::create_request(&file, &ops, context.as_deref(), ttl)?;
+                println!("{}", serde_json::to_string_pretty(&request)?);
+                Ok(())
+            }
+            CallbackAction::Read { file } => {
+                match callback::read_request(&file)? {
+                    Some(request) => {
+                        println!("{}", serde_json::to_string_pretty(&request)?);
+                    }
+                    None => {
+                        println!("{{}}");
+                        eprintln!("[callback] no pending request for {}", file.display());
+                    }
+                }
+                Ok(())
+            }
+            CallbackAction::Respond { file, request_id, status, summary } => {
+                callback::write_response(&file, &request_id, &status, &summary, None)?;
+                eprintln!("[callback] response written for request {}", request_id);
+                Ok(())
+            }
+            CallbackAction::Gc { root } => {
+                let cwd = std::env::current_dir()?;
+                let root_path = root.map(PathBuf::from)
+                    .or_else(|| snapshot::find_project_root(&cwd))
+                    .context("could not find project root")?;
+                callback::cleanup_expired(&root_path, 300)
             }
         },
     }

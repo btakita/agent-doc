@@ -46,18 +46,23 @@ pub trait Agent {
     ) -> Result<AgentResponse>;
 }
 
-/// Resolve an agent backend by name.
-pub fn resolve(name: &str, config: Option<&AgentConfig>) -> Result<Box<dyn Agent>> {
+/// Resolve an agent backend by name. `env` is applied to the spawned child process
+/// (currently only honored by the Claude backend).
+pub fn resolve(
+    name: &str,
+    config: Option<&AgentConfig>,
+    env: Vec<(String, String)>,
+) -> Result<Box<dyn Agent>> {
     let (cmd, args) = match config {
         Some(ac) => (Some(ac.command.clone()), Some(ac.args.clone())),
         None => (None, None),
     };
     match name {
-        "claude" => Ok(Box::new(claude::Claude::new(cmd, args))),
+        "claude" => Ok(Box::new(claude::Claude::new(cmd, args).with_env(env))),
         "junie" => Ok(Box::new(junie::Junie::new(cmd, args))),
         other => {
             if config.is_some() {
-                Ok(Box::new(claude::Claude::new(cmd, args)))
+                Ok(Box::new(claude::Claude::new(cmd, args).with_env(env)))
             } else {
                 anyhow::bail!("Unknown agent backend: {}", other)
             }

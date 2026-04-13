@@ -57,8 +57,16 @@ use std::process::Command;
 /// Returns (git_root, resolved_file_path) so callers can run git commands in the correct repo.
 pub(crate) fn resolve_to_git_root(file: &Path) -> Result<(std::path::PathBuf, std::path::PathBuf)> {
     if file.is_absolute() {
-        // Find git root from the file's directory
+        // Find git root from the file's directory.
+        // Prefer the superproject root when the file is inside a submodule, so
+        // submodule files resolve to the parent repo (matches the relative-path
+        // branch below). Without this, IPC patches for submodule documents land
+        // in the submodule's `.agent-doc/patches/` instead of the parent's,
+        // which is the only directory the IDE plugin watches.
         let parent = file.parent().unwrap_or(Path::new("/"));
+        if let Some(superproject) = git_superproject_at(parent) {
+            return Ok((superproject, file.to_path_buf()));
+        }
         let root = git_toplevel_at(parent)
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
         return Ok((root, file.to_path_buf()));
@@ -100,10 +108,25 @@ pub(crate) fn resolve_to_git_root(file: &Path) -> Result<(std::path::PathBuf, st
 }
 
 /// Get git toplevel from a specific directory.
-fn git_toplevel_at(dir: &Path) -> Option<std::path::PathBuf> {
+pub(crate) fn git_toplevel_at(dir: &Path) -> Option<std::path::PathBuf> {
     Command::new("git")
         .current_dir(dir)
         .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if s.is_empty() { None } else { Some(std::path::PathBuf::from(s)) }
+        })
+}
+
+/// Get the superproject working tree from a specific directory.
+/// Returns `Some(path)` only when `dir` is inside a submodule. Returns `None`
+/// for top-level repos or when git is unavailable.
+pub(crate) fn git_superproject_at(dir: &Path) -> Option<std::path::PathBuf> {
+    Command::new("git")
+        .current_dir(dir)
+        .args(["rev-parse", "--show-superproject-working-tree"])
         .output()
         .ok()
         .and_then(|o| {

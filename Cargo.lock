@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doc"
-version = "0.31.31"
+version = "0.32.2"
 dependencies = [
  "agent-kit 0.3.2",
  "anyhow",
@@ -31,6 +31,7 @@ dependencies = [
  "fs2",
  "hex",
  "htmd",
+ "indexmap",
  "instruction-files",
  "interprocess",
  "libc",

@@ -312,6 +312,13 @@ pub struct Frontmatter {
     /// ```
     #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
     pub hooks: std::collections::HashMap<String, Vec<String>>,
+    /// Environment variables to inject into the Claude session.
+    /// Keys are env var names, values are strings supporting shell expansion
+    /// (`$(command)`, `$VAR`, `${VAR}`). Order is preserved: later values can
+    /// reference earlier keys. Unexpanded values are passed through preflight JSON
+    /// for skill-side export; expanded values are set on the child process in start.rs.
+    #[serde(default, skip_serializing_if = "indexmap::IndexMap::is_empty")]
+    pub env: indexmap::IndexMap<String, String>,
 }
 
 impl Frontmatter {
@@ -635,6 +642,7 @@ mod tests {
             auto_compact: None,
             model_tier: None,
             hooks: std::collections::HashMap::new(),
+            env: indexmap::IndexMap::new(),
         };
         let body = "# Hello\n\nBody text.\n";
         let written = write(&fm, body).unwrap();
@@ -993,5 +1001,62 @@ mod tests {
         let content = "---\nsession: abc\n---\nBody\n";
         let (fm, _) = parse(content).unwrap();
         assert!(fm.hooks.is_empty());
+    }
+
+    #[test]
+    fn parse_no_mcp_field() {
+        let content = "---\nno_mcp: true\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.no_mcp, Some(true));
+    }
+
+    #[test]
+    fn parse_enable_tool_search_field() {
+        let content = "---\nenable_tool_search: true\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.enable_tool_search, Some(true));
+    }
+
+    #[test]
+    fn parse_missing_flags_default_none() {
+        let content = "---\nsession: abc\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert!(fm.no_mcp.is_none());
+        assert!(fm.enable_tool_search.is_none());
+    }
+
+    #[test]
+    fn parse_env_map() {
+        let content = "---\nenv:\n  FOO: bar\n  BAZ: \"$(echo hello)\"\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.env.len(), 2);
+        assert_eq!(fm.env["FOO"], "bar");
+        assert_eq!(fm.env["BAZ"], "$(echo hello)");
+        // Verify order is preserved
+        let keys: Vec<&String> = fm.env.keys().collect();
+        assert_eq!(keys, vec!["FOO", "BAZ"]);
+    }
+
+    #[test]
+    fn parse_env_empty_default() {
+        let content = "---\nsession: abc\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert!(fm.env.is_empty());
+    }
+
+    #[test]
+    fn write_roundtrip_with_env() {
+        let mut env = indexmap::IndexMap::new();
+        env.insert("KEY1".to_string(), "value1".to_string());
+        env.insert("KEY2".to_string(), "$KEY1".to_string());
+        let fm = Frontmatter {
+            env,
+            ..Default::default()
+        };
+        let written = write(&fm, "body\n").unwrap();
+        let (fm2, _) = parse(&written).unwrap();
+        assert_eq!(fm2.env.len(), 2);
+        assert_eq!(fm2.env["KEY1"], "value1");
+        assert_eq!(fm2.env["KEY2"], "$KEY1");
     }
 }

@@ -2,10 +2,10 @@
 //!
 //! ## Spec
 //! - Replaces, appends, or prepends content in a named `<!-- agent:name -->` component within a markdown document.
-//! - Patch mode resolution order: inline attribute on the component tag (`patch=`) > `[component]` entry in `.agent-doc/components.toml` > built-in default (`replace`). `mode=` is accepted as a backward-compatible alias; `patch=` takes precedence when both are present.
+//! - Patch mode resolution order: inline attribute on the component tag (`patch=`) > `[components.<name>]` entry in `.agent-doc/config.toml` > built-in default (`replace`). `mode=` is accepted as a backward-compatible alias; `patch=` takes precedence when both are present.
 //! - `append` mode: concatenates new content after existing; `prepend` mode: inserts new content before existing.
-//! - Optional `timestamp: true` in `components.toml` prefixes each entry with an ISO-8601 UTC timestamp.
-//! - Optional `max_entries` in `components.toml` trims to the last N non-empty lines after append/prepend.
+//! - Optional `timestamp: true` in component config prefixes each entry with an ISO-8601 UTC timestamp.
+//! - Optional `max_entries` in component config trims to the last N non-empty lines after append/prepend.
 //! - `pre_patch` shell hook: content piped to stdin, transformed stdout replaces the replacement string before writing. Receives `COMPONENT` and `FILE` env vars.
 //! - `post_patch` shell hook: fire-and-forget after write, receives same env vars. Non-zero exit is logged as a warning only.
 //! - After patching, the document is written to disk and a snapshot is saved relative to the project root (`.agent-doc/snapshots/`). Falls back to CWD-relative snapshot if no project root is found.
@@ -31,85 +31,32 @@
 //! - post_patch_hook_runs: `post_patch = "touch <file>"` → marker file created after write
 
 use anyhow::{bail, Context, Result};
-use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
 use std::process::Command;
 
-use crate::{component, snapshot};
+use crate::{component, project_config, snapshot};
 
-const COMPONENTS_FILENAME: &str = ".agent-doc/components.toml";
-
-/// Component configuration from `.agent-doc/components.toml`.
-#[derive(Debug, Deserialize, Default)]
-struct ComponentConfig {
-    /// Patch mode: "replace" (default), "append", "prepend".
-    /// `patch` is the primary key; `mode` is a backward-compatible alias.
-    #[serde(default = "default_mode", alias = "mode")]
-    patch: String,
-    /// Merge strategy: "append-friendly" (default) or "strict".
-    /// "append-friendly" auto-resolves conflicts where both sides only appended.
-    /// "strict" preserves all conflict markers for manual resolution.
-    /// Currently parsed for config validation; merge runs at document level.
-    #[serde(default = "default_merge_strategy")]
-    #[allow(dead_code)]
-    merge_strategy: String,
-    /// Auto-prefix entries with ISO timestamp (for append/prepend modes)
-    #[serde(default)]
-    timestamp: bool,
-    /// Auto-trim old entries in append/prepend modes (0 = unlimited)
-    #[serde(default)]
-    max_entries: usize,
-    /// Trim component content to the last N lines after patching (0 = unlimited).
-    /// Currently used by template.rs post-patch processing; deserialized here
-    /// for components.toml validation.
-    #[serde(default)]
-    #[allow(dead_code)]
-    max_lines: usize,
-    /// Shell command to run before patching (stdin: content, stdout: transformed)
-    #[serde(default)]
-    pre_patch: Option<String>,
-    /// Shell command to run after patching (fire-and-forget)
-    #[serde(default)]
-    post_patch: Option<String>,
-}
-
-fn default_merge_strategy() -> String {
-    "append-friendly".to_string()
-}
-
-fn default_mode() -> String {
-    "replace".to_string()
-}
-
-/// Find the project root by walking up from a file path looking for `.agent-doc/`.
-fn find_project_root(file: &Path) -> Option<std::path::PathBuf> {
-    let canonical = file.canonicalize().ok()?;
-    let mut dir = canonical.parent()?;
+/// Load component configs from `.agent-doc/config.toml` relative to the document.
+/// Walks up from the document's parent directory to find the project root.
+fn load_configs(file: &Path) -> Result<HashMap<String, project_config::ComponentConfig>> {
+    let start = file.parent().unwrap_or(file);
+    let mut current = start;
     loop {
-        if dir.join(".agent-doc").is_dir() {
-            return Some(dir.to_path_buf());
+        let candidate = current.join(".agent-doc").join("config.toml");
+        if candidate.exists() {
+            let cfg = project_config::load_project_from(&candidate);
+            return Ok(cfg.components.into_iter().collect());
         }
-        dir = dir.parent()?;
+        match current.parent() {
+            Some(p) if p != current => current = p,
+            _ => break,
+        }
     }
-}
-
-/// Load component configs from `.agent-doc/components.toml` relative to project root.
-fn load_configs(file: &Path) -> Result<HashMap<String, ComponentConfig>> {
-    let root = match find_project_root(file) {
-        Some(r) => r,
-        None => return Ok(HashMap::new()),
-    };
-    let path = root.join(COMPONENTS_FILENAME);
-    if !path.exists() {
-        return Ok(HashMap::new());
-    }
-    let content = std::fs::read_to_string(&path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
-    let configs: HashMap<String, ComponentConfig> = toml::from_str(&content)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
-    Ok(configs)
+    // Fall back to CWD-based resolution
+    let proj_cfg = project_config::load_project();
+    Ok(proj_cfg.components.into_iter().collect())
 }
 
 /// Replace content in a named component.
@@ -157,7 +104,7 @@ pub fn run(file: &Path, component_name: &str, content: Option<&str>) -> Result<(
         replacement = run_pre_hook(script, component_name, file, &replacement)?;
     }
 
-    // Apply mode: inline attr > components.toml > default ("replace")
+    // Apply mode: inline attr > config.toml [components.<name>] > default ("replace")
     let mode = comp.patch_mode()
         .or_else(|| config.map(|c| c.patch.as_str()))
         .unwrap_or("replace");
@@ -208,7 +155,7 @@ pub fn run(file: &Path, component_name: &str, content: Option<&str>) -> Result<(
 
     // Save snapshot relative to project root (not CWD) for thread safety
     let snap_rel = snapshot::path_for(file)?;
-    if let Some(root) = find_project_root(file) {
+    if let Some(root) = snapshot::find_project_root(file) {
         let snap_abs = root.join(&snap_rel);
         if let Some(parent) = snap_abs.parent() {
             std::fs::create_dir_all(parent)
@@ -325,7 +272,9 @@ mod tests {
     }
 
     fn write_config(dir: &Path, content: &str) {
-        std::fs::write(dir.join(COMPONENTS_FILENAME), content).unwrap();
+        // Config lives at .agent-doc/config.toml with [components] section
+        let config_path = dir.join(".agent-doc").join("config.toml");
+        std::fs::write(config_path, content).unwrap();
     }
 
     #[test]
@@ -400,7 +349,7 @@ mod tests {
     #[test]
     fn append_mode() {
         let dir = setup_project();
-        write_config(dir.path(), "[log]\nmode = \"append\"\n");
+        write_config(dir.path(), "[components.log]\npatch = \"append\"\n");
 
         let doc = write_doc(
             dir.path(),
@@ -418,7 +367,7 @@ mod tests {
     #[test]
     fn prepend_mode() {
         let dir = setup_project();
-        write_config(dir.path(), "[log]\nmode = \"prepend\"\n");
+        write_config(dir.path(), "[components.log]\npatch = \"prepend\"\n");
 
         let doc = write_doc(
             dir.path(),
@@ -470,7 +419,7 @@ mod tests {
     #[test]
     fn pre_patch_hook_transforms_content() {
         let dir = setup_project();
-        write_config(dir.path(), "[x]\npre_patch = \"tr a-z A-Z\"\n");
+        write_config(dir.path(), "[components.x]\npre_patch = \"tr a-z A-Z\"\n");
 
         let doc = write_doc(
             dir.path(),
@@ -491,7 +440,7 @@ mod tests {
         write_config(
             dir.path(),
             &format!(
-                "[x]\npost_patch = \"touch {}\"\n",
+                "[components.x]\npost_patch = \"touch {}\"\n",
                 marker.to_string_lossy()
             ),
         );

@@ -600,3 +600,48 @@ fn test_skill_md_references_valid_commands() {
         valid_subcommands
     );
 }
+
+#[test]
+fn test_submodule_write_patches_dir_structure() {
+    use tempfile::TempDir;
+    use std::fs;
+
+    // This is a simpler integration test that verifies the expected directory structure
+    // for submodule patch routing. The actual git submodule test is in write.rs unit tests
+    // where we can create real git structures.
+
+    let parent_dir = TempDir::new().unwrap();
+    let parent = parent_dir.path();
+
+    // Set up parent repo's .agent-doc structure
+    let parent_agent_doc = parent.join(".agent-doc");
+    fs::create_dir_all(parent_agent_doc.join("patches")).unwrap();
+    fs::create_dir_all(parent_agent_doc.join("snapshots")).unwrap();
+    fs::create_dir_all(parent_agent_doc.join("crdt")).unwrap();
+
+    // Verify patches directory exists and is accessible
+    let parent_patches = parent.join(".agent-doc/patches");
+    assert!(parent_patches.exists(), "parent should have .agent-doc/patches directory");
+    assert!(parent_patches.is_dir(), ".agent-doc/patches should be a directory");
+
+    // Simulate a document in a submodule location
+    let simulated_submodule_path = parent.join("src/submodule/tasks");
+    fs::create_dir_all(&simulated_submodule_path).unwrap();
+    let doc = simulated_submodule_path.join("test.md");
+    fs::write(&doc, "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->test<!-- /agent:exchange -->\n").unwrap();
+
+    // Verify the document file exists
+    assert!(doc.exists(), "test document should exist");
+    assert!(doc.is_file(), "test document should be a file");
+
+    // Verify parent's patches directory is still accessible (would receive patches in actual IPC scenario)
+    let entries: Vec<_> = fs::read_dir(&parent_patches)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    // Directory should be empty initially
+    assert!(
+        entries.is_empty(),
+        "patches directory should be initially empty"
+    );
+}

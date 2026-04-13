@@ -164,7 +164,7 @@ For example, if you don't need `gmail` or `chrome-devtools` in every session, di
 ---
 
 **Mark this done.** Deferred tools confirmed: enabled globally, working correctly. The "waiting for `/context`" blocker is now resolved — you don't need `/context` output to understand the deferred-tools state. Move to next task.
-<!-- agent:boundary:a9cfc773 -->
+<!-- agent:boundary:49a5f9b4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

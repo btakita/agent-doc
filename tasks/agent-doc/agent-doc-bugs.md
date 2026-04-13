@@ -1055,7 +1055,7 @@ Both files committed in their own submodule repos and the parent's submodule poi
 **Not yet done (deliberately deferred per your release checklist):**
 - VERSIONS.md entry + version bump in `Cargo.toml`/`pyproject.toml` — waiting until manual-testing gate passes for both this fix and the safety rail
 - Release to crates.io / PyPI / GitHub Release — same gate
-<!-- agent:boundary:8287d4c0 -->
+<!-- agent:boundary:b22efa19 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

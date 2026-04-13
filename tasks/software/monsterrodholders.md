@@ -813,6 +813,8 @@ Recommended minimum before re-enabling any staff login:
 3. Add a password policy plugin (or Wordfence Premium's password audit) requiring 14+ chars, mixed case, digit, symbol, and blocking the Wordfence "leaked password" list
 4. Set `DISABLE_XMLRPC` or restrict `xmlrpc.php` (historical brute-force vector — matters because MRHadmin is the default "known good" login name every bot tries)
 
+❯ Yes...do all recommended minimum actions.
+
 ### Re: Deactivate passwords for users with write permissions (except rberkes/brian.takita)
 
 **Full write-permission roster on staging (15 accounts):**
@@ -846,6 +848,8 @@ Three possibilities:
 3. You want me to NOT exclude any berkes account because `rberkes@gmail.com` genuinely doesn't exist here. (unlikely — that'd lock you out of admin #2.)
 
 **Please confirm which email to exclude** before I proceed.
+
+❯ Yes, exclude `berkes06@yahoo.com` and `brian.takita@gmail.com`. The two admins.
 
 ### Proposed deactivation procedure (once you confirm)
 
@@ -882,15 +886,116 @@ Separate from the deactivation sweep, you should probably:
 3. Check `wp_nxz1mfc9cg_usermeta` for `wfls-*` keys on user 1 (Wordfence Login Security leaves a trail even when the main plugin is disabled — the `wfls_last_role_change` option in my query suggests Wordfence was active at some point)
 
 Want me to pull the wfls meta and any audit-trail breadcrumbs for user 1 in the next cycle?
-<!-- agent:boundary:aad6f6c3 -->
+❯ yes
+
+### Re: Forensic snapshot + deactivation executed — read this, there is a big scope issue (HEAD)
+
+#### 1. MRHadmin forensic findings (saved to `tasks/software/monsterrodholders/forensics-mrhadmin-20260412-1957.tsv`)
+
+**Profile data — consistent with legitimate Jenny Boone:**
+- `first_name: Jenny`, `last_name: Boone`, `nickname: MRHadmin`, `display_name: MRHadmin`
+- Billing: `114 North Fifth Street, Bardstown, KY 40004`, phone `502-827-3107`
+- `community-events-location` usermeta IP: `104.14.52.0` — **Charter/Spectrum, Bardstown KY residential range** ✅ (this IS Jenny)
+- `wc_last_active: 1775220581` ≈ 2026-03-30; `last_update: 1775844955` ≈ 2026-04-07
+- `_woocommerce_persistent_cart_1`: has a real cart (product 8581, variation 19665 "1/2 INCH RIGHT HAND" slide track base) — Jenny was shopping on her own store
+- Password hash: `$wp$` prefix (new WP 6.8+ bcrypt, not legacy phpass)
+
+#### 2. 🚨 Active brute-force campaign against MRHadmin — in `wp_nxz1mfc9cg_wflogins`
+
+Wordfence's `wflogins` table on the (cloned) DB has **~100 failed login attempts against `MRHadmin`** from 2026-03-09 through 2026-04-06, plus older probing in December 2025. Attack profile:
+
+- `action = loginFailValidUsername` — attackers know MRHadmin is a real username
+- Rotating source IPs in known bulletproof-hosting ranges:
+  - `45.13.191.x`, `45.128.199.x`, `45.95.243.x` (Russia)
+  - `212.30.33.x` (Lithuania)
+  - `185.223.152.x`, `185.192.16.x`, `185.3.134.x` (Europe bulletproof)
+  - `98.159.37.x`, `173.239.218.x` (US VPN/proxy exits)
+  - `216.73.160.x`, `216.24.210.61`
+- Rotating UAs (Windows/Mac/old IE6 fingerprint)
+- ~1-2 attempts per hour, sustained for weeks
+- Earlier lowercase `mrhadmin` attempts Dec 2-11, 2025 — attackers have been at this for ≥4 months
+
+**Two successful logins in the window:**
+
+| Time | IP | Verdict |
+|---|---|---|
+| 2026-03-16 12:50 | `104.14.52.38` (Charter/Spectrum KY) | ✅ legitimate — matches Jenny's known IP block |
+| **2026-04-01 20:44** | **`131.239.136.26` (MITRE Corporation)** | 🚨 **anomalous — does NOT match Jenny's ISP; matches the active `session_tokens` entry** |
+
+The MITRE-IP login is **6 days after the first spam post** you flagged (post-2026-03-26), so it's not necessarily the original spam injection vector, but it IS currently holding an active admin-shop_manager session on an account under brute-force attack. Preserved forensic copy before deactivation.
+
+#### 3. 🚨🚨 Scope problem — wflogins data reflects PRODUCTION, not staging
+
+This matters more than the rest: staging at `50.28.2.199` is a Docker clone. The `wflogins` table was imported from a prod DB dump, so **those ~100 brute-force attempts and the MITRE login are targeting production** — not the 50.28.2.199 box. Staging itself receives essentially no traffic.
+
+**Implication:** The deactivation I just ran on staging does NOT stop the attacker. If MRHadmin on prod still has the old password, the MITRE session is still live on prod, the brute-force is still hammering prod, and `sellbrite-integration` on prod still has whatever password it had.
+
+**Prod needs the exact same treatment urgently.** How do I get to prod? Flywheel SFTP/SSH? The memory has `ssh monsterrodholders-server` → `50.28.2.199` (staging). I don't have a prod SSH shortcut documented. Please hand me the prod access path (or paste me into a tmux pane on the prod host) and I'll replay the deactivation there.
+
+#### 4. Staging deactivation — completed
+
+Pre-state saved to `tasks/software/monsterrodholders/staging-password-deactivation-20260412-1957-prestate.tsv`. Executed as a single transaction:
+
+```sql
+START TRANSACTION;
+UPDATE wp_nxz1mfc9cg_users
+  SET user_pass = CONCAT('!', SHA2(CONCAT(RAND(), UUID(), ID), 256))
+  WHERE ID IN (1,3,4617,14971,15518,15682,15711,15712,15738,16044,16990,20232,20500);
+DELETE FROM wp_nxz1mfc9cg_usermeta
+  WHERE user_id IN (same 13)
+    AND meta_key IN ('session_tokens','_application_passwords');
+COMMIT;
+```
+
+Results:
+- **13 users** deactivated (`user_pass` now `!`-prefixed, `wp_check_password()` will always fail for them)
+- **9 session_tokens** rows deleted (matches the 9 with active sessions in pre-state — correct)
+- **0 application_passwords** — none existed
+- Admins **66923 (catfishinfo / berkes06@yahoo.com)** and **67703 (btak / brian.takita@gmail.com)** untouched. Verified: `$wp$` prefix, length 63 on both.
+
+**Caveats you need to hear:**
+- `sellbrite-integration` (ID 16990) is in this list. If Sellbrite uses wp-login password auth (not an application password), its product-sync webhook will break until you rotate its credential and update Sellbrite. On staging this doesn't matter; **when you replay on prod, generate a fresh app password + WC API key for Sellbrite before or immediately after, so the sync window is short.**
+- These users can recover via WordPress "Lost your password?" → the reset email goes to their existing `user_email`. If an attacker controls any of those inboxes, they can recover the account. Specifically audit: `hmdrompt@protonmail.com` (CATC Support) and `herve@kentuckyglobal.com` (ghostcat) — unusual email patterns for a fishing-industry staff account.
+- MRHadmin's email is `jennyboonedesignstudio@gmail.com`. If Jenny's gmail is compromised, password reset is trivial for the attacker. Before re-enabling MRHadmin, **confirm with Jenny out-of-band** that her gmail is secure + has 2FA, or change `user_email` on the admin account to something you control.
+
+#### 5. Wordfence activation on staging — blocked
+
+Wordfence is NOT installed on staging disk at all. Only residual `wordfence_*` and `wfls_*` options remain in `wp_nxz1mfc9cg_options`, and the `wf*` tables exist — all leftover from a past install (almost certainly the prod clone). Plugin directory on staging contains only: `akismet`, `blocksy-companion-pro`, `host-webfonts-local`, `stackable-ultimate-gutenberg-blocks`, `woocommerce`, `woocommerce-gateway-stripe`, `woocommerce-legacy-rest-api`, `woocommerce-paypal-payments`, `wordpress-seo`.
+
+Also notable: `mrh-performance` appears in the `active_plugins` option but is NOT on disk — staging has a broken plugin reference.
+
+The plugins dir IS bind-mounted to `/opt/monsterrodholders/app/wordpress/plugins` on the host, so installation is feasible (download zip → extract on host → activate). But installing Wordfence on staging only has value if:
+1. You want to practice the install/config flow before doing it on prod, OR
+2. You want the staging environment to match prod
+
+If you want me to proceed with a staging install anyway to de-risk the prod install, say so. Otherwise the higher-leverage next step is the prod deactivation + prod Wordfence activation, which needs your access.
+
+### Re: 2FA + password policy + xmlrpc (HEAD)
+
+All three depend on Wordfence being active (2FA via `wfls`; password-leak check via Wordfence Premium), so they block on step above. Deferred with rationale rather than executed blindly. xmlrpc restriction is the one piece I can do independently via htaccess/nginx — want me to do that on prod once I have access?
+
+#### What I need from you to keep going
+
+1. **Prod access path** — ssh alias, credentials location, or tmux pane handoff
+2. **Confirmation** whether to install Wordfence on staging as a dry-run (low value IMO, skip) or go straight to prod
+3. **Jenny out-of-band verification** — her gmail needs to be confirmed secure before her MRHadmin account can be restored
+4. **Sellbrite rotation window** — do you want me to pre-generate a new WC REST API key before killing the prod `sellbrite-integration` login, or accept a brief sync gap
+<!-- agent:boundary:1b70a81d -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **Staging password deactivation** — BLOCKED on email confirmation (`rberkes@gmail.com` vs `berkes06@yahoo.com`). Will execute SQL + forensic snapshot once confirmed.
-- [ ] **Preserve MRHadmin session forensics** — dump `session_tokens`, `wfls-*` meta, and any related audit rows for user ID=1 before any modification
-- [ ] **Activate Wordfence on staging** — plugin installed but not in `active_plugins`; 2FA / strong-password enforcement currently absent
-- [ ] **Prod mirror of deactivation** — staging hardening is incomplete protection; prod needs the same credential sweep + Wordfence activation
-- [ ] **IP intel on 131.239.136.26** — MITRE Corporation ASN; cross-reference with prod web/Wordfence logs for any admin-authenticated hits
+- [x] ([done]) Forensic snapshot of MRHadmin (user 1) — wrote `tasks/software/monsterrodholders/forensics-mrhadmin-20260412-1957.tsv` + wflogins dump
+- [x] ([done]) Staging password deactivation for 13 write-permission users — executed, pre-state logged
+- [ ] 🚨 **PROD password deactivation** — same 13-user sweep against production DB (not yet done — staging DB is a clone, attack traffic targets prod). BLOCKED on prod access.
+- [ ] 🚨 **Revoke prod MRHadmin session** from IP `131.239.136.26` (MITRE) — preserve forensics first, then delete session_tokens
+- [ ] 🚨 **Jenny out-of-band verification** — confirm `jennyboonedesignstudio@gmail.com` gmail is secure + has 2FA before MRHadmin can be re-enabled; consider changing user_email off her address entirely
+- [ ] Pre-generate replacement Sellbrite WC REST API key before prod deactivation (to minimize sync gap on ID 16990)
+- [ ] Install + activate Wordfence on prod (plugin, then Wordfence Login Security module)
+- [ ] Enforce 2FA via `wfls` for administrator + shop_manager roles on prod
+- [ ] Install password-policy plugin or Wordfence Premium — 14+ char, mixed, leaked-password check
+- [ ] Restrict `/xmlrpc.php` at web-server layer (htaccess/nginx) on prod
+- [ ] Audit staff email addresses for anomalies — specifically `hmdrompt@protonmail.com` (CATC Support) and `herve@kentuckyglobal.com` (ghostcat); password reset flows to these inboxes if they're compromised
+- [ ] Fix staging: `mrh-performance` in `active_plugins` but missing from disk (broken ref)
 - [ ] Flywheel: DECISION — approve steps 1–5 (lock MRHadmin, purge 16 spam posts, scanner, plugin audit, 2FA)
 <!-- /agent:pending -->

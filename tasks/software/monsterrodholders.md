@@ -1176,7 +1176,7 @@ The SSH-server-clone concern is legitimate. If monsterrodholders-dev is cloned a
 Want me to create the gist now? I'll need you to confirm `gh auth status` is pointing at the right account first — the gist will be owned by whichever GitHub user `gh` is authenticated as.
 
 ❯ Create the secret gist. Will delete it after short period.
-### Re: Create the secret gist (HEAD)
+### Re: Create the secret gist
 
 Done. Owner: `btakita` (confirmed `gh auth status` before creating — `gist` scope present).
 
@@ -1203,13 +1203,27 @@ Or via web UI at the gist URL → Delete button. Since you plan to delete after 
 ```bash
 gh gist edit 7151ff6b944d525fa4f8f0c00f4261f8 tasks/software/monsterrodholders/security-findings-gist-draft.md
 ```
-<!-- agent:boundary:a7fbc9af -->
+
+❯ Create a new private gh repo btakita/btakita/boost-client
+❯ Make btakita/monsterrodholders-dev a submodule in boost-client
+❯ Add gh user rberkes as a private collaborator
+### Re: boost-client repo setup (HEAD)
+
+Done:
+
+1. **Created private repo**: `https://github.com/btakita/boost-client` ✓
+2. **Added submodule**: `src/monsterrodholders-dev` tracking `btakita/monsterrodholders-dev` ✓
+3. **Invited collaborator**: rberkes invited with write (push) permission ✓
+
+rberkes will receive an invitation email for the boost-client repo. Once accepted, they'll have full read+write access to the monsterrodholders-dev submodule from within the boost-client workspace.
+<!-- agent:boundary:ca8ccaf3 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Send gist URL `https://gist.github.com/btakita/7151ff6b944d525fa4f8f0c00f4261f8` to ron-berkes via trusted channel (Signal / encrypted email)
 - [ ] Delete gist after Ron has reviewed: `gh gist delete 7151ff6b944d525fa4f8f0c00f4261f8`
+- [ ] Share boost-client repo access with rberkes once invitation is accepted
 - [ ] Purchase + install Solid Security Pro on monsterrodholders.com WP; enable Hide Backend, 2FA, Password Requirements
 - [ ] Install Wordfence Free alongside, disable its firewall, keep only malware scanner
 - [ ] Decide: dedicated `monsterrodholders-security` private repo for ongoing security docs, or stick with gists

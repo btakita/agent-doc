@@ -1147,7 +1147,7 @@ On it. Spec at `src/agent-doc/specs/pending-system.md` is the source of truth. E
 5. Tests for each primitive + end-to-end migration
 
 Delegating Rust work to a focused subagent to keep this context clean. Will report back with build/test results and the SKILL edits in one summary.
-### Re: Layer 2 landed — granular pending ops + lazy backfill (HEAD)
+### Re: Layer 2 landed — granular pending ops + lazy backfill
 
 Implementation complete and installed. Dogfooding it on this very write — `--pending-done a007 a008 a009` + three `--pending-add` calls instead of a `patch:pending` block. (The binary would now reject a `patch:pending` block with a clear error.)
 
@@ -1199,7 +1199,28 @@ Implementation complete and installed. Dogfooding it on this very write — `--p
 - Enforcement toggled by env var rather than plumbing a bool through four write entry points. Single-threaded CLI so this is safe; cleaner to refactor later if needed.
 
 Your call on next steps: release v0.32.4, or queue more work first?
-<!-- agent:boundary:e942d2d5 -->
+
+I restarted my computer. I need `Refresh Agent Doc Environment` to bind to a Tmux session. It could be the last selected Tmux session for new. I would like a popup menu showing the open tmux enviornments to pick from. But for now th last selected Tmux session works.
+```
+Claim failed (exit 1): resync: purged 1 orphaned stash pane(s) error: pane %4 is in tmux session 'claude' but project session is '6'. Switch to session '6' and re-run, or use --force to override. Error: session mismatch: cross-session claim rejected
+```
+### Re: Refresh Agent Doc Environment — bind tmux session (HEAD)
+
+Got it. The claim error is the project session (`6`) being stale after restart — pane `%4` is in session `claude` now, so `resync` rejects cross-session. `agent-doc session set <name>` is the fix; we just need `RefreshEnvironmentAction` to call it.
+
+(Note: I hit the same class of issue writing this response — pane ownership mismatch across %4/%6. Recovered with `agent-doc claim --force`. Same root cause as your claim failure.)
+
+**Proposal (phase 1, last-attached):**
+- `RefreshEnvironmentAction.actionPerformed` adds a step 0: shell out to `tmux list-sessions -F '#{session_activity} #S' | sort -rn | head -1 | awk '{print $2}'` → get most recently attached session name.
+- Run `agent-doc session set <name>` from project root. On success, show hint `"Bound to tmux session: <name>"`. On failure, balloon the stderr.
+- Then run the existing cache-clear + VFS refresh.
+
+**Phase 2 (popup picker):** Replace the `head -1` with a JBPopup listing all sessions (`tmux list-sessions -F '#S|#{session_attached}|#{session_windows}w'`), default highlight on last-attached, Enter to bind. Same `agent-doc session set` call underneath.
+
+**Tradeoff:** Phase 1 is ~20 lines, fixes your restart case immediately. Risk is auto-binding to the "wrong" session if multiple are attached — last-activity is a reasonable default, phase 2 solves ambiguous cases.
+
+Want me to implement phase 1 now, or skip straight to phase 2?
+<!-- agent:boundary:d4b85653 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1207,13 +1228,9 @@ Your call on next steps: release v0.32.4, or queue more work first?
 <!-- agent:pending patch=replace -->
 - [ ] [#a001] 🔴 Investigate boundary/baseline divergence root cause — `out_of_band_write` always-on log line landed (`git.rs:286`); aggregate after 1 day.
 - [ ] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
-- [x] [#a003] Submodule pathspec fix (Option A) — ✅ landed, verified live, shipped in v0.32.3.
 - [ ] [#a004] Drop Option B (skill-side submodule workaround) — A handles it deterministically; B redundant.
 - [ ] [#a005] Investigate 1062 pre-existing `❯` lines across 46 snapshots — legitimate or prior corruption?
 - [ ] [#a006] Investigate duplicated `/agent:exchange` closing marker — likely same class as mass-prefix bug.
-- [x] [#a007] Layer 2: required pending declaration — **in progress this cycle**.
-- [x] [#a008] Update SKILL.md + skill-submit-cycle.md — part of Layer 2 PR.
-- [x] [#a009] Integration tests for pending enforcement.
 - [ ] [#a010] PostToolUse hook for agent-doc write (layer 3, optional).
 - [ ] [#a011] End-of-cycle write invariant — warn if `preflight_diff_start` without `ipc_write_attempt`.
 - [ ] [#a012] Expose `agent-doc session-check <FILE>` — nonzero if last ops.log entry is `preflight_diff_start`.
@@ -1222,5 +1239,7 @@ Your call on next steps: release v0.32.4, or queue more work first?
 - [ ] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release after manual-testing gate
 - [ ] [#14z4] Hash collision ceiling: implement 8-char fallback in pending::generate_hash if 4-char collides (spec §1)
 - [ ] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)
+- [ ] [#mdbs] RefreshEnvironmentAction: bind project tmux session to last-attached session (plus later: popup picker)
+- [ ] [#89g4] RefreshEnvironmentAction: bind project tmux session to last-attached session (plus later: popup picker)
 <!-- /agent:pending -->
 ## Assistant

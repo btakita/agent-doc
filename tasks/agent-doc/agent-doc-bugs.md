@@ -388,16 +388,15 @@ This is a one-line safety net that catches exactly this case.
 cd src/boost-client
 agent-doc commit tasks/monsterrodholders.md
 ```
-<!-- agent:boundary:8e323b43 -->
+<!-- agent:boundary:29d7e483 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Create SKILL runbook** (`.claude/skills/agent-doc/runbooks/skill-submit-cycle.md`) — codify the 3 steps (preflight → respond → write+commit) to prevent silent failures when step 2 is forgotten
-- **Fix submodule commit race** — add submodule-aware commit logic to SKILL.md step 3. After `agent-doc commit`, check if file is in a submodule and re-commit from within it. See diagnosed issue in boost-client/tasks/monsterrodholders.md (30 lines uncommitted)
-- **Investigate duplicated `/agent:exchange` closing marker** — doc had two close markers with an orphan boundary between them; parser rejected the write. Look at `commit.reposition` and any path that emits `<!-- agent:boundary:... -->\n<!-- /agent:exchange -->`
+- **Investigate duplicated `/agent:exchange` closing marker** — doc had two close markers with an orphan boundary between them; parser rejected the write. Look at `commit.reposition` and any path that emits `<!-- agent:boundary:... -->\n&lt;!-- /agent:exchange --&gt;`
 - **Add end-of-cycle write invariant** — warn if `preflight_diff_start` was emitted but `ipc_write_attempt` was not, for the same doc, within the cycle
 - **Expose `agent-doc session-check <FILE>`** — returns non-zero if last ops.log entry for doc is `preflight_diff_start`, giving the skill a self-diagnosis hook
+- **Audit `ops.log` historically** — count how often `preflight_diff_start` has no paired `write_origin`; gives a baseline for silent-skip rate
 <!-- /agent:pending -->
 ## Assistant

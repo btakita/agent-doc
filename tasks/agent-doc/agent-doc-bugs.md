@@ -1474,7 +1474,7 @@ Option C — **local-only hotpatch** (edit `.claude/skills/agent-doc/SKILL.md` d
 My suggestion: **C then A**. Hotpatch to validate the behavior in your live session, and if it feels right, roll into the next release alongside the preflight slash-command parser fix (also in pending) so you get two fixes per release cycle instead of one.
 
 Say the word — A, B, or C — and I'll execute. Also, if you want the `--isolate` design sketch written in parallel (pure specs doc, no code, no release cycle), I can do that alongside any of the above.
-<!-- agent:boundary:7516359e -->
+<!-- agent:boundary:74baad89 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -573,7 +573,7 @@ Which? I'd lean #1 — `skill-submit-cycle.md` is the more descriptive name and 
 ### Re: Rename cycle-steps.md → skill-submit-cycle.md (HEAD)
 
 Done. `mv .claude/skills/agent-doc/runbooks/cycle-steps.md .claude/skills/agent-doc/runbooks/skill-submit-cycle.md`. Grepped for `cycle-steps` across the skill directory — no references to update. The runbook is now at the requested path with its original 5-step content (preflight → gate checks → compose → write-back → commit) plus self-check list and failure-mode fingerprints intact.
-<!-- agent:boundary:06f18147 -->
+<!-- agent:boundary:c29b6292 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1660,7 +1660,7 @@ Want me to add a short "Non-tmux mode (future)" section to `specs/supervisor.md`
 Inserted after the WSL caveat in `src/agent-doc/specs/supervisor.md`, before the Logging section. Captures the four requirements (entry gate, resize source, IPC discoverability, claim/binding model) plus a non-goals note that visual multiplexing stays tmux's job. The section explicitly frames this as "not in phase 1" so the release scope is preserved.
 
 Ready to proceed with Phase 1 implementation whenever you are — starting with `supervisor/cwd.rs` + unit tests as planned.
-<!-- agent:boundary:5922d8ff -->
+<!-- agent:boundary:68aa058d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

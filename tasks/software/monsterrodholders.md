@@ -1174,7 +1174,7 @@ The SSH-server-clone concern is legitimate. If monsterrodholders-dev is cloned a
 **My recommendation:** Private Gist for this one document. If you end up writing more security docs (incident runbooks, forensic reports, post-mortems), create `monsterrodholders-security` as a separate private repo and keep it off the production server entirely.
 
 Want me to create the gist now? I'll need you to confirm `gh auth status` is pointing at the right account first — the gist will be owned by whichever GitHub user `gh` is authenticated as.
-<!-- agent:boundary:39394076 -->
+<!-- agent:boundary:2e8af598 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

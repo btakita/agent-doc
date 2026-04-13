@@ -26,7 +26,7 @@ Dogfooded Phase 1 kickoff. Outcomes captured in `src/agent-doc/specs/supervisor.
 - **Question answered:** supervisor works outside tmux architecturally (owns its own pty), but every current consumer — livestream setup, `/agent-doc` cross-pane routing, claim system, focus — assumes tmux. Dropping tmux is a separate spec cycle.
 
 **Next submodule:** `supervisor/pty.rs` — awaiting user go-ahead to proceed.
-### Re: Context written to specs + pending, exchange compacted (HEAD)
+### Re: Context written to specs + pending, exchange compacted
 
 **Spec updates (`src/agent-doc/specs/supervisor.md`):**
 
@@ -39,7 +39,46 @@ Dogfooded Phase 1 kickoff. Outcomes captured in `src/agent-doc/specs/supervisor.
 **Exchange compacted** via `agent-doc compact` with a summary-message pointer. 1693 lines archived to `.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20260413-195807.md` — nothing lost, just moved off the hot path.
 
 Ready to proceed with `supervisor/pty.rs` whenever you give the go-ahead.
-<!-- agent:boundary:dcacd33f -->
+❯ proceed
+### Re: supervisor/pty.rs landed (#a17b done) (HEAD)
+
+`src/agent-doc/src/supervisor/pty.rs` — pty allocation + child spawn + optional stdin/stdout forwarding threads. Registered in `supervisor/mod.rs`. `portable-pty = "0.8"` added to `Cargo.toml`. Build clean, clippy clean, 6 targeted tests passing.
+
+**Public surface (kept narrow — resize/state/ipc each get their own module):**
+
+- `PtySpawnConfig { program, args, cwd, env, size }` — caller-supplied, everything pre-resolved. Has a `new(program, cwd)` helper that defaults to 24×80 when the real size isn't known yet.
+- `PtySession::spawn(cfg)` — allocates the pair via `NativePtySystem::default().openpty`, builds a `CommandBuilder`, calls `env_clear()` then re-populates from `cfg.env`, spawns, **drops the slave immediately** so the child owns the only reference (otherwise master reads never EOF on child exit).
+- `PtySession::forward_stdio()` — spins up the two I/O threads (`pty->stdout`, `stdin->pty`). Separate from `spawn` so tests can skip it; errors are logged to stderr (honoring "never swallow errors" from `CLAUDE.md`), second call returns `bail!`.
+- `PtySession::resize(size)` — thin wrapper so `resize.rs` never has to touch `portable-pty` types directly.
+- `PtySession::wait()` / `kill()` — consumed by the eventual `state.rs` restart loop.
+
+**Invariants pinned in the module doc comment:**
+
+1. Caller-supplied `cwd` is already canonicalized (by `cwd.rs`) — we pass it through unchanged.
+2. `env` is the **complete** env for the child. Parent env is **not** inherited — this enforces the "deterministic env" invariant from the spec. Callers that want `PATH`, `HOME`, etc. populate them explicitly. This matters for the `start.rs` wire-up — see pending item below.
+3. Slave dropped immediately after spawn (load-bearing; I put a comment there).
+4. I/O threads exit on EOF from their underlying pipe; no explicit teardown — `PtySession::drop` closes the master, which propagates.
+
+**Tests (all via fake-claude shell scripts in a `TempDir`, no real claude):**
+
+| Test | What it locks |
+|------|---------------|
+| `spawns_and_waits_for_clean_exit` | Happy path — spawn, run, `wait` returns `success()` |
+| `propagates_nonzero_exit_code` | `exit 42` → `wait` returns non-success (state.rs restart policy will depend on this) |
+| `env_is_not_inherited_from_parent` | Sets `AGENT_DOC_PTY_PARENT_LEAK` in the parent; child-side `[ -n $VAR ] && exit 99` → expects clean exit. Locks the deterministic-env invariant against future refactors. |
+| `cwd_is_set_on_child` | Child runs `touch marker.txt` from a nested subdir; asserts marker lands in the requested cwd, not the parent process cwd. |
+| `resize_after_spawn_succeeds` | `resize(50, 120)` mid-run on a sleeping child. Smoke-tests that the `resize.rs` wrapper has a real master to hit. |
+| `missing_program_errors_cleanly` | Spawn of `/nonexistent/...` returns `Err` whose chain mentions the program name (useful when start.rs logs the failure). |
+
+**Two follow-ups pushed to pending** (both tagged for `start.rs` wire-up, which is already the last stage of phase 1):
+
+- `#<auto>` — wire `PtySession` into `start.rs`, replacing the current `Command::status` inherit-tty path. Non-trivial because `start.rs` carries the auto-trigger `tmux send-keys` + session logging + restart loop that `state.rs` will eventually absorb. Do not touch until `resize.rs`, `state.rs`, `ipc.rs` land.
+- `#<auto>` — decide env passthrough policy. `cwd.rs` gave us deterministic CWD; `pty.rs` requires the caller to hand over a complete env, but `start.rs` today just inherits. Two options when we wire up: (a) enumerate the exact set of vars claude needs (`PATH`, `HOME`, `TERM`, `LANG`, `TMUX`, `TMUX_PANE`, any agent-doc vars from frontmatter expansion) and only forward those, or (b) add an opt-in `PtySpawnConfig::inherit_parent_env` escape hatch that grabs `std::env::vars()` at spawn time. Option (a) matches the spec's "deterministic env" invariant better; (b) is less painful in the short term. Decide before `start.rs` wire-up, not during.
+
+**Not in scope for this landing** (deliberately): SIGWINCH plumbing, crash classifier, IPC socket, `start.rs` integration. Each gets its own PR per the phase 1 status table in `specs/supervisor.md`.
+
+Next: `supervisor/resize.rs` when you give the go-ahead — `signal-hook` for Unix SIGWINCH → `PtySession::resize`, Windows stub deferred.
+<!-- agent:boundary:d198e63d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -64,11 +103,13 @@ Ready to proceed with `supervisor/pty.rs` whenever you give the go-ahead.
 - [ ] [#64mb] Investigate double commit_staging race: ops.log at 1776095605 shows two back-to-back commit_staging/out_of_band_write pairs for the same file within the same second.
 - [ ] [#tw4a] claim: cd into document's .agent-doc root (nearest git repo) when claiming a pane. Fixes relative-path ambiguity and makes git ops naturally target the correct repo.
 - [ ] [#8jzg] claim --isolate: spawn a fresh Claude Code process in the submodule root so CLAUDE.md, memory, and skills load scoped to that repo. Only real fix for cross-project context leakage (mid-session cd does not reload context).
-- [ ] [#a17b] supervisor/pty.rs: portable-pty allocation, stdin/pty forwarding threads, fake-claude shell-script integration test
+- [x] [#a17b] supervisor/pty.rs: portable-pty allocation, stdin/pty forwarding threads, fake-claude shell-script integration test
 - [ ] [#jg0d] supervisor/resize.rs: SIGWINCH unix path via signal-hook; Windows ConPTY stub for phase 1
 - [ ] [#b486] supervisor/state.rs: crash classifier, ring buffer, Healthy->Transient->Flapping->Halted state machine
 - [ ] [#40ct] supervisor/ipc.rs: Unix-domain socket accept loop, reuse length-prefixed JSON frame from ipc_socket.rs
 - [ ] [#vnp0] supervisor: wire into start.rs (replace existing restart loop, remove #[allow(dead_code)])
 - [ ] [#f7d5] supervisor: smoke test — real claude under supervisor in a tmux pane, verify restart + inject + CWD invariant end-to-end
+- [ ] [#6ae3] supervisor/pty.rs: wire PtySession into start.rs (phase 1 wire-up stage) — replaces the current Command::status inherit-tty path
+- [ ] [#jaaz] supervisor/pty.rs: decide env passthrough policy for start.rs — cwd.rs gives deterministic CWD, but start.rs currently inherits parent env. Either enumerate required vars (PATH, HOME, TERM, LANG, TMUX, %3, anything agent-doc needs) or add an opt-in inherit flag to PtySpawnConfig
 <!-- /agent:pending -->
 ## Assistant

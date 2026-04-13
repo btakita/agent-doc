@@ -1199,7 +1199,7 @@ Implementation complete and installed. Dogfooding it on this very write — `--p
 - Enforcement toggled by env var rather than plumbing a bool through four write entry points. Single-threaded CLI so this is safe; cleaner to refactor later if needed.
 
 Your call on next steps: release v0.32.4, or queue more work first?
-<!-- agent:boundary:660c861e -->
+<!-- agent:boundary:48832fbe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

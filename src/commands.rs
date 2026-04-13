@@ -83,6 +83,12 @@ fn all_commands() -> Vec<CommandInfo> {
     cmds.push(cmd("/agent-doc upgrade", "", "Check for updates and upgrade"));
     cmds.push(cmd("/agent-doc autoclaim", "", "Re-establish claims after context compaction"));
     cmds.push(cmd("/agent-doc stream", "<FILE>", "Stream agent output to document in real-time (CRDT)"));
+    cmds.push(cmd("/agent-doc cleanup", "<FILE>", "Clean up: callback orchestration, compaction"));
+    cmds.push(cmd("/agent-doc pending add", "<FILE> <ITEM>", "Add item to pending component"));
+    cmds.push(cmd("/agent-doc pending remove", "<FILE> <TARGET>", "Remove item from pending component"));
+    cmds.push(cmd("/agent-doc pending prune", "<FILE>", "Remove completed items from pending"));
+    cmds.push(cmd("/agent-doc pending list", "<FILE>", "List pending items"));
+    cmds.push(cmd("/agent-doc callback request", "<FILE> [<OPS>]", "Create IPC callback request"));
 
     // --- Claude Code built-in commands ---
     cmds.push(cmd("/help", "", "Show help and available commands"));

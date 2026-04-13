@@ -2,7 +2,7 @@
 //!
 //! ## Spec
 //! - Exposes the public API surface consumed by the CLI binary, FFI layer, and editor plugins.
-//! - Re-exports: `component`, `crdt`, `debounce`, `ffi`, `frontmatter`, `merge`, `template`.
+//! - Re-exports: `component`, `crdt`, `debounce`, `ffi`, `frontmatter`, `merge`, `project_config`, `template`.
 //! - `component::strip_comments(content)` is the shared entry point for comment stripping,
 //!   usable by both the binary (`diff::compute`) and external crates (`eval-runner`).
 //! - Provides two boundary-ID utilities used across all write paths:
@@ -36,6 +36,8 @@ pub mod ffi;
 pub mod frontmatter;
 pub mod ipc_socket;
 pub mod merge;
+pub mod model_tier;
+pub mod project_config;
 pub mod template;
 
 /// Default number of hex characters for boundary IDs.

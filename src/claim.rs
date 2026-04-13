@@ -42,8 +42,8 @@
 //!   neither `format`, `write_mode`, nor legacy `mode` is present.
 //! - Scaffolds default `## Status` and `## Exchange` component sections when the
 //!   document has none and format is `template`.
-//! - Creates `.agent-doc/components.toml` with default per-component patch modes if
-//!   the file does not yet exist.
+//! - Merges default component configuration into `.agent-doc/config.toml` (under the
+//!   `[components]` section) if the document is template format.
 //! - Registers the session→pane mapping using the pane's own PID (not the short-lived
 //!   CLI process PID) via `sessions::register_with_pid`.
 //! - Focuses the claimed pane via `tmux select-pane` (cross-window safe); warns but
@@ -99,7 +99,7 @@ use anyhow::{Context, Result};
 use std::io::Write;
 use std::path::Path;
 
-use crate::{frontmatter, resync, route, sessions};
+use crate::{frontmatter, project_config, resync, route, sessions};
 
 pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Option<&str>, force: bool) -> Result<()> {
     let _ = resync::prune(); // Clean stale entries before window resolution
@@ -265,23 +265,31 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
             eprintln!("scaffolded default components in {}", file.display());
         }
 
-        // Create default .agent-doc/components.toml if it doesn't exist
+        // Merge default components into .agent-doc/config.toml if template format
         if resolved.format == frontmatter::AgentDocFormat::Template {
-            let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-            let project_root = crate::snapshot::find_project_root(&canonical)
-                .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
-            let components_toml = project_root.join(".agent-doc/components.toml");
-            if !components_toml.exists() {
-                if let Some(parent) = components_toml.parent()
-                    && let Err(e) = std::fs::create_dir_all(parent)
-                {
-                    eprintln!("warning: failed to create .agent-doc dir: {}", e);
-                }
-                let default_config = "[exchange]\nmode = \"append\"\n\n[findings]\nmode = \"append\"\n\n[status]\nmode = \"replace\"\n";
-                match std::fs::write(&components_toml, default_config) {
-                    Ok(()) => eprintln!("created {}", components_toml.display()),
-                    Err(e) => eprintln!("warning: failed to create components.toml: {}", e),
-                }
+            let mut proj_cfg = project_config::load_project();
+
+            // Add default components if not already present
+            proj_cfg.components.entry("exchange".to_string())
+                .or_insert_with(|| project_config::ComponentConfig {
+                    patch: "append".to_string(),
+                    ..Default::default()
+                });
+            proj_cfg.components.entry("findings".to_string())
+                .or_insert_with(|| project_config::ComponentConfig {
+                    patch: "append".to_string(),
+                    ..Default::default()
+                });
+            proj_cfg.components.entry("status".to_string())
+                .or_insert_with(|| project_config::ComponentConfig {
+                    patch: "replace".to_string(),
+                    ..Default::default()
+                });
+
+            if let Err(e) = project_config::save_project(&proj_cfg) {
+                eprintln!("warning: failed to save config with components: {}", e);
+            } else {
+                eprintln!("merged default components into .agent-doc/config.toml");
             }
         }
     }

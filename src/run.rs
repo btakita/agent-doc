@@ -124,7 +124,21 @@ pub fn run(
         .or(config.default_agent.as_deref())
         .unwrap_or("claude");
     let agent_config = config.agents.get(agent_name);
-    let backend = agent::resolve(agent_name, agent_config)?;
+
+    // Expand frontmatter env vars (applied to the spawned agent child process).
+    let expanded_env = if fm.env.is_empty() {
+        Vec::new()
+    } else {
+        match crate::env::expand_values(&fm.env) {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("[run] env expansion failed: {} — continuing without env", e);
+                Vec::new()
+            }
+        }
+    };
+
+    let backend = agent::resolve(agent_name, agent_config, expanded_env)?;
 
     // Build prompt
     let prompt = if fm.resume.is_some() {

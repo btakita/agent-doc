@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc"
-version = "0.32.1"
+version = "0.32.2"
 edition = "2024"
 description = "Interactive document sessions with AI agents"
 license = "MIT"
@@ -38,6 +38,7 @@ pulldown-cmark = "0.12"
 yrs = "0.21"
 interprocess = { version = "2", default-features = false }
 htmd = "0.5.3"
+indexmap = { version = "2", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"

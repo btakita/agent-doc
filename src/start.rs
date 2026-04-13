@@ -101,6 +101,7 @@ fn log_event(log: &mut Option<std::fs::File>, msg: &str) {
     }
 }
 
+/// Expand frontmatter env values through the shell, preserving document order.
 pub fn run(file: &Path) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -178,9 +179,24 @@ pub fn run(file: &Path) -> Result<()> {
         if fm.no_mcp.unwrap_or(false) {
             cmd.arg("--no-mcp");
         }
-        // Add --enable-tool-search if frontmatter sets enable_tool_search: true
+        // Set ENABLE_TOOL_SEARCH env var if frontmatter sets enable_tool_search: true
         if fm.enable_tool_search.unwrap_or(false) {
-            cmd.arg("--enable-tool-search");
+            cmd.env("ENABLE_TOOL_SEARCH", "true");
+        }
+        // Expand and set frontmatter env vars on the child process.
+        // Values are expanded through the shell in document order so later
+        // values can reference earlier keys (e.g., $OPENROUTER_API_KEY).
+        if !fm.env.is_empty() {
+            match crate::env::expand_values(&fm.env) {
+                Ok(expanded) => {
+                    for (key, value) in &expanded {
+                        cmd.env(key, value);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[env] warning: failed to expand env values: {}", e);
+                }
+            }
         }
         let auto_trigger = if !first_run {
             // After first run, continue the previous session
@@ -419,4 +435,5 @@ mod tests {
         assert_eq!(output, ":", "expected empty agent+model, got: {}", output);
         let _ = std::fs::remove_file(&tmp);
     }
+
 }

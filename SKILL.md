@@ -2,7 +2,7 @@
 description: Submit a session document to an AI agent and append the response
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.31.5"
+agent-doc-version: "0.32.0"
 ---
 
 # agent-doc
@@ -58,7 +58,12 @@ The command outputs JSON to stdout:
   "no_changes": false,
   "baseline_file": "/path/to/.agent-doc/baselines/<hash>.md",
   "slash_commands": [],
-  "builtin_commands": []
+  "builtin_commands": [],
+  "effective_tier": "med",
+  "required_tier": null,
+  "suggested_tier": "med",
+  "model_switch": null,
+  "model_switch_tier": null
 }
 ```
 
@@ -85,6 +90,26 @@ If preflight returns a non-empty `slash_commands` or `builtin_commands` array, h
 - All other built-ins → log to console and skip (cannot execute Claude Code built-ins from within the session)
 
 **Guards:** `parse_slash_commands` already filtered out code-fenced lines, blockquotes, and non-added lines — trust the output. Do not re-validate.
+
+### 0c. Model tier gate (harness-agnostic)
+
+Preflight composes an `effective_tier` (`low | med | high`) from these sources, highest precedence first:
+
+1. Inline `/model <x>` command in the diff (stripped from downstream diff)
+2. `<!-- agent:model -->` component content
+3. `agent_doc_model_tier` frontmatter field
+4. Diff heuristic (`suggested_tier`)
+
+Use the tier to gate execution:
+
+- If `model_switch` is set (user typed `/model <x>`), acknowledge the switch in your response and proceed. The user explicitly chose this tier.
+- If `required_tier` is set (from component or frontmatter) and the current session's tier is **lower** than `required_tier`, tell the user:
+  > "This document requires `<required_tier>` tier. Run `/model <x>` in your terminal, then re-run `/agent-doc`."
+  and stop. Do not generate a response.
+- Otherwise, compare `effective_tier` against the current session model. If you (the running agent) are a lower tier than `effective_tier` and the task looks substantial (`diff_type` ∈ {`approval`, `implementation`, `architecture`}, or long diff), suggest escalating in the response but still proceed best-effort.
+- `effective_tier = auto` means "no preference" — always proceed.
+
+The tier comparison is advisory within a session — the skill cannot switch the running model, but it can surface the mismatch so the user can `/model` and re-invoke.
 
 ### 1. Respond (with streaming checkpoints for template mode)
 

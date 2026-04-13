@@ -130,8 +130,23 @@ pub fn run(
         .unwrap_or("claude");
     let agent_config = config.agents.get(agent_name);
 
+    // Expand frontmatter env vars (applied to the streaming agent's child process).
+    // Values may contain $(passage ...) — expanded in document order via a single
+    // shell invocation so later values can reference earlier keys.
+    let expanded_env = if fm.env.is_empty() {
+        Vec::new()
+    } else {
+        match crate::env::expand_values(&fm.env) {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("[stream] env expansion failed: {} — continuing without env", e);
+                Vec::new()
+            }
+        }
+    };
+
     // Resolve streaming agent
-    let streaming_agent = resolve_streaming(agent_name, agent_config)?;
+    let streaming_agent = resolve_streaming(agent_name, agent_config, expanded_env)?;
 
     // Build prompt
     let prompt = build_prompt(&fm, &the_diff, &content_original);
@@ -458,16 +473,17 @@ fn build_prompt(fm: &frontmatter::Frontmatter, the_diff: &str, content: &str) ->
 fn resolve_streaming(
     name: &str,
     config: Option<&crate::config::AgentConfig>,
+    env: Vec<(String, String)>,
 ) -> Result<Box<dyn StreamingAgent>> {
     let (cmd, args) = match config {
         Some(ac) => (Some(ac.command.clone()), Some(ac.args.clone())),
         None => (None, None),
     };
     match name {
-        "claude" => Ok(Box::new(agent::claude::Claude::new(cmd, args))),
+        "claude" => Ok(Box::new(agent::claude::Claude::new(cmd, args).with_env(env))),
         other => {
             if config.is_some() {
-                Ok(Box::new(agent::claude::Claude::new(cmd, args)))
+                Ok(Box::new(agent::claude::Claude::new(cmd, args).with_env(env)))
             } else {
                 anyhow::bail!("Unknown streaming agent backend: {} (only claude supports streaming)", other)
             }

@@ -15,7 +15,7 @@
 //!   1. Pre-patch: strips all existing boundary markers, inserts a fresh boundary at the end
 //!      of the `exchange` component (keyed to the file stem).
 //!   2. Applies each patch using mode resolution: stream overrides > inline attr (`patch=` or
-//!      `mode=`) > `.agent-doc/components.toml` > built-in defaults (`exchange`/`findings`
+//!      `mode=`) > `.agent-doc/config.toml ([components] section)` > built-in defaults (`exchange`/`findings`
 //!      default to `append`, all others to `replace`).
 //!   3. For `append` mode, uses boundary-aware insertion when a boundary marker exists.
 //!   4. Patches targeting missing component names are routed as overflow to `exchange`/`output`.
@@ -43,7 +43,7 @@
 //! - Missing-component patches never cause errors; content is silently routed to `exchange`/
 //!   `output` with a diagnostic written to stderr.
 //! - Mode precedence is deterministic: stream override > inline attr (`patch=` > `mode=`) >
-//!   `components.toml` (`patch` key > `mode` key) > built-in default. Callers can rely on this
+//!   `config.toml ([components] section)` (`patch` key > `mode` key) > built-in default. Callers can rely on this
 //!   ordering when constructing overrides for stream mode.
 //! - `template_info` reads the document from disk; callers must ensure the file is flushed
 //!   before calling (especially in the IPC write path).
@@ -64,11 +64,11 @@
 //! - `apply_patches_unmatched_appends_to_existing_exchange`: unmatched text appends to existing exchange; no duplicate component
 //! - `apply_patches_missing_component_routes_to_exchange`: patch targeting unknown component name appears in exchange
 //! - `apply_patches_missing_component_creates_exchange`: missing component + no exchange → auto-creates exchange with overflow
-//! - `inline_attr_mode_overrides_config`: `mode=replace` on tag wins over `components.toml` append config
+//! - `inline_attr_mode_overrides_config`: `mode=replace` on tag wins over `config.toml ([components] section)` append config
 //! - `inline_attr_mode_overrides_default`: `mode=replace` on exchange wins over built-in append default
-//! - `no_inline_attr_falls_back_to_config`: no inline attr → `components.toml` append config applies
+//! - `no_inline_attr_falls_back_to_config`: no inline attr → `config.toml ([components] section)` append config applies
 //! - `no_inline_attr_no_config_falls_back_to_default`: no attr, no config → exchange defaults to append
-//! - `inline_patch_attr_overrides_config`: `patch=replace` on tag wins over `components.toml` append config
+//! - `inline_patch_attr_overrides_config`: `patch=replace` on tag wins over `config.toml ([components] section)` append config
 //! - `template_info_works`: template-mode doc → `TemplateInfo.template_mode = true`, component list populated
 //! - `template_info_legacy_mode_works`: `response_mode: template` frontmatter key recognized
 //! - `template_info_append_mode`: non-template doc → `template_mode = false`, empty component list
@@ -81,6 +81,7 @@ use serde::Serialize;
 use std::path::Path;
 
 use crate::component::{self, find_comment_end, Component};
+use crate::project_config;
 
 /// A parsed patch directive from an agent response.
 #[derive(Debug, Clone)]
@@ -239,7 +240,7 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
 ///
 /// For each patch block, finds the matching `<!-- agent:name -->` component
 /// and replaces its content. Uses patch.rs mode logic (replace/append/prepend)
-/// based on `.agent-doc/components.toml` config.
+/// based on `.agent-doc/config.toml ([components] section)` config.
 ///
 /// Returns the modified document. Unmatched content (outside patch blocks)
 /// is appended to `<!-- agent:output -->` if it exists, or creates one at the end.
@@ -308,7 +309,7 @@ pub fn apply_patches_with_overrides(
 
     for (idx, patch) in &ops {
         let comp = &components[*idx];
-        // Mode precedence: stream overrides > inline attr > components.toml > built-in default
+        // Mode precedence: stream overrides > inline attr > config.toml ([components] section) > built-in default
         let mode = mode_overrides.get(&patch.name)
             .map(|s| s.as_str())
             .or_else(|| comp.patch_mode())
@@ -375,7 +376,7 @@ pub fn apply_patches_with_overrides(
     result = dedup_exchange_adjacent_lines(&result);
 
     // Post-patch: apply max_lines trimming to components that have it configured.
-    // Precedence: inline attr > components.toml > unlimited (0).
+    // Precedence: inline attr > config.toml ([components] section) > unlimited (0).
     // Re-parse after each replacement (offsets change) and iterate up to 3 times
     // until stable — trimming one component cannot grow another, so 2 passes suffice
     // in practice; the third is a safety bound.
@@ -523,7 +524,7 @@ pub fn template_info(file: &Path) -> Result<TemplateInfo> {
         .iter()
         .map(|comp| {
             let content = comp.content(&doc).to_string();
-            // Inline attr > components.toml > built-in default
+            // Inline attr > config.toml ([components] section) > built-in default
             let mode = comp.patch_mode().map(|s| s.to_string())
                 .or_else(|| configs.get(&comp.name).cloned())
                 .unwrap_or_else(|| default_mode(&comp.name).to_string());
@@ -534,7 +535,7 @@ pub fn template_info(file: &Path) -> Result<TemplateInfo> {
                 mode,
                 content,
                 line,
-                max_entries: None, // TODO: read from components.toml
+                max_entries: None, // TODO: read from config.toml ([components] section)
             }
         })
         .collect();
@@ -545,50 +546,46 @@ pub fn template_info(file: &Path) -> Result<TemplateInfo> {
     })
 }
 
-/// Load component mode configs from `.agent-doc/components.toml`.
+/// Load component mode configs from `.agent-doc/config.toml` (under [components] section).
 /// Returns a map of component_name → mode string.
+/// Resolves the project root by walking up from the document's parent directory.
 fn load_component_configs(file: &Path) -> std::collections::HashMap<String, String> {
-    let mut result = std::collections::HashMap::new();
-    let root = find_project_root(file);
-    if let Some(root) = root {
-        let config_path = root.join(".agent-doc/components.toml");
-        if config_path.exists()
-            && let Ok(content) = std::fs::read_to_string(&config_path)
-            && let Ok(table) = content.parse::<toml::Table>()
-        {
-            for (name, value) in &table {
-                // "patch" is the primary key; "mode" is a backward-compatible alias
-                if let Some(mode) = value.get("patch").and_then(|v| v.as_str())
-                    .or_else(|| value.get("mode").and_then(|v| v.as_str()))
-                {
-                    result.insert(name.clone(), mode.to_string());
-                }
-            }
-        }
-    }
-    result
+    let proj_cfg = load_project_from_doc(file);
+    proj_cfg
+        .components
+        .iter()
+        .map(|(name, cfg): (&String, &project_config::ComponentConfig)| (name.clone(), cfg.patch.clone()))
+        .collect()
 }
 
-/// Load max_lines settings from `.agent-doc/components.toml`.
+/// Load max_lines settings from `.agent-doc/config.toml` (under [components] section).
+/// Resolves the project root by walking up from the document's parent directory.
 fn load_max_lines_configs(file: &Path) -> std::collections::HashMap<String, usize> {
-    let mut result = std::collections::HashMap::new();
-    let root = find_project_root(file);
-    if let Some(root) = root {
-        let config_path = root.join(".agent-doc/components.toml");
-        if config_path.exists()
-            && let Ok(content) = std::fs::read_to_string(&config_path)
-            && let Ok(table) = content.parse::<toml::Table>()
-        {
-            for (name, value) in &table {
-                if let Some(max_lines) = value.get("max_lines").and_then(|v| v.as_integer())
-                    && max_lines > 0
-                {
-                    result.insert(name.clone(), max_lines as usize);
-                }
-            }
+    let proj_cfg = load_project_from_doc(file);
+    proj_cfg
+        .components
+        .iter()
+        .filter(|(_, cfg)| cfg.max_lines > 0)
+        .map(|(name, cfg): (&String, &project_config::ComponentConfig)| (name.clone(), cfg.max_lines))
+        .collect()
+}
+
+/// Resolve project config by walking up from a document path to find `.agent-doc/config.toml`.
+fn load_project_from_doc(file: &Path) -> project_config::ProjectConfig {
+    let start = file.parent().unwrap_or(file);
+    let mut current = start;
+    loop {
+        let candidate = current.join(".agent-doc").join("config.toml");
+        if candidate.exists() {
+            return project_config::load_project_from(&candidate);
+        }
+        match current.parent() {
+            Some(p) if p != current => current = p,
+            _ => break,
         }
     }
-    result
+    // Fall back to CWD-based resolution
+    project_config::load_project()
 }
 
 /// Default mode for a component by name.
@@ -677,6 +674,7 @@ fn strip_leading_overlap<'a>(existing: &str, new_content: &'a str) -> &'a str {
     }
 }
 
+#[allow(dead_code)]
 fn find_project_root(file: &Path) -> Option<std::path::PathBuf> {
     let canonical = file.canonicalize().ok()?;
     let mut dir = canonical.parent()?;
@@ -1004,13 +1002,13 @@ All systems go.
 
     #[test]
     fn inline_attr_mode_overrides_config() {
-        // Component has mode=replace inline, but components.toml says append
+        // Component has mode=replace inline, but config.toml says append
         let dir = setup_project();
         let doc_path = dir.path().join("test.md");
         // Write config with append mode for status
         std::fs::write(
-            dir.path().join(".agent-doc/components.toml"),
-            "[status]\nmode = \"append\"\n",
+            dir.path().join(".agent-doc/config.toml"),
+            "[components.status]\npatch = \"append\"\n",
         ).unwrap();
         // But the inline attr says replace
         let doc = "<!-- agent:status mode=replace -->\nold\n<!-- /agent:status -->\n";
@@ -1047,12 +1045,12 @@ All systems go.
 
     #[test]
     fn no_inline_attr_falls_back_to_config() {
-        // No inline attr → falls back to components.toml
+        // No inline attr → falls back to config.toml ([components] section)
         let dir = setup_project();
         let doc_path = dir.path().join("test.md");
         std::fs::write(
-            dir.path().join(".agent-doc/components.toml"),
-            "[status]\nmode = \"append\"\n",
+            dir.path().join(".agent-doc/config.toml"),
+            "[components.status]\npatch = \"append\"\n",
         ).unwrap();
         let doc = "<!-- agent:status -->\nold\n<!-- /agent:status -->\n";
         std::fs::write(&doc_path, doc).unwrap();
@@ -1089,12 +1087,12 @@ All systems go.
 
     #[test]
     fn inline_patch_attr_overrides_config() {
-        // Component has patch=replace inline, but components.toml says append
+        // Component has patch=replace inline, but config.toml says append
         let dir = setup_project();
         let doc_path = dir.path().join("test.md");
         std::fs::write(
-            dir.path().join(".agent-doc/components.toml"),
-            "[status]\nmode = \"append\"\n",
+            dir.path().join(".agent-doc/config.toml"),
+            "[components.status]\npatch = \"append\"\n",
         ).unwrap();
         let doc = "<!-- agent:status patch=replace -->\nold\n<!-- /agent:status -->\n";
         std::fs::write(&doc_path, doc).unwrap();
@@ -1129,12 +1127,12 @@ All systems go.
 
     #[test]
     fn toml_patch_key_works() {
-        // components.toml uses `patch = "append"` instead of `mode = "append"`
+        // config.toml uses `[components.status]` with `patch = "append"`
         let dir = setup_project();
         let doc_path = dir.path().join("test.md");
         std::fs::write(
-            dir.path().join(".agent-doc/components.toml"),
-            "[status]\npatch = \"append\"\n",
+            dir.path().join(".agent-doc/config.toml"),
+            "[components.status]\npatch = \"append\"\n",
         ).unwrap();
         let doc = "<!-- agent:status -->\nold\n<!-- /agent:status -->\n";
         std::fs::write(&doc_path, doc).unwrap();
@@ -1410,8 +1408,8 @@ Some content.
         let dir = setup_project();
         let doc_path = dir.path().join("test.md");
         std::fs::write(
-            dir.path().join(".agent-doc/components.toml"),
-            "[log]\npatch = \"replace\"\nmax_lines = 2\n",
+            dir.path().join(".agent-doc/config.toml"),
+            "[components.log]\npatch = \"replace\"\nmax_lines = 2\n",
         )
         .unwrap();
         let doc = "<!-- agent:log -->\nold\n<!-- /agent:log -->\n";
@@ -1434,8 +1432,8 @@ Some content.
         let dir = setup_project();
         let doc_path = dir.path().join("test.md");
         std::fs::write(
-            dir.path().join(".agent-doc/components.toml"),
-            "[log]\nmax_lines = 1\n",
+            dir.path().join(".agent-doc/config.toml"),
+            "[components.log]\nmax_lines = 1\n",
         )
         .unwrap();
         let doc = "<!-- agent:log patch=replace max_lines=3 -->\nold\n<!-- /agent:log -->\n";

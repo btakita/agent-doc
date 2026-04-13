@@ -388,15 +388,144 @@ This is a one-line safety net that catches exactly this case.
 cd src/boost-client
 agent-doc commit tasks/monsterrodholders.md
 ```
-<!-- agent:boundary:29d7e483 -->
+❯ I want this to be deterministic. What would Option A look like?
+### Re: Option A — deterministic binary-side submodule detection (HEAD)
+
+**Option A architecture: Binary detects submodule boundaries and commits intelligently.**
+
+The key is in `src/commit.rs`. Here's the design:
+
+**1. Add submodule detection function:**
+```rust
+// src/commit.rs
+
+fn get_submodule_root(file_path: &Path) -> Result<Option<PathBuf>> {
+    // Method A (robust): Use git config
+    let output = Command::new("git")
+        .args(&["config", "--file", ".gitmodules", "--get-regexp", "path"])
+        .output()?;
+    
+    let gitmodules_content = String::from_utf8(output.stdout)?;
+    
+    for line in gitmodules_content.lines() {
+        // "submodule.src/boost-client.path" "src/boost-client"
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let submodule_path = Path::new(parts[1].trim_matches('"'));
+            if file_path.starts_with(submodule_path) {
+                return Ok(Some(submodule_path.to_path_buf()));
+            }
+        }
+    }
+    
+    // If .gitmodules doesn't exist or file not found, return None
+    Ok(None)
+}
+
+fn is_file_in_submodule(file_path: &Path) -> Result<bool> {
+    Ok(get_submodule_root(file_path)?.is_some())
+}
+```
+
+**2. Update the commit flow in `run_commit()`:**
+```rust
+pub fn run_commit(file_path: &Path) -> Result<()> {
+    // Early detection: is this file in a submodule?
+    if let Some(submodule_root) = get_submodule_root(file_path)? {
+        log::info!("File {} is in submodule {}", file_path.display(), submodule_root.display());
+        
+        // Spawn agent-doc commit from WITHIN the submodule
+        return commit_in_submodule(file_path, &submodule_root);
+    }
+    
+    // Standard commit flow for non-submodule files
+    do_commit_locally(file_path)
+}
+
+fn commit_in_submodule(file_path: &Path, submodule_root: &Path) -> Result<()> {
+    // Get the relative path within the submodule
+    let relative_path = file_path.strip_prefix(submodule_root)
+        .context("file not under submodule root")?;
+    
+    // Option 1: Spawn a child agent-doc process in the submodule
+    let output = Command::new("agent-doc")
+        .current_dir(submodule_root)
+        .args(&["commit", relative_path.to_str().unwrap()])
+        .output()?;
+    
+    if !output.status.success() {
+        bail!("Submodule commit failed in {}: {}", 
+              submodule_root.display(), 
+              String::from_utf8_lossy(&output.stderr));
+    }
+    
+    // After submodule commit, update the parent's pointer
+    update_parent_submodule_pointer(submodule_root)?;
+    
+    Ok(())
+}
+
+fn update_parent_submodule_pointer(submodule_root: &Path) -> Result<()> {
+    // Back in the parent repo, stage the submodule update
+    let output = Command::new("git")
+        .args(&["add", submodule_root.to_str().unwrap()])
+        .output()?;
+    
+    if !output.status.success() {
+        log::warn!("Failed to update submodule pointer: {}", 
+                   String::from_utf8_lossy(&output.stderr));
+    }
+    
+    Ok(())
+}
+```
+
+**3. Integration into existing `commit.rs` flow:**
+
+The file currently has a `CommitCmd` struct that runs the commit process. Insert the submodule check at the start:
+
+```rust
+impl CommitCmd {
+    pub fn run(self) -> Result<()> {
+        let canonical_path = fs::canonicalize(&self.file)
+            .context("Cannot canonicalize file path")?;
+        
+        // ← NEW: Detect and handle submodule
+        if let Some(submodule_root) = get_submodule_root(&canonical_path)? {
+            return commit_in_submodule(&canonical_path, &submodule_root);
+        }
+        
+        // Existing logic: read snapshot, stage, commit, reposition
+        do_commit_locally(&canonical_path)
+    }
+}
+```
+
+**Advantages of Option A:**
+- ✅ **Deterministic** — no race condition, no need for skill-side workarounds
+- ✅ **Automatic** — just works, no user intervention needed
+- ✅ **Centralizes knowledge** — the binary owns the submodule logic, not the skill
+- ✅ **Handles both parent and submodule** — after submodule commit, updates the parent's pointer automatically
+- ✅ **Scales** — works for nested submodules (recursion)
+
+**Disadvantages:**
+- ⚠️ **Binary complexity** — adds ~100 lines of code to `commit.rs`
+- ⚠️ **Testing burden** — need tests for submodule detection + recursive commit
+- ⚠️ **Spawn overhead** — spawns a child `agent-doc` process for submodule files
+
+**Implementation effort:** ~3 hours (parsing `.gitmodules`, handling edge cases, testing with real submodule structure)
+
+**Would you want me to implement Option A, or stick with Option B (skill-side workaround)?** Option A is more elegant but Option B is simpler and solves the immediate problem with a one-liner in SKILL.md.
+<!-- agent:boundary:5609564d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Investigate duplicated `/agent:exchange` closing marker** — doc had two close markers with an orphan boundary between them; parser rejected the write. Look at `commit.reposition` and any path that emits `<!-- agent:boundary:... -->\n&lt;!-- /agent:exchange --&gt;`
+- **Create SKILL runbook** (`.claude/skills/agent-doc/runbooks/skill-submit-cycle.md`) — codify the 3 steps (preflight → respond → write+commit) to prevent silent failures when step 2 is forgotten
+- **Fix submodule commit race** — add submodule-aware commit logic to SKILL.md step 3. After `agent-doc commit`, check if file is in a submodule and re-commit from within it. See diagnosed issue in boost-client/tasks/monsterrodholders.md (30 lines uncommitted)
+- **Investigate duplicated `/agent:exchange` closing marker** — doc had two close markers with an orphan boundary between them; parser rejected the write. Look at `commit.reposition` and any path that emits `<!-- agent:boundary:... -->\n<!-- /agent:exchange -->`
 - **Add end-of-cycle write invariant** — warn if `preflight_diff_start` was emitted but `ipc_write_attempt` was not, for the same doc, within the cycle
 - **Expose `agent-doc session-check <FILE>`** — returns non-zero if last ops.log entry for doc is `preflight_diff_start`, giving the skill a self-diagnosis hook
-- **Audit `ops.log` historically** — count how often `preflight_diff_start` has no paired `write_origin`; gives a baseline for silent-skip rate
 <!-- /agent:pending -->
 ## Assistant

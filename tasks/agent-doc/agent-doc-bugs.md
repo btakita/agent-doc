@@ -1245,7 +1245,7 @@ Implemented in `RefreshEnvironmentAction.kt`. Plugin builds clean (`./gradlew bu
 - `build/distributions/agent-doc-jetbrains-0.1.0-signed.zip` (signed)
 
 **Next step (manual testing gate per release checklist):** Install the rebuilt zip — IDEA → Settings → Plugins → gear → Install Plugin from Disk. Structural changes to the class (new helper methods, new data class) — per your memory rules, full uninstall → restart → install → restart is the safe path if hot-reload misbehaves. Then hit Ctrl+Shift+Alt+R on this doc and confirm the picker lists your sessions and binds correctly. Once that works, I'll commit.
-<!-- agent:boundary:2c63baf9 -->
+<!-- agent:boundary:7fe88c26 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

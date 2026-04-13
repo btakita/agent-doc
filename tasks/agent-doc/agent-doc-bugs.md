@@ -516,7 +516,7 @@ impl CommitCmd {
 **Implementation effort:** ~3 hours (parsing `.gitmodules`, handling edge cases, testing with real submodule structure)
 
 **Would you want me to implement Option A, or stick with Option B (skill-side workaround)?** Option A is more elegant but Option B is simpler and solves the immediate problem with a one-liner in SKILL.md.
-<!-- agent:boundary:bd035462 -->
+<!-- agent:boundary:e6a7b699 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1422,13 +1422,16 @@ Shipping `cd` first lets us validate that path/git hygiene actually improves in 
 **My recommendation stands:** ship `cd`-on-claim now, keep `--isolate` in pending as a Phase 2 that gets its own design doc. If you want to accelerate `--isolate`, the next step is a design sketch in `src/agent-doc/specs/` covering the five questions above before writing any code.
 ❯ continue
 
-### Re: concrete plan for `cd`-on-claim — checkpoint before I execute (HEAD)
+### Re: concrete plan for `cd`-on-claim — checkpoint before I execute
 
 Scoped the change by reading `claim.rs` and tracing the three SKILL.md copies. Summary first, then the exact edit, then the open question for you.
 
 **Finding: this is SKILL.md-only, no `claim.rs` change needed.**
 
 A Rust binary cannot change its caller's shell CWD — `std::env::set_current_dir` only affects the binary's own process and is reset on exit. The actual `cd` has to happen in the skill's Bash tool invocations, which share a persistent shell across calls. So the fix is purely in SKILL.md's claim handler:
+
+❯ We have a "supervisor" agent-doc process that runs in the tmux pane. The supervisor spawns instances of claude code. The supervisor also restarts claude code if claude code crashes. Can we have this supervisor have a distinct api that we can use to 
+❯ deterministically control the claude sessions and `cd` to the correct directory? This supervisor should be a cli written in Rust.
 
 ```bash
 # current (SKILL.md step 0, claim branch):
@@ -1474,7 +1477,63 @@ Option C — **local-only hotpatch** (edit `.claude/skills/agent-doc/SKILL.md` d
 My suggestion: **C then A**. Hotpatch to validate the behavior in your live session, and if it feels right, roll into the next release alongside the preflight slash-command parser fix (also in pending) so you get two fixes per release cycle instead of one.
 
 Say the word — A, B, or C — and I'll execute. Also, if you want the `--isolate` design sketch written in parallel (pure specs doc, no code, no release cycle), I can do that alongside any of the above.
-<!-- agent:boundary:75fa113b -->
+
+### Re: supervisor CLI for deterministic claude session control (HEAD)
+
+Pushing back on the premise before scoping — want to make sure the supervisor solves the right problem.
+
+**What I think you're describing.** A Rust CLI that (a) owns the `claude` process as a child (pty-wrapped), (b) restarts it on crash with backoff, (c) exposes an IPC API (socket? named pipe?) so external tools can say "start a session here with CWD=X", "inject this prompt", "kill & restart", etc. The pane runs `agent-doc supervisor` as pid 1 of the pane; `claude` is its child.
+
+**What already exists and why it's adjacent but not the same.**
+
+- **`tmux-router`** already has `send` / `capture` / `register` and the "multi-agent orchestration" use case in its README. But it doesn't *own* the claude process — it just pokes keystrokes at whatever the pane's shell is running. No crash detection, no restart, no lifecycle.
+- **`agent-doc claim`** owns the *document↔pane binding*, not the process. It assumes claude-code is already running in the pane.
+- **The SKILL.md `cd`** I proposed fixes CWD *inside* the running claude's Bash tool (which is what actually matters for `git`, `cargo`, file reads). It doesn't fix the pane shell's CWD or claude's launch CWD.
+
+**The honest question: what does supervisor-level `cd` buy that SKILL.md `cd` doesn't?**
+
+Three possibilities, each with different scope:
+
+1. **Deterministic CWD at claude launch** — so `claude` itself sees the right CWD as its initial directory (affects file picker, `@`-autocomplete roots, some tool defaults). SKILL.md cd can't do this because claude is already running. **This one actually needs a supervisor.**
+2. **Crash recovery without losing document context** — supervisor restarts claude with `--resume <session>` + correct CWD, rebinds the document. Today if claude crashes mid-session, the pane dies and you lose the claim. **Also needs a supervisor.**
+3. **External control** — "from script X, tell the claude in pane Y to work on document Z". Today we rely on `tmux send-keys` which is fragile (can't tell if claude is ready for input, can't distinguish prompt vs. tool output). **Needs either a supervisor or a claude-code IPC hook, which doesn't exist upstream.**
+
+If your motivation is (1) alone, the supervisor is overkill — SKILL.md `cd` covers 95% because Bash tool CWD is what actually drives correctness, and claude's launch CWD is cosmetic. If it's (2) or (3), the supervisor is the right shape and I'd scope it.
+
+**Scope sketch if we go supervisor.**
+
+```
+agent-doc supervisor start --pane $TMUX_PANE --socket ~/.agent-doc/supervisor-$PANE.sock
+  # pid 1 of the pane; spawns `claude` as child with initial CWD from --cwd or pwd
+  # watches child; on exit: log, backoff, respawn with --resume <session>
+  # listens on unix socket for control ops
+
+agent-doc supervisor cd <pane_or_doc> <path>
+  # SIGTERM child, respawn with new CWD + --resume
+
+agent-doc supervisor status
+  # list all supervisors, pids, CWDs, uptime, restart counts
+
+agent-doc supervisor send <pane_or_doc> <text>
+  # write to child pty stdin (superset of tmux send-keys, but knows claude state)
+```
+
+**Hard parts I'd flag before writing a line of code.**
+
+- **PTY ownership vs. tmux.** Today claude runs in the tmux pane's shell (bash/zsh → claude). If supervisor wraps claude, the chain becomes tmux pane shell → supervisor → claude. Supervisor needs to forward pty resize, signals, and raw bytes transparently, or the terminal UX degrades. Non-trivial.
+- **Detecting crash vs. clean exit.** `claude` exits 0 when the user types `/exit`. Restart-on-clean-exit would be wrong. Need to distinguish, probably via exit code + time-since-start heuristic.
+- **Session resume correctness.** Claude's `--resume` is per-project; if you change CWD, does the same session id resolve? Need to verify before committing to this as the restart mechanism.
+- **IPC concurrency.** Preflight runs frequently. If preflight tries to talk to the supervisor while claude is mid-tool-call, what happens? Either supervisor queues ops, or exposes a "is idle?" query.
+- **Bootstrapping.** Who starts the supervisor? The user? A tmux hook? `agent-doc claim` autospawning one if missing? This is a UX decision that affects everything.
+
+**My recommendation.**
+
+Don't build the supervisor yet. First: write a spec in `src/agent-doc/specs/supervisor.md` answering the five hard parts above. In parallel, ship SKILL.md `cd` this release (Option C→A from my previous response) so you get the 95% fix today. Then decide whether the remaining 5% — claude-launch CWD determinism + crash recovery + external control — justifies the pty/IPC complexity.
+
+If after writing the spec you still want it, it's probably a new crate (`src/agent-doc-supervisor/` or a subcommand of an existing binary), not a bolt-on to `agent-doc` proper — it has a fundamentally different lifecycle (long-lived daemon vs. short CLI invocation).
+
+Say "spec it" and I'll draft `specs/supervisor.md`. Say "ship cd first" and I'll execute C→A from the previous plan. Both is fine too — they're independent.
+<!-- agent:boundary:39bdd538 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

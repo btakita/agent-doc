@@ -1095,7 +1095,7 @@ What's **redacted** from the draft:
 3. **Don't use gist — use a different channel** — e.g., private GitHub repo, passage-encrypted file, encrypted email attachment to the relevant party. Tell me who the recipient is and I'll propose a fit.
 
 My default recommendation is #1 **only if the intended audience is inside your trust circle** (you, Flywheel ops, the legitimate account owner's team). If any of this might reach the attacker — don't gist.
-<!-- agent:boundary:b54e164c -->
+<!-- agent:boundary:b46d6fa4 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

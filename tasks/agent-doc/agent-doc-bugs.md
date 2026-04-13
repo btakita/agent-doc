@@ -1639,7 +1639,7 @@ If you want the Windows ConPTY resize path implemented now instead of stubbed, s
 **Spec is ready for implementation.** Next step: start Phase 1 coding, beginning with `supervisor/cwd.rs` + unit tests for the resolution priority chain, since that's the one piece that's fully deterministic and testable without a live claude child. Then `supervisor/pty.rs`, `supervisor/resize.rs` (unix path), `supervisor/state.rs` (crash classifier), `supervisor/ipc.rs` (socket), and finally wire into `start.rs`.
 
 Want me to proceed with implementation now, or do you want to review the updated `specs/supervisor.md` first?
-<!-- agent:boundary:47597c61 -->
+<!-- agent:boundary:202aec58 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

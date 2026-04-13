@@ -1010,7 +1010,7 @@ Want me to implement B immediately, then continue into A? Or A-only if you'd rat
 ❯ Implement A for now. Then B
 
 ❯ Fix monsterrodholders.md commit state
-### Re: Option A landed + verified live (HEAD)
+### Re: Option A landed + verified live
 
 Implemented, tested, installed, and verified end-to-end in a real preflight sweep.
 
@@ -1055,20 +1055,44 @@ Both files committed in their own submodule repos and the parent's submodule poi
 **Not yet done (deliberately deferred per your release checklist):**
 - VERSIONS.md entry + version bump in `Cargo.toml`/`pyproject.toml` — waiting until manual-testing gate passes for both this fix and the safety rail
 - Release to crates.io / PyPI / GitHub Release — same gate
-<!-- agent:boundary:2ee78cba -->
+
+❯ do
+❯ - **🔴 Investigate boundary/baseline divergence root cause** — wait for `normalize_threshold_exceeded` entries in `ops.log`.
+### Re: Boundary/baseline divergence — ops.log check (HEAD)
+
+Checked `ops.log` (28,084 lines, 2.7MB):
+
+- **`normalize_threshold_exceeded`** — **0 entries**. Safety rail has not tripped since the forensic log landed. Either we haven't hit a large-prefix corruption event yet, or the threshold is set above anything we've produced this session.
+- **`normalize_user_prompts`** entries are firing normally — sampled the recent window: `applied` counts range 1–7 per cycle. Highest was `applied=7` at `snap_len=76224 base_len=76736` (delta 512b). Routine prefix stripping, not a corruption signature.
+- **Out-of-band write just flagged in this cycle's preflight**: `preflight_diff_start file=tasks/agent-doc/agent-doc-bugs.md snap_len=76677 file_len=76812` — 135-byte gap. That matches the `[commit] WARNING: file is 135 bytes larger than snapshot` emitted on entry to this cycle. The gap was **committed cleanly** (same path that will later emit `normalize_threshold_exceeded` if the delta ever exceeds the rail's threshold).
+
+**Interpretation:** there *is* a small, recurring snapshot-vs-file delta (the 135b gap this cycle), but it's well under the safety-rail threshold, so no telemetry fires and we have no diagnostic data to root-cause from yet. The rail is doing its job (not false-positiving on normal gaps), but we also can't investigate until it trips — which is the "wait" state the pending item describes.
+
+**Options to accelerate the investigation** (since passive waiting may be slow):
+
+1. **Lower the threshold temporarily** in a debug build to catch the small 135b-class gaps as `normalize_threshold_exceeded` events. Gives us a stack trace / context dump on every out-of-band write, not just catastrophic ones.
+2. **Add a secondary log line** at the existing "file is N bytes larger than snapshot" warning site in `commit.rs` — cheap, always-on, no threshold change. Emits `out_of_band_write file=... delta=... file_len=... snap_len=...` to `ops.log` so we can aggregate and classify without waiting for a full-blown corruption.
+3. **Status quo:** keep waiting. Release as-is, let the rail trip in the wild, then investigate with real forensics.
+
+My recommendation: **option 2**. It's ~5 lines, doesn't weaken the rail, and starts accumulating a dataset immediately — we'll know within a day whether the 135b-class gaps are frequent, correlated with specific operations (commit gap commits, streaming writes, user-editor interleaving), or isolated.
+
+Shall I implement option 2 now, or hold for the release and revisit after the rail has had time to collect real-world data?
+
+Also noted: the stray `n` line at the end of your input is likely a typo — want me to strip it on the next write, or leave it?
+<!-- agent:boundary:296fc32e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **🔴 Investigate boundary/baseline divergence root cause** — wait for `normalize_threshold_exceeded` entries in `ops.log`.
-- **Submodule pathspec fix (Option A)** — ✅ landed, tested (3 unit/integration tests), installed, **verified live** in preflight sweep. Both submodule docs committed cleanly with parent pointer updates. **← done this cycle**
-- **Safety rail + forensic log in normalize_user_prompts_in_exchange** — ✅ landed, tested, installed. Awaiting live-session verification before release.
+- **🔴 Investigate boundary/baseline divergence root cause** — `normalize_threshold_exceeded` count in ops.log: **0**. Rail not yet tripped. Recurring 135b-class out-of-band gaps observed but under threshold. ← awaiting decision: option 2 (always-on `out_of_band_write` log line) or keep waiting.
+- **Safety rail + forensic log in normalize_user_prompts_in_exchange** — ✅ landed, tested, installed. Live-verified passive (no threshold_exceeded entries yet — rail silent is expected when deltas are small).
+- **Submodule pathspec fix (Option A)** — ✅ landed, tested, verified live in preflight sweep. ← done prior cycle
 - **Drop or implement Option B (skill-side submodule workaround)** — A handles it deterministically; B is redundant. ← awaiting decision
 - **Investigate the 1062 pre-existing `❯` lines across 46 snapshots** — legitimate or prior corruption? Diff against git history to classify.
 - **Investigate duplicated `/agent:exchange` closing marker** — likely same root cause class as mass-prefix bug.
 - **Release agent-doc with safety rail + submodule fix** — bump version in `Cargo.toml` + `pyproject.toml`, add VERSIONS.md entry, publish after manual-testing gate.
-- **Implement Layer 2: required pending declaration** — ← awaiting ack on id strategy (option 1: exact text match)
+- **Implement Layer 2: required pending declaration** — ← awaiting ack on id strategy (option 3: stable hash ids w/ lazy preflight migration)
 - **Update SKILL.md + skill-submit-cycle.md** — document new pending declaration contract as part of Layer 2 PR.
 - **Integration tests for pending enforcement**
 - **PostToolUse hook for agent-doc write** (layer 3, optional)

@@ -888,7 +888,7 @@ Separate from the deactivation sweep, you should probably:
 Want me to pull the wfls meta and any audit-trail breadcrumbs for user 1 in the next cycle?
 ❯ yes
 
-### Re: Forensic snapshot + deactivation executed — read this, there is a big scope issue (HEAD)
+### Re: Forensic snapshot + deactivation executed — read this, there is a big scope issue
 
 #### 1. MRHadmin forensic findings (saved to `tasks/software/monsterrodholders/forensics-mrhadmin-20260412-1957.tsv`)
 
@@ -970,7 +970,9 @@ The plugins dir IS bind-mounted to `/opt/monsterrodholders/app/wordpress/plugins
 
 If you want me to proceed with a staging install anyway to de-risk the prod install, say so. Otherwise the higher-leverage next step is the prod deactivation + prod Wordfence activation, which needs your access.
 
-### Re: 2FA + password policy + xmlrpc (HEAD)
+❯ Should we use wordfence or is there a better security option? We need 2FA, strong passwords, and other security measures.
+
+### Re: 2FA + password policy + xmlrpc
 
 All three depend on Wordfence being active (2FA via `wfls`; password-leak check via Wordfence Premium), so they block on step above. Deferred with rationale rather than executed blindly. xmlrpc restriction is the one piece I can do independently via htaccess/nginx — want me to do that on prod once I have access?
 
@@ -980,22 +982,135 @@ All three depend on Wordfence being active (2FA via `wfls`; password-leak check 
 2. **Confirmation** whether to install Wordfence on staging as a dry-run (low value IMO, skip) or go straight to prod
 3. **Jenny out-of-band verification** — her gmail needs to be confirmed secure before her MRHadmin account can be restored
 4. **Sellbrite rotation window** — do you want me to pre-generate a new WC REST API key before killing the prod `sellbrite-integration` login, or accept a brief sync gap
-<!-- agent:boundary:c88d21d8 -->
+
+❯ Create a private gist of the security findings.
+
+### Re: Wordfence or something better? (HEAD)
+
+**Short answer:** Wordfence Free (or Solid Security Pro) is fine for the WP layer, but the bigger lever is **Cloudflare edge rules**, not the WP plugin. Do edge first, plugin second.
+
+#### The framing
+
+Your threat is ~100 brute-force attempts/month from rotating bulletproof-hosting IPs against a known-good username. That's a volume problem best solved **at the edge**, not inside PHP. Every request that reaches `wp-login.php` has already cost you 50–200ms of PHP+DB execution. Blocking at Cloudflare is ~1000× cheaper per request and doesn't wake up the origin at all.
+
+**So the architecture should be:**
+1. **Cloudflare** handles brute-force mitigation, IP blocking, rate limiting, XML-RPC hard-block, and Bot Fight Mode. This stops ≥90% of the attack.
+2. **A single WP security plugin** handles 2FA enforcement, password policy, malware scan, and defense-in-depth for whatever sneaks through.
+
+Using CF as layer 1 also means you can run a lighter WP plugin (or even the free DIY combo below) without feeling exposed.
+
+#### The WP plugin options (ranked for monsterrodholders)
+
+| Option | 2FA | Strong PW | Brute-force | Scan | License | Verdict for MRH |
+|---|---|---|---|---|---|---|
+| **Wordfence Free** | ✅ (wfls) | advisory | ✅ | ✅ | free | **Solid default.** Already has DB muscle memory here (`wf*` tables exist). Heavy but battle-tested. |
+| **Solid Security Pro** (StellarWP) | ✅ | ✅ enforced | ✅ | ✅ | ~$99/yr | **Best UX.** Modernized iThemes Security. Password policy is enforced out of the box. Pay-to-play. |
+| **Two-Factor** + **Limit Login Attempts Reloaded** + **Password Policy Manager** | ✅ | ✅ | ✅ | — | free | **DIY combo.** Three plugins to maintain; works but more surface area. |
+| **MalCare** | ✅ | — | ✅ | cloud | paid tier | Lower server CPU but moves scan data off-server. |
+| **miniOrange 2FA** | ✅ only | — | — | — | freemium | 2FA specialist. Pair with something else. Not a one-stop shop. |
+| **Sucuri Security** | — | — | limited | ✅ | paid WAF | Strong at DNS-WAF but you already have Cloudflare. Duplicates layer 1. Skip. |
+
+**Recommendation:** **Wordfence Free** (zero license cost, fastest path, existing DB footprint) **OR** **Solid Security Pro** (cleaner UX, enforced password policy, if a license is acceptable). Do **not** stack Wordfence + Solid + miniOrange — they race for `wp-login.php` hooks and break 2FA flows.
+
+#### Cloudflare rules I'd deploy today (higher priority than any WP plugin)
+
+1. **WAF custom rule — `wp-login.php` POST challenge**
+   ```
+   (http.request.uri.path eq "/wp-login.php" and http.request.method eq "POST" and not cf.client.bot)
+   ```
+   Action: **Managed Challenge**
+
+2. **WAF custom rule — block `/xmlrpc.php` entirely** (monsterrodholders isn't using Jetpack/mobile app XML-RPC AFAICT)
+   ```
+   http.request.uri.path eq "/xmlrpc.php"
+   ```
+   Action: **Block**
+
+3. **Rate-limiting rule — login attempts**
+   - Path: `/wp-login.php`, method: POST
+   - Threshold: **5 req / 10 min / IP**
+   - Action: **Block 1 hour**
+
+4. **IP Access Rules — block bulletproof hosting /24s** from the forensic data:
+   `45.13.191.0/24`, `45.128.199.0/24`, `45.95.243.0/24`, `212.30.33.0/24`, `185.223.152.0/24`, `185.192.16.0/24`, `45.8.17.0/24`, `98.159.37.0/24`, `173.239.218.0/24`, `216.73.160.0/24`, `85.203.15.0/24`, `85.203.47.0/24`, `188.212.135.0/24`, `81.199.26.0/24`
+   (review quarterly — attackers rotate)
+
+5. **Bot Fight Mode** — enable if not already on.
+
+6. **MITRE AS271 block** — consider blocking `131.239.0.0/16` outright unless you have a known MITRE user. That's where the anomalous successful login came from.
+
+Want me to draft these as Cloudflare Terraform / `cf-cli` commands once I have your CF API token / account ID access path?
+
+#### Strong password enforcement
+
+Separate from 2FA — this is the other half of "strong passwords". Options:
+
+- **Solid Security Pro**: built-in, enforced at `wp_update_user` filter
+- **Wordfence Premium**: password audit against leaked-password lists (zxcvbn + Troy Hunt's haveibeenpwned)
+- **Password Policy Manager** (free): standalone, enforces length/complexity, no leak check
+- **Free manual**: add a `wp_authenticate_user` filter in a mu-plugin that calls `zxcvbn_is_strong()` and rejects below score 3 — ~20 lines of PHP, no plugin needed
+
+For a site this exposed I'd go with **Wordfence Premium** (leaked-password check is the meaningful win) or **Solid Security Pro** (enforced policy, no leak check without an add-on).
+
+---
+
+### Re: Create a private gist of the security findings (HEAD)
+
+**⚠️ Pausing before upload — the findings contain PII and I don't want to push them to GitHub without your review.** The raw forensic data includes:
+
+- Account owner's full home address, phone, full name (WooCommerce billing fields)
+- Personal gmail address of the account owner
+- Staff email addresses for 15 people
+- Attacker IP list + exact timestamps
+- DB schema details (custom table prefix, user ID mapping)
+- Attacker MITRE IP (`131.239.136.26`) — publishing this publicly isn't a legal issue but it is attribution
+
+GitHub secret gists are **not truly private** — they're "unlisted" (anyone with the URL can view, and URL can leak via git clients, shell history, screenshots of livestreams, clipboard managers, etc.). Per our security convention, third-party uploads of sensitive content need explicit review first.
+
+**What I've done instead:** drafted a **sanitized** version of the findings at:
+
+```
+tasks/software/monsterrodholders/security-findings-gist-draft.md
+```
+
+What's in the draft:
+- ✅ Attack timeline, volume, IP ranges, tactics
+- ✅ The MITRE `131.239.136.26` finding with ASN attribution (needed for the actual security story)
+- ✅ Hash distribution (`$wp$` vs `$P$B`)
+- ✅ Cloudflare rules section, WP plugin comparison, follow-up action list
+- ✅ Explicit list of what is NOT covered (scoping)
+
+What's **redacted** from the draft:
+- ❌ Account owner's real name, home address, phone number
+- ❌ Account owner's personal email
+- ❌ Staff email addresses (the 15-row table is reduced to just a count + role split)
+- ❌ DB table prefix (`wp_nxz1mfc9cg_` → just `wp_*`)
+- ❌ Numeric WP user IDs (replaced with generic labels)
+- ❌ Successful-login IP for the legitimate user (kept only the MITRE one, which is what matters)
+
+**Please review the draft file before I upload.** Three options:
+
+1. **Look good, ship as a secret gist** — I'll run `gh gist create --secret tasks/software/monsterrodholders/security-findings-gist-draft.md` and return the URL
+2. **Redact more / change emphasis** — tell me what else to strip or reframe
+3. **Don't use gist — use a different channel** — e.g., private GitHub repo, passage-encrypted file, encrypted email attachment to the relevant party. Tell me who the recipient is and I'll propose a fit.
+
+My default recommendation is #1 **only if the intended audience is inside your trust circle** (you, Flywheel ops, the legitimate account owner's team). If any of this might reach the attacker — don't gist.
+<!-- agent:boundary:b54e164c -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] ([done]) Forensic snapshot of MRHadmin (user 1) — wrote `tasks/software/monsterrodholders/forensics-mrhadmin-20260412-1957.tsv` + wflogins dump
-- [x] ([done]) Staging password deactivation for 13 write-permission users — executed, pre-state logged
-- [ ] 🚨 **PROD password deactivation** — same 13-user sweep against production DB (not yet done — staging DB is a clone, attack traffic targets prod). BLOCKED on prod access.
+- [ ] **AWAITING REVIEW**: sanitized gist draft at `tasks/software/monsterrodholders/security-findings-gist-draft.md` — confirm ship / redact more / use different channel before upload
+- [ ] 🚨 **PROD password deactivation** — same 13-user sweep against production DB. BLOCKED on prod access.
 - [ ] 🚨 **Revoke prod MRHadmin session** from IP `131.239.136.26` (MITRE) — preserve forensics first, then delete session_tokens
+- [ ] 🚨 **Cloudflare edge rules** — deploy WAF rule for `/wp-login.php` POST, block `/xmlrpc.php`, rate limit login, block bulletproof /24s, consider blocking `131.239.0.0/16` (MITRE). Highest leverage step, needs CF API access path.
 - [ ] 🚨 **Jenny out-of-band verification** — confirm `jennyboonedesignstudio@gmail.com` gmail is secure + has 2FA before MRHadmin can be re-enabled; consider changing user_email off her address entirely
-- [ ] Pre-generate replacement Sellbrite WC REST API key before prod deactivation (to minimize sync gap on ID 16990)
-- [ ] Install + activate Wordfence on prod (plugin, then Wordfence Login Security module)
-- [ ] Enforce 2FA via `wfls` for administrator + shop_manager roles on prod
-- [ ] Install password-policy plugin or Wordfence Premium — 14+ char, mixed, leaked-password check
-- [ ] Restrict `/xmlrpc.php` at web-server layer (htaccess/nginx) on prod
-- [ ] Audit staff email addresses for anomalies — specifically `hmdrompt@protonmail.com` (CATC Support) and `herve@kentuckyglobal.com` (ghostcat); password reset flows to these inboxes if they're compromised
-- [ ] Fix staging: `mrh-performance` in `active_plugins` but missing from disk (broken ref)
+- [ ] Pre-generate replacement Sellbrite WC REST API key (or WP Application Password) before prod deactivation
+- [ ] Install Wordfence Free OR Solid Security Pro on prod (pick one, don't stack). Enable wfls 2FA for administrator + shop_manager roles.
+- [ ] Strong password enforcement — Wordfence Premium (leaked-password check) OR Solid Security Pro built-in OR mu-plugin zxcvbn filter
+- [ ] Migrate integration accounts off `user_pass` to WC REST API keys / WP Application Passwords (starting with Sellbrite)
+- [ ] Audit staff email addresses — specifically `hmdrompt@protonmail.com` (CATC Support) and `herve@kentuckyglobal.com` (ghostcat)
+- [ ] Audit `shop_manager` roster — retire inactive accounts
+- [ ] Fix staging `mrh-performance` active_plugins / disk mismatch (also likely present on prod)
 - [ ] Flywheel: DECISION — approve steps 1–5 (lock MRHadmin, purge 16 spam posts, scanner, plugin audit, 2FA)
 <!-- /agent:pending -->

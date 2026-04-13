@@ -570,20 +570,27 @@ Two options — your call:
 
 Which? I'd lean #1 — `skill-submit-cycle.md` is the more descriptive name and the existing content is already well-scoped.
 ❯ do #1
-### Re: Rename cycle-steps.md → skill-submit-cycle.md (HEAD)
+### Re: Rename cycle-steps.md → skill-submit-cycle.md
 
 Done. `mv .claude/skills/agent-doc/runbooks/cycle-steps.md .claude/skills/agent-doc/runbooks/skill-submit-cycle.md`. Grepped for `cycle-steps` across the skill directory — no references to update. The runbook is now at the requested path with its original 5-step content (preflight → gate checks → compose → write-back → commit) plus self-check list and failure-mode fingerprints intact.
-<!-- agent:boundary:c29b6292 -->
+❯ Why was this not marked as done? I thought we had deterministic logic.
+❯ - **Create SKILL runbook** (`.claude/skills/agent-doc/runbooks/skill-submit-cycle.md`) — codify the 3 steps (preflight → respond → write+commit) to prevent silent failures when step 2 is forgotten
+### Re: Why was it not marked done? (HEAD)
+
+My mistake — not a determinism failure, an operator failure. I didn't include a `<!-- patch:pending -->` block in the previous response. SKILL.md step 1b says "every response MUST include a `<!-- patch:pending -->` block" — I skipped it. The binary only rewrites pending when a patch block exists; absent that, the old list stays verbatim.
+
+Fixing it this cycle: pending now removes the completed item. Also worth adding to `skill-submit-cycle.md` — the existing runbook is about write-back (step 4), but step 1b (pending update) has the same silent-skip failure mode and deserves the same self-check treatment. Want me to add a "Pending update" checkpoint to the runbook?
+<!-- agent:boundary:e70a297b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Create SKILL runbook** (`.claude/skills/agent-doc/runbooks/skill-submit-cycle.md`) — codify the 3 steps (preflight → respond → write+commit) to prevent silent failures when step 2 is forgotten
 - **Choose submodule fix strategy** — Option A (deterministic binary-side) vs Option B (one-liner skill-side workaround). Leaning toward Option A (child process is correct semantic). Would you like me to implement it?
 - **Investigate `❯ ` prefix write artifact** — lines in monsterrodholders.md responses have shell prompts. Check stream mode, control code stripping, and origin handling in write.rs.
 - **Investigate duplicated `/agent:exchange` closing marker** — doc had two close markers with an orphan boundary between them; parser rejected the write. Look at `commit.reposition` and any path that emits `<!-- agent:boundary:... -->\n&lt;!-- /agent:exchange --&gt;`
 - **Add end-of-cycle write invariant** — warn if `preflight_diff_start` was emitted but `ipc_write_attempt` was not, for the same doc, within the cycle
+- **Extend `skill-submit-cycle.md`** — add a step 1b self-check: "every response with an `agent:pending` component MUST include a `<!-- patch:pending -->` block" (same silent-skip class as forgetting step 4)
 - **Expose `agent-doc session-check <FILE>`** — returns non-zero if last ops.log entry for doc is `preflight_diff_start`, giving the skill a self-diagnosis hook
 <!-- /agent:pending -->
 ## Assistant

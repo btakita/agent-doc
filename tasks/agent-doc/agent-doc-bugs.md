@@ -389,7 +389,7 @@ cd src/boost-client
 agent-doc commit tasks/monsterrodholders.md
 ```
 ❯ I want this to be deterministic. What would Option A look like?
-### Re: Option A — deterministic binary-side submodule detection (HEAD)
+### Re: Option A — deterministic binary-side submodule detection
 
 **Option A architecture: Binary detects submodule boundaries and commits intelligently.**
 
@@ -523,7 +523,7 @@ impl CommitCmd {
 
 <!-- agent:pending patch=replace -->
 - **Create SKILL runbook** (`.claude/skills/agent-doc/runbooks/skill-submit-cycle.md`) — codify the 3 steps (preflight → respond → write+commit) to prevent silent failures when step 2 is forgotten
-- **Fix submodule commit race** — add submodule-aware commit logic to SKILL.md step 3. After `agent-doc commit`, check if file is in a submodule and re-commit from within it. See diagnosed issue in boost-client/tasks/monsterrodholders.md (30 lines uncommitted)
+- **Choose submodule fix strategy** — Option A (deterministic binary-side) vs Option B (one-liner skill-side workaround). See design in exchange above. Implement chosen approach.
 - **Investigate duplicated `/agent:exchange` closing marker** — doc had two close markers with an orphan boundary between them; parser rejected the write. Look at `commit.reposition` and any path that emits `<!-- agent:boundary:... -->\n<!-- /agent:exchange -->`
 - **Add end-of-cycle write invariant** — warn if `preflight_diff_start` was emitted but `ipc_write_attempt` was not, for the same doc, within the cycle
 - **Expose `agent-doc session-check <FILE>`** — returns non-zero if last ops.log entry for doc is `preflight_diff_start`, giving the skill a self-diagnosis hook

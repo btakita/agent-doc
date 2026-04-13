@@ -516,14 +516,14 @@ impl CommitCmd {
 **Implementation effort:** ~3 hours (parsing `.gitmodules`, handling edge cases, testing with real submodule structure)
 
 **Would you want me to implement Option A, or stick with Option B (skill-side workaround)?** Option A is more elegant but Option B is simpler and solves the immediate problem with a one-liner in SKILL.md.
-<!-- agent:boundary:5609564d -->
+<!-- agent:boundary:bd035462 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - **Create SKILL runbook** (`.claude/skills/agent-doc/runbooks/skill-submit-cycle.md`) — codify the 3 steps (preflight → respond → write+commit) to prevent silent failures when step 2 is forgotten
-- **Choose submodule fix strategy** — Option A (deterministic binary-side) vs Option B (one-liner skill-side workaround). See design in exchange above. Implement chosen approach.
+- **Fix submodule commit race** — add submodule-aware commit logic to SKILL.md step 3. After `agent-doc commit`, check if file is in a submodule and re-commit from within it. See diagnosed issue in boost-client/tasks/monsterrodholders.md (30 lines uncommitted)
 - **Investigate duplicated `/agent:exchange` closing marker** — doc had two close markers with an orphan boundary between them; parser rejected the write. Look at `commit.reposition` and any path that emits `<!-- agent:boundary:... -->\n<!-- /agent:exchange -->`
 - **Add end-of-cycle write invariant** — warn if `preflight_diff_start` was emitted but `ipc_write_attempt` was not, for the same doc, within the cycle
 - **Expose `agent-doc session-check <FILE>`** — returns non-zero if last ops.log entry for doc is `preflight_diff_start`, giving the skill a self-diagnosis hook

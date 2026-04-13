@@ -945,7 +945,7 @@ Got it. Expanding scope: when the safety rail detects a big changeset, also forc
 3. **Unit tests:** (a) threshold reached → content unchanged, (b) below threshold → normal prefixing, (c) threshold reached → commit side-effect happens.
 
 Implementing now.
-<!-- agent:boundary:45c3a72a -->
+<!-- agent:boundary:abd0b5b1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

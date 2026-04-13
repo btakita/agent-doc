@@ -1332,7 +1332,7 @@ I didn't label any of the questions with numbered sub-options, so "Option 3" is 
 3. The agent-loop restructure itself — **execute** (deinit → rm → add boost-client → commit) or **defer**?
 
 Once you clarify, I'll execute in one shot.
-<!-- agent:boundary:69ef3c1e -->
+<!-- agent:boundary:ac9acb05 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

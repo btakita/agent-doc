@@ -78,7 +78,7 @@ Ready to proceed with `supervisor/pty.rs` whenever you give the go-ahead.
 **Not in scope for this landing** (deliberately): SIGWINCH plumbing, crash classifier, IPC socket, `start.rs` integration. Each gets its own PR per the phase 1 status table in `specs/supervisor.md`.
 
 Next: `supervisor/resize.rs` when you give the go-ahead — `signal-hook` for Unix SIGWINCH → `PtySession::resize`, Windows stub deferred.
-<!-- agent:boundary:0d6dee51 -->
+<!-- agent:boundary:52b6919a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

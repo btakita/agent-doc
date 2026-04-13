@@ -1478,7 +1478,7 @@ My suggestion: **C then A**. Hotpatch to validate the behavior in your live sess
 
 Say the word — A, B, or C — and I'll execute. Also, if you want the `--isolate` design sketch written in parallel (pure specs doc, no code, no release cycle), I can do that alongside any of the above.
 
-### Re: supervisor CLI for deterministic claude session control (HEAD)
+### Re: supervisor CLI for deterministic claude session control
 
 Pushing back on the premise before scoping — want to make sure the supervisor solves the right problem.
 
@@ -1533,7 +1533,41 @@ Don't build the supervisor yet. First: write a spec in `src/agent-doc/specs/supe
 If after writing the spec you still want it, it's probably a new crate (`src/agent-doc-supervisor/` or a subcommand of an existing binary), not a bolt-on to `agent-doc` proper — it has a fundamentally different lifecycle (long-lived daemon vs. short CLI invocation).
 
 Say "spec it" and I'll draft `specs/supervisor.md`. Say "ship cd first" and I'll execute C→A from the previous plan. Both is fine too — they're independent.
-<!-- agent:boundary:38bbeaba -->
+
+❯ Just so we are on the same page, when I exit Claude Code by pressing `Ctrl-D`, I get `Press Enter to restart, or 'q' to exit.`. What process does this? I thought web built that supervisor already.
+```
+  Press Ctrl-D again to exit
+
+Resume this session with:
+claude --resume 817bcb48-1789-45af-934c-4a5b9c7b684a
+
+Claude exited cleanly.
+Press Enter to restart, or 'q' to exit.
+```
+### Re: "I thought we built that supervisor already" (HEAD)
+
+That prompt comes from `agent-doc start` — `src/agent-doc/src/start.rs:273`. It's a **supervisor-lite**, not the full supervisor from my previous response.
+
+What `agent-doc start` does today:
+- Launches `claude` as a child process (`cmd.status()` at `start.rs:261`)
+- On exit code 0 → prints `Press Enter to restart, or 'q' to exit.` and waits on stdin
+- On non-zero exit → auto-restarts after 2s (context exhaustion / crash recovery)
+- Runs inside a tmux pane, registers the session, logs events
+
+So yes — there is a restart loop. That's why `Ctrl-D` (clean exit from claude) lands you at that prompt instead of killing the pane. It's the same binary you're typing into now, just its outer loop.
+
+What it is **not** (from the previous supervisor discussion):
+- No pty wrapping — claude has the real tty, which is why auto-restart on context exhaustion works but external control (sending keystrokes from another process) does not
+- No deterministic CWD injection — it inherits whatever the tmux pane's CWD is at spawn time (the bug this thread is about)
+- No IPC socket for external drivers
+- No crash-state inspection beyond the exit code
+
+So the "do we build the supervisor?" question is really: **do we extend `start.rs` into a pty/IPC supervisor, or keep it as a restart-loop-lite and solve CWD a different way?**
+
+The SKILL.md `cd` fix (Option C→A from my previous response) is orthogonal to `start.rs` — it runs inside the already-launched claude session, so it doesn't care whether start.rs is lite or full.
+
+Still recommending: ship `cd` this release, write `specs/supervisor.md` to decide whether start.rs graduates into a full supervisor or stays lite.
+<!-- agent:boundary:9394769d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

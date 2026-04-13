@@ -1420,7 +1420,7 @@ They're at different layers and mostly mutually exclusive — doing them togethe
 Shipping `cd` first lets us validate that path/git hygiene actually improves in practice. Then we have real evidence for whether process-level isolation is worth the design complexity, or whether `cd` + being disciplined about context already closes 80% of the gap.
 
 **My recommendation stands:** ship `cd`-on-claim now, keep `--isolate` in pending as a Phase 2 that gets its own design doc. If you want to accelerate `--isolate`, the next step is a design sketch in `src/agent-doc/specs/` covering the five questions above before writing any code.
-<!-- agent:boundary:4a591ce0 -->
+<!-- agent:boundary:51c1082a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

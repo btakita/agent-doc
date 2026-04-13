@@ -841,24 +841,59 @@ Benefits over the `done/` subdirectory:
 **Action:** I'll skip creating `specs/done/` in the SPEC.md breakup plan and instead add `status:` frontmatter to each extracted section. `pending-system.md` already exists without frontmatter — I'll add it when I touch that file next.
 
 ❯ Just a simple extraction for now.
-### Re: simple extraction (HEAD)
+### Re: simple extraction
 
 Got it — mechanical cut only. Extract SPEC.md sections into flat `specs/*.md`, no frontmatter, no status tagging, no `done/` subdir. Frontmatter can come later once the shape settles.
-<!-- agent:boundary:09e38f22 -->
+
+❯ agent-doc run is messing up src/boost-client/tasks/monsterrodholders.md
+❯ We need an immediate fix.
+### Re: monsterrodholders.md ❯-prefix corruption (HEAD)
+
+**Fixed (immediate).** Working tree of `src/boost-client/tasks/monsterrodholders.md` was stashed and restored to HEAD.
+
+**What I observed:**
+- `git diff` showed 958 lines changed / 543 insertions / 415 deletions.
+- **Every single insertion** was a `❯ ` prefix applied to pre-existing lines. Zero legitimate user content in the diff.
+- HEAD version: 0 `❯` lines. Working-tree version (before fix): 543 `❯` lines.
+- Snapshot at `.agent-doc/snapshots/7b9f2a63...md` was already clean (matches HEAD byte-for-byte, 62612 bytes).
+- So the corruption lived only in the working tree — meaning whatever produced it wrote to the file but never reached the snapshot path.
+
+**Steps taken:**
+1. `git stash push src/boost-client/tasks/monsterrodholders.md -m "corruption: ❯ prefix..."` — preserved for forensics (`stash@{0}`)
+2. `git restore` implied by stash — working tree now matches HEAD
+3. Verified: `diff` against snapshot → byte-identical
+4. Left untracked `tasks/monsterrodholders/` directory alone (separate, legitimate content)
+
+**Scope check across all snapshots:** `grep -c '^❯' .agent-doc/snapshots/*.md` → **46 snapshot files** contain a total of **1062 `❯`-prefixed lines**. This is systemic, not isolated to monsterrodholders. The existing pending item ("Investigate `❯ ` prefix write artifact") was understating the blast radius.
+
+**Root cause — strong hypothesis:** Something is passing tmux pane capture output (with starship prompt glyph intact) into `agent-doc write` stdin. Every prompt line in a captured pane begins with `❯ `, so piping it as patch content prefixes every line. Candidates to audit:
+- `tmux capture-pane -p` usage anywhere in skill runbooks / hooks
+- The boundary-synthesis path in `write.rs` when stdin isn't wrapped in a patch block
+- PostToolUse hooks that shell-capture terminal state
+- `agent-doc claim` / pane binding operations that may read pane history
+
+**Why it's suddenly worse here:** The file has 900+ exchange lines. If a capture-pane-to-write happened while the full history was visible, the whole buffer gets `❯`-prefixed in one shot. Earlier manifestations were small because the pane history was shorter.
+
+**Recommendation for durable fix:** Strip leading `❯ ` (and optionally other common prompt glyphs: `$ `, `> `, `% `) at the ingestion boundary in `write.rs` before applying patches. This is defensive but catches the entire class. Separately, find and remove the capture-pane source.
+
+Want me to implement the stripping fix in `write.rs` now?
+<!-- agent:boundary:0d6de636 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Implement Layer 2: required pending declaration** — `agent-doc write` errors when `agent:pending` exists in doc but no `--pending-done` / `--pending-none` / `patch:pending` block is provided. Collapses layers 1+2. **← active, awaiting ack on id strategy (recommending option 1: exact text match)**
+- **🔴 CORRUPTION: `❯ `-prefix write artifact is systemic** — 46 snapshot files, 1062 affected lines workspace-wide. monsterrodholders.md hit 543 corrupted lines in a single working-tree write. Hypothesis: tmux pane capture output being piped into `agent-doc write` stdin. **← escalated from "investigate" — this is now P0**
+- **Durable fix: strip prompt glyphs at write.rs ingestion** — strip leading `❯ `, `$ `, `> `, `% ` from patch content before apply. Defensive catchall for the entire class. **← proposed, awaiting ack**
+- **Find the capture-pane source** — audit skill runbooks, hooks, and any path in the binary that might shell-capture pane state into stdin. Separate from the stripping fix.
+- **Implement Layer 2: required pending declaration** — `agent-doc write` errors when `agent:pending` exists in doc but no `--pending-done` / `--pending-none` / `patch:pending` block is provided. **← awaiting ack on id strategy (option 1: exact text match)**
 - **Update SKILL.md + skill-submit-cycle.md** — document the new pending declaration contract as part of Layer 2 PR.
-- **Integration tests for pending enforcement** — verify write fails without declaration and succeeds via each of three paths (--pending-done, --pending-none, patch:pending block).
+- **Integration tests for pending enforcement** — verify write fails without declaration and succeeds via each of three paths.
 - **PostToolUse hook for agent-doc write** (layer 3, optional) — redundant with layer 1/2 but enforces at Claude Code boundary.
-- **Choose submodule fix strategy** — Option A (deterministic binary-side) vs Option B (one-liner skill-side workaround). Leaning toward Option A (child process is correct semantic). Would you like me to implement it?
-- **Investigate `❯ ` prefix write artifact** — lines in monsterrodholders.md responses have shell prompts. Check stream mode, control code stripping, and origin handling in write.rs.
-- **Investigate duplicated `/agent:exchange` closing marker** — doc had two close markers with an orphan boundary between them; parser rejected the write. Look at `commit.reposition` and any path that emits `<!-- agent:boundary:... -->\n&lt;!-- /agent:exchange --&gt;`
-- **Add end-of-cycle write invariant** — warn if `preflight_diff_start` was emitted but `ipc_write_attempt` was not, for the same doc, within the cycle
-- **Expose `agent-doc session-check <FILE>`** — returns non-zero if last ops.log entry for doc is `preflight_diff_start`, giving the skill a self-diagnosis hook
-- **SPEC.md breakup** — flat `specs/*.md` extraction, mechanical only, no frontmatter/status work yet. **← confirmed this cycle**
+- **Choose submodule fix strategy** — Option A (deterministic binary-side) vs Option B (one-liner skill-side workaround). Leaning toward Option A.
+- **Investigate duplicated `/agent:exchange` closing marker** — doc had two close markers with an orphan boundary between them.
+- **Add end-of-cycle write invariant** — warn if `preflight_diff_start` was emitted but `ipc_write_attempt` was not, for the same doc, within the cycle.
+- **Expose `agent-doc session-check <FILE>`** — returns non-zero if last ops.log entry for doc is `preflight_diff_start`.
+- **SPEC.md breakup** — flat `specs/*.md` extraction, mechanical only, no frontmatter/status work yet.
 <!-- /agent:pending -->
 ## Assistant

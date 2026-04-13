@@ -1387,7 +1387,7 @@ That's a bigger change — it means `claim` grows a mode like `--isolate` that s
 Mostly no — and that's the point. The value of the monorepo is filesystem proximity for cross-submodule edits (e.g., `agent-doc` touching files in `instruction-files` and `presence`). But when you're in a **session document** that lives inside one submodule, you almost always want to stay inside that submodule. Cross-submodule work should happen from the workspace root; submodule-scoped work should be process-isolated. `claim` is the natural place to draw that line because that's exactly when the document's identity gets bound to a pane.
 
 **Recommendation:** ship the `cd`-on-claim change first (small, immediately fixes path/git noise), then design `claim --isolate` as a follow-up once the first one is proven.
-<!-- agent:boundary:b2e8c23c -->
+<!-- agent:boundary:a1eac519 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

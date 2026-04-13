@@ -640,7 +640,7 @@ agent-doc write <FILE> --stream --origin skill \
 2. **Matching strategy for `--pending-done`**: prefix match on bullet text is fragile (drift as wording changes). Do you want me to add stable ids (`- [#a3f] text`) as part of this PR, or keep it prefix-match-only for v1 and add ids later?
 
 Give me the call on those two and I'll implement. ~60-80 lines in Rust + the docs updates. Estimated one cycle.
-### Re: How do ids work? (HEAD)
+### Re: How do ids work?
 
 Three options, ranked by simplicity:
 
@@ -652,12 +652,49 @@ Downside: long args. Solution: repeat the flag (`--pending-done "text1" --pendin
 
 **3. Stable hash id.** Binary auto-assigns a 4-6 char hash on first write (`- [#a3f2] text`), visible in the rendered markdown like a GitHub issue number. Stable across reorders and text edits. Clean but adds schema migration (existing pending lists need backfill) and rendering complexity (do we strip on display? keep visible?). Best long-term, more work now.
 
+❯ We should use option 3. How can we migrate existing agent docs?
+
 **My call:** Start with **option 1** (exact text match). It's the minimum viable enforcement and uses data the skill already has. If text-drift becomes a problem in practice (user edits bullet wording between cycles → skill's match fails), upgrade to option 3 in a follow-up. Don't let perfect be the enemy of shipping layer 2.
 
 **Practical note:** in 90% of cycles the skill will use the `patch:pending` block path (full state replace), not `--pending-done`. The flag is a shortcut for "I only want to remove item X and don't want to re-state the whole list." For the common case (rewriting the full list), ids don't matter — text matching only applies to the `--pending-done` shortcut path.
 
+❯ We should always use the write command. The SKILL->runbook should **never** do a full replace. We can add a `--pending-clear`. We should have a `--pending-add`. Should we also add a `--pending-replace`...I think we should not but is there a good reason to have `--pending-replace`?
+
 Sound good? If yes, I'll start on the rust side with option 1.
-<!-- agent:boundary:2da46e9b -->
+### Re: option 3 + migration (HEAD)
+
+Agreed — jump straight to stable hash ids. Migration is cheap if we do it **lazily at preflight**:
+
+1. When `agent-doc preflight` loads the doc, scan the `agent:pending` component for bullets without a `[#xxxx]` prefix.
+2. For each unhashed bullet, generate a 4-char base32 hash (seeded from `text + doc_id + timestamp` so it's deterministic-ish but unique), and rewrite the bullet in-place.
+3. Preflight already commits the result as the next snapshot, so the backfill rides on the existing boundary-maintenance path — no new commit type, no new tool.
+4. On a doc that's already hashed, the scan is a no-op (O(n) line check).
+
+No `agent-doc migrate` command needed. The first time any upgraded session touches an old doc, it self-heals. Docs that never get opened again never migrate, which is fine — ids only matter when the skill/runbook is actively managing the list.
+
+Edge case: if two sessions open the same doc concurrently before either has committed backfill, both could assign different hashes to the same bullet. The CRDT merge would end up with one winning; acceptable because the id is opaque and the bullet text is the same.
+
+### Re: command surface — no `--pending-replace` (HEAD)
+
+Your instinct is right. The primitive set should be:
+
+- `--pending-add "text"` — append item, binary assigns hash
+- `--pending-done <id>` — mark/remove item by hash
+- `--pending-clear` — drop everything
+- `--pending-edit <id> "new text"` — **rewrite text, preserve hash** (this is the "I want to reword without losing tracking" case)
+
+`--pending-replace` would mean "take this whole list as the new state." That's exactly the full-replace pattern you want the runbook to stop doing. Every transformation `--pending-replace` could express is already expressible as a sequence of `add`/`done`/`edit`, and the sequence preserves ids where replace would churn them. **Reject it.** No good reason to add it.
+
+One more primitive worth considering: `--pending-reorder <id1,id2,...>` to move an item to the top without touching text. Useful because "active work to top" is one of the required updates each cycle. Could also ship later — `add` at top + `done` on old position works as a workaround, at the cost of a new hash.
+
+### Revised plan (HEAD)
+
+1. **Rust:** implement `--pending-add`, `--pending-done <id>`, `--pending-clear`, `--pending-edit <id>` in the write command. Hash generation on insert. Lazy backfill in preflight.
+2. **Skill:** rewrite the runbook to forbid `patch:pending` full blocks — the skill must use the granular flags only. Update `feedback_pending_patch_every_cycle.md` to reflect the new invariant (granular ops, not full replace).
+3. **Enforcement:** preflight errors if it sees a `patch:pending` block in the outgoing payload (symmetric to the current "missing patch:pending" error, but inverted).
+
+Sound good? If yes, I'll start on the Rust side.
+<!-- agent:boundary:07068dea -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

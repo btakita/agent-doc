@@ -603,7 +603,7 @@ You're right — SKILLs are LLM-following-instructions, not enforcement. Hooks c
 ❯ The skill->runbook should account for this new protocol.
 
 Want me to implement layer 1 first? It's ~30 lines in `src/agent-doc/src/write.rs` — parse components from the resolved doc, check for `agent:pending`, check payload for `patch:pending`, error if mismatched.
-### Re: Layer 2 — required pending declaration on every write (HEAD)
+### Re: Layer 2 — required pending declaration on every write
 
 Confirming I understand: every `agent-doc write` against a doc with `agent:pending` must carry an explicit declaration — "these items are done" OR "none done" — or the write errors. No silent inheritance. This collapses layer 1 and layer 2 into one enforcement boundary, which I think is what you want. Good call.
 
@@ -617,6 +617,8 @@ agent-doc write <FILE> --stream --origin skill \
   # OR
   # include <!-- patch:pending --> block in stdin (full replace)
 ```
+
+❯ How do we know what the id values are? Should we use a numeric index based approach or the entire text of the pending item?
 
 **Rules:**
 - If target doc has `&lt;!-- agent:pending --&gt;` AND none of `{--pending-done, --pending-none, patch:pending in payload}` is present → **error**: `ERR: agent:pending exists in <FILE> but no pending declaration provided. Use --pending-done <items> | --pending-none | <!-- patch:pending --> block.`
@@ -638,13 +640,30 @@ agent-doc write <FILE> --stream --origin skill \
 2. **Matching strategy for `--pending-done`**: prefix match on bullet text is fragile (drift as wording changes). Do you want me to add stable ids (`- [#a3f] text`) as part of this PR, or keep it prefix-match-only for v1 and add ids later?
 
 Give me the call on those two and I'll implement. ~60-80 lines in Rust + the docs updates. Estimated one cycle.
-<!-- agent:boundary:098df460 -->
+### Re: How do ids work? (HEAD)
+
+Three options, ranked by simplicity:
+
+**1. Exact bullet text (recommended for v1).** The skill passes the full line after `- `, normalized (collapse whitespace, strip leading/trailing). Binary exact-matches against the current pending list. Deterministic, zero schema change, no drift — the skill already has the text in context from preflight.
+
+Downside: long args. Solution: repeat the flag (`--pending-done "text1" --pending-done "text2"`) or accept stdin via `--pending-done-from-stdin` / file path. For most cycles marking 1-2 items, repeated flags are fine.
+
+**2. Numeric index (1-based).** `--pending-done 3,5`. Simplest for the shell, but **fragile under reorder**: if cycle N-1 reordered the list (moving an active item to the top), cycle N's "item 3" refers to a different bullet. Correct behavior becomes cycle-order-dependent, which is exactly the drift we're fixing. **Reject.**
+
+**3. Stable hash id.** Binary auto-assigns a 4-6 char hash on first write (`- [#a3f2] text`), visible in the rendered markdown like a GitHub issue number. Stable across reorders and text edits. Clean but adds schema migration (existing pending lists need backfill) and rendering complexity (do we strip on display? keep visible?). Best long-term, more work now.
+
+**My call:** Start with **option 1** (exact text match). It's the minimum viable enforcement and uses data the skill already has. If text-drift becomes a problem in practice (user edits bullet wording between cycles → skill's match fails), upgrade to option 3 in a follow-up. Don't let perfect be the enemy of shipping layer 2.
+
+**Practical note:** in 90% of cycles the skill will use the `patch:pending` block path (full state replace), not `--pending-done`. The flag is a shortcut for "I only want to remove item X and don't want to re-state the whole list." For the common case (rewriting the full list), ids don't matter — text matching only applies to the `--pending-done` shortcut path.
+
+Sound good? If yes, I'll start on the rust side with option 1.
+<!-- agent:boundary:b382660b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Implement Layer 2: required pending declaration** — `agent-doc write` errors when `agent:pending` exists in doc but no `--pending-done` / `--pending-none` / `patch:pending` block is provided. Collapses layers 1+2. **← active, awaiting ack on two design questions (flag precedence, stable ids)**
+- **Implement Layer 2: required pending declaration** — `agent-doc write` errors when `agent:pending` exists in doc but no `--pending-done` / `--pending-none` / `patch:pending` block is provided. Collapses layers 1+2. **← active, awaiting ack on id strategy (recommending option 1: exact text match)**
 - **Update SKILL.md + skill-submit-cycle.md** — document the new pending declaration contract as part of Layer 2 PR.
 - **Integration tests for pending enforcement** — verify write fails without declaration and succeeds via each of three paths (--pending-done, --pending-none, patch:pending block).
 - **PostToolUse hook for agent-doc write** (layer 3, optional) — redundant with layer 1/2 but enforces at Claude Code boundary.

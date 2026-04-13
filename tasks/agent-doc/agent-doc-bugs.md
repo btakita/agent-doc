@@ -1533,7 +1533,7 @@ Don't build the supervisor yet. First: write a spec in `src/agent-doc/specs/supe
 If after writing the spec you still want it, it's probably a new crate (`src/agent-doc-supervisor/` or a subcommand of an existing binary), not a bolt-on to `agent-doc` proper — it has a fundamentally different lifecycle (long-lived daemon vs. short CLI invocation).
 
 Say "spec it" and I'll draft `specs/supervisor.md`. Say "ship cd first" and I'll execute C→A from the previous plan. Both is fine too — they're independent.
-<!-- agent:boundary:39bdd538 -->
+<!-- agent:boundary:38bbeaba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

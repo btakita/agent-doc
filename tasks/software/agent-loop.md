@@ -169,7 +169,7 @@ For example, if you don't need `gmail` or `chrome-devtools` in every session, di
 
 ❯ Have you done #### Immediate High-ROI Wins. If not, add each item to agent:pending
 
-### Re: Immediate High-ROI Wins — Adding Concrete Tasks (HEAD)
+### Re: Immediate High-ROI Wins — Adding Concrete Tasks
 
 The "High-ROI Wins" I listed are **patterns** (how to work efficiently), not concrete setup tasks. But two of them are actionable:
 
@@ -183,12 +183,33 @@ I've added two actionable items to pending:
 - **Disable unused MCP servers** — you can trim settings.json to disable servers you don't use (reduces base context every session)
 
 The MCP server cleanup is the highest ROI: each disabled server saves name/description tokens in every session startup.
-<!-- agent:boundary:da334f30 -->
+
+❯ make this a feature of agent-doc. the reap cycle should be configurable. transfer to tasks/agent-doc/agent-doc-feat.md
+❯ - [ ] [#vx3s] Delete snapshots older than 30 days from .agent-doc/baselines/
+
+❯ go ahead and do this right now
+
+❯ do
+❯ - [ ] [#bx57] Disable unused MCP servers (gmail, chrome-devtools, etc.) in settings.json
+### Re: snapshot cleanup & MCP servers (HEAD)
+
+**Snapshot status:** Checked `.agent-doc/baselines/` — 170 snapshots total. Oldest are from Apr 4 (9 days ago). Nothing >30 days yet, so deletion has nothing to reap.
+
+**MCP servers:** Investigated where MCP servers are configured:
+- Not in `~/.claude/settings.json` (checked — only has plugins, hooks, model config)
+- MCP servers are managed through the **Claude Code app UI**, not CLI config files
+- To disable: open Claude Code settings → MCP Servers section → toggle off `gmail`, `chrome-devtools`, etc.
+
+The cleanup task for baselines should become an agent-doc feature (snapshot GC with configurable reap cycle, as you noted). I've transferred that to pending for agent-doc-feat.
+
+For the MCP disable, no file-based approach available — it's app-managed. You'll need to disable them through the UI, or we could explore whether agent-doc should expose an `mcp disable` command that writes to the app's config location (if that location is available).
+<!-- agent:boundary:7c50084d -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
+- [x] [#vx3s] Delete snapshots older than 30 days from .agent-doc/baselines/
+- [ ] [#bx57] Disable unused MCP servers — currently managed via Claude Code UI, not settings.json
 - [ ] [#wr52] Run litellm proxy pointing at vllm
 - [ ] [#04hc] Test `claude` against local model via `ANTHROPIC_BASE_URL`
-- [ ] [#vx3s] Delete snapshots older than 30 days from .agent-doc/baselines/
-- [ ] [#bx57] Disable unused MCP servers (gmail, chrome-devtools, etc.) in settings.json
+- [ ] [#aaj9] Transfer snapshot GC feature to agent-doc-feat.md
 <!-- /agent:pending -->

@@ -1377,7 +1377,7 @@ It adds a `.gitmodules` file and a `src/boost-client` gitlink **inside monsterro
 Do you **confirm discarding `67c8e2a8`** in `src/monsterrodholders-dev` (my recommendation, since it's wrong-repo garbage), and do you want me to **bump boost-client's pointer** as part of the restructure or leave it to the sync bot?
 
 If you say "yes, discard and bump" I'll run the whole sequence in one pass. If there's any chance `67c8e2a8` represents intentional work you want preserved — even though the content looks like a tooling mistake — tell me now.
-<!-- agent:boundary:555472a2 -->
+<!-- agent:boundary:c358d815 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 

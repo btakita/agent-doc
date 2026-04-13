@@ -1567,7 +1567,7 @@ So the "do we build the supervisor?" question is really: **do we extend `start.r
 The SKILL.md `cd` fix (Option C→A from my previous response) is orthogonal to `start.rs` — it runs inside the already-launched claude session, so it doesn't care whether start.rs is lite or full.
 
 Still recommending: ship `cd` this release, write `specs/supervisor.md` to decide whether start.rs graduates into a full supervisor or stays lite.
-<!-- agent:boundary:9394769d -->
+<!-- agent:boundary:fc4a792d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

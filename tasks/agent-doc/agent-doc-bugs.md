@@ -1349,7 +1349,7 @@ The only thing that's arguably duplicated is `config.toml` — submodule's is 12
 Those were parsed as `slash_commands` by preflight and nearly got invoked as skills. I skipped them (they're clearly absolute paths, not command names) and added a pending item to tighten the parser — it should require `[a-z][a-z0-9:_-]*` after the leading `/` and reject tokens containing a second `/`.
 
 I also noticed a separate oddity in `ops.log`: at timestamp `1776095605` there are two back-to-back `commit_staging` + `out_of_band_write` pairs for the same file within one second (drift=410, then drift=122). Looks like a double-commit race worth investigating — added to pending.
-<!-- agent:boundary:21e4826c -->
+<!-- agent:boundary:6987b272 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

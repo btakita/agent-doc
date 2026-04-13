@@ -694,7 +694,7 @@ One more primitive worth considering: `--pending-reorder <id1,id2,...>` to move 
 3. **Enforcement:** preflight errors if it sees a `patch:pending` block in the outgoing payload (symmetric to the current "missing patch:pending" error, but inverted).
 
 Sound good? If yes, I'll start on the Rust side.
-<!-- agent:boundary:07068dea -->
+<!-- agent:boundary:fe6816f8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

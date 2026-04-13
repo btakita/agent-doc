@@ -1315,7 +1315,7 @@ If I run `git submodule deinit src/monsterrodholders-dev && git rm src/monsterro
 
 I'll wait for your direction rather than guess. Everything else in the restructure runbook still applies once these are settled.
 
-### Re: "Option 3" — need to disambiguate (HEAD)
+### Re: "Option 3" — need to disambiguate
 
 I'm not sure which "Option 3" you mean:
 
@@ -1332,15 +1332,61 @@ I didn't label any of the questions with numbered sub-options, so "Option 3" is 
 3. The agent-loop restructure itself — **execute** (deinit → rm → add boost-client → commit) or **defer**?
 
 Once you clarify, I'll execute in one shot.
-<!-- agent:boundary:ac9acb05 -->
+
+❯ Push monsterrodholders-dev to origin first.
+
+### Re: "Push monsterrodholders-dev to origin first" — stopping, this commit doesn't belong in that repo (HEAD)
+
+I inspected `67c8e2a8` before pushing and it's worse than "misleading message" — **the entire commit is wrong-repo work**. You should not push it to `monsterrodholders-dev`.
+
+**`67c8e2a8` contents:**
+```
+commit 67c8e2a84215f542dcd1c697276b4145091e8e7d
+Author: Brian Takita <brian.takita@gmail.com>
+Date:   Sun Apr 12 21:14:41 2026 -0400
+
+    agent-loop: add boost-client submodule, remove monsterrodholders-dev
+
+    - Add src/boost-client as submodule (includes monsterrodholders-dev nested)
+    - Remove direct monsterrodholders-dev reference from agent-loop
+    - boost-client now manages monsterrodholders-dev workspace
+
+    Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>
+
+ .gitmodules      | 3 +++
+ src/boost-client | 1 +
+ 2 files changed, 4 insertions(+)
+```
+
+It adds a `.gitmodules` file and a `src/boost-client` gitlink **inside monsterrodholders-dev**, which is nonsense at that layer — monsterrodholders-dev is a WP site repo, not a workspace. Those files belong in **agent-loop**, but they got committed in the wrong working directory (by a Haiku 4.5 session, per the co-author trailer). Agent-loop itself never received these changes (`.gitmodules` in agent-loop has no `boost-client` entry, confirmed).
+
+**Pushing this to `monsterrodholders-dev` would:**
+- Either corrupt the site repo with stray workspace scaffolding, OR
+- Fail/force-push (remote `origin/main` has advanced to `96bdd84f` with 5+ WP sync commits since, so a fast-forward isn't possible).
+
+**What should actually happen:**
+
+1. **Inside `src/monsterrodholders-dev`:** abandon `67c8e2a8`. Reset local `main` to `origin/main` (`git fetch origin && git reset --hard origin/main`). This cleanly drops the wrong-repo commit — it's not in any remote, so nothing is lost that isn't also recoverable from reflog for a while.
+
+2. **Inside agent-loop:** re-perform the restructure cleanly from the top level — `git submodule deinit src/monsterrodholders-dev`, `git rm src/monsterrodholders-dev`, `git submodule add git@github.com:btakita/boost-client.git src/boost-client`, `git submodule update --init --recursive src/boost-client`, then commit. This time the `.gitmodules` edit and `src/boost-client` gitlink will land in **agent-loop's** tree, which is where they belong.
+
+3. **Boost-client's pointer for `monsterrodholders-dev`** is currently `9991ad09` (WP sync 20:30). By the time we nest, `origin/main` will be ~4–5 cycles newer. We can either (a) leave it and let the next bot cycle inside boost-client catch up, or (b) bump it now with `cd src/boost-client && git submodule update --remote src/monsterrodholders-dev && git commit -am "bump monsterrodholders-dev" && git push`.
+
+**Question I still need answered before I execute:**
+
+Do you **confirm discarding `67c8e2a8`** in `src/monsterrodholders-dev` (my recommendation, since it's wrong-repo garbage), and do you want me to **bump boost-client's pointer** as part of the restructure or leave it to the sync bot?
+
+If you say "yes, discard and bump" I'll run the whole sequence in one pass. If there's any chance `67c8e2a8` represents intentional work you want preserved — even though the content looks like a tooling mistake — tell me now.
+<!-- agent:boundary:555472a2 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] **BLOCKING:** Clarify "Option 3" — see questions in exchange
-- [ ] Decide fate of local-only commit `67c8e2a8` in `src/monsterrodholders-dev` (discard vs push)
-- [ ] Decide whether to bump `boost-client`'s submodule pointer for `monsterrodholders-dev` before nesting
-- [ ] Once answered: execute the deinit/rm/add sequence to restructure agent-loop
-- [ ] Verify nested layout post-restructure and commit to agent-loop
+- [ ] **BLOCKING:** Confirm discarding local `67c8e2a8` in `src/monsterrodholders-dev` (wrong-repo commit: adds `.gitmodules` + `src/boost-client` gitlink inside the site repo where they don't belong)
+- [ ] **BLOCKING:** Decide — bump `boost-client`'s `monsterrodholders-dev` pointer during restructure, or leave it for the next sync-bot cycle
+- [ ] Execute cleanup: `cd src/monsterrodholders-dev && git fetch origin && git reset --hard origin/main`
+- [ ] Execute restructure in agent-loop: deinit → rm → add boost-client → init --recursive → commit
+- [ ] (Optional) `cd src/boost-client && git submodule update --remote src/monsterrodholders-dev && commit && push`
+- [ ] Verify nested layout: `ls src/boost-client/src/monsterrodholders-dev/`
 - [ ] Send gist URL `https://gist.github.com/btakita/7151ff6b944d525fa4f8f0c00f4261f8` to ron-berkes via trusted channel (Signal / encrypted email)
 <!-- /agent:pending -->

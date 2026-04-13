@@ -121,6 +121,6 @@
 [submodule "src/equityfundingsource-dev"]
 	path = src/equityfundingsource-dev
 	url = git@github.com:btakita/equityfundingsource-dev.git
-[submodule "src/monsterrodholders-dev"]
-	path = src/monsterrodholders-dev
-	url = git@github.com:btakita/monsterrodholders-dev.git
+[submodule "src/boost-client"]
+	path = src/boost-client
+	url = git@github.com:btakita/boost-client.git

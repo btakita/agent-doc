@@ -1250,7 +1250,7 @@ Implemented in `RefreshEnvironmentAction.kt`. Plugin builds clean (`./gradlew bu
 
 **Next step (manual testing gate per release checklist):** Install the rebuilt zip — IDEA → Settings → Plugins → gear → Install Plugin from Disk. Structural changes to the class (new helper methods, new data class) — per your memory rules, full uninstall → restart → install → restart is the safe path if hot-reload misbehaves. Then hit Ctrl+Shift+Alt+R on this doc and confirm the picker lists your sessions and binds correctly. Once that works, I'll commit.
 
-### Re: JB plugin version reverting to v0.1.0 (HEAD)
+### Re: JB plugin version reverting to v0.1.0
 
 The *real* version lives in `editors/jetbrains/gradle.properties` (`pluginVersion = 0.2.56`). Gradle picks it up via `version = providers.gradleProperty("pluginVersion").get()`. The reversion isn't in code — it's in **docs**:
 
@@ -1264,7 +1264,9 @@ Every time I regenerate docs/runbooks from that CLAUDE.md, `0.1.0` gets repeated
 
 Recommendation: do both — fix the doc (1 line) and add a `bump-plugin` target so the runbook becomes `make bump-plugin && ./gradlew buildPlugin signPlugin`. Pending items added.
 
-### Re: Claim for Tmux Pane swaps pane out of window (HEAD)
+❯ Do both.
+
+### Re: Claim for Tmux Pane swaps pane out of window
 
 `ClaimAction.kt:49-78` runs two steps on a background thread:
 1. `agent-doc claim <file> --window <id> --position <left|right>`
@@ -1276,7 +1278,35 @@ Two suspects, in likelihood order:
 - **`--position` mismatch.** If `editorLayout.columns.size == 1`, the code sends `position = "left"` (colIdx == 0 and also == size-1; the `colIdx == 0` branch wins first). If the pane was previously claimed as `right`, claim reassigns it to `left`, and sync then moves it.
 
 To diagnose I need: (a) `.agent-doc/logs/ops.log` around the claudescore.md claim event, and (b) `tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index} #{pane_title}'` before/after. Want me to run those now on a reproducing case, or land a pending item to add planned-move logging to `sync.rs` so the next reproduction is self-diagnosing? (I've added the logging item to pending either way.)
-<!-- agent:boundary:cb956779 -->
+
+❯ Look in session-share/.agent-doc/logs/ops.log
+
+### Re: Do both — done (HEAD)
+
+**Doc fix:** `editors/jetbrains/AGENTS.md` (CLAUDE.md is a symlink to it) — stripped the hardcoded `0.1.0`, replaced with `<version>` placeholder + glob pattern `agent-doc-jetbrains-*-signed.zip`. Added a note that `gradle.properties` is the source of truth and the version must never be hardcoded in docs.
+
+**Makefile:** added `bump-plugin` target in `src/agent-doc/Makefile`. Usage from `src/agent-doc`:
+
+```
+make bump-plugin
+```
+
+Reads `pluginVersion` from `editors/jetbrains/gradle.properties`, bumps patch, `sed`s it back, runs `./gradlew buildPlugin signPlugin`, then `ls`s the two resulting zips so the new filename is printed at the end. The existing `plugin-version-check` precommit gate still enforces bumps when `.kt` files change.
+
+### Re: ops.log diagnosis of pane swap (HEAD)
+
+Read `session-share/.agent-doc/logs/ops.log` — **the log records zero claim/sync/tmux events**. Everything in it is snapshot/commit/IPC traffic. `claim.rs`, `sync.rs`, `layout.rs` don't hit `ops_log` at all, so the swap event went entirely unrecorded.
+
+That is itself the answer to "why": we cannot tell from the log, because the log doesn't know. The pending item to add planned-move logging to `sync.rs` is now load-bearing — without it, the next reproduction will be equally invisible. Want me to upgrade that pending item to "implement now" rather than "someday"? The minimum useful emission would be:
+
+- `claim_action_start file=… window=… position=…`
+- `sync_plan column=… target_pane=… current_pane=… action=move|noop`
+- `sync_pane_move from=… to=… reason=…`
+
+Roughly 30 lines across `claim.rs` + `sync.rs`. Say the word and I'll land it in the next cycle.
+
+Marked pending `#mrc4` (CLAUDE.md version strip) and `#31a5` (`make bump-plugin`) as done.
+<!-- agent:boundary:98394565 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1296,8 +1326,8 @@ To diagnose I need: (a) `.agent-doc/logs/ops.log` around the claudescore.md clai
 - [ ] [#14z4] Hash collision ceiling: implement 8-char fallback in pending::generate_hash if 4-char collides (spec §1)
 - [ ] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)
 - [ ] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
-- [ ] [#mrc4] editors/jetbrains/CLAUDE.md: strip hardcoded 0.1.0 zip filename; reference <version> or glob instead (root cause of plugin version reversion in docs)
-- [ ] [#31a5] Add make bump-plugin target: sed-bump pluginVersion in gradle.properties, build both zips, print new filename
+- [x] [#mrc4] editors/jetbrains/CLAUDE.md: strip hardcoded 0.1.0 zip filename; reference <version> or glob instead (root cause of plugin version reversion in docs)
+- [x] [#31a5] Add make bump-plugin target: sed-bump pluginVersion in gradle.properties, build both zips, print new filename
 - [ ] [#4sh0] Add planned-move logging to sync.rs reconciler so ClaimAction→SyncLayout pane swaps are debuggable
 <!-- /agent:pending -->
 ## Assistant

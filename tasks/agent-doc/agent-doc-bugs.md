@@ -314,7 +314,7 @@ How to confirm next time:
 Also: I hit a **separate bug** while trying to write this response — the agent-doc-bugs.md doc had **two `&lt;!-- /agent:exchange --&gt;` closing markers** with a stray `<!-- agent:boundary:... -->` wedged between them. The parser rejected it: `closing marker &lt;!-- /agent:exchange --&gt; without matching open`. I fixed it with an Edit so this write could land. How it got there is a second question — boundary-repositioning logic probably wrote a new boundary + close without removing the old one under some race/retry path. Worth a separate look at `commit.reposition` in src/agent-doc/src/commit.rs.
 
 Suggested skill-side fix for the silent-skip: add an end-of-cycle invariant — if the SKILL flow saw a non-empty `diff` in preflight and the cycle exits without calling `agent-doc write`, emit a visible warning. That turns a silent failure into a loud one, without requiring binary changes.
-<!-- agent:boundary:af998964 -->
+<!-- agent:boundary:ae0807b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

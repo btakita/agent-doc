@@ -1606,7 +1606,7 @@ Next step after you review: I'll start Phase 1 implementation — `supervisor/cw
 ❯ logs remain going to .agent-doc/logs/<session>.log
 
 ❯ Windows is a supported target
-### Re: decisions — supervisor is default, SIGWINCH + Windows, single log file (HEAD)
+### Re: decisions — supervisor is default, SIGWINCH + Windows, single log file
 
 Spec updated with your decisions.
 
@@ -1639,7 +1639,22 @@ If you want the Windows ConPTY resize path implemented now instead of stubbed, s
 **Spec is ready for implementation.** Next step: start Phase 1 coding, beginning with `supervisor/cwd.rs` + unit tests for the resolution priority chain, since that's the one piece that's fully deterministic and testable without a live claude child. Then `supervisor/pty.rs`, `supervisor/resize.rs` (unix path), `supervisor/state.rs` (crash classifier), `supervisor/ipc.rs` (socket), and finally wire into `start.rs`.
 
 Want me to proceed with implementation now, or do you want to review the updated `specs/supervisor.md` first?
-<!-- agent:boundary:202aec58 -->
+❯ Can the supervisor work outside of tmux?
+### Re: Can the supervisor work outside of tmux? (HEAD)
+
+**Architecturally yes, but phase 1 ships tmux-only.** The spec at `src/agent-doc/specs/supervisor.md:22` is explicit: "Not a tmux replacement. Supervisor still runs inside a tmux pane; tmux still owns the visual terminal." Nothing in the design *requires* tmux though — the supervisor owns claude behind its own pty (`supervisor/pty.rs`), so the tty the user sees is conceptually independent from how claude is wrapped.
+
+What would need to change to drop tmux:
+
+1. **Entry gate.** `start.rs:128` calls `sessions::in_tmux()` and refuses to run outside a tmux pane. Would become a mode check (`--tmux` vs `--no-tmux`).
+2. **Resize source.** Today SIGWINCH comes from the tmux pane (`supervisor/resize.rs` unix path). Without tmux, resize events come from whatever the outer terminal is — the controlling tty directly on Linux, `ReadConsoleInputW` on native Windows (the ConPTY path at spec line 188 is already scoped for this future).
+3. **IPC discoverability.** The socket path scheme keys off session id (`supervisor/ipc.rs`); it already doesn't depend on tmux. `/agent-doc` routing from "a different tmux pane" (spec line 103) would just become "from any process that can find the socket."
+4. **Claim/pane model.** `agent-doc claim` binds a doc to a tmux pane id. Outside tmux there are no panes — you'd need a different binding unit (pid? socket path? tty name?). This is the biggest conceptual change, not a technical one.
+
+**Phase 1 recommendation:** keep the tmux requirement. The WSL note at spec line 165 already frames a hypothetical `--no-tmux` mode as future work, and every current consumer (livestream setup, `/agent-doc` cross-pane routing, the claim system) assumes tmux. Dropping it is a separate spec — the supervisor makes it *possible*, not *done*.
+
+Want me to add a short "Non-tmux mode (future)" section to `specs/supervisor.md` capturing those four requirements, so it's not lost?
+<!-- agent:boundary:2d087063 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

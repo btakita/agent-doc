@@ -1079,7 +1079,7 @@ My recommendation: **option 2**. It's ~5 lines, doesn't weaken the rail, and sta
 Shall I implement option 2 now, or hold for the release and revisit after the rail has had time to collect real-world data?
 
 Also noted: the stray `n` line at the end of your input is likely a typo — want me to strip it on the next write, or leave it?
-<!-- agent:boundary:296fc32e -->
+<!-- agent:boundary:5617c79f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

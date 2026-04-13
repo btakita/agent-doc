@@ -661,7 +661,7 @@ Downside: long args. Solution: repeat the flag (`--pending-done "text1" --pendin
 ❯ We should always use the write command. The SKILL->runbook should **never** do a full replace. We can add a `--pending-clear`. We should have a `--pending-add`. Should we also add a `--pending-replace`...I think we should not but is there a good reason to have `--pending-replace`?
 
 Sound good? If yes, I'll start on the rust side with option 1.
-### Re: option 3 + migration (HEAD)
+### Re: option 3 + migration
 
 Agreed — jump straight to stable hash ids. Migration is cheap if we do it **lazily at preflight**:
 
@@ -674,7 +674,9 @@ No `agent-doc migrate` command needed. The first time any upgraded session touch
 
 Edge case: if two sessions open the same doc concurrently before either has committed backfill, both could assign different hashes to the same bullet. The CRDT merge would end up with one winning; acceptable because the id is opaque and the bullet text is the same.
 
-### Re: command surface — no `--pending-replace` (HEAD)
+❯ In addition to having the id hash migration in the preflight, we should also enforce a single convention of a checkbox to mark the agent:pending item as done. Do you recommend a markdown checkbox `[ ]` or a utf8 checkbox? I like the markdown checkbox since the user can explicitly mark the pending item as done. If the user marks the pending item as done, agent-doc preflight should be able to parse the pending item as done.
+
+### Re: command surface — no `--pending-replace`
 
 Your instinct is right. The primitive set should be:
 
@@ -687,14 +689,72 @@ Your instinct is right. The primitive set should be:
 
 One more primitive worth considering: `--pending-reorder <id1,id2,...>` to move an item to the top without touching text. Useful because "active work to top" is one of the required updates each cycle. Could also ship later — `add` at top + `done` on old position works as a workaround, at the cost of a new hash.
 
-### Revised plan (HEAD)
+❯ Yes, add `--pending-reorder`. The `preflight` should also detect if the user reorders the pending items. 
+
+### Revised plan
 
 1. **Rust:** implement `--pending-add`, `--pending-done <id>`, `--pending-clear`, `--pending-edit <id>` in the write command. Hash generation on insert. Lazy backfill in preflight.
 2. **Skill:** rewrite the runbook to forbid `patch:pending` full blocks — the skill must use the granular flags only. Update `feedback_pending_patch_every_cycle.md` to reflect the new invariant (granular ops, not full replace).
 3. **Enforcement:** preflight errors if it sees a `patch:pending` block in the outgoing payload (symmetric to the current "missing patch:pending" error, but inverted).
 
 Sound good? If yes, I'll start on the Rust side.
-<!-- agent:boundary:fe6816f8 -->
+### Re: checkbox convention (HEAD)
+
+**Markdown `- [ ]` / `- [x]`** (GFM task list). Agreed — reasons:
+
+- Standard GFM syntax, renders natively in GitHub, VS Code, JetBrains, Obsidian, most viewers
+- User can toggle with a click in GFM-aware editors, or a single keystroke in most markdown plugins
+- Grep-friendly (`- \[x\]`) vs hunting unicode codepoints like `☑` / `☒`
+- Monospace-safe, copy/paste-safe across terminals
+- Unicode checkboxes render inconsistently across fonts and break alignment in plain text
+- Zero ambiguity about the "done" state — `[x]` is universally understood
+
+**Full bullet form** (with hash id from the previous step):
+
+```
+- [ ] [#a3f2] refactor preflight commit path
+- [x] [#b1c4] fix boundary repositioning off-by-one
+```
+
+**Preflight parsing rules:**
+
+1. Scan the `agent:pending` component for list items.
+2. Match `- [ ]` → active, `- [x]` or `- [X]` → done (case-insensitive).
+3. Any bullet without a checkbox → lazy-backfill to `- [ ]` in the same pass as hash id backfill.
+4. Any `- [x]` line → considered user-marked done. Preflight removes the bullet from the component (or moves it to an archived `agent:pending-done` component if we want a history trail — I'd defer that until someone asks for it), then commits as part of the normal boundary-maintenance commit.
+5. The hash id stays on the line through the `[x]` → removal transition so the `done` event is attributable if we ever add a log.
+
+This gives the user **three parallel ways** to mark done, all equivalent:
+
+- Click/type `[x]` in the editor → preflight reaps on next cycle
+- Runbook calls `agent-doc write --pending-done <id>` → immediate
+- Delete the bullet outright → preflight sees the diff, also fine
+
+### Re: reorder detection (HEAD)
+
+Agreed, add `--pending-reorder <id1,id2,...>` to the write command surface, and make preflight reorder-aware:
+
+1. Preflight extracts the ordered list of `[#id]`s from the snapshot's pending component.
+2. Extracts the same from the current doc.
+3. If the id set is unchanged but the order differs → user reordered. Preflight accepts it: rewrites the snapshot to match the new order, includes the change in the commit, and emits `pending_reordered: true` in the JSON so the skill knows the user expressed intent about priority.
+4. If the id set **also** changed (adds/removes) → apply adds/removes first (via the lazy-backfill + `[x]` reap), then compare remaining ids' order.
+5. The skill should **never** reorder on its own if `pending_reordered: true` is set this cycle — the user just expressed a priority and the agent shouldn't immediately override it. Respect user intent for at least one cycle.
+
+**Edge:** User reorders AND adds a brand-new unhashed bullet in the same cycle. Lazy backfill assigns a hash first (O(n) pass), then the reorder-diff runs and sees the new id as "inserted at position N." Both signals get recorded cleanly.
+
+### Revised plan (v2) (HEAD)
+
+1. **Rust — commands:** `--pending-add`, `--pending-done <id>`, `--pending-edit <id>`, `--pending-clear`, `--pending-reorder <ids>`.
+2. **Rust — preflight:**
+   - Lazy backfill: assign hash ids to unhashed bullets.
+   - Lazy backfill: add `- [ ]` to bullets missing checkbox.
+   - Reap: remove `- [x]` bullets, commit.
+   - Reorder detect: diff ordered id list vs snapshot, emit `pending_reordered` flag.
+3. **Skill:** rewrite runbook — forbid full `patch:pending` blocks, require granular flags, respect `pending_reordered` for the current cycle.
+4. **Enforcement:** preflight errors if outgoing payload contains `patch:pending` (inverted from current rule).
+
+Good? If yes I'll start on step 1.
+<!-- agent:boundary:fcf29cca -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

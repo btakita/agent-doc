@@ -1204,7 +1204,7 @@ I restarted my computer. I need `Refresh Agent Doc Environment` to bind to a Tmu
 ```
 Claim failed (exit 1): resync: purged 1 orphaned stash pane(s) error: pane %4 is in tmux session 'claude' but project session is '6'. Switch to session '6' and re-run, or use --force to override. Error: session mismatch: cross-session claim rejected
 ```
-### Re: Refresh Agent Doc Environment — bind tmux session (HEAD)
+### Re: Refresh Agent Doc Environment — bind tmux session
 
 Got it. The claim error is the project session (`6`) being stale after restart — pane `%4` is in session `claude` now, so `resync` rejects cross-session. `agent-doc session set <name>` is the fix; we just need `RefreshEnvironmentAction` to call it.
 
@@ -1220,7 +1220,32 @@ Got it. The claim error is the project session (`6`) being stale after restart �
 **Tradeoff:** Phase 1 is ~20 lines, fixes your restart case immediately. Risk is auto-binding to the "wrong" session if multiple are attached — last-activity is a reasonable default, phase 2 solves ambiguous cases.
 
 Want me to implement phase 1 now, or skip straight to phase 2?
-<!-- agent:boundary:2a5a62fd -->
+Go straight to phase 2. Also hook up the JB Plugin `Refresh Agent Doc Environment`. 
+### Re: Phase 2 — JBPopup session picker landed (HEAD)
+
+Implemented in `RefreshEnvironmentAction.kt`. Plugin builds clean (`./gradlew buildPlugin signPlugin` — BUILD SUCCESSFUL).
+
+**What it does now (Ctrl+Shift+Alt+R or Alt+Space → Refresh Agent Doc Environment):**
+
+1. Runs `tmux list-sessions -F '#{session_name}|#{session_attached}|#{session_windows}|#{session_activity}'`
+2. Sorts: attached sessions first, then by `session_activity` descending (most recent wins)
+3. Shows a `JBPopupChooserBuilder` with each session as `● name  (Nw)` / `○ name  (Nw)` — filled dot = attached
+4. On selection: shells out to `agent-doc session set <name>` from project root in a background thread
+   - Success → inline hint `"Bound to tmux session: <name>"`
+   - Failure → balloon notification with stderr
+5. Then runs the existing cache-clear + VFS refresh on `~/.claude/` and `<project>/.claude/`
+
+**Edge cases handled:**
+- No tmux running / no sessions → skip bind, just do the refresh, hint `"Agent Doc environment refreshed (no tmux sessions)"`
+- No editor context → popup falls back to `showCenteredInCurrentWindow`
+- Bind runs on a worker thread, UI updates marshalled through `invokeLater`
+
+**Artifacts:**
+- `build/distributions/agent-doc-jetbrains-0.1.0.zip` (unsigned)
+- `build/distributions/agent-doc-jetbrains-0.1.0-signed.zip` (signed)
+
+**Next step (manual testing gate per release checklist):** Install the rebuilt zip — IDEA → Settings → Plugins → gear → Install Plugin from Disk. Structural changes to the class (new helper methods, new data class) — per your memory rules, full uninstall → restart → install → restart is the safe path if hot-reload misbehaves. Then hit Ctrl+Shift+Alt+R on this doc and confirm the picker lists your sessions and binds correctly. Once that works, I'll commit.
+<!-- agent:boundary:dba79e4d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1239,7 +1264,8 @@ Want me to implement phase 1 now, or skip straight to phase 2?
 - [ ] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release after manual-testing gate
 - [ ] [#14z4] Hash collision ceiling: implement 8-char fallback in pending::generate_hash if 4-char collides (spec §1)
 - [ ] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)
-- [ ] [#mdbs] RefreshEnvironmentAction: bind project tmux session to last-attached session (plus later: popup picker)
-- [ ] [#89g4] RefreshEnvironmentAction: bind project tmux session to last-attached session (plus later: popup picker)
+- [x] [#mdbs] RefreshEnvironmentAction: bind project tmux session to last-attached session (plus later: popup picker)
+- [x] [#89g4] RefreshEnvironmentAction: bind project tmux session to last-attached session (plus later: popup picker)
+- [ ] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
 <!-- /agent:pending -->
 ## Assistant

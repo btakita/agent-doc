@@ -259,7 +259,7 @@ Done. Summary of changes:
 - 43 pre-existing `resync::` + `route::` failures are tmux-isolation test infrastructure issues, unrelated
 
 **Ready for manual testing.** The binary is installed. Add `env:` to a document's frontmatter and try each path (start / run / stream / parallel) to confirm.
-<!-- agent:boundary:cf310281 -->
+<!-- agent:boundary:c379540d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

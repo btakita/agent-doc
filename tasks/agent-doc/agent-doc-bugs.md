@@ -1102,7 +1102,7 @@ Landed in `src/agent-doc/src/git.rs:286-317`. Five-line change: added an uncondi
 - Release to crates.io / PyPI / GitHub (same gate)
 
 Note on the stray `n`: the previous cycle's `n` typo got absorbed into committed content by the time the boundary moved. Leaving it — harmless. Let me know if you want it scrubbed in a cleanup pass.
-<!-- agent:boundary:ea645398 -->
+<!-- agent:boundary:854c3ac2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

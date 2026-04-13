@@ -1220,7 +1220,7 @@ Got it. The claim error is the project session (`6`) being stale after restart â
 **Tradeoff:** Phase 1 is ~20 lines, fixes your restart case immediately. Risk is auto-binding to the "wrong" session if multiple are attached â€” last-activity is a reasonable default, phase 2 solves ambiguous cases.
 
 Want me to implement phase 1 now, or skip straight to phase 2?
-<!-- agent:boundary:d4b85653 -->
+<!-- agent:boundary:2a5a62fd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -575,22 +575,44 @@ Which? I'd lean #1 — `skill-submit-cycle.md` is the more descriptive name and 
 Done. `mv .claude/skills/agent-doc/runbooks/cycle-steps.md .claude/skills/agent-doc/runbooks/skill-submit-cycle.md`. Grepped for `cycle-steps` across the skill directory — no references to update. The runbook is now at the requested path with its original 5-step content (preflight → gate checks → compose → write-back → commit) plus self-check list and failure-mode fingerprints intact.
 ❯ Why was this not marked as done? I thought we had deterministic logic.
 ❯ - **Create SKILL runbook** (`.claude/skills/agent-doc/runbooks/skill-submit-cycle.md`) — codify the 3 steps (preflight → respond → write+commit) to prevent silent failures when step 2 is forgotten
-### Re: Why was it not marked done? (HEAD)
+### Re: Why was it not marked done?
 
 My mistake — not a determinism failure, an operator failure. I didn't include a `<!-- patch:pending -->` block in the previous response. SKILL.md step 1b says "every response MUST include a `<!-- patch:pending -->` block" — I skipped it. The binary only rewrites pending when a patch block exists; absent that, the old list stays verbatim.
 
 Fixing it this cycle: pending now removes the completed item. Also worth adding to `skill-submit-cycle.md` — the existing runbook is about write-back (step 4), but step 1b (pending update) has the same silent-skip failure mode and deserves the same self-check treatment. Want me to add a "Pending update" checkpoint to the runbook?
-<!-- agent:boundary:f69bc010 -->
+❯ Yes. Can we make the pending entirely deterministic? Does Claude Code have a hook to know for sure if an something is done?
+❯ My concern is that the SKILLs have not been reliable.
+### Re: Make pending deterministic (HEAD)
+
+You're right — SKILLs are LLM-following-instructions, not enforcement. Hooks can observe events but can't introspect reasoning, so "did Claude correctly mark X as done" is not a question a hook can answer. But "did Claude emit a `<!-- patch:pending -->` block in this write" **is** answerable, and that's where the leverage lives. Move enforcement from SKILL.md (hope) to the binary (guarantee).
+
+**Three layers, strongest first:**
+
+1. **Binary-side rejection (hard enforcement).** `agent-doc write` inspects the payload. If the target doc has an `&lt;!-- agent:pending --&gt;` component **and** the payload has no `<!-- patch:pending -->` block, reject with a clear error: `ERR: agent:pending exists but no patch:pending block in payload. Use --allow-stale-pending to override.` The skill can't silently skip — the write literally fails. This is the right primitive: SHOULD → MUST.
+
+2. **Explicit mark-done command.** `agent-doc pending complete <FILE> <pattern>` — fuzzy-matches a bullet by prefix or id and removes it. Skill calls this explicitly when work lands, instead of regenerating the whole list from memory (which is where drift comes from). Bullets get stable ids (`- [#id] text`) so matching is deterministic.
+
+3. **PostToolUse hook (belt + suspenders).** A hook on `Bash` matching `agent-doc write`: if the write succeeded but the command had no `patch:pending` in stdin, fail the tool call and force correction in-turn. This is what Claude Code hooks are good at — they observe tool invocations and can return nonzero to block. Redundant with #1 but useful if you want the check outside the binary.
+
+**Claude Code hook capabilities (re: your question):** Hooks fire on `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`, `SessionStart`, etc. They're shell commands with access to the tool call JSON and can return nonzero to block/warn. They see **what** was called, not **why** — so they can verify "patch:pending was in the payload" but not "the items marked done actually correspond to work completed." Semantic "doneness" stays an LLM problem; syntactic "patch block present" is a hook problem. Combine both.
+
+**Recommendation:** Layer 1 (binary rejection) is the highest ROI — one place, one rule, no way to skip. Layer 2 (explicit complete command) makes the "what to mark done" step explicit and auditable. Layer 3 is optional.
+
+Want me to implement layer 1 first? It's ~30 lines in `src/agent-doc/src/write.rs` — parse components from the resolved doc, check for `agent:pending`, check payload for `patch:pending`, error if mismatched.
+<!-- agent:boundary:42c0d0ee -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- **Implement binary-side pending enforcement** (layer 1) — `agent-doc write` rejects template writes when `agent:pending` exists in doc but no `patch:pending` in payload. Add `--allow-stale-pending` escape hatch for edge cases. Location: `src/agent-doc/src/write.rs`. **← recommended next action**
+- **Add `agent-doc pending complete <FILE> <pattern>`** (layer 2) — explicit mark-done command with stable bullet ids. Makes "what to mark done" an observable tool call instead of reasoning.
+- **PostToolUse hook for agent-doc write** (layer 3, optional) — redundant with layer 1 but enforces at Claude Code boundary.
 - **Choose submodule fix strategy** — Option A (deterministic binary-side) vs Option B (one-liner skill-side workaround). Leaning toward Option A (child process is correct semantic). Would you like me to implement it?
 - **Investigate `❯ ` prefix write artifact** — lines in monsterrodholders.md responses have shell prompts. Check stream mode, control code stripping, and origin handling in write.rs.
 - **Investigate duplicated `/agent:exchange` closing marker** — doc had two close markers with an orphan boundary between them; parser rejected the write. Look at `commit.reposition` and any path that emits `<!-- agent:boundary:... -->\n&lt;!-- /agent:exchange --&gt;`
 - **Add end-of-cycle write invariant** — warn if `preflight_diff_start` was emitted but `ipc_write_attempt` was not, for the same doc, within the cycle
-- **Extend `skill-submit-cycle.md`** — add a step 1b self-check: "every response with an `agent:pending` component MUST include a `<!-- patch:pending -->` block" (same silent-skip class as forgetting step 4)
+- **Extend `skill-submit-cycle.md`** — add a step 1b self-check: "every response with an `agent:pending` component MUST include a `<!-- patch:pending -->` block" (subsumed by layer 1 if that lands, but still useful as documentation)
 - **Expose `agent-doc session-check <FILE>`** — returns non-zero if last ops.log entry for doc is `preflight_diff_start`, giving the skill a self-diagnosis hook
 <!-- /agent:pending -->
 ## Assistant

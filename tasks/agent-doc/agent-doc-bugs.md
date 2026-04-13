@@ -1654,7 +1654,7 @@ What would need to change to drop tmux:
 **Phase 1 recommendation:** keep the tmux requirement. The WSL note at spec line 165 already frames a hypothetical `--no-tmux` mode as future work, and every current consumer (livestream setup, `/agent-doc` cross-pane routing, the claim system) assumes tmux. Dropping it is a separate spec — the supervisor makes it *possible*, not *done*.
 
 Want me to add a short "Non-tmux mode (future)" section to `specs/supervisor.md` capturing those four requirements, so it's not lost?
-<!-- agent:boundary:2d087063 -->
+<!-- agent:boundary:539f4165 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

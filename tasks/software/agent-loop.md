@@ -183,7 +183,7 @@ I've added two actionable items to pending:
 - **Disable unused MCP servers** — you can trim settings.json to disable servers you don't use (reduces base context every session)
 
 The MCP server cleanup is the highest ROI: each disabled server saves name/description tokens in every session startup.
-<!-- agent:boundary:b570a91a -->
+<!-- agent:boundary:da334f30 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

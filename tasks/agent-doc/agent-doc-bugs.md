@@ -599,7 +599,7 @@ You're right — SKILLs are LLM-following-instructions, not enforcement. Hooks c
 **Recommendation:** Layer 1 (binary rejection) is the highest ROI — one place, one rule, no way to skip. Layer 2 (explicit complete command) makes the "what to mark done" step explicit and auditable. Layer 3 is optional.
 
 Want me to implement layer 1 first? It's ~30 lines in `src/agent-doc/src/write.rs` — parse components from the resolved doc, check for `agent:pending`, check payload for `patch:pending`, error if mismatched.
-<!-- agent:boundary:42c0d0ee -->
+<!-- agent:boundary:df7fbf08 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

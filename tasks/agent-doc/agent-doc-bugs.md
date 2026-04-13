@@ -1640,7 +1640,7 @@ If you want the Windows ConPTY resize path implemented now instead of stubbed, s
 
 Want me to proceed with implementation now, or do you want to review the updated `specs/supervisor.md` first?
 ❯ Can the supervisor work outside of tmux?
-### Re: Can the supervisor work outside of tmux? (HEAD)
+### Re: Can the supervisor work outside of tmux?
 
 **Architecturally yes, but phase 1 ships tmux-only.** The spec at `src/agent-doc/specs/supervisor.md:22` is explicit: "Not a tmux replacement. Supervisor still runs inside a tmux pane; tmux still owns the visual terminal." Nothing in the design *requires* tmux though — the supervisor owns claude behind its own pty (`supervisor/pty.rs`), so the tty the user sees is conceptually independent from how claude is wrapped.
 
@@ -1654,7 +1654,13 @@ What would need to change to drop tmux:
 **Phase 1 recommendation:** keep the tmux requirement. The WSL note at spec line 165 already frames a hypothetical `--no-tmux` mode as future work, and every current consumer (livestream setup, `/agent-doc` cross-pane routing, the claim system) assumes tmux. Dropping it is a separate spec — the supervisor makes it *possible*, not *done*.
 
 Want me to add a short "Non-tmux mode (future)" section to `specs/supervisor.md` capturing those four requirements, so it's not lost?
-<!-- agent:boundary:539f4165 -->
+❯ Yes
+### Re: Added "Non-tmux Mode (Future)" section (HEAD)
+
+Inserted after the WSL caveat in `src/agent-doc/specs/supervisor.md`, before the Logging section. Captures the four requirements (entry gate, resize source, IPC discoverability, claim/binding model) plus a non-goals note that visual multiplexing stays tmux's job. The section explicitly frames this as "not in phase 1" so the release scope is preserved.
+
+Ready to proceed with Phase 1 implementation whenever you are — starting with `supervisor/cwd.rs` + unit tests as planned.
+<!-- agent:boundary:5922d8ff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -582,7 +582,7 @@ My mistake — not a determinism failure, an operator failure. I didn't include 
 Fixing it this cycle: pending now removes the completed item. Also worth adding to `skill-submit-cycle.md` — the existing runbook is about write-back (step 4), but step 1b (pending update) has the same silent-skip failure mode and deserves the same self-check treatment. Want me to add a "Pending update" checkpoint to the runbook?
 ❯ Yes. Can we make the pending entirely deterministic? Does Claude Code have a hook to know for sure if an something is done?
 ❯ My concern is that the SKILLs have not been reliable.
-### Re: Make pending deterministic (HEAD)
+### Re: Make pending deterministic
 
 You're right — SKILLs are LLM-following-instructions, not enforcement. Hooks can observe events but can't introspect reasoning, so "did Claude correctly mark X as done" is not a question a hook can answer. But "did Claude emit a `<!-- patch:pending -->` block in this write" **is** answerable, and that's where the leverage lives. Move enforcement from SKILL.md (hope) to the binary (guarantee).
 
@@ -598,21 +598,60 @@ You're right — SKILLs are LLM-following-instructions, not enforcement. Hooks c
 
 **Recommendation:** Layer 1 (binary rejection) is the highest ROI — one place, one rule, no way to skip. Layer 2 (explicit complete command) makes the "what to mark done" step explicit and auditable. Layer 3 is optional.
 
+❯ Let's do Layer 2. Make the protocol always require a call to an agent-doc write declare either what pending items were done or no pending items were done. This pending items done or none done is required. The command should result with an error if not sent the pending change.
+
+❯ The skill->runbook should account for this new protocol.
+
 Want me to implement layer 1 first? It's ~30 lines in `src/agent-doc/src/write.rs` — parse components from the resolved doc, check for `agent:pending`, check payload for `patch:pending`, error if mismatched.
-<!-- agent:boundary:df7fbf08 -->
+### Re: Layer 2 — required pending declaration on every write (HEAD)
+
+Confirming I understand: every `agent-doc write` against a doc with `agent:pending` must carry an explicit declaration — "these items are done" OR "none done" — or the write errors. No silent inheritance. This collapses layer 1 and layer 2 into one enforcement boundary, which I think is what you want. Good call.
+
+**Proposed API** (single write-time contract):
+
+```
+agent-doc write <FILE> --stream --origin skill \
+  --pending-done "id1,id2"     # declare these items complete
+  # OR
+  --pending-none                # declare no items complete this cycle
+  # OR
+  # include <!-- patch:pending --> block in stdin (full replace)
+```
+
+**Rules:**
+- If target doc has `&lt;!-- agent:pending --&gt;` AND none of `{--pending-done, --pending-none, patch:pending in payload}` is present → **error**: `ERR: agent:pending exists in <FILE> but no pending declaration provided. Use --pending-done <items> | --pending-none | <!-- patch:pending --> block.`
+- `--pending-done` matches items by prefix or explicit id (we'll add stable ids per item later if matching gets ambiguous — for now, prefix match on the bullet text).
+- `--pending-done` and `--pending-none` are mutually exclusive.
+- `patch:pending` block overrides the flags (if both given, block wins with a warning).
+- Escape hatch: `--allow-stale-pending` for rare cases (compact exchange, tooling paths, tests). Off by default. Logged.
+
+**Files to change:**
+1. `src/agent-doc/src/write.rs` — parse flags, inspect resolved doc for `agent:pending`, enforce contract, build synthetic `patch:pending` from `--pending-done`.
+2. `src/agent-doc/src/cli.rs` (or wherever clap args live) — add `--pending-done`, `--pending-none`, `--allow-stale-pending`.
+3. `src/agent-doc/src/components.rs` (or equivalent) — helper: `remove_pending_items(current: &str, done_ids: &[&str]) -> String`.
+4. `.claude/skills/agent-doc/SKILL.md` — update step 1b to describe the new contract. Step 1b becomes: "call `agent-doc write` with `--pending-done` or `--pending-none` (or include `patch:pending` block) — the binary enforces this."
+5. `.claude/skills/agent-doc/runbooks/skill-submit-cycle.md` — add "Pending declaration" checkpoint. Failure mode: "forgot pending flag → write errors, re-run with declaration."
+6. `src/agent-doc/tests/` — integration test: write fails without declaration, succeeds with each of the three satisfaction paths.
+
+**Two questions before I start:**
+1. **Flag precedence**: if the user's response contains a `patch:pending` block AND a `--pending-done` flag, is that an error, or does the block win silently? I lean "block wins, warn" since the skill will usually just pass the block.
+2. **Matching strategy for `--pending-done`**: prefix match on bullet text is fragile (drift as wording changes). Do you want me to add stable ids (`- [#a3f] text`) as part of this PR, or keep it prefix-match-only for v1 and add ids later?
+
+Give me the call on those two and I'll implement. ~60-80 lines in Rust + the docs updates. Estimated one cycle.
+<!-- agent:boundary:cde0b61e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- **Implement binary-side pending enforcement** (layer 1) — `agent-doc write` rejects template writes when `agent:pending` exists in doc but no `patch:pending` in payload. Add `--allow-stale-pending` escape hatch for edge cases. Location: `src/agent-doc/src/write.rs`. **← recommended next action**
-- **Add `agent-doc pending complete <FILE> <pattern>`** (layer 2) — explicit mark-done command with stable bullet ids. Makes "what to mark done" an observable tool call instead of reasoning.
-- **PostToolUse hook for agent-doc write** (layer 3, optional) — redundant with layer 1 but enforces at Claude Code boundary.
+- **Implement Layer 2: required pending declaration** — `agent-doc write` errors when `agent:pending` exists in doc but no `--pending-done` / `--pending-none` / `patch:pending` block is provided. Collapses layers 1+2. **← active, awaiting ack on two design questions (flag precedence, stable ids)**
+- **Update SKILL.md + skill-submit-cycle.md** — document the new pending declaration contract as part of Layer 2 PR.
+- **Integration tests for pending enforcement** — verify write fails without declaration and succeeds via each of three paths (--pending-done, --pending-none, patch:pending block).
+- **PostToolUse hook for agent-doc write** (layer 3, optional) — redundant with layer 1/2 but enforces at Claude Code boundary.
 - **Choose submodule fix strategy** — Option A (deterministic binary-side) vs Option B (one-liner skill-side workaround). Leaning toward Option A (child process is correct semantic). Would you like me to implement it?
 - **Investigate `❯ ` prefix write artifact** — lines in monsterrodholders.md responses have shell prompts. Check stream mode, control code stripping, and origin handling in write.rs.
 - **Investigate duplicated `/agent:exchange` closing marker** — doc had two close markers with an orphan boundary between them; parser rejected the write. Look at `commit.reposition` and any path that emits `<!-- agent:boundary:... -->\n&lt;!-- /agent:exchange --&gt;`
 - **Add end-of-cycle write invariant** — warn if `preflight_diff_start` was emitted but `ipc_write_attempt` was not, for the same doc, within the cycle
-- **Extend `skill-submit-cycle.md`** — add a step 1b self-check: "every response with an `agent:pending` component MUST include a `<!-- patch:pending -->` block" (subsumed by layer 1 if that lands, but still useful as documentation)
 - **Expose `agent-doc session-check <FILE>`** — returns non-zero if last ops.log entry for doc is `preflight_diff_start`, giving the skill a self-diagnosis hook
 <!-- /agent:pending -->
 ## Assistant

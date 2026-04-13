@@ -1706,7 +1706,7 @@ Priority chain matches the spec exactly — CLI flag > frontmatter > `.agent-doc
 **Clippy:** `cargo clippy --all-targets` clean on the supervisor module (the 30 other warnings are pre-existing, untouched by this change).
 
 **Next up:** `supervisor/pty.rs` — `portable-pty` allocation, stdin/pty forwarding threads, and the first integration test that spawns a shell-script fake-claude and asserts bytes flow both directions. Want me to proceed, or review this cwd piece first?
-<!-- agent:boundary:c7d81fa2 -->
+<!-- agent:boundary:3ce0ceb8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

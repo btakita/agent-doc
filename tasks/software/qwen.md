@@ -67,7 +67,7 @@ Anthropic's API is not OpenAI-compatible, so there's no direct provider config f
 2. **LiteLLM proxy** — Run a local LiteLLM server with your Anthropic API key, point Open WebUI's OpenAI endpoint at it
 
 Either way, web search works automatically with Claude models too — same preprocessing pipeline.
-<!-- agent:boundary:bad3415a -->
+<!-- agent:boundary:77b1a8d2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -754,7 +754,7 @@ Agreed, add `--pending-reorder <id1,id2,...>` to the write command surface, and 
 4. **Enforcement:** preflight errors if outgoing payload contains `patch:pending` (inverted from current rule).
 
 Good? If yes I'll start on step 1.
-<!-- agent:boundary:fcf29cca -->
+<!-- agent:boundary:39289e97 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

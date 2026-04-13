@@ -1569,7 +1569,7 @@ The SKILL.md `cd` fix (Option C→A from my previous response) is orthogonal to 
 Still recommending: ship `cd` this release, write `specs/supervisor.md` to decide whether start.rs graduates into a full supervisor or stays lite.
 
 ❯ start.rs should graduate into a full supervisor. Let's jump to the supervisor.
-### Re: graduate start.rs into a full supervisor (HEAD)
+### Re: graduate start.rs into a full supervisor
 
 Drafted `src/agent-doc/specs/supervisor.md`. Summary of what it commits to:
 
@@ -1598,7 +1598,48 @@ Drafted `src/agent-doc/specs/supervisor.md`. Summary of what it commits to:
 Read the full spec: [`src/agent-doc/specs/supervisor.md`](../../src/agent-doc/specs/supervisor.md).
 
 Next step after you review: I'll start Phase 1 implementation — `supervisor/cwd.rs` + `supervisor/pty.rs` behind `--supervised`, with unit tests for CWD resolution priority and the crash classifier. Want me to answer the four open questions myself with defaults and proceed, or wait for your input first?
-<!-- agent:boundary:b34a22ad -->
+
+❯ `agent-doc start` should always run the full supervisor.
+
+❯ Use SIGWINCH. Will this work on Windows?
+
+❯ logs remain going to .agent-doc/logs/<session>.log
+
+❯ Windows is a supported target
+### Re: decisions — supervisor is default, SIGWINCH + Windows, single log file (HEAD)
+
+Spec updated with your decisions.
+
+**1. `agent-doc start` always runs the supervisor.** Collapsed the three migration phases into a single PR. `start.rs` becomes a thin wrapper around `supervisor::run` — no `--supervised` flag, no rollout staging. Behavior change is called out in release notes; existing in-flight claude processes are unaffected because the supervisor only owns processes it spawned.
+
+**2. SIGWINCH + Windows — this is where it gets subtle.**
+
+SIGWINCH is POSIX-only. Windows has no equivalent signal. But `portable-pty::PtyMaster::resize()` is cross-platform — on Unix it writes `TIOCSWINSZ`, on Windows it calls `ResizePseudoConsole`. So the **sink** is the same; only the **source of resize events** differs.
+
+Split the resize watcher by platform behind a `ResizeWatcher` trait in `supervisor/resize.rs`:
+
+- **`#[cfg(unix)]`** — `signal-hook` installs a SIGWINCH handler that sends into a `crossbeam_channel`. Worker thread reads the channel, queries `TIOCGWINSZ` on stdin, calls `pty_master.resize(...)`.
+- **`#[cfg(windows)]`** — loop on `ReadConsoleInputW(stdin)`, filter for `WINDOW_BUFFER_SIZE_EVENT`, call `pty_master.resize(...)`.
+
+**WSL caveat:** the realistic Windows story for `agent-doc start` is WSL, because **tmux doesn't run natively on Windows**. Inside WSL, the supervisor is a Linux process and SIGWINCH works normally — the Windows code path only matters if we ever ship `agent-doc start --no-tmux` running claude directly in Windows Terminal (not in this spec's scope).
+
+So for Phase 1 shipping:
+- Unix SIGWINCH path: implemented and tested (covers Linux, macOS, WSL — i.e., the actual user-facing cases today)
+- Windows ConPTY resize path: **stubbed** with a TODO that calls `pty_master.resize()` on initial size only, no live resize forwarding. Adequate because no one is running tmux natively on Windows.
+- Cargo.toml deps: `portable-pty`, `signal-hook` (unix cfg), `windows-sys` (windows cfg, future use).
+
+If you want the Windows ConPTY resize path implemented now instead of stubbed, say so and I'll add it to Phase 1. It's maybe a day of work plus testing in a Windows VM — which I don't have locally, so I'd need you to validate.
+
+**3. Logs stay at `.agent-doc/logs/<session>.log`.** Supervisor events get a `[supervisor]` tag prefix on each line so downstream tooling (`agent-doc logs`, future dashboards) can filter without a second file. Example format shown in the updated spec.
+
+**4. Windows is a supported target** — acknowledged. `portable-pty` stays (covers ConPTY), Cargo deps are conditional (`#[cfg(unix)]` for `signal-hook`, `#[cfg(windows)]` for `windows-sys`).
+
+---
+
+**Spec is ready for implementation.** Next step: start Phase 1 coding, beginning with `supervisor/cwd.rs` + unit tests for the resolution priority chain, since that's the one piece that's fully deterministic and testable without a live claude child. Then `supervisor/pty.rs`, `supervisor/resize.rs` (unix path), `supervisor/state.rs` (crash classifier), `supervisor/ipc.rs` (socket), and finally wire into `start.rs`.
+
+Want me to proceed with implementation now, or do you want to review the updated `specs/supervisor.md` first?
+<!-- agent:boundary:47597c61 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

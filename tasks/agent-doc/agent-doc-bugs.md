@@ -1389,7 +1389,7 @@ Mostly no — and that's the point. The value of the monorepo is filesystem prox
 **Recommendation:** ship the `cd`-on-claim change first (small, immediately fixes path/git noise), then design `claim --isolate` as a follow-up once the first one is proven.
 ❯ Would `claim --isolate` fire at the same time as `cd`-on-claim? If yes, let's implement both at the same time.
 
-### Re: would `claim --isolate` fire at the same time as `cd`-on-claim? (HEAD)
+### Re: would `claim --isolate` fire at the same time as `cd`-on-claim?
 
 They're at different layers and mostly mutually exclusive — doing them together doesn't save much work, and I'd still split them.
 
@@ -1420,7 +1420,61 @@ They're at different layers and mostly mutually exclusive — doing them togethe
 Shipping `cd` first lets us validate that path/git hygiene actually improves in practice. Then we have real evidence for whether process-level isolation is worth the design complexity, or whether `cd` + being disciplined about context already closes 80% of the gap.
 
 **My recommendation stands:** ship `cd`-on-claim now, keep `--isolate` in pending as a Phase 2 that gets its own design doc. If you want to accelerate `--isolate`, the next step is a design sketch in `src/agent-doc/specs/` covering the five questions above before writing any code.
-<!-- agent:boundary:51c1082a -->
+❯ continue
+
+### Re: concrete plan for `cd`-on-claim — checkpoint before I execute (HEAD)
+
+Scoped the change by reading `claim.rs` and tracing the three SKILL.md copies. Summary first, then the exact edit, then the open question for you.
+
+**Finding: this is SKILL.md-only, no `claim.rs` change needed.**
+
+A Rust binary cannot change its caller's shell CWD — `std::env::set_current_dir` only affects the binary's own process and is reset on exit. The actual `cd` has to happen in the skill's Bash tool invocations, which share a persistent shell across calls. So the fix is purely in SKILL.md's claim handler:
+
+```bash
+# current (SKILL.md step 0, claim branch):
+agent-doc claim <FILE>
+
+# new:
+agent-doc claim <FILE>
+ROOT="$(git -C "$(dirname "<FILE>")" rev-parse --show-toplevel 2>/dev/null || dirname "<FILE>")"
+cd "$ROOT"
+```
+
+That's it. `git rev-parse --show-toplevel` naturally stops at the nearest `.git`, so for a doc inside `src/session-share/` it returns the submodule root — exactly what `claim.rs` line 325 already uses via `snapshot::find_project_root()`. The fallback handles docs not in any git repo.
+
+**But — SKILL.md has three copies and one of them is embedded in the binary.**
+
+```
+src/agent-doc/SKILL.md                              — canonical source (edited by hand)
+src/agent-doc/.claude/skills/agent-doc/SKILL.md     — committed installed copy (for in-repo Claude sessions)
+.claude/skills/agent-doc/SKILL.md                   — workspace-installed copy (what my current session loads)
+```
+
+The canonical source is embedded into the binary via `include_str!` (used by `agent-doc skill install`). So even a SKILL.md-only change flows through:
+
+1. Edit `src/agent-doc/SKILL.md`
+2. `cargo build --release` (refresh embedded string)
+3. `cargo install --path .` (refresh `~/.cargo/bin/agent-doc`)
+4. `agent-doc skill install` → regenerates both installed copies
+5. Manual test: open a session in `src/session-share/tasks/<doc>.md`, verify CWD changes after claim
+6. Bump version in `Cargo.toml` + `pyproject.toml` (memory rule: keep in sync)
+7. Add VERSIONS.md entry (memory rule: before release)
+8. `make check`
+9. **Manual testing gate** — I pause here for your confirmation
+10. Publish to crates.io + PyPI + GitHub Release (memory rule: publish all targets)
+
+**Open question for you before I start:**
+
+Option A — **ship as part of next release cycle** (steps 1-4 now, then bundle with other pending work; user decides when to release). This matches how small fixes usually stack up.
+
+Option B — **ship now as its own point release** (full 1-10). Justified if you want the cd-on-claim behavior today in your running sessions.
+
+Option C — **local-only hotpatch** (edit `.claude/skills/agent-doc/SKILL.md` directly, skip binary rebuild). Works for your current session but gets overwritten on next `agent-doc skill install`. Useful for live validation before committing to a release.
+
+My suggestion: **C then A**. Hotpatch to validate the behavior in your live session, and if it feels right, roll into the next release alongside the preflight slash-command parser fix (also in pending) so you get two fixes per release cycle instead of one.
+
+Say the word — A, B, or C — and I'll execute. Also, if you want the `--isolate` design sketch written in parallel (pure specs doc, no code, no release cycle), I can do that alongside any of the above.
+<!-- agent:boundary:7516359e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

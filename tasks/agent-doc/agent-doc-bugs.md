@@ -1147,7 +1147,7 @@ On it. Spec at `src/agent-doc/specs/pending-system.md` is the source of truth. E
 5. Tests for each primitive + end-to-end migration
 
 Delegating Rust work to a focused subagent to keep this context clean. Will report back with build/test results and the SKILL edits in one summary.
-<!-- agent:boundary:086928dc -->
+<!-- agent:boundary:49e08e36 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

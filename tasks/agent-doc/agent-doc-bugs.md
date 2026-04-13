@@ -1134,7 +1134,7 @@ Note on the stray `n`: the previous cycle's `n` typo got absorbed into committed
 - Drop Option B from pending (A is the canonical fix)
 
 Release tagged and landed. ✅
-<!-- agent:boundary:83ad08fd -->
+<!-- agent:boundary:1993b0cc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

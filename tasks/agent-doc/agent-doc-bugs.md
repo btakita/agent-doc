@@ -758,13 +758,15 @@ Agreed, add `--pending-reorder <id1,id2,...>` to the write command surface, and 
 Good? If yes I'll start on step 1.
 
 ❯ Add a specs/ directory. Add this as an approved/pending spec that we will implement. Break up SPEC.md into individual specs that are done.
-### Re: specs/ directory + SPEC.md breakup (HEAD)
+### Re: specs/ directory + SPEC.md breakup
 
 Created the pending-system spec:
 
 - **New:** `src/agent-doc/specs/pending-system.md` — status: approved, pending implementation. Captures everything from this exchange: stable hash IDs, GFM checkboxes, lazy backfill in preflight, granular `--pending-*` flags (rejects `--pending-replace`), reorder detection, inverted enforcement (pending flag forbids `patch:pending` blocks).
 - **Created:** `src/agent-doc/specs/done/` directory (empty so far) as the destination for extracted SPEC.md sections.
 - **Existing:** `src/agent-doc/specs/pane-groups.md` stays where it is — it's approved/partially-built, not "done" yet. Format of that file is what I used as the template for `pending-system.md`.
+
+❯ Should we have a specs/done directory or leave all of the specs in the same directory? I think all of the specs should live in the same directory. I was thinking of having frontmatter mark the status. We probably should have a spec of a spec but that can happen later.
 
 **SPEC.md breakup — proposed plan.** SPEC.md is 977 lines / 22 top-level sections, and most of it is built. Rather than do a big-bang rewrite, I want to confirm the structure before the mechanical work:
 
@@ -808,7 +810,36 @@ src/agent-doc/specs/
    - My recommendation: **(a)** — fast, mechanical. If we find a drift later we can reclassify individual files. Verification is a separate pass.
 
 If you like this structure, confirm and I'll start the extraction. If you want a different layout, tell me what to change before I touch any of it — I'd rather re-cut the plan than re-cut 25 files.
-<!-- agent:boundary:41e9e2cb -->
+### Re: specs/done directory (HEAD)
+
+Agreed — flat directory with frontmatter status is the better shape. Concretely:
+
+```yaml
+---
+name: pending-system
+status: approved    # draft | approved | built | superseded
+built: false
+supersedes: null
+---
+```
+
+Benefits over the `done/` subdirectory:
+
+- **No moves** — status changes are a 1-line frontmatter edit, not a `git mv`. History stays intact, no broken cross-links.
+- **Single index** — `specs/README.md` can render a status table by reading frontmatter; with subdirs you'd either hardcode two lists or traverse.
+- **Query-friendly** — `rg '^status: draft' specs/*.md` beats path-based discovery.
+- **Mirrors `tasks/`** — tasks already use inline status markers; specs following the same pattern reduces cognitive overhead.
+
+**Proposed status values:**
+- `draft` — being written, not yet ack'd
+- `approved` — ack'd, pending implementation (e.g. `pending-system.md` right now)
+- `built` — implementation landed, spec is the reference doc
+- `superseded` — kept for history; `supersedes:` points to the replacement
+
+**Spec-of-a-spec:** agreed, defer. Once we have 5-6 specs in the flat layout the shape of the meta-spec will be obvious. Premature to write it against one example.
+
+**Action:** I'll skip creating `specs/done/` in the SPEC.md breakup plan and instead add `status:` frontmatter to each extracted section. `pending-system.md` already exists without frontmatter — I'll add it when I touch that file next.
+<!-- agent:boundary:969e691f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -823,5 +854,6 @@ If you like this structure, confirm and I'll start the extraction. If you want a
 - **Investigate duplicated `/agent:exchange` closing marker** — doc had two close markers with an orphan boundary between them; parser rejected the write. Look at `commit.reposition` and any path that emits `<!-- agent:boundary:... -->\n&lt;!-- /agent:exchange --&gt;`
 - **Add end-of-cycle write invariant** — warn if `preflight_diff_start` was emitted but `ipc_write_attempt` was not, for the same doc, within the cycle
 - **Expose `agent-doc session-check <FILE>`** — returns non-zero if last ops.log entry for doc is `preflight_diff_start`, giving the skill a self-diagnosis hook
+- **Add `status:` frontmatter to specs/*.md** — skip `specs/done/` subdir; use flat layout with `status: draft|approved|built|superseded`. Apply when touching `pending-system.md` next. **← added this cycle**
 <!-- /agent:pending -->
 ## Assistant

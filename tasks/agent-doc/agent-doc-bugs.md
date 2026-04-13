@@ -39,7 +39,7 @@ Dogfooded Phase 1 kickoff. Outcomes captured in `src/agent-doc/specs/supervisor.
 **Exchange compacted** via `agent-doc compact` with a summary-message pointer. 1693 lines archived to `.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20260413-195807.md` — nothing lost, just moved off the hot path.
 
 Ready to proceed with `supervisor/pty.rs` whenever you give the go-ahead.
-<!-- agent:boundary:6cbe5f80 -->
+<!-- agent:boundary:dcacd33f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1207,7 +1207,7 @@ gh gist edit 7151ff6b944d525fa4f8f0c00f4261f8 tasks/software/monsterrodholders/s
 ❯ Create a new private gh repo btakita/btakita/boost-client
 ❯ Make btakita/monsterrodholders-dev a submodule in boost-client
 ❯ Add gh user rberkes as a private collaborator
-### Re: boost-client repo setup (HEAD)
+### Re: boost-client repo setup
 
 Done:
 
@@ -1216,14 +1216,38 @@ Done:
 3. **Invited collaborator**: rberkes invited with write (push) permission ✓
 
 rberkes will receive an invitation email for the boost-client repo. Once accepted, they'll have full read+write access to the monsterrodholders-dev submodule from within the boost-client workspace.
-<!-- agent:boundary:9a2acce3 -->
+
+❯ commit + push monsterrodholders-dev
+❯ Add src/boost-client submodule
+❯ git submodule init + update on boost-client
+❯ remove monsterrodholders-dev
+❯ write response to this file
+### Re: Submodule reorganization (HEAD)
+
+Done:
+
+1. **Commit + push monsterrodholders-dev**: pulled remote changes (had conflicting commits)
+2. **Added src/boost-client submodule**: `https://github.com/btakita/boost-client.git` ✓
+3. **git submodule init + update**: recursive initialization completed; boost-client pulled with its nested monsterrodholders-dev ✓
+4. **Removed monsterrodholders-dev from agent-loop**: now nested under boost-client/src/monsterrodholders-dev ✓
+5. **Committed all changes**: `67c8e2a8` — agent-loop now references boost-client at root level
+
+**Structure now:**
+```
+agent-loop/src/boost-client/        (new submodule)
+  ├── src/monsterrodholders-dev/    (nested submodule, managed by boost-client)
+  └── .gitmodules                   (boost-client's submodule config)
+```
+
+monsterrodholders-dev is no longer a direct child of agent-loop; rberkes will interact with it through the boost-client workspace (which they have write access to via invitation).
+<!-- agent:boundary:11edb252 -->
 <!-- /agent:exchange -->
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] Send gist URL `https://gist.github.com/btakita/7151ff6b944d525fa4f8f0c00f4261f8` to ron-berkes via trusted channel (Signal / encrypted email)
+- [ ] Share boost-client repo link with rberkes (they're invited, awaiting email confirmation)
 - [ ] Delete gist after Ron has reviewed: `gh gist delete 7151ff6b944d525fa4f8f0c00f4261f8`
-- [ ] Share boost-client repo access with rberkes once invitation is accepted
 - [ ] Purchase + install Solid Security Pro on monsterrodholders.com WP; enable Hide Backend, 2FA, Password Requirements
 - [ ] Install Wordfence Free alongside, disable its firewall, keep only malware scanner
 - [ ] Decide: dedicated `monsterrodholders-security` private repo for ongoing security docs, or stick with gists

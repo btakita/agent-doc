@@ -1026,7 +1026,7 @@ Most Sprint 2 tasks are "Started" with 0 actual hours — signal extraction (2.3
 
 ❯ do **`corky gsc` user-OAuth fallback (step 6)**
 
-### Re: gsc user-OAuth fallback (step 6) (HEAD)
+### Re: gsc user-OAuth fallback (step 6)
 
 On it. Porting `src/corky/src/cal/auth.rs` user flow into `src/corky/src/gsc/auth.rs`, preserving the existing SA path.
 
@@ -1048,12 +1048,31 @@ Preserving all existing SA tests. Adding user-flow tests (`token_key`, `parse_to
 After code edit: `make check` in `src/corky/`. OAuth scope `webmasters.readonly` is "sensitive" per Google, so the user will need to add themselves as a test user in GCP Console → OAuth consent screen → Test users before the flow completes successfully — noting that in the response but not blocking on it.
 
 Also noticed a stray file at `src/corky/src/gsc/20260413/corky-gsc` — looks like a misdirected `git branch` command that captured stdout. Not touching it unless you want me to clean it up.
-<!-- agent:boundary:dc0aa2a0 -->
+
+### Re: gsc user-OAuth fallback — done (HEAD)
+
+Ported. `src/corky/src/gsc/auth.rs` now has the full user-OAuth flow alongside the existing SA path.
+
+**What changed:**
+- `get_access_token(account)` — tries SA → stored valid token → refresh → full flow, in order.
+- `run_auth(account)` — unconditional user-OAuth flow, stores token as `gsc:<account>` (or `gsc:default`).
+- `run_auth_flow` — mirror of `cal::auth::run_auth_flow`: browser open, loopback `127.0.0.1:8485/callback`, 120s timeout, CSRF state check, reuse `social::auth::parse_callback`.
+- `exchange_code` / `refresh_access_token` / `parse_user_token_response` — parallel to cal, platform stamp `"gsc"`, scopes `[GSC_SCOPE]`.
+- `resolve_credentials` — reuses `[gmail]` client_id/secret (same Google project as Gmail/Calendar).
+
+**Tests** (`cargo test gsc::auth`): 7 passed — 4 existing SA tests + 3 new ones (`token_key_default`, `token_key_named`, `parses_user_token_response`).
+
+**`make check`**: clippy + full test suite green (exit 0).
+
+**Before first live use:** publish the corky OAuth consent screen or add your Google account as a test user (GCP Console → OAuth consent screen → Test users) — `webmasters.readonly` is a sensitive scope and unverified apps get blocked for non-test users.
+
+Left as-is: the stray `src/corky/src/gsc/20260413/corky-gsc` file (looks like a misdirected git command). Let me know if you want it removed.
+<!-- agent:boundary:6bfd26f9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#0kfh] **`corky gsc` user-OAuth fallback (step 6)** — clone `src/corky/src/cal/auth.rs` → `src/corky/src/gsc/auth.rs` user path. Port **8485** (Calendar uses 8484), scope `https://www.googleapis.com/auth/webmasters.readonly`, token-store key prefix `gsc:`. Requires publishing corky OAuth consent screen or adding test users for the sensitive `webmasters.readonly` scope (GCP Console → OAuth consent screen → Test users). Deferred out of the monsterrodholders gsc v1 cut because the service-account path (`passage corky/gcp/searchconsole_sa_json`) covers that use case. Pick this up when a non-SA caller needs GSC access. Related: `src/corky/plan.md` step 6 on branch `20260413/corky-gsc`.
-- [ ] [#g674] implement gsc user-OAuth fallback: port cal/auth.rs → gsc/auth.rs (port 8485, scope webmasters.readonly, key prefix gsc:)
+- [x] [#0kfh] **`corky gsc` user-OAuth fallback (step 6)** — clone `src/corky/src/cal/auth.rs` → `src/corky/src/gsc/auth.rs` user path. Port **8485** (Calendar uses 8484), scope `https://www.googleapis.com/auth/webmasters.readonly`, token-store key prefix `gsc:`. Requires publishing corky OAuth consent screen or adding test users for the sensitive `webmasters.readonly` scope (GCP Console → OAuth consent screen → Test users). Deferred out of the monsterrodholders gsc v1 cut because the service-account path (`passage corky/gcp/searchconsole_sa_json`) covers that use case. Pick this up when a non-SA caller needs GSC access. Related: `src/corky/plan.md` step 6 on branch `20260413/corky-gsc`.
+- [x] [#g674] implement gsc user-OAuth fallback: port cal/auth.rs → gsc/auth.rs (port 8485, scope webmasters.readonly, key prefix gsc:)
 <!-- /agent:pending -->

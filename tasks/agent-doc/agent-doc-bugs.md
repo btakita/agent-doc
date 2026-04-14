@@ -686,7 +686,7 @@ Locked in. Plan below; pending items for each step have been added to the queue 
 
 **Open question for you before I start step 1:** do you want the spec update to go on its own branch (`20260414/pending-gated-state`) or straight to `main`? Default is branch per your convention (`yyyymmdd/short-description`).
 ❯ follow convention. go
-### Re: step 1 landed on `20260414/pending-gated-state` (HEAD)
+### Re: step 1 landed on `20260414/pending-gated-state`
 
 Branch created, spec updated, and the session is now running off of it. All edits are in `src/agent-doc/specs/pending-system.md` — no code yet, just the design contract steps 2–6 will implement against.
 
@@ -729,6 +729,14 @@ Branch created, spec updated, and the session is now running off of it. All edit
 
 **Design decisions frozen in this spec landing** (matches the plan, no re-litigation):
 
+
+❯ We need to migrate all memories (e.g. `5. **Feedback memory:**`) to agent-doc's skill/runbook for agent-doc install deployment.
+❯ We should **never** use memories for library logic. The library logic should either be deterministic binary or accessible via skill preferring a runbook.
+❯ This **must** be added to AGENTS.md/CLAUDE.md. If I were to add this rule to **every** installable library, would I have duplicate context? If I only apply this rule to leaf libraries, will it be in context only once?
+
+❯ Please explain the feedback_pending_patch_every_cycle vs feedback_pending_granular_ops decision.
+❯ This needs to be a question of which runbook belong in the agent-doc package...not which memory should be on brian-takita's local dev machine.
+
 1. Bare `[/]` syntax, no structured gate field — free-text prose suffix stays.
 2. No auto-migration — lazy rules too fuzzy, blast radius unclear, manual retag faster.
 3. Five valid state transitions (see matrix).
@@ -744,7 +752,84 @@ Branch created, spec updated, and the session is now running off of it. All edit
 `PendingState { Open, Gated, Done }` variant added, parser accepts `[ ] | [/] | [x]`, renderer round-trips. Unit tests: parser round-trip across all three states, state transition validation (each cell in the matrix), error cases (`[x] → [/]`, etc.). This is `#mgdw`. Awaiting your go to land it — or if you'd rather review the spec change first before I touch code, say so and I'll pause after committing the spec.
 
 Branch state: `20260414/pending-gated-state` created off `main`, spec change is uncommitted in the working tree (will commit after this response writes back). No other files touched — step 1 is deliberately spec-only.
-<!-- agent:boundary:a54f4062 -->
+### Re: library logic ≠ user-local memory — and the stale `patch_every_cycle` feedback (HEAD)
+
+**Short answer on the feedback decision:** the `feedback_pending_patch_every_cycle` vs `feedback_pending_granular_ops` question is **already obsolete**. Both describe *how the skill should drive the binary*. That is agent-doc library behavior, not user preference. It belongs in `src/agent-doc/.claude/skills/agent-doc/SKILL.md` §1b (which already has the granular-ops contract) and in `specs/pending-system.md` (which defines the on-disk contract). Neither should survive as a user-local memory.
+
+Current state:
+
+- `feedback_pending_patch_every_cycle.md` is **stale** — it encodes the pre-granular-ops rule ("always emit `<!-- patch:pending -->`"). The new spec *forbids* `patch:pending` blocks. If this memory stays, future sessions will silently regress.
+- `feedback_pending_granular_ops.md` **does not exist**. Writing it would just duplicate SKILL.md §1b onto a second surface that only applies to one dev machine.
+
+**Right move:** delete `feedback_pending_patch_every_cycle.md` outright. The canonical source is already in the library (`SKILL.md` §1b + `specs/pending-system.md`). Anyone who installs agent-doc gets the same runbook by virtue of installing the skill. No migration needed — the skill is already the runbook. I'll delete the stale feedback memory this cycle.
+
+### Re: library logic rule — put it in ONE place, not every library (HEAD)
+
+**The rule you want:**
+
+> Library logic — any behavior the library itself must enforce — belongs in the library's deterministic binary or in a skill/runbook shipped with the library. It must NOT live in a user-local auto-memory. Auto-memory is for *user preferences* (communication style, tone, local machine quirks), not library contracts.
+
+**The duplication question — where should the rule live:**
+
+If you put the rule in *every* installable library's AGENTS.md, it duplicates in context every time multiple libraries load (nested submodules walk up through parent AGENTS.md, so even "leaf only" still stacks). With 17+ submodules under `src/`, you'd pay 17× the token cost whenever multiple library contexts are active.
+
+If you put the rule in *only leaf libraries*, it appears once per leaf in context. That's better but still wrong — the rule isn't *about* any specific library, it's about **how libraries are built**. It's a development practice, not a library invariant.
+
+**Recommendation: put it in exactly one place — `agent-loop/CLAUDE.md` (the monorepo root)**, as a new section under "Core Principles" or "Conventions":
+
+```markdown
+## Library Logic Placement
+
+Library logic — behavior the library itself must enforce — belongs in:
+1. **The binary (deterministic)** — parsing, validation, file manipulation, CRDT merge.
+2. **A skill/runbook shipped with the library** — for agents driving the binary (e.g., `src/agent-doc/.claude/skills/agent-doc/SKILL.md`).
+
+It must NOT live in user-local auto-memory. Auto-memory is reserved for *user preferences* (voice, tools, machine quirks). Library contracts must ship with the library so every consumer sees the same rules.
+
+**Test:** "If I uninstall this library on machine A and install it on machine B, does the rule still apply?" If yes → library. If no → user memory.
+```
+
+**Why root AGENTS.md and not every library:**
+
+1. **Context economics** — loads once, applies everywhere. No stacking cost.
+2. **It's a meta-rule** — governs how libraries are authored, not what any one library does. The root AGENTS.md is already the canonical home for cross-cutting concerns ("This root AGENTS.md covers cross-cutting concerns only." — existing line in `CLAUDE.md`).
+3. **Libraries stay self-contained** — each library's AGENTS.md stays focused on its own contracts (agent-doc's CLAUDE.md is about agent-doc, not about meta-policy). Developers can extract a library without dragging rules it doesn't care about.
+4. **No duplication across libraries** — if this rule needs to change (e.g., adding "provide a linter" as a third option), you change one file, not seventeen.
+
+**What this rule displaces from user-local memory** (delete candidates — all encode library behavior):
+
+- `feedback_pending_patch_every_cycle.md` — stale, superseded by SKILL.md §1b
+- `feedback_pending_granular_ops.md` — does not exist; would duplicate SKILL.md §1b
+- `feedback_pending_protocol.md` — agent-doc-specific flow control; belongs in SKILL.md
+- `feedback_compact_exchange_pending_invariant.md` — agent-doc invariant; belongs in `specs/pending-system.md` + SKILL.md compact-exchange runbook
+- `feedback_compact_exchange_edit.md` — same
+- `feedback_agent_doc_immediate_write.md` — same
+- `feedback_agent_doc_foreground_writes.md` — same
+- `feedback_no_auto_compact.md` — same
+- `feedback_no_background_claims_log.md` — same
+- `feedback_immediate_commit.md` — same
+- `feedback_no_escape_backticks_heredoc.md` — general shell knowledge, arguably belongs in a core skill, definitely not user memory
+- `feedback_pending_patch_every_cycle.md` (again, for emphasis)
+
+**What legitimately stays in user-local memory** (preferences, not library logic):
+
+- `feedback_writing_voice.md` — Brian's voice preferences
+- `feedback_no_sycophancy.md` — communication style
+- `user_communication_priorities.md` — user's decision filters
+- `feedback_no_cleartext_secrets.md` — livestream-specific, machine-level concern
+- `feedback_bun_not_pnpm.md` — local dev environment quirk
+- Reference memories (SSH hosts, API key paths) — machine-specific
+
+**Concrete delta I can land this cycle:**
+
+1. **Delete** `feedback_pending_patch_every_cycle.md` (stale + library-logic).
+2. **Add** a "Library Logic Placement" section to `agent-loop/CLAUDE.md`.
+3. **Audit** the other `feedback_pending_*` / `feedback_agent_doc_*` / `feedback_compact_*` entries — for each, either confirm the content is already in `SKILL.md` / `specs/` (then delete), or note the gap and file a follow-up to land it in the library.
+
+Say **"go"** and I'll do the delete + CLAUDE.md update in this cycle, and file the audit as a pending item (won't bundle the full audit into the same response — that's a separate read-through).
+
+**Connection back to agent-doc-bugs**: this is an orthogonal track to the `#mgdw` parser work for the Gated lifecycle — I can do it in the same cycle or sequence it after `#mgdw`. Your call. Default: do the CLAUDE.md + stale-memory delete first (small, frees context for every future session), then land `#mgdw`.
+<!-- agent:boundary:8a92ba7f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

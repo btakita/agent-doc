@@ -956,7 +956,7 @@ I added pending items for both the interim plugin install and the post-fork subm
 Five items landed in pending — review before next cycle in case I misread scope.
 ❯ implement pending-system
 
-### Re: implement pending-system (HEAD)
+### Re: implement pending-system
 
 Audited current state before planning. Most of the spec is already built — the gap is narrower than the spec's 6-section scope suggests.
 
@@ -992,7 +992,56 @@ Audited current state before planning. Most of the spec is already built — the
 Release target: per spec §Implementation §4, Gated lifecycle ships in **v0.32.6** (separate from the `#eg0w` CommitLock v0.32.5). I'll hold publishing until you confirm.
 
 Approve the phasing and I'll start Phase 1. Each phase commits + tests cleanly before moving to the next.
-<!-- agent:boundary:12d37e6d -->
+❯ start
+### Re: Phase 1 landed — `PendingState` enum + `[/]` parse/render (HEAD)
+
+Submodule commit `c53b09b` on `20260414/pending-gated-state`. Internal data-model only — no CLI surface yet, no behavior change for existing docs. 30 `pending::tests` pass (6 new).
+
+**What changed in `src/pending.rs`:**
+
+- New `PendingState` enum: `Open` (`[ ]`) | `Gated` (`[/]`) | `Done` (`[x]`). `box_char()` for render, `from_box_char()` for parse (gated `#[allow(dead_code)]` until Phase 2 consumes it).
+- `PendingItem.checked: bool` → `PendingItem.state: PendingState`. Added `is_done()` helper.
+- `parse_item_line()` recognizes `[/]` as `Gated`. Order: `[ ]` → `[/]` → `[x]` → `[X]` → bare.
+- `render()` emits `state.box_char()` — single source of truth, no per-state branches.
+- `reap()` keys off `is_done()` only — `[/]` is skipped unconditionally.
+- `op_done()` sets `state = Done`; `op_add()` defaults to `Open`. **Phase 1 keeps these primitives unconditional** — state-machine validation (reject `[x]→*`, `[ ]→ungate`, etc.) lands in Phase 2 at the `pending_cmd` layer, not in `pending.rs`. This keeps `pending.rs` I/O-free and pure.
+
+**Tests added (six):**
+
+| Test | Asserts |
+|------|---------|
+| `parse_gated_state` | `[/]` parses to `Gated`, hash + text intact |
+| `parse_all_three_states` | round-trip across the full enum |
+| `render_roundtrip_all_three_states` | render output is byte-identical to input |
+| `render_emits_slash_for_gated` | `PendingItem { state: Gated, .. }` renders `- [/] [#id] text` |
+| `backfill_never_inserts_gated` | legacy `- foo` becomes `- [ ] [#hash] foo`, **never** `- [/]` (spec §3 invariant) |
+| `backfill_preserves_existing_gated` | already-canonical `[/]` body is unchanged + `changed=false` |
+| `reap_skips_gated` | `[/]` survives, `[x]` is removed, removed-id list correct |
+
+Plus the existing `parse_fully_migrated`, `parse_checkbox_only_no_id`, `parse_legacy_no_checkbox` etc. updated to assert `PendingState` instead of `bool`.
+
+**Audit before refactor:** grepped `\.checked|PendingItem` across the crate — only `pending.rs` itself uses `PendingItem.checked`. Refactor was strictly local. `pending_cmd.rs`, `preflight.rs`, `write.rs` consume only the `op_*` functions and `reap()`/`backfill()` — those return `String`, so they're untouched.
+
+**Build status:** `cargo build` clean. `cargo clippy` shows pre-existing warnings in `diff.rs`, `write.rs`, `preflight.rs`, etc. — none in `pending.rs` or my changes. `cargo test pending::tests` → 30 passed.
+
+### Phase 2 plan (`pending_cmd::gate/ungate` + CLI flags) (HEAD)
+
+Ready to start when you give the next go. Scope:
+
+1. **`pending_cmd::gate(body, id)`** — find item, validate source state (`Open` only), set `Gated`, return new body. Error on `[x]→gate`. No-op (logged) on `[/]→gate`.
+2. **`pending_cmd::ungate(body, id)`** — find item, validate source state (`Gated` only), set `Open`. Error on `[ ]→ungate` and `[x]→ungate`.
+3. **State transition matrix** — single helper `validate_transition(from, op) -> Result<NextState, TransitionError>` so the truth table lives in one place. 9-case unit test (3 states × 3 ops).
+4. **`--pending-gate <id>` / `--pending-ungate <id>` flags** in `main.rs` Write subcommand. Repeatable like `--pending-done`. Wire to `pending_cmd::gate/ungate`.
+5. **CLI integration test** (`tests/pending_integration.rs`) — happy path + error cases for each flag.
+
+No spec ambiguity for Phase 2 — the matrix in `specs/pending-system.md` §4 is the contract. I'll match it exactly.
+
+### Open question still pending (Phase 3 only) (HEAD)
+
+The `AGENT_DOC_REJECT_PATCH_PENDING=1` → flip-default question is **only** for Phase 3 (preflight + enforcement). Phase 1 changes nothing user-visible; Phase 2 only adds new flags. So the question can wait one or two more cycles. I'll re-raise before starting Phase 3.
+
+Approve Phase 2 and I'll start the `gate/ungate` matrix + CLI flags.
+<!-- agent:boundary:77e5b2a3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -531,7 +531,7 @@ Recommend **(1) + (2)**: lock for correctness, gate for perf. Neither requires c
 - Adding a sub-item: "Ship per-file commit lock + sweep freshness gate for #64mb".
 
 
-### Re: does the freshness gate create a race? (HEAD)
+### Re: does the freshness gate create a race?
 
 **Yes — on its own.** The gate alone is a classic TOCTOU:
 
@@ -557,7 +557,39 @@ So the roles are:
 Without the lock, the gate is a perf hint with a race. With the lock, the gate is a valid fast-path. They're not redundant, but the gate is only meaningful *inside* the locked region.
 
 **Practical consequence for the fix:** don't ship the gate without the lock. If you want a one-shot PR, ship only the lock — it's sufficient for correctness. The gate is a nice-to-have follow-up that saves a few ms per sweep per doc under contention.
-<!-- agent:boundary:25d337fa -->
+❯ do Recommend **(1) + (2)**: lock for correctness, gate for perf. Neither requires changing the commit content pipeline.
+### Re: do — shipped (1) per-file commit lock + (2) sweep freshness gate (HEAD)
+
+Both landed in `src/agent-doc`, `cargo build` clean.
+
+**(1) Per-file `CommitLock` — `src/agent-doc/src/git.rs`**
+
+- New private `CommitLock` RAII guard (flock on `<project_root>/.agent-doc/locks/commit-<hash>.lock`)
+- Acquired at the very top of `git::commit()`, held until return
+- Uses existing `fs2::FileExt` + `snapshot::doc_hash` / `snapshot::find_project_root` infra
+- Best-effort: if the project root or lock dir can't be resolved, logs and proceeds unlocked rather than hard-failing (matches the rest of the commit path's error discipline)
+- Serializes the full read-modify-write: drift check → snapshot load → hash-object/update-index → `git commit` → `(HEAD)`-strip rewrite → reposition → VCS signal. Two concurrent preflights on different target docs can no longer interleave on the same doc's working tree.
+
+**(2) Sweep freshness gate — `src/agent-doc/src/preflight.rs` (step 2d)**
+
+- Before calling `git::commit(&doc_path)` on a sweep target, check `git::last_commit_mtime(&doc_path)` and `continue` if elapsed < 5s
+- Logs `[preflight] sweep: skipping <doc> (committed <5s ago)` so the skip is visible in ops output
+- Per earlier analysis: the gate is only a valid fast-path *inside* the CommitLock critical section — alone it's TOCTOU, but once (1) serializes the critical section, sweep B checks freshness *after* A released the lock and correctly short-circuits without spawning git (~10ms saved per contended sweep per doc)
+
+**What this fixes (#64mb)**
+
+The double `commit_staging` trace with drift=410 then drift=122 (288-byte shrink between commits) can no longer reproduce: the `(HEAD)`-strip rewrite at `git.rs:464-471` now happens inside the commit-lock, so a second preflight cannot observe the shrunken file while the snapshot is still at the pre-strip length.
+
+`out_of_band_write` / `drift_warning` telemetry stays in place as the permanent canary for the real bug class (write paths that skip `snapshot::save`). That's still the right shape — we're closing the race, not the observability.
+
+**Not touched (intentional)**
+
+- Commit content pipeline (staging, hash-object, update-index) — unchanged
+- `snapshot::save` path — unchanged (SnapshotLock still guards it internally; CommitLock is a strictly outer lock so no recursive acquisition risk)
+- Sweep ordering within a single preflight — still skips `doc_path == canonical` at line 460 as before
+
+**Pending queue:** `#eg0w` moved to ✅ (awaiting release gate); `#qpzd` (the duplicate) marked done. `#gqep` release bump is next when you want to cut v0.32.5 with this fix.
+<!-- agent:boundary:329790b2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -587,7 +619,7 @@ Without the lock, the gate is a perf hint with a race. With the lock, the gate i
 - [ ] [#zp02] supervisor/env.rs: wire into start.rs — replace the inline fm.env expansion loop in start.rs:189 with EnvSpec::from_frontmatter(&fm).resolve()?; feed the result into PtySpawnConfig.env once state.rs restart loop is in place
 - [ ] [#f7d5] supervisor: smoke test — real claude under supervisor in a tmux pane, verify restart + inject + CWD invariant end-to-end
 - [ ] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)
-- [ ] [#eg0w] Ship per-file commit lock + sweep freshness gate for #64mb (per-file flock on .agent-doc/locks/commit-<hash>.lock in git::commit, plus <5s freshness skip in preflight sweep)
-- [ ] [#qpzd] Ship per-file commit lock + sweep freshness gate for #64mb (per-file flock on .agent-doc/locks/commit-<hash>.lock in git::commit, plus <5s freshness skip in preflight sweep)
+- [ ] [#eg0w] ✅ Shipped: per-file CommitLock in git::commit + <5s freshness gate in preflight sweep (awaiting release)
+- [x] [#qpzd] Ship per-file commit lock + sweep freshness gate for #64mb (per-file flock on .agent-doc/locks/commit-<hash>.lock in git::commit, plus <5s freshness skip in preflight sweep)
 <!-- /agent:pending -->
 ## Assistant

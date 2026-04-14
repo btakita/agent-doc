@@ -1216,7 +1216,7 @@ Confirmed — `replace:pending` it is. Added to the pending list with the full m
 > Rename `patch:pending` → `replace:pending`. Parser accepts both for one release with deprecation warning; `--allow-patch-pending` gains `--allow-replace-pending` alias; `AGENT_DOC_ALLOW_REPLACE_PENDING=1` becomes canonical env var; `specs/pending-system.md` + SKILL.md updated to new name; drop old name after one release. Queue behind current phase-3 work.
 
 Sequencing: this lands **after** the current phase-3 work (pending_gated_count + enforcement inversion) ships. Rationale — the rename is a surface-level API change, and doing it on top of a stabilized enforcement default avoids re-touching the same call sites twice. When phase-3 is green, this becomes the first visible cleanup on top of it.
-<!-- agent:boundary:be26b6f4 -->
+<!-- agent:boundary:07077ab7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

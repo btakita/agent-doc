@@ -829,7 +829,7 @@ It must NOT live in user-local auto-memory. Auto-memory is reserved for *user pr
 Say **"go"** and I'll do the delete + CLAUDE.md update in this cycle, and file the audit as a pending item (won't bundle the full audit into the same response — that's a separate read-through).
 
 **Connection back to agent-doc-bugs**: this is an orthogonal track to the `#mgdw` parser work for the Gated lifecycle — I can do it in the same cycle or sequence it after `#mgdw`. Your call. Default: do the CLAUDE.md + stale-memory delete first (small, frees context for every future session), then land `#mgdw`.
-<!-- agent:boundary:8a92ba7f -->
+<!-- agent:boundary:a60d9e2e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

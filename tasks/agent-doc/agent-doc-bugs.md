@@ -284,7 +284,7 @@ Forward-compat path for when multi-user lands:
 Net: ship auto-create as default now, with `--no-create-pending` as the escape hatch. Plan the recipient-policy TOML knob as a multi-user follow-up, not v1.
 
 Updating the pending item to reflect this — want me to reword it to "notify: auto-create agent:pending on target (with --no-create-pending opt-out)"?
-<!-- agent:boundary:13c00b8a -->
+<!-- agent:boundary:ad4e5cf4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

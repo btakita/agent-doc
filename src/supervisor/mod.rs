@@ -9,6 +9,8 @@
 //! ## Phase 1 status
 //! - `cwd` — CWD resolution priority chain (CLI flag > frontmatter > project root > doc parent).
 //! - `pty` — pty allocation, child spawn, stdin/stdout forwarding threads.
+//! - `env` — parent-env cascade + frontmatter overlay + unset, resolved once
+//!   per supervisor lifetime and reused across every `state.rs` restart.
 //!
 //! Remaining phase 1 submodules (`resize`, `state`, `ipc`) land in
 //! subsequent commits and get wired into `start.rs` last. Until `start.rs`
@@ -19,4 +21,5 @@
 #![allow(dead_code)]
 
 pub mod cwd;
+pub mod env;
 pub mod pty;

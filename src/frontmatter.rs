@@ -315,10 +315,30 @@ pub struct Frontmatter {
     /// Environment variables to inject into the Claude session.
     /// Keys are env var names, values are strings supporting shell expansion
     /// (`$(command)`, `$VAR`, `${VAR}`). Order is preserved: later values can
-    /// reference earlier keys. Unexpanded values are passed through preflight JSON
-    /// for skill-side export; expanded values are set on the child process in start.rs.
+    /// reference earlier keys. A `null` value (YAML `KEY: null`) means "unset
+    /// this key in the child env" — supported by every consumer (start.rs,
+    /// run.rs, stream.rs, parallel.rs, supervisor/env.rs).
     #[serde(default, skip_serializing_if = "indexmap::IndexMap::is_empty")]
-    pub env: indexmap::IndexMap<String, String>,
+    pub env: indexmap::IndexMap<String, Option<String>>,
+    /// Whether the supervisor starts from the parent process env before
+    /// applying the `env:` overlay. Default `true` — the supervised claude
+    /// child inherits PATH/HOME/TERM/TMUX/... from the shell that launched
+    /// agent-doc, then frontmatter `env:` overrides/unsets specific keys.
+    /// Set `false` for a sealed env (only the explicit `env:` keys, nothing
+    /// from the parent). Consumed by `supervisor/env.rs::EnvSpec`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_doc_env_inherit: Option<bool>,
+    /// Explicit working directory for the supervised claude child process.
+    /// Resolved relative to the document's parent directory if a relative path
+    /// is given. When absent, the supervisor falls back to project-root detection
+    /// (`.agent-doc/` walk) or the document's parent directory.
+    /// See `src/agent-doc/specs/supervisor.md` § Core Invariants / CWD determinism.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_cwd"
+    )]
+    pub cwd: Option<String>,
 }
 
 impl Frontmatter {
@@ -643,6 +663,8 @@ mod tests {
             model_tier: None,
             hooks: std::collections::HashMap::new(),
             env: indexmap::IndexMap::new(),
+            agent_doc_env_inherit: None,
+            cwd: None,
         };
         let body = "# Hello\n\nBody text.\n";
         let written = write(&fm, body).unwrap();
@@ -1030,8 +1052,8 @@ mod tests {
         let content = "---\nenv:\n  FOO: bar\n  BAZ: \"$(echo hello)\"\n---\nBody\n";
         let (fm, _) = parse(content).unwrap();
         assert_eq!(fm.env.len(), 2);
-        assert_eq!(fm.env["FOO"], "bar");
-        assert_eq!(fm.env["BAZ"], "$(echo hello)");
+        assert_eq!(fm.env["FOO"], Some("bar".to_string()));
+        assert_eq!(fm.env["BAZ"], Some("$(echo hello)".to_string()));
         // Verify order is preserved
         let keys: Vec<&String> = fm.env.keys().collect();
         assert_eq!(keys, vec!["FOO", "BAZ"]);
@@ -1045,18 +1067,29 @@ mod tests {
     }
 
     #[test]
+    fn parse_env_unset_via_null() {
+        let content = "---\nenv:\n  SET_ME: value\n  UNSET_ME: null\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.env.len(), 2);
+        assert_eq!(fm.env["SET_ME"], Some("value".to_string()));
+        assert_eq!(fm.env["UNSET_ME"], None);
+    }
+
+    #[test]
     fn write_roundtrip_with_env() {
-        let mut env = indexmap::IndexMap::new();
-        env.insert("KEY1".to_string(), "value1".to_string());
-        env.insert("KEY2".to_string(), "$KEY1".to_string());
+        let mut env: indexmap::IndexMap<String, Option<String>> = indexmap::IndexMap::new();
+        env.insert("KEY1".to_string(), Some("value1".to_string()));
+        env.insert("KEY2".to_string(), Some("$KEY1".to_string()));
+        env.insert("KEY3".to_string(), None);
         let fm = Frontmatter {
             env,
             ..Default::default()
         };
         let written = write(&fm, "body\n").unwrap();
         let (fm2, _) = parse(&written).unwrap();
-        assert_eq!(fm2.env.len(), 2);
-        assert_eq!(fm2.env["KEY1"], "value1");
-        assert_eq!(fm2.env["KEY2"], "$KEY1");
+        assert_eq!(fm2.env.len(), 3);
+        assert_eq!(fm2.env["KEY1"], Some("value1".to_string()));
+        assert_eq!(fm2.env["KEY2"], Some("$KEY1".to_string()));
+        assert_eq!(fm2.env["KEY3"], None);
     }
 }

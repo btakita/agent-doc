@@ -53,6 +53,7 @@ mod commands;
 mod compact;
 mod config;
 mod convert;
+mod pending;
 mod pending_cmd;
 mod project_config;
 mod gc;
@@ -88,6 +89,7 @@ mod skill;
 mod snapshot;
 mod start;
 mod stream;
+mod supervisor;
 mod run;
 mod sync;
 mod terminal;
@@ -415,6 +417,32 @@ enum Commands {
         /// Commit the document to git after a successful write (skipped silently if not in a git repo)
         #[arg(long)]
         commit: bool,
+        /// Append a new pending item (repeatable). Binary assigns hash id and `[ ]`.
+        #[arg(long = "pending-add")]
+        pending_add: Vec<String>,
+        /// Mark a pending item `[x]` by hash id (repeatable).
+        #[arg(long = "pending-done")]
+        pending_done: Vec<String>,
+        /// Edit a pending item: `id=new text` (repeatable).
+        #[arg(long = "pending-edit")]
+        pending_edit: Vec<String>,
+        /// Clear all pending items.
+        #[arg(long = "pending-clear")]
+        pending_clear: bool,
+        /// Reorder pending items by comma-separated hash ids.
+        #[arg(long = "pending-reorder")]
+        pending_reorder: Option<String>,
+        /// Transition a pending item to `[/]` (gated) by hash id (repeatable).
+        /// Idempotent on already-gated items; errors on `[x]` items.
+        #[arg(long = "pending-gate")]
+        pending_gate: Vec<String>,
+        /// Transition a pending item from `[/]` back to `[ ]` by hash id (repeatable).
+        /// Errors on `[ ]` or `[x]` items — the source must be gated.
+        #[arg(long = "pending-ungate")]
+        pending_ungate: Vec<String>,
+        /// Allow `patch:pending` blocks in stdin (escape hatch, hidden).
+        #[arg(long = "allow-patch-pending", hide = true)]
+        allow_patch_pending: bool,
     },
     /// Stream agent output to document in real-time (CRDT merge)
     Stream {
@@ -694,7 +722,7 @@ enum HookAction {
 
 #[derive(Subcommand)]
 enum PendingAction {
-    /// Add an item to the pending component
+    /// Add an item to the pending component (assigns stable hash id + `[ ]`)
     Add {
         /// The pending item description
         item: String,
@@ -707,8 +735,31 @@ enum PendingAction {
         #[arg(long, short)]
         contains: bool,
     },
-    /// Remove completed items
+    /// Remove completed items (legacy — alias for `reap`)
     Prune,
+    /// Reap `[x]` items and print removed ids
+    Reap,
+    /// Run lazy backfill — assign missing hash ids and checkboxes
+    Backfill,
+    /// Mark an item done by id
+    Done {
+        /// Hash id (without the `#` prefix)
+        id: String,
+    },
+    /// Rewrite an item's text, preserving its hash id
+    Edit {
+        /// Hash id (without the `#` prefix)
+        id: String,
+        /// New item text
+        text: String,
+    },
+    /// Clear all pending items
+    Clear,
+    /// Reorder items by hash id (comma-separated)
+    Reorder {
+        /// Comma-separated list of hash ids
+        ids: String,
+    },
     /// List current pending items
     List,
 }
@@ -1011,11 +1062,64 @@ fn main() -> anyhow::Result<()> {
             PluginAction::Update { editor } => plugin::update(&editor),
             PluginAction::List => plugin::list(),
         },
-        Commands::Write { file, baseline_file, template: is_template, stream: is_stream, ipc: is_ipc, force_disk, origin, commit: do_commit } => {
+        Commands::Write { file, baseline_file, template: is_template, stream: is_stream, ipc: is_ipc, force_disk, origin, commit: do_commit, pending_add, pending_done, pending_edit, pending_clear, pending_reorder, pending_gate, pending_ungate, allow_patch_pending } => {
             // Log write origin for tracing
             if let Some(ref orig) = origin {
                 crate::ops_log::log_op(&file, &format!("write_origin file={} origin={}", file.display(), orig));
             }
+
+            // Apply pending ops BEFORE the patch payload write so both mutations
+            // land in the same atomic cycle (the pending ops write directly to disk;
+            // the subsequent patch write reads the already-updated document).
+            let has_pending_ops = !pending_add.is_empty()
+                || !pending_done.is_empty()
+                || !pending_edit.is_empty()
+                || pending_clear
+                || pending_reorder.is_some()
+                || !pending_gate.is_empty()
+                || !pending_ungate.is_empty();
+            if has_pending_ops {
+                // Order: clear (destructive) → add → edit → gate → ungate → done → reorder.
+                // Gate/ungate run before done so a `--pending-gate X --pending-done X`
+                // pair is rejected (Done→Gate error) instead of silently swallowed.
+                if pending_clear {
+                    pending_cmd::clear(&file)?;
+                }
+                for item in &pending_add {
+                    pending_cmd::add(&file, item)?;
+                }
+                for pair in &pending_edit {
+                    let (id, text) = pair
+                        .split_once('=')
+                        .with_context(|| format!("--pending-edit expects 'id=text', got: {}", pair))?;
+                    pending_cmd::edit(&file, id, text)?;
+                }
+                for id in &pending_gate {
+                    pending_cmd::gate(&file, id)?;
+                }
+                for id in &pending_ungate {
+                    pending_cmd::ungate(&file, id)?;
+                }
+                for id in &pending_done {
+                    pending_cmd::done(&file, id)?;
+                }
+                if let Some(ref order) = pending_reorder {
+                    let ids: Vec<String> = order
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    pending_cmd::reorder(&file, &ids)?;
+                }
+            }
+
+            // Enforcement: reject `patch:pending` blocks in stdin unless allowed.
+            // The skill MUST use the granular flags above.
+            if !allow_patch_pending {
+                // SAFETY: single-threaded at this point in the CLI entrypoint.
+                unsafe { std::env::set_var("AGENT_DOC_REJECT_PATCH_PENDING", "1"); }
+            }
+
             let baseline = baseline_file
                 .as_ref()
                 .map(std::fs::read_to_string)
@@ -1170,7 +1274,16 @@ fn main() -> anyhow::Result<()> {
         Commands::Pending { file, action } => match action {
             PendingAction::Add { item } => pending_cmd::add(&file, &item),
             PendingAction::Remove { target, contains } => pending_cmd::remove(&file, &target, contains),
-            PendingAction::Prune => pending_cmd::prune(&file),
+            PendingAction::Prune => pending_cmd::reap(&file),
+            PendingAction::Reap => pending_cmd::reap(&file),
+            PendingAction::Backfill => pending_cmd::backfill(&file),
+            PendingAction::Done { id } => pending_cmd::done(&file, &id),
+            PendingAction::Edit { id, text } => pending_cmd::edit(&file, &id, &text),
+            PendingAction::Clear => pending_cmd::clear(&file),
+            PendingAction::Reorder { ids } => {
+                let ids: Vec<String> = ids.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                pending_cmd::reorder(&file, &ids)
+            }
             PendingAction::List => pending_cmd::list(&file),
         },
         Commands::Callback { action } => match action {

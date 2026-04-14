@@ -473,7 +473,7 @@ fn build_prompt(fm: &frontmatter::Frontmatter, the_diff: &str, content: &str) ->
 fn resolve_streaming(
     name: &str,
     config: Option<&crate::config::AgentConfig>,
-    env: Vec<(String, String)>,
+    env: Vec<(String, Option<String>)>,
 ) -> Result<Box<dyn StreamingAgent>> {
     let (cmd, args) = match config {
         Some(ac) => (Some(ac.command.clone()), Some(ac.args.clone())),

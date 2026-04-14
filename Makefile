@@ -1,4 +1,4 @@
-.PHONY: build build-release release test clippy check precommit install install-hooks clean init-python wheel publish publish-crate publish-pypi
+.PHONY: build build-release release test clippy check precommit install install-hooks clean init-python wheel publish publish-crate publish-pypi bump-plugin
 
 # Build debug binary
 build:
@@ -35,6 +35,19 @@ version-sync:
 		echo "ERROR: version mismatch — Cargo.toml=$$cargo_ver pyproject.toml=$$pypi_ver"; \
 		exit 1; \
 	fi
+
+# Bump JB plugin patch version and build both zips
+bump-plugin:
+	@cd editors/jetbrains && \
+	cur=$$(grep '^pluginVersion' gradle.properties | sed 's/.*= *//'); \
+	maj=$$(echo "$$cur" | cut -d. -f1); \
+	min=$$(echo "$$cur" | cut -d. -f2); \
+	pat=$$(echo "$$cur" | cut -d. -f3); \
+	new="$$maj.$$min.$$((pat + 1))"; \
+	sed -i "s/^pluginVersion = .*/pluginVersion = $$new/" gradle.properties; \
+	echo "bumped pluginVersion: $$cur -> $$new"; \
+	./gradlew buildPlugin signPlugin && \
+	ls -1 build/distributions/agent-doc-jetbrains-$$new*.zip
 
 # Check plugin version was bumped if .kt files changed
 plugin-version-check:

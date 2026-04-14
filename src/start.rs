@@ -190,7 +190,14 @@ pub fn run(file: &Path) -> Result<()> {
             match crate::env::expand_values(&fm.env) {
                 Ok(expanded) => {
                     for (key, value) in &expanded {
-                        cmd.env(key, value);
+                        match value {
+                            Some(v) => {
+                                cmd.env(key, v);
+                            }
+                            None => {
+                                cmd.env_remove(key);
+                            }
+                        }
                     }
                 }
                 Err(e) => {

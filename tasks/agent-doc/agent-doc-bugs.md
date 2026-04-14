@@ -513,7 +513,7 @@ Plus a stale `<!-- agent:boundary:... -->` marker being dropped at the old posit
 Going with option #1 — extending `reposition_boundary_in_snapshot` (git.rs:593) to also rewrite the working tree with `template::reposition_boundary_to_end` + `strip_head_markers`, gated on the existing active-run guard (`pending_path_for`). Sweep-committed foreign docs have no active run, so they'll get the deterministic rewrite; in-flight runs are skipped so concurrent IPC/plugin writes don't race.
 
 Implementing now in the agent-doc binary only — no FFI/plugin changes needed since the binary is the canonical source of truth. I'll leave `try_ipc_reposition_boundary` in place as a hint to open editors, but the on-disk state will be correct regardless of whether the plugin is loaded.
-<!-- agent:boundary:9bc3eb92 -->
+<!-- agent:boundary:2e2f226e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

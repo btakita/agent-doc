@@ -169,6 +169,30 @@ use std::path::Path;
 use crate::{component, frontmatter, merge, recover, sessions, snapshot, template};
 use crate::snapshot::find_project_root;
 
+/// Enforcement: reject `patch:pending` blocks in the patch payload unless the
+/// caller explicitly set `--allow-patch-pending`. The pending system requires
+/// mutations via granular flags (`--pending-add/done/edit/clear/reorder`); a
+/// full-replace `patch:pending` block would churn hash ids and lose user intent.
+///
+/// This is enforced lazily via the `AGENT_DOC_REJECT_PATCH_PENDING` env var so
+/// all three write entry points (`run_template`, `run_stream`, `run_ipc`) share
+/// one check without plumbing a new parameter through every signature.
+fn enforce_no_patch_pending(patches: &[template::PatchBlock]) -> Result<()> {
+    let reject = std::env::var("AGENT_DOC_REJECT_PATCH_PENDING")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    if !reject {
+        return Ok(());
+    }
+    if patches.iter().any(|p| p.name == "pending") {
+        anyhow::bail!(
+            "ERR: patch:pending block forbidden — use --pending-add/done/edit/clear/reorder. \
+             See specs/pending-system.md."
+        );
+    }
+    Ok(())
+}
+
 /// Resolve the IPC project root for `canonical` (an already-canonicalized file
 /// path). Prefers the git superproject root so submodule documents share the
 /// parent's `.agent-doc/patches/` directory (the only one the IDE plugin
@@ -776,6 +800,9 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
     // Sanitize component tags in patch content to prevent parser corruption
     sanitize_patches(&mut patches);
 
+    // Enforcement: reject `patch:pending` blocks unless `--allow-patch-pending`.
+    enforce_no_patch_pending(&patches)?;
+
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
     }
@@ -874,6 +901,9 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
 
     // Sanitize component tags in patch content to prevent parser corruption
     sanitize_patches(&mut patches);
+
+    // Enforcement: reject `patch:pending` blocks unless `--allow-patch-pending`.
+    enforce_no_patch_pending(&patches)?;
 
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
@@ -1262,6 +1292,9 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     // Sanitize component tags in patch content to prevent parser corruption
     sanitize_patches(&mut patches);
 
+    // Enforcement: reject `patch:pending` blocks unless `--allow-patch-pending`.
+    enforce_no_patch_pending(&patches)?;
+
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
     }
@@ -1442,6 +1475,9 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
 
     // Sanitize component tags in patch content to prevent parser corruption
     sanitize_patches(&mut patches);
+
+    // Enforcement: reject `patch:pending` blocks unless `--allow-patch-pending`.
+    enforce_no_patch_pending(&patches)?;
 
     let content_ours = template::apply_patches(&content, &patches, &unmatched, file)
         .context("failed to apply template patches")?;

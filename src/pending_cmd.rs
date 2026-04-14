@@ -8,9 +8,12 @@
 //! - `agent-doc pending <FILE> list` — print pending items
 
 use anyhow::{Context, Result};
+use std::collections::HashSet;
 use std::path::Path;
 
 use crate::component;
+use crate::pending;
+use crate::snapshot;
 
 fn find_pending_component(file: &Path) -> Result<(String, component::Component)> {
     let content = std::fs::read_to_string(file)
@@ -23,19 +26,117 @@ fn find_pending_component(file: &Path) -> Result<(String, component::Component)>
     Ok((content, comp))
 }
 
-/// Add a new item to the pending component.
+/// Compute a stable document id from a file path. Uses `snapshot::doc_hash` so
+/// the id is consistent across pending ops and backfill.
+fn doc_id_for(file: &Path) -> String {
+    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    snapshot::doc_hash(&canonical).unwrap_or_else(|_| file.display().to_string())
+}
+
+/// Add a new item to the pending component (assigns a stable hash id + `[ ]`).
 pub fn add(file: &Path, item: &str) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let trimmed = existing.trim_end();
-    let new_content = if trimmed.is_empty() {
-        format!("- {}\n", item)
-    } else {
-        format!("{}\n- {}\n", trimmed, item)
-    };
-
+    let doc_id = doc_id_for(file);
+    let new_content = pending::op_add(existing, item, &doc_id)?;
     let new_doc = comp.replace_content(&full_content, &new_content);
     std::fs::write(file, &new_doc)?;
+    Ok(())
+}
+
+/// Run lazy backfill over the pending component and write if changed.
+pub fn backfill(file: &Path) -> Result<()> {
+    let (full_content, comp) = find_pending_component(file)?;
+    let existing = &full_content[comp.open_end..comp.close_start];
+    let doc_id = doc_id_for(file);
+    let (new_content, changed) = pending::backfill(existing, &doc_id, &HashSet::new());
+    if !changed {
+        eprintln!("[pending] already canonical — no changes");
+        return Ok(());
+    }
+    let new_doc = comp.replace_content(&full_content, &new_content);
+    std::fs::write(file, &new_doc)?;
+    Ok(())
+}
+
+/// Mark an item `[x]` by id.
+pub fn done(file: &Path, id: &str) -> Result<()> {
+    let (full_content, comp) = find_pending_component(file)?;
+    let existing = &full_content[comp.open_end..comp.close_start];
+    let new_content = pending::op_done(existing, id)?;
+    let new_doc = comp.replace_content(&full_content, &new_content);
+    std::fs::write(file, &new_doc)?;
+    Ok(())
+}
+
+/// Transition an item to `Gated` (`[/]`) by id.
+/// Idempotent on already-gated items; errors on `Done` items.
+pub fn gate(file: &Path, id: &str) -> Result<()> {
+    let (full_content, comp) = find_pending_component(file)?;
+    let existing = &full_content[comp.open_end..comp.close_start];
+    let new_content = pending::op_gate(existing, id)?;
+    if new_content == existing {
+        // No-op (already gated). Skip the disk write so we don't churn mtime.
+        return Ok(());
+    }
+    let new_doc = comp.replace_content(&full_content, &new_content);
+    std::fs::write(file, &new_doc)?;
+    Ok(())
+}
+
+/// Transition an item back to `Open` (`[ ]`) by id.
+/// Errors on `Open` or `Done` items — the source must be `[/]`.
+pub fn ungate(file: &Path, id: &str) -> Result<()> {
+    let (full_content, comp) = find_pending_component(file)?;
+    let existing = &full_content[comp.open_end..comp.close_start];
+    let new_content = pending::op_ungate(existing, id)?;
+    let new_doc = comp.replace_content(&full_content, &new_content);
+    std::fs::write(file, &new_doc)?;
+    Ok(())
+}
+
+/// Edit an item's text, preserving its hash id.
+pub fn edit(file: &Path, id: &str, text: &str) -> Result<()> {
+    let (full_content, comp) = find_pending_component(file)?;
+    let existing = &full_content[comp.open_end..comp.close_start];
+    let new_content = pending::op_edit(existing, id, text)?;
+    let new_doc = comp.replace_content(&full_content, &new_content);
+    std::fs::write(file, &new_doc)?;
+    Ok(())
+}
+
+/// Clear all items from the pending component.
+pub fn clear(file: &Path) -> Result<()> {
+    let (full_content, comp) = find_pending_component(file)?;
+    let existing = &full_content[comp.open_end..comp.close_start];
+    let new_content = pending::op_clear(existing)?;
+    let new_doc = comp.replace_content(&full_content, &new_content);
+    std::fs::write(file, &new_doc)?;
+    Ok(())
+}
+
+/// Reorder items by id (comma-separated). Missing ids keep their relative order.
+pub fn reorder(file: &Path, ids: &[String]) -> Result<()> {
+    let (full_content, comp) = find_pending_component(file)?;
+    let existing = &full_content[comp.open_end..comp.close_start];
+    let new_content = pending::op_reorder(existing, ids)?;
+    let new_doc = comp.replace_content(&full_content, &new_content);
+    std::fs::write(file, &new_doc)?;
+    Ok(())
+}
+
+/// Reap `[x]` items and print removed ids.
+pub fn reap(file: &Path) -> Result<()> {
+    let (full_content, comp) = find_pending_component(file)?;
+    let existing = &full_content[comp.open_end..comp.close_start];
+    let (new_content, removed) = pending::reap(existing);
+    if removed.is_empty() {
+        eprintln!("[pending] no [x] items to reap");
+        return Ok(());
+    }
+    let new_doc = comp.replace_content(&full_content, &new_content);
+    std::fs::write(file, &new_doc)?;
+    eprintln!("[pending] reaped {} item(s): {}", removed.len(), removed.join(", "));
     Ok(())
 }
 
@@ -70,6 +171,8 @@ pub fn remove(file: &Path, target: &str, contains: bool) -> Result<()> {
 }
 
 /// Remove completed items (lines with [x], [done], or starting with ✅).
+/// Legacy helper retained for back-compat tests; new callers should use `reap`.
+#[allow(dead_code)]
 pub fn prune(file: &Path) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
     let existing = &full_content[comp.open_end..comp.close_start];
@@ -143,8 +246,11 @@ mod tests {
         add(&doc, "item two").unwrap();
 
         let content = fs::read_to_string(&doc).unwrap();
-        assert!(content.contains("- item one"));
-        assert!(content.contains("- item two"));
+        // `add` now runs op_add which canonicalizes items with hash + checkbox.
+        assert!(content.contains("item one"));
+        assert!(content.contains("item two"));
+        // Both items should have hash ids.
+        assert_eq!(content.matches("[#").count(), 2);
     }
 
     #[test]
@@ -153,7 +259,9 @@ mod tests {
         add(&doc, "new item").unwrap();
 
         let content = fs::read_to_string(&doc).unwrap();
-        assert!(content.contains("- new item"));
+        assert!(content.contains("new item"));
+        assert!(content.contains("[ ]"));
+        assert!(content.contains("[#"));
     }
 
     #[test]

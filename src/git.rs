@@ -49,9 +49,59 @@
 //! - reposition_boundary_cleans_multiple_stale: document with 2 stale boundaries → all removed, exactly 1 fresh boundary at end after user text
 
 use anyhow::Result;
+use fs2::FileExt;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// RAII guard for an exclusive advisory lock serializing `git::commit()` runs
+/// on the same document across concurrent preflight sessions. Protects the
+/// read-modify-write on the working tree + index from interleaving.
+///
+/// Lock file lives at `<project_root>/.agent-doc/locks/commit-<hash>.lock`.
+/// Best-effort: if the path cannot be resolved (no project root yet), returns
+/// `None` and the caller proceeds unlocked.
+struct CommitLock {
+    _file: File,
+}
+
+impl CommitLock {
+    fn acquire(doc: &Path) -> Option<Self> {
+        let canonical = doc.canonicalize().ok()?;
+        let root = crate::snapshot::find_project_root(&canonical)?;
+        let hash = crate::snapshot::doc_hash(doc).ok()?;
+        let lock_dir = root.join(".agent-doc/locks");
+        if let Err(e) = std::fs::create_dir_all(&lock_dir) {
+            eprintln!("[commit] commit-lock dir create failed: {} (proceeding unlocked)", e);
+            return None;
+        }
+        let lock_path = lock_dir.join(format!("commit-{}.lock", hash));
+        let file = match OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+        {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("[commit] commit-lock open failed: {} (proceeding unlocked)", e);
+                return None;
+            }
+        };
+        if let Err(e) = file.lock_exclusive() {
+            eprintln!("[commit] commit-lock flock failed: {} (proceeding unlocked)", e);
+            return None;
+        }
+        Some(Self { _file: file })
+    }
+}
+
+impl Drop for CommitLock {
+    fn drop(&mut self) {
+        let _ = self._file.unlock();
+    }
+}
 
 /// Resolve a relative path against the git root (superproject root if in a submodule).
 /// Returns (git_root, resolved_file_path) so callers can run git commands in the correct repo.
@@ -242,6 +292,13 @@ pub(crate) fn is_in_git_repo(file: &Path) -> bool {
 /// Git commands run from the resolved git root, so this works even when CWD is a submodule.
 pub fn commit(file: &Path) -> Result<()> {
     let t_total = std::time::Instant::now();
+
+    // Serialize concurrent preflight runs against each other: without this,
+    // step 2 (commit target doc) and step 2d (cross-document sweep) from two
+    // independent preflight processes can race through the read-modify-write
+    // on the working tree (e.g. the (HEAD)-strip rewrite) and produce a second
+    // commit that stages a shrunken file. Held until function return.
+    let _commit_lock = CommitLock::acquire(file);
 
     let (super_root, resolved) = resolve_to_git_root(file)?;
     // If the file lives inside a submodule, run git ops in the submodule itself.

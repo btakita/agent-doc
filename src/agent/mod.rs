@@ -51,7 +51,7 @@ pub trait Agent {
 pub fn resolve(
     name: &str,
     config: Option<&AgentConfig>,
-    env: Vec<(String, String)>,
+    env: Vec<(String, Option<String>)>,
 ) -> Result<Box<dyn Agent>> {
     let (cmd, args) = match config {
         Some(ac) => (Some(ac.command.clone()), Some(ac.args.clone())),

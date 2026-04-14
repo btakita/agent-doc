@@ -40,7 +40,7 @@ use super::{Agent, AgentResponse};
 pub struct Claude {
     command: String,
     base_args: Vec<String>,
-    env: Vec<(String, String)>,
+    env: Vec<(String, Option<String>)>,
 }
 
 impl Claude {
@@ -62,7 +62,9 @@ impl Claude {
 
     /// Set environment variables to apply to the spawned `claude` child process.
     /// Values must already be expanded — pass the output of `env::expand_values()`.
-    pub fn with_env(mut self, env: Vec<(String, String)>) -> Self {
+    /// A `None` value means "unset this key in the child env" (translated to
+    /// `Command::env_remove`).
+    pub fn with_env(mut self, env: Vec<(String, Option<String>)>) -> Self {
         self.env = env;
         self
     }
@@ -103,7 +105,14 @@ impl Agent for Claude {
         let mut cmd = Command::new(&self.command);
         cmd.args(&args).env_remove("CLAUDECODE");
         for (k, v) in &self.env {
-            cmd.env(k, v);
+            match v {
+                Some(val) => {
+                    cmd.env(k, val);
+                }
+                None => {
+                    cmd.env_remove(k);
+                }
+            }
         }
         let output = cmd
             .stdin(std::process::Stdio::piped())
@@ -197,7 +206,14 @@ impl StreamingAgent for Claude {
         let mut cmd = Command::new(&self.command);
         cmd.args(&args).env_remove("CLAUDECODE");
         for (k, v) in &self.env {
-            cmd.env(k, v);
+            match v {
+                Some(val) => {
+                    cmd.env(k, val);
+                }
+                None => {
+                    cmd.env_remove(k);
+                }
+            }
         }
         let mut child = cmd
             .stdin(std::process::Stdio::piped())

@@ -2,16 +2,27 @@
 
 ## Build
 
-Always build **both** unsigned and signed plugin zips:
+Current version lives in `gradle.properties` as `pluginVersion = <x.y.z>`. **Never hardcode the version in docs or scripts** — read it from `gradle.properties` or glob the zip filename.
+
+To bump the patch version and build both zips in one shot:
+
+```bash
+# from src/agent-doc
+make bump-plugin
+```
+
+Or manually:
 
 ```bash
 cd agent-doc/editors/jetbrains
 ./gradlew buildPlugin signPlugin
 ```
 
-Output:
-- `build/distributions/agent-doc-jetbrains-0.1.0.zip` (unsigned)
-- `build/distributions/agent-doc-jetbrains-0.1.0-signed.zip` (signed)
+Output (where `<version>` comes from `gradle.properties`):
+- `build/distributions/agent-doc-jetbrains-<version>.zip` (unsigned)
+- `build/distributions/agent-doc-jetbrains-<version>-signed.zip` (signed)
+
+Reference zips via glob: `build/distributions/agent-doc-jetbrains-*-signed.zip`.
 
 ## Install
 

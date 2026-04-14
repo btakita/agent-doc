@@ -179,10 +179,15 @@ pub struct PreflightOutput {
     pub pending_callbacks: Vec<crate::callback::PendingCallback>,
     /// Environment variables from frontmatter `env` field (unexpanded).
     /// Values may contain shell expressions like `$(passage ...)` or `$VAR`.
-    /// The skill should expand these via `export` in a Bash tool call.
+    /// A `null` value means "unset this key" — the skill should emit
+    /// `unset KEY` instead of `export KEY=...`.
     /// Order is preserved from the document for sequential evaluation.
     #[serde(default, skip_serializing_if = "indexmap::IndexMap::is_empty")]
-    pub env: indexmap::IndexMap<String, String>,
+    pub env: indexmap::IndexMap<String, Option<String>>,
+    /// True when the pending component's id order changed between snapshot and current.
+    /// When set, the skill MUST NOT reorder pending this cycle — user intent wins.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pending_reordered: bool,
 }
 
 /// Check tmux layout health for the current session.
@@ -466,6 +471,21 @@ pub fn run(file: &Path) -> Result<()> {
                         })
                         .unwrap_or(true); // if uncertain, try commit anyway
                     if snap_is_newer {
+                        // Freshness gate: skip if another session committed this doc
+                        // within the last 5s. Inside the CommitLock critical section
+                        // this is a valid fast-path — a concurrent commit that just
+                        // ran will have advanced HEAD's commit time, so we avoid
+                        // re-spawning git (~10ms) for nothing. The gate only closes
+                        // races when paired with the per-file commit flock in git::commit.
+                        let fresh = git::last_commit_mtime(&doc_path)
+                            .ok()
+                            .flatten()
+                            .and_then(|t| t.elapsed().ok())
+                            .is_some_and(|e| e.as_secs() < 5);
+                        if fresh {
+                            eprintln!("[preflight] sweep: skipping {} (committed <5s ago)", doc_path.display());
+                            continue;
+                        }
                         match git::commit(&doc_path) {
                             Ok(()) => eprintln!("[preflight] sweep: committed {}", doc_path.display()),
                             Err(e) => eprintln!("[preflight] sweep: warning for {}: {}", doc_path.display(), e),
@@ -475,6 +495,14 @@ pub fn run(file: &Path) -> Result<()> {
             }
         }
     }
+
+    // Step 2e: Pending component maintenance — lazy backfill, reap, and reorder detection.
+    // All three are idempotent: they only write when something actually changes, and the
+    // subsequent diff step picks up any changes via the snapshot comparison.
+    let pending_reordered = run_pending_maintenance(file).unwrap_or_else(|e| {
+        eprintln!("[preflight] pending maintenance warning: {}", e);
+        false
+    });
 
     // Step 3: Read and truncate the claims log.
     eprintln!("[preflight] step 3: claims");
@@ -663,6 +691,7 @@ pub fn run(file: &Path) -> Result<()> {
         model_switch_tier: model_switch_tier.map(|t| t.to_string()),
         pending_callbacks,
         env: frontmatter_env,
+        pending_reordered,
     };
 
     let json = serde_json::to_string_pretty(&output)
@@ -670,6 +699,81 @@ pub fn run(file: &Path) -> Result<()> {
     println!("{}", json);
 
     Ok(())
+}
+
+/// Run pending-component maintenance: lazy backfill, reap `[x]`, and reorder detection.
+///
+/// Returns `true` when a reorder was detected (same ids, different order). Any
+/// write-through (backfill / reap) is persisted and committed in the same pass.
+/// Silent no-op when the document has no `agent:pending` component.
+fn run_pending_maintenance(file: &Path) -> Result<bool> {
+    let content = match std::fs::read_to_string(file) {
+        Ok(c) => c,
+        Err(_) => return Ok(false),
+    };
+    let components = match crate::component::parse(&content) {
+        Ok(cs) => cs,
+        Err(_) => return Ok(false),
+    };
+    let comp = match components.into_iter().find(|c| c.name == "pending") {
+        Some(c) => c,
+        None => return Ok(false),
+    };
+    let body = &content[comp.open_end..comp.close_start];
+
+    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let doc_id = snapshot::doc_hash(&canonical).unwrap_or_else(|_| file.display().to_string());
+
+    let mut current_body = body.to_string();
+    let mut mutated = false;
+
+    // 1. Lazy backfill: assign missing hash ids and normalize checkboxes.
+    let (after_backfill, changed) =
+        crate::pending::backfill(&current_body, &doc_id, &std::collections::HashSet::new());
+    if changed {
+        eprintln!("[preflight] pending: backfilled missing hash ids / checkboxes");
+        current_body = after_backfill;
+        mutated = true;
+    }
+
+    // 2. Reap `[x]` items.
+    let (after_reap, removed) = crate::pending::reap(&current_body);
+    if !removed.is_empty() {
+        eprintln!("[preflight] pending: reaped {} item(s): {}", removed.len(), removed.join(", "));
+        current_body = after_reap;
+        mutated = true;
+    }
+
+    // 3. Persist and commit any mutations.
+    if mutated {
+        let new_content = comp.replace_content(&content, &current_body);
+        std::fs::write(file, &new_content)
+            .with_context(|| format!("failed to write pending updates to {}", file.display()))?;
+        // Best-effort commit so the boundary check later sees a clean tree.
+        if let Err(e) = git::commit(file) {
+            eprintln!("[preflight] pending commit warning: {}", e);
+        }
+    }
+
+    // 4. Reorder detection: compare the snapshot's pending component to the current body.
+    let reordered = match snapshot::load(file).unwrap_or(None) {
+        Some(snap) => {
+            let snap_comp = crate::component::parse(&snap)
+                .ok()
+                .and_then(|comps| comps.into_iter().find(|c| c.name == "pending"));
+            if let Some(sc) = snap_comp {
+                let snap_body = &snap[sc.open_end..sc.close_start];
+                crate::pending::detect_reorder(snap_body, &current_body).is_some()
+            } else {
+                false
+            }
+        }
+        None => false,
+    };
+    if reordered {
+        eprintln!("[preflight] pending: reorder detected (skill must not reorder this cycle)");
+    }
+    Ok(reordered)
 }
 
 /// Read the claims log and truncate it. Returns lines as a `Vec<String>`.

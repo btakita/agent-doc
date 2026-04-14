@@ -45,7 +45,8 @@ impl PendingState {
     }
 
     /// Parse the inside of a `[…]` checkbox. Accepts `[X]` as `Done`.
-    /// Used by the upcoming `pending_cmd::gate/ungate` state-transition layer (Phase 2).
+    /// Currently only used by tests; kept on the public API for parser callers
+    /// that may need to inspect a single checkbox char in isolation.
     #[allow(dead_code)]
     pub fn from_box_char(c: char) -> Option<PendingState> {
         match c {
@@ -54,6 +55,61 @@ impl PendingState {
             'x' | 'X' => Some(PendingState::Done),
             _ => None,
         }
+    }
+}
+
+/// Mutating operation on a pending item — used by the state-transition matrix.
+///
+/// `MarkDone` is referenced by the matrix tests and reserved for the `op_done`
+/// migration path (Phase 3); it is not yet wired through the CLI primitives,
+/// which keep the unconditional `op_done` semantics from Phase 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum PendingOp {
+    /// `[ ] → [/]` — code-complete, awaiting external gate.
+    Gate,
+    /// `[/] → [ ]` — return a gated item to active.
+    Ungate,
+    /// `[ ] | [/] → [x]` — fully complete.
+    MarkDone,
+}
+
+/// Outcome of `validate_transition`. `NoOp` means "already in target state, do nothing".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransitionResult {
+    Transition(PendingState),
+    NoOp,
+}
+
+/// Apply the state-machine matrix from `specs/pending-system.md` §4.
+///
+/// | from \ op | Gate     | Ungate   | MarkDone |
+/// |-----------|----------|----------|----------|
+/// | Open      | → Gated  | error    | → Done   |
+/// | Gated     | no-op    | → Open   | → Done   |
+/// | Done      | error    | error    | no-op    |
+///
+/// Rationale (spec §4):
+/// - `gate` from Done is an error: a fully-complete item cannot be re-gated; the
+///   intended workflow is to add a new pending item describing the follow-up gate.
+/// - `ungate` from Open or Done is an error: ungate is the inverse of gate, not
+///   a generic "reset" — it requires an explicit `[/]` source.
+/// - `Gate` on Gated and `MarkDone` on Done are idempotent no-ops, not errors,
+///   so the granular CLI flags can be re-run safely (skill retries, watch loops).
+pub fn validate_transition(from: PendingState, op: PendingOp) -> Result<TransitionResult> {
+    use PendingOp::*;
+    use PendingState as S;
+    use TransitionResult::*;
+    match (from, op) {
+        (S::Open, Gate) => Ok(Transition(S::Gated)),
+        (S::Open, Ungate) => bail!("cannot ungate Open item: source must be `[/]`"),
+        (S::Open, MarkDone) => Ok(Transition(S::Done)),
+        (S::Gated, Gate) => Ok(NoOp),
+        (S::Gated, Ungate) => Ok(Transition(S::Open)),
+        (S::Gated, MarkDone) => Ok(Transition(S::Done)),
+        (S::Done, Gate) => bail!("cannot gate Done item: add a new pending item for the follow-up gate"),
+        (S::Done, Ungate) => bail!("cannot ungate Done item: source must be `[/]`"),
+        (S::Done, MarkDone) => Ok(NoOp),
     }
 }
 
@@ -386,6 +442,48 @@ pub fn op_done(body: &str, id: &str) -> Result<String> {
     Ok(render_items(&prelude, &items, &postlude))
 }
 
+/// Transition an item to `Gated` (`[/]`) by id.
+///
+/// - `Open → Gated`: state mutates.
+/// - `Gated → Gated`: idempotent no-op (returns body unchanged).
+/// - `Done → *`: error (cannot re-gate a completed item).
+pub fn op_gate(body: &str, id: &str) -> Result<String> {
+    let id = id.trim().to_lowercase();
+    let (prelude, mut items, postlude) = parse_items(body);
+    let item = items
+        .iter_mut()
+        .find(|i| i.id == id)
+        .ok_or_else(|| anyhow!("pending gate: no item with id [#{}]", id))?;
+    match validate_transition(item.state, PendingOp::Gate)? {
+        TransitionResult::Transition(next) => {
+            item.state = next;
+            Ok(render_items(&prelude, &items, &postlude))
+        }
+        TransitionResult::NoOp => Ok(body.to_string()),
+    }
+}
+
+/// Transition an item to `Open` (`[ ]`) by id.
+///
+/// - `Gated → Open`: state mutates.
+/// - `Open → *`: error (no source `[/]`).
+/// - `Done → *`: error (cannot ungate a completed item).
+pub fn op_ungate(body: &str, id: &str) -> Result<String> {
+    let id = id.trim().to_lowercase();
+    let (prelude, mut items, postlude) = parse_items(body);
+    let item = items
+        .iter_mut()
+        .find(|i| i.id == id)
+        .ok_or_else(|| anyhow!("pending ungate: no item with id [#{}]", id))?;
+    match validate_transition(item.state, PendingOp::Ungate)? {
+        TransitionResult::Transition(next) => {
+            item.state = next;
+            Ok(render_items(&prelude, &items, &postlude))
+        }
+        TransitionResult::NoOp => Ok(body.to_string()),
+    }
+}
+
 /// Edit an item's text, preserving its hash id.
 pub fn op_edit(body: &str, id: &str, new_text: &str) -> Result<String> {
     let new_text = new_text.trim();
@@ -687,6 +785,99 @@ mod tests {
     fn op_reorder_unknown_id_errors() {
         let body = "- [ ] [#a1b2] one\n";
         assert!(op_reorder(body, &["zzzz".to_string()]).is_err());
+    }
+
+    // ---- Phase 2: state matrix + gate/ungate ----
+
+    #[test]
+    fn validate_transition_full_matrix() {
+        use PendingOp::*;
+        use PendingState::*;
+        use TransitionResult::*;
+
+        // Open
+        assert_eq!(validate_transition(Open, Gate).unwrap(), Transition(Gated));
+        assert!(validate_transition(Open, Ungate).is_err());
+        assert_eq!(validate_transition(Open, MarkDone).unwrap(), Transition(Done));
+
+        // Gated
+        assert_eq!(validate_transition(Gated, Gate).unwrap(), NoOp);
+        assert_eq!(validate_transition(Gated, Ungate).unwrap(), Transition(Open));
+        assert_eq!(validate_transition(Gated, MarkDone).unwrap(), Transition(Done));
+
+        // Done
+        assert!(validate_transition(Done, Gate).is_err());
+        assert!(validate_transition(Done, Ungate).is_err());
+        assert_eq!(validate_transition(Done, MarkDone).unwrap(), NoOp);
+    }
+
+    #[test]
+    fn op_gate_open_to_gated() {
+        let body = "- [ ] [#a1b2] task\n";
+        let new_body = op_gate(body, "a1b2").unwrap();
+        assert!(new_body.contains("- [/] [#a1b2]"));
+    }
+
+    #[test]
+    fn op_gate_gated_is_noop() {
+        let body = "- [/] [#a1b2] task\n";
+        let new_body = op_gate(body, "a1b2").unwrap();
+        // No-op: body unchanged byte-for-byte.
+        assert_eq!(new_body, body);
+    }
+
+    #[test]
+    fn op_gate_done_errors() {
+        let body = "- [x] [#a1b2] task\n";
+        let err = op_gate(body, "a1b2").unwrap_err();
+        let msg = format!("{}", err);
+        assert!(msg.contains("cannot gate Done item"), "got: {}", msg);
+    }
+
+    #[test]
+    fn op_gate_unknown_id_errors() {
+        let body = "- [ ] [#a1b2] task\n";
+        assert!(op_gate(body, "zzzz").is_err());
+    }
+
+    #[test]
+    fn op_ungate_gated_to_open() {
+        let body = "- [/] [#a1b2] task\n";
+        let new_body = op_ungate(body, "a1b2").unwrap();
+        assert!(new_body.contains("- [ ] [#a1b2]"));
+    }
+
+    #[test]
+    fn op_ungate_open_errors() {
+        let body = "- [ ] [#a1b2] task\n";
+        let err = op_ungate(body, "a1b2").unwrap_err();
+        let msg = format!("{}", err);
+        assert!(msg.contains("cannot ungate Open"), "got: {}", msg);
+    }
+
+    #[test]
+    fn op_ungate_done_errors() {
+        let body = "- [x] [#a1b2] task\n";
+        let err = op_ungate(body, "a1b2").unwrap_err();
+        let msg = format!("{}", err);
+        assert!(msg.contains("cannot ungate Done"), "got: {}", msg);
+    }
+
+    #[test]
+    fn op_ungate_unknown_id_errors() {
+        let body = "- [/] [#a1b2] task\n";
+        assert!(op_ungate(body, "zzzz").is_err());
+    }
+
+    #[test]
+    fn op_gate_preserves_other_items_and_text() {
+        let body = "- [ ] [#a1b2] one\n- [ ] [#c3d4] two — gate: v0.32.6\n- [x] [#e5f6] three\n";
+        let new_body = op_gate(body, "c3d4").unwrap();
+        let (_, items, _) = parse_items(&new_body);
+        assert_eq!(items[0].state, PendingState::Open);
+        assert_eq!(items[1].state, PendingState::Gated);
+        assert_eq!(items[1].text, "two — gate: v0.32.6");
+        assert_eq!(items[2].state, PendingState::Done);
     }
 
     #[test]

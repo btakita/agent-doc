@@ -384,7 +384,7 @@ Edge case: `/model` switch mid-response. The model flag is captured at write-tim
 Added as pending item. I'll wire it up alongside the `supervisor_dirty` work since both need the supervisor to expose its current model state to the skill.
 
 ❯ Please reorder agent:pending with the priority using this agent doc as a reference.
-### Re: reorder pending by bugs-doc priority (HEAD)
+### Re: reorder pending by bugs-doc priority
 
 Reordered with this doc's focus (bugs + investigations) driving priority:
 
@@ -398,7 +398,36 @@ Reordered with this doc's focus (bugs + investigations) driving priority:
 8. **Janitorial**: `#a013` SPEC breakup, `#a004` drop Option B
 9. **Supervisor feature work** (least urgent for *bugs* doc): `#jg0d`, `#b486`, `#40ct`, `#vnp0`, `#6ae3`, `#zp02`, `#f7d5`
 10. **Deferred optional**: `#bak5`
-<!-- agent:boundary:70e25bd0 -->
+❯ Make a spec file for the supervisor implementation.
+### Re: supervisor spec already exists — what gap should I fill? (HEAD)
+
+`src/agent-doc/specs/supervisor.md` already exists (248 lines, 19.5K) and has been updated throughout this session. Current sections:
+
+- Motivation
+- Phase 1 Implementation Status (cwd ✅ / pty ✅ / env ✅ / resize / state / ipc / start.rs wire-up)
+- Non-Goals
+- Architecture
+- Core Invariants (incl. CWD determinism block landed this session)
+- IPC Socket
+- Crash Recovery Policy
+- Migration from `start.rs`
+- Five Hard Parts — Answers
+- Resize Handling
+- Non-tmux Mode (Future)
+- Logging
+- Dependencies to Add
+- Testing Strategy
+- Files to Add / Modify
+
+Before I write anything, which of these do you actually want?
+
+1. **Nothing — you forgot it existed.** I'll point you at it and stop.
+2. **A separate implementation playbook** (step-by-step PR-by-PR checklist for phase 1, tighter than the design spec — something `/agent-doc` can drive from). Lives alongside `supervisor.md`, e.g. `supervisor-impl.md` or `runbooks/supervisor-phase1.md`.
+3. **A new spec for a specific submodule** (`resize.rs`, `state.rs`, `ipc.rs`, or the `start.rs` wire-up) — smaller, module-scoped, invariants + tests + open questions.
+4. **Something else** — tell me what's missing from `supervisor.md` and I'll extend it in-place rather than creating a parallel doc.
+
+My recommendation: **option 2** if you want the phase 1 landing to be drivable from a single short checklist without re-reading the 248-line design spec each cycle; **option 4** (extend `supervisor.md`) otherwise. Parallel specs drift.
+<!-- agent:boundary:3a1ab084 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

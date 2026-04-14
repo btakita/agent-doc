@@ -404,7 +404,7 @@ Marking `#25ag` done via `--pending-done 25ag` in this write cycle. Preflight wi
 
 Pending item `#25ag` marked done.
 
-### Re: Bundled skill rewrite is a release gate (HEAD)
+### Re: Bundled skill rewrite is a release gate
 
 Acknowledged — promoting the `src/agent-doc/SKILL.md` rewrite from "follow-up" to **release gate for #gqep**. You're right: shipping v0.32.4 with the bundled skill still saying "every response MUST include a patch:pending block" would be actively harmful — Phase 3 inverts that rule (granular ops only, `replace:pending` forbidden in normal cycles), and any agent loading the bundled skill from crates.io/PyPI would immediately violate the contract.
 
@@ -415,20 +415,48 @@ Acknowledged — promoting the `src/agent-doc/SKILL.md` rewrite from "follow-up"
 3. **Document `pending_reordered` semantics** — skip reorder for one cycle after user expresses priority.
 4. **Escape hatch paragraph** — `--allow-replace-pending` + `AGENT_DOC_ALLOW_REPLACE_PENDING=1`, only for compaction/migration/tests; `--allow-patch-pending` + `patch:pending` as deprecated aliases for one release with stderr warning.
 5. **Cycle example** — the multi-flag `agent-doc write` invocation showing add + done + edit in one call.
-
+❯ Move detailed instructions into a runbook.
 **Gating changes:**
 
 - Added new pending item for the rewrite (release gate, queued ahead of #gqep).
 - Rewrote #gqep to explicitly mark "BLOCKED on bundled SKILL.md rewrite + manual-testing gate" so nothing accidentally triggers publish.
 
 **What I'm NOT doing yet:** the rewrite itself. It's a substantive edit to `src/agent-doc/SKILL.md` (~a few hundred lines touched), and per process discipline I'd rather land it as its own focused change with a diff you can review, not fold it into this cycle. Say "do the bundled skill rewrite" (or similar) and I'll execute it next.
-<!-- agent:boundary:5d322dc2 -->
+❯ do the bundled skill rewrite
+### Re: Bundled skill rewrite — landed (runbook extraction) (HEAD)
+
+Done. Followed your "move detailed instructions into a runbook" guidance — `src/agent-doc/SKILL.md` §1b is now a tight summary that links out, and the full contract lives in a new runbook.
+
+**Changes:**
+
+1. **New file** `src/agent-doc/runbooks/pending-ops.md` — full granular-ops contract:
+   - Item shape (hash IDs, GFM checkboxes, `[/]` gated syntax)
+   - All 7 flags in a table (`--pending-add`, `--pending-done`, `--pending-edit`, `--pending-clear`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`)
+   - `pending_reordered` semantics
+   - Multi-flag cycle example
+   - Escape hatch paragraph (`--allow-replace-pending` + `AGENT_DOC_ALLOW_REPLACE_PENDING=1`, and the one-release deprecation alias for `--allow-patch-pending` / `patch:pending`)
+
+2. **`src/agent-doc/SKILL.md` §1b rewritten** — replaced the inverted Phase 2 mandate ("every response MUST include a `<!-- patch:pending -->` block") with a 3-paragraph summary:
+   - Granular flags are canonical; `replace:pending` / `patch:pending` forbidden in normal cycles
+   - Preflight lazy-backfills hashes + checkboxes; `pending_reordered` skip-reorder rule
+   - Link to `runbooks/pending-ops.md` for the full contract and `specs/pending-system.md` for the spec
+
+3. **Runbooks section** — added pending-ops entry alongside compact-exchange and transfer/extract.
+
+**What I deliberately did NOT touch in this cycle:**
+
+- `agent-doc-version` in frontmatter (still `"0.32.0"`) — bumping it triggers the auto-update path on next skill invocation, which is a release-adjacent concern. Your call whether to land that in the same v0.32.4 bump or separately.
+- The preflight JSON example in §0 — it's missing `pending_reordered`, `pending_gated_count`, `diff_type`, `annotated_diff`, `env`, `layout_issues`, `pending_callbacks`. Drift but not load-bearing for the Phase 3 correctness fix. Filing as follow-up.
+- Release itself. #gqep is still blocked on the manual-testing gate — I edited the text to reflect that the bundled SKILL.md rewrite sub-dependency has landed, but the release itself is still your call.
+
+**Release-gate status for #gqep:** bundled SKILL.md rewrite ✅ landed. Remaining gate: `cargo install --path .` + manual-testing confirmation in a live session before crates.io/PyPI/GitHub Release publish.
+<!-- agent:boundary:103cdf72 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. BLOCKED on bundled src/agent-doc/SKILL.md rewrite + manual-testing gate.
+- [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [ ] [#e6z1] agent-doc: version bump + VERSIONS.md entry for gated-state feature after implementation lands (release gate — do not ship with the #eg0w bundle)
 - [ ] [#14z4] Hash collision ceiling: implement 8-char fallback in pending::generate_hash if 4-char collides (spec §1)
 - [ ] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)

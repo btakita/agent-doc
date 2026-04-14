@@ -402,7 +402,7 @@ All six pass in isolation (`cargo test --test pending_integration -- --exact ...
 Marking `#25ag` done via `--pending-done 25ag` in this write cycle. Preflight will reap it next cycle.
 
 Pending item `#25ag` marked done.
-<!-- agent:boundary:83ea8a8f -->
+<!-- agent:boundary:c5690c90 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

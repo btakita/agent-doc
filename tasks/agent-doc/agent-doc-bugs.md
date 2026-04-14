@@ -607,7 +607,7 @@ Both are code-complete but intentionally parked in pending as watch items, not f
 
 **If you want them closed now**, say "mark #64mb and #a002 done" and I'll `--pending-done` both this cycle. Otherwise they reap naturally after v0.32.5 ships and the telemetry watch is satisfied.
 ❯ Can we add a code complete but not shipped convention? What is a terse way to do this? 2 checkboxes? Any other recommendations? This decision should land in the agent-doc binary spec + implementation.
-### Re: code-complete-but-not-shipped convention (HEAD)
+### Re: code-complete-but-not-shipped convention
 
 Three real options, ranked by how well they fit what agent-doc already does:
 
@@ -656,7 +656,36 @@ Three real options, ranked by how well they fit what agent-doc already does:
 6. Tests: state transitions, reaper respects `Gated`, parser round-trip.
 
 Say **"go with A"** (or A + specific tweaks) and I'll draft the spec update + implementation plan as the next cycle. If you want B or a hybrid, say so and I'll rework.
-<!-- agent:boundary:99926089 -->
+❯ go with A
+### Re: go with A — draft spec + implementation plan (HEAD)
+
+Locked in. Plan below; pending items for each step have been added to the queue (6 items). I'll tackle them in order next cycles, not this one.
+
+**Design decisions frozen in this cycle** (call out now so later cycles don't re-litigate):
+
+1. **Bare `[/]` syntax, no structured gate field.** Free-text suffix stays (`- [/] [#id] text — gate: v0.32.5`). Revisit only if we want machine-queryable gates.
+2. **No auto-migration.** Existing `[ ]` items with "✅ landed"/"shipped"/"awaiting release" prose stay as-is until touched manually. Reasoning: lazy upgrade rules are fuzzy (what prose counts?), blast radius is unclear, and we only have ~3 real gated items right now — retagging by hand is faster and safer than writing a heuristic.
+3. **State transitions allowed:**
+   - `[ ] → [/]` via `--pending-gate <id>`
+   - `[/] → [x]` via `--pending-done <id>` (release confirmed, ready to reap)
+   - `[/] → [ ]` via `--pending-ungate <id>` (gate failed, back to active)
+   - `[ ] → [x]` via `--pending-done` (existing path, unchanged)
+4. **Reaper rule:** only `[x]` reaps. `[/]` stays forever unless explicitly moved. No TTL on gated state — operator decides.
+5. **Lazy ID backfill still applies to `[/]` items.** A human typing `- [/] fix the thing` gets an ID assigned on next preflight, same as `- [ ]`.
+
+**Implementation order (6 pending items track this):**
+
+1. **Spec first** — `src/agent-doc/specs/pending-system.md`. Add Gated variant to the lifecycle diagram, define syntax, document reaper rules, list the 4 CLI operations, note GFM-renderer caveat.
+2. **Parser + enum + renderer** in `src/agent-doc/src/pending.rs`. `PendingState { Open, Gated, Done }`. Parse `[ ]/[/]/[x]` → variants. Render reverse. Round-trip tests.
+3. **Reaper** — one-line change in the preflight reap pass: skip non-`Done`. Add `pending_gated_count` to preflight JSON alongside existing counts.
+4. **CLI flags** on `agent-doc write`: `--pending-gate <id>`, `--pending-ungate <id>`. Same plumbing as `--pending-done`.
+5. **Tests** — unit (parser round-trip, state transitions), integration (CLI flag → file state), reaper behavior.
+6. **Release** — version bump + VERSIONS.md entry. **Do NOT bundle with the #eg0w release** (v0.32.5 is already scoped to the per-file CommitLock fix). Gated state ships in v0.32.6 as its own focused release so the commit-lock fix gets clean field validation first.
+
+**What happens to #a002, #64mb, #eg0w after this lands:** they get retagged `[/]` by hand. `#a002` stays `[/]` until a large-drift event trips telemetry. `#64mb` + `#eg0w` both promote to `[x]` once v0.32.5 runs cleanly for ~24h. Post-v0.32.6 ships, the first real cycle of the new workflow is validated on its own implementation — nice closed loop.
+
+**Open question for you before I start step 1:** do you want the spec update to go on its own branch (`20260414/pending-gated-state`) or straight to `main`? Default is branch per your convention (`yyyymmdd/short-description`).
+<!-- agent:boundary:a3c7debd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -687,5 +716,11 @@ Say **"go with A"** (or A + specific tweaks) and I'll draft the spec update + im
 - [ ] [#f7d5] supervisor: smoke test — real claude under supervisor in a tmux pane, verify restart + inject + CWD invariant end-to-end
 - [ ] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)
 - [ ] [#eg0w] ✅ Shipped: per-file CommitLock in git::commit + <5s freshness gate in preflight sweep (awaiting release)
+- [ ] [#pf01] agent-doc: spec update — add PendingState::Gated lifecycle (`[/]`) to src/agent-doc/specs/pending-system.md (syntax, reaper rules, state transitions, lifecycle diagram, CLI surface)
+- [ ] [#mgdw] agent-doc: parser — accept `[/]` checkbox char, extend PendingState enum with Gated variant in src/agent-doc/src/pending.rs; renderer emits `[/]` round-trip
+- [ ] [#h1j2] agent-doc: reaper — skip Gated items in preflight reap pass; emit pending_gated_count alongside existing counts in preflight JSON output
+- [ ] [#q90h] agent-doc: CLI — add `--pending-gate <id>` flag on `agent-doc write` (mirror of --pending-done); `--pending-ungate <id>` to return to `[ ]`
+- [ ] [#sx35] agent-doc: tests — parser round-trip for `[/]`, state transitions ( →/→x,  →x, /→x, /→ ), reaper respects Gated, CLI flag integration
+- [ ] [#e6z1] agent-doc: version bump + VERSIONS.md entry for gated-state feature after implementation lands (release gate — do not ship with the #eg0w bundle)
 <!-- /agent:pending -->
 ## Assistant

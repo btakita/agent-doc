@@ -1123,7 +1123,7 @@ Gate/ungate run **before** done deliberately. That means:
 Pending updated: `#pjfg`, `#j5x0`, `#kzk7`, `#0jyk`, `#zrbq`, `#z6xv` marked done. New item added for Phase 3 work. The remaining `#mgdw`/`#h1j2`/`#q90h`/`#sx35` items are also covered by what landed in Phases 1+2 — let me know if you want me to reap them too or keep them as the original spec-driven tracker.
 
 Approve Phase 3 and I'll re-raise the enforcement-flip question with a concrete migration plan, then land `pending_gated_count` + the flip in one commit.
-<!-- agent:boundary:d18fe435 -->
+<!-- agent:boundary:0c555a92 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

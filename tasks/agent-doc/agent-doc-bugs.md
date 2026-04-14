@@ -427,7 +427,7 @@ Before I write anything, which of these do you actually want?
 4. **Something else** — tell me what's missing from `supervisor.md` and I'll extend it in-place rather than creating a parallel doc.
 
 My recommendation: **option 2** if you want the phase 1 landing to be drivable from a single short checklist without re-reading the 248-line design spec each cycle; **option 4** (extend `supervisor.md`) otherwise. Parallel specs drift.
-<!-- agent:boundary:3a1ab084 -->
+<!-- agent:boundary:0276782b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -720,7 +720,7 @@ If you want extra confidence before shipping, I can also:
 - Run `make check` (clippy + full test suite)
 
 Let me know if you want either before I queue a release.
-<!-- agent:boundary:80850df1 -->
+<!-- agent:boundary:c9cfe179 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

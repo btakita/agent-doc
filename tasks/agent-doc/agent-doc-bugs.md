@@ -191,7 +191,7 @@ The designed-for use case is **cross-document re-evaluation signals** — one se
 - ❌ No ack path back to sender.
 
 So `notify` is the right **primitive**, but a `dispatch` wrapper (notify + focus + optional tmux send-keys for wake) would be a cleaner ergonomic layer for "send a task." Still waiting on your call: queue `dispatch` as pending, or document `notify` as the canonical cross-pane mechanism and leave it there?
-<!-- agent:boundary:4ba570bb -->
+<!-- agent:boundary:823f1201 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

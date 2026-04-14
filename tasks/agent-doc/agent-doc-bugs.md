@@ -536,7 +536,7 @@ Implementing now in the agent-doc binary only — no FFI/plugin changes needed s
 - 7 existing `reposition_boundary*` tests pass (underlying `template::reposition_boundary_to_end` and `strip_head_markers` primitives are already unit-tested)
 - `cargo install --path .` + `cargo build --release` rebuilt both the global binary and `.bin/agent-doc` symlink target
 - No new test added for the git.rs function itself — it's a thin composition of already-covered primitives behind the pending-path guard
-<!-- agent:boundary:26af807a -->
+<!-- agent:boundary:49276650 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

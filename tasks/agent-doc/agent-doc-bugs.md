@@ -249,7 +249,7 @@ Open sub-questions I'll resolve during implementation (or flag back to you if th
 3. **Commit behavior:** same as current `notify` — commit by default, `--no-commit` to skip.
 
 Added to pending. Implementation happens when that item gets scheduled — nothing further this cycle unless you want to refine the design first.
-### Re: option b + auto-create pending? (HEAD)
+### Re: option b + auto-create pending?
 
 Locked in **(b)** for `notify --pending-add` — pending-only, no exchange blockquote.
 
@@ -266,7 +266,25 @@ So the principled default for `notify --pending-add` is: **error if the target l
 Escape hatch for your "I'd be OK with it" case: an explicit **`--create-pending`** flag on `notify` that opts the sender into materializing the component on the target. Off by default, on when you know the recipient won't mind. That keeps the principle intact while giving the pragmatic path you want for your own docs.
 
 Want me to add that `--create-pending` flag to the pending item, or keep it strict-only for v1?
-<!-- agent:boundary:eb497ee4 -->
+
+❯ Right now, I'm the author of the sending + receiving documents.
+❯ We may support multi-user agent-doc workspaces in the future.
+### Re: single-author now, multi-user later (HEAD)
+
+That flips the default. When you own both ends, "violating author expectation" is vacuous — you *are* the author on both sides. The conservative default exists to protect a stranger's document; there's no stranger yet.
+
+**Revised recommendation for v1:** auto-create `agent:pending` on the target when absent. Ergonomic, zero friction, matches today's reality.
+
+Forward-compat path for when multi-user lands:
+
+1. **Invert the flag.** Ship with `--no-create-pending` (opt-out) instead of `--create-pending` (opt-in). Default = create. Users who want strict behavior have an explicit knob.
+2. **Recipient-side policy later.** When multi-user workspaces arrive, add a recipient config (e.g., `.agent-doc/config.toml` → `receive.auto_create_components = ["pending"]` or `= false`). Recipient decides what senders can materialize on their docs. This moves the consent from sender-flag to recipient-config, which is where it belongs in a multi-user world.
+3. **Migration is a no-op for you.** Since you're the recipient of your own docs today, flipping the recipient default to strict later wouldn't break anything — you'd just add `auto_create_components = ["pending"]` to your workspace config and keep working.
+
+Net: ship auto-create as default now, with `--no-create-pending` as the escape hatch. Plan the recipient-policy TOML knob as a multi-user follow-up, not v1.
+
+Updating the pending item to reflect this — want me to reword it to "notify: auto-create agent:pending on target (with --no-create-pending opt-out)"?
+<!-- agent:boundary:13c00b8a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

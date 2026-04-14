@@ -353,7 +353,7 @@ Tests:
 
 Pending item `#vnxg` marked done.
 ❯ do #25ag
-### Re: #25ag landed — `patch:pending` → `replace:pending` with dual-accept (HEAD)
+### Re: #25ag landed — `patch:pending` → `replace:pending` with dual-accept
 
 Implementation complete in `src/agent-doc`. Version bumped to **0.32.4** (`Cargo.toml` + `pyproject.toml`). All pending-system tests green (24/24), write suite green (62/62), clippy clean, release binary built. Pre-existing `resync::tests` / `route::tests` failures are tmux-environment flakes unrelated to this change.
 
@@ -383,6 +383,7 @@ All six pass in isolation (`cargo test --test pending_integration -- --exact ...
 **What's NOT in this change (deliberate):**
 
 - `src/agent-doc/SKILL.md` (the bundled skill) still has the *old Phase 2* guidance ("every response MUST include a patch:pending block") which is now outright inverted by Phase 3 — touching it is a separate skill-rewrite job, not part of #25ag. Filed as follow-up below.
+❯ We need to do this before the release
 - No release (crates.io / PyPI / GitHub Release). Per release checklist, `cargo install --path .` + live manual-testing gate must run first, and that's your call.
 - `--pending-add` still writes text literally — the `[/]` state-marker footgun (`#9v7h`) is a separate queued item.
 
@@ -402,14 +403,32 @@ All six pass in isolation (`cargo test --test pending_integration -- --exact ...
 Marking `#25ag` done via `--pending-done 25ag` in this write cycle. Preflight will reap it next cycle.
 
 Pending item `#25ag` marked done.
-<!-- agent:boundary:d5580831 -->
+
+### Re: Bundled skill rewrite is a release gate (HEAD)
+
+Acknowledged — promoting the `src/agent-doc/SKILL.md` rewrite from "follow-up" to **release gate for #gqep**. You're right: shipping v0.32.4 with the bundled skill still saying "every response MUST include a patch:pending block" would be actively harmful — Phase 3 inverts that rule (granular ops only, `replace:pending` forbidden in normal cycles), and any agent loading the bundled skill from crates.io/PyPI would immediately violate the contract.
+
+**What the rewrite needs to cover** (mirroring `.claude/skills/agent-doc/SKILL.md` §1b):
+
+1. **Delete the old Phase 2 mandate** — no more "every cycle must emit `<!-- patch:pending -->`". That block type is deprecated.
+2. **Add the granular-ops contract** — `--pending-add`, `--pending-done <id>`, `--pending-edit "id=text"`, `--pending-clear`, `--pending-reorder`. Explain hash IDs + GFM checkboxes + lazy backfill.
+3. **Document `pending_reordered` semantics** — skip reorder for one cycle after user expresses priority.
+4. **Escape hatch paragraph** — `--allow-replace-pending` + `AGENT_DOC_ALLOW_REPLACE_PENDING=1`, only for compaction/migration/tests; `--allow-patch-pending` + `patch:pending` as deprecated aliases for one release with stderr warning.
+5. **Cycle example** — the multi-flag `agent-doc write` invocation showing add + done + edit in one call.
+
+**Gating changes:**
+
+- Added new pending item for the rewrite (release gate, queued ahead of #gqep).
+- Rewrote #gqep to explicitly mark "BLOCKED on bundled SKILL.md rewrite + manual-testing gate" so nothing accidentally triggers publish.
+
+**What I'm NOT doing yet:** the rewrite itself. It's a substantive edit to `src/agent-doc/SKILL.md` (~a few hundred lines touched), and per process discipline I'd rather land it as its own focused change with a diff you can review, not fold it into this cycle. Say "do the bundled skill rewrite" (or similar) and I'll execute it next.
+<!-- agent:boundary:3a842e1a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#25ag] Rename patch:pending → replace:pending. Parser accepts both for one release with deprecation warning; --allow-patch-pending gains --allow-replace-pending alias; AGENT_DOC_ALLOW_REPLACE_PENDING=1 becomes canonical env var; specs/pending-system.md + SKILL.md updated to new name; drop old name after one release. Queue behind current phase-3 work.
-- [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release after manual-testing gate
+- [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. BLOCKED on bundled src/agent-doc/SKILL.md rewrite + manual-testing gate.
 - [ ] [#e6z1] agent-doc: version bump + VERSIONS.md entry for gated-state feature after implementation lands (release gate — do not ship with the #eg0w bundle)
 - [ ] [#14z4] Hash collision ceiling: implement 8-char fallback in pending::generate_hash if 4-char collides (spec §1)
 - [ ] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)
@@ -448,5 +467,6 @@ Pending item `#25ag` marked done.
 - [ ] [#9v7h] agent-doc: --pending-add should reject text starting with '[/]' / '[x]' / '[ ]' (ambiguous state marker). Add --pending-add-gated flag and emit assigned hash to stdout so skill can compose add+gate atomically without text-embedding.
 - [ ] [#txex] notify: add --pending-add flag — auto-create agent:pending on target when absent, --no-create-pending to opt out. Pending-only (no exchange blockquote). Errors become no-ops under auto-create.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
+- [ ] [#hrmt] Rewrite src/agent-doc/SKILL.md (bundled skill) to invert Phase 2 pending guidance: remove 'every response MUST include a patch:pending block', replace with granular-ops contract from .claude/skills/agent-doc/SKILL.md §1b. RELEASE GATE for #gqep — v0.32.4 cannot ship with inverted bundled-skill guidance.
 <!-- /agent:pending -->
 ## Assistant

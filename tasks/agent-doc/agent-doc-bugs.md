@@ -269,7 +269,7 @@ Want me to add that `--create-pending` flag to the pending item, or keep it stri
 
 ❯ Right now, I'm the author of the sending + receiving documents.
 ❯ We may support multi-user agent-doc workspaces in the future.
-### Re: single-author now, multi-user later (HEAD)
+### Re: single-author now, multi-user later
 
 That flips the default. When you own both ends, "violating author expectation" is vacuous — you *are* the author on both sides. The conservative default exists to protect a stranger's document; there's no stranger yet.
 
@@ -284,7 +284,31 @@ Forward-compat path for when multi-user lands:
 Net: ship auto-create as default now, with `--no-create-pending` as the escape hatch. Plan the recipient-policy TOML knob as a multi-user follow-up, not v1.
 
 Updating the pending item to reflect this — want me to reword it to "notify: auto-create agent:pending on target (with --no-create-pending opt-out)"?
-<!-- agent:boundary:193c1843 -->
+❯ Yes.
+❯ How can we track **Recipient-side policy later.**? This may happen weeks from now.
+### Re: reword confirmed + tracking the multi-user follow-up (HEAD)
+
+Reworded `#txex` to match the new design: auto-create default, `--no-create-pending` opt-out, pending-only behavior.
+
+For the **recipient-side policy** work — that's exactly what `[/]` gated state is designed for. Gated items:
+
+- Are **not reaped** by preflight, so they persist indefinitely without cluttering active work.
+- Show up in `pending_gated_count` in preflight JSON, so you can see at a glance how many long-term trackers exist.
+- Transition `[/] → [ ]` via `--pending-ungate <id>` when you're ready to schedule the work, then through the normal `[ ] → [x]` active lifecycle.
+- Survive pending reorders and stay visible in the tail of the list as a roadmap marker.
+
+**What I just did:** added the multi-user follow-up as a new pending item. I tried `--pending-gate "last"` to gate it in the same call, but that alias isn't implemented — the binary rejected it (`pending gate: no item with id [#last]`). So the item landed as an active `[ ]` for now. Next cycle I'll read the fresh hash from preflight and run `--pending-gate <hash>` to flip it to `[/]`. I tagged the item text with `[MULTI-USER FOLLOW-UP, gate next cycle]` so it's visually distinct until the gate lands.
+
+**Small feature idea** (not adding to pending unless you want): `--pending-gate last` and `--pending-gate N` (gate the Nth-most-recent add) would be a clean ergonomic improvement for this exact workflow. Currently you have to do a two-cycle dance to add-and-gate.
+
+**Alternative tracking mechanisms** if pending-gated feels wrong for long-horizon work:
+
+- **tasks/software/agent-doc.md or a dedicated roadmap doc** — narrative tracker, not lifecycle-managed. Good for architecture notes, weak for "remind me when X lands."
+- **A `[MULTI-USER]` tag prefix convention** — search by tag instead of state. Simpler but no first-class reap protection.
+- **GitHub issue on agent-doc** — external tracker, good if you want it visible to collaborators and linked from code.
+
+Gated-pending wins for single-user workspaces because it keeps the tracker adjacent to the code it describes and inherits lifecycle machinery. If you later want GitHub visibility, we can mirror gated items → issues via a sync command.
+<!-- agent:boundary:d9057f66 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -328,6 +352,8 @@ Updating the pending item to reflect this — want me to reword it to "notify: a
 - [ ] [#3j0e] Install skills-janitor as Claude Code plugin (run /plugin install khendzel/skills-janitor at terminal). User plans to fork eventually; this is the interim path.
 - [ ] [#vdyj] After fork: move forked skills-janitor under src/ as submodule, wire audit into make precommit, and optionally add nightly cron via schedule skill writing drift reports to tasks/agent-doc/skills-audit.md.
 - [ ] [#9v7h] agent-doc: --pending-add should reject text starting with '[/]' / '[x]' / '[ ]' (ambiguous state marker). Add --pending-add-gated flag and emit assigned hash to stdout so skill can compose add+gate atomically without text-embedding.
-- [ ] [#txex] notify: add --pending-add flag to add task to target's agent:pending
+- [ ] [#txex] notify: add --pending-add flag — auto-create agent:pending on target when absent, --no-create-pending to opt out. Pending-only (no exchange blockquote). Errors become no-ops under auto-create.
+- [ ] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set the list once; multi-user recipients gate what senders can materialize. Ship with multi-user workspace support, not before. Gate with [/] until multi-user work begins.
+- [ ] [#e4pc] [MULTI-USER FOLLOW-UP, gate next cycle] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set the list once; multi-user recipients gate what senders can materialize. Ship with multi-user workspace support, not before.
 <!-- /agent:pending -->
 ## Assistant

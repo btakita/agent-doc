@@ -143,7 +143,7 @@ My recommendation: **option 1** if pane %2 is still live, **option 3** otherwise
 ❯ Can we add a way to send a task to another pane? Would transfer work?
 
 **No pending change this cycle** — nothing to add/remove until I know which path you want.
-### Re: send a task to another pane (HEAD)
+### Re: send a task to another pane
 
 Short answer: **`transfer` won't do it** — it moves component content between documents, not tasks between panes. Panes are bound to documents via claims, so "send to another pane" really means "write into the document that other pane owns, in a way its next cycle will see."
 
@@ -161,7 +161,37 @@ What's missing for a clean "dispatch" UX:
 **Possible new command** (pending candidate): `agent-doc dispatch <target-doc> "<task>" [--wake]` — wraps `notify` + `focus` + optional `tmux send-keys` to the receiver pane to kick a cycle. Cleaner than remembering the notify + focus dance.
 
 Want me to add `dispatch` as a pending item, or start with just documenting `notify` as the canonical cross-pane task-send mechanism?
-<!-- agent:boundary:6124f388 -->
+
+❯ What is `agent-doc notify` used for normally?
+### Re: what is `agent-doc notify` normally for? (HEAD)
+
+The designed-for use case is **cross-document re-evaluation signals** — one session telling another "something you depend on changed, take another look." Not primarily a task-dispatch mechanism (even though it can be repurposed as one).
+
+**What it does** (from `src/notify.rs`):
+- Appends a blockquote to the target document's `agent:exchange` component:
+  ```
+  > **[NOTIFY from <source>]** (2026-04-14T04:09:18Z)
+  > <message>
+  > Re-evaluate: <affects>
+  ```
+- Inserts **before** the boundary marker if one exists (so it reads as new user input on the next cycle, not as stale history).
+- Atomic write + snapshot update + optional git commit (same write path as a normal response).
+
+**The flags reveal the intent:**
+- `--source <doc-or-session>` — who's sending the signal (e.g. `src/agent-doc/tasks/agent-doc-feat.md`). Lets the receiver trace provenance.
+- `--affects <sections>` — emits a `Re-evaluate: <sections>` line, which is the **directive** to the receiving agent: "the following sections of your doc may be stale now." That's the semantic core — it's a change-propagation primitive, not a generic message.
+
+**Canonical scenario:** agent-doc session A edits a shared spec or a dependency that session B's doc references. A runs `agent-doc notify path/to/B.md "Spec X changed: Y is now required" --source path/to/A.md --affects "architecture,pending"`. Next time B's pane runs a cycle, the blockquote is in the diff as a `[user+]` turn, and B re-evaluates the flagged sections.
+
+**Why it's close-but-not-ideal for "send a task to another pane":**
+- ✅ Cross-pane reachable — works for any claimed document regardless of which pane owns it.
+- ✅ Shows up as user input on the next cycle.
+- ❌ No wake — receiver sees it only when its pane naturally runs (editor save, explicit `/agent-doc`, watch daemon). No push.
+- ❌ Semantically framed as "re-evaluate," not "do this." Works fine for task-dispatch, but the `[NOTIFY]` header + `Re-evaluate:` line read weird for imperative tasks.
+- ❌ No ack path back to sender.
+
+So `notify` is the right **primitive**, but a `dispatch` wrapper (notify + focus + optional tmux send-keys for wake) would be a cleaner ergonomic layer for "send a task." Still waiting on your call: queue `dispatch` as pending, or document `notify` as the canonical cross-pane mechanism and leave it there?
+<!-- agent:boundary:4ba570bb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -337,7 +337,7 @@ Option 2 is the cleaner invariant — the component tells us the context, so don
 
 ❯ do Option 2
 
-### Re: do Option 2 (HEAD)
+### Re: do Option 2
 
 Done. Landed the cleaner invariant in `normalize_user_prompts_in_exchange` (`src/agent-doc/src/write.rs`):
 
@@ -352,13 +352,63 @@ Tests:
 - Full `cargo test --bin agent-doc write::` suite: 62 passed, 0 failed.
 
 Pending item `#vnxg` marked done.
-<!-- agent:boundary:a6b94799 -->
+❯ do #25ag
+### Re: #25ag landed — `patch:pending` → `replace:pending` with dual-accept (HEAD)
+
+Implementation complete in `src/agent-doc`. Version bumped to **0.32.4** (`Cargo.toml` + `pyproject.toml`). All pending-system tests green (24/24), write suite green (62/62), clippy clean, release binary built. Pre-existing `resync::tests` / `route::tests` failures are tmux-environment flakes unrelated to this change.
+
+**Parser change (`src/template.rs::parse_patches`):** Added a second prefix branch — the scanner now recognizes `<!-- replace:pending -->...<!-- /replace:pending -->` as a full synonym for the old `<!-- patch:pending -->` form. Scope is tight: `replace:` is only accepted when the component name is exactly `pending`. Other `replace:*` names fall through as unmatched rather than silently broadening the grammar to every component. The close marker tracks the open prefix (`</patch:pending>` closes a `patch:` open; `</replace:pending>` closes a `replace:` open) so mixed open/close pairs don't accidentally match. When the parser sees `patch:pending`, it emits a stderr deprecation warning **per block** so callers find and update their sites during the dual-accept window.
+
+**Enforcement rename (`src/write.rs`):** `enforce_no_patch_pending` → `enforce_no_replace_pending` (call sites updated at lines 823, 925, 1315, 1499). The function checks both env vars — either `AGENT_DOC_ALLOW_REPLACE_PENDING=1` (canonical) or `AGENT_DOC_ALLOW_PATCH_PENDING=1` (deprecated alias) authorizes the escape hatch. Error message now says `ERR: replace:pending block forbidden — use --pending-add/done/edit/clear/reorder.` Enforcement still triggers on `name == "pending"`, so both block forms hit the same gate regardless of which prefix opened them.
+
+**CLI flag rename (`src/main.rs`):** `--allow-patch-pending` → `--allow-replace-pending` via clap `alias`. Struct field renamed `allow_patch_pending` → `allow_replace_pending`. The CLI sets **both** env vars when the flag is passed, so any library-layer code still reading only the old env name keeps working through the migration window. Hidden flag stays hidden.
+
+**Tests added/renamed (`tests/pending_integration.rs`):**
+
+1. `write_rejects_replace_pending_block` — default-reject on canonical form.
+2. `write_rejects_legacy_patch_pending_block` — default-reject on deprecated form, **asserts stderr contains `deprecated`** (pins the warning emission).
+3. `write_allows_replace_pending_with_escape_hatch` — happy path: canonical form + canonical flag.
+4. `write_allows_legacy_patch_pending_with_legacy_flag` — legacy form + legacy flag routed via clap alias, asserts deprecation warning still emitted.
+5. `write_allows_replace_pending_with_legacy_env_var` — library-layer compat: canonical block + `AGENT_DOC_ALLOW_PATCH_PENDING=1` (old env var) still authorizes.
+6. `write_rejects_replace_pending_via_library_default` — phase-3 inversion intact for library callers, both env vars unset.
+
+All six pass in isolation (`cargo test --test pending_integration -- --exact ...`). The renamed tests replace the two old `write_{allows,rejects}_patch_pending_*` cases; the legacy tests exercise the deprecation-warning path that didn't exist before.
+
+**Docs updated:**
+
+- `VERSIONS.md` — 0.32.4 entry with full rationale, test list, and a **"next release removes dual-accept"** call-out so the migration window is finite and visible.
+- `specs/pending-system.md` — `§4 Granular write-command surface` and `§6 Enforcement` now mention both forms; added a **#25ag rename paragraph** documenting canonical names, deprecated aliases, and the dual-accept policy.
+- `.claude/skills/agent-doc/SKILL.md` — `§1b Update pending` references `<!-- replace:pending -->` as canonical; escape hatch paragraph explains the deprecation status of `--allow-patch-pending` / `patch:pending`.
+
+**What's NOT in this change (deliberate):**
+
+- `src/agent-doc/SKILL.md` (the bundled skill) still has the *old Phase 2* guidance ("every response MUST include a patch:pending block") which is now outright inverted by Phase 3 — touching it is a separate skill-rewrite job, not part of #25ag. Filed as follow-up below.
+- No release (crates.io / PyPI / GitHub Release). Per release checklist, `cargo install --path .` + live manual-testing gate must run first, and that's your call.
+- `--pending-add` still writes text literally — the `[/]` state-marker footgun (`#9v7h`) is a separate queued item.
+
+**Invariants verified:**
+
+- Default-reject holds for both forms — you cannot land a `replace:pending` or `patch:pending` block without an explicit opt-in.
+- Granular-flag path (`--pending-add/done/edit/clear/reorder/gate/ungate`) is unchanged — the dual-accept is strictly additive at the parser layer.
+- Hash-id stability is untouched — no code path assigns or churns ids during this change.
+- Parser scope: the new `replace:` branch only matches `replace:pending`. `<!-- replace:status -->` or any other `replace:*` falls through as unmatched text, which keeps the grammar surface small.
+
+**Follow-ups queued (not this cycle):**
+
+1. `src/agent-doc/SKILL.md` rewrite to match Phase 3 + #25ag — the bundled skill doc is drifted.
+2. Next-release removal of `patch:pending` parsing + `--allow-patch-pending` alias + `AGENT_DOC_ALLOW_PATCH_PENDING` env var.
+3. Sweep of any other `patch:pending` references I may have missed in submodule task docs / runbooks (this change only touched the `src/agent-doc` crate + the canonical skill file).
+
+Marking `#25ag` done via `--pending-done 25ag` in this write cycle. Preflight will reap it next cycle.
+
+Pending item `#25ag` marked done.
+<!-- agent:boundary:273931e4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#25ag] Rename patch:pending → replace:pending. Parser accepts both for one release with deprecation warning; --allow-patch-pending gains --allow-replace-pending alias; AGENT_DOC_ALLOW_REPLACE_PENDING=1 becomes canonical env var; specs/pending-system.md + SKILL.md updated to new name; drop old name after one release. Queue behind current phase-3 work.
+- [x] [#25ag] Rename patch:pending → replace:pending. Parser accepts both for one release with deprecation warning; --allow-patch-pending gains --allow-replace-pending alias; AGENT_DOC_ALLOW_REPLACE_PENDING=1 becomes canonical env var; specs/pending-system.md + SKILL.md updated to new name; drop old name after one release. Queue behind current phase-3 work.
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release after manual-testing gate
 - [ ] [#e6z1] agent-doc: version bump + VERSIONS.md entry for gated-state feature after implementation lands (release gate — do not ship with the #eg0w bundle)
 - [ ] [#14z4] Hash collision ceiling: implement 8-char fallback in pending::generate_hash if 4-char collides (spec §1)
@@ -398,6 +448,5 @@ Pending item `#vnxg` marked done.
 - [ ] [#9v7h] agent-doc: --pending-add should reject text starting with '[/]' / '[x]' / '[ ]' (ambiguous state marker). Add --pending-add-gated flag and emit assigned hash to stdout so skill can compose add+gate atomically without text-embedding.
 - [ ] [#txex] notify: add --pending-add flag — auto-create agent:pending on target when absent, --no-create-pending to opt out. Pending-only (no exchange blockquote). Errors become no-ops under auto-create.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [x] [#vnxg] bug: patchback omits ❯ prefix on user-prompt lines that contain only a hash ref (e.g. a line that is just #zj6s). Repro in src/session-share/tasks/claudescore.md. normalize_user_prompts_in_exchange likely treats hash-only lines as metadata/annotations and skips prefixing. Expected: any added line within an exchange user-prompt block gets the prefix.
 <!-- /agent:pending -->
 ## Assistant

@@ -508,12 +508,35 @@ Plus a stale `<!-- agent:boundary:... -->` marker being dropped at the old posit
 #1 looks like the lower-friction fix and matches what the existing comment already implies the snapshot path "should maybe" do. #2 is the purist answer. Let me know which way you want it, or if you'd rather hold off.
 ❯ reposition_boundary_in_snapshot seems fine.
 
-### Re: Deterministic `(HEAD)` removal in the binary (HEAD)
+### Re: Deterministic `(HEAD)` removal in the binary
 
 Going with option #1 — extending `reposition_boundary_in_snapshot` (git.rs:593) to also rewrite the working tree with `template::reposition_boundary_to_end` + `strip_head_markers`, gated on the existing active-run guard (`pending_path_for`). Sweep-committed foreign docs have no active run, so they'll get the deterministic rewrite; in-flight runs are skipped so concurrent IPC/plugin writes don't race.
 
 Implementing now in the agent-doc binary only — no FFI/plugin changes needed since the binary is the canonical source of truth. I'll leave `try_ipc_reposition_boundary` in place as a hint to open editors, but the on-disk state will be correct regardless of whether the plugin is loaded.
-<!-- agent:boundary:2ba9342e -->
+
+### Re: Implemented — deterministic working-tree boundary reposition (HEAD)
+
+**Change:** `reposition_boundary_in_snapshot` (git.rs:593) now rewrites both the snapshot AND the working tree under the same active-run guard.
+
+**Diff** (src/agent-doc/src/git.rs):
+- Snapshot path unchanged: `template::reposition_boundary_to_end` still drops stale `<!-- agent:boundary:... -->` markers and inserts a single fresh one at the end of exchange
+- Working-tree path added: reads the file, applies `reposition_boundary_to_end` + `strip_head_markers`, atomic-writes if the content differs
+- Both transformations preserve user edits — they only touch boundary lines and ` (HEAD)` heading suffixes
+- Returns `true` if either write changed content (so the existing `try_ipc_reposition_boundary` hint still fires)
+
+**Why this is safe:**
+- `pending_path_for` guard is unchanged — active `agent-doc write` runs still own the transition via IPC, preventing races
+- Outside an active run, the binary becomes the canonical source of truth regardless of whether a plugin is loaded — fixes the foreign sweep-committed doc case directly
+- No-op writes are skipped (`cleaned != working` check), so IDEs with open editors only see "externally modified" when something actually needed fixing
+- No FFI/plugin changes required — the skill requirement "+ ffi plugin (JB plugin only if necessary)" reduced to zero plugin work
+
+**Verification:**
+- `cargo clippy` clean
+- 274 lib tests pass
+- 7 existing `reposition_boundary*` tests pass (underlying `template::reposition_boundary_to_end` and `strip_head_markers` primitives are already unit-tested)
+- `cargo install --path .` + `cargo build --release` rebuilt both the global binary and `.bin/agent-doc` symlink target
+- No new test added for the git.rs function itself — it's a thin composition of already-covered primitives behind the pending-path guard
+<!-- agent:boundary:26af807a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

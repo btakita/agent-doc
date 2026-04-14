@@ -311,7 +311,7 @@ Gated-pending wins for single-user workspaces because it keeps the tracker adjac
 ❯ Gated-pending with a gh issue.
 
 ❯ In src/session-share/tasks/claudescore.md, my last prompt where the entire line is `#zj6s` did not get a `❯ ` prefix in the patchback.
-### Re: gated-pending + gh issue, and the prefix bug (HEAD)
+### Re: gated-pending + gh issue, and the prefix bug
 
 **Done on the multi-user follow-up:**
 
@@ -322,7 +322,7 @@ Gated-pending wins for single-user workspaces because it keeps the tracker adjac
 
 The gh issue gives external visibility; the gated-pending keeps the tracker adjacent to the code. When multi-user lands, you ungate `#ha3h`, close the issue with a link to the implementing PR, and the loop closes.
 
-### Re: prefix bug on hash-only user-prompt lines (HEAD)
+### Re: prefix bug on hash-only user-prompt lines
 
 Nice catch. Filed as a new pending item. Working theory:
 
@@ -334,7 +334,25 @@ Fix candidates:
 2. **Anchor the skip to the component.** Only skip prefix-rewrite inside `agent:pending`, `agent:boundary:*`, and patch/component open/close comments. Inside `agent:exchange`, every added line gets prefixed, full stop.
 
 Option 2 is the cleaner invariant — the component tells us the context, so don't second-guess the content. I'll pick it up when that item gets scheduled. If you want me to investigate right now instead of queuing, say the word and I'll pull up `write.rs` and pinpoint the branch.
-<!-- agent:boundary:be0881ea -->
+
+❯ do Option 2
+
+### Re: do Option 2 (HEAD)
+
+Done. Landed the cleaner invariant in `normalize_user_prompts_in_exchange` (`src/agent-doc/src/write.rs`):
+
+- Dropped the content-based skips (`starts_with('#')`, `starts_with('"')`).
+- Tightened the HTML-comment skip to `<!--` (still excludes component/patch/boundary markers).
+- Inside `agent:exchange`, every added line in the user region now gets the `❯ ` prefix. Structural markers and fenced code blocks remain excluded.
+
+Tests:
+
+- New regression: `normalize_user_prompts_hash_ref_prefixed` — bare `#zj6s` gets `❯ ` (the #vnxg repro).
+- Updated `normalize_user_prompts_heading_in_user_region_prefixed` and `normalize_user_prompts_quoted_string_prefixed` to match the new invariant — user-typed headings and quoted lines now get the prefix.
+- Full `cargo test --bin agent-doc write::` suite: 62 passed, 0 failed.
+
+Pending item `#vnxg` marked done.
+<!-- agent:boundary:3d82df50 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -380,7 +398,6 @@ Option 2 is the cleaner invariant — the component tells us the context, so don
 - [ ] [#9v7h] agent-doc: --pending-add should reject text starting with '[/]' / '[x]' / '[ ]' (ambiguous state marker). Add --pending-add-gated flag and emit assigned hash to stdout so skill can compose add+gate atomically without text-embedding.
 - [ ] [#txex] notify: add --pending-add flag — auto-create agent:pending on target when absent, --no-create-pending to opt out. Pending-only (no exchange blockquote). Errors become no-ops under auto-create.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [x] [#e4pc] [MULTI-USER FOLLOW-UP, gate next cycle] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set the list once; multi-user recipients gate what senders can materialize. Ship with multi-user workspace support, not before.
-- [ ] [#vnxg] bug: patchback omits ❯ prefix on user-prompt lines that contain only a hash ref (e.g. a line that is just #zj6s). Repro in src/session-share/tasks/claudescore.md. normalize_user_prompts_in_exchange likely treats hash-only lines as metadata/annotations and skips prefixing. Expected: any added line within an exchange user-prompt block gets the prefix.
+- [x] [#vnxg] bug: patchback omits ❯ prefix on user-prompt lines that contain only a hash ref (e.g. a line that is just #zj6s). Repro in src/session-share/tasks/claudescore.md. normalize_user_prompts_in_exchange likely treats hash-only lines as metadata/annotations and skips prefixing. Expected: any added line within an exchange user-prompt block gets the prefix.
 <!-- /agent:pending -->
 ## Assistant

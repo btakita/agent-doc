@@ -993,7 +993,7 @@ Release target: per spec §Implementation §4, Gated lifecycle ships in **v0.32.
 
 Approve the phasing and I'll start Phase 1. Each phase commits + tests cleanly before moving to the next.
 ❯ start
-### Re: Phase 1 landed — `PendingState` enum + `[/]` parse/render (HEAD)
+### Re: Phase 1 landed — `PendingState` enum + `[/]` parse/render
 
 Submodule commit `c53b09b` on `20260414/pending-gated-state`. Internal data-model only — no CLI surface yet, no behavior change for existing docs. 30 `pending::tests` pass (6 new).
 
@@ -1024,7 +1024,7 @@ Plus the existing `parse_fully_migrated`, `parse_checkbox_only_no_id`, `parse_le
 
 **Build status:** `cargo build` clean. `cargo clippy` shows pre-existing warnings in `diff.rs`, `write.rs`, `preflight.rs`, etc. — none in `pending.rs` or my changes. `cargo test pending::tests` → 30 passed.
 
-### Phase 2 plan (`pending_cmd::gate/ungate` + CLI flags) (HEAD)
+### Phase 2 plan (`pending_cmd::gate/ungate` + CLI flags)
 
 Ready to start when you give the next go. Scope:
 
@@ -1036,12 +1036,94 @@ Ready to start when you give the next go. Scope:
 
 No spec ambiguity for Phase 2 — the matrix in `specs/pending-system.md` §4 is the contract. I'll match it exactly.
 
-### Open question still pending (Phase 3 only) (HEAD)
+### Open question still pending (Phase 3 only)
 
 The `AGENT_DOC_REJECT_PATCH_PENDING=1` → flip-default question is **only** for Phase 3 (preflight + enforcement). Phase 1 changes nothing user-visible; Phase 2 only adds new flags. So the question can wait one or two more cycles. I'll re-raise before starting Phase 3.
 
 Approve Phase 2 and I'll start the `gate/ungate` matrix + CLI flags.
-<!-- agent:boundary:a0c9fbe1 -->
+❯ continue to phase 2
+### Re: Phase 2 landed — `gate/ungate` matrix + CLI flags (HEAD)
+
+Working-tree state on `20260414/pending-gated-state`. **Not committed yet** — the submodule has unrelated working-tree changes (supervisor, env.rs, frontmatter.rs, etc.) from prior cycles that I don't want to bundle into a "Phase 2" commit. You'll want to stage selectively or do a sweep commit.
+
+**Build:** clean. **Tests:** `pending::tests` 40 passing (10 new), `pending_integration` 18 passing (6 new). **Clippy:** clean on changed files (pre-existing warnings in `write.rs` only — unrelated).
+
+**`src/pending.rs` — new public surface:**
+
+```rust
+pub enum PendingOp { Gate, Ungate, MarkDone }
+pub enum TransitionResult { Transition(PendingState), NoOp }
+pub fn validate_transition(from: PendingState, op: PendingOp) -> Result<TransitionResult>
+pub fn op_gate(body: &str, id: &str) -> Result<String>
+pub fn op_ungate(body: &str, id: &str) -> Result<String>
+```
+
+`validate_transition` is the single source of truth for the matrix. `op_gate` and `op_ungate` call it; `op_done` stays unconditional per the Phase 1 plan ("primitives are unconditional, validation lives at the layer above"). `MarkDone` is wired into the matrix and tested but not yet consumed by a primitive — that's a Phase 3 follow-up if/when we want `op_done` to also error on `Done → Done` instead of silently re-marking.
+
+**State matrix (locked in `validate_transition_full_matrix` test):**
+
+| from \ op | Gate     | Ungate   | MarkDone |
+|-----------|----------|----------|----------|
+| Open      | → Gated  | **err**  | → Done   |
+| Gated     | no-op    | → Open   | → Done   |
+| Done      | **err**  | **err**  | no-op    |
+
+Decisions worth remembering:
+- `Gate` on `Gated` and `MarkDone` on `Done` are idempotent **no-ops, not errors** — so the skill can re-issue `--pending-gate X` safely on retries / watch loops without faking a failure.
+- `Gate` on `Done` is an error, not a "kick it back to Gated" reset. The intended workflow for "this completed item needs another gate later" is to add a fresh pending item, not to time-travel an existing one. (Spec §4 rationale.)
+- `Ungate` requires a `[/]` source. Open → Open and Done → Open are both errors — ungate is the strict inverse of gate, not a generic reset.
+
+**`src/pending_cmd.rs`:** `gate(file, id)` and `ungate(file, id)` — thin wrappers that call the primitives, then `comp.replace_content` + `fs::write`. `gate` short-circuits the disk write on no-op (already gated) so we don't churn the file mtime and trigger spurious watch debounces.
+
+**`src/main.rs` — Write subcommand additions:**
+
+```text
+--pending-gate <id>     (repeatable)
+--pending-ungate <id>   (repeatable)
+```
+
+Apply order in the `Write` handler:
+
+```text
+clear → add → edit → gate → ungate → done → reorder
+```
+
+Gate/ungate run **before** done deliberately. That means:
+
+- `--pending-gate X --pending-done X` in one call lands on `[x]` (Gated → Done, valid). Test: `write_pending_gate_then_done_in_one_call`.
+- `--pending-done X --pending-gate X` would fail at the gate step (Done → Gate error), which is the right failure mode for "skill confused itself about state".
+
+**Tests added:**
+
+| File | Test | Asserts |
+|------|------|---------|
+| `pending.rs` | `validate_transition_full_matrix` | All 9 cells of the 3×3 matrix |
+| `pending.rs` | `op_gate_open_to_gated` | happy path |
+| `pending.rs` | `op_gate_gated_is_noop` | byte-identical body on no-op |
+| `pending.rs` | `op_gate_done_errors` | error message contains "cannot gate Done item" |
+| `pending.rs` | `op_gate_unknown_id_errors` | unknown id → Err |
+| `pending.rs` | `op_ungate_gated_to_open` | happy path |
+| `pending.rs` | `op_ungate_open_errors` | "cannot ungate Open" |
+| `pending.rs` | `op_ungate_done_errors` | "cannot ungate Done" |
+| `pending.rs` | `op_ungate_unknown_id_errors` | unknown id → Err |
+| `pending.rs` | `op_gate_preserves_other_items_and_text` | gate on item 2 leaves items 1 + 3 untouched, preserves em-dash text |
+| `pending_integration.rs` | `write_pending_gate_open_to_gated` | CLI flag end-to-end |
+| `pending_integration.rs` | `write_pending_gate_idempotent_on_gated` | re-running on `[/]` is silent + safe |
+| `pending_integration.rs` | `write_pending_gate_done_errors` | stderr contains the matrix error |
+| `pending_integration.rs` | `write_pending_ungate_gated_to_open` | CLI ungate path |
+| `pending_integration.rs` | `write_pending_ungate_open_errors` | stderr contains the matrix error |
+| `pending_integration.rs` | `write_pending_gate_then_done_in_one_call` | apply order: gate runs before done |
+
+**What's still on the table for Phase 3:**
+
+1. **Invert `enforce_no_patch_pending` default** — currently the rejection only kicks in when `AGENT_DOC_REJECT_PATCH_PENDING=1` is set, and `main.rs:1102` sets it from the `Write` handler unless `--allow-patch-pending` is passed. That's effectively "default-on for the skill path, default-off for everyone else." Per spec §6 we want default-on globally, with the env var as a kill switch instead of an opt-in. This is the question I parked — I'll re-raise it on the Phase 3 cycle along with concrete migration cost (which docs in this repo still rely on `patch:pending`, if any).
+2. **`pending_gated_count` in `PreflightOutput` JSON** — straight additive, no behavior change. Drops out of preflight reading the parsed items.
+3. **Decide whether `op_done` should also use `validate_transition`** — e.g. error on `Done → Done` to catch double-marks. Cheap to add, slightly less forgiving for retry loops.
+
+Pending updated: `#pjfg`, `#j5x0`, `#kzk7`, `#0jyk`, `#zrbq`, `#z6xv` marked done. New item added for Phase 3 work. The remaining `#mgdw`/`#h1j2`/`#q90h`/`#sx35` items are also covered by what landed in Phases 1+2 — let me know if you want me to reap them too or keep them as the original spec-driven tracker.
+
+Approve Phase 3 and I'll re-raise the enforcement-flip question with a concrete migration plan, then land `pending_gated_count` + the flip in one commit.
+<!-- agent:boundary:839abe02 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1083,13 +1165,14 @@ Approve Phase 2 and I'll start the `gate/ungate` matrix + CLI flags.
 - [ ] [#breh] rust-package skill: write the Library Context Policy stub into new library AGENTS.md at scaffold time.
 - [ ] [#3j0e] Install skills-janitor as Claude Code plugin (run /plugin install khendzel/skills-janitor at terminal). User plans to fork eventually; this is the interim path.
 - [ ] [#vdyj] After fork: move forked skills-janitor under src/ as submodule, wire audit into make precommit, and optionally add nightly cron via schedule skill writing drift reports to tasks/agent-doc/skills-audit.md.
-- [ ] [#kzk7] pending-system: add PendingState enum (Open/Gated/Done); migrate PendingItem off checked:bool
-- [ ] [#0jyk] pending-system: parse + render [/] gated checkbox in pending.rs
-- [ ] [#pjfg] pending-system: pending_cmd::gate / ungate + state-transition matrix validation
-- [ ] [#j5x0] pending-system: CLI flags --pending-gate / --pending-ungate wired through main.rs + write.rs
-- [ ] [#zrbq] pending-system: backfill() inserts missing [ ] checkboxes (currently hash-only)
+- [x] [#kzk7] pending-system: add PendingState enum (Open/Gated/Done); migrate PendingItem off checked:bool
+- [x] [#0jyk] pending-system: parse + render [/] gated checkbox in pending.rs
+- [x] [#pjfg] pending-system: pending_cmd::gate / ungate + state-transition matrix validation
+- [x] [#j5x0] pending-system: CLI flags --pending-gate / --pending-ungate wired through main.rs + write.rs
+- [x] [#zrbq] pending-system: backfill() inserts missing [ ] checkboxes (currently hash-only)
 - [ ] [#tzwy] pending-system: preflight emits pending_gated_count in JSON
 - [ ] [#2ng4] pending-system: invert patch:pending enforcement default (reject without env var gate)
-- [ ] [#z6xv] pending-system: unit tests for state matrix, gated parse/render, backfill, reap-skips-gated
+- [x] [#z6xv] pending-system: unit tests for state matrix, gated parse/render, backfill, reap-skips-gated
+- [ ] [#6d6c] Phase 3: invert patch:pending enforcement default + emit pending_gated_count in preflight JSON
 <!-- /agent:pending -->
 ## Assistant

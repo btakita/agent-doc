@@ -1048,7 +1048,7 @@ Preserving all existing SA tests. Adding user-flow tests (`token_key`, `parse_to
 After code edit: `make check` in `src/corky/`. OAuth scope `webmasters.readonly` is "sensitive" per Google, so the user will need to add themselves as a test user in GCP Console → OAuth consent screen → Test users before the flow completes successfully — noting that in the response but not blocking on it.
 
 Also noticed a stray file at `src/corky/src/gsc/20260413/corky-gsc` — looks like a misdirected `git branch` command that captured stdout. Not touching it unless you want me to clean it up.
-<!-- agent:boundary:774c498a -->
+<!-- agent:boundary:dc0aa2a0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

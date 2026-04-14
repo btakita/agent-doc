@@ -248,7 +248,7 @@ Open sub-questions I'll resolve during implementation (or flag back to you if th
 3. **Commit behavior:** same as current `notify` — commit by default, `--no-commit` to skip.
 
 Added to pending. Implementation happens when that item gets scheduled — nothing further this cycle unless you want to refine the design first.
-<!-- agent:boundary:f1ce31a2 -->
+<!-- agent:boundary:e7fdd65d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

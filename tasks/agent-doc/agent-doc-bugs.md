@@ -1209,14 +1209,34 @@ Candidates, ordered by how loudly they signal "escape hatch":
 
 Want me to turn this into a `[#xxxx]` pending item and queue it behind the current phase-3 work?
 ❯ yes
-### Re: queued (HEAD)
+### Re: queued
 
 Confirmed — `replace:pending` it is. Added to the pending list with the full migration path baked into the item text so future-me (or future-you) can pick it up without re-deriving the plan:
 
 > Rename `patch:pending` → `replace:pending`. Parser accepts both for one release with deprecation warning; `--allow-patch-pending` gains `--allow-replace-pending` alias; `AGENT_DOC_ALLOW_REPLACE_PENDING=1` becomes canonical env var; `specs/pending-system.md` + SKILL.md updated to new name; drop old name after one release. Queue behind current phase-3 work.
 
 Sequencing: this lands **after** the current phase-3 work (pending_gated_count + enforcement inversion) ships. Rationale — the rename is a surface-level API change, and doing it on top of a stabilized enforcement default avoids re-touching the same call sites twice. When phase-3 is green, this becomes the first visible cleanup on top of it.
-<!-- agent:boundary:07077ab7 -->
+
+❯ continue
+### Re: continue — what to pick up next? (HEAD)
+
+"Continue" is ambiguous after a long cycle, so flagging the fork before I start cutting code:
+
+**Current state:**
+- Branch `20260414/pending-gated-state` is 3 commits ahead of main: `c53b09b` (Phase 1) → `fa31f78` (sweep) → `69b5475` (Phase 3).
+- Not yet merged. Not yet released.
+- Next queued item is `#25ag` (rename `patch:pending` → `replace:pending`).
+
+**Three plausible reads of "continue":**
+
+1. **Merge + release first, then rename.** Fast-forward `20260414/pending-gated-state` into main, cut v0.32.4 (`#gqep`), then start `#25ag` on a fresh branch on top of the release. Cleanest history — the rename lands on a shipped enforcement default rather than a branch-local one.
+2. **Rename on the current branch, defer release.** Keep stacking on `20260414/pending-gated-state`, land `#25ag` as a fourth commit, release the whole bundle as v0.32.4 once the rename is green. Fewer release cycles, but the branch grows and the release note gets busier.
+3. **Something else entirely.** e.g. the spec's open question about `op_done` using `validate_transition` for `Done → Done` catches, or `#mchh` (JetBrains plugin reinstall + session-picker verify), or a bug I haven't spotted in the diff.
+
+My read of the sequencing note from last cycle ("this lands **after** the current phase-3 work ships") favors **option 1** — "ships" implies released, not just committed. But I don't want to trigger a release cycle on a one-word prompt.
+
+Which one?
+<!-- agent:boundary:ce4af10d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

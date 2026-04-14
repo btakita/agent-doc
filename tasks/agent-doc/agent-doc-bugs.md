@@ -557,7 +557,7 @@ Bumping the version + writing a VERSIONS.md entry now would ship a release that 
 3. **Override the gate** — explicitly say "ship the version bump now without the feature code" and I'll do it, but I'd push back hard because the bundled skill (`#hrmt`) is also a release gate for `#gqep` and you'd be stacking half-ready gates.
 
 My read: you probably want option 1. Confirm and I'll start on `#mgdw` (parser + `PendingState::Gated` + `[/]` round-trip) as the first slice.
-<!-- agent:boundary:e6758095 -->
+<!-- agent:boundary:6462f7c3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

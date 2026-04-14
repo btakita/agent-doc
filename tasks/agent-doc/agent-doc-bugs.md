@@ -538,7 +538,7 @@ Implementing now in the agent-doc binary only — no FFI/plugin changes needed s
 - No new test added for the git.rs function itself — it's a thin composition of already-covered primitives behind the pending-path guard
 ❯ do #e6z1
 
-### Re: #e6z1 — can't execute, upstream implementation not landed (HEAD)
+### Re: #e6z1 — can't execute, upstream implementation not landed
 
 `#e6z1` is the release-gate task: *"version bump + VERSIONS.md entry for gated-state feature **after implementation lands**"*. The gated-state implementation items are all still open:
 
@@ -557,21 +557,56 @@ Bumping the version + writing a VERSIONS.md entry now would ship a release that 
 3. **Override the gate** — explicitly say "ship the version bump now without the feature code" and I'll do it, but I'd push back hard because the bundled skill (`#hrmt`) is also a release gate for `#gqep` and you'd be stacking half-ready gates.
 
 My read: you probably want option 1. Confirm and I'll start on `#mgdw` (parser + `PendingState::Gated` + `[/]` round-trip) as the first slice.
-<!-- agent:boundary:6462f7c3 -->
+❯ do option 1
+
+### Re: option 1 — the bundle was already shipped; only the VERSIONS.md entry was missing (HEAD)
+
+Walked the tree before writing any code and found everything already landed across three commits:
+
+- `c53b09b` — **Phase 1:** `PendingState` enum (`Open` / `Gated` / `Done`), `PendingOp` enum (`Gate` / `Ungate` / `MarkDone`), `validate_transition` state matrix, parser round-trip for `[/]`, `box_char` / `from_box_char` primitives in `src/pending.rs`
+- `fa31f78` — **Phase 2:** CLI flags wired — `--pending-gate <id>` / `--pending-ungate <id>` on `agent-doc write` (main.rs:437–442, 1098–1101), gate/ungate ordering before done in main.rs:1084, reaper skips `Gated` items in preflight
+- `69b5475` — **Phase 3:** `pending_gated_count` field in preflight JSON (preflight.rs:196, 512, 706), plus the earlier `patch:pending` → `replace:pending` enforcement inversion
+
+Which means `#mgdw` / `#h1j2` / `#q90h` / `#sx35` were already discharged — I was about to re-implement work that's already in `main`.
+
+**Verification run (fresh, just now):**
+- `cargo test --lib -q` — 274 passed
+- `cargo test --test pending_integration -q` — 24 passed (covers `write_pending_gate_open_to_gated`, `write_pending_gate_idempotent_on_gated`, `write_pending_gate_done_errors`, `write_pending_gate_then_done_in_one_call`, `preflight_emits_pending_gated_count`, `preflight_omits_pending_gated_count_when_zero`)
+- Live signal from this very cycle's preflight: `pending: 4 gated item(s)` + `"pending_gated_count": 4` in the JSON — the feature is running in production against this exact document
+
+### Re: #e6z1 — VERSIONS.md entry landed, no version bump needed (HEAD)
+
+`0.32.4` is **not yet published** (`cargo search agent-doc` shows `0.32.3`; `git tag -l 'v0.32.*'` stops at `v0.32.3`). So `#e6z1` collapses to *"append the gated-state feature notes to the in-progress 0.32.4 section"* — no `Cargo.toml` / `pyproject.toml` bump required.
+
+**Change to VERSIONS.md:**
+- New top entry under `## 0.32.4`, above the existing `patch:pending → replace:pending` bullet
+- Cites the five pending-ids (#pf01, #mgdw, #h1j2, #q90h, #sx35) so git-blame ↔ tasklist is recoverable
+- Documents: the `[/]` canonical form, state-transition matrix + rationale for illegal/no-op cells, CLI flag combinability (gate-before-done ordering), preflight's `pending_gated_count` signal (emitted when ≥1, omitted at zero), reaper skip semantics, the concrete test names that cover each path, and the original rationale for why `[/]` exists at all (release-gated tasks had no lexical distinction from active work)
+- `Cargo.toml` / `pyproject.toml` untouched — both still at `0.32.4`
+
+**Marking done this cycle:** `#mgdw`, `#h1j2`, `#q90h`, `#sx35`, `#e6z1`. All five were the gated-state bundle + its release-gate meta-item, and all five are discharged.
+
+**What's still on the release path to `#gqep` (v0.32.4 publish):**
+1. `#hrmt` — rewrite bundled `src/agent-doc/SKILL.md` to invert Phase 2 pending guidance (remove "every response MUST include a patch:pending block", replace with granular-ops contract). Still the hard release gate.
+2. Manual-testing gate — per `feedback_testing_before_release.md`, pause for your live-session confirmation before `cargo publish` / `maturin publish` / `gh release create`.
+3. `cargo install --path .` + `cargo build --release` after publish so `.bin/agent-doc` and `~/.cargo/bin/agent-doc` both track the published build.
+
+Ready to start on `#hrmt` next if you want to keep the release train moving, or stop here so you can eyeball the VERSIONS.md prose first.
+<!-- agent:boundary:24ce3417 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
-- [ ] [#e6z1] agent-doc: version bump + VERSIONS.md entry for gated-state feature after implementation lands (release gate — do not ship with the #eg0w bundle)
+- [x] [#e6z1] agent-doc: version bump + VERSIONS.md entry for gated-state feature after implementation lands (release gate — do not ship with the #eg0w bundle)
 - [ ] [#14z4] Hash collision ceiling: implement 8-char fallback in pending::generate_hash if 4-char collides (spec §1)
 - [ ] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)
 - [ ] [#pf01] ✅ Spec landed on 20260414/pending-gated-state: src/agent-doc/specs/pending-system.md — PendingState::Gated, [/] syntax, reaper rules, lifecycle diagram, CLI surface, state transition matrix, release discipline
-- [ ] [#mgdw] agent-doc: parser — accept `[/]` checkbox char, extend PendingState enum with Gated variant in src/agent-doc/src/pending.rs; renderer emits `[/]` round-trip
-- [ ] [#h1j2] agent-doc: reaper — skip Gated items in preflight reap pass; emit pending_gated_count alongside existing counts in preflight JSON output
-- [ ] [#q90h] agent-doc: CLI — add `--pending-gate <id>` flag on `agent-doc write` (mirror of --pending-done); `--pending-ungate <id>` to return to `[ ]`
-- [ ] [#sx35] agent-doc: tests — parser round-trip for `[/]`, state transitions ( →/→x,  →x, /→x, /→ ), reaper respects Gated, CLI flag integration
+- [x] [#mgdw] agent-doc: parser — accept `[/]` checkbox char, extend PendingState enum with Gated variant in src/agent-doc/src/pending.rs; renderer emits `[/]` round-trip
+- [x] [#h1j2] agent-doc: reaper — skip Gated items in preflight reap pass; emit pending_gated_count alongside existing counts in preflight JSON output
+- [x] [#q90h] agent-doc: CLI — add `--pending-gate <id>` flag on `agent-doc write` (mirror of --pending-done); `--pending-ungate <id>` to return to `[ ]`
+- [x] [#sx35] agent-doc: tests — parser round-trip for `[/]`, state transitions ( →/→x,  →x, /→x, /→ ), reaper respects Gated, CLI flag integration
 - [ ] [#64mb] Investigate double commit_staging race — root cause: concurrent preflights racing step 2 vs step 2d sweep; mid-flight (HEAD)-strip rewrites working tree between them
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [ ] [#xzz5] Preflight slash-command parser: absolute paths like /home/... get captured as commands. Require [a-z][a-z0-9:_-]* after the slash and reject tokens containing a second /.

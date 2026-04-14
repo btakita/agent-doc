@@ -685,7 +685,7 @@ Locked in. Plan below; pending items for each step have been added to the queue 
 **What happens to #a002, #64mb, #eg0w after this lands:** they get retagged `[/]` by hand. `#a002` stays `[/]` until a large-drift event trips telemetry. `#64mb` + `#eg0w` both promote to `[x]` once v0.32.5 runs cleanly for ~24h. Post-v0.32.6 ships, the first real cycle of the new workflow is validated on its own implementation — nice closed loop.
 
 **Open question for you before I start step 1:** do you want the spec update to go on its own branch (`20260414/pending-gated-state`) or straight to `main`? Default is branch per your convention (`yyyymmdd/short-description`).
-<!-- agent:boundary:a3c7debd -->
+<!-- agent:boundary:476db5b3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

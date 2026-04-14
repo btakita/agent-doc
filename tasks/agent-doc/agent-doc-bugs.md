@@ -702,7 +702,7 @@ Result:
 Let me know which direction you want and I'll open the patch. Preference would be the reorder — it's the structurally correct fix and makes the ordering match the intent ("one commit per turn, atomic").
 
 ❯ do the reorder
-### Re: reorder done (HEAD)
+### Re: reorder done
 
 Implemented in `src/agent-doc/src/git.rs`:
 
@@ -720,15 +720,48 @@ If you want extra confidence before shipping, I can also:
 - Run `make check` (clippy + full test suite)
 
 Let me know if you want either before I queue a release.
-<!-- agent:boundary:c9cfe179 -->
+❯ do [#14z4] [#bak5]
+### Re: #14z4 + #bak5 done (HEAD)
+
+Both landed in `src/agent-doc/src/pending.rs` and `src/preflight.rs`.
+
+**#14z4 — Hash collision ceiling (8-char fallback)**
+
+- `generate_hash_n(text, doc_id, counter, width)` — variable-width hash, `width` clamped to `[4, 8]`. Width-4 output is bit-identical to the pre-#14z4 formula (existing docs don't churn on re-backfill — verified by a new test).
+- `generate_hash(text, doc_id, counter)` kept as a thin width-4 wrapper with `#[allow(dead_code)]` so the backward-compat API + tests continue to work.
+- `assign_unique_hash(text, doc_id, taken)` — collision-escalation loop. Starts at width 4, budgets 4 retries per width, widens by 1 on exhaustion, ceiling at width 8 per spec §1. At width 8 (40 bits of entropy) it keeps spinning counter forever — a further collision is effectively impossible.
+- Both `backfill` and `op_add` now call `assign_unique_hash` instead of the open-coded counter loop.
+- Parser already accepted up to 8 chars (`is_valid_hash_id` check) — no parser change needed.
+- **Tests:** 5 new unit tests — `generate_hash_n_width4_matches_generate_hash`, `generate_hash_n_widths_have_correct_length`, `generate_hash_n_wider_extends_shorter`, `assign_unique_hash_extends_on_collision`, `assign_unique_hash_widens_when_counter_exhausted_at_width4`, and a stress test `backfill_assigns_collision_free_ids_under_pressure` (50 items, all unique, all within 4..=8 chars).
+
+**#bak5 — pending-done archive component**
+
+- `pending::reap_with_items` — new function that returns `(new_body, Vec<PendingItem>)` so callers can access the full reaped item (including text), not just the id. `pending::reap` is now a thin wrapper that drops the text.
+- `preflight::archive_pending_done(content, removed)` — new helper. Parses the content, looks for an `agent:pending-done` component, and if present, appends entries in format `- YYYY-MM-DD [#id] text` (ISO date, hash preserved for grep-compat, text verbatim). Silent no-op when the archive component is absent — per spec §3 step 3 we never auto-create it.
+- `run_pending_maintenance` now calls `reap_with_items` and, if reap produced entries, invokes `archive_pending_done` before writing back. Re-parses the post-reap content because component offsets shift after the first `replace_content`.
+- Date comes from the `date` command (not `chrono`) — matches `git.rs::chrono_timestamp`, keeps agent-doc's no-chrono dependency policy. Falls back to `"unknown-date"` on command failure.
+
+**Verification**
+- `cargo build --release` → clean, 0 warnings
+- `cargo test --release --bin agent-doc -- pending::tests reposition git::tests` → **70/70 pass**
+- Full test suite has pre-existing failures in `resync::tests` (missing tmux in test env, 45 failures) and one `preflight_sweep_commits_other_tracked_docs` failure — I confirmed both are reproducible on a `git stash` of my changes, so they're not regressions.
+- `cargo install --path .` → binary updated at `~/.cargo/bin/`
+
+**What's next**
+- The two items are marked `--pending-done` on this write (`14z4`, `bak5`) — preflight will reap them next cycle.
+- Spec §3 step 3 is no longer "deferred" — the archive component now works when present. An `agent:pending-done` component can be added to any doc that wants history; docs without it behave unchanged.
+- Release candidates for v0.32.5: #eg0w (CommitLock), #14z4 (hash ceiling), #bak5 (archive), and the pre-commit reposition reorder from this session's earlier work.
+
+Let me know if you want me to update `VERSIONS.md` + `specs/pending-system.md` (flip `(Optional, deferred)` to `(shipped)`) or queue a release.
+<!-- agent:boundary:9eabdf49 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
-- [ ] [#14z4] Hash collision ceiling: implement 8-char fallback in pending::generate_hash if 4-char collides (spec §1)
-- [ ] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)
+- [x] [#14z4] Hash collision ceiling: implement 8-char fallback in pending::generate_hash if 4-char collides (spec §1)
+- [x] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)
 - [ ] [#pf01] ✅ Spec landed on 20260414/pending-gated-state: src/agent-doc/specs/pending-system.md — PendingState::Gated, [/] syntax, reaper rules, lifecycle diagram, CLI surface, state transition matrix, release discipline
 - [ ] [#64mb] Investigate double commit_staging race — root cause: concurrent preflights racing step 2 vs step 2d sweep; mid-flight (HEAD)-strip rewrites working tree between them
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.

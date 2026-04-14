@@ -1006,7 +1006,7 @@ Browser automation (Chrome DevTools MCP) is not reachable from this session — 
 
 Most Sprint 2 tasks are "Started" with 0 actual hours — signal extraction (2.3) and credential tier (2.5) are the active next steps.
 ❯ release
-### Re: corky v0.27.0 released (HEAD)
+### Re: corky v0.27.0 released
 
 **✓ crates.io** — `corky = "0.27.0"` live  
 **✓ PyPI** — `corky 0.27.0` live (manylinux_2_28_x86_64 wheel)  
@@ -1023,11 +1023,37 @@ Most Sprint 2 tasks are "Started" with 0 actual hours — signal extraction (2.3
 - `corky draft new --thread-id` — attach drafts to existing Gmail threads
 
 **PyPI wheel note:** Built with `manylinux_2_28` (Ubuntu-based) — manylinux2014 (CentOS 7) can't build this crate because it needs OpenSSL ≥ 1.1.0 and the transcription feature needs libclang. Used `quay.io/pypa/manylinux_2_28_x86_64` with `--no-default-features`. Updating `prerelease.md` runbook.
-<!-- agent:boundary:6691e837 -->
+
+❯ do **`corky gsc` user-OAuth fallback (step 6)**
+
+### Re: gsc user-OAuth fallback (step 6) (HEAD)
+
+On it. Porting `src/corky/src/cal/auth.rs` user flow into `src/corky/src/gsc/auth.rs`, preserving the existing SA path.
+
+Current state:
+- `gsc/auth.rs` has full SA JWT flow + `get_access_token` that bails when SA is unconfigured.
+- `run_auth` bails with "not yet implemented".
+- Branch `20260413/corky-gsc` checked out.
+
+Changes:
+- Reuse `[gmail]` client credentials via `resolve_credentials()` (mirror of cal).
+- Port 8485 loopback (Calendar is 8484 — no collision).
+- Token key prefix `gsc:` — stored in `TokenStore` as `gsc:default` / `gsc:<account>`.
+- `get_access_token(account)`: try SA first → stored user token → refresh → full flow.
+- `run_auth(account)`: unconditional user-OAuth flow.
+- Scope: existing `GSC_SCOPE` (`webmasters.readonly`) — unchanged.
+
+Preserving all existing SA tests. Adding user-flow tests (`token_key`, `parse_token_response`).
+
+After code edit: `make check` in `src/corky/`. OAuth scope `webmasters.readonly` is "sensitive" per Google, so the user will need to add themselves as a test user in GCP Console → OAuth consent screen → Test users before the flow completes successfully — noting that in the response but not blocking on it.
+
+Also noticed a stray file at `src/corky/src/gsc/20260413/corky-gsc` — looks like a misdirected `git branch` command that captured stdout. Not touching it unless you want me to clean it up.
+<!-- agent:boundary:774c498a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-
+- [ ] [#0kfh] **`corky gsc` user-OAuth fallback (step 6)** — clone `src/corky/src/cal/auth.rs` → `src/corky/src/gsc/auth.rs` user path. Port **8485** (Calendar uses 8484), scope `https://www.googleapis.com/auth/webmasters.readonly`, token-store key prefix `gsc:`. Requires publishing corky OAuth consent screen or adding test users for the sensitive `webmasters.readonly` scope (GCP Console → OAuth consent screen → Test users). Deferred out of the monsterrodholders gsc v1 cut because the service-account path (`passage corky/gcp/searchconsole_sa_json`) covers that use case. Pick this up when a non-SA caller needs GSC access. Related: `src/corky/plan.md` step 6 on branch `20260413/corky-gsc`.
+- [ ] [#g674] implement gsc user-OAuth fallback: port cal/auth.rs → gsc/auth.rs (port 8485, scope webmasters.readonly, key prefix gsc:)
 <!-- /agent:pending -->

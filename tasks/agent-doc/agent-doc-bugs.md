@@ -428,7 +428,7 @@ Before I write anything, which of these do you actually want?
 
 My recommendation: **option 2** if you want the phase 1 landing to be drivable from a single short checklist without re-reading the 248-line design spec each cycle; **option 4** (extend `supervisor.md`) otherwise. Parallel specs drift.
 ❯ **option 2**
-### Re: phase 1 implementation playbook landed (HEAD)
+### Re: phase 1 implementation playbook landed
 
 `src/agent-doc/specs/runbooks/supervisor-phase1.md` — 6 stages (cwd/pty/env marked landed, resize/state/ipc/start.rs wire-up as PR-by-PR checklists), each with scope, module layout sketch, pinned invariants, test table, and done criteria. Front-links back to `../supervisor.md` as the source of truth for design rationale.
 
@@ -462,15 +462,36 @@ My recommendation: **option 2** if you want the phase 1 landing to be drivable f
 - Non-tmux mode (has its own "Future" section in `supervisor.md`).
 
 Ready to start landing `#jg0d` (`resize.rs`) whenever you give the go-ahead. That's the smallest of the four remaining submodules and has the cleanest dependency graph — no cross-module locking, just SIGWINCH → channel → resize call.
-<!-- agent:boundary:a85a34ce -->
+❯ do
+❯ [#a001]
+❯ [#a006]
+❯ [#a005]
+### Re: #a001 / #a006 / #a005 — investigations done, all three close as not-a-bug (HEAD)
+
+**#a001 boundary/baseline divergence — benign, closing**
+
+96 `out_of_band_write` events since `git.rs:286` telemetry landed. Per-file distribution: `monsterrodholders.md` 50, `agent-doc-bugs.md` 39, `agent-loop.md` 5, `corky.md` 2 — all four are heavy-edit task docs. Drift stats: median=97 B, mean=158 B, max=753 B. No `snapshot_resync` (5× threshold) fired. The only `drift_warning` trips (>100 B) look like multi-line paste edits between cycles, not pipeline corruption.
+
+Conclusion: every logged OOB write is the user typing/pasting in their editor between the previous commit and the next `preflight` sweep — exactly the behavior `selective commit` (snapshot staged, user edits left uncommitted) is designed to tolerate. The telemetry confirms baseline management is working; there is no divergence to fix. Leaving `out_of_band_write` + `drift_warning` logging in place as a permanent canary for the real class of bug (e.g. a write path that forgets to call `snapshot::save`), but removing the 🔴 flag.
+
+**#a006 duplicated `/agent:exchange` closing marker — not reproducing, closing**
+
+Audited all 177 snapshots under `.agent-doc/snapshots/`. Only 2 files contain more than one `&lt;!-- /agent:exchange --&gt;` hit, and both are inline prose/code references discussing the bug itself (e.g. "...at the original position just before the `&lt;!-- /agent:exchange --&gt;`"). Structural marker counts (opener / closer on their own line) are balanced 1:1 across every snapshot. No live reproduction in the current corpus — the class of bug that produced it (same family as the mass-`❯`-prefix corruption) has been fixed by the `normalize_user_prompts_in_exchange` safety rail (#a002). Closing, with the safety rail as the load-bearing guard.
+
+**#a005 pre-existing `❯` lines — legitimate user annotations, closing**
+
+Re-audited: 422 `❯`-prefixed lines across 46 snapshots (down from 1062 as compactions landed). Top offenders sampled — every line is a legitimate inline user prompt (`❯ do`, `❯ commit + push`, `❯ Please research...`). This is exactly the inline-annotation convention: users type `❯ ` before a prompt and the marker survives across cycles until the exchange is compacted. Not corruption, not residue from the mass-prefix bug. No action needed.
+
+**Net effect:** three 🔴 items off the top of the pending queue. The remaining boundary-class canary (`out_of_band_write` / `drift_warning` logs) stays on permanently — cheap, and catches the real bug class if it ever re-emerges.
+<!-- agent:boundary:85ba1e78 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#a001] 🔴 Investigate boundary/baseline divergence root cause — `out_of_band_write` always-on log line landed (`git.rs:286`); aggregate after 1 day.
-- [ ] [#a006] Investigate duplicated `/agent:exchange` closing marker — likely same class as mass-prefix bug.
-- [ ] [#a005] Investigate 1062 pre-existing `❯` lines across 46 snapshots — legitimate or prior corruption?
+- [x] [#a001] 🔴 Investigate boundary/baseline divergence root cause — `out_of_band_write` always-on log line landed (`git.rs:286`); aggregate after 1 day.
+- [x] [#a006] Investigate duplicated `/agent:exchange` closing marker — likely same class as mass-prefix bug.
+- [x] [#a005] Investigate 1062 pre-existing `❯` lines across 46 snapshots — legitimate or prior corruption?
 - [ ] [#64mb] Investigate double commit_staging race: ops.log at 1776095605 shows two back-to-back commit_staging/out_of_band_write pairs for the same file within the same second.
 - [ ] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [ ] [#xzz5] Preflight slash-command parser: absolute paths like /home/... get captured as commands. Require [a-z][a-z0-9:_-]* after the slash and reject tokens containing a second /.

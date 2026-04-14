@@ -864,7 +864,7 @@ The resolution is **leaf placement with a canonical spec**, not duplication:
 
 Want me to draft the canonical spec file + a sample leaf stub so you can evaluate the concrete shape?
 ❯ yes
-### Re: decisions locked in (HEAD)
+### Re: decisions locked in
 
 Locked in:
 
@@ -889,7 +889,7 @@ before making changes.
 
 For libraries that ship independently (crates.io, npm), use the absolute GitHub URL form instead so external contributors hit a resolvable link.
 
-### Re: skill-janitor integration (HEAD)
+### Re: skill-janitor integration
 
 I read the repo. Important distinction:
 
@@ -904,6 +904,8 @@ They're complementary — not overlapping. Both should run in precommit/CI.
 2. **Git submodule under `src/skills-janitor/`** — follows the existing pattern (`src/agent-doc`, `src/instruction-files`, etc.). Updates flow via `git submodule update`. Pros: clean update path, matches workspace conventions. Cons: another submodule to maintain.
 3. **Install as a Claude Code plugin** from the upstream GitHub URL directly. Pros: zero vendor burden. Cons: external availability risk, version pinning harder.
 
+❯ I want to fork the repo and have these skills in my ecosystem soon! For now we can add the plugin.
+
 **My recommendation: option 2 (submodule).** It matches how every other cross-cutting tool in this workspace is organized (`src/instruction-files`, `src/agent-doc`, `src/corky`), gives you clean `git submodule update --remote` semantics, and keeps the audit tool co-located with the code it audits. The `khendzel/skills-janitor` repo is MIT-licensed with no dependencies, so submoduling is cheap.
 
 **Regular-audit wiring** (once submoduled):
@@ -915,9 +917,44 @@ They're complementary — not overlapping. Both should run in precommit/CI.
 **What to decide:**
 
 1. Option 1, 2, or 3 for skill-janitor integration?
-2. Should I commit `LIBRARY_CONTEXT_POLICY.md` now, or do you want to edit it first?
-3. Once the spec is committed, should I sweep the sixteen-ish libraries under `src/` to add the stub section to their AGENTS.md, or do that after the audit check lands so the audit drives the sweep?
-<!-- agent:boundary:d8cb3d39 -->
+❯ 2. Should I commit `LIBRARY_CONTEXT_POLICY.md` now, or do you want to edit it first?: commit
+❯ 3. Once the spec is committed, should I sweep the sixteen-ish libraries under `src/` to add the stub section to their AGENTS.md, or do that after the audit check lands so the audit drives the sweep?: yes
+### Re: committed + next moves (HEAD)
+
+Done in this cycle:
+
+- `src/instruction-files/LIBRARY_CONTEXT_POLICY.md` committed (submodule `d3b6203`) and parent pointer updated (`a924dbb3`).
+- Canonical spec is now the single source of truth. Any library authoring new agent context should link to this file.
+
+**Library sweep deferred** per your call — audit check lands first, then the sweep is driven by audit failures. That way the sweep is mechanical ("fix every AGENTS.md the audit flags") instead of manual search-and-edit. I added this to pending.
+
+### Re: skills-janitor plugin install (HEAD)
+
+The `khendzel/skills-janitor` repo ships with a `.claude-plugin/` manifest, so it's a first-class Claude Code plugin. The normal install path is interactive via the `/plugin` command — I can't install it from this session because plugin installation touches `~/.claude/plugins/installed_plugins.json` and the marketplace cache, which are managed state I shouldn't poke at directly.
+
+**To install, run at the terminal:**
+
+```
+/plugin
+```
+
+Then in the interactive UI: add marketplace `khendzel/skills-janitor` (or browse and install directly if it's already in a marketplace you track). After install, the plugin's skills become available via the Skill tool.
+
+Once you've installed it, let me know and I can run a first audit pass to surface any noise (duplicate skill names, unused skills, stale SKILL.md files) across `.claude/skills/` in this repo.
+
+### Re: eventual fork (HEAD)
+
+I added pending items for both the interim plugin install and the post-fork submodule migration. When you fork, the clean path is:
+
+1. Fork `khendzel/skills-janitor` to your own GitHub org
+2. Add it as a submodule under `src/skills-janitor/` (matches the workspace pattern)
+3. Replace the plugin install with the submodule invocation in precommit
+4. Optional: nightly `schedule` cron writing drift reports to `tasks/agent-doc/skills-audit.md`
+
+### Pending added (HEAD)
+
+Five items landed in pending — review before next cycle in case I misread scope.
+<!-- agent:boundary:632c93d2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -954,5 +991,10 @@ They're complementary — not overlapping. Both should run in precommit/CI.
 - [ ] [#q90h] agent-doc: CLI — add `--pending-gate <id>` flag on `agent-doc write` (mirror of --pending-done); `--pending-ungate <id>` to return to `[ ]`
 - [ ] [#sx35] agent-doc: tests — parser round-trip for `[/]`, state transitions ( →/→x,  →x, /→x, /→ ), reaper respects Gated, CLI flag integration
 - [ ] [#e6z1] agent-doc: version bump + VERSIONS.md entry for gated-state feature after implementation lands (release gate — do not ship with the #eg0w bundle)
+- [ ] [#kdy5] Implement instruction-files audit check: every library AGENTS.md has a ## Library Context Policy section with resolvable link to LIBRARY_CONTEXT_POLICY.md. Wire into make precommit.
+- [ ] [#1376] After audit check lands: sweep all libraries under src/ to add the Library Context Policy stub section. Each submodule commit separately, then parent pointer bumps.
+- [ ] [#breh] rust-package skill: write the Library Context Policy stub into new library AGENTS.md at scaffold time.
+- [ ] [#3j0e] Install skills-janitor as Claude Code plugin (run /plugin install khendzel/skills-janitor at terminal). User plans to fork eventually; this is the interim path.
+- [ ] [#vdyj] After fork: move forked skills-janitor under src/ as submodule, wire audit into make precommit, and optionally add nightly cron via schedule skill writing drift reports to tasks/agent-doc/skills-audit.md.
 <!-- /agent:pending -->
 ## Assistant

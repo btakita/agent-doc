@@ -626,7 +626,7 @@ Both fixes are additive and independently testable — I can land them as a pair
 Added to pending. Not touching code yet pending your go-ahead.
 ❯ fix both right now
 
-### Re: Both fixes landed — awaiting live verification (HEAD)
+### Re: Both fixes landed — awaiting live verification
 
 Implemented in `src/agent-doc`:
 
@@ -653,7 +653,54 @@ I'm stopping here for you to live-verify in a claudescore / monsterrodholders se
 4. Kill the pane, re-open, run a boundary-only cycle (pending-only change, no new heading) — confirm the `(HEAD)` marker on the prior heading persists via the re-apply-from-HEAD path that show_head now actually reaches.
 
 If all four pass, I'll mark the pending items done and queue the v0.32.4 release. If anything misbehaves, flag it and I'll iterate before touching the gate.
-<!-- agent:boundary:6b9f2348 -->
+❯ Looks good.
+❯ One issue. There is too much commit noise in src/session-share/tasks/claudescore.md
+❯ It appears there are 2 commits on the agent:boundary id per turn. Please propose a way to at least reduce to 1 commit. Even better if we can roll the agent:boundary move into the patchback commit.
+### Re: boundary commit noise — proposal (HEAD)
+
+Confirmed from `git log tasks/claudescore.md`:
+
+```
+ec56aa6 boundary 574921c7 → 221a1a69   15:26:47
+1f6b618 boundary 221a1a69 → 7ca2aae4   15:26:47
+```
+
+Two commits per turn, identical timestamp, each rotating the boundary id. Root cause is the commit/reposition ordering in `src/agent-doc/src/git.rs` (~L520–567):
+
+1. Stage snapshot (old boundary id) + `git commit` — **commit A**
+2. Strip `(HEAD)` from snapshot
+3. `reposition_boundary_in_snapshot()` — rewrites snapshot + working tree with a **new** boundary id
+
+Step 3 lands *uncommitted*. The next turn's preflight commit picks it up as **commit B**, separate from that turn's actual response. So every turn commits the previous turn's boundary rotation alongside its own content.
+
+**Proposal — fold reposition into the same commit (preferred):**
+
+Reorder `commit_file()` so reposition happens **before** staging, and the committed blob carries both the response and the new boundary id atomically:
+
+```
+1. load snapshot (response + old boundary)
+2. reposition_boundary → snapshot now has new boundary id
+3. inject (HEAD) markers → staged blob
+4. hash-object + update-index + git commit      ← single commit, new boundary id
+5. strip (HEAD) from snapshot
+6. working tree: reposition boundary + strip (HEAD)
+```
+
+Result:
+- Committed content already has the fresh boundary id → nothing left over for next cycle
+- Next turn's preflight commit is a genuine no-op when only the boundary rotated
+- Blue `(HEAD)` gutter mechanism unchanged — still relies on `(HEAD)` in staged content vs. stripped working tree
+
+**Risk / edge cases to validate:**
+
+- The active-run guard (`pending_path_for`) in `reposition_boundary_in_snapshot` currently skips reposition mid-run. Moving reposition before commit means we need to preserve that guard at the new call site — if a run is active, commit the old boundary id and let the in-flight write's IPC path handle it (unchanged behavior).
+- Submodule pointer update (`update_parent_submodule_pointer`) runs after the submodule commit — still fires once per real commit, so no extra parent commits.
+- Preflight's "gap commit" on the next turn will now see a clean state; the `file is N bytes larger than snapshot` warning should disappear for boundary-only gaps.
+
+**Fallback (simpler, if the reorder is risky):** detect boundary-only diffs in the preflight commit path and skip them — `git commit` becomes a no-op when the only staged change is a single-line boundary marker rewrite. Cheaper to implement but leaves a small window where the working tree has an uncommitted boundary id.
+
+Let me know which direction you want and I'll open the patch. Preference would be the reorder — it's the structurally correct fix and makes the ordering match the intent ("one commit per turn, atomic").
+<!-- agent:boundary:ca551fe9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

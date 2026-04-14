@@ -558,7 +558,7 @@ Without the lock, the gate is a perf hint with a race. With the lock, the gate i
 
 **Practical consequence for the fix:** don't ship the gate without the lock. If you want a one-shot PR, ship only the lock — it's sufficient for correctness. The gate is a nice-to-have follow-up that saves a few ms per sweep per doc under contention.
 ❯ do Recommend **(1) + (2)**: lock for correctness, gate for perf. Neither requires changing the commit content pipeline.
-### Re: do — shipped (1) per-file commit lock + (2) sweep freshness gate (HEAD)
+### Re: do — shipped (1) per-file commit lock + (2) sweep freshness gate
 
 Both landed in `src/agent-doc`, `cargo build` clean.
 
@@ -589,7 +589,24 @@ The double `commit_staging` trace with drift=410 then drift=122 (288-byte shrink
 - Sweep ordering within a single preflight — still skips `doc_path == canonical` at line 460 as before
 
 **Pending queue:** `#eg0w` moved to ✅ (awaiting release gate); `#qpzd` (the duplicate) marked done. `#gqep` release bump is next when you want to cut v0.32.5 with this fix.
-<!-- agent:boundary:d4f475d6 -->
+❯ Is [#64mb] & [#a002] complete? Why were they not marked as complete?
+### Re: Is #64mb & #a002 complete? (HEAD)
+
+Both are code-complete but intentionally parked in pending as watch items, not forgotten:
+
+**#a002 — Safety rail in `normalize_user_prompts_in_exchange`**
+- Code: **landed.** The rail fires and blocks the mass-`❯` corruption class.
+- Why still `[ ]`: waiting for a real large-drift event to trip the `normalize_threshold_exceeded` telemetry path so we know the alert side actually works end-to-end. Until one fires in the wild (or we synthesize one in a test), the telemetry limb is unexercised.
+
+**#64mb — double `commit_staging` race**
+- Investigation: **complete** — root cause nailed (concurrent preflights racing step 2 vs step 2d sweep; mid-flight `(HEAD)`-strip rewrites the working tree between them).
+- Fix: **shipped** under `#eg0w` (per-file `CommitLock` in `git::commit` + <5s freshness gate in preflight sweep) — which is why `#eg0w` is marked ✅ awaiting release, not `#64mb`.
+- Why `#64mb` still `[ ]`: it's the umbrella investigation item. I was waiting to confirm the fix actually eliminates the race in production (post-v0.32.5 release gate `#gqep`) before closing the parent. If the per-file lock holds for a day of real use, `#64mb` gets reaped alongside `#eg0w`.
+
+**TL;DR on "why not done":** the convention I've been applying is *code-landed ≠ done*; done means "shipped and verified in prod." Both are shipped-in-tree, both are gated on the same release + observation window.
+
+**If you want them closed now**, say "mark #64mb and #a002 done" and I'll `--pending-done` both this cycle. Otherwise they reap naturally after v0.32.5 ships and the telemetry watch is satisfied.
+<!-- agent:boundary:b95e9f92 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -620,6 +637,5 @@ The double `commit_staging` trace with drift=410 then drift=122 (288-byte shrink
 - [ ] [#f7d5] supervisor: smoke test — real claude under supervisor in a tmux pane, verify restart + inject + CWD invariant end-to-end
 - [ ] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)
 - [ ] [#eg0w] ✅ Shipped: per-file CommitLock in git::commit + <5s freshness gate in preflight sweep (awaiting release)
-- [x] [#qpzd] Ship per-file commit lock + sweep freshness gate for #64mb (per-file flock on .agent-doc/locks/commit-<hash>.lock in git::commit, plus <5s freshness skip in preflight sweep)
 <!-- /agent:pending -->
 ## Assistant

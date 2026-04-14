@@ -526,8 +526,7 @@ Recommend **(1) + (2)**: lock for correctness, gate for perf. Neither requires c
 **Pending updates:**
 - #64mb stays on the queue, now with root cause nailed → implementation task.
 - Adding a sub-item: "Ship per-file commit lock + sweep freshness gate for #64mb".
-
-<!-- agent:boundary:3578958d -->
+<!-- agent:boundary:82a21f15 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

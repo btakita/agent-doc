@@ -487,7 +487,7 @@ Re-audited: 422 `❯`-prefixed lines across 46 snapshots (down from 1062 as comp
 ❯ - [#64mb] Investigate double commit_staging race
 ❯ - [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange
 
-### Re: do #64mb #a002 (HEAD)
+### Re: do #64mb #a002
 
 **#a002 — already landed.** Status line says "✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry." No code work needed — just waiting for a real event to fire the telemetry. Leaving in pending as a watch item.
 
@@ -523,10 +523,41 @@ Two independent observations in that window:
 
 Recommend **(1) + (2)**: lock for correctness, gate for perf. Neither requires changing the commit content pipeline.
 
+❯ Will **Sweep freshness gate.** create a race condition?
+❯ > Avoids the lock but leaves a small window
+
 **Pending updates:**
 - #64mb stays on the queue, now with root cause nailed → implementation task.
 - Adding a sub-item: "Ship per-file commit lock + sweep freshness gate for #64mb".
-<!-- agent:boundary:fd74c9ba -->
+
+
+### Re: does the freshness gate create a race? (HEAD)
+
+**Yes — on its own.** The gate alone is a classic TOCTOU:
+
+```
+session A: read HEAD commit time → "12s ago, stale, proceed"
+session B: read HEAD commit time → "12s ago, stale, proceed"
+both → git::commit() → two commit_staging calls, same race you already have
+```
+
+The "small window" I hand-waved past is exactly that interval between the gate check and the actual staging. Anything the gate can observe as "safe to commit" can also be observed by a second process at the same instant.
+
+**Combined with (1) the per-file flock, the race closes.** Ordering:
+
+1. Session A acquires `locks/commit-<hash>.lock`
+2. Session A checks freshness gate → stale → proceeds → commits → releases lock
+3. Session B blocks on the lock (serialized, not racing)
+4. Session B acquires the lock → checks freshness gate → **now fresh** (A just committed) → skips cheaply without re-running `git commit`
+
+So the roles are:
+- **Lock** = correctness (serializes the read-modify-write on working tree + index)
+- **Gate** = cheap short-circuit inside the critical section (avoids the ~10ms git spawn when there's nothing to do)
+
+Without the lock, the gate is a perf hint with a race. With the lock, the gate is a valid fast-path. They're not redundant, but the gate is only meaningful *inside* the locked region.
+
+**Practical consequence for the fix:** don't ship the gate without the lock. If you want a one-shot PR, ship only the lock — it's sufficient for correctness. The gate is a nice-to-have follow-up that saves a few ms per sweep per doc under contention.
+<!-- agent:boundary:6866978c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

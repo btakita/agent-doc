@@ -80,7 +80,7 @@ All other items retain their original relative order beneath this group — `--p
 **`pending_reordered` guard:** the spec says not to reorder again for at least one cycle after the user does. I just reordered per your explicit instruction — next cycle will respect `pending_reordered: true` if preflight reports it and leave the order alone unless you re-ask.
 
 ❯ In src/session-share/tasks/claudescore.md, I asked agent-doc to recalibrate. But `- [ ] [#ahmt] [/]` was rendered. Why?
-### Re: Reproduced — `- [ ] [#ahmt] [/] ...` is the skill misusing `--pending-add`, not a renderer bug (HEAD)
+### Re: Reproduced — `- [ ] [#ahmt] [/] ...` is the skill misusing `--pending-add`, not a renderer bug
 
 Reproduced in a scratch doc in ~5 seconds:
 
@@ -121,7 +121,27 @@ agent-doc write tasks/claudescore.md --pending-gate ahmt
 ```
 
 Want me to run those against `src/session-share/tasks/claudescore.md` now, or leave it for that doc's own session?
-<!-- agent:boundary:a2025140 -->
+❯ do it
+### Re: Blocked on pane ownership — claudescore doc is claimed by pane %2 (HEAD)
+
+Ran the edit, got:
+
+```
+Error: pane ownership mismatch: session 143cbb97-6295-45d1-add5-9c19e9c713bb owned by pane %2, current pane is %3. Use `agent-doc claim` to reclaim.
+```
+
+This pane (%3) is the agent-doc-bugs session. The claudescore doc is currently claimed by pane %2 — presumably a live session in another tmux window. The pending-system contract intentionally blocks cross-pane writes so two agents can't fight over the same document's pending list mid-cycle.
+
+Three ways forward, you pick:
+
+1. **Run it from the claudescore pane.** Switch to %2 and issue the two commands there — that session already holds the claim and the write will succeed instantly. Cleanest option since the update then shows up in that session's next preflight diff naturally.
+2. **Let me reclaim from this pane.** `agent-doc claim src/session-share/tasks/claudescore.md` would transfer ownership to %3, I'd run edit+gate, then I'd release or you'd re-claim from %2. Works but disrupts whatever %2 is doing — if that session is mid-cycle, it'll see "pane ownership lost" on its next action.
+3. **Defer.** Leave the item as-is; next time the claudescore session runs, its own skill can notice the stray `[/]` in the body and fix it. The rendered item is ugly but not broken — it's `state=Open, body="[/] ..."`, reaper and gate count work correctly, just reads weird.
+
+My recommendation: **option 1** if pane %2 is still live, **option 3** otherwise. Option 2 is available but I don't want to take it without a direct "yes, reclaim." Let me know which — or just do it from the other pane and I'll verify here on the next cycle.
+
+**No pending change this cycle** — nothing to add/remove until I know which path you want.
+<!-- agent:boundary:e4c5dbca -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

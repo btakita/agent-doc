@@ -315,7 +315,7 @@ Proposed mechanism — extends the preflight contract, no new moving parts:
 Edge case worth calling out: if `agent_doc_env_inherit` flips from `true` → `false`, the new env is **smaller** than the old one (parent vars dropped). Restart is the only safe path — you cannot hot-unset arbitrary parent vars from a running process without killing child subprocesses that may depend on them. The classification table should mark `agent_doc_env_inherit` as `Spawn` unconditionally.
 
 Proceeding with the Option<String> implementation as planned; I'll add the frontmatter-diff + `supervisor_dirty` surfacing as a follow-up item rather than bundling it into this delta.
-### Re: `agent_doc_model_tier` as a supervisor operation — yes, and it closes a real gap (HEAD)
+### Re: `agent_doc_model_tier` as a supervisor operation — yes, and it closes a real gap
 
 Claude Code's CLI accepts `--model <model-id>` at spawn. The supervisor already owns the spawn command construction, so wiring tier → model is mechanical:
 
@@ -341,7 +341,9 @@ pub fn tier_to_model(tier: Tier) -> &'static str {
 
 One caveat: haiku/sonnet/opus mapping needs to live somewhere versioned. Hard-coding model IDs in `supervisor/model.rs` ties the binary to specific models; a month from now Opus 4.7 ships and we need a release to pick it up. Options: (a) read from a config file shipped with the binary, (b) accept a `model_map:` frontmatter override at the document or project level, (c) just release. I'd pick (c) initially — one-line change, easy to update — and add (b) when someone actually needs per-project overrides.
 
-### Re: Claude Code on-the-fly `! ENVVAR=...` — partial, and not a supported mutation path for session env (HEAD)
+❯ In the output header sections, should we also include which model performed the patch? Add to pending
+
+### Re: Claude Code on-the-fly `! ENVVAR=...` — partial, and not a supported mutation path for session env
 
 Breaking this into three layers because they behave differently:
 
@@ -356,10 +358,31 @@ Breaking this into three layers because they behave differently:
 1. Edit frontmatter → save → next restart picks it up. (Explicit via `agent-doc restart`, or implicit via crash-triggered restart.)
 2. First spawn after claim: always reads current frontmatter.
 
+❯ correct... I tested and `!` and the envvar does not persist past the call...even when `! export FOO=bar` is used.
+
 Your note is exactly right — *even if* on-the-fly export worked, harness-specific vars (`AGENT_DOC_*`, `CLAUDE_*`, anything the claude binary caches at startup) would still need a restart. So making ad-hoc export a mutation surface would create a two-tier env model (hot-patchable vs. restart-required) with no clear user-visible line between them. That's a confusing API. Better to keep one rule: **frontmatter is the env, restart applies it.** If someone needs a quick throwaway var for one command, they can just `FOO=bar some_command` inline — that's not session env, that's a per-invocation override and doesn't need the supervisor's help.
 
-I'll add a note in the spec doc making this explicit: "Session environment variables are set at spawn time from frontmatter `env:` only. Ad-hoc shell exports do not affect the supervised pty or future Bash tool calls."
-<!-- agent:boundary:afa42b25 -->
+❯ I'll add a note in the spec doc making this explicit: "Session environment variables are set at spawn time from frontmatter `env:` 
+❯  only. Ad-hoc shell exports do not affect the supervised pty or future Bash tool calls."
+### Re: `!` empirical test — confirmed, and good to have it in writing (HEAD)
+
+Thanks for running the test. That matches the model: each `!` invocation is a fresh shell process, so `export FOO=bar` dies with the shell. Same behavior as the Bash tool. Worth capturing in the spec doc alongside the supervised-pty point so the next person who asks "why can't I just export a var" has an empirical answer, not just an architectural one. I'll cite your test in the spec note.
+
+### Re: model attribution in response headers — yes, useful, adding to pending (HEAD)
+
+Short answer: yes, this is a good signal, especially for mixed-tier documents where a `/model` mid-session means some `### Re:` sections were opus and others were haiku and there's no way to tell after the fact.
+
+Mechanism sketch (not implementing now, just naming the pieces):
+
+- **Source of truth:** the supervisor already knows which model it spawned claude with (the `--model` flag from the tier resolution). When a response cycle starts, `agent-doc write --stream` can be told the current model ID via a new `--model <id>` flag, or read it from a session-state file the supervisor writes.
+- **Header format:** append a subtle suffix to `### Re:` headers — `### Re: topic — opus-4-6` or `### Re: topic <sub>opus-4-6</sub>`. The em-dash form is cleaner in rendered markdown and doesn't need HTML.
+- **Boundary synthesis:** when the skill writes raw content (no explicit header), the binary synthesizes a `### Re:` header from context. That synthesis path is the right place to inject the model — the skill doesn't need to know or care.
+- **Explicit path:** when the skill writes `### Re: foo`, the binary can append ` — <model>` as a post-parse normalization step. Idempotent: skip if the header already has a trailing ` — <model-id>`.
+
+Edge case: `/model` switch mid-response. The model flag is captured at write-time, so whatever the cycle started as is what the header reflects. If the user switches model via `/model` *between* cycles, subsequent cycles get the new attribution — correct.
+
+Added as pending item. I'll wire it up alongside the `supervisor_dirty` work since both need the supervisor to expose its current model state to the skill.
+<!-- agent:boundary:1ec39c9a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -391,5 +414,6 @@ I'll add a note in the spec doc making this explicit: "Session environment varia
 - [ ] [#f7d5] supervisor: smoke test — real claude under supervisor in a tmux pane, verify restart + inject + CWD invariant end-to-end
 - [ ] [#6ae3] supervisor/pty.rs: wire PtySession into start.rs (phase 1 wire-up stage) — replaces the current Command::status inherit-tty path
 - [ ] [#zp02] supervisor/env.rs: wire into start.rs — replace the inline fm.env expansion loop in start.rs:189 with EnvSpec::from_frontmatter(&fm).resolve()?; feed the result into PtySpawnConfig.env once state.rs restart loop is in place
+- [ ] [#cce5] response headers: include model attribution in '### Re:' sections (e.g. '### Re: topic — opus-4-6'). Source: agent-doc binary records spawn model; skill reads and appends to boundary-synthesized headers or patch:exchange headers
 <!-- /agent:pending -->
 ## Assistant

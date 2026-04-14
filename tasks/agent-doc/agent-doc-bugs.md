@@ -286,7 +286,7 @@ Net: ship auto-create as default now, with `--no-create-pending` as the escape h
 Updating the pending item to reflect this — want me to reword it to "notify: auto-create agent:pending on target (with --no-create-pending opt-out)"?
 ❯ Yes.
 ❯ How can we track **Recipient-side policy later.**? This may happen weeks from now.
-### Re: reword confirmed + tracking the multi-user follow-up (HEAD)
+### Re: reword confirmed + tracking the multi-user follow-up
 
 Reworded `#txex` to match the new design: auto-create default, `--no-create-pending` opt-out, pending-only behavior.
 
@@ -308,7 +308,33 @@ For the **recipient-side policy** work — that's exactly what `[/]` gated state
 - **GitHub issue on agent-doc** — external tracker, good if you want it visible to collaborators and linked from code.
 
 Gated-pending wins for single-user workspaces because it keeps the tracker adjacent to the code it describes and inherits lifecycle machinery. If you later want GitHub visibility, we can mirror gated items → issues via a sync command.
-<!-- agent:boundary:c7d562bd -->
+❯ Gated-pending with a gh issue.
+
+❯ In src/session-share/tasks/claudescore.md, my last prompt where the entire line is `#zj6s` did not get a `❯ ` prefix in the patchback.
+### Re: gated-pending + gh issue, and the prefix bug (HEAD)
+
+**Done on the multi-user follow-up:**
+
+- Created [btakita/agent-doc#40](https://github.com/btakita/agent-doc/issues/40) with full context, TOML sketch, and the "do not ship before" note.
+- Marked the duplicate `#e4pc` done (it'll reap next cycle) — that was stray fallout from the failed `--pending-gate "last"` call last round, which partially landed before erroring.
+- Edited `#ha3h` to include the issue link and tightened the wording.
+- Gated `#ha3h` to `[/]` — preflight should report four gated items next cycle (was 3) and stop touching it.
+
+The gh issue gives external visibility; the gated-pending keeps the tracker adjacent to the code. When multi-user lands, you ungate `#ha3h`, close the issue with a link to the implementing PR, and the loop closes.
+
+### Re: prefix bug on hash-only user-prompt lines (HEAD)
+
+Nice catch. Filed as a new pending item. Working theory:
+
+`normalize_user_prompts_in_exchange` (src/agent-doc/src/write.rs) rebuilds added lines within the exchange component as user-prompt prefixed so the next cycle sees them as user prompts. There's almost certainly a short-circuit that skips lines that look like agent metadata — checkbox items, hash ids in brackets, boundary markers, patch blocks. A line that is literally just `#zj6s` (a bare hash) probably trips the "looks like an id reference" branch and gets passed through unprefixed.
+
+Fix candidates:
+
+1. **Scope the skip to actual metadata shapes.** A line matching `^[-*] \[[ x/]\] \[#[a-z0-9]+\]` is a pending item and should stay as-is. A bare `^#[a-z0-9]+$` line is almost certainly a user prompt referencing a pending id — prefix it.
+2. **Anchor the skip to the component.** Only skip prefix-rewrite inside `agent:pending`, `agent:boundary:*`, and patch/component open/close comments. Inside `agent:exchange`, every added line gets prefixed, full stop.
+
+Option 2 is the cleaner invariant — the component tells us the context, so don't second-guess the content. I'll pick it up when that item gets scheduled. If you want me to investigate right now instead of queuing, say the word and I'll pull up `write.rs` and pinpoint the branch.
+<!-- agent:boundary:b571a21e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -353,7 +379,8 @@ Gated-pending wins for single-user workspaces because it keeps the tracker adjac
 - [ ] [#vdyj] After fork: move forked skills-janitor under src/ as submodule, wire audit into make precommit, and optionally add nightly cron via schedule skill writing drift reports to tasks/agent-doc/skills-audit.md.
 - [ ] [#9v7h] agent-doc: --pending-add should reject text starting with '[/]' / '[x]' / '[ ]' (ambiguous state marker). Add --pending-add-gated flag and emit assigned hash to stdout so skill can compose add+gate atomically without text-embedding.
 - [ ] [#txex] notify: add --pending-add flag — auto-create agent:pending on target when absent, --no-create-pending to opt out. Pending-only (no exchange blockquote). Errors become no-ops under auto-create.
-- [ ] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set the list once; multi-user recipients gate what senders can materialize. Ship with multi-user workspace support, not before. Gate with [/] until multi-user work begins.
-- [ ] [#e4pc] [MULTI-USER FOLLOW-UP, gate next cycle] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set the list once; multi-user recipients gate what senders can materialize. Ship with multi-user workspace support, not before.
+- [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
+- [x] [#e4pc] [MULTI-USER FOLLOW-UP, gate next cycle] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set the list once; multi-user recipients gate what senders can materialize. Ship with multi-user workspace support, not before.
+- [ ] [#vnxg] bug: patchback omits ❯ prefix on user-prompt lines that contain only a hash ref (e.g. a line that is just #zj6s). Repro in src/session-share/tasks/claudescore.md. normalize_user_prompts_in_exchange likely treats hash-only lines as metadata/annotations and skips prefixing. Expected: any added line within an exchange user-prompt block gets the prefix.
 <!-- /agent:pending -->
 ## Assistant

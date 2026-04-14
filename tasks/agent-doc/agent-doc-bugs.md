@@ -557,7 +557,7 @@ So the roles are:
 Without the lock, the gate is a perf hint with a race. With the lock, the gate is a valid fast-path. They're not redundant, but the gate is only meaningful *inside* the locked region.
 
 **Practical consequence for the fix:** don't ship the gate without the lock. If you want a one-shot PR, ship only the lock — it's sufficient for correctness. The gate is a nice-to-have follow-up that saves a few ms per sweep per doc under contention.
-<!-- agent:boundary:dd584d3c -->
+<!-- agent:boundary:d8178eae -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

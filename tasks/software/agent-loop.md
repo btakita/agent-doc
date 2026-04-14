@@ -203,7 +203,7 @@ The MCP server cleanup is the highest ROI: each disabled server saves name/descr
 The cleanup task for baselines should become an agent-doc feature (snapshot GC with configurable reap cycle, as you noted). I've transferred that to pending for agent-doc-feat.
 
 For the MCP disable, no file-based approach available — it's app-managed. You'll need to disable them through the UI, or we could explore whether agent-doc should expose an `mcp disable` command that writes to the app's config location (if that location is available).
-<!-- agent:boundary:72cea373 -->
+<!-- agent:boundary:1862077e -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

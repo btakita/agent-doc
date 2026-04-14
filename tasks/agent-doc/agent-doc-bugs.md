@@ -277,7 +277,7 @@ let cfg = supervisor::pty::PtySpawnConfig {
 - `start.rs` wire-up itself — blocked on `state.rs` per the phase 1 status table.
 
 Ready for `resize.rs` whenever you give the go-ahead.
-<!-- agent:boundary:c7778f3f -->
+<!-- agent:boundary:02e5100e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

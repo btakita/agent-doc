@@ -398,7 +398,7 @@ Reordered with this doc's focus (bugs + investigations) driving priority:
 8. **Janitorial**: `#a013` SPEC breakup, `#a004` drop Option B
 9. **Supervisor feature work** (least urgent for *bugs* doc): `#jg0d`, `#b486`, `#40ct`, `#vnp0`, `#6ae3`, `#zp02`, `#f7d5`
 10. **Deferred optional**: `#bak5`
-<!-- agent:boundary:f2165e70 -->
+<!-- agent:boundary:70e25bd0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

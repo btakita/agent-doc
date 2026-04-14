@@ -917,7 +917,7 @@ They're complementary — not overlapping. Both should run in precommit/CI.
 1. Option 1, 2, or 3 for skill-janitor integration?
 2. Should I commit `LIBRARY_CONTEXT_POLICY.md` now, or do you want to edit it first?
 3. Once the spec is committed, should I sweep the sixteen-ish libraries under `src/` to add the stub section to their AGENTS.md, or do that after the audit check lands so the audit drives the sweep?
-<!-- agent:boundary:a8d1dfd3 -->
+<!-- agent:boundary:d8cb3d39 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

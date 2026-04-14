@@ -656,7 +656,7 @@ If all four pass, I'll mark the pending items done and queue the v0.32.4 release
 ❯ Looks good.
 ❯ One issue. There is too much commit noise in src/session-share/tasks/claudescore.md
 ❯ It appears there are 2 commits on the agent:boundary id per turn. Please propose a way to at least reduce to 1 commit. Even better if we can roll the agent:boundary move into the patchback commit.
-### Re: boundary commit noise — proposal (HEAD)
+### Re: boundary commit noise — proposal
 
 Confirmed from `git log tasks/claudescore.md`:
 
@@ -700,7 +700,27 @@ Result:
 **Fallback (simpler, if the reorder is risky):** detect boundary-only diffs in the preflight commit path and skip them — `git commit` becomes a no-op when the only staged change is a single-line boundary marker rewrite. Cheaper to implement but leaves a small window where the working tree has an uncommitted boundary id.
 
 Let me know which direction you want and I'll open the patch. Preference would be the reorder — it's the structurally correct fix and makes the ordering match the intent ("one commit per turn, atomic").
-<!-- agent:boundary:29a047a0 -->
+
+❯ do the reorder
+### Re: reorder done (HEAD)
+
+Implemented in `src/agent-doc/src/git.rs`:
+
+1. Added a **pre-commit** reposition block right after the snapshot-bootstrap step (before staging). Calls `reposition_boundary_in_snapshot(file)` and then reloads `snapshot_content` from disk so the staged blob carries the fresh boundary id.
+2. Removed the **post-commit** reposition block. The IPC `try_ipc_reposition_boundary(file)` call is preserved so the plugin's in-memory Document buffer still picks up the new boundary without a disk reload.
+3. The active-run guard (`pending_path_for`) inside `reposition_boundary_in_snapshot` still applies — if a concurrent `agent-doc write` is in flight, reposition is skipped and the IPC path owns the transition. Unchanged for that case.
+
+**Verification:**
+- `cargo build --release` → clean
+- `cargo test --release reposition` → 7 passed, 0 failed (all boundary-lifecycle tests)
+- Next turn will test the live fix on this document — expect **one** commit per turn instead of two.
+
+If you want extra confidence before shipping, I can also:
+- Add a regression test that asserts "two consecutive commits produce no boundary-only delta between them"
+- Run `make check` (clippy + full test suite)
+
+Let me know if you want either before I queue a release.
+<!-- agent:boundary:80850df1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

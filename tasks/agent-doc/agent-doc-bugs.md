@@ -656,7 +656,7 @@ Three real options, ranked by how well they fit what agent-doc already does:
 6. Tests: state transitions, reaper respects `Gated`, parser round-trip.
 
 Say **"go with A"** (or A + specific tweaks) and I'll draft the spec update + implementation plan as the next cycle. If you want B or a hybrid, say so and I'll rework.
-<!-- agent:boundary:f5045031 -->
+<!-- agent:boundary:99926089 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -192,7 +192,7 @@ The designed-for use case is **cross-document re-evaluation signals** — one se
 
 So `notify` is the right **primitive**, but a `dispatch` wrapper (notify + focus + optional tmux send-keys for wake) would be a cleaner ergonomic layer for "send a task." Still waiting on your call: queue `dispatch` as pending, or document `notify` as the canonical cross-pane mechanism and leave it there?
 ❯ The proposed `dispatch` would swap the tmux pane even if the target document is closed or not viewable in the editor?
-### Re: would `dispatch` swap away the active pane? (HEAD)
+### Re: would `dispatch` swap away the active pane?
 
 Good catch — yes, as I loosely described it (`notify + focus + tmux send-keys`), it would, and that's the wrong default. `agent-doc focus` resolves the pane claiming the target doc and calls `tmux select-pane` on it, which yanks the visible pane in the current window regardless of whether the editor is showing the doc. For a background dispatch ("hey B, do this task when you get a chance"), stealing focus from whatever I'm currently looking at is user-hostile.
 
@@ -221,7 +221,34 @@ Rethinking the design along the axis you pointed at — **focus should not be th
 So the revised proposal: `dispatch` defaults to pure fire-and-forget (safe, no side effects on my current view), `--wake` adds background trigger without disruption, `--focus` is the only flag that changes visible pane state.
 
 Still want me to queue `dispatch` (with this tiered design) as a pending item, or park this in the agent-doc-feat doc as a full proposal first?
-<!-- agent:boundary:3f3f6bcf -->
+❯ Just do a notify. Add an option for notify to add a task.
+### Re: extend `notify` with a task option (HEAD)
+
+Confirmed. Queued as pending. Proposed shape:
+
+```
+agent-doc notify <target-doc> "<message>" --pending-add
+agent-doc notify <target-doc> "<message>" --pending-add --source <src> --affects <sections>
+```
+
+Semantics:
+- **Without `--pending-add`** (current behavior): append blockquote to target's `agent:exchange` — change-propagation signal.
+- **With `--pending-add`**: also (or instead of?) add `<message>` as a new item in target's `agent:pending` via the same code path as `agent-doc write --pending-add`. Hash ID auto-assigned by the binary.
+- `--source` annotation: prefix the pending text with `[from <source>]` so the receiver can trace provenance when it picks up the item.
+
+Open sub-questions I'll resolve during implementation (or flag back to you if there's ambiguity):
+
+1. **Exchange + pending, or pending-only?** Two reasonable readings of "add an option for notify to add a task":
+   - (a) `--pending-add` is additive — still appends the blockquote to `agent:exchange` *and* adds a pending item. Receiver sees both an inbox message and a queued task.
+   - (b) `--pending-add` switches behavior — skip the exchange blockquote, only add to pending. Quieter, doesn't interrupt the receiver's current conversation.
+   I'll default to **(b)** — the exchange blockquote would be redundant noise when the task is what matters, and the sender can always run notify twice if they want both.
+
+2. **What if the target has no `agent:pending` component?** Error out with a clear message (`target document has no agent:pending component`). Don't silently fall back to exchange.
+
+3. **Commit behavior:** same as current `notify` — commit by default, `--no-commit` to skip.
+
+Added to pending. Implementation happens when that item gets scheduled — nothing further this cycle unless you want to refine the design first.
+<!-- agent:boundary:f1ce31a2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -265,5 +292,6 @@ Still want me to queue `dispatch` (with this tiered design) as a pending item, o
 - [ ] [#3j0e] Install skills-janitor as Claude Code plugin (run /plugin install khendzel/skills-janitor at terminal). User plans to fork eventually; this is the interim path.
 - [ ] [#vdyj] After fork: move forked skills-janitor under src/ as submodule, wire audit into make precommit, and optionally add nightly cron via schedule skill writing drift reports to tasks/agent-doc/skills-audit.md.
 - [ ] [#9v7h] agent-doc: --pending-add should reject text starting with '[/]' / '[x]' / '[ ]' (ambiguous state marker). Add --pending-add-gated flag and emit assigned hash to stdout so skill can compose add+gate atomically without text-embedding.
+- [ ] [#txex] notify: add --pending-add flag to add task to target's agent:pending
 <!-- /agent:pending -->
 ## Assistant

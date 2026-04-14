@@ -653,7 +653,7 @@ I'm stopping here for you to live-verify in a claudescore / monsterrodholders se
 4. Kill the pane, re-open, run a boundary-only cycle (pending-only change, no new heading) — confirm the `(HEAD)` marker on the prior heading persists via the re-apply-from-HEAD path that show_head now actually reaches.
 
 If all four pass, I'll mark the pending items done and queue the v0.32.4 release. If anything misbehaves, flag it and I'll iterate before touching the gate.
-<!-- agent:boundary:4f77c87b -->
+<!-- agent:boundary:6b9f2348 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

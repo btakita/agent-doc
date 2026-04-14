@@ -382,7 +382,7 @@ Mechanism sketch (not implementing now, just naming the pieces):
 Edge case: `/model` switch mid-response. The model flag is captured at write-time, so whatever the cycle started as is what the header reflects. If the user switches model via `/model` *between* cycles, subsequent cycles get the new attribution — correct.
 
 Added as pending item. I'll wire it up alongside the `supervisor_dirty` work since both need the supervisor to expose its current model state to the skill.
-<!-- agent:boundary:3a3560d0 -->
+<!-- agent:boundary:4e478e45 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

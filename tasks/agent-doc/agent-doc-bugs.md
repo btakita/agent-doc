@@ -450,7 +450,7 @@ Done. Followed your "move detailed instructions into a runbook" guidance — `sr
 - Release itself. #gqep is still blocked on the manual-testing gate — I edited the text to reflect that the bundled SKILL.md rewrite sub-dependency has landed, but the release itself is still your call.
 
 **Release-gate status for #gqep:** bundled SKILL.md rewrite ✅ landed. Remaining gate: `cargo install --path .` + manual-testing confirmation in a live session before crates.io/PyPI/GitHub Release publish.
-<!-- agent:boundary:103cdf72 -->
+<!-- agent:boundary:e0d61647 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

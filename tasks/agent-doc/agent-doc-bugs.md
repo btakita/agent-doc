@@ -161,7 +161,7 @@ What's missing for a clean "dispatch" UX:
 **Possible new command** (pending candidate): `agent-doc dispatch <target-doc> "<task>" [--wake]` — wraps `notify` + `focus` + optional `tmux send-keys` to the receiver pane to kick a cycle. Cleaner than remembering the notify + focus dance.
 
 Want me to add `dispatch` as a pending item, or start with just documenting `notify` as the canonical cross-pane task-send mechanism?
-<!-- agent:boundary:897dcc8f -->
+<!-- agent:boundary:6124f388 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

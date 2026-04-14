@@ -636,7 +636,7 @@ Add a agent-doc preflight command
 - Returns JSON with baseline path, diff, and tier info
 
 **What's missing from model docs?** Should I add it to the SKILL.md runbooks, or add to VERSIONS.md as a feature entry?
-<!-- agent:boundary:14419a21 -->
+<!-- agent:boundary:2364b066 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

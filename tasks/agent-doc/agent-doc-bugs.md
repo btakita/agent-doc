@@ -1258,7 +1258,7 @@ Both are also present on pre-merge HEAD (I verified against `2727f70`), so **the
 3. `--allow-patch-pending` escape hatch still works for this doc's compact cycles.
 
 What to test next — want me to also release v0.32.4 now, or hold for the `#25ag` rename and ship them together? No publish happened in this cycle, just a local install.
-<!-- agent:boundary:1f035d54 -->
+<!-- agent:boundary:570e38cd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

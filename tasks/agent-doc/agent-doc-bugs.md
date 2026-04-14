@@ -15,7 +15,7 @@ claude_args: --dangerously-skip-permissions
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-## Compacted exchange summary (2026-04-14) (HEAD)
+## Compacted exchange summary (2026-04-14)
 
 ### Shipped to main
 
@@ -56,12 +56,44 @@ Three pending items transitioned `[ ] → [/]` (preflight confirms `pending_gate
 - `main` at `69b5475` (three commits ahead of origin).
 - `20260414/pending-gated-state` redundant, still points at HEAD (safe to delete after origin push).
 - Submodule `src/agent-doc` has working-tree clean; `.bin/agent-doc` symlink points at the fresh release binary.
-<!-- agent:boundary:a8b15712 -->
+
+❯ reorder agent:pending to have the tasks related to pending moved to the top
+### Re: Pending reordered — pending-system items at top (HEAD)
+
+Ten items moved to the head of the list via `--pending-reorder`, ordered from "active next" to "shipped tracker":
+
+1. `#25ag` — Rename `patch:pending` → `replace:pending` (next queued task)
+2. `#gqep` — Release v0.32.4 (gated, awaiting manual-testing gate)
+3. `#e6z1` — Version bump + VERSIONS.md entry for gated-state (release gate)
+4. `#14z4` — Hash collision ceiling: 8-char fallback in `generate_hash`
+5. `#bak5` — Optional: pending-done archive component (spec §3 step 3, deferred)
+6. `#pf01` — ✅ Spec landed: `specs/pending-system.md`
+7. `#mgdw` — ✅ Parser `[/]` (Phase 1 shipped)
+8. `#h1j2` — ✅ Reaper skip + `pending_gated_count` (Phase 3 shipped)
+9. `#q90h` — ✅ CLI `--pending-gate`/`--pending-ungate` (Phase 2 shipped)
+10. `#sx35` — ✅ Tests: parser round-trip + state transitions + CLI integration
+
+All other items retain their original relative order beneath this group — `--pending-reorder` only moves the listed ids; unlisted ids fall through in place.
+
+**Reap question:** `#pf01`, `#mgdw`, `#h1j2`, `#q90h`, `#sx35` are all shipped work now tracked only as history. If you want a cleaner list, I can mark them `--pending-done` next cycle and preflight will reap them. Keeping them for now since you asked for reorder, not reap — but say the word and they're gone. `#14z4` (hash collision ceiling) and `#bak5` (archive component) are genuinely future work and should stay.
+
+**`pending_reordered` guard:** the spec says not to reorder again for at least one cycle after the user does. I just reordered per your explicit instruction — next cycle will respect `pending_reordered: true` if preflight reports it and leave the order alone unless you re-ask.
+<!-- agent:boundary:81026d77 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#25ag] Rename patch:pending → replace:pending. Parser accepts both for one release with deprecation warning; --allow-patch-pending gains --allow-replace-pending alias; AGENT_DOC_ALLOW_REPLACE_PENDING=1 becomes canonical env var; specs/pending-system.md + SKILL.md updated to new name; drop old name after one release. Queue behind current phase-3 work.
+- [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release after manual-testing gate
+- [ ] [#e6z1] agent-doc: version bump + VERSIONS.md entry for gated-state feature after implementation lands (release gate — do not ship with the #eg0w bundle)
+- [ ] [#14z4] Hash collision ceiling: implement 8-char fallback in pending::generate_hash if 4-char collides (spec §1)
+- [ ] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)
+- [ ] [#pf01] ✅ Spec landed on 20260414/pending-gated-state: src/agent-doc/specs/pending-system.md — PendingState::Gated, [/] syntax, reaper rules, lifecycle diagram, CLI surface, state transition matrix, release discipline
+- [ ] [#mgdw] agent-doc: parser — accept `[/]` checkbox char, extend PendingState enum with Gated variant in src/agent-doc/src/pending.rs; renderer emits `[/]` round-trip
+- [ ] [#h1j2] agent-doc: reaper — skip Gated items in preflight reap pass; emit pending_gated_count alongside existing counts in preflight JSON output
+- [ ] [#q90h] agent-doc: CLI — add `--pending-gate <id>` flag on `agent-doc write` (mirror of --pending-done); `--pending-ungate <id>` to return to `[ ]`
+- [ ] [#sx35] agent-doc: tests — parser round-trip for `[/]`, state transitions ( →/→x,  →x, /→x, /→ ), reaper respects Gated, CLI flag integration
 - [ ] [#64mb] Investigate double commit_staging race — root cause: concurrent preflights racing step 2 vs step 2d sweep; mid-flight (HEAD)-strip rewrites working tree between them
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [ ] [#xzz5] Preflight slash-command parser: absolute paths like /home/... get captured as commands. Require [a-z][a-z0-9:_-]* after the slash and reject tokens containing a second /.
@@ -69,8 +101,6 @@ Three pending items transitioned `[ ] → [/]` (preflight confirms `pending_gate
 - [ ] [#a012] Expose `agent-doc session-check <FILE>` — nonzero if last ops.log entry is `preflight_diff_start`.
 - [ ] [#a014] Session drift: `registered panes span 2 tmux sessions: 1, 4` — resync if recurring.
 - [ ] [#a010] PostToolUse hook for agent-doc write (layer 3, optional).
-- [ ] [#14z4] Hash collision ceiling: implement 8-char fallback in pending::generate_hash if 4-char collides (spec §1)
-- [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release after manual-testing gate
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
 - [ ] [#4sh0] Add planned-move logging to sync.rs reconciler so ClaimAction→SyncLayout pane swaps are debuggable
 - [ ] [#tw4a] claim: cd into document's .agent-doc root (nearest git repo) when claiming a pane. Fixes relative-path ambiguity and makes git ops naturally target the correct repo.
@@ -85,19 +115,11 @@ Three pending items transitioned `[ ] → [/]` (preflight confirms `pending_gate
 - [ ] [#6ae3] supervisor/pty.rs: wire PtySession into start.rs (phase 1 wire-up stage) — replaces the current Command::status inherit-tty path
 - [ ] [#zp02] supervisor/env.rs: wire into start.rs — replace the inline fm.env expansion loop in start.rs:189 with EnvSpec::from_frontmatter(&fm).resolve()?; feed the result into PtySpawnConfig.env once state.rs restart loop is in place
 - [ ] [#f7d5] supervisor: smoke test — real claude under supervisor in a tmux pane, verify restart + inject + CWD invariant end-to-end
-- [ ] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)
 - [ ] [#eg0w] ✅ Shipped: per-file CommitLock in git::commit + <5s freshness gate in preflight sweep (awaiting release)
-- [ ] [#pf01] ✅ Spec landed on 20260414/pending-gated-state: src/agent-doc/specs/pending-system.md — PendingState::Gated, [/] syntax, reaper rules, lifecycle diagram, CLI surface, state transition matrix, release discipline
-- [ ] [#mgdw] agent-doc: parser — accept `[/]` checkbox char, extend PendingState enum with Gated variant in src/agent-doc/src/pending.rs; renderer emits `[/]` round-trip
-- [ ] [#h1j2] agent-doc: reaper — skip Gated items in preflight reap pass; emit pending_gated_count alongside existing counts in preflight JSON output
-- [ ] [#q90h] agent-doc: CLI — add `--pending-gate <id>` flag on `agent-doc write` (mirror of --pending-done); `--pending-ungate <id>` to return to `[ ]`
-- [ ] [#sx35] agent-doc: tests — parser round-trip for `[/]`, state transitions ( →/→x,  →x, /→x, /→ ), reaper respects Gated, CLI flag integration
-- [ ] [#e6z1] agent-doc: version bump + VERSIONS.md entry for gated-state feature after implementation lands (release gate — do not ship with the #eg0w bundle)
 - [ ] [#kdy5] Implement instruction-files audit check: every library AGENTS.md has a ## Library Context Policy section with resolvable link to LIBRARY_CONTEXT_POLICY.md. Wire into make precommit.
 - [ ] [#1376] After audit check lands: sweep all libraries under src/ to add the Library Context Policy stub section. Each submodule commit separately, then parent pointer bumps.
 - [ ] [#breh] rust-package skill: write the Library Context Policy stub into new library AGENTS.md at scaffold time.
 - [ ] [#3j0e] Install skills-janitor as Claude Code plugin (run /plugin install khendzel/skills-janitor at terminal). User plans to fork eventually; this is the interim path.
 - [ ] [#vdyj] After fork: move forked skills-janitor under src/ as submodule, wire audit into make precommit, and optionally add nightly cron via schedule skill writing drift reports to tasks/agent-doc/skills-audit.md.
-- [ ] [#25ag] Rename patch:pending → replace:pending. Parser accepts both for one release with deprecation warning; --allow-patch-pending gains --allow-replace-pending alias; AGENT_DOC_ALLOW_REPLACE_PENDING=1 becomes canonical env var; specs/pending-system.md + SKILL.md updated to new name; drop old name after one release. Queue behind current phase-3 work.
 <!-- /agent:pending -->
 ## Assistant

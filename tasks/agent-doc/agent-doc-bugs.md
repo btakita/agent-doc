@@ -58,7 +58,7 @@ Three pending items transitioned `[ ] → [/]` (preflight confirms `pending_gate
 - Submodule `src/agent-doc` has working-tree clean; `.bin/agent-doc` symlink points at the fresh release binary.
 
 ❯ reorder agent:pending to have the tasks related to pending moved to the top
-### Re: Pending reordered — pending-system items at top (HEAD)
+### Re: Pending reordered — pending-system items at top
 
 Ten items moved to the head of the list via `--pending-reorder`, ordered from "active next" to "shipped tracker":
 
@@ -78,7 +78,50 @@ All other items retain their original relative order beneath this group — `--p
 **Reap question:** `#pf01`, `#mgdw`, `#h1j2`, `#q90h`, `#sx35` are all shipped work now tracked only as history. If you want a cleaner list, I can mark them `--pending-done` next cycle and preflight will reap them. Keeping them for now since you asked for reorder, not reap — but say the word and they're gone. `#14z4` (hash collision ceiling) and `#bak5` (archive component) are genuinely future work and should stay.
 
 **`pending_reordered` guard:** the spec says not to reorder again for at least one cycle after the user does. I just reordered per your explicit instruction — next cycle will respect `pending_reordered: true` if preflight reports it and leave the order alone unless you re-ask.
-<!-- agent:boundary:4c588300 -->
+
+❯ In src/session-share/tasks/claudescore.md, I asked agent-doc to recalibrate. But `- [ ] [#ahmt] [/]` was rendered. Why?
+### Re: Reproduced — `- [ ] [#ahmt] [/] ...` is the skill misusing `--pending-add`, not a renderer bug (HEAD)
+
+Reproduced in a scratch doc in ~5 seconds:
+
+```bash
+$ agent-doc write bugtest.md --pending-add "[/] test item"
+$ cat bugtest.md
+- [ ] [#3sxg] [/] test item
+```
+
+Same pattern. Here's what happened.
+
+**Root cause.** `--pending-add` writes the text **literally** — it does not parse the body for state markers. State is controlled by the checkbox char (`[ ]` / `[/]` / `[x]`), and `--pending-add` always creates items in the `Open` state (`[ ]`). The `[/]` in the argument became part of the item body, not a state transition. The renderer faithfully emitted what was stored: `- [ ] [#hash] [/] text`. From the renderer's POV this is correct — `[ ]` is the state, `[/] text` is the body.
+
+**Why the other skill session wrote this.** Looking at the claudescore item text — "testing gated-state pending feature in live claudescore doc — verify [/] round-trip..." — the skill was trying to create a **gated** item in one shot. It reached for `--pending-add "[/] ..."` as a way to encode the state in the text, because there's no atomic add-as-gated path today:
+
+- `--pending-add` creates `Open` only.
+- `--pending-gate <id>` requires knowing the hash id.
+- `--pending-add "X"` does **not** emit the assigned hash to stdout — the skill has no way to learn the new id within the same call. So `--pending-add "X" --pending-gate $NEW_ID` can't be composed atomically.
+
+The skill got stuck and improvised by jamming `[/]` into the body. Wrong answer, but the hole is real.
+
+**Three ways to fix this, each fixing a different slice of the problem:**
+
+1. **Emit the assigned hash to stdout on `--pending-add`.** One line per add: `pending_added: abcd`. Lets the skill do `HASH=$(agent-doc write ... --pending-add "X" | grep pending_added | awk '{print $2}')` and then `agent-doc write ... --pending-gate $HASH` as a two-call flow. Minimal surface change; closes the "can't learn the id" gap.
+2. **Add `--pending-add-gated "text"` as a convenience flag.** Directly creates `- [/] [#hash] text`. One-call atomic. Mirrors the existing `--pending-add` surface. Preferred if we think gated-at-birth is a common-enough case (it is for "this item is blocked on X from day one" scenarios, which is exactly what the claudescore test was).
+3. **Reject ambiguous text in `--pending-add`.** If the text starts with `[/]`, `[x]`, or `[ ]` (with or without a leading space), refuse with an error telling the caller to use the proper flag. Defensive — stops the silent footgun the claudescore doc tripped.
+
+All three are compatible and probably all worth doing. Queued as one pending item (`--pending-add-gated` flag + hash-to-stdout + reject-ambiguous-text bundle) since they cluster as one ergonomics fix.
+
+**Immediate fix for the claudescore doc.** Two CLI calls:
+
+```bash
+# Strip the [/] prefix from the body text (keeps hash intact)
+agent-doc write tasks/claudescore.md --pending-edit "ahmt=testing gated-state pending feature in live claudescore doc — verify [/] round-trip, reaper skip, preflight pending_gated_count. Tracks agent-doc v0.32.4 bundle (#gqep, #mgdw, #h1j2, #q90h, #sx35). See tasks/agent-doc/agent-doc-bugs.md"
+
+# Then gate it for real
+agent-doc write tasks/claudescore.md --pending-gate ahmt
+```
+
+Want me to run those against `src/session-share/tasks/claudescore.md` now, or leave it for that doc's own session?
+<!-- agent:boundary:b088af41 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -121,5 +164,6 @@ All other items retain their original relative order beneath this group — `--p
 - [ ] [#breh] rust-package skill: write the Library Context Policy stub into new library AGENTS.md at scaffold time.
 - [ ] [#3j0e] Install skills-janitor as Claude Code plugin (run /plugin install khendzel/skills-janitor at terminal). User plans to fork eventually; this is the interim path.
 - [ ] [#vdyj] After fork: move forked skills-janitor under src/ as submodule, wire audit into make precommit, and optionally add nightly cron via schedule skill writing drift reports to tasks/agent-doc/skills-audit.md.
+- [ ] [#9v7h] agent-doc: --pending-add should reject text starting with '[/]' / '[x]' / '[ ]' (ambiguous state marker). Add --pending-add-gated flag and emit assigned hash to stdout so skill can compose add+gate atomically without text-embedding.
 <!-- /agent:pending -->
 ## Assistant

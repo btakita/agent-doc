@@ -188,6 +188,16 @@ pub struct PreflightOutput {
     /// When set, the skill MUST NOT reorder pending this cycle — user intent wins.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pending_reordered: bool,
+    /// Count of pending items currently in `[/]` gated state.
+    /// Surfaced so the skill can highlight blocked items in its response and
+    /// decide whether to address gated work this cycle. Zero is omitted from
+    /// JSON to keep the common case quiet.
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    pub pending_gated_count: usize,
+}
+
+fn is_zero_usize(n: &usize) -> bool {
+    *n == 0
 }
 
 /// Check tmux layout health for the current session.
@@ -499,10 +509,11 @@ pub fn run(file: &Path) -> Result<()> {
     // Step 2e: Pending component maintenance — lazy backfill, reap, and reorder detection.
     // All three are idempotent: they only write when something actually changes, and the
     // subsequent diff step picks up any changes via the snapshot comparison.
-    let pending_reordered = run_pending_maintenance(file).unwrap_or_else(|e| {
-        eprintln!("[preflight] pending maintenance warning: {}", e);
-        false
-    });
+    let (pending_reordered, pending_gated_count) =
+        run_pending_maintenance(file).unwrap_or_else(|e| {
+            eprintln!("[preflight] pending maintenance warning: {}", e);
+            (false, 0)
+        });
 
     // Step 3: Read and truncate the claims log.
     eprintln!("[preflight] step 3: claims");
@@ -692,6 +703,7 @@ pub fn run(file: &Path) -> Result<()> {
         pending_callbacks,
         env: frontmatter_env,
         pending_reordered,
+        pending_gated_count,
     };
 
     let json = serde_json::to_string_pretty(&output)
@@ -703,21 +715,24 @@ pub fn run(file: &Path) -> Result<()> {
 
 /// Run pending-component maintenance: lazy backfill, reap `[x]`, and reorder detection.
 ///
-/// Returns `true` when a reorder was detected (same ids, different order). Any
-/// write-through (backfill / reap) is persisted and committed in the same pass.
+/// Returns `(reordered, gated_count)`:
+/// - `reordered` is `true` when a reorder was detected (same ids, different order).
+/// - `gated_count` is the number of items currently in `[/]` state after backfill+reap.
+///
+/// Any write-through (backfill / reap) is persisted and committed in the same pass.
 /// Silent no-op when the document has no `agent:pending` component.
-fn run_pending_maintenance(file: &Path) -> Result<bool> {
+fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
     let content = match std::fs::read_to_string(file) {
         Ok(c) => c,
-        Err(_) => return Ok(false),
+        Err(_) => return Ok((false, 0)),
     };
     let components = match crate::component::parse(&content) {
         Ok(cs) => cs,
-        Err(_) => return Ok(false),
+        Err(_) => return Ok((false, 0)),
     };
     let comp = match components.into_iter().find(|c| c.name == "pending") {
         Some(c) => c,
-        None => return Ok(false),
+        None => return Ok((false, 0)),
     };
     let body = &content[comp.open_end..comp.close_start];
 
@@ -773,7 +788,18 @@ fn run_pending_maintenance(file: &Path) -> Result<bool> {
     if reordered {
         eprintln!("[preflight] pending: reorder detected (skill must not reorder this cycle)");
     }
-    Ok(reordered)
+
+    // 5. Count gated items in the post-maintenance body.
+    let (_, items, _) = crate::pending::parse_items(&current_body);
+    let gated_count = items
+        .iter()
+        .filter(|i| matches!(i.state, crate::pending::PendingState::Gated))
+        .count();
+    if gated_count > 0 {
+        eprintln!("[preflight] pending: {} gated item(s)", gated_count);
+    }
+
+    Ok((reordered, gated_count))
 }
 
 /// Read the claims log and truncate it. Returns lines as a `Vec<String>`.

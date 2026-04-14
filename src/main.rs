@@ -1113,11 +1113,13 @@ fn main() -> anyhow::Result<()> {
                 }
             }
 
-            // Enforcement: reject `patch:pending` blocks in stdin unless allowed.
+            // Enforcement: reject `patch:pending` blocks in stdin unless the
+            // caller explicitly opts in. Default is reject (Phase 3 inversion);
+            // the env var below is the escape hatch shared with library callers.
             // The skill MUST use the granular flags above.
-            if !allow_patch_pending {
+            if allow_patch_pending {
                 // SAFETY: single-threaded at this point in the CLI entrypoint.
-                unsafe { std::env::set_var("AGENT_DOC_REJECT_PATCH_PENDING", "1"); }
+                unsafe { std::env::set_var("AGENT_DOC_ALLOW_PATCH_PENDING", "1"); }
             }
 
             let baseline = baseline_file

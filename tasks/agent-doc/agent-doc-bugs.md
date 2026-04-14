@@ -589,7 +589,7 @@ The double `commit_staging` trace with drift=410 then drift=122 (288-byte shrink
 - Sweep ordering within a single preflight — still skips `doc_path == canonical` at line 460 as before
 
 **Pending queue:** `#eg0w` moved to ✅ (awaiting release gate); `#qpzd` (the duplicate) marked done. `#gqep` release bump is next when you want to cut v0.32.5 with this fix.
-<!-- agent:boundary:329790b2 -->
+<!-- agent:boundary:c871692a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1207,7 +1207,7 @@ Candidates, ordered by how loudly they signal "escape hatch":
 - Drop the old name after one release.
 
 Want me to turn this into a `[#xxxx]` pending item and queue it behind the current phase-3 work?
-<!-- agent:boundary:99c58b94 -->
+<!-- agent:boundary:635c7fec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

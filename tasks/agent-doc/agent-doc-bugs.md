@@ -122,7 +122,7 @@ agent-doc write tasks/claudescore.md --pending-gate ahmt
 
 Want me to run those against `src/session-share/tasks/claudescore.md` now, or leave it for that doc's own session?
 ❯ do it
-### Re: Blocked on pane ownership — claudescore doc is claimed by pane %2 (HEAD)
+### Re: Blocked on pane ownership — claudescore doc is claimed by pane %2
 
 Ran the edit, got:
 
@@ -140,8 +140,28 @@ Three ways forward, you pick:
 
 My recommendation: **option 1** if pane %2 is still live, **option 3** otherwise. Option 2 is available but I don't want to take it without a direct "yes, reclaim." Let me know which — or just do it from the other pane and I'll verify here on the next cycle.
 
+❯ Can we add a way to send a task to another pane? Would transfer work?
+
 **No pending change this cycle** — nothing to add/remove until I know which path you want.
-<!-- agent:boundary:98df0f70 -->
+### Re: send a task to another pane (HEAD)
+
+Short answer: **`transfer` won't do it** — it moves component content between documents, not tasks between panes. Panes are bound to documents via claims, so "send to another pane" really means "write into the document that other pane owns, in a way its next cycle will see."
+
+The existing primitives that come closest:
+
+1. **`agent-doc notify <target-doc> "<message>"`** — appends a blockquote into the target doc's `agent:exchange`. The pane claiming that doc sees it as a new user turn on its next preflight. Supports `--source` and `--affects` for re-eval directives. This is the real "send a task" path.
+2. **`agent-doc pending <target-doc> --add "text"`** (or `agent-doc write ... --pending-add`) — drops a task into the target doc's `agent:pending`. Less intrusive than `notify` — it doesn't interrupt an ongoing exchange, just queues work.
+3. **`transfer` / `extract`** — bulk content movement between docs (e.g., hoist an exchange entry out of a scratch doc into a tracked one). Not a task-dispatch mechanism.
+
+What's missing for a clean "dispatch" UX:
+- No single command like `agent-doc send <target-doc> "<task>"` that combines notify + focus + optional wake (tmux send-keys to trigger a cycle immediately).
+- No cross-pane ack — the sender doesn't know when the receiver picked it up unless it polls the target doc's git log.
+- The receiving pane only picks the message up on its **next** user-triggered cycle (editor save, explicit `/agent-doc`). There's no push — unless you `focus` the pane and have a watch running.
+
+**Possible new command** (pending candidate): `agent-doc dispatch <target-doc> "<task>" [--wake]` — wraps `notify` + `focus` + optional `tmux send-keys` to the receiver pane to kick a cycle. Cleaner than remembering the notify + focus dance.
+
+Want me to add `dispatch` as a pending item, or start with just documenting `notify` as the canonical cross-pane task-send mechanism?
+<!-- agent:boundary:d6b33c2d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

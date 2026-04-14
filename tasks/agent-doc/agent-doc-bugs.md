@@ -1042,9 +1042,11 @@ The `AGENT_DOC_REJECT_PATCH_PENDING=1` → flip-default question is **only** for
 
 Approve Phase 2 and I'll start the `gate/ungate` matrix + CLI flags.
 ❯ continue to phase 2
-### Re: Phase 2 landed — `gate/ungate` matrix + CLI flags (HEAD)
+### Re: Phase 2 landed — `gate/ungate` matrix + CLI flags
 
 Working-tree state on `20260414/pending-gated-state`. **Not committed yet** — the submodule has unrelated working-tree changes (supervisor, env.rs, frontmatter.rs, etc.) from prior cycles that I don't want to bundle into a "Phase 2" commit. You'll want to stage selectively or do a sweep commit.
+
+❯ Do a sweep commit. we need to continue moving forward.
 
 **Build:** clean. **Tests:** `pending::tests` 40 passing (10 new), `pending_integration` 18 passing (6 new). **Clippy:** clean on changed files (pre-existing warnings in `write.rs` only — unrelated).
 
@@ -1123,7 +1125,45 @@ Gate/ungate run **before** done deliberately. That means:
 Pending updated: `#pjfg`, `#j5x0`, `#kzk7`, `#0jyk`, `#zrbq`, `#z6xv` marked done. New item added for Phase 3 work. The remaining `#mgdw`/`#h1j2`/`#q90h`/`#sx35` items are also covered by what landed in Phases 1+2 — let me know if you want me to reap them too or keep them as the original spec-driven tracker.
 
 Approve Phase 3 and I'll re-raise the enforcement-flip question with a concrete migration plan, then land `pending_gated_count` + the flip in one commit.
-<!-- agent:boundary:0c555a92 -->
+❯ do phase 3
+### Re: Sweep commit + Phase 3 landed (HEAD)
+
+**Sweep commit:** `fa31f78` on `20260414/pending-gated-state` — 22 files, 2571 insertions / 118 deletions. Bundled Phase 2 (gate/ungate matrix, CLI flags, integration tests, `specs/pending-system.md`), supervisor scaffolding (`src/supervisor/env.rs`, specs), and the env/frontmatter/agent infrastructure work that had accumulated in the working tree. Single commit per your "moving forward" note — selective staging would have been churn.
+
+**Phase 3:** `69b5475` — both pieces landed in one commit.
+
+**Part 1 — invert `patch:pending` enforcement default**
+
+`src/write.rs::enforce_no_patch_pending`: now rejects unconditionally unless `AGENT_DOC_ALLOW_PATCH_PENDING=1`. The CLI (`src/main.rs`) sets that env var only when `--allow-patch-pending` is passed.
+
+The old wiring was: CLI sets `AGENT_DOC_REJECT_PATCH_PENDING=1` to enable rejection → library/FFI/SDK/test callers that bypass `main.rs` silently skipped the check. Closing that hole was the whole point — any future caller must opt in explicitly.
+
+**Part 2 — emit `pending_gated_count` in preflight JSON**
+
+`PreflightOutput` gains `pending_gated_count: usize` (omitted at zero via `skip_serializing_if`). `run_pending_maintenance` now returns `(reordered, gated_count)`; the count is taken **after** backfill+reap so it reflects the post-maintenance state the skill will actually see.
+
+```rust
+let (_, items, _) = crate::pending::parse_items(&current_body);
+let gated_count = items
+    .iter()
+    .filter(|i| matches!(i.state, crate::pending::PendingState::Gated))
+    .count();
+```
+
+Logged to stderr too (`[preflight] pending: N gated item(s)`) when non-zero.
+
+**Tests:**
+- `cargo test --test pending_integration` → **21 passed** (3 new for Phase 3: gated-count positive case, gated-count zero-omission, library-default-reject).
+- `cargo test --lib` → 274 passed.
+- Full `cargo test`: 576 passed, 45 failed — all 45 failures are pre-existing tmux/resync env failures, identical count with my changes stashed. Verified.
+- `cargo clippy --tests`: no new warnings (one pre-existing `map_or` lint at `src/preflight.rs:1618` is unrelated).
+
+**Pending updated:** marked `#tzwy`, `#2ng4`, `#6d6c` done — all three Phase 3 trackers covered by this commit.
+
+**Branch state:** `20260414/pending-gated-state` now sits at three commits ahead of `c53b09b` (Phase 1): sweep, then Phase 3. Ready for merge to main when you want.
+
+**Next:** the spec's "Open questions" section in `specs/pending-system.md` is still unanswered — particularly whether `op_done` should also use `validate_transition` to catch `Done → Done` double-marks. Let me know if you want that as a follow-up cycle.
+<!-- agent:boundary:ff425fbd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1165,14 +1205,8 @@ Approve Phase 3 and I'll re-raise the enforcement-flip question with a concrete 
 - [ ] [#breh] rust-package skill: write the Library Context Policy stub into new library AGENTS.md at scaffold time.
 - [ ] [#3j0e] Install skills-janitor as Claude Code plugin (run /plugin install khendzel/skills-janitor at terminal). User plans to fork eventually; this is the interim path.
 - [ ] [#vdyj] After fork: move forked skills-janitor under src/ as submodule, wire audit into make precommit, and optionally add nightly cron via schedule skill writing drift reports to tasks/agent-doc/skills-audit.md.
-- [x] [#kzk7] pending-system: add PendingState enum (Open/Gated/Done); migrate PendingItem off checked:bool
-- [x] [#0jyk] pending-system: parse + render [/] gated checkbox in pending.rs
-- [x] [#pjfg] pending-system: pending_cmd::gate / ungate + state-transition matrix validation
-- [x] [#j5x0] pending-system: CLI flags --pending-gate / --pending-ungate wired through main.rs + write.rs
-- [x] [#zrbq] pending-system: backfill() inserts missing [ ] checkboxes (currently hash-only)
-- [ ] [#tzwy] pending-system: preflight emits pending_gated_count in JSON
-- [ ] [#2ng4] pending-system: invert patch:pending enforcement default (reject without env var gate)
-- [x] [#z6xv] pending-system: unit tests for state matrix, gated parse/render, backfill, reap-skips-gated
-- [ ] [#6d6c] Phase 3: invert patch:pending enforcement default + emit pending_gated_count in preflight JSON
+- [x] [#tzwy] pending-system: preflight emits pending_gated_count in JSON
+- [x] [#2ng4] pending-system: invert patch:pending enforcement default (reject without env var gate)
+- [x] [#6d6c] Phase 3: invert patch:pending enforcement default + emit pending_gated_count in preflight JSON
 <!-- /agent:pending -->
 ## Assistant

@@ -954,7 +954,45 @@ I added pending items for both the interim plugin install and the post-fork subm
 ### Pending added
 
 Five items landed in pending — review before next cycle in case I misread scope.
-<!-- agent:boundary:d03250ae -->
+❯ implement pending-system
+
+### Re: implement pending-system (HEAD)
+
+Audited current state before planning. Most of the spec is already built — the gap is narrower than the spec's 6-section scope suggests.
+
+**Already in place** (per audit of `pending.rs`, `pending_cmd.rs`, `preflight.rs`, `write.rs`, `main.rs`):
+
+- Stable hash IDs — `generate_hash()` + parser recognizes `[#xxxx]` (4–8 chars, collision handling)
+- `--pending-add` / `--pending-done` / `--pending-edit` / `--pending-clear` / `--pending-reorder` — all wired through `pending_cmd::*` and the `Write` subcommand
+- Lazy hash backfill in preflight `run_pending_maintenance()`
+- `[x]` reap (won't touch `[ ]`)
+- Reorder detection + `pending_reordered` JSON flag
+- `patch:pending` rejection via `enforce_no_patch_pending()` — currently gated on `AGENT_DOC_REJECT_PATCH_PENDING=1`
+- `--allow-patch-pending` hidden escape hatch
+
+**Gaps** (what needs building):
+
+1. **`PendingState` enum** — `Open | Gated | Done`. Replaces `PendingItem.checked: bool`. Not FFI-exposed (checked `ffi.rs`), so the refactor is safe.
+2. **`[/]` parse + render** — parser currently treats `[/]` as legacy-no-checkbox text. Extend the checkbox matcher + renderer.
+3. **`pending_cmd::gate()` / `ungate()`** + state-transition matrix validation (reject `[x]→*`, `[ ]→ungate`, etc.).
+4. **`--pending-gate` / `--pending-ungate`** CLI flags in `main.rs` Write subcommand.
+5. **`backfill()` — insert missing `[ ]`** checkboxes (currently hash-only). Never inserts `[/]` — gated is always explicit.
+6. **`pending_gated_count`** in `PreflightOutput` JSON.
+7. **Invert enforcement default** — spec §6 says `patch:pending` presence is an error by default, not opt-in. Currently the rejection is opt-in via env var. Flip the default, keep the env var as a kill switch.
+8. **Tests** — state matrix, gated parse/render roundtrip, backfill inserts `[ ]` not `[/]`, reap skips `[/]`, enforcement rejects unless `--allow-patch-pending`.
+
+**Phasing** (three commits, each independently testable):
+
+- **Phase 1 — data model:** `PendingState` enum, migrate `PendingItem`, parser/renderer for `[/]`, backfill inserts `[ ]`. All internal; no CLI changes. Test: roundtrip parse/render for all three states.
+- **Phase 2 — ops surface:** `pending_cmd::gate/ungate`, transition matrix, `--pending-gate/--pending-ungate` flags. Test: matrix truth table (9 cases), CLI integration.
+- **Phase 3 — preflight + enforcement:** `pending_gated_count` JSON field, flip `enforce_no_patch_pending` default. Test: preflight JSON shape, `patch:pending` rejected without the escape hatch.
+
+**Open question before I start:** spec §6 says "invert the current rule — presence of `patch:pending` → error." The current code rejects only when `AGENT_DOC_REJECT_PATCH_PENDING=1`. Flipping the default is a behavior change for any docs still using `patch:pending` blocks. Safe to flip unconditionally, or gate behind a frontmatter opt-out for one release?
+
+Release target: per spec §Implementation §4, Gated lifecycle ships in **v0.32.6** (separate from the `#eg0w` CommitLock v0.32.5). I'll hold publishing until you confirm.
+
+Approve the phasing and I'll start Phase 1. Each phase commits + tests cleanly before moving to the next.
+<!-- agent:boundary:e9b7c86a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -996,5 +1034,13 @@ Five items landed in pending — review before next cycle in case I misread scop
 - [ ] [#breh] rust-package skill: write the Library Context Policy stub into new library AGENTS.md at scaffold time.
 - [ ] [#3j0e] Install skills-janitor as Claude Code plugin (run /plugin install khendzel/skills-janitor at terminal). User plans to fork eventually; this is the interim path.
 - [ ] [#vdyj] After fork: move forked skills-janitor under src/ as submodule, wire audit into make precommit, and optionally add nightly cron via schedule skill writing drift reports to tasks/agent-doc/skills-audit.md.
+- [ ] [#kzk7] pending-system: add PendingState enum (Open/Gated/Done); migrate PendingItem off checked:bool
+- [ ] [#0jyk] pending-system: parse + render [/] gated checkbox in pending.rs
+- [ ] [#pjfg] pending-system: pending_cmd::gate / ungate + state-transition matrix validation
+- [ ] [#j5x0] pending-system: CLI flags --pending-gate / --pending-ungate wired through main.rs + write.rs
+- [ ] [#zrbq] pending-system: backfill() inserts missing [ ] checkboxes (currently hash-only)
+- [ ] [#tzwy] pending-system: preflight emits pending_gated_count in JSON
+- [ ] [#2ng4] pending-system: invert patch:pending enforcement default (reject without env var gate)
+- [ ] [#z6xv] pending-system: unit tests for state matrix, gated parse/render, backfill, reap-skips-gated
 <!-- /agent:pending -->
 ## Assistant

@@ -334,7 +334,7 @@ Fix candidates:
 2. **Anchor the skip to the component.** Only skip prefix-rewrite inside `agent:pending`, `agent:boundary:*`, and patch/component open/close comments. Inside `agent:exchange`, every added line gets prefixed, full stop.
 
 Option 2 is the cleaner invariant — the component tells us the context, so don't second-guess the content. I'll pick it up when that item gets scheduled. If you want me to investigate right now instead of queuing, say the word and I'll pull up `write.rs` and pinpoint the branch.
-<!-- agent:boundary:b571a21e -->
+<!-- agent:boundary:77dc9390 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

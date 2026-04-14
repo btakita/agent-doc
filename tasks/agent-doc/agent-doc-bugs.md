@@ -1236,7 +1236,7 @@ Sequencing: this lands **after** the current phase-3 work (pending_gated_count +
 My read of the sequencing note from last cycle ("this lands **after** the current phase-3 work ships") favors **option 1** — "ships" implies released, not just committed. But I don't want to trigger a release cycle on a one-word prompt.
 
 Which one?
-<!-- agent:boundary:ce4af10d -->
+<!-- agent:boundary:fb9b547f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

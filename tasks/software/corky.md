@@ -1023,7 +1023,7 @@ Most Sprint 2 tasks are "Started" with 0 actual hours — signal extraction (2.3
 - `corky draft new --thread-id` — attach drafts to existing Gmail threads
 
 **PyPI wheel note:** Built with `manylinux_2_28` (Ubuntu-based) — manylinux2014 (CentOS 7) can't build this crate because it needs OpenSSL ≥ 1.1.0 and the transcription feature needs libclang. Used `quay.io/pypa/manylinux_2_28_x86_64` with `--no-default-features`. Updating `prerelease.md` runbook.
-<!-- agent:boundary:ba67b057 -->
+<!-- agent:boundary:4b5e54b0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -266,7 +266,7 @@ So the principled default for `notify --pending-add` is: **error if the target l
 Escape hatch for your "I'd be OK with it" case: an explicit **`--create-pending`** flag on `notify` that opts the sender into materializing the component on the target. Off by default, on when you know the recipient won't mind. That keeps the principle intact while giving the pragmatic path you want for your own docs.
 
 Want me to add that `--create-pending` flag to the pending item, or keep it strict-only for v1?
-<!-- agent:boundary:6014c41c -->
+<!-- agent:boundary:eb497ee4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

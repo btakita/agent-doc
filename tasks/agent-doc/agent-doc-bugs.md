@@ -399,7 +399,7 @@ Reordered with this doc's focus (bugs + investigations) driving priority:
 9. **Supervisor feature work** (least urgent for *bugs* doc): `#jg0d`, `#b486`, `#40ct`, `#vnp0`, `#6ae3`, `#zp02`, `#f7d5`
 10. **Deferred optional**: `#bak5`
 ❯ Make a spec file for the supervisor implementation.
-### Re: supervisor spec already exists — what gap should I fill? (HEAD)
+### Re: supervisor spec already exists — what gap should I fill?
 
 `src/agent-doc/specs/supervisor.md` already exists (248 lines, 19.5K) and has been updated throughout this session. Current sections:
 
@@ -427,7 +427,42 @@ Before I write anything, which of these do you actually want?
 4. **Something else** — tell me what's missing from `supervisor.md` and I'll extend it in-place rather than creating a parallel doc.
 
 My recommendation: **option 2** if you want the phase 1 landing to be drivable from a single short checklist without re-reading the 248-line design spec each cycle; **option 4** (extend `supervisor.md`) otherwise. Parallel specs drift.
-<!-- agent:boundary:0276782b -->
+❯ **option 2**
+### Re: phase 1 implementation playbook landed (HEAD)
+
+`src/agent-doc/specs/runbooks/supervisor-phase1.md` — 6 stages (cwd/pty/env marked landed, resize/state/ipc/start.rs wire-up as PR-by-PR checklists), each with scope, module layout sketch, pinned invariants, test table, and done criteria. Front-links back to `../supervisor.md` as the source of truth for design rationale.
+
+**Structure per remaining stage:**
+
+- Scope (what the PR does)
+- Module layout (public surface sketch in Rust)
+- Invariants to pin (4–5 non-obvious rules to hard-code in the module doc comment — these are the things future refactors will trip over)
+- Tests table (test name → what it locks)
+- Cargo.toml additions
+- Done criteria (green tests, clippy, gate flag status, etc.)
+
+**Key design decisions baked into the playbook** (flag any you disagree with before I start landing `#jg0d`):
+
+1. **Resize watcher owns the initial size push.** First resize fires synchronously before the watcher blocks, so claude boots at the real pane size instead of `PtySpawnConfig::new`'s 24×80 default. Alternative (push from `start.rs`) leaves a race between spawn and first SIGWINCH.
+2. **Crash classifier uses `Instant::now()`, not wall clock.** Flap detection is monotonic — NTP jumps / suspend-resume cannot spuriously clear the counter. Tests inject a `Clock` trait to avoid real sleeps.
+3. **`consecutive_failures` does NOT reset on `Transient`.** Only `Clean` resets. Prevents a flapping child that occasionally exits 0 from looping forever.
+4. **IPC is one-request-per-connection.** No long-lived subscriptions in phase 1. Simplifies accept loop, avoids subscription leaks, keeps the lock-order invariant trivial.
+5. **IPC lock order is state → pty**, documented in module doc. Prevents deadlocks with the `state.rs` restart loop.
+6. **Clean shutdown order is reverse of startup.** kill claude → drop pty → close IPC socket → join threads → unlink socket. Other orders leak.
+7. **`AGENT_DOC_SESSION` / `AGENT_DOC_DOCUMENT` set via `EnvSpec` overrides**, not inside `pty.rs`. Keeps `pty.rs` ignorant of session semantics (so it stays unit-testable without a session).
+8. **SKILL.md `cd` fix stays in a separate cleanup PR**, even though supervisor CWD resolution makes it redundant. Don't bundle orthogonal changes with the wire-up PR.
+
+**Cross-reference table** at the bottom maps each stage to its pending IDs in `agent-doc-bugs.md` (`#jg0d`, `#b486`, `#40ct`, `#vnp0`, `#6ae3`, `#zp02`, `#f7d5`). Keeping this table honest is part of each stage's done criteria — if pending IDs drift, the table gets fixed in the same PR.
+
+**What's deliberately out of scope for the playbook:**
+
+- Real-claude smoke test detail (one-liner → `#f7d5`, manual testing gate).
+- Windows ConPTY real impl (stub for phase 1; WSL handles the tmux case).
+- `supervisor resume <session>` CLI for `Halted` recovery (defer until first real flap observed).
+- Non-tmux mode (has its own "Future" section in `supervisor.md`).
+
+Ready to start landing `#jg0d` (`resize.rs`) whenever you give the go-ahead. That's the smallest of the four remaining submodules and has the cleanest dependency graph — no cross-module locking, just SIGWINCH → channel → resize call.
+<!-- agent:boundary:bc01718e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

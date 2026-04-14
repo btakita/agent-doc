@@ -831,7 +831,7 @@ It must NOT live in user-local auto-memory. Auto-memory is reserved for *user pr
 Say **"go"** and I'll do the delete + CLAUDE.md update in this cycle, and file the audit as a pending item (won't bundle the full audit into the same response — that's a separate read-through).
 
 **Connection back to agent-doc-bugs**: this is an orthogonal track to the `#mgdw` parser work for the Gated lifecycle — I can do it in the same cycle or sequence it after `#mgdw`. Your call. Default: do the CLAUDE.md + stale-memory delete first (small, frees context for every future session), then land `#mgdw`.
-### Re: visibility for external contributors (HEAD)
+### Re: visibility for external contributors
 
 You're right — that's the failure mode of the root-only placement. A rule that governs library authorship but lives in the parent workspace's AGENTS.md is invisible the moment someone clones the leaf repo in isolation.
 
@@ -842,6 +842,9 @@ The resolution is **leaf placement with a canonical spec**, not duplication:
    - A top-level `SPEC.md` in each library's own repo if it's self-hosting
    - A published doc URL for libraries that ship to crates.io/npm
 
+❯ I like `src/instruction-files/LIBRARY_CONTEXT_POLICY.md`
+❯ We should add the skills from [skill-janitor](https://github.com/khendzel/skills-janitor) into one of our repos. Make sure we run regular audits.
+
 2. **Leaf stub** — each library's `AGENTS.md` carries a 2-3 line pointer, not the full rule:
    ```markdown
    ## Library Context Policy
@@ -851,6 +854,7 @@ The resolution is **leaf placement with a canonical spec**, not duplication:
    An external contributor who clones only the leaf sees the stub, follows the link, and gets the full rule. No duplication, no drift.
 
 3. **Enforcement via `instruction-files` audit** — the crate already audits instruction file structure across the workspace. Extend it with a check: "every library AGENTS.md contains a `## Library Context Policy` section that links to the canonical spec." Violations surface in `make precommit`. This turns the rule from a norm into a contract.
+❯ yes
 
 4. **Scaffolder integration** — `rust-package` skill writes the stub into new library AGENTS.md automatically. New libraries get it for free; existing ones need a one-time sweep.
 
@@ -859,7 +863,61 @@ The resolution is **leaf placement with a canonical spec**, not duplication:
 **What to decide:** where the canonical spec lives. If agent-loop is the sole workspace these libraries ever appear in, `src/instruction-files/LIBRARY_CONTEXT_POLICY.md` is the cleanest home. If some libraries are published and consumed independently, the spec needs a public URL (a docs site or a README section in `instruction-files` on crates.io) so the stub link resolves for external readers.
 
 Want me to draft the canonical spec file + a sample leaf stub so you can evaluate the concrete shape?
-<!-- agent:boundary:9823078e -->
+❯ yes
+### Re: decisions locked in (HEAD)
+
+Locked in:
+
+- Canonical spec lives at `src/instruction-files/LIBRARY_CONTEXT_POLICY.md`
+- `instruction-files` audit enforces `## Library Context Policy` stub presence + link validity on every library AGENTS.md
+- `rust-package` scaffolder writes the stub for new libraries
+
+I drafted the canonical spec file at `src/instruction-files/LIBRARY_CONTEXT_POLICY.md` — open it in your editor to review. It covers: scope, the five rules (AGENTS.md + runbooks split, stub format, no-duplication, audit enforcement, scaffolder integration), explicit non-rules, and amendment procedure. Nothing is committed yet — it's uncommitted in your working tree.
+
+**Sample leaf stub** (paste into any library's `AGENTS.md`):
+
+```markdown
+## Library Context Policy
+
+This library follows the agent-loop library-context policy. Contributors
+authoring `AGENTS.md`, `SKILL.md`, or runbooks in this repo must read:
+
+../instruction-files/LIBRARY_CONTEXT_POLICY.md
+
+before making changes.
+```
+
+For libraries that ship independently (crates.io, npm), use the absolute GitHub URL form instead so external contributors hit a resolvable link.
+
+### Re: skill-janitor integration (HEAD)
+
+I read the repo. Important distinction:
+
+- **`instruction-files`** audits `AGENTS.md` / `CLAUDE.md` / `SKILL.md` content for staleness, broken tree paths, line budget, non-actionable content, machine-local paths.
+- **`skills-janitor`** audits `.claude/skills/` directories: tracks which skills exist, usage patterns, comparison across installs, duplicate detection. Different surface, different concerns.
+
+They're complementary — not overlapping. Both should run in precommit/CI.
+
+**Where to add it.** Three options:
+
+1. **Vendor into `agent-loop` as a plugin** — copy `skills-janitor/skills/` and `scripts/` into `.claude/plugins/skills-janitor/`. Pros: self-contained, pinned version, no external dependency. Cons: manual updates when upstream changes, license/attribution burden.
+2. **Git submodule under `src/skills-janitor/`** — follows the existing pattern (`src/agent-doc`, `src/instruction-files`, etc.). Updates flow via `git submodule update`. Pros: clean update path, matches workspace conventions. Cons: another submodule to maintain.
+3. **Install as a Claude Code plugin** from the upstream GitHub URL directly. Pros: zero vendor burden. Cons: external availability risk, version pinning harder.
+
+**My recommendation: option 2 (submodule).** It matches how every other cross-cutting tool in this workspace is organized (`src/instruction-files`, `src/agent-doc`, `src/corky`), gives you clean `git submodule update --remote` semantics, and keeps the audit tool co-located with the code it audits. The `khendzel/skills-janitor` repo is MIT-licensed with no dependencies, so submoduling is cheap.
+
+**Regular-audit wiring** (once submoduled):
+
+- Add `skills-janitor` invocation to `make precommit` alongside the existing `instruction-files` audit call.
+- Run it in CI on every PR that touches `.claude/skills/**`.
+- Optional: nightly cron via the `schedule` skill to surface drift reports into a task document (e.g., `tasks/agent-doc/skills-audit.md`).
+
+**What to decide:**
+
+1. Option 1, 2, or 3 for skill-janitor integration?
+2. Should I commit `LIBRARY_CONTEXT_POLICY.md` now, or do you want to edit it first?
+3. Once the spec is committed, should I sweep the sixteen-ish libraries under `src/` to add the stub section to their AGENTS.md, or do that after the audit check lands so the audit drives the sweep?
+<!-- agent:boundary:e94b2c80 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

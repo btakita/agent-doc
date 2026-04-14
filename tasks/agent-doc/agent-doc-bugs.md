@@ -313,7 +313,7 @@ Proposed mechanism — extends the preflight contract, no new moving parts:
 Edge case worth calling out: if `agent_doc_env_inherit` flips from `true` → `false`, the new env is **smaller** than the old one (parent vars dropped). Restart is the only safe path — you cannot hot-unset arbitrary parent vars from a running process without killing child subprocesses that may depend on them. The classification table should mark `agent_doc_env_inherit` as `Spawn` unconditionally.
 
 Proceeding with the Option<String> implementation as planned; I'll add the frontmatter-diff + `supervisor_dirty` surfacing as a follow-up item rather than bundling it into this delta.
-<!-- agent:boundary:e57c843b -->
+<!-- agent:boundary:5c9b4580 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

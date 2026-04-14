@@ -592,7 +592,7 @@ Which means `#mgdw` / `#h1j2` / `#q90h` / `#sx35` were already discharged — I 
 3. `cargo install --path .` + `cargo build --release` after publish so `.bin/agent-doc` and `~/.cargo/bin/agent-doc` both track the published build.
 
 Ready to start on `#hrmt` next if you want to keep the release train moving, or stop here so you can eyeball the VERSIONS.md prose first.
-<!-- agent:boundary:24ce3417 -->
+<!-- agent:boundary:bf422e38 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

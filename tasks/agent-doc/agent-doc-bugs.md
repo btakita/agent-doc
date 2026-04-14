@@ -308,7 +308,7 @@ For the **recipient-side policy** work — that's exactly what `[/]` gated state
 - **GitHub issue on agent-doc** — external tracker, good if you want it visible to collaborators and linked from code.
 
 Gated-pending wins for single-user workspaces because it keeps the tracker adjacent to the code it describes and inherits lifecycle machinery. If you later want GitHub visibility, we can mirror gated items → issues via a sync command.
-<!-- agent:boundary:d9057f66 -->
+<!-- agent:boundary:c7d562bd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

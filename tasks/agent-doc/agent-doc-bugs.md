@@ -466,7 +466,7 @@ Ready to start landing `#jg0d` (`resize.rs`) whenever you give the go-ahead. Tha
 ❯ [#a001]
 ❯ [#a006]
 ❯ [#a005]
-### Re: #a001 / #a006 / #a005 — investigations done, all three close as not-a-bug (HEAD)
+### Re: #a001 / #a006 / #a005 — investigations done, all three close as not-a-bug
 
 **#a001 boundary/baseline divergence — benign, closing**
 
@@ -483,16 +483,57 @@ Audited all 177 snapshots under `.agent-doc/snapshots/`. Only 2 files contain mo
 Re-audited: 422 `❯`-prefixed lines across 46 snapshots (down from 1062 as compactions landed). Top offenders sampled — every line is a legitimate inline user prompt (`❯ do`, `❯ commit + push`, `❯ Please research...`). This is exactly the inline-annotation convention: users type `❯ ` before a prompt and the marker survives across cycles until the exchange is compacted. Not corruption, not residue from the mass-prefix bug. No action needed.
 
 **Net effect:** three 🔴 items off the top of the pending queue. The remaining boundary-class canary (`out_of_band_write` / `drift_warning` logs) stays on permanently — cheap, and catches the real bug class if it ever re-emerges.
-<!-- agent:boundary:94b0f2d8 -->
+❯ do
+❯ - [#64mb] Investigate double commit_staging race
+❯ - [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange
+
+### Re: do #64mb #a002 (HEAD)
+
+**#a002 — already landed.** Status line says "✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry." No code work needed — just waiting for a real event to fire the telemetry. Leaving in pending as a watch item.
+
+**#64mb — double `commit_staging` race, root cause identified.**
+
+Full ops.log trace at `ts=1776095605`:
+
+```
+[1776095605] commit_staging  drift=410 snap=97776 file=98186
+[1776095605] commit_success
+[1776095605] snapshot_save   len=97776
+[1776095605] commit_staging  drift=122 snap=97776 file=97898   ← second call, 288 bytes shorter
+[1776095605] commit_success
+[1776095605] snapshot_save   len=97776
+```
+
+Two independent observations in that window:
+
+1. **Two distinct `commit_file()` invocations.** Not a retry loop — both emit full commit_success/snapshot_save. Each came from a different preflight run. `preflight.rs:391` calls `git::commit(file)` on the target doc (step 2); `preflight.rs:474` calls `git::commit(&doc_path)` on every tracked doc whose snap mtime > doc mtime (step 2d sweep). Step 2d explicitly skips `doc_path == canonical` (line 460), so within a single preflight this fires once. The double fire comes from **concurrent preflights on different target docs** — session A targets agent-doc-bugs.md (step 2 commits it); session B targets some other doc and its step 2d sweep picks up agent-doc-bugs.md as well. Both processes race through `git::commit()` in the same second.
+
+2. **The 288-byte shrink between commits is real, not a measurement artifact.** First commit sees file_len=98186, second sees 97898. Between the `commit_success` of run 1 and the `commit_staging` of run 2, `commit_file()` at `git.rs:464-471` runs the `(HEAD) found in working tree — stripping` branch and calls `write::atomic_write_pub(file, &clean_working)`. That's the write that shrinks the file by ~288 bytes. The second preflight's sweep then reads the shrunken file while the snapshot is still at 97776, producing drift=122.
+
+**Why it's a "race" and not benign serialization.**
+
+- The two preflights are not serialized against each other. `git::commit()` has a retry loop for `index.lock`, but nothing serializes *read-modify-write on the working tree*. Run A strips the working tree HEAD marker between its commit and run B's staging, so B stages a different file than the one it observed at preflight entry.
+- The drift warning fires twice in the same second for the same file, which looks alarming but is exactly what you'd expect: each run independently observes `snap_len < file_len` against the same stale snapshot.
+
+**Fix candidates (ordered, smallest blast radius first):**
+
+1. **Per-file advisory lock around `commit_file()`.** Take a flock on `.agent-doc/locks/commit-<hash>.lock` at entry, drop on exit. Serializes step 2 vs step 2d sweeps across concurrent preflights without touching git internals. Matches existing `.agent-doc/locks/` + `sync.lock` pattern. ~20 LOC in `git.rs`.
+2. **Sweep freshness gate.** In `preflight.rs:462-472`, skip any doc whose HEAD commit is younger than ~5s — if it was just committed by another session, nothing to do. Avoids the lock but leaves a small window.
+3. **Fold both checks.** Lock + freshness gate — lock is authoritative, freshness gate keeps the sweep cheap when traffic is high.
+
+Recommend **(1) + (2)**: lock for correctness, gate for perf. Neither requires changing the commit content pipeline.
+
+**Pending updates:**
+- #64mb stays on the queue, now with root cause nailed → implementation task.
+- Adding a sub-item: "Ship per-file commit lock + sweep freshness gate for #64mb".
+
+<!-- agent:boundary:3578958d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#a001] 🔴 Investigate boundary/baseline divergence root cause — `out_of_band_write` always-on log line landed (`git.rs:286`); aggregate after 1 day.
-- [x] [#a006] Investigate duplicated `/agent:exchange` closing marker — likely same class as mass-prefix bug.
-- [x] [#a005] Investigate 1062 pre-existing `❯` lines across 46 snapshots — legitimate or prior corruption?
-- [ ] [#64mb] Investigate double commit_staging race: ops.log at 1776095605 shows two back-to-back commit_staging/out_of_band_write pairs for the same file within the same second.
+- [ ] [#64mb] Investigate double commit_staging race — root cause: concurrent preflights racing step 2 vs step 2d sweep; mid-flight (HEAD)-strip rewrites working tree between them
 - [ ] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [ ] [#xzz5] Preflight slash-command parser: absolute paths like /home/... get captured as commands. Require [a-z][a-z0-9:_-]* after the slash and reject tokens containing a second /.
 - [ ] [#a011] End-of-cycle write invariant — warn if `preflight_diff_start` without `ipc_write_attempt`.
@@ -516,5 +557,7 @@ Re-audited: 422 `❯`-prefixed lines across 46 snapshots (down from 1062 as comp
 - [ ] [#zp02] supervisor/env.rs: wire into start.rs — replace the inline fm.env expansion loop in start.rs:189 with EnvSpec::from_frontmatter(&fm).resolve()?; feed the result into PtySpawnConfig.env once state.rs restart loop is in place
 - [ ] [#f7d5] supervisor: smoke test — real claude under supervisor in a tmux pane, verify restart + inject + CWD invariant end-to-end
 - [ ] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)
+- [ ] [#eg0w] Ship per-file commit lock + sweep freshness gate for #64mb (per-file flock on .agent-doc/locks/commit-<hash>.lock in git::commit, plus <5s freshness skip in preflight sweep)
+- [ ] [#qpzd] Ship per-file commit lock + sweep freshness gate for #64mb (per-file flock on .agent-doc/locks/commit-<hash>.lock in git::commit, plus <5s freshness skip in preflight sweep)
 <!-- /agent:pending -->
 ## Assistant

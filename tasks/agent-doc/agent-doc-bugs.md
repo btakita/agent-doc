@@ -1218,7 +1218,7 @@ Confirmed — `replace:pending` it is. Added to the pending list with the full m
 Sequencing: this lands **after** the current phase-3 work (pending_gated_count + enforcement inversion) ships. Rationale — the rename is a surface-level API change, and doing it on top of a stabilized enforcement default avoids re-touching the same call sites twice. When phase-3 is green, this becomes the first visible cleanup on top of it.
 
 ❯ continue
-### Re: continue — what to pick up next? (HEAD)
+### Re: continue — what to pick up next?
 
 "Continue" is ambiguous after a long cycle, so flagging the fork before I start cutting code:
 
@@ -1236,7 +1236,29 @@ Sequencing: this lands **after** the current phase-3 work (pending_gated_count +
 My read of the sequencing note from last cycle ("this lands **after** the current phase-3 work ships") favors **option 1** — "ships" implies released, not just committed. But I don't want to trigger a release cycle on a one-word prompt.
 
 Which one?
-<!-- agent:boundary:fe723a99 -->
+❯ merge + build for testing
+### Re: merged main + cargo install (v0.32.3, pre-release) (HEAD)
+
+**Merge** — `main` fast-forwarded from `2727f70` → `69b5475` (3 commits: pending Phase 1/2/3 + sweep). Branch `20260414/pending-gated-state` still points at HEAD but is now redundant.
+
+**Build + install** — `cargo build --release` clean in 49s, `cargo install --path .` replaced `~/.cargo/bin/agent-doc`. `.bin/agent-doc` symlink resolves correctly. Binary reports `agent-doc 0.32.3` — no version bump yet, that's still gated behind `#gqep`. This is a testing install on top of the shipped tag.
+
+**Test suite** — 576 passed / 45 failed / 7 ignored. Breakdown:
+
+- **43 route/resync failures** — entire `route::tests::*` and `resync::tests::*` modules. These are tmux-integration tests that need a live tmux session binary in the test env. Not new and not triggered by the merge — they fail the same way on the pre-merge tip. Unrelated to pending work.
+- **2 non-tmux failures** worth a closer look:
+  - `supervisor::cwd::tests::document_parent_fallback_when_no_project_root` — assertion `ProjectRoot == DocumentParent` fails. The test expects fallback to doc-parent when no project root, but the resolver is returning `ProjectRoot`. Likely test env picks up the outer `agent-loop/.git` as a project root, so the "no project root" precondition isn't actually met. Either a sandbox hole in the test or the resolver isn't respecting its own precondition.
+  - `preflight::tests::preflight_sweep_commits_other_tracked_docs` — failing for the same reason I suspect: nested git repo contamination from running inside `agent-loop/`.
+
+Both are also present on pre-merge HEAD (I verified against `2727f70`), so **they're not regressions from the pending work** — they're test-isolation issues. Worth filing but shouldn't block testing.
+
+**Ready for live test.** Open a fresh session against a template doc with a `[/]` gated item and confirm:
+1. `/agent-doc` preflight blocks on the gate (see `pending_gated_count` in the output).
+2. `<!-- patch:pending -->` in a response is rejected (Phase 3 inversion — only `--pending-*` flags allowed).
+3. `--allow-patch-pending` escape hatch still works for this doc's compact cycles.
+
+What to test next — want me to also release v0.32.4 now, or hold for the `#25ag` rename and ship them together? No publish happened in this cycle, just a local install.
+<!-- agent:boundary:1f035d54 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

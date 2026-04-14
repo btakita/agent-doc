@@ -1126,7 +1126,7 @@ Pending updated: `#pjfg`, `#j5x0`, `#kzk7`, `#0jyk`, `#zrbq`, `#z6xv` marked don
 
 Approve Phase 3 and I'll re-raise the enforcement-flip question with a concrete migration plan, then land `pending_gated_count` + the flip in one commit.
 ❯ do phase 3
-### Re: Sweep commit + Phase 3 landed (HEAD)
+### Re: Sweep commit + Phase 3 landed
 
 **Sweep commit:** `fa31f78` on `20260414/pending-gated-state` — 22 files, 2571 insertions / 118 deletions. Bundled Phase 2 (gate/ungate matrix, CLI flags, integration tests, `specs/pending-system.md`), supervisor scaffolding (`src/supervisor/env.rs`, specs), and the env/frontmatter/agent infrastructure work that had accumulated in the working tree. Single commit per your "moving forward" note — selective staging would have been churn.
 
@@ -1135,6 +1135,8 @@ Approve Phase 3 and I'll re-raise the enforcement-flip question with a concrete 
 **Part 1 — invert `patch:pending` enforcement default**
 
 `src/write.rs::enforce_no_patch_pending`: now rejects unconditionally unless `AGENT_DOC_ALLOW_PATCH_PENDING=1`. The CLI (`src/main.rs`) sets that env var only when `--allow-patch-pending` is passed.
+
+❯ Should we not always allow patch pending? Why do we reject patch pending in the first place?
 
 The old wiring was: CLI sets `AGENT_DOC_REJECT_PATCH_PENDING=1` to enable rejection → library/FFI/SDK/test callers that bypass `main.rs` silently skipped the check. Closing that hole was the whole point — any future caller must opt in explicitly.
 
@@ -1163,7 +1165,22 @@ Logged to stderr too (`[preflight] pending: N gated item(s)`) when non-zero.
 **Branch state:** `20260414/pending-gated-state` now sits at three commits ahead of `c53b09b` (Phase 1): sweep, then Phase 3. Ready for merge to main when you want.
 
 **Next:** the spec's "Open questions" section in `specs/pending-system.md` is still unanswered — particularly whether `op_done` should also use `validate_transition` to catch `Done → Done` double-marks. Let me know if you want that as a follow-up cycle.
-<!-- agent:boundary:b5423faa -->
+### Re: why reject `patch:pending` by default? (HEAD)
+
+Short answer: `patch:pending` is a **full-replace** op, and full-replace on a list the user is also editing is a silent-data-loss footgun. Granular flags exist precisely to avoid it.
+
+Three concrete failure modes the gate closes:
+
+1. **Concurrent-edit clobber.** Preflight snapshots the pending list, the skill generates a new list, the user adds an item in their editor during that window. A `patch:pending` write overwrites the user's add. `--pending-add`/`--pending-done`/`--pending-edit` target items by hash ID, so CRDT merge preserves the user's concurrent edit.
+
+2. **Hash instability.** Stable `[#xxxx]` IDs are the contract the skill uses to mark items done across cycles. A full-replace block re-emits the list — if the skill drops or reorders IDs (easy to do when regenerating from memory), preflight's next reap cycle loses track of which items the user marked `[x]`. Granular ops mutate by ID and cannot break that invariant.
+
+3. **Intent laundering.** Full-replace hides which items actually changed. With granular flags, the write call itself is the audit log: `--pending-done a3f2 --pending-add "new thing"` is greppable and reviewable. A `patch:pending` block is an opaque diff against whatever the skill happened to remember.
+
+So rejection-by-default isn't about safety theater — it's about forcing the skill down the path where user edits, hash IDs, and intent all stay coherent. The escape hatch (`--allow-patch-pending` / `AGENT_DOC_ALLOW_PATCH_PENDING=1`) exists for the cases where full rewrite **is** the intent: compaction, migration, and tests. Those are rare and explicit; normal response cycles should never need it.
+
+The "always allow it" alternative re-opens all three holes and trades a working invariant for convenience the skill doesn't need.
+<!-- agent:boundary:e30d7f4d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1205,8 +1222,5 @@ Logged to stderr too (`[preflight] pending: N gated item(s)`) when non-zero.
 - [ ] [#breh] rust-package skill: write the Library Context Policy stub into new library AGENTS.md at scaffold time.
 - [ ] [#3j0e] Install skills-janitor as Claude Code plugin (run /plugin install khendzel/skills-janitor at terminal). User plans to fork eventually; this is the interim path.
 - [ ] [#vdyj] After fork: move forked skills-janitor under src/ as submodule, wire audit into make precommit, and optionally add nightly cron via schedule skill writing drift reports to tasks/agent-doc/skills-audit.md.
-- [x] [#tzwy] pending-system: preflight emits pending_gated_count in JSON
-- [x] [#2ng4] pending-system: invert patch:pending enforcement default (reject without env var gate)
-- [x] [#6d6c] Phase 3: invert patch:pending enforcement default + emit pending_gated_count in preflight JSON
 <!-- /agent:pending -->
 ## Assistant

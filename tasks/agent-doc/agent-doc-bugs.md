@@ -1237,7 +1237,7 @@ My read of the sequencing note from last cycle ("this lands **after** the curren
 
 Which one?
 ❯ merge + build for testing
-### Re: merged main + cargo install (v0.32.3, pre-release) (HEAD)
+### Re: merged main + cargo install (v0.32.3, pre-release)
 
 **Merge** — `main` fast-forwarded from `2727f70` → `69b5475` (3 commits: pending Phase 1/2/3 + sweep). Branch `20260414/pending-gated-state` still points at HEAD but is now redundant.
 
@@ -1258,22 +1258,45 @@ Both are also present on pre-merge HEAD (I verified against `2727f70`), so **the
 3. `--allow-patch-pending` escape hatch still works for this doc's compact cycles.
 
 What to test next — want me to also release v0.32.4 now, or hold for the `#25ag` rename and ship them together? No publish happened in this cycle, just a local install.
-<!-- agent:boundary:370e60ad -->
+❯ Live test. Some agent:pending items should be gated. Should we have a migration or can we somehow calibrate this document?
+### Re: Calibrate, don't migrate — gated three items for live test (HEAD)
+
+**Migration vs calibration:** calibration. A migration makes sense if we had many docs with heterogeneous pending states and wanted a uniform rule ("anything containing 'awaiting' → gated"). We don't — this is the only doc with a real pending system, the system itself is brand new, and any heuristic strong enough to be useful would also be wrong often enough to need manual review. Manual calibration on one doc is cheaper than building (and trusting) a migration.
+
+**Gated this cycle (three natural candidates):**
+
+- **`#a002`** — "Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry." Already landed, waiting on an external trigger (a real-world large-drift event). Textbook `[/]`.
+- **`#gqep`** — "Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry, publish crates.io + GitHub Release **after manual-testing gate**." The testing gate is literally what we're doing right now — `[/]` captures that it's blocked on a live-session confirmation this cycle can't fabricate.
+- **`#mchh`** — "Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end." Blocked on a rebuilt zip being available on disk, which is a separate JetBrains build cycle.
+
+These three are enough to exercise the gate without faking it. The other items (`#64mb`, `#xzz5`, `#a011`, `#a012`, `#a014`, `#a010`, `#14z4`, `#4sh0`, `#tw4a`, `#8jzg`, `#cce5`) stay `[ ]` — they're ready-to-start work, not blocked.
+
+**What to watch on the live test:**
+
+1. Next preflight should emit `pending_gated_count: 3` in its output.
+2. Try putting a `<!-- patch:pending -->` block in a response — the binary should reject it with the Phase 3 error (that's the inversion that just shipped).
+3. Try adding `--allow-patch-pending` to the same call — should succeed (the escape hatch).
+4. Mark one of the gated items `[x]` manually in your editor (or use `--pending-done` on a `[/]` item — should it error? I think that's the current contract since `--pending-ungate` explicitly errors on `[ ]`/`[x]`). That's an edge case worth checking.
+
+On edge case 4: the `--pending-done <id>` semantic isn't documented to gate-check. If you mark a `[/]` item `--pending-done`, I'd expect it to transition `[/] → [x]` cleanly (completion overrides gating). Worth confirming — it's the main path a finished-but-gated item would take. If it errors, that's a bug to queue behind `#a002`.
+
+**Re: v0.32.4 release** — I'd still hold for `#25ag` (the command rename) unless you want to ship pending system enforcement standalone. The rename is small and benefits from shipping on the enforced default. Your call.
+<!-- agent:boundary:62352f83 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] [#64mb] Investigate double commit_staging race — root cause: concurrent preflights racing step 2 vs step 2d sweep; mid-flight (HEAD)-strip rewrites working tree between them
-- [ ] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
+- [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [ ] [#xzz5] Preflight slash-command parser: absolute paths like /home/... get captured as commands. Require [a-z][a-z0-9:_-]* after the slash and reject tokens containing a second /.
 - [ ] [#a011] End-of-cycle write invariant — warn if `preflight_diff_start` without `ipc_write_attempt`.
 - [ ] [#a012] Expose `agent-doc session-check <FILE>` — nonzero if last ops.log entry is `preflight_diff_start`.
 - [ ] [#a014] Session drift: `registered panes span 2 tmux sessions: 1, 4` — resync if recurring.
 - [ ] [#a010] PostToolUse hook for agent-doc write (layer 3, optional).
 - [ ] [#14z4] Hash collision ceiling: implement 8-char fallback in pending::generate_hash if 4-char collides (spec §1)
-- [ ] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release after manual-testing gate
-- [ ] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
+- [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release after manual-testing gate
+- [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
 - [ ] [#4sh0] Add planned-move logging to sync.rs reconciler so ClaimAction→SyncLayout pane swaps are debuggable
 - [ ] [#tw4a] claim: cd into document's .agent-doc root (nearest git repo) when claiming a pane. Fixes relative-path ambiguity and makes git ops naturally target the correct repo.
 - [ ] [#8jzg] claim --isolate: spawn a fresh Claude Code process in the submodule root so CLAUDE.md, memory, and skills load scoped to that repo. Only real fix for cross-project context leakage (mid-session cd does not reload context).

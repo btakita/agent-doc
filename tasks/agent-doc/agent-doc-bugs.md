@@ -1163,7 +1163,7 @@ Logged to stderr too (`[preflight] pending: N gated item(s)`) when non-zero.
 **Branch state:** `20260414/pending-gated-state` now sits at three commits ahead of `c53b09b` (Phase 1): sweep, then Phase 3. Ready for merge to main when you want.
 
 **Next:** the spec's "Open questions" section in `specs/pending-system.md` is still unanswered — particularly whether `op_done` should also use `validate_transition` to catch `Done → Done` double-marks. Let me know if you want that as a follow-up cycle.
-<!-- agent:boundary:ff425fbd -->
+<!-- agent:boundary:6d46a69b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

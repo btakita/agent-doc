@@ -1281,7 +1281,7 @@ These three are enough to exercise the gate without faking it. The other items (
 On edge case 4: the `--pending-done <id>` semantic isn't documented to gate-check. If you mark a `[/]` item `--pending-done`, I'd expect it to transition `[/] → [x]` cleanly (completion overrides gating). Worth confirming — it's the main path a finished-but-gated item would take. If it errors, that's a bug to queue behind `#a002`.
 
 **Re: v0.32.4 release** — I'd still hold for `#25ag` (the command rename) unless you want to ship pending system enforcement standalone. The rename is small and benefits from shipping on the enforced default. Your call.
-<!-- agent:boundary:62352f83 -->
+<!-- agent:boundary:1b30b007 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -700,7 +700,7 @@ Result:
 **Fallback (simpler, if the reorder is risky):** detect boundary-only diffs in the preflight commit path and skip them — `git commit` becomes a no-op when the only staged change is a single-line boundary marker rewrite. Cheaper to implement but leaves a small window where the working tree has an uncommitted boundary id.
 
 Let me know which direction you want and I'll open the patch. Preference would be the reorder — it's the structurally correct fix and makes the ordering match the intent ("one commit per turn, atomic").
-<!-- agent:boundary:ca551fe9 -->
+<!-- agent:boundary:29a047a0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

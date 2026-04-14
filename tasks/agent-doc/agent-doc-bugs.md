@@ -559,7 +559,7 @@ Bumping the version + writing a VERSIONS.md entry now would ship a release that 
 My read: you probably want option 1. Confirm and I'll start on `#mgdw` (parser + `PendingState::Gated` + `[/]` round-trip) as the first slice.
 ❯ do option 1
 
-### Re: option 1 — the bundle was already shipped; only the VERSIONS.md entry was missing (HEAD)
+### Re: option 1 — the bundle was already shipped; only the VERSIONS.md entry was missing
 
 Walked the tree before writing any code and found everything already landed across three commits:
 
@@ -574,7 +574,7 @@ Which means `#mgdw` / `#h1j2` / `#q90h` / `#sx35` were already discharged — I 
 - `cargo test --test pending_integration -q` — 24 passed (covers `write_pending_gate_open_to_gated`, `write_pending_gate_idempotent_on_gated`, `write_pending_gate_done_errors`, `write_pending_gate_then_done_in_one_call`, `preflight_emits_pending_gated_count`, `preflight_omits_pending_gated_count_when_zero`)
 - Live signal from this very cycle's preflight: `pending: 4 gated item(s)` + `"pending_gated_count": 4` in the JSON — the feature is running in production against this exact document
 
-### Re: #e6z1 — VERSIONS.md entry landed, no version bump needed (HEAD)
+### Re: #e6z1 — VERSIONS.md entry landed, no version bump needed
 
 `0.32.4` is **not yet published** (`cargo search agent-doc` shows `0.32.3`; `git tag -l 'v0.32.*'` stops at `v0.32.3`). So `#e6z1` collapses to *"append the gated-state feature notes to the in-progress 0.32.4 section"* — no `Cargo.toml` / `pyproject.toml` bump required.
 
@@ -592,21 +592,48 @@ Which means `#mgdw` / `#h1j2` / `#q90h` / `#sx35` were already discharged — I 
 3. `cargo install --path .` + `cargo build --release` after publish so `.bin/agent-doc` and `~/.cargo/bin/agent-doc` both track the published build.
 
 Ready to start on `#hrmt` next if you want to keep the release train moving, or stop here so you can eyeball the VERSIONS.md prose first.
-<!-- agent:boundary:f796f79d -->
+
+❯ src/boost-client/tasks/monsterrodholders.md and src/session-share/tasks/claudescore.md is still not having the ` (HEAD)` in uncommitted changes during a patchback. Note that both of these agent docs are in a submodule. Sanity check, the pwd for claudescore.md is incorrect. It should be src/session-share. monsterrodholders.md pwd should be src/boost-client:
+```
+! pwd
+  ⎿  /home/brian/work/btakita/agent-loop
+```
+
+### Re: Submodule docs missing `(HEAD)` + wrong pwd (HEAD)
+
+Two separate bugs, both rooted in the same asymmetry: commit logic routes through the submodule repo, but peripheral helpers still resolve against the superproject.
+
+**Bug 1 — `(HEAD)` marker missing in submodule docs.**
+
+Traced it in `src/agent-doc/src/git.rs`:
+
+- `commit()` calls `narrow_to_submodule(super_root, resolved)` at git.rs:309 → git ops run inside the submodule. Good.
+- `add_head_marker(snap, file)` at git.rs:404 then calls `show_head(file)` to diff against HEAD.
+- `show_head()` at git.rs:1051 uses `resolve_to_git_root(file)` which, for absolute paths, **prefers the superproject** (git.rs:117-119). So it runs `git show HEAD:src/session-share/tasks/claudescore.md` from the *superproject* root.
+- Superproject can't `git show HEAD:<submodule-tracked-path>` — the gitlink blocks path traversal. `output.status.success() == false` → `show_head` returns `Ok(None)`.
+- Back in `add_head_marker`, `head_content = None` → falls through to the "mark last heading only" branch (git.rs:859). In theory that still stamps `(HEAD)` on the tail heading, but it also skips the "re-apply from HEAD" safety at git.rs:864 that handles *no-new-heading* cycles. Any boundary-only or pending-only cycle on a submodule doc gets no marker at all — the snapshot stages clean, commit succeeds, working tree strips, gutter goes flat.
+
+Fix: `show_head` (and any other HEAD-lookup helper in this file) needs to route via `narrow_to_submodule` the same way `commit()` does. Concretely, after `resolve_to_git_root`, narrow the `git_root` to the submodule and strip the rel_path against *that* root before `git show HEAD:...`.
+
+**Bug 2 — Pane pwd is super root, not submodule root.**
+
+When `agent-doc start` / `agent-doc route` spawns the tmux pane for a submodule doc, the `-c <cwd>` passed to `tmux new-window`/`new-session` is `std::env::current_dir()` (see route.rs uses at :644 and all the test-site :1038+ call sites). Whatever directory the caller happened to be in leaks into the pane, which for `/agent-doc` invocations is almost always the agent-loop super root.
+
+Fix: add a `resolve_pane_cwd(file)` helper that does `narrow_to_submodule(super_root, resolved).0` and returns that (falling back to `super_root` for non-submodule files), then route start.rs / route.rs spawn paths through it. Gives `src/session-share` for claudescore.md, `src/boost-client` for monsterrodholders.md, and doesn't change behavior for top-level docs.
+
+Both fixes are additive and independently testable — I can land them as a pair or split.
+
+Added to pending. Not touching code yet pending your go-ahead.
+<!-- agent:boundary:b299bfe7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
-- [x] [#e6z1] agent-doc: version bump + VERSIONS.md entry for gated-state feature after implementation lands (release gate — do not ship with the #eg0w bundle)
 - [ ] [#14z4] Hash collision ceiling: implement 8-char fallback in pending::generate_hash if 4-char collides (spec §1)
 - [ ] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)
 - [ ] [#pf01] ✅ Spec landed on 20260414/pending-gated-state: src/agent-doc/specs/pending-system.md — PendingState::Gated, [/] syntax, reaper rules, lifecycle diagram, CLI surface, state transition matrix, release discipline
-- [x] [#mgdw] agent-doc: parser — accept `[/]` checkbox char, extend PendingState enum with Gated variant in src/agent-doc/src/pending.rs; renderer emits `[/]` round-trip
-- [x] [#h1j2] agent-doc: reaper — skip Gated items in preflight reap pass; emit pending_gated_count alongside existing counts in preflight JSON output
-- [x] [#q90h] agent-doc: CLI — add `--pending-gate <id>` flag on `agent-doc write` (mirror of --pending-done); `--pending-ungate <id>` to return to `[ ]`
-- [x] [#sx35] agent-doc: tests — parser round-trip for `[/]`, state transitions ( →/→x,  →x, /→x, /→ ), reaper respects Gated, CLI flag integration
 - [ ] [#64mb] Investigate double commit_staging race — root cause: concurrent preflights racing step 2 vs step 2d sweep; mid-flight (HEAD)-strip rewrites working tree between them
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [ ] [#xzz5] Preflight slash-command parser: absolute paths like /home/... get captured as commands. Require [a-z][a-z0-9:_-]* after the slash and reject tokens containing a second /.
@@ -641,5 +668,7 @@ Ready to start on `#hrmt` next if you want to keep the release train moving, or 
 - [ ] [#e46w] Sweep-commit path: working-tree boundary lags until next write or editor re-open. Fix: have reposition_boundary_in_snapshot also rewrite the working-tree file when no active run is in progress (git.rs:593). Alternative: emit IPC reposition_boundary notification to open plugins.
 - [ ] [#f8j3] Sweep-commit working-tree lag: reposition_boundary_in_snapshot (git.rs:593) only updates snapshot; working tree boundary only moves via IPC from agent-doc write. Fix: also rewrite working tree in snapshot reposition path, or emit IPC ping to open plugins.
 - [ ] [#y4da] Deterministic boundary reposition in working tree (git.rs reposition_boundary_in_snapshot extends to disk write with active-run guard)
+- [ ] [#zvmd] Submodule (HEAD) marker: fix show_head() to route via narrow_to_submodule — superproject rev-parse can't show submodule-tracked files, so add_head_marker falls through to the 'no HEAD → mark last heading only' fallback, which drops (HEAD) when the exchange component has no ### Re: heading yet or when the fallback runs during a boundary-only cycle
+- [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
 <!-- /agent:pending -->
 ## Assistant

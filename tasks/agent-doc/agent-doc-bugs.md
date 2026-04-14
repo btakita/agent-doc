@@ -221,7 +221,7 @@ Rethinking the design along the axis you pointed at — **focus should not be th
 So the revised proposal: `dispatch` defaults to pure fire-and-forget (safe, no side effects on my current view), `--wake` adds background trigger without disruption, `--focus` is the only flag that changes visible pane state.
 
 Still want me to queue `dispatch` (with this tiered design) as a pending item, or park this in the agent-doc-feat doc as a full proposal first?
-<!-- agent:boundary:975abe52 -->
+<!-- agent:boundary:3f3f6bcf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

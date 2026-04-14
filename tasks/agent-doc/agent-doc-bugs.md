@@ -450,7 +450,11 @@ Done. Followed your "move detailed instructions into a runbook" guidance — `sr
 - Release itself. #gqep is still blocked on the manual-testing gate — I edited the text to reflect that the bundled SKILL.md rewrite sub-dependency has landed, but the release itself is still your call.
 
 **Release-gate status for #gqep:** bundled SKILL.md rewrite ✅ landed. Remaining gate: `cargo install --path .` + manual-testing confirmation in a live session before crates.io/PyPI/GitHub Release publish.
-<!-- agent:boundary:e0d61647 -->
+❯ One more issue. Both of these files do not have the uncommitted removal of ` (HEAD)` in the header. Why?
+❯ - src/boost-client/tasks/monsterrodholders.md
+❯ - src/session-share/tasks/claudescore.md
+$(cat /tmp/agent-doc-resp-$$.md)
+<!-- agent:boundary:c87e5d3d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -496,5 +500,6 @@ Done. Followed your "move detailed instructions into a runbook" guidance — `sr
 - [ ] [#txex] notify: add --pending-add flag — auto-create agent:pending on target when absent, --no-create-pending to opt out. Pending-only (no exchange blockquote). Errors become no-ops under auto-create.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#hrmt] Rewrite src/agent-doc/SKILL.md (bundled skill) to invert Phase 2 pending guidance: remove 'every response MUST include a patch:pending block', replace with granular-ops contract from .claude/skills/agent-doc/SKILL.md §1b. RELEASE GATE for #gqep — v0.32.4 cannot ship with inverted bundled-skill guidance.
+- [ ] [#e46w] Sweep-commit path: working-tree boundary lags until next write or editor re-open. Fix: have reposition_boundary_in_snapshot also rewrite the working-tree file when no active run is in progress (git.rs:593). Alternative: emit IPC reposition_boundary notification to open plugins.
 <!-- /agent:pending -->
 ## Assistant

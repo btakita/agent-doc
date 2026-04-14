@@ -56,6 +56,7 @@ Three pending items transitioned `[ ] → [/]` (preflight confirms `pending_gate
 - `main` at `69b5475` (three commits ahead of origin).
 - `20260414/pending-gated-state` redundant, still points at HEAD (safe to delete after origin push).
 - Submodule `src/agent-doc` has working-tree clean; `.bin/agent-doc` symlink points at the fresh release binary.
+<!-- agent:boundary:9db25b74 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

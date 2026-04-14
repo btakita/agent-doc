@@ -599,7 +599,7 @@ Ready to start on `#hrmt` next if you want to keep the release train moving, or 
   ⎿  /home/brian/work/btakita/agent-loop
 ```
 
-### Re: Submodule docs missing `(HEAD)` + wrong pwd (HEAD)
+### Re: Submodule docs missing `(HEAD)` + wrong pwd
 
 Two separate bugs, both rooted in the same asymmetry: commit logic routes through the submodule repo, but peripheral helpers still resolve against the superproject.
 
@@ -624,7 +624,36 @@ Fix: add a `resolve_pane_cwd(file)` helper that does `narrow_to_submodule(super_
 Both fixes are additive and independently testable — I can land them as a pair or split.
 
 Added to pending. Not touching code yet pending your go-ahead.
-<!-- agent:boundary:3f869ec7 -->
+❯ fix both right now
+
+### Re: Both fixes landed — awaiting live verification (HEAD)
+
+Implemented in `src/agent-doc`:
+
+**Fix 1 — `show_head()` narrows to submodule** (`src/git.rs`)
+- After `resolve_to_git_root(file)`, pipe through `narrow_to_submodule(&super_root, &resolved)` so `git show HEAD:<rel>` runs from the submodule's own repo.
+- `rel_path` is now stripped against the narrowed `git_root`, so the HEAD lookup succeeds for submodule-tracked docs and `add_head_marker` gets real HEAD content instead of falling through to the "mark last heading only" branch.
+
+**Fix 2 — `resolve_pane_cwd()` helper** (`src/git.rs` + `src/route.rs`)
+- New pub helper: `resolve_pane_cwd(file: &Path) -> PathBuf`. Returns the submodule git toplevel for submodule-hosted docs, super-root for top-level docs, `current_dir()` only as last-resort fallback.
+- `route::auto_start_in_session` now uses `crate::git::resolve_pane_cwd(file)` instead of `std::env::current_dir()` at route.rs:644. All four downstream `tmux.split_window` / `tmux.auto_start` call sites (671/686/707/719) pick it up automatically via the single `cwd` var.
+
+**Verification:**
+- `cargo build` — clean
+- `cargo test --lib -- --skip tmux` — 274 passed
+- `cargo clippy --all-targets` — no new warnings (only pre-existing noise in `diff.rs`, `write.rs`, `sync.rs` etc.)
+- `cargo install --path .` + `cargo build --release` — `~/.cargo/bin/agent-doc` and `.bin/agent-doc` both updated to the new build
+
+**Manual testing gate (per feedback_testing_before_release.md):**
+I'm stopping here for you to live-verify in a claudescore / monsterrodholders session before any release motion. To test:
+
+1. Open `src/session-share/tasks/claudescore.md` (or `src/boost-client/tasks/monsterrodholders.md`) via `/agent-doc`.
+2. Confirm the spawned Claude pane's `! pwd` reports the submodule root (`…/src/session-share`), not `…/agent-loop`.
+3. Run a normal response cycle and check that the new `### Re:` heading shows the blue `(HEAD)` gutter boundary in the editor diff markers.
+4. Kill the pane, re-open, run a boundary-only cycle (pending-only change, no new heading) — confirm the `(HEAD)` marker on the prior heading persists via the re-apply-from-HEAD path that show_head now actually reaches.
+
+If all four pass, I'll mark the pending items done and queue the v0.32.4 release. If anything misbehaves, flag it and I'll iterate before touching the gate.
+<!-- agent:boundary:4f77c87b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

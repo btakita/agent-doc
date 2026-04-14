@@ -752,7 +752,7 @@ Branch created, spec updated, and the session is now running off of it. All edit
 `PendingState { Open, Gated, Done }` variant added, parser accepts `[ ] | [/] | [x]`, renderer round-trips. Unit tests: parser round-trip across all three states, state transition validation (each cell in the matrix), error cases (`[x] → [/]`, etc.). This is `#mgdw`. Awaiting your go to land it — or if you'd rather review the spec change first before I touch code, say so and I'll pause after committing the spec.
 
 Branch state: `20260414/pending-gated-state` created off `main`, spec change is uncommitted in the working tree (will commit after this response writes back). No other files touched — step 1 is deliberately spec-only.
-### Re: library logic ≠ user-local memory — and the stale `patch_every_cycle` feedback (HEAD)
+### Re: library logic ≠ user-local memory — and the stale `patch_every_cycle` feedback
 
 **Short answer on the feedback decision:** the `feedback_pending_patch_every_cycle` vs `feedback_pending_granular_ops` question is **already obsolete**. Both describe *how the skill should drive the binary*. That is agent-doc library behavior, not user preference. It belongs in `src/agent-doc/.claude/skills/agent-doc/SKILL.md` §1b (which already has the granular-ops contract) and in `specs/pending-system.md` (which defines the on-disk contract). Neither should survive as a user-local memory.
 
@@ -763,7 +763,7 @@ Current state:
 
 **Right move:** delete `feedback_pending_patch_every_cycle.md` outright. The canonical source is already in the library (`SKILL.md` §1b + `specs/pending-system.md`). Anyone who installs agent-doc gets the same runbook by virtue of installing the skill. No migration needed — the skill is already the runbook. I'll delete the stale feedback memory this cycle.
 
-### Re: library logic rule — put it in ONE place, not every library (HEAD)
+### Re: library logic rule — put it in ONE place, not every library
 
 **The rule you want:**
 
@@ -795,6 +795,8 @@ It must NOT live in user-local auto-memory. Auto-memory is reserved for *user pr
 2. **It's a meta-rule** — governs how libraries are authored, not what any one library does. The root AGENTS.md is already the canonical home for cross-cutting concerns ("This root AGENTS.md covers cross-cutting concerns only." — existing line in `CLAUDE.md`).
 3. **Libraries stay self-contained** — each library's AGENTS.md stays focused on its own contracts (agent-doc's CLAUDE.md is about agent-doc, not about meta-policy). Developers can extract a library without dragging rules it doesn't care about.
 4. **No duplication across libraries** — if this rule needs to change (e.g., adding "provide a linter" as a third option), you change one file, not seventeen.
+
+❯ But if someone else contributes to a library, that person will not receive the context. So it seems to me that the context belongs in the leaf libraries. Is there a way to make sure this rule applies universally, but is also seen by all contributors?
 
 **What this rule displaces from user-local memory** (delete candidates — all encode library behavior):
 
@@ -829,7 +831,35 @@ It must NOT live in user-local auto-memory. Auto-memory is reserved for *user pr
 Say **"go"** and I'll do the delete + CLAUDE.md update in this cycle, and file the audit as a pending item (won't bundle the full audit into the same response — that's a separate read-through).
 
 **Connection back to agent-doc-bugs**: this is an orthogonal track to the `#mgdw` parser work for the Gated lifecycle — I can do it in the same cycle or sequence it after `#mgdw`. Your call. Default: do the CLAUDE.md + stale-memory delete first (small, frees context for every future session), then land `#mgdw`.
-<!-- agent:boundary:49172b54 -->
+### Re: visibility for external contributors (HEAD)
+
+You're right — that's the failure mode of the root-only placement. A rule that governs library authorship but lives in the parent workspace's AGENTS.md is invisible the moment someone clones the leaf repo in isolation.
+
+The resolution is **leaf placement with a canonical spec**, not duplication:
+
+1. **Canonical spec** — one file, in a neutral home. Candidates:
+   - `src/instruction-files/LIBRARY_CONTEXT_POLICY.md` (already the shared audit crate, semantically fits)
+   - A top-level `SPEC.md` in each library's own repo if it's self-hosting
+   - A published doc URL for libraries that ship to crates.io/npm
+
+2. **Leaf stub** — each library's `AGENTS.md` carries a 2-3 line pointer, not the full rule:
+   ```markdown
+   ## Library Context Policy
+   This library follows the agent-loop library-context policy:
+   contributors must read `<spec-url>` before authoring AGENTS.md or runbooks.
+   ```
+   An external contributor who clones only the leaf sees the stub, follows the link, and gets the full rule. No duplication, no drift.
+
+3. **Enforcement via `instruction-files` audit** — the crate already audits instruction file structure across the workspace. Extend it with a check: "every library AGENTS.md contains a `## Library Context Policy` section that links to the canonical spec." Violations surface in `make precommit`. This turns the rule from a norm into a contract.
+
+4. **Scaffolder integration** — `rust-package` skill writes the stub into new library AGENTS.md automatically. New libraries get it for free; existing ones need a one-time sweep.
+
+**The tradeoff you're trading against:** pure-leaf-copy (full rule in every library) maximizes contributor visibility but guarantees drift. Pure-root (current state) avoids drift but is invisible externally. The stub-pointer hybrid gets you both — contributors see *something* in the leaf, the canonical text lives in exactly one place.
+
+**What to decide:** where the canonical spec lives. If agent-loop is the sole workspace these libraries ever appear in, `src/instruction-files/LIBRARY_CONTEXT_POLICY.md` is the cleanest home. If some libraries are published and consumed independently, the spec needs a public URL (a docs site or a README section in `instruction-files` on crates.io) so the stub link resolves for external readers.
+
+Want me to draft the canonical spec file + a sample leaf stub so you can evaluate the concrete shape?
+<!-- agent:boundary:6e7b00c1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

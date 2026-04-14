@@ -624,7 +624,7 @@ Fix: add a `resolve_pane_cwd(file)` helper that does `narrow_to_submodule(super_
 Both fixes are additive and independently testable — I can land them as a pair or split.
 
 Added to pending. Not touching code yet pending your go-ahead.
-<!-- agent:boundary:b299bfe7 -->
+<!-- agent:boundary:3f869ec7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -744,7 +744,7 @@ Branch created, spec updated, and the session is now running off of it. All edit
 `PendingState { Open, Gated, Done }` variant added, parser accepts `[ ] | [/] | [x]`, renderer round-trips. Unit tests: parser round-trip across all three states, state transition validation (each cell in the matrix), error cases (`[x] → [/]`, etc.). This is `#mgdw`. Awaiting your go to land it — or if you'd rather review the spec change first before I touch code, say so and I'll pause after committing the spec.
 
 Branch state: `20260414/pending-gated-state` created off `main`, spec change is uncommitted in the working tree (will commit after this response writes back). No other files touched — step 1 is deliberately spec-only.
-<!-- agent:boundary:50388cde -->
+<!-- agent:boundary:7ea4eb6d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

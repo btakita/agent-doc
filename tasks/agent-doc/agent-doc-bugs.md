@@ -462,7 +462,7 @@ My recommendation: **option 2** if you want the phase 1 landing to be drivable f
 - Non-tmux mode (has its own "Future" section in `supervisor.md`).
 
 Ready to start landing `#jg0d` (`resize.rs`) whenever you give the go-ahead. That's the smallest of the four remaining submodules and has the cleanest dependency graph — no cross-module locking, just SIGWINCH → channel → resize call.
-<!-- agent:boundary:9207410a -->
+<!-- agent:boundary:a85a34ce -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

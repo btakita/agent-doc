@@ -163,7 +163,7 @@ What's missing for a clean "dispatch" UX:
 Want me to add `dispatch` as a pending item, or start with just documenting `notify` as the canonical cross-pane task-send mechanism?
 
 ❯ What is `agent-doc notify` used for normally?
-### Re: what is `agent-doc notify` normally for? (HEAD)
+### Re: what is `agent-doc notify` normally for?
 
 The designed-for use case is **cross-document re-evaluation signals** — one session telling another "something you depend on changed, take another look." Not primarily a task-dispatch mechanism (even though it can be repurposed as one).
 
@@ -191,7 +191,37 @@ The designed-for use case is **cross-document re-evaluation signals** — one se
 - ❌ No ack path back to sender.
 
 So `notify` is the right **primitive**, but a `dispatch` wrapper (notify + focus + optional tmux send-keys for wake) would be a cleaner ergonomic layer for "send a task." Still waiting on your call: queue `dispatch` as pending, or document `notify` as the canonical cross-pane mechanism and leave it there?
-<!-- agent:boundary:823f1201 -->
+❯ The proposed `dispatch` would swap the tmux pane even if the target document is closed or not viewable in the editor?
+### Re: would `dispatch` swap away the active pane? (HEAD)
+
+Good catch — yes, as I loosely described it (`notify + focus + tmux send-keys`), it would, and that's the wrong default. `agent-doc focus` resolves the pane claiming the target doc and calls `tmux select-pane` on it, which yanks the visible pane in the current window regardless of whether the editor is showing the doc. For a background dispatch ("hey B, do this task when you get a chance"), stealing focus from whatever I'm currently looking at is user-hostile.
+
+Rethinking the design along the axis you pointed at — **focus should not be the default**. Three tiers make more sense:
+
+**Tier 1 — fire-and-forget (default):** `agent-doc dispatch <target-doc> "<task>"`
+- Same as `notify` but with imperative framing (`[DISPATCH from ...]` header, no `Re-evaluate:` line).
+- No tmux interaction at all. No pane swap, no send-keys, no focus.
+- Receiver picks it up on its next natural cycle — editor save, explicit `/agent-doc`, or watch daemon tick.
+- Safe to run from anywhere, any time, including when the target doc isn't open in the editor.
+
+**Tier 2 — wake without stealing focus:** `agent-doc dispatch ... --wake`
+- Does the notify, then sends a command to the **target's claimed tmux pane** via `tmux send-keys -t <pane> '/agent-doc <target-doc>' Enter`. That triggers the receiver to run a cycle immediately.
+- Critically: `send-keys` routes by pane ID — it does **not** require the pane to be the active one, and it does **not** change which pane is visible. The receiver runs in the background pane; my current pane stays put.
+- Caveat: if the target doc is **not claimed by any tmux pane**, `--wake` is a no-op (or an error). Fire-and-forget still works because the notify is just a file mutation — it doesn't need a live pane.
+
+**Tier 3 — interactive handoff:** `agent-doc dispatch ... --focus`
+- Opt-in only. Does notify + wake + `tmux select-pane`. Use when I actually want to hand control over (e.g., "stop what I'm doing, go watch B work on this").
+- This is the only tier that touches visibility. Never default.
+
+**On "document closed/not viewable in editor":**
+- For Tier 1, totally irrelevant — the notify just writes to the file on disk. The receiver's next cycle will see it whether or not the doc is open in the editor.
+- For Tier 2, "viewable in editor" still doesn't matter, but "claimed by a tmux pane" does. If nothing owns the doc, there's no pane to `send-keys` to. Could auto-start a headless receiver pane (`agent-doc start`) but that's scope creep — error out and tell the user to claim or start first is fine.
+- For Tier 3, editor visibility still doesn't matter (it's a tmux-level focus, not an editor-level one), but it's reasonable for `--focus` to also trigger the editor plugin to open the target doc. That's plugin-side work though, not dispatch-side.
+
+So the revised proposal: `dispatch` defaults to pure fire-and-forget (safe, no side effects on my current view), `--wake` adds background trigger without disruption, `--focus` is the only flag that changes visible pane state.
+
+Still want me to queue `dispatch` (with this tiered design) as a pending item, or park this in the agent-doc-feat doc as a full proposal first?
+<!-- agent:boundary:42ec69a8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

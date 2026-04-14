@@ -78,7 +78,7 @@ All other items retain their original relative order beneath this group — `--p
 **Reap question:** `#pf01`, `#mgdw`, `#h1j2`, `#q90h`, `#sx35` are all shipped work now tracked only as history. If you want a cleaner list, I can mark them `--pending-done` next cycle and preflight will reap them. Keeping them for now since you asked for reorder, not reap — but say the word and they're gone. `#14z4` (hash collision ceiling) and `#bak5` (archive component) are genuinely future work and should stay.
 
 **`pending_reordered` guard:** the spec says not to reorder again for at least one cycle after the user does. I just reordered per your explicit instruction — next cycle will respect `pending_reordered: true` if preflight reports it and leave the order alone unless you re-ask.
-<!-- agent:boundary:78152001 -->
+<!-- agent:boundary:225c323e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -514,7 +514,7 @@ Going with option #1 — extending `reposition_boundary_in_snapshot` (git.rs:593
 
 Implementing now in the agent-doc binary only — no FFI/plugin changes needed since the binary is the canonical source of truth. I'll leave `try_ipc_reposition_boundary` in place as a hint to open editors, but the on-disk state will be correct regardless of whether the plugin is loaded.
 
-### Re: Implemented — deterministic working-tree boundary reposition (HEAD)
+### Re: Implemented — deterministic working-tree boundary reposition
 
 **Change:** `reposition_boundary_in_snapshot` (git.rs:593) now rewrites both the snapshot AND the working tree under the same active-run guard.
 
@@ -536,7 +536,28 @@ Implementing now in the agent-doc binary only — no FFI/plugin changes needed s
 - 7 existing `reposition_boundary*` tests pass (underlying `template::reposition_boundary_to_end` and `strip_head_markers` primitives are already unit-tested)
 - `cargo install --path .` + `cargo build --release` rebuilt both the global binary and `.bin/agent-doc` symlink target
 - No new test added for the git.rs function itself — it's a thin composition of already-covered primitives behind the pending-path guard
-<!-- agent:boundary:49276650 -->
+❯ do #e6z1
+
+### Re: #e6z1 — can't execute, upstream implementation not landed (HEAD)
+
+`#e6z1` is the release-gate task: *"version bump + VERSIONS.md entry for gated-state feature **after implementation lands**"*. The gated-state implementation items are all still open:
+
+- `#pf01` spec ✅ landed
+- `#mgdw` parser — not started
+- `#h1j2` reaper — not started
+- `#q90h` CLI `--pending-gate` / `--pending-ungate` — not started
+- `#sx35` tests — not started
+
+Bumping the version + writing a VERSIONS.md entry now would ship a release that advertises the feature without any of the parser/reaper/CLI/test code actually present. That's the exact failure mode the gate was written to prevent.
+
+**What I can do instead, pick one:**
+
+1. **Execute `#mgdw` → `#h1j2` → `#q90h` → `#sx35` as a bundle**, then come back to `#e6z1` for the version bump. Roughly a parser extension + a preflight field + two CLI flags + a test sweep. This is the path that actually discharges `#e6z1`.
+2. **Re-scope `#e6z1`** if you meant something narrower (e.g. "draft the VERSIONS.md entry now as a stub so it's ready when impl lands") — tell me and I'll edit the pending text.
+3. **Override the gate** — explicitly say "ship the version bump now without the feature code" and I'll do it, but I'd push back hard because the bundled skill (`#hrmt`) is also a release gate for `#gqep` and you'd be stacking half-ready gates.
+
+My read: you probably want option 1. Confirm and I'll start on `#mgdw` (parser + `PendingState::Gated` + `[/]` round-trip) as the first slice.
+<!-- agent:boundary:e6758095 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

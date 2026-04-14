@@ -352,7 +352,7 @@ Tests:
 - Full `cargo test --bin agent-doc write::` suite: 62 passed, 0 failed.
 
 Pending item `#vnxg` marked done.
-<!-- agent:boundary:3aba6f26 -->
+<!-- agent:boundary:a6b94799 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

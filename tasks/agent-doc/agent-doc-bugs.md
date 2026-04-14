@@ -504,7 +504,7 @@ Plus a stale `<!-- agent:boundary:... -->` marker being dropped at the old posit
 2. **Emit an IPC `reposition_boundary` notification** from the sweep path, matching what `agent-doc write` does. Cleaner separation but requires a running plugin to take effect.
 
 #1 looks like the lower-friction fix and matches what the existing comment already implies the snapshot path "should maybe" do. #2 is the purist answer. Let me know which way you want it, or if you'd rather hold off.
-<!-- agent:boundary:38420a0f -->
+<!-- agent:boundary:b7c1d453 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

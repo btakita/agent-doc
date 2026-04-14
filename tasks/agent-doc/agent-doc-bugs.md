@@ -590,7 +590,7 @@ The double `commit_staging` trace with drift=410 then drift=122 (288-byte shrink
 
 **Pending queue:** `#eg0w` moved to ✅ (awaiting release gate); `#qpzd` (the duplicate) marked done. `#gqep` release bump is next when you want to cut v0.32.5 with this fix.
 ❯ Is [#64mb] & [#a002] complete? Why were they not marked as complete?
-### Re: Is #64mb & #a002 complete? (HEAD)
+### Re: Is #64mb & #a002 complete?
 
 Both are code-complete but intentionally parked in pending as watch items, not forgotten:
 
@@ -606,7 +606,57 @@ Both are code-complete but intentionally parked in pending as watch items, not f
 **TL;DR on "why not done":** the convention I've been applying is *code-landed ≠ done*; done means "shipped and verified in prod." Both are shipped-in-tree, both are gated on the same release + observation window.
 
 **If you want them closed now**, say "mark #64mb and #a002 done" and I'll `--pending-done` both this cycle. Otherwise they reap naturally after v0.32.5 ships and the telemetry watch is satisfied.
-<!-- agent:boundary:c0cc4205 -->
+❯ Can we add a code complete but not shipped convention? What is a terse way to do this? 2 checkboxes? Any other recommendations? This decision should land in the agent-doc binary spec + implementation.
+### Re: code-complete-but-not-shipped convention (HEAD)
+
+Three real options, ranked by how well they fit what agent-doc already does:
+
+**Option A — single-char lifecycle state `[/]`** ⭐ recommended
+```
+- [ ] [#id] open / not started
+- [/] [#id] code-complete, awaiting gate (release / telemetry / verification)
+- [x] [#id] done — reap next cycle
+```
+- **Pros:** one char change. Obsidian & Logseq already use `[/]` for "in progress" so muscle memory maps. Preflight reaper gets a trivial rule change: reap only `[x]`, leave `[/]` alone. Visually scannable — you instantly see "3 items gated, 5 open" at a glance.
+- **Cons:** GFM renderers (GitHub, stock markdown preview) show `[/]` as literal text, not a styled checkbox. Fine for agent-doc docs which are edited in raw markdown, ugly if the file gets rendered on GitHub.
+- **Spec impact:** add `PendingState::Gated` enum variant; parser accepts `/`; reaper skips `Gated`; renderer emits `[/]`. ~30 lines in `pending.rs`.
+
+**Option B — two checkboxes `[x][ ]`**
+```
+- [ ][ ] [#id] open
+- [x][ ] [#id] code-complete, not shipped
+- [x][x] [#id] shipped
+```
+- **Pros:** models the two independent gates literally (code done? shipped?). Most honest representation.
+- **Cons:** +3 chars of width on every line, visual clutter, confuses GFM renderers harder than A, requires custom parser path (GFM task-list extension only knows single checkbox). Muscle memory for toggling is awkward.
+
+**Option C — status suffix (no syntax change)**
+```
+- [ ] [#id] text — ✅ landed, awaiting v0.32.5
+```
+- **Pros:** zero spec change — already how `#a002` and `#eg0w` are written today.
+- **Cons:** no machine-readable state; reaper can't distinguish "gated" from "open"; requires humans to read prose to understand status. This is what we're already doing and why the question came up.
+
+**My recommendation: Option A (`[/]`).** It's the smallest diff to the spec, the reaper logic is one-line, and the visual density stays tight. The GFM-preview cost is real but low-impact because agent-doc docs live in editors, not GitHub READMEs.
+
+**What A buys us concretely:**
+1. `#a002`, `#64mb`, `#eg0w` all become `[/]` immediately — machine-readable "gated" bucket.
+2. Preflight can emit a new metric: `pending_gated_count`. Makes "awaiting release" items surface in status summaries without parsing prose.
+3. Release workflow can query gated items: "`v0.32.5` unblocks `#eg0w, #a002` — promote to `[x]`?" — scriptable gate promotion.
+4. Future: `--pending-gate <id>` flag alongside `--pending-done`, so the agent can move items to gated state explicitly.
+
+**Sub-question worth answering before implementing:** should gated items carry the gate name? e.g. `[/]` alone vs `[/:v0.32.5]` or `[/] (gate: v0.32.5)`. Recommendation: start with bare `[/]` + free-text suffix (existing prose convention), add structured gate field only if we find ourselves wanting to query by gate programmatically. YAGNI.
+
+**Spec + impl landing plan** (if you approve A):
+1. `src/agent-doc/specs/pending-system.md` — add `Gated` state, define `[/]` syntax, reaper rules, lifecycle diagram.
+2. `src/agent-doc/src/pending.rs` — extend parser, add variant to enum, teach renderer.
+3. Preflight reaper — skip `Gated` in the reap pass; optionally count gated items in returned JSON.
+4. New CLI flag `--pending-gate <id>` (mirror of `--pending-done`).
+5. Migration: existing `[ ]` items with "✅ landed" / "shipped" / "awaiting release" prose get auto-upgraded to `[/]` on first preflight touch (lazy, same mechanism as ID backfill). Or skip auto-migration and let us retag by hand — cleaner, smaller blast radius.
+6. Tests: state transitions, reaper respects `Gated`, parser round-trip.
+
+Say **"go with A"** (or A + specific tweaks) and I'll draft the spec update + implementation plan as the next cycle. If you want B or a hybrid, say so and I'll rework.
+<!-- agent:boundary:f5045031 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

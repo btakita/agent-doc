@@ -222,7 +222,7 @@ So the revised proposal: `dispatch` defaults to pure fire-and-forget (safe, no s
 
 Still want me to queue `dispatch` (with this tiered design) as a pending item, or park this in the agent-doc-feat doc as a full proposal first?
 ❯ Just do a notify. Add an option for notify to add a task.
-### Re: extend `notify` with a task option (HEAD)
+### Re: extend `notify` with a task option
 
 Confirmed. Queued as pending. Proposed shape:
 
@@ -242,13 +242,31 @@ Open sub-questions I'll resolve during implementation (or flag back to you if th
    - (a) `--pending-add` is additive — still appends the blockquote to `agent:exchange` *and* adds a pending item. Receiver sees both an inbox message and a queued task.
    - (b) `--pending-add` switches behavior — skip the exchange blockquote, only add to pending. Quieter, doesn't interrupt the receiver's current conversation.
    I'll default to **(b)** — the exchange blockquote would be redundant noise when the task is what matters, and the sender can always run notify twice if they want both.
+❯ option b
 
 2. **What if the target has no `agent:pending` component?** Error out with a clear message (`target document has no agent:pending component`). Don't silently fall back to exchange.
-
+❯ Would adding a agent:pending to the target violate user expectation? I would be ok with it. But what is the standard thought on this applied to agent-doc?
 3. **Commit behavior:** same as current `notify` — commit by default, `--no-commit` to skip.
 
 Added to pending. Implementation happens when that item gets scheduled — nothing further this cycle unless you want to refine the design first.
-<!-- agent:boundary:cc779568 -->
+### Re: option b + auto-create pending? (HEAD)
+
+Locked in **(b)** for `notify --pending-add` — pending-only, no exchange blockquote.
+
+On auto-creating `agent:pending` in the target: the standard thought in agent-doc is that **components are opt-in surfaces controlled by the document author**. A doc without `agent:pending` hasn't enrolled in the pending workflow — it has no reaper, no granular flags wired in the author's mental model, and the author may have deliberately kept the doc as a plain exchange. Silently materializing the component on someone else's document is the same class of overreach as a sender deciding to add `agent:status` or `agent:architecture` because they felt like it.
+
+The conservative default lines up with how the rest of the system behaves:
+
+- `agent-doc write --pending-*` on a local doc errors if `agent:pending` is absent — it doesn't auto-create.
+- Component creation is an authoring action (`agent-doc component add`, template scaffolding), not a side effect of a write.
+- Receivers get to decide what surfaces live in their doc.
+
+So the principled default for `notify --pending-add` is: **error if the target lacks `agent:pending`**, with the error message telling the sender exactly how to fix it (`ask the recipient to run agent-doc component add pending`, or similar).
+
+Escape hatch for your "I'd be OK with it" case: an explicit **`--create-pending`** flag on `notify` that opts the sender into materializing the component on the target. Off by default, on when you know the recipient won't mind. That keeps the principle intact while giving the pragmatic path you want for your own docs.
+
+Want me to add that `--create-pending` flag to the pending item, or keep it strict-only for v1?
+<!-- agent:boundary:e3a14917 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

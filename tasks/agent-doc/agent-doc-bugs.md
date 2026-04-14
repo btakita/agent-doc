@@ -992,7 +992,7 @@ Audited current state before planning. Most of the spec is already built — the
 Release target: per spec §Implementation §4, Gated lifecycle ships in **v0.32.6** (separate from the `#eg0w` CommitLock v0.32.5). I'll hold publishing until you confirm.
 
 Approve the phasing and I'll start Phase 1. Each phase commits + tests cleanly before moving to the next.
-<!-- agent:boundary:e9b7c86a -->
+<!-- agent:boundary:2f1b4499 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

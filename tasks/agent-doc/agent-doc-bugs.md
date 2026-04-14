@@ -422,7 +422,7 @@ Acknowledged — promoting the `src/agent-doc/SKILL.md` rewrite from "follow-up"
 - Rewrote #gqep to explicitly mark "BLOCKED on bundled SKILL.md rewrite + manual-testing gate" so nothing accidentally triggers publish.
 
 **What I'm NOT doing yet:** the rewrite itself. It's a substantive edit to `src/agent-doc/SKILL.md` (~a few hundred lines touched), and per process discipline I'd rather land it as its own focused change with a diff you can review, not fold it into this cycle. Say "do the bundled skill rewrite" (or similar) and I'll execute it next.
-<!-- agent:boundary:a4083abd -->
+<!-- agent:boundary:5d322dc2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

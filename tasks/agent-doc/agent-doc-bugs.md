@@ -423,7 +423,7 @@ Acknowledged — promoting the `src/agent-doc/SKILL.md` rewrite from "follow-up"
 
 **What I'm NOT doing yet:** the rewrite itself. It's a substantive edit to `src/agent-doc/SKILL.md` (~a few hundred lines touched), and per process discipline I'd rather land it as its own focused change with a diff you can review, not fold it into this cycle. Say "do the bundled skill rewrite" (or similar) and I'll execute it next.
 ❯ do the bundled skill rewrite
-### Re: Bundled skill rewrite — landed (runbook extraction) (HEAD)
+### Re: Bundled skill rewrite — landed (runbook extraction)
 
 Done. Followed your "move detailed instructions into a runbook" guidance — `src/agent-doc/SKILL.md` §1b is now a tight summary that links out, and the full contract lives in a new runbook.
 
@@ -454,7 +454,57 @@ Done. Followed your "move detailed instructions into a runbook" guidance — `sr
 ❯ - src/boost-client/tasks/monsterrodholders.md
 ❯ - src/session-share/tasks/claudescore.md
 $(cat /tmp/agent-doc-resp-$$.md)
-<!-- agent:boundary:3bd74df2 -->
+❯ The patchback did not occur in this doc. Why?
+
+### Re: Why didn't the patchback occur last cycle? (HEAD)
+
+Skill-author bug on my end, not a binary bug. My previous cycle used a **quoted heredoc** to pipe the response into `agent-doc write`:
+
+```
+cat <<'RESPONSE' | agent-doc write ...
+$(cat /tmp/agent-doc-resp-$$.md)
+RESPONSE
+```
+
+The single-quoted delimiter disables all shell expansion inside the heredoc, so `$(cat ...)` was passed through as a literal 32-byte string instead of being replaced with the file's contents. `agent-doc write` saw one line of raw (unwrapped) content, synthesized a boundary, and appended the literal `$(cat ...)` string into `&lt;!-- agent:exchange --&gt;`. That's the stray line sitting above your follow-up.
+
+So the patchback **did** occur — it just wrote the wrong content. The real response (the `### Re:` analysis of why the two swept files lack the working-tree `(HEAD)` removal) never reached the binary at all.
+
+**Fix:** either use an unquoted heredoc so `$(...)` expands, or — simpler and what I'm using now — pass the response file to `agent-doc write` via stdin redirection from a real file (`< /tmp/resp.md`) with no command substitution involved.
+
+I'm re-delivering the original answer inline:
+
+---
+
+Both swept files **do** now have the uncommitted `(HEAD)` removal in the working tree — the sweep this preflight runs is what creates it. From `git diff` against the index:
+
+`src/boost-client/tasks/monsterrodholders.md`:
+```
+-## Pending / Not Built (HEAD)
++## Pending / Not Built
+```
+
+`src/session-share/tasks/claudescore.md`:
+```
+-### Expansion Phases (Future) (HEAD)
++### Expansion Phases (Future)
+```
+
+Plus a stale `<!-- agent:boundary:... -->` marker being dropped at the old position.
+
+**Why it looks invisible until the sweep runs:** sweep commit and working-tree boundary reposition are decoupled.
+
+- `reposition_boundary_in_snapshot` (git.rs:593) only updates the snapshot file under `.agent-doc/snapshots/`. Its doc-comment spells it out: *"The plugin handles working-tree boundary reposition via the `reposition_boundary: true` IPC flag sent during `agent-doc write`."*
+- So a file's working-tree heading only gains/loses `(HEAD)` when (a) `agent-doc write` runs on it and the open editor plugin receives an IPC ping, or (b) the next `agent-doc commit` stages the snapshot into the index, at which point `git diff` shows the lag between index (new boundary position) and working tree (old boundary position).
+- Sweep-committed docs never go through `agent-doc write` — they're foreign docs preflight happens to notice dirty. So (a) is skipped, and (b) is what just produced the visible diff.
+
+**The residual gap:** without an editor actively holding those files open and wired to the plugin, the working tree continues to lag until someone opens them or another write cycle targets them. Two candidate fixes, now in pending:
+
+1. **Have `reposition_boundary_in_snapshot` also rewrite the working tree** when no active run is in progress. It already has the canonical path and the pending-run guard. Cheapest, but sweep commits would start touching working trees of unrelated files — potentially surprising for editors that don't have the plugin loaded.
+2. **Emit an IPC `reposition_boundary` notification** from the sweep path, matching what `agent-doc write` does. Cleaner separation but requires a running plugin to take effect.
+
+#1 looks like the lower-friction fix and matches what the existing comment already implies the snapshot path "should maybe" do. #2 is the purist answer. Let me know which way you want it, or if you'd rather hold off.
+<!-- agent:boundary:38420a0f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -501,5 +551,6 @@ $(cat /tmp/agent-doc-resp-$$.md)
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#hrmt] Rewrite src/agent-doc/SKILL.md (bundled skill) to invert Phase 2 pending guidance: remove 'every response MUST include a patch:pending block', replace with granular-ops contract from .claude/skills/agent-doc/SKILL.md §1b. RELEASE GATE for #gqep — v0.32.4 cannot ship with inverted bundled-skill guidance.
 - [ ] [#e46w] Sweep-commit path: working-tree boundary lags until next write or editor re-open. Fix: have reposition_boundary_in_snapshot also rewrite the working-tree file when no active run is in progress (git.rs:593). Alternative: emit IPC reposition_boundary notification to open plugins.
+- [ ] [#f8j3] Sweep-commit working-tree lag: reposition_boundary_in_snapshot (git.rs:593) only updates snapshot; working tree boundary only moves via IPC from agent-doc write. Fix: also rewrite working tree in snapshot reposition path, or emit IPC ping to open plugins.
 <!-- /agent:pending -->
 ## Assistant

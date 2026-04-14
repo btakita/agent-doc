@@ -13,7 +13,7 @@ agent_doc_write: crdt
 
 <!-- agent:exchange patch=append -->
 Implemented document-level hooks (session_start/post_write/post_commit) via frontmatter YAML. Fixed (HEAD) suffix incorrectly committed to fenced code # comments (is_fence_marker + in_fence tracking in git.rs). Fixed ❯ prefix lost in editor after transfer (normalize_patch_content bakes prefix into IPC patch body). Discussed real-time steering via tmux send-keys. Open: release, agent-doc steer command, inotify watcher, fenced-code diff classifier.
-<!-- agent:boundary:aa132d79 -->
+<!-- agent:boundary:f1140b54 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

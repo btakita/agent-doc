@@ -606,7 +606,7 @@ Both are code-complete but intentionally parked in pending as watch items, not f
 **TL;DR on "why not done":** the convention I've been applying is *code-landed ≠ done*; done means "shipped and verified in prod." Both are shipped-in-tree, both are gated on the same release + observation window.
 
 **If you want them closed now**, say "mark #64mb and #a002 done" and I'll `--pending-done` both this cycle. Otherwise they reap naturally after v0.32.5 ships and the telemetry watch is satisfied.
-<!-- agent:boundary:c28115a4 -->
+<!-- agent:boundary:c0cc4205 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

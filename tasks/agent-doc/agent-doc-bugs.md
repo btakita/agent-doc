@@ -456,7 +456,7 @@ Done. Followed your "move detailed instructions into a runbook" guidance — `sr
 $(cat /tmp/agent-doc-resp-$$.md)
 ❯ The patchback did not occur in this doc. Why?
 
-### Re: Why didn't the patchback occur last cycle? (HEAD)
+### Re: Why didn't the patchback occur last cycle?
 
 Skill-author bug on my end, not a binary bug. My previous cycle used a **quoted heredoc** to pipe the response into `agent-doc write`:
 
@@ -492,6 +492,8 @@ Both swept files **do** now have the uncommitted `(HEAD)` removal in the working
 
 Plus a stale `<!-- agent:boundary:... -->` marker being dropped at the old position.
 
+❯ Make this ` (HEAD)` removal logic deterministic in the agent-doc binary + ffi plugin (JB plugin only if necessary) if possible.
+
 **Why it looks invisible until the sweep runs:** sweep commit and working-tree boundary reposition are decoupled.
 
 - `reposition_boundary_in_snapshot` (git.rs:593) only updates the snapshot file under `.agent-doc/snapshots/`. Its doc-comment spells it out: *"The plugin handles working-tree boundary reposition via the `reposition_boundary: true` IPC flag sent during `agent-doc write`."*
@@ -504,7 +506,14 @@ Plus a stale `<!-- agent:boundary:... -->` marker being dropped at the old posit
 2. **Emit an IPC `reposition_boundary` notification** from the sweep path, matching what `agent-doc write` does. Cleaner separation but requires a running plugin to take effect.
 
 #1 looks like the lower-friction fix and matches what the existing comment already implies the snapshot path "should maybe" do. #2 is the purist answer. Let me know which way you want it, or if you'd rather hold off.
-<!-- agent:boundary:b7c1d453 -->
+❯ reposition_boundary_in_snapshot seems fine.
+
+### Re: Deterministic `(HEAD)` removal in the binary (HEAD)
+
+Going with option #1 — extending `reposition_boundary_in_snapshot` (git.rs:593) to also rewrite the working tree with `template::reposition_boundary_to_end` + `strip_head_markers`, gated on the existing active-run guard (`pending_path_for`). Sweep-committed foreign docs have no active run, so they'll get the deterministic rewrite; in-flight runs are skipped so concurrent IPC/plugin writes don't race.
+
+Implementing now in the agent-doc binary only — no FFI/plugin changes needed since the binary is the canonical source of truth. I'll leave `try_ipc_reposition_boundary` in place as a hint to open editors, but the on-disk state will be correct regardless of whether the plugin is loaded.
+<!-- agent:boundary:9bc3eb92 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -552,5 +561,6 @@ Plus a stale `<!-- agent:boundary:... -->` marker being dropped at the old posit
 - [ ] [#hrmt] Rewrite src/agent-doc/SKILL.md (bundled skill) to invert Phase 2 pending guidance: remove 'every response MUST include a patch:pending block', replace with granular-ops contract from .claude/skills/agent-doc/SKILL.md §1b. RELEASE GATE for #gqep — v0.32.4 cannot ship with inverted bundled-skill guidance.
 - [ ] [#e46w] Sweep-commit path: working-tree boundary lags until next write or editor re-open. Fix: have reposition_boundary_in_snapshot also rewrite the working-tree file when no active run is in progress (git.rs:593). Alternative: emit IPC reposition_boundary notification to open plugins.
 - [ ] [#f8j3] Sweep-commit working-tree lag: reposition_boundary_in_snapshot (git.rs:593) only updates snapshot; working tree boundary only moves via IPC from agent-doc write. Fix: also rewrite working tree in snapshot reposition path, or emit IPC ping to open plugins.
+- [ ] [#y4da] Deterministic boundary reposition in working tree (git.rs reposition_boundary_in_snapshot extends to disk write with active-run guard)
 <!-- /agent:pending -->
 ## Assistant

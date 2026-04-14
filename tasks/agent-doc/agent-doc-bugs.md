@@ -919,7 +919,7 @@ They're complementary — not overlapping. Both should run in precommit/CI.
 1. Option 1, 2, or 3 for skill-janitor integration?
 ❯ 2. Should I commit `LIBRARY_CONTEXT_POLICY.md` now, or do you want to edit it first?: commit
 ❯ 3. Once the spec is committed, should I sweep the sixteen-ish libraries under `src/` to add the stub section to their AGENTS.md, or do that after the audit check lands so the audit drives the sweep?: yes
-### Re: committed + next moves (HEAD)
+### Re: committed + next moves
 
 Done in this cycle:
 
@@ -928,7 +928,7 @@ Done in this cycle:
 
 **Library sweep deferred** per your call — audit check lands first, then the sweep is driven by audit failures. That way the sweep is mechanical ("fix every AGENTS.md the audit flags") instead of manual search-and-edit. I added this to pending.
 
-### Re: skills-janitor plugin install (HEAD)
+### Re: skills-janitor plugin install
 
 The `khendzel/skills-janitor` repo ships with a `.claude-plugin/` manifest, so it's a first-class Claude Code plugin. The normal install path is interactive via the `/plugin` command — I can't install it from this session because plugin installation touches `~/.claude/plugins/installed_plugins.json` and the marketplace cache, which are managed state I shouldn't poke at directly.
 
@@ -942,7 +942,7 @@ Then in the interactive UI: add marketplace `khendzel/skills-janitor` (or browse
 
 Once you've installed it, let me know and I can run a first audit pass to surface any noise (duplicate skill names, unused skills, stale SKILL.md files) across `.claude/skills/` in this repo.
 
-### Re: eventual fork (HEAD)
+### Re: eventual fork
 
 I added pending items for both the interim plugin install and the post-fork submodule migration. When you fork, the clean path is:
 
@@ -951,10 +951,10 @@ I added pending items for both the interim plugin install and the post-fork subm
 3. Replace the plugin install with the submodule invocation in precommit
 4. Optional: nightly `schedule` cron writing drift reports to `tasks/agent-doc/skills-audit.md`
 
-### Pending added (HEAD)
+### Pending added
 
 Five items landed in pending — review before next cycle in case I misread scope.
-<!-- agent:boundary:632c93d2 -->
+<!-- agent:boundary:aded6800 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

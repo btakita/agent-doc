@@ -277,7 +277,7 @@ let cfg = supervisor::pty::PtySpawnConfig {
 - `start.rs` wire-up itself — blocked on `state.rs` per the phase 1 status table.
 
 Ready for `resize.rs` whenever you give the go-ahead.
-### Re: `null` vs `"null"` string — yes, fully distinguishable (HEAD)
+### Re: `null` vs `"null"` string — yes, fully distinguishable
 
 YAML has a native null scalar distinct from string `"null"`. serde_yaml maps them correctly to `Option<String>`:
 
@@ -292,7 +292,7 @@ env:
 
 No custom deserializer needed — `IndexMap<String, Option<String>>` with `#[serde(default)]` handles it. I'll add a round-trip test in `env.rs` covering all five forms so a future YAML library swap can't silently break the distinction.
 
-### Re: Frontmatter changes mid-session — surface, don't auto-apply (HEAD)
+### Re: Frontmatter changes mid-session — surface, don't auto-apply
 
 Short answer: **apply on next supervisor restart, surface a notice when the change is detected, never auto-kill the running pane.**
 
@@ -302,10 +302,12 @@ Rationale — three failure modes to avoid:
 2. **Disruptive auto-restart.** User tweaks frontmatter while claude is mid-response in the pane. Killing the pty to apply a new `PATH` loses in-flight output and context. → must not auto-restart.
 3. **Ambiguous scope.** Some fields affect spawn (`env`, `agent_doc_env_inherit`, `cwd`, model binary selection). Others are advisory (`agent_doc_model_tier`, metadata). Blanket "restart on any frontmatter change" is too aggressive.
 
+❯ Can `agent_doc_model_tier` be a supervisor operation? Would the supervisor be able to start Claude Code with the defined model?
+
 Proposed mechanism — extends the preflight contract, no new moving parts:
 
 - **Preflight diffs frontmatter** against the snapshot frontmatter (already parses both). Computes a `supervisor_dirty: { changed: ["env.FOO", "agent_doc_env_inherit"], restart_required: true }` block in the JSON output.
-- **Classification table** in `supervisor/env.rs` (or a sibling `frontmatter_effects.rs`) maps each field to one of: `Spawn` (needs restart), `Advisory` (no effect on running pty), `Hotpatch` (can be applied without restart — none yet, but room to grow).
+❯ - **Classification table** in `supervisor/env.rs` (or a sibling `frontmatter_effects.rs`) maps each field to one of: `Spawn` (needs restart), `Advisory` (no effect on running pty), `Hotpatch` (can be applied without restart — none yet, but room to grow).: Does Claude Code support setting env variable on the fly using shell commands `! ENVVAR=...`. Note if this were to be done, some envvars (agent harness specific) would require a restart to take effect.
 - **Skill step 0c3** (new): if `supervisor_dirty.restart_required` is true, write a one-liner into the response: "⚠ frontmatter changed: `env.FOO`, `agent_doc_env_inherit` — run `agent-doc restart <FILE>` to apply, or changes take effect on next crash-triggered restart."
 - **New subcommand** `agent-doc restart <FILE>`: sends SIGTERM to the supervised pty, supervisor state machine re-enters spawn with fresh `EnvSpec::from_frontmatter`. This is the explicit opt-in the user triggers when they're ready.
 - **Next-session pickup is automatic.** `start.rs` calls `EnvSpec::from_frontmatter` on every spawn, so a fresh session after `agent-doc claim` or process exit always picks up current frontmatter — no special path needed.
@@ -313,7 +315,51 @@ Proposed mechanism — extends the preflight contract, no new moving parts:
 Edge case worth calling out: if `agent_doc_env_inherit` flips from `true` → `false`, the new env is **smaller** than the old one (parent vars dropped). Restart is the only safe path — you cannot hot-unset arbitrary parent vars from a running process without killing child subprocesses that may depend on them. The classification table should mark `agent_doc_env_inherit` as `Spawn` unconditionally.
 
 Proceeding with the Option<String> implementation as planned; I'll add the frontmatter-diff + `supervisor_dirty` surfacing as a follow-up item rather than bundling it into this delta.
-<!-- agent:boundary:6bc6d7eb -->
+### Re: `agent_doc_model_tier` as a supervisor operation — yes, and it closes a real gap (HEAD)
+
+Claude Code's CLI accepts `--model <model-id>` at spawn. The supervisor already owns the spawn command construction, so wiring tier → model is mechanical:
+
+```rust
+// supervisor/model.rs (new, or fold into env.rs)
+pub fn tier_to_model(tier: Tier) -> &'static str {
+    match tier {
+        Tier::Low  => "claude-haiku-4-5",
+        Tier::Med  => "claude-sonnet-4-6",
+        Tier::High => "claude-opus-4-6",
+        Tier::Auto => "",  // omit --model, let Claude Code pick
+    }
+}
+```
+
+`start.rs` appends `--model <id>` to the claude invocation when `agent_doc_model_tier` is set and not `auto`. Falls through cleanly when unset (current behavior).
+
+**What this actually fixes:** today the skill's tier gate is advisory — it prints "run /model high" and hopes the user does it. With supervisor ownership, a fresh session (first spawn or post-restart) always comes up at the document's declared tier, zero user action required. The gate becomes enforcement, not a suggestion.
+
+**Interaction with `/model` mid-session:** Claude Code's own `/model` slash command still works and overrides the spawn flag for the remainder of that session — that's CC's internal state, not something the supervisor can or should interfere with. The supervisor flag just sets the *initial* model per spawn. If the user `/model`s to something else, that sticks until restart, at which point the supervisor re-applies the frontmatter tier. This is the correct semantic: frontmatter is the source of truth for "what should this document run as by default", `/model` is a temporary override.
+
+**Classification:** `agent_doc_model_tier` joins `Spawn` in the effects table — changing it requires restart for the new tier to take effect. Consistent with the `env` story.
+
+One caveat: haiku/sonnet/opus mapping needs to live somewhere versioned. Hard-coding model IDs in `supervisor/model.rs` ties the binary to specific models; a month from now Opus 4.7 ships and we need a release to pick it up. Options: (a) read from a config file shipped with the binary, (b) accept a `model_map:` frontmatter override at the document or project level, (c) just release. I'd pick (c) initially — one-line change, easy to update — and add (b) when someone actually needs per-project overrides.
+
+### Re: Claude Code on-the-fly `! ENVVAR=...` — partial, and not a supported mutation path for session env (HEAD)
+
+Breaking this into three layers because they behave differently:
+
+**1. Bash tool (what I use for every tool call):** Shell state does NOT persist between calls. From my own system prompt verbatim: *"The working directory persists between commands, but shell state does not."* So `export FOO=bar` in one Bash call is gone by the next. Each call re-sources the user's profile. The preflight step 0c2 pattern (export in a single Bash call) only works because subsequent commands *in that same call* see the exports — not subsequent tool calls.
+
+**2. `!` prefix in the Claude Code prompt (user-typed):** This runs the command in a shell the harness manages and pipes output back into the conversation. I'm not 100% certain whether that shell is persistent across `!` invocations — I'd need to test it, and I don't want to speculate. Even if it is persistent, it's a *separate* shell from the Bash tool's shell, so exports there don't reach my tool calls.
+
+**3. The supervised claude pty (the actual target of session env):** This process has its env set **once**, at `fork/exec` time, from whatever `EnvSpec::resolve()` returned. Nothing the user types at the Claude Code prompt — `!` or otherwise — reaches back into that pty's environment. The kernel doesn't expose "mutate another running process's env" as an API (you can `ptrace` it but that's a sledgehammer, and anything the child already read into its own state is untouched).
+
+**What this means for the design:** ad-hoc `export` is not a mutation path for document session env. The supported paths are:
+
+1. Edit frontmatter → save → next restart picks it up. (Explicit via `agent-doc restart`, or implicit via crash-triggered restart.)
+2. First spawn after claim: always reads current frontmatter.
+
+Your note is exactly right — *even if* on-the-fly export worked, harness-specific vars (`AGENT_DOC_*`, `CLAUDE_*`, anything the claude binary caches at startup) would still need a restart. So making ad-hoc export a mutation surface would create a two-tier env model (hot-patchable vs. restart-required) with no clear user-visible line between them. That's a confusing API. Better to keep one rule: **frontmatter is the env, restart applies it.** If someone needs a quick throwaway var for one command, they can just `FOO=bar some_command` inline — that's not session env, that's a per-invocation override and doesn't need the supervisor's help.
+
+I'll add a note in the spec doc making this explicit: "Session environment variables are set at spawn time from frontmatter `env:` only. Ad-hoc shell exports do not affect the supervised pty or future Bash tool calls."
+<!-- agent:boundary:e6523e7a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

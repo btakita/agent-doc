@@ -1041,7 +1041,7 @@ No spec ambiguity for Phase 2 — the matrix in `specs/pending-system.md` §4 is
 The `AGENT_DOC_REJECT_PATCH_PENDING=1` → flip-default question is **only** for Phase 3 (preflight + enforcement). Phase 1 changes nothing user-visible; Phase 2 only adds new flags. So the question can wait one or two more cycles. I'll re-raise before starting Phase 3.
 
 Approve Phase 2 and I'll start the `gate/ungate` matrix + CLI flags.
-<!-- agent:boundary:c256b301 -->
+<!-- agent:boundary:a0c9fbe1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

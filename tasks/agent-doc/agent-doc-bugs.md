@@ -657,7 +657,7 @@ Three real options, ranked by how well they fit what agent-doc already does:
 
 Say **"go with A"** (or A + specific tweaks) and I'll draft the spec update + implementation plan as the next cycle. If you want B or a hybrid, say so and I'll rework.
 ❯ go with A
-### Re: go with A — draft spec + implementation plan (HEAD)
+### Re: go with A — draft spec + implementation plan
 
 Locked in. Plan below; pending items for each step have been added to the queue (6 items). I'll tackle them in order next cycles, not this one.
 
@@ -685,7 +685,66 @@ Locked in. Plan below; pending items for each step have been added to the queue 
 **What happens to #a002, #64mb, #eg0w after this lands:** they get retagged `[/]` by hand. `#a002` stays `[/]` until a large-drift event trips telemetry. `#64mb` + `#eg0w` both promote to `[x]` once v0.32.5 runs cleanly for ~24h. Post-v0.32.6 ships, the first real cycle of the new workflow is validated on its own implementation — nice closed loop.
 
 **Open question for you before I start step 1:** do you want the spec update to go on its own branch (`20260414/pending-gated-state`) or straight to `main`? Default is branch per your convention (`yyyymmdd/short-description`).
-<!-- agent:boundary:f92b343a -->
+❯ follow convention. go
+### Re: step 1 landed on `20260414/pending-gated-state` (HEAD)
+
+Branch created, spec updated, and the session is now running off of it. All edits are in `src/agent-doc/specs/pending-system.md` — no code yet, just the design contract steps 2–6 will implement against.
+
+**What changed in `pending-system.md`:**
+
+1. **Title + intro** — renamed to "Stable IDs, Checkboxes, **Gated Lifecycle**, Granular Ops" so the new axis is visible at a glance.
+
+2. **§2 rewritten as a three-state lifecycle** (was a two-state checkbox section):
+
+   | State | Char | Meaning | Reaped? |
+   |-------|------|---------|---------|
+   | `Open`  | `[ ]` | active work or not started | No |
+   | `Gated` | `[/]` | code-complete, awaiting external gate | **No** |
+   | `Done`  | `[x]` | fully complete | Yes (next preflight) |
+
+   Includes an ASCII lifecycle diagram (`[ ] ↔ [/] → [x] → reaped`, plus the direct `[ ] → [x]` path for items that don't need gating) and locks the "no auto-reap for `[/]`, no TTL" rule explicitly. `code-landed ≠ done` is now a data-model invariant, not a convention buried in prose.
+
+3. **§2 "Why three states"** — captures the three frozen decisions from the previous cycle:
+   - Machine-readable (`pending_gated_count` metric path), prevents accidental reap on release, matches observed reality.
+   - Gate name stays **free-text prose** suffix (`— gate: v0.32.5`), not a structured field. YAGNI noted inline.
+   - GFM-renderer caveat called out: `[/]` shows as literal text on GitHub, acceptable cost since agent-doc docs live in editors.
+
+4. **§3 Lazy backfill in preflight** — reaper rule tightened: "Reap `- [x]` bullets **only**. `[ ]` and `[/]` are never auto-reaped." Added an explicit **Migration** subsection: no auto-migration, existing items stay `[ ]` until retagged by hand via `--pending-gate`. Frozen decision #2 from the plan.
+
+5. **§4 Granular write-command surface** — flag table extended with:
+   - `--pending-gate <id>` — `[ ] → [/]`, no-op (log) if already `[/]`, error if source is `[x]`.
+   - `--pending-ungate <id>` — `[/] → [ ]`, error if source is `[ ]` or `[x]`.
+   - `--pending-done` note updated: "Valid from any state (`[ ]` or `[/]`)" so `[/] → [x]` promotion is explicit.
+   - `--pending-edit` note updated: "preserve hash **and state**" — editing text on a `[/]` item does not kick it back to `[ ]`.
+
+6. **State transition matrix table** — full From×Op grid so the parser/validator has an unambiguous reference. Five valid transitions (`[ ]→[x]`, `[ ]→[/]`, `[/]→[x]`, `[/]→[ ]`, and the three no-ops/errors explicit).
+
+7. **§ Schema example** — updated to include two `[/]` items with realistic gate suffixes (`#eg0w` → "gate: v0.32.5 release"; `#a002` → "awaiting large-drift telemetry trip"). Shows that after preflight reaps `#c9e0`, the gated items survive untouched.
+
+8. **§ Implementation plan rewritten** to drive steps 2–6 of the playbook:
+   - Step 1 (commands) now lists `--pending-gate` / `--pending-ungate` explicitly and calls out the `PendingState` enum + state transition validation.
+   - Step 2 (preflight) pins "reap `[x]` only, `[/]` skipped unconditionally" and emits `pending_gated_count` in JSON output.
+   - Step 3 (skill runbook) documents the new flags plus the guidance: when code lands but cannot ship, `--pending-gate` instead of `[ ]` + prose.
+   - **New step 4 — Release discipline:** frozen decision #5 baked into the spec. Gated lifecycle ships in **v0.32.6** as its own focused release. Do NOT bundle with the v0.32.5 `#eg0w` CommitLock release, so the CommitLock fix gets clean field validation first. Post-v0.32.6 ships, `#a002`, `#64mb`, `#eg0w` get retagged `[/]` by hand — the closed-loop validation I called out before starting.
+
+**Design decisions frozen in this spec landing** (matches the plan, no re-litigation):
+
+1. Bare `[/]` syntax, no structured gate field — free-text prose suffix stays.
+2. No auto-migration — lazy rules too fuzzy, blast radius unclear, manual retag faster.
+3. Five valid state transitions (see matrix).
+4. Reaper rule: only `[x]` reaps, no TTL on `[/]`.
+5. Lazy ID backfill still applies to `[/]` items — a human typing `- [/] fix the thing` gets an ID on next preflight.
+6. Gated lifecycle ships v0.32.6, NOT bundled with v0.32.5.
+
+**Pending updates this cycle:**
+- `#pf01` → **✅ done** (spec landed — that was step 1 of the playbook).
+
+**What's next (step 2 — parser + enum + renderer in `src/pending.rs`):**
+
+`PendingState { Open, Gated, Done }` variant added, parser accepts `[ ] | [/] | [x]`, renderer round-trips. Unit tests: parser round-trip across all three states, state transition validation (each cell in the matrix), error cases (`[x] → [/]`, etc.). This is `#mgdw`. Awaiting your go to land it — or if you'd rather review the spec change first before I touch code, say so and I'll pause after committing the spec.
+
+Branch state: `20260414/pending-gated-state` created off `main`, spec change is uncommitted in the working tree (will commit after this response writes back). No other files touched — step 1 is deliberately spec-only.
+<!-- agent:boundary:252a9907 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -716,7 +775,7 @@ Locked in. Plan below; pending items for each step have been added to the queue 
 - [ ] [#f7d5] supervisor: smoke test — real claude under supervisor in a tmux pane, verify restart + inject + CWD invariant end-to-end
 - [ ] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)
 - [ ] [#eg0w] ✅ Shipped: per-file CommitLock in git::commit + <5s freshness gate in preflight sweep (awaiting release)
-- [ ] [#pf01] agent-doc: spec update — add PendingState::Gated lifecycle (`[/]`) to src/agent-doc/specs/pending-system.md (syntax, reaper rules, state transitions, lifecycle diagram, CLI surface)
+- [ ] [#pf01] ✅ Spec landed on 20260414/pending-gated-state: src/agent-doc/specs/pending-system.md — PendingState::Gated, [/] syntax, reaper rules, lifecycle diagram, CLI surface, state transition matrix, release discipline
 - [ ] [#mgdw] agent-doc: parser — accept `[/]` checkbox char, extend PendingState enum with Gated variant in src/agent-doc/src/pending.rs; renderer emits `[/]` round-trip
 - [ ] [#h1j2] agent-doc: reaper — skip Gated items in preflight reap pass; emit pending_gated_count alongside existing counts in preflight JSON output
 - [ ] [#q90h] agent-doc: CLI — add `--pending-gate <id>` flag on `agent-doc write` (mirror of --pending-done); `--pending-ungate <id>` to return to `[ ]`

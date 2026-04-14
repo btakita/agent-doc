@@ -1180,7 +1180,7 @@ Three concrete failure modes the gate closes:
 So rejection-by-default isn't about safety theater — it's about forcing the skill down the path where user edits, hash IDs, and intent all stay coherent. The escape hatch (`--allow-patch-pending` / `AGENT_DOC_ALLOW_PATCH_PENDING=1`) exists for the cases where full rewrite **is** the intent: compaction, migration, and tests. Those are rare and explicit; normal response cycles should never need it.
 ❯ `patch:pending` does not describe the behavior. Is there a better name?
 The "always allow it" alternative re-opens all three holes and trades a working invariant for convenience the skill doesn't need.
-### Re: better name than `patch:pending`? (HEAD)
+### Re: better name than `patch:pending`?
 
 Agreed — the issue is that `patch:` is used everywhere else for "apply a content patch to this component," and readers reasonably expect `patch:pending` to mean "patch the pending list." What it actually means is "replace the entire pending list, bypassing the granular-ops contract." The name hides the footgun.
 
@@ -1205,9 +1205,18 @@ Candidates, ordered by how loudly they signal "escape hatch":
 - `--allow-patch-pending` gains an alias `--allow-replace-pending`; env var `AGENT_DOC_ALLOW_REPLACE_PENDING=1` is the new canonical form.
 - Spec doc (`specs/pending-system.md`) and SKILL.md updated to the new name; old name documented only in the migration note.
 - Drop the old name after one release.
+❯ Switch to `replace:pending`
 
 Want me to turn this into a `[#xxxx]` pending item and queue it behind the current phase-3 work?
-<!-- agent:boundary:635c7fec -->
+❯ yes
+### Re: queued (HEAD)
+
+Confirmed — `replace:pending` it is. Added to the pending list with the full migration path baked into the item text so future-me (or future-you) can pick it up without re-deriving the plan:
+
+> Rename `patch:pending` → `replace:pending`. Parser accepts both for one release with deprecation warning; `--allow-patch-pending` gains `--allow-replace-pending` alias; `AGENT_DOC_ALLOW_REPLACE_PENDING=1` becomes canonical env var; `specs/pending-system.md` + SKILL.md updated to new name; drop old name after one release. Queue behind current phase-3 work.
+
+Sequencing: this lands **after** the current phase-3 work (pending_gated_count + enforcement inversion) ships. Rationale — the rename is a surface-level API change, and doing it on top of a stabilized enforcement default avoids re-touching the same call sites twice. When phase-3 is green, this becomes the first visible cleanup on top of it.
+<!-- agent:boundary:1f9f2ca5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1249,5 +1258,6 @@ Want me to turn this into a `[#xxxx]` pending item and queue it behind the curre
 - [ ] [#breh] rust-package skill: write the Library Context Policy stub into new library AGENTS.md at scaffold time.
 - [ ] [#3j0e] Install skills-janitor as Claude Code plugin (run /plugin install khendzel/skills-janitor at terminal). User plans to fork eventually; this is the interim path.
 - [ ] [#vdyj] After fork: move forked skills-janitor under src/ as submodule, wire audit into make precommit, and optionally add nightly cron via schedule skill writing drift reports to tasks/agent-doc/skills-audit.md.
+- [ ] [#25ag] Rename patch:pending → replace:pending. Parser accepts both for one release with deprecation warning; --allow-patch-pending gains --allow-replace-pending alias; AGENT_DOC_ALLOW_REPLACE_PENDING=1 becomes canonical env var; specs/pending-system.md + SKILL.md updated to new name; drop old name after one release. Queue behind current phase-3 work.
 <!-- /agent:pending -->
 ## Assistant

@@ -121,7 +121,7 @@ agent-doc write tasks/claudescore.md --pending-gate ahmt
 ```
 
 Want me to run those against `src/session-share/tasks/claudescore.md` now, or leave it for that doc's own session?
-<!-- agent:boundary:b088af41 -->
+<!-- agent:boundary:a2025140 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

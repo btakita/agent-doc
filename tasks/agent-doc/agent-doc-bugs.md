@@ -859,7 +859,7 @@ The resolution is **leaf placement with a canonical spec**, not duplication:
 **What to decide:** where the canonical spec lives. If agent-loop is the sole workspace these libraries ever appear in, `src/instruction-files/LIBRARY_CONTEXT_POLICY.md` is the cleanest home. If some libraries are published and consumed independently, the spec needs a public URL (a docs site or a README section in `instruction-files` on crates.io) so the stub link resolves for external readers.
 
 Want me to draft the canonical spec file + a sample leaf stub so you can evaluate the concrete shape?
-<!-- agent:boundary:6e7b00c1 -->
+<!-- agent:boundary:3e98f38d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

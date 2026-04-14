@@ -364,11 +364,11 @@ Your note is exactly right — *even if* on-the-fly export worked, harness-speci
 
 ❯ I'll add a note in the spec doc making this explicit: "Session environment variables are set at spawn time from frontmatter `env:` 
 ❯  only. Ad-hoc shell exports do not affect the supervised pty or future Bash tool calls."
-### Re: `!` empirical test — confirmed, and good to have it in writing (HEAD)
+### Re: `!` empirical test — confirmed, and good to have it in writing
 
 Thanks for running the test. That matches the model: each `!` invocation is a fresh shell process, so `export FOO=bar` dies with the shell. Same behavior as the Bash tool. Worth capturing in the spec doc alongside the supervised-pty point so the next person who asks "why can't I just export a var" has an empirical answer, not just an architectural one. I'll cite your test in the spec note.
 
-### Re: model attribution in response headers — yes, useful, adding to pending (HEAD)
+### Re: model attribution in response headers — yes, useful, adding to pending
 
 Short answer: yes, this is a good signal, especially for mixed-tier documents where a `/model` mid-session means some `### Re:` sections were opus and others were haiku and there's no way to tell after the fact.
 
@@ -382,38 +382,54 @@ Mechanism sketch (not implementing now, just naming the pieces):
 Edge case: `/model` switch mid-response. The model flag is captured at write-time, so whatever the cycle started as is what the header reflects. If the user switches model via `/model` *between* cycles, subsequent cycles get the new attribution — correct.
 
 Added as pending item. I'll wire it up alongside the `supervisor_dirty` work since both need the supervisor to expose its current model state to the skill.
-<!-- agent:boundary:4e478e45 -->
+
+❯ Please reorder agent:pending with the priority using this agent doc as a reference.
+### Re: reorder pending by bugs-doc priority (HEAD)
+
+Reordered with this doc's focus (bugs + investigations) driving priority:
+
+1. **Active bug investigations** (top): `#a001` 🔴 boundary/baseline divergence, `#a006` duplicated `/agent:exchange` marker, `#a005` 1062 pre-existing `❯` lines, `#64mb` double commit_staging race
+2. **Safety rails awaiting telemetry**: `#a002` normalize_user_prompts, `#xzz5` preflight slash-command parser
+3. **Observability/guards**: `#a011` end-of-cycle write invariant, `#a012` session-check, `#a014` session drift resync, `#a010` PostToolUse hook
+4. **Pending-system polish**: `#14z4` hash collision ceiling
+5. **Release gate**: `#gqep` v0.32.4, `#mchh` jetbrains plugin verify
+6. **Diagnostics**: `#4sh0` planned-move logging, `#tw4a` claim cd, `#8jzg` claim --isolate
+7. **UX**: `#cce5` model attribution headers
+8. **Janitorial**: `#a013` SPEC breakup, `#a004` drop Option B
+9. **Supervisor feature work** (least urgent for *bugs* doc): `#jg0d`, `#b486`, `#40ct`, `#vnp0`, `#6ae3`, `#zp02`, `#f7d5`
+10. **Deferred optional**: `#bak5`
+<!-- agent:boundary:f3808ae5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] [#a001] 🔴 Investigate boundary/baseline divergence root cause — `out_of_band_write` always-on log line landed (`git.rs:286`); aggregate after 1 day.
-- [ ] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
-- [ ] [#a004] Drop Option B (skill-side submodule workaround) — A handles it deterministically; B redundant.
-- [ ] [#a005] Investigate 1062 pre-existing `❯` lines across 46 snapshots — legitimate or prior corruption?
 - [ ] [#a006] Investigate duplicated `/agent:exchange` closing marker — likely same class as mass-prefix bug.
-- [ ] [#a010] PostToolUse hook for agent-doc write (layer 3, optional).
+- [ ] [#a005] Investigate 1062 pre-existing `❯` lines across 46 snapshots — legitimate or prior corruption?
+- [ ] [#64mb] Investigate double commit_staging race: ops.log at 1776095605 shows two back-to-back commit_staging/out_of_band_write pairs for the same file within the same second.
+- [ ] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
+- [ ] [#xzz5] Preflight slash-command parser: absolute paths like /home/... get captured as commands. Require [a-z][a-z0-9:_-]* after the slash and reject tokens containing a second /.
 - [ ] [#a011] End-of-cycle write invariant — warn if `preflight_diff_start` without `ipc_write_attempt`.
 - [ ] [#a012] Expose `agent-doc session-check <FILE>` — nonzero if last ops.log entry is `preflight_diff_start`.
-- [ ] [#a013] SPEC.md breakup — flat `specs/*.md` mechanical extraction.
 - [ ] [#a014] Session drift: `registered panes span 2 tmux sessions: 1, 4` — resync if recurring.
-- [ ] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release after manual-testing gate
+- [ ] [#a010] PostToolUse hook for agent-doc write (layer 3, optional).
 - [ ] [#14z4] Hash collision ceiling: implement 8-char fallback in pending::generate_hash if 4-char collides (spec §1)
-- [ ] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)
+- [ ] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release after manual-testing gate
 - [ ] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
 - [ ] [#4sh0] Add planned-move logging to sync.rs reconciler so ClaimAction→SyncLayout pane swaps are debuggable
-- [ ] [#xzz5] Preflight slash-command parser: absolute paths like /home/... get captured as commands. Require [a-z][a-z0-9:_-]* after the slash and reject tokens containing a second /.
-- [ ] [#64mb] Investigate double commit_staging race: ops.log at 1776095605 shows two back-to-back commit_staging/out_of_band_write pairs for the same file within the same second.
 - [ ] [#tw4a] claim: cd into document's .agent-doc root (nearest git repo) when claiming a pane. Fixes relative-path ambiguity and makes git ops naturally target the correct repo.
 - [ ] [#8jzg] claim --isolate: spawn a fresh Claude Code process in the submodule root so CLAUDE.md, memory, and skills load scoped to that repo. Only real fix for cross-project context leakage (mid-session cd does not reload context).
+- [ ] [#cce5] response headers: include model attribution in '### Re:' sections (e.g. '### Re: topic — opus-4-6'). Source: agent-doc binary records spawn model; skill reads and appends to boundary-synthesized headers or patch:exchange headers
+- [ ] [#a013] SPEC.md breakup — flat `specs/*.md` mechanical extraction.
+- [ ] [#a004] Drop Option B (skill-side submodule workaround) — A handles it deterministically; B redundant.
 - [ ] [#jg0d] supervisor/resize.rs: SIGWINCH unix path via signal-hook; Windows ConPTY stub for phase 1
 - [ ] [#b486] supervisor/state.rs: crash classifier, ring buffer, Healthy->Transient->Flapping->Halted state machine
 - [ ] [#40ct] supervisor/ipc.rs: Unix-domain socket accept loop, reuse length-prefixed JSON frame from ipc_socket.rs
 - [ ] [#vnp0] supervisor: wire into start.rs (replace existing restart loop, remove #[allow(dead_code)])
-- [ ] [#f7d5] supervisor: smoke test — real claude under supervisor in a tmux pane, verify restart + inject + CWD invariant end-to-end
 - [ ] [#6ae3] supervisor/pty.rs: wire PtySession into start.rs (phase 1 wire-up stage) — replaces the current Command::status inherit-tty path
 - [ ] [#zp02] supervisor/env.rs: wire into start.rs — replace the inline fm.env expansion loop in start.rs:189 with EnvSpec::from_frontmatter(&fm).resolve()?; feed the result into PtySpawnConfig.env once state.rs restart loop is in place
-- [ ] [#cce5] response headers: include model attribution in '### Re:' sections (e.g. '### Re: topic — opus-4-6'). Source: agent-doc binary records spawn model; skill reads and appends to boundary-synthesized headers or patch:exchange headers
+- [ ] [#f7d5] supervisor: smoke test — real claude under supervisor in a tmux pane, verify restart + inject + CWD invariant end-to-end
+- [ ] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)
 <!-- /agent:pending -->
 ## Assistant

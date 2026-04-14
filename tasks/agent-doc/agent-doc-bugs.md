@@ -359,7 +359,7 @@ Breaking this into three layers because they behave differently:
 Your note is exactly right — *even if* on-the-fly export worked, harness-specific vars (`AGENT_DOC_*`, `CLAUDE_*`, anything the claude binary caches at startup) would still need a restart. So making ad-hoc export a mutation surface would create a two-tier env model (hot-patchable vs. restart-required) with no clear user-visible line between them. That's a confusing API. Better to keep one rule: **frontmatter is the env, restart applies it.** If someone needs a quick throwaway var for one command, they can just `FOO=bar some_command` inline — that's not session env, that's a per-invocation override and doesn't need the supervisor's help.
 
 I'll add a note in the spec doc making this explicit: "Session environment variables are set at spawn time from frontmatter `env:` only. Ad-hoc shell exports do not affect the supervised pty or future Bash tool calls."
-<!-- agent:boundary:a1618b25 -->
+<!-- agent:boundary:afa42b25 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

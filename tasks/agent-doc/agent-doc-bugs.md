@@ -454,7 +454,7 @@ Done. Followed your "move detailed instructions into a runbook" guidance — `sr
 ❯ - src/boost-client/tasks/monsterrodholders.md
 ❯ - src/session-share/tasks/claudescore.md
 $(cat /tmp/agent-doc-resp-$$.md)
-<!-- agent:boundary:1d3c58e7 -->
+<!-- agent:boundary:3bd74df2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

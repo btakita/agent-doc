@@ -1165,7 +1165,7 @@ Logged to stderr too (`[preflight] pending: N gated item(s)`) when non-zero.
 **Branch state:** `20260414/pending-gated-state` now sits at three commits ahead of `c53b09b` (Phase 1): sweep, then Phase 3. Ready for merge to main when you want.
 
 **Next:** the spec's "Open questions" section in `specs/pending-system.md` is still unanswered — particularly whether `op_done` should also use `validate_transition` to catch `Done → Done` double-marks. Let me know if you want that as a follow-up cycle.
-### Re: why reject `patch:pending` by default? (HEAD)
+### Re: why reject `patch:pending` by default?
 
 Short answer: `patch:pending` is a **full-replace** op, and full-replace on a list the user is also editing is a silent-data-loss footgun. Granular flags exist precisely to avoid it.
 
@@ -1178,9 +1178,36 @@ Three concrete failure modes the gate closes:
 3. **Intent laundering.** Full-replace hides which items actually changed. With granular flags, the write call itself is the audit log: `--pending-done a3f2 --pending-add "new thing"` is greppable and reviewable. A `patch:pending` block is an opaque diff against whatever the skill happened to remember.
 
 So rejection-by-default isn't about safety theater — it's about forcing the skill down the path where user edits, hash IDs, and intent all stay coherent. The escape hatch (`--allow-patch-pending` / `AGENT_DOC_ALLOW_PATCH_PENDING=1`) exists for the cases where full rewrite **is** the intent: compaction, migration, and tests. Those are rare and explicit; normal response cycles should never need it.
-
+❯ `patch:pending` does not describe the behavior. Is there a better name?
 The "always allow it" alternative re-opens all three holes and trades a working invariant for convenience the skill doesn't need.
-<!-- agent:boundary:a243d97c -->
+### Re: better name than `patch:pending`? (HEAD)
+
+Agreed — the issue is that `patch:` is used everywhere else for "apply a content patch to this component," and readers reasonably expect `patch:pending` to mean "patch the pending list." What it actually means is "replace the entire pending list, bypassing the granular-ops contract." The name hides the footgun.
+
+Candidates, ordered by how loudly they signal "escape hatch":
+
+| Name | Reads as | Notes |
+|------|---------|-------|
+| `replace:pending` | explicit verb, full-replace | Parallel to a new `replace:<component>` family if we ever need it elsewhere. Clean. |
+| `pending:rewrite` | full rewrite of the component | Verb-forward, component-scoped namespace. |
+| `raw:pending` | bypass granular ops | Matches the "raw" convention from other tools (raw SQL, raw HTML). Clearly "you know what you're doing." |
+| `override:pending` | admin/escape semantics | Strongest footgun signal, but overloaded with config-override connotations. |
+| `patch:pending-full` | keeps `patch:` prefix, adds qualifier | Minimal churn, but still lets a skimmer think "a patch is a patch." |
+
+**Recommendation:** `replace:pending`. Three reasons:
+
+1. It's honest — `replace` is what it literally does, and a reader who has never seen this block can predict the behavior from the name alone.
+2. It opens a coherent namespace. If another component ever needs a full-replace escape hatch (say, a hand-curated architecture diagram where granular ops don't make sense), `replace:<component>` extends naturally.
+3. It makes the error message sharper. Today's error is "patch:pending is forbidden, use granular flags" — future error becomes "replace:pending requires --allow-replace-pending," which reads as a deliberate gate rather than an arbitrary ban.
+
+**Migration path** (if we do this):
+- Parser accepts both `replace:pending` and `patch:pending` for one release, with a deprecation warning on the old name.
+- `--allow-patch-pending` gains an alias `--allow-replace-pending`; env var `AGENT_DOC_ALLOW_REPLACE_PENDING=1` is the new canonical form.
+- Spec doc (`specs/pending-system.md`) and SKILL.md updated to the new name; old name documented only in the migration note.
+- Drop the old name after one release.
+
+Want me to turn this into a `[#xxxx]` pending item and queue it behind the current phase-3 work?
+<!-- agent:boundary:956fe21d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

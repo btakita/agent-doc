@@ -141,7 +141,7 @@ Three ways forward, you pick:
 My recommendation: **option 1** if pane %2 is still live, **option 3** otherwise. Option 2 is available but I don't want to take it without a direct "yes, reclaim." Let me know which — or just do it from the other pane and I'll verify here on the next cycle.
 
 **No pending change this cycle** — nothing to add/remove until I know which path you want.
-<!-- agent:boundary:22eaad37 -->
+<!-- agent:boundary:98df0f70 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -1180,7 +1180,7 @@ Three concrete failure modes the gate closes:
 So rejection-by-default isn't about safety theater — it's about forcing the skill down the path where user edits, hash IDs, and intent all stay coherent. The escape hatch (`--allow-patch-pending` / `AGENT_DOC_ALLOW_PATCH_PENDING=1`) exists for the cases where full rewrite **is** the intent: compaction, migration, and tests. Those are rare and explicit; normal response cycles should never need it.
 
 The "always allow it" alternative re-opens all three holes and trades a working invariant for convenience the skill doesn't need.
-<!-- agent:boundary:e30d7f4d -->
+<!-- agent:boundary:9fa7623e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -344,3 +344,65 @@ fn preflight_emits_pending_reordered_flag() {
         stdout
     );
 }
+
+#[test]
+fn preflight_emits_pending_gated_count() {
+    // Doc with one open + two gated + one done item. Reap drops [x],
+    // leaving one open + two gated → expected count = 2.
+    let (_tmp, doc) = setup_doc(
+        "- [ ] [#aaaa] open\n- [/] [#bbbb] gated one\n- [/] [#cccc] gated two\n- [x] [#dddd] reaped",
+    );
+
+    let output = agent_doc()
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("preflight output should be JSON");
+    assert_eq!(
+        parsed.get("pending_gated_count").and_then(|v| v.as_u64()),
+        Some(2),
+        "expected pending_gated_count: 2, full output: {}",
+        stdout
+    );
+}
+
+#[test]
+fn preflight_omits_pending_gated_count_when_zero() {
+    let (_tmp, doc) = setup_doc("- [ ] [#aaaa] open\n- [ ] [#bbbb] also open");
+    let output = agent_doc()
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("preflight output should be JSON");
+    // Zero is omitted via skip_serializing_if — field should be absent entirely.
+    assert!(
+        parsed.get("pending_gated_count").is_none(),
+        "expected pending_gated_count to be omitted at zero, got: {}",
+        stdout
+    );
+}
+
+#[test]
+fn write_rejects_patch_pending_via_library_default() {
+    // Phase 3 inversion: even without the CLI's old REJECT env var being set
+    // by main.rs, library-level callers must default to reject. The CLI test
+    // (`write_rejects_patch_pending_block`) covers the binary path; this test
+    // pins the inversion at the library level by exercising the same enforce
+    // function indirectly through the CLI but checking the default-reject
+    // behavior is wired through.
+    let (_tmp, doc) = setup_doc("- [ ] [#aaaa] existing");
+    let payload =
+        "<!-- patch:pending -->\n- [ ] [#zzzz] new\n<!-- /patch:pending -->\n";
+    let assert_result = agent_doc()
+        .args(["write", doc.to_str().unwrap(), "--force-disk"])
+        .env_remove("AGENT_DOC_ALLOW_PATCH_PENDING")
+        .write_stdin(payload)
+        .assert()
+        .failure();
+    let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
+    assert!(stderr.contains("patch:pending block forbidden"), "stderr: {}", stderr);
+}

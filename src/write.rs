@@ -170,18 +170,22 @@ use crate::{component, frontmatter, merge, recover, sessions, snapshot, template
 use crate::snapshot::find_project_root;
 
 /// Enforcement: reject `patch:pending` blocks in the patch payload unless the
-/// caller explicitly set `--allow-patch-pending`. The pending system requires
-/// mutations via granular flags (`--pending-add/done/edit/clear/reorder`); a
-/// full-replace `patch:pending` block would churn hash ids and lose user intent.
+/// caller explicitly opts in via `AGENT_DOC_ALLOW_PATCH_PENDING=1` (which the
+/// CLI sets when `--allow-patch-pending` is passed). The pending system
+/// requires mutations via granular flags
+/// (`--pending-add/done/edit/clear/reorder`); a full-replace `patch:pending`
+/// block would churn hash ids and lose user intent.
 ///
-/// This is enforced lazily via the `AGENT_DOC_REJECT_PATCH_PENDING` env var so
-/// all three write entry points (`run_template`, `run_stream`, `run_ipc`) share
-/// one check without plumbing a new parameter through every signature.
+/// Phase 3 inversion (2026-04-14): the default is now reject. Previously the
+/// CLI had to set `AGENT_DOC_REJECT_PATCH_PENDING=1` to enable rejection,
+/// which meant library callers (FFI, tests, future SDK consumers) silently
+/// bypassed enforcement. Inverting the gate closes that hole — any caller
+/// that needs the escape hatch must opt in explicitly.
 fn enforce_no_patch_pending(patches: &[template::PatchBlock]) -> Result<()> {
-    let reject = std::env::var("AGENT_DOC_REJECT_PATCH_PENDING")
+    let allow = std::env::var("AGENT_DOC_ALLOW_PATCH_PENDING")
         .map(|v| v == "1")
         .unwrap_or(false);
-    if !reject {
+    if allow {
         return Ok(());
     }
     if patches.iter().any(|p| p.name == "pending") {

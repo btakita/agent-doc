@@ -155,7 +155,7 @@ And **not** do `resize.rs` yet — env.rs is a smaller, tighter dependency of `s
 
 Confirm and I will go.
 ❯ go
-### Re: research done — landing `supervisor/env.rs` on top of the existing shared `env.rs` (HEAD)
+### Re: research done — landing `supervisor/env.rs` on top of the existing shared `env.rs`
 
 **Research findings — the seam already exists:**
 
@@ -173,7 +173,7 @@ So the shared foundation is **`env.rs`**, not a new module. `supervisor/env.rs` 
 
 1. **Schema change** — `Frontmatter.env: IndexMap<String, Option<String>>`. `FOO: null` in YAML parses to `None` = "remove this key from the child env". Serde handles the null→None mapping.
 2. **`env.rs` signatures** — `expand_values` and `shell_export_prefix` take the new map type. `expand_values` returns `Vec<(String, Option<String>)>`; unset keys are preserved for the caller. `shell_export_prefix` emits `unset KEY` for None.
-3. **Consumers handle None** — `start.rs` / `run.rs` / `stream.rs` call `cmd.env_remove(key)` for None. `parallel.rs` picks up `unset` via the helper. `preflight.rs` JSON output serializes null correctly (skill step 0c2 treats null as `unset`).
+❯ 3. **Consumers handle None** — `start.rs` / `run.rs` / `stream.rs` call `cmd.env_remove(key)` for None. `parallel.rs` picks up `unset` via the helper. `preflight.rs` JSON output serializes null correctly (skill step 0c2 treats null as `unset`).: Is there any way to distinguish between a `null` unset and a `"null"` string?
 4. **New frontmatter field** — `agent_doc_env_inherit: Option<bool>` (default `true`). Controls whether the supervisor starts from the parent env. `true` = inherit + overlay (your preference). `false` = sealed env.
 5. **New module `supervisor/env.rs`:**
    ```rust
@@ -186,12 +186,12 @@ So the shared foundation is **`env.rs`**, not a new module. `supervisor/env.rs` 
        pub fn resolve(&self) -> Result<HashMap<String, String>> { ... }
    }
    ```
-   `resolve()` captures `std::env::vars()` once (if `inherit_parent`), calls `env::expand_values` on `overrides`, overlays set values, removes unset keys, returns the complete map for `PtySpawnConfig.env`. Called once at supervisor startup → reused across every `state.rs` restart.
+❯    `resolve()` captures `std::env::vars()` once (if `inherit_parent`), calls `env::expand_values` on `overrides`, overlays set values, removes unset keys, returns the complete map for `PtySpawnConfig.env`. Called once at supervisor startup → reused across every `state.rs` restart.: If a user changes the env frontmatter, or any other frontmatter that affects the session state, should we prompt to restart the session or have the changes apply to the next session?
 6. **Tests** for env.rs (Option round-trip) and supervisor/env.rs (inherit / override / unset / expansion / restart-determinism / sealed env).
 7. **Pending updates** — drop `#jaaz` (resolved by this module), mark pty.rs env passthrough decision closed, add new item for `start.rs` wire-up consuming `EnvSpec`.
 
 Proceeding with implementation. Will checkpoint when env.rs + frontmatter change lands and tests are green.
-### Re: `supervisor/env.rs` landed — parent cascade wired through the existing `env.rs` seam (HEAD)
+### Re: `supervisor/env.rs` landed — parent cascade wired through the existing `env.rs` seam
 
 **Landed the refactor + the new module. All targeted tests green, clippy clean.**
 
@@ -277,7 +277,43 @@ let cfg = supervisor::pty::PtySpawnConfig {
 - `start.rs` wire-up itself — blocked on `state.rs` per the phase 1 status table.
 
 Ready for `resize.rs` whenever you give the go-ahead.
-<!-- agent:boundary:b0fcd286 -->
+### Re: `null` vs `"null"` string — yes, fully distinguishable (HEAD)
+
+YAML has a native null scalar distinct from string `"null"`. serde_yaml maps them correctly to `Option<String>`:
+
+```yaml
+env:
+  FOO: null       # → None       (unset)
+  BAR: ~          # → None       (unset, YAML alt syntax)
+  BAZ:            # → None       (empty scalar, YAML null)
+  QUX: "null"     # → Some("null")  (literal 4-char string)
+  ZOT: 'null'     # → Some("null")  (same)
+```
+
+No custom deserializer needed — `IndexMap<String, Option<String>>` with `#[serde(default)]` handles it. I'll add a round-trip test in `env.rs` covering all five forms so a future YAML library swap can't silently break the distinction.
+
+### Re: Frontmatter changes mid-session — surface, don't auto-apply (HEAD)
+
+Short answer: **apply on next supervisor restart, surface a notice when the change is detected, never auto-kill the running pane.**
+
+Rationale — three failure modes to avoid:
+
+1. **Silent drift.** User edits `env.FOO` mid-session; current pane keeps old value; user assumes new value is live. → must surface.
+2. **Disruptive auto-restart.** User tweaks frontmatter while claude is mid-response in the pane. Killing the pty to apply a new `PATH` loses in-flight output and context. → must not auto-restart.
+3. **Ambiguous scope.** Some fields affect spawn (`env`, `agent_doc_env_inherit`, `cwd`, model binary selection). Others are advisory (`agent_doc_model_tier`, metadata). Blanket "restart on any frontmatter change" is too aggressive.
+
+Proposed mechanism — extends the preflight contract, no new moving parts:
+
+- **Preflight diffs frontmatter** against the snapshot frontmatter (already parses both). Computes a `supervisor_dirty: { changed: ["env.FOO", "agent_doc_env_inherit"], restart_required: true }` block in the JSON output.
+- **Classification table** in `supervisor/env.rs` (or a sibling `frontmatter_effects.rs`) maps each field to one of: `Spawn` (needs restart), `Advisory` (no effect on running pty), `Hotpatch` (can be applied without restart — none yet, but room to grow).
+- **Skill step 0c3** (new): if `supervisor_dirty.restart_required` is true, write a one-liner into the response: "⚠ frontmatter changed: `env.FOO`, `agent_doc_env_inherit` — run `agent-doc restart <FILE>` to apply, or changes take effect on next crash-triggered restart."
+- **New subcommand** `agent-doc restart <FILE>`: sends SIGTERM to the supervised pty, supervisor state machine re-enters spawn with fresh `EnvSpec::from_frontmatter`. This is the explicit opt-in the user triggers when they're ready.
+- **Next-session pickup is automatic.** `start.rs` calls `EnvSpec::from_frontmatter` on every spawn, so a fresh session after `agent-doc claim` or process exit always picks up current frontmatter — no special path needed.
+
+Edge case worth calling out: if `agent_doc_env_inherit` flips from `true` → `false`, the new env is **smaller** than the old one (parent vars dropped). Restart is the only safe path — you cannot hot-unset arbitrary parent vars from a running process without killing child subprocesses that may depend on them. The classification table should mark `agent_doc_env_inherit` as `Spawn` unconditionally.
+
+Proceeding with the Option<String> implementation as planned; I'll add the frontmatter-diff + `supervisor_dirty` surfacing as a follow-up item rather than bundling it into this delta.
+<!-- agent:boundary:e57c843b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -308,7 +344,6 @@ Ready for `resize.rs` whenever you give the go-ahead.
 - [ ] [#vnp0] supervisor: wire into start.rs (replace existing restart loop, remove #[allow(dead_code)])
 - [ ] [#f7d5] supervisor: smoke test — real claude under supervisor in a tmux pane, verify restart + inject + CWD invariant end-to-end
 - [ ] [#6ae3] supervisor/pty.rs: wire PtySession into start.rs (phase 1 wire-up stage) — replaces the current Command::status inherit-tty path
-- [x] [#jaaz] supervisor/pty.rs: decide env passthrough policy for start.rs — cwd.rs gives deterministic CWD, but start.rs currently inherits parent env. Either enumerate required vars (PATH, HOME, TERM, LANG, TMUX, %3, anything agent-doc needs) or add an opt-in inherit flag to PtySpawnConfig
 - [ ] [#zp02] supervisor/env.rs: wire into start.rs — replace the inline fm.env expansion loop in start.rs:189 with EnvSpec::from_frontmatter(&fm).resolve()?; feed the result into PtySpawnConfig.env once state.rs restart loop is in place
 <!-- /agent:pending -->
 ## Assistant

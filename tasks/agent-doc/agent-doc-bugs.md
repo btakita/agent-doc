@@ -483,7 +483,7 @@ Audited all 177 snapshots under `.agent-doc/snapshots/`. Only 2 files contain mo
 Re-audited: 422 `❯`-prefixed lines across 46 snapshots (down from 1062 as compactions landed). Top offenders sampled — every line is a legitimate inline user prompt (`❯ do`, `❯ commit + push`, `❯ Please research...`). This is exactly the inline-annotation convention: users type `❯ ` before a prompt and the marker survives across cycles until the exchange is compacted. Not corruption, not residue from the mass-prefix bug. No action needed.
 
 **Net effect:** three 🔴 items off the top of the pending queue. The remaining boundary-class canary (`out_of_band_write` / `drift_warning` logs) stays on permanently — cheap, and catches the real bug class if it ever re-emerges.
-<!-- agent:boundary:7c6f8b29 -->
+<!-- agent:boundary:94b0f2d8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

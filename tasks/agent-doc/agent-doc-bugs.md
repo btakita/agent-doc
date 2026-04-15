@@ -73,7 +73,7 @@ New boolean `--isolate` flag on `agent-doc claim`. When set, `run_isolate(file)`
 
 **#cce5 — model attribution in `### Re:` headers** (`src/preflight.rs`, bundled SKILL.md)
 `PreflightOutput` now includes `agent_model: Option<String>` — populated from `ANTHROPIC_MODEL` env var (preferred) or frontmatter `model` field, both shortened via `short_model_name()` (strips `claude-` prefix). Bundled SKILL.md updated: when `preflight.agent_model` is set, append ` — <model>` to `### Re:` headers. Example: `### Re: do #4sh0 — sonnet-4-6`.
-<!-- agent:boundary:825441c9 -->
+<!-- agent:boundary:c94b597f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -82,10 +82,6 @@ New boolean `--isolate` flag on `agent-doc claim`. When set, `run_isolate(file)`
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
-- [x] [#4sh0] Add planned-move logging to sync.rs reconciler so ClaimAction→SyncLayout pane swaps are debuggable
-- [x] [#tw4a] claim: cd into document's .agent-doc root (nearest git repo) when claiming a pane. Fixes relative-path ambiguity and makes git ops naturally target the correct repo.
-- [x] [#8jzg] claim --isolate: spawn a fresh Claude Code process in the submodule root so CLAUDE.md, memory, and skills load scoped to that repo. Only real fix for cross-project context leakage (mid-session cd does not reload context).
-- [x] [#cce5] response headers: include model attribution in '### Re:' sections (e.g. '### Re: topic — opus-4-6'). Source: agent-doc binary records spawn model; skill reads and appends to boundary-synthesized headers or patch:exchange headers
 - [ ] [#a013] SPEC.md breakup — flat `specs/*.md` mechanical extraction.
 - [ ] [#a004] Drop Option B (skill-side submodule workaround) — A handles it deterministically; B redundant.
 - [ ] [#jg0d] supervisor/resize.rs: SIGWINCH unix path via signal-hook; Windows ConPTY stub for phase 1

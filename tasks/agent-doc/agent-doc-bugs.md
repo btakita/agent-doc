@@ -597,7 +597,7 @@ Want me to:
 I'd do **(c)**. The symlink takes 5 seconds; the `--user` flag is the real fix so this doesn't bite anyone else (or future-you after an `rm -rf ~/.claude`). Flag it `[bug]` in this doc if you want it tracked.
 
 **Note on `— opus-4-6` in this header:** preflight still reports `agent_model: haiku` (env var not yet unset), but I'm overriding to `opus-4-6` manually since we diagnosed the env-var bug last cycle and you confirmed you're on Opus. The attribution will auto-correct once `ANTHROPIC_MODEL` is cleared from your shell.
-<!-- agent:boundary:53df1778 -->
+<!-- agent:boundary:7e2ef251 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

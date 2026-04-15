@@ -815,7 +815,7 @@ fn inline_edit_in_older_section_preserves_head_marker() {
 Minimal scaffolding — whatever `reposition_boundary` unit-test harness already exists is probably the right home. The key assertions are (a) `(HEAD)` preserved on the older heading, (b) no phantom migration to the newer heading, (c) working-tree byte-equal to input modulo the user's edit.
 
 Want me to implement option 2 + this test now, or keep it as pending for a dedicated pass?
-<!-- agent:boundary:3912d9af -->
+<!-- agent:boundary:b8a7ae37 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

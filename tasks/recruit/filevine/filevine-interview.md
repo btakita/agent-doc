@@ -203,15 +203,12 @@ Full read of the 471-line file. Structure is clean: three map functions (contact
 When you walk through this code, I'd lead with items 1–4 (phone/email label + the ignored "Primary Contact is FN" column + country default) — those are **real bugs** you can point at, fix on-the-fly if asked, and show mapping judgment. Then pivot to the Gemini opportunity: column-mapping under ambiguity is exactly where the existing heuristics break down (items 10–11), and that's your slot to propose the LLM-assisted mapper as a *genuine* improvement, not decoration.
 
 Completed pending items: `#xf9v`, `#7d7s`, `#awgb`. Remaining items are still queued — say "go phase 2" when you're ready to exercise the workflow.
-<!-- agent:boundary:69e90280 -->
+<!-- agent:boundary:b531b009 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#xf9v] Run `docker compose up -d` inside FDE-Project-Interview; confirm FastAPI / Temporal UI / LocalStack come up clean
-- [x] [#7d7s] Inspect the three xlsx files (from `data/` on host) and capture actual column headers for Contacts, Address History, Projects
-- [x] [#awgb] Read `filevine_mapper.py` end-to-end; compare field mappings against Filevine Create Contact + Create Project docs; note any gaps or incorrect assumptions
 - [ ] [#kkpf] Exercise the `MigrationWorkflow` via the Temporal UI or `temporal_router.py` endpoint with `write_json=true`, `send_to_filevine=false`; verify output JSON payloads look right
 - [ ] [#8fah] Re-run the workflow with `send_to_filevine=true` and unset keys; confirm 401/403 path is handled without crashing the workflow
 - [ ] [#ca60] Fill in the empty `mockPersenIDFetch.py` (rename to `mock_person_id_fetch.py`) — define how mock contactIds are generated and threaded into project payloads (currently inline in pipeline)

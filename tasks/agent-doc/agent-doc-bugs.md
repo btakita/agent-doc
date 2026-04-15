@@ -557,7 +557,7 @@ Starting claude...
 
 ● Args from unknown skill: src/boost-client/tasks/monsterrodholders.md
 ```
-### Re: /agent-doc unknown in boost-client submodule — opus-4-6
+❯ ### Re: /agent-doc unknown in boost-client submodule — opus-4-6 (HEAD)
 
 **Root cause.** Claude Code only discovers skills from two places: `<cwd>/.claude/skills/` and `~/.claude/skills/`. It does **not** walk up the directory tree to find parent-repo skills.
 
@@ -594,10 +594,29 @@ Want me to:
 - **(b)** Implement `agent-doc skill install --user` in the binary (small change — ~30 lines in `skill.rs` + a new flag in `main.rs`)?
 - **(c)** Both — symlink now for the unblock, then PR the `--user` flag?
 
+❯ Do option a first. The check back in
+
 I'd do **(c)**. The symlink takes 5 seconds; the `--user` flag is the real fix so this doesn't bite anyone else (or future-you after an `rm -rf ~/.claude`). Flag it `[bug]` in this doc if you want it tracked.
 
 **Note on `— opus-4-6` in this header:** preflight still reports `agent_model: haiku` (env var not yet unset), but I'm overriding to `opus-4-6` manually since we diagnosed the env-var bug last cycle and you confirmed you're on Opus. The attribution will auto-correct once `ANTHROPIC_MODEL` is cleared from your shell.
-<!-- agent:boundary:7e2ef251 -->
+### Re: symlink applied — opus-4-6
+
+Done.
+
+```
+/home/brian/.claude/skills/agent-doc -> /home/brian/work/btakita/agent-loop/.claude/skills/agent-doc
+```
+
+**To verify the fix in boost-client:**
+
+1. Go to the broken tmux pane (the one that showed `Unknown command: /agent-doc`).
+2. Type `/clear` then Enter — Claude Code reloads its skill registry on a fresh conversation. (Restart the pane if `/clear` doesn't pick up the new skill; skill discovery happens at session start, not per-message.)
+3. Try `/agent-doc src/boost-client/tasks/monsterrodholders.md` again.
+
+If it still errors, the fallback is to fully quit that `claude` process in the pane and let `agent-doc start` respawn it — the new Claude instance will rescan `~/.claude/skills/` at startup and find the symlink.
+
+Tell me what happens (works / still broken / new error) and I'll either queue up option (b) — the `agent-doc skill install --user` binary change — or dig into whatever's still wrong.
+<!-- agent:boundary:fa7c0e9a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

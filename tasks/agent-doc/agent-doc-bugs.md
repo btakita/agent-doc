@@ -1086,7 +1086,7 @@ Done. `src/agent-doc/src/template.rs:557` and `src/agent-doc/src/template.rs:632
 - `annotate_re_headings_with_head`'s baseline lookup builds the key with `trim_end_matches('\n').trim_end_matches('\r').trim_start().trim_end()`.
 
 Both sides are symmetric, so a heading like `  ### Re: foo` in HEAD will match `### Re: foo` in the working tree and (correctly) not be marked as new. Existing 53 template tests pass unchanged — none exercised leading whitespace before, so I can add a regression test for the indented-heading case in a follow-up if you want it locked in.
-<!-- agent:boundary:99c40803 -->
+<!-- agent:boundary:a8055d29 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

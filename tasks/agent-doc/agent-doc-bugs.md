@@ -774,7 +774,7 @@ Want me to dig into `reposition_boundary` and propose a patch, or just leave it 
 ❯ Do you recommend 1 or 2
 ❯ I a regression test in addition
 
-### Re: 1 vs 2 + regression test (HEAD)
+### Re: 1 vs 2 + regression test
 
 **Recommend option 2** as the primary fix, with option 1 as a follow-up if needed.
 
@@ -815,7 +815,44 @@ fn inline_edit_in_older_section_preserves_head_marker() {
 Minimal scaffolding — whatever `reposition_boundary` unit-test harness already exists is probably the right home. The key assertions are (a) `(HEAD)` preserved on the older heading, (b) no phantom migration to the newer heading, (c) working-tree byte-equal to input modulo the user's edit.
 
 Want me to implement option 2 + this test now, or keep it as pending for a dedicated pass?
-<!-- agent:boundary:b8a7ae37 -->
+
+❯ The issue I ran into is that `### Re: #older — already committed (HEAD)` was committed when the boundary moved. The uncommitted `### Re: #older — already committed` is convenient for the user to see and navigate to the beginning of the patchback.
+
+❯ If the boundary moves, presumably due to the user running the next agent-doc command...should the commit strip the ` (HEAD)`?
+❯ I believe if the commit strips ` (HEAD)`, then the issue would also be fixed.
+
+### Re: strip `(HEAD)` from staged blob — yes, this is the right fix (HEAD)
+
+You're right, and this is cleaner than both options 1 and 2. Let me restate the invariant:
+
+**`(HEAD)` is a working-tree-only marker. It must never appear in the committed blob.**
+
+Under that invariant:
+- HEAD blob of the doc: clean — no `(HEAD)` on any heading.
+- Working tree: exactly one heading carries `(HEAD)` — the current boundary.
+- Git gutter: the boundary heading is always blue (uncommitted modification of a committed line), which is exactly the navigation affordance you want.
+- Moving the boundary: strip `(HEAD)` from the old boundary in the working tree, add it to the new one. The commit stages the clean content, so the old boundary's committed form already matches the new working-tree form (both clean) → no phantom diff.
+
+Why this subsumes options 1 and 2:
+- The bug you hit exists because the old boundary was committed *with* `(HEAD)` on it, so when reposition later stripped it, git saw a removal. If `(HEAD)` is never in the blob, there's nothing to remove against — the phantom diff can't exist.
+- Reposition in the working tree is still fine (it's how you move the visual marker), but it no longer needs any "don't touch other headings" guard — the commit path has already normalized the blob.
+
+Concrete change, roughly:
+1. In `agent-doc commit` staging: before `git hash-object` / `update-index`, run the staged content through a `strip_head_markers` pass that rewrites any `### ... (HEAD)` heading to `### ...`. Stage the stripped bytes, not the working-tree bytes.
+2. Leave the working tree alone (don't `git checkout` it). Reposition in the working tree continues to move `(HEAD)` to the new boundary heading.
+3. Result: stripped content in blob, `(HEAD)` on current boundary in working tree, old boundary now clean in both (no diff).
+
+This also means the "reposition in working tree" step can stop touching older headings entirely — since the blob is clean, the only heading that needs modification on a boundary move is the *new* boundary (add `(HEAD)`) and the *old* boundary (strip `(HEAD)`), which is the narrow scope option 1 wanted but gets it for free.
+
+Regression test shifts to assert: after commit, `git show HEAD:<file>` contains zero occurrences of `(HEAD)`, and the working tree contains exactly one.
+
+Want me to implement:
+- `strip_head_markers` helper + call it in `agent-doc commit` staging,
+- drop any reposition-rewrites-working-tree-for-old-headings logic that's now unnecessary,
+- add the regression test above?
+
+I'd replace the `#pending` item you added earlier with this approach — same bug, cleaner fix.
+<!-- agent:boundary:0422facb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

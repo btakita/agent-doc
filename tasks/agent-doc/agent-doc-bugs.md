@@ -29,7 +29,35 @@ claude_args: --dangerously-skip-permissions
 ### Open / not yet implemented
 
 - **(HEAD) stripped from older section on inline prompt** — when the user edits inside an older `### Re:` section, reposition strips that heading's `(HEAD)` marker (phantom diff). Fix: option 2 — early-return in reposition when boundary heading is unchanged. Regression test spec defined (see prior exchange). Not yet implemented.
-<!-- agent:boundary:cb7fdeeb -->
+
+❯ do #xzz5 #a011 #a012 #a014 #a010
+
+### Re: do #xzz5 #a011 #a012 #a014 #a010
+
+All five shipped. Binary rebuilt (`cargo build --release`) and installed (`cargo install --path .`).
+
+**#xzz5 — slash-command parser hardening** (`src/diff.rs:319-343`)
+Grammar now rejects anything not matching `/[a-z][a-z0-9:_-]*`. `/home/brian/foo.md`, `/Model`, `/foo/bar` all drop out before the `slash_commands` array. Three regression tests added: `parse_slash_commands_rejects_absolute_paths`, `parse_slash_commands_rejects_uppercase_and_symbols`, `parse_slash_commands_accepts_namespaced_and_hyphenated`. All 11 parser tests pass.
+
+**#a012 — `agent-doc session-check <FILE>` subcommand** (`src/session_check.rs` new, `src/main.rs` wired)
+New module reads the tail of `.agent-doc/logs/ops.log`, strips the `[epoch] ` prefix, and exits `1` when the last event is `preflight_diff_start`, `0` otherwise (including empty/missing log). Six unit tests cover timestamp stripping, missing log, empty log, terminal event, and the interrupted-cycle sentinel. Smoke test on the current doc confirmed both exit codes — before this cycle's write it returned `INTERRUPTED exit=1`, after it returned `ok — last event: snapshot_save ... exit=0`.
+
+**#a011 — end-of-cycle write invariant warning** (`src/preflight.rs:380-392`)
+Piggybacks on `session_check::last_ops_event`. Every preflight start checks the prior tail; if it's still `preflight_diff_start`, preflight emits `[preflight] WARNING: previous cycle ended at preflight_diff_start without a write — interrupted cycle detected` and logs `interrupted_cycle_detected` to ops.log. The `session-check` subcommand is the external tool for the same invariant.
+
+**#a014 — session drift auto-resync** (`src/preflight.rs:394-398`, `maybe_auto_resync_on_drift`)
+State file `.agent-doc/state/drift.count` tracks consecutive drift detections. First detection increments (count=1) and logs the deferral; second consecutive detection fires `resync::run(true, None)` and resets the counter. Drift-cleared preflights delete the counter file (one false positive is tolerated). The auto-fix path logs `auto_resync_on_drift consecutive=N` for audit.
+
+**#a010 — `fire_post_write` hook in stream.rs** (`src/stream.rs:188-203`)
+After `stream_loop` + final git commit, `run_stream` now fires both `fire_post_write(file, session_id, 1)` and `fire_doc_event(file, "post_write")`. Mirrors the pattern in `write.rs:1046-1049`. Supervisors and cross-session coordinators now get notified when a stream run completes, not only when append/template writes land.
+
+**Test matrix (my changes only):**
+- `session_check::tests` — 6 pass
+- `stream::tests` — 15 pass
+- `parse_slash_commands` — 11 pass
+- `template::tests` — 56 pass
+- `preflight::tests` — 29 pass, 1 pre-existing failure (`preflight_sweep_commits_other_tracked_docs`) verified to fail on stashed baseline, unrelated to this work.
+<!-- agent:boundary:b18ac0ca -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -37,11 +65,11 @@ claude_args: --dangerously-skip-permissions
 <!-- agent:pending patch=replace -->
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
-- [ ] [#xzz5] Preflight slash-command parser: absolute paths like /home/... get captured as commands. Require [a-z][a-z0-9:_-]* after the slash and reject tokens containing a second /.
-- [ ] [#a011] End-of-cycle write invariant — warn if `preflight_diff_start` without `ipc_write_attempt`.
-- [ ] [#a012] Expose `agent-doc session-check <FILE>` — nonzero if last ops.log entry is `preflight_diff_start`.
-- [ ] [#a014] Session drift: `registered panes span 2 tmux sessions: 1, 4` — resync if recurring.
-- [ ] [#a010] PostToolUse hook for agent-doc write (layer 3, optional).
+- [x] [#xzz5] Preflight slash-command parser: absolute paths like /home/... get captured as commands. Require [a-z][a-z0-9:_-]* after the slash and reject tokens containing a second /.
+- [x] [#a011] End-of-cycle write invariant — warn if `preflight_diff_start` without `ipc_write_attempt`.
+- [x] [#a012] Expose `agent-doc session-check <FILE>` — nonzero if last ops.log entry is `preflight_diff_start`.
+- [x] [#a014] Session drift: `registered panes span 2 tmux sessions: 1, 4` — resync if recurring.
+- [x] [#a010] PostToolUse hook for agent-doc write (layer 3, optional).
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
 - [ ] [#4sh0] Add planned-move logging to sync.rs reconciler so ClaimAction→SyncLayout pane swaps are debuggable
 - [ ] [#tw4a] claim: cd into document's .agent-doc root (nearest git repo) when claiming a pane. Fixes relative-path ambiguity and makes git ops naturally target the correct repo.

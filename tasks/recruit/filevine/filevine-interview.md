@@ -28,7 +28,7 @@ To prep effectively, a few things would help:
 - **Scheduled date** — so I can sequence prep tasks.
 
 If you paste the LinkedIn bios (or a summary) into the doc, I can tailor talking points, likely questions, and a short technical review checklist against your strengths (Rust/TS/distributed systems/AI tooling).
-<!-- agent:boundary:73d8dae0 -->
+<!-- agent:boundary:1ae26a54 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

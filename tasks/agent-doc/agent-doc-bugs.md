@@ -2,7 +2,7 @@
 agent_doc_session: 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688
 agent_doc_format: template
 agent_doc_write: crdt
-agent_doc_model_tier: low
+agent_doc_model_tier: high
 claude_args: --dangerously-skip-permissions
 ---
 
@@ -872,7 +872,7 @@ Next: release gate. `cargo install --path .` + VERSIONS.md entry + manual-testin
 
 Marking `#dsng` done in pending — this fix is the root-cause resolution.
 ❯ do #pf01 #64mb
-### Re: #pf01 + #64mb (HEAD)
+### Re: #pf01 + #64mb
 
 **#pf01 — spec landed, marking done.** `specs/pending-system.md` is in tree; reaping via `--pending-done pf01`.
 
@@ -918,17 +918,40 @@ The pending item's original description ("concurrent preflights racing step 2 vs
 
 **Recommendation: Option A.** ~10 lines in `preflight.rs` + snapshot write inside `run_pending_maintenance`. Test: run preflight against a doc with one `[x]` pending item and assert `git rev-list HEAD -- <file>` advances by exactly 1.
 
+❯ do option A
+
 **Side-note on the `#dsng` reap trigger:** that's precisely why this cycle showed two commits — prior cycle was the strip-markers fix landing, and this cycle reaped the `[x] #dsng` you marked done. Every reap/backfill cycle will produce two commits until this lands.
 
 **Next:** Want me to implement Option A?
-<!-- agent:boundary:7baa10fb -->
+### Re: Option A implementation
+
+Landed in `src/preflight.rs`. Three edits:
+
+**1. Moved `run_pending_maintenance` call to run BEFORE step 2 commit** (was step 2e, now step 1c — between `ensure_initialized` and `git::commit`).
+
+**2. Removed the `git::commit(file)` call from inside `run_pending_maintenance`.** It no longer triggers its own commit — the upcoming step-2 commit picks up the mutations.
+
+**3. Made `run_pending_maintenance` sync the snapshot alongside the working tree** (surgical, via `component::parse` + `Component::replace_content`). Reap + archive land in both file and snapshot so step-2 commit stages the mutated snapshot atomically.
+
+**Key invariant preserved:** the snapshot write only touches the `pending` (and optionally `pending-done`) component regions. User edits elsewhere in the working tree don't bleed into the snapshot — they were never in the snapshot to begin with.
+
+**Cargo state:**
+- `cargo build --bin agent-doc` → clean
+- `cargo test --bin agent-doc pending` → 61 passed
+- `cargo install --path .` → replaced `~/.cargo/bin/agent-doc`
+
+**Live verification next preflight cycle:** the preflight that fired for this doc JUST showed the double-commit pattern one last time (with the rebuilt binary not yet active for that invocation since the build happened during the cycle). The NEXT cycle after this write should produce a single commit when pending reap is needed. Since there's nothing to reap this cycle, the cleanest test is: mark any item `[x]` manually and run `/agent-doc` — `git log --oneline -5` should show exactly one `agent-doc(agent-doc-bugs)` commit added.
+
+**Marking #64mb done** next cycle after you confirm — want me to mark it now with `--pending-done 64mb`, or hold for your live test?
+
+**Test I still owe:** integration test asserting `git rev-list HEAD -- <file>` advances by exactly 1 across a preflight with one `[x]` pending item. Listed as a new pending item #nf7a (placeholder — will be hash-assigned by backfill).
+<!-- agent:boundary:d30d1502 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
-- [x] [#pf01] ✅ Spec landed on 20260414/pending-gated-state: src/agent-doc/specs/pending-system.md — PendingState::Gated, [/] syntax, reaper rules, lifecycle diagram, CLI surface, state transition matrix, release discipline
 - [ ] [#64mb] Fix double commit_staging: step 2e run_pending_maintenance calls git::commit after step 2 already committed. Move maintenance BEFORE step 2 commit so the single commit bundles reap+archive with the previous-cycle response. Repro: preflight at 03:21:19 produced 72d95738 then 21b73421.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [ ] [#xzz5] Preflight slash-command parser: absolute paths like /home/... get captured as commands. Require [a-z][a-z0-9:_-]* after the slash and reject tokens containing a second /.

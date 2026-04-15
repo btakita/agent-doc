@@ -338,7 +338,7 @@ My fault — I've been ending exchange responses with a bare `❯` on its own li
 **Fix (skill-side, no binary change):** saved a new auto-memory rule `feedback_no_trailing_prompt_glyph.md` — "Never end an agent-doc exchange response with a bare `❯` line" — and indexed it in `MEMORY.md` under the agent-doc Skill section. Going forward, responses end with the last real content line. If you want a submit affordance, you type `❯` yourself (you already do — `❯ confirm` and `❯ ` blocks are all user-authored).
 
 This response is the first one following the new rule — note no trailing `❯` below.
-<!-- agent:boundary:ec0f7d40 -->
+<!-- agent:boundary:9925b72c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

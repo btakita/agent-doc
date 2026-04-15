@@ -514,7 +514,7 @@ Per the memory rule **"Manual testing gate before publish"** and the prerelease 
 - Pending gated-state `[/]` + submodule auto-start fix also included (pre-existing in-flight work).
 
 **Memory and context are clean:** `feedback_no_trailing_prompt_glyph.md` deleted and de-indexed. The rule is now enforced at the binary layer — agents can forget it and the behavior stays correct.
-<!-- agent:boundary:ab04d68a -->
+<!-- agent:boundary:8d862568 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

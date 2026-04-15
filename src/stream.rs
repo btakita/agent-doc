@@ -192,6 +192,15 @@ pub fn run(
         eprintln!("[stream] git commit skipped: {}", e);
     }
 
+    // #a010: Fire post_write hook for cross-session coordination. The append /
+    // template write paths already do this in write.rs after each successful
+    // IPC/disk write, but stream mode used its own flush loop and never fired
+    // post_write. Missing this hook broke supervisors that trigger follow-up
+    // actions (gutter refresh, downstream doc sync) when a stream completes.
+    let session_id = result.session_id.clone().unwrap_or_default();
+    crate::hooks::fire_post_write(file, &session_id, 1);
+    crate::hooks::fire_doc_event(file, "post_write");
+
     eprintln!("[stream] Stream complete for {}", file.display());
     Ok(())
 }

@@ -1967,4 +1967,73 @@ mod tests {
             "preflight sweep should have committed secondary.md, got:\n{log_str}"
         );
     }
+
+    // --- #cce5: resolve_agent_model / short_model_name tests ---
+
+    #[test]
+    fn short_model_name_strips_claude_prefix() {
+        assert_eq!(short_model_name("claude-sonnet-4-6"), "sonnet-4-6");
+        assert_eq!(short_model_name("claude-opus-4"), "opus-4");
+        assert_eq!(short_model_name("claude-haiku-4-5"), "haiku-4-5");
+    }
+
+    #[test]
+    fn short_model_name_returns_as_is_without_prefix() {
+        assert_eq!(short_model_name("sonnet-4-6"), "sonnet-4-6");
+        assert_eq!(short_model_name("gpt-4o"), "gpt-4o");
+        assert_eq!(short_model_name(""), "");
+    }
+
+    #[test]
+    fn resolve_agent_model_env_var_preferred_over_frontmatter() {
+        // When ANTHROPIC_MODEL is set, it must take priority regardless of frontmatter.
+        // Test is structured to observe current env state without mutating it
+        // (env mutation in parallel tests is not thread-safe).
+        let env_model = std::env::var("ANTHROPIC_MODEL").ok();
+        let result = resolve_agent_model(Some("claude-opus-4"));
+
+        match env_model {
+            Some(env) if !env.trim().is_empty() => {
+                // Env var is set → result must be the env model (stripped), NOT opus-4
+                let expected = short_model_name(env.trim()).to_string();
+                assert_eq!(result, Some(expected),
+                    "env var should win over frontmatter model");
+            }
+            _ => {
+                // Env var is unset → result must be from frontmatter
+                assert_eq!(result, Some("opus-4".to_string()),
+                    "frontmatter should be used when env var is absent");
+            }
+        }
+    }
+
+    #[test]
+    fn resolve_agent_model_returns_some_when_frontmatter_present() {
+        // When no env var is set and frontmatter has a model, we get a Some.
+        // We verify the shape of the result rather than the exact value
+        // (which depends on env state in CI).
+        let result_with_fm = resolve_agent_model(Some("claude-haiku-4-5"));
+        // Must be Some (either env var or frontmatter provides a model)
+        assert!(result_with_fm.is_some(), "should return Some when frontmatter model provided");
+        // The result must not contain the 'claude-' prefix (always stripped)
+        if let Some(ref s) = result_with_fm {
+            assert!(!s.starts_with("claude-"), "result must not have claude- prefix, got: {s}");
+        }
+    }
+
+    #[test]
+    fn resolve_agent_model_none_frontmatter_returns_env_or_none() {
+        // When frontmatter is None, result is the env var (if set) or None.
+        let result = resolve_agent_model(None);
+        match std::env::var("ANTHROPIC_MODEL").ok() {
+            Some(env) if !env.trim().is_empty() => {
+                assert!(result.is_some(), "env var set → should return Some");
+                let s = result.unwrap();
+                assert!(!s.starts_with("claude-"), "result must not have claude- prefix");
+            }
+            _ => {
+                assert_eq!(result, None, "no env var, no frontmatter → None");
+            }
+        }
+    }
 }

@@ -41,6 +41,11 @@ const BUNDLED_SKILL: &str = include_str!("../SKILL.md");
 const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
     ("compact-exchange.md", include_str!("../runbooks/compact-exchange.md")),
     ("transfer-extract.md", include_str!("../runbooks/transfer-extract.md")),
+    ("pending-ops.md", include_str!("../runbooks/pending-ops.md")),
+    ("model-tier-gate.md", include_str!("../runbooks/model-tier-gate.md")),
+    ("streaming-checkpoints.md", include_str!("../runbooks/streaming-checkpoints.md")),
+    ("document-format.md", include_str!("../runbooks/document-format.md")),
+    ("code-enforced-directives.md", include_str!("../runbooks/code-enforced-directives.md")),
 ];
 
 /// Current binary version (from Cargo.toml).

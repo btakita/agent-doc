@@ -169,28 +169,37 @@ use std::path::Path;
 use crate::{component, frontmatter, merge, recover, sessions, snapshot, template};
 use crate::snapshot::find_project_root;
 
-/// Enforcement: reject `patch:pending` blocks in the patch payload unless the
-/// caller explicitly opts in via `AGENT_DOC_ALLOW_PATCH_PENDING=1` (which the
-/// CLI sets when `--allow-patch-pending` is passed). The pending system
-/// requires mutations via granular flags
-/// (`--pending-add/done/edit/clear/reorder`); a full-replace `patch:pending`
-/// block would churn hash ids and lose user intent.
+/// Enforcement: reject full-replacement blocks targeting the `pending` component
+/// unless the caller explicitly opts in.
 ///
-/// Phase 3 inversion (2026-04-14): the default is now reject. Previously the
-/// CLI had to set `AGENT_DOC_REJECT_PATCH_PENDING=1` to enable rejection,
-/// which meant library callers (FFI, tests, future SDK consumers) silently
-/// bypassed enforcement. Inverting the gate closes that hole — any caller
-/// that needs the escape hatch must opt in explicitly.
-fn enforce_no_patch_pending(patches: &[template::PatchBlock]) -> Result<()> {
-    let allow = std::env::var("AGENT_DOC_ALLOW_PATCH_PENDING")
+/// Canonical form: `<!-- replace:pending -->...<!-- /replace:pending -->` with
+/// `--allow-replace-pending` (or `AGENT_DOC_ALLOW_REPLACE_PENDING=1`).
+///
+/// Deprecated form (`#25ag` migration — one release of dual-accept):
+/// `<!-- patch:pending -->...<!-- /patch:pending -->` with `--allow-patch-pending`
+/// (or `AGENT_DOC_ALLOW_PATCH_PENDING=1`). Parser emits a deprecation warning
+/// when the deprecated form is used.
+///
+/// The pending system requires mutations via granular flags
+/// (`--pending-add/done/edit/clear/reorder`); a full-replace block on a list the
+/// user concurrently edits enables silent-data-loss via concurrent-edit clobber
+/// and hash instability.
+///
+/// Phase 3 inversion (2026-04-14): the default is now reject. Library callers
+/// (FFI, tests, future SDK consumers) must opt in explicitly.
+fn enforce_no_replace_pending(patches: &[template::PatchBlock]) -> Result<()> {
+    let allow_canonical = std::env::var("AGENT_DOC_ALLOW_REPLACE_PENDING")
         .map(|v| v == "1")
         .unwrap_or(false);
-    if allow {
+    let allow_legacy = std::env::var("AGENT_DOC_ALLOW_PATCH_PENDING")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    if allow_canonical || allow_legacy {
         return Ok(());
     }
     if patches.iter().any(|p| p.name == "pending") {
         anyhow::bail!(
-            "ERR: patch:pending block forbidden — use --pending-add/done/edit/clear/reorder. \
+            "ERR: replace:pending block forbidden — use --pending-add/done/edit/clear/reorder. \
              See specs/pending-system.md."
         );
     }
@@ -321,9 +330,12 @@ pub fn extract_normalization_targets(before: &str, after: &str) -> Vec<String> {
 /// incorrectly mark agent response lines as Insert and prefix them. Diffing
 /// `snapshot → baseline` identifies only genuine user additions.
 ///
-/// Skips lines that: are blank, already start with `❯`, start with `<!--`,
-/// or start with `#`. Non-destructive if no exchange component is present or
-/// no new lines are found.
+/// Skips lines that are blank, already start with `❯`, start with `<!--`
+/// (structural component/patch/boundary markers), or sit inside a fenced code
+/// block. Every other added line in the exchange user region gets the prefix —
+/// the component defines the context, so content shape is not second-guessed.
+/// Non-destructive if no exchange component is present or no new lines are
+/// found.
 ///
 /// Both disk and IPC write paths call this after computing `content_ours` so the
 /// snapshot and merged document consistently show `❯ ` on user input.
@@ -391,6 +403,11 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
     // Handles both ``` and ~~~ fences (matching CommonMark spec).
     use similar::{ChangeTag, TextDiff};
 
+    // Option 2 invariant: inside `agent:exchange`, every added line gets the ❯ prefix.
+    // The component defines the context, so content shape does not gate the decision.
+    // Only structural markers (HTML comments for component/patch/boundary tags) and
+    // code fences are excluded — everything else is user input.
+
     /// Returns Some((fence_char, fence_len)) if `trimmed` opens a new fence, else None.
     fn fence_open(trimmed: &str) -> Option<(char, usize)> {
         let fc = trimmed.chars().next()?;
@@ -439,10 +456,8 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
             && !in_baseline_fence
             && !trimmed.is_empty()
             && !trimmed.starts_with('❯')
-            && !trimmed.starts_with("<!-- ")
-            && !trimmed.starts_with('#')
+            && !trimmed.starts_with("<!--")
             && !is_fence_delim
-            && !trimmed.starts_with('"')
         {
             user_added.insert(line.to_string());
         }
@@ -804,8 +819,8 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
     // Sanitize component tags in patch content to prevent parser corruption
     sanitize_patches(&mut patches);
 
-    // Enforcement: reject `patch:pending` blocks unless `--allow-patch-pending`.
-    enforce_no_patch_pending(&patches)?;
+    // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
+    enforce_no_replace_pending(&patches)?;
 
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
@@ -906,8 +921,8 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     // Sanitize component tags in patch content to prevent parser corruption
     sanitize_patches(&mut patches);
 
-    // Enforcement: reject `patch:pending` blocks unless `--allow-patch-pending`.
-    enforce_no_patch_pending(&patches)?;
+    // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
+    enforce_no_replace_pending(&patches)?;
 
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
@@ -1296,8 +1311,8 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     // Sanitize component tags in patch content to prevent parser corruption
     sanitize_patches(&mut patches);
 
-    // Enforcement: reject `patch:pending` blocks unless `--allow-patch-pending`.
-    enforce_no_patch_pending(&patches)?;
+    // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
+    enforce_no_replace_pending(&patches)?;
 
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
@@ -1480,8 +1495,8 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     // Sanitize component tags in patch content to prevent parser corruption
     sanitize_patches(&mut patches);
 
-    // Enforcement: reject `patch:pending` blocks unless `--allow-patch-pending`.
-    enforce_no_patch_pending(&patches)?;
+    // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
+    enforce_no_replace_pending(&patches)?;
 
     let content_ours = template::apply_patches(&content, &patches, &unmatched, file)
         .context("failed to apply template patches")?;
@@ -2998,12 +3013,26 @@ mod tests {
     }
 
     #[test]
-    fn normalize_user_prompts_heading_skipped() {
+    fn normalize_user_prompts_heading_in_user_region_prefixed() {
+        // Option 2 invariant: the component defines the context, so a user-typed heading
+        // in the exchange user region gets the ❯ prefix like any other added line.
         let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
-        let baseline = "<!-- agent:exchange patch=append -->\n### Re: answer\n<!-- /agent:exchange -->\n";
-        let content = "<!-- agent:exchange patch=append -->\n### Re: answer\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\n### My heading\n<!-- /agent:exchange -->\n";
+        let content = "<!-- agent:exchange patch=append -->\n### My heading\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-        assert!(!result.contains("❯ ###"), "heading should not get prefix: {}", result);
+        assert!(result.contains("❯ ### My heading"), "user heading should get prefix: {}", result);
+    }
+
+    #[test]
+    fn normalize_user_prompts_hash_ref_prefixed() {
+        // Regression for agent-doc-bugs #vnxg: a bare hash reference like `#zj6s` inside
+        // the exchange user region was being skipped by the old `starts_with('#')` guard.
+        // Under Option 2, the line is user input and must receive the ❯ prefix.
+        let snapshot = "<!-- agent:exchange patch=append -->\nprior turn\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\nprior turn\n#zj6s\n<!-- /agent:exchange -->\n";
+        let content = "<!-- agent:exchange patch=append -->\nprior turn\n#zj6s\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
+        let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
+        assert!(result.contains("❯ #zj6s"), "hash-ref line must get prefix: {}", result);
     }
 
     #[test]
@@ -3067,12 +3096,14 @@ mod tests {
     }
 
     #[test]
-    fn normalize_user_prompts_quoted_string_skipped() {
+    fn normalize_user_prompts_quoted_string_prefixed() {
+        // Option 2 invariant: a quoted string the user typed is still user input,
+        // so it gets the ❯ prefix.
         let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
         let baseline = "<!-- agent:exchange patch=append -->\n\"Merge conflict with external write\"\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\n\"Merge conflict with external write\"\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
         let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
-        assert!(!result.contains("❯ \""), "quoted string should not get prefix: {}", result);
+        assert!(result.contains("❯ \"Merge conflict"), "quoted user line should get prefix: {}", result);
     }
 
     #[test]

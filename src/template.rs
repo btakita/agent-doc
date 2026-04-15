@@ -132,6 +132,12 @@ pub fn is_template_mode(mode: Option<&str>) -> bool {
 ///
 /// Content outside patch blocks is collected as "unmatched" and returned separately.
 /// Markers inside fenced code blocks (``` or ~~~) and inline code spans are ignored.
+///
+/// Also accepts the canonical `<!-- replace:pending -->...<!-- /replace:pending -->`
+/// form as a synonym for `<!-- patch:pending -->...<!-- /patch:pending -->`. The
+/// `replace:` prefix signals full-replacement semantics and is the canonical name
+/// for pending mutations going forward. `patch:pending` is still parsed for one
+/// release with a deprecation warning emitted to stderr. See #25ag.
 pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
     let bytes = response.as_bytes();
     let len = bytes.len();
@@ -167,7 +173,28 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
         let inner = &response[marker_start + 4..close - 3];
         let trimmed = inner.trim();
 
-        if let Some(rest) = trimmed.strip_prefix("patch:") {
+        // Recognize two prefix forms:
+        //   - `patch:<name>`     — original form (deprecated for pending component)
+        //   - `replace:pending`  — canonical form for the pending component (#25ag)
+        let parsed_prefix: Option<(&str, &str)> = if let Some(rest) = trimmed.strip_prefix("patch:") {
+            Some(("patch", rest))
+        } else if let Some(rest) = trimmed.strip_prefix("replace:") {
+            // Only `replace:pending` is accepted. Other `replace:*` names fall
+            // through as unmatched to avoid silently broadening the grammar.
+            let rest_trim = rest.trim_start();
+            let name_end = rest_trim
+                .find(|c: char| c.is_whitespace())
+                .unwrap_or(rest_trim.len());
+            if &rest_trim[..name_end] == "pending" {
+                Some(("replace", rest))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some((prefix_kind, rest)) = parsed_prefix {
             let rest = rest.trim();
             if rest.is_empty() || rest.starts_with('/') {
                 pos = close;
@@ -182,6 +209,14 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
             } else {
                 (rest, std::collections::HashMap::new())
             };
+
+            // Deprecation warning: `patch:pending` is deprecated in favor of
+            // `replace:pending`. Warn once per parse call on first occurrence.
+            if prefix_kind == "patch" && name == "pending" {
+                eprintln!(
+                    "warning: `<!-- patch:pending -->` is deprecated — use `<!-- replace:pending -->` instead (see #25ag)"
+                );
+            }
 
             // Consume trailing newline after opening marker
             let mut content_start = close;
@@ -199,8 +234,9 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
                 unmatched.push_str(trimmed_before);
             }
 
-            // Find the matching close: <!-- /patch:name --> (skipping code blocks)
-            let close_marker = format!("<!-- /patch:{} -->", name);
+            // Find the matching close: <!-- /<prefix>:name --> (skipping code blocks).
+            // The close must use the same prefix as the open.
+            let close_marker = format!("<!-- /{}:{} -->", prefix_kind, name);
             if let Some(close_pos) = find_outside_code(&close_marker, response, content_start, &code_ranges) {
                 let content = &response[content_start..close_pos];
                 patches.push(PatchBlock {
@@ -246,6 +282,40 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
 /// is appended to `<!-- agent:output -->` if it exists, or creates one at the end.
 pub fn apply_patches(doc: &str, patches: &[PatchBlock], unmatched: &str, file: &Path) -> Result<String> {
     apply_patches_with_overrides(doc, patches, unmatched, file, &std::collections::HashMap::new())
+}
+
+/// Strip trailing bare `❯` lines from exchange-bound content.
+///
+/// `❯` is the user's submit-prompt glyph. When an agent ends a response with a bare
+/// `❯` line, the post-patch boundary marker lands directly under it, producing a
+/// phantom prompt row on every cycle. This is a code-enforced invariant (see
+/// `runbooks/code-enforced-directives.md`): the binary strips trailing bare-`❯`
+/// lines so agents cannot produce the bug even if they forget the rule.
+///
+/// Only strips lines that contain nothing but `❯` and whitespace. `❯` appearing
+/// inside content lines (e.g. `❯ How do I…`) is preserved. Multiple trailing bare
+/// lines collapse to zero.
+pub(crate) fn strip_trailing_caret_lines(content: &str) -> String {
+    let trailing_nl = content.ends_with('\n');
+    let mut lines: Vec<&str> = content.split('\n').collect();
+    // split('\n') on a trailing-newline string yields an empty final element; ignore
+    // it so we consider only real trailing lines.
+    if trailing_nl {
+        lines.pop();
+    }
+    while let Some(last) = lines.last() {
+        let t = last.trim();
+        if t == "❯" {
+            lines.pop();
+        } else {
+            break;
+        }
+    }
+    let mut out = lines.join("\n");
+    if trailing_nl {
+        out.push('\n');
+    }
+    out
 }
 
 /// Apply patches with per-component mode overrides (e.g., stream mode forces "replace"
@@ -315,14 +385,21 @@ pub fn apply_patches_with_overrides(
             .or_else(|| comp.patch_mode())
             .or_else(|| configs.get(&patch.name).map(|s| s.as_str()))
             .unwrap_or_else(|| default_mode(&patch.name));
+        // Strip trailing bare `❯` lines for exchange-bound patches so a phantom
+        // prompt row never lands above the post-patch boundary marker.
+        let patch_content: std::borrow::Cow<'_, str> = if patch.name == "exchange" {
+            std::borrow::Cow::Owned(strip_trailing_caret_lines(&patch.content))
+        } else {
+            std::borrow::Cow::Borrowed(patch.content.as_str())
+        };
         // For append mode, use boundary-aware insertion when a marker exists
         if mode == "append"
             && let Some(bid) = find_boundary_in_component(&result, comp)
         {
-            result = comp.append_with_boundary(&result, &patch.content, &bid);
+            result = comp.append_with_boundary(&result, &patch_content, &bid);
             continue;
         }
-        let new_content = apply_mode(mode, comp.content(&result), &patch.content);
+        let new_content = apply_mode(mode, comp.content(&result), &patch_content);
         result = comp.replace_content(&result, &new_content);
     }
 
@@ -340,12 +417,19 @@ pub fn apply_patches_with_overrides(
 
     // Handle unmatched content
     if !all_unmatched.is_empty() {
-        let unmatched = &all_unmatched;
         // Re-parse after patches applied
         let components = component::parse(&result)
             .context("failed to re-parse components after patching")?;
 
         if let Some(output_comp) = components.iter().find(|c| c.name == "exchange" || c.name == "output") {
+            // Unmatched content lands in exchange/output — strip trailing bare `❯`
+            // lines so a phantom prompt row never precedes the boundary marker.
+            let stripped = if output_comp.name == "exchange" {
+                strip_trailing_caret_lines(&all_unmatched)
+            } else {
+                all_unmatched.clone()
+            };
+            let unmatched = &stripped;
             // Try boundary-aware append first (preserves prompt ordering)
             if let Some(bid) = find_boundary_in_component(&result, output_comp) {
                 eprintln!("[template] unmatched content: using boundary {} for insertion", &bid[..bid.len().min(8)]);
@@ -361,12 +445,13 @@ pub fn apply_patches_with_overrides(
                 result = output_comp.replace_content(&result, &new_content);
             }
         } else {
-            // Auto-create exchange component at the end
+            // Auto-create exchange component at the end — always strip trailing `❯`.
+            let stripped = strip_trailing_caret_lines(&all_unmatched);
             if !result.ends_with('\n') {
                 result.push('\n');
             }
             result.push_str("\n<!-- agent:exchange -->\n");
-            result.push_str(unmatched);
+            result.push_str(&stripped);
             result.push_str("\n<!-- /agent:exchange -->\n");
         }
     }
@@ -445,18 +530,195 @@ pub fn reposition_boundary_to_end(doc: &str) -> String {
 /// The summary is slugified and appended to the boundary ID:
 /// `a0cfeb34:agent-doc` instead of just `a0cfeb34`.
 pub fn reposition_boundary_to_end_with_summary(doc: &str, summary: Option<&str>) -> String {
+    reposition_boundary_to_end_with_baseline(doc, summary, None)
+}
+
+/// Reposition boundary, with an optional set of baseline `### Re:` headings
+/// (typically extracted from git HEAD). When a baseline is supplied, every
+/// `### Re:` heading in the current exchange whose normalized text is NOT in
+/// the baseline is treated as "new this cycle" and receives a ` (HEAD)` suffix.
+/// Headings already present in the baseline are stripped of any stale
+/// ` (HEAD)` suffix. When the baseline is `None`, behavior matches the legacy
+/// `annotate_latest_re_heading_with_head` path: only the last `### Re:` heading
+/// gets the marker.
+pub fn reposition_boundary_to_end_with_baseline(
+    doc: &str,
+    summary: Option<&str>,
+    baseline_headings: Option<&std::collections::HashSet<String>>,
+) -> String {
     let mut result = remove_all_boundaries(doc);
     if let Ok(components) = component::parse(&result)
         && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
     {
         let id = crate::new_boundary_id_with_summary(summary);
         let marker = crate::format_boundary_marker(&id);
-        let content = exchange.content(&result);
-        let new_content = format!("{}\n{}\n", content.trim_end(), marker);
+        let content = exchange.content(&result).to_string();
+        let annotated = annotate_re_headings_with_head(&content, baseline_headings);
+        let new_content = format!("{}\n{}\n", annotated.trim_end(), marker);
         result = exchange.replace_content(&result, &new_content);
     }
     result
 }
+
+/// Extract the set of stripped `### Re:` heading lines from the `exchange`
+/// component of a document. Used by the commit path to build a baseline of
+/// headings already present in `git HEAD` so the reposition step can mark all
+/// new-this-cycle headings (not just the last one) with ` (HEAD)`.
+///
+/// Returns an empty set if the document has no `exchange` component or no
+/// matching headings. Headings inside fenced code blocks are skipped.
+pub fn exchange_baseline_headings(doc: &str) -> std::collections::HashSet<String> {
+    if let Ok(components) = component::parse(doc)
+        && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
+    {
+        return collect_re_headings(exchange.content(doc));
+    }
+    std::collections::HashSet::new()
+}
+
+/// Collect normalized `### Re:` heading lines from a chunk of exchange content.
+/// Each entry is the heading line with any trailing ` (HEAD)` suffix and
+/// trailing whitespace removed. Headings inside fenced code blocks are skipped.
+fn collect_re_headings(content: &str) -> std::collections::HashSet<String> {
+    let code_ranges = component::find_code_ranges(content);
+    let in_code = |pos: usize| code_ranges.iter().any(|&(s, e)| pos >= s && pos < e);
+    let mut set = std::collections::HashSet::new();
+    let mut offset = 0usize;
+    for line in content.split_inclusive('\n') {
+        let line_start = offset;
+        offset += line.len();
+        if in_code(line_start) {
+            continue;
+        }
+        let body = line.trim_end_matches('\n').trim_end_matches('\r');
+        let trimmed = body.trim_start();
+        let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
+        if hash_count == 0 || hash_count > 6 {
+            continue;
+        }
+        let after_hash = &trimmed[hash_count..];
+        if !after_hash.starts_with(' ') {
+            continue;
+        }
+        if !after_hash.trim_start().starts_with("Re:") {
+            continue;
+        }
+        let stripped = body
+            .trim_start()
+            .trim_end()
+            .trim_end_matches(" (HEAD)")
+            .to_string();
+        set.insert(stripped);
+    }
+    set
+}
+
+/// Strip ` (HEAD)` suffix from all `### Re:` heading lines, then append
+/// ` (HEAD)` to every heading that is NEW relative to `baseline`. When
+/// `baseline` is `None`, the legacy behavior is preserved: only the last
+/// `### Re:` heading receives ` (HEAD)`. Leaves content unchanged if no such
+/// heading exists. Skips headings inside fenced code blocks.
+///
+/// This is the symmetric counterpart to `git::strip_head_markers`: this adds
+/// the marker on the working-tree / snapshot side; strip_head_markers removes
+/// it on the git-staging side so the committed blob stays clean.
+///
+/// Operates on exchange component content, where `### Re:` is the canonical
+/// response heading format (h3). We only touch `### Re:` headings — NOT bold
+/// pseudo-headers (`**Re: ...**`) — matching the SKILL.md response contract.
+///
+/// When baseline is supplied (typically from git HEAD via
+/// `exchange_baseline_headings`), a patchback containing multiple `### Re:`
+/// sections in a single cycle gets ` (HEAD)` appended to EVERY new heading,
+/// so every newly-added heading line shows as modified in the git gutter.
+pub(crate) fn annotate_re_headings_with_head(
+    content: &str,
+    baseline: Option<&std::collections::HashSet<String>>,
+) -> String {
+    let code_ranges = component::find_code_ranges(content);
+    let in_code = |pos: usize| code_ranges.iter().any(|&(s, e)| pos >= s && pos < e);
+
+    let mut lines: Vec<String> = content.split_inclusive('\n').map(|s| s.to_string()).collect();
+    let mut re_indices: Vec<usize> = Vec::new();
+    let mut offset = 0usize;
+
+    for (idx, line) in lines.iter_mut().enumerate() {
+        let line_start = offset;
+        offset += line.len();
+        if in_code(line_start) {
+            continue;
+        }
+        let had_newline = line.ends_with('\n');
+        let body_ref = line.trim_end_matches('\n').trim_end_matches('\r');
+        let trimmed = body_ref.trim_start();
+        let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
+        if hash_count == 0 || hash_count > 6 {
+            continue;
+        }
+        let after_hash = &trimmed[hash_count..];
+        if !after_hash.starts_with(' ') {
+            continue;
+        }
+        if !after_hash.trim_start().starts_with("Re:") {
+            continue;
+        }
+        // Strip existing (HEAD) suffix (robust against trailing whitespace).
+        let stripped = body_ref.trim_end().trim_end_matches(" (HEAD)");
+        *line = if had_newline {
+            format!("{stripped}\n")
+        } else {
+            stripped.to_string()
+        };
+        re_indices.push(idx);
+    }
+
+    // Decide which heading lines receive (HEAD).
+    // - With baseline: every Re: heading whose normalized text is NOT in the
+    //   baseline set is treated as new this cycle and gets (HEAD). When the
+    //   baseline filter yields zero new headings (common: a turn that doesn't
+    //   open a new Re: section), fall back to marking the last Re: heading so
+    //   the working tree always retains a single "head" marker. Without this
+    //   fallback, the commit path strips the prior cycle's (HEAD) on line 613
+    //   and leaves nothing marked — regressing the visual head pointer.
+    // - Without baseline: legacy behavior — only the last Re: heading.
+    let mark_indices: Vec<usize> = match baseline {
+        Some(baseline_set) => {
+            let filtered: Vec<usize> = re_indices
+                .iter()
+                .copied()
+                .filter(|&idx| {
+                    let line = &lines[idx];
+                    let key = line
+                        .trim_end_matches('\n')
+                        .trim_end_matches('\r')
+                        .trim_start()
+                        .trim_end();
+                    !baseline_set.contains(key)
+                })
+                .collect();
+            if filtered.is_empty() {
+                re_indices.last().copied().into_iter().collect()
+            } else {
+                filtered
+            }
+        }
+        None => re_indices.last().copied().into_iter().collect(),
+    };
+
+    for idx in mark_indices {
+        let line = &lines[idx];
+        let had_newline = line.ends_with('\n');
+        let body = line.trim_end_matches('\n').trim_end_matches('\r');
+        lines[idx] = if had_newline {
+            format!("{body} (HEAD)\n")
+        } else {
+            format!("{body} (HEAD)")
+        };
+    }
+
+    lines.concat()
+}
+
 
 /// Remove all boundary markers from a document (line-level removal).
 /// Skips boundaries inside fenced code blocks (lesson #13).
@@ -1367,6 +1629,264 @@ Some content.
     }
 
     #[test]
+    fn reposition_appends_head_to_last_re_heading() {
+        // #hdap: reposition must append ` (HEAD)` to the last `### Re:`
+        // heading inside the exchange component, stripping any stale
+        // `(HEAD)` suffix from earlier headings.
+        let doc = "\
+<!-- agent:exchange -->
+### Re: older (HEAD)
+old body
+### Re: newer
+new body
+<!-- /agent:exchange -->";
+        let result = reposition_boundary_to_end(doc);
+        assert!(
+            !result.contains("### Re: older (HEAD)"),
+            "stale (HEAD) on prior heading must be stripped; got:\n{result}"
+        );
+        assert!(
+            result.contains("### Re: older\n"),
+            "older heading must remain (without HEAD); got:\n{result}"
+        );
+        assert!(
+            result.contains("### Re: newer (HEAD)"),
+            "latest heading must get (HEAD); got:\n{result}"
+        );
+        assert_eq!(
+            result.matches("(HEAD)").count(),
+            1,
+            "exactly one (HEAD) in result; got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn reposition_head_annotation_no_re_heading_unchanged() {
+        // No `### Re:` headings → no (HEAD) added, content passes through.
+        let doc = "\
+<!-- agent:exchange -->
+User text with no response headings.
+<!-- /agent:exchange -->";
+        let result = reposition_boundary_to_end(doc);
+        assert!(!result.contains("(HEAD)"), "no heading → no (HEAD); got:\n{result}");
+    }
+
+    #[test]
+    fn reposition_head_annotation_skips_code_fence() {
+        // ### Re: inside a fenced code block must NOT be treated as a heading.
+        let doc = "\
+<!-- agent:exchange -->
+### Re: real heading
+```markdown
+### Re: fake heading in code fence
+```
+<!-- /agent:exchange -->";
+        let result = reposition_boundary_to_end(doc);
+        assert!(
+            result.contains("### Re: real heading (HEAD)"),
+            "real heading outside fence gets (HEAD); got:\n{result}"
+        );
+        assert!(
+            result.contains("### Re: fake heading in code fence\n"),
+            "fenced heading must be untouched; got:\n{result}"
+        );
+        assert_eq!(
+            result.matches("(HEAD)").count(),
+            1,
+            "exactly one (HEAD) — fenced heading ignored; got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn reposition_with_baseline_marks_all_new_re_headings() {
+        // Patchback with multiple `### Re:` headings: every heading NOT in
+        // the baseline (git HEAD) gets (HEAD); every heading IN the baseline
+        // does not. This matches the "all patchback top-level headers" rule.
+        let doc = "\
+<!-- agent:exchange -->
+### Re: old-1
+body a
+### Re: old-2 (HEAD)
+body b
+### Re: new-1
+body c
+### Re: new-2
+body d
+<!-- /agent:exchange -->";
+        // Baseline contains just the two "old" headings (no (HEAD), as HEAD
+        // blob is always stripped by the commit staging path).
+        let mut baseline = std::collections::HashSet::new();
+        baseline.insert("### Re: old-1".to_string());
+        baseline.insert("### Re: old-2".to_string());
+
+        let result = reposition_boundary_to_end_with_baseline(doc, None, Some(&baseline));
+
+        // Both old headings lose (HEAD).
+        assert!(result.contains("### Re: old-1\n"), "old-1 must not have (HEAD); got:\n{result}");
+        assert!(result.contains("### Re: old-2\n"), "old-2 must not have (HEAD); got:\n{result}");
+        // Both new headings get (HEAD).
+        assert!(result.contains("### Re: new-1 (HEAD)"), "new-1 must get (HEAD); got:\n{result}");
+        assert!(result.contains("### Re: new-2 (HEAD)"), "new-2 must get (HEAD); got:\n{result}");
+        // Exactly two (HEAD)s — one per new heading.
+        assert_eq!(
+            result.matches("(HEAD)").count(),
+            2,
+            "exactly two (HEAD) markers; got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn reposition_with_empty_baseline_marks_every_re_heading() {
+        // First cycle / untracked file: baseline is empty. All headings are
+        // "new", so all get (HEAD).
+        let doc = "\
+<!-- agent:exchange -->
+### Re: first
+a
+### Re: second
+b
+<!-- /agent:exchange -->";
+        let baseline: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let result = reposition_boundary_to_end_with_baseline(doc, None, Some(&baseline));
+        assert!(result.contains("### Re: first (HEAD)"), "first gets (HEAD); got:\n{result}");
+        assert!(result.contains("### Re: second (HEAD)"), "second gets (HEAD); got:\n{result}");
+        assert_eq!(
+            result.matches("(HEAD)").count(),
+            2,
+            "exactly two (HEAD) markers; got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn exchange_baseline_headings_extracts_stripped_re_lines() {
+        let doc = "\
+<!-- agent:exchange -->
+### Re: one (HEAD)
+body
+### Re: two
+more body
+### Not a Re heading
+body
+<!-- /agent:exchange -->";
+        let set = exchange_baseline_headings(doc);
+        assert!(set.contains("### Re: one"), "stripped one present; got: {set:?}");
+        assert!(set.contains("### Re: two"), "two present; got: {set:?}");
+        assert_eq!(set.len(), 2, "only Re: headings; got: {set:?}");
+    }
+
+    #[test]
+    fn exchange_baseline_headings_normalizes_leading_whitespace() {
+        // HEAD has an indented heading; set entry must be trim_start'd so a
+        // non-indented working-tree heading matches it.
+        let doc = "\
+<!-- agent:exchange -->
+  ### Re: indented
+body
+### Re: flush
+more
+<!-- /agent:exchange -->";
+        let set = exchange_baseline_headings(doc);
+        assert!(set.contains("### Re: indented"), "indented entry normalized; got: {set:?}");
+        assert!(set.contains("### Re: flush"), "flush entry present; got: {set:?}");
+    }
+
+    #[test]
+    fn reposition_with_baseline_matches_indented_heading() {
+        // Baseline has "### Re: foo" (flush). Working tree has "  ### Re: foo"
+        // (indented). trim_start normalization makes the lookup recognize the
+        // indented heading as already-in-baseline. Because the baseline filter
+        // then yields zero "new" headings, the fallback kicks in and marks the
+        // last Re: heading anyway — preserving the head pointer. The key point
+        // is that normalization works (the heading is recognized), not that
+        // (HEAD) is absent.
+        let doc = "\
+<!-- agent:exchange -->
+  ### Re: foo
+body
+### Re: bar (HEAD)
+body2
+<!-- /agent:exchange -->";
+        let mut baseline = std::collections::HashSet::new();
+        baseline.insert("### Re: foo".to_string());
+        baseline.insert("### Re: bar".to_string());
+        let result =
+            reposition_boundary_to_end_with_baseline(doc, None, Some(&baseline));
+        // Both headings are in baseline → filter is empty → fallback marks
+        // the LAST Re: heading only. "### Re: foo" stays unmarked (proving
+        // trim_start normalization worked — without it, foo would be
+        // treated as new and also get (HEAD)).
+        assert!(
+            result.contains("  ### Re: foo\n"),
+            "indented heading must remain unmarked; got:\n{result}"
+        );
+        assert!(
+            result.contains("### Re: bar (HEAD)"),
+            "last heading gets fallback (HEAD) marker; got:\n{result}"
+        );
+        assert_eq!(
+            result.matches("(HEAD)").count(),
+            1,
+            "exactly one (HEAD) via fallback; got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn baseline_filter_empty_falls_back_to_last_heading() {
+        // When every Re: heading in the working tree is already in baseline
+        // (i.e., the current turn adds no new Re: sections), the filter is
+        // empty. The fallback must mark the last heading so the working tree
+        // retains a single "head" marker across empty-Re cycles.
+        let doc = "\
+<!-- agent:exchange -->
+### Re: older
+body
+### Re: newer (HEAD)
+more
+<!-- /agent:exchange -->";
+        let mut baseline = std::collections::HashSet::new();
+        baseline.insert("### Re: older".to_string());
+        baseline.insert("### Re: newer".to_string());
+        let result =
+            reposition_boundary_to_end_with_baseline(doc, None, Some(&baseline));
+        assert!(
+            result.contains("### Re: newer (HEAD)"),
+            "last heading retains (HEAD) via fallback; got:\n{result}"
+        );
+        assert!(
+            result.contains("### Re: older\n"),
+            "older heading remains unmarked; got:\n{result}"
+        );
+        assert_eq!(
+            result.matches("(HEAD)").count(),
+            1,
+            "exactly one (HEAD) marker after fallback; got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn reposition_head_annotation_strips_multiple_stale() {
+        // Multiple stale (HEAD)s on prior headings → all stripped, only last gets it.
+        let doc = "\
+<!-- agent:exchange -->
+### Re: one (HEAD)
+a
+### Re: two (HEAD)
+b
+### Re: three
+c
+<!-- /agent:exchange -->";
+        let result = reposition_boundary_to_end(doc);
+        assert_eq!(
+            result.matches("(HEAD)").count(),
+            1,
+            "exactly one (HEAD) after reposition; got:\n{result}"
+        );
+        assert!(result.contains("### Re: three (HEAD)"));
+        assert!(result.contains("### Re: one\n"));
+        assert!(result.contains("### Re: two\n"));
+    }
+
+    #[test]
     fn max_lines_inline_attr_trims_content() {
         let dir = setup_project();
         let doc_path = dir.path().join("test.md");
@@ -1545,6 +2065,88 @@ Previous response.
         let count = result.matches("❯ How do I configure .mise.toml?").count();
         assert_eq!(count, 1, "overlap line should appear exactly once");
         assert!(result.contains("### Re: configure"));
+    }
+
+    #[test]
+    fn strip_trailing_caret_removes_bare_prompt_line() {
+        let content = "Answer text.\n❯\n";
+        assert_eq!(strip_trailing_caret_lines(content), "Answer text.\n");
+    }
+
+    #[test]
+    fn strip_trailing_caret_removes_multiple_trailing_lines() {
+        let content = "Answer.\n❯\n❯\n";
+        assert_eq!(strip_trailing_caret_lines(content), "Answer.\n");
+    }
+
+    #[test]
+    fn strip_trailing_caret_preserves_mid_content_caret() {
+        // `❯` mid-content (e.g. user prompt quoted in response) must survive.
+        let content = "### Re: topic\n\n❯ user question echoed\n\nAnswer.\n";
+        assert_eq!(strip_trailing_caret_lines(content), content);
+    }
+
+    #[test]
+    fn strip_trailing_caret_preserves_caret_with_text() {
+        // Line that starts with `❯ ` and has other text is user content; don't strip.
+        let content = "Answer.\n❯ follow-up\n";
+        assert_eq!(strip_trailing_caret_lines(content), content);
+    }
+
+    #[test]
+    fn strip_trailing_caret_handles_no_trailing_newline() {
+        let content = "Answer.\n❯";
+        assert_eq!(strip_trailing_caret_lines(content), "Answer.");
+    }
+
+    #[test]
+    fn strip_trailing_caret_noop_when_no_caret() {
+        let content = "Answer.\n";
+        assert_eq!(strip_trailing_caret_lines(content), content);
+    }
+
+    #[test]
+    fn apply_patches_strips_trailing_caret_from_exchange() {
+        let doc = "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n❯ prior question\n<!-- /agent:exchange -->\n";
+        let patches = vec![PatchBlock {
+            name: "exchange".to_string(),
+            content: "### Re: thing\n\nAnswer.\n❯\n".to_string(),
+            attrs: Default::default(),
+        }];
+        let doc_path = std::path::PathBuf::from("/tmp/test.md");
+        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        // Extract just the exchange component content
+        let components = component::parse(&result).unwrap();
+        let exchange = components.iter().find(|c| c.name == "exchange").unwrap();
+        let content = exchange.content(&result);
+        // No bare `❯` on its own line immediately before the boundary marker.
+        let has_bare_caret_before_boundary = content
+            .lines()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .any(|w| w[0].trim() == "❯" && w[1].starts_with("<!-- agent:boundary"));
+        assert!(
+            !has_bare_caret_before_boundary,
+            "bare ❯ line must not appear before boundary marker. content:\n{}",
+            content
+        );
+    }
+
+    #[test]
+    fn apply_patches_preserves_caret_in_non_exchange() {
+        // A patch targeting a non-exchange component should preserve trailing `❯`
+        // (no special rule there).
+        let doc = "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n<!-- agent:notes patch=replace -->\n<!-- /agent:notes -->\n";
+        let patches = vec![PatchBlock {
+            name: "notes".to_string(),
+            content: "note body\n❯\n".to_string(),
+            attrs: Default::default(),
+        }];
+        let doc_path = std::path::PathBuf::from("/tmp/test.md");
+        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        let components = component::parse(&result).unwrap();
+        let notes = components.iter().find(|c| c.name == "notes").unwrap();
+        assert!(notes.content(&result).contains("❯"), "non-exchange content retains ❯");
     }
 
     #[test]

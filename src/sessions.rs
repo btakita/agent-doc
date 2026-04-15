@@ -734,6 +734,57 @@ mod tests {
         assert!(t.pane_alive(&pane2));
     }
 
+    // --- #tw4a: register_with_pid_and_cwd tests ---
+
+    #[test]
+    #[ignore] // uses set_current_dir which is not thread-safe with other tests
+    fn register_with_pid_and_cwd_stores_explicit_cwd() {
+        // register_full_with_cwd (called by register_with_pid_and_cwd) should
+        // store the provided cwd string rather than querying the process cwd.
+        let dir = TempDir::new().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        std::fs::create_dir_all(".agent-doc").unwrap();
+
+        let explicit_cwd = "/home/user/projects/my-submodule";
+        register_full_with_cwd(
+            "session-cwd-test",
+            "%77",
+            "plan.md",
+            9999,
+            "@5",
+            explicit_cwd,
+        )
+        .unwrap();
+
+        let loaded = load().unwrap();
+        assert!(loaded.contains_key("session-cwd-test"), "session should be registered");
+        let entry = &loaded["session-cwd-test"];
+        assert_eq!(entry.cwd, explicit_cwd, "stored cwd must match the explicit value passed in");
+        assert_eq!(entry.pane, "%77");
+        assert_eq!(entry.file, "plan.md");
+        assert_eq!(entry.pid, 9999);
+    }
+
+    #[test]
+    #[ignore] // uses set_current_dir which is not thread-safe with other tests
+    fn register_full_with_cwd_differs_from_process_cwd() {
+        // The cwd stored by register_full_with_cwd must be the explicitly passed value,
+        // even when it differs from the process cwd (which is what register_full uses).
+        let dir = TempDir::new().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        std::fs::create_dir_all(".agent-doc").unwrap();
+
+        let explicit_cwd = "/completely/different/path";
+        register_full_with_cwd("s-explicit", "%88", "doc.md", 1234, "@1", explicit_cwd).unwrap();
+
+        let loaded = load().unwrap();
+        let entry = &loaded["s-explicit"];
+        assert_eq!(entry.cwd, explicit_cwd);
+        // Verify it differs from the actual process cwd
+        let process_cwd = std::env::current_dir().unwrap().to_string_lossy().to_string();
+        assert_ne!(entry.cwd, process_cwd, "stored cwd should differ from process cwd");
+    }
+
     #[test]
     #[ignore] // uses set_current_dir which is not thread-safe with other tests
     fn register_full_deduplicates_pane() {

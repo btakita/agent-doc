@@ -2,6 +2,7 @@
 agent_doc_session: 6cb2a9bf-8521-46d0-8670-e76cf4aeabd4
 agent_doc_format: template
 agent_doc_write: crdt
+agent_doc_model_tier: high
 claude_args: --dangerously-skip-permissions
 links:
   - ./build-party.md
@@ -1232,7 +1233,16 @@ Summary of the call:
 - **Scoring API confusion:** Rob was conflating "Brian's score" with the "scoring API" service. Brian clarified: the task was to run the scoring API against Brian's session transcript + CLAUDE.md, compare output to expected 82/100, then diff factor-by-factor to identify miscalibrated eval prompts.
 - **Two scoring methodologies:** Rob has his own set of factors; Brian has his (from the original rubric). ~100 factors each. Rob's phrasing ("two factors") was imprecise — Brian corrected: two sets of scoring methodologies, not two individual factors.
 - **Call cut short:** Rob had another call come in at ~4:46 and had to drop. They ended roughly aligned ("I think we're in agreement").
-<!-- agent:boundary:ce887a68 -->
+❯ compact + transcribe + diarize [2026-04-14 16-16-46.mp4](../../../../../Videos/2026-04-14%2016-16-46.mp4) call with robert-ross and Miguel (last name tbd)
+
+### Re: 2026-04-14 call — transcribe + diarize kicked off
+
+Started `corky transcribe --diarize --speakers "Brian,Robert,Miguel"` on `~/Videos/2026-04-14 16-16-46.mp4` (9.6 GB) in the background. Output → `tasks/dreamable/transcripts/2026-04-14-robert-ross-miguel.md`.
+
+This is a large file, so it will take a while. I'll summarize the call into the exchange on the next cycle once the transcript lands, and handle the `compact` at the same time so the new summary fits cleanly into a freshly compacted exchange.
+
+Background task id: `bl2ms2969`.
+<!-- agent:boundary:d864c62b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

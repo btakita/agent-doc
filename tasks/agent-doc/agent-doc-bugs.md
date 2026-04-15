@@ -871,7 +871,7 @@ Full `cargo test --bin agent-doc git::` → 19 passed, 0 failed. Full-suite fail
 Next: release gate. `cargo install --path .` + VERSIONS.md entry + manual-testing pause before publishing. Holding here until you've run a live session against the rebuilt binary and confirmed the phantom `(HEAD)` strip on `#nahq`-style older sections is gone.
 
 Marking `#dsng` done in pending — this fix is the root-cause resolution.
-<!-- agent:boundary:32696d7a -->
+<!-- agent:boundary:41c3a064 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

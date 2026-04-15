@@ -1030,7 +1030,7 @@ The reorder the pending item describes is already in tree — maintenance no lon
 2. Your new response heading get `(HEAD)` appended
 3. Blue gutter on the new `(HEAD)` heading line in your editor
 4. Single commit per preflight (no double-commit from #64mb)
-<!-- agent:boundary:9e394440 -->
+<!-- agent:boundary:f6213156 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

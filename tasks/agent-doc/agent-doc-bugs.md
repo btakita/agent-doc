@@ -192,7 +192,19 @@ What order?
 ### Re: 1, 2, 3 — opus-4-6
 
 On it. Starting step 1: `cargo build --release` in `src/agent-doc/`.
-<!-- agent:boundary:d19da62f -->
+When I try to auto-claim 
+```
+/home/brian/.cargo/bin/agent-doc start src/session-share/tasks/harness-research.md
+~/work/btakita/agent-loop/src/session-share main ⇡40 !4 ?1                                        agent-loop 11:59:38
+❯ /home/brian/.cargo/bin/agent-doc start src/session-share/tasks/harness-research.md
+Error: file not found: src/session-share/tasks/harness-research.md
+```
+
+**Step 1 done.** Release build: `agent-doc 0.32.4` at `src/agent-doc/target/release/agent-doc` (48s). `.bin/agent-doc` symlink points to it — live in tmux-spawned sessions.
+
+Test in a live session before I move to step 2 (JB plugin `Force Claim` action)? Or should I proceed straight to step 2 while you test?
+❯
+<!-- agent:boundary:60adf820 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

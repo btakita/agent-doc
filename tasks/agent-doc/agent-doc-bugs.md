@@ -545,7 +545,7 @@ Tier is `high` (Opus-class), but model attribution is `haiku`. Those two shouldn
 Want me to (a) hunt down where `ANTHROPIC_MODEL=haiku` is being set in your shell config, (b) add the tier-consistency check to `resolve_agent_model`, or both? I'd lean toward doing (a) first since it's the immediate unblocker, then (b) so this class of bug can't silently recur.
 
 Also worth adding to `tasks/agent-doc/agent-doc-bugs.md` as a tracked item — this is a real correctness bug, not just a cosmetic quirk, because the attribution is visible in archived exchanges and will mislead anyone reading the history.
-<!-- agent:boundary:32e26412 -->
+<!-- agent:boundary:98b5717d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

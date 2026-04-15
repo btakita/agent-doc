@@ -101,7 +101,12 @@ use std::path::Path;
 
 use crate::{frontmatter, project_config, resync, route, sessions};
 
-pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Option<&str>, force: bool) -> Result<()> {
+pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Option<&str>, force: bool, isolate: bool) -> Result<()> {
+    // --isolate: spawn a fresh Claude Code process in a new tmux window scoped to
+    // the nearest git repo root for this document (#8jzg).
+    if isolate {
+        return run_isolate(file);
+    }
     let _ = resync::prune(); // Clean stale entries before window resolution
 
     // Check for stale claims on this specific file and log if found
@@ -295,8 +300,18 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
     }
 
     // Register session → pane (use the pane's actual PID, not our short-lived CLI PID)
+    // Resolve cwd to the nearest git repo root for the document to avoid superproject
+    // drift when claiming submodule-hosted documents (#tw4a).
     let pane_pid = sessions::pane_pid(&pane_id).unwrap_or(std::process::id());
-    sessions::register_with_pid(&session_id, &pane_id, &file_str, pane_pid)?;
+    let resolved_cwd = crate::git::resolve_pane_cwd(file);
+    eprintln!("[claim] using cwd={} for registry entry", resolved_cwd.display());
+    sessions::register_with_pid_and_cwd(
+        &session_id,
+        &pane_id,
+        &file_str,
+        pane_pid,
+        &resolved_cwd.to_string_lossy(),
+    )?;
 
     // Focus the claimed pane (select-window + select-pane for cross-window support)
     if tmux.pane_alive(&pane_id) {
@@ -439,6 +454,60 @@ fn find_alive_project_window() -> Option<String> {
     let registry = sessions::load().ok()?;
     let cwd = std::env::current_dir().ok()?.to_string_lossy().to_string();
     find_alive_window_in_registry(&registry, &cwd, is_window_alive)
+}
+
+/// Spawn a fresh Claude Code session in a new tmux window, with cwd set to the
+/// nearest git repo root for the document. This scopes CLAUDE.md, memory, and
+/// skills to that repo rather than the superproject (#8jzg).
+fn run_isolate(file: &Path) -> Result<()> {
+    use std::process::Command;
+
+    let file = &file.canonicalize().map_err(|_| {
+        anyhow::anyhow!("file not found: {}", file.display())
+    })?;
+
+    // Resolve nearest git root for the document
+    let cwd = crate::git::resolve_pane_cwd(file);
+    let file_str = file.to_string_lossy();
+
+    eprintln!(
+        "[claim --isolate] spawning Claude in new window: cwd={} file={}",
+        cwd.display(), file_str
+    );
+
+    // Resolve the agent-doc binary path (same binary currently running)
+    let agent_doc_bin = std::env::current_exe()
+        .unwrap_or_else(|_| "agent-doc".into())
+        .to_string_lossy()
+        .to_string();
+
+    // Create a new tmux window running claude in the submodule root
+    let shell_cmd = format!(
+        "cd {} && {} start {}",
+        cwd.display(),
+        agent_doc_bin,
+        file_str,
+    );
+
+    let status = Command::new("tmux")
+        .args([
+            "new-window",
+            "-c", &cwd.to_string_lossy(),
+            "-n", "agent-doc",
+            &shell_cmd,
+        ])
+        .status()
+        .context("failed to run tmux new-window")?;
+
+    if !status.success() {
+        anyhow::bail!("tmux new-window failed (exit {:?})", status.code());
+    }
+
+    eprintln!(
+        "[claim --isolate] new window spawned with cwd={}",
+        cwd.display()
+    );
+    Ok(())
 }
 
 /// Pure logic for finding an alive window in a registry.

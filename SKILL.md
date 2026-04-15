@@ -125,6 +125,13 @@ Use `### Re:` markdown headers for response sections — NOT bold text (`**Re: .
 
 Markdown supports h1-h6. In template mode exchange components (typically under `## Exchange`), use `### Re:` (h3) for response headers. This leaves h4-h6 for sub-sections within each response.
 
+**Model attribution in `### Re:` headers:**
+When `preflight.agent_model` is set (non-null), append it to each `### Re:` header with a spaced em dash:
+```
+### Re: topic — sonnet-4-6
+```
+When `agent_model` is null or absent, use the plain format `### Re: topic` without attribution. This provides at-a-glance model tracking directly in the document history.
+
 **Streaming checkpoints (template/stream mode):**
 When responding to a document with multiple user questions/topics, flush partial responses at natural breakpoints so the user sees progress in their editor:
 
@@ -147,15 +154,21 @@ When responding to a document with multiple user questions/topics, flush partial
 
 **Preferred: wrap exchange responses in `<!-- patch:exchange -->`:** For template-mode documents, wrapping responses in `<!-- patch:exchange -->` targets the component directly and is the cleanest path. Raw (unwrapped) content goes through boundary-synthesis, which is also correct — the binary deduplicates and clears `unmatched` when synthesis occurs. Both paths are valid; explicit wrapping is preferred for clarity.
 
-### 1b. Update pending (template mode)
+### 1b. Update pending (template mode) — granular ops only
 
-If the document has an `<!-- agent:pending -->` component, **every response MUST include a `<!-- patch:pending -->` block** reflecting the current state. This is not optional — pending drift makes task lists unreliable.
+If the document has an `<!-- agent:pending -->` component, mutations go through **granular
+flags** on `agent-doc write` (`--pending-add`, `--pending-done <id>`, `--pending-edit
+"id=text"`, `--pending-clear`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`).
+Full-replace via `<!-- replace:pending -->` or `<!-- patch:pending -->` is **forbidden** in
+normal cycles — the binary rejects them.
 
-**What to update each cycle:**
-- Items completed during this response → remove or mark `([done])`
-- New items discovered → add with context
-- Active work items → move to top
-- Reprioritize based on current work direction
+Preflight lazy-backfills stable 4-char hash IDs and GFM checkboxes on items that lack them.
+If preflight returns `pending_reordered: true`, skip reorder this cycle — respect the user's
+expressed priority for at least one cycle.
+
+**Full contract** (item shape, all flags, escape hatch, multi-flag example):
+[runbooks/pending-ops.md](runbooks/pending-ops.md). See also
+`src/agent-doc/specs/pending-system.md` for the spec.
 
 ### 2. Write back to the document
 
@@ -267,6 +280,7 @@ When the user requests one of these operations, read and follow the linked runbo
 
 - `compact exchange` — [runbooks/compact-exchange.md](runbooks/compact-exchange.md)
 - `transfer` / `extract` — [runbooks/transfer-extract.md](runbooks/transfer-extract.md)
+- pending mutations (granular ops contract) — [runbooks/pending-ops.md](runbooks/pending-ops.md)
 
 ## Success Criteria
 

@@ -83,6 +83,7 @@ mod rename;
 mod reset;
 mod resync;
 mod route;
+mod session_check;
 mod session_cmd;
 mod sessions;
 mod skill;
@@ -305,6 +306,11 @@ enum Commands {
         /// Force overwrite tmux_session even if already set to a different session
         #[arg(long)]
         force: bool,
+        /// Spawn a fresh Claude Code session in a new tmux window scoped to the
+        /// document's nearest git repo root (loads CLAUDE.md, memory, skills for
+        /// that repo rather than the superproject)
+        #[arg(long)]
+        isolate: bool,
     },
     /// Focus the tmux pane for a session document
     Focus {
@@ -440,9 +446,10 @@ enum Commands {
         /// Errors on `[ ]` or `[x]` items — the source must be gated.
         #[arg(long = "pending-ungate")]
         pending_ungate: Vec<String>,
-        /// Allow `patch:pending` blocks in stdin (escape hatch, hidden).
-        #[arg(long = "allow-patch-pending", hide = true)]
-        allow_patch_pending: bool,
+        /// Allow `replace:pending` blocks in stdin (escape hatch, hidden).
+        /// `--allow-patch-pending` is accepted as a deprecated alias (#25ag).
+        #[arg(long = "allow-replace-pending", alias = "allow-patch-pending", hide = true)]
+        allow_replace_pending: bool,
     },
     /// Stream agent output to document in real-time (CRDT merge)
     Stream {
@@ -473,6 +480,11 @@ enum Commands {
     },
     /// Run all pre-agent steps (recover, commit, claims, diff, document HEAD) and output JSON
     Preflight {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Check end-of-cycle write invariant — nonzero exit if last ops.log event is `preflight_diff_start`
+    SessionCheck {
         /// Path to the session document
         file: PathBuf,
     },
@@ -978,7 +990,7 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Commit { file } => git::commit(&file),
         Commands::Dedupe { file } => dedupe::run(&file),
-        Commands::Claim { file, position, pane, window, force } => claim::run(&file, position.as_deref(), pane.as_deref(), window.as_deref(), force),
+        Commands::Claim { file, position, pane, window, force, isolate } => claim::run(&file, position.as_deref(), pane.as_deref(), window.as_deref(), force, isolate),
         Commands::Focus { file, pane } => focus::run(&file, pane.as_deref()),
         Commands::Layout { files, split, pane, window } => {
             let split = match split.as_str() {
@@ -1062,7 +1074,7 @@ fn main() -> anyhow::Result<()> {
             PluginAction::Update { editor } => plugin::update(&editor),
             PluginAction::List => plugin::list(),
         },
-        Commands::Write { file, baseline_file, template: is_template, stream: is_stream, ipc: is_ipc, force_disk, origin, commit: do_commit, pending_add, pending_done, pending_edit, pending_clear, pending_reorder, pending_gate, pending_ungate, allow_patch_pending } => {
+        Commands::Write { file, baseline_file, template: is_template, stream: is_stream, ipc: is_ipc, force_disk, origin, commit: do_commit, pending_add, pending_done, pending_edit, pending_clear, pending_reorder, pending_gate, pending_ungate, allow_replace_pending } => {
             // Log write origin for tracing
             if let Some(ref orig) = origin {
                 crate::ops_log::log_op(&file, &format!("write_origin file={} origin={}", file.display(), orig));
@@ -1113,13 +1125,24 @@ fn main() -> anyhow::Result<()> {
                 }
             }
 
-            // Enforcement: reject `patch:pending` blocks in stdin unless the
-            // caller explicitly opts in. Default is reject (Phase 3 inversion);
-            // the env var below is the escape hatch shared with library callers.
-            // The skill MUST use the granular flags above.
-            if allow_patch_pending {
+            // Enforcement: reject `replace:pending` (and the deprecated
+            // `patch:pending`) blocks in stdin unless the caller explicitly
+            // opts in. Default is reject (Phase 3 inversion); the env var
+            // below is the escape hatch shared with library callers. The
+            // skill MUST use the granular flags above.
+            //
+            // `AGENT_DOC_ALLOW_REPLACE_PENDING` is the canonical env var.
+            // `AGENT_DOC_ALLOW_PATCH_PENDING` is accepted for one release as
+            // a deprecated alias (#25ag migration).
+            if allow_replace_pending {
                 // SAFETY: single-threaded at this point in the CLI entrypoint.
-                unsafe { std::env::set_var("AGENT_DOC_ALLOW_PATCH_PENDING", "1"); }
+                unsafe {
+                    std::env::set_var("AGENT_DOC_ALLOW_REPLACE_PENDING", "1");
+                    // Also set the legacy var so any library-layer code that
+                    // still checks only the old name keeps working during the
+                    // dual-accept window.
+                    std::env::set_var("AGENT_DOC_ALLOW_PATCH_PENDING", "1");
+                }
             }
 
             let baseline = baseline_file
@@ -1175,6 +1198,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Commands::Preflight { file } => preflight::run(&file),
+        Commands::SessionCheck { file } => session_check::run(&file),
         Commands::Read { file, component } => read::run(&file, component.as_deref()),
         Commands::Compact {
             file,

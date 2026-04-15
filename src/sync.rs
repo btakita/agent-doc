@@ -246,12 +246,24 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
                     continue;
                 }
 
+                sync_log(&format!(
+                    "stash_consolidate_action=join-pane src={} dst={} primary_stash={}",
+                    pane, target, primary_id
+                ));
                 match PaneMoveOp::new(tmux, pane, &target).join("-dv") {
                     Ok(()) => {
                         eprintln!("[repair] joined pane {} → stash {}", pane, primary_id);
+                        sync_log(&format!(
+                            "stash_consolidate_result=join-pane ok=true src={} dst={}",
+                            pane, target
+                        ));
                     }
                     Err(e) => {
                         eprintln!("[repair] join-pane {} → {} failed: {}, leaving in place", pane, target, e);
+                        sync_log(&format!(
+                            "stash_consolidate_result=join-pane ok=false src={} dst={} err={}",
+                            pane, target, e
+                        ));
                     }
                 }
             }
@@ -331,19 +343,37 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
                 if window_0_exists {
                     // Window 0 is occupied — swap to preserve both windows
                     eprintln!("[repair] swapping {}:{} with window 0", idx, name);
-                    let _ = tmux.raw_cmd(&[
+                    sync_log(&format!(
+                        "repair_action=swap-window src={}:{} dst={}:0 window_name={}",
+                        session_name, idx, session_name, name
+                    ));
+                    let result = tmux.raw_cmd(&[
                         "swap-window",
                         "-s", &format!("{}:{}", session_name, idx),
                         "-t", &format!("{}:0", session_name),
                     ]);
+                    sync_log(&format!(
+                        "repair_result=swap-window src_idx={} dst_idx=0 ok={}",
+                        idx, result.is_ok()
+                    ));
+                    let _ = result;
                 } else {
                     // Window 0 is free — move directly
                     eprintln!("[repair] moving {}:{} to index 0", idx, name);
-                    let _ = tmux.raw_cmd(&[
+                    sync_log(&format!(
+                        "repair_action=move-window src={}:{} dst={}:0 window_name={}",
+                        session_name, idx, session_name, name
+                    ));
+                    let result = tmux.raw_cmd(&[
                         "move-window",
                         "-s", &format!("{}:{}", session_name, idx),
                         "-t", &format!("{}:0", session_name),
                     ]);
+                    sync_log(&format!(
+                        "repair_result=move-window src_idx={} dst_idx=0 ok={}",
+                        idx, result.is_ok()
+                    ));
+                    let _ = result;
                 }
                 break;
             }
@@ -752,22 +782,51 @@ fn run_with_options(
                                 "[sync] pane {} for {} is in stash window '{}', rescuing",
                                 pane, file_path.display(), win_name
                             );
+                            sync_log(&format!(
+                                "rescue_attempt pane={} file={} stash_window={} session={}",
+                                pane, file_path.display(), win_name, target_sess
+                            ));
                             // Rescue: swap the stashed pane into the agent-doc window
                             if let Some(target_win) = window {
                                 let agent_doc_window = format!("{}:agent-doc", target_win);
                                 let target_panes = tmux.list_window_panes(&agent_doc_window).unwrap_or_default();
                                 if let Some(target) = target_panes.first() {
                                     let swap_session = target_sess.to_string();
+                                    sync_log(&format!(
+                                        "rescue_action=swap-pane src={} dst={} agent_doc_window={}",
+                                        pane, target, agent_doc_window
+                                    ));
                                     match sessions::swap_pane_guarded(tmux, pane, target, &swap_session) {
                                         Ok(()) => {
                                             eprintln!("[sync] rescued pane {} via swap-pane", pane);
+                                            sync_log(&format!(
+                                                "rescue_result=swap-pane ok=true pane={} target={}",
+                                                pane, target
+                                            ));
                                             return true;
                                         }
                                         Err(e) => {
                                             eprintln!("[sync] swap-pane rescue failed ({}), trying join-pane", e);
+                                            sync_log(&format!(
+                                                "rescue_result=swap-pane ok=false pane={} target={} err={}",
+                                                pane, target, e
+                                            ));
+                                            sync_log(&format!(
+                                                "rescue_action=join-pane src={} dst={}",
+                                                pane, target
+                                            ));
                                             if PaneMoveOp::new(tmux, pane, target).join("-dh").is_ok() {
                                                 eprintln!("[sync] rescued pane {} via join-pane", pane);
+                                                sync_log(&format!(
+                                                    "rescue_result=join-pane ok=true pane={} target={}",
+                                                    pane, target
+                                                ));
                                                 return true;
+                                            } else {
+                                                sync_log(&format!(
+                                                    "rescue_result=join-pane ok=false pane={} target={}",
+                                                    pane, target
+                                                ));
                                             }
                                         }
                                     }

@@ -95,7 +95,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
 
-use crate::{config, diff, frontmatter, git, recover, sessions, snapshot};
+use crate::{config, diff, frontmatter, git, recover, resync, sessions, snapshot};
 
 /// A change detected in a related document since the last cycle.
 #[derive(Serialize)]
@@ -194,10 +194,111 @@ pub struct PreflightOutput {
     /// JSON to keep the common case quiet.
     #[serde(default, skip_serializing_if = "is_zero_usize")]
     pub pending_gated_count: usize,
+    /// Short model name for attribution in `### Re:` response headers.
+    ///
+    /// Resolved from (in priority order): `ANTHROPIC_MODEL` env var → frontmatter
+    /// `model` field. Full model IDs are shortened to their human-readable suffix
+    /// (e.g. `claude-sonnet-4-6` → `sonnet-4-6`). `None` when no model is known.
+    /// The skill appends this to `### Re: topic` as `### Re: topic — <model>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_model: Option<String>,
 }
 
 fn is_zero_usize(n: &usize) -> bool {
     *n == 0
+}
+
+/// Extract a human-readable short model name from a full model ID.
+///
+/// Strips well-known provider prefixes so the response header stays compact:
+/// - `claude-sonnet-4-6` → `sonnet-4-6`
+/// - `claude-opus-4` → `opus-4`
+/// - `claude-haiku-4-5` → `haiku-4-5`
+/// - Short names (no prefix) are returned as-is.
+fn short_model_name(model_id: &str) -> &str {
+    // Strip leading "claude-" prefix if present
+    if let Some(suffix) = model_id.strip_prefix("claude-") {
+        return suffix;
+    }
+    model_id
+}
+
+/// Resolve the agent model short name for attribution in `### Re:` headers.
+///
+/// Priority: `ANTHROPIC_MODEL` env var → frontmatter `model` field.
+/// Full model IDs are shortened via `short_model_name`.
+fn resolve_agent_model(frontmatter_model: Option<&str>) -> Option<String> {
+    // Prefer the env var: it reflects what Claude Code actually runs with
+    if let Ok(env_model) = std::env::var("ANTHROPIC_MODEL") {
+        let s = env_model.trim().to_string();
+        if !s.is_empty() {
+            return Some(short_model_name(&s).to_string());
+        }
+    }
+    // Fall back to frontmatter `model` field
+    frontmatter_model.map(|m| short_model_name(m).to_string())
+}
+
+/// Trigger an automatic `resync --fix` when session-drift has been detected
+/// on two consecutive preflights.
+///
+/// The drift counter lives at `.agent-doc/state/drift.count`. Each call either
+/// increments it (drift present) or deletes it (drift absent). When the counter
+/// reaches >= 2 we invoke `resync::run(true, None)` and reset it to 0 so we do
+/// not loop on every cycle.
+fn maybe_auto_resync_on_drift(file: &std::path::Path, layout_issues: &[String]) {
+    let has_drift = layout_issues
+        .iter()
+        .any(|i| i.starts_with("session drift:"));
+
+    let Ok(canonical) = file.canonicalize() else { return; };
+    let Some(project_root) = snapshot::find_project_root(&canonical) else { return; };
+    let state_dir = project_root.join(".agent-doc/state");
+    let counter_path = state_dir.join("drift.count");
+
+    if !has_drift {
+        // Drift cleared — reset the counter.
+        if counter_path.exists() {
+            let _ = std::fs::remove_file(&counter_path);
+        }
+        return;
+    }
+
+    let current: u32 = std::fs::read_to_string(&counter_path)
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0);
+    let next = current + 1;
+
+    if let Err(e) = std::fs::create_dir_all(&state_dir) {
+        eprintln!("[preflight] drift state dir create failed: {}", e);
+        return;
+    }
+    if let Err(e) = std::fs::write(&counter_path, next.to_string()) {
+        eprintln!("[preflight] drift counter write failed: {}", e);
+    }
+
+    if next >= 2 {
+        eprintln!(
+            "[preflight] session drift detected {}x consecutively — running `resync --fix`",
+            next
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!("auto_resync_on_drift consecutive={}", next),
+        );
+        if let Err(e) = resync::run(true, None) {
+            eprintln!("[preflight] auto-resync failed: {}", e);
+        } else {
+            // Reset after successful fix — next cycle re-evaluates.
+            let _ = std::fs::remove_file(&counter_path);
+        }
+    } else {
+        eprintln!(
+            "[preflight] session drift detected (count={}) — will auto-resync on next detection",
+            next
+        );
+    }
 }
 
 /// Check tmux layout health for the current session.
@@ -376,12 +477,31 @@ pub fn run(file: &Path) -> Result<()> {
         }
     }
 
+    // Step 0-pre: Invariant check (#a011) — if the last ops.log event was a
+    // `preflight_diff_start` without any subsequent write/commit event, the
+    // previous cycle was interrupted (crash, killed agent, IPC timeout that
+    // never recovered). Warn loudly so the operator can investigate.
+    if let Ok(Some(last)) = crate::session_check::last_ops_event(file)
+        && last.starts_with(crate::session_check::PREFLIGHT_START_EVENT)
+    {
+        eprintln!(
+            "[preflight] WARNING: previous cycle ended at `preflight_diff_start` without a write — interrupted cycle detected"
+        );
+        crate::ops_log::log_op(file, "interrupted_cycle_detected file=");
+    }
+
     // Step 0: Check tmux layout health.
     eprintln!("[preflight] step 0: layout check");
     let layout_issues = check_layout();
     for issue in &layout_issues {
         eprintln!("[preflight] layout issue: {}", issue);
     }
+
+    // Step 0b (#a014): Session drift auto-resync — when drift is detected on
+    // consecutive preflights, auto-run `resync --fix` to clean the registry.
+    // State lives in `.agent-doc/state/drift.count` so we only auto-fix after
+    // the second consecutive detection (one false positive is tolerated).
+    maybe_auto_resync_on_drift(file, &layout_issues);
 
     // Step 1: Recover orphaned pending responses.
     eprintln!("[preflight] step 1: recover");
@@ -395,6 +515,22 @@ pub fn run(file: &Path) -> Result<()> {
     if let Err(e) = snapshot::ensure_initialized(file) {
         eprintln!("[preflight] warning: auto-init failed: {}", e);
     }
+
+    // Step 1c: Pending component maintenance — lazy backfill, reap, archive, and
+    // reorder detection. MUST run BEFORE step 2 commit so the single step-2
+    // commit bundles the pending mutations with the previous-cycle response,
+    // producing exactly one HEAD advance per preflight. Running after step 2
+    // caused #64mb (double commit_staging: step 2 committed, then maintenance
+    // mutated and committed again).
+    //
+    // Maintenance applies its mutations to BOTH the working tree file AND the
+    // snapshot (surgically, via component replace), so the upcoming step-2
+    // commit which stages from snapshot picks them up atomically.
+    let (pending_reordered, pending_gated_count) =
+        run_pending_maintenance(file).unwrap_or_else(|e| {
+            eprintln!("[preflight] pending maintenance warning: {}", e);
+            (false, 0)
+        });
 
     // Step 2: Commit previous cycle.
     eprintln!("[preflight] step 2: commit");
@@ -505,15 +641,6 @@ pub fn run(file: &Path) -> Result<()> {
             }
         }
     }
-
-    // Step 2e: Pending component maintenance — lazy backfill, reap, and reorder detection.
-    // All three are idempotent: they only write when something actually changes, and the
-    // subsequent diff step picks up any changes via the snapshot comparison.
-    let (pending_reordered, pending_gated_count) =
-        run_pending_maintenance(file).unwrap_or_else(|e| {
-            eprintln!("[preflight] pending maintenance warning: {}", e);
-            (false, 0)
-        });
 
     // Step 3: Read and truncate the claims log.
     eprintln!("[preflight] step 3: claims");
@@ -629,16 +756,16 @@ pub fn run(file: &Path) -> Result<()> {
     // Step 4e: Resolve model tier sources and compose effective_tier.
     // Sources (highest precedence first): inline /model command, <!-- agent:model --> component,
     // agent_doc_model_tier frontmatter, diff heuristic.
-    let (frontmatter_tier, component_tier_value, frontmatter_env) = match std::fs::read_to_string(file) {
+    let (frontmatter_tier, component_tier_value, frontmatter_env, frontmatter_model) = match std::fs::read_to_string(file) {
         Ok(content) => {
-            let (fm_tier, env_map) = frontmatter::parse(&content)
+            let (fm_tier, env_map, fm_model) = frontmatter::parse(&content)
                 .ok()
-                .map(|(fm, _)| (fm.model_tier, fm.env))
+                .map(|(fm, _)| (fm.model_tier, fm.env, fm.model))
                 .unwrap_or_default();
             let comp_value = agent_doc::model_tier::extract_model_component(&content);
-            (fm_tier, comp_value, env_map)
+            (fm_tier, comp_value, env_map, fm_model)
         }
-        Err(_) => (None, None, Default::default()),
+        Err(_) => (None, None, Default::default(), None),
     };
     let component_tier = component_tier_value.as_deref().and_then(|v| {
         agent_doc::model_tier::component_value_to_tier(v, &harness, &global_config.model)
@@ -681,6 +808,7 @@ pub fn run(file: &Path) -> Result<()> {
         eprintln!("[preflight] found {} pending callback(s)", pending_callbacks.len());
     }
 
+    let agent_model = resolve_agent_model(frontmatter_model.as_deref());
     let output = PreflightOutput {
         layout_issues,
         recovered,
@@ -704,6 +832,7 @@ pub fn run(file: &Path) -> Result<()> {
         env: frontmatter_env,
         pending_reordered,
         pending_gated_count,
+        agent_model,
     };
 
     let json = serde_json::to_string_pretty(&output)
@@ -751,22 +880,58 @@ fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
         mutated = true;
     }
 
-    // 2. Reap `[x]` items.
-    let (after_reap, removed) = crate::pending::reap(&current_body);
-    if !removed.is_empty() {
-        eprintln!("[preflight] pending: reaped {} item(s): {}", removed.len(), removed.join(", "));
+    // 2. Reap `[x]` items. Collect full items (not just ids) so we can
+    //    archive them to `agent:pending-done` in step 2b below.
+    let (after_reap, removed_items) = crate::pending::reap_with_items(&current_body);
+    if !removed_items.is_empty() {
+        let removed_ids: Vec<String> =
+            removed_items.iter().map(|i| i.id.clone()).collect();
+        eprintln!(
+            "[preflight] pending: reaped {} item(s): {}",
+            removed_items.len(),
+            removed_ids.join(", ")
+        );
         current_body = after_reap;
         mutated = true;
     }
 
-    // 3. Persist and commit any mutations.
+    // 3. Persist any mutations to BOTH the working tree file and the snapshot.
+    //    Writing to both (surgically, via component replace) keeps the two in
+    //    sync so the upcoming step-2 `git::commit` stages the reaped+archived
+    //    snapshot in a single commit. We no longer call `git::commit` here —
+    //    see #64mb: calling commit inside maintenance produced a second commit
+    //    per preflight whenever anything mutated.
     if mutated {
-        let new_content = comp.replace_content(&content, &current_body);
-        std::fs::write(file, &new_content)
+        // 3a. Working tree — preserves user edits outside the pending region.
+        let mut new_file_content = comp.replace_content(&content, &current_body);
+        if !removed_items.is_empty()
+            && let Some(archived) =
+                archive_pending_done(&new_file_content, &removed_items)
+        {
+            new_file_content = archived;
+        }
+        std::fs::write(file, &new_file_content)
             .with_context(|| format!("failed to write pending updates to {}", file.display()))?;
-        // Best-effort commit so the boundary check later sees a clean tree.
-        if let Err(e) = git::commit(file) {
-            eprintln!("[preflight] pending commit warning: {}", e);
+
+        // 3b. Snapshot — surgical replace of the pending (and optionally
+        //     pending-done) component in the snapshot content. User edits
+        //     elsewhere don't exist in the snapshot, so there's nothing to
+        //     preserve beyond the existing snapshot body.
+        if let Ok(Some(snap_content)) = snapshot::load(file) {
+            let snap_comps = crate::component::parse(&snap_content).ok();
+            if let Some(snap_pending) = snap_comps
+                .and_then(|cs| cs.into_iter().find(|c| c.name == "pending"))
+            {
+                let mut new_snap = snap_pending.replace_content(&snap_content, &current_body);
+                if !removed_items.is_empty()
+                    && let Some(archived) = archive_pending_done(&new_snap, &removed_items)
+                {
+                    new_snap = archived;
+                }
+                if let Err(e) = snapshot::save(file, &new_snap) {
+                    eprintln!("[preflight] pending: snapshot sync warning: {}", e);
+                }
+            }
         }
     }
 
@@ -800,6 +965,50 @@ fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
     }
 
     Ok((reordered, gated_count))
+}
+
+/// Archive reaped pending items to `agent:pending-done` if the component
+/// exists. Returns `Some(new_content)` when archival happened, `None` when
+/// the archive component is absent (silent no-op per spec §3 step 3).
+///
+/// Entry format: `- YYYY-MM-DD [#id] text` — ISO date prefix for chronology,
+/// hash preserved so the archive is grep-compatible with the live list, text
+/// verbatim from the reaped item so context survives.
+///
+/// New entries are appended AFTER any existing archive body. The component
+/// is always rendered with a trailing blank line so successive turns don't
+/// pack entries onto one line.
+fn archive_pending_done(
+    content: &str,
+    removed: &[crate::pending::PendingItem],
+) -> Option<String> {
+    if removed.is_empty() {
+        return None;
+    }
+    let components = crate::component::parse(content).ok()?;
+    let archive = components.into_iter().find(|c| c.name == "pending-done")?;
+    let existing_body = &content[archive.open_end..archive.close_start];
+
+    // Use the `date` command so we stay on agent-doc's no-chrono policy
+    // (see git.rs::chrono_timestamp). Fallback to "unknown-date" if the
+    // command fails — archival still succeeds with a legible placeholder.
+    let today = std::process::Command::new("date")
+        .args(["+%Y-%m-%d"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown-date".to_string());
+
+    let mut new_body = existing_body.to_string();
+    if !new_body.is_empty() && !new_body.ends_with('\n') {
+        new_body.push('\n');
+    }
+    for item in removed {
+        new_body.push_str(&format!("- {} [#{}] {}\n", today, item.id, item.text));
+    }
+
+    Some(archive.replace_content(content, &new_body))
 }
 
 /// Read the claims log and truncate it. Returns lines as a `Vec<String>`.

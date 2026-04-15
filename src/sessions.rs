@@ -224,6 +224,14 @@ pub fn register_with_pid(session_id: &str, pane_id: &str, file: &str, pid: u32) 
     register_full(session_id, pane_id, file, pid, &window)
 }
 
+/// Like `register_with_pid` but accepts an explicit `cwd` override.
+/// Used by `claim` to record the document's nearest git repo root as cwd,
+/// avoiding superproject drift when claiming submodule-hosted documents.
+pub fn register_with_pid_and_cwd(session_id: &str, pane_id: &str, file: &str, pid: u32, cwd: &str) -> Result<()> {
+    let window = pane_window(pane_id).unwrap_or_default();
+    register_full_with_cwd(session_id, pane_id, file, pid, &window, cwd)
+}
+
 pub fn register_full(
     session_id: &str,
     pane_id: &str,
@@ -258,6 +266,47 @@ pub fn register_full(
             pane: pane_id.to_string(),
             pid,
             cwd,
+            started,
+            file: file.to_string(),
+            window: window.to_string(),
+        },
+    );
+    save(&registry)
+}
+
+/// Like `register_full` but uses the provided `cwd` instead of querying the process cwd.
+pub fn register_full_with_cwd(
+    session_id: &str,
+    pane_id: &str,
+    file: &str,
+    pid: u32,
+    window: &str,
+    cwd: &str,
+) -> Result<()> {
+    let _lock = RegistryLock::acquire(&registry_path())?;
+    let mut registry = load()?;
+    let started = chrono_now();
+
+    // Enforce single session per pane: remove stale entries pointing to same pane
+    let stale_keys: Vec<String> = registry
+        .iter()
+        .filter(|(k, e)| e.pane == pane_id && k.as_str() != session_id)
+        .map(|(k, _)| k.clone())
+        .collect();
+    for key in &stale_keys {
+        eprintln!(
+            "[registry] removing stale session {} (was pane {})",
+            key, pane_id
+        );
+        registry.remove(key);
+    }
+
+    registry.insert(
+        session_id.to_string(),
+        SessionEntry {
+            pane: pane_id.to_string(),
+            pid,
+            cwd: cwd.to_string(),
             started,
             file: file.to_string(),
             window: window.to_string(),

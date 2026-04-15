@@ -71,7 +71,7 @@ Practical implications:
 - **Gemini `.env`** — it's mounted into the containers, so the key is only reachable from inside the stack. Don't print it.
 
 Want me to spin up the stack now and poke at the xlsx column headers + verify the Temporal boilerplate, or hold off until you give the go-ahead?
-<!-- agent:boundary:04cb2f02 -->
+<!-- agent:boundary:a5ad4285 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

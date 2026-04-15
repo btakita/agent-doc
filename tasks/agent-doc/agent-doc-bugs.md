@@ -921,7 +921,7 @@ The pending item's original description ("concurrent preflights racing step 2 vs
 **Side-note on the `#dsng` reap trigger:** that's precisely why this cycle showed two commits — prior cycle was the strip-markers fix landing, and this cycle reaped the `[x] #dsng` you marked done. Every reap/backfill cycle will produce two commits until this lands.
 
 **Next:** Want me to implement Option A?
-<!-- agent:boundary:a68cb3fc -->
+<!-- agent:boundary:7baa10fb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

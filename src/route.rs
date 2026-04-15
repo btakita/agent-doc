@@ -574,6 +574,28 @@ pub fn auto_start(
     auto_start_ext(tmux, file, session_id, file_path, context_session, false, false)
 }
 
+/// Rewrite `file_path` to be relative to `cwd` so `agent-doc start <path>` resolves
+/// correctly when the spawned pane's cwd is narrowed to a submodule root.
+///
+/// When `resolve_pane_cwd` narrows to a submodule (e.g. `.../src/session-share`),
+/// the caller's super-root-relative `file_path` (e.g. `src/session-share/tasks/foo.md`)
+/// does not resolve from inside that cwd. We canonicalize both sides, strip the cwd
+/// prefix, and return the cwd-relative remainder. On any failure (canonicalize error,
+/// file not under cwd) we fall back to the original `file_path` so non-submodule docs
+/// and missing-file cases behave exactly as before.
+pub(crate) fn rewrite_start_path(file: &Path, cwd: &Path, original: &str) -> String {
+    let Ok(abs_file) = std::fs::canonicalize(file) else {
+        return original.to_string();
+    };
+    let Ok(abs_cwd) = std::fs::canonicalize(cwd) else {
+        return original.to_string();
+    };
+    match abs_file.strip_prefix(&abs_cwd) {
+        Ok(rel) => rel.to_string_lossy().into_owned(),
+        Err(_) => original.to_string(),
+    }
+}
+
 /// **Provisioning** — create a new tmux pane and start Claude asynchronously.
 ///
 /// Called by sync during Reconciliation when a file has a session UUID but no
@@ -641,7 +663,11 @@ fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: 
         let _ = std::fs::write(&lock_path, "");
     }
 
-    let cwd = std::env::current_dir().context("failed to get current directory")?;
+    // Use the document's own submodule root as the pane cwd when applicable,
+    // so `/agent-doc` invocations on submodule-hosted documents spawn panes
+    // inside the correct submodule (e.g. `src/session-share`) instead of the
+    // agent-loop super root where the command happened to be invoked from.
+    let cwd = crate::git::resolve_pane_cwd(file);
 
     // Resolve the agent-doc binary path (same binary that's currently running)
     let agent_doc_bin = std::env::current_exe()
@@ -728,8 +754,16 @@ fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: 
         eprintln!("[route] warning: failed to focus pane {}: {}", new_pane, e);
     }
 
+    // Rewrite file_path to be relative to the spawned pane's cwd.
+    // `cwd` may be narrowed to a submodule root (see `resolve_pane_cwd`), in which
+    // case a super-root-relative `file_path` like `src/session-share/tasks/foo.md`
+    // will not resolve when `agent-doc start` runs from inside the submodule.
+    // Fallback: if canonicalize fails or the file is not under `cwd`, use the
+    // original `file_path` (preserves behavior for non-submodule docs).
+    let start_path = rewrite_start_path(file, &cwd, file_path);
+
     // Start agent-doc start in the new pane
-    let start_cmd = format!("{} start {}", agent_doc_bin, file_path);
+    let start_cmd = format!("{} start {}", agent_doc_bin, start_path);
     tmux.send_keys(&new_pane, &start_cmd)?;
 
     eprintln!(
@@ -746,8 +780,9 @@ fn auto_start_in_session(tmux: &Tmux, file: &Path, session_id: &str, file_path: 
         eprintln!("[route] Waiting for Claude to initialize...");
         if wait_for_claude_ready(tmux, &new_pane, std::time::Duration::from_secs(30)) {
             eprintln!("[route] Claude is ready, sending /agent-doc command");
-            // send_command now includes Enter verification + retry
-            send_command(tmux, &new_pane, file_path)?;
+            // send_command now includes Enter verification + retry.
+            // Use `start_path` (cwd-relative) for the same reason as `start_cmd`.
+            send_command(tmux, &new_pane, &start_path)?;
         } else {
             eprintln!(
                 "[route] Timed out waiting for Claude. Run `agent-doc route {}` to retry.",
@@ -901,6 +936,64 @@ fn await_idle(file: &Path, debounce: Duration) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- rewrite_start_path tests ---
+
+    #[test]
+    fn rewrite_start_path_narrows_to_submodule_relative() {
+        // Simulate: super root with a `src/sub` submodule holding `tasks/foo.md`.
+        // `cwd` = super/src/sub (narrowed by resolve_pane_cwd).
+        // `file_path` = "src/sub/tasks/foo.md" (super-root-relative, as passed by caller).
+        // Expected: rewritten to "tasks/foo.md".
+        let tmp = tempfile::TempDir::new().unwrap();
+        let super_root = tmp.path();
+        let sub_root = super_root.join("src").join("sub");
+        let tasks_dir = sub_root.join("tasks");
+        std::fs::create_dir_all(&tasks_dir).unwrap();
+        let doc = tasks_dir.join("foo.md");
+        std::fs::write(&doc, "# foo\n").unwrap();
+
+        let original = "src/sub/tasks/foo.md";
+        let rewritten = rewrite_start_path(&doc, &sub_root, original);
+        assert_eq!(rewritten, format!("tasks{}foo.md", std::path::MAIN_SEPARATOR));
+    }
+
+    #[test]
+    fn rewrite_start_path_no_op_when_file_under_cwd_with_same_prefix() {
+        // Non-submodule case: cwd = super root, file is already super-root-relative.
+        // The rewrite still works — it just returns the same relative path.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let doc = root.join("plan.md");
+        std::fs::write(&doc, "# plan\n").unwrap();
+
+        let original = "plan.md";
+        let rewritten = rewrite_start_path(&doc, root, original);
+        assert_eq!(rewritten, "plan.md");
+    }
+
+    #[test]
+    fn rewrite_start_path_falls_back_when_canonicalize_fails() {
+        // Non-existent file path → canonicalize fails → fallback to original.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ghost = tmp.path().join("does-not-exist.md");
+        let original = "does-not-exist.md";
+        let rewritten = rewrite_start_path(&ghost, tmp.path(), original);
+        assert_eq!(rewritten, original);
+    }
+
+    #[test]
+    fn rewrite_start_path_falls_back_when_file_not_under_cwd() {
+        // File exists but lives outside the given cwd → strip_prefix fails → fallback.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let outside = tmp.path().join("outside.md");
+        std::fs::write(&outside, "# outside\n").unwrap();
+        let unrelated_cwd = tempfile::TempDir::new().unwrap();
+
+        let original = "outside.md";
+        let rewritten = rewrite_start_path(&outside, unrelated_cwd.path(), original);
+        assert_eq!(rewritten, original);
+    }
 
     // --- Split direction tests ---
 

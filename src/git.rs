@@ -4,11 +4,13 @@
 //! - `commit(file)`: stages and commits a session document with an auto-generated
 //!   `agent-doc(<stem>): <timestamp>` message, skipping hooks (`--no-verify`).  Relative paths are
 //!   resolved against the git superproject root first, then the toplevel.  When a snapshot exists,
-//!   the snapshot content (with ` (HEAD)` markers added to the shallowest new headings) is staged
-//!   via `git hash-object + update-index` so the working tree is never touched; user keystrokes
-//!   typed after the snapshot was taken remain uncommitted (green gutter).  Falls back to
-//!   `git add -f` when hash-object fails.  After a successful commit, strips `(HEAD)` from the
-//!   snapshot, repositions the boundary marker in the snapshot, and fires an IPC reposition signal
+//!   a CLEAN copy of the snapshot (with all ` (HEAD)` heading suffixes stripped via
+//!   `strip_head_markers`) is staged via `git hash-object + update-index` so the working tree is
+//!   never touched; user keystrokes typed after the snapshot was taken remain uncommitted (green
+//!   gutter), and the working tree's current-boundary `### Re: ... (HEAD)` heading shows as a
+//!   single modified line (blue gutter) automatically since the blob has no `(HEAD)` suffix.
+//!   Falls back to `git add -f` when hash-object fails.  After a successful commit, repositions
+//!   the boundary marker in the snapshot and fires an IPC reposition signal
 //!   (`try_ipc_reposition_boundary`) to the IDE plugin so the working tree boundary is updated
 //!   via the plugin's Document API.
 //! - `show_head(file)`: returns the file content from `HEAD` as `Some(String)`, or `None` if not
@@ -19,12 +21,11 @@
 //!   already exists.
 //! - `squash_session(file)`: soft-resets to before the first `agent-doc` commit touching the file
 //!   and recommits as a single squashed commit.
-//! - `add_head_marker` (private): compares the snapshot against `HEAD` to identify newly added
-//!   headings; marks only the shallowest (root-level) new headings with ` (HEAD)` so the IDE shows
-//!   a single modified line per response section as a visual boundary.  Uses occurrence counting
-//!   to correctly handle duplicate heading text across exchange cycles (e.g., multiple
-//!   `### Re: Implementation complete` from different responses).  Falls back to bold-text
-//!   pseudo-headers (`**...**` on its own line) when no markdown headings are found.
+//! - `strip_head_markers` (private): strips ` (HEAD)` suffix from markdown headings and bold-text
+//!   pseudo-headers in the commit-staging path.  `(HEAD)` is a working-tree-only marker and
+//!   must never appear in the committed blob — with a clean blob, the working tree's current
+//!   boundary heading shows as a single modified line automatically (blue gutter) and moving
+//!   the boundary across cycles cannot produce phantom `(HEAD)` diffs on prior-cycle headings.
 //!
 //! ## Agentic Contracts
 //! - `commit` never modifies the working tree file directly; all staging is done through the git
@@ -40,9 +41,8 @@
 //! - strip_head_markers_from_headings: heading lines with ` (HEAD)` suffix → suffix removed; non-heading lines unchanged
 //! - strip_head_markers_preserves_non_heading_lines: body text containing "(HEAD)" → preserved verbatim
 //! - strip_head_markers_bold_text: bold-text pseudo-header `**Re: Something** (HEAD)` → suffix removed
-//! - add_head_marker_strips_old_markers: old `(HEAD)` heading stripped; new heading acquires `(HEAD)`
-//! - add_head_marker_bold_text_fallback: no markdown headings → bold-text pseudo-header gets `(HEAD)`; real heading present → bold text skipped
-//! - add_head_marker_duplicate_heading_text: duplicate heading text across exchange cycles → last occurrence gets `(HEAD)` via occurrence counting
+//! - strip_head_markers_ignores_fenced_code_hash: `(HEAD)` inside fenced code block preserved verbatim
+//! - commit_staged_blob_has_no_head_markers: regression for #dsng — commit staging strips `(HEAD)` from the blob so prior-cycle headings don't take phantom diffs when the boundary moves
 //! - reposition_boundary_to_end_basic: stale boundary before user prompt → boundary repositioned after prompt
 //! - reposition_boundary_no_exchange: doc with no exchange component → content returned unchanged
 //! - reposition_boundary_preserves_user_edits: user text between response and boundary → all user text preserved, boundary after it
@@ -270,6 +270,23 @@ fn update_parent_submodule_pointer(super_root: &Path, submodule_root: &Path, msg
     }
 }
 
+/// Resolve the cwd to use when spawning a tmux pane for `file`.
+///
+/// For documents inside a submodule, returns the submodule's own git toplevel
+/// so the spawned Claude session starts inside that submodule. For top-level
+/// docs (or when git resolution fails), falls back to the process cwd —
+/// matching the pre-existing behavior.
+pub fn resolve_pane_cwd(file: &Path) -> std::path::PathBuf {
+    if let Ok((super_root, resolved)) = resolve_to_git_root(file) {
+        let (git_root, in_submodule) = narrow_to_submodule(&super_root, &resolved);
+        if in_submodule {
+            return git_root;
+        }
+        return super_root;
+    }
+    std::env::current_dir().unwrap_or_default()
+}
+
 /// Check if `file` is inside a git repository.
 /// Returns `true` if the file's directory (or any ancestor) is a git repo.
 /// Returns `false` if git is not available or the path is not tracked.
@@ -396,12 +413,38 @@ pub fn commit(file: &Path) -> Result<()> {
         snapshot_content = Some(file_content.clone());
     }
 
+    // Reposition boundary BEFORE staging so the commit captures the new
+    // boundary id atomically. Previously this ran post-commit, which left
+    // the boundary-id delta to be picked up by the next turn's preflight
+    // commit — producing two commits per turn (one for the prior turn's
+    // stale reposition, one for the current turn's content). Running it
+    // here folds both into a single commit.
+    //
+    // The active-run guard inside `reposition_boundary_in_snapshot` still
+    // applies: if a concurrent `agent-doc write` is in flight, reposition
+    // is skipped and the IPC path owns the transition, matching prior
+    // behavior for that case.
+    let t_reposition = std::time::Instant::now();
+    let _snap_changed = reposition_boundary_in_snapshot(file);
+    // Reload snapshot_content from disk — the reposition may have rewritten
+    // it with a fresh boundary id. Staging must use the repositioned blob.
+    if let Ok(Some(reloaded)) = crate::snapshot::load(file) {
+        snapshot_content = Some(reloaded);
+    }
+    let elapsed_reposition = t_reposition.elapsed().as_millis();
+    if elapsed_reposition > 0 {
+        eprintln!("[perf] commit.reposition: {}ms", elapsed_reposition);
+    }
+
     let t_staging = std::time::Instant::now();
     if let Some(ref snap) = snapshot_content {
-        // Add (HEAD) marker to the last ### Re: heading in the snapshot.
-        // The working tree keeps the heading WITHOUT the marker, creating
-        // a single modified line (blue gutter) as a visual boundary.
-        let staged_content = add_head_marker(snap, file);
+        // Stage a CLEAN copy of the snapshot — (HEAD) is a working-tree-only
+        // marker and must never appear in the committed blob. With a clean
+        // blob, the working tree's current-boundary `### Re: ... (HEAD)`
+        // heading shows as a single modified line (blue gutter) automatically,
+        // and moving the boundary across cycles cannot produce a phantom
+        // "strip (HEAD)" diff on previously-committed headings.
+        let staged_content = strip_head_markers(snap);
 
         let rel_path = resolved.strip_prefix(&git_root)
             .unwrap_or(&resolved);
@@ -500,54 +543,27 @@ pub fn commit(file: &Path) -> Result<()> {
         }
     }
 
-    // After commit, strip (HEAD) markers from the snapshot so the working tree
-    // is clean. The committed content has (HEAD) markers; the working tree should not.
-    // This creates the blue gutter diff the user sees.
+    // Post-commit housekeeping. The staged blob is already clean (commit
+    // staging strips `(HEAD)` from the snapshot before `git hash-object`),
+    // so the working tree keeps its current-boundary `(HEAD)` as the
+    // blue-gutter navigation affordance. The on-disk snapshot is kept in
+    // sync with the committed blob (clean, no `(HEAD)`) so the next cycle's
+    // diff doesn't see phantom `(HEAD)` additions/removals.
     if let Ok(ref s) = commit_status
         && s.success()
     {
-            // Strip (HEAD) from snapshot
             if let Some(ref snap) = snapshot_content {
                 let clean_snap = strip_head_markers(snap);
-                if clean_snap != *snap {
-                    eprintln!("[commit] stripping (HEAD) markers from snapshot ({} chars removed)", snap.len() - clean_snap.len());
-                    if let Err(e) = crate::snapshot::save(file, &clean_snap) {
-                        eprintln!("[commit] failed to clean snapshot: {}", e);
-                    }
+                if clean_snap != *snap
+                    && let Err(e) = crate::snapshot::save(file, &clean_snap) {
+                    eprintln!("[commit] failed to clean snapshot: {}", e);
                 }
             }
-            // Also strip (HEAD) from working tree if present — the IPC reposition
-            // may have added it. The working tree should NEVER have (HEAD) markers.
-            if let Ok(working) = std::fs::read_to_string(file) {
-                let clean_working = strip_head_markers(&working);
-                if clean_working != working {
-                    eprintln!("[commit] WARNING: (HEAD) found in working tree — stripping");
-                    if let Err(e) = crate::write::atomic_write_pub(file, &clean_working) {
-                        eprintln!("[commit] failed to clean working tree: {}", e);
-                    }
-                }
-            }
-            // Note: working tree is NOT modified here. The staged content has (HEAD)
-            // markers, the working tree does not. This creates the blue gutter diff.
-            // Previously we stripped HEAD markers from the working tree, but that was
-            // unnecessary (staging doesn't modify the working tree) and caused file
-            // cache conflicts in the IDE.
-
-            // Reposition boundary in snapshot AND via IPC to the plugin.
-            // Working tree is NEVER written directly — that causes IDE "externally modified"
-            // dialogs and loses user keystrokes. The IPC signal tells the plugin to
-            // reposition in its Document buffer, which handles stale boundaries too.
-            let t_reposition = std::time::Instant::now();
-            let snap_changed = reposition_boundary_in_snapshot(file);
-            // Send IPC reposition signal to plugin only if boundary actually moved.
-            // Skipping no-op repositions eliminates ~64% of unnecessary Document API writes.
-            if snap_changed {
-                crate::write::try_ipc_reposition_boundary(file);
-            }
-            let elapsed_reposition = t_reposition.elapsed().as_millis();
-            if elapsed_reposition > 0 {
-                eprintln!("[perf] commit.reposition: {}ms", elapsed_reposition);
-            }
+            // Boundary reposition happens pre-commit now (see above) so the
+            // new boundary id lands in the same commit as the response.
+            // IPC reposition signal is still sent here so the plugin's
+            // Document buffer picks up the new boundary without a disk reload.
+            crate::write::try_ipc_reposition_boundary(file);
 
             // Signal plugin to refresh VCS state so the gutter reflects the commit.
             // Without this, the IDE shows the entire response as uncommitted until
@@ -582,16 +598,28 @@ pub fn commit(file: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Reposition boundary in snapshot only (not working tree).
+/// Reposition boundary in snapshot AND working tree deterministically.
 ///
-/// After commit, moves the boundary to the end of exchange in the snapshot.
-/// The working tree is NOT modified — writing to it while the user is typing
-/// causes the IDE to reload from disk, losing in-progress keystrokes.
-/// The plugin handles working-tree boundary reposition via the
-/// `reposition_boundary: true` IPC flag sent during `agent-doc write`.
-/// Returns true if the boundary was actually repositioned (content changed).
+/// After commit, moves the boundary to the end of exchange in both the
+/// snapshot and the working-tree file. The active-run guard
+/// (`pending_path_for`) prevents racing a concurrent `agent-doc write`:
+/// in-flight runs are skipped so the plugin's IPC write path owns the
+/// transition. Outside of an active run — including sweep-committed
+/// foreign docs that never touch `agent-doc write` — this function is
+/// the canonical place the on-disk state becomes consistent.
+///
+/// The working-tree rewrite applies `template::reposition_boundary_to_end`
+/// only — drops stale `<!-- agent:boundary:... -->` markers and inserts a
+/// single fresh one at the end of the exchange component. `(HEAD)` suffixes
+/// on `### Re:` headings are intentionally NOT touched here: the commit
+/// staging path strips `(HEAD)` from the blob, so leaving the working tree
+/// alone is both simpler and avoids phantom diffs on prior-cycle sections
+/// the user is editing.
+///
+/// Returns true if the snapshot OR working tree content changed.
 fn reposition_boundary_in_snapshot(file: &Path) -> bool {
-    // Check for active run — don't reposition if a run is in progress
+    // Check for active run — don't reposition if a run is in progress.
+    // The in-flight `agent-doc write` owns the transition via IPC.
     if let Ok(canonical) = file.canonicalize()
         && let Ok(pending_path) = crate::snapshot::pending_path_for(&canonical)
         && pending_path.exists()
@@ -600,20 +628,76 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
         return false;
     }
 
-    // Reposition in snapshot only — use template::reposition_boundary_to_end()
-    // which removes ALL stale boundaries and inserts a single fresh one.
+    let mut changed = false;
+
+    // Build a baseline of `### Re:` headings from git HEAD so the reposition
+    // step can mark EVERY new-this-cycle heading with ` (HEAD)`, not just the
+    // last one. When a patchback contains multiple `### Re:` sections (the
+    // common case for responses with more than one topic), each new heading
+    // becomes a modified line in the git gutter. If HEAD is unavailable
+    // (file untracked, no commits yet), the baseline is empty — meaning all
+    // current Re: headings are treated as "new" and all get marked.
+    let head_doc = crate::git::show_head(file).ok().flatten();
+    let baseline_headings: std::collections::HashSet<String> = head_doc
+        .as_deref()
+        .map(crate::template::exchange_baseline_headings)
+        .unwrap_or_default();
+    let baseline_opt = Some(&baseline_headings);
+
+    // Reposition in snapshot — use the baseline-aware path so all new Re:
+    // headings get annotated (not just the last one).
     if let Ok(Some(snap_content)) = crate::snapshot::load(file) {
-        let new_snap = crate::template::reposition_boundary_to_end(&snap_content);
+        let new_snap = crate::template::reposition_boundary_to_end_with_baseline(
+            &snap_content,
+            None,
+            baseline_opt,
+        );
         if new_snap != snap_content {
-            if let Err(e) = crate::snapshot::save(file, &new_snap) {
-                eprintln!("[commit] failed to update snapshot after boundary reposition: {}", e);
-                return false;
+            match crate::snapshot::save(file, &new_snap) {
+                Ok(()) => {
+                    eprintln!("[commit] repositioned boundary in snapshot");
+                    changed = true;
+                }
+                Err(e) => {
+                    eprintln!("[commit] failed to update snapshot after boundary reposition: {}", e);
+                }
             }
-            eprintln!("[commit] repositioned boundary in snapshot");
-            return true;
         }
     }
-    false
+
+    // Reposition in the working tree. Previously this was left to the plugin
+    // IPC path, so sweep-committed foreign docs (no active plugin session)
+    // kept stale boundary markers until the next `agent-doc write`. Applying
+    // the same transformation here makes the working-tree state deterministic
+    // in the binary regardless of whether any editor plugin is loaded.
+    //
+    // Only the `<!-- agent:boundary:... -->` marker is repositioned here;
+    // `(HEAD)` suffixes on `### Re:` headings are left alone. The commit
+    // staging path strips `(HEAD)` from the blob, so the working tree's
+    // current-boundary `(HEAD)` heading shows correctly as a modified line
+    // without any rewrite. Rewriting old headings here would strip `(HEAD)`
+    // from sections the user is actively editing and cause phantom diffs
+    // on prior-cycle sections (bug #dsng).
+    if let Ok(working) = std::fs::read_to_string(file) {
+        let repositioned = crate::template::reposition_boundary_to_end_with_baseline(
+            &working,
+            None,
+            baseline_opt,
+        );
+        if repositioned != working {
+            match crate::write::atomic_write_pub(file, &repositioned) {
+                Ok(()) => {
+                    eprintln!("[commit] repositioned boundary in working tree");
+                    changed = true;
+                }
+                Err(e) => {
+                    eprintln!("[commit] failed to reposition boundary in working tree: {}", e);
+                }
+            }
+        }
+    }
+
+    changed
 }
 
 /// Returns the byte ranges of all fenced code blocks in `content` using a
@@ -682,225 +766,6 @@ fn strip_head_markers(content: &str) -> String {
 }
 
 
-/// Add ` (HEAD)` suffix to ALL new markdown headings in the agent's appended content.
-///
-/// Matches any heading level (`#` through `######`). Compares the snapshot
-/// against git HEAD to find which headings are new (added by the agent).
-/// Only the top-level (shallowest) headings in the new content get marked —
-/// sub-headings within a response section are left unmarked.
-///
-/// When git HEAD is unavailable, falls back to marking the last heading only.
-fn add_head_marker(content: &str, file: &Path) -> String {
-    let head_content = show_head(file).ok().flatten();
-
-    // Step 1: Strip ALL existing (HEAD) markers from heading lines and bold-text pseudo-headers.
-    // This prevents accumulation across commit cycles.
-    // Use AST-based code block detection so markers inside fenced blocks are not touched.
-    let content_code_ranges = code_block_byte_ranges(content);
-    let mut cleaned_lines: Vec<String> = Vec::new();
-    let mut offset = 0usize;
-    for line in content.lines() {
-        let trimmed = line.trim_start();
-        if !is_in_code_block(&content_code_ranges, offset) && trimmed.ends_with(" (HEAD)") {
-            if trimmed.starts_with('#') {
-                cleaned_lines.push(line[..line.len() - 7].to_string());
-                offset += line.len() + 1;
-                continue;
-            }
-            // Bold-text pseudo-header: "**...** (HEAD)"
-            let without_suffix = line[..line.len() - 7].trim_end();
-            if trimmed.starts_with("**") && without_suffix.trim_start().ends_with("**") {
-                cleaned_lines.push(line[..line.len() - 7].to_string());
-                offset += line.len() + 1;
-                continue;
-            }
-        }
-        cleaned_lines.push(line.to_string());
-        offset += line.len() + 1;
-    }
-    let cleaned = cleaned_lines.join("\n");
-    // Preserve trailing newline
-    let cleaned = if content.ends_with('\n') && !cleaned.ends_with('\n') {
-        format!("{}\n", cleaned)
-    } else {
-        cleaned
-    };
-
-    // Also strip (HEAD) from git HEAD content for accurate comparison
-    let head_cleaned = head_content.as_ref().map(|h| {
-        h.lines()
-            .map(|line| {
-                let trimmed = line.trim_start();
-                if trimmed.ends_with(" (HEAD)") {
-                    if trimmed.starts_with('#') {
-                        return &line[..line.len() - 7];
-                    }
-                    let without_suffix = line[..line.len() - 7].trim_end();
-                    if trimmed.starts_with("**") && without_suffix.trim_start().ends_with("**") {
-                        return &line[..line.len() - 7];
-                    }
-                }
-                line
-            })
-            .collect::<Vec<&str>>()
-            .join("\n")
-    });
-
-    // Step 2: Collect all heading positions from cleaned content.
-    // Use AST-based code block detection so `# comment` inside a fenced block is excluded.
-    let cleaned_code_ranges = code_block_byte_ranges(&cleaned);
-    let mut heading_positions: Vec<(usize, usize, usize)> = Vec::new();
-    let mut offset = 0usize;
-    for line in cleaned.lines() {
-        let trimmed = line.trim_start();
-        let line_end = offset + line.len();
-        if !is_in_code_block(&cleaned_code_ranges, offset) && trimmed.starts_with('#') {
-            let level = trimmed.chars().take_while(|c| *c == '#').count();
-            if level <= 6 && trimmed.len() > level && trimmed.as_bytes()[level] == b' ' {
-                heading_positions.push((offset, line_end, level));
-            }
-        }
-        offset = line_end + 1;
-    }
-
-    // Fallback: if no markdown headings found, scan for bold-text pseudo-headers
-    // (lines matching `**...**` at start of line). Treat the first one found as a
-    // pseudo-heading so it can receive the (HEAD) marker.
-    if heading_positions.is_empty() {
-        let mut offset = 0usize;
-        for line in cleaned.lines() {
-            let trimmed = line.trim_start();
-            let line_end = offset + line.len();
-            let trimmed_end = trimmed.trim_end();
-            if trimmed_end.starts_with("**") && trimmed_end.ends_with("**") && trimmed_end.len() > 4 {
-                // Use level 99 as a sentinel — bold pseudo-headers are always "shallowest"
-                // since there are no real headings to compete with.
-                heading_positions.push((offset, line_end, 99));
-            }
-            offset = line_end + 1;
-        }
-    }
-
-    if heading_positions.is_empty() {
-        return cleaned;
-    }
-
-    // Step 3: Filter to headings NOT in git HEAD (= new headings from latest response)
-    // Count occurrences in HEAD to handle duplicate heading text correctly.
-    // A heading is "new" if it appears more times in the current content than in HEAD.
-    let new_headings: Vec<(usize, usize, usize)> = if let Some(ref hc) = head_cleaned {
-        // Count how many times each heading text appears in HEAD.
-        // Use AST-based code block detection to exclude `# comment` lines in fenced blocks.
-        let head_code_ranges = code_block_byte_ranges(hc);
-        let head_heading_counts: std::collections::HashMap<&str, usize> = {
-            let mut counts = std::collections::HashMap::new();
-            let mut head_offset = 0usize;
-            for line in hc.lines() {
-                let trimmed = line.trim_start();
-                let line_end = head_offset + line.len();
-                if !is_in_code_block(&head_code_ranges, head_offset) && trimmed.starts_with('#') {
-                    let level = trimmed.chars().take_while(|c| *c == '#').count();
-                    if level <= 6 && trimmed.len() > level && trimmed.as_bytes()[level] == b' ' {
-                        *counts.entry(line).or_insert(0) += 1;
-                    }
-                }
-                head_offset = line_end + 1;
-            }
-            counts
-        };
-        // Count how many times each heading text appears in current content (up to each position)
-        let mut seen_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-        heading_positions.into_iter().filter(|(start, end, _)| {
-            let heading_text = &cleaned[*start..*end];
-            let seen = seen_counts.entry(heading_text).or_insert(0);
-            *seen += 1;
-            let head_count = head_heading_counts.get(heading_text).copied().unwrap_or(0);
-            *seen > head_count
-        }).collect()
-    } else {
-        // No HEAD available → mark last heading only
-        vec![*heading_positions.last().unwrap()]
-    };
-
-    if new_headings.is_empty() {
-        // No new headings from this commit. Re-apply (HEAD) markers from git HEAD
-        // to prevent concurrent commits from stripping markers placed by a previous commit.
-        // Without this, Session B's preflight commit would overwrite Session A's committed
-        // content (which has HEAD markers) with cleaned content (which doesn't).
-        //
-        // Safety: only re-apply if HEAD has a reasonable number of markers (≤3).
-        // After a file move/rename, HEAD may have many stale (HEAD) markers baked in
-        // from the old path — re-applying all of them creates permanent uncommitted diffs.
-        if let Some(ref head) = head_content {
-            // Use AST-based detection to count only real markdown headings with (HEAD) markers,
-            // excluding bash comments and other `#` lines inside fenced code blocks.
-            let head_code_ranges_for_reapply = code_block_byte_ranges(head);
-            let head_marker_count = {
-                let mut count = 0usize;
-                let mut h_offset = 0usize;
-                for l in head.lines() {
-                    let t = l.trim_start();
-                    if !is_in_code_block(&head_code_ranges_for_reapply, h_offset)
-                        && t.ends_with(" (HEAD)")
-                        && t.starts_with('#')
-                    {
-                        count += 1;
-                    }
-                    h_offset += l.len() + 1;
-                }
-                count
-            };
-            if head_marker_count <= 3 {
-                let mut result = cleaned;
-                let mut h_offset = 0usize;
-                for line in head.lines() {
-                    let trimmed = line.trim_start();
-                    let h_line_end = h_offset + line.len();
-                    // Only re-apply if this heading is NOT inside a code block in HEAD.
-                    // Prevents baked-in `# comment (HEAD)` from propagating across commits.
-                    if trimmed.ends_with(" (HEAD)")
-                        && trimmed.starts_with('#')
-                        && !is_in_code_block(&head_code_ranges_for_reapply, h_offset)
-                    {
-                        let without_head = &line[..line.len() - 7];
-                        // Find this heading at a line boundary in the result and re-add (HEAD)
-                        let search = format!("\n{}\n", without_head);
-                        if let Some(pos) = result.find(&search) {
-                            let insert_at = pos + 1 + without_head.len();
-                            result.insert_str(insert_at, " (HEAD)");
-                        } else if result.starts_with(&format!("{}\n", without_head)) {
-                            result.insert_str(without_head.len(), " (HEAD)");
-                        }
-                    }
-                    h_offset = h_line_end + 1;
-                }
-                return result;
-            } else {
-                eprintln!(
-                    "[commit] Skipping (HEAD) re-application — {} markers in HEAD (stale, likely from file move)",
-                    head_marker_count
-                );
-            }
-        }
-        return cleaned;
-    }
-
-    // Step 4: Mark ALL root-level (shallowest) new headings.
-    // All newly added headings get (HEAD) so they show as blue gutter (visual boundary).
-    // "New" = heading text appears more times in current content than in git HEAD.
-    let min_level = new_headings.iter().map(|(_, _, level)| *level).min().unwrap();
-    let root_ends: Vec<usize> = new_headings.iter()
-        .filter(|(_, _, level)| *level == min_level)
-        .map(|(_, end, _)| *end)
-        .collect();
-
-    // Step 5: Insert (HEAD) markers in reverse order to preserve offsets
-    let mut result = cleaned;
-    for pos in root_ends.iter().rev() {
-        result.insert_str(*pos, " (HEAD)");
-    }
-    result
-}
 
 /// Write content to git's object database and return the blob hash.
 fn hash_object(git_root: &Path, content: &str) -> Result<String> {
@@ -1011,9 +876,15 @@ pub fn squash_session(file: &Path) -> Result<()> {
 /// Get the content of a file from the last agent-doc commit (or HEAD).
 /// Returns None if the file is not tracked or no commits exist.
 pub fn show_head(file: &Path) -> Result<Option<String>> {
-    let (git_root, resolved) = resolve_to_git_root(file)?;
+    let (super_root, resolved) = resolve_to_git_root(file)?;
+    // Narrow to the submodule's own repo when the file lives inside a submodule.
+    // `resolve_to_git_root` prefers the superproject, but `git show HEAD:<path>`
+    // from a superproject cannot traverse a submodule gitlink — the lookup
+    // fails and callers fall back to no-HEAD branches that drop `(HEAD)`
+    // markers on submodule-hosted documents.
+    let (git_root, _in_submodule) = narrow_to_submodule(&super_root, &resolved);
 
-    // Get the file path relative to the git root
+    // Get the file path relative to the git root (submodule root when narrowed)
     let rel_path = if resolved.is_absolute() {
         resolved
             .strip_prefix(&git_root)
@@ -1109,78 +980,10 @@ mod tests {
     }
 
     #[test]
-    fn add_head_marker_strips_old_markers() {
-        let content = "### Re: Old (HEAD)\n### Re: New\n";
-        let result = add_head_marker(content, Path::new("/nonexistent/file.md"));
-        assert!(!result.contains("### Re: Old (HEAD)"), "old heading should not have (HEAD)");
-        assert!(result.contains("### Re: New (HEAD)") || result.contains("### Re: Old\n"), "old (HEAD) should be stripped");
-    }
-
-    #[test]
-    fn add_head_marker_bold_text_fallback() {
-        // No markdown headings — bold-text pseudo-header should get (HEAD)
-        let content = "Some intro text.\n**Re: Something**\nBody paragraph.\n";
-        let result = add_head_marker(content, Path::new("/nonexistent/file.md"));
-        assert!(
-            result.contains("**Re: Something** (HEAD)"),
-            "bold-text pseudo-header should get (HEAD) marker, got: {result}"
-        );
-    }
-
-    #[test]
-    fn add_head_marker_prefers_real_headings() {
-        // Both a real heading and bold text — only the heading should get (HEAD)
-        let content = "### Re: Something\n**Bold text**\nBody.\n";
-        let result = add_head_marker(content, Path::new("/nonexistent/file.md"));
-        assert!(
-            result.contains("### Re: Something (HEAD)"),
-            "real heading should get (HEAD), got: {result}"
-        );
-        assert!(
-            !result.contains("**Bold text** (HEAD)"),
-            "bold text should NOT get (HEAD) when real headings exist, got: {result}"
-        );
-    }
-
-    #[test]
-    fn add_head_marker_duplicate_heading_text() {
-        // Simulate a document where the same heading text appears in both
-        // old content (git HEAD) and new content. The new occurrence should
-        // get the (HEAD) marker even though the same text exists earlier.
-        //
-        // We can't easily mock git HEAD in unit tests, so we test the
-        // no-HEAD fallback (marks last heading only). The real fix is
-        // verified by the occurrence-counting logic in add_head_marker.
-        let content = "### Re: Implementation complete\nOld response.\n### Re: Other\nMiddle.\n### Re: Implementation complete\nNew response.\n";
-        let result = add_head_marker(content, Path::new("/nonexistent/file.md"));
-        // With no HEAD available, marks the last heading
-        assert!(
-            result.ends_with("### Re: Implementation complete (HEAD)\nNew response.\n"),
-            "last heading should get (HEAD), got: {result}"
-        );
-    }
-
-    #[test]
     fn strip_head_markers_bold_text() {
         let input = "**Re: Something** (HEAD)\nSome text.\n";
         let result = strip_head_markers(input);
         assert_eq!(result, "**Re: Something**\nSome text.\n");
-    }
-
-    #[test]
-    fn add_head_marker_ignores_fenced_code_hash() {
-        // A line starting with `#` inside a fenced code block must NOT get (HEAD).
-        // The last real markdown heading should get it instead.
-        let content = "### Re: Implementation\nSome response.\n```yaml\n# this is a yaml comment\nkey: value\n```\n";
-        let result = add_head_marker(content, Path::new("/nonexistent/file.md"));
-        assert!(
-            result.contains("### Re: Implementation (HEAD)"),
-            "real heading should get (HEAD), got:\n{result}"
-        );
-        assert!(
-            !result.contains("# this is a yaml comment (HEAD)"),
-            "fenced code comment must NOT get (HEAD), got:\n{result}"
-        );
     }
 
     #[test]
@@ -1193,45 +996,6 @@ mod tests {
             result,
             "### Re: Answer\nResponse.\n```bash\n# comment (HEAD)\n```\n",
             "fenced (HEAD) must be preserved, got:\n{result}"
-        );
-    }
-
-    #[test]
-    fn add_head_marker_bash_comment_inside_plain_fence() {
-        // Regression: a ``` fence followed by inner ```bash confused the old ad-hoc
-        // fence tracker.  CommonMark says ```bash cannot CLOSE a fence opened by ```;
-        // only plain ``` (no info string) can close it.  The old `is_fence_marker`
-        // toggled on every backtick-sequence regardless of state, causing the fence
-        // state to invert and exposing `# On the server — run once` as if it were
-        // outside the fence — giving it a (HEAD) marker it must not have.
-        //
-        // Document structure (simplified from tasks/software/monsterrodholders.md):
-        //   - A ``` plain fence containing terminal output (lines that look like
-        //     ```bash openings inside the block).
-        //   - A real ### Re: heading immediately after.
-        //   - A ```bash fence containing `# On the server — run once`.
-        let content = concat!(
-            "### Re: previous (HEAD)\n",    // existing marker from prior commit
-            "Old response.\n",
-            "```\n",                         // opens plain fence
-            "```bash\n",                     // looks like fence open — but it's CONTENT
-            "some terminal output\n",
-            "```\n",                         // closes the plain fence (per CommonMark)
-            "### Re: new heading\n",         // real heading added this commit
-            "Description.\n",
-            "```bash\n",                     // opens bash fence
-            "# On the server — run once\n", // bash comment — must NOT get (HEAD)
-            "git config pull.rebase true\n",
-            "```\n",
-        );
-        let result = add_head_marker(content, Path::new("/nonexistent/file.md"));
-        assert!(
-            result.contains("### Re: new heading (HEAD)"),
-            "real new heading must get (HEAD), got:\n{result}"
-        );
-        assert!(
-            !result.contains("# On the server — run once (HEAD)"),
-            "bash comment inside fenced block must NOT get (HEAD), got:\n{result}"
         );
     }
 
@@ -1381,19 +1145,25 @@ mod tests {
         Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
         Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
 
-        // Create a document and snapshot
+        // Create a document at its pre-response state and commit it.
         let doc = root.join("session.md");
-        let doc_content = "---\nagent_doc_session: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nResponse\n\n## User\n\n";
-        fs::write(&doc, doc_content).unwrap();
-
-        let snap_path = crate::snapshot::path_for(&doc).unwrap();
-        let snap_abs = root.join(&snap_path);
-        fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
-        fs::write(&snap_abs, doc_content).unwrap();
+        let initial_content = "---\nagent_doc_session: test\n---\n\n## User\n\nHello\n\n";
+        fs::write(&doc, initial_content).unwrap();
 
         // Stage + initial commit so the file is tracked
         Command::new("git").current_dir(root).args(["add", "session.md"]).output().unwrap();
         Command::new("git").current_dir(root).args(["commit", "-m", "add doc", "--no-verify"]).output().unwrap();
+
+        // Simulate a write cycle landing a new response: update both the
+        // working tree and the snapshot with the post-response content so
+        // commit staging has something to commit.
+        let post_response = "---\nagent_doc_session: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nResponse\n\n## User\n\n";
+        fs::write(&doc, post_response).unwrap();
+
+        let snap_path = crate::snapshot::path_for(&doc).unwrap();
+        let snap_abs = root.join(&snap_path);
+        fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
+        fs::write(&snap_abs, post_response).unwrap();
 
         // Now call commit (simulating what --commit does after write)
         commit(&doc).expect("commit should succeed");
@@ -1450,6 +1220,80 @@ mod tests {
         // No lock present — commit should succeed on first try
         let result = commit(&doc);
         assert!(result.is_ok(), "commit without lock should succeed: {:?}", result.err());
+    }
+
+    #[test]
+    fn commit_staged_blob_has_no_head_markers() {
+        // Regression for bug #dsng: (HEAD) is a working-tree-only marker and
+        // must never appear in the committed blob. If it does, the next
+        // cycle's reposition produces a phantom "strip (HEAD)" diff on
+        // prior-cycle headings the user is editing.
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.email", "test@test.com"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["config", "user.name", "Test"]).output().unwrap();
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+
+        // Initial doc + snapshot, tracked cleanly (no HEAD markers yet).
+        let doc = root.join("session.md");
+        let initial = "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, initial).unwrap();
+        let snap_path = crate::snapshot::path_for(&doc).unwrap();
+        let snap_abs = root.join(&snap_path);
+        fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
+        fs::write(&snap_abs, initial).unwrap();
+        Command::new("git").current_dir(root).args(["add", "session.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "add doc", "--no-verify"]).output().unwrap();
+
+        // Simulate a write cycle: snapshot has a new response whose boundary
+        // heading carries `(HEAD)`. Working tree matches — this is what the
+        // IPC write path leaves on disk.
+        let cycle1 = "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->\n### Re: older\nold body\n\n### Re: newer (HEAD)\nnew body\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, cycle1).unwrap();
+        fs::write(&snap_abs, cycle1).unwrap();
+
+        commit(&doc).expect("commit should succeed");
+
+        // Assert the committed blob has ZERO `(HEAD)` occurrences.
+        let show = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(show.status.success(), "git show HEAD:session.md failed");
+        let blob = String::from_utf8_lossy(&show.stdout);
+        assert!(
+            !blob.contains("(HEAD)"),
+            "committed blob must not contain (HEAD); got:\n{blob}"
+        );
+        assert!(
+            blob.contains("### Re: newer\n"),
+            "committed blob should contain the clean new heading; got:\n{blob}"
+        );
+        assert!(
+            blob.contains("### Re: older\n"),
+            "committed blob should still contain the older heading; got:\n{blob}"
+        );
+
+        // And the working tree keeps its `(HEAD)` on the current boundary —
+        // the blue-gutter navigation affordance. Commit staging must not
+        // touch the working tree.
+        let working = fs::read_to_string(&doc).unwrap();
+        assert!(
+            working.contains("### Re: newer (HEAD)"),
+            "working tree should retain (HEAD) on current boundary; got:\n{working}"
+        );
+        assert_eq!(
+            working.matches("(HEAD)").count(),
+            1,
+            "working tree should have exactly one (HEAD) — the current boundary"
+        );
     }
 
     // --- Fix 1: snapshot saved before process::exit(75) (structural test) ---
@@ -1569,6 +1413,35 @@ mod tests {
         let (narrowed, in_sub) = narrow_to_submodule(root, &doc);
         assert!(!in_sub, "non-submodule file should not be detected as in-submodule");
         assert_eq!(narrowed, root);
+    }
+
+    // --- #8jzg: resolve_pane_cwd tests ---
+
+    #[test]
+    fn resolve_pane_cwd_returns_git_root_for_file_in_repo() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        Command::new("git").current_dir(root).args(["init"]).output().unwrap();
+        let doc = root.join("plan.md");
+        fs::write(&doc, "# Plan\n").unwrap();
+
+        // resolve_pane_cwd should return the git root (not the file's parent)
+        let cwd = resolve_pane_cwd(&doc);
+        assert_eq!(cwd, root, "cwd should be the git root for a file inside a plain repo");
+    }
+
+    #[test]
+    fn resolve_pane_cwd_falls_back_to_process_cwd_for_non_git_path() {
+        // A file in a temp dir with no git repo — should fall back to process cwd
+        let dir = tempfile::TempDir::new().unwrap();
+        let non_git_file = dir.path().join("notes.md");
+        std::fs::write(&non_git_file, "notes\n").unwrap();
+
+        // resolve_pane_cwd should not panic and should return a valid path
+        let cwd = resolve_pane_cwd(&non_git_file);
+        assert!(cwd.exists() || cwd == std::env::current_dir().unwrap_or_default(),
+            "fallback cwd should be the process cwd or an existing path");
     }
 
     #[test]

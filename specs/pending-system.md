@@ -121,7 +121,7 @@ A doc that never gets opened again never migrates — fine, because IDs only mat
 
 ### 4. Granular write-command surface
 
-The skill/runbook **never** writes a `patch:pending` block. Full-replace is forbidden. All mutations go through explicit flags on `agent-doc write`:
+The skill/runbook **never** writes a `replace:pending` (or the deprecated `patch:pending`) block. Full-replace is forbidden. All mutations go through explicit flags on `agent-doc write`:
 
 | Flag | Behavior |
 |------|----------|
@@ -158,16 +158,18 @@ Preflight becomes reorder-aware:
 Invert the current rule:
 
 - **Before:** missing `patch:pending` → error.
-- **After:** presence of `patch:pending` in the outgoing write payload → error.
+- **After:** presence of `replace:pending` (or the deprecated `patch:pending`) in the outgoing write payload → error.
 
 `agent-doc write` validates this at parse time. The only way to mutate pending is via the granular flags.
+
+**#25ag rename (v0.32.4):** The block syntax was renamed from `patch:pending` to `replace:pending`. The `replace:` prefix signals full-replacement semantics explicitly and is the canonical form. Dual-accept is in effect for one release: `patch:pending`, `--allow-patch-pending`, and `AGENT_DOC_ALLOW_PATCH_PENDING=1` still work but emit a deprecation warning on stderr. Canonical names: `replace:pending` + `--allow-replace-pending` + `AGENT_DOC_ALLOW_REPLACE_PENDING=1`. Next release removes the deprecated names.
 
 ## Schema — fully-migrated example
 
 ```markdown
 <!-- agent:pending patch=append -->
 - [ ] [#a3f2] implement --pending-reorder
-- [ ] [#b1c4] rewrite runbook to forbid patch:pending
+- [ ] [#b1c4] rewrite runbook to forbid replace:pending
 - [/] [#eg0w] per-file CommitLock + freshness gate — gate: v0.32.5 release
 - [/] [#a002] normalize_user_prompts safety rail — awaiting large-drift telemetry trip
 - [x] [#c9e0] fix boundary repositioning
@@ -189,7 +191,7 @@ After next preflight: `#c9e0` is reaped, `- [x]` line is removed, commit rolls f
    - `PendingState` enum: `Open | Gated | Done`. Parser accepts `[ ] | [/] | [x]`; renderer emits the reverse.
    - Hash generation helper in `src/pending.rs`.
    - State transition validation (see matrix above) enforced at the `pending_cmd` layer.
-   - Enforcement: reject `patch:pending` blocks in parsed patches.
+   - Enforcement: reject `replace:pending` (and deprecated `patch:pending`) blocks in parsed patches.
 
 2. **Rust — preflight** (`src/preflight.rs`):
    - Lazy backfill: assign missing hash IDs.

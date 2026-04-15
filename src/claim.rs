@@ -101,6 +101,39 @@ use std::path::Path;
 
 use crate::{frontmatter, project_config, resync, route, sessions};
 
+/// Outcome of the cross-session claim gate. Pure function output, separated
+/// from side effects so it can be unit-tested without a live tmux server.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum CrossSessionDecision {
+    /// Pane's tmux session matches the configured project session — no gate fires.
+    Accept,
+    /// Configured project session no longer exists on the tmux server — there
+    /// is nothing to "conflict with", so auto-accept the claim.
+    AcceptStale,
+    /// Cross-session claim explicitly allowed via `--force`.
+    AcceptForce,
+    /// Cross-session claim rejected — user must switch sessions or pass `--force`.
+    Reject,
+}
+
+pub(crate) fn cross_session_decision(
+    pane_session: &str,
+    configured: &str,
+    configured_alive: bool,
+    force: bool,
+) -> CrossSessionDecision {
+    if pane_session == configured {
+        return CrossSessionDecision::Accept;
+    }
+    if !configured_alive {
+        return CrossSessionDecision::AcceptStale;
+    }
+    if force {
+        return CrossSessionDecision::AcceptForce;
+    }
+    CrossSessionDecision::Reject
+}
+
 pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Option<&str>, force: bool, isolate: bool) -> Result<()> {
     // --isolate: spawn a fresh Claude Code process in a new tmux window scoped to
     // the nearest git repo root for this document (#8jzg).
@@ -184,18 +217,30 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
             && !pane_tmux_session.is_empty()
             && pane_tmux_session != configured
         {
-            if !force {
-                eprintln!(
-                    "error: pane {} is in tmux session '{}' but project session is '{}'.\n\
-                     Switch to session '{}' and re-run, or use --force to override.",
-                    pane_id, pane_tmux_session, configured, configured
-                );
-                anyhow::bail!("session mismatch: cross-session claim rejected");
+            let configured_alive = tmux.session_alive(&configured);
+            match cross_session_decision(&pane_tmux_session, &configured, configured_alive, force) {
+                CrossSessionDecision::Accept => {}
+                CrossSessionDecision::AcceptStale => {
+                    eprintln!(
+                        "[claim] configured session '{}' is not alive — accepting claim on pane {} in session '{}' (stale-session auto-force)",
+                        configured, pane_id, pane_tmux_session
+                    );
+                }
+                CrossSessionDecision::AcceptForce => {
+                    eprintln!(
+                        "warning [--force]: registering cross-session pane {} (session '{}', configured '{}')",
+                        pane_id, pane_tmux_session, configured
+                    );
+                }
+                CrossSessionDecision::Reject => {
+                    eprintln!(
+                        "error: pane {} is in tmux session '{}' but project session is '{}'.\n\
+                         Switch to session '{}' and re-run, or use --force to override.",
+                        pane_id, pane_tmux_session, configured, configured
+                    );
+                    anyhow::bail!("session mismatch: cross-session claim rejected");
+                }
             }
-            eprintln!(
-                "warning [--force]: registering cross-session pane {} (session '{}', configured '{}')",
-                pane_id, pane_tmux_session, configured
-            );
         }
     }
 
@@ -617,5 +662,38 @@ mod tests {
         let content = "---\nagent_doc_session: abc\n---\n\nJust text.\n";
         let result = strip_exchange_content(content);
         assert_eq!(result, content);
+    }
+
+    #[test]
+    fn cross_session_accept_when_pane_matches_configured() {
+        let d = cross_session_decision("0", "0", true, false);
+        assert_eq!(d, CrossSessionDecision::Accept);
+    }
+
+    #[test]
+    fn cross_session_accept_stale_when_configured_dead() {
+        // Stale session (e.g. post-reboot): auto-accept without requiring --force.
+        let d = cross_session_decision("claude", "0", false, false);
+        assert_eq!(d, CrossSessionDecision::AcceptStale);
+    }
+
+    #[test]
+    fn cross_session_accept_stale_takes_precedence_over_force() {
+        // If configured is dead, prefer the "stale" classification so the warning
+        // message reflects reality — not a cross-session override.
+        let d = cross_session_decision("claude", "0", false, true);
+        assert_eq!(d, CrossSessionDecision::AcceptStale);
+    }
+
+    #[test]
+    fn cross_session_reject_when_configured_alive_and_no_force() {
+        let d = cross_session_decision("claude", "0", true, false);
+        assert_eq!(d, CrossSessionDecision::Reject);
+    }
+
+    #[test]
+    fn cross_session_accept_force_when_configured_alive_and_force() {
+        let d = cross_session_decision("claude", "0", true, true);
+        assert_eq!(d, CrossSessionDecision::AcceptForce);
     }
 }

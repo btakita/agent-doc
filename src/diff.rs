@@ -316,11 +316,29 @@ pub fn parse_slash_commands(diff: &str) -> Vec<String> {
             continue;
         }
 
-        // Must start with '/' followed by an ASCII letter.
+        // Must start with '/' followed by a command-like token.
+        // Grammar: `/[a-z][a-z0-9:_-]*` with no additional `/` in the token.
+        // This rejects absolute paths like `/home/brian/...` and `/tmp/foo`
+        // that look like slash commands but are really filesystem paths.
         if !content.starts_with('/') {
             continue;
         }
-        if !content[1..].starts_with(|c: char| c.is_ascii_alphabetic()) {
+        let token_end = content[1..]
+            .find(|c: char| c.is_whitespace())
+            .map(|i| i + 1)
+            .unwrap_or(content.len());
+        let token = &content[1..token_end];
+        if token.is_empty() {
+            continue;
+        }
+        let first = token.chars().next().unwrap();
+        if !first.is_ascii_lowercase() {
+            continue;
+        }
+        let rest_ok = token
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, ':' | '_' | '-'));
+        if !rest_ok {
             continue;
         }
 
@@ -1509,5 +1527,49 @@ Please fix the bug.\n\
             "--- snapshot\n+++ document\n@@ -1 +1,3 @@\n ctx\n+/clear\n+/agent-doc foo.md\n";
         let cmds = parse_slash_commands(diff);
         assert_eq!(cmds, vec!["/clear", "/agent-doc foo.md"]);
+    }
+
+    #[test]
+    fn parse_slash_commands_rejects_absolute_paths() {
+        // #xzz5: `/home/brian/...` looks like a command but is a filesystem
+        // path. The tightened grammar (`/[a-z][a-z0-9:_-]*` with no second `/`)
+        // must reject any token containing a second slash.
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,5 @@\n ctx\n\
+            +/home/brian/work/foo.md\n\
+            +/tmp/scratch\n\
+            +/usr/local/bin/agent-doc\n\
+            +/var\n";
+        let cmds = parse_slash_commands(diff);
+        // "/var" is a bare token with no slash → allowed by grammar (it's a
+        // valid command name shape). Only the three path-shaped entries are
+        // rejected. This is the minimum contract: reject second-slash.
+        assert_eq!(cmds, vec!["/var"]);
+    }
+
+    #[test]
+    fn parse_slash_commands_rejects_uppercase_and_symbols() {
+        // Grammar: first char must be [a-z]; rest must be [a-z0-9:_-].
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,5 @@\n ctx\n\
+            +/Clear\n\
+            +/foo.bar\n\
+            +/foo!bang\n\
+            +/foo#hash\n";
+        let cmds = parse_slash_commands(diff);
+        assert!(cmds.is_empty(), "all four must be rejected; got: {cmds:?}");
+    }
+
+    #[test]
+    fn parse_slash_commands_accepts_namespaced_and_hyphenated() {
+        // Grammar allows `:`, `_`, `-`, digits — namespaced/versioned commands.
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,5 @@\n ctx\n\
+            +/mcp:reload\n\
+            +/agent-doc file.md\n\
+            +/some_thing\n\
+            +/v2\n";
+        let cmds = parse_slash_commands(diff);
+        assert_eq!(
+            cmds,
+            vec!["/mcp:reload", "/agent-doc file.md", "/some_thing", "/v2"]
+        );
     }
 }

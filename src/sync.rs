@@ -1742,4 +1742,58 @@ mod tests {
         // File has content (frontmatter) → not empty → no scaffold
         assert!(!raw.trim().is_empty(), "file with frontmatter is not empty");
     }
+
+    // --- #4sh0: sync_log / repair_layout logging tests ---
+
+    /// repair_layout writes move-window or swap-window entries to /tmp/agent-doc-sync.log
+    /// when it has to reposition the agent-doc window to index 0.
+    #[test]
+    fn repair_layout_logs_move_window_action() {
+        let iso = IsolatedTmux::new("sync-log-move-window");
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        // Create session: placeholder at 0, then agent-doc at 1+ after killing placeholder
+        let _pane0 = iso.new_session("test", tmp.path()).unwrap();
+        let _ = iso.raw_cmd(&[
+            "new-window", "-t", "test:", "-n", "agent-doc", "-d",
+        ]);
+        // Kill index 0 so agent-doc is at index 1 with 0 free → triggers move-window
+        let _ = iso.raw_cmd(&["kill-window", "-t", "test:0"]);
+
+        let log_path = std::path::Path::new("/tmp/agent-doc-sync.log");
+        // Record log size before repair so we only check new lines
+        let before_len = std::fs::metadata(log_path).map(|m| m.len()).unwrap_or(0);
+
+        repair_layout(&iso, "test", "agent-doc").unwrap();
+
+        // Verify the log file has new content mentioning move-window or swap-window
+        let log_content = std::fs::read_to_string(log_path).unwrap_or_default();
+        let new_content = &log_content[before_len.min(log_content.len() as u64) as usize..];
+        assert!(
+            new_content.contains("repair_action=move-window") || new_content.contains("repair_action=swap-window"),
+            "repair_layout should log a move-window or swap-window action, got:\n{new_content}"
+        );
+    }
+
+    /// sync_log writes timestamped entries to /tmp/agent-doc-sync.log.
+    #[test]
+    fn sync_log_writes_to_log_file() {
+        let marker = format!("sync_log_test_marker_{}", std::process::id());
+        sync_log(&marker);
+
+        let log_content = std::fs::read_to_string("/tmp/agent-doc-sync.log").unwrap_or_default();
+        assert!(
+            log_content.contains(&marker),
+            "sync_log should write to /tmp/agent-doc-sync.log, marker not found"
+        );
+        // Verify timestamp format: each line starts with [<unix_seconds>]
+        let matching_line = log_content
+            .lines()
+            .find(|l| l.contains(&marker))
+            .expect("marker line should exist");
+        assert!(
+            matching_line.starts_with('['),
+            "log line should start with timestamp bracket, got: {matching_line}"
+        );
+    }
 }

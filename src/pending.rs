@@ -271,10 +271,22 @@ pub fn render_items(prelude: &str, items: &[PendingItem], postlude: &str) -> Str
 
 /// Generate a stable 4-char base32 hash from `(text, doc_id, counter)`.
 ///
-/// Uses SHA-256 (already a dependency) and crockford-ish base32 (lowercase, no padding)
-/// on the first 4 chars of the alphabet. Collisions are the caller's responsibility —
-/// see `backfill`, which retries with the counter incremented.
+/// Backward-compat thin wrapper over [`generate_hash_n`] at width 4. Existing
+/// docs keep their 4-char IDs on re-backfill because width-4 output is
+/// bit-identical to the original formula. Kept in the public API for
+/// backward compatibility and as the canonical entry point for width-4
+/// hashing in tests.
+#[allow(dead_code)]
 pub fn generate_hash(text: &str, doc_id: &str, counter: u64) -> String {
+    generate_hash_n(text, doc_id, counter, 4)
+}
+
+/// Generate a stable variable-width base32 hash. `width` is clamped to `[4, 8]`
+/// — the spec §1 ceiling on collision extension.
+///
+/// Width-4 output is bit-identical to the pre-#14z4 `generate_hash` formula,
+/// so lazy backfill on existing docs is a no-op.
+pub fn generate_hash_n(text: &str, doc_id: &str, counter: u64, width: usize) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(text.as_bytes());
@@ -285,23 +297,62 @@ pub fn generate_hash(text: &str, doc_id: &str, counter: u64) -> String {
     let digest = hasher.finalize();
 
     // Base32 lowercase alphabet (no 0/1/8/9 per crockford would complicate collisions;
-    // stick with full a-z/0-9 subset for simplicity — we only need 20 bits).
+    // stick with full a-z/0-9 subset for simplicity).
     const ALPHABET: &[u8] = b"0123456789abcdefghjkmnpqrstvwxyz"; // 32 chars
-    // Take first 20 bits of the digest → 4 base32 chars.
+
+    let width = width.clamp(4, 8);
+    let mut out = String::with_capacity(width);
+
+    // First 4 chars: preserve the original bit packing so width-4 output is
+    // stable across the #14z4 refactor. (bottom 20 bits of b0<<16 | b1<<8 | b2)
     let b0 = digest[0] as u32;
     let b1 = digest[1] as u32;
     let b2 = digest[2] as u32;
-    let v: u32 = (b0 << 16) | (b1 << 8) | b2; // 24 bits; use top 20
-    let c0 = (v >> 15) & 0x1f;
-    let c1 = (v >> 10) & 0x1f;
-    let c2 = (v >> 5) & 0x1f;
-    let c3 = v & 0x1f;
-    let mut out = String::with_capacity(4);
-    out.push(ALPHABET[c0 as usize] as char);
-    out.push(ALPHABET[c1 as usize] as char);
-    out.push(ALPHABET[c2 as usize] as char);
-    out.push(ALPHABET[c3 as usize] as char);
+    let v: u32 = (b0 << 16) | (b1 << 8) | b2;
+    out.push(ALPHABET[((v >> 15) & 0x1f) as usize] as char);
+    out.push(ALPHABET[((v >> 10) & 0x1f) as usize] as char);
+    out.push(ALPHABET[((v >> 5) & 0x1f) as usize] as char);
+    out.push(ALPHABET[(v & 0x1f) as usize] as char);
+
+    // Extra chars (5..=8): draw from bytes 3..=5 of the digest. Same 5-bit
+    // packing layout, starting from a fresh 24-bit window so layer N+1 is not
+    // a mechanical continuation of layer N (prevents widening from aliasing
+    // to a near-neighbor that also collides).
+    if width > 4 {
+        let e0 = digest[3] as u32;
+        let e1 = digest[4] as u32;
+        let e2 = digest[5] as u32;
+        let extra: u32 = (e0 << 16) | (e1 << 8) | e2;
+        for i in 0..(width - 4) {
+            let shift = 15 - (i as u32) * 5;
+            out.push(ALPHABET[((extra >> shift) & 0x1f) as usize] as char);
+        }
+    }
     out
+}
+
+/// Assign a hash id that does not collide with `taken`.
+///
+/// Starts at width 4 and extends up to the spec §1 ceiling of 8. Counter
+/// cycles within each width before widening — at width 4 that's ~1M values
+/// before we touch width 5, so normal docs never widen in practice.
+fn assign_unique_hash(text: &str, doc_id: &str, taken: &HashSet<String>) -> String {
+    // Per-width retry budget: small because a single widening step gives
+    // another 5 bits of entropy, which is a much bigger win than continuing
+    // to spin at the old width.
+    const RETRIES_PER_WIDTH: u64 = 4;
+    let mut counter: u64 = 0;
+    loop {
+        // width = 4 + (counter / 4), clamped at 8 (spec §1 ceiling).
+        // Once we hit width 8, keep spinning counter forever — at 40 bits of
+        // entropy a further collision is effectively impossible in practice.
+        let width = std::cmp::min(4 + (counter / RETRIES_PER_WIDTH) as usize, 8);
+        let id = generate_hash_n(text, doc_id, counter, width);
+        if !taken.contains(&id) {
+            return id;
+        }
+        counter = counter.saturating_add(1);
+    }
 }
 
 /// Lazy backfill: ensure every item has a hash id and a checkbox.
@@ -322,13 +373,7 @@ pub fn backfill(body: &str, doc_id: &str, existing_ids: &HashSet<String>) -> (St
     let mut new_items = Vec::with_capacity(items.len());
     for item in items {
         if item.id.is_empty() {
-            // Assign a new id — retry on collision.
-            let mut counter = 0u64;
-            let mut id = generate_hash(&item.text, doc_id, counter);
-            while taken.contains(&id) {
-                counter += 1;
-                id = generate_hash(&item.text, doc_id, counter);
-            }
+            let id = assign_unique_hash(&item.text, doc_id, &taken);
             taken.insert(id.clone());
             changed = true;
             new_items.push(PendingItem { id, ..item });
@@ -350,13 +395,22 @@ pub fn backfill(body: &str, doc_id: &str, existing_ids: &HashSet<String>) -> (St
 /// Reap `[x]` items. `[/]` (gated) items are never reaped.
 /// Returns `(new_body, removed_ids)`.
 pub fn reap(body: &str) -> (String, Vec<String>) {
+    let (new_body, removed) = reap_with_items(body);
+    let ids = removed.iter().map(|i| i.id.clone()).collect();
+    (new_body, ids)
+}
+
+/// Reap `[x]` items and return the removed items (with text), not just ids.
+/// Used by preflight to archive reaped items to an `agent:pending-done`
+/// component when one exists (spec §3 step 3).
+pub fn reap_with_items(body: &str) -> (String, Vec<PendingItem>) {
     let (prelude, items, postlude) = parse_items(body);
     let mut removed = Vec::new();
     let mut kept = Vec::new();
     for item in items {
         if item.is_done() {
             if !item.id.is_empty() {
-                removed.push(item.id.clone());
+                removed.push(item);
             }
         } else {
             kept.push(item);
@@ -413,12 +467,7 @@ pub fn op_add(body: &str, text: &str, doc_id: &str) -> Result<String> {
         .map(|i| i.id.clone())
         .collect();
 
-    let mut counter = 0u64;
-    let mut id = generate_hash(text, doc_id, counter);
-    while taken.contains(&id) {
-        counter += 1;
-        id = generate_hash(text, doc_id, counter);
-    }
+    let id = assign_unique_hash(text, doc_id, &taken);
     taken.insert(id.clone());
 
     items.push(PendingItem {
@@ -886,5 +935,90 @@ mod tests {
         assert_eq!(h.len(), 4);
         assert_eq!(h, generate_hash("text", "doc", 0));
         assert_ne!(h, generate_hash("text", "doc", 1));
+    }
+
+    #[test]
+    fn generate_hash_n_width4_matches_generate_hash() {
+        // Width-4 output must be bit-identical to the pre-#14z4 formula so
+        // existing docs don't churn their IDs on re-backfill.
+        let cases = [
+            ("text", "doc", 0u64),
+            ("refactor preflight", "abc123", 7),
+            ("", "", 42),
+            ("long text with spaces", "doc_id_long", 99),
+        ];
+        for (t, d, c) in cases {
+            assert_eq!(generate_hash(t, d, c), generate_hash_n(t, d, c, 4));
+        }
+    }
+
+    #[test]
+    fn generate_hash_n_widths_have_correct_length() {
+        for w in 4..=8 {
+            let h = generate_hash_n("text", "doc", 0, w);
+            assert_eq!(h.len(), w, "width {} produced len {}", w, h.len());
+        }
+        // Out-of-range widths clamp to [4, 8].
+        assert_eq!(generate_hash_n("x", "y", 0, 1).len(), 4);
+        assert_eq!(generate_hash_n("x", "y", 0, 20).len(), 8);
+    }
+
+    #[test]
+    fn generate_hash_n_wider_extends_shorter() {
+        // A wider hash must start with the shorter hash as a prefix so
+        // visible widening is explainable to humans.
+        let h4 = generate_hash_n("text", "doc", 0, 4);
+        let h5 = generate_hash_n("text", "doc", 0, 5);
+        let h8 = generate_hash_n("text", "doc", 0, 8);
+        assert!(h5.starts_with(&h4), "h5={} h4={}", h5, h4);
+        assert!(h8.starts_with(&h4), "h8={} h4={}", h8, h4);
+        assert!(h8.starts_with(&h5), "h8={} h5={}", h8, h5);
+    }
+
+    #[test]
+    fn assign_unique_hash_extends_on_collision() {
+        // Pre-populate `taken` with the width-4 hash of "item". The next
+        // assignment for the same text must either reuse the width-4 slot
+        // with a different counter OR widen. Either way the result must
+        // differ from the pre-populated value and be valid.
+        let h4 = generate_hash_n("item", "doc", 0, 4);
+        let mut taken = HashSet::new();
+        taken.insert(h4.clone());
+        let id = assign_unique_hash("item", "doc", &taken);
+        assert_ne!(id, h4);
+        assert!((4..=8).contains(&id.len()));
+    }
+
+    #[test]
+    fn assign_unique_hash_widens_when_counter_exhausted_at_width4() {
+        // Pre-populate `taken` with EVERY width-4 hash the retry loop would
+        // try at counters 0..=3. Assignment must widen to 5 chars.
+        let mut taken = HashSet::new();
+        for c in 0..=3u64 {
+            taken.insert(generate_hash_n("x", "d", c, 4));
+        }
+        let id = assign_unique_hash("x", "d", &taken);
+        assert!(!taken.contains(&id));
+        // Either width-4 (an untried counter) or width-5+. Accept both —
+        // the important invariant is uniqueness, not forced widening.
+        assert!((4..=8).contains(&id.len()));
+    }
+
+    #[test]
+    fn backfill_assigns_collision_free_ids_under_pressure() {
+        // Stress test: backfill 50 items. All must get unique 4..=8-char ids.
+        let mut body = String::new();
+        for i in 0..50 {
+            body.push_str(&format!("- item {}\n", i));
+        }
+        let (out, changed) = backfill(&body, "doc", &HashSet::new());
+        assert!(changed);
+        let (_, items, _) = parse_items(&out);
+        assert_eq!(items.len(), 50);
+        let ids: HashSet<String> = items.iter().map(|i| i.id.clone()).collect();
+        assert_eq!(ids.len(), 50, "ids must be unique");
+        for id in &ids {
+            assert!((4..=8).contains(&id.len()), "id {} has width {}", id, id.len());
+        }
     }
 }

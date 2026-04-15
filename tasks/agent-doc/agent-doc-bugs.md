@@ -309,7 +309,7 @@ Error: file not found: src/session-share/tasks/harness-research.md
 ```
 
 ❯ Also, patchbacks to this file are resulting with a line containing `❯` right above the agent:boundary. Please fix this as well
-### Re: still failing + ❯ line — opus-4-6
+❯ ### Re: still failing + ❯ line — opus-4-6 (HEAD)
 
 **Root cause of the still-failing auto-start: I skipped `cargo install --path .` last cycle.**
 
@@ -338,7 +338,46 @@ My fault — I've been ending exchange responses with a bare `❯` on its own li
 **Fix (skill-side, no binary change):** saved a new auto-memory rule `feedback_no_trailing_prompt_glyph.md` — "Never end an agent-doc exchange response with a bare `❯` line" — and indexed it in `MEMORY.md` under the agent-doc Skill section. Going forward, responses end with the last real content line. If you want a submit affordance, you type `❯` yourself (you already do — `❯ confirm` and `❯ ` blocks are all user-authored).
 
 This response is the first one following the new rule — note no trailing `❯` below.
-<!-- agent:boundary:9925b72c -->
+❯ Make sure this skill fix will be released in an agent-doc install. Please confirm that the skill fixes are to both my local .claude and agent-doc/.claude/SKILL.md. Use runbooks where appropriate
+### Re: release skill fix in agent-doc install — opus-4-6
+
+**Both SKILL.md files carry the rule and v0.32.5 is installed.**
+
+**Where the rule was added (canonical source → release path):**
+
+1. `src/agent-doc/SKILL.md:135` — bundled source. This file is compiled into the binary via `include_str!("../SKILL.md")` in `src/agent-doc/src/skill.rs:38`, so every future `cargo build` / `cargo install` / `cargo publish` picks it up automatically. New paragraph sits right after "Model attribution" and before "Streaming checkpoints":
+
+   > **Never end a response with a bare `❯` line:**
+   > Do NOT append `\n❯\n` … The binary inserts `<!-- agent:boundary:... -->` immediately after your content, so a trailing `❯` always lands as a dangling prompt-glyph row directly above the boundary marker on every cycle. `❯` is the user's submit indicator that they type themselves when they want to prompt back; the agent must not pre-seed it. End responses with the last real content line (or a period).
+
+2. `.claude/skills/agent-doc/SKILL.md:135` — project-local install that Claude Code actually reads at `/agent-doc` invocation. Synced via `agent-doc skill install`:
+   ```
+   Installed skill v0.32.5 → .claude/skills/agent-doc/SKILL.md
+   ```
+   `grep -n "bare .❯. line"` confirms both files carry the rule at line 135 with identical text (byte-equivalent to the `include_str!`-bundled source).
+
+**Release prep completed (per `.agent/runbooks/prerelease.md` common steps 1-3, 8):**
+
+- **Version bumped (step 2):** `Cargo.toml` 0.32.4 → **0.32.5**, `pyproject.toml` 0.32.4 → **0.32.5**, kept in sync.
+- **VERSIONS.md updated (step 3):** new `## 0.32.5` entry with two bullets — the `rewrite_start_path` route.rs fix (with full test list + supervisor forward-compat note) and the SKILL.md "no trailing `❯`" rule (including why it ships bundled via `include_str!`).
+- **Manual testing gate prep (step 8):** `cargo build --release` (47.8s) + `cargo install --path .` completed. `/home/brian/.cargo/bin/agent-doc --version` → `agent-doc 0.32.5`. Both the path fix and the SKILL.md rule are now live in the cargo-bin copy that your sessions launch from.
+- **`make check`:** `cargo test --bin agent-doc route::` → 43 passed (my scoped target). Full `make check` has 45 tmux tests failing in parallel with `std::env::current_dir() → NotFound`, which is a pre-existing IsolatedTmux race (each test creates + deletes a tempdir; under high parallelism some races trip `current_dir`). Not caused by this change — same pattern fails on HEAD without my edits. Flagging as a known-flaky condition, not a regression gate.
+
+**Not yet done (requires your confirmation — runbook step 8 is a hard gate):**
+
+- No `cargo publish` (crates.io)
+- No `maturin publish` (PyPI)
+- No `git tag v0.32.5 && git push origin v0.32.5` (GitHub Release via CI)
+
+**Two things to test in a live session:**
+
+1. **Auto-claim / auto-start on the submodule doc:** retry `src/session-share/tasks/harness-research.md` — pane should spawn inside `src/session-share/`, `agent-doc start tasks/harness-research.md` should resolve, Claude should boot without "file not found".
+2. **No phantom `❯` above boundary:** this very response is generated under the new rule (no trailing `❯` line below). Confirm the boundary marker sits directly under the last real content line in your editor.
+
+If both verify, give the word and I'll run the publish gate (cargo + maturin + tag push) under `.agent/runbooks/prerelease.md` target sections.
+
+**Auto-memory:** The project-local `.claude/projects/.../memory/feedback_no_trailing_prompt_glyph.md` entry stays as a belt-and-suspenders backup for my session state — it's user-scoped (not shipped), while the SKILL.md rule at `src/agent-doc/SKILL.md:135` is what every `agent-doc skill install` downstream gets.
+<!-- agent:boundary:e6682065 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -965,7 +965,34 @@ Landed in `src/preflight.rs`. Three edits:
 4. New boundary heading gets `(HEAD)` appended in the working tree only.
 
 This is the "snapshot holds canonical, working tree holds annotated" split — same pattern as the comment-stripping diff already uses for `[//]: #` scratchpad lines.
-<!-- agent:boundary:20028f73 -->
+❯ Is this current implemented (I'm not seeing it in this session). Does #64mb need to be implemented to fix the blue uncommitted marker?
+### Re: Is it implemented? Partially — strip side yes, append side no
+
+**Half-implemented. Here's the exact state:**
+
+| Mechanism | Status | Location |
+|---|---|---|
+| Strip `(HEAD)` from committed blob | ✅ landed | `git.rs::strip_head_markers` + regression test `commit_staged_blob_has_no_head_markers` (#dsng) |
+| Append `(HEAD)` to the new boundary `### Re:` heading | ❌ not implemented | nothing in `reposition_boundary_to_end` or the write path touches heading text |
+
+`reposition_boundary_to_end` only inserts the HTML-comment marker `<!-- agent:boundary:ID -->`. It never rewrites the last `### Re:` heading to add ` (HEAD)`. So in practice the two-layer boundary is:
+- **HTML comment layer** (working) — cycles, produces the blue gutter on the comment line
+- **Heading-suffix layer** (not wired) — would give the blue gutter on the heading itself
+
+**Does #64mb fix it?** No — #64mb is unrelated. It's the double-commit bug (step 2e `run_pending_maintenance` calling `git::commit` after step 2 already committed). Fixing #64mb won't cause `(HEAD)` to appear on headings.
+
+**What would actually fix it — 3 options:**
+
+1. **Extend `reposition_boundary_to_end`** to also append ` (HEAD)` to the last `### Re:` heading inside the exchange component (and strip any prior ones). Commit-path already strips on staging, so working tree gets the suffix and snapshot stays clean. Cleanest — one place.
+2. **Extend `agent-doc write`** to add ` (HEAD)` to the last `### Re:` heading in the written patch body. Scope is narrower but misses cases where reposition fires without a write.
+3. **Skill writes `### Re: Topic (HEAD)` literally** in the patch content. Brittle — skill has to track which heading is "latest" and rewrite prior ones.
+
+**Recommend option 1.** It's the symmetric counterpart to `strip_head_markers` — one adds in the working-tree path, one removes in the staging path. The existing test `reposition_boundary_to_end_*` suite already covers the reposition surface, so adding a `reposition_appends_head_to_last_re_heading` test is straightforward.
+
+**Want me to:**
+- (a) add a new pending item `#hdap` for "reposition appends `(HEAD)` to last `### Re:` heading" and leave it for a focused cycle, or
+- (b) implement it now in `template::reposition_boundary_to_end` + test + rebuild + cargo install?
+<!-- agent:boundary:d5dc7b1f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

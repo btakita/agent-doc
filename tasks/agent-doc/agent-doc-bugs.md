@@ -99,7 +99,7 @@ Got it — I'll add tests for all 4 features. Plan:
 
 Starting on the JB blocker below first, then I'll implement these. Want me to batch into one commit or one per feature?
 
-### Re: JB plugin claim session mismatch — opus-4-6
+❯ ### Re: JB plugin claim session mismatch — opus-4-6 (HEAD)
 
 **How to start agent-doc from the JB plugin:**
 
@@ -133,7 +133,23 @@ The project has a registered tmux session (`0`) from before reboot. Your new tmu
 **Which I'd use:** option 2 (`--force`) — reboot invalidated session `0`, and forcing is the intended escape hatch. If the plugin's Claim action doesn't expose `--force`, that's itself a bug (file under agent-doc-bugs).
 
 **Follow-up bug candidate:** after reboot, stale session bindings in the registry should probably be garbage-collected (detect that session `0` no longer exists in `tmux list-sessions` and auto-clear). Want me to add that as a pending item?
-<!-- agent:boundary:1d280f14 -->
+❯ I want the Claim action to expose `--force`. The FFI plugin should detect if the session does not exist and use `--force`.
+### Re: expose --force + auto-detect stale session — opus-4-6
+
+Got it. Two-part change:
+
+**1. CLI: `agent-doc claim --force` already exists** (the error message mentions it) — I'll verify and, if missing, add the flag to `claim` subcommand in `cli.rs` / `claim.rs`.
+
+**2. FFI: auto-detect stale session and retry with force.** In `ffi.rs` `claim_for_pane` (or wherever the JB plugin calls into), on `session mismatch: cross-session claim rejected`:
+- Parse the registered session name from the error (or read it from the registry directly).
+- Call `tmux has-session -t <registered>` — if exit != 0, the session is stale.
+- Retry the claim with `force=true`.
+- If `tmux has-session` succeeds, return the original error (real cross-session conflict — user should decide).
+
+**3. JB plugin UI:** also expose a manual `--force` toggle on the `Claim for Tmux Pane` action (checkbox in the dialog, or a separate `Force Claim for Tmux Pane` action) so the user can override even when auto-detect is wrong.
+
+Added to pending. I'll implement after the tests from #4sh0/#tw4a/#8jzg/#cce5 unless you want this first — it's the active blocker, so I lean toward **this first, then tests**. Confirm?
+<!-- agent:boundary:b1bc1008 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -167,5 +183,6 @@ The project has a registered tmux session (`0`) from before reboot. Your new tmu
 - [ ] [#zvmd] Submodule (HEAD) marker: fix show_head() to route via narrow_to_submodule — superproject rev-parse can't show submodule-tracked files, so add_head_marker falls through to the 'no HEAD → mark last heading only' fallback, which drops (HEAD) when the exchange component has no ### Re: heading yet or when the fallback runs during a boundary-only cycle
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
+- [ ] [#2g09] FFI claim: detect missing tmux session and auto-retry with --force; expose --force on JB Claim action as manual override
 <!-- /agent:pending -->
 ## Assistant

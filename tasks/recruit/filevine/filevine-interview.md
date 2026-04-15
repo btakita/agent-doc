@@ -122,7 +122,7 @@ So this is **not a green-field build** — it's closer to "understand this, run 
 I've populated `agent:pending` with the actionable items from above. Say "go" (or "go phase 1") and I'll start executing.
 ❯ do #xf9v #7d7s #awgb
 I'm using port 8080 for something else. Please use port 8081
-### Re: phase 1 execution (#xf9v #7d7s #awgb) — haiku
+❯ ### Re: phase 1 execution (#xf9v #7d7s #awgb) — haiku (HEAD)
 
 #### #xf9v — Stack up
 
@@ -203,7 +203,14 @@ Full read of the 471-line file. Structure is clean: three map functions (contact
 When you walk through this code, I'd lead with items 1–4 (phone/email label + the ignored "Primary Contact is FN" column + country default) — those are **real bugs** you can point at, fix on-the-fly if asked, and show mapping judgment. Then pivot to the Gemini opportunity: column-mapping under ambiguity is exactly where the existing heuristics break down (items 10–11), and that's your slot to propose the LLM-assisted mapper as a *genuine* improvement, not decoration.
 
 Completed pending items: `#xf9v`, `#7d7s`, `#awgb`. Remaining items are still queued — say "go phase 2" when you're ready to exercise the workflow.
-<!-- agent:boundary:b531b009 -->
+### Re: temporal-ui port → 8081 — haiku
+
+Remapped `temporal-ui` from 8088 to **8081** in `docker-compose.override.yml` and recreated the container. Verified with `curl` — returns 200.
+
+New endpoint: http://localhost:8081/
+
+The other two override entries (postgres unbound, localstack pinned to `3.8`) are unchanged. My earlier summary above still references 8088 — treat **8081 as the live URL** going forward.
+<!-- agent:boundary:f20cb0a1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

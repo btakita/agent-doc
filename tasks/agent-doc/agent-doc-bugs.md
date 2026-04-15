@@ -29,7 +29,7 @@ claude_args: --dangerously-skip-permissions
 ### Open / not yet implemented
 
 - **(HEAD) stripped from older section on inline prompt** — when the user edits inside an older `### Re:` section, reposition strips that heading's `(HEAD)` marker (phantom diff). Fix: option 2 — early-return in reposition when boundary heading is unchanged. Regression test spec defined (see prior exchange). Not yet implemented.
-<!-- agent:boundary:ab1a12d2 -->
+<!-- agent:boundary:cb7fdeeb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

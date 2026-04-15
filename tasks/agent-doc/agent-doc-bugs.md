@@ -1149,7 +1149,7 @@ Behavior after fix:
 Test suite: **56 template tests passing** (+1 from the 55 locked in last cycle).
 
 **Binary rebuilt and installed**: `cargo install --path .` + `cargo build --release` both completed — so this turn's commit should be the first to exercise the fix, and the `### Re: diagnosed` heading above should ship with `(HEAD)` in the working tree after commit.
-<!-- agent:boundary:f0e3374a -->
+<!-- agent:boundary:3ac0b2ea -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

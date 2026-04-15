@@ -1086,7 +1086,16 @@ Done. `src/agent-doc/src/template.rs:557` and `src/agent-doc/src/template.rs:632
 - `annotate_re_headings_with_head`'s baseline lookup builds the key with `trim_end_matches('\n').trim_end_matches('\r').trim_start().trim_end()`.
 
 Both sides are symmetric, so a heading like `  ### Re: foo` in HEAD will match `### Re: foo` in the working tree and (correctly) not be marked as new. Existing 53 template tests pass unchanged — none exercised leading whitespace before, so I can add a regression test for the indented-heading case in a follow-up if you want it locked in.
-<!-- agent:boundary:a8055d29 -->
+❯ lock it in. add regression test
+### Re: lock it in, add regression test
+
+Locked. Two new tests in `src/agent-doc/src/template.rs`:
+
+1. `exchange_baseline_headings_normalizes_leading_whitespace` — HEAD has `  ### Re: indented`; asserts the collected baseline set contains the trim_start'd form `### Re: indented` so a flush-left working-tree heading will match it.
+2. `reposition_with_baseline_matches_indented_heading` — baseline contains `### Re: foo` (flush), working tree has `  ### Re: foo` (indented); asserts `reposition_boundary_to_end_with_baseline` produces output with zero `(HEAD)` markers (the indented heading is recognized as already-in-baseline).
+
+Test suite: 55 template tests passing (was 53, +2). Both new tests exercise the two lines touched in the previous cycle — `collect_re_headings`'s set-entry normalization and `annotate_re_headings_with_head`'s lookup-key normalization — so a regression in either direction would flip exactly one test.
+<!-- agent:boundary:e74b68fe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -75,7 +75,7 @@ New boolean `--isolate` flag on `agent-doc claim`. When set, `run_isolate(file)`
 `PreflightOutput` now includes `agent_model: Option<String>` — populated from `ANTHROPIC_MODEL` env var (preferred) or frontmatter `model` field, both shortened via `short_model_name()` (strips `claude-` prefix). Bundled SKILL.md updated: when `preflight.agent_model` is set, append ` — <model>` to `### Re:` headers. Example: `### Re: do #4sh0 — sonnet-4-6`.
 
 ❯ did you add tests?
-### Re: did you add tests?
+❯ ### Re: did you add tests? (HEAD)
 
 No. The implementation commit added no tests for the 4 features:
 
@@ -85,7 +85,55 @@ No. The implementation commit added no tests for the 4 features:
 - **#cce5 (agent_model)** — no tests. `resolve_agent_model()` added to `preflight.rs` with no unit test for the env-var path, frontmatter fallback, or `short_model_name` trimming.
 
 The only test activity in that commit was a pre-existing clippy fix in `session_check.rs`. Want me to add tests for these now?
-<!-- agent:boundary:70b38470 -->
+❯ yes
+
+❯ I rebooted my machine. I opened JB Idea and a tmux session. From the JB Plugin, how do I start agent-doc? When I tried called `Claim for Tmux Pane`, I got a prompt "Claim failed (exit 1): error: pane %0 is in tmux session 'claude' but project session is '0'. Switch to session '0' and re-run, or use --force to override. Error: session mismatch: cross-session claim rejected".
+### Re: yes (tests) — opus-4-6
+
+Got it — I'll add tests for all 4 features. Plan:
+
+- **#4sh0 (sync.rs logging)** — assert log output on the new call paths (capture via `tracing-test` or existing pattern in `sync.rs` tests).
+- **#tw4a (claim cwd)** — unit test `register_with_pid_and_cwd` in `sessions.rs`: verify cwd is persisted and round-trips through the registry.
+- **#8jzg (--isolate flag)** — integration test for `run_isolate` path (tempdir, verify isolation semantics).
+- **#cce5 (agent_model)** — unit tests for `resolve_agent_model()`: env var precedence, frontmatter fallback, `None` case; and `short_model_name()` trimming (`claude-opus-4-6` → `opus-4-6`, `claude-sonnet-4-6` → `sonnet-4-6`, passthrough for already-short).
+
+Starting on the JB blocker below first, then I'll implement these. Want me to batch into one commit or one per feature?
+
+### Re: JB plugin claim session mismatch — opus-4-6
+
+**How to start agent-doc from the JB plugin:**
+
+1. Open a session document (`.md` with `agent_doc_session` frontmatter) in IDEA.
+2. Open a tmux pane in a terminal where you want agent-doc to run.
+3. Invoke **Claim for Tmux Pane** from the plugin — this binds the active tmux pane to that document. Edits to the doc then route to that pane.
+4. Agent-doc runs inside the pane (the `/agent-doc` skill handles each cycle).
+
+**Your error — session mismatch:**
+
+```
+pane %0 is in tmux session 'claude' but project session is '0'
+```
+
+The project has a registered tmux session (`0`) from before reboot. Your new tmux session is named `claude`, so the claim is rejected as a cross-session claim (guard against commandeering panes from unrelated sessions).
+
+**Three fixes, pick one:**
+
+1. **Attach to the old session name** — if session `0` still exists post-reboot (unlikely after reboot), `tmux attach -t 0`.
+2. **Force the claim** (quickest if you've verified `%0` is really yours):
+   ```
+   agent-doc claim tasks/agent-doc/agent-doc-bugs.md --force
+   ```
+   The plugin should expose a `--force` toggle; if not, run from a terminal. This overwrites the registered session to `claude`.
+3. **Reset the project session registry** — clear the stale session binding so the next claim picks up `claude` cleanly:
+   ```
+   agent-doc sessions reset   # or: rm .agent-doc/sessions.json (check exact path)
+   ```
+   Then re-run `Claim for Tmux Pane`.
+
+**Which I'd use:** option 2 (`--force`) — reboot invalidated session `0`, and forcing is the intended escape hatch. If the plugin's Claim action doesn't expose `--force`, that's itself a bug (file under agent-doc-bugs).
+
+**Follow-up bug candidate:** after reboot, stale session bindings in the registry should probably be garbage-collected (detect that session `0` no longer exists in `tmux list-sessions` and auto-clear). Want me to add that as a pending item?
+<!-- agent:boundary:c17fac36 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -73,7 +73,19 @@ New boolean `--isolate` flag on `agent-doc claim`. When set, `run_isolate(file)`
 
 **#cce5 — model attribution in `### Re:` headers** (`src/preflight.rs`, bundled SKILL.md)
 `PreflightOutput` now includes `agent_model: Option<String>` — populated from `ANTHROPIC_MODEL` env var (preferred) or frontmatter `model` field, both shortened via `short_model_name()` (strips `claude-` prefix). Bundled SKILL.md updated: when `preflight.agent_model` is set, append ` — <model>` to `### Re:` headers. Example: `### Re: do #4sh0 — sonnet-4-6`.
-<!-- agent:boundary:c94b597f -->
+
+❯ did you add tests?
+### Re: did you add tests?
+
+No. The implementation commit added no tests for the 4 features:
+
+- **#4sh0 (sync.rs logging)** — no tests. Sync.rs already has 17 tests but none cover the new log call paths.
+- **#tw4a (claim cwd)** — no new tests. `register_with_pid_and_cwd` was added to `sessions.rs` without coverage.
+- **#8jzg (--isolate flag)** — no tests. The `run_isolate` path goes untested.
+- **#cce5 (agent_model)** — no tests. `resolve_agent_model()` added to `preflight.rs` with no unit test for the env-var path, frontmatter fallback, or `short_model_name` trimming.
+
+The only test activity in that commit was a pre-existing clippy fix in `session_check.rs`. Want me to add tests for these now?
+<!-- agent:boundary:63fda2ee -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

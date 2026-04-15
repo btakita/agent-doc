@@ -1095,7 +1095,7 @@ Locked. Two new tests in `src/agent-doc/src/template.rs`:
 2. `reposition_with_baseline_matches_indented_heading` — baseline contains `### Re: foo` (flush), working tree has `  ### Re: foo` (indented); asserts `reposition_boundary_to_end_with_baseline` produces output with zero `(HEAD)` markers (the indented heading is recognized as already-in-baseline).
 
 Test suite: 55 template tests passing (was 53, +2). Both new tests exercise the two lines touched in the previous cycle — `collect_re_headings`'s set-entry normalization and `annotate_re_headings_with_head`'s lookup-key normalization — so a regression in either direction would flip exactly one test.
-<!-- agent:boundary:4f58513e -->
+<!-- agent:boundary:9153507f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -460,7 +460,7 @@ Bundled. Starting execution now. Plan:
 6. **Verify live** — confirm response from installed binary produces no trailing `❯`.
 
 Will post progress after each completed step. Starting with exploration of `write.rs` and test layout.
-### Re: bundled changes built + installed — manual gate — opus-4-6
+❯ ### Re: bundled changes built + installed — manual gate — opus-4-6 (HEAD)
 
 **Status:** all changes done, release build installed, **awaiting manual verification** before publishing.
 
@@ -494,7 +494,27 @@ Will post progress after each completed step. Starting with exploration of `writ
 - `gh release create v0.32.5` (or let CI handle it after tag push)
 
 Per the memory rule **"Manual testing gate before publish"** and the prerelease runbook §8, none of those fire until you confirm. Say `publish` (or `ship it` / `release`) and I'll run the publish gate.
-<!-- agent:boundary:1c8ba7ba -->
+❯ release
+### Re: released — opus-4-6
+
+**agent-doc v0.32.5 shipped.**
+
+| Target | Status |
+|--------|--------|
+| crates.io | Published (`agent-doc v0.32.5`) |
+| PyPI | Uploaded (`agent_doc-0.32.5-py3-none-manylinux_2_28_x86_64.whl`) |
+| GitHub Release | https://github.com/btakita/agent-doc/releases/tag/v0.32.5 |
+| `~/.cargo/bin/agent-doc` | v0.32.5 (installed) |
+| `.bin/agent-doc` symlink | v0.32.5 (release build) |
+
+**What shipped:**
+
+- Binary strips trailing bare `❯` from exchange writes — code-enforced invariant.
+- SKILL.md: 293 → 112 lines. 4 new runbooks bundled (`model-tier-gate`, `streaming-checkpoints`, `document-format`, `code-enforced-directives`).
+- Pending gated-state `[/]` + submodule auto-start fix also included (pre-existing in-flight work).
+
+**Memory and context are clean:** `feedback_no_trailing_prompt_glyph.md` deleted and de-indexed. The rule is now enforced at the binary layer — agents can forget it and the behavior stays correct.
+<!-- agent:boundary:6b33fb98 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

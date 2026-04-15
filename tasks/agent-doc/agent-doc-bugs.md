@@ -377,7 +377,7 @@ This response is the first one following the new rule — note no trailing `❯`
 If both verify, give the word and I'll run the publish gate (cargo + maturin + tag push) under `.agent/runbooks/prerelease.md` target sections.
 
 **Auto-memory:** The project-local `.claude/projects/.../memory/feedback_no_trailing_prompt_glyph.md` entry stays as a belt-and-suspenders backup for my session state — it's user-scoped (not shipped), while the SKILL.md rule at `src/agent-doc/SKILL.md:135` is what every `agent-doc skill install` downstream gets.
-<!-- agent:boundary:e6682065 -->
+<!-- agent:boundary:05a8d413 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

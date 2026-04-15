@@ -494,7 +494,7 @@ Will post progress after each completed step. Starting with exploration of `writ
 - `gh release create v0.32.5` (or let CI handle it after tag push)
 
 Per the memory rule **"Manual testing gate before publish"** and the prerelease runbook §8, none of those fire until you confirm. Say `publish` (or `ship it` / `release`) and I'll run the publish gate.
-<!-- agent:boundary:d7c783c0 -->
+<!-- agent:boundary:1c8ba7ba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

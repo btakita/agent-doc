@@ -120,7 +120,7 @@ So this is **not a green-field build** — it's closer to "understand this, run 
 ### Pending items added
 
 I've populated `agent:pending` with the actionable items from above. Say "go" (or "go phase 1") and I'll start executing.
-<!-- agent:boundary:70386a9f -->
+<!-- agent:boundary:1ec2b035 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -31,7 +31,7 @@ If you paste the LinkedIn bios (or a summary) into the doc, I can tailor talking
 
 ❯ Please add as a submodule git@github.com:mixmasterc85/FDE-Project-Interview.git
 This is in a docker container.
-### Re: FDE-Project-Interview submodule — haiku
+❯ ### Re: FDE-Project-Interview submodule — haiku (HEAD)
 
 Added at `tasks/recruit/filevine/FDE-Project-Interview` and read the README. Summary of what they gave you:
 
@@ -59,7 +59,19 @@ Added at `tasks/recruit/filevine/FDE-Project-Interview` and read the README. Sum
 **Interview strategy:** they want to see you reason about mapping under ambiguity, not memorized Filevine trivia. Narrate tradeoffs out loud. The Gemini call is the signal — show you can pick a high-value LLM use case, not just sprinkle it in.
 
 Want me to draft the mapping tables and a workflow skeleton you can walk in with, or keep it hands-off so you can work through it cold in the interview?
-<!-- agent:boundary:eb027fae -->
+### Re: docker container note — haiku
+
+Got it — the whole stack (FastAPI, Temporal worker, LocalStack, Postgres) runs via `docker compose up -d` from inside `tasks/recruit/filevine/FDE-Project-Interview`. I won't try to run Python/uvicorn on the host.
+
+Practical implications:
+
+- **Host tooling for inspection:** to read the xlsx files without starting the full stack, I'd either `docker compose run` a one-off python container or just copy the files out of `data/` (they ship in the repo too, per the README — same files as in the S3 bucket). The `data/` dir is the easy path.
+- **LocalStack endpoint:** `http://localstack:4566` from inside the compose network, `http://localhost:4566` from the host. Code should read from an env var so it works in both.
+- **Temporal worker lives in the compose stack** — any workflow/activity code edits need a container rebuild or a bind mount (the README says FastAPI hot-reloads under `app/`; worth checking if the worker does too).
+- **Gemini `.env`** — it's mounted into the containers, so the key is only reachable from inside the stack. Don't print it.
+
+Want me to spin up the stack now and poke at the xlsx column headers + verify the Temporal boilerplate, or hold off until you give the go-ahead?
+<!-- agent:boundary:0804da02 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

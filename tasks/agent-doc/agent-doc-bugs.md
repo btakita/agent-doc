@@ -757,7 +757,7 @@ Let me know if you want me to update `VERSIONS.md` + `specs/pending-system.md` (
 ❯ One of my last patchbacks to claudescore.md resulted wth `### Re: #nahq — checkpoint 1: news + spec + ontology landed` having an uncommitted removal of ` (HEAD)` even though the section was from a previous commit.
 ❯ I did an inline prompt in the section.
 
-### Re: (HEAD) stripped from older section on inline prompt (HEAD)
+### Re: (HEAD) stripped from older section on inline prompt
 
 Logged as pending. Quick read on the suspect path:
 
@@ -771,7 +771,51 @@ Fix direction (not implementing yet, want your call):
 3. Add a regression test: doc with two `### Re:` sections, the older one carries `(HEAD)`, user edits inside the older one, run preflight, assert working tree still has `(HEAD)` on the older heading.
 
 Want me to dig into `reposition_boundary` and propose a patch, or just leave it as #pending for a dedicated pass?
-<!-- agent:boundary:67de08ca -->
+❯ Do you recommend 1 or 2
+❯ I a regression test in addition
+
+### Re: 1 vs 2 + regression test (HEAD)
+
+**Recommend option 2** as the primary fix, with option 1 as a follow-up if needed.
+
+Why 2 over 1:
+- **Narrower invariant**: "if the boundary heading is unchanged, don't touch the working tree" is a cheap, local check — compute the new boundary, compare against the old boundary's identity (heading text + component), early-return if equal. No risk of rewriting unrelated headings.
+- **Option 1 requires knowing "previous boundary" reliably** across snapshot + working tree, which is exactly the state that drifts when the user is editing. Option 2 sidesteps that by making the no-op condition a *property of the new computation*, not a diff against remembered state.
+- **Option 2 also fixes the phantom-diff class generally** — any inline edit that doesn't move the boundary becomes a true no-op in reposition, which is the correct semantics: reposition is a boundary-migration operation, not a working-tree normalizer.
+- Option 1 is still worth doing eventually as a defense-in-depth: even when reposition *does* run, it should only rewrite the two headings it actually needs to touch. But it's a bigger change and the bug you hit is already closed by 2.
+
+**Regression test** (yes, in addition):
+
+```rust
+// src/agent-doc/tests/reposition_boundary_preserves_older_head.rs
+#[test]
+fn inline_edit_in_older_section_preserves_head_marker() {
+    let doc = indoc! {"
+        ---
+        agent_doc_mode: template
+        ---
+        &lt;!-- agent:exchange --&gt;
+        ### Re: #older — already committed (HEAD)
+        old content
+        ### Re: #newer — current boundary
+        new content
+        &lt;!-- /agent:exchange --&gt;
+    "};
+    // commit, then inline-edit inside the #older section
+    let edited = doc.replace("old content", "old content\nuser note");
+    // run preflight (or reposition_boundary directly)
+    let result = run_preflight(&edited);
+    // assert: #older still carries " (HEAD)" in working tree
+    assert!(result.working_tree.contains("### Re: #older — already committed (HEAD)"));
+    // assert: #newer did NOT gain (HEAD)
+    assert!(!result.working_tree.contains("### Re: #newer — current boundary (HEAD)"));
+}
+```
+
+Minimal scaffolding — whatever `reposition_boundary` unit-test harness already exists is probably the right home. The key assertions are (a) `(HEAD)` preserved on the older heading, (b) no phantom migration to the newer heading, (c) working-tree byte-equal to input modulo the user's edit.
+
+Want me to implement option 2 + this test now, or keep it as pending for a dedicated pass?
+<!-- agent:boundary:3912d9af -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

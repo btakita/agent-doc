@@ -272,7 +272,7 @@ The bug is not in *how* the pane is spawned — it's in the `start` argument str
 
 Confirm and I'll ship the fix.
 ❯ confirm
-### Re: confirm — opus-4-6
+❯ ### Re: confirm — opus-4-6 (HEAD)
 
 **Landed and rebuilt.** Quick fix shipped in `src/agent-doc/src/route.rs`.
 
@@ -300,8 +300,45 @@ Plus full `route::` suite: **43 passed, 0 failed**. `cargo clippy --bin agent-do
 
 - No supervisor wire-up. Stays queued in #jg0d/#b486/#40ct/#vnp0/#6ae3/#zp02/#f7d5 as its own track. When phase 1 lands, the same `rewrite_start_path` helper feeds `PtySpawnConfig.args` — this fix is forward-compatible, not throwaway.
 - No `cargo install --path .` yet — waiting on your manual-test confirmation before I push to `~/.cargo/bin/`, then the publish gate for v0.32.5.
-❯
-<!-- agent:boundary:16d4d85c -->
+❯ When I switch editor panes where the bound tmux pane is closed...causing an auto start on harness-research.md...I get the following error
+```
+/home/brian/.cargo/bin/agent-doc start src/session-share/tasks/harness-research.md
+~/work/btakita/agent-loop/src/session-share main ⇡40 !4 ?1                                        agent-loop 12:44:13
+❯ /home/brian/.cargo/bin/agent-doc start src/session-share/tasks/harness-research.md
+Error: file not found: src/session-share/tasks/harness-research.md
+```
+
+❯ Also, patchbacks to this file are resulting with a line containing `❯` right above the agent:boundary. Please fix this as well
+### Re: still failing + ❯ line — opus-4-6
+
+**Root cause of the still-failing auto-start: I skipped `cargo install --path .` last cycle.**
+
+Your error shows `/home/brian/.cargo/bin/agent-doc` — the stale binary. My previous cycle rebuilt `src/agent-doc/target/release/agent-doc` (0.32.4) and updated the `.bin/agent-doc` symlink, but the cargo-bin copy still contained the pre-fix code. That's the binary your sessions launch from (`~/.cargo/bin/` is on `$PATH`; `.bin/` is only on `$PATH` for tmux-spawned sessions inside the repo). So the old `auto_start_in_session` ran and passed the unrewritten super-root-relative path.
+
+**Fix applied:**
+
+```
+cargo install --path src/agent-doc
+→ Replacing /home/brian/.cargo/bin/agent-doc
+→ Replaced package `agent-doc v0.32.4`
+```
+
+Verified: `/home/brian/.cargo/bin/agent-doc --version` → `agent-doc 0.32.4`. The `rewrite_start_path` helper is now live in both the cargo-bin and the repo `.bin` copies.
+
+**Memory update:** I already treat `cargo install --path .` as mandatory post-publish; I also need to treat it as mandatory whenever I rebuild `src/agent-doc` locally and expect the fix to reach live sessions — `.bin/agent-doc` only helps tmux-spawned sessions inside the repo, not `~/.cargo/bin/`-launched ones. The release runbook (`src/agent-doc/CLAUDE.md` step 4) already lists this before the manual-testing gate; I elided it last cycle and will not again.
+
+**Please retry the auto-claim** on `src/session-share/tasks/harness-research.md` — the cargo-bin fix is now in place. If it still reproduces, it's a distinct bug and I'll diagnose.
+
+---
+
+**On the `❯` line above the boundary:**
+
+My fault — I've been ending exchange responses with a bare `❯` on its own line as a pseudo-prompt affordance. The binary then inserts `<!-- agent:boundary:... -->` right after my content, so the `❯` lands directly above the boundary marker on every cycle. Visual clutter, no semantic value.
+
+**Fix (skill-side, no binary change):** saved a new auto-memory rule `feedback_no_trailing_prompt_glyph.md` — "Never end an agent-doc exchange response with a bare `❯` line" — and indexed it in `MEMORY.md` under the agent-doc Skill section. Going forward, responses end with the last real content line. If you want a submit affordance, you type `❯` yourself (you already do — `❯ confirm` and `❯ ` blocks are all user-authored).
+
+This response is the first one following the new rule — note no trailing `❯` below.
+<!-- agent:boundary:ec0f7d40 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

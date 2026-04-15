@@ -2,7 +2,6 @@
 agent_doc_session: 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688
 agent_doc_format: template
 agent_doc_write: crdt
-agent_doc_model_tier: high
 claude_args: --dangerously-skip-permissions
 ---
 
@@ -32,7 +31,7 @@ claude_args: --dangerously-skip-permissions
 
 ❯ do #xzz5 #a011 #a012 #a014 #a010
 
-### Re: do #xzz5 #a011 #a012 #a014 #a010
+❯ ### Re: do #xzz5 #a011 #a012 #a014 #a010 (HEAD)
 
 All five shipped. Binary rebuilt (`cargo build --release`) and installed (`cargo install --path .`).
 
@@ -57,7 +56,24 @@ After `stream_loop` + final git commit, `run_stream` now fires both `fire_post_w
 - `parse_slash_commands` — 11 pass
 - `template::tests` — 56 pass
 - `preflight::tests` — 29 pass, 1 pre-existing failure (`preflight_sweep_commits_other_tracked_docs`) verified to fail on stashed baseline, unrelated to this work.
-<!-- agent:boundary:6b7a638b -->
+
+❯ do #4sh0 #tw4a #8jzg #cce5
+### Re: do #4sh0 #tw4a #8jzg #cce5
+
+All four shipped. Binary rebuilt and installed (still v0.32.4).
+
+**#4sh0 — sync.rs planned-move logging** (`src/sync.rs`)
+Added `sync_log()` calls at all tmux operation points in `repair_layout` and the stash rescue path: `stash_consolidate_action/result=join-pane`, `repair_action/result=swap-window`, `repair_action/result=move-window`, `rescue_attempt/action/result=swap-pane|join-pane`. Each log entry records pane IDs, window indices, session, and outcome (ok/err). All ClaimAction→SyncLayout swaps now have a trace in `/tmp/agent-doc-sync.log`.
+
+**#tw4a — claim cwd → nearest git repo** (`src/claim.rs`, `src/sessions.rs`)
+`claim::run` now resolves cwd via `git::resolve_pane_cwd(file)` (returns submodule root when file is in a submodule) before calling `sessions::register_with_pid_and_cwd()`. New helper `register_full_with_cwd` added to `sessions.rs`. Relative-path ambiguity and cross-repo git ops are fixed.
+
+**#8jzg — `--isolate` flag** (`src/main.rs`, `src/claim.rs`)
+New boolean `--isolate` flag on `agent-doc claim`. When set, `run_isolate(file)` resolves the nearest git root, then spawns `tmux new-window -c <git_root>` running `agent-doc start <file>`. CLAUDE.md, memory, and skills now load scoped to the submodule. Mid-session `cd` does not reload context — this is the only clean fix.
+
+**#cce5 — model attribution in `### Re:` headers** (`src/preflight.rs`, bundled SKILL.md)
+`PreflightOutput` now includes `agent_model: Option<String>` — populated from `ANTHROPIC_MODEL` env var (preferred) or frontmatter `model` field, both shortened via `short_model_name()` (strips `claude-` prefix). Bundled SKILL.md updated: when `preflight.agent_model` is set, append ` — <model>` to `### Re:` headers. Example: `### Re: do #4sh0 — sonnet-4-6`.
+<!-- agent:boundary:467d20e3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

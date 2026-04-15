@@ -1063,7 +1063,30 @@ Existing `reposition_appends_head_to_last_re_heading` and the four other `(HEAD)
 2. Leading whitespace on a heading line is NOT trimmed for the baseline key, but the scanner only recognizes headings by `hash_count + space` after `trim_start`. So `  ### Re: foo` and `### Re: foo` would hash differently as keys — unlikely in practice but worth noting if something behaves oddly.
 
 Want a follow-up cycle to fold the normalization down to `stripped.trim_start()` for absolute safety, or is this good as-is?
-<!-- agent:boundary:418d1c79 -->
+❯ The last patchback did not include the uncommitted `(HEAD)` suffix. Is that a concern or was that due to the work done leading to the last patchback?
+❯ do `stripped.trim_start()`
+### Re: missing (HEAD) on last patchback
+
+Probably expected, not a concern — but worth understanding the rule so you can tell when it's wrong.
+
+`(HEAD)` is only ever appended to `### Re:` **h3** headings by `annotate_re_headings_with_head` in `src/agent-doc/src/template.rs:581`. If a response body doesn't start with (or contain) a `### Re:` heading, there is nothing for the annotator to mark, and the patchback lands into the exchange with no `(HEAD)` suffix anywhere new. My previous cycle — the normalization caveats — was written as a continuation paragraph under the existing `### Re:` section without emitting a fresh h3, so nothing got annotated.
+
+Two other details worth knowing, since they're adjacent to the same code path:
+
+1. **`write` uses the non-baseline path, `commit` uses the baseline path.** `src/agent-doc/src/write.rs:1061,1335,1999` all call `reposition_boundary_to_end_with_summary` (no baseline arg), which falls through to the legacy branch — only the **last** `### Re:` heading receives `(HEAD)` during a write. The baseline-aware variant only runs in `reposition_boundary_in_snapshot` during commit (`src/agent-doc/src/git.rs:640`), which then marks **every** new-this-cycle heading. So for a multi-topic patchback, the working tree briefly has `(HEAD)` on just the final `### Re:`, and after the next commit cycle all new ones get marked. That's intentional per the doc comment but asymmetric — if you ever want the working-tree to reflect all new headings immediately, `write.rs` would need to pass a baseline through.
+2. **Bold pseudo-headers are ignored.** `**Re: ...**` never gets `(HEAD)` — only real h1–h6 headings starting with `#`. SKILL.md already forbids bold pseudo-headers in exchange responses, so this is consistent, but if one slipped in it would silently fail to get the marker.
+
+**TL;DR:** no `(HEAD)` on the last patchback means the response didn't emit a fresh `### Re:` heading. Not a bug, not data loss — the next response that does emit one will mark normally.
+
+### Re: `stripped.trim_start()`
+
+Done. `src/agent-doc/src/template.rs:557` and `src/agent-doc/src/template.rs:632` now both apply `trim_start()` when building/looking up baseline keys:
+
+- `collect_re_headings` now stores `body.trim_start().trim_end().trim_end_matches(" (HEAD)")` as the set entry.
+- `annotate_re_headings_with_head`'s baseline lookup builds the key with `trim_end_matches('\n').trim_end_matches('\r').trim_start().trim_end()`.
+
+Both sides are symmetric, so a heading like `  ### Re: foo` in HEAD will match `### Re: foo` in the working tree and (correctly) not be marked as new. Existing 53 template tests pass unchanged — none exercised leading whitespace before, so I can add a regression test for the indented-heading case in a follow-up if you want it locked in.
+<!-- agent:boundary:99c40803 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

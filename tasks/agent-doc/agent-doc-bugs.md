@@ -771,7 +771,7 @@ Fix direction (not implementing yet, want your call):
 3. Add a regression test: doc with two `### Re:` sections, the older one carries `(HEAD)`, user edits inside the older one, run preflight, assert working tree still has `(HEAD)` on the older heading.
 
 Want me to dig into `reposition_boundary` and propose a patch, or just leave it as #pending for a dedicated pass?
-<!-- agent:boundary:251dab7f -->
+<!-- agent:boundary:67de08ca -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

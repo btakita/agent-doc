@@ -992,14 +992,52 @@ This is the "snapshot holds canonical, working tree holds annotated" split — s
 **Want me to:**
 - (a) add a new pending item `#hdap` for "reposition appends `(HEAD)` to last `### Re:` heading" and leave it for a focused cycle, or
 - (b) implement it now in `template::reposition_boundary_to_end` + test + rebuild + cargo install?
-<!-- agent:boundary:a5060b7c -->
+❯ Add #hdap to pending. Immediately do #hdap. Do #64mb.
+### Re: #hdap landed + #64mb already fixed
+
+**#hdap — implemented, tests passing, binary rebuilt & installed.**
+
+Extended `template::reposition_boundary_to_end_with_summary` with a new helper `annotate_latest_re_heading_with_head(content)` that:
+1. Walks the exchange content line-by-line, skipping fenced code blocks (reuses `component::find_code_ranges`).
+2. Identifies every `### Re:` heading (h1–h6, any leading `#` count + `Re:` after the space).
+3. Strips ` (HEAD)` suffix from ALL such headings.
+4. Appends ` (HEAD)` to the **last** one.
+
+Then `reposition_boundary_to_end_with_summary` runs this annotation on `exchange.content()` before appending the `<!-- agent:boundary:ID -->` marker. Net effect: working tree and snapshot both contain `### Re: latest (HEAD)` on the newest response heading; `git::strip_head_markers` strips it during commit staging so the committed blob stays clean; `git diff` against the blob shows the heading as modified → **blue gutter on the heading line**.
+
+**Tests added** (`src/template.rs` test module):
+- `reposition_appends_head_to_last_re_heading` — stale (HEAD) on prior heading stripped, latest gets (HEAD), exactly 1 match in result
+- `reposition_head_annotation_no_re_heading_unchanged` — no `### Re:` → no (HEAD) added
+- `reposition_head_annotation_skips_code_fence` — `### Re:` inside ```` ``` ```` fence untouched
+- `reposition_head_annotation_strips_multiple_stale` — multiple stale (HEAD)s all stripped, only the last heading gets the fresh one
+
+All 4 new tests pass; existing `reposition_*` + `strip_head_markers_*` + `commit_staged_blob_has_no_head_markers` tests still green.
+
+Binary: `cargo build --release` clean, `cargo install --path .` replaced `~/.cargo/bin/agent-doc`. `.bin/agent-doc` symlink points at `target/release/agent-doc` which is the same artifact — live.
+
+**#64mb — already fixed in a prior cycle, just needs reaping.**
+
+Audit of `src/preflight.rs`:
+- Line 399: `// Step 1c: Pending component maintenance — ... MUST run BEFORE step 2 commit`
+- Line 410: `run_pending_maintenance(file)` called in Step 1c
+- Line 417: `git::commit(file)` called in Step 2 (after maintenance)
+- Lines 778-779 in `run_pending_maintenance`: `"We no longer call git::commit here — see #64mb"`
+
+The reorder the pending item describes is already in tree — maintenance no longer double-commits. Marking it done this cycle.
+
+**Live verification on the NEXT cycle:** when you paste a new question, preflight will run the new binary. You should see:
+1. The `### Re: #hdap landed` heading above get stripped of its `(HEAD)` suffix (stale — this cycle's annotation moved on)
+2. Your new response heading get `(HEAD)` appended
+3. Blue gutter on the new `(HEAD)` heading line in your editor
+4. Single commit per preflight (no double-commit from #64mb)
+<!-- agent:boundary:836ae976 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
-- [ ] [#64mb] Fix double commit_staging: step 2e run_pending_maintenance calls git::commit after step 2 already committed. Move maintenance BEFORE step 2 commit so the single commit bundles reap+archive with the previous-cycle response. Repro: preflight at 03:21:19 produced 72d95738 then 21b73421.
+- [x] [#64mb] Fix double commit_staging: step 2e run_pending_maintenance calls git::commit after step 2 already committed. Move maintenance BEFORE step 2 commit so the single commit bundles reap+archive with the previous-cycle response. Repro: preflight at 03:21:19 produced 72d95738 then 21b73421.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [ ] [#xzz5] Preflight slash-command parser: absolute paths like /home/... get captured as commands. Require [a-z][a-z0-9:_-]* after the slash and reject tokens containing a second /.
 - [ ] [#a011] End-of-cycle write invariant — warn if `preflight_diff_start` without `ipc_write_attempt`.
@@ -1035,5 +1073,6 @@ This is the "snapshot holds canonical, working tree holds annotated" split — s
 - [ ] [#y4da] Deterministic boundary reposition in working tree (git.rs reposition_boundary_in_snapshot extends to disk write with active-run guard)
 - [ ] [#zvmd] Submodule (HEAD) marker: fix show_head() to route via narrow_to_submodule — superproject rev-parse can't show submodule-tracked files, so add_head_marker falls through to the 'no HEAD → mark last heading only' fallback, which drops (HEAD) when the exchange component has no ### Re: heading yet or when the fallback runs during a boundary-only cycle
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
+- [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
 <!-- /agent:pending -->
 ## Assistant

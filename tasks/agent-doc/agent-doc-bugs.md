@@ -447,7 +447,7 @@ Net delta: ~+10 lines in `write.rs`, −15 lines across SKILL + memory. Behavior
 5. No version bump needed (SKILL content change only, no binary behavior change) — **unless** you also want the binary `❯`-stripping fix bundled, in which case it's a patch release under `.agent/runbooks/prerelease.md`.
 
 **Question before I execute:** Should I bundle this with the binary `❯`-stripping fix (one release) or ship the SKILL prune now and the binary fix separately? Bundling is cleaner; separating is lower-risk.
-<!-- agent:boundary:d983f507 -->
+<!-- agent:boundary:c58f925e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

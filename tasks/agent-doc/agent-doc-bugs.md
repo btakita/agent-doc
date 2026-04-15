@@ -301,7 +301,7 @@ Plus full `route::` suite: **43 passed, 0 failed**. `cargo clippy --bin agent-do
 - No supervisor wire-up. Stays queued in #jg0d/#b486/#40ct/#vnp0/#6ae3/#zp02/#f7d5 as its own track. When phase 1 lands, the same `rewrite_start_path` helper feeds `PtySpawnConfig.args` — this fix is forward-compatible, not throwaway.
 - No `cargo install --path .` yet — waiting on your manual-test confirmation before I push to `~/.cargo/bin/`, then the publish gate for v0.32.5.
 ❯
-<!-- agent:boundary:56cad24b -->
+<!-- agent:boundary:16d4d85c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

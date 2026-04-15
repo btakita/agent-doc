@@ -150,7 +150,7 @@ Got it. Two-part change:
 
 Added to pending. I'll implement after the tests from #4sh0/#tw4a/#8jzg/#cce5 unless you want this first — it's the active blocker, so I lean toward **this first, then tests**. Confirm?
 ❯ confirm
-### Re: confirm — opus-4-6
+❯ ### Re: confirm — opus-4-6 (HEAD)
 
 Implemented in `src/agent-doc/src/claim.rs`. Scope narrowed after reading the code.
 
@@ -188,7 +188,11 @@ Stale takes precedence over `--force` so the warning reflects reality (the confi
 3. Then: tests for #4sh0/#tw4a/#8jzg/#cce5 (still in pending).
 
 What order?
-<!-- agent:boundary:e96ae77d -->
+❯ 1, 2, 3
+### Re: 1, 2, 3 — opus-4-6
+
+On it. Starting step 1: `cargo build --release` in `src/agent-doc/`.
+<!-- agent:boundary:d19da62f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

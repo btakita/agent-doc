@@ -516,7 +516,7 @@ Per the memory rule **"Manual testing gate before publish"** and the prerelease 
 **Memory and context are clean:** `feedback_no_trailing_prompt_glyph.md` deleted and de-indexed. The rule is now enforced at the binary layer — agents can forget it and the behavior stays correct.
 
 ❯ In tasks/recruit/filevine/filevine-interview.md, I'm using Opus, but the header says haiku `### Re: docker container note — haiku (HEAD)` Why?
-### Re: header says haiku but I'm on Opus — opus-4-6
+❯ ### Re: header says haiku but I'm on Opus — opus-4-6 (HEAD)
 
 **Diagnosis.** `resolve_agent_model()` in `src/agent-doc/src/preflight.rs:230` resolves attribution in this priority order:
 
@@ -545,7 +545,59 @@ Tier is `high` (Opus-class), but model attribution is `haiku`. Those two shouldn
 Want me to (a) hunt down where `ANTHROPIC_MODEL=haiku` is being set in your shell config, (b) add the tier-consistency check to `resolve_agent_model`, or both? I'd lean toward doing (a) first since it's the immediate unblocker, then (b) so this class of bug can't silently recur.
 
 Also worth adding to `tasks/agent-doc/agent-doc-bugs.md` as a tracked item — this is a real correctness bug, not just a cosmetic quirk, because the attribution is visible in archived exchanges and will mislead anyone reading the history.
-<!-- agent:boundary:98b5717d -->
+
+❯ I'm getting an error with `Run Agent Doc` at src/boost-client/tasks/monsterrodholders.md. Need this fixed asap
+```
+Starting claude...
+ ▐▛███▜▌   Claude Code v2.1.109
+▝▜█████▛▘  Opus 4.6 · Claude Max
+  ▘▘ ▝▝    ~/work/btakita/agent-loop/src/boost-client
+
+❯ Unknown command: /agent-doc
+
+● Args from unknown skill: src/boost-client/tasks/monsterrodholders.md
+```
+### Re: /agent-doc unknown in boost-client submodule — opus-4-6
+
+**Root cause.** Claude Code only discovers skills from two places: `<cwd>/.claude/skills/` and `~/.claude/skills/`. It does **not** walk up the directory tree to find parent-repo skills.
+
+When `agent-doc start` spawns `claude` at `src/agent-doc/src/start.rs:171`, it doesn't set `current_dir`, so Claude inherits the tmux pane's cwd. For a doc in `src/boost-client/tasks/monsterrodholders.md`, that's `~/work/btakita/agent-loop/src/boost-client`.
+
+Verified:
+
+- `src/boost-client/.claude/` — **does not exist**
+- `~/.claude/skills/agent-doc/` — **does not exist**
+- `agent-loop/.claude/skills/agent-doc/SKILL.md` — exists, but invisible to a Claude process rooted in the submodule
+
+Claude has no `/agent-doc` skill to dispatch → "Unknown command".
+
+**Immediate unblocker (30 seconds, no code change).** Symlink the skill into your user-level skills dir so it's available from any cwd:
+
+```bash
+mkdir -p ~/.claude/skills
+ln -s ~/work/btakita/agent-loop/.claude/skills/agent-doc ~/.claude/skills/agent-doc
+```
+
+After that, `/agent-doc` works from any submodule shell — including fresh `agent-doc start` spawns inside `src/boost-client`, `src/presence`, `src/corky`, etc. Updates to the agent-loop copy flow through automatically because it's a symlink.
+
+**Proper fix (agent-doc binary).** Two complementary changes:
+
+1. **`agent-doc skill install --user`** — add a `--user` (or `--global`) flag that installs to `~/.claude/skills/agent-doc/` instead of `<cwd>/.claude/skills/agent-doc/`. Prefer symlink-to-source when the binary was invoked from a repo checkout; fall back to file copy for installed binaries. `skill::install()` at `src/agent-doc/src/skill.rs` currently hardcodes the `.claude/skills/` path relative to cwd.
+
+2. **`agent-doc start` should chdir up to the outermost repo containing `.claude/skills/agent-doc/`.** Walk up from the document's parent until either (a) we find a `.claude/skills/agent-doc/SKILL.md`, or (b) we reach `$HOME`. If found, set the child `claude` process's `current_dir` to that ancestor. This keeps the skill discoverable even in nested submodules without requiring a user-level install. The tradeoff: Claude's cwd is no longer the submodule, so relative file ops from Claude target agent-loop root instead. Mitigation: pass the doc path as absolute, and Claude's `Read`/`Edit` tools already handle absolute paths fine.
+
+**Recommendation.** Do #1 now (symlink + `--user` flag). Skip #2 — the chdir behavior is surprising and will break assumptions about cwd in `agent-doc start` sub-processes. The user-level install is the clean separation: "install once, works from anywhere."
+
+Want me to:
+
+- **(a)** Apply the symlink immediately so you're unblocked on boost-client?
+- **(b)** Implement `agent-doc skill install --user` in the binary (small change — ~30 lines in `skill.rs` + a new flag in `main.rs`)?
+- **(c)** Both — symlink now for the unblock, then PR the `--user` flag?
+
+I'd do **(c)**. The symlink takes 5 seconds; the `--user` flag is the real fix so this doesn't bite anyone else (or future-you after an `rm -rf ~/.claude`). Flag it `[bug]` in this doc if you want it tracked.
+
+**Note on `— opus-4-6` in this header:** preflight still reports `agent_model: haiku` (env var not yet unset), but I'm overriding to `opus-4-6` manually since we diagnosed the env-var bug last cycle and you confirmed you're on Opus. The attribution will auto-correct once `ANTHROPIC_MODEL` is cleared from your shell.
+<!-- agent:boundary:53df1778 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

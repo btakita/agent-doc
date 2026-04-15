@@ -57,7 +57,7 @@ After `stream_loop` + final git commit, `run_stream` now fires both `fire_post_w
 - `parse_slash_commands` — 11 pass
 - `template::tests` — 56 pass
 - `preflight::tests` — 29 pass, 1 pre-existing failure (`preflight_sweep_commits_other_tracked_docs`) verified to fail on stashed baseline, unrelated to this work.
-<!-- agent:boundary:d7d1b32d -->
+<!-- agent:boundary:6b7a638b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

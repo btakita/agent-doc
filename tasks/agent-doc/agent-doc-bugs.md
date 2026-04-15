@@ -945,7 +945,7 @@ Landed in `src/preflight.rs`. Three edits:
 **Marking #64mb done** next cycle after you confirm — want me to mark it now with `--pending-done 64mb`, or hold for your live test?
 
 **Test I still owe:** integration test asserting `git rev-list HEAD -- <file>` advances by exactly 1 across a preflight with one `[x]` pending item. Listed as a new pending item #nf7a (placeholder — will be hash-assigned by backfill).
-<!-- agent:boundary:d30d1502 -->
+<!-- agent:boundary:b59ee67b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

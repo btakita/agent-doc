@@ -993,7 +993,7 @@ This is the "snapshot holds canonical, working tree holds annotated" split — s
 - (a) add a new pending item `#hdap` for "reposition appends `(HEAD)` to last `### Re:` heading" and leave it for a focused cycle, or
 - (b) implement it now in `template::reposition_boundary_to_end` + test + rebuild + cargo install?
 ❯ Add #hdap to pending. Immediately do #hdap. Do #64mb.
-### Re: #hdap landed + #64mb already fixed
+❯ ### Re: #hdap landed + #64mb already fixed (HEAD)
 
 **#hdap — implemented, tests passing, binary rebuilt & installed.**
 
@@ -1001,7 +1001,7 @@ Extended `template::reposition_boundary_to_end_with_summary` with a new helper `
 1. Walks the exchange content line-by-line, skipping fenced code blocks (reuses `component::find_code_ranges`).
 2. Identifies every `### Re:` heading (h1–h6, any leading `#` count + `Re:` after the space).
 3. Strips ` (HEAD)` suffix from ALL such headings.
-4. Appends ` (HEAD)` to the **last** one.
+❯ 4. Appends ` (HEAD)` to the **last** one.: Note that if a patchback includes multiple top level headers (usually on h3 `### `)...All of the patchback top level headers need ` (HEAD)` appended.
 
 Then `reposition_boundary_to_end_with_summary` runs this annotation on `exchange.content()` before appending the `<!-- agent:boundary:ID -->` marker. Net effect: working tree and snapshot both contain `### Re: latest (HEAD)` on the newest response heading; `git::strip_head_markers` strips it during commit staging so the committed blob stays clean; `git diff` against the blob shows the heading as modified → **blue gutter on the heading line**.
 
@@ -1030,7 +1030,40 @@ The reorder the pending item describes is already in tree — maintenance no lon
 2. Your new response heading get `(HEAD)` appended
 3. Blue gutter on the new `(HEAD)` heading line in your editor
 4. Single commit per preflight (no double-commit from #64mb)
-<!-- agent:boundary:8844c072 -->
+### Re: patchback-wide (HEAD) — all new headings now marked
+
+Landed. The annotation is now **baseline-aware**: every `### Re:` heading that doesn't exist in the git HEAD blob's exchange gets ` (HEAD)` appended, so a patchback with 2+ `### Re:` sections produces 2+ blue-gutter lines — not just the last one.
+
+**What changed in `template.rs`:**
+
+1. New public helper `exchange_baseline_headings(doc: &str) -> HashSet<String>` — parses a document's `&lt;!-- agent:exchange --&gt;` component and returns the stripped `### Re:` heading lines inside it (skipping fenced code blocks).
+2. New public entry point `reposition_boundary_to_end_with_baseline(doc, summary, baseline_headings: Option<&HashSet<String>>)` — same boundary lifecycle as `_with_summary`, but threads a baseline set through to the annotation step.
+3. `annotate_latest_re_heading_with_head` replaced by `annotate_re_headings_with_head(content, baseline)`:
+   - `baseline = None` → legacy behavior preserved (mark only the last `### Re:`), so existing tests, FFI callers, and non-git reposition paths keep working.
+   - `baseline = Some(set)` → mark every `### Re:` whose normalized line text is NOT in `set`. First cycle / untracked file / empty set → all headings are marked.
+4. `reposition_boundary_to_end_with_summary` is now a thin shim over `_with_baseline(doc, summary, None)`.
+
+**What changed in `git.rs`:**
+
+`reposition_boundary_in_snapshot` now reads `show_head(file)`, extracts the baseline heading set via `exchange_baseline_headings`, and passes it to the new baseline-aware entry point for **both** the snapshot and the working-tree rewrite. If HEAD is unavailable (file untracked, first commit), the baseline is empty — so every current `### Re:` is treated as new and all get `(HEAD)`. That matches the first-cycle "everything is new" intuition.
+
+Critically, the write-side IPC builders in `write.rs` (`build_ipc_patches_json`, IPC-timeout fallback, pre-patch reposition) still call `reposition_boundary_to_end_with_summary` with no baseline — their repositioned output is used only to locate boundary IDs for IPC patch JSON and never reaches disk, so keeping the legacy path there avoids a wasteful `git show HEAD` per write. The annotation work lives entirely in the commit path, which is where the working tree actually gets rewritten.
+
+**Tests added** (`src/template.rs`):
+- `reposition_with_baseline_marks_all_new_re_headings` — baseline has `old-1, old-2`; doc has those + `new-1, new-2` (plus a stale `(HEAD)` on `old-2`); result: both olds stripped, both news get `(HEAD)`, exactly 2 `(HEAD)` markers in the final content.
+- `reposition_with_empty_baseline_marks_every_re_heading` — empty baseline set → every `### Re:` in exchange becomes `(HEAD)`. This is the first-cycle / non-git case.
+- `exchange_baseline_headings_extracts_stripped_re_lines` — parser sanity check: collects only `### Re:` heading lines, strips stale `(HEAD)`, ignores non-Re headings.
+
+Existing `reposition_appends_head_to_last_re_heading` and the four other `(HEAD)` annotation tests still pass — all 53 `template::tests::` green. The 45 unrelated failures in `resync::tests::*` / `route::tests::*` are pre-existing tmux-env tests that require a live tmux server and are not affected by this change.
+
+**Binary status:** `cargo build --release` + `cargo install --path .` both completed — the `~/.cargo/bin/agent-doc` binary used by tmux-spawned sessions and the `.bin/agent-doc` symlink target are both fresh. The next commit cycle you trigger will exercise the baseline-aware path via `reposition_boundary_in_snapshot`.
+
+**One caveat on normalization:** the baseline set stores heading lines verbatim (minus trailing `(HEAD)` and trailing whitespace). Two edge cases to be aware of:
+1. If you rename a heading in the working tree (e.g., `### Re: foo` → `### Re: foo renamed`), the old form is in HEAD but the new form is not → the renamed heading will get `(HEAD)`. That's probably what you want (rename = new line in gutter).
+2. Leading whitespace on a heading line is NOT trimmed for the baseline key, but the scanner only recognizes headings by `hash_count + space` after `trim_start`. So `  ### Re: foo` and `### Re: foo` would hash differently as keys — unlikely in practice but worth noting if something behaves oddly.
+
+Want a follow-up cycle to fold the normalization down to `stripped.trim_start()` for absolute safety, or is this good as-is?
+<!-- agent:boundary:04347204 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

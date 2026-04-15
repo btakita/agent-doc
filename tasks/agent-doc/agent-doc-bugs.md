@@ -401,7 +401,7 @@ Net delta: ~+10 lines in `write.rs`, −15 lines across SKILL + memory. Behavior
 **If you want this:** say "do binary fix" and I'll implement under `.agent/runbooks/prerelease.md` (code → test → bump → publish → verify). If you'd rather keep the SKILL rule as a soft belt (in case the binary fix ever regresses), say "keep SKILL only" and I'll just delete the memory file.
 
 ❯ Could you do an audit of the agent-doc SKILL. Prune unnecessary content. Make sure we delegate to runbooks if we can.
-### Re: SKILL audit + pruning plan — opus-4-6
+❯ ### Re: SKILL audit + pruning plan — opus-4-6 (HEAD)
 
 **Current:** 293 lines. **Target:** ~140 lines (~52% cut). Delegating to runbooks wherever the content isn't hot-path on every cycle.
 
@@ -447,7 +447,20 @@ Net delta: ~+10 lines in `write.rs`, −15 lines across SKILL + memory. Behavior
 5. No version bump needed (SKILL content change only, no binary behavior change) — **unless** you also want the binary `❯`-stripping fix bundled, in which case it's a patch release under `.agent/runbooks/prerelease.md`.
 
 **Question before I execute:** Should I bundle this with the binary `❯`-stripping fix (one release) or ship the SKILL prune now and the binary fix separately? Bundling is cleaner; separating is lower-risk.
-<!-- agent:boundary:c58f925e -->
+❯ bundle this
+### Re: bundle — executing — opus-4-6
+
+Bundled. Starting execution now. Plan:
+
+1. **Binary fix** — add trailing-`❯` strip to `agent-doc write` exchange writes (single normalization pass, exchange component only).
+2. **Tests** — positive (trailing `❯` stripped) + negative (`❯` mid-content preserved, `❯` in pending not touched).
+3. **SKILL prune** — edit `src/agent-doc/SKILL.md` per audit table; create 3 new runbooks; `agent-doc skill install` to sync.
+4. **Memory cleanup** — delete `feedback_no_trailing_prompt_glyph.md` + its `MEMORY.md` line.
+5. **Release** — follow `.agent/runbooks/prerelease.md` (VERSIONS.md, Cargo.toml, pyproject.toml sync, `make check`, cargo publish, maturin, `cargo install --path .`, tag push).
+6. **Verify live** — confirm response from installed binary produces no trailing `❯`.
+
+Will post progress after each completed step. Starting with exploration of `write.rs` and test layout.
+<!-- agent:boundary:a245d7b9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

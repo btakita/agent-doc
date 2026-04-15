@@ -1095,7 +1095,61 @@ Locked. Two new tests in `src/agent-doc/src/template.rs`:
 2. `reposition_with_baseline_matches_indented_heading` — baseline contains `### Re: foo` (flush), working tree has `  ### Re: foo` (indented); asserts `reposition_boundary_to_end_with_baseline` produces output with zero `(HEAD)` markers (the indented heading is recognized as already-in-baseline).
 
 Test suite: 55 template tests passing (was 53, +2). Both new tests exercise the two lines touched in the previous cycle — `collect_re_headings`'s set-entry normalization and `annotate_re_headings_with_head`'s lookup-key normalization — so a regression in either direction would flip exactly one test.
-<!-- agent:boundary:9153507f -->
+❯ Again, `(HEAD)` was not appended. Please diagnose.
+### Re: diagnosed — baseline filter strips the prior-turn head when current turn adds no new Re
+
+Root cause: `annotate_re_headings_with_head` in `src/agent-doc/src/template.rs:581`. When invoked with a baseline (which the commit path always does, via `reposition_boundary_in_snapshot` in `src/agent-doc/src/git.rs:620`), the function does two things in sequence:
+
+1. **Line 613**: strips any existing ` (HEAD)` suffix from every `### Re:` heading in the content.
+2. **Lines 630–645**: filters `re_indices` to only those headings whose normalized text is NOT in the baseline set, and marks those.
+
+The baseline is built from the current git HEAD (`src/agent-doc/src/git.rs:640`), which — because the commit staging path calls `strip_head_markers` — already contains every committed `### Re:` heading without the marker.
+
+**The failure mode**: on a turn that adds no new `### Re:` section (like my previous response, which extended the "lock it in" section under its existing header), every heading in the working tree is also in the baseline set, so the filter yields zero "new" headings. But step 1 already stripped the stale `(HEAD)` from the prior turn's last heading. The net effect is: the working tree loses its head pointer entirely.
+
+Turn M (adds "lock it in, add regression test"):
+- HEAD = cycle M-1, does NOT contain "lock it in"
+- filter: "lock it in" is NEW → gets `(HEAD)` ✓
+- staging strips to blob → HEAD becomes cycle M with "lock it in" (no marker)
+- working tree: "lock it in (HEAD)" ✓
+
+Turn N (current — user types "please diagnose" under the same section, no new `### Re:`):
+- HEAD = cycle M, contains "lock it in"
+- step 1 strips stale `(HEAD)` from "lock it in"
+- filter: "lock it in" IS in baseline → NOT marked
+- working tree: no `(HEAD)` anywhere ✗
+
+I confirmed this matches reality — `git diff HEAD` on the doc shows only boundary marker + user prompt differences, no heading delta. The only way a `(HEAD)` marker could have survived to the working tree was via the previous cycle's write-path (legacy mark-last), and the commit path then stripped it.
+
+**Fix landed** at `src/agent-doc/src/template.rs:626`. The baseline-aware branch now falls back to `re_indices.last()` when the filter produces zero new headings:
+
+```rust
+Some(baseline_set) => {
+    let filtered: Vec<usize> = re_indices
+        .iter().copied()
+        .filter(|&idx| /* not in baseline */)
+        .collect();
+    if filtered.is_empty() {
+        re_indices.last().copied().into_iter().collect()
+    } else {
+        filtered
+    }
+}
+```
+
+Behavior after fix:
+- Turn adds ≥1 new Re → every new heading marked (unchanged, preserves #dsng semantics)
+- Turn adds 0 new Re → last Re heading marked via fallback (restores head pointer)
+- No Re headings in exchange → nothing marked (unchanged)
+
+**Regression tests** added to `src/agent-doc/src/template.rs`:
+- `baseline_filter_empty_falls_back_to_last_heading` — two headings, both in baseline → fallback marks only the last.
+- Updated `reposition_with_baseline_matches_indented_heading` to assert the fallback path (exactly one `(HEAD)` on the last heading, indented heading proves trim_start normalization still recognizes it).
+
+Test suite: **56 template tests passing** (+1 from the 55 locked in last cycle).
+
+**Binary rebuilt and installed**: `cargo install --path .` + `cargo build --release` both completed — so this turn's commit should be the first to exercise the fix, and the `### Re: diagnosed` heading above should ship with `(HEAD)` in the working tree after commit.
+<!-- agent:boundary:bb44b0a5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -188,7 +188,7 @@ Stale takes precedence over `--force` so the warning reflects reality (the confi
 3. Then: tests for #4sh0/#tw4a/#8jzg/#cce5 (still in pending).
 
 What order?
-<!-- agent:boundary:922f0258 -->
+<!-- agent:boundary:e96ae77d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

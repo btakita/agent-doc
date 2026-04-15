@@ -381,7 +381,7 @@ If both verify, give the word and I'll run the publish gate (cargo + maturin + t
 **Auto-memory:** The project-local `.claude/projects/.../memory/feedback_no_trailing_prompt_glyph.md` entry stays as a belt-and-suspenders backup for my session state — it's user-scoped (not shipped), while the SKILL.md rule at `src/agent-doc/SKILL.md:135` is what every `agent-doc skill install` downstream gets.
 
 ❯ Do we need `.claude/projects/.../memory/feedback_no_trailing_prompt_glyph.md`? I don't want context bloat
-### Re: skill bloat + memory bloat — opus-4-6
+❯ ### Re: skill bloat + memory bloat — opus-4-6 (HEAD)
 
 **You're right on both. The elegant fix is in the binary, not docs.**
 
@@ -399,7 +399,55 @@ If both verify, give the word and I'll run the publish gate (cargo + maturin + t
 Net delta: ~+10 lines in `write.rs`, −15 lines across SKILL + memory. Behavior rule becomes a code invariant.
 
 **If you want this:** say "do binary fix" and I'll implement under `.agent/runbooks/prerelease.md` (code → test → bump → publish → verify). If you'd rather keep the SKILL rule as a soft belt (in case the binary fix ever regresses), say "keep SKILL only" and I'll just delete the memory file.
-<!-- agent:boundary:61f031f9 -->
+
+❯ Could you do an audit of the agent-doc SKILL. Prune unnecessary content. Make sure we delegate to runbooks if we can.
+### Re: SKILL audit + pruning plan — opus-4-6
+
+**Current:** 293 lines. **Target:** ~140 lines (~52% cut). Delegating to runbooks wherever the content isn't hot-path on every cycle.
+
+**Audit by section:**
+
+| # | Section | Lines | Action | Rationale |
+|---|---------|-------|--------|-----------|
+| 1 | Preflight JSON schema block (44–68) | 25 | **Cut** — keep 1-line field list | Agent parses real output; schema dupe is dead weight |
+| 2 | `0c. Model tier gate` (94–112) | 19 | **Move** → `runbooks/model-tier-gate.md` | Rarely triggers; 2-line pointer suffices |
+| 3 | `Streaming checkpoints` (138–154) | 17 | **Move** → `runbooks/streaming-checkpoints.md` | Procedural detail, not every-cycle |
+| 4 | `Never end with ❯` (135–136) | 2 | **Delete** — becomes binary fix (prior exchange) | Code-enforced, not agent-enforced |
+| 5 | `### 2a Append mode` (180–195) | 16 | **Collapse** to 3 lines | All modern docs are template mode; append is legacy |
+| 6 | `### 2b Template mode` duplicates (216–226) | 11 | **Cut** — step 1 already covers `--stream`/baseline | Pure duplication |
+| 7 | `Baseline file` paragraph (237–243) | 7 | **Cut** — covered in preflight section | Duplication |
+| 8 | `Snapshot Storage` (273–278) | 6 | **Delete** | Internal detail; agent never touches snapshot files directly |
+| 9 | `Document Format` frontmatter example (255–271) | 17 | **Move** → `runbooks/document-format.md` | Reference, not workflow |
+| 10 | `### 3 Git integration` gutter explanation (247–253) | 7 | **Collapse** to: "After write, run `agent-doc commit <FILE>`." | Visual-gutter detail is operator-facing, not agent-facing |
+| 11 | `Success Criteria` (288–293) | 6 | **Keep** — orients new invocations | Small and load-bearing |
+
+**What stays verbatim (hot path on every cycle):**
+- Invocation + claim/compact detection (§0)
+- `agent-doc preflight` call + `no_changes` / `claims` / `baseline_file` handling
+- `0b` slash-command dispatch (Skill tool semantics are non-obvious)
+- `### Re:` header rule + model attribution (§1) — structural requirement for `(HEAD)` gutter
+- `1b` pending ops 3-line summary + runbook pointer
+- `--stream` write-back + `agent-doc commit` immediately after
+- `IMPORTANT: Do NOT use Edit tool` (one line, load-bearing)
+
+**New runbooks to create:**
+
+1. `runbooks/model-tier-gate.md` — precedence chain, `required_tier` gate behavior, `model_switch` ack
+2. `runbooks/streaming-checkpoints.md` — when/how to flush, baseline re-save pattern, code sample
+3. `runbooks/document-format.md` — frontmatter fields, append vs template mode, `agent:name` component conventions
+
+**Runbooks already present that absorb content:** `compact-exchange.md`, `pending-ops.md`, `transfer-extract.md`, `code-enforced-directives.md` (supports the "move ❯ rule to binary" decision).
+
+**Execution plan (if you approve):**
+
+1. Create the 3 new runbook files with extracted content.
+2. Edit `src/agent-doc/SKILL.md` (bundled source — shipped via `include_str!`).
+3. Run `agent-doc skill install` to sync `.claude/skills/agent-doc/SKILL.md`.
+4. Verify: `wc -l` on both files, `grep` spot-checks for deleted anchors.
+5. No version bump needed (SKILL content change only, no binary behavior change) — **unless** you also want the binary `❯`-stripping fix bundled, in which case it's a patch release under `.agent/runbooks/prerelease.md`.
+
+**Question before I execute:** Should I bundle this with the binary `❯`-stripping fix (one release) or ship the SKILL prune now and the binary fix separately? Bundling is cleaner; separating is lower-risk.
+<!-- agent:boundary:d983f507 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

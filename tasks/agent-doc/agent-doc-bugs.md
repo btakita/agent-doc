@@ -133,7 +133,7 @@ The project has a registered tmux session (`0`) from before reboot. Your new tmu
 **Which I'd use:** option 2 (`--force`) — reboot invalidated session `0`, and forcing is the intended escape hatch. If the plugin's Claim action doesn't expose `--force`, that's itself a bug (file under agent-doc-bugs).
 
 **Follow-up bug candidate:** after reboot, stale session bindings in the registry should probably be garbage-collected (detect that session `0` no longer exists in `tmux list-sessions` and auto-clear). Want me to add that as a pending item?
-<!-- agent:boundary:c17fac36 -->
+<!-- agent:boundary:1d280f14 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

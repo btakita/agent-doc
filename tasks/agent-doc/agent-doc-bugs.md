@@ -149,7 +149,7 @@ Got it. Two-part change:
 **3. JB plugin UI:** also expose a manual `--force` toggle on the `Claim for Tmux Pane` action (checkbox in the dialog, or a separate `Force Claim for Tmux Pane` action) so the user can override even when auto-detect is wrong.
 
 Added to pending. I'll implement after the tests from #4sh0/#tw4a/#8jzg/#cce5 unless you want this first — it's the active blocker, so I lean toward **this first, then tests**. Confirm?
-<!-- agent:boundary:336f3dc2 -->
+<!-- agent:boundary:e1268d30 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

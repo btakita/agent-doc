@@ -339,7 +339,7 @@ My fault — I've been ending exchange responses with a bare `❯` on its own li
 
 This response is the first one following the new rule — note no trailing `❯` below.
 ❯ Make sure this skill fix will be released in an agent-doc install. Please confirm that the skill fixes are to both my local .claude and agent-doc/.claude/SKILL.md. Use runbooks where appropriate
-### Re: release skill fix in agent-doc install — opus-4-6
+❯ ### Re: release skill fix in agent-doc install — opus-4-6 (HEAD)
 
 **Both SKILL.md files carry the rule and v0.32.5 is installed.**
 
@@ -349,6 +349,8 @@ This response is the first one following the new rule — note no trailing `❯`
 
    > **Never end a response with a bare `❯` line:**
    > Do NOT append `\n❯\n` … The binary inserts `<!-- agent:boundary:... -->` immediately after your content, so a trailing `❯` always lands as a dangling prompt-glyph row directly above the boundary marker on every cycle. `❯` is the user's submit indicator that they type themselves when they want to prompt back; the agent must not pre-seed it. End responses with the last real content line (or a period).
+
+❯ Why do we need to specify this in the SKILL? I'm concerned about skill bloat.
 
 2. `.claude/skills/agent-doc/SKILL.md:135` — project-local install that Claude Code actually reads at `/agent-doc` invocation. Synced via `agent-doc skill install`:
    ```
@@ -377,7 +379,27 @@ This response is the first one following the new rule — note no trailing `❯`
 If both verify, give the word and I'll run the publish gate (cargo + maturin + tag push) under `.agent/runbooks/prerelease.md` target sections.
 
 **Auto-memory:** The project-local `.claude/projects/.../memory/feedback_no_trailing_prompt_glyph.md` entry stays as a belt-and-suspenders backup for my session state — it's user-scoped (not shipped), while the SKILL.md rule at `src/agent-doc/SKILL.md:135` is what every `agent-doc skill install` downstream gets.
-<!-- agent:boundary:05a8d413 -->
+
+❯ Do we need `.claude/projects/.../memory/feedback_no_trailing_prompt_glyph.md`? I don't want context bloat
+### Re: skill bloat + memory bloat — opus-4-6
+
+**You're right on both. The elegant fix is in the binary, not docs.**
+
+**Proposal: strip trailing `❯` lines in `agent-doc write` itself.**
+
+- Location: `src/agent-doc/src/write.rs` (or wherever exchange content is normalized pre-append). Single regex/trim pass on inbound content: strip trailing `\n❯\s*\n?` before boundary insertion.
+- Scope: exchange-component writes only (don't touch `agent:pending` or other components where `❯` could be legitimate content).
+- Effect: enforced at the layer where it matters. Agents can't produce the bug even if the SKILL forgets to say so.
+
+**Then both bloat concerns go away:**
+
+1. **Remove the SKILL paragraph** (`src/agent-doc/SKILL.md:135` and the mirrored project-local copy). The binary enforces it; no need to teach every agent.
+2. **Remove `feedback_no_trailing_prompt_glyph.md`** and its `MEMORY.md` index line. Same reason — binary-enforced, no local rule needed.
+
+Net delta: ~+10 lines in `write.rs`, −15 lines across SKILL + memory. Behavior rule becomes a code invariant.
+
+**If you want this:** say "do binary fix" and I'll implement under `.agent/runbooks/prerelease.md` (code → test → bump → publish → verify). If you'd rather keep the SKILL rule as a soft belt (in case the binary fix ever regresses), say "keep SKILL only" and I'll just delete the memory file.
+<!-- agent:boundary:f86c9ebe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

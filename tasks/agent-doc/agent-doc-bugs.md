@@ -945,7 +945,27 @@ Landed in `src/preflight.rs`. Three edits:
 **Marking #64mb done** next cycle after you confirm — want me to mark it now with `--pending-done 64mb`, or hold for your live test?
 
 **Test I still owe:** integration test asserting `git rev-list HEAD -- <file>` advances by exactly 1 across a preflight with one `[x]` pending item. Listed as a new pending item #nf7a (placeholder — will be hash-assigned by backfill).
-<!-- agent:boundary:b59ee67b -->
+
+❯ `### Re: Option A implementation` header did not have the uncommit change affordance from the last patchback. Which of the 2 options do you recommend with the new implementation?
+❯ - `### Re: Option A implementation` is committed and `### Re: Option A implementation (HEAD)` is uncommitted. Next agent-doc run will again strip (HEAD) so `### Re: Option A implementation` will be unchanged.
+❯ - `### Re: Option A implementation (HEAD)` committed and `### Re: Option A implementation` uncommitted. Next agent-doc run will commit `### Re: Option A implementation` change.
+### Re: (HEAD) commit placement — Option 1
+
+**Recommend Option 1:** committed `### Re: Option A implementation` + uncommitted `### Re: Option A implementation (HEAD)`.
+
+**Why:**
+- `(HEAD)` is a transient marker — it should live in the uncommitted slice so the blue gutter actually tracks the boundary line.
+- The stable/canonical form (without `(HEAD)`) is what git history should carry. Stripping `(HEAD)` during diff comparison means no churn — the heading isn't rewritten every cycle.
+- Option 2 causes a commit every cycle just to move `(HEAD)` forward, polluting git log with boundary-only commits.
+
+**Mechanics it implies for the commit path:**
+1. When repositioning the boundary, the binary stages the heading *without* `(HEAD)` into the snapshot/index.
+2. The working tree keeps `(HEAD)` appended on the current boundary heading → shows as modified (blue gutter).
+3. On next cycle, diff comparison strips `(HEAD)` from both sides → no phantom diff → the old boundary heading is byte-identical to its committed form and drops out of the working tree diff cleanly.
+4. New boundary heading gets `(HEAD)` appended in the working tree only.
+
+This is the "snapshot holds canonical, working tree holds annotated" split — same pattern as the comment-stripping diff already uses for `[//]: #` scratchpad lines.
+<!-- agent:boundary:f9b1fca6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

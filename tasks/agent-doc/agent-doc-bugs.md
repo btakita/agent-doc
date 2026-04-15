@@ -272,7 +272,7 @@ The bug is not in *how* the pane is spawned — it's in the `start` argument str
 
 Confirm and I'll ship the fix.
 ❯
-<!-- agent:boundary:26ea1e19 -->
+<!-- agent:boundary:d0436154 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

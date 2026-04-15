@@ -245,7 +245,7 @@ Fallback behavior: if canonicalize fails or the file isn't under `cwd`, use the 
 
 This bug is the active blocker for your other session, so I'd lean toward fixing it immediately.
 ❯ Yes. We were discussing the supervisor to fix this issue. Should we implement the supervisor managing the `cd` or have a quick fix before that?
-### Re: supervisor vs quick fix — opus-4-6
+❯ ### Re: supervisor vs quick fix — opus-4-6 (HEAD)
 
 **Quick fix first.** The supervisor is not a prerequisite for this bug, and the quick fix stays correct even after the supervisor lands.
 
@@ -271,8 +271,37 @@ The bug is not in *how* the pane is spawned — it's in the `start` argument str
 6. Supervisor work stays queued as its own track.
 
 Confirm and I'll ship the fix.
+❯ confirm
+### Re: confirm — opus-4-6
+
+**Landed and rebuilt.** Quick fix shipped in `src/agent-doc/src/route.rs`.
+
+**Change:**
+
+1. New pure helper `rewrite_start_path(file, cwd, original) -> String` — canonicalizes both `file` and `cwd`, strips the cwd prefix, falls back to `original` on any failure. Keeps non-submodule docs on the pre-existing code path.
+2. Call site in `auto_start_in_session` (single funnel for both `auto_start` and `provision_pane`) now computes `start_path` once and uses it in both:
+   - `start_cmd = format!("{} start {}", agent_doc_bin, start_path)` (the `send_keys` invocation that was failing)
+   - `send_command(tmux, &new_pane, &start_path)` (the subsequent `/agent-doc <path>` slash command — same cwd, same bug class)
+
+**Tests (4 new, all passing):**
+
+- `rewrite_start_path_narrows_to_submodule_relative` — super-root-relative `src/sub/tasks/foo.md` + cwd `super/src/sub` → `tasks/foo.md`. The exact failure mode from your other session.
+- `rewrite_start_path_no_op_when_file_under_cwd_with_same_prefix` — non-submodule case (cwd = super root) stays byte-identical.
+- `rewrite_start_path_falls_back_when_canonicalize_fails` — ghost path → original string.
+- `rewrite_start_path_falls_back_when_file_not_under_cwd` — real file outside cwd → original string.
+
+Plus full `route::` suite: **43 passed, 0 failed**. `cargo clippy --bin agent-doc -- -D warnings`: clean.
+
+**Release build:** `cargo build --release` → 47.5s. `agent-doc 0.32.4` at `src/agent-doc/target/release/agent-doc`. `.bin/agent-doc` symlink resolves and reports `agent-doc 0.32.4` — live for tmux-spawned sessions.
+
+**Manual testing gate (per release runbook):** please retry auto-claim on `src/session-share/tasks/harness-research.md` in a live session. Expected: pane spawns inside `src/session-share/`, `agent-doc start tasks/harness-research.md` resolves, Claude boots, `/agent-doc tasks/harness-research.md` lands without "file not found". Report back and I'll proceed to step 2 (JB `Force Claim` action) → step 3 (tests for #4sh0/#tw4a/#8jzg/#cce5).
+
+**Not touched (deliberate):**
+
+- No supervisor wire-up. Stays queued in #jg0d/#b486/#40ct/#vnp0/#6ae3/#zp02/#f7d5 as its own track. When phase 1 lands, the same `rewrite_start_path` helper feeds `PtySpawnConfig.args` — this fix is forward-compatible, not throwaway.
+- No `cargo install --path .` yet — waiting on your manual-test confirmation before I push to `~/.cargo/bin/`, then the publish gate for v0.32.5.
 ❯
-<!-- agent:boundary:2516c45c -->
+<!-- agent:boundary:56cad24b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

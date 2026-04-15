@@ -721,7 +721,7 @@ If you want extra confidence before shipping, I can also:
 
 Let me know if you want either before I queue a release.
 ❯ do [#14z4] [#bak5]
-### Re: #14z4 + #bak5 done (HEAD)
+### Re: #14z4 + #bak5 done
 
 Both landed in `src/agent-doc/src/pending.rs` and `src/preflight.rs`.
 
@@ -753,15 +753,31 @@ Both landed in `src/agent-doc/src/pending.rs` and `src/preflight.rs`.
 - Release candidates for v0.32.5: #eg0w (CommitLock), #14z4 (hash ceiling), #bak5 (archive), and the pre-commit reposition reorder from this session's earlier work.
 
 Let me know if you want me to update `VERSIONS.md` + `specs/pending-system.md` (flip `(Optional, deferred)` to `(shipped)`) or queue a release.
-<!-- agent:boundary:9fb786a0 -->
+
+❯ One of my last patchbacks to claudescore.md resulted wth `### Re: #nahq — checkpoint 1: news + spec + ontology landed` having an uncommitted removal of ` (HEAD)` even though the section was from a previous commit.
+❯ I did an inline prompt in the section.
+
+### Re: (HEAD) stripped from older section on inline prompt (HEAD)
+
+Logged as pending. Quick read on the suspect path:
+
+- `commit.reposition` runs on every preflight step 2, both in snapshot and working tree (`[commit] repositioned boundary in ...`).
+- If reposition strips `(HEAD)` from *any* heading that is not the newly-computed boundary, then an inline prompt inside an older `### Re:` — which happens to still carry `(HEAD)` in the working tree because the prior cycle committed it that way — will show a phantom diff: the committed blob has ` (HEAD)`, the rewritten working tree does not.
+- That matches your symptom exactly: section is from a previous commit, yet git gutter shows an uncommitted removal of ` (HEAD)`.
+
+Fix direction (not implementing yet, want your call):
+1. Reposition should only touch the *previous* boundary heading and the *new* boundary heading — never a third heading.
+2. Or: reposition should be a no-op on the working tree when the only change is an inline user edit that does not move the boundary. Detect via "boundary heading unchanged across old/new snapshot".
+3. Add a regression test: doc with two `### Re:` sections, the older one carries `(HEAD)`, user edits inside the older one, run preflight, assert working tree still has `(HEAD)` on the older heading.
+
+Want me to dig into `reposition_boundary` and propose a patch, or just leave it as #pending for a dedicated pass?
+<!-- agent:boundary:251dab7f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
-- [x] [#14z4] Hash collision ceiling: implement 8-char fallback in pending::generate_hash if 4-char collides (spec §1)
-- [x] [#bak5] Optional: pending-done archive component for history trail (spec §3 step 3, deferred)
 - [ ] [#pf01] ✅ Spec landed on 20260414/pending-gated-state: src/agent-doc/specs/pending-system.md — PendingState::Gated, [/] syntax, reaper rules, lifecycle diagram, CLI surface, state transition matrix, release discipline
 - [ ] [#64mb] Investigate double commit_staging race — root cause: concurrent preflights racing step 2 vs step 2d sweep; mid-flight (HEAD)-strip rewrites working tree between them
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
@@ -799,5 +815,6 @@ Let me know if you want me to update `VERSIONS.md` + `specs/pending-system.md` (
 - [ ] [#y4da] Deterministic boundary reposition in working tree (git.rs reposition_boundary_in_snapshot extends to disk write with active-run guard)
 - [ ] [#zvmd] Submodule (HEAD) marker: fix show_head() to route via narrow_to_submodule — superproject rev-parse can't show submodule-tracked files, so add_head_marker falls through to the 'no HEAD → mark last heading only' fallback, which drops (HEAD) when the exchange component has no ### Re: heading yet or when the fallback runs during a boundary-only cycle
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
+- [ ] [#dsng] (HEAD) marker wrongly stripped from prior-cycle section on inline prompt: #nahq — checkpoint 1 section in claudescore.md showed uncommitted removal of ' (HEAD)' after inline-prompt edit, even though the section was committed in a previous cycle. Repro: edit inline inside an older ### Re: section that still carries (HEAD). Expected: (HEAD) preserved on sections not being responded to this cycle; only the current boundary section gains/loses it. Suspect: reposition_boundary pass rewrites the working tree and strips (HEAD) from any heading not matching current boundary, instead of only the one that previously held it.
 <!-- /agent:pending -->
 ## Assistant

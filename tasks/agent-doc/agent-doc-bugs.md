@@ -855,7 +855,7 @@ Want me to implement:
 
 I'd replace the `#pending` item you added earlier with this approach — same bug, cleaner fix.
 
-### Re: strip `(HEAD)` from staged blob — landed (HEAD)
+### Re: strip `(HEAD)` from staged blob — landed
 
 Done in `src/agent-doc/src/git.rs`:
 
@@ -871,15 +871,65 @@ Full `cargo test --bin agent-doc git::` → 19 passed, 0 failed. Full-suite fail
 Next: release gate. `cargo install --path .` + VERSIONS.md entry + manual-testing pause before publishing. Holding here until you've run a live session against the rebuilt binary and confirmed the phantom `(HEAD)` strip on `#nahq`-style older sections is gone.
 
 Marking `#dsng` done in pending — this fix is the root-cause resolution.
-<!-- agent:boundary:c6aeff65 -->
+❯ do #pf01 #64mb
+### Re: #pf01 + #64mb (HEAD)
+
+**#pf01 — spec landed, marking done.** `specs/pending-system.md` is in tree; reaping via `--pending-done pf01`.
+
+**#64mb — root cause confirmed with live evidence from this preflight.**
+
+This run's stderr is the repro:
+
+```
+[preflight] step 2: commit
+[main 72d95738] agent-doc(agent-doc-bugs): 2026-04-15 03:21:19
+[preflight] baseline saved: .../9b6e92d2...md
+[preflight] pending: reaped 1 item(s): dsng
+[main 21b73421] agent-doc(agent-doc-bugs): 2026-04-15 03:21:19
+[preflight] pending: 4 gated item(s)
+[preflight] step 3: claims
+```
+
+Two commits, same second. Not concurrent preflights — one preflight calling `git::commit` twice.
+
+**Mechanism** (`src/preflight.rs`):
+
+1. **Step 2** (line 401) — `git::commit(file)` → commit #1 (`72d95738`). Stages the snapshot blob with `(HEAD)` stripped. Previous-cycle response lands.
+2. **Step 2e** (line 513) → `run_pending_maintenance(file)` → detects `[x] #dsng`, reaps, archives to `agent:pending-done`, writes mutated body to working tree, then calls `git::commit(file)` again at line 788 → commit #2 (`21b73421`).
+
+The pending item's original description ("concurrent preflights racing step 2 vs step 2d sweep; mid-flight (HEAD)-strip rewrites working tree between them") is **wrong about concurrency** — the race is intra-preflight. Step 2d's cross-doc sweep is a red herring; line 470 skips `canonical`. The real culprit is step 2e's own `git::commit` call.
+
+**Fix options:**
+
+**Option A — move pending maintenance BEFORE step 2 commit (preferred).** Reorder so `run_pending_maintenance` runs after `ensure_initialized` but before the step-2 `git::commit`. The single step-2 commit bundles: previous-cycle response + reap + archive.
+
+  - Pro: eliminates the second `git::commit` call entirely. One HEAD advance per cycle.
+  - Gotcha: step 2 `git::commit` stages from *snapshot* (with `strip_head_markers`). If maintenance mutates the working tree but leaves the snapshot stale, the committed blob still contains `[x]`. Need to add `snapshot::write(file, new_content)` inside `run_pending_maintenance`'s mutation branch after `std::fs::write`, then drop the `git::commit` call there.
+
+**Option B — drop `git::commit` from `run_pending_maintenance`, defer reap to next agent-write.**
+
+  - Pro: smallest diff.
+  - Con: reap+archive is uncommitted in the working tree for the entire response cycle — user sees green gutter on the reaped region. Also `baseline_file` saved at step 2b would contain the mutated body while snapshot stays stale → next cycle's diff mis-attributes reap as a user edit. **Reject.**
+
+**Option C — collapse into `commit_with_pending_maintenance()` helper in `git.rs`.**
+
+  - Pro: clean separation; preflight stays slim.
+  - Con: couples pending logic into git.rs.
+
+**Recommendation: Option A.** ~10 lines in `preflight.rs` + snapshot write inside `run_pending_maintenance`. Test: run preflight against a doc with one `[x]` pending item and assert `git rev-list HEAD -- <file>` advances by exactly 1.
+
+**Side-note on the `#dsng` reap trigger:** that's precisely why this cycle showed two commits — prior cycle was the strip-markers fix landing, and this cycle reaped the `[x] #dsng` you marked done. Every reap/backfill cycle will produce two commits until this lands.
+
+**Next:** Want me to implement Option A?
+<!-- agent:boundary:e8abed18 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
-- [ ] [#pf01] ✅ Spec landed on 20260414/pending-gated-state: src/agent-doc/specs/pending-system.md — PendingState::Gated, [/] syntax, reaper rules, lifecycle diagram, CLI surface, state transition matrix, release discipline
-- [ ] [#64mb] Investigate double commit_staging race — root cause: concurrent preflights racing step 2 vs step 2d sweep; mid-flight (HEAD)-strip rewrites working tree between them
+- [x] [#pf01] ✅ Spec landed on 20260414/pending-gated-state: src/agent-doc/specs/pending-system.md — PendingState::Gated, [/] syntax, reaper rules, lifecycle diagram, CLI surface, state transition matrix, release discipline
+- [ ] [#64mb] Fix double commit_staging: step 2e run_pending_maintenance calls git::commit after step 2 already committed. Move maintenance BEFORE step 2 commit so the single commit bundles reap+archive with the previous-cycle response. Repro: preflight at 03:21:19 produced 72d95738 then 21b73421.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [ ] [#xzz5] Preflight slash-command parser: absolute paths like /home/... get captured as commands. Require [a-z][a-z0-9:_-]* after the slash and reject tokens containing a second /.
 - [ ] [#a011] End-of-cycle write invariant — warn if `preflight_diff_start` without `ipc_write_attempt`.
@@ -915,6 +965,5 @@ Marking `#dsng` done in pending — this fix is the root-cause resolution.
 - [ ] [#y4da] Deterministic boundary reposition in working tree (git.rs reposition_boundary_in_snapshot extends to disk write with active-run guard)
 - [ ] [#zvmd] Submodule (HEAD) marker: fix show_head() to route via narrow_to_submodule — superproject rev-parse can't show submodule-tracked files, so add_head_marker falls through to the 'no HEAD → mark last heading only' fallback, which drops (HEAD) when the exchange component has no ### Re: heading yet or when the fallback runs during a boundary-only cycle
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
-- [x] [#dsng] (HEAD) marker wrongly stripped from prior-cycle section on inline prompt: #nahq — checkpoint 1 section in claudescore.md showed uncommitted removal of ' (HEAD)' after inline-prompt edit, even though the section was committed in a previous cycle. Repro: edit inline inside an older ### Re: section that still carries (HEAD). Expected: (HEAD) preserved on sections not being responded to this cycle; only the current boundary section gains/loses it. Suspect: reposition_boundary pass rewrites the working tree and strips (HEAD) from any heading not matching current boundary, instead of only the one that previously held it.
 <!-- /agent:pending -->
 ## Assistant

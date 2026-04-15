@@ -992,7 +992,7 @@ This is the "snapshot holds canonical, working tree holds annotated" split — s
 **Want me to:**
 - (a) add a new pending item `#hdap` for "reposition appends `(HEAD)` to last `### Re:` heading" and leave it for a focused cycle, or
 - (b) implement it now in `template::reposition_boundary_to_end` + test + rebuild + cargo install?
-<!-- agent:boundary:d5dc7b1f -->
+<!-- agent:boundary:a5060b7c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

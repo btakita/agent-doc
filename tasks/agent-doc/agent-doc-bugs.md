@@ -1030,14 +1030,13 @@ The reorder the pending item describes is already in tree — maintenance no lon
 2. Your new response heading get `(HEAD)` appended
 3. Blue gutter on the new `(HEAD)` heading line in your editor
 4. Single commit per preflight (no double-commit from #64mb)
-<!-- agent:boundary:836ae976 -->
+<!-- agent:boundary:9e394440 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
-- [x] [#64mb] Fix double commit_staging: step 2e run_pending_maintenance calls git::commit after step 2 already committed. Move maintenance BEFORE step 2 commit so the single commit bundles reap+archive with the previous-cycle response. Repro: preflight at 03:21:19 produced 72d95738 then 21b73421.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [ ] [#xzz5] Preflight slash-command parser: absolute paths like /home/... get captured as commands. Require [a-z][a-z0-9:_-]* after the slash and reject tokens containing a second /.
 - [ ] [#a011] End-of-cycle write invariant — warn if `preflight_diff_start` without `ipc_write_attempt`.

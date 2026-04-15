@@ -495,7 +495,7 @@ Will post progress after each completed step. Starting with exploration of `writ
 
 Per the memory rule **"Manual testing gate before publish"** and the prerelease runbook §8, none of those fire until you confirm. Say `publish` (or `ship it` / `release`) and I'll run the publish gate.
 ❯ release
-### Re: released — opus-4-6
+❯ ### Re: released — opus-4-6 (HEAD)
 
 **agent-doc v0.32.5 shipped.**
 
@@ -514,7 +514,38 @@ Per the memory rule **"Manual testing gate before publish"** and the prerelease 
 - Pending gated-state `[/]` + submodule auto-start fix also included (pre-existing in-flight work).
 
 **Memory and context are clean:** `feedback_no_trailing_prompt_glyph.md` deleted and de-indexed. The rule is now enforced at the binary layer — agents can forget it and the behavior stays correct.
-<!-- agent:boundary:1303607d -->
+
+❯ In tasks/recruit/filevine/filevine-interview.md, I'm using Opus, but the header says haiku `### Re: docker container note — haiku (HEAD)` Why?
+### Re: header says haiku but I'm on Opus — opus-4-6
+
+**Diagnosis.** `resolve_agent_model()` in `src/agent-doc/src/preflight.rs:230` resolves attribution in this priority order:
+
+1. `ANTHROPIC_MODEL` env var
+2. Frontmatter `model` field
+
+Your shell has `ANTHROPIC_MODEL=haiku` exported (verified just now with `env | grep -i model`). Preflight reads that env var and stamps `agent_model: haiku` into its JSON, regardless of what Claude Code is actually running. The skill then appends `— haiku` to every `### Re:` header.
+
+**Why Claude Code doesn't correct it.** Claude Code's `/model` selection is internal to the harness — it does **not** export `ANTHROPIC_MODEL` to the child shell. So the env var is stale (probably set in your zshrc or a prior session) and agent-doc trusts it blindly.
+
+**Evidence in the current preflight for this doc:**
+
+```
+"effective_tier": "high",
+"agent_model": "haiku"
+```
+
+Tier is `high` (Opus-class), but model attribution is `haiku`. Those two shouldn't disagree — that's the smell.
+
+**Proposed fixes** (ranked):
+
+1. **Remove `ANTHROPIC_MODEL=haiku` from your shell env.** Fastest fix. Check `~/.zshrc`, `~/.zshenv`, `~/.config/zsh/*`, and any direnv `.envrc`. Once unset, `resolve_agent_model` falls through to frontmatter (none set here) and returns `None`, so headers render as plain `### Re: topic` with no suffix.
+2. **Make agent-doc consistency-check the env var against `effective_tier`.** If `ANTHROPIC_MODEL` maps to a tier below `effective_tier`, log a warning and ignore the env var. Prevents silent mislabeling if someone deliberately sets `ANTHROPIC_MODEL=haiku` for cost reasons but then Claude Code escalates to Opus.
+3. **Drop env-var priority entirely.** Frontmatter-only. Harness-agnostic and predictable, but loses the "auto-detect current model" convenience.
+
+Want me to (a) hunt down where `ANTHROPIC_MODEL=haiku` is being set in your shell config, (b) add the tier-consistency check to `resolve_agent_model`, or both? I'd lean toward doing (a) first since it's the immediate unblocker, then (b) so this class of bug can't silently recur.
+
+Also worth adding to `tasks/agent-doc/agent-doc-bugs.md` as a tracked item — this is a real correctness bug, not just a cosmetic quirk, because the attribution is visible in archived exchanges and will mislead anyone reading the history.
+<!-- agent:boundary:4894b1c0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

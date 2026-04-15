@@ -1063,7 +1063,7 @@ Existing `reposition_appends_head_to_last_re_heading` and the four other `(HEAD)
 2. Leading whitespace on a heading line is NOT trimmed for the baseline key, but the scanner only recognizes headings by `hash_count + space` after `trim_start`. So `  ### Re: foo` and `### Re: foo` would hash differently as keys — unlikely in practice but worth noting if something behaves oddly.
 
 Want a follow-up cycle to fold the normalization down to `stripped.trim_start()` for absolute safety, or is this good as-is?
-<!-- agent:boundary:04347204 -->
+<!-- agent:boundary:d49ed5cc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

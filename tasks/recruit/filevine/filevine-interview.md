@@ -59,7 +59,7 @@ Added at `tasks/recruit/filevine/FDE-Project-Interview` and read the README. Sum
 **Interview strategy:** they want to see you reason about mapping under ambiguity, not memorized Filevine trivia. Narrate tradeoffs out loud. The Gemini call is the signal — show you can pick a high-value LLM use case, not just sprinkle it in.
 
 Want me to draft the mapping tables and a workflow skeleton you can walk in with, or keep it hands-off so you can work through it cold in the interview?
-<!-- agent:boundary:19e230f7 -->
+<!-- agent:boundary:eb027fae -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

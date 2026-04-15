@@ -965,7 +965,7 @@ Landed in `src/preflight.rs`. Three edits:
 4. New boundary heading gets `(HEAD)` appended in the working tree only.
 
 This is the "snapshot holds canonical, working tree holds annotated" split — same pattern as the comment-stripping diff already uses for `[//]: #` scratchpad lines.
-<!-- agent:boundary:f9b1fca6 -->
+<!-- agent:boundary:20028f73 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

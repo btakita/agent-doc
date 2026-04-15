@@ -205,7 +205,7 @@ Error: file not found: src/session-share/tasks/harness-research.md
 
 Test in a live session before I move to step 2 (JB plugin `Force Claim` action)? Or should I proceed straight to step 2 while you test?
 ❯
-### Re: auto-claim submodule path bug + step 1 — opus-4-6
+❯ ### Re: auto-claim submodule path bug + step 1 — opus-4-6 (HEAD)
 
 **Readding step 1 result:** `cargo build --release` in `src/agent-doc/` completed (48s). `agent-doc 0.32.4` now live at `src/agent-doc/target/release/agent-doc`; `.bin/agent-doc` symlink points to it.
 
@@ -244,8 +244,35 @@ Fallback behavior: if canonicalize fails or the file isn't under `cwd`, use the 
 2. Then resume the step 2 → step 3 sequence we agreed on?
 
 This bug is the active blocker for your other session, so I'd lean toward fixing it immediately.
+❯ Yes. We were discussing the supervisor to fix this issue. Should we implement the supervisor managing the `cd` or have a quick fix before that?
+### Re: supervisor vs quick fix — opus-4-6
+
+**Quick fix first.** The supervisor is not a prerequisite for this bug, and the quick fix stays correct even after the supervisor lands.
+
+**Why the supervisor doesn't fix this on its own:**
+
+The bug is not in *how* the pane is spawned — it's in the `start` argument string. `route.rs` narrows `cwd` to the submodule but still passes `file_path` as super-root-relative. No matter who spawns the child (current `tmux send-keys`, future supervisor PTY), `agent-doc start src/session-share/tasks/harness-research.md` run from `src/session-share/` will still fail. The supervisor would inherit the same broken invariant unless we also teach it "rewrite path relative to resolved cwd" — which *is* the quick fix.
+
+**Layering:**
+
+1. **Now (quick fix, ~10 LOC in `route.rs`):** canonicalize `file`, strip `cwd` prefix, fall back to original. Unit-testable without tmux. Unblocks your other session immediately.
+2. **Later (#jg0d/#b486/#40ct/#vnp0/#6ae3/#zp02):** supervisor phase 1 wire-up. When `start.rs` moves to `PtySpawnConfig`, `PtySpawnConfig.args` receives the already-rewritten `start_path` — the quick fix becomes the canonical path-normalization step, not throwaway work.
+3. **Supervisor smoke test (#f7d5)** can then assert the CWD-invariant + path-relative contract in one place.
+
+**Risk of doing supervisor first:** 6 pending items, real restart/state/ipc/pty/env wiring, cross-platform concerns (Windows ConPTY stub in #jg0d). Your other session stays blocked the entire time. And you'd still need this rewrite anyway.
+
+**Plan:**
+
+1. Land `route.rs` rewrite + unit test (`cwd_narrowing_rewrites_start_path_for_submodule_doc`).
+2. Also patch `provision_pane` path (same `auto_start_in_session` call site).
+3. `cargo test --bins route::` + `cargo build --release`.
+4. You retry auto-claim on `src/session-share/tasks/harness-research.md` in a live session.
+5. Resume step 2 (JB `Force Claim` action) → step 3 (tests for #4sh0/#tw4a/#8jzg/#cce5).
+6. Supervisor work stays queued as its own track.
+
+Confirm and I'll ship the fix.
 ❯
-<!-- agent:boundary:74207907 -->
+<!-- agent:boundary:26ea1e19 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

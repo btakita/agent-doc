@@ -821,7 +821,7 @@ Want me to implement option 2 + this test now, or keep it as pending for a dedic
 ❯ If the boundary moves, presumably due to the user running the next agent-doc command...should the commit strip the ` (HEAD)`?
 ❯ I believe if the commit strips ` (HEAD)`, then the issue would also be fixed.
 
-### Re: strip `(HEAD)` from staged blob — yes, this is the right fix (HEAD)
+### Re: strip `(HEAD)` from staged blob — yes, this is the right fix
 
 You're right, and this is cleaner than both options 1 and 2. Let me restate the invariant:
 
@@ -851,8 +851,27 @@ Want me to implement:
 - drop any reposition-rewrites-working-tree-for-old-headings logic that's now unnecessary,
 - add the regression test above?
 
+❯ yes to all 3
+
 I'd replace the `#pending` item you added earlier with this approach — same bug, cleaner fix.
-<!-- agent:boundary:ca25f404 -->
+
+### Re: strip `(HEAD)` from staged blob — landed (HEAD)
+
+Done in `src/agent-doc/src/git.rs`:
+
+1. **Staging now strips instead of adds.** `commit()` calls `strip_head_markers(snap)` before `git hash-object + update-index` (git.rs:446). `(HEAD)` is a working-tree-only marker; the committed blob is clean. Blue-gutter on the current boundary comes for free — the working tree's `### Re: ... (HEAD)` is a single modified line against the clean blob.
+2. **Dropped unnecessary working-tree rewrites.** `reposition_boundary_in_snapshot` no longer runs `strip_head_markers` on the working tree — it only touches the `<!-- agent:boundary:... -->` marker. Post-commit strip of the working tree is gone. The post-commit snapshot strip is kept (one-shot, so the next cycle's diff doesn't see phantom `(HEAD)` adds/removes).
+3. **`add_head_marker` + its tests deleted.** The function and all 6 of its tests are gone — they documented the old "put `(HEAD)` in the blob" contract that this fix inverts.
+4. **Regression test added.** `git::tests::commit_staged_blob_has_no_head_markers` builds a repo, writes a snapshot with `### Re: newer (HEAD)`, calls `commit()`, then asserts `git show HEAD:session.md` contains zero `(HEAD)` occurrences AND the working tree still has exactly one on the current boundary. Passes.
+
+Also had to nudge `write_commit_lifecycle` to write a pre-response commit and then a post-response snapshot — under the new contract "snapshot equal to HEAD" is a no-op commit, so the test was asserting on an outcome the old behavior only produced incidentally via `add_head_marker`-mutation.
+
+Full `cargo test --bin agent-doc git::` → 19 passed, 0 failed. Full-suite failures (45) are pre-existing tmux-parallel flakiness in `resync::` / `route::` / `supervisor::` — same set passes/fails between stashed and unstashed runs.
+
+Next: release gate. `cargo install --path .` + VERSIONS.md entry + manual-testing pause before publishing. Holding here until you've run a live session against the rebuilt binary and confirmed the phantom `(HEAD)` strip on `#nahq`-style older sections is gone.
+
+Marking `#dsng` done in pending — this fix is the root-cause resolution.
+<!-- agent:boundary:32696d7a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -896,6 +915,6 @@ I'd replace the `#pending` item you added earlier with this approach — same bu
 - [ ] [#y4da] Deterministic boundary reposition in working tree (git.rs reposition_boundary_in_snapshot extends to disk write with active-run guard)
 - [ ] [#zvmd] Submodule (HEAD) marker: fix show_head() to route via narrow_to_submodule — superproject rev-parse can't show submodule-tracked files, so add_head_marker falls through to the 'no HEAD → mark last heading only' fallback, which drops (HEAD) when the exchange component has no ### Re: heading yet or when the fallback runs during a boundary-only cycle
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
-- [ ] [#dsng] (HEAD) marker wrongly stripped from prior-cycle section on inline prompt: #nahq — checkpoint 1 section in claudescore.md showed uncommitted removal of ' (HEAD)' after inline-prompt edit, even though the section was committed in a previous cycle. Repro: edit inline inside an older ### Re: section that still carries (HEAD). Expected: (HEAD) preserved on sections not being responded to this cycle; only the current boundary section gains/loses it. Suspect: reposition_boundary pass rewrites the working tree and strips (HEAD) from any heading not matching current boundary, instead of only the one that previously held it.
+- [x] [#dsng] (HEAD) marker wrongly stripped from prior-cycle section on inline prompt: #nahq — checkpoint 1 section in claudescore.md showed uncommitted removal of ' (HEAD)' after inline-prompt edit, even though the section was committed in a previous cycle. Repro: edit inline inside an older ### Re: section that still carries (HEAD). Expected: (HEAD) preserved on sections not being responded to this cycle; only the current boundary section gains/loses it. Suspect: reposition_boundary pass rewrites the working tree and strips (HEAD) from any heading not matching current boundary, instead of only the one that previously held it.
 <!-- /agent:pending -->
 ## Assistant

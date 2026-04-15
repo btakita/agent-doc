@@ -852,7 +852,7 @@ Want me to implement:
 - add the regression test above?
 
 I'd replace the `#pending` item you added earlier with this approach — same bug, cleaner fix.
-<!-- agent:boundary:0422facb -->
+<!-- agent:boundary:ca25f404 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

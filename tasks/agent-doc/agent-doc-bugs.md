@@ -189,10 +189,11 @@ Stale takes precedence over `--force` so the warning reflects reality (the confi
 
 What order?
 ❯ 1, 2, 3
-### Re: 1, 2, 3 — opus-4-6
+❯ ### Re: 1, 2, 3 — opus-4-6 (HEAD)
 
 On it. Starting step 1: `cargo build --release` in `src/agent-doc/`.
-When I try to auto-claim 
+❯ Please readd the patchback. I rejected the external change while writing the following.
+❯ When I try to auto-claim src/session-share/tasks/harness-research.md, there seems to be an issue with the recently added `cd src/session-share` for submodules change
 ```
 /home/brian/.cargo/bin/agent-doc start src/session-share/tasks/harness-research.md
 ~/work/btakita/agent-loop/src/session-share main ⇡40 !4 ?1                                        agent-loop 11:59:38
@@ -204,7 +205,47 @@ Error: file not found: src/session-share/tasks/harness-research.md
 
 Test in a live session before I move to step 2 (JB plugin `Force Claim` action)? Or should I proceed straight to step 2 while you test?
 ❯
-<!-- agent:boundary:fdf29173 -->
+### Re: auto-claim submodule path bug + step 1 — opus-4-6
+
+**Readding step 1 result:** `cargo build --release` in `src/agent-doc/` completed (48s). `agent-doc 0.32.4` now live at `src/agent-doc/target/release/agent-doc`; `.bin/agent-doc` symlink points to it.
+
+**Diagnosis of the new bug (auto-claim on `src/session-share/tasks/harness-research.md`):**
+
+Root cause is in `route.rs:736` + `route.rs:648`:
+
+```rust
+let cwd = crate::git::resolve_pane_cwd(file);   // → .../src/session-share
+...
+let start_cmd = format!("{} start {}", agent_doc_bin, file_path);
+tmux.send_keys(&new_pane, &start_cmd)?;
+```
+
+`file_path` is passed through from the caller as the super-root-relative string (`src/session-share/tasks/harness-research.md`). The new pane is spawned with `cwd = <submodule root>`, then `agent-doc start src/session-share/tasks/harness-research.md` runs from inside the submodule — the super-root-relative path does not resolve, hence `Error: file not found`.
+
+The cwd narrowing was added (correctly) in `#tw4a`/`#8jzg` so submodule docs spawn inside the submodule; the start command was not updated to match.
+
+**Fix:** rewrite `file_path` to be relative to the spawned pane's `cwd` before composing `start_cmd`. Proposed logic:
+
+```rust
+let start_path = std::fs::canonicalize(file)
+    .ok()
+    .and_then(|abs| abs.strip_prefix(&cwd).ok().map(|p| p.to_path_buf()))
+    .map(|p| p.to_string_lossy().to_string())
+    .unwrap_or_else(|| file_path.to_string());
+let start_cmd = format!("{} start {}", agent_doc_bin, start_path);
+```
+
+Fallback behavior: if canonicalize fails or the file isn't under `cwd`, use the original `file_path` (matches current behavior — no regression for non-submodule docs).
+
+**Impact:** affects every auto-started submodule pane. `provision_pane` path too (same `auto_start_in_session`).
+
+**Want me to:**
+1. Land the fix in `route.rs` now (tiny diff, plus a unit test if I can isolate `cwd` narrowing), rebuild locally, and then you re-try the auto-claim?
+2. Then resume the step 2 → step 3 sequence we agreed on?
+
+This bug is the active blocker for your other session, so I'd lean toward fixing it immediately.
+❯
+<!-- agent:boundary:4a39040d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -57,7 +57,7 @@ After `stream_loop` + final git commit, `run_stream` now fires both `fire_post_w
 - `parse_slash_commands` — 11 pass
 - `template::tests` — 56 pass
 - `preflight::tests` — 29 pass, 1 pre-existing failure (`preflight_sweep_commits_other_tracked_docs`) verified to fail on stashed baseline, unrelated to this work.
-<!-- agent:boundary:bf9e33d3 -->
+<!-- agent:boundary:d7d1b32d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -65,11 +65,6 @@ After `stream_loop` + final git commit, `run_stream` now fires both `fire_post_w
 <!-- agent:pending patch=replace -->
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
-- [x] [#xzz5] Preflight slash-command parser: absolute paths like /home/... get captured as commands. Require [a-z][a-z0-9:_-]* after the slash and reject tokens containing a second /.
-- [x] [#a011] End-of-cycle write invariant — warn if `preflight_diff_start` without `ipc_write_attempt`.
-- [x] [#a012] Expose `agent-doc session-check <FILE>` — nonzero if last ops.log entry is `preflight_diff_start`.
-- [x] [#a014] Session drift: `registered panes span 2 tmux sessions: 1, 4` — resync if recurring.
-- [x] [#a010] PostToolUse hook for agent-doc write (layer 3, optional).
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
 - [ ] [#4sh0] Add planned-move logging to sync.rs reconciler so ClaimAction→SyncLayout pane swaps are debuggable
 - [ ] [#tw4a] claim: cd into document's .agent-doc root (nearest git repo) when claiming a pane. Fixes relative-path ambiguity and makes git ops naturally target the correct repo.

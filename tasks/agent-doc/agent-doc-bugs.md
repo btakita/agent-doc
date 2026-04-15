@@ -460,7 +460,41 @@ Bundled. Starting execution now. Plan:
 6. **Verify live** — confirm response from installed binary produces no trailing `❯`.
 
 Will post progress after each completed step. Starting with exploration of `write.rs` and test layout.
-<!-- agent:boundary:a245d7b9 -->
+### Re: bundled changes built + installed — manual gate — opus-4-6
+
+**Status:** all changes done, release build installed, **awaiting manual verification** before publishing.
+
+**Built:**
+
+1. **Binary fix** — `template::strip_trailing_caret_lines` + call sites in `apply_patches_with_overrides` (patch loop + unmatched routing + auto-created-exchange path). Only fires for exchange-bound content; `❯` in other components is preserved.
+2. **Tests** — 8 new unit tests in `template.rs`, all passing; full `template::` suite: 64 passing. Lib suite: 292 passing. (45 pre-existing tmux-dependent `resync::`/`route::` test failures are unrelated — all panic with `Os { code: 2, kind: NotFound }` from tmux subprocess spawning; they fail identically on the pre-change baseline.)
+3. **SKILL prune** — `src/agent-doc/SKILL.md`: **293 → 112 lines (~62% cut).**
+4. **Runbooks created + bundled** via `include_str!` in `src/skill.rs::BUNDLED_RUNBOOKS`:
+   - `runbooks/model-tier-gate.md`
+   - `runbooks/streaming-checkpoints.md`
+   - `runbooks/document-format.md`
+   - `runbooks/code-enforced-directives.md` (promoted from project-local)
+5. **Memory cleanup** — deleted `~/.claude/projects/-home-brian-work-btakita-agent-loop/memory/feedback_no_trailing_prompt_glyph.md` + removed its `MEMORY.md` index line.
+6. **VERSIONS.md** — 0.32.5 entry updated: replaced the old "SKILL rule" bullet with two new bullets (binary fix + SKILL prune), preserved the existing `rewrite_start_path` bullet untouched.
+7. **Release artifacts built** — `make build-release` produced `src/agent-doc/target/release/agent-doc`, `.bin/agent-doc` symlink is live, `cargo install --path .` replaced `~/.cargo/bin/agent-doc` with v0.32.5 (so tmux-spawned Claude sessions pick it up too).
+
+**This response is the first write through the new binary.** If the binary fix is correct, the boundary marker below will sit directly under the last real content line — no phantom `❯` row. I'm deliberately ending this response with a period, not `❯`, because the point is that the agent *can* forget and the binary still catches it.
+
+**Manual testing gate — please verify:**
+
+1. **Boundary sanity:** After this write, open the doc in your editor and confirm `<!-- agent:boundary:... -->` sits directly under the last real line (no bare `❯` row above it).
+2. **Mid-content `❯` preserved:** Scroll up — all the `❯ <user prompt>` lines from this session's history should still be intact. They're user content, not trailing prompt glyphs, and the binary must not have touched them.
+3. **Optional stress test:** Manually edit this exchange to append a line containing just `❯` at the very end, save, then run `/agent-doc` again. The next preflight cycle should strip it server-side and no phantom row should appear.
+
+**Not yet done (publish gate):**
+
+- `cargo publish` to crates.io
+- `maturin upload` to PyPI
+- `git tag v0.32.5 && git push origin v0.32.5`
+- `gh release create v0.32.5` (or let CI handle it after tag push)
+
+Per the memory rule **"Manual testing gate before publish"** and the prerelease runbook §8, none of those fire until you confirm. Say `publish` (or `ship it` / `release`) and I'll run the publish gate.
+<!-- agent:boundary:d7c783c0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

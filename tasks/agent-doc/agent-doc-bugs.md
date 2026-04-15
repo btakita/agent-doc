@@ -245,7 +245,7 @@ Fallback behavior: if canonicalize fails or the file isn't under `cwd`, use the 
 
 This bug is the active blocker for your other session, so I'd lean toward fixing it immediately.
 ❯
-<!-- agent:boundary:4a39040d -->
+<!-- agent:boundary:74207907 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

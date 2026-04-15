@@ -85,7 +85,7 @@ No. The implementation commit added no tests for the 4 features:
 - **#cce5 (agent_model)** — no tests. `resolve_agent_model()` added to `preflight.rs` with no unit test for the env-var path, frontmatter fallback, or `short_model_name` trimming.
 
 The only test activity in that commit was a pre-existing clippy fix in `session_check.rs`. Want me to add tests for these now?
-<!-- agent:boundary:8b3ee997 -->
+<!-- agent:boundary:70b38470 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

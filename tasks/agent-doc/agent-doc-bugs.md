@@ -753,7 +753,7 @@ Both landed in `src/agent-doc/src/pending.rs` and `src/preflight.rs`.
 - Release candidates for v0.32.5: #eg0w (CommitLock), #14z4 (hash ceiling), #bak5 (archive), and the pre-commit reposition reorder from this session's earlier work.
 
 Let me know if you want me to update `VERSIONS.md` + `specs/pending-system.md` (flip `(Optional, deferred)` to `(shipped)`) or queue a release.
-<!-- agent:boundary:9eabdf49 -->
+<!-- agent:boundary:920c5483 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

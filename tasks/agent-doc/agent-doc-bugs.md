@@ -399,7 +399,7 @@ If both verify, give the word and I'll run the publish gate (cargo + maturin + t
 Net delta: ~+10 lines in `write.rs`, −15 lines across SKILL + memory. Behavior rule becomes a code invariant.
 
 **If you want this:** say "do binary fix" and I'll implement under `.agent/runbooks/prerelease.md` (code → test → bump → publish → verify). If you'd rather keep the SKILL rule as a soft belt (in case the binary fix ever regresses), say "keep SKILL only" and I'll just delete the memory file.
-<!-- agent:boundary:f86c9ebe -->
+<!-- agent:boundary:61f031f9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -349,7 +349,7 @@ Result: the content appears **twice** in unmatched. Then `try_ipc` synthesizes a
 **Fix:** Use `<!-- /patch:exchange -->` (with `/`) as the close tag in all subsequent writes. This is my error in the skill invocation, not a binary bug. The `0 components` in previous IPC logs was the tell — patches array was empty because no block was properly closed.
 
 ❯ I did not notice the `patch:exchange`. This seems ok...but I want to test out the ergonomics of it for a bit. If I tell you to remove it, are there any alternatives?
-### Re: patch:exchange alternatives — opus-4-6
+❯ ### Re: patch:exchange alternatives — opus-4-6 (HEAD)
 
 Yes, there are two alternatives if you want to drop the `<!-- patch:exchange -->` wrapper:
 
@@ -360,7 +360,15 @@ Yes, there are two alternatives if you want to drop the `<!-- patch:exchange -->
 For now, the `<!-- patch:exchange -->` / `<!-- /patch:exchange -->` wrapper is the most explicit and safest option — it tells the parser exactly what component to target and avoids ambiguity. But if the wrapper feels noisy in the document, option 1 (raw content, no wrapper) works for typical responses that don't contain agent-doc markers.
 
 Try it out and let me know if you want to switch.
-<!-- agent:boundary:d5456858 -->
+❯ I did not see the patch:exchange in the last patchback. Why?
+### Re: patch:exchange visibility — opus-4-6
+
+That's correct — the `<!-- patch:exchange -->` / `<!-- /patch:exchange -->` wrapper tags are **never written to the document**. They're consumed by `parse_patches` in the write command. The parser extracts the content between the tags and applies it to the exchange component. Only the inner content (your response text) appears in the document.
+
+The wrapper exists only in the heredoc I pipe to `agent-doc write` — it's a transport-layer directive, not document content. You'll never see it in the rendered file.
+
+So there's nothing to "test the ergonomics of" from the document side — it's invisible to you. The ergonomics question is only relevant if I were to use raw content (no wrapper) instead, which would also be invisible to you but slightly less safe for responses containing HTML comment markers.
+<!-- agent:boundary:32c423b9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -264,7 +264,7 @@ Added content-aware guard before sweep-commit. The sweep now:
 For template mode docs, `is_stale_snapshot` always returns `false` (no `## Assistant` markers), so sweep only commits when snapshot and document are content-equal after comment stripping — conservative but correct.
 
 **Tests:** 1040 pass (1 new: `preflight_sweep_skips_doc_with_unresponded_user_content`). Clippy clean, release binary built and installed.
-<!-- agent:boundary:3c0dbd1f -->
+<!-- agent:boundary:57891fb3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

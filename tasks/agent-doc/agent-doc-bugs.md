@@ -297,7 +297,7 @@ The important invariant is binary: `[/]` items are never auto-reaped. The *what*
 ❯ `[/release]` and `[/deploy]` are interesting. Add to the bottom of pending.
 
 ❯ Make sure the instructions are in a runbook.
-### Re: typed gates + runbook — opus-4-6
+❯ ### Re: typed gates + runbook — opus-4-6 (HEAD)
 
 Added `[/release]` / `[/deploy]` event-driven gate resolution to the bottom of pending.
 
@@ -307,7 +307,29 @@ Updated the pending-ops runbook (`runbooks/pending-ops.md`) with a new **"When t
 - **Default rule:** always gate after implementation, never done. The user's confirmation closes the gate.
 
 Also updated the "What to decide each cycle" checklist: first bullet now reads "Items implemented during this response → `--pending-gate <id>`" instead of `--pending-done`.
-<!-- agent:boundary:97145506 -->
+❯ In src/session-share/tasks/claudescore.md there is a `<!-- /replace:status -->` in the patchback. Why?
+### Re: replace:status in claudescore.md — opus-4-6
+
+It's dead text — the binary's `parse_patches` only accepts `replace:pending`. All other `replace:*` names fall through as unmatched content (`template.rs:181–192`):
+
+```rust
+} else if let Some(rest) = trimmed.strip_prefix("replace:") {
+    // Only `replace:pending` is accepted. Other `replace:*` names fall
+    // through as unmatched to avoid silently broadening the grammar.
+    if &rest_trim[..name_end] == "pending" {
+        Some(("replace", rest))
+    } else {
+        None  // ← replace:status lands here → plain text
+    }
+}
+```
+
+So `<!-- replace:status -->...<!-- /replace:status -->` was treated as literal exchange content. The `&lt;!-- agent:status --&gt;` component stayed empty.
+
+**Root cause:** The skill emitted `replace:status` when it should have used `<!-- patch:status -->` — which works for any component name. `replace:` was introduced as a semantic alias specifically for `pending` (#25ag) and was never generalized.
+
+**Classification:** Skill-side bug (wrong patch prefix), not a binary bug. The binary correctly refused to broaden the `replace:` grammar. The fix is to use `<!-- patch:status -->` for status component updates.
+<!-- agent:boundary:2dc1e99a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

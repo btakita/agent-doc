@@ -159,7 +159,7 @@ Starting implementation. The root cause is three independent `patch_id` UUIDs ge
 2. **Plugin (PatchWatcher.kt):** Add `appliedPatchIds: ConcurrentHashMap<String, Long>` dedup set. Before applying any patch (socket or file), check if patch_id already applied. After applying, record it. Periodic cleanup of entries >60s.
 
 Implementing now.
-<!-- agent:boundary:5fed6a42 -->
+<!-- agent:boundary:d6ec3bc4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

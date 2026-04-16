@@ -21,7 +21,7 @@ links:
 Rebuilt equityfundingsource.com as rappstack app (Hono+rhonojs, Tailwind v4, Bun workspace). Content crawled from equityfundingnow.com + Wayback Machine: 18 funded deals, full site pages. Assets gitignored, served via Cloudflare R2. Deployed to https://equityfundingsource.pages.dev. Form backend: POST /api/apply + /api/contact → D1 (applications/contacts/uploaded_documents tables, ID: 280e1539-b940-4c59-8988-fbed63c12ac0) + R2 quarantine + Resend email to brian.takita@gmail.com. RESEND_API_KEY configured. Document pipeline architecture: Tier 0 (WAF) → Tier 1 (Workers AI) → Tier 2 (Claude API) → Tier 3 (Ragie Parse). Ragie alone insufficient for content validation. 54 tests passing. Judith proposal email pushed to Gmail Drafts: To judithkrug@gmail.com, CC rwaldman100@gmail.com, BCC robertward3@yahoo.com. Email includes online presence issues (domain down, fragmented listings on Weebly/WordPress/directories). Resend domain notifications@equityfundingsource.com needs verification.
 
 ❯ equityfundingsource.com is back up. Now I need to update the existing site that we have to exactly match the current equityfundingsource.com. It is a wordpress site. Please assess equityfundingsource.com and give an evaluation of its look and feel. Is this an effective website giving a professional appearance? Is the SEO optimized. Should I remain on wordpress or make a custom solution?
-### Re: equityfundingsource.com site assessment — opus-4-6
+❯ ### Re: equityfundingsource.com site assessment — opus-4-6 (HEAD)
 
 Good news that the domain is live again. I crawled the site. Here's my assessment:
 
@@ -65,7 +65,32 @@ Stay with the rappstack build we already deployed to equityfundingsource.pages.d
 - DNS cutover timeline (can be done with zero downtime via Cloudflare proxy)
 - Any content on the WordPress site not yet in the pages.dev build
 - Whether Judith needs to review the pages.dev version before switching
-<!-- agent:boundary:0abeb6af -->
+❯ How does the look and feel of our site compare?
+### Re: pages.dev vs WordPress comparison — opus-4-6
+
+I crawled both sites side by side. Here's how the rappstack build (equityfundingsource.pages.dev) compares to the current WordPress site (equityfundingsource.com):
+
+**Where pages.dev wins:**
+- **Performance** — static Cloudflare edge delivery vs WordPress shared hosting. Night and day on load times.
+- **Funded deals** — card grid with clickable detail pages, "View All" CTA. WordPress just lists them flat.
+- **About page** — 4 professional photos (family, business owner, property, homeowner) vs WordPress's single headshot. Richer visual storytelling.
+- **Forms** — integrated application flow with D1 backend vs Google Forms redirect. Far more professional.
+- **Contact accessibility** — clickable tel: links, structured contact section.
+- **Security** — no WordPress attack surface to maintain.
+
+**Where WordPress currently wins:**
+- **Blog** — the Private Lending Blog and Broker Portal sections exist on WordPress. pages.dev doesn't have blog content yet.
+- **Investor Opt-In form** — WordPress has a dedicated email opt-in. pages.dev has the general contact form but not a separate investor funnel.
+
+**Roughly equivalent:**
+- Both show the same 18 funded deals, same credentials (CA DRE, NMLS), same core navigation.
+- Both use property photography and similar content hierarchy.
+- Neither has testimonials, case studies, or structured data markup (opportunity for pages.dev to leapfrog).
+
+**Design quality:** The pages.dev build is cleaner and more modern — minimal clutter, better section separation, mobile-first responsive. The WordPress site reads as a template with content poured in. The pages.dev version reads as a purpose-built site. Neither is going to win design awards, but pages.dev is meaningfully better positioned for trust with borrowers considering six-figure loans.
+
+**Bottom line:** pages.dev is already ahead. The gaps (blog, investor opt-in) are additive features we can build, not architectural disadvantages. WordPress's only real advantage is that it's the live domain — which is just a DNS change.
+<!-- agent:boundary:c7e98b32 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

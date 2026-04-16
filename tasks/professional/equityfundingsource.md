@@ -19,7 +19,7 @@ links:
 
 <!-- agent:exchange patch=append -->
 Rebuilt equityfundingsource.com as rappstack app (Hono+rhonojs, Tailwind v4, Bun workspace). Content crawled from equityfundingnow.com + Wayback Machine: 18 funded deals, full site pages. Assets gitignored, served via Cloudflare R2. Deployed to https://equityfundingsource.pages.dev. Form backend: POST /api/apply + /api/contact → D1 (applications/contacts/uploaded_documents tables, ID: 280e1539-b940-4c59-8988-fbed63c12ac0) + R2 quarantine + Resend email to brian.takita@gmail.com. RESEND_API_KEY configured. Document pipeline architecture: Tier 0 (WAF) → Tier 1 (Workers AI) → Tier 2 (Claude API) → Tier 3 (Ragie Parse). Ragie alone insufficient for content validation. 54 tests passing. Judith proposal email pushed to Gmail Drafts: To judithkrug@gmail.com, CC rwaldman100@gmail.com, BCC robertward3@yahoo.com. Email includes online presence issues (domain down, fragmented listings on Weebly/WordPress/directories). Resend domain notifications@equityfundingsource.com needs verification.
-<!-- agent:boundary:a7560b47 -->
+<!-- agent:boundary:04149b33 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

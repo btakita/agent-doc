@@ -182,7 +182,7 @@ The IPC path has no mode override — the plugin defaults to `append` for exchan
 
 **Fix:** Either gate the main-thread final flush when the timer thread already flushed the complete text, or pass `mode=replace` in the IPC patch JSON for stream flushes. Added as `#du8f`.
 <!-- patch:exchange -->
-### Re: live pane killed + duplicate patchback — opus-4-6
+❯ ### Re: live pane killed + duplicate patchback — opus-4-6 (HEAD)
 
 **Bug 1: Live pane stolen by lazy-claim — confirmed.**
 
@@ -206,8 +206,85 @@ Root cause is a double-flush in `stream.rs`. The timer thread performs a final f
 The IPC path has no mode override — the plugin defaults to `append` for exchange components. So each flush appends the full cumulative response text at the boundary. Result: the response appears twice.
 
 **Fix:** Either gate the main-thread final flush when the timer thread already flushed the complete text, or pass `mode=replace` in the IPC patch JSON for stream flushes. Added as `#du8f`.
+
+❯ Focus on #du8f. gate the main-thread final flush seems preferable for me. Agree or not?
 <!-- patch:exchange -->
-<!-- agent:boundary:f7164c30 -->
+<!-- patch:exchange -->
+### Re: #du8f approach — gating main-thread flush — opus-4-6
+
+Agree. Gating the main-thread flush is strictly better because:
+
+1. **Minimal blast radius** — one `AtomicBool` check vs changing IPC protocol semantics
+2. **No plugin-side changes** — IPC append mode is correct for intermediate checkpoint flushes; the bug is only that the *same final text* is flushed twice
+3. **Easy to reason about** — "timer did its final flush? skip main-thread flush"
+
+**Implementation plan:**
+
+```rust
+// Before spawning timer thread:
+let timer_flushed_final = Arc::new(AtomicBool::new(false));
+let timer_flushed_clone = timer_flushed_final.clone();
+
+// Inside timer thread, after successful final flush (line ~262, when is_done):
+timer_flushed_clone.store(true, Ordering::Release);
+
+// Main thread, after joining timer (line ~352):
+let final_text = buffer.lock().unwrap().clone();
+if !final_text.is_empty() {
+    recover::save_pending(file, &final_text)?;
+    
+    // Gate: only flush if timer thread didn't already flush the final text
+    if !timer_flushed_final.load(Ordering::Acquire) {
+        flush_to_document(file, &final_text, target, baseline)?;
+    }
+    // ... thinking flush gets same gate ...
+}
+```
+
+The `recover::save_pending` call stays unconditional — crash recovery should always have the latest text regardless. Only `flush_to_document` gets gated.
+
+Same pattern applies to the thinking flush at line ~365.
+
+Want me to implement this?
+<!-- patch:exchange -->
+### Re: #du8f approach — gating main-thread flush — opus-4-6
+
+Agree. Gating the main-thread flush is strictly better because:
+
+1. **Minimal blast radius** — one `AtomicBool` check vs changing IPC protocol semantics
+2. **No plugin-side changes** — IPC append mode is correct for intermediate checkpoint flushes; the bug is only that the *same final text* is flushed twice
+3. **Easy to reason about** — "timer did its final flush? skip main-thread flush"
+
+**Implementation plan:**
+
+```rust
+// Before spawning timer thread:
+let timer_flushed_final = Arc::new(AtomicBool::new(false));
+let timer_flushed_clone = timer_flushed_final.clone();
+
+// Inside timer thread, after successful final flush (line ~262, when is_done):
+timer_flushed_clone.store(true, Ordering::Release);
+
+// Main thread, after joining timer (line ~352):
+let final_text = buffer.lock().unwrap().clone();
+if !final_text.is_empty() {
+    recover::save_pending(file, &final_text)?;
+    
+    // Gate: only flush if timer thread didn't already flush the final text
+    if !timer_flushed_final.load(Ordering::Acquire) {
+        flush_to_document(file, &final_text, target, baseline)?;
+    }
+    // ... thinking flush gets same gate ...
+}
+```
+
+The `recover::save_pending` call stays unconditional — crash recovery should always have the latest text regardless. Only `flush_to_document` gets gated.
+
+Same pattern applies to the thinking flush at line ~365.
+
+Want me to implement this?
+<!-- patch:exchange -->
+<!-- agent:boundary:c3b2eb12 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

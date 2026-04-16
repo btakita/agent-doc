@@ -611,7 +611,7 @@ Implemented. Three changes landed:
 - Auto-detect resolves to current tmux session at runtime
 
 Your config is now cleared to `(auto-detect)`. After reboots, routing will auto-detect whichever tmux session is current — no manual config.toml edits needed.
-<!-- agent:boundary:2d294be7 -->
+<!-- agent:boundary:400f3b68 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -644,6 +644,5 @@ Your config is now cleared to `(auto-detect)`. After reboots, routing will auto-
 - [ ] [#zvmd] Submodule (HEAD) marker: fix show_head() to route via narrow_to_submodule — superproject rev-parse can't show submodule-tracked files, so add_head_marker falls through to the 'no HEAD → mark last heading only' fallback, which drops (HEAD) when the exchange component has no ### Re: heading yet or when the fallback runs during a boundary-only cycle
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
-- [x] [#cv8a] tmux_session auto-detect by default: remove auto-write in resolve_target_session (route.rs:499-506), add `session clear` subcommand, make `session set` the only way to pin
 <!-- /agent:pending -->
 ## Assistant

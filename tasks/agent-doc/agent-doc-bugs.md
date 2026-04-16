@@ -347,7 +347,7 @@ But `parse_patches` expects `<!-- /patch:exchange -->` (with forward slash) to c
 Result: the content appears **twice** in unmatched. Then `try_ipc` synthesizes an exchange patch from this doubled unmatched text.
 
 **Fix:** Use `<!-- /patch:exchange -->` (with `/`) as the close tag in all subsequent writes. This is my error in the skill invocation, not a binary bug. The `0 components` in previous IPC logs was the tell — patches array was empty because no block was properly closed.
-<!-- agent:boundary:1add61a7 -->
+<!-- agent:boundary:154baf8b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

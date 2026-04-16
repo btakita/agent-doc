@@ -186,13 +186,12 @@ Implementing now.
 - If socket handler processes first → records patch_id → file watcher checks → skips (already applied)
 - If file watcher processes first → records patch_id → socket handler checks → skips (already applied)
 - Timeout fallback in run_stream → same patch_id → plugin dedup catches it regardless of delivery order
-<!-- agent:boundary:7a474360 -->
+<!-- agent:boundary:b69b2fc8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#esws] IPC timeout fallback double-apply race: atomic IPC mode select (socket XOR file, never both in flight) — prevent duplicate exchange patches when try_ipc() times out and fallback patch file is picked up by watcher concurrently
 - [ ] [#1kap] Stale snapshot after IPC success: replace 200ms sleep with post-apply snapshot handshake — plugin ack-content sidecar exists but isn't always used, causing ghost diffs in next cycle
 - [ ] [#08yv] Pre-lock file modification race: content_at_start read (write.rs ~725) to doc_lock acquire (~750) window allows external edits that drift the snapshot baseline
 - [ ] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots

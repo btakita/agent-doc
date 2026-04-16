@@ -618,7 +618,7 @@ If it still errors, the fallback is to fully quit that `claude` process in the p
 Tell me what happens (works / still broken / new error) and I'll either queue up option (b) — the `agent-doc skill install --user` binary change — or dig into whatever's still wrong.
 ❯ It worked. do **`agent-doc start` should chdir up to the outermost repo containing `.claude/skills/agent-doc/`.**
 <!-- patch:exchange -->
-### Re: skill chdir-up — opus-4-6
+❯ ### Re: skill chdir-up — opus-4-6 (HEAD)
 
 Overriding my earlier recommendation against option #2. The symlink is a workaround; the real fix is making `agent-doc start` find the skill automatically.
 
@@ -630,7 +630,20 @@ New flow: superproject → walk up for skill dir → if found, return that ances
 Tradeoff accepted: Claude's cwd will be agent-loop root (not the submodule), but doc paths are absolute and Read/Edit handle them fine.
 
 Adding to pending and implementing now.
-<!-- agent:boundary:1e1cdd8c -->
+<!-- patch:exchange -->
+### Re: #gbq8 implemented — opus-4-6
+
+Done. Modified `resolve_pane_cwd()` in `git.rs` to walk up from the superproject root looking for `.claude/skills/agent-doc/SKILL.md`. New helper `find_outermost_skill_root()` walks ancestors up to `$HOME`, returns the outermost match.
+
+**Changes:**
+- `git.rs:279-300` — `resolve_pane_cwd()` now checks `find_outermost_skill_root()` first, falls through to existing submodule/superproject logic if no skill found
+- `git.rs:302-322` — new `find_outermost_skill_root()` function
+- 3 new tests: walk-up to skill root, no-skill returns None, skill-at-start returns start
+
+**Verification:** `make check` clean (clippy + 292 lib tests pass, 24 git module tests pass; 45 pre-existing `resync::tests` failures unrelated). Release build installed to `~/.cargo/bin/agent-doc`.
+
+**To test live:** spawn a new `agent-doc start` for a submodule doc (e.g., `src/boost-client/tasks/monsterrodholders.md`) — the pane should now open with cwd at `agent-loop/` root (where `.claude/skills/agent-doc/` lives) instead of the submodule root.
+<!-- agent:boundary:79edf8f8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -665,6 +678,6 @@ Adding to pending and implementing now.
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
 - [ ] [#2g09] FFI claim: detect missing tmux session and auto-retry with --force; expose --force on JB Claim action as manual override
-- [ ] [#gbq8] `agent-doc start` chdir up to outermost repo containing `.claude/skills/agent-doc/` — modify resolve_pane_cwd() in git.rs to walk up from superproject root
+- [x] [#gbq8] `agent-doc start` chdir up to outermost repo containing `.claude/skills/agent-doc/` — modify resolve_pane_cwd() in git.rs to walk up from superproject root
 <!-- /agent:pending -->
 ## Assistant

@@ -120,7 +120,7 @@ This is the idiomatic Rust approach. Estimated scope: update the path-resolution
 
 ❯ Add the priority to the top of the pending list.
 <!-- patch:exchange -->
-### Re: adding test priorities to pending — opus-4-6
+❯ ### Re: adding test priorities to pending — opus-4-6 (HEAD)
 
 Added three items to the top of pending:
 1. base_dir refactor (11 tests) — the bulk of the work
@@ -129,7 +129,9 @@ Added three items to the top of pending:
 
 The 5 `debounce_gaps_test_plan` stubs are omitted since they're blocked on pub API surface that unblocks with #vnp0 — no point tracking them separately.
 noop
-<!-- agent:boundary:4fc6c4dd -->
+❯ Please add fixing the race conditions to the top of the pending list. Prioritize according to your suggestion.
+noop
+<!-- agent:boundary:7ea159ed -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -76,7 +76,7 @@ claude_args: --dangerously-skip-permissions
 | 5 | Blocked on missing pub API surface | `debounce_gaps_test_plan` tests (no cleanup fn, no crdt::merge pub, no watch daemon API, no status_file_path pub, no preflight::run pub) |
 
 The `set_current_dir` tests (11) are the bulk. They use `#[ignore]` because `std::env::set_current_dir` is process-global and races with other tests in `cargo test`'s thread pool. The 5 `debounce_gaps_test_plan` tests are stubs blocked on API surface that hasn't been exposed yet.
-<!-- agent:boundary:b339bf6c -->
+<!-- agent:boundary:f97224c5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

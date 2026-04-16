@@ -630,7 +630,7 @@ New flow: superproject → walk up for skill dir → if found, return that ances
 Tradeoff accepted: Claude's cwd will be agent-loop root (not the submodule), but doc paths are absolute and Read/Edit handle them fine.
 
 Adding to pending and implementing now.
-<!-- agent:boundary:06bdb00c -->
+<!-- agent:boundary:556aeff6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

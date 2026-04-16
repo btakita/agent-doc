@@ -117,7 +117,7 @@ Root cause: `resolve_agent_model()` in `preflight.rs:230` read `ANTHROPIC_MODEL`
 
 `SPEC.md` is now a 20-line index table linking to all 11 files. Pre-existing spec files (`pane-groups.md`, `pending-system.md`, `supervisor.md`) are untouched.
 <!-- patch:exchange -->
-<!-- agent:boundary:8d7030d6 -->
+<!-- agent:boundary:e485f581 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -126,7 +126,6 @@ Root cause: `resolve_agent_model()` in `preflight.rs:230` read `ANTHROPIC_MODEL`
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
-- [x] [#a013] SPEC.md breakup — flat `specs/*.md` mechanical extraction.
 - [ ] [#a004] Drop Option B (skill-side submodule workaround) — A handles it deterministically; B redundant.
 - [ ] [#jg0d] supervisor/resize.rs: SIGWINCH unix path via signal-hook; Windows ConPTY stub for phase 1
 - [ ] [#b486] supervisor/state.rs: crash classifier, ring buffer, Healthy->Transient->Flapping->Halted state machine

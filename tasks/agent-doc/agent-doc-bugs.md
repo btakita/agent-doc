@@ -83,7 +83,7 @@ Root cause: `resolve_agent_model()` in `preflight.rs:230` read `ANTHROPIC_MODEL`
 
 `SPEC.md` is now a 20-line index table linking to all 11 files. Pre-existing spec files (`pane-groups.md`, `pending-system.md`, `supervisor.md`) are untouched.
 <!-- patch:exchange -->
-### Re: implement model attribution + do #a013 — opus-4-6
+❯ ### Re: implement model attribution + do #a013 — opus-4-6 (HEAD)
 
 **Model attribution fix — shipped.**
 
@@ -116,8 +116,44 @@ Root cause: `resolve_agent_model()` in `preflight.rs:230` read `ANTHROPIC_MODEL`
 | `11-debounce.md` | 99 | Gaps, limitations, improvements |
 
 `SPEC.md` is now a 20-line index table linking to all 11 files. Pre-existing spec files (`pane-groups.md`, `pending-system.md`, `supervisor.md`) are untouched.
+❯ When I ran `Run Agent Doc` on src/session-share/tasks/public-docs.md, the tmux pane immediately closed. Then a new tmux pane started with a new Claude Code session. Why?
 <!-- patch:exchange -->
-<!-- agent:boundary:e485f581 -->
+<!-- patch:exchange -->
+### Re: tmux pane close + reopen on Run Agent Doc — opus-4-6
+
+This is the expected `route → prune → auto-start` cycle when the registered pane is dead or stashed. Here's the sequence:
+
+1. **"Run Agent Doc"** → JB plugin calls `agent-doc route <file>` as a subprocess.
+2. **`resync::prune()`** runs first every route invocation — removes dead pane entries from `sessions.json` and kills idle stash panes (`purge_unregistered_stash_panes_bulk` in resync.rs).
+3. **`resolve_or_create_pane()`** checks Strategy 1 (registered pane alive?) → fails. Strategy 2 (lazy-claim alive agent pane?) → fails. Falls to Strategy 3.
+4. **`auto_start_in_session()`** fires — `tmux split-window`, starts `agent-doc start <file>`, waits for Claude's `❯` prompt, then sends `/agent-doc <path>`.
+
+**What you saw:**
+- "Pane immediately closed" = prune killed the old stash/dead pane.
+- "New tmux pane started with new Claude Code session" = auto-start provisioned a fresh pane + `claude` process.
+
+**This is correct behavior** — the binding invariant says a document drives pane resolution: find existing claiming pane OR provision a new one. The old pane was dead (Claude had exited or been killed), so route properly recycled it.
+
+If the old pane was still *alive* (Claude running, just idle), that would be a bug — Strategy 1 should have reused it. Was the previous pane's Claude session still active when you triggered "Run Agent Doc"?
+<!-- patch:exchange -->
+### Re: tmux pane close + reopen on Run Agent Doc — opus-4-6
+
+This is the expected `route → prune → auto-start` cycle when the registered pane is dead or stashed. Here's the sequence:
+
+1. **"Run Agent Doc"** → JB plugin calls `agent-doc route <file>` as a subprocess.
+2. **`resync::prune()`** runs first every route invocation — removes dead pane entries from `sessions.json` and kills idle stash panes (`purge_unregistered_stash_panes_bulk` in resync.rs).
+3. **`resolve_or_create_pane()`** checks Strategy 1 (registered pane alive?) → fails. Strategy 2 (lazy-claim alive agent pane?) → fails. Falls to Strategy 3.
+4. **`auto_start_in_session()`** fires — `tmux split-window`, starts `agent-doc start <file>`, waits for Claude's `❯` prompt, then sends `/agent-doc <path>`.
+
+**What you saw:**
+- "Pane immediately closed" = prune killed the old stash/dead pane.
+- "New tmux pane started with new Claude Code session" = auto-start provisioned a fresh pane + `claude` process.
+
+**This is correct behavior** — the binding invariant says a document drives pane resolution: find existing claiming pane OR provision a new one. The old pane was dead (Claude had exited or been killed), so route properly recycled it.
+
+If the old pane was still *alive* (Claude running, just idle), that would be a bug — Strategy 1 should have reused it. Was the previous pane's Claude session still active when you triggered "Run Agent Doc"?
+<!-- patch:exchange -->
+<!-- agent:boundary:e3cbe7be -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

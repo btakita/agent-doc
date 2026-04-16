@@ -352,7 +352,7 @@ The pattern already exists for pending: the skill doesn't emit `<!-- patch:pendi
 This keeps the responsibility boundary clean:
 - **Skill** decides *what* the status says (non-deterministic)
 - **Binary** decides *where* it goes and *how* it gets there (deterministic)
-<!-- agent:boundary:836d2393 -->
+<!-- agent:boundary:3bb76dd6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

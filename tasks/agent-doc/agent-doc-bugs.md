@@ -694,7 +694,7 @@ The `$HOME` result you saw was entirely caused by `find_outermost_skill_root()` 
 The `.agent-doc/` directory detection is what `supervisor/cwd.rs` uses (project root finder), but `resolve_pane_cwd` achieves the same thing via git submodule detection — which is more reliable since it uses git's own topology rather than looking for a specific directory.
 
 Try the autoclaim again with the reverted binary — it should resolve to `src/session-share` now.
-<!-- agent:boundary:a000269a -->
+<!-- agent:boundary:f1e973ea -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

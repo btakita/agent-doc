@@ -498,7 +498,7 @@ Run these in order, then switch back to a document with an active pane. A fresh 
 **Why this happened after the fix:** The fix stopped the infinite thrashing, so cleanup logic got a chance to consolidate damage — all the orphans that accumulated during thrashing got moved en masse to session 2. This is actually *progress* (thrashing stopped), but it surfaced the cleanup debt.
 
 **Verify the fix:** After cleanup, open monsterrodholders.md and route a pane. The route should succeed without forcing session switches. If you get another drift, that's a different bug — the layout reconciler has logic that's assigning sessions incorrectly.
-<!-- agent:boundary:f8629ac9 -->
+<!-- agent:boundary:2d424377 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

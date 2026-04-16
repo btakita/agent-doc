@@ -227,7 +227,7 @@ Replaced the 200ms sleep with polling for the ack-content sidecar. The sidecar i
 ```
 noop
 ❯ The patchback is `noop`. I did see a proper response patchback but it was cleared and not committed.
-### Re: response cleared after appearing — opus-4-6
+❯ ### Re: response cleared after appearing — opus-4-6 (HEAD)
 
 You saw the response flash in the document and then disappear. Here's what happened in sequence last cycle:
 
@@ -239,14 +239,39 @@ The second write sent a 0-component patch to the plugin. The plugin consumed it 
 This is a variant of bug #s7wk (snapshot integrity) combined with #1497 (pending-only writes). The fix is twofold:
 - **Don't update the snapshot when writing 0 components** — if there's nothing to apply, the snapshot shouldn't change
 - **#1497** — pending-only mutations shouldn't touch the exchange pipeline at all
-<!-- agent:boundary:9418679d -->
+❯ do #s7wk #1497
+<!-- patch:exchange -->
+### Re: #s7wk and #1497 — opus-4-6
+
+**#1497 — `--pending-only` flag (main.rs):**
+
+Added `--pending-only` flag to the `write` command. When set:
+1. Validates at least one `--pending-*` flag is present (errors otherwise)
+2. Validates incompatibility with `--template`/`--stream`/`--ipc`
+3. Executes pending ops (add/done/edit/gate/ungate/reorder/clear) as normal
+4. Returns immediately — no stdin reading, no boundary synthesis, no exchange pollution
+
+The skill can now run `agent-doc write doc.md --pending-only --pending-add "task"` without piping carrier text through stdin.
+
+**#s7wk — sweep-commit guard (preflight.rs:620-639):**
+
+Added content-aware guard before sweep-commit. The sweep now:
+1. Reads both snapshot and document content
+2. Calls `is_stale_snapshot(snap, doc)` — returns `true` for inline mode when the document has completed `## Assistant` blocks beyond the snapshot with an empty trailing `## User` block (safe to commit)
+3. If not stale (inline mode with user additions, or template mode): falls through to content-equality check after `strip_comments()` — if snapshot ≠ document, the user has edits → skip
+4. Only reaches `git::commit` if content checks pass
+
+For template mode docs, `is_stale_snapshot` always returns `false` (no `## Assistant` markers), so sweep only commits when snapshot and document are content-equal after comment stripping — conservative but correct.
+
+**Tests:** 1040 pass (1 new: `preflight_sweep_skips_doc_with_unresponded_user_content`). Clippy clean, release binary built and installed.
+<!-- agent:boundary:719f7512 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] [#p2xm] Orphaned patch:exchange marker leak: parse_patches() does not consume unclosed opening markers — they leak into unmatched text and get appended to exchange verbatim. Fix: advance last_end past unclosed openers in parse_patches()
-- [ ] [#s7wk] Sweep commits unresponded user content: preflight sweep uses mtime-only heuristic (preflight.rs:606-616) — no guard against committing user annotations without agent response. Fix: call is_stale_snapshot() diff check before sweep-commit, skip files with user additions
+- [x] [#s7wk] Sweep commits unresponded user content: preflight sweep uses mtime-only heuristic (preflight.rs:606-616) — no guard against committing user annotations without agent response. Fix: call is_stale_snapshot() diff check before sweep-commit, skip files with user additions
 - [ ] [#08yv] Pre-lock file modification race: content_at_start read (write.rs ~725) to doc_lock acquire (~750) window allows external edits that drift the snapshot baseline
 - [ ] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots
 - [ ] [#vefa] Refactor set_current_dir tests to accept base_dir: &Path parameter — re-enable 11 ignored tests (autoclaim 3, sessions 5, watch 2)
@@ -275,6 +300,6 @@ This is a variant of bug #s7wk (snapshot integrity) combined with #1497 (pending
 - [ ] [#zvmd] Submodule (HEAD) marker: fix show_head() to route via narrow_to_submodule — superproject rev-parse can't show submodule-tracked files, so add_head_marker falls through to the 'no HEAD → mark last heading only' fallback, which drops (HEAD) when the exchange component has no ### Re: heading yet or when the fallback runs during a boundary-only cycle
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
-- [ ] [#1497] agent-doc write leaks carrier stdin into exchange via boundary synthesis when used purely for --pending-* flag operations — needs a --pending-only or --no-exchange flag to suppress exchange content synthesis when the write is only mutating pending
+- [x] [#1497] agent-doc write leaks carrier stdin into exchange via boundary synthesis when used purely for --pending-* flag operations — needs a --pending-only or --no-exchange flag to suppress exchange content synthesis when the write is only mutating pending
 <!-- /agent:pending -->
 ## Assistant

@@ -329,7 +329,7 @@ So `<!-- replace:status -->...<!-- /replace:status -->` was treated as literal e
 **Root cause:** The skill emitted `replace:status` when it should have used `<!-- patch:status -->` — which works for any component name. `replace:` was introduced as a semantic alias specifically for `pending` (#25ag) and was never generalized.
 
 **Classification:** Skill-side bug (wrong patch prefix), not a binary bug. The binary correctly refused to broaden the `replace:` grammar. The fix is to use `<!-- patch:status -->` for status component updates.
-<!-- agent:boundary:2dc1e99a -->
+<!-- agent:boundary:fede5cb9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

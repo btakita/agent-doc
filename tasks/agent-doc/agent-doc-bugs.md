@@ -310,7 +310,7 @@ Done. Three changes in `stream.rs`:
 
 Ready for manual testing — the fix is in the release binary. Try a `stream` command and verify the response appears once, not twice.
 <!-- patch:exchange -->
-<!-- agent:boundary:4624964d -->
+<!-- agent:boundary:71689b3a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

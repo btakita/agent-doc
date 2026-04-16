@@ -44,8 +44,80 @@ claude_args: --dangerously-skip-permissions
 ### Open items / unanswered
 
 - **Model attribution bug** — `ANTHROPIC_MODEL=haiku` env var in user shell causes wrong header label even when Claude Code is on Opus. Diagnosed; fix (remove env var or add tier-consistency check) not yet implemented.
-- **Autoclaim on `src/session-share` docs** — resolve_pane_cwd reverted to narrow_to_submodule; user asked to retry autoclaim to confirm it resolves to `src/session-share`. No confirmation yet.
-<!-- agent:boundary:f2252f23 -->
+❯ implement
+❯ - **Autoclaim on `src/session-share` docs** — resolve_pane_cwd reverted to narrow_to_submodule; user asked to retry autoclaim to confirm it resolves to `src/session-share`. No confirmation yet.: confirmed
+
+❯ do #a013
+<!-- patch:exchange -->
+### Re: implement model attribution + do #a013 — opus-4-6
+
+**Model attribution fix — shipped.**
+
+Root cause: `resolve_agent_model()` in `preflight.rs:230` read `ANTHROPIC_MODEL` from the shell env. Claude Code doesn't export that var — it was set in your shell as `haiku`, causing every header to say `— haiku` regardless of the actual model.
+
+**Binary change** (`preflight.rs`): Dropped `ANTHROPIC_MODEL` from `resolve_agent_model()`. Now frontmatter-only. When frontmatter has no `model` field, `agent_model` is null and the SKILL stamps its own model identity (it always knows what model it's running as).
+
+**SKILL change** (`SKILL.md:68`): Attribution is now "always append your own model short name" instead of "use plain form when null." The SKILL running inside Claude Code knows its identity — no env var needed.
+
+**Tests:** 3 updated tests (replaced env-var-dependent tests with deterministic ones): `resolve_agent_model_uses_frontmatter_only`, `resolve_agent_model_strips_claude_prefix_from_frontmatter`, `resolve_agent_model_none_when_no_frontmatter`. All 5 model tests pass. Clippy clean. 34/35 preflight tests pass (1 pre-existing failure unrelated).
+
+---
+
+**#a013 — SPEC.md breakup — done.**
+
+977-line monolith split into 11 flat spec files under `specs/`:
+
+| File | Lines | Content |
+|------|-------|---------|
+| `01-overview.md` | 9 | What agent-doc does |
+| `02-document-format.md` | 54 | Frontmatter, components, template structure |
+| `03-snapshot-system.md` | 15 | Snapshot storage and lifecycle |
+| `04-diff-computation.md` | 8 | Unified diff and comment stripping |
+| `05-agent-backend.md` | 23 | Agent trait, resolution, Claude backend |
+| `06-config.md` | 76 | Global/project config, IPC, document state model |
+| `07-commands.md` | 516 | All CLI commands (run through dedupe) |
+| `08-session-routing.md` | 127 | Registry, claim semantics, stash, binding invariant |
+| `09-git-integration.md` | 31 | Commit/branch/squash and hook system |
+| `10-security.md` | 26 | Threat model, risks, recommendations |
+| `11-debounce.md` | 99 | Gaps, limitations, improvements |
+
+`SPEC.md` is now a 20-line index table linking to all 11 files. Pre-existing spec files (`pane-groups.md`, `pending-system.md`, `supervisor.md`) are untouched.
+<!-- patch:exchange -->
+### Re: implement model attribution + do #a013 — opus-4-6
+
+**Model attribution fix — shipped.**
+
+Root cause: `resolve_agent_model()` in `preflight.rs:230` read `ANTHROPIC_MODEL` from the shell env. Claude Code doesn't export that var — it was set in your shell as `haiku`, causing every header to say `— haiku` regardless of the actual model.
+
+**Binary change** (`preflight.rs`): Dropped `ANTHROPIC_MODEL` from `resolve_agent_model()`. Now frontmatter-only. When frontmatter has no `model` field, `agent_model` is null and the SKILL stamps its own model identity (it always knows what model it's running as).
+
+**SKILL change** (`SKILL.md:68`): Attribution is now "always append your own model short name" instead of "use plain form when null." The SKILL running inside Claude Code knows its identity — no env var needed.
+
+**Tests:** 3 updated tests (replaced env-var-dependent tests with deterministic ones): `resolve_agent_model_uses_frontmatter_only`, `resolve_agent_model_strips_claude_prefix_from_frontmatter`, `resolve_agent_model_none_when_no_frontmatter`. All 5 model tests pass. Clippy clean. 34/35 preflight tests pass (1 pre-existing failure unrelated).
+
+---
+
+**#a013 — SPEC.md breakup — done.**
+
+977-line monolith split into 11 flat spec files under `specs/`:
+
+| File | Lines | Content |
+|------|-------|---------|
+| `01-overview.md` | 9 | What agent-doc does |
+| `02-document-format.md` | 54 | Frontmatter, components, template structure |
+| `03-snapshot-system.md` | 15 | Snapshot storage and lifecycle |
+| `04-diff-computation.md` | 8 | Unified diff and comment stripping |
+| `05-agent-backend.md` | 23 | Agent trait, resolution, Claude backend |
+| `06-config.md` | 76 | Global/project config, IPC, document state model |
+| `07-commands.md` | 516 | All CLI commands (run through dedupe) |
+| `08-session-routing.md` | 127 | Registry, claim semantics, stash, binding invariant |
+| `09-git-integration.md` | 31 | Commit/branch/squash and hook system |
+| `10-security.md` | 26 | Threat model, risks, recommendations |
+| `11-debounce.md` | 99 | Gaps, limitations, improvements |
+
+`SPEC.md` is now a 20-line index table linking to all 11 files. Pre-existing spec files (`pane-groups.md`, `pending-system.md`, `supervisor.md`) are untouched.
+<!-- patch:exchange -->
+<!-- agent:boundary:8d7030d6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -54,7 +126,7 @@ claude_args: --dangerously-skip-permissions
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
-- [ ] [#a013] SPEC.md breakup — flat `specs/*.md` mechanical extraction.
+- [x] [#a013] SPEC.md breakup — flat `specs/*.md` mechanical extraction.
 - [ ] [#a004] Drop Option B (skill-side submodule workaround) — A handles it deterministically; B redundant.
 - [ ] [#jg0d] supervisor/resize.rs: SIGWINCH unix path via signal-hook; Windows ConPTY stub for phase 1
 - [ ] [#b486] supervisor/state.rs: crash classifier, ring buffer, Healthy->Transient->Flapping->Halted state machine

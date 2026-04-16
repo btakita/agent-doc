@@ -153,7 +153,7 @@ This is the expected `route → prune → auto-start` cycle when the registered 
 
 If the old pane was still *alive* (Claude running, just idle), that would be a bug — Strategy 1 should have reused it. Was the previous pane's Claude session still active when you triggered "Run Agent Doc"?
 <!-- patch:exchange -->
-<!-- agent:boundary:e3cbe7be -->
+<!-- agent:boundary:9991b155 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

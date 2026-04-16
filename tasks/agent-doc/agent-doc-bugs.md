@@ -325,7 +325,7 @@ My mistake. When I called `--pending-add`, I included `[#du8f]` and `[#pj2k]` in
 The canonical IDs are `#wp8c` (stream double-flush, now done) and `#pg8w` (lazy-claim pane theft, still open). I've marked `#wp8c` done and edited `#pg8w` to remove the embedded `[#pj2k]`.
 ❯ This patchback to this doc still receives a double `### Re: double IDs in pending — opus-4-6 (HEAD)`. Why?
 <!-- patch:exchange -->
-### Re: skill-side duplication — different root cause — opus-4-6
+❯ ### Re: skill-side duplication — different root cause — opus-4-6 (HEAD)
 
 The duplication in THIS document is **not** caused by the stream.rs double-flush (#du8f). That fix applies to `agent-doc stream` (the timer-thread path). This document is written by `agent-doc write --stream` from the skill — a single-shot write, no timer thread.
 
@@ -347,7 +347,20 @@ But `parse_patches` expects `<!-- /patch:exchange -->` (with forward slash) to c
 Result: the content appears **twice** in unmatched. Then `try_ipc` synthesizes an exchange patch from this doubled unmatched text.
 
 **Fix:** Use `<!-- /patch:exchange -->` (with `/`) as the close tag in all subsequent writes. This is my error in the skill invocation, not a binary bug. The `0 components` in previous IPC logs was the tell — patches array was empty because no block was properly closed.
-<!-- agent:boundary:154baf8b -->
+
+❯ I did not notice the `patch:exchange`. This seems ok...but I want to test out the ergonomics of it for a bit. If I tell you to remove it, are there any alternatives?
+### Re: patch:exchange alternatives — opus-4-6
+
+Yes, there are two alternatives if you want to drop the `<!-- patch:exchange -->` wrapper:
+
+1. **Raw content (no wrapper)** — just send the response text directly. The write command treats it as "unmatched" content and synthesizes an exchange patch automatically via boundary detection. This already works — it's what the SKILL calls "boundary synthesis." The only downside: if the response contains `<!-- patch:something -->` or `&lt;!-- agent:something --&gt;` markers (e.g., in code examples), they could be misinterpreted.
+
+2. **`--target exchange` flag** — pass the target component on the CLI instead of in the content. The write command would treat all stdin as content for that component. This flag doesn't exist yet but would be trivial to add.
+
+For now, the `<!-- patch:exchange -->` / `<!-- /patch:exchange -->` wrapper is the most explicit and safest option — it tells the parser exactly what component to target and avoids ambiguity. But if the wrapper feels noisy in the document, option 1 (raw content, no wrapper) works for typical responses that don't contain agent-doc markers.
+
+Try it out and let me know if you want to switch.
+<!-- agent:boundary:f32da195 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

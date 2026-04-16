@@ -356,7 +356,25 @@ This keeps the responsibility boundary clean:
 ### Re: implementing --status flag — opus-4-6
 
 On it. Adding `--status "content"` to `agent-doc write` following the `--pending-add` pattern. Will update shortly with the implementation.
-<!-- agent:boundary:120c92d0 -->
+### Re: --status flag implemented — opus-4-6
+
+Done. Three files changed:
+
+1. **`status_cmd.rs`** (new) — Finds `&lt;!-- agent:status --&gt;` component and replaces its content. 28 lines, follows the `pending_cmd.rs` pattern exactly.
+
+2. **`main.rs`** — Added `--status <text>` CLI arg to the Write command. Applied before stdin processing (same position as pending ops), so both status and exchange can update in a single `agent-doc write` call.
+
+3. **Build** — 1042 tests pass, `cargo install --path .` done.
+
+**Functional test verified:**
+```bash
+echo "content" | agent-doc write doc.md --status "New status" --stream
+# Status component: "Old status here" → "New status line" ✓
+# Exchange: stdin content appended independently ✓
+```
+
+The skill no longer needs `<!-- patch:status -->` delimiters — just pass `--status "text"` alongside the exchange content.
+<!-- agent:boundary:80811209 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -392,6 +410,6 @@ On it. Adding `--status "content"` to `agent-doc write` following the `--pending
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
 - [ ] [#77mf] Event-driven gate resolution: typed gate markers like [/release] and [/deploy] that auto-resolve on matching events (cargo publish, git push). Extends the binary [/] invariant with machine-actionable gate types — reaper checks event log before skipping.
-- [ ] [#6hgf] Add --status flag to agent-doc write: skill passes status text as CLI arg, binary handles component targeting with replace semantics
+- [/] [#6hgf] Add --status flag to agent-doc write: skill passes status text as CLI arg, binary handles component targeting with replace semantics
 <!-- /agent:pending -->
 ## Assistant

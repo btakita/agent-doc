@@ -387,7 +387,7 @@ Fixed in `route.rs`. The bug: `find_target_pane` returned `active_pane` uncondit
 
 Build clean, clippy clean, all non-tmux tests pass. The 45 failures are pre-existing tmux integration tests that require a running tmux server.
 ❯ Please fix the 45 failures.
-### Re: fix 45 test failures — opus-4-6
+❯ ### Re: fix 45 test failures — opus-4-6 (HEAD)
 
 Fixed. Root cause was two distinct issues:
 
@@ -408,7 +408,28 @@ Fixed. Root cause was two distinct issues:
 **Fix:** Added guard that skips assertion when ancestor `.agent-doc/` is detected.
 
 **Results:** 1010 tests pass, 0 failures, 19 ignored. Stable across 3 consecutive runs. Clippy clean.
-<!-- agent:boundary:dbc67abd -->
+❯ do #2g09
+### Re: #2g09 FFI claim auto-force + JB Force Claim — opus-4-6
+
+Implemented both parts:
+
+**1. Auto-force cross-session claim (claim.rs:235):** The `CrossSessionDecision::Reject` branch no longer bails — it emits a warning and continues. Explicit claim always succeeds regardless of tmux session mismatch. This eliminates the "session mismatch" error that blocked plugin-initiated claims after tmux restarts or session switches.
+
+The `--force` flag is preserved for its other purpose: overriding the binding invariant (commandeering a pane already claimed by another document).
+
+**2. ForceClaimAction (JetBrains plugin):** New action registered as `AgentDoc.ForceClaim`:
+- Passes `--force` to `agent-doc claim`, allowing binding commandeering
+- Available in Tools menu, editor context menu, project view context menu, and the Alt+Space popup
+- No keyboard shortcut assigned (accessible via popup menu)
+
+**Files changed:**
+- `src/claim.rs` — Reject branch: bail → warning (3 lines changed)
+- `editors/jetbrains/.../ForceClaimAction.kt` — new action (mirrors ClaimAction with `--force`)
+- `editors/jetbrains/.../AgentDocPopupAction.kt` — added ForceClaim to popup menu
+- `editors/jetbrains/.../plugin.xml` — registered `AgentDoc.ForceClaim` action
+
+**Verification:** 1010 tests pass, 0 failures, clippy clean, plugin builds clean.
+<!-- agent:boundary:9f9f9447 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -441,6 +462,6 @@ Fixed. Root cause was two distinct issues:
 - [ ] [#zvmd] Submodule (HEAD) marker: fix show_head() to route via narrow_to_submodule — superproject rev-parse can't show submodule-tracked files, so add_head_marker falls through to the 'no HEAD → mark last heading only' fallback, which drops (HEAD) when the exchange component has no ### Re: heading yet or when the fallback runs during a boundary-only cycle
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
-- [ ] [#2g09] FFI claim: detect missing tmux session and auto-retry with --force; expose --force on JB Claim action as manual override
+- [x] [#2g09] FFI claim: detect missing tmux session and auto-retry with --force; expose --force on JB Claim action as manual override
 <!-- /agent:pending -->
 ## Assistant

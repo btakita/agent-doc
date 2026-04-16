@@ -142,7 +142,7 @@ The "noop", "reorder", "pending reorder" strings in the exchange are artifacts f
 This is a real bug: there's no way to run pending-only mutations without polluting the exchange. Added #-pending-only to the top of the pending list — `agent-doc write` needs a `--pending-only` or `--no-exchange` flag that accepts pending flags but suppresses exchange content synthesis.
 
 The first failed patchback (the one that triggered this whole thread) was the 0-component IPC bug — that's already fixed in the codebase. The artifacts you're seeing now are a different issue: the skill workflow has no clean path for pending-only writes.
-<!-- agent:boundary:5f09100b -->
+<!-- agent:boundary:bf1df241 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

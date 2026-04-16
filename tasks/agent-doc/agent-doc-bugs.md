@@ -160,7 +160,7 @@ Starting implementation. The root cause is three independent `patch_id` UUIDs ge
 
 Implementing now.
 <!-- patch:exchange -->
-### Re: #esws implementation complete — opus-4-6
+❯ ### Re: #esws implementation complete — opus-4-6 (HEAD)
 
 **Root cause:** Three independent `patch_id` UUIDs were generated for the same logical write — socket path, file path, and timeout fallback each created their own. The plugin had no way to know these were the same write.
 
@@ -186,13 +186,50 @@ Implementing now.
 - If socket handler processes first → records patch_id → file watcher checks → skips (already applied)
 - If file watcher processes first → records patch_id → socket handler checks → skips (already applied)
 - Timeout fallback in run_stream → same patch_id → plugin dedup catches it regardless of delivery order
-<!-- agent:boundary:a579341f -->
+❯ do #1kap
+Looking at /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md, there were some deadlocked tasks
+Here is 1
+```
+  Status: running
+  Runtime: 1h 47m 15s
+  Command: cat <<'RESPONSE' | agent-doc write
+  /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md \
+    --baseline-file /home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/baselines/7b9f2a6394de97c213efeb3e
+  c1e3d33b7b966229655f4720376409f6abef299f.md \
+    …
+
+  Output:
+  ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │ warning: `<!-- patch:pending -->` is deprecated — use `<!-- replace:pending -->` instead (see #25ag)           │
+  │ Error: ERR: replace:pending block forbidden — use --pending-add/done/edit/clear/reorder. See specs/pending-sy… │
+```
+<!-- patch:exchange -->
+### Re: #1kap — stale snapshot race fix — opus-4-6
+
+Replaced the 200ms sleep with polling for the ack-content sidecar. The sidecar is the authoritative post-apply snapshot written by the plugin — polling catches it as soon as it appears instead of racing against an arbitrary delay.
+
+**Changes (write.rs):**
+
+1. **`poll_ack_content_sidecar()`** — new helper that polls `read_ack_content_sidecar()` in a loop with configurable timeout (500ms) and poll interval (25ms). Returns `Some(content)` when the sidecar appears, `None` after timeout.
+
+2. **Socket IPC path** (line ~1633) — replaced single `read_ack_content_sidecar()` + `sleep(200ms)` fallback with `poll_ack_content_sidecar()`. Snap source logged as `ack_content_sidecar` or `file_read_no_sidecar`.
+
+3. **File IPC path** (line ~1885) — same replacement. The no-patch_id branch now logs `file_read (no patch_id for sidecar lookup)` instead of silently sleeping.
+
+**Tests (3 new):**
+
+- `test_poll_sidecar_present_immediately` — sidecar exists before poll starts
+- `test_poll_sidecar_appears_after_delay` — sidecar written by background thread after 50ms (atomic rename to avoid partial-read race)
+- `test_poll_sidecar_timeout` — no sidecar → returns None after timeout, verifies timing bounds
+
+**Verification:** 1039 tests pass, clippy clean, release binary built.
+<!-- agent:boundary:859b2b52 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#1kap] Stale snapshot after IPC success: replace 200ms sleep with post-apply snapshot handshake — plugin ack-content sidecar exists but isn't always used, causing ghost diffs in next cycle
+- [x] [#1kap] Stale snapshot after IPC success: replace 200ms sleep with post-apply snapshot handshake — plugin ack-content sidecar exists but isn't always used, causing ghost diffs in next cycle
 - [ ] [#08yv] Pre-lock file modification race: content_at_start read (write.rs ~725) to doc_lock acquire (~750) window allows external edits that drift the snapshot baseline
 - [ ] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots
 - [ ] [#vefa] Refactor set_current_dir tests to accept base_dir: &Path parameter — re-enable 11 ignored tests (autoclaim 3, sessions 5, watch 2)

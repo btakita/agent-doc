@@ -131,7 +131,7 @@ Threading fix extracted to `tasks/software/corky.md` — the bug and fix are now
 **Summary of the fix:** `corky draft push` needs both `thread_id` (Gmail thread ID) and `in_reply_to` (RFC 2822 Message-ID) set in the draft YAML to properly attach a draft to an existing Gmail thread. Using only `in_reply_to` sets the email headers but doesn't tell the Gmail API which thread to attach to.
 
 ❯ Please compress [2026-04-15 15-03-53.mp4](../../../../../Videos/2026-04-15%2015-03-53.mp4)
-### Re: Compress video
+❯ ### Re: Compress video (HEAD)
 
 Video compressed and ready at `~/Videos/2026-04-15 15-03-53-compressed.mp4`
 
@@ -141,7 +141,18 @@ Video compressed and ready at `~/Videos/2026-04-15 15-03-53-compressed.mp4`
 - **Duration:** 1h 39m 31s
 
 Quality tuning: CRF 28 is perceptually lossless while aggressive on file size. Bump to CRF 26–27 if quality seems soft, or up to CRF 30 if you want smaller.
-<!-- agent:boundary:62e0399f -->
+
+❯ Please trim the video up to 1:37:27
+### Re: Trim video
+
+Trimmed to 1:37:27 — file at `~/Videos/2026-04-15 15-03-53-trimmed.mp4`
+
+- **Size:** 325.6 MB (down from 330 MB)
+- **Duration:** 1h 37m 27s
+- **Codec:** H.265 (no re-encoding, stream copy)
+
+Stream copy kept video & audio unchanged — instant operation.
+<!-- agent:boundary:68fb8a17 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

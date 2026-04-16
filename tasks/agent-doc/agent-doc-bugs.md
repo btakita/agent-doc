@@ -525,7 +525,7 @@ This moves any pane found in the "wrong" session's stash to the `target_sess` â€
 **Why the entire 0:agent-doc window disappeared:** Once all registered panes were relocated to session 2, the now-empty agent-doc window in session 0 was cleaned up by tmux (empty windows auto-close) or by the layout reconciler's purge logic.
 
 **The fix already landed** (correct `list-panes -t @1` target) stops step 1 from recurring. The cleanup steps from the previous response (resync + kill session 2) clear the accumulated damage.
-<!-- agent:boundary:1e7655d7 -->
+<!-- agent:boundary:b6362434 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

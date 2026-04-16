@@ -52,7 +52,7 @@ claude_args: --dangerously-skip-permissions
 ❯ Why is there so much uncommitted content in this current patchback?
 ❯ Why are there 19 ignored tests?
 <!-- patch:exchange -->
-### Re: patchback root cause + uncommitted content + ignored tests — opus-4-6
+❯ ### Re: patchback root cause + uncommitted content + ignored tests — opus-4-6 (HEAD)
 
 **Root cause fixed.** Two code paths in `write.rs` manually built IPC patches from `patches` without boundary synthesis — when all response content is "unmatched" (no explicit `<!-- patch:exchange -->` block), `patches` is empty and these paths produced patch files with 0 components.
 
@@ -63,6 +63,8 @@ claude_args: --dangerously-skip-permissions
 2. **`run_ipc()` explicit IPC mode** (line ~1339) — same manual iteration pattern. Now uses `build_ipc_patches_json()` + dedup guard. Also fixed a logging bug that reported `patches.len()` instead of `ipc_patches.len()` (masked the 0-component issue in logs).
 
 **Verification:** 1036 tests pass, clippy clean, release binary built.
+
+❯ Are there any race conditions associated with patch:exchange?
 
 **Why so much uncommitted content:** The previous turn's response was lost to this bug. The snapshot was updated as if the write succeeded (plugin consumed the 0-component patch file as a no-op), so this turn's diff includes both the compacted exchange summary and the manually-pasted previous response — all appearing as "new" since the snapshot thought the document was already up to date.
 
@@ -76,7 +78,46 @@ claude_args: --dangerously-skip-permissions
 | 5 | Blocked on missing pub API surface | `debounce_gaps_test_plan` tests (no cleanup fn, no crdt::merge pub, no watch daemon API, no status_file_path pub, no preflight::run pub) |
 
 The `set_current_dir` tests (11) are the bulk. They use `#[ignore]` because `std::env::set_current_dir` is process-global and races with other tests in `cargo test`'s thread pool. The 5 `debounce_gaps_test_plan` tests are stubs blocked on API surface that hasn't been exposed yet.
-<!-- agent:boundary:f97224c5 -->
+❯ How can we readd these tests? Would a docker container or chroot help?
+<!-- patch:exchange -->
+### Re: patch:exchange race conditions — opus-4-6
+
+Yes, several race windows exist. Ranked by severity:
+
+**High — IPC timeout fallback double-apply:** When `try_ipc()` socket send fails/times out, `run_stream()` writes a fallback `.agent-doc/patches/<hash>.json` file (write.rs ~1101). If the file watcher is polling the patches directory concurrently, both socket and file IPC can fire — double-applying the exchange patch. The cleanup at line ~1533 tries to prevent this but the window between socket failure and fallback write still exists.
+
+**High — Snapshot stale after IPC success:** Between the plugin applying the patch (deleting the patch file) and the binary saving the snapshot (write.rs ~1599), the user can start editing. The snapshot is then stale relative to the next cycle's baseline, causing the next diff to include content that was already applied. The ack-content sidecar mitigates this when available; without it, the 200ms sleep is best-effort but not atomic.
+
+**Medium — Pre-lock file modification:** Between reading `content_at_start` (line ~725) and acquiring `doc_lock` (line ~750), external edits can land. The CRDT 3-way merge handles this, but snapshot drift can occur if the baseline is stale.
+
+**Medium — Replace-vs-append CRDT interleaving:** When agent replaces exchange content while user appends, character-level interleaving was possible with stale baselines. Fixed by design — regression test `merge_replace_vs_append_no_interleaving` guards this. The fix uses the committed baseline rather than stale CRDT state for diff computation.
+
+**Low — Advisory flock doesn't protect external watchers:** IDE file-change listeners and git hooks aren't synchronized by agent-doc's flock. Concurrent diff computations can race if both use stale snapshots.
+
+**Low — Boundary reposition off-transaction:** The `reposition_boundary: true` IPC flag is fire-and-forget within the Document API transaction. If the plugin crashes between patch apply and reposition, the boundary marker is stale until the next write cycle.
+
+The double-apply (#1) and stale snapshot (#2) are the most likely to cause observable issues — duplicated exchange content or "ghost" diffs in the next cycle. Both are mitigable: #1 with an atomic IPC mode select (socket XOR file, never both in flight), #2 with a post-apply snapshot handshake instead of timeout polling.
+
+### Re: re-enabling the 19 ignored tests — opus-4-6
+
+Docker/chroot is overkill. The best path depends on the test category:
+
+**11 `set_current_dir` tests — refactor to accept `base_dir: &Path`:**
+
+The root cause is that `save()`, `load()`, `write_pid()`, `read_pid()` etc. call `env::current_dir()` internally to resolve `.agent-doc/` paths. Refactor these to take an optional `root: &Path` parameter (defaulting to `env::current_dir()`). Tests pass an explicit temp dir — no process isolation needed, tests become fully parallelizable. Affected files: `autoclaim.rs` (3 tests), `sessions.rs` (5 tests), `watch.rs` (2 tests), plus 1 more.
+
+This is the idiomatic Rust approach. Estimated scope: update the path-resolution functions to accept `root`, thread it through callers, update tests to pass `tempdir.path()`.
+
+**Interim alternative:** `serial_test` crate — add `#[serial]` to these 11 tests. They run sequentially but remain enabled. Quick fix while the API refactor happens.
+
+**1 filesystem notify test (`watcher_detects_change`):** Likely needs a real tmpdir + short poll timeout. Could be un-ignored with a `#[cfg(not(ci))]` gate or by adding a 500ms timeout to the notify watcher setup.
+
+**2 submodule IPC routing tests:** Need a git repo with submodule structure in a temp dir. `git init` + `git submodule add` in test setup. Moderately fiddly but no external tooling needed.
+
+**5 `debounce_gaps_test_plan` stubs:** These are blocked on pub API surface (`crdt::merge`, `status_file_path`, `preflight::run`, watch daemon API, cleanup fn). Unblocking requires making those APIs public — which should happen naturally as the supervisor module wire-up (#vnp0) progresses. No workaround; these wait on the API.
+
+**Recommended priority:** base_dir refactor (11 tests) → submodule IPC setup (2 tests) → filesystem notify (1 test) → pub API stubs (5, blocked on other work).
+<!-- agent:boundary:9b27c8c3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -220,7 +220,7 @@ Got it — cost breakdown for the three proposal options:
 | Fully Custom | $0 | ~$100 | ~$100+ | ~$1,200+ |
 
 Brian's build cost (retainer) is separate — TBD once scope is confirmed. Want this exported to CSV/Excel or added to the proposal?
-<!-- agent:boundary:6344ecc3 -->
+<!-- agent:boundary:01b12e40 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

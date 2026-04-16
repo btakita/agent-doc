@@ -266,9 +266,11 @@ For template mode docs, `is_stale_snapshot` always returns `false` (no `## Assis
 **Tests:** 1040 pass (1 new: `preflight_sweep_skips_doc_with_unresponded_user_content`). Clippy clean, release binary built and installed.
 ❯ do #p2xm
 ❯ [#1497] and [#s7wk] were marked as [x]...they should have been [/]. Why were they marked as [x]?
-### Re: #p2xm + why #1497/#s7wk were [x] — opus-4-6
+❯ ### Re: #p2xm + why #1497/#s7wk were [x] — opus-4-6 (HEAD)
 
 **Why #1497 and #s7wk were marked [x] instead of [/]:** I used `--pending-done` which sets `[x]` (fully complete → reaped next cycle). Should have used `--pending-gate` to set `[/]` (code-complete, awaiting live verification). Going forward: implementations get `[/]` (gated) until the user confirms the fix works in a live session.
+
+❯ I thought changes were `[/]` gated pending the release. A release for agent-doc is a versioned release. But other projects may be continuous where each commit + push is a release. Do we need an additional marker to distinguish or is `[/]` sufficient?
 
 **#p2xm — orphaned `patch:exchange` marker leak: fixed.**
 
@@ -281,7 +283,18 @@ Root cause in `template.rs:parse_patches()` line 258: when a recognized opening 
 - `parse_patches_orphaned_opener_between_valid_patches` — orphan sandwiched between two valid patches, verifies valid patches still parse and orphan is consumed
 
 **Verification:** 1042 tests pass (2 new), 19 ignored, clippy clean, release binary built and installed.
-<!-- agent:boundary:e95d72ae -->
+### Re: [/] gating semantics — opus-4-6
+
+`[/]` is sufficient without sub-types. The gate condition is implicit from the project context, not the marker itself:
+
+- **agent-doc** (versioned releases): `[/]` means "code landed, awaiting release + live verification"
+- **Continuous project** (commit+push = release): `[/]` means "code landed, awaiting push/deploy confirmation"
+- **Field validation** (like #a002's telemetry): `[/]` means "code shipped, awaiting real-world signal"
+
+The pending item's text already carries the gate context — e.g. `[/] [#gqep] Release v0.32.4: ... BLOCKED on manual-testing gate` vs `[/] [#a002] ... awaiting large-drift trip for normalize_threshold_exceeded telemetry`. Adding gate-type markers would duplicate information that's already in the description.
+
+The important invariant is binary: `[/]` items are never auto-reaped. The *what* of the gate is human-readable context, not machine state. If we ever needed machine-actionable gate types (e.g., auto-reap on `cargo publish` or auto-reap on `git push`), that would be a different feature — event-driven gate resolution — and the marker syntax would be something like `[/release]` or `[/deploy]`. But that's speculative and not needed now.
+<!-- agent:boundary:77c82d94 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

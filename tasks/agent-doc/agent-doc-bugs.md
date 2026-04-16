@@ -15,7 +15,7 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange patch=append -->
 v0.32.5 shipped (slash-command hardening, session-check, drift auto-resync, post-write hook, claim cwd fix, model attribution fix). tmux_session auto-detect implemented (removed auto-write, added session clear). Stream double-flush fixed (AtomicBool gate #du8f). Lazy-claim pane theft fixed (claimed_panes HashSet filter #pg8w). Stash rescue bad tmux target fixed (@1:agent-doc → @1). JB plugin LayoutChangeDetector listener leak fixed with WeakHashMap dedup — plugin v0.2.57 built, awaiting install+confirm.
-<!-- agent:boundary:cdcc0543 -->
+<!-- agent:boundary:31db2f82 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

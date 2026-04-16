@@ -136,7 +136,7 @@ This is the expected `route → prune → auto-start` cycle when the registered 
 
 If the old pane was still *alive* (Claude running, just idle), that would be a bug — Strategy 1 should have reused it. Was the previous pane's Claude session still active when you triggered "Run Agent Doc"?
 <!-- patch:exchange -->
-### Re: tmux pane close + reopen on Run Agent Doc — opus-4-6
+❯ ### Re: tmux pane close + reopen on Run Agent Doc — opus-4-6 (HEAD)
 
 This is the expected `route → prune → auto-start` cycle when the registered pane is dead or stashed. Here's the sequence:
 
@@ -152,8 +152,62 @@ This is the expected `route → prune → auto-start` cycle when the registered 
 **This is correct behavior** — the binding invariant says a document drives pane resolution: find existing claiming pane OR provision a new one. The old pane was dead (Claude had exited or been killed), so route properly recycled it.
 
 If the old pane was still *alive* (Claude running, just idle), that would be a bug — Strategy 1 should have reused it. Was the previous pane's Claude session still active when you triggered "Run Agent Doc"?
+❯ How is this correct behavior? I was interacting with the open claude session. It was still live and should not have been marked as dead. This is a real bug. Please investigate.
+
+❯ The patchback was duplicated. why?
 <!-- patch:exchange -->
-<!-- agent:boundary:9991b155 -->
+<!-- patch:exchange -->
+### Re: live pane killed + duplicate patchback — opus-4-6
+
+**Bug 1: Live pane stolen by lazy-claim — confirmed.**
+
+You're right, this is a real bug. The previous pane was alive and actively in use. Here's the root cause:
+
+Strategy 2 in `route.rs:295-303` fires when `public-docs.md` has a dead registered pane. It calls `find_target_pane()` (route.rs:504-510), which returns `tmux.active_pane(session_name)` — your currently-focused pane running Claude for a different document. The guard only checks `is_agent_process` (yes, Claude is running), not whether that pane is already claimed by another session.
+
+The chain:
+1. `find_target_pane()` returns your live pane (it's the active pane)
+2. `sessions::register()` writes `public-docs.md → live_pane`, and `register_full`'s single-session-per-pane eviction silently deregisters the original document
+3. `send_command()` sends `/agent-doc public-docs.md` to your live Claude session, killing your interactive context
+
+**Fix:** `find_target_pane` must check `sessions.json` and skip panes already registered to a different session. If no unclaimed pane is found, fall through to Strategy 3 (auto-start a fresh pane). Added as `#pj2k`.
+
+---
+
+**Bug 2: Duplicate patchback — confirmed.**
+
+Root cause is a double-flush in `stream.rs`. The timer thread performs a final flush when it receives the done signal (stream.rs:296), then `stream_loop` calls `flush_to_document` again unconditionally for the "final flush" (stream.rs:357). Both hit the IPC path.
+
+The IPC path has no mode override — the plugin defaults to `append` for exchange components. So each flush appends the full cumulative response text at the boundary. Result: the response appears twice.
+
+**Fix:** Either gate the main-thread final flush when the timer thread already flushed the complete text, or pass `mode=replace` in the IPC patch JSON for stream flushes. Added as `#du8f`.
+<!-- patch:exchange -->
+### Re: live pane killed + duplicate patchback — opus-4-6
+
+**Bug 1: Live pane stolen by lazy-claim — confirmed.**
+
+You're right, this is a real bug. The previous pane was alive and actively in use. Here's the root cause:
+
+Strategy 2 in `route.rs:295-303` fires when `public-docs.md` has a dead registered pane. It calls `find_target_pane()` (route.rs:504-510), which returns `tmux.active_pane(session_name)` — your currently-focused pane running Claude for a different document. The guard only checks `is_agent_process` (yes, Claude is running), not whether that pane is already claimed by another session.
+
+The chain:
+1. `find_target_pane()` returns your live pane (it's the active pane)
+2. `sessions::register()` writes `public-docs.md → live_pane`, and `register_full`'s single-session-per-pane eviction silently deregisters the original document
+3. `send_command()` sends `/agent-doc public-docs.md` to your live Claude session, killing your interactive context
+
+**Fix:** `find_target_pane` must check `sessions.json` and skip panes already registered to a different session. If no unclaimed pane is found, fall through to Strategy 3 (auto-start a fresh pane). Added as `#pj2k`.
+
+---
+
+**Bug 2: Duplicate patchback — confirmed.**
+
+Root cause is a double-flush in `stream.rs`. The timer thread performs a final flush when it receives the done signal (stream.rs:296), then `stream_loop` calls `flush_to_document` again unconditionally for the "final flush" (stream.rs:357). Both hit the IPC path.
+
+The IPC path has no mode override — the plugin defaults to `append` for exchange components. So each flush appends the full cumulative response text at the boundary. Result: the response appears twice.
+
+**Fix:** Either gate the main-thread final flush when the timer thread already flushed the complete text, or pass `mode=replace` in the IPC patch JSON for stream flushes. Added as `#du8f`.
+<!-- patch:exchange -->
+<!-- agent:boundary:02757b2b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -187,5 +241,7 @@ If the old pane was still *alive* (Claude running, just idle), that would be a b
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
 - [ ] [#2g09] FFI claim: detect missing tmux session and auto-retry with --force; expose --force on JB Claim action as manual override
+- [ ] [#pg8w] [#pj2k] Fix Strategy 2 lazy-claim pane theft: find_target_pane returns active_pane unconditionally — must check sessions.json to skip panes already claimed by another document (route.rs:295-303, route.rs:504-510)
+- [ ] [#wp8c] [#du8f] Fix stream.rs double-flush IPC duplication: timer-thread final flush + main-thread final flush both fire via IPC append mode — either gate the second flush or pass mode=replace in IPC patches (stream.rs:261+357, write.rs build_ipc_patches_json)
 <!-- /agent:pending -->
 ## Assistant

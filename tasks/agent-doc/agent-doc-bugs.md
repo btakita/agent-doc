@@ -599,7 +599,7 @@ Want me to:
 I'd do **(c)**. The symlink takes 5 seconds; the `--user` flag is the real fix so this doesn't bite anyone else (or future-you after an `rm -rf ~/.claude`). Flag it `[bug]` in this doc if you want it tracked.
 
 **Note on `— opus-4-6` in this header:** preflight still reports `agent_model: haiku` (env var not yet unset), but I'm overriding to `opus-4-6` manually since we diagnosed the env-var bug last cycle and you confirmed you're on Opus. The attribution will auto-correct once `ANTHROPIC_MODEL` is cleared from your shell.
-### Re: symlink applied — opus-4-6
+❯ ### Re: symlink applied — opus-4-6 (HEAD)
 
 Done.
 
@@ -616,7 +616,21 @@ Done.
 If it still errors, the fallback is to fully quit that `claude` process in the pane and let `agent-doc start` respawn it — the new Claude instance will rescan `~/.claude/skills/` at startup and find the symlink.
 
 Tell me what happens (works / still broken / new error) and I'll either queue up option (b) — the `agent-doc skill install --user` binary change — or dig into whatever's still wrong.
-<!-- agent:boundary:612f4121 -->
+❯ It worked. do **`agent-doc start` should chdir up to the outermost repo containing `.claude/skills/agent-doc/`.**
+<!-- patch:exchange -->
+### Re: skill chdir-up — opus-4-6
+
+Overriding my earlier recommendation against option #2. The symlink is a workaround; the real fix is making `agent-doc start` find the skill automatically.
+
+**Implementation:** Modify `resolve_pane_cwd()` in `git.rs:279`. After finding the superproject root, walk up looking for `.claude/skills/agent-doc/SKILL.md`. If an ancestor contains it, use that ancestor as the cwd.
+
+Current flow: superproject → narrow to submodule → return submodule root.
+New flow: superproject → walk up for skill dir → if found, return that ancestor; else fall through to existing submodule/superproject logic.
+
+Tradeoff accepted: Claude's cwd will be agent-loop root (not the submodule), but doc paths are absolute and Read/Edit handle them fine.
+
+Adding to pending and implementing now.
+<!-- agent:boundary:06bdb00c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -651,5 +665,6 @@ Tell me what happens (works / still broken / new error) and I'll either queue up
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
 - [ ] [#2g09] FFI claim: detect missing tmux session and auto-retry with --force; expose --force on JB Claim action as manual override
+- [ ] [#gbq8] `agent-doc start` chdir up to outermost repo containing `.claude/skills/agent-doc/` — modify resolve_pane_cwd() in git.rs to walk up from superproject root
 <!-- /agent:pending -->
 ## Assistant

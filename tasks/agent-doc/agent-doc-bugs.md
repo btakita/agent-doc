@@ -117,7 +117,7 @@ This is the idiomatic Rust approach. Estimated scope: update the path-resolution
 **5 `debounce_gaps_test_plan` stubs:** These are blocked on pub API surface (`crdt::merge`, `status_file_path`, `preflight::run`, watch daemon API, cleanup fn). Unblocking requires making those APIs public — which should happen naturally as the supervisor module wire-up (#vnp0) progresses. No workaround; these wait on the API.
 
 **Recommended priority:** base_dir refactor (11 tests) → submodule IPC setup (2 tests) → filesystem notify (1 test) → pub API stubs (5, blocked on other work).
-<!-- agent:boundary:9b27c8c3 -->
+<!-- agent:boundary:8da903d7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

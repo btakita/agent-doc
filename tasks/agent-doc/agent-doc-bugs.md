@@ -187,24 +187,8 @@ Implementing now.
 - If file watcher processes first → records patch_id → socket handler checks → skips (already applied)
 - Timeout fallback in run_stream → same patch_id → plugin dedup catches it regardless of delivery order
 ❯ do #1kap
-Looking at /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md, there were some deadlocked tasks
-Here is 1
-```
-  Status: running
-  Runtime: 1h 47m 15s
-  Command: cat <<'RESPONSE' | agent-doc write
-  /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md \
-    --baseline-file /home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/baselines/7b9f2a6394de97c213efeb3e
-  c1e3d33b7b966229655f4720376409f6abef299f.md \
-    …
-
-  Output:
-  ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-  │ warning: `<!-- patch:pending -->` is deprecated — use `<!-- replace:pending -->` instead (see #25ag)           │
-  │ Error: ERR: replace:pending block forbidden — use --pending-add/done/edit/clear/reorder. See specs/pending-sy… │
-```
 <!-- patch:exchange -->
-### Re: #1kap — stale snapshot race fix — opus-4-6
+❯ ### Re: #1kap — stale snapshot race fix — opus-4-6 (HEAD)
 
 Replaced the 200ms sleep with polling for the ack-content sidecar. The sidecar is the authoritative post-apply snapshot written by the plugin — polling catches it as soon as it appears instead of racing against an arbitrary delay.
 
@@ -223,7 +207,26 @@ Replaced the 200ms sleep with polling for the ack-content sidecar. The sidecar i
 - `test_poll_sidecar_timeout` — no sidecar → returns None after timeout, verifies timing bounds
 
 **Verification:** 1039 tests pass, clippy clean, release binary built.
-<!-- agent:boundary:ca4bc29c -->
+❯ There is a leftover patch:exchange from the last patchback. Also my annotation that I entered while a task was running was committed without a response patchback.
+
+❯ Looking at /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md, there were some deadlocked tasks
+❯ Here is 1
+```
+  Status: running
+  Runtime: 1h 47m 15s
+  Command: cat <<'RESPONSE' | agent-doc write
+  /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md \
+    --baseline-file /home/brian/work/btakita/agent-loop/src/boost-client/.agent-doc/baselines/7b9f2a6394de97c213efeb3e
+  c1e3d33b7b966229655f4720376409f6abef299f.md \
+    …
+
+  Output:
+  ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │ warning: `<!-- patch:pending -->` is deprecated — use `<!-- replace:pending -->` instead (see #25ag)           │
+  │ Error: ERR: replace:pending block forbidden — use --pending-add/done/edit/clear/reorder. See specs/pending-sy… │
+```
+noop
+<!-- agent:boundary:0b653c75 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

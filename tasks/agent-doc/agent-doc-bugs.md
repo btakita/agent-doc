@@ -369,14 +369,24 @@ The wrapper exists only in the heredoc I pipe to `agent-doc write` — it's a tr
 
 So there's nothing to "test the ergonomics of" from the document side — it's invisible to you. The ergonomics question is only relevant if I were to use raw content (no wrapper) instead, which would also be invisible to you but slightly less safe for responses containing HTML comment markers.
 ❯ This document has several `<!-- patch:exchange -->` comments in it. Was this due to the bug you just fixed?
-### Re: leftover patch:exchange comments — opus-4-6
+❯ ### Re: leftover patch:exchange comments — opus-4-6 (HEAD)
 
 Yes, exactly. When I used `<!-- patch:exchange -->` as both open AND close (no `/`), `parse_patches` couldn't match the block. Both markers fell through as unrecognized and ended up as literal text in the `unmatched` content — which was then written to the document verbatim.
 
 With the proper `<!-- /patch:exchange -->` close tag, the parser correctly extracts the content and the wrapper tags are consumed. They never reach the document.
 
 The leftover `<!-- patch:exchange -->` comments visible in the exchange are artifacts from the earlier malformed cycles. They'll be cleaned up on the next `compact exchange`.
-<!-- agent:boundary:c70faa16 -->
+❯ do #pg8w
+### Re: #pg8w lazy-claim pane theft — opus-4-6
+
+Fixed in `route.rs`. The bug: `find_target_pane` returned `active_pane` unconditionally — it checked liveness and agent-process status but never consulted `sessions.json` for existing claims.
+
+**Change (route.rs:293-310):** Before Strategy 2's `find_target_pane` call, load the registry and build a `HashSet<String>` of pane IDs that are alive AND already claimed. Pass this set into `find_target_pane`, which now filters candidates against it. A pane claimed by another document is skipped — Strategy 2 falls through to Strategy 3 (auto-start) instead of stealing the pane.
+
+**`find_target_pane` signature change (route.rs:507):** Added `claimed_panes: &HashSet<String>` parameter. The filter now checks `!claimed_panes.contains(p)` alongside `pane_alive`.
+
+Build clean, clippy clean, all non-tmux tests pass. The 45 failures are pre-existing tmux integration tests that require a running tmux server.
+<!-- agent:boundary:b92078a0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -410,6 +420,6 @@ The leftover `<!-- patch:exchange -->` comments visible in the exchange are arti
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
 - [ ] [#2g09] FFI claim: detect missing tmux session and auto-retry with --force; expose --force on JB Claim action as manual override
-- [ ] [#pg8w] Fix Strategy 2 lazy-claim pane theft: find_target_pane returns active_pane unconditionally — must check sessions.json to skip panes already claimed by another document (route.rs:295-303, route.rs:504-510)
+- [x] [#pg8w] Fix Strategy 2 lazy-claim pane theft: find_target_pane returns active_pane unconditionally — must check sessions.json to skip panes already claimed by another document (route.rs:295-303, route.rs:504-510)
 <!-- /agent:pending -->
 ## Assistant

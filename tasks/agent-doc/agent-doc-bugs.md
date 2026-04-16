@@ -241,7 +241,7 @@ This is a variant of bug #s7wk (snapshot integrity) combined with #1497 (pending
 - **#1497** — pending-only mutations shouldn't touch the exchange pipeline at all
 ❯ do #s7wk #1497
 <!-- patch:exchange -->
-### Re: #s7wk and #1497 — opus-4-6
+❯ ### Re: #s7wk and #1497 — opus-4-6 (HEAD)
 
 **#1497 — `--pending-only` flag (main.rs):**
 
@@ -264,13 +264,30 @@ Added content-aware guard before sweep-commit. The sweep now:
 For template mode docs, `is_stale_snapshot` always returns `false` (no `## Assistant` markers), so sweep only commits when snapshot and document are content-equal after comment stripping — conservative but correct.
 
 **Tests:** 1040 pass (1 new: `preflight_sweep_skips_doc_with_unresponded_user_content`). Clippy clean, release binary built and installed.
-<!-- agent:boundary:57891fb3 -->
+❯ do #p2xm
+❯ [#1497] and [#s7wk] were marked as [x]...they should have been [/]. Why were they marked as [x]?
+### Re: #p2xm + why #1497/#s7wk were [x] — opus-4-6
+
+**Why #1497 and #s7wk were marked [x] instead of [/]:** I used `--pending-done` which sets `[x]` (fully complete → reaped next cycle). Should have used `--pending-gate` to set `[/]` (code-complete, awaiting live verification). Going forward: implementations get `[/]` (gated) until the user confirms the fix works in a live session.
+
+**#p2xm — orphaned `patch:exchange` marker leak: fixed.**
+
+Root cause in `template.rs:parse_patches()` line 258: when a recognized opening marker (`<!-- patch:exchange -->`) has no matching close, the parser set `pos = close` to advance past `-->` but **never advanced `last_end`**. The orphaned marker text stayed in the `last_end..` range and got collected as trailing unmatched text (lines 262-269), which boundary synthesis then appended to the exchange verbatim.
+
+**Fix (template.rs:256-265):** When a recognized patch opener has no matching close, advance both `pos` and `last_end` past the orphaned marker (including trailing newline). The marker is consumed and excluded from unmatched text. Text before and after the orphaned marker still flows into `unmatched` correctly.
+
+**Tests (2 new):**
+- `parse_patches_orphaned_opener_does_not_leak_into_unmatched` — lone orphaned opener, verifies marker excluded from unmatched, surrounding text preserved
+- `parse_patches_orphaned_opener_between_valid_patches` — orphan sandwiched between two valid patches, verifies valid patches still parse and orphan is consumed
+
+**Verification:** 1042 tests pass (2 new), 19 ignored, clippy clean, release binary built and installed.
+<!-- agent:boundary:229105b4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#p2xm] Orphaned patch:exchange marker leak: parse_patches() does not consume unclosed opening markers — they leak into unmatched text and get appended to exchange verbatim. Fix: advance last_end past unclosed openers in parse_patches()
+- [/] [#p2xm] Orphaned patch:exchange marker leak: parse_patches() does not consume unclosed opening markers — they leak into unmatched text and get appended to exchange verbatim. Fix: advance last_end past unclosed openers in parse_patches()
 - [ ] [#08yv] Pre-lock file modification race: content_at_start read (write.rs ~725) to doc_lock acquire (~750) window allows external edits that drift the snapshot baseline
 - [ ] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots
 - [ ] [#vefa] Refactor set_current_dir tests to accept base_dir: &Path parameter — re-enable 11 ignored tests (autoclaim 3, sessions 5, watch 2)

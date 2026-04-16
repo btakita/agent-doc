@@ -431,7 +431,7 @@ The `--force` flag is preserved for its other purpose: overriding the binding in
 **Verification:** 1010 tests pass, 0 failures, clippy clean, plugin builds clean.
 ❯ I'm still having the pane force close on src/boost-client/tasks/monsterrodholders.md. Why?
 I'm also seeing frequent navigation to the tmux 1:stash window. Why? Are the tmux tests interfering with my current tmux session running the agent-doc project?
-### Re: monsterrodholders pane force-close — opus-4-6
+❯ ### Re: monsterrodholders pane force-close — opus-4-6 (HEAD)
 
 Found the root cause. It's a stash rescue bug in `sync.rs:791`.
 
@@ -457,7 +457,26 @@ No `rescue_result` logged — the rescue code never reached the swap-pane/join-p
 Verified: `tmux list-panes -t @1` returns panes; `tmux list-panes -t @1:agent-doc` errors with "can't find session: @1".
 
 1010 tests pass, clippy clean, release binary built.
-<!-- agent:boundary:843e0b75 -->
+❯ When I ran monsterrodholders.md, the tmux pane closed. Is this the same bug that is now fixed?
+When I ran this file, the tmux pane closed as well. It seems like a current bug.
+### Re: stash navigation + pane close after fix — opus-4-6
+
+**Yes, same bug — both symptoms.**
+
+**Stash window navigation:** Every time sync ran and the stash rescue failed (bad `@1:agent-doc` target), it auto-started a new pane. The layout reconciler then stashed excess panes, causing tmux to briefly focus the stash window. This is the "frequent navigation to stash" you're seeing — each sync cycle creates a new pane, stashes the old one, and the tmux focus flickers to the stash window during the move.
+
+**Pane close after running monsterrodholders:** The sequence is:
+1. You open monsterrodholders.md → sync creates/routes a pane
+2. Next sync fires (tab switch, save, focus change) → layout reconciler stashes the pane
+3. Following sync → rescue from stash fails → "no alive pane" → auto-starts fresh pane
+4. Previous pane is abandoned in stash or killed by orphan cleanup
+
+**The fix is live** — the release binary was rebuilt at the end of the last cycle. The `.bin/agent-doc` symlink already points to the new binary. The next sync that encounters a stashed monsterrodholders pane should rescue it successfully via `list-panes -t @1` (correct) instead of `list-panes -t @1:agent-doc` (broken).
+
+**Session drift warning:** Preflight reported "registered panes span 2 tmux sessions: 2, claude". Session "2" likely has a stale registry entry from the thrashing. Run `agent-doc resync` to clean up stale entries.
+
+**To verify the fix:** Switch to monsterrodholders.md in the editor, wait for a sync cycle, then switch away and back. The pane should survive the round-trip instead of being replaced.
+<!-- agent:boundary:d6199758 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

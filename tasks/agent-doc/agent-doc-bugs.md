@@ -631,7 +631,7 @@ Tradeoff accepted: Claude's cwd will be agent-loop root (not the submodule), but
 
 Adding to pending and implementing now.
 <!-- patch:exchange -->
-### Re: #gbq8 implemented — opus-4-6
+❯ ### Re: #gbq8 implemented — opus-4-6 (HEAD)
 
 Done. Modified `resolve_pane_cwd()` in `git.rs` to walk up from the superproject root looking for `.claude/skills/agent-doc/SKILL.md`. New helper `find_outermost_skill_root()` walks ancestors up to `$HOME`, returns the outermost match.
 
@@ -643,7 +643,24 @@ Done. Modified `resolve_pane_cwd()` in `git.rs` to walk up from the superproject
 **Verification:** `make check` clean (clippy + 292 lib tests pass, 24 git module tests pass; 45 pre-existing `resync::tests` failures unrelated). Release build installed to `~/.cargo/bin/agent-doc`.
 
 **To test live:** spawn a new `agent-doc start` for a submodule doc (e.g., `src/boost-client/tasks/monsterrodholders.md`) — the pane should now open with cwd at `agent-loop/` root (where `.claude/skills/agent-doc/` lives) instead of the submodule root.
-<!-- agent:boundary:d8c804b5 -->
+
+❯ When I navigated to src/session-share/tasks/claudescore.md, the plugin attempted an autoclaim. But the tmux pane opened claude code on my home directory
+❯ ![img.png](img.png)
+<!-- patch:exchange -->
+### Re: $HOME skill root bug — opus-4-6
+
+Found it. `find_outermost_skill_root()` walks up to `$HOME` and finds `~/.claude/skills/agent-doc/SKILL.md` (the symlink we just created). It checks the skill file *before* the `$HOME` stop condition, so `$HOME` gets returned as the outermost skill root.
+
+**Two-part fix:**
+1. Move the `$HOME` stop check *before* the skill check (don't even consider `$HOME`)
+2. Require candidates to be git repos (have `.git`) — non-repo dirs with skill symlinks are ignored
+
+This means `~/.claude/skills/agent-doc/` (user-level symlink) never interferes with the repo-level walk. Only actual git repos with `.claude/skills/agent-doc/SKILL.md` qualify.
+
+**Tests:** 6 pass (added a test specifically for "non-git dir with skill should be ignored"). `make check` clean. Release build reinstalled.
+
+Try the autoclaim again — it should now resolve to `agent-loop/` root, not `$HOME`.
+<!-- agent:boundary:20a04e40 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

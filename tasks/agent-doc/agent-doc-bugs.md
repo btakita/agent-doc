@@ -676,7 +676,7 @@ The symlink handles skill discovery. The `--user` flag (#a002-style binary fix) 
 `make check` clean, release build reinstalled. Try the autoclaim again — should resolve to `src/session-share` now.
 
 A walkdown wouldn't help here — the problem was never about traversal direction. It was about conflating two orthogonal concerns (cwd selection vs skill discovery). The symlink cleanly separates them.
-<!-- agent:boundary:2d795bf4 -->
+<!-- agent:boundary:6908cbc3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

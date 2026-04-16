@@ -65,7 +65,7 @@ Stay with the rappstack build we already deployed to equityfundingsource.pages.d
 - DNS cutover timeline (can be done with zero downtime via Cloudflare proxy)
 - Any content on the WordPress site not yet in the pages.dev build
 - Whether Judith needs to review the pages.dev version before switching
-<!-- agent:boundary:6a85b097 -->
+<!-- agent:boundary:0abeb6af -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

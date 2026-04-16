@@ -38,7 +38,7 @@ Created `mail/contacts/colleen-carroll/` with AGENTS.md + CLAUDE.md symlink.
 
 Quality settings optimized for recruiter reference (screen recording): CRF 28 reduces file size while maintaining clarity for faces/text visibility.
 ===
-<!-- agent:boundary:63da20b0 -->
+<!-- agent:boundary:b993dd10 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

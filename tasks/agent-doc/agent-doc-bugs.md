@@ -239,7 +239,7 @@ The second write sent a 0-component patch to the plugin. The plugin consumed it 
 This is a variant of bug #s7wk (snapshot integrity) combined with #1497 (pending-only writes). The fix is twofold:
 - **Don't update the snapshot when writing 0 components** — if there's nothing to apply, the snapshot shouldn't change
 - **#1497** — pending-only mutations shouldn't touch the exchange pipeline at all
-<!-- agent:boundary:e99ec31d -->
+<!-- agent:boundary:9418679d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

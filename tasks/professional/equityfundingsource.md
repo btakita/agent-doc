@@ -499,6 +499,7 @@ npx wrangler d1 migrations apply equityfundingsource
 ~/work/btakita/agent-loop/src/equityfundingsource-dev main !7 ?1                                                                                                                                                                      16:05:52
 ❯ bunx wrangler d1 create equityfundingsource
  ⛅️ wrangler 4.80.0
+───────────────────
 ✅ Successfully created DB 'equityfundingsource' in region ENAM
 Created your new D1 database.
 
@@ -633,6 +634,10 @@ You mentioned you'll delete the existing Gmail drafts (there may be duplicates f
 
 ● No changes detected in the document. Nothing to respond to.
 
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
  ▐▛███▜▌   Claude Code v2.1.89
 ▝▜█████▛▘  Opus 4.6 (1M context) · Claude Max
   ▘▘ ▝▝    ~/work/btakita/agent-loop
@@ -661,33 +666,29 @@ You mentioned you'll delete the existing Gmail drafts (there may be duplicates f
 
 ● No changes detected in the document. Nothing to respond to.
 
-<!-- agent:boundary:1bcbd089 -->
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+<!-- agent:boundary:dd55201f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] All pages built (25 total, 54 tests passing)
-- [x] Deploy to Cloudflare Pages (equityfundingsource.pages.dev)
-- [x] Add EFS document pipeline topic to bob-remeika.md
-- [x] Wire up form submission backend (Apply Now + Contact) -- D1 + R2 + Pages Functions
-- [x] Review and send proposal email to Judith -- in Drafts (CC Waldman, BCC Ward, SEO info)
-- [x] Create D1 database and run migration
-- [x] Redeploy with form backend + email notifications
-- [x] Configure Resend API key for email notifications
-- [ ] Verify equityfundingsource.com domain in Resend (or use sandbox from address)
-- [ ] Online presence cleanup (after Judith approves)
-  - [ ] Consolidate domains under equityfundingsource.com
-  - [ ] Take down/redirect Weebly and WordPress sites
-  - [ ] Update directory listings (Yelp, Manta, hard money directories)
-  - [ ] Consolidate Facebook pages
-  - [ ] Optimize LinkedIn profile
-- [ ] Form submission pipeline
-  - [ ] Tier 0: Cloudflare WAF + upload limits
-  - [ ] Tier 1: Workers AI pre-screening
-  - [ ] Tier 2: Claude API document review
-  - [ ] Tier 3: Ragie Parse + Index for approved docs
-  - [ ] Admin dashboard (Cloudflare Access auth)
-  - [ ] Token-based document upload flow
-- [ ] Discuss Ragie content validation with Bob Remeika (scheduled call)
+- [ ] [#b8w5] Verify equityfundingsource.com domain in Resend (or use sandbox from address)
+- [ ] [#4vb5] Online presence cleanup (after Judith approves)
+- [ ] [#a3gc] Consolidate domains under equityfundingsource.com
+- [ ] [#zhyg] Take down/redirect Weebly and WordPress sites
+- [ ] [#vd6p] Update directory listings (Yelp, Manta, hard money directories)
+- [ ] [#tfee] Consolidate Facebook pages
+- [ ] [#1w4n] Optimize LinkedIn profile
+- [ ] [#kxsx] Form submission pipeline
+- [ ] [#njsx] Tier 0: Cloudflare WAF + upload limits
+- [ ] [#x0px] Tier 1: Workers AI pre-screening
+- [ ] [#xgqg] Tier 2: Claude API document review
+- [ ] [#kf1p] Tier 3: Ragie Parse + Index for approved docs
+- [ ] [#yh4b] Admin dashboard (Cloudflare Access auth)
+- [ ] [#ft47] Token-based document upload flow
+- [ ] [#4ktv] Discuss Ragie content validation with Bob Remeika (scheduled call)
 <!-- /agent:pending -->

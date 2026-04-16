@@ -141,7 +141,7 @@ Video compressed and ready at `~/Videos/2026-04-15 15-03-53-compressed.mp4`
 - **Duration:** 1h 39m 31s
 
 Quality tuning: CRF 28 is perceptually lossless while aggressive on file size. Bump to CRF 26–27 if quality seems soft, or up to CRF 30 if you want smaller.
-<!-- agent:boundary:a3b7777b -->
+<!-- agent:boundary:62e0399f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -25,7 +25,7 @@ Created `mail/contacts/colleen-carroll/` with AGENTS.md + CLAUDE.md symlink.
 - **Role discussed:** Senior Subcontractor - React.js, fully remote, 1099
 - **Timeline:** Intro call 2026-04-13, follow-up with JD sent same day
 - **Next step:** Send resume if interested, then 30-min consulting interview
-<!-- agent:boundary:21ac0824 -->
+<!-- agent:boundary:f8195f0c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

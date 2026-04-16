@@ -145,7 +145,7 @@ The first failed patchback (the one that triggered this whole thread) was the 0-
 
 ❯ do #esws
 <!-- patch:exchange -->
-### Re: implementing #esws — opus-4-6
+❯ ### Re: implementing #esws — opus-4-6 (HEAD)
 
 Starting implementation. The root cause is three independent `patch_id` UUIDs generated for what should be a single logical write:
 - Socket path (write.rs:1548)
@@ -226,12 +226,27 @@ Replaced the 200ms sleep with polling for the ack-content sidecar. The sidecar i
   │ Error: ERR: replace:pending block forbidden — use --pending-add/done/edit/clear/reorder. See specs/pending-sy… │
 ```
 noop
-<!-- agent:boundary:5af07549 -->
+❯ The patchback is `noop`. I did see a proper response patchback but it was cleared and not committed.
+### Re: response cleared after appearing — opus-4-6
+
+You saw the response flash in the document and then disappear. Here's what happened in sequence last cycle:
+
+1. **First write** — response content piped through `agent-doc write --stream` → "IPC patch consumed by plugin — snapshot updated" (1 component, success)
+2. **Second write** — "noop" carrier text for `--pending-add` flags → "content already present in exchange — skipping synthesis" → "WARNING: 4 bytes of unmatched content with no IPC patches — content will be dropped" → **0 components**, but "IPC patch consumed by plugin — snapshot updated"
+
+The second write sent a 0-component patch to the plugin. The plugin consumed it as a no-op (didn't change the document), but the **snapshot was still updated** from the second write's state — which didn't include the response content. So when commit ran, it staged the second write's snapshot, which was missing the response.
+
+This is a variant of bug #s7wk (snapshot integrity) combined with #1497 (pending-only writes). The fix is twofold:
+- **Don't update the snapshot when writing 0 components** — if there's nothing to apply, the snapshot shouldn't change
+- **#1497** — pending-only mutations shouldn't touch the exchange pipeline at all
+<!-- agent:boundary:6d91cac7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#p2xm] Orphaned patch:exchange marker leak: parse_patches() does not consume unclosed opening markers — they leak into unmatched text and get appended to exchange verbatim. Fix: advance last_end past unclosed openers in parse_patches()
+- [ ] [#s7wk] Sweep commits unresponded user content: preflight sweep uses mtime-only heuristic (preflight.rs:606-616) — no guard against committing user annotations without agent response. Fix: call is_stale_snapshot() diff check before sweep-commit, skip files with user additions
 - [ ] [#08yv] Pre-lock file modification race: content_at_start read (write.rs ~725) to doc_lock acquire (~750) window allows external edits that drift the snapshot baseline
 - [ ] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots
 - [ ] [#vefa] Refactor set_current_dir tests to accept base_dir: &Path parameter — re-enable 11 ignored tests (autoclaim 3, sessions 5, watch 2)

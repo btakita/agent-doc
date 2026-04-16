@@ -284,7 +284,7 @@ Same pattern applies to the thinking flush at line ~365.
 
 Want me to implement this?
 <!-- patch:exchange -->
-<!-- agent:boundary:c3b2eb12 -->
+<!-- agent:boundary:7ce3c50d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

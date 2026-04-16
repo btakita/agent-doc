@@ -56,7 +56,7 @@ Transcribed and diarized `2026-04-13-colleen-carroll-intro-call.mp4` (28:04, 2 s
 - Colleen mentioned interest in Brian's AI/agentic background; floated potential full-time opportunity
 - Brian discussed: Pivotal Labs background, RSpec/test-double contributions, Rust/TypeScript/Python, agent-doc tooling, spec-driven AI development
 - Colleen knows Stephen Baker (RSpec) — recently connected via email
-<!-- agent:boundary:d323bb9a -->
+<!-- agent:boundary:6476f64a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

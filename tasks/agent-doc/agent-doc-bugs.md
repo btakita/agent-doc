@@ -246,8 +246,9 @@ The `recover::save_pending` call stays unconditional — crash recovery should a
 Same pattern applies to the thinking flush at line ~365.
 
 Want me to implement this?
+❯ implement
 <!-- patch:exchange -->
-### Re: #du8f approach — gating main-thread flush — opus-4-6
+❯ ### Re: #du8f approach — gating main-thread flush — opus-4-6 (HEAD)
 
 Agree. Gating the main-thread flush is strictly better because:
 
@@ -284,7 +285,32 @@ Same pattern applies to the thinking flush at line ~365.
 
 Want me to implement this?
 <!-- patch:exchange -->
-<!-- agent:boundary:7ce3c50d -->
+<!-- patch:exchange -->
+### Re: #du8f implemented — opus-4-6
+
+Done. Three changes in `stream.rs`:
+
+1. **Import** `AtomicBool` + `Ordering` (line 59)
+2. **Timer thread** — `timer_flushed_final_clone.store(true, Release)` after successful flush when `is_done` (line 265)
+3. **Main thread** — both `flush_to_document` calls gated by `!timer_flushed_final.load(Acquire)` (lines 359, 367). `recover::save_pending` stays unconditional.
+
+`cargo build --release` clean. `make check`: 605 passed, 45 pre-existing failures (tmux-dependent tests), 0 new failures. All 3 stream-specific tests pass.
+
+Ready for manual testing — the fix is in the release binary. Try a `stream` command and verify the response appears once, not twice.
+<!-- patch:exchange -->
+### Re: #du8f implemented — opus-4-6
+
+Done. Three changes in `stream.rs`:
+
+1. **Import** `AtomicBool` + `Ordering` (line 59)
+2. **Timer thread** — `timer_flushed_final_clone.store(true, Release)` after successful flush when `is_done` (line 265)
+3. **Main thread** — both `flush_to_document` calls gated by `!timer_flushed_final.load(Acquire)` (lines 359, 367). `recover::save_pending` stays unconditional.
+
+`cargo build --release` clean. `make check`: 605 passed, 45 pre-existing failures (tmux-dependent tests), 0 new failures. All 3 stream-specific tests pass.
+
+Ready for manual testing — the fix is in the release binary. Try a `stream` command and verify the response appears once, not twice.
+<!-- patch:exchange -->
+<!-- agent:boundary:4624964d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

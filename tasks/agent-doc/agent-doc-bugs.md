@@ -45,7 +45,7 @@ claude_args: --dangerously-skip-permissions
 
 - **Model attribution bug** — `ANTHROPIC_MODEL=haiku` env var in user shell causes wrong header label even when Claude Code is on Opus. Diagnosed; fix (remove env var or add tier-consistency check) not yet implemented.
 - **Autoclaim on `src/session-share` docs** — resolve_pane_cwd reverted to narrow_to_submodule; user asked to retry autoclaim to confirm it resolves to `src/session-share`. No confirmation yet.
-<!-- agent:boundary:9b82e270 -->
+<!-- agent:boundary:f2252f23 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

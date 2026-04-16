@@ -386,7 +386,7 @@ Fixed in `route.rs`. The bug: `find_target_pane` returned `active_pane` uncondit
 **`find_target_pane` signature change (route.rs:507):** Added `claimed_panes: &HashSet<String>` parameter. The filter now checks `!claimed_panes.contains(p)` alongside `pane_alive`.
 
 Build clean, clippy clean, all non-tmux tests pass. The 45 failures are pre-existing tmux integration tests that require a running tmux server.
-<!-- agent:boundary:b92078a0 -->
+<!-- agent:boundary:183e640f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -420,6 +420,5 @@ Build clean, clippy clean, all non-tmux tests pass. The 45 failures are pre-exis
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
 - [ ] [#2g09] FFI claim: detect missing tmux session and auto-retry with --force; expose --force on JB Claim action as manual override
-- [x] [#pg8w] Fix Strategy 2 lazy-claim pane theft: find_target_pane returns active_pane unconditionally — must check sessions.json to skip panes already claimed by another document (route.rs:295-303, route.rs:504-510)
 <!-- /agent:pending -->
 ## Assistant

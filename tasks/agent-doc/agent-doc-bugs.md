@@ -29,7 +29,7 @@ Done. Option B was the in-process `STATUS: Mutex<HashMap<PathBuf, String>>` in `
 3. **Tests** — Updated comments in `status_file_staleness_timeout` and `status_found_for_file_one_level_deep` to reflect file-based path. All tests pass unchanged since the tests already had `.agent-doc/status/` dirs set up.
 
 **Verification:** 1010 tests pass, 19 ignored, clippy clean, release binary built.
-<!-- agent:boundary:acab745f -->
+<!-- agent:boundary:efd8abc1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -38,7 +38,6 @@ Done. Option B was the in-process `STATUS: Mutex<HashMap<PathBuf, String>>` in `
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
-- [x] [#a004] Drop Option B (skill-side submodule workaround) — A handles it deterministically; B redundant.
 - [ ] [#jg0d] supervisor/resize.rs: SIGWINCH unix path via signal-hook; Windows ConPTY stub for phase 1
 - [ ] [#b486] supervisor/state.rs: crash classifier, ring buffer, Healthy->Transient->Flapping->Halted state machine
 - [ ] [#40ct] supervisor/ipc.rs: Unix-domain socket accept loop, reuse length-prefixed JSON frame from ipc_socket.rs

@@ -159,13 +159,40 @@ Starting implementation. The root cause is three independent `patch_id` UUIDs ge
 2. **Plugin (PatchWatcher.kt):** Add `appliedPatchIds: ConcurrentHashMap<String, Long>` dedup set. Before applying any patch (socket or file), check if patch_id already applied. After applying, record it. Periodic cleanup of entries >60s.
 
 Implementing now.
-<!-- agent:boundary:d6ec3bc4 -->
+<!-- patch:exchange -->
+### Re: #esws implementation complete — opus-4-6
+
+**Root cause:** Three independent `patch_id` UUIDs were generated for the same logical write — socket path, file path, and timeout fallback each created their own. The plugin had no way to know these were the same write.
+
+**Binary changes (write.rs):**
+
+1. Added `IpcResult` struct — returns `success: bool` + `patch_id: String` from `try_ipc()`
+2. Single `patch_id` generated once at the top of `try_ipc()`, shared across socket and file paths
+3. New `reuse_patch_id: Option<&str>` parameter — callers can pass a previously-used ID
+4. `run_stream()` timeout fallback now reuses `ipc_result.patch_id` instead of generating a new UUID
+5. All callers updated (stream.rs, 6 tests)
+
+**Plugin changes (PatchWatcher.kt):**
+
+1. Added `appliedPatchIds: ConcurrentHashMap<String, Long>` dedup set with 60s TTL
+2. `recordApplied(patchId)` — called after every successful `applyPatch()` in both socket and file paths
+3. `isAlreadyApplied(patchId)` — checked before apply in both `handleSocketMessage()` and `processPatchFile()`
+4. Double-checked under EDT to close TOCTOU race between background thread and EDT dispatch
+5. Lazy cleanup of expired entries on each `recordApplied()` call
+
+**Verification:** 671 tests pass (1 pre-existing failure in resync, unrelated), clippy clean, release binary built.
+
+**How it prevents double-apply:** When socket IPC sends but doesn't ACK (timeout), and the file fallback writes the same `patch_id` to disk:
+- If socket handler processes first → records patch_id → file watcher checks → skips (already applied)
+- If file watcher processes first → records patch_id → socket handler checks → skips (already applied)
+- Timeout fallback in run_stream → same patch_id → plugin dedup catches it regardless of delivery order
+<!-- agent:boundary:6233f16e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#esws] IPC timeout fallback double-apply race: atomic IPC mode select (socket XOR file, never both in flight) — prevent duplicate exchange patches when try_ipc() times out and fallback patch file is picked up by watcher concurrently
+- [x] [#esws] IPC timeout fallback double-apply race: atomic IPC mode select (socket XOR file, never both in flight) — prevent duplicate exchange patches when try_ipc() times out and fallback patch file is picked up by watcher concurrently
 - [ ] [#1kap] Stale snapshot after IPC success: replace 200ms sleep with post-apply snapshot handshake — plugin ack-content sidecar exists but isn't always used, causing ghost diffs in next cycle
 - [ ] [#08yv] Pre-lock file modification race: content_at_start read (write.rs ~725) to doc_lock acquire (~750) window allows external edits that drift the snapshot baseline
 - [ ] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots

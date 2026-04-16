@@ -186,7 +186,7 @@ Implementing now.
 - If socket handler processes first → records patch_id → file watcher checks → skips (already applied)
 - If file watcher processes first → records patch_id → socket handler checks → skips (already applied)
 - Timeout fallback in run_stream → same patch_id → plugin dedup catches it regardless of delivery order
-<!-- agent:boundary:f26c116d -->
+<!-- agent:boundary:b09a970c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

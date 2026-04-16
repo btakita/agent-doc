@@ -266,7 +266,7 @@ Based on the developer portal docs and TMO's pricing model:
 **Watch for:** Robert Waldman may push GoHighLevel (he has enterprise access). Have a clear answer on whether GHL replaces or complements the platform choice.
 
 ❯ transcribe + diarize /home/brian/work/btakita/agent-loop/mail/contacts/judith-krug/recordings/phone_20260416-143052_3107290112.m4a
-### Re: 2026-04-16 call transcript — sonnet-4-6
+❯ ### Re: 2026-04-16 call transcript — sonnet-4-6 (HEAD)
 
 **Transcript:** `mail/contacts/judith-krug/recordings/phone_20260416-143052-diarized.md`
 **Participants:** Brian, Judith, Robert Waldman (in LA visiting for 2 weeks)
@@ -315,7 +315,6 @@ Judith will add Brian to her investor e-blast list so he can see how she formats
 #### GoDaddy
 
 Judith shared GoDaddy PIN verbally during call (not logged here). Credentials are now in hand.
-
 #### Next steps
 
 - [ ] TMO: confirm API seat requirement + webhook roadmap
@@ -324,8 +323,18 @@ Judith shared GoDaddy PIN verbally during call (not logged here). Credentials ar
 - [ ] Set up Judith's GoHighLevel sub-account via Robert's enterprise
 - [ ] Get Robert's demo site URL for design reference
 - [ ] Investor e-blast: draft outreach sequence with Robert for 400 contacts
-<!-- agent:boundary:de593cf2 -->
+❯ Please add Next steps into pending
+### Re: pending — opus-4-6
+
+Done — moved the six next-step items into pending.
+<!-- agent:boundary:df6b5dc5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
+- [ ] [#dna5] TMO: confirm API seat requirement + webhook roadmap
+- [ ] [#fzb9] Review TMO applicant portal embed link + referring broker link
+- [ ] [#70kj] Build OCR pipeline (fillable PDF → TMO fields via API)
+- [ ] [#0h50] Set up Judith's GoHighLevel sub-account via Robert's enterprise
+- [ ] [#avqb] Get Robert's demo site URL for design reference
+- [ ] [#63gt] Investor e-blast: draft outreach sequence with Robert for 400 contacts
 <!-- /agent:pending -->

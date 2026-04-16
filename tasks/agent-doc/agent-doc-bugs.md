@@ -308,7 +308,7 @@ Updated the pending-ops runbook (`runbooks/pending-ops.md`) with a new **"When t
 
 Also updated the "What to decide each cycle" checklist: first bullet now reads "Items implemented during this response → `--pending-gate <id>`" instead of `--pending-done`.
 ❯ In src/session-share/tasks/claudescore.md there is a `<!-- /replace:status -->` in the patchback. Why?
-### Re: replace:status in claudescore.md — opus-4-6
+❯ ### Re: replace:status in claudescore.md — opus-4-6 (HEAD)
 
 It's dead text — the binary's `parse_patches` only accepts `replace:pending`. All other `replace:*` names fall through as unmatched content (`template.rs:181–192`):
 
@@ -329,7 +329,17 @@ So `<!-- replace:status -->...<!-- /replace:status -->` was treated as literal e
 **Root cause:** The skill emitted `replace:status` when it should have used `<!-- patch:status -->` — which works for any component name. `replace:` was introduced as a semantic alias specifically for `pending` (#25ag) and was never generalized.
 
 **Classification:** Skill-side bug (wrong patch prefix), not a binary bug. The binary correctly refused to broaden the `replace:` grammar. The fix is to use `<!-- patch:status -->` for status component updates.
-<!-- agent:boundary:fede5cb9 -->
+❯ Why does the skill emit the patch:status? Can the agent-doc binary handle this instead?
+### Re: why skill emits patch:status — opus-4-6
+
+Two aspects:
+
+**1. Why the skill, not the binary?** The status content is non-deterministic — the skill decides *what's notable* and *how to summarize*. The binary handles deterministic document manipulation (parsing, patching, CRDT merge). It can't decide what to write. That's the core responsibility boundary from the CLAUDE.md: "If the operation can be unit-tested with fixed inputs → binary. If it requires understanding natural language → skill."
+
+**2. Can the binary handle it?** It already does — `<!-- patch:status -->` works for any component name. The bug was simply using the wrong prefix. `replace:` was intentionally restricted to `pending` (because `replace:pending` has special rejection logic via `enforce_no_replace_pending`). The fix is trivial: emit `<!-- patch:status -->` instead of `<!-- replace:status -->`.
+
+A third option — generalize `replace:*` to work for all components — is unnecessary. `patch:*` already handles all component names generically. The `replace:` prefix only exists as a semantic alias for pending's special enforcement path.
+<!-- agent:boundary:377b6c19 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

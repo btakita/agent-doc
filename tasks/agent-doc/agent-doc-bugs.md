@@ -569,7 +569,7 @@ Or use: `agent-doc session set claude`
 
 ❯ I did the option 1. Does option 3 supercede option 2? If yes, let's implement option 3.
 <!-- patch:exchange -->
-### Re: option 3 supersedes option 2 — opus-4-6
+❯ ### Re: option 3 supersedes option 2 — opus-4-6 (HEAD)
 
 Yes, option 3 completely supersedes option 2. Here's why:
 
@@ -592,7 +592,26 @@ Three changes in route.rs + session_cmd.rs:
 - Existing projects with auto-written sessions: unaffected until they `session clear`
 
 Ready to implement. Added to pending.
-<!-- agent:boundary:87dac03e -->
+❯ Implement
+<!-- patch:exchange -->
+### Re: implement tmux_session auto-detect — opus-4-6
+
+Implemented. Three changes landed:
+
+**1. Removed auto-write** (`route.rs:resolve_target_session`): The `auto_update_config` parameter and the block that wrote fallback session to config.toml are gone. Session resolution now always auto-detects unless explicitly pinned.
+
+**2. Added `session clear`** (`session_cmd.rs` + `project_config.rs`): New subcommand removes `tmux_session` from config.toml. `agent-doc session` now prints `(auto-detect)` when unconfigured.
+
+**3. Cleaned up API**: `resolve_target_session()` dropped the unused `auto_update_config` param. Doc comments updated to reflect the new contract.
+
+**Verified:**
+- `make check` passes (292 tests, clippy clean)
+- `cargo install --path .` updated `~/.cargo/bin/agent-doc`
+- `session set claude` → `session clear` → `(auto-detect)` round-trip works
+- Auto-detect resolves to current tmux session at runtime
+
+Your config is now cleared to `(auto-detect)`. After reboots, routing will auto-detect whichever tmux session is current — no manual config.toml edits needed.
+<!-- agent:boundary:2d294be7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -625,6 +644,6 @@ Ready to implement. Added to pending.
 - [ ] [#zvmd] Submodule (HEAD) marker: fix show_head() to route via narrow_to_submodule — superproject rev-parse can't show submodule-tracked files, so add_head_marker falls through to the 'no HEAD → mark last heading only' fallback, which drops (HEAD) when the exchange component has no ### Re: heading yet or when the fallback runs during a boundary-only cycle
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
-- [ ] [#cv8a] tmux_session auto-detect by default: remove auto-write in resolve_target_session (route.rs:499-506), add `session clear` subcommand, make `session set` the only way to pin
+- [x] [#cv8a] tmux_session auto-detect by default: remove auto-write in resolve_target_session (route.rs:499-506), add `session clear` subcommand, make `session set` the only way to pin
 <!-- /agent:pending -->
 ## Assistant

@@ -318,13 +318,36 @@ My mistake. When I called `--pending-add`, I included `[#du8f]` and `[#pj2k]` in
 
 The canonical IDs are `#wp8c` (stream double-flush, now done) and `#pg8w` (lazy-claim pane theft, still open). I've marked `#wp8c` done and edited `#pg8w` to remove the embedded `[#pj2k]`.
 <!-- patch:exchange -->
-### Re: double IDs in pending — opus-4-6
+❯ ### Re: double IDs in pending — opus-4-6 (HEAD)
 
 My mistake. When I called `--pending-add`, I included `[#du8f]` and `[#pj2k]` in the text — but `--pending-add` auto-generates its own hash ID. So the result was two IDs: the auto-generated one (`#wp8c`, `#pg8w`) plus the one I embedded in the text.
 
 The canonical IDs are `#wp8c` (stream double-flush, now done) and `#pg8w` (lazy-claim pane theft, still open). I've marked `#wp8c` done and edited `#pg8w` to remove the embedded `[#pj2k]`.
+❯ This patchback to this doc still receives a double `### Re: double IDs in pending — opus-4-6 (HEAD)`. Why?
 <!-- patch:exchange -->
-<!-- agent:boundary:b535a983 -->
+### Re: skill-side duplication — different root cause — opus-4-6
+
+The duplication in THIS document is **not** caused by the stream.rs double-flush (#du8f). That fix applies to `agent-doc stream` (the timer-thread path). This document is written by `agent-doc write --stream` from the skill — a single-shot write, no timer thread.
+
+**Root cause: I've been using malformed patch close tags.**
+
+I was writing:
+```
+<!-- patch:exchange -->
+content
+<!-- patch:exchange -->
+```
+
+But `parse_patches` expects `<!-- /patch:exchange -->` (with forward slash) to close the block. Without the proper close tag, the parser:
+
+1. Sees first `<!-- patch:exchange -->` — recognizes opening tag, searches for `<!-- /patch:exchange -->` close — not found, falls through
+2. Sees second `<!-- patch:exchange -->` — same thing, falls through, but collects `response[0..second_marker]` into unmatched
+3. After loop: collects `response[0..end]` as trailing unmatched (since `last_end` was never advanced)
+
+Result: the content appears **twice** in unmatched. Then `try_ipc` synthesizes an exchange patch from this doubled unmatched text.
+
+**Fix:** Use `<!-- /patch:exchange -->` (with `/`) as the close tag in all subsequent writes. This is my error in the skill invocation, not a binary bug. The `0 components` in previous IPC logs was the tell — patches array was empty because no block was properly closed.
+<!-- agent:boundary:1add61a7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -629,7 +629,7 @@ Applied to `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/Layout
 **Plugin v0.2.57 built.** Install: IDEA → Settings → Plugins → gear → "Install Plugin from Disk" → `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.57-signed.zip`.
 
 After install+restart, the listener count should stay small (a few hundred at most) and the freeze should be gone.
-<!-- agent:boundary:927927a6 -->
+<!-- agent:boundary:79f10161 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

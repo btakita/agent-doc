@@ -207,7 +207,7 @@ The IPC path has no mode override — the plugin defaults to `append` for exchan
 
 **Fix:** Either gate the main-thread final flush when the timer thread already flushed the complete text, or pass `mode=replace` in the IPC patch JSON for stream flushes. Added as `#du8f`.
 <!-- patch:exchange -->
-<!-- agent:boundary:02757b2b -->
+<!-- agent:boundary:f7164c30 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

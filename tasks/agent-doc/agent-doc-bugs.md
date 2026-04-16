@@ -16,7 +16,7 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange patch=append -->
 
-<!-- agent:boundary:29eb86c0 -->
+<!-- agent:boundary:8f9c2084 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

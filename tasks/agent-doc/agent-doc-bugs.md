@@ -592,7 +592,7 @@ Three changes in route.rs + session_cmd.rs:
 - Existing projects with auto-written sessions: unaffected until they `session clear`
 
 Ready to implement. Added to pending.
-<!-- agent:boundary:4fcfd6bc -->
+<!-- agent:boundary:87dac03e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

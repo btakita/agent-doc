@@ -566,7 +566,7 @@ Or use: `agent-doc session set claude`
 2. **Medium term (code fix):** Add a `session auto-detect` or `session reset` subcommand that detects the current session and updates config. Or: make `agent-doc resync --fix` also update the config's `tmux_session` to the session it's relocating panes to. Currently resync fixes pane placement but leaves the config stale.
 
 3. **Long term:** Consider making `tmux_session` in config optional with auto-detect as default. Only pin to a specific session when the user explicitly runs `agent-doc session set <name>`. The "preserve stale config" behavior is too conservative — it protects against an edge case (cross-terminal session drift) but creates a worse problem (broken state after every reboot).
-<!-- agent:boundary:c939001f -->
+<!-- agent:boundary:f31b83cf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -135,14 +135,31 @@ reorder
 pending reorder
 ❯ Please add the previous failed patchback
 <!-- patch:exchange -->
-### Re: failed patchback artifacts — opus-4-6
+❯ ### Re: failed patchback artifacts — opus-4-6 (HEAD)
 
 The "noop", "reorder", "pending reorder" strings in the exchange are artifacts from my workaround — `agent-doc write` rejects empty stdin, so I had to pipe carrier text to execute `--pending-add` and `--pending-reorder` flags. That carrier text then got synthesized into the exchange via boundary synthesis as "unmatched content."
 
 This is a real bug: there's no way to run pending-only mutations without polluting the exchange. Added #-pending-only to the top of the pending list — `agent-doc write` needs a `--pending-only` or `--no-exchange` flag that accepts pending flags but suppresses exchange content synthesis.
 
 The first failed patchback (the one that triggered this whole thread) was the 0-component IPC bug — that's already fixed in the codebase. The artifacts you're seeing now are a different issue: the skill workflow has no clean path for pending-only writes.
-<!-- agent:boundary:bf1df241 -->
+
+❯ do #esws
+<!-- patch:exchange -->
+### Re: implementing #esws — opus-4-6
+
+Starting implementation. The root cause is three independent `patch_id` UUIDs generated for what should be a single logical write:
+- Socket path (write.rs:1548)
+- File path (write.rs:1649)  
+- Timeout fallback (write.rs:1070)
+
+**Plan:**
+
+1. **Binary (write.rs):** Generate patch_id once per logical write. `try_ipc()` returns the used patch_id alongside the bool so `run_stream()` can reuse it in the timeout fallback. Same patch_id flows through socket → file → fallback.
+
+2. **Plugin (PatchWatcher.kt):** Add `appliedPatchIds: ConcurrentHashMap<String, Long>` dedup set. Before applying any patch (socket or file), check if patch_id already applied. After applying, record it. Periodic cleanup of entries >60s.
+
+Implementing now.
+<!-- agent:boundary:5fed6a42 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -294,7 +294,7 @@ Root cause in `template.rs:parse_patches()` line 258: when a recognized opening 
 The pending item's text already carries the gate context — e.g. `[/] [#gqep] Release v0.32.4: ... BLOCKED on manual-testing gate` vs `[/] [#a002] ... awaiting large-drift trip for normalize_threshold_exceeded telemetry`. Adding gate-type markers would duplicate information that's already in the description.
 
 The important invariant is binary: `[/]` items are never auto-reaped. The *what* of the gate is human-readable context, not machine state. If we ever needed machine-actionable gate types (e.g., auto-reap on `cargo publish` or auto-reap on `git push`), that would be a different feature — event-driven gate resolution — and the marker syntax would be something like `[/release]` or `[/deploy]`. But that's speculative and not needed now.
-<!-- agent:boundary:77c82d94 -->
+<!-- agent:boundary:251dc747 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

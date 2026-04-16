@@ -98,7 +98,7 @@ Yes, several race windows exist. Ranked by severity:
 
 The double-apply (#1) and stale snapshot (#2) are the most likely to cause observable issues — duplicated exchange content or "ghost" diffs in the next cycle. Both are mitigable: #1 with an atomic IPC mode select (socket XOR file, never both in flight), #2 with a post-apply snapshot handshake instead of timeout polling.
 
-### Re: re-enabling the 19 ignored tests — opus-4-6
+❯ ### Re: re-enabling the 19 ignored tests — opus-4-6 (HEAD)
 
 Docker/chroot is overkill. The best path depends on the test category:
 
@@ -117,12 +117,27 @@ This is the idiomatic Rust approach. Estimated scope: update the path-resolution
 **5 `debounce_gaps_test_plan` stubs:** These are blocked on pub API surface (`crdt::merge`, `status_file_path`, `preflight::run`, watch daemon API, cleanup fn). Unblocking requires making those APIs public — which should happen naturally as the supervisor module wire-up (#vnp0) progresses. No workaround; these wait on the API.
 
 **Recommended priority:** base_dir refactor (11 tests) → submodule IPC setup (2 tests) → filesystem notify (1 test) → pub API stubs (5, blocked on other work).
-<!-- agent:boundary:8da903d7 -->
+
+❯ Add the priority to the top of the pending list.
+<!-- patch:exchange -->
+### Re: adding test priorities to pending — opus-4-6
+
+Added three items to the top of pending:
+1. base_dir refactor (11 tests) — the bulk of the work
+2. submodule IPC test fixtures (2 tests)
+3. filesystem notify test (1 test)
+
+The 5 `debounce_gaps_test_plan` stubs are omitted since they're blocked on pub API surface that unblocks with #vnp0 — no point tracking them separately.
+noop
+<!-- agent:boundary:df9cb56d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#vefa] Refactor set_current_dir tests to accept base_dir: &Path parameter — re-enable 11 ignored tests (autoclaim 3, sessions 5, watch 2)
+- [ ] [#3t02] Add submodule IPC routing test fixtures (git init + submodule add in tmpdir) — re-enable 2 ignored tests
+- [ ] [#cjpp] Un-ignore watcher_detects_change with real tmpdir + timeout — re-enable 1 integration test
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end

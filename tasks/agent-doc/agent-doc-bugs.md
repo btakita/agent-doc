@@ -356,7 +356,7 @@ This keeps the responsibility boundary clean:
 ### Re: implementing --status flag — opus-4-6
 
 On it. Adding `--status "content"` to `agent-doc write` following the `--pending-add` pattern. Will update shortly with the implementation.
-### Re: --status flag implemented — opus-4-6
+❯ ### Re: --status flag implemented — opus-4-6 (HEAD)
 
 Done. Three files changed:
 
@@ -374,14 +374,32 @@ echo "content" | agent-doc write doc.md --status "New status" --stream
 ```
 
 The skill no longer needs `<!-- patch:status -->` delimiters — just pass `--status "text"` alongside the exchange content.
-<!-- agent:boundary:bef17170 -->
+❯ do #08yv
+### Re: #08yv — pre-lock file modification race fixed — opus-4-6
+
+Fixed. The race window between `content_at_start` read and `doc_lock` acquire allowed concurrent agent-doc writes to modify the file + snapshot, drifting the merge baseline and pre-response undo snapshot.
+
+**Three functions patched** — `run()`, `run_template()`, `run_stream()` (disk path):
+
+1. **`write.rs` `run()`** — Moved `acquire_doc_lock` before `content_at_start` read. `save_pending` (doesn't need file content) stays above the lock. Pre-response snapshot and `content_ours` construction now happen under the lock.
+
+2. **`write.rs` `run_template()`** — Same pattern: lock first, read under lock. Patch application happens under the lock.
+
+3. **`write.rs` `run_stream()` disk path** — Same pattern: lock first, read + patch application + normalization all under the lock.
+
+The IPC path in `run_stream()` is unaffected — the plugin handles atomicity there, and its `content_at_start` is only used for snapshot/dedup, not for merge baseline.
+
+**Lock scope widened slightly** — the lock now covers `save_pre_response`, patch application, and `content_ours` construction. These are fast local operations (typically <5ms per perf logs), so contention impact is negligible.
+
+`make check` passes: 1042 tests green, clippy clean.
+<!-- agent:boundary:98ee8661 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [/] [#p2xm] Orphaned patch:exchange marker leak: parse_patches() does not consume unclosed opening markers — they leak into unmatched text and get appended to exchange verbatim. Fix: advance last_end past unclosed openers in parse_patches()
-- [ ] [#08yv] Pre-lock file modification race: content_at_start read (write.rs ~725) to doc_lock acquire (~750) window allows external edits that drift the snapshot baseline
+- [x] [#08yv] Pre-lock file modification race: content_at_start read (write.rs ~725) to doc_lock acquire (~750) window allows external edits that drift the snapshot baseline
 - [ ] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots
 - [ ] [#vefa] Refactor set_current_dir tests to accept base_dir: &Path parameter — re-enable 11 ignored tests (autoclaim 3, sessions 5, watch 2)
 - [ ] [#3t02] Add submodule IPC routing test fixtures (git init + submodule add in tmpdir) — re-enable 2 ignored tests

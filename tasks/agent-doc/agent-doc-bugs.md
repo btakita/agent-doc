@@ -457,7 +457,7 @@ No `rescue_result` logged — the rescue code never reached the swap-pane/join-p
 Verified: `tmux list-panes -t @1` returns panes; `tmux list-panes -t @1:agent-doc` errors with "can't find session: @1".
 
 1010 tests pass, clippy clean, release binary built.
-<!-- agent:boundary:0de9dd4f -->
+<!-- agent:boundary:843e0b75 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

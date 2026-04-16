@@ -616,7 +616,7 @@ Done.
 If it still errors, the fallback is to fully quit that `claude` process in the pane and let `agent-doc start` respawn it — the new Claude instance will rescan `~/.claude/skills/` at startup and find the symlink.
 
 Tell me what happens (works / still broken / new error) and I'll either queue up option (b) — the `agent-doc skill install --user` binary change — or dig into whatever's still wrong.
-<!-- agent:boundary:2d0b1057 -->
+<!-- agent:boundary:612f4121 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

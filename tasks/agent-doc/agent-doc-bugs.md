@@ -339,7 +339,7 @@ Two aspects:
 **2. Can the binary handle it?** It already does — `<!-- patch:status -->` works for any component name. The bug was simply using the wrong prefix. `replace:` was intentionally restricted to `pending` (because `replace:pending` has special rejection logic via `enforce_no_replace_pending`). The fix is trivial: emit `<!-- patch:status -->` instead of `<!-- replace:status -->`.
 
 A third option — generalize `replace:*` to work for all components — is unnecessary. `patch:*` already handles all component names generically. The `replace:` prefix only exists as a semantic alias for pending's special enforcement path.
-<!-- agent:boundary:377b6c19 -->
+<!-- agent:boundary:ce699928 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -341,7 +341,7 @@ Two aspects:
 A third option — generalize `replace:*` to work for all components — is unnecessary. `patch:*` already handles all component names generically. The `replace:` prefix only exists as a semantic alias for pending's special enforcement path.
 
 ❯ Why would the skill be involved with the boundaries `<!-- patch:status -->`/`<!-- /patch:status -->`? This seems like deterministic logic. The inner content seems like a skill.
-### Re: patch delimiters as deterministic logic — opus-4-6
+❯ ### Re: patch delimiters as deterministic logic — opus-4-6 (HEAD)
 
 You're right. The `<!-- patch:status -->` / `<!-- /patch:status -->` delimiters are deterministic routing — they tell the binary which component to target. That's binary-side logic, not skill-side.
 
@@ -352,7 +352,11 @@ The pattern already exists for pending: the skill doesn't emit `<!-- patch:pendi
 This keeps the responsibility boundary clean:
 - **Skill** decides *what* the status says (non-deterministic)
 - **Binary** decides *where* it goes and *how* it gets there (deterministic)
-<!-- agent:boundary:3bb76dd6 -->
+❯ Yes...do this
+### Re: implementing --status flag — opus-4-6
+
+On it. Adding `--status "content"` to `agent-doc write` following the `--pending-add` pattern. Will update shortly with the implementation.
+<!-- agent:boundary:120c92d0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -388,5 +392,6 @@ This keeps the responsibility boundary clean:
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
 - [ ] [#77mf] Event-driven gate resolution: typed gate markers like [/release] and [/deploy] that auto-resolve on matching events (cargo publish, git push). Extends the binary [/] invariant with machine-actionable gate types — reaper checks event log before skipping.
+- [ ] [#6hgf] Add --status flag to agent-doc write: skill passes status text as CLI arg, binary handles component targeting with replace semantics
 <!-- /agent:pending -->
 ## Assistant

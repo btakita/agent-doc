@@ -647,7 +647,7 @@ Done. Modified `resolve_pane_cwd()` in `git.rs` to walk up from the superproject
 ❯ When I navigated to src/session-share/tasks/claudescore.md, the plugin attempted an autoclaim. But the tmux pane opened claude code on my home directory
 ❯ ![img.png](img.png)
 <!-- patch:exchange -->
-### Re: $HOME skill root bug — opus-4-6
+❯ ### Re: $HOME skill root bug — opus-4-6 (HEAD)
 
 Found it. `find_outermost_skill_root()` walks up to `$HOME` and finds `~/.claude/skills/agent-doc/SKILL.md` (the symlink we just created). It checks the skill file *before* the `$HOME` stop condition, so `$HOME` gets returned as the outermost skill root.
 
@@ -660,7 +660,23 @@ This means `~/.claude/skills/agent-doc/` (user-level symlink) never interferes w
 **Tests:** 6 pass (added a test specifically for "non-git dir with skill should be ignored"). `make check` clean. Release build reinstalled.
 
 Try the autoclaim again — it should now resolve to `agent-loop/` root, not `$HOME`.
-<!-- agent:boundary:66f8c9b1 -->
+
+❯ It does resolve to `agent-loop/`. But I want it to resolve to `src/session-share` since `claudescore.md` is in `src/session-share`.Would a walkdown be a better strategy instead?
+<!-- patch:exchange -->
+### Re: revert chdir-up, keep symlink — opus-4-6
+
+You're right — the chdir-up approach is wrong. It trades correct submodule cwd for skill discovery, but skill discovery is already solved by the `~/.claude/skills/agent-doc` symlink.
+
+**Reverted:** removed `find_outermost_skill_root()` and all 4 associated tests. `resolve_pane_cwd()` is back to the original `narrow_to_submodule` behavior:
+- Submodule docs → cwd = submodule root (e.g., `src/session-share`)
+- Top-level docs → cwd = superproject root (e.g., `agent-loop`)
+
+The symlink handles skill discovery. The `--user` flag (#a002-style binary fix) would make it self-installing without the symlink, but that's a separate item.
+
+`make check` clean, release build reinstalled. Try the autoclaim again — should resolve to `src/session-share` now.
+
+A walkdown wouldn't help here — the problem was never about traversal direction. It was about conflating two orthogonal concerns (cwd selection vs skill discovery). The symlink cleanly separates them.
+<!-- agent:boundary:2d795bf4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

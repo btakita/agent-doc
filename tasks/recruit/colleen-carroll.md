@@ -59,7 +59,7 @@ Transcribed and diarized `2026-04-13-colleen-carroll-intro-call.mp4` (28:04, 2 s
 
 ❯ Please draft a response for /home/brian/work/btakita/agent-loop/mail/conversations/test-double-chat-follow-up.md
 ❯ Create a custom resume
-### Re: Draft response + custom resume — opus-4-6
+❯ ### Re: Draft response + custom resume — opus-4-6 (HEAD)
 
 #### Resume
 
@@ -81,11 +81,11 @@ Built `BrianTakita-test-double.pdf` (4 pages) with a Test Double-specific profil
 
 > Hi Colleen,
 >
-> Thanks again for the great conversation on Sunday. I'd like to move forward.
+❯ > Thanks again for the great conversation on Monday. I'd like to move forward.
 >
 > I've attached my resume. $100/hr works for me. I'm comfortable with either the Ruby on Rails + React project or the Node/TypeScript one, so happy to go wherever the fit is best.
 >
-> I'm also open to discussing full-time down the road, especially given the AI work you mentioned.
+❯ > I'm also open to discussing the full-time role, especially given the AI work you mentioned.
 >
 > Looking forward to the next steps.
 >
@@ -93,7 +93,16 @@ Built `BrianTakita-test-double.pdf` (4 pages) with a Test Double-specific profil
 > Brian
 
 Let me know if you'd like changes to the resume or email, and I'll push to Gmail Drafts via corky.
-<!-- agent:boundary:e52916e6 -->
+❯ Please send my updated email as a gmail draft
+### Re: Send updated email — opus-4-6
+
+Pushed to Gmail Drafts (btak.dev). The draft includes:
+- Updated wording: "Monday" and "the full-time role"
+- Resume attachment: BrianTakita-test-double.pdf
+- Threaded via In-Reply-To + thread_id
+
+Open your btak.dev Gmail drafts to review and send.
+<!-- agent:boundary:8149a495 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

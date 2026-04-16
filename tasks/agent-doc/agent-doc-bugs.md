@@ -283,7 +283,7 @@ Root cause in `template.rs:parse_patches()` line 258: when a recognized opening 
 - `parse_patches_orphaned_opener_between_valid_patches` — orphan sandwiched between two valid patches, verifies valid patches still parse and orphan is consumed
 
 **Verification:** 1042 tests pass (2 new), 19 ignored, clippy clean, release binary built and installed.
-### Re: [/] gating semantics — opus-4-6
+❯ ### Re: [/] gating semantics — opus-4-6 (HEAD)
 
 `[/]` is sufficient without sub-types. The gate condition is implicit from the project context, not the marker itself:
 
@@ -294,7 +294,20 @@ Root cause in `template.rs:parse_patches()` line 258: when a recognized opening 
 The pending item's text already carries the gate context — e.g. `[/] [#gqep] Release v0.32.4: ... BLOCKED on manual-testing gate` vs `[/] [#a002] ... awaiting large-drift trip for normalize_threshold_exceeded telemetry`. Adding gate-type markers would duplicate information that's already in the description.
 
 The important invariant is binary: `[/]` items are never auto-reaped. The *what* of the gate is human-readable context, not machine state. If we ever needed machine-actionable gate types (e.g., auto-reap on `cargo publish` or auto-reap on `git push`), that would be a different feature — event-driven gate resolution — and the marker syntax would be something like `[/release]` or `[/deploy]`. But that's speculative and not needed now.
-<!-- agent:boundary:251dc747 -->
+❯ `[/release]` and `[/deploy]` are interesting. Add to the bottom of pending.
+
+❯ Make sure the instructions are in a runbook.
+### Re: typed gates + runbook — opus-4-6
+
+Added `[/release]` / `[/deploy]` event-driven gate resolution to the bottom of pending.
+
+Updated the pending-ops runbook (`runbooks/pending-ops.md`) with a new **"When to gate vs done"** section that codifies:
+- **`--pending-gate`** — default after implementation. Use when code is complete but awaiting external signal (release, deploy, live verification, telemetry, user confirmation).
+- **`--pending-done`** — only when user explicitly confirms the item is fully resolved.
+- **Default rule:** always gate after implementation, never done. The user's confirmation closes the gate.
+
+Also updated the "What to decide each cycle" checklist: first bullet now reads "Items implemented during this response → `--pending-gate <id>`" instead of `--pending-done`.
+<!-- agent:boundary:e6e691f9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -329,5 +342,6 @@ The important invariant is binary: `[/]` items are never auto-reaped. The *what*
 - [ ] [#zvmd] Submodule (HEAD) marker: fix show_head() to route via narrow_to_submodule — superproject rev-parse can't show submodule-tracked files, so add_head_marker falls through to the 'no HEAD → mark last heading only' fallback, which drops (HEAD) when the exchange component has no ### Re: heading yet or when the fallback runs during a boundary-only cycle
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
+- [ ] [#77mf] Event-driven gate resolution: typed gate markers like [/release] and [/deploy] that auto-resolve on matching events (cargo publish, git push). Extends the binary [/] invariant with machine-actionable gate types — reaper checks event log before skipping.
 <!-- /agent:pending -->
 ## Assistant

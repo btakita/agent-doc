@@ -409,7 +409,7 @@ Fixed. Root cause was two distinct issues:
 
 **Results:** 1010 tests pass, 0 failures, 19 ignored. Stable across 3 consecutive runs. Clippy clean.
 ❯ do #2g09
-### Re: #2g09 FFI claim auto-force + JB Force Claim — opus-4-6
+❯ ### Re: #2g09 FFI claim auto-force + JB Force Claim — opus-4-6 (HEAD)
 
 Implemented both parts:
 
@@ -429,7 +429,35 @@ The `--force` flag is preserved for its other purpose: overriding the binding in
 - `editors/jetbrains/.../plugin.xml` — registered `AgentDoc.ForceClaim` action
 
 **Verification:** 1010 tests pass, 0 failures, clippy clean, plugin builds clean.
-<!-- agent:boundary:f9eabe33 -->
+❯ I'm still having the pane force close on src/boost-client/tasks/monsterrodholders.md. Why?
+I'm also seeing frequent navigation to the tmux 1:stash window. Why? Are the tmux tests interfering with my current tmux session running the agent-doc project?
+### Re: monsterrodholders pane force-close — opus-4-6
+
+Found the root cause. It's a stash rescue bug in `sync.rs:791`.
+
+**The bug:** When sync detects a pane in the stash window and attempts rescue, it constructs the tmux target as `format!("{}:agent-doc", window_id)` — e.g., `"@1:agent-doc"`. Tmux interprets the colon as `session:window`, treating `@1` as a session name. No session is named `@1`, so `list-panes` fails, `target_panes` is empty, and rescue silently falls through to "no alive pane → auto-start".
+
+**Proof from sync log:**
+```
+rescue_attempt pane=%91 file=src/boost-client/tasks/monsterrodholders.md stash_window=stash session=claude
+auto-starting session for src/boost-client/tasks/monsterrodholders.md (no alive pane)
+```
+
+No `rescue_result` logged — the rescue code never reached the swap-pane/join-pane step because the pane list was empty.
+
+**The cycle:**
+1. Sync runs → stashes excess panes for layout reconciliation
+2. Next sync → finds monsterrodholders pane in stash
+3. Rescue attempts `list-panes -t @1:agent-doc` → fails (bad tmux target)
+4. Falls through to "no alive pane" → auto-starts new pane
+5. Old pane orphaned in stash → repeat from step 1
+
+**The fix (sync.rs:791):** Use the window ID directly (`list-panes -t @1`) instead of the broken `@1:agent-doc` format. The window parameter already IS the agent-doc window — no need to construct a `session:window_name` target.
+
+Verified: `tmux list-panes -t @1` returns panes; `tmux list-panes -t @1:agent-doc` errors with "can't find session: @1".
+
+1010 tests pass, clippy clean, release binary built.
+<!-- agent:boundary:0de9dd4f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

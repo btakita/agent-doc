@@ -360,7 +360,7 @@ Yes, there are two alternatives if you want to drop the `<!-- patch:exchange -->
 For now, the `<!-- patch:exchange -->` / `<!-- /patch:exchange -->` wrapper is the most explicit and safest option — it tells the parser exactly what component to target and avoids ambiguity. But if the wrapper feels noisy in the document, option 1 (raw content, no wrapper) works for typical responses that don't contain agent-doc markers.
 
 Try it out and let me know if you want to switch.
-<!-- agent:boundary:f32da195 -->
+<!-- agent:boundary:d5456858 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

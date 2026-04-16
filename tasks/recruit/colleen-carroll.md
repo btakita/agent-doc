@@ -40,7 +40,7 @@ Created `mail/contacts/colleen-carroll/` with AGENTS.md + CLAUDE.md symlink.
 
 Quality settings optimized for recruiter reference (screen recording): CRF 28 reduces file size while maintaining clarity for faces/text visibility.
 ===
-### Re: Transcribe + diarize intro call — opus-4-6
+❯ ### Re: Transcribe + diarize intro call — opus-4-6 (HEAD)
 
 Transcribed and diarized `2026-04-13-colleen-carroll-intro-call.mp4` (28:04, 2 speakers detected).
 
@@ -56,7 +56,44 @@ Transcribed and diarized `2026-04-13-colleen-carroll-intro-call.mp4` (28:04, 2 s
 - Colleen mentioned interest in Brian's AI/agentic background; floated potential full-time opportunity
 - Brian discussed: Pivotal Labs background, RSpec/test-double contributions, Rust/TypeScript/Python, agent-doc tooling, spec-driven AI development
 - Colleen knows Stephen Baker (RSpec) — recently connected via email
-<!-- agent:boundary:93dbffa5 -->
+
+❯ Please draft a response for /home/brian/work/btakita/agent-loop/mail/conversations/test-double-chat-follow-up.md
+❯ Create a custom resume
+### Re: Draft response + custom resume — opus-4-6
+
+#### Resume
+
+Built `BrianTakita-test-double.pdf` (4 pages) with a Test Double-specific profile:
+- **Pivotal Labs leads** the experience section (XP, TDD, pair programming, mentoring 20+ startups, RailsConf 2008)
+- Highlights: Rails, React, Node/TypeScript, consulting DNA, BDD/TDD, AI/agentic work
+- Experience order: Pivotal Labs > Presence AI > Open Source > TrueCar > Milyoni > SocialChorus > CrystalCommerce > Neo Innovation > Censible > Freelance
+- Skills bolded: Ruby on Rails, React, TypeScript, Node.js, Python, Rust, Context Engineering, Spec-Driven Development, Agents, GraphQL, PostgreSQL, Docker, AWS
+
+**Review:** [file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-test-double.pdf](file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-test-double.pdf)
+
+#### Draft email reply
+
+**To:** colleen.carroll@testdouble.com
+**From:** btak.dev@gmail.com
+**Subject:** Re: Test Double chat - follow up
+**In-Reply-To:** CAD-U2DmY82q0brB_7HbgNsvJ1RC5Z2pdKGWG9TGX226g7Wzu0g@mail.gmail.com
+**Attachment:** BrianTakita-test-double.pdf
+
+> Hi Colleen,
+>
+> Thanks again for the great conversation on Sunday. I'd like to move forward.
+>
+> I've attached my resume. $100/hr works for me. I'm comfortable with either the Ruby on Rails + React project or the Node/TypeScript one, so happy to go wherever the fit is best.
+>
+> I'm also open to discussing full-time down the road, especially given the AI work you mentioned.
+>
+> Looking forward to the next steps.
+>
+> Best,
+> Brian
+
+Let me know if you'd like changes to the resume or email, and I'll push to Gmail Drafts via corky.
+<!-- agent:boundary:8a4df1c0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

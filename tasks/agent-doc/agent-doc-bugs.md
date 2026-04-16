@@ -663,7 +663,7 @@ Try the autoclaim again — it should now resolve to `agent-loop/` root, not `$H
 
 ❯ It does resolve to `agent-loop/`. But I want it to resolve to `src/session-share` since `claudescore.md` is in `src/session-share`.Would a walkdown be a better strategy instead?
 <!-- patch:exchange -->
-### Re: revert chdir-up, keep symlink — opus-4-6
+❯ ### Re: revert chdir-up, keep symlink — opus-4-6 (HEAD)
 
 You're right — the chdir-up approach is wrong. It trades correct submodule cwd for skill discovery, but skill discovery is already solved by the `~/.claude/skills/agent-doc` symlink.
 
@@ -676,7 +676,25 @@ The symlink handles skill discovery. The `--user` flag (#a002-style binary fix) 
 `make check` clean, release build reinstalled. Try the autoclaim again — should resolve to `src/session-share` now.
 
 A walkdown wouldn't help here — the problem was never about traversal direction. It was about conflating two orthogonal concerns (cwd selection vs skill discovery). The symlink cleanly separates them.
-<!-- agent:boundary:6908cbc3 -->
+
+❯ So is there a solution using `agent-doc start`? I don't see why you cannot walk back from the file to see `src/session-share/.agent-doc`
+<!-- patch:exchange -->
+### Re: resolve_pane_cwd already does this — opus-4-6
+
+The code already walks back from the file. Here's the chain:
+
+1. `route.rs:670` — `let cwd = crate::git::resolve_pane_cwd(file);`
+2. `git.rs:280` — `resolve_to_git_root(file)` finds superproject = `agent-loop`
+3. `git.rs:281` — `narrow_to_submodule(&super_root, &resolved)` runs `git rev-parse --show-toplevel` from the file's parent dir
+4. For `src/session-share/tasks/claudescore.md`, that returns `src/session-share` (it's a git submodule with its own `.git`)
+5. `in_submodule = true` → returns `src/session-share`
+
+The `$HOME` result you saw was entirely caused by `find_outermost_skill_root()` that I added and then reverted. The original `resolve_pane_cwd` was already correct — it resolves submodule docs to their submodule root.
+
+The `.agent-doc/` directory detection is what `supervisor/cwd.rs` uses (project root finder), but `resolve_pane_cwd` achieves the same thing via git submodule detection — which is more reliable since it uses git's own topology rather than looking for a specific directory.
+
+Try the autoclaim again with the reverted binary — it should resolve to `src/session-share` now.
+<!-- agent:boundary:417e94a1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

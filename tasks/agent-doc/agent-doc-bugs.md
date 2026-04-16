@@ -526,7 +526,7 @@ This moves any pane found in the "wrong" session's stash to the `target_sess` �
 
 **The fix already landed** (correct `list-panes -t @1` target) stops step 1 from recurring. The cleanup steps from the previous response (resync + kill session 2) clear the accumulated damage.
 ❯ An agent doc tmux session interaction is still acting strange. I saw message (yellow bar) about a document being claimed in tmux. Then tmux navigated to the 1:stash tmux window. I did not explicitly claim a document...so it seems to have happened in the background. What is going on? Please look in the logs.
-### Re: background claim + stash navigation — haiku
+❯ ### Re: background claim + stash navigation — haiku (HEAD)
 
 **What happened:** An `auto_resync_on_drift` fired at 13:11:46 (ops.log) after 2 consecutive drift events. It found 14 issues and applied fixes. The resync relocates panes via `join-pane`, which triggers the JetBrains plugin's IPC claim notification (the yellow bar). The tmux focus jumped to `claude:1:stash` because `join-pane`/`stash_pane` operations move tmux's active selection.
 
@@ -542,7 +542,31 @@ The root problem: the registry's `window` field says `@9` for monsterrodholders 
 **Why it happened without user action:** The `agent-doc sync` runs automatically (triggered by file save events from the JetBrains plugin watcher). The sync detected drift → auto-resync kicked in → resync moved panes → IPC notified the plugin → yellow bar appeared. No explicit user claim was needed.
 
 **To clean up:** Run `agent-doc resync --fix --session claude` to relocate the wrong-session panes to the `claude` session and rescue monsterrodholders from the stash.
-<!-- agent:boundary:684f45f2 -->
+
+❯ .agent-doc/config.toml still has `tmux_session = "1"`
+❯ This also causes issues when I reboot...where I cannot connect to the tmux session without going into config.toml and changing the value. We need a way to get started after a reboot and in this circumstance. Please advise.
+### Re: stale tmux_session config + reboot recovery — haiku
+
+**The immediate fix:** Change `tmux_session` in `.agent-doc/config.toml` from `"1"` to `"claude"`:
+
+```
+tmux_session = "claude"
+```
+
+Or use: `agent-doc session set claude`
+
+**Why session "1" is there:** At some point a tmux session named "1" was active and agent-doc auto-wrote it to config (route.rs:502-506 — auto-updates when config was previously empty). After a reboot, tmux recreates sessions with different names, but the config still says "1".
+
+**Why it persists across reboots:** By design. route.rs:491-508 has explicit logic: when a configured session IS set but dead, it preserves the config value and falls back to current session at runtime. The comment says: *"If a session IS configured but dead (e.g. server restart), preserve the config value so a session-1 terminal cannot silently overwrite the project's session-0 target."* This prevents session drift but creates the reboot friction you're hitting.
+
+**What should change (design advice):**
+
+1. **Short term:** Just set it to `"claude"` now. The `claude` session name is the hardcoded fallback (route.rs:105 `TMUX_SESSION_NAME = "claude"`), so it's stable across reboots as long as your tmux config creates a session named "claude".
+
+2. **Medium term (code fix):** Add a `session auto-detect` or `session reset` subcommand that detects the current session and updates config. Or: make `agent-doc resync --fix` also update the config's `tmux_session` to the session it's relocating panes to. Currently resync fixes pane placement but leaves the config stale.
+
+3. **Long term:** Consider making `tmux_session` in config optional with auto-detect as default. Only pin to a specific session when the user explicitly runs `agent-doc session set <name>`. The "preserve stale config" behavior is too conservative — it protects against an edge case (cross-terminal session drift) but creates a worse problem (broken state after every reboot).
+<!-- agent:boundary:c939001f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -361,14 +361,22 @@ For now, the `<!-- patch:exchange -->` / `<!-- /patch:exchange -->` wrapper is t
 
 Try it out and let me know if you want to switch.
 ❯ I did not see the patch:exchange in the last patchback. Why?
-### Re: patch:exchange visibility — opus-4-6
+❯ ### Re: patch:exchange visibility — opus-4-6 (HEAD)
 
 That's correct — the `<!-- patch:exchange -->` / `<!-- /patch:exchange -->` wrapper tags are **never written to the document**. They're consumed by `parse_patches` in the write command. The parser extracts the content between the tags and applies it to the exchange component. Only the inner content (your response text) appears in the document.
 
 The wrapper exists only in the heredoc I pipe to `agent-doc write` — it's a transport-layer directive, not document content. You'll never see it in the rendered file.
 
 So there's nothing to "test the ergonomics of" from the document side — it's invisible to you. The ergonomics question is only relevant if I were to use raw content (no wrapper) instead, which would also be invisible to you but slightly less safe for responses containing HTML comment markers.
-<!-- agent:boundary:9b87e244 -->
+❯ This document has several `<!-- patch:exchange -->` comments in it. Was this due to the bug you just fixed?
+### Re: leftover patch:exchange comments — opus-4-6
+
+Yes, exactly. When I used `<!-- patch:exchange -->` as both open AND close (no `/`), `parse_patches` couldn't match the block. Both markers fell through as unrecognized and ended up as literal text in the `unmatched` content — which was then written to the document verbatim.
+
+With the proper `<!-- /patch:exchange -->` close tag, the parser correctly extracts the content and the wrapper tags are consumed. They never reach the document.
+
+The leftover `<!-- patch:exchange -->` comments visible in the exchange are artifacts from the earlier malformed cycles. They'll be cleaned up on the next `compact exchange`.
+<!-- agent:boundary:c709460c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

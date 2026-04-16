@@ -542,7 +542,7 @@ The root problem: the registry's `window` field says `@9` for monsterrodholders 
 **Why it happened without user action:** The `agent-doc sync` runs automatically (triggered by file save events from the JetBrains plugin watcher). The sync detected drift → auto-resync kicked in → resync moved panes → IPC notified the plugin → yellow bar appeared. No explicit user claim was needed.
 
 **To clean up:** Run `agent-doc resync --fix --session claude` to relocate the wrong-session panes to the `claude` session and rescue monsterrodholders from the stash.
-<!-- agent:boundary:ad413bdb -->
+<!-- agent:boundary:684f45f2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

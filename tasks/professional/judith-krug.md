@@ -238,7 +238,7 @@ Based on the developer portal docs and TMO's pricing model:
 
 ---
 
-### Re: Strategy Session Prep — sonnet-4-6
+❯ ### Re: Strategy Session Prep — sonnet-4-6 (HEAD)
 
 **Where you stand going in:**
 - $1,000 retainer paid ✓
@@ -264,7 +264,67 @@ Based on the developer portal docs and TMO's pricing model:
 - Lead with the website delivery as proof of execution, not as a sales pitch
 
 **Watch for:** Robert Waldman may push GoHighLevel (he has enterprise access). Have a clear answer on whether GHL replaces or complements the platform choice.
-<!-- agent:boundary:abf40110 -->
+
+❯ transcribe + diarize /home/brian/work/btakita/agent-loop/mail/contacts/judith-krug/recordings/phone_20260416-143052_3107290112.m4a
+### Re: 2026-04-16 call transcript — sonnet-4-6
+
+**Transcript:** `mail/contacts/judith-krug/recordings/phone_20260416-143052-diarized.md`
+**Participants:** Brian, Judith, Robert Waldman (in LA visiting for 2 weeks)
+
+#### Platform decision: TMO locked in
+
+Judith already signed up and paid for TMO — MA is off the table ("as far as I'm concerned, that's a done deal, maybe in the future, but not right now"). Eight setup/training calls scheduled with TMO; first done; hope to start entering data by Monday. She's committed for at least a year.
+
+#### TMO API
+
+- TMO confirmed they have an API — asked about webhooks, no webhooks yet
+- API seat question: unknown, "it shouldn't" require one — TMO already knows Brian wants API for CRM export; they've been receptive
+- TMO call scheduled ~1 hour after this call to ask directly
+- Mirka (TMO contact) offered to help with document mapping for Judith's custom docs
+
+#### No OCR in TMO
+
+TMO is old school, no AI currently (though hiring AI people). Manual data entry required. **OCR extraction remains in scope** — Brian builds it to pull doc fields and push to TMO via API.
+
+#### Scope agreed
+
+1. **Borrower + lender portals** — Brian builds upload; data/docs forwarded to TMO via API
+2. **OCR extraction** — fillable PDFs → auto-populate TMO loan fields
+3. **Google Calendar notifications** — Judith has G Suite; Outlook integration is limited/skipped
+4. **TMO dashboard** — view TMO data without a seat (for Judith / underwriter visibility)
+5. **GoHighLevel CRM** — investor outreach, automations, email blasts via Robert's enterprise account
+
+#### GoHighLevel (Robert Waldman)
+
+Robert has enterprise GHL access through a financial company client. They offered Judith a free sub-account. Robert already built 4 automations for that client in one day using GHL's Claude AI workflow builder. He'll handle investor email blasts for the 400-contact outreach.
+
+Robert also demoed a GHL + Supabase site (borrower portal, lender portal, loan origination backend) that he built — enterprise quality, judge spent 30 min on it and started referring clients. He'll share the site for design reference and is open to collaborating.
+
+#### TMO seats
+
+Judith has 1 seat. Staff pushing for 2nd because "two people can't be logged in at once." She'll discuss with TMO today. Brian's dashboard approach (read-only via API) would reduce pressure on seat count.
+
+#### Documents
+
+Judith uses her own custom docs (not TMO Lightning templates), developed for ADS over many years. Mirka (TMO) may help map these.
+
+#### Investor outreach
+
+Judith will add Brian to her investor e-blast list so he can see how she formats deal pitches. Robert owns the GHL automation for outreach campaigns. 400 new contacts to work.
+
+#### GoDaddy
+
+Judith shared GoDaddy PIN verbally during call (not logged here). Credentials are now in hand.
+
+#### Next steps
+
+- [ ] TMO: confirm API seat requirement + webhook roadmap
+- [ ] Review TMO applicant portal embed link + referring broker link
+- [ ] Build OCR pipeline (fillable PDF → TMO fields via API)
+- [ ] Set up Judith's GoHighLevel sub-account via Robert's enterprise
+- [ ] Get Robert's demo site URL for design reference
+- [ ] Investor e-blast: draft outreach sequence with Robert for 400 contacts
+<!-- agent:boundary:a8ea28c8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

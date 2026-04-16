@@ -594,7 +594,7 @@ Three changes in route.rs + session_cmd.rs:
 Ready to implement. Added to pending.
 ❯ Implement
 <!-- patch:exchange -->
-### Re: implement tmux_session auto-detect — opus-4-6
+❯ ### Re: implement tmux_session auto-detect — opus-4-6 (HEAD)
 
 Implemented. Three changes landed:
 
@@ -611,7 +611,25 @@ Implemented. Three changes landed:
 - Auto-detect resolves to current tmux session at runtime
 
 Your config is now cleared to `(auto-detect)`. After reboots, routing will auto-detect whichever tmux session is current — no manual config.toml edits needed.
-<!-- agent:boundary:400f3b68 -->
+❯ I'm getting "IntelliJ IDEA is not responding...jump threads" when I type. Please look in the logs. I believe this is a JB Plugin regression. This started happening yesterday or the day before.
+### Re: IntelliJ IDEA freeze — listener leak in LayoutChangeDetector — sonnet-4-6
+
+Root cause confirmed from the logs. `listeners` has grown to **1,106,254** while `containerEvents` is at **2,138,100** — those are impossible numbers for a healthy layout detector.
+
+**The bug:** `addRecursiveContainerListener` never deduplicates. When `componentAdded` fires, it calls `addRecursiveContainerListener(child)` on the newly added container — but if that same container was already instrumented (e.g. via a previous add-then-remove-then-re-add cycle, or because it was already in the tree), it gets *another* `containerListener` registration. Over hours of IDEA use, the same containers accumulate thousands of listener registrations. Every keystroke triggers Swing's `Container.fireContainerEvent` → fires every registered listener → backs up the EDT.
+
+**The fix:** Track which containers already have the listener using a `WeakHashMap`-backed set. `WeakHashMap` lets GC'd containers fall out automatically. One line added to `addRecursiveContainerListener`:
+
+```kotlin
+if (!listenedContainers.add(container)) return // already attached — skip
+```
+
+Applied to `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/LayoutChangeDetector.kt`.
+
+**Plugin v0.2.57 built.** Install: IDEA → Settings → Plugins → gear → "Install Plugin from Disk" → `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.57-signed.zip`.
+
+After install+restart, the listener count should stay small (a few hundred at most) and the freeze should be gone.
+<!-- agent:boundary:927927a6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

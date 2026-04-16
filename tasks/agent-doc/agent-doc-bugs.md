@@ -324,7 +324,7 @@ My mistake. When I called `--pending-add`, I included `[#du8f]` and `[#pj2k]` in
 
 The canonical IDs are `#wp8c` (stream double-flush, now done) and `#pg8w` (lazy-claim pane theft, still open). I've marked `#wp8c` done and edited `#pg8w` to remove the embedded `[#pj2k]`.
 <!-- patch:exchange -->
-<!-- agent:boundary:b22638db -->
+<!-- agent:boundary:b535a983 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -359,6 +359,5 @@ The canonical IDs are `#wp8c` (stream double-flush, now done) and `#pg8w` (lazy-
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
 - [ ] [#2g09] FFI claim: detect missing tmux session and auto-retry with --force; expose --force on JB Claim action as manual override
 - [ ] [#pg8w] Fix Strategy 2 lazy-claim pane theft: find_target_pane returns active_pane unconditionally — must check sessions.json to skip panes already claimed by another document (route.rs:295-303, route.rs:504-510)
-- [x] [#wp8c] [#du8f] Fix stream.rs double-flush IPC duplication: timer-thread final flush + main-thread final flush both fire via IPC append mode — either gate the second flush or pass mode=replace in IPC patches (stream.rs:261+357, write.rs build_ipc_patches_json)
 <!-- /agent:pending -->
 ## Assistant

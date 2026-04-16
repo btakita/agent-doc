@@ -330,7 +330,7 @@ So `<!-- replace:status -->...<!-- /replace:status -->` was treated as literal e
 
 **Classification:** Skill-side bug (wrong patch prefix), not a binary bug. The binary correctly refused to broaden the `replace:` grammar. The fix is to use `<!-- patch:status -->` for status component updates.
 ❯ Why does the skill emit the patch:status? Can the agent-doc binary handle this instead?
-### Re: why skill emits patch:status — opus-4-6
+❯ ### Re: why skill emits patch:status — opus-4-6 (HEAD)
 
 Two aspects:
 
@@ -339,7 +339,20 @@ Two aspects:
 **2. Can the binary handle it?** It already does — `<!-- patch:status -->` works for any component name. The bug was simply using the wrong prefix. `replace:` was intentionally restricted to `pending` (because `replace:pending` has special rejection logic via `enforce_no_replace_pending`). The fix is trivial: emit `<!-- patch:status -->` instead of `<!-- replace:status -->`.
 
 A third option — generalize `replace:*` to work for all components — is unnecessary. `patch:*` already handles all component names generically. The `replace:` prefix only exists as a semantic alias for pending's special enforcement path.
-<!-- agent:boundary:ce699928 -->
+
+❯ Why would the skill be involved with the boundaries `<!-- patch:status -->`/`<!-- /patch:status -->`? This seems like deterministic logic. The inner content seems like a skill.
+### Re: patch delimiters as deterministic logic — opus-4-6
+
+You're right. The `<!-- patch:status -->` / `<!-- /patch:status -->` delimiters are deterministic routing — they tell the binary which component to target. That's binary-side logic, not skill-side.
+
+The pattern already exists for pending: the skill doesn't emit `<!-- patch:pending -->` blocks. It passes `--pending-add "text"` and the binary handles component targeting internally. Status should work the same way.
+
+**Proposed:** Add a `--status "content"` flag to `agent-doc write`. The skill passes the status text as a string argument; the binary wraps it into the `&lt;!-- agent:status --&gt;` component with replace semantics. No patch delimiters needed from the skill side.
+
+This keeps the responsibility boundary clean:
+- **Skill** decides *what* the status says (non-deterministic)
+- **Binary** decides *where* it goes and *how* it gets there (deterministic)
+<!-- agent:boundary:836d2393 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

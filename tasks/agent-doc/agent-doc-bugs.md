@@ -499,7 +499,7 @@ Run these in order, then switch back to a document with an active pane. A fresh 
 
 **Verify the fix:** After cleanup, open monsterrodholders.md and route a pane. The route should succeed without forcing session switches. If you get another drift, that's a different bug — the layout reconciler has logic that's assigning sessions incorrectly.
 ❯ Why did any tmux get moved to tmux session 2?
-### Re: why panes moved to session 2 — haiku
+❯ ### Re: why panes moved to session 2 — haiku (HEAD)
 
 The previous answer was partially wrong. Session 2 is not a "graveyard" by design — it became one through a specific code path.
 
@@ -525,7 +525,24 @@ This moves any pane found in the "wrong" session's stash to the `target_sess` �
 **Why the entire 0:agent-doc window disappeared:** Once all registered panes were relocated to session 2, the now-empty agent-doc window in session 0 was cleaned up by tmux (empty windows auto-close) or by the layout reconciler's purge logic.
 
 **The fix already landed** (correct `list-panes -t @1` target) stops step 1 from recurring. The cleanup steps from the previous response (resync + kill session 2) clear the accumulated damage.
-<!-- agent:boundary:b6362434 -->
+❯ An agent doc tmux session interaction is still acting strange. I saw message (yellow bar) about a document being claimed in tmux. Then tmux navigated to the 1:stash tmux window. I did not explicitly claim a document...so it seems to have happened in the background. What is going on? Please look in the logs.
+### Re: background claim + stash navigation — haiku
+
+**What happened:** An `auto_resync_on_drift` fired at 13:11:46 (ops.log) after 2 consecutive drift events. It found 14 issues and applied fixes. The resync relocates panes via `join-pane`, which triggers the JetBrains plugin's IPC claim notification (the yellow bar). The tmux focus jumped to `claude:1:stash` because `join-pane`/`stash_pane` operations move tmux's active selection.
+
+**Current state (from `agent-doc resync` dry run):**
+
+3 residual issues remain:
+1. `monsterrodholders.md` pane %104 is stuck in the stash window
+2. `agent-doc-bugs.md` pane %98 — registry says session `1` but it's in session `claude`
+3. `public-docs.md` pane %99 — same wrong-session mismatch
+
+The root problem: the registry's `window` field says `@9` for monsterrodholders and `@23` for the other two, but the expected session is `1` (which doesn't exist — only `claude`, `4`, and `5` exist). The auto-resync cleaned up 14 issues but left these 3 with stale session expectations.
+
+**Why it happened without user action:** The `agent-doc sync` runs automatically (triggered by file save events from the JetBrains plugin watcher). The sync detected drift → auto-resync kicked in → resync moved panes → IPC notified the plugin → yellow bar appeared. No explicit user claim was needed.
+
+**To clean up:** Run `agent-doc resync --fix --session claude` to relocate the wrong-session panes to the `claude` session and rescue monsterrodholders from the stash.
+<!-- agent:boundary:ad413bdb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

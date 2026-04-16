@@ -476,7 +476,7 @@ When I ran this file, the tmux pane closed as well. It seems like a current bug.
 **Session drift warning:** Preflight reported "registered panes span 2 tmux sessions: 2, claude". Session "2" likely has a stale registry entry from the thrashing. Run `agent-doc resync` to clean up stale entries.
 
 **To verify the fix:** Switch to monsterrodholders.md in the editor, wait for a sync cycle, then switch away and back. The pane should survive the round-trip instead of being replaced.
-<!-- agent:boundary:4e2585e0 -->
+<!-- agent:boundary:9b102b2f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

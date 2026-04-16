@@ -27,6 +27,8 @@ Created `mail/contacts/colleen-carroll/` with AGENTS.md + CLAUDE.md symlink.
 - **Next step:** Send resume if interested, then 30-min consulting interview
 ❯ compress [2026-04-13 10-59-43.mp4](../../../../../Videos/2026-04-13%2010-59-43.mp4) and move into mail/contacts/colleen-carroll/recordings
 
+❯ transcribe + diarize conversation with colleen-carroll /home/brian/work/btakita/agent-loop/mail/contacts/colleen-carroll/recordings/2026-04-13-colleen-carroll-intro-call.mp4
+
 ❯ [//]: # (Please draft a response for /home/brian/work/btakita/agent-loop/mail/conversations/test-double-chat-follow-up.md)
 ❯ [//]: # (Create a custom resume)
 === Replace line: compress [2026-04-13 10-59-43.mp4](../../../../../Videos/2026-04-13%2010-59-43.mp4) and move into mail/contacts/colleen-carroll/recordings
@@ -38,7 +40,23 @@ Created `mail/contacts/colleen-carroll/` with AGENTS.md + CLAUDE.md symlink.
 
 Quality settings optimized for recruiter reference (screen recording): CRF 28 reduces file size while maintaining clarity for faces/text visibility.
 ===
-<!-- agent:boundary:b993dd10 -->
+### Re: Transcribe + diarize intro call — opus-4-6
+
+Transcribed and diarized `2026-04-13-colleen-carroll-intro-call.mp4` (28:04, 2 speakers detected).
+
+**Output:** `mail/contacts/colleen-carroll/recordings/2026-04-13-colleen-carroll-intro-call.md`
+
+**Diarization notes:** Chunked mode (600s windows) was needed — full-audio diarization detected 0 speakers. Speaker attribution has high confidence (0.87–0.97) but the transcript lumps long stretches under one speaker since the recruiter did most of the talking. Some speaker boundaries may be imprecise.
+
+**Key details from transcript:**
+- Test Double: ~100 employees, mostly senior/staff engineering consultants
+- Engagement model: 6–9 month embedded consulting, collaborative, trust-building
+- Role: 1099 subcontractor, 40 hrs/week, 3–6 months, $100/hr standard rate
+- Interview: 2 steps — 30-min consulting scenarios conversation + pairing interview (Ruby on Rails or Node)
+- Colleen mentioned interest in Brian's AI/agentic background; floated potential full-time opportunity
+- Brian discussed: Pivotal Labs background, RSpec/test-double contributions, Rust/TypeScript/Python, agent-doc tooling, spec-driven AI development
+- Colleen knows Stephen Baker (RSpec) — recently connected via email
+<!-- agent:boundary:7874bcfe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

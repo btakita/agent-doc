@@ -15,7 +15,21 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange patch=append -->
 v0.32.5 shipped (slash-command hardening, session-check, drift auto-resync, post-write hook, claim cwd fix, model attribution fix). tmux_session auto-detect implemented (removed auto-write, added session clear). Stream double-flush fixed (AtomicBool gate #du8f). Lazy-claim pane theft fixed (claimed_panes HashSet filter #pg8w). Stash rescue bad tmux target fixed (@1:agent-doc → @1). JB plugin LayoutChangeDetector listener leak fixed with WeakHashMap dedup — plugin v0.2.57 built, awaiting install+confirm.
-<!-- agent:boundary:31db2f82 -->
+❯ do #a004
+### Re: #a004 — drop Option B (in-process status) — opus-4-6
+
+Done. Option B was the in-process `STATUS: Mutex<HashMap<PathBuf, String>>` in `debounce.rs` — a redundant duplicate of the file-based status signal (Option A) at `.agent-doc/status/`.
+
+**Changes:**
+
+1. **`debounce.rs`** — Removed `STATUS` static, `with_status` helper. `set_status()` now writes only the file signal. `get_status()` and `is_busy()` delegate to `get_status_via_file()` (file-based, 30s staleness timeout). All callers (watch daemon, FFI layer, JB plugin) see the same behavior since `set_status` always wrote to both — now it just writes to one.
+
+2. **`ffi.rs`** — Updated doc comments on `agent_doc_get_status` and `agent_doc_is_busy` to remove "Option B: in-process" language.
+
+3. **Tests** — Updated comments in `status_file_staleness_timeout` and `status_found_for_file_one_level_deep` to reflect file-based path. All tests pass unchanged since the tests already had `.agent-doc/status/` dirs set up.
+
+**Verification:** 1010 tests pass, 19 ignored, clippy clean, release binary built.
+<!-- agent:boundary:acab745f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -24,7 +38,7 @@ v0.32.5 shipped (slash-command hardening, session-check, drift auto-resync, post
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
-- [ ] [#a004] Drop Option B (skill-side submodule workaround) — A handles it deterministically; B redundant.
+- [x] [#a004] Drop Option B (skill-side submodule workaround) — A handles it deterministically; B redundant.
 - [ ] [#jg0d] supervisor/resize.rs: SIGWINCH unix path via signal-hook; Windows ConPTY stub for phase 1
 - [ ] [#b486] supervisor/state.rs: crash classifier, ring buffer, Healthy->Transient->Flapping->Halted state machine
 - [ ] [#40ct] supervisor/ipc.rs: Unix-domain socket accept loop, reuse length-prefixed JSON frame from ipc_socket.rs

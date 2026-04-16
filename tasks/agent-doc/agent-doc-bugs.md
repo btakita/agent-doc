@@ -264,14 +264,13 @@ Added content-aware guard before sweep-commit. The sweep now:
 For template mode docs, `is_stale_snapshot` always returns `false` (no `## Assistant` markers), so sweep only commits when snapshot and document are content-equal after comment stripping — conservative but correct.
 
 **Tests:** 1040 pass (1 new: `preflight_sweep_skips_doc_with_unresponded_user_content`). Clippy clean, release binary built and installed.
-<!-- agent:boundary:719f7512 -->
+<!-- agent:boundary:3c0dbd1f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] [#p2xm] Orphaned patch:exchange marker leak: parse_patches() does not consume unclosed opening markers — they leak into unmatched text and get appended to exchange verbatim. Fix: advance last_end past unclosed openers in parse_patches()
-- [x] [#s7wk] Sweep commits unresponded user content: preflight sweep uses mtime-only heuristic (preflight.rs:606-616) — no guard against committing user annotations without agent response. Fix: call is_stale_snapshot() diff check before sweep-commit, skip files with user additions
 - [ ] [#08yv] Pre-lock file modification race: content_at_start read (write.rs ~725) to doc_lock acquire (~750) window allows external edits that drift the snapshot baseline
 - [ ] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots
 - [ ] [#vefa] Refactor set_current_dir tests to accept base_dir: &Path parameter — re-enable 11 ignored tests (autoclaim 3, sessions 5, watch 2)
@@ -300,6 +299,5 @@ For template mode docs, `is_stale_snapshot` always returns `false` (no `## Assis
 - [ ] [#zvmd] Submodule (HEAD) marker: fix show_head() to route via narrow_to_submodule — superproject rev-parse can't show submodule-tracked files, so add_head_marker falls through to the 'no HEAD → mark last heading only' fallback, which drops (HEAD) when the exchange component has no ### Re: heading yet or when the fallback runs during a boundary-only cycle
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
-- [x] [#1497] agent-doc write leaks carrier stdin into exchange via boundary synthesis when used purely for --pending-* flag operations — needs a --pending-only or --no-exchange flag to suppress exchange content synthesis when the write is only mutating pending
 <!-- /agent:pending -->
 ## Assistant

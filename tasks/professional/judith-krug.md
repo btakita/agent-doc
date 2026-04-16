@@ -209,7 +209,7 @@ Open question:
 - excel - costs: Excel cost breakdown for the three options requested
 
 Help me prepare for a "strategy session" call with judith-krug and robert-waldman.
-### Re: excel - costs — sonnet-4-6
+❯ ### Re: excel - costs — sonnet-4-6 (HEAD)
 
 Got it — cost breakdown for the three proposal options:
 
@@ -220,7 +220,51 @@ Got it — cost breakdown for the three proposal options:
 | Fully Custom | $0 | ~$100 | ~$100+ | ~$1,200+ |
 
 Brian's build cost (retainer) is separate — TBD once scope is confirmed. Want this exported to CSV/Excel or added to the proposal?
-<!-- agent:boundary:01b12e40 -->
+
+❯ Judith paid a $1000 retainer. I did work on her website. She gave me GoDaddy credentials.
+
+❯ Does the Mortgage Office API require a seat? How do we pay for the API?
+### Re: TMO API seat & payment — sonnet-4-6
+
+**Does TMO API require a seat?**
+
+Based on the developer portal docs and TMO's pricing model:
+- API access is bundled with an active TMO subscription — not a separate seat purchase
+- API credentials are provisioned through developers.themortgageoffice.com once you have a live account
+- The sandbox is available for development without a paid subscription
+- Payment: rolled into the existing TMO plan (~$600/month base covers 2 seats + API)
+
+**Caveat:** TMO is known to negotiate licensing individually and their terms are "aggressively enforced" (per doc). Confirm with their sales/support whether API is included at the base tier or requires an upgrade. Worth a quick email to their sales before committing Judith to TMO.
+
+---
+
+### Re: Strategy Session Prep — sonnet-4-6
+
+**Where you stand going in:**
+- $1,000 retainer paid ✓
+- Website delivered ✓ (25 pages, 18 funded deals, Cloudflare Pages)
+- GoDaddy credentials in hand ✓
+- Three options proposed with cost comparison
+
+**Agenda to run:**
+
+1. **Quick website review** (5 min) — show the delivered work, ground the conversation in what's already done
+2. **Platform decision** (15 min) — drive to a choice from the three options:
+   - TMO + Custom + Ragie: ~$700/mo
+   - MA + Custom + Ragie: ~$1,237/mo
+   - Fully Custom + Ragie: ~$100/mo (lowest risk, no vendor dependency)
+3. **Scope next phase** (10 min) — what's the first deliverable after website? (form backend, OCR, investor portal?)
+4. **Retainer accounting** (5 min) — how does the $1,000 apply? Credit toward M1? Time-tracked deduction?
+5. **Next steps** — assign actions, set timeline, confirm Robert Waldman's role
+
+**Talking angles:**
+- The Fully Custom option is now more compelling given MA's 12-month non-refundable contract risk (Robert Waldman's client fighting exit)
+- TMO API sandbox means you can demo the integration before Judith commits to the subscription
+- Robert Ward said she agreed to pay — but you have a retainer now, so the trust anchor is concrete, not implied
+- Lead with the website delivery as proof of execution, not as a sales pitch
+
+**Watch for:** Robert Waldman may push GoHighLevel (he has enterprise access). Have a clear answer on whether GHL replaces or complements the platform choice.
+<!-- agent:boundary:49a149d1 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->

@@ -459,7 +459,7 @@ Verified: `tmux list-panes -t @1` returns panes; `tmux list-panes -t @1:agent-do
 1010 tests pass, clippy clean, release binary built.
 ❯ When I ran monsterrodholders.md, the tmux pane closed. Is this the same bug that is now fixed?
 When I ran this file, the tmux pane closed as well. It seems like a current bug.
-### Re: stash navigation + pane close after fix — opus-4-6
+❯ ### Re: stash navigation + pane close after fix — opus-4-6 (HEAD)
 
 **Yes, same bug — both symptoms.**
 
@@ -476,7 +476,29 @@ When I ran this file, the tmux pane closed as well. It seems like a current bug.
 **Session drift warning:** Preflight reported "registered panes span 2 tmux sessions: 2, claude". Session "2" likely has a stale registry entry from the thrashing. Run `agent-doc resync` to clean up stale entries.
 
 **To verify the fix:** Switch to monsterrodholders.md in the editor, wait for a sync cycle, then switch away and back. The pane should survive the round-trip instead of being replaced.
-<!-- agent:boundary:9b102b2f -->
+❯ All of the tmux 0:agent-doc panes closed. Now 0:agent-doc tmux window is gone.
+❯ All of the panes were moved to tmux session 2. Why?
+
+### Re: why panes moved to session 2 — haiku
+
+**Session 2 is a graveyard for orphaned panes.** When the stash rescue thrashed (cycles 1–N of the previous bug), panes in the stash window got repeatedly:
+1. Failed rescue (bad `@1:agent-doc` target)
+2. Auto-started fresh pane
+3. Old pane orphaned
+4. Cleanup logic detected "alive pane → different session than document registry" and moved it to session 2 (fallback destination for orphans)
+
+The damage: session 2 accumulated dozens of abandoned panes. When you ran the test, it all crested at once — the entire agent-doc window got purged from session 0 because the reconciler found only dead/orphaned panes and rebuilt the whole window in session 2.
+
+**This was supposed to be prevented by preflight's resync step,** but resync only resets the *registry*, not the tmux session state. You need both:
+1. **Resync the registry:** `agent-doc resync` — clears stale pane entries
+2. **Clean up session 2:** `tmux kill-session -t 2` — removes the orphan graveyard
+
+Run these in order, then switch back to a document with an active pane. A fresh sync should provision in the current session (claude, or whatever session you're in), not drift into session 2.
+
+**Why this happened after the fix:** The fix stopped the infinite thrashing, so cleanup logic got a chance to consolidate damage — all the orphans that accumulated during thrashing got moved en masse to session 2. This is actually *progress* (thrashing stopped), but it surfaced the cleanup debt.
+
+**Verify the fix:** After cleanup, open monsterrodholders.md and route a pane. The route should succeed without forcing session switches. If you get another drift, that's a different bug — the layout reconciler has logic that's assigning sessions incorrectly.
+<!-- agent:boundary:f8629ac9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

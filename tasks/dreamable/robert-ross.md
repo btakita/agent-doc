@@ -70,7 +70,19 @@ Full diarized transcript: [`transcripts/2026-04-14-robert-ross-miguel.md`](trans
 - `corky` threading bugs (Message-ID resolution + Gmail API `threadId` field) — tracked in `tasks/software/corky.md`.
 - Call prep PDF: `tmp/robert-ross-call-prep.pdf` (from Apr 2 prep, may be stale).
 - Transcripts dir: `tasks/dreamable/transcripts/` — all Rob calls archived here, never embed inline.
-<!-- agent:boundary:fea0ed18 -->
+
+❯ transcribe + diarize /home/brian/work/btakita/agent-loop/mail/contacts/robert-ross/recordings/phone_20260415-194318_4156839775.m4a
+### Re: April 15 phone call transcript
+
+Transcribed & diarized — 43:36 call between you and Robert covering documentation strategy for CloudScore, FileVine interview aftermath, and financial planning. Saved to [`transcripts/2026-04-15-robert-ross-phone.md`](transcripts/2026-04-15-robert-ross-phone.md).
+
+**Key topics from call:**
+- **Documentation as product:** Rob wants every CloudScore doc (GitHub + mirrored Google Docs) to have consistent metadata headers (name, link, version, last updated, purpose, audience) at 100% compliance — fundamental to credibility
+- **Public vs. proprietary split:** Long discussion on what content should be public; landed on Claude Code as partner to help make those decisions (not just you and Rob guessing)
+- **Rubric work deferred:** Don't build GitHub→Google Docs sync yet; focus on the conceptual doc taxonomy first (what goes public, why, how to mark it)
+- **Personal/budget:** Rob walked Brian through expense breakdown; highlighted rent ($1,800) + groceries (~$400–500/week) = ~$4k/month baseline; Brian committed to filling out budget spreadsheet
+- **Two action items:** (1) fill out budget tonight, (2) think through how Claude Code becomes part of the documentation decision-making process
+<!-- agent:boundary:9272f064 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

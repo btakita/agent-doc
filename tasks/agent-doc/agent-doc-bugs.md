@@ -368,7 +368,7 @@ That's correct — the `<!-- patch:exchange -->` / `<!-- /patch:exchange -->` wr
 The wrapper exists only in the heredoc I pipe to `agent-doc write` — it's a transport-layer directive, not document content. You'll never see it in the rendered file.
 
 So there's nothing to "test the ergonomics of" from the document side — it's invisible to you. The ergonomics question is only relevant if I were to use raw content (no wrapper) instead, which would also be invisible to you but slightly less safe for responses containing HTML comment markers.
-<!-- agent:boundary:32c423b9 -->
+<!-- agent:boundary:9b87e244 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

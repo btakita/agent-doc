@@ -82,7 +82,7 @@ Transcribed & diarized — 43:36 call between you and Robert covering documentat
 - **Rubric work deferred:** Don't build GitHub→Google Docs sync yet; focus on the conceptual doc taxonomy first (what goes public, why, how to mark it)
 - **Personal/budget:** Rob walked Brian through expense breakdown; highlighted rent ($1,800) + groceries (~$400–500/week) = ~$4k/month baseline; Brian committed to filling out budget spreadsheet
 - **Two action items:** (1) fill out budget tonight, (2) think through how Claude Code becomes part of the documentation decision-making process
-<!-- agent:boundary:e0e3f97c -->
+<!-- agent:boundary:4150b6db -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

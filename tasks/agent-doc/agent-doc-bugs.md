@@ -545,7 +545,7 @@ The root problem: the registry's `window` field says `@9` for monsterrodholders 
 
 ❯ .agent-doc/config.toml still has `tmux_session = "1"`
 ❯ This also causes issues when I reboot...where I cannot connect to the tmux session without going into config.toml and changing the value. We need a way to get started after a reboot and in this circumstance. Please advise.
-### Re: stale tmux_session config + reboot recovery — haiku
+❯ ### Re: stale tmux_session config + reboot recovery — haiku (HEAD)
 
 **The immediate fix:** Change `tmux_session` in `.agent-doc/config.toml` from `"1"` to `"claude"`:
 
@@ -566,7 +566,33 @@ Or use: `agent-doc session set claude`
 2. **Medium term (code fix):** Add a `session auto-detect` or `session reset` subcommand that detects the current session and updates config. Or: make `agent-doc resync --fix` also update the config's `tmux_session` to the session it's relocating panes to. Currently resync fixes pane placement but leaves the config stale.
 
 3. **Long term:** Consider making `tmux_session` in config optional with auto-detect as default. Only pin to a specific session when the user explicitly runs `agent-doc session set <name>`. The "preserve stale config" behavior is too conservative — it protects against an edge case (cross-terminal session drift) but creates a worse problem (broken state after every reboot).
-<!-- agent:boundary:f31b83cf -->
+
+❯ I did the option 1. Does option 3 supercede option 2? If yes, let's implement option 3.
+<!-- patch:exchange -->
+### Re: option 3 supersedes option 2 — opus-4-6
+
+Yes, option 3 completely supersedes option 2. Here's why:
+
+**Option 2** (add `session reset` subcommand) is just a manual escape hatch for the current "write-once" behavior. Option 3 (auto-detect by default) eliminates the need for that escape hatch entirely — there's nothing to reset if the config was never auto-written.
+
+**Implementation plan for option 3:**
+
+Three changes in route.rs + session_cmd.rs:
+
+1. **Remove auto-write** (route.rs:499-506): Delete the block that writes the fallback session to config.toml when `configured.is_none()`. Auto-detect becomes the permanent default for unconfigured projects.
+
+2. **Add `session clear`** (session_cmd.rs): New subcommand that removes `tmux_session` from config.toml, returning the project to auto-detect mode. Counterpart to `session set`.
+
+3. **Dead-session behavior** (route.rs:491-494): When a *user-pinned* session is dead, preserve the pin (user explicitly chose it — they may be rebooting). The current behavior here is correct once auto-write is removed, because only explicitly-set sessions will be in config.
+
+**What changes for users:**
+- Fresh projects: no `tmux_session` in config.toml ever (unless `session set`)
+- Reboots: auto-detect picks up the new session name automatically
+- Multi-terminal: users who need pinning explicitly `session set <name>`
+- Existing projects with auto-written sessions: unaffected until they `session clear`
+
+Ready to implement. Added to pending.
+<!-- agent:boundary:4fcfd6bc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -599,5 +625,6 @@ Or use: `agent-doc session set claude`
 - [ ] [#zvmd] Submodule (HEAD) marker: fix show_head() to route via narrow_to_submodule — superproject rev-parse can't show submodule-tracked files, so add_head_marker falls through to the 'no HEAD → mark last heading only' fallback, which drops (HEAD) when the exchange component has no ### Re: heading yet or when the fallback runs during a boundary-only cycle
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
+- [ ] [#cv8a] tmux_session auto-detect by default: remove auto-write in resolve_target_session (route.rs:499-506), add `session clear` subcommand, make `session set` the only way to pin
 <!-- /agent:pending -->
 ## Assistant

@@ -207,15 +207,21 @@ Open items (moved to equityfundingsource.md):
 
 Open question:
 - excel - costs: Excel cost breakdown for the three options requested
+
+Help me prepare for a "strategy session" call with judith-krug and robert-waldman.
+### Re: excel - costs — sonnet-4-6
+
+Got it — cost breakdown for the three proposal options:
+
+| Option | Platform | Ragie | Monthly Total | Annual Total |
+|--------|----------|-------|---------------|--------------|
+| TMO + Custom | ~$600 | ~$100 | ~$700+ | ~$8,400+ |
+| MA + Custom | ~$1,137 | ~$100 | ~$1,237+ | ~$14,844+ |
+| Fully Custom | $0 | ~$100 | ~$100+ | ~$1,200+ |
+
+Brian's build cost (retainer) is separate — TBD once scope is confirmed. Want this exported to CSV/Excel or added to the proposal?
+<!-- agent:boundary:6344ecc3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [x] Send text to Judith about website being down
-- [x] Reply to Judith's text
-- [x] Draft & send proposal email to Judith with options
-- [x] Add Ragie mention to proposal
-- [x] Redirect proposal to Robert Ward for review first
-- [x] Update proposal with live EFS website link
-- [x] Re-address to Judith (cc Robert Waldman) and push to Gmail Drafts
-- [x] Add form backend + email send items to equityfundingsource.md
 <!-- /agent:pending -->

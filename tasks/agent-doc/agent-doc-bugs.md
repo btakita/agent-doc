@@ -643,7 +643,7 @@ Done. Modified `resolve_pane_cwd()` in `git.rs` to walk up from the superproject
 **Verification:** `make check` clean (clippy + 292 lib tests pass, 24 git module tests pass; 45 pre-existing `resync::tests` failures unrelated). Release build installed to `~/.cargo/bin/agent-doc`.
 
 **To test live:** spawn a new `agent-doc start` for a submodule doc (e.g., `src/boost-client/tasks/monsterrodholders.md`) — the pane should now open with cwd at `agent-loop/` root (where `.claude/skills/agent-doc/` lives) instead of the submodule root.
-<!-- agent:boundary:79edf8f8 -->
+<!-- agent:boundary:d8c804b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -678,6 +678,5 @@ Done. Modified `resolve_pane_cwd()` in `git.rs` to walk up from the superproject
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
 - [ ] [#2g09] FFI claim: detect missing tmux session and auto-retry with --force; expose --force on JB Claim action as manual override
-- [x] [#gbq8] `agent-doc start` chdir up to outermost repo containing `.claude/skills/agent-doc/` — modify resolve_pane_cwd() in git.rs to walk up from superproject root
 <!-- /agent:pending -->
 ## Assistant

@@ -223,13 +223,12 @@ Replaced the 200ms sleep with polling for the ack-content sidecar. The sidecar i
 - `test_poll_sidecar_timeout` — no sidecar → returns None after timeout, verifies timing bounds
 
 **Verification:** 1039 tests pass, clippy clean, release binary built.
-<!-- agent:boundary:859b2b52 -->
+<!-- agent:boundary:ca4bc29c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#1kap] Stale snapshot after IPC success: replace 200ms sleep with post-apply snapshot handshake — plugin ack-content sidecar exists but isn't always used, causing ghost diffs in next cycle
 - [ ] [#08yv] Pre-lock file modification race: content_at_start read (write.rs ~725) to doc_lock acquire (~750) window allows external edits that drift the snapshot baseline
 - [ ] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots
 - [ ] [#vefa] Refactor set_current_dir tests to accept base_dir: &Path parameter — re-enable 11 ignored tests (autoclaim 3, sessions 5, watch 2)

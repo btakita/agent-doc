@@ -281,7 +281,7 @@ Root cause in `template.rs:parse_patches()` line 258: when a recognized opening 
 - `parse_patches_orphaned_opener_between_valid_patches` — orphan sandwiched between two valid patches, verifies valid patches still parse and orphan is consumed
 
 **Verification:** 1042 tests pass (2 new), 19 ignored, clippy clean, release binary built and installed.
-<!-- agent:boundary:229105b4 -->
+<!-- agent:boundary:e95d72ae -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

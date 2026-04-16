@@ -131,12 +131,18 @@ The 5 `debounce_gaps_test_plan` stubs are omitted since they're blocked on pub A
 noop
 ❯ Please add fixing the race conditions to the top of the pending list. Prioritize according to your suggestion.
 noop
-<!-- agent:boundary:7ea159ed -->
+reorder
+pending reorder
+<!-- agent:boundary:634749b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#esws] IPC timeout fallback double-apply race: atomic IPC mode select (socket XOR file, never both in flight) — prevent duplicate exchange patches when try_ipc() times out and fallback patch file is picked up by watcher concurrently
+- [ ] [#1kap] Stale snapshot after IPC success: replace 200ms sleep with post-apply snapshot handshake — plugin ack-content sidecar exists but isn't always used, causing ghost diffs in next cycle
+- [ ] [#08yv] Pre-lock file modification race: content_at_start read (write.rs ~725) to doc_lock acquire (~750) window allows external edits that drift the snapshot baseline
+- [ ] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots
 - [ ] [#vefa] Refactor set_current_dir tests to accept base_dir: &Path parameter — re-enable 11 ignored tests (autoclaim 3, sessions 5, watch 2)
 - [ ] [#3t02] Add submodule IPC routing test fixtures (git init + submodule add in tmpdir) — re-enable 2 ignored tests
 - [ ] [#cjpp] Un-ignore watcher_detects_change with real tmpdir + timeout — re-enable 1 integration test

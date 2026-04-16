@@ -31,64 +31,8 @@ Done. Option B was the in-process `STATUS: Mutex<HashMap<PathBuf, String>>` in `
 **Verification:** 1010 tests pass, 19 ignored, clippy clean, release binary built.
 ❯ do #jg0d #b486 #40ct
 ❯ Add tests
-<!-- patch:exchange -->
-### Re: #jg0d #b486 #40ct + tests — opus-4-6
-
-Done. Three supervisor submodules implemented with 26 new tests (52 total supervisor tests passing).
-
-**#b486 — `supervisor/state.rs`** (crash classifier + state machine):
-- `ExitClass { Clean, Transient, Flapping }` — classifies each child exit
-- `SupervisorState { Healthy, Degraded, Halted }` — surfaced via IPC
-- `CrashPolicy` — owns `RestartHistory` ring buffer (VecDeque, cap 10), tracks consecutive flaps, returns `RestartAction { PromptUser, RestartAfter { delay, with_continue }, Halt }`
-- Spec thresholds: 3 non-zero exits in 60s → Flapping, 5 consecutive flaps → Halted
-- 12 tests: classify paths, ring buffer cap, window exclusion, state transitions, reset, recovery
-
-**#jg0d — `supervisor/resize.rs`** (SIGWINCH → pty resize):
-- `ResizeWatcher::spawn(callback)` — registers SIGWINCH via `signal-hook`, blocks on signal iterator, queries `TIOCGWINSZ` on stdin, calls callback with `PtySize`
-- `stop()` — AtomicBool flag + raise(SIGWINCH) to unblock iterator
-- Windows stub logs warning, returns Ok (WSL handles via Unix path)
-- 4 tests: construction+stop, idempotent stop, callback fires on raise(SIGWINCH), non-tty fd fails
-
-**#40ct — `supervisor/ipc.rs`** (per-session Unix socket):
-- `SupervisorIpc::start(root, uuid, handler)` — creates `.agent-doc/supervisor/<uuid>.sock` (mode 0600), spawns accept thread
-- NDJSON protocol matching `ipc_socket.rs` — one request-response per connection
-- `IpcMethod { Restart, Inject, State, Pid, Stop }` with serde tagged enum
-- `send_command(socket, method)` — client side with 2s timeout
-- 10 tests: roundtrip for each method, malformed JSON error, permissions 0600, stale socket cleanup, concurrent clients, is_active detection, stop cleanup
-
-**Deps:** Added `signal-hook = "0.3"` to Cargo.toml. Used `std::sync::mpsc` (no crossbeam needed).
-
-**Verification:** clippy clean, 52 supervisor tests pass, release binary builds.
-<!-- patch:exchange -->
-### Re: #jg0d #b486 #40ct + tests — opus-4-6
-
-Done. Three supervisor submodules implemented with 26 new tests (52 total supervisor tests passing).
-
-**#b486 — `supervisor/state.rs`** (crash classifier + state machine):
-- `ExitClass { Clean, Transient, Flapping }` — classifies each child exit
-- `SupervisorState { Healthy, Degraded, Halted }` — surfaced via IPC
-- `CrashPolicy` — owns `RestartHistory` ring buffer (VecDeque, cap 10), tracks consecutive flaps, returns `RestartAction { PromptUser, RestartAfter { delay, with_continue }, Halt }`
-- Spec thresholds: 3 non-zero exits in 60s → Flapping, 5 consecutive flaps → Halted
-- 12 tests: classify paths, ring buffer cap, window exclusion, state transitions, reset, recovery
-
-**#jg0d — `supervisor/resize.rs`** (SIGWINCH → pty resize):
-- `ResizeWatcher::spawn(callback)` — registers SIGWINCH via `signal-hook`, blocks on signal iterator, queries `TIOCGWINSZ` on stdin, calls callback with `PtySize`
-- `stop()` — AtomicBool flag + raise(SIGWINCH) to unblock iterator
-- Windows stub logs warning, returns Ok (WSL handles via Unix path)
-- 4 tests: construction+stop, idempotent stop, callback fires on raise(SIGWINCH), non-tty fd fails
-
-**#40ct — `supervisor/ipc.rs`** (per-session Unix socket):
-- `SupervisorIpc::start(root, uuid, handler)` — creates `.agent-doc/supervisor/<uuid>.sock` (mode 0600), spawns accept thread
-- NDJSON protocol matching `ipc_socket.rs` — one request-response per connection
-- `IpcMethod { Restart, Inject, State, Pid, Stop }` with serde tagged enum
-- `send_command(socket, method)` — client side with 2s timeout
-- 10 tests: roundtrip for each method, malformed JSON error, permissions 0600, stale socket cleanup, concurrent clients, is_active detection, stop cleanup
-
-**Deps:** Added `signal-hook = "0.3"` to Cargo.toml. Used `std::sync::mpsc` (no crossbeam needed).
-
-**Verification:** clippy clean, 52 supervisor tests pass, release binary builds.
-<!-- patch:pending --pending-done jg0d --pending-done b486 --pending-done 40ct -->
-<!-- agent:boundary:d38e1ffa -->
+.
+<!-- agent:boundary:675215ed -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

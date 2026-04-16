@@ -226,7 +226,7 @@ Replaced the 200ms sleep with polling for the ack-content sidecar. The sidecar i
   │ Error: ERR: replace:pending block forbidden — use --pending-add/done/edit/clear/reorder. See specs/pending-sy… │
 ```
 noop
-<!-- agent:boundary:0b653c75 -->
+<!-- agent:boundary:37106251 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

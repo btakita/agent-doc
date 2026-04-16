@@ -408,7 +408,7 @@ Fixed. Root cause was two distinct issues:
 **Fix:** Added guard that skips assertion when ancestor `.agent-doc/` is detected.
 
 **Results:** 1010 tests pass, 0 failures, 19 ignored. Stable across 3 consecutive runs. Clippy clean.
-<!-- agent:boundary:f38f17ad -->
+<!-- agent:boundary:dbc67abd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

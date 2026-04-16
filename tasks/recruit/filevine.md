@@ -152,7 +152,7 @@ Trimmed to 1:37:27 — file at `~/Videos/2026-04-15 15-03-53-trimmed.mp4`
 - **Codec:** H.265 (no re-encoding, stream copy)
 
 Stream copy kept video & audio unchanged — instant operation.
-<!-- agent:boundary:e26d0c49 -->
+<!-- agent:boundary:ec563192 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

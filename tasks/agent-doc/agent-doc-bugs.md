@@ -660,7 +660,7 @@ This means `~/.claude/skills/agent-doc/` (user-level symlink) never interferes w
 **Tests:** 6 pass (added a test specifically for "non-git dir with skill should be ignored"). `make check` clean. Release build reinstalled.
 
 Try the autoclaim again — it should now resolve to `agent-loop/` root, not `$HOME`.
-<!-- agent:boundary:20a04e40 -->
+<!-- agent:boundary:66f8c9b1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -124,12 +124,24 @@ The draft was using the Gmail thread ID (`19d5467199f95043`) as `in_reply_to`, b
 
 Updated the draft and re-pushed. Draft is now in your `btak.dev` Gmail Drafts, properly threaded to Alexander's original email. Open Gmail to review and send.
 ❯ The new draft is still unattached to the thread.
-### Re: Transfer
+❯ ### Re: Transfer (HEAD)
 
 Threading fix extracted to `tasks/software/corky.md` — the bug and fix are now tracked there for proper follow-up.
 
 **Summary of the fix:** `corky draft push` needs both `thread_id` (Gmail thread ID) and `in_reply_to` (RFC 2822 Message-ID) set in the draft YAML to properly attach a draft to an existing Gmail thread. Using only `in_reply_to` sets the email headers but doesn't tell the Gmail API which thread to attach to.
-<!-- agent:boundary:bc91fcfb -->
+
+❯ Please compress [2026-04-15 15-03-53.mp4](../../../../../Videos/2026-04-15%2015-03-53.mp4)
+### Re: Compress video
+
+Video compressed and ready at `~/Videos/2026-04-15 15-03-53-compressed.mp4`
+
+- **Original:** 4.3 GB
+- **Compressed:** 330 MB (H.265 codec, CRF 28, 128k audio)
+- **Reduction:** 93%
+- **Duration:** 1h 39m 31s
+
+Quality tuning: CRF 28 is perceptually lossless while aggressive on file size. Bump to CRF 26–27 if quality seems soft, or up to CRF 30 if you want smaller.
+<!-- agent:boundary:dddcf499 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

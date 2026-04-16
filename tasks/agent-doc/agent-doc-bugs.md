@@ -298,7 +298,7 @@ Done. Three changes in `stream.rs`:
 
 Ready for manual testing — the fix is in the release binary. Try a `stream` command and verify the response appears once, not twice.
 <!-- patch:exchange -->
-### Re: #du8f implemented — opus-4-6
+❯ ### Re: #du8f implemented — opus-4-6 (HEAD)
 
 Done. Three changes in `stream.rs`:
 
@@ -309,8 +309,22 @@ Done. Three changes in `stream.rs`:
 `cargo build --release` clean. `make check`: 605 passed, 45 pre-existing failures (tmux-dependent tests), 0 new failures. All 3 stream-specific tests pass.
 
 Ready for manual testing — the fix is in the release binary. Try a `stream` command and verify the response appears once, not twice.
+❯ Please explain why there are 2 ids in the pending `- [ ] [#wp8c] [#du8f]` and `- [ ] [#pg8w] [#pj2k]`
 <!-- patch:exchange -->
-<!-- agent:boundary:71689b3a -->
+<!-- patch:exchange -->
+### Re: double IDs in pending — opus-4-6
+
+My mistake. When I called `--pending-add`, I included `[#du8f]` and `[#pj2k]` in the text — but `--pending-add` auto-generates its own hash ID. So the result was two IDs: the auto-generated one (`#wp8c`, `#pg8w`) plus the one I embedded in the text.
+
+The canonical IDs are `#wp8c` (stream double-flush, now done) and `#pg8w` (lazy-claim pane theft, still open). I've marked `#wp8c` done and edited `#pg8w` to remove the embedded `[#pj2k]`.
+<!-- patch:exchange -->
+### Re: double IDs in pending — opus-4-6
+
+My mistake. When I called `--pending-add`, I included `[#du8f]` and `[#pj2k]` in the text — but `--pending-add` auto-generates its own hash ID. So the result was two IDs: the auto-generated one (`#wp8c`, `#pg8w`) plus the one I embedded in the text.
+
+The canonical IDs are `#wp8c` (stream double-flush, now done) and `#pg8w` (lazy-claim pane theft, still open). I've marked `#wp8c` done and edited `#pg8w` to remove the embedded `[#pj2k]`.
+<!-- patch:exchange -->
+<!-- agent:boundary:b22638db -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -344,7 +358,7 @@ Ready for manual testing — the fix is in the release binary. Try a `stream` co
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
 - [ ] [#2g09] FFI claim: detect missing tmux session and auto-retry with --force; expose --force on JB Claim action as manual override
-- [ ] [#pg8w] [#pj2k] Fix Strategy 2 lazy-claim pane theft: find_target_pane returns active_pane unconditionally — must check sessions.json to skip panes already claimed by another document (route.rs:295-303, route.rs:504-510)
-- [ ] [#wp8c] [#du8f] Fix stream.rs double-flush IPC duplication: timer-thread final flush + main-thread final flush both fire via IPC append mode — either gate the second flush or pass mode=replace in IPC patches (stream.rs:261+357, write.rs build_ipc_patches_json)
+- [ ] [#pg8w] Fix Strategy 2 lazy-claim pane theft: find_target_pane returns active_pane unconditionally — must check sessions.json to skip panes already claimed by another document (route.rs:295-303, route.rs:504-510)
+- [x] [#wp8c] [#du8f] Fix stream.rs double-flush IPC duplication: timer-thread final flush + main-thread final flush both fire via IPC append mode — either gate the second flush or pass mode=replace in IPC patches (stream.rs:261+357, write.rs build_ipc_patches_json)
 <!-- /agent:pending -->
 ## Assistant

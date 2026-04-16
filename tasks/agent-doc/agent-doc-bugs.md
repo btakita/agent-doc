@@ -479,7 +479,7 @@ When I ran this file, the tmux pane closed as well. It seems like a current bug.
 ❯ All of the tmux 0:agent-doc panes closed. Now 0:agent-doc tmux window is gone.
 ❯ All of the panes were moved to tmux session 2. Why?
 
-### Re: why panes moved to session 2 — haiku
+❯ ### Re: why panes moved to session 2 — haiku (HEAD)
 
 **Session 2 is a graveyard for orphaned panes.** When the stash rescue thrashed (cycles 1–N of the previous bug), panes in the stash window got repeatedly:
 1. Failed rescue (bad `@1:agent-doc` target)
@@ -498,7 +498,34 @@ Run these in order, then switch back to a document with an active pane. A fresh 
 **Why this happened after the fix:** The fix stopped the infinite thrashing, so cleanup logic got a chance to consolidate damage — all the orphans that accumulated during thrashing got moved en masse to session 2. This is actually *progress* (thrashing stopped), but it surfaced the cleanup debt.
 
 **Verify the fix:** After cleanup, open monsterrodholders.md and route a pane. The route should succeed without forcing session switches. If you get another drift, that's a different bug — the layout reconciler has logic that's assigning sessions incorrectly.
-<!-- agent:boundary:2d424377 -->
+❯ Why did any tmux get moved to tmux session 2?
+### Re: why panes moved to session 2 — haiku
+
+The previous answer was partially wrong. Session 2 is not a "graveyard" by design — it became one through a specific code path.
+
+**Root cause: `context_session` propagation in sync.rs:698-711**
+
+When sync runs, it derives `context_session` from the `--window` argument by asking tmux which session owns that window. Once a single pane accidentally ended up in session 2 (via the broken `@1:agent-doc` rescue), subsequent sync cycles that happened to reference a window in session 2 set `context_session = "2"`.
+
+Then at sync.rs:771-779, the stash rescue logic checks:
+```
+if pane_session != target_sess {
+    tmux.stash_pane(pane, target_sess)  // moves pane to session 2's stash
+}
+```
+
+This moves any pane found in the "wrong" session's stash to the `target_sess` — which was session 2. The `stash_pane` implementation in tmux-router creates a stash window in the target session via `new-window -t "2:" -n stash` and uses `join-pane` to relocate.
+
+**The cascade:**
+1. Broken rescue (`@1:agent-doc`) orphaned one pane into session 2
+2. Next sync derived `context_session = "2"` from a window reference in that session
+3. Stash rescue found other panes in session 0/claude's stash, saw session mismatch, moved them to session 2
+4. More panes in session 2 → more sync cycles targeting session 2 → snowball
+
+**Why the entire 0:agent-doc window disappeared:** Once all registered panes were relocated to session 2, the now-empty agent-doc window in session 0 was cleaned up by tmux (empty windows auto-close) or by the layout reconciler's purge logic.
+
+**The fix already landed** (correct `list-panes -t @1` target) stops step 1 from recurring. The cleanup steps from the previous response (resync + kill session 2) clear the accumulated damage.
+<!-- agent:boundary:1e7655d7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

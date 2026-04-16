@@ -307,7 +307,7 @@ Updated the pending-ops runbook (`runbooks/pending-ops.md`) with a new **"When t
 - **Default rule:** always gate after implementation, never done. The user's confirmation closes the gate.
 
 Also updated the "What to decide each cycle" checklist: first bullet now reads "Items implemented during this response → `--pending-gate <id>`" instead of `--pending-done`.
-<!-- agent:boundary:e6e691f9 -->
+<!-- agent:boundary:97145506 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

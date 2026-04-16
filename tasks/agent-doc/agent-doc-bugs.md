@@ -374,7 +374,7 @@ echo "content" | agent-doc write doc.md --status "New status" --stream
 ```
 
 The skill no longer needs `<!-- patch:status -->` delimiters — just pass `--status "text"` alongside the exchange content.
-<!-- agent:boundary:80811209 -->
+<!-- agent:boundary:bef17170 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

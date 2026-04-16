@@ -376,7 +376,7 @@ Yes, exactly. When I used `<!-- patch:exchange -->` as both open AND close (no `
 With the proper `<!-- /patch:exchange -->` close tag, the parser correctly extracts the content and the wrapper tags are consumed. They never reach the document.
 
 The leftover `<!-- patch:exchange -->` comments visible in the exchange are artifacts from the earlier malformed cycles. They'll be cleaned up on the next `compact exchange`.
-<!-- agent:boundary:c709460c -->
+<!-- agent:boundary:c70faa16 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -160,7 +160,7 @@ Once the input handler enters this corrupted state, Enter (CR/`\r`) is no longer
    }
    ```
 3. **DSR filtering:** Strip `\x1b[?NNN;NNNn` sequences from the pty output before they reach Claude Code's input handler. These are terminal-to-application responses that shouldn't be in the input buffer.
-<!-- agent:boundary:b83c9b2e -->
+<!-- agent:boundary:0453dce3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

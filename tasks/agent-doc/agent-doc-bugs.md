@@ -195,7 +195,7 @@ By waiting for the `❯` prompt to actually appear in the pane, we guarantee Cla
 ❯ The issue is still happening with an `agent-doc start`. Is the new build installed?
 ❯ Please address the Claude code banner/tmux output issue? This is consistent
 ❯ `^[[?997;1n^[P>|tmux 3.6a^[\^[[?1;2;4c ▐▛███▜▌   Claude Code v2.1.109`
-### Re: DSR interleaving in pty reader — opus-4-6
+❯ ### Re: DSR interleaving in pty reader — opus-4-6 (HEAD)
 
 The previous fix only addressed the auto-trigger timing. The real issue is that terminal capability queries from Claude Code pass through the pty→stdout reader to the outer tmux, which responds with DSR/DA/DCS sequences that echo as visible garbage.
 
@@ -221,7 +221,21 @@ Normal escape sequences (SGR colors, cursor movement, etc.) pass through unchang
 **Build:** clippy clean, 1062 tests pass, release binary installed.
 
 **Manual testing gate:** needs a live `agent-doc start` to confirm the banner appears clean without `^[[?997;1n^[P>|tmux 3.6a^[\^[[?1;2;4c` prefix.
-<!-- agent:boundary:18168aaf -->
+❯ Is this a tmux specific transformation? If yes, please extract to a tmux specific module
+### Re: extract to pty module — opus-4-6
+
+Not tmux-specific — DSR/DA/DCS are standard terminal escape sequences that any terminal emulator (xterm, kitty, alacritty) responds to. The issue is the nested pty topology: Claude Code queries terminal capabilities through the pty slave → pty master → reader thread → outer terminal, which responds and the responses echo as garbage.
+
+**Extracted to `supervisor/pty.rs`** — the filter is pty I/O concern, not tmux-specific:
+
+- Moved `filter_terminal_queries()` from `start.rs` to `supervisor/pty.rs` as `pub(crate)`
+- Moved all 7 filter tests to `supervisor/pty.rs` test module
+- `start.rs` reader thread now calls `crate::supervisor::pty::filter_terminal_queries()`
+
+The function lives alongside the pty spawn/forward/IO code where it belongs. If `forward_stdio()` (the built-in I/O path in pty.rs) is ever used instead of the manual reader/writer threads, the filter is right there to integrate.
+
+**Build:** clippy clean, 1062 tests pass, release binary installed.
+<!-- agent:boundary:be0605a8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

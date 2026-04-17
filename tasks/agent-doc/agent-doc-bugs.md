@@ -457,7 +457,7 @@ Done. Rewrote the two `#[ignore]` tests in `write.rs::submodule_patch_routing_te
 - `wait_for_listener(project_root)` — polls `is_listener_active` with 10ms intervals, up to 1s
 
 `make check` passes: 1054 tests green (net +2), clippy clean.
-<!-- agent:boundary:8374938d -->
+<!-- agent:boundary:1fc70664 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

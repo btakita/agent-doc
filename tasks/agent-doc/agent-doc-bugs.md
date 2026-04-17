@@ -214,7 +214,7 @@ agent-doc notify target.md --pending-add "item" --no-create-pending
 **Files changed:** `notify.rs` (run signature + ensure_pending_component + add_pending_item + save_snapshot helper), `pending_cmd.rs` (pub doc_id_for), `main.rs` (CLI args + dispatch).
 
 **Tests:** 8 new tests (auto-create, existing component, gated, no-create skip, both pending+message, snapshot update, insert position, message required). Full suite: 1091 passed, 0 failures. Binary installed.
-<!-- agent:boundary:57fc6adc -->
+<!-- agent:boundary:39450338 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -225,7 +225,6 @@ agent-doc notify target.md --pending-add "item" --no-create-pending
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
-- [x] [#txex] notify: add --pending-add flag — auto-create agent:pending on target when absent, --no-create-pending to opt out. Pending-only (no exchange blockquote). Errors become no-ops under auto-create.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#hrmt] Rewrite src/agent-doc/SKILL.md (bundled skill) to invert Phase 2 pending guidance: remove 'every response MUST include a patch:pending block', replace with granular-ops contract from .claude/skills/agent-doc/SKILL.md §1b. RELEASE GATE for #gqep — v0.32.4 cannot ship with inverted bundled-skill guidance.
 - [ ] [#e46w] Sweep-commit path: working-tree boundary lags until next write or editor re-open. Fix: have reposition_boundary_in_snapshot also rewrite the working-tree file when no active run is in progress (git.rs:593). Alternative: emit IPC reposition_boundary notification to open plugins.

@@ -329,7 +329,7 @@ The filter is the minimal cost of owning the pty. If we didn't need injection/re
 /context                      Visualize current context usage as a colored grid
 /effort                       Set effort level for model usage
 ```
-### Re: stateful pty filter fix — opus-4-6
+❯ ### Re: stateful pty filter fix — opus-4-6 (HEAD)
 
 The filter was **stateless across reads** — each `read()` call processed bytes independently. When an ESC byte landed at the end of one read buffer:
 
@@ -352,7 +352,38 @@ The reader thread in `start.rs` now creates one `PtyFilter` instance and reuses 
 **Build:** clippy clean, 1080 tests pass, release binary installed.
 
 **Manual testing gate:** needs a live `agent-doc start` to confirm the banner appears clean.
-<!-- agent:boundary:b4d967b1 -->
+❯ Same output
+❯ `^[P>|tmux 3.6a^[\^[[?1;2;4c ▐▛███▜▌   Claude Code v2.1.109`
+❯ and Enter behavior
+```
+❯ /usage
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/usage                        Show plan usage limits
+/caveman                      (caveman) Ultra-compressed communication mode. Slash token usage ~75% by speaking li…
+/janitor-usage                (skills-janitor) Show which skills you use and which you never use
+...
+```
+### Re: filter queries, not just responses — opus-4-6
+
+The stateful fix was correct (cross-boundary handling) but insufficient. The real issue: we were filtering RESPONSES (`\x1b[?1;2;4c`, `\x1bP>|tmux...\x1b\`) but letting the QUERIES through. Claude Code sends `\x1b[c` (DA1 query) and `\x1b[>q` (XTVERSION query) — neither had a filter match. These pass through the reader thread to tmux, which generates responses that appear as visible garbage.
+
+**Root cause:** The nested pty topology means Claude Code's outgoing terminal queries reach the outer tmux pane. Tmux generates responses that get displayed as text (they come back through a path the response filter may not cover). The fix: suppress queries at the source so tmux never responds.
+
+**New filter rules added:**
+| Pattern | Type | What it catches |
+|---------|------|----------------|
+| `\x1b[c` / `\x1b[0c` | DA1 query | Triggers `\x1b[?1;2;4c` response |
+| `\x1b[>q` | XTVERSION query | Triggers `\x1bP>\|tmux 3.6a\x1b\` response |
+
+Existing response filters remain as defense-in-depth.
+
+**Tests:** 3 new query-stripping tests (DA1 bare, DA1 with param, XTVERSION). Total: 79 pty tests passing.
+
+**Build:** clippy clean, release binary installed.
+
+**Important:** Existing `agent-doc start` processes use the OLD binary (process memory doesn't change when the file is replaced). You need to kill and restart the `agent-doc start` for the affected pane to pick up the new binary.
+<!-- agent:boundary:b624cdfb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

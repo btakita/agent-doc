@@ -127,3 +127,6 @@
 [submodule "tasks/recruit/filevine/FDE-Project-Interview"]
 	path = tasks/recruit/filevine/FDE-Project-Interview
 	url = git@github.com:mixmasterc85/FDE-Project-Interview.git
+[submodule "src/tsift"]
+	path = src/tsift
+	url = git@github.com:btakita/tsift.git

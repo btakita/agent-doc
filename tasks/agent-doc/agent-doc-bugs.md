@@ -98,7 +98,7 @@ MIT — that settles the licensing question. Now let's scope the build-vs-buy ho
 **Or the pragmatic middle:** Skip building anything. Use Sift for search (MCP or shell), Claude Code native Edit for edits, claude-mem for recall, and write a 50-line routing skill that picks agent model tiers. That's 90% of WozCode's value in an afternoon, no new project needed.
 
 ❯ We can implement the "the pragmatic middle" as a plugin. I want a cli instead of a mcp. What should we call it? sift-tokens? token-sifter? sifting-tokens? siftoken? any other suggestions?
-### Re: Naming the CLI plugin — opus-4-6
+❯ ### Re: Naming the CLI plugin — opus-4-6 (HEAD)
 
 CLI, not MCP — good call. Lower overhead, works as a Claude Code hook target, and you already have the `rtk` pattern for CLI proxies.
 
@@ -119,7 +119,27 @@ Evaluating your candidates:
 - **`siftcc`** — "sift for claude code". 6 chars, explicit about what it targets.
 
 **My pick: `tsift`** — same family as `rtk` (terse, 4-5 chars, token-focused), easy to type, and the `t` prefix clearly signals "token." Second choice: `siftoken` if you want something more self-documenting.
-<!-- agent:boundary:8f18ef6b -->
+
+❯ Please extract a repo btakita/tsift. The binary will be written in Rust for universal installation. Extract a tasks/tsift.md agent doc to manage the project. Add src/tsift as a git submodule.
+### Re: tsift repo extracted — opus-4-6
+
+Done. Here's what was set up:
+
+1. **GitHub repo**: https://github.com/btakita/tsift (public, MIT)
+2. **Rust scaffold**: `Cargo.toml` with metadata, `src/main.rs` stub, LICENSE
+3. **Submodule**: `src/tsift` added to agent-loop
+4. **Session doc**: `tasks/tsift.md` — agent-doc template with pending items for the build plan
+
+**Pending items in `tasks/tsift.md`:**
+- Wire Sift as search backend
+- Batch edit command
+- Agent model routing skill
+- SQL introspection
+- Claude Code hook integration (rtk-style)
+- CLAUDE.md, CI, release workflow
+
+To start building, open a session on `tasks/tsift.md`. The first step would be wiring the Sift binary as a search backend with shell-out + output parsing.
+<!-- agent:boundary:f9b228b7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

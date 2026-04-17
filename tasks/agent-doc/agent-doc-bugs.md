@@ -472,7 +472,7 @@ Three implementations:
 
 The trait object cost is negligible (called a handful of times per session, not per-keystroke), and it gives you a clear extension point without touching cfg gates when adding a new backend.
 
-### Re: direct console support feasibility — opus-4-6
+❯ ### Re: direct console support feasibility — opus-4-6 (HEAD)
 
 Short answer: very feasible for input handling, and you can mostly rely on standards.
 
@@ -495,7 +495,40 @@ Short answer: very feasible for input handling, and you can mostly rely on stand
 For (1), you'd need your own multiplexer or integrate with an existing one (Zellij has an IPC API). For (2) and (3), the Unix socket IPC you already have in `supervisor/ipc.rs` handles this — it's tmux-independent.
 
 **Bottom line:** The terminal I/O layer (raw mode, escape sequences) is fully portable via POSIX + one Windows cfg block. You don't need per-terminal logic. The dependency on tmux is architectural (pane lifecycle, persistence), not terminal-level.
-<!-- agent:boundary:91483ce1 -->
+
+❯ On the flip side, can I rely on the user being able to install Tmux? Can I package the install to ensure the dependencies, including tmux, are installed...across all operatings systems?
+### Re: tmux portability and packaging — opus-4-6
+
+**Can you rely on users installing tmux?**
+
+On Linux and macOS — mostly yes. It's in every major package manager (`apt`, `brew`, `pacman`, `dnf`). Power users (your target audience for a CLI dev tool) almost certainly have it or can install it trivially.
+
+On Windows — no. Tmux doesn't run natively on Windows. It requires WSL or MSYS2/Cygwin. Asking Windows users to install WSL just to use agent-doc is a significant friction barrier.
+
+**Can you package tmux as a dependency?**
+
+| Approach | Linux | macOS | Windows |
+|----------|-------|-------|---------|
+| System package (`apt`/`brew`) | Works, but requires sudo or Homebrew | Works | N/A |
+| Static binary bundle | Possible but fragile — tmux links against libevent, ncurses | Same issues | N/A |
+| Nix/Homebrew formula | Clean, but adds a dependency on Nix/Homebrew | Clean | WSL only |
+| WSL detection + auto-setup | N/A | N/A | Possible but invasive |
+
+The core problem: tmux is a C program with its own dependency chain (libevent, ncurses). You can't just `cargo install` it as part of your Rust build. Bundling a static binary is doable but means maintaining builds across architectures (x86_64, aarch64) and dealing with glibc/musl compatibility.
+
+**Practical recommendation:**
+
+1. **Short term:** Keep tmux as a documented prerequisite. Add a startup check that prints a helpful install command if tmux is missing (`brew install tmux` / `apt install tmux` / "Windows: install WSL first"). This is the approach most CLI tools take (e.g., `lazygit` expects `git`, `k9s` expects `kubectl`).
+
+2. **Medium term:** If Windows support matters, build the `TerminalBackend` trait now, and add a `DirectTerminal` backend that uses your own pty management (you already have `portable-pty`) instead of tmux panes. This removes the tmux dependency entirely for the core loop — tmux becomes one optional backend for users who want its session persistence and pane management.
+
+3. **For distribution:** Use platform-specific installers that declare tmux as a dependency:
+   - **Homebrew formula:** `depends_on "tmux"` — Homebrew handles the rest
+   - **AUR/deb/rpm:** standard package dependency declaration
+   - **cargo-binstall:** can't express system deps, so fall back to runtime detection
+
+**The honest answer:** You can't reliably ensure tmux is installed across all operating systems without either (a) shipping your own multiplexer or (b) making tmux optional. Option (b) with the `TerminalBackend` trait is where this naturally leads — tmux is the premium backend for users who have it, and a direct-pty backend covers everyone else with reduced functionality (no session persistence, no pane splitting).
+<!-- agent:boundary:3f3fe3e2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

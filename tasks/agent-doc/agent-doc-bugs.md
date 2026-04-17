@@ -236,7 +236,7 @@ The function lives alongside the pty spawn/forward/IO code where it belongs. If 
 
 **Build:** clippy clean, 1062 tests pass, release binary installed.
 ❯ Same behavior. Would debugging logs help?
-### Re: debugging logs added — opus-4-6
+❯ ### Re: debugging logs added — opus-4-6 (HEAD)
 
 Yes — added `AGENT_DOC_DEBUG_FILTER=1` environment variable gate to the reader thread. When set, logs to stderr:
 
@@ -260,7 +260,30 @@ This will reveal which of three scenarios we're in:
 | No | — | Sequences originate outside the pty read path entirely |
 
 The answer determines whether to fix the filter, the pty topology, or tmux escape handling.
-<!-- agent:boundary:c625fe30 -->
+
+❯ The tmux pane that claims robert-ross.md has a Yes | Yes
+❯ Please verify and fix
+### Re: pty filter — Yes|Yes diagnosis and fix — opus-4-6
+
+Captured the debug output from pane %129 (robert-ross.md). Three categories of escape sequences were passing through:
+
+| Sequence | Purpose | Why it passed |
+|----------|---------|---------------|
+| `\x1b[?2026h` / `\x1b[?2026l` | DEC private mode set/reset (synchronized output) | Filter only caught `?` + `n`/`c`, missed `h`/`l` |
+| `\x1b[<u` | Kitty keyboard pop | Filter had no `<` prefix handling |
+| `\x1b[>1u` / `\x1b[>4;2m` | Kitty keyboard push / progressive enhancement | Filter caught `>` + `c` only, missed `u`/`m` |
+
+**Fix** (`pty.rs:filter_terminal_queries`): expanded filter to handle all three:
+
+1. Added `has_lt` for `<` prefix detection alongside existing `has_question`/`has_gt`
+2. Replaced if-chain with match expression for clarity:
+   - `? + n|c|h|l` — DSR, DA1, DEC private mode set/reset
+   - `> + c|u|m` — DA2, Kitty push, Kitty progressive enhancement
+   - `< + u` — Kitty keyboard pop
+3. Added 5 new tests (DEC private mode set/reset, Kitty push/pop/progressive) + cursor movement preservation test
+
+**Build:** clippy clean, 1068 tests pass, release binary installed.
+<!-- agent:boundary:b84b53c4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

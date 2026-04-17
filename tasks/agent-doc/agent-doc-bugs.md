@@ -235,7 +235,7 @@ Not tmux-specific — DSR/DA/DCS are standard terminal escape sequences that any
 The function lives alongside the pty spawn/forward/IO code where it belongs. If `forward_stdio()` (the built-in I/O path in pty.rs) is ever used instead of the manual reader/writer threads, the filter is right there to integrate.
 
 **Build:** clippy clean, 1062 tests pass, release binary installed.
-<!-- agent:boundary:be0605a8 -->
+<!-- agent:boundary:12062040 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

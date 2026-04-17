@@ -221,7 +221,7 @@ Normal escape sequences (SGR colors, cursor movement, etc.) pass through unchang
 **Build:** clippy clean, 1062 tests pass, release binary installed.
 
 **Manual testing gate:** needs a live `agent-doc start` to confirm the banner appears clean without `^[[?997;1n^[P>|tmux 3.6a^[\^[[?1;2;4c` prefix.
-<!-- agent:boundary:496aaa3f -->
+<!-- agent:boundary:18168aaf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

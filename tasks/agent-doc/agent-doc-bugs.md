@@ -497,7 +497,7 @@ For (1), you'd need your own multiplexer or integrate with an existing one (Zell
 **Bottom line:** The terminal I/O layer (raw mode, escape sequences) is fully portable via POSIX + one Windows cfg block. You don't need per-terminal logic. The dependency on tmux is architectural (pane lifecycle, persistence), not terminal-level.
 
 ❯ On the flip side, can I rely on the user being able to install Tmux? Can I package the install to ensure the dependencies, including tmux, are installed...across all operatings systems?
-### Re: tmux portability and packaging — opus-4-6
+❯ ### Re: tmux portability and packaging — opus-4-6 (HEAD)
 
 **Can you rely on users installing tmux?**
 
@@ -520,15 +520,36 @@ The core problem: tmux is a C program with its own dependency chain (libevent, n
 
 1. **Short term:** Keep tmux as a documented prerequisite. Add a startup check that prints a helpful install command if tmux is missing (`brew install tmux` / `apt install tmux` / "Windows: install WSL first"). This is the approach most CLI tools take (e.g., `lazygit` expects `git`, `k9s` expects `kubectl`).
 
+❯ do this
+
 2. **Medium term:** If Windows support matters, build the `TerminalBackend` trait now, and add a `DirectTerminal` backend that uses your own pty management (you already have `portable-pty`) instead of tmux panes. This removes the tmux dependency entirely for the core loop — tmux becomes one optional backend for users who want its session persistence and pane management.
+
+❯ do the TerminalBackend trait. Add the spec for a DirectTerminal as a comment or as a spec file. Let me know which would be easier to surface once we decide to implement this.
 
 3. **For distribution:** Use platform-specific installers that declare tmux as a dependency:
    - **Homebrew formula:** `depends_on "tmux"` — Homebrew handles the rest
    - **AUR/deb/rpm:** standard package dependency declaration
    - **cargo-binstall:** can't express system deps, so fall back to runtime detection
 
+❯ Create a plan file. Link to the spec, in the comment or dedicated spec file, for the DirectTerminal.
+
 **The honest answer:** You can't reliably ensure tmux is installed across all operating systems without either (a) shipping your own multiplexer or (b) making tmux optional. Option (b) with the `TerminalBackend` trait is where this naturally leads — tmux is the premium backend for users who have it, and a direct-pty backend covers everyone else with reduced functionality (no session persistence, no pane splitting).
-<!-- agent:boundary:f380f574 -->
+### Re: action items — opus-4-6
+
+Adding all three to pending:
+
+1. **Tmux install check** — straightforward. I'll add a detection + helpful error message in `start.rs` before the existing `in_tmux()` bail, so users who don't even have tmux installed get a better message than "not running inside tmux."
+
+2. **TerminalBackend trait + DirectTerminal spec** — a dedicated spec file at `src/agent-doc/specs/terminal-backend.md` is the better choice over a code comment. Reasons:
+   - Survives refactors (code comments move/get deleted with the code they're attached to)
+   - Can be linked from plan files, CLAUDE.md, and pending items
+   - Supports richer content (diagrams, trait signatures, migration plan)
+   - Shows up in `Glob` searches when you're ready to implement
+
+3. **Plan file** — I'll create `src/agent-doc/specs/direct-terminal-plan.md` linking to the spec.
+
+All three added to pending as gated items.
+<!-- agent:boundary:88cd181c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -554,5 +575,8 @@ The core problem: tmux is a C program with its own dependency chain (libevent, n
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
 - [ ] [#77mf] Event-driven gate resolution: typed gate markers like [/release] and [/deploy] that auto-resolve on matching events (cargo publish, git push). Extends the binary [/] invariant with machine-actionable gate types — reaper checks event log before skipping.
 - [/] [#6hgf] Add --status flag to agent-doc write: skill passes status text as CLI arg, binary handles component targeting with replace semantics
+- [ ] [#t8tg] [/] #tmxi Add tmux install detection with platform-specific install instructions in start.rs
+- [ ] [#1yk1] [/] #tbak Create TerminalBackend trait and spec file at src/agent-doc/specs/terminal-backend.md
+- [ ] [#zy7m] [/] #dtpl Create DirectTerminal plan file at src/agent-doc/specs/direct-terminal-plan.md linking to the spec
 <!-- /agent:pending -->
 ## Assistant

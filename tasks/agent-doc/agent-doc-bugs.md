@@ -140,7 +140,7 @@ Done. Here's what was set up:
 
 To start building, open a session on `tasks/tsift.md`. The first step would be wiring the Sift binary as a search backend with shell-out + output parsing.
 ❯ Please add any useful info from this doc into tsift.md before we compact exchange.
-### Re: Context transferred to tsift.md — opus-4-6
+❯ ### Re: Context transferred to tsift.md — opus-4-6 (HEAD)
 
 Done. Transferred to `tasks/tsift.md` exchange section:
 
@@ -150,7 +150,24 @@ Done. Transferred to `tasks/tsift.md` exchange section:
 - **Sift technical details**: pipeline stages, SIMD, caching, performance benchmarks
 
 Ready for `/agent-doc compact exchange tasks/agent-doc/agent-doc-bugs.md` whenever you are.
-<!-- agent:boundary:8097b9ca -->
+❯ Please trans the skills-janitor fork & related pending items into tsift.md. Let's have tsift be an all-in-one audit + token sifter tool.
+### Re: Skills-janitor → tsift merge — opus-4-6
+
+Transferred to `tasks/tsift.md`. The vision: **tsift = token sifter + skill auditor** in one binary.
+
+**What moved:**
+- **#vdyj** (skills-janitor fork) → absorbed into tsift. Instead of a separate `src/skills-janitor` submodule, tsift gets a `tsift audit` subcommand that covers skill drift detection, duplicate finding, usage analysis, and cleanup recommendations.
+- **Skill audit integration** → `tsift audit` replaces the planned `make precommit` janitor hook. Same drift reports, but unified under tsift's CLI.
+- **Nightly cron** → `tsift audit --report` writes drift reports to `tasks/agent-doc/skills-audit.md` via `/schedule`.
+
+**tsift's expanded scope:**
+1. **Search** — Sift backend for codebase search
+2. **Audit** — skill health checks, duplicate detection, usage tracking, cleanup (replaces skills-janitor)
+3. **Route** — agent model tier routing (haiku/sonnet/opus)
+4. **Hook** — Claude Code command rewriting (rtk-style)
+
+Marked #vdyj as done here since the work now lives in tsift's backlog. Also fixed the "Avisory" typo in #wcf5.
+<!-- agent:boundary:807d056c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -161,7 +178,7 @@ Ready for `/agent-doc compact exchange tasks/agent-doc/agent-doc-bugs.md` whenev
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
-- [ ] [#vdyj] After fork: move forked skills-janitor under src/ as submodule, wire audit into make precommit, and optionally add nightly cron via schedule skill writing drift reports to tasks/agent-doc/skills-audit.md.
+- [x] [#vdyj] After fork: move forked skills-janitor under src/ as submodule, wire audit into make precommit, and optionally add nightly cron via schedule skill writing drift reports to tasks/agent-doc/skills-audit.md.
 - [ ] [#9v7h] agent-doc: --pending-add should reject text starting with '[/]' / '[x]' / '[ ]' (ambiguous state marker). Add --pending-add-gated flag and emit assigned hash to stdout so skill can compose add+gate atomically without text-embedding.
 - [ ] [#txex] notify: add --pending-add flag — auto-create agent:pending on target when absent, --no-create-pending to opt out. Pending-only (no exchange blockquote). Errors become no-ops under auto-create.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40

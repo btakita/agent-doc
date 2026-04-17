@@ -119,7 +119,7 @@ Evaluating your candidates:
 - **`siftcc`** — "sift for claude code". 6 chars, explicit about what it targets.
 
 **My pick: `tsift`** — same family as `rtk` (terse, 4-5 chars, token-focused), easy to type, and the `t` prefix clearly signals "token." Second choice: `siftoken` if you want something more self-documenting.
-<!-- agent:boundary:094954b4 -->
+<!-- agent:boundary:8f18ef6b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

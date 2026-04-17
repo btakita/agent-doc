@@ -467,7 +467,7 @@ cargo test submodule_patch_routing → 3 passed (resolve + 2 IPC routing tests)
 ```
 
 Changes are in the working tree (not yet committed as part of the larger v0.32.6 changeset). Marking #3t02 done.
-<!-- agent:boundary:172d57bd -->
+<!-- agent:boundary:ca3479e1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -475,7 +475,6 @@ Changes are in the working tree (not yet committed as part of the larger v0.32.6
 <!-- agent:pending patch=replace -->
 - [/] [#p2xm] Orphaned patch:exchange marker leak: parse_patches() does not consume unclosed opening markers — they leak into unmatched text and get appended to exchange verbatim. Fix: advance last_end past unclosed openers in parse_patches()
 - [/] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots
-- [x] [#3t02] Add submodule IPC routing test fixtures (git init + submodule add in tmpdir) — re-enable 2 ignored tests
 - [ ] [#cjpp] Un-ignore watcher_detects_change with real tmpdir + timeout — re-enable 1 integration test
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.

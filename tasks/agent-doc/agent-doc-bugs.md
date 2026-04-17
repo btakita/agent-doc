@@ -121,7 +121,7 @@ Evaluating your candidates:
 **My pick: `tsift`** — same family as `rtk` (terse, 4-5 chars, token-focused), easy to type, and the `t` prefix clearly signals "token." Second choice: `siftoken` if you want something more self-documenting.
 
 ❯ Please extract a repo btakita/tsift. The binary will be written in Rust for universal installation. Extract a tasks/tsift.md agent doc to manage the project. Add src/tsift as a git submodule.
-### Re: tsift repo extracted — opus-4-6
+❯ ### Re: tsift repo extracted — opus-4-6 (HEAD)
 
 Done. Here's what was set up:
 
@@ -139,7 +139,18 @@ Done. Here's what was set up:
 - CLAUDE.md, CI, release workflow
 
 To start building, open a session on `tasks/tsift.md`. The first step would be wiring the Sift binary as a search backend with shell-out + output parsing.
-<!-- agent:boundary:cf50b183 -->
+❯ Please add any useful info from this doc into tsift.md before we compact exchange.
+### Re: Context transferred to tsift.md — opus-4-6
+
+Done. Transferred to `tasks/tsift.md` exchange section:
+
+- **Origin story**: WozCode evaluation → Sift discovery → pragmatic middle decision
+- **Architecture table**: what each WozCode capability maps to in tsift (Sift search, native Edit, direct DB, model routing skill, claude-mem)
+- **Key decisions**: CLI not MCP, Rust, naming rationale, MIT, composition over reimplementation
+- **Sift technical details**: pipeline stages, SIMD, caching, performance benchmarks
+
+Ready for `/agent-doc compact exchange tasks/agent-doc/agent-doc-bugs.md` whenever you are.
+<!-- agent:boundary:a7927897 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

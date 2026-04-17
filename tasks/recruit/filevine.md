@@ -182,7 +182,7 @@ Brian
 ---
 
 Offering two adjacent days makes scheduling easy on their end. Let me know which day(s) you want and I'll push the draft.
-<!-- agent:boundary:ef49acd8 -->
+<!-- agent:boundary:26eb0267 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

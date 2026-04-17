@@ -76,10 +76,43 @@ session_start → cwd_resolved (project_root) → ipc_started → claude_start (
 → ipc_stop → session_end
 ```
 ❯ do #eg0w
-### Re: do #eg0w — opus-4-6
+❯ ### Re: do #eg0w — opus-4-6 (HEAD)
 
 Already shipped. Per-file `CommitLock` in `git::commit` + `<5s` freshness gate in preflight sweep landed in the current build (v0.32.5). Marking complete.
-<!-- agent:boundary:a6897d08 -->
+❯ do #kdy5
+### Re: do #kdy5 — opus-4-6
+
+Implemented. `check_library_context_policy` added to instruction-files crate with `check-policy` CLI subcommand.
+
+**What shipped:**
+
+1. **`audit.rs`** — New `check_library_context_policy(rel, content, root)` function:
+   - Applies only to AGENTS.md files in subdirectories (skips root-level)
+   - Checks for `## Library Context Policy` heading presence (error if missing)
+   - Validates a link to `LIBRARY_CONTEXT_POLICY.md` exists in the section (markdown links, bare URLs, bare relative paths)
+   - For relative links: resolves from the AGENTS.md file's directory and checks file existence
+   - For HTTP URLs: accepts any URL containing `LIBRARY_CONTEXT_POLICY.md`
+
+2. **`main.rs`** — New `check-policy` subcommand:
+   - Globs `src/*/AGENTS.md` and `src/*/*/AGENTS.md` (bounded depth, no deep traversal)
+   - Fast: completes instantly vs full `audit` which hangs on deep workspace trees
+
+3. **`lib.rs`** — Exported `check_library_context_policy` + wired into the per-file audit loop in `run()`
+
+4. **Root `Makefile`** — `precommit` target now runs `check-shared` + submodule precommits + workspace-level `check-policy`
+
+**Verification:**
+- `cargo clippy -- -D warnings` — clean
+- `cargo test` — 32 passed (9 new tests for the policy check)
+- `check-policy --root ../..` — correctly finds 11 AGENTS.md files missing the section
+
+**Current violations (expected — #1376 sweep is next):**
+```
+src/agent-resume, src/boost-client, src/corky, src/ctx-core-dev,
+src/lazily-rs, src/presence, src/session-share, src/tagpath,
+src/webmaster, src/presence/backend, src/presence/material_service
+```
+<!-- agent:boundary:50de8e47 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

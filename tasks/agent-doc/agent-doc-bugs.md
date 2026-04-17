@@ -428,7 +428,7 @@ Added a `RawMode` guard struct that:
 **Build:** clippy clean, 294 lib tests pass, release binary installed.
 
 **Important:** You need to kill and restart `agent-doc start` for the affected pane to pick up the new binary. The fix only takes effect after restart.
-<!-- agent:boundary:5dcf0c62 -->
+<!-- agent:boundary:2401ce1b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

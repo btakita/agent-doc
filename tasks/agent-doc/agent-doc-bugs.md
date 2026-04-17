@@ -39,7 +39,7 @@ The two tools complement each other at different layers:
 4. **Quick win right now:** Run `/janitor-usage` to see which of your ~40+ skills actually get used. Pruning the unused ones is the single highest-leverage token reduction — each removed skill saves its description tokens on every turn of every session.
 
 Want me to run `/janitor-usage` now to identify pruning candidates? Or should I start on the #vdyj submodule setup?
-<!-- agent:boundary:9be9bb90 -->
+<!-- agent:boundary:eff47234 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -263,7 +263,7 @@ The answer determines whether to fix the filter, the pty topology, or tmux escap
 
 ❯ The tmux pane that claims robert-ross.md has a Yes | Yes
 ❯ Please verify and fix
-### Re: pty filter — Yes|Yes diagnosis and fix — opus-4-6
+❯ ### Re: pty filter — Yes|Yes diagnosis and fix — opus-4-6 (HEAD)
 
 Captured the debug output from pane %129 (robert-ross.md). Three categories of escape sequences were passing through:
 
@@ -283,7 +283,38 @@ Captured the debug output from pane %129 (robert-ross.md). Three categories of e
 3. Added 5 new tests (DEC private mode set/reset, Kitty push/pop/progressive) + cursor movement preservation test
 
 **Build:** clippy clean, 1068 tests pass, release binary installed.
-<!-- agent:boundary:bed35dd0 -->
+❯ Why do we need to do a filter at all? The supervisor is the parent process. Why is it interfering with the inputs and outputs to the console?
+### Re: why the pty filter exists — opus-4-6
+
+The supervisor **can't** just pass stdin/stdout through unmodified because it needs the pty pair for three things:
+
+1. **IPC injection** — `inject` writes bytes to the pty master fd, which is how `/agent-doc` commands get routed into a running Claude session without `tmux send-keys`
+2. **Restart semantics** — killing and respawning the child requires owning the pty lifecycle
+3. **Resize forwarding** — `TIOCSWINSZ` ioctl on the pty master fd
+
+This creates a **nested terminal topology**:
+
+```
+tmux pane (outer terminal emulator)
+  └─ supervisor (pty master/slave owner)
+       └─ Claude Code (child on pty slave)
+```
+
+Claude Code sends terminal capability queries (`\x1b[?997n`, DA1, DA2) because it thinks it's talking to a real terminal — and it is, just the *inner* pty slave. Those queries pass through the supervisor's reader thread to stdout, which feeds into the **outer** tmux pane. Tmux responds with its own sequences (`^[[?997;1n`, `^[P>|tmux 3.6a^[\`), and those responses have nowhere to go — they echo as visible garbage.
+
+**The filter strips the outer terminal's responses** before they reach stdout. It's not interfering with Claude Code's I/O — it's cleaning up the side effects of the pty-in-tmux topology.
+
+**Alternative architectures and why they don't work:**
+
+| Approach | Problem |
+|----------|---------|
+| Inherit terminal directly (`Command::status()`) | No IPC injection, no programmatic restart, no resize control |
+| Use `tmux send-keys` for injection | Race conditions, 5-second sleep hacks, no reliable delivery |
+| Suppress queries in the child | Can't — Claude Code's terminal detection is built-in |
+| Let the outer terminal consume responses silently | Can't — the response bytes flow through the pty reader to stdout, not through a bidirectional control channel |
+
+The filter is the minimal cost of owning the pty. If we didn't need injection/restart/resize, we could drop the whole supervisor and just `exec` Claude Code directly — but then we'd lose the entire IPC surface that makes `agent-doc route`, `agent-doc start --continue`, and cross-pane control work.
+<!-- agent:boundary:cb547381 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

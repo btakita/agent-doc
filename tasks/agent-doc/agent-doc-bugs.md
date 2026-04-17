@@ -550,10 +550,42 @@ Adding all three to pending:
 
 All three added to pending as gated items.
 ❯ Why are #t8tg #1yk1 #zy7m gated (`- [ ] [#t8tg] [/] ...`)?
-### Re: why gated — opus-4-6
+❯ ### Re: why gated — opus-4-6 (HEAD)
 
 They shouldn't be. The `[/]` gate means "don't implement until user approves" — but you already approved all three ("do this", "do the TerminalBackend trait", "Create a plan file"). My mistake: I passed `[/]` as part of the `--pending-add` text, which embedded it as a literal string rather than using `--pending-gate`. The items were actually ungated `[ ]` but had confusing `[/]` text prefixes. Fixed — removed the stale `[/]` prefixes from all three.
-<!-- agent:boundary:b0a29661 -->
+❯ do #t8tg #1yk1 #zy7m
+### Re: do #t8tg #1yk1 #zy7m — opus-4-6
+
+All three done.
+
+**#t8tg — Tmux install detection** (`start.rs:383-400`)
+
+Added a `which tmux` check before the existing `in_tmux()` bail. Two distinct error paths:
+
+- **tmux not installed:** Platform-specific install command (macOS: `brew install tmux`, Linux: `apt/pacman/dnf`, Windows: "Install WSL first") + `tmux new-session -s dev` follow-up
+- **tmux installed but not in a session:** Existing bail with added `tmux new-session -s dev` hint
+
+Clippy clean.
+
+**#1yk1 — TerminalBackend spec** → `src/agent-doc/specs/terminal-backend.md`
+
+Contains:
+- Trait definition (`enable_raw`, `suspend`, `resume`, `restore`)
+- Three implementation sketches: `UnixTerminal` (extracted from current `RawMode`), `WindowsTerminal` (stub), `NoopTerminal`
+- Integration points: `select_backend()` dispatch in `start.rs`
+- File location: `src/terminal_backend.rs` (separate from `terminal.rs`)
+- Migration steps
+
+**#zy7m — DirectTerminal plan** → `src/agent-doc/specs/direct-terminal-plan.md`
+
+Four phases:
+1. Extract trait (no behavior change)
+2. Abstract pane management (`PaneManager` trait)
+3. DirectTerminal backend with graceful degradation
+4. Windows support
+
+Links to the spec. Includes a decisions-to-make section (session persistence, multi-pane, auto-detection).
+<!-- agent:boundary:d11d913d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -579,8 +611,8 @@ They shouldn't be. The `[/]` gate means "don't implement until user approves" �
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
 - [ ] [#77mf] Event-driven gate resolution: typed gate markers like [/release] and [/deploy] that auto-resolve on matching events (cargo publish, git push). Extends the binary [/] invariant with machine-actionable gate types — reaper checks event log before skipping.
 - [/] [#6hgf] Add --status flag to agent-doc write: skill passes status text as CLI arg, binary handles component targeting with replace semantics
-- [ ] [#t8tg] Add tmux install detection with platform-specific install instructions in start.rs
-- [ ] [#1yk1] Create TerminalBackend trait and spec file at src/agent-doc/specs/terminal-backend.md
-- [ ] [#zy7m] Create DirectTerminal plan file at src/agent-doc/specs/direct-terminal-plan.md linking to the spec
+- [x] [#t8tg] Add tmux install detection with platform-specific install instructions in start.rs
+- [x] [#1yk1] Create TerminalBackend trait and spec file at src/agent-doc/specs/terminal-backend.md
+- [x] [#zy7m] Create DirectTerminal plan file at src/agent-doc/specs/direct-terminal-plan.md linking to the spec
 <!-- /agent:pending -->
 ## Assistant

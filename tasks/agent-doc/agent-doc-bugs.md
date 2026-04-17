@@ -132,7 +132,7 @@ Pane %124 shows the problem clearly. After the supervisor injected `/agent-doc t
 
 **Immediate workaround:** Manually press Enter in pane %124 to submit the pending `/agent-doc` command. The command text is already in the input buffer.
 Enter seems to write a `\n` but does not enter the command. The `^[[O` is from me pressing `Win+Space+Up Arrow`. You can see it's on its own line which was caused by pressing `Enter`.
-### Re: Enter doesn't submit in pane %124 — opus-4-6
+❯ ### Re: Enter doesn't submit in pane %124 — opus-4-6 (HEAD)
 
 Thanks for the correction — the `^[[O` is from `Win+Space+Up Arrow`, not focus events. And Enter produces `\n` (visual newline) but doesn't submit.
 
@@ -160,7 +160,39 @@ Once the input handler enters this corrupted state, Enter (CR/`\r`) is no longer
    }
    ```
 3. **DSR filtering:** Strip `\x1b[?NNN;NNNn` sequences from the pty output before they reach Claude Code's input handler. These are terminal-to-application responses that shouldn't be in the input buffer.
-<!-- agent:boundary:0453dce3 -->
+
+❯ Note the following interleaving also happens during `agent-doc start`
+
+```
+❯ /home/brian/.cargo/bin/agent-doc start tasks/dreamable/robert-ross.md
+Registered session 6cb2a9bf → pane %125
+Starting claude...
+^[[?997;1n^[P>|tmux 3.6a^[\^[[?1;2;4c ▐▛███▜▌   Claude Code v2.1.109
+```
+
+❯ Please fix immediately
+### Re: DSR interleaving during agent-doc start — opus-4-6
+
+Fixed. The auto-trigger in `start.rs` now polls `tmux capture-pane` for the Claude Code prompt character (`❯` or `⏵`) instead of using a fixed 5-second sleep.
+
+**What changed (`start.rs:480–549`):**
+
+- **Before:** `std::thread::sleep(Duration::from_secs(5))` then blind `tmux send-keys`
+- **After:** 2s initial grace period, then poll every 500ms (up to 60 attempts / ~30s timeout) checking the last 20 lines of pane output for a prompt character. Only sends keys once the prompt is confirmed ready.
+
+**Why this fixes the DSR interleaving:**
+
+The race was: Claude Code starts → terminal queries capabilities → DSR responses (`^[[?997;1n`, `^[P>|tmux 3.6a^[\`, `^[[?1;2;4c`) flow through the pty → fixed 5s sleep fires `send-keys` while these sequences are still in-flight or buffered → command bytes interleave with escape sequences → Claude's readline state corrupts → Enter no longer submits.
+
+By waiting for the `❯` prompt to actually appear in the pane, we guarantee Claude Code has:
+1. Finished terminal capability negotiation (DSR sequences consumed)
+2. Rendered its banner and loaded context
+3. Presented an interactive input prompt ready to receive text
+
+**Build status:** clippy clean, 1055 tests pass, release binary installed.
+
+**Manual testing gate:** needs a live `agent-doc start` with `--continue` restart to confirm the prompt polling works end-to-end.
+<!-- agent:boundary:4b806fd0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

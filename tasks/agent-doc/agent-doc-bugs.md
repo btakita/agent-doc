@@ -80,39 +80,8 @@ session_start → cwd_resolved (project_root) → ipc_started → claude_start (
 
 Already shipped. Per-file `CommitLock` in `git::commit` + `<5s` freshness gate in preflight sweep landed in the current build (v0.32.5). Marking complete.
 ❯ do #kdy5
-### Re: do #kdy5 — opus-4-6
-
-Implemented. `check_library_context_policy` added to instruction-files crate with `check-policy` CLI subcommand.
-
-**What shipped:**
-
-1. **`audit.rs`** — New `check_library_context_policy(rel, content, root)` function:
-   - Applies only to AGENTS.md files in subdirectories (skips root-level)
-   - Checks for `## Library Context Policy` heading presence (error if missing)
-   - Validates a link to `LIBRARY_CONTEXT_POLICY.md` exists in the section (markdown links, bare URLs, bare relative paths)
-   - For relative links: resolves from the AGENTS.md file's directory and checks file existence
-   - For HTTP URLs: accepts any URL containing `LIBRARY_CONTEXT_POLICY.md`
-
-2. **`main.rs`** — New `check-policy` subcommand:
-   - Globs `src/*/AGENTS.md` and `src/*/*/AGENTS.md` (bounded depth, no deep traversal)
-   - Fast: completes instantly vs full `audit` which hangs on deep workspace trees
-
-3. **`lib.rs`** — Exported `check_library_context_policy` + wired into the per-file audit loop in `run()`
-
-4. **Root `Makefile`** — `precommit` target now runs `check-shared` + submodule precommits + workspace-level `check-policy`
-
-**Verification:**
-- `cargo clippy -- -D warnings` — clean
-- `cargo test` — 32 passed (9 new tests for the policy check)
-- `check-policy --root ../..` — correctly finds 11 AGENTS.md files missing the section
-
-**Current violations (expected — #1376 sweep is next):**
-```
-src/agent-resume, src/boost-client, src/corky, src/ctx-core-dev,
-src/lazily-rs, src/presence, src/session-share, src/tagpath,
-src/webmaster, src/presence/backend, src/presence/material_service
-```
-<!-- agent:boundary:50de8e47 -->
+done
+<!-- agent:boundary:99ed3f02 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -123,7 +92,7 @@ src/webmaster, src/presence/backend, src/presence/material_service
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
-- [ ] [#kdy5] Implement instruction-files audit check: every library AGENTS.md has a ## Library Context Policy section with resolvable link to LIBRARY_CONTEXT_POLICY.md. Wire into make precommit.
+- [x] [#kdy5] Implement instruction-files audit check: every library AGENTS.md has a ## Library Context Policy section with resolvable link to LIBRARY_CONTEXT_POLICY.md. Wire into make precommit.
 - [ ] [#1376] After audit check lands: sweep all libraries under src/ to add the Library Context Policy stub section. Each submodule commit separately, then parent pointer bumps.
 - [ ] [#breh] rust-package skill: write the Library Context Policy stub into new library AGENTS.md at scaffold time.
 - [ ] [#3j0e] Install skills-janitor as Claude Code plugin (run /plugin install khendzel/skills-janitor at terminal). User plans to fork eventually; this is the interim path.

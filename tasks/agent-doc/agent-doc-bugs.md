@@ -16,7 +16,7 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange patch=append -->
 Session covered v0.32.5→v0.32.6 development. Key fixes: #a004 (drop in-process status Mutex, file-based only), 0-component IPC patchback bug (boundary synthesis in all write paths), #jg0d/#b486/#40ct (supervisor submodules: state.rs, resize.rs, ipc.rs — 52 tests), #esws (single patch_id per logical write + plugin-side dedup TTL set), #1kap (poll ack-content sidecar instead of 200ms sleep), #s7wk/#1497 (sweep-commit guard + --pending-only flag), #p2xm (orphaned patch:exchange marker fix in parse_patches), --status flag (skill passes text, binary handles component targeting), #08yv (pre-lock file mod race), #wcf5 (snapshot-before-document ordering), #vefa (set_current_dir→base_dir refactor, 10 tests re-enabled), #3t02 (submodule IPC routing fixtures, 2 tests), #cjpp (un-ignored watcher_detects_change). Decisions: [/] vs [x] semantics codified (gate after impl, done on confirm); typed gates [/release]/[/deploy] added to pending; replace:* restricted to pending only; --status flag mirrors --pending-add pattern. State: 1055 tests passing, pending has 7 gated items.
-<!-- agent:boundary:414bccf3 -->
+<!-- agent:boundary:6b778444 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

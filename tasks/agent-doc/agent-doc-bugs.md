@@ -409,7 +409,7 @@ Fixed. All disk write paths had document-first, snapshot-second ordering. Extern
 The IPC success path (try_ipc) is unaffected — the plugin applies patches via Document API, and the snapshot is saved from the post-apply file content. No external rename event triggers a race there.
 
 `make check` passes: 1042 tests green, clippy clean.
-<!-- agent:boundary:7f043015 -->
+<!-- agent:boundary:46c2bc0f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

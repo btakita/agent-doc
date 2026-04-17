@@ -607,7 +607,7 @@ Error: bind supervisor socket: /home/brian/work/btakita/agent-loop/src/session-s
 Caused by:
     local socket name length exceeds capacity of sun_path of sockaddr_un
 ```
-### Re: sun_path overflow on deep submodule paths — opus-4-6
+❯ ### Re: sun_path overflow on deep submodule paths — opus-4-6 (HEAD)
 
 Classic Unix domain socket limit. `sun_path` in `sockaddr_un` is 108 bytes (107 + NUL). Your path:
 
@@ -624,7 +624,11 @@ That's 113 bytes — 6 over the limit.
 - 13 tests passing (3 new: path fallback, short path preference, long-path bind+connect)
 
 Needs `cargo install --path .` to take effect. Want me to do that?
-<!-- agent:boundary:b44e9476 -->
+❯ yes...always. We need to iterate. Don't waste turns please.
+### Re: iterate without confirmation — opus-4-6
+
+Noted. `cargo install --path .` done — binary is live. Try `agent-doc start` from session-share again.
+<!-- agent:boundary:b2cbfe68 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

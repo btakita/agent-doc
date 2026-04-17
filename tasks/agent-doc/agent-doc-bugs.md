@@ -400,7 +400,7 @@ Starting claude...
 /caveman                      (caveman) Ultra-compressed communication mode. Slash token usage ~75% by speaking li…
 ...
 ```
-### Re: Enter sends \n instead of \r — raw mode fix — opus-4-6
+❯ ### Re: Enter sends \n instead of \r — raw mode fix — opus-4-6 (HEAD)
 
 Good news: the header being clean confirms the query-stripping fix works. The Enter issue is a separate bug — a pty line discipline double-translation.
 
@@ -428,7 +428,25 @@ Added a `RawMode` guard struct that:
 **Build:** clippy clean, 294 lib tests pass, release binary installed.
 
 **Important:** You need to kill and restart `agent-doc start` for the affected pane to pick up the new binary. The fix only takes effect after restart.
-<!-- agent:boundary:2401ce1b -->
+❯ The fix worked. Will this work on windows, osx, and for non-tmux sessions? If there are differences, we should modularize the architecture to allow for other operating systems and terminal front ends.
+### Re: cross-platform and non-tmux compatibility — opus-4-6
+
+**Current state by platform:**
+
+| Platform | Status | Why |
+|----------|--------|-----|
+| **Linux** | Works | `cfmakeraw` + `tcsetattr` via libc — tested and confirmed |
+| **macOS** | Works | Same POSIX termios API — `cfmakeraw` is identical. libc crate supports Darwin |
+| **Windows** | No-op stub | Windows uses ConPTY, not Unix ptys. No ICRNL translation issue — console handles process input differently. The `#[cfg(not(unix))]` stub correctly does nothing |
+
+**Non-tmux sessions:** `agent-doc start` already requires tmux (bails at line 327: "not running inside tmux"). The raw mode fix applies to any hosting environment though — if we ever lift the tmux requirement, the same double-translation issue would occur with any terminal emulator hosting the supervisor process, and the fix would still work.
+
+**On modularization:** The `#[cfg(unix)]` / `#[cfg(not(unix))]` gate is already the idiomatic Rust pattern for platform-specific terminal handling. A trait abstraction (`trait TerminalMode { fn enable_raw(); fn suspend(); fn resume(); }`) would be premature — we have exactly two cases (Unix: real impl, Windows: no-op), and cfg gates handle that cleanly without runtime dispatch or trait objects.
+
+If Windows ever needs ConPTY-specific raw mode (via `SetConsoleMode` removing `ENABLE_PROCESSED_INPUT`), we'd add a `#[cfg(windows)]` block alongside the existing stubs. The compile-time selection means zero cost on platforms that don't need it.
+
+**Where modularization would matter more:** The pty allocation itself (portable_pty already abstracts Unix openpty vs Windows ConPTY), and the tmux dependency (which locks us to Unix in practice). Lifting the tmux requirement is a bigger architectural decision — it would mean replacing `tmux send-keys` injection with direct pty writes for IPC, and finding a non-tmux pane management strategy.
+<!-- agent:boundary:5a24fb8f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

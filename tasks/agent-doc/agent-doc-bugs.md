@@ -393,7 +393,7 @@ The IPC path in `run_stream()` is unaffected — the plugin handles atomicity th
 
 `make check` passes: 1042 tests green, clippy clean.
 ❯ do #wcf5
-### Re: #wcf5 — snapshot-before-document write ordering — opus-4-6
+❯ ### Re: #wcf5 — snapshot-before-document write ordering — opus-4-6 (HEAD)
 
 Fixed. All disk write paths had document-first, snapshot-second ordering. External file watchers (IDE inotify listeners, git hooks) fire on the document rename and could compute diffs against a stale snapshot before agent-doc updated it.
 
@@ -409,7 +409,33 @@ Fixed. All disk write paths had document-first, snapshot-second ordering. Extern
 The IPC success path (try_ipc) is unaffected — the plugin applies patches via Document API, and the snapshot is saved from the post-apply file content. No external rename event triggers a race there.
 
 `make check` passes: 1042 tests green, clippy clean.
-<!-- agent:boundary:46c2bc0f -->
+❯ do #vefa
+### Re: #vefa — refactor set_current_dir tests to accept base_dir: &Path — opus-4-6
+
+Done. Added `_in(base_dir: &Path)` variants to all functions that used CWD-relative paths, then refactored 10 tests to pass `dir.path()` directly instead of calling `set_current_dir`.
+
+**sessions.rs** — new functions:
+- `registry_path_in(base_dir)`, `load_in(base_dir)`, `save_in(base_dir, registry)`
+- `register_full_in(base_dir, ...)`, `register_full_with_cwd_in(base_dir, ...)`
+- Original functions delegate to `_in` variants with `std::env::current_dir()`
+
+**watch.rs** — new functions:
+- `read_pid_in(base_dir)`, `write_pid_in(base_dir)`, `remove_pid_in(base_dir)` (test-only)
+- `discover_entries_in(base_dir)`, `discover_files_in(base_dir)` (test-only)
+
+**autoclaim.rs** — new functions:
+- `run_with_tmux_in(tmux, base_dir)` — passes `base_dir` through to `load_in`/`save_in`, resolves relative file paths against `base_dir` for existence checks
+- `sync_after_autoclaim_in(tmux, pane_id, claimed, base_dir)`
+
+**Re-enabled tests (10 of 11 described):**
+- sessions: `registry_roundtrip`, `load_empty_returns_empty_map`, `register_with_pid_and_cwd_stores_explicit_cwd`, `register_full_with_cwd_differs_from_process_cwd`, `register_full_deduplicates_pane` (5)
+- autoclaim: `autoclaim_focuses_pane_with_claim`, `autoclaim_syncs_layout_with_multiple_files`, `autoclaim_no_claim_skips_focus` (3)
+- watch: `pid_file_roundtrip`, `discover_empty_registry` (2)
+
+The 11th test (`watcher_detects_change`) was already tracked under #cjpp — it's an integration test unrelated to `set_current_dir`.
+
+`make check` passes: 1052 tests green, clippy clean.
+<!-- agent:boundary:2898ccdc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -417,7 +443,7 @@ The IPC success path (try_ipc) is unaffected — the plugin applies patches via 
 <!-- agent:pending patch=replace -->
 - [/] [#p2xm] Orphaned patch:exchange marker leak: parse_patches() does not consume unclosed opening markers — they leak into unmatched text and get appended to exchange verbatim. Fix: advance last_end past unclosed openers in parse_patches()
 - [/] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots
-- [ ] [#vefa] Refactor set_current_dir tests to accept base_dir: &Path parameter — re-enable 11 ignored tests (autoclaim 3, sessions 5, watch 2)
+- [x] [#vefa] Refactor set_current_dir tests to accept base_dir: &Path parameter — re-enable 11 ignored tests (autoclaim 3, sessions 5, watch 2)
 - [ ] [#3t02] Add submodule IPC routing test fixtures (git init + submodule add in tmpdir) — re-enable 2 ignored tests
 - [ ] [#cjpp] Un-ignore watcher_detects_change with real tmpdir + timeout — re-enable 1 integration test
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.

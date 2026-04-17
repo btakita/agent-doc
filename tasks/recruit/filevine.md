@@ -155,7 +155,7 @@ Stream copy kept video & audio unchanged — instant operation.
 
 ❯ Please draft a response email for /home/brian/work/btakita/agent-loop/mail/conversations/your-filevine-journey-continues-2.md
 ❯ I want to delay the meeting a bit but not too long. Would Tue, Wed, or Thu be the best day? Any reason for Monday...such as "Brian is very excited about this"?
-### Re: Draft reply — scheduling VP of FDE interview — opus-4-6
+❯ ### Re: Draft reply — scheduling VP of FDE interview — opus-4-6 (HEAD)
 
 **Timing analysis:**
 - **Monday Apr 20** — shows strong momentum. Works if you want the "excited" signal.
@@ -182,7 +182,16 @@ Brian
 ---
 
 Offering two adjacent days makes scheduling easy on their end. Let me know which day(s) you want and I'll push the draft.
-<!-- agent:boundary:26eb0267 -->
+❯ draft the gmail
+### Re: Draft pushed to Gmail — sonnet-4-6
+
+Draft created and pushed to `btak.dev` Gmail Drafts. Properly threaded to Alexander's Apr 16 email.
+
+- **File:** `mail/drafts/2026-04-17-re-your-filevine-journey-continues-2.md`
+- **Availability offered:** Tue Apr 21 or Wed Apr 22, 10am–4pm MT
+
+Open Gmail Drafts to review and send when ready.
+<!-- agent:boundary:3b31cb28 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

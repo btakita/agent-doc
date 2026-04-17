@@ -83,7 +83,7 @@ Already shipped. Per-file `CommitLock` in `git::commit` + `<5s` freshness gate i
 done
 ❯ write patchback to this file
 ❯ do #1376
-### Re: #kdy5 patchback + do #1376 — opus-4-6
+❯ ### Re: #kdy5 patchback + do #1376 — opus-4-6 (HEAD)
 
 **#kdy5 implementation (instruction-files crate):**
 
@@ -101,7 +101,37 @@ Committed in 9 submodules (8 parent pointer bumps):
 **Deferred:** session-share — pre-commit hook blocks due to unrelated `specs/expert-sentiment-calibration.md` doc-lint error. Needs that file fixed first.
 
 `check-policy --root ../..` passes for all 10 committed libraries.
-<!-- agent:boundary:350e83b2 -->
+❯ My cpu is thrashing. Is this due to the 4 subprocesses in the claude session?
+```
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND                                                                                                                                                                 1956834 brian     16  -4   13636  10536   5384 R  99.8   0.0  81:07.21 instruction-fil
+1960570 brian     16  -4   13112   9948   5308 R  99.8   0.0  80:34.72 instruction-fil                                                                                                                                                         1972714 brian     16  -4   12472   9144   5128 R  99.8   0.0  77:45.03 instruction-fil
+1954149 brian     16  -4   13212  10092   5360 R  99.4   0.0  81:43.32 instruction-fil 
+```
+
+❯ The input characters into the tmux pane are messed up on tasks/dreamable/robert-ross.md. I'm unable to press enter from an agent-doc start. Is the supervisor properly sending characters to the claude code subprocess? See the content in the prompt. I attempted to `Run Agent Doc`
+### Re: CPU thrashing — opus-4-6
+
+Yes, those 4 `instruction-files` processes are orphans from a previous Claude tool call in this session (PID 221133, running 14+ hours). Three are `audit --root ../..` and one is `check-policy --root ../..`. The `audit` subcommand hangs on deep workspace trees — each has been spinning at 100% CPU for ~84 minutes accumulating 80+ minutes of CPU time.
+
+**Killed all 4.** CPU should be back to normal.
+
+**Root cause:** Claude's Bash tool spawned these as background tasks that never completed. The `audit` command descends into submodules recursively and gets stuck. The `check-policy` variant (bounded depth glob) should finish quickly but this one was also stuck — possibly because it was a debug build (`target/debug/instruction-files`) rather than release.
+
+**Prevention:** The precommit Makefile already uses `check-policy` instead of full `audit`. These were likely from an ad-hoc tool call that ran `audit` directly. Consider adding a timeout wrapper or using release builds for CLI invocations.
+
+### Re: tmux input garbling on robert-ross.md — opus-4-6
+
+Pane %124 shows the problem clearly. After the supervisor injected `/agent-doc tasks/dreamable/robert-ross.md`, the pane received `^[[I^[[O` (terminal focus-in/focus-out CSI escape sequences) instead of a newline to submit the command. The prompt is sitting there with the command typed but not executed.
+
+**What happened:** The terminal emulator has focus reporting enabled (`\x1b[?1004h`). When the supervisor's inject writes to the pty master fd, focus events (`\x1b[I` = focus in, `\x1b[O` = focus out) get interleaved with the injected bytes. The `\r` (Enter) that should follow the command text was either swallowed or replaced by these sequences.
+
+**Likely fix in supervisor:** The inject path should either:
+1. Disable focus reporting before injecting (`\x1b[?1004l`), inject, then re-enable
+2. Filter out CSI focus sequences from the pty read side so they don't corrupt the input buffer
+3. Use a write lock / drain between the injected bytes and any asynchronous terminal events
+
+**Immediate workaround:** Manually press Enter in pane %124 to submit the pending `/agent-doc` command. The command text is already in the input buffer.
+<!-- agent:boundary:2ba06ed7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

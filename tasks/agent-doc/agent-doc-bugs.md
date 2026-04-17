@@ -168,7 +168,7 @@ Transferred to `tasks/tsift.md`. The vision: **tsift = token sifter + skill audi
 
 Marked #vdyj as done here since the work now lives in tsift's backlog. Also fixed the "Avisory" typo in #wcf5.
 ❯ do #9v7h
-### Re: #9v7h implemented — opus-4-6
+❯ ### Re: #9v7h implemented — opus-4-6 (HEAD)
 
 Done. Three changes to agent-doc:
 
@@ -185,7 +185,36 @@ Done. Three changes to agent-doc:
 **Files changed:** `pending.rs` (op_add signature + validation), `pending_cmd.rs` (gated param + println), `main.rs` (CLI arg + dispatch + PendingAction::AddGated).
 
 **Tests:** 4 new tests (state marker rejection, gated add, id return). Full suite: 1083 passed, 0 failures. Binary installed.
-<!-- agent:boundary:0b37d3f7 -->
+❯ do #txex
+### Re: #txex implemented — opus-4-6
+
+Done. Three changes to notify command:
+
+1. **`--pending-add` / `--pending-add-gated`**: Adds items to the target document's `agent:pending` component. Works identically to the write command's flags — assigns hash ID, prints to stderr.
+
+2. **Auto-create `agent:pending`**: When the target document has no pending component, one is auto-created after the exchange close tag. `--no-create-pending` opts out (errors become no-ops).
+
+3. **Pending-only mode**: When `--pending-add` is used without a message, the exchange blockquote is skipped entirely. Only pending mutations + snapshot update + commit.
+
+**Usage examples:**
+```bash
+# Pending-only (no exchange blockquote)
+agent-doc notify target.md --pending-add "implement feature X"
+
+# Gated pending item
+agent-doc notify target.md --pending-add-gated "blocked on release"
+
+# Pending + exchange notification
+agent-doc notify target.md "API changed" --pending-add "update tests" --source build
+
+# Opt out of auto-creation
+agent-doc notify target.md --pending-add "item" --no-create-pending
+```
+
+**Files changed:** `notify.rs` (run signature + ensure_pending_component + add_pending_item + save_snapshot helper), `pending_cmd.rs` (pub doc_id_for), `main.rs` (CLI args + dispatch).
+
+**Tests:** 8 new tests (auto-create, existing component, gated, no-create skip, both pending+message, snapshot update, insert position, message required). Full suite: 1091 passed, 0 failures. Binary installed.
+<!-- agent:boundary:57fc6adc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -196,7 +225,7 @@ Done. Three changes to agent-doc:
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
-- [ ] [#txex] notify: add --pending-add flag — auto-create agent:pending on target when absent, --no-create-pending to opt out. Pending-only (no exchange blockquote). Errors become no-ops under auto-create.
+- [x] [#txex] notify: add --pending-add flag — auto-create agent:pending on target when absent, --no-create-pending to opt out. Pending-only (no exchange blockquote). Errors become no-ops under auto-create.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#hrmt] Rewrite src/agent-doc/SKILL.md (bundled skill) to invert Phase 2 pending guidance: remove 'every response MUST include a patch:pending block', replace with granular-ops contract from .claude/skills/agent-doc/SKILL.md §1b. RELEASE GATE for #gqep — v0.32.4 cannot ship with inverted bundled-skill guidance.
 - [ ] [#e46w] Sweep-commit path: working-tree boundary lags until next write or editor re-open. Fix: have reposition_boundary_in_snapshot also rewrite the working-tree file when no active run is in progress (git.rs:593). Alternative: emit IPC reposition_boundary notification to open plugins.

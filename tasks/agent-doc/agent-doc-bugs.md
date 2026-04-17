@@ -16,7 +16,30 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange patch=append -->
 v0.32.5 session. Key fixes: supervisor IPC stack wired into start.rs (#vnp0/#6ae3/#zp02), DSR interleaving fix (prompt-poll instead of fixed sleep), supervisor smoke test (#f7d5), sun_path overflow for deep submodule paths (XDG_RUNTIME_DIR fallback when >107 bytes, 13 tests), tmux install detection (#t8tg), TerminalBackend trait spec (#1yk1), DirectTerminal plan (#zy7m), Library Context Policy stub in rust-package skill (#breh). Decisions: [/] vs [x] semantics (gate after impl, done on confirm); typed gates [/release]/[/deploy]; replace:* restricted to pending; --status flag mirrors --pending-add; always run cargo install --path . after builds without asking. State: 1055 tests, 7 gated pending items.
-<!-- agent:boundary:93d54d2f -->
+❯ Look at #vdyj. I also installed wozcode: https://app.wozcode.com/
+❯ How can I synthesize skills janitor and wozcode to save on tokens?
+### Re: #vdyj + WozCode synergy — opus-4-6
+
+**#vdyj status:** Currently `[ ]` (unstarted). The plan is: fork skills-janitor → `src/skills-janitor` submodule → wire `/janitor-report` into `make precommit` → optionally add nightly cron via `/schedule`. This gives you drift detection as part of the normal commit flow.
+
+**Synthesizing skills-janitor + wozcode for token savings:**
+
+The two tools complement each other at different layers:
+
+1. **Reduce skill context bloat (janitor):** Every installed skill adds its description to the system prompt. Run `/janitor-usage` to find skills you never invoke, `/janitor-duplicates` to find overlapping ones, then `/janitor-cleanup` to remove dead weight. Fewer skill descriptions = smaller system prompt = fewer tokens per turn.
+
+2. **Use woz agents for cheaper execution (wozcode):** Once skills are clean, use `woz:explore` instead of general-purpose agents for read-only research (it's faster and cheaper). Use `woz:code` for editing tasks that benefit from batch edits and smart search. The `mcp__plugin_woz_code__Search` tool replaces multi-round Grep/Glob cycles with a single semantic call.
+
+3. **Concrete workflow for #vdyj:**
+   - Fork + submodule skills-janitor (the planned work)
+   - Add `janitor-report` to `make precommit` — catches skill drift before it accumulates
+   - Use `/janitor-usage` periodically to prune unused skills (immediate token savings every session)
+   - Delegate janitor audit operations to `woz:explore` subagents instead of full agents (cheaper per-audit)
+
+4. **Quick win right now:** Run `/janitor-usage` to see which of your ~40+ skills actually get used. Pruning the unused ones is the single highest-leverage token reduction — each removed skill saves its description tokens on every turn of every session.
+
+Want me to run `/janitor-usage` now to identify pruning candidates? Or should I start on the #vdyj submodule setup?
+<!-- agent:boundary:9be9bb90 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -352,7 +352,7 @@ The reader thread in `start.rs` now creates one `PtyFilter` instance and reuses 
 **Build:** clippy clean, 1080 tests pass, release binary installed.
 
 **Manual testing gate:** needs a live `agent-doc start` to confirm the banner appears clean.
-<!-- agent:boundary:4e9a0e09 -->
+<!-- agent:boundary:b4d967b1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

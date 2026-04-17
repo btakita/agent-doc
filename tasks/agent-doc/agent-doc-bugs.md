@@ -283,7 +283,7 @@ Captured the debug output from pane %129 (robert-ross.md). Three categories of e
 3. Added 5 new tests (DEC private mode set/reset, Kitty push/pop/progressive) + cursor movement preservation test
 
 **Build:** clippy clean, 1068 tests pass, release binary installed.
-<!-- agent:boundary:b84b53c4 -->
+<!-- agent:boundary:bed35dd0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

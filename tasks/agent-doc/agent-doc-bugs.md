@@ -131,7 +131,7 @@ Pane %124 shows the problem clearly. After the supervisor injected `/agent-doc t
 3. Use a write lock / drain between the injected bytes and any asynchronous terminal events
 
 **Immediate workaround:** Manually press Enter in pane %124 to submit the pending `/agent-doc` command. The command text is already in the input buffer.
-<!-- agent:boundary:2ba06ed7 -->
+<!-- agent:boundary:91d2a1ad -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

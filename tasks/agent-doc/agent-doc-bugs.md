@@ -171,7 +171,7 @@ Starting claude...
 ```
 
 ❯ Please fix immediately
-### Re: DSR interleaving during agent-doc start — opus-4-6
+❯ ### Re: DSR interleaving during agent-doc start — opus-4-6 (HEAD)
 
 Fixed. The auto-trigger in `start.rs` now polls `tmux capture-pane` for the Claude Code prompt character (`❯` or `⏵`) instead of using a fixed 5-second sleep.
 
@@ -192,7 +192,36 @@ By waiting for the `❯` prompt to actually appear in the pane, we guarantee Cla
 **Build status:** clippy clean, 1055 tests pass, release binary installed.
 
 **Manual testing gate:** needs a live `agent-doc start` with `--continue` restart to confirm the prompt polling works end-to-end.
-<!-- agent:boundary:aff05d36 -->
+❯ The issue is still happening with an `agent-doc start`. Is the new build installed?
+❯ Please address the Claude code banner/tmux output issue? This is consistent
+❯ `^[[?997;1n^[P>|tmux 3.6a^[\^[[?1;2;4c ▐▛███▜▌   Claude Code v2.1.109`
+### Re: DSR interleaving in pty reader — opus-4-6
+
+The previous fix only addressed the auto-trigger timing. The real issue is that terminal capability queries from Claude Code pass through the pty→stdout reader to the outer tmux, which responds with DSR/DA/DCS sequences that echo as visible garbage.
+
+**New fix: `filter_terminal_queries()` in `start.rs`**
+
+Added a byte-level escape sequence filter in the reader thread that strips:
+
+| Sequence | Pattern | Example |
+|----------|---------|---------|
+| DSR response | `ESC [ ? ... n` | `^[[?997;1n` |
+| DA1 response | `ESC [ ? ... c` | `^[[?1;2;4c` |
+| DA2 response | `ESC [ > ... c` | `^[[>0;115;0c` |
+| DCS string | `ESC P ... ESC \` | `^[P>|tmux 3.6a^[\` |
+
+Normal escape sequences (SGR colors, cursor movement, etc.) pass through unchanged.
+
+**How it works:** The reader thread now filters every read through `filter_terminal_queries()` before writing to stdout. This prevents:
+1. Terminal queries from reaching the outer tmux (no spurious responses generated)
+2. Echoed responses from appearing as visible garbage in the pane
+
+**Tests added (7):** DSR response, DA1, DA2, DCS string, interleaved real-world sequence, SGR preservation, plain text passthrough.
+
+**Build:** clippy clean, 1062 tests pass, release binary installed.
+
+**Manual testing gate:** needs a live `agent-doc start` to confirm the banner appears clean without `^[[?997;1n^[P>|tmux 3.6a^[\^[[?1;2;4c` prefix.
+<!-- agent:boundary:496aaa3f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

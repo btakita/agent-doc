@@ -446,7 +446,7 @@ Added a `RawMode` guard struct that:
 If Windows ever needs ConPTY-specific raw mode (via `SetConsoleMode` removing `ENABLE_PROCESSED_INPUT`), we'd add a `#[cfg(windows)]` block alongside the existing stubs. The compile-time selection means zero cost on platforms that don't need it.
 
 **Where modularization would matter more:** The pty allocation itself (portable_pty already abstracts Unix openpty vs Windows ConPTY), and the tmux dependency (which locks us to Unix in practice). Lifting the tmux requirement is a bigger architectural decision — it would mean replacing `tmux send-keys` injection with direct pty writes for IPC, and finding a non-tmux pane management strategy.
-<!-- agent:boundary:5a24fb8f -->
+<!-- agent:boundary:84acfc4e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

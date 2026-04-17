@@ -16,7 +16,7 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange patch=append -->
 v0.32.5 session. Key fixes: supervisor IPC stack wired into start.rs (#vnp0/#6ae3/#zp02), DSR interleaving fix (prompt-poll instead of fixed sleep), supervisor smoke test (#f7d5), sun_path overflow for deep submodule paths (XDG_RUNTIME_DIR fallback when >107 bytes, 13 tests), tmux install detection (#t8tg), TerminalBackend trait spec (#1yk1), DirectTerminal plan (#zy7m), Library Context Policy stub in rust-package skill (#breh). Decisions: [/] vs [x] semantics (gate after impl, done on confirm); typed gates [/release]/[/deploy]; replace:* restricted to pending; --status flag mirrors --pending-add; always run cargo install --path . after builds without asking. State: 1055 tests, 7 gated pending items.
-<!-- agent:boundary:93e71a7b -->
+<!-- agent:boundary:93d54d2f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

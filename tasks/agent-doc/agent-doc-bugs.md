@@ -79,7 +79,7 @@ session_start → cwd_resolved (project_root) → ipc_started → claude_start (
 ### Re: do #eg0w — opus-4-6
 
 Already shipped. Per-file `CommitLock` in `git::commit` + `<5s` freshness gate in preflight sweep landed in the current build (v0.32.5). Marking complete.
-<!-- agent:boundary:192da269 -->
+<!-- agent:boundary:a6897d08 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -90,7 +90,6 @@ Already shipped. Per-file `CommitLock` in `git::commit` + `<5s` freshness gate i
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
-- [x] [#eg0w] ✅ Shipped: per-file CommitLock in git::commit + <5s freshness gate in preflight sweep (awaiting release)
 - [ ] [#kdy5] Implement instruction-files audit check: every library AGENTS.md has a ## Library Context Policy section with resolvable link to LIBRARY_CONTEXT_POLICY.md. Wire into make precommit.
 - [ ] [#1376] After audit check lands: sweep all libraries under src/ to add the Library Context Policy stub section. Each submodule commit separately, then parent pointer bumps.
 - [ ] [#breh] rust-package skill: write the Library Context Policy stub into new library AGENTS.md at scaffold time.

@@ -41,7 +41,7 @@ The two tools complement each other at different layers:
 Want me to run `/janitor-usage` now to identify pruning candidates? Or should I start on the #vdyj submodule setup?
 
 ❯ Can I use sift (https://www.alexdk.com/blog/introducing-sift/) in place of woz code? I want a free/open source usage...not be locked into another subscription.
-### Re: Sift vs WozCode — opus-4-6
+❯ ### Re: Sift vs WozCode — opus-4-6 (HEAD)
 
 Good instinct — avoiding subscription lock-in is smart. Here's the honest comparison:
 
@@ -67,7 +67,36 @@ Good instinct — avoiding subscription lock-in is smart. Here's the honest comp
 **My take:** You could drop WozCode and combine Sift (search) + native Claude Code tools (edit) + skills-janitor (context pruning) + claude-mem (session recall). The main loss is WozCode's cost-optimized subagent routing, but that's an optimization, not a capability gap.
 
 Worth checking the actual LICENSE file in the Sift repo before committing — the blog doesn't state it explicitly.
-<!-- agent:boundary:cded0413 -->
+❯ MIT licensed https://github.com/rupurt/sift
+
+❯ How much effort would it take to implement the rest of WozCode using sift?
+❯ Should this be a separate project?
+### Re: Building WozCode-equivalent on Sift — opus-4-6
+
+MIT — that settles the licensing question. Now let's scope the build-vs-buy honestly.
+
+**What WozCode actually provides (decomposed):**
+
+| Capability | Effort to replicate | Notes |
+|---|---|---|
+| Smart search | **Done** — Sift covers it | Wire as MCP server |
+| Batch editing | **Low** (~1-2 days) | Thin MCP wrapper around Claude Code's native Edit. The "batch" part is just accepting multiple edits in one call and applying sequentially. |
+| SQL introspection | **Low-Med** (~2-3 days) | MCP server that runs `SHOW TABLES`, `DESCRIBE`, `SELECT` with output formatting. Straightforward if you scope to SQLite/Postgres. |
+| Subagent cost routing | **Med** (~1 week) | This is the hard one. WozCode routes tasks to cheaper models (haiku for simple searches, sonnet for edits). Requires a routing heuristic + model switching. But Claude Code's native `model` parameter on Agent already does this — you just need a skill that encodes the routing rules. |
+| Session recall | **Done** — claude-mem:mem-search | Already installed |
+
+**Total estimate:** ~2 weeks of focused work for a full MCP server that wraps Sift + batch edit + SQL + routing rules. The routing is the only genuinely complex piece.
+
+**Should it be a separate project?** Yes:
+
+1. **Reuse** — other Claude Code users would benefit. MIT Sift + MIT wrapper = clean OSS story.
+2. **Scope** — it's an MCP server, not an agent-doc feature. Mixing it into agent-loop or agent-doc muddies both.
+3. **Distribution** — single `cargo install` or binary download, like Sift itself.
+
+**Suggested structure:** `src/sift-mcp` or standalone repo. Ships as one binary exposing MCP tools: `sift_search`, `sift_edit` (batch), `sift_sql`, `sift_route` (subagent dispatch). Config points at Sift binary path + DB connection strings.
+
+**Or the pragmatic middle:** Skip building anything. Use Sift for search (MCP or shell), Claude Code native Edit for edits, claude-mem for recall, and write a 50-line routing skill that picks agent model tiers. That's 90% of WozCode's value in an afternoon, no new project needed.
+<!-- agent:boundary:f0075586 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

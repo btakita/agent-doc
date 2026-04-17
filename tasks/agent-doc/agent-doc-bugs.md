@@ -586,7 +586,7 @@ Four phases:
 
 Links to the spec. Includes a decisions-to-make section (session persistence, multi-pane, auto-detection).
 ❯ do #breh
-### Re: do #breh — opus-4-6
+❯ ### Re: do #breh — opus-4-6 (HEAD)
 
 Done. Added **section 7 (AGENTS.md — Library Context Policy Stub)** to `.claude/skills/rust-package/SKILL.md`.
 
@@ -596,7 +596,35 @@ The skill now scaffolds an `AGENTS.md` with:
 - `CLAUDE.md → AGENTS.md` symlink
 
 Handles edge cases: existing AGENTS.md (adds section only if missing), packages outside agent-loop (uses absolute GitHub URL).
-<!-- agent:boundary:ee33620a -->
+❯ I ran `Claim for Tmux Pane` on src/session-share/tasks/ross-gpt-session.md: Got an error. Why?
+```
+/home/brian/.cargo/bin/agent-doc start tasks/ross-gpt-session.md
+~/work/btakita/agent-loop/src/session-share main ⇡100                                             agent-loop 13:36:39
+❯ /home/brian/.cargo/bin/agent-doc start tasks/ross-gpt-session.md
+Registered session 5086566f → pane %138
+Error: bind supervisor socket: /home/brian/work/btakita/agent-loop/src/session-share/.agent-doc/supervisor/5086566f-872e-49b1-8d53-d8fa2eef2b14.sock
+
+Caused by:
+    local socket name length exceeds capacity of sun_path of sockaddr_un
+```
+### Re: sun_path overflow on deep submodule paths — opus-4-6
+
+Classic Unix domain socket limit. `sun_path` in `sockaddr_un` is 108 bytes (107 + NUL). Your path:
+
+```
+/home/brian/work/btakita/agent-loop/src/session-share/.agent-doc/supervisor/5086566f-872e-49b1-8d53-d8fa2eef2b14.sock
+```
+
+That's 113 bytes — 6 over the limit.
+
+**Fix** (`supervisor/ipc.rs`): `socket_path()` now checks the computed path length. If it exceeds 107 bytes, it falls back to `$XDG_RUNTIME_DIR/agent-doc/<hash12>-<uuid8>.sock` (or `$TMPDIR/agent-doc/...` on macOS). The hash is a truncated SHA-256 of the project root, so the mapping is deterministic — same project + session always resolves to the same socket.
+
+- Short project roots (like `agent-loop/` itself): unchanged, stays in `.agent-doc/supervisor/`
+- Deep submodule paths (like `session-share/`): redirects to `/run/user/1000/agent-doc/...` (~55 bytes)
+- 13 tests passing (3 new: path fallback, short path preference, long-path bind+connect)
+
+Needs `cargo install --path .` to take effect. Want me to do that?
+<!-- agent:boundary:7e233457 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

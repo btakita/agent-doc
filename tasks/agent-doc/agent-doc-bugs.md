@@ -119,7 +119,7 @@ Yes, those 4 `instruction-files` processes are orphans from a previous Claude to
 
 **Prevention:** The precommit Makefile already uses `check-policy` instead of full `audit`. These were likely from an ad-hoc tool call that ran `audit` directly. Consider adding a timeout wrapper or using release builds for CLI invocations.
 
-### Re: tmux input garbling on robert-ross.md — opus-4-6
+❯ ### Re: tmux input garbling on robert-ross.md — opus-4-6 (HEAD)
 
 Pane %124 shows the problem clearly. After the supervisor injected `/agent-doc tasks/dreamable/robert-ross.md`, the pane received `^[[I^[[O` (terminal focus-in/focus-out CSI escape sequences) instead of a newline to submit the command. The prompt is sitting there with the command typed but not executed.
 
@@ -131,7 +131,36 @@ Pane %124 shows the problem clearly. After the supervisor injected `/agent-doc t
 3. Use a write lock / drain between the injected bytes and any asynchronous terminal events
 
 **Immediate workaround:** Manually press Enter in pane %124 to submit the pending `/agent-doc` command. The command text is already in the input buffer.
-<!-- agent:boundary:91d2a1ad -->
+Enter seems to write a `\n` but does not enter the command. The `^[[O` is from me pressing `Win+Space+Up Arrow`. You can see it's on its own line which was caused by pressing `Enter`.
+### Re: Enter doesn't submit in pane %124 — opus-4-6
+
+Thanks for the correction — the `^[[O` is from `Win+Space+Up Arrow`, not focus events. And Enter produces `\n` (visual newline) but doesn't submit.
+
+**Root cause analysis:** The pane capture shows TWO `❯` prompts. The first one received `^[[?997;1n^[[?997;1n` — these are DSR (Device Status Report) responses to `\x1b[?997n` terminal capability queries. These bytes entered Claude Code's input buffer before the real input prompt was ready, likely corrupting its readline/input state.
+
+The auto-trigger code in `start.rs:488` uses `tmux send-keys -t <pane> <cmd> Enter` which is correct. The `Enter` argument makes tmux send a CR. But the 5-second sleep before auto-trigger (`start.rs:486`) may not have been enough — the SessionStart hook output shows the context loading is substantial (10.8KB persisted-output). If Claude Code's input handler wasn't fully initialized when `send-keys` arrived, the characters queued in the pty input buffer and got interleaved with DSR responses.
+
+Once the input handler enters this corrupted state, Enter (CR/`\r`) is no longer recognized as the submit key — it renders as a visual newline instead.
+
+**Fix options:**
+
+1. **Immediate:** Kill the stuck session in pane %124 and restart: `tmux send-keys -t %124 C-c C-c` then re-run `agent-doc start`
+2. **Auto-trigger robustness:** Instead of a fixed 5-second sleep, probe for the Claude Code `❯` prompt character in the pane output before sending. Something like:
+   ```rust
+   // Poll for prompt readiness
+   for _ in 0..30 {
+       let output = Command::new("tmux")
+           .args(["capture-pane", "-t", &pane, "-p"])
+           .output()?;
+       let text = String::from_utf8_lossy(&output.stdout);
+       if text.contains("❯") || text.contains("⏵") {
+           break;
+       }
+       std::thread::sleep(Duration::from_millis(500));
+   }
+   ```
+3. **DSR filtering:** Strip `\x1b[?NNN;NNNn` sequences from the pty output before they reach Claude Code's input handler. These are terminal-to-application responses that shouldn't be in the input buffer.
+<!-- agent:boundary:b83c9b2e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

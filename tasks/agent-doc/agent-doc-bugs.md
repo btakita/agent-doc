@@ -596,7 +596,7 @@ The skill now scaffolds an `AGENTS.md` with:
 - `CLAUDE.md → AGENTS.md` symlink
 
 Handles edge cases: existing AGENTS.md (adds section only if missing), packages outside agent-loop (uses absolute GitHub URL).
-<!-- agent:boundary:28cb4473 -->
+<!-- agent:boundary:ee33620a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -607,7 +607,6 @@ Handles edge cases: existing AGENTS.md (adds section only if missing), packages 
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
-- [x] [#breh] rust-package skill: write the Library Context Policy stub into new library AGENTS.md at scaffold time.
 - [ ] [#3j0e] Install skills-janitor as Claude Code plugin (run /plugin install khendzel/skills-janitor at terminal). User plans to fork eventually; this is the interim path.
 - [ ] [#vdyj] After fork: move forked skills-janitor under src/ as submodule, wire audit into make precommit, and optionally add nightly cron via schedule skill writing drift reports to tasks/agent-doc/skills-audit.md.
 - [ ] [#9v7h] agent-doc: --pending-add should reject text starting with '[/]' / '[x]' / '[ ]' (ambiguous state marker). Add --pending-add-gated flag and emit assigned hash to stdout so skill can compose add+gate atomically without text-embedding.

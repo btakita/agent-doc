@@ -260,7 +260,7 @@ This will reveal which of three scenarios we're in:
 | No | — | Sequences originate outside the pty read path entirely |
 
 The answer determines whether to fix the filter, the pty topology, or tmux escape handling.
-<!-- agent:boundary:5663cede -->
+<!-- agent:boundary:c625fe30 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

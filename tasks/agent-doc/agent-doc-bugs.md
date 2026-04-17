@@ -284,7 +284,7 @@ Captured the debug output from pane %129 (robert-ross.md). Three categories of e
 
 **Build:** clippy clean, 1068 tests pass, release binary installed.
 ❯ Why do we need to do a filter at all? The supervisor is the parent process. Why is it interfering with the inputs and outputs to the console?
-### Re: why the pty filter exists — opus-4-6
+❯ ### Re: why the pty filter exists — opus-4-6 (HEAD)
 
 The supervisor **can't** just pass stdin/stdout through unmodified because it needs the pty pair for three things:
 
@@ -314,7 +314,45 @@ Claude Code sends terminal capability queries (`\x1b[?997n`, DA1, DA2) because i
 | Let the outer terminal consume responses silently | Can't — the response bytes flow through the pty reader to stdout, not through a bidirectional control channel |
 
 The filter is the minimal cost of owning the pty. If we didn't need injection/restart/resize, we could drop the whole supervisor and just `exec` Claude Code directly — but then we'd lose the entire IPC surface that makes `agent-doc route`, `agent-doc start --continue`, and cross-pane control work.
-<!-- agent:boundary:1c783462 -->
+❯ This seems fragile.
+
+❯ Getting `^[P>|tmux 3.6a^[\^[[?1;2;4c ▐▛███▜▌   Claude Code v2.1.109`
+❯ Enter still only sends a \n.
+```
+❯ /usage
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/usage                        Show plan usage limits
+/caveman                      (caveman) Ultra-compressed communication mode. Slash token usage ~75% by speaking li…
+/janitor-usage                (skills-janitor) Show which skills you use and which you never use
+/extra-usage                  Configure extra usage to keep working when limits are hit
+/context                      Visualize current context usage as a colored grid
+/effort                       Set effort level for model usage
+```
+### Re: stateful pty filter fix — opus-4-6
+
+The filter was **stateless across reads** — each `read()` call processed bytes independently. When an ESC byte landed at the end of one read buffer:
+
+1. `input[i] == 0x1b && i + 1 < len` → false (ESC is last byte)
+2. ESC pushed to output as plain text
+3. Next read starts fresh — `P>|tmux 3.6a\x1b\` leaks as visible characters
+
+**Fix:** Replaced the stateless `filter_terminal_queries()` function with a `PtyFilter` struct that carries partial escape sequences across reads. When parsing hits the end of a buffer mid-sequence (ESC at end, incomplete CSI params, unterminated DCS), the remaining bytes are saved to a `carryover` buffer and prepended to the next `filter()` call.
+
+The reader thread in `start.rs` now creates one `PtyFilter` instance and reuses it across all reads in the loop.
+
+**Boundary cases handled:**
+- ESC at end of read (DCS/CSI start split)
+- DCS body split at ST (`\x1b\` across reads)
+- CSI params split (`\x1b[?997` / `;1n`)
+- Normal SGR sequences preserved across splits
+
+**Tests:** 6 new cross-boundary tests including a real-world simulation that splits `DSR + DCS + DA1 + banner` at arbitrary points across 4 reads.
+
+**Build:** clippy clean, 1080 tests pass, release binary installed.
+
+**Manual testing gate:** needs a live `agent-doc start` to confirm the banner appears clean.
+<!-- agent:boundary:4e9a0e09 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

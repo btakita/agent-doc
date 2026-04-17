@@ -528,7 +528,7 @@ The core problem: tmux is a C program with its own dependency chain (libevent, n
    - **cargo-binstall:** can't express system deps, so fall back to runtime detection
 
 **The honest answer:** You can't reliably ensure tmux is installed across all operating systems without either (a) shipping your own multiplexer or (b) making tmux optional. Option (b) with the `TerminalBackend` trait is where this naturally leads — tmux is the premium backend for users who have it, and a direct-pty backend covers everyone else with reduced functionality (no session persistence, no pane splitting).
-<!-- agent:boundary:3f3fe3e2 -->
+<!-- agent:boundary:f380f574 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

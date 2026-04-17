@@ -151,7 +151,7 @@ Done. Transferred to `tasks/tsift.md` exchange section:
 
 Ready for `/agent-doc compact exchange tasks/agent-doc/agent-doc-bugs.md` whenever you are.
 ❯ Please trans the skills-janitor fork & related pending items into tsift.md. Let's have tsift be an all-in-one audit + token sifter tool.
-### Re: Skills-janitor → tsift merge — opus-4-6
+❯ ### Re: Skills-janitor → tsift merge — opus-4-6 (HEAD)
 
 Transferred to `tasks/tsift.md`. The vision: **tsift = token sifter + skill auditor** in one binary.
 
@@ -167,7 +167,25 @@ Transferred to `tasks/tsift.md`. The vision: **tsift = token sifter + skill audi
 4. **Hook** — Claude Code command rewriting (rtk-style)
 
 Marked #vdyj as done here since the work now lives in tsift's backlog. Also fixed the "Avisory" typo in #wcf5.
-<!-- agent:boundary:d876a534 -->
+❯ do #9v7h
+### Re: #9v7h implemented — opus-4-6
+
+Done. Three changes to agent-doc:
+
+1. **Validation**: `--pending-add` now rejects text starting with `[ ]`, `[/]`, `[x]`, `[X]` — prevents ambiguous state markers embedded in item text.
+
+2. **`--pending-add-gated`**: New flag on both `agent-doc write` and `agent-doc pending add-gated`. Creates items with `[/]` state directly, no separate gate step needed.
+
+3. **Hash echo**: Both `--pending-add` and `--pending-add-gated` print the assigned hash ID to stdout. The skill can now compose add+gate atomically:
+   ```bash
+   agent-doc write doc.md --pending-add-gated "implement feature" --pending-only
+   # stdout: a3f2
+   ```
+
+**Files changed:** `pending.rs` (op_add signature + validation), `pending_cmd.rs` (gated param + println), `main.rs` (CLI arg + dispatch + PendingAction::AddGated).
+
+**Tests:** 4 new tests (state marker rejection, gated add, id return). Full suite: 1083 passed, 0 failures. Binary installed.
+<!-- agent:boundary:3223464f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -178,7 +196,7 @@ Marked #vdyj as done here since the work now lives in tsift's backlog. Also fixe
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
-- [ ] [#9v7h] agent-doc: --pending-add should reject text starting with '[/]' / '[x]' / '[ ]' (ambiguous state marker). Add --pending-add-gated flag and emit assigned hash to stdout so skill can compose add+gate atomically without text-embedding.
+- [x] [#9v7h] agent-doc: --pending-add should reject text starting with '[/]' / '[x]' / '[ ]' (ambiguous state marker). Add --pending-add-gated flag and emit assigned hash to stdout so skill can compose add+gate atomically without text-embedding.
 - [ ] [#txex] notify: add --pending-add flag — auto-create agent:pending on target when absent, --no-create-pending to opt out. Pending-only (no exchange blockquote). Errors become no-ops under auto-create.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [ ] [#hrmt] Rewrite src/agent-doc/SKILL.md (bundled skill) to invert Phase 2 pending guidance: remove 'every response MUST include a patch:pending block', replace with granular-ops contract from .claude/skills/agent-doc/SKILL.md §1b. RELEASE GATE for #gqep — v0.32.4 cannot ship with inverted bundled-skill guidance.

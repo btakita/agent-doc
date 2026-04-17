@@ -314,7 +314,7 @@ Claude Code sends terminal capability queries (`\x1b[?997n`, DA1, DA2) because i
 | Let the outer terminal consume responses silently | Can't — the response bytes flow through the pty reader to stdout, not through a bidirectional control channel |
 
 The filter is the minimal cost of owning the pty. If we didn't need injection/restart/resize, we could drop the whole supervisor and just `exec` Claude Code directly — but then we'd lose the entire IPC surface that makes `agent-doc route`, `agent-doc start --continue`, and cross-pane control work.
-<!-- agent:boundary:21360890 -->
+<!-- agent:boundary:1c783462 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

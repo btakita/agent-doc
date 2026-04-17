@@ -1049,7 +1049,7 @@ After code edit: `make check` in `src/corky/`. OAuth scope `webmasters.readonly`
 
 Also noticed a stray file at `src/corky/src/gsc/20260413/corky-gsc` — looks like a misdirected `git branch` command that captured stdout. Not touching it unless you want me to clean it up.
 
-### Re: gsc user-OAuth fallback — done (HEAD)
+### Re: gsc user-OAuth fallback — done
 
 Ported. `src/corky/src/gsc/auth.rs` now has the full user-OAuth flow alongside the existing SA path.
 
@@ -1067,12 +1067,10 @@ Ported. `src/corky/src/gsc/auth.rs` now has the full user-OAuth flow alongside t
 **Before first live use:** publish the corky OAuth consent screen or add your Google account as a test user (GCP Console → OAuth consent screen → Test users) — `webmasters.readonly` is a sensitive scope and unverified apps get blocked for non-test users.
 
 Left as-is: the stray `src/corky/src/gsc/20260413/corky-gsc` file (looks like a misdirected git command). Let me know if you want it removed.
-<!-- agent:boundary:6bfd26f9 -->
+<!-- agent:boundary:5924f939 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [x] [#0kfh] **`corky gsc` user-OAuth fallback (step 6)** — clone `src/corky/src/cal/auth.rs` → `src/corky/src/gsc/auth.rs` user path. Port **8485** (Calendar uses 8484), scope `https://www.googleapis.com/auth/webmasters.readonly`, token-store key prefix `gsc:`. Requires publishing corky OAuth consent screen or adding test users for the sensitive `webmasters.readonly` scope (GCP Console → OAuth consent screen → Test users). Deferred out of the monsterrodholders gsc v1 cut because the service-account path (`passage corky/gcp/searchconsole_sa_json`) covers that use case. Pick this up when a non-SA caller needs GSC access. Related: `src/corky/plan.md` step 6 on branch `20260413/corky-gsc`.
-- [x] [#g674] implement gsc user-OAuth fallback: port cal/auth.rs → gsc/auth.rs (port 8485, scope webmasters.readonly, key prefix gsc:)
 <!-- /agent:pending -->

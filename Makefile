@@ -21,12 +21,14 @@ check-shared:
 	@echo "=== instruction-files: clippy + test ==="
 	@cd instruction-files && cargo clippy -- -D warnings && cargo test
 
-# Pre-commit checks for both projects
-precommit:
+# Pre-commit checks for both projects + workspace-level audit
+precommit: check-shared
 	@for dir in $(SUBMODULES); do \
 		echo "=== $$dir: make precommit ==="; \
 		$(MAKE) -C $$dir precommit || exit 1; \
 	done
+	@echo "=== workspace: library context policy ==="
+	@cd src/instruction-files && cargo run --quiet -- check-policy --root ../..
 
 # Pull latest changes and rebuild release binaries
 update:

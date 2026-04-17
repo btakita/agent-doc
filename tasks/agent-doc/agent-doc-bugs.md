@@ -495,7 +495,7 @@ Short answer: very feasible for input handling, and you can mostly rely on stand
 For (1), you'd need your own multiplexer or integrate with an existing one (Zellij has an IPC API). For (2) and (3), the Unix socket IPC you already have in `supervisor/ipc.rs` handles this — it's tmux-independent.
 
 **Bottom line:** The terminal I/O layer (raw mode, escape sequences) is fully portable via POSIX + one Windows cfg block. You don't need per-terminal logic. The dependency on tmux is architectural (pane lifecycle, persistence), not terminal-level.
-<!-- agent:boundary:116b577e -->
+<!-- agent:boundary:91483ce1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

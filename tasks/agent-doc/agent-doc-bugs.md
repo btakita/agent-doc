@@ -186,7 +186,7 @@ Done. Three changes to agent-doc:
 
 **Tests:** 4 new tests (state marker rejection, gated add, id return). Full suite: 1083 passed, 0 failures. Binary installed.
 ❯ do #txex
-### Re: #txex implemented — opus-4-6
+❯ ### Re: #txex implemented — opus-4-6 (HEAD)
 
 Done. Three changes to notify command:
 
@@ -214,7 +214,23 @@ agent-doc notify target.md --pending-add "item" --no-create-pending
 **Files changed:** `notify.rs` (run signature + ensure_pending_component + add_pending_item + save_snapshot helper), `pending_cmd.rs` (pub doc_id_for), `main.rs` (CLI args + dispatch).
 
 **Tests:** 8 new tests (auto-create, existing component, gated, no-create skip, both pending+message, snapshot update, insert position, message required). Full suite: 1091 passed, 0 failures. Binary installed.
-<!-- agent:boundary:39450338 -->
+❯ do #hrmt
+### Re: #hrmt implemented — opus-4-6
+
+Done. The stale `.claude/skills/agent-doc/SKILL.md` inside the agent-doc repo (v0.28.0) has been synced with the current bundled version (v0.32.0).
+
+**What changed:** The repo-local `.claude/skills/agent-doc/SKILL.md` had the old §1b: "every response MUST include a `patch:pending` block reflecting the current state." Replaced with the granular-ops contract: mutations via `--pending-add`, `--pending-done`, `--pending-edit`, etc. Full-replace via `patch:pending` is now explicitly rejected.
+
+**Scope of fix:**
+- The binary-bundled `SKILL.md` (root `src/agent-doc/SKILL.md`, `include_str!`'d in `skill.rs:38`) was already correct — no change needed.
+- The stale copy at `src/agent-doc/.claude/skills/agent-doc/SKILL.md` was the only file with the old guidance. Now matches the bundled version exactly.
+
+**Other updates in the sync:** v0.28.0 → v0.32.0 frontmatter, subcommand detection (compact), preflight JSON fields (baseline_file, slash_commands, model tier), model attribution, streaming checkpoints, runbook references, document-format runbook link.
+
+**Tests:** 15 skill tests passed, 1091 total (0 failures). Release binary built and installed.
+
+**Release gate:** #hrmt was the last blocker for #gqep (v0.32.4 release). The bundled skill guidance is now consistent — `patch:pending` is rejected in both the binary enforcement and the skill instructions.
+<!-- agent:boundary:c9fb0b52 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -226,7 +242,7 @@ agent-doc notify target.md --pending-add "item" --no-create-pending
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [ ] [#hrmt] Rewrite src/agent-doc/SKILL.md (bundled skill) to invert Phase 2 pending guidance: remove 'every response MUST include a patch:pending block', replace with granular-ops contract from .claude/skills/agent-doc/SKILL.md §1b. RELEASE GATE for #gqep — v0.32.4 cannot ship with inverted bundled-skill guidance.
+- [x] [#hrmt] Rewrite src/agent-doc/SKILL.md (bundled skill) to invert Phase 2 pending guidance: remove 'every response MUST include a patch:pending block', replace with granular-ops contract from .claude/skills/agent-doc/SKILL.md §1b. RELEASE GATE for #gqep — v0.32.4 cannot ship with inverted bundled-skill guidance.
 - [ ] [#e46w] Sweep-commit path: working-tree boundary lags until next write or editor re-open. Fix: have reposition_boundary_in_snapshot also rewrite the working-tree file when no active run is in progress (git.rs:593). Alternative: emit IPC reposition_boundary notification to open plugins.
 - [ ] [#f8j3] Sweep-commit working-tree lag: reposition_boundary_in_snapshot (git.rs:593) only updates snapshot; working tree boundary only moves via IPC from agent-doc write. Fix: also rewrite working tree in snapshot reposition path, or emit IPC ping to open plugins.
 - [ ] [#y4da] Deterministic boundary reposition in working tree (git.rs reposition_boundary_in_snapshot extends to disk write with active-run guard)

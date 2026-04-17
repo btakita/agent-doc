@@ -475,7 +475,7 @@ Done. Removed the `#[ignore]` annotation from `watcher_detects_change` in `watch
 **Change:** one line removed (`#[ignore] // Integration test — requires notify to work with real filesystem`).
 
 `make check` passes: 1055 tests green (net +1), clippy clean.
-<!-- agent:boundary:cb9d046b -->
+<!-- agent:boundary:9aa69a08 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -483,7 +483,6 @@ Done. Removed the `#[ignore]` annotation from `watcher_detects_change` in `watch
 <!-- agent:pending patch=replace -->
 - [/] [#p2xm] Orphaned patch:exchange marker leak: parse_patches() does not consume unclosed opening markers — they leak into unmatched text and get appended to exchange verbatim. Fix: advance last_end past unclosed openers in parse_patches()
 - [/] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots
-- [x] [#cjpp] Un-ignore watcher_detects_change with real tmpdir + timeout — re-enable 1 integration test
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end

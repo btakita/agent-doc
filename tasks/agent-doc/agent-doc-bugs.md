@@ -71,7 +71,7 @@ Worth checking the actual LICENSE file in the Sift repo before committing — th
 
 ❯ How much effort would it take to implement the rest of WozCode using sift?
 ❯ Should this be a separate project?
-### Re: Building WozCode-equivalent on Sift — opus-4-6
+❯ ### Re: Building WozCode-equivalent on Sift — opus-4-6 (HEAD)
 
 MIT — that settles the licensing question. Now let's scope the build-vs-buy honestly.
 
@@ -96,7 +96,30 @@ MIT — that settles the licensing question. Now let's scope the build-vs-buy ho
 **Suggested structure:** `src/sift-mcp` or standalone repo. Ships as one binary exposing MCP tools: `sift_search`, `sift_edit` (batch), `sift_sql`, `sift_route` (subagent dispatch). Config points at Sift binary path + DB connection strings.
 
 **Or the pragmatic middle:** Skip building anything. Use Sift for search (MCP or shell), Claude Code native Edit for edits, claude-mem for recall, and write a 50-line routing skill that picks agent model tiers. That's 90% of WozCode's value in an afternoon, no new project needed.
-<!-- agent:boundary:26bc5caf -->
+
+❯ We can implement the "the pragmatic middle" as a plugin. I want a cli instead of a mcp. What should we call it? sift-tokens? token-sifter? sifting-tokens? siftoken? any other suggestions?
+### Re: Naming the CLI plugin — opus-4-6
+
+CLI, not MCP — good call. Lower overhead, works as a Claude Code hook target, and you already have the `rtk` pattern for CLI proxies.
+
+Evaluating your candidates:
+
+| Name | Pros | Cons |
+|---|---|---|
+| `sift-tokens` | Clear, descriptive | Hyphenated (annoying to type repeatedly) |
+| `token-sifter` | Reads well | Long, hyphenated |
+| `sifting-tokens` | Very descriptive | Way too long for a CLI |
+| `siftoken` | Short, clean portmanteau, 8 chars | Might read as "sif-token" on first glance |
+
+**Additional suggestions:**
+
+- **`tsift`** — 5 chars, "token sift", mirrors the `rtk` pattern of terse CLI names. Easy to type.
+- **`sieve`** — metaphor for filtering/refining tokens. 5 chars, memorable, but might conflict with existing tools.
+- **`pansift`** — gold-panning metaphor (sift for the valuable tokens, discard the rest). 7 chars.
+- **`siftcc`** — "sift for claude code". 6 chars, explicit about what it targets.
+
+**My pick: `tsift`** — same family as `rtk` (terse, 4-5 chars, token-focused), easy to type, and the `t` prefix clearly signals "token." Second choice: `siftoken` if you want something more self-documenting.
+<!-- agent:boundary:094954b4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

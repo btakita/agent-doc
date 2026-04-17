@@ -67,7 +67,7 @@ Good instinct — avoiding subscription lock-in is smart. Here's the honest comp
 **My take:** You could drop WozCode and combine Sift (search) + native Claude Code tools (edit) + skills-janitor (context pruning) + claude-mem (session recall). The main loss is WozCode's cost-optimized subagent routing, but that's an optimization, not a capability gap.
 
 Worth checking the actual LICENSE file in the Sift repo before committing — the blog doesn't state it explicitly.
-<!-- agent:boundary:0baa1008 -->
+<!-- agent:boundary:cded0413 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

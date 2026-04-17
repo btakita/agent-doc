@@ -435,7 +435,7 @@ Done. Added `_in(base_dir: &Path)` variants to all functions that used CWD-relat
 The 11th test (`watcher_detects_change`) was already tracked under #cjpp — it's an integration test unrelated to `set_current_dir`.
 
 `make check` passes: 1052 tests green, clippy clean.
-<!-- agent:boundary:2898ccdc -->
+<!-- agent:boundary:691b3fd3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -443,7 +443,6 @@ The 11th test (`watcher_detects_change`) was already tracked under #cjpp — it'
 <!-- agent:pending patch=replace -->
 - [/] [#p2xm] Orphaned patch:exchange marker leak: parse_patches() does not consume unclosed opening markers — they leak into unmatched text and get appended to exchange verbatim. Fix: advance last_end past unclosed openers in parse_patches()
 - [/] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots
-- [x] [#vefa] Refactor set_current_dir tests to accept base_dir: &Path parameter — re-enable 11 ignored tests (autoclaim 3, sessions 5, watch 2)
 - [ ] [#3t02] Add submodule IPC routing test fixtures (git init + submodule add in tmpdir) — re-enable 2 ignored tests
 - [ ] [#cjpp] Un-ignore watcher_detects_change with real tmpdir + timeout — re-enable 1 integration test
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.

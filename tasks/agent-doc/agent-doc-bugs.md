@@ -429,7 +429,7 @@ Added a `RawMode` guard struct that:
 
 **Important:** You need to kill and restart `agent-doc start` for the affected pane to pick up the new binary. The fix only takes effect after restart.
 ❯ The fix worked. Will this work on windows, osx, and for non-tmux sessions? If there are differences, we should modularize the architecture to allow for other operating systems and terminal front ends.
-### Re: cross-platform and non-tmux compatibility — opus-4-6
+❯ ### Re: cross-platform and non-tmux compatibility — opus-4-6 (HEAD)
 
 **Current state by platform:**
 
@@ -443,10 +443,59 @@ Added a `RawMode` guard struct that:
 
 **On modularization:** The `#[cfg(unix)]` / `#[cfg(not(unix))]` gate is already the idiomatic Rust pattern for platform-specific terminal handling. A trait abstraction (`trait TerminalMode { fn enable_raw(); fn suspend(); fn resume(); }`) would be premature — we have exactly two cases (Unix: real impl, Windows: no-op), and cfg gates handle that cleanly without runtime dispatch or trait objects.
 
+❯ I understand that this is premature. But I'm inclined to have an architecture distinction in place. For now a non-tmux environment can have an error or a noop. What do you recommend?
+
 If Windows ever needs ConPTY-specific raw mode (via `SetConsoleMode` removing `ENABLE_PROCESSED_INPUT`), we'd add a `#[cfg(windows)]` block alongside the existing stubs. The compile-time selection means zero cost on platforms that don't need it.
 
 **Where modularization would matter more:** The pty allocation itself (portable_pty already abstracts Unix openpty vs Windows ConPTY), and the tmux dependency (which locks us to Unix in practice). Lifting the tmux requirement is a bigger architectural decision — it would mean replacing `tmux send-keys` injection with direct pty writes for IPC, and finding a non-tmux pane management strategy.
-<!-- agent:boundary:84acfc4e -->
+
+❯ How feasible would it be to have direct console support? Would I need special logic for each terminal program or can I rely on the POSIX standard and any other os-specific standard?
+### Re: modularization recommendation — opus-4-6
+
+You're right to want the architectural seam in place early — it's cheap now and painful to retrofit later. Here's what I'd recommend:
+
+**A thin trait, not cfg gates:**
+
+```rust
+pub trait TerminalBackend: Send {
+    fn enable_raw(&mut self) -> Result<()>;
+    fn suspend(&mut self) -> Result<()>;
+    fn resume(&mut self) -> Result<()>;
+    fn restore(&mut self) -> Result<()>;
+}
+```
+
+Three implementations:
+- `UnixTerminal` — the current `libc::termios` code
+- `WindowsTerminal` — `SetConsoleMode` when needed, no-op for now
+- `NoopTerminal` — non-tmux / headless / CI environments
+
+The trait object cost is negligible (called a handful of times per session, not per-keystroke), and it gives you a clear extension point without touching cfg gates when adding a new backend.
+
+### Re: direct console support feasibility — opus-4-6
+
+Short answer: very feasible for input handling, and you can mostly rely on standards.
+
+**What POSIX gives you for free:**
+- Terminal raw mode (`termios`/`cfmakeraw`) is POSIX.1 — works identically across Linux, macOS, BSDs, and any POSIX-compliant system. No per-terminal-emulator logic needed.
+- Escape sequences for cursor control, colors, etc. follow the ANSI/ECMA-48 standard. Every modern terminal emulator (iTerm2, Alacritty, kitty, Windows Terminal, GNOME Terminal) implements this.
+- The `TERM`/`TERMINFO` database handles capability differences automatically.
+
+**What you'd need per-OS logic for:**
+- **Windows:** `SetConsoleMode` to disable `ENABLE_PROCESSED_INPUT` (the Windows equivalent of raw mode). The Win32 console API is separate from POSIX, so a `#[cfg(windows)]` block is unavoidable. Windows Terminal also supports VT sequences, but legacy `cmd.exe` needs the Win32 path.
+
+**What you do NOT need per-terminal-program logic for:**
+- All terminal emulators (iTerm2, kitty, Alacritty, xterm, etc.) present the same POSIX pty interface to your process. Your code talks to the pty master fd, not to the terminal emulator directly. The emulator renders what you write — you never need to know which one it is.
+
+**The real question is tmux replacement, not terminal compatibility.** Direct console support is trivial for raw mode and I/O. The hard part is replacing what tmux provides:
+1. **Pane management** — creating/splitting/targeting panes for document rendering
+2. **Session persistence** — surviving SSH disconnects, terminal crashes
+3. **`send-keys` injection** — the auto-trigger mechanism for `/agent-doc`
+
+For (1), you'd need your own multiplexer or integrate with an existing one (Zellij has an IPC API). For (2) and (3), the Unix socket IPC you already have in `supervisor/ipc.rs` handles this — it's tmux-independent.
+
+**Bottom line:** The terminal I/O layer (raw mode, escape sequences) is fully portable via POSIX + one Windows cfg block. You don't need per-terminal logic. The dependency on tmux is architectural (pane lifecycle, persistence), not terminal-level.
+<!-- agent:boundary:116b577e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

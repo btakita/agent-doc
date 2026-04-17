@@ -624,7 +624,7 @@ That's 113 bytes — 6 over the limit.
 - 13 tests passing (3 new: path fallback, short path preference, long-path bind+connect)
 
 Needs `cargo install --path .` to take effect. Want me to do that?
-<!-- agent:boundary:7e233457 -->
+<!-- agent:boundary:b44e9476 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -553,7 +553,7 @@ All three added to pending as gated items.
 ### Re: why gated — opus-4-6
 
 They shouldn't be. The `[/]` gate means "don't implement until user approves" — but you already approved all three ("do this", "do the TerminalBackend trait", "Create a plan file"). My mistake: I passed `[/]` as part of the `--pending-add` text, which embedded it as a literal string rather than using `--pending-gate`. The items were actually ungated `[ ]` but had confusing `[/]` text prefixes. Fixed — removed the stale `[/]` prefixes from all three.
-<!-- agent:boundary:6ddde8d0 -->
+<!-- agent:boundary:b0a29661 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

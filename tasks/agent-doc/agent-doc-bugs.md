@@ -45,10 +45,37 @@ Implemented. The restart loop in `start.rs` now uses the full supervisor stack:
 
 Also noting #zp02 (wire supervisor/env.rs into start.rs) is similarly done — `EnvSpec::from_frontmatter(&fm).resolve()` replaced the inline `crate::env::expand_values(&fm.env)` loop at the old start.rs:189.
 ❯ do #zp02
-### Re: do #zp02 — opus-4-6
+❯ ### Re: do #zp02 — opus-4-6 (HEAD)
 
 Confirmed done. `EnvSpec::from_frontmatter(&fm).resolve()` is at start.rs:340, replacing the old inline `crate::env::expand_values(&fm.env)` loop. This was wired in as part of #vnp0's full supervisor integration. Marked complete.
-<!-- agent:boundary:85910db3 -->
+❯ do #f7d5
+### Re: do #f7d5 supervisor smoke test — opus-4-6
+
+Smoke test passed — real Claude under supervisor in a tmux pane, all IPC methods verified end-to-end.
+
+**Setup:** Created test doc with session UUID `smoke-test-f7d5`. First attempt failed because `~/.cargo/bin/agent-doc` was stale (different md5 from `target/release/agent-doc`). After `cargo install --path .`, supervisor started correctly.
+
+**Results:**
+
+| Test | Command | Result |
+|------|---------|--------|
+| Socket creation | `ls .agent-doc/supervisor/` | `smoke-test-f7d5.sock` created |
+| State query | `{"method":"state"}` | `running:true, state:healthy, restart_count:0, cwd_source:project_root` |
+| PID query | `{"method":"pid"}` | PID 1685075 — verified as real claude process |
+| Inject | `{"method":"inject","bytes":"echo hello..."}` | `n:27` — text appeared in Claude pty input |
+| Restart | `{"method":"restart","mode":"continue"}` | Log: `ipc_restart` → `claude_restart` → `auto_trigger`. State: `restart_count:1`, healthy |
+| CWD invariant | `tmux pane_current_path` | `/home/brian/work/btakita/agent-loop` (project root, correct) |
+| Graceful stop | `{"method":"stop","graceful":true}` | Log: `ipc_stop` → `session_end`, socket cleaned up |
+
+**Bug found:** Installed binary was out of sync with release build — supervisor IPC was silently absent with the old binary. `cargo install --path .` is critical after supervisor module changes.
+
+**Full lifecycle log:**
+```
+session_start → cwd_resolved (project_root) → ipc_started → claude_start (fresh, #0)
+→ ipc_restart (continue, #1) → claude_restart → auto_trigger
+→ ipc_stop → session_end
+```
+<!-- agent:boundary:c50652e0 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -59,7 +86,7 @@ Confirmed done. `EnvSpec::from_frontmatter(&fm).resolve()` is at start.rs:340, r
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
-- [ ] [#f7d5] supervisor: smoke test — real claude under supervisor in a tmux pane, verify restart + inject + CWD invariant end-to-end
+- [x] [#f7d5] supervisor: smoke test — real claude under supervisor in a tmux pane, verify restart + inject + CWD invariant end-to-end
 - [ ] [#eg0w] ✅ Shipped: per-file CommitLock in git::commit + <5s freshness gate in preflight sweep (awaiting release)
 - [ ] [#kdy5] Implement instruction-files audit check: every library AGENTS.md has a ## Library Context Policy section with resolvable link to LIBRARY_CONTEXT_POLICY.md. Wire into make precommit.
 - [ ] [#1376] After audit check lands: sweep all libraries under src/ to add the Library Context Policy stub section. Each submodule commit separately, then parent pointer bumps.

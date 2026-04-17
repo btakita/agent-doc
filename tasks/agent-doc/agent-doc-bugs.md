@@ -375,7 +375,7 @@ echo "content" | agent-doc write doc.md --status "New status" --stream
 
 The skill no longer needs `<!-- patch:status -->` delimiters — just pass `--status "text"` alongside the exchange content.
 ❯ do #08yv
-### Re: #08yv — pre-lock file modification race fixed — opus-4-6
+❯ ### Re: #08yv — pre-lock file modification race fixed — opus-4-6 (HEAD)
 
 Fixed. The race window between `content_at_start` read and `doc_lock` acquire allowed concurrent agent-doc writes to modify the file + snapshot, drifting the merge baseline and pre-response undo snapshot.
 
@@ -392,14 +392,31 @@ The IPC path in `run_stream()` is unaffected — the plugin handles atomicity th
 **Lock scope widened slightly** — the lock now covers `save_pre_response`, patch application, and `content_ours` construction. These are fast local operations (typically <5ms per perf logs), so contention impact is negligible.
 
 `make check` passes: 1042 tests green, clippy clean.
-<!-- agent:boundary:088bac1d -->
+❯ do #wcf5
+### Re: #wcf5 — snapshot-before-document write ordering — opus-4-6
+
+Fixed. All disk write paths had document-first, snapshot-second ordering. External file watchers (IDE inotify listeners, git hooks) fire on the document rename and could compute diffs against a stale snapshot before agent-doc updated it.
+
+**Invariant:** snapshot is now always saved BEFORE the document across all write paths, so external watchers always read a current baseline.
+
+**Four paths patched:**
+
+1. **`run()` (inline mode, line ~774)** — `snapshot::save()` moved before `atomic_write()`
+2. **`run_template()` (template mode, line ~868)** — same reorder
+3. **`run_stream()` (stream mode, line ~1237)** — `snapshot::save()` + `save_crdt()` moved before `atomic_write()`
+4. **IPC timeout fallback (line ~1120)** — `snapshot::save()` moved before `atomic_write()` in the exit(75) path
+
+The IPC success path (try_ipc) is unaffected — the plugin applies patches via Document API, and the snapshot is saved from the post-apply file content. No external rename event triggers a race there.
+
+`make check` passes: 1042 tests green, clippy clean.
+<!-- agent:boundary:7f043015 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [/] [#p2xm] Orphaned patch:exchange marker leak: parse_patches() does not consume unclosed opening markers — they leak into unmatched text and get appended to exchange verbatim. Fix: advance last_end past unclosed openers in parse_patches()
-- [ ] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots
+- [/] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots
 - [ ] [#vefa] Refactor set_current_dir tests to accept base_dir: &Path parameter — re-enable 11 ignored tests (autoclaim 3, sessions 5, watch 2)
 - [ ] [#3t02] Add submodule IPC routing test fixtures (git init + submodule add in tmpdir) — re-enable 2 ignored tests
 - [ ] [#cjpp] Un-ignore watcher_detects_change with real tmpdir + timeout — re-enable 1 integration test

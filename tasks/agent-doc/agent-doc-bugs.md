@@ -364,7 +364,7 @@ The reader thread in `start.rs` now creates one `PtyFilter` instance and reuses 
 /janitor-usage                (skills-janitor) Show which skills you use and which you never use
 ...
 ```
-### Re: filter queries, not just responses — opus-4-6
+❯ ### Re: filter queries, not just responses — opus-4-6 (HEAD)
 
 The stateful fix was correct (cross-boundary handling) but insufficient. The real issue: we were filtering RESPONSES (`\x1b[?1;2;4c`, `\x1bP>|tmux...\x1b\`) but letting the QUERIES through. Claude Code sends `\x1b[c` (DA1 query) and `\x1b[>q` (XTVERSION query) — neither had a filter match. These pass through the reader thread to tmux, which generates responses that appear as visible garbage.
 
@@ -383,7 +383,52 @@ Existing response filters remain as defense-in-depth.
 **Build:** clippy clean, release binary installed.
 
 **Important:** Existing `agent-doc start` processes use the OLD binary (process memory doesn't change when the file is replaced). You need to kill and restart the `agent-doc start` for the affected pane to pick up the new binary.
-<!-- agent:boundary:cba052f2 -->
+❯ The header renders correctly...
+```
+Registered session 6cb2a9bf → pane %134
+Starting claude...
+ ▐▛███▜▌   Claude Code v2.1.109
+▝▜█████▛▘  Haiku 4.5 · Claude Max
+  ▘▘ ▝▝    ~/work/btakita/agent-loop
+```
+❯ But the Enter behavior is still the same...
+```
+❯ /usage
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/usage                        Show plan usage limits
+/caveman                      (caveman) Ultra-compressed communication mode. Slash token usage ~75% by speaking li…
+...
+```
+### Re: Enter sends \n instead of \r — raw mode fix — opus-4-6
+
+Good news: the header being clean confirms the query-stripping fix works. The Enter issue is a separate bug — a pty line discipline double-translation.
+
+**Root cause:** The nested pty topology has two line disciplines:
+
+```
+User types Enter (\r)
+  → outer pty (tmux pane, cooked mode, ICRNL on)
+  → \r converted to \n (0x0A)
+  → agent-doc start reads \n from stdin
+  → writer thread forwards \n to inner pty master
+  → Claude Code (raw mode on inner slave) receives \n
+  → expects \r — broken
+```
+
+When Claude Code runs directly in a terminal, it puts the terminal into raw mode (disabling ICRNL), so Enter arrives as `\r` (0x0D). Through the supervisor, the outer pty's cooked-mode ICRNL has already converted `\r` → `\n` before `agent-doc start` even reads it from stdin.
+
+**Fix:** `start.rs` now puts its own stdin into raw mode via `cfmakeraw()` before entering the supervisor restart loop. This disables ICRNL (and all other line-discipline translations) on the outer pty, so `\r` passes through unchanged to the inner pty master and arrives at Claude Code as expected.
+
+Added a `RawMode` guard struct that:
+- Saves original termios on construction, sets raw mode
+- `suspend()` / `resume()` for the PromptUser path (clean exit → "Press Enter to restart or 'q' to exit" needs cooked mode for `read_line()`)
+- Restores original termios on `Drop`
+
+**Build:** clippy clean, 294 lib tests pass, release binary installed.
+
+**Important:** You need to kill and restart `agent-doc start` for the affected pane to pick up the new binary. The fix only takes effect after restart.
+<!-- agent:boundary:5dcf0c62 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

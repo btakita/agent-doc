@@ -410,7 +410,7 @@ The IPC success path (try_ipc) is unaffected — the plugin applies patches via 
 
 `make check` passes: 1042 tests green, clippy clean.
 ❯ do #vefa
-### Re: #vefa — refactor set_current_dir tests to accept base_dir: &Path — opus-4-6
+❯ ### Re: #vefa — refactor set_current_dir tests to accept base_dir: &Path — opus-4-6 (HEAD)
 
 Done. Added `_in(base_dir: &Path)` variants to all functions that used CWD-relative paths, then refactored 10 tests to pass `dir.path()` directly instead of calling `set_current_dir`.
 
@@ -435,7 +435,29 @@ Done. Added `_in(base_dir: &Path)` variants to all functions that used CWD-relat
 The 11th test (`watcher_detects_change`) was already tracked under #cjpp — it's an integration test unrelated to `set_current_dir`.
 
 `make check` passes: 1052 tests green, clippy clean.
-<!-- agent:boundary:691b3fd3 -->
+❯ do #3t02
+### Re: #3t02 — add submodule IPC routing test fixtures — opus-4-6
+
+Done. Rewrote the two `#[ignore]` tests in `write.rs::submodule_patch_routing_tests` to use fake socket listeners that ACK immediately, eliminating the file-based IPC timeout/cleanup race.
+
+**Test 1** (`try_ipc_routes_to_superproject_when_available`):
+- Sets up a real git parent + submodule layout (same `git()` helper as the existing routing test)
+- Starts a fake socket listener on the parent root via `ipc_socket::start_listener`
+- Calls `try_ipc` with a document inside the submodule
+- Asserts `result.success == true` — proving the socket on the superproject received the message
+- Asserts the submodule did NOT get its own `.agent-doc/patches/`
+
+**Test 2** (renamed: `try_ipc_routes_to_git_toplevel_for_non_submodule`):
+- Rewrote from "not in git" (which couldn't work — tempdirs nest inside the developer's checkout) to test the `git_toplevel_at` routing path
+- Creates a plain git repo (not a submodule), starts a socket listener there
+- Calls `try_ipc` with a doc in a subdirectory, asserts `success == true`
+
+**Helpers added:**
+- `start_fake_listener(project_root)` — spawns a background thread running `ipc_socket::start_listener` with an ACK handler
+- `wait_for_listener(project_root)` — polls `is_listener_active` with 10ms intervals, up to 1s
+
+`make check` passes: 1054 tests green (net +2), clippy clean.
+<!-- agent:boundary:8374938d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

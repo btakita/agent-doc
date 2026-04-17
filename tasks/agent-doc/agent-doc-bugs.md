@@ -383,7 +383,7 @@ Existing response filters remain as defense-in-depth.
 **Build:** clippy clean, release binary installed.
 
 **Important:** Existing `agent-doc start` processes use the OLD binary (process memory doesn't change when the file is replaced). You need to kill and restart the `agent-doc start` for the affected pane to pick up the new binary.
-<!-- agent:boundary:b624cdfb -->
+<!-- agent:boundary:cba052f2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -585,7 +585,7 @@ Four phases:
 4. Windows support
 
 Links to the spec. Includes a decisions-to-make section (session persistence, multi-pane, auto-detection).
-<!-- agent:boundary:d11d913d -->
+<!-- agent:boundary:97dea09d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -611,8 +611,5 @@ Links to the spec. Includes a decisions-to-make section (session persistence, mu
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
 - [ ] [#77mf] Event-driven gate resolution: typed gate markers like [/release] and [/deploy] that auto-resolve on matching events (cargo publish, git push). Extends the binary [/] invariant with machine-actionable gate types — reaper checks event log before skipping.
 - [/] [#6hgf] Add --status flag to agent-doc write: skill passes status text as CLI arg, binary handles component targeting with replace semantics
-- [x] [#t8tg] Add tmux install detection with platform-specific install instructions in start.rs
-- [x] [#1yk1] Create TerminalBackend trait and spec file at src/agent-doc/specs/terminal-backend.md
-- [x] [#zy7m] Create DirectTerminal plan file at src/agent-doc/specs/direct-terminal-plan.md linking to the spec
 <!-- /agent:pending -->
 ## Assistant

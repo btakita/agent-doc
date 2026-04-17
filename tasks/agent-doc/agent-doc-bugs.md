@@ -150,7 +150,7 @@ Done. Transferred to `tasks/tsift.md` exchange section:
 - **Sift technical details**: pipeline stages, SIMD, caching, performance benchmarks
 
 Ready for `/agent-doc compact exchange tasks/agent-doc/agent-doc-bugs.md` whenever you are.
-<!-- agent:boundary:a7927897 -->
+<!-- agent:boundary:f7519264 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

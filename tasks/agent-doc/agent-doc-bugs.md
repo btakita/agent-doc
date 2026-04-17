@@ -549,7 +549,7 @@ Adding all three to pending:
 3. **Plan file** — I'll create `src/agent-doc/specs/direct-terminal-plan.md` linking to the spec.
 
 All three added to pending as gated items.
-<!-- agent:boundary:88cd181c -->
+<!-- agent:boundary:de332648 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -101,7 +101,7 @@ Committed in 9 submodules (8 parent pointer bumps):
 **Deferred:** session-share — pre-commit hook blocks due to unrelated `specs/expert-sentiment-calibration.md` doc-lint error. Needs that file fixed first.
 
 `check-policy --root ../..` passes for all 10 committed libraries.
-<!-- agent:boundary:b3d95f1f -->
+<!-- agent:boundary:350e83b2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -112,7 +112,6 @@ Committed in 9 submodules (8 parent pointer bumps):
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
-- [x] [#1376] After audit check lands: sweep all libraries under src/ to add the Library Context Policy stub section. Each submodule commit separately, then parent pointer bumps.
 - [ ] [#breh] rust-package skill: write the Library Context Policy stub into new library AGENTS.md at scaffold time.
 - [ ] [#3j0e] Install skills-janitor as Claude Code plugin (run /plugin install khendzel/skills-janitor at terminal). User plans to fork eventually; this is the interim path.
 - [ ] [#vdyj] After fork: move forked skills-janitor under src/ as submodule, wire audit into make precommit, and optionally add nightly cron via schedule skill writing drift reports to tasks/agent-doc/skills-audit.md.

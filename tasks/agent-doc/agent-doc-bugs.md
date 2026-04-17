@@ -192,7 +192,7 @@ By waiting for the `❯` prompt to actually appear in the pane, we guarantee Cla
 **Build status:** clippy clean, 1055 tests pass, release binary installed.
 
 **Manual testing gate:** needs a live `agent-doc start` with `--continue` restart to confirm the prompt polling works end-to-end.
-<!-- agent:boundary:4b806fd0 -->
+<!-- agent:boundary:aff05d36 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

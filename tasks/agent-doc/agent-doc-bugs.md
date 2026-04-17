@@ -17,7 +17,7 @@ claude_args: --dangerously-skip-permissions
 <!-- agent:exchange patch=append -->
 Session covered v0.32.5→v0.32.6 development. Key fixes: #a004 (drop in-process status Mutex, file-based only), 0-component IPC patchback bug (boundary synthesis in all write paths), #jg0d/#b486/#40ct (supervisor submodules: state.rs, resize.rs, ipc.rs — 52 tests), #esws (single patch_id per logical write + plugin-side dedup TTL set), #1kap (poll ack-content sidecar instead of 200ms sleep), #s7wk/#1497 (sweep-commit guard + --pending-only flag), #p2xm (orphaned patch:exchange marker fix in parse_patches), --status flag (skill passes text, binary handles component targeting), #08yv (pre-lock file mod race), #wcf5 (snapshot-before-document ordering), #vefa (set_current_dir→base_dir refactor, 10 tests re-enabled), #3t02 (submodule IPC routing fixtures, 2 tests), #cjpp (un-ignored watcher_detects_change). Decisions: [/] vs [x] semantics codified (gate after impl, done on confirm); typed gates [/release]/[/deploy] added to pending; replace:* restricted to pending only; --status flag mirrors --pending-add pattern. State: 1055 tests passing, pending has 7 gated items.
 ❯ do #vnp0
-### Re: #vnp0 supervisor wired into start.rs — opus-4-6
+❯ ### Re: #vnp0 supervisor wired into start.rs — opus-4-6 (HEAD)
 
 Implemented. The restart loop in `start.rs` now uses the full supervisor stack:
 
@@ -38,7 +38,13 @@ Implemented. The restart loop in `start.rs` now uses the full supervisor stack:
 - `cargo test` — 1055 passed, 6 ignored
 - `cargo build --release` — builds clean
 - Manual testing gate: needs live `agent-doc start` session to confirm pty I/O, resize, restart, and IPC work end-to-end
-<!-- agent:boundary:9cf0a6da -->
+❯ do #6ae3
+### Re: #6ae3 already completed in #vnp0 — opus-4-6
+
+#6ae3 (wire PtySession into start.rs, replace Command::status inherit-tty path) was fully completed as part of #vnp0. The old `std::process::Command::new("claude").status()` path is gone — replaced by `PtySpawnConfig` + `PtySession::spawn()` + manual I/O forwarding threads + `session.wait()`. Marking done.
+
+Also noting #zp02 (wire supervisor/env.rs into start.rs) is similarly done — `EnvSpec::from_frontmatter(&fm).resolve()` replaced the inline `crate::env::expand_values(&fm.env)` loop at the old start.rs:189.
+<!-- agent:boundary:2527e2a1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -49,7 +55,7 @@ Implemented. The restart loop in `start.rs` now uses the full supervisor stack:
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
-- [ ] [#6ae3] supervisor/pty.rs: wire PtySession into start.rs (phase 1 wire-up stage) — replaces the current Command::status inherit-tty path
+- [x] [#6ae3] supervisor/pty.rs: wire PtySession into start.rs (phase 1 wire-up stage) — replaces the current Command::status inherit-tty path
 - [ ] [#zp02] supervisor/env.rs: wire into start.rs — replace the inline fm.env expansion loop in start.rs:189 with EnvSpec::from_frontmatter(&fm).resolve()?; feed the result into PtySpawnConfig.env once state.rs restart loop is in place
 - [ ] [#f7d5] supervisor: smoke test — real claude under supervisor in a tmux pane, verify restart + inject + CWD invariant end-to-end
 - [ ] [#eg0w] ✅ Shipped: per-file CommitLock in git::commit + <5s freshness gate in preflight sweep (awaiting release)

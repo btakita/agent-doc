@@ -139,7 +139,7 @@ Done. Here's what was set up:
 - CLAUDE.md, CI, release workflow
 
 To start building, open a session on `tasks/tsift.md`. The first step would be wiring the Sift binary as a search backend with shell-out + output parsing.
-<!-- agent:boundary:f9b228b7 -->
+<!-- agent:boundary:cf50b183 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

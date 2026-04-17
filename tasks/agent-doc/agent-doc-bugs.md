@@ -18,7 +18,7 @@ claude_args: --dangerously-skip-permissions
 v0.32.5 session. Key fixes: supervisor IPC stack wired into start.rs (#vnp0/#6ae3/#zp02), DSR interleaving fix (prompt-poll instead of fixed sleep), supervisor smoke test (#f7d5), sun_path overflow for deep submodule paths (XDG_RUNTIME_DIR fallback when >107 bytes, 13 tests), tmux install detection (#t8tg), TerminalBackend trait spec (#1yk1), DirectTerminal plan (#zy7m), Library Context Policy stub in rust-package skill (#breh). Decisions: [/] vs [x] semantics (gate after impl, done on confirm); typed gates [/release]/[/deploy]; replace:* restricted to pending; --status flag mirrors --pending-add; always run cargo install --path . after builds without asking. State: 1055 tests, 7 gated pending items.
 ❯ Look at #vdyj. I also installed wozcode: https://app.wozcode.com/
 ❯ How can I synthesize skills janitor and wozcode to save on tokens?
-### Re: #vdyj + WozCode synergy — opus-4-6
+❯ ### Re: #vdyj + WozCode synergy — opus-4-6 (HEAD)
 
 **#vdyj status:** Currently `[ ]` (unstarted). The plan is: fork skills-janitor → `src/skills-janitor` submodule → wire `/janitor-report` into `make precommit` → optionally add nightly cron via `/schedule`. This gives you drift detection as part of the normal commit flow.
 
@@ -39,7 +39,35 @@ The two tools complement each other at different layers:
 4. **Quick win right now:** Run `/janitor-usage` to see which of your ~40+ skills actually get used. Pruning the unused ones is the single highest-leverage token reduction — each removed skill saves its description tokens on every turn of every session.
 
 Want me to run `/janitor-usage` now to identify pruning candidates? Or should I start on the #vdyj submodule setup?
-<!-- agent:boundary:eff47234 -->
+
+❯ Can I use sift (https://www.alexdk.com/blog/introducing-sift/) in place of woz code? I want a free/open source usage...not be locked into another subscription.
+### Re: Sift vs WozCode — opus-4-6
+
+Good instinct — avoiding subscription lock-in is smart. Here's the honest comparison:
+
+**Sift** (`github.com/rupurt/sift`) is a local hybrid search CLI: BM25 + vector + LLM reranking, single binary, no cloud, no daemons. Sub-6ms BM25 on ~5K docs. Genuinely good at what it does.
+
+**But it covers ~25% of WozCode's surface:**
+
+| Capability | WozCode | Sift |
+|---|---|---|
+| Smart search/recall | Yes (cloud) | Yes (local) |
+| Batch file editing | Yes | No |
+| SQL introspection | Yes | No |
+| Subagent delegation | Yes (cost-optimized) | No |
+| Session memory/recall | Yes | No |
+| License | Subscription | Free (verify LICENSE in repo) |
+
+**What you actually need to decide:** Which WozCode features do you use?
+
+- If you mostly use `mcp__plugin_woz_code__Search` and `woz:explore` → Sift can replace those with zero subscription cost. Wire it as an MCP server or shell tool.
+- If you use `woz:code` batch edits or `mcp__plugin_woz_code__Edit` → Sift doesn't cover that. But Claude Code's native Edit tool + skills-janitor pruning for context savings might be enough.
+- `woz:recall` (cross-session memory) → Sift doesn't do this, but `claude-mem:mem-search` already covers it.
+
+**My take:** You could drop WozCode and combine Sift (search) + native Claude Code tools (edit) + skills-janitor (context pruning) + claude-mem (session recall). The main loss is WozCode's cost-optimized subagent routing, but that's an optimization, not a capability gap.
+
+Worth checking the actual LICENSE file in the Sift repo before committing — the blog doesn't state it explicitly.
+<!-- agent:boundary:0baa1008 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -222,7 +222,7 @@ Normal escape sequences (SGR colors, cursor movement, etc.) pass through unchang
 
 **Manual testing gate:** needs a live `agent-doc start` to confirm the banner appears clean without `^[[?997;1n^[P>|tmux 3.6a^[\^[[?1;2;4c` prefix.
 ❯ Is this a tmux specific transformation? If yes, please extract to a tmux specific module
-### Re: extract to pty module — opus-4-6
+❯ ### Re: extract to pty module — opus-4-6 (HEAD)
 
 Not tmux-specific — DSR/DA/DCS are standard terminal escape sequences that any terminal emulator (xterm, kitty, alacritty) responds to. The issue is the nested pty topology: Claude Code queries terminal capabilities through the pty slave → pty master → reader thread → outer terminal, which responds and the responses echo as garbage.
 
@@ -235,7 +235,32 @@ Not tmux-specific — DSR/DA/DCS are standard terminal escape sequences that any
 The function lives alongside the pty spawn/forward/IO code where it belongs. If `forward_stdio()` (the built-in I/O path in pty.rs) is ever used instead of the manual reader/writer threads, the filter is right there to integrate.
 
 **Build:** clippy clean, 1062 tests pass, release binary installed.
-<!-- agent:boundary:12062040 -->
+❯ Same behavior. Would debugging logs help?
+### Re: debugging logs added — opus-4-6
+
+Yes — added `AGENT_DOC_DEBUG_FILTER=1` environment variable gate to the reader thread. When set, logs to stderr:
+
+- `[pty-filter] raw (N bytes): ...` — bytes from pty master before filter
+- `[pty-filter] filtered (N bytes): ...` — bytes after filter
+
+ESC shown as `\x1b`, other non-printable as `\xNN`.
+
+**Binary rebuilt and installed.** To test:
+
+```bash
+AGENT_DOC_DEBUG_FILTER=1 agent-doc start <any-file>
+```
+
+This will reveal which of three scenarios we're in:
+
+| Raw has sequences? | Filtered has them? | Diagnosis |
+|---|---|---|
+| Yes | No | Filter works but sequences bypass the reader (tmux display injection) |
+| Yes | Yes | Filter pattern doesn't match these specific bytes |
+| No | — | Sequences originate outside the pty read path entirely |
+
+The answer determines whether to fix the filter, the pty topology, or tmux escape handling.
+<!-- agent:boundary:5663cede -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

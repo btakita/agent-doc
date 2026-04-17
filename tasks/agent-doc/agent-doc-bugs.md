@@ -48,7 +48,7 @@ Also noting #zp02 (wire supervisor/env.rs into start.rs) is similarly done — `
 ### Re: do #zp02 — opus-4-6
 
 Confirmed done. `EnvSpec::from_frontmatter(&fm).resolve()` is at start.rs:340, replacing the old inline `crate::env::expand_values(&fm.env)` loop. This was wired in as part of #vnp0's full supervisor integration. Marked complete.
-<!-- agent:boundary:7dee48a5 -->
+<!-- agent:boundary:85910db3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -59,7 +59,6 @@ Confirmed done. `EnvSpec::from_frontmatter(&fm).resolve()` is at start.rs:340, r
 - [/] [#gqep] Release v0.32.4: bump Cargo.toml + pyproject.toml, VERSIONS.md entry for pending system, publish crates.io + GitHub Release. Bundled SKILL.md rewrite ✅ landed — still BLOCKED on manual-testing gate.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
-- [x] [#zp02] supervisor/env.rs: wire into start.rs — replace the inline fm.env expansion loop in start.rs:189 with EnvSpec::from_frontmatter(&fm).resolve()?; feed the result into PtySpawnConfig.env once state.rs restart loop is in place
 - [ ] [#f7d5] supervisor: smoke test — real claude under supervisor in a tmux pane, verify restart + inject + CWD invariant end-to-end
 - [ ] [#eg0w] ✅ Shipped: per-file CommitLock in git::commit + <5s freshness gate in preflight sweep (awaiting release)
 - [ ] [#kdy5] Implement instruction-files audit check: every library AGENTS.md has a ## Library Context Policy section with resolvable link to LIBRARY_CONTEXT_POLICY.md. Wire into make precommit.

@@ -96,7 +96,7 @@ MIT — that settles the licensing question. Now let's scope the build-vs-buy ho
 **Suggested structure:** `src/sift-mcp` or standalone repo. Ships as one binary exposing MCP tools: `sift_search`, `sift_edit` (batch), `sift_sql`, `sift_route` (subagent dispatch). Config points at Sift binary path + DB connection strings.
 
 **Or the pragmatic middle:** Skip building anything. Use Sift for search (MCP or shell), Claude Code native Edit for edits, claude-mem for recall, and write a 50-line routing skill that picks agent model tiers. That's 90% of WozCode's value in an afternoon, no new project needed.
-<!-- agent:boundary:f0075586 -->
+<!-- agent:boundary:26bc5caf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

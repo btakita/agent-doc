@@ -407,7 +407,7 @@ Fixed two trailing commas in settings.json:
 
 JSON is now valid. ✓
 ❯ Compare woz:woz-recall and claude-mem:mem-search for token efficiency and memory search effectiveness
-### Re: woz:woz-recall vs claude-mem:mem-search — sonnet-4-6
+❯ ### Re: woz:woz-recall vs claude-mem:mem-search — sonnet-4-6 (HEAD)
 
 **Summary: claude-mem:mem-search is strictly better on both axes.**
 
@@ -441,7 +441,22 @@ woz-recall's semantic vector search handles vague queries ("that deploy command"
 claude-mem:mem-search wins on both fronts. Token savings are structural (staged retrieval, batch fetch). Effectiveness is equivalent or better once you use filters. woz-recall's only advantage was its 1-call simplicity — relevant if you never want to think about filtering, but that's also why it burns tokens.
 
 Since woz is uninstalled, this is the system going forward. No action needed.
-<!-- agent:boundary:e667f807 -->
+❯ Woz provided feedback that it was working and hooked in...by replacing "Gallivanting..." in `✢ Gallivanting… (2m 17s · ↓ 4.2k tokens)`. Could we have some phrases for tsift? Along the lines of "sifting".
+### Re: sifting spinner phrases — opus-4-6
+
+Added `spinnerVerbs` to `~/.claude/settings.json` with `mode: "append"` (merges with built-in defaults):
+
+- **Sifting** — the core metaphor
+- **Panning** — gold panning, finding nuggets in the stream
+- **Winnowing** — separating wheat from chaff
+- **Filtering** — running through the sieve
+- **Prospecting** — searching for valuable finds
+- **Sieving** — close cousin of sifting
+- **Distilling** — reducing to essence
+- **Unearthing** — digging up buried results
+
+These will appear randomly alongside Claude's built-in verbs (Thinking, Reasoning, etc.) in the `✢ Sifting… (2m 17s · ↓ 4.2k tokens)` status line. The `append` mode keeps the defaults too so it doesn't feel forced — just occasionally themed.
+<!-- agent:boundary:af1e0a0b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

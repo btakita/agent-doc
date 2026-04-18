@@ -562,7 +562,7 @@ Already fixed. The orphaned `patch:exchange` marker leak was resolved in a prior
 
 Marking #p2xm done.
 ❯ do #wcf5 #a002 #ha3h
-### Re: do #wcf5 #a002 #ha3h — opus-4-6
+❯ ### Re: do #wcf5 #a002 #ha3h — opus-4-6 (HEAD)
 
 **#a002** — Already fully implemented and deployed. Safety rail with 50-line threshold, forensic logging, graceful degradation on overrun. 14 tests pass. The `[/]` gate is "awaiting production telemetry" — no code to write. Stays gated until a `normalize_threshold_exceeded` event is observed or enough quiet time confirms the threshold is safe.
 
@@ -576,13 +576,25 @@ Fix options:
 3. **Snapshot generation counter** — detect and retry when snapshot changes mid-diff
 
 Recommendation: option 2 (copy-on-read). Awaiting your call on whether to implement now or defer to a design session.
-<!-- agent:boundary:033f2bd2 -->
+❯ do option 2
+### Re: do option 2 — opus-4-6
+
+Implemented copy-on-read guard for #wcf5.
+
+**What changed:** `diff::compute()` in `diff.rs` now captures the snapshot file's `mtime` immediately after `snapshot::resolve()` reads the content. Before the stale-snapshot recovery `save()`, it re-checks mtime — if an external process (IDE watcher, git hook) modified the snapshot during the `wait_for_stable_content()` window (~6s), recovery is skipped with a diagnostic log line.
+
+**Code:**
+- Lines 363-367: capture `snap_mtime_at_read` after initial resolve
+- Lines 420-427: guard check before recovery save — mtime mismatch skips the write
+
+**Test:** `copy_on_read_guard_skips_recovery_when_snapshot_modified` — verifies the mtime comparison logic (same → allow, different → block, both-None → allow). 1112 tests pass, clippy clean.
+<!-- agent:boundary:f967fb02 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [/] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots
+- [x] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

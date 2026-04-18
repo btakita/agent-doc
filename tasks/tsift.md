@@ -211,7 +211,7 @@ Architecture beats edit beats search — "design and implement" routes to opus.
 
 `apply_edit_op` extracted from `cmd_edit` so core replacement logic is tested directly. `cmd_edit` now delegates to it — no duplication.
 ❯ do #6jmq; add tests
-### Re: #6jmq + tests — verified — sonnet-4-6
+❯ ### Re: #6jmq + tests — verified — sonnet-4-6 (HEAD)
 
 Already implemented in the previous cycle. Ran `cargo test` to confirm:
 
@@ -231,13 +231,41 @@ All 9 tests pass:
 - `edit_fails_when_old_equals_new`
 
 Closed #6jmq in pending.
-<!-- agent:boundary:bc441d66 -->
+❯ do #yscf. Use SQLite. Add tests.
+### Re: #yscf — SQL introspection with SQLite — opus-4-6
+
+Implemented `tsift sql` with full SQLite introspection:
+
+**Commands:**
+- `tsift sql <db>` — schema overview (all tables, columns, row counts)
+- `tsift sql <db> -t <table>` — single table schema detail
+- `tsift sql <db> -q "SELECT ..."` — execute arbitrary SQL (read-only)
+- All modes support `--json` for machine consumption
+
+**Design:**
+- Read-only connection (`SQLITE_OPEN_READ_ONLY`) — safe for introspection, can't accidentally mutate
+- Three output modes: schema overview, single table detail, query execution
+- Query results rendered as tabular text or JSON array of objects
+- Handles NULL, integers, reals, text, and blobs
+
+**Tests added (8):**
+- `sql_schema_overview_lists_tables` — discovers tables alphabetically
+- `sql_schema_overview_row_counts` — correct counts per table
+- `sql_table_columns_metadata` — PK, NOT NULL, types
+- `sql_execute_query_returns_rows` — SELECT with NULL handling
+- `sql_execute_query_aggregate` — COUNT(*)
+- `sql_execute_query_join` — JOIN across tables
+- `sql_open_db_read_only` — rejects INSERT on read-only connection
+- `sql_empty_table_schema` — empty table with blob column
+
+**Verification:** 17 tests pass, clippy clean. `rusqlite` with `bundled` feature — no system SQLite dependency.
+<!-- agent:boundary:e7d21be3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#yscf] SQL introspection: connect to SQLite/Postgres, expose schema + query
+- [x] [#yscf] SQL introspection: connect to SQLite/Postgres, expose schema + query
 - [ ] [#95as] Claude Code hook integration: rewrite commands through tsift like rtk does
 - [ ] [#kq5t] CLAUDE.md with project conventions
 - [ ] [#e15f] CI: GitHub Actions for cargo test + clippy

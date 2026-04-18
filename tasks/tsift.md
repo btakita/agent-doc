@@ -137,7 +137,7 @@ The skill is live — Claude Code picked it up immediately. Test with `/tsift "s
 
 No runbook for hook integration yet — that belongs with #95as (Claude Code hook integration pending item).
 ❯ Will tsift take over all claude searches now? Will this save tokens?
-### Re: tsift scope and token savings — opus-4-6
+❯ ### Re: tsift scope and token savings — opus-4-6 (HEAD)
 
 **No, tsift won't take over all searches automatically.** Right now it's a manual skill (`/tsift`) — you invoke it when you want it. Claude Code's native Grep, Glob, and Read tools remain the default for directed searches and are perfectly efficient for that.
 
@@ -152,14 +152,16 @@ No runbook for hook integration yet — that belongs with #95as (Claude Code hoo
 - For hook integration (#95as), tsift could replace the woz:Search MCP tool calls entirely — those are the expensive ones
 
 **To make it automatic** would require #95as (Claude Code hook integration) — rewriting search commands through tsift the way rtk rewrites git/cargo commands. That's when the token savings compound.
-<!-- agent:boundary:2293bd61 -->
+❯ do #mwhg
+.
+<!-- agent:boundary:3ee1d745 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] [#92bz] Wire Sift as search backend (direct Rust lib integration via git dep — done)
-- [ ] [#mwhg] Batch edit command: accept multiple file edits in one invocation
+- [x] [#mwhg] Batch edit command: accept multiple file edits in one invocation
 - [ ] [#6jmq] Agent model routing skill: haiku for search, sonnet for edits, opus for architecture
 - [ ] [#yscf] SQL introspection: connect to SQLite/Postgres, expose schema + query
 - [ ] [#95as] Claude Code hook integration: rewrite commands through tsift like rtk does

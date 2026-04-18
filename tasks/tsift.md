@@ -161,7 +161,7 @@ Committed. Both the submodule and parent pointer are committed:
 
 - `src/tsift` — `feat(edit): add batch edit command (#mwhg)` (41a188b)
 - `agent-loop` — submodule pointer bumped (68f46c77)
-<!-- agent:boundary:3079801b -->
+<!-- agent:boundary:dd534934 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

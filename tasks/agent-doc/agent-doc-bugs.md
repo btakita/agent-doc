@@ -53,7 +53,7 @@ Found the full sequence in session `fbeed7e9`. Six write attempts for the #mwhg 
 **This IS an agent-doc concern** — `agent-doc write --stream` with `--pending-done` but no meaningful exchange content should not destroy previously-written exchange content. The `--pending-done` flag should be applicable independently of exchange writes.
 
 **Skill-side fix:** The model should have used a single write combining the exchange content AND `--pending-done mwhg` in one call, not split them across multiple attempts.
-<!-- agent:boundary:700b13a8 -->
+<!-- agent:boundary:59fb91f6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

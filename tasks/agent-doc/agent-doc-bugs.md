@@ -600,7 +600,7 @@ The `Run Agent Doc` command still does not write `tmux-send /agent-doc tasks/age
 Please correct the commit state of src/session-share/tasks/claudescore.md
 
 Always write response back into this agent doc.
-<!-- agent:boundary:631651ce -->
+<!-- agent:boundary:e45c8a60 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

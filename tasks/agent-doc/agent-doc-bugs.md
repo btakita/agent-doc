@@ -165,7 +165,7 @@ Changed file: `src/agent-doc/src/start.rs`
 Done. `cargo install --path .` replaced `~/.cargo/bin/agent-doc` with v0.33.1 (built with the stdin fix).
 
 Ready for live test — start a supervised Claude session and verify Enter/q works after clean exit.
-<!-- agent:boundary:69940931 -->
+<!-- agent:boundary:3480f0bd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

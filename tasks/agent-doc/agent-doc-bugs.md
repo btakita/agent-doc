@@ -85,7 +85,7 @@ The stream buffer is cumulative — each flush contains ALL content written so f
 - `shrink_guard_skips_small_exchange` — <100 byte exchange skips guard
 - `shrink_guard_passes_no_exchange` — no exchange component passes
 - `extract_exchange_content_len_works` — helper unit test
-<!-- agent:boundary:5ad3247d -->
+<!-- agent:boundary:fe2420bd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

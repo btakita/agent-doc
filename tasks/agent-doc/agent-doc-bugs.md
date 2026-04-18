@@ -37,7 +37,7 @@ The previous `/agent-doc` cycle was interrupted by the WozCode hook. The hook re
 **Bugs to file:**
 - `[#]` accumulation on bare-placeholder pending items (assign-prepend bug)
 - Duplicate items from repeated `--pending-add` with identical text (no dedup)
-<!-- agent:boundary:65fcfb27 -->
+<!-- agent:boundary:4acdecb4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

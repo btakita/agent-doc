@@ -335,7 +335,7 @@ SKIP: exact symbol lookups, known file paths, regex patterns
 This would make tsift savings measurable — every auto-triggered `/tsift` call replaces what would have been a multi-step grep→read→wrong file loop.
 
 Want me to implement either approach in SKILL.md?
-<!-- agent:boundary:7fef2bb1 -->
+<!-- agent:boundary:b9281516 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

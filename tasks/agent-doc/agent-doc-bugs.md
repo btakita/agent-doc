@@ -600,7 +600,17 @@ The `Run Agent Doc` command still does not write `tmux-send /agent-doc tasks/age
 Please correct the commit state of src/session-share/tasks/claudescore.md
 
 Always write response back into this agent doc.
-<!-- agent:boundary:e45c8a60 -->
+
+This instruction failed in every way on claude-opus-4-7...trying it again on claude-opus-4-6
+src/session-share/tasks/claudescore.md has an uncommitted patchback from manually running `/graphify .` directly in the tmux pane. Why?
+
+Write response back into this agent doc.
+The `Run Agent Doc` command still does not write `tmux-send /agent-doc tasks/agent-doc/agent-doc-bugs.md`. I reinstalled the JB plugin 0.2.60...Note the version did not change. Why does this keep on failing? You should **always** build and install any changes. Why do you keep on failing to do so?
+
+Please correct the commit state of src/session-share/tasks/claudescore.md
+
+Always write response back into this agent doc.
+<!-- agent:boundary:af6adb3e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

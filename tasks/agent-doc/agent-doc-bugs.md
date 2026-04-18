@@ -179,7 +179,7 @@ Post-publish:
 - Parent submodule pointer updated + committed
 
 1133 tests passing. Token path corrected: `passage btak/CARGO_REGISTRY_TOKEN` (not `crates.io/token`).
-<!-- agent:boundary:54f752f3 -->
+<!-- agent:boundary:c4cd4b64 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

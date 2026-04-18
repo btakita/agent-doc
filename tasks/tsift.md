@@ -352,7 +352,7 @@ SKIP: exact symbol lookups, known file paths, regex patterns, simple
 **No runbook added** — the existing `runbooks/search-strategies.md` (31 lines) already covers the strategy decision flow. A separate "when to trigger" runbook would duplicate what's now inline in SKILL.md and cost more tokens to load than it saves.
 
 Claude Code will now auto-invoke `/tsift` for exploratory queries. Each auto-trigger replaces what would have been a multi-step grep→read→wrong file loop, making the savings measurable over time.
-<!-- agent:boundary:22260f21 -->
+<!-- agent:boundary:aea6d54e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

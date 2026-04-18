@@ -544,7 +544,7 @@ This is actually the design working correctly. These items are gated on differen
 **#6hgf** (`--status` flag) — this one IS done, it shipped in 0.33.0. Marking `[x]` now.
 
 If you want future release items to auto-resolve, set typed gates: `set-gate-type <id> release` before publishing, then wire `agent-doc resolve-gate release` as a post-publish hook.
-<!-- agent:boundary:14170649 -->
+<!-- agent:boundary:6119e0fd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

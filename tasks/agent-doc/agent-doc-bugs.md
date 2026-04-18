@@ -332,8 +332,6 @@ If you confirm, I'll bundle into a single release (one cut, manual testing gate 
 3. Fix the `LayoutChangeDetector` recursive-listener leak with a regression test that asserts listener count stays bounded across N container events.
 confirm...do fixes
 ❯ ### Re: 0.2.58 thrash + missing patchback — opus-4-7 (HEAD)
-❯ ### Re: 0.2.58 thrash + missing patchback — opus-4-7 (HEAD)
-❯ ### Re: 0.2.58 thrash + missing patchback — opus-4-7 (HEAD)
 
 Two distinct bugs, neither of which is "Run Agent Doc routes wrong path" — that part of v0.2.58 is sound. Both are pre-existing latent issues the v0.2.58 changes finally tripped.
 
@@ -464,10 +462,29 @@ Interpretation check: I read "add last patchback into this doc" as "append the r
 Moving on to Bug A (JNA `Structure.ByValue` in NativeLib.kt) next.
 ❯ add last patchback into this doc
 ❯ go...do fixes
-### Re: go — opus-4-7
+❯ ### Re: go — opus-4-7 (HEAD)
 
 Acknowledged. Three fixes queued in pending plus the orphan recovery and install-gate. Starting with the orphan patchback, then Bug A (JNA ByValue), Bug B (multi-root PatchWatcher), Bug C (LayoutChangeDetector leak). Will check back before publishing — local install + your manual verification first per the release rule.
-<!-- agent:boundary:0459c2f6 -->
+### Re: progress — opus-4-7
+
+Bugs B + C landed. Plugin 0.2.60 built, signed, installed to IntelliJIdea2026.1. **Restart the IDE** to activate.
+
+**Bug B — multi-root PatchWatcher** (`PatchWatcher.kt`):
+- `RootState` holds per-root watch thread + FFI ipc callback.
+- `start()` registers `project.basePath` plus every nested `.agent-doc/` discovered under it (skip list: .git, .idea, .gradle, node_modules, target, build, dist, out, venv, .venv, __pycache__; depth cap 6).
+- `registerRoot(root)` is idempotent; `TerminalUtil.resolveProject` calls it on-demand when FFI returns a non-basePath root, so submodules not present at startup get picked up when you first touch a doc in them.
+- `resolveRootFor(filePath)` walks up to `.agent-doc/`; used by `writeAckContent`, `isClaimedByForceDisk`, and the socket-message patch-file cleanup path so each operation hits the correct `.agent-doc/` dir (submodule's, not parent's).
+- `appliedPatchIds` stays class-level — patch IDs are globally unique, no per-root partitioning needed.
+- `dispose()` iterates `rootStates` and stops the FFI socket listener for each.
+
+**Bug C — LayoutChangeDetector leak** (already done): recursive re-attach in `componentAdded` removed; initial one-shot walk + 5s fallback poll cover the tree. Listener count stays bounded on heavy Swing churn.
+
+**Still gated (#m1bz):** cargo publish / pypi / GitHub Release are blocked on your live-session verification that the installed 0.2.60 plugin handles submodule patches without regression. Things worth stressing:
+- Open a doc inside `src/session-share/` or `src/agent-doc/` and confirm `/agent-doc` patches land via IPC (no "externally modified" dialog, snapshot updates).
+- Tab-drag a markdown file between splits — layout detector should NOT accumulate listeners (check idea.log for `[state] layout-detector: listeners=N` trending flat, not climbing).
+
+**Uncommitted submodule state:** `src/agent-doc/` still has the Bug A FFI-side changes + Bug B plugin changes + Bug C plugin change uncommitted. Not touching them until you decide bundle strategy (agent-doc 0.33.2 cut vs. plugin-only commit vs. hold).
+<!-- agent:boundary:e7bfb055 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -475,8 +492,8 @@ Acknowledged. Three fixes queued in pending plus the orphan recovery and install
 <!-- agent:pending patch=replace -->
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [/] [#1rmb] multi-root PatchWatcher refactor — projectOpened scan + FFI-triggered registration + per-root WatchService/socket listener + startup orphan sweep + tests
-- [/] [#b025] LayoutChangeDetector.kt:73-99 recursive-listener leak — drop recursive walk in componentAdded, keep 5s fallback poll; regression test asserts bounded listener count across N container events
+- [x] [#1rmb] multi-root PatchWatcher refactor — projectOpened scan + FFI-triggered registration + per-root WatchService/socket listener + startup orphan sweep + tests
+- [x] [#b025] LayoutChangeDetector.kt:73-99 recursive-listener leak — drop recursive walk in componentAdded, keep 5s fallback poll; regression test asserts bounded listener count across N container events
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 <!-- /agent:pending -->
 ## Assistant

@@ -136,7 +136,7 @@ Created `/tsift` Claude Code skill at `~/.claude/skills/tsift/`:
 The skill is live — Claude Code picked it up immediately. Test with `/tsift "search query"`.
 
 No runbook for hook integration yet — that belongs with #95as (Claude Code hook integration pending item).
-<!-- agent:boundary:4415617e -->
+<!-- agent:boundary:28d4e56d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

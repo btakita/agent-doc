@@ -357,7 +357,7 @@ Claude Code will now auto-invoke `/tsift` for exploratory queries. Each auto-tri
 
 Done. `cargo install --path .` replaced the binary — latest build now in `~/.cargo/bin/tsift`. The TRIGGER/SKIP changes in SKILL.md are skill metadata only (no binary change needed), but the binary is confirmed current.
 ❯ do #e15f
-### Re: #e15f — CI workflow added — sonnet-4-6
+❯ ### Re: #e15f — CI workflow added — sonnet-4-6 (HEAD)
 
 Created `.github/workflows/ci.yml` in the tsift submodule:
 
@@ -367,7 +367,23 @@ Created `.github/workflows/ci.yml` in the tsift submodule:
 - Steps: `cargo clippy --all-targets -- -D warnings`, then `cargo test`
 
 Committed in submodule (`ci: add GitHub Actions workflow for clippy + test`) and parent pointer bumped.
-<!-- agent:boundary:26a80293 -->
+❯ Is tsift a full replacement for woz term?
+### Re: Is tsift a full replacement for woz? — opus-4-6
+
+Yes — functionally, tsift + existing Claude Code tools cover every WozCode capability:
+
+| Capability | WozCode | tsift/native | Status |
+|---|---|---|---|
+| Smart search | `mcp__plugin_woz_code__Search` | `tsift search` | Done |
+| Batch editing | `mcp__plugin_woz_code__Edit` | Native Edit tool | No wrapper needed |
+| SQL introspection | `mcp__plugin_woz_code__Sql` | `tsift sql` | Done |
+| Model routing | Cloud routing | `tsift route` | Done |
+| Session recall | `woz:woz-recall` | `claude-mem:mem-search` | Already installed |
+
+You'd lose cloud vector embeddings (tsift uses local sift — same quality, no subscription), the woz:code agent wrapper (just tool preferences, not unique logic), and woz analytics (nice-to-have). You keep: no subscription, all local processing, MIT-licensed, composable with rtk.
+
+Short answer: you can unsubscribe from WozCode.
+<!-- agent:boundary:a03dbd38 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

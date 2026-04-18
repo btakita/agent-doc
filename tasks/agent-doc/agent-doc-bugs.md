@@ -166,7 +166,7 @@ Done. `cargo install --path .` replaced `~/.cargo/bin/agent-doc` with v0.33.1 (b
 
 Ready for live test — start a supervised Claude session and verify Enter/q works after clean exit.
 ❯ release
-### Re: release — sonnet-4-6
+❯ ### Re: release — sonnet-4-6 (HEAD)
 
 Published v0.33.1 to all three targets:
 
@@ -179,7 +179,42 @@ Post-publish:
 - Parent submodule pointer updated + committed
 
 1133 tests passing. Token path corrected: `passage btak/CARGO_REGISTRY_TOKEN` (not `crates.io/token`).
-<!-- agent:boundary:c4cd4b64 -->
+❯ I restarted the session src/session-share/tasks/claudescore.md
+❯ I had to press Enter twice for the restart to take effect. Now I cannot type into the prompt. Please diagnose.
+```
+Claude exited cleanly.
+Press Enter to restart, or 'q' to exit.
+
+
+Starting claude...
+                   ▐▛███▜▌   Claude Code v2.1.109
+▝▜█████▛▘  Sonnet 4.6 · Claude Max
+  ▘▘ ▝▝    ~/work/btakita/agent-loop/src/session-share
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+```
+### Re: stdin lost after restart — opus-4-6
+
+Two root causes identified and fixed in `start.rs`:
+
+**Bug 1 — Reader thread never joined between restarts.** The reader thread (`_reader_thread`) was detached (JoinHandle dropped with underscore prefix). After Claude exits, the old reader thread holds a cloned pty reader fd, keeping the old pty master's file descriptor alive. When the supervisor spawns a new session, two reader threads write to stdout concurrently. The old thread's fd and associated terminal driver state can interfere with the new session's stdin forwarding.
+
+**Fix:** Changed `_reader_thread` → `reader_thread`. After joining the writer thread and clearing shared state, explicitly `drop(session)` (closes pty master), then `reader_thread.join()` (reader gets EOF from closed master and exits cleanly). This ensures a clean slate before the restart prompt or next session spawn.
+
+**Bug 2 — Stale stdin bytes after exit.** Between `session.wait()` returning and `writer_stop.signal()`, the writer thread can consume a keystroke from stdin and forward it to the dead pty. The byte is gone — `read_line()` then requires the user to press Enter again.
+
+**Fix:** Added `tcflush(STDIN_FILENO, TCIFLUSH)` after joining both threads to discard any pending kernel-buffered input.
+
+**Diagnostics:** Added `AGENT_DOC_DEBUG_STDIN=1` env var for writer thread logging (start, exit reason, write failures). Silent failures previously made diagnosis impossible.
+
+**2 new tests** (1135 total, `make check` clean):
+- `reader_thread_exits_on_eof` — verifies reader thread exits when write end closes
+- `tcflush_discards_pending_input` — verifies tcflush call doesn't panic
+
+`cargo install --path .` + `cargo build --release` done. **Important:** Running supervisors still use the OLD binary. To get the fix, kill the supervisor pane and re-start with `agent-doc start`. The previously reported issue may have been on the old binary (v0.33.1 was the version number, but the running process was the pre-fix binary).
+<!-- agent:boundary:658997cd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

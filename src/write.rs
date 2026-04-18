@@ -159,6 +159,11 @@
 //! - `normalize_user_prompts_existing_content_unchanged`: lines from snapshot → unchanged (no double-prefix).
 //! - `normalize_user_prompts_restores_prefix_lost_in_file`: snapshot has `❯ do`, baseline (file) has `do` → restored to `❯ do`.
 //! - `normalize_user_prompts_no_exchange_passthrough`: document without exchange → returned unchanged.
+//! - `shrink_guard_blocks_truncation`: exchange shrinks from 500 to 5 bytes →
+//!   `check_exchange_shrink_guard` returns error.
+//! - `shrink_guard_allows_normal_write`: exchange shrinks by 50% → guard passes.
+//! - `shrink_guard_skips_small_exchange`: exchange is 50 bytes → guard passes
+//!   regardless of shrink ratio (below `SHRINK_GUARD_MIN_BYTES`).
 
 use anyhow::{Context, Result};
 use fs2::FileExt;
@@ -642,6 +647,58 @@ fn strip_boundary_for_dedup(content: &str) -> String {
         .join("\n")
 }
 
+/// Minimum byte count for exchange content before the shrink guard triggers.
+/// Below this threshold the exchange is too small to be worth protecting.
+const SHRINK_GUARD_MIN_BYTES: usize = 100;
+
+/// Maximum ratio (new / old) that the shrink guard allows without `--force`.
+/// If the new exchange content is less than this fraction of the old, refuse.
+const SHRINK_GUARD_MAX_RATIO: f64 = 0.10;
+
+/// Guard against accidental exchange content truncation.
+///
+/// Compares the exchange component content in the current file against the
+/// proposed content. If the existing exchange is substantial (>100 bytes) and
+/// the new exchange is <10% of the old, refuse the write. Returns `Ok(())` if
+/// the write should proceed, or an error message if it should be refused.
+fn check_exchange_shrink_guard(content_at_start: &str, content_ours: &str, file: &Path) -> Result<()> {
+    let old_exchange_len = extract_exchange_content_len(content_at_start);
+    let new_exchange_len = extract_exchange_content_len(content_ours);
+
+    if old_exchange_len < SHRINK_GUARD_MIN_BYTES {
+        return Ok(());
+    }
+
+    let ratio = new_exchange_len as f64 / old_exchange_len as f64;
+    if ratio < SHRINK_GUARD_MAX_RATIO {
+        crate::ops_log::log_op(file, &format!(
+            "shrink_guard_blocked file={} old_len={} new_len={} ratio={:.3}",
+            file.display(), old_exchange_len, new_exchange_len, ratio
+        ));
+        anyhow::bail!(
+            "exchange content would shrink from {} to {} bytes ({:.0}% of original) — \
+             refusing write to prevent accidental truncation. If this is intentional, \
+             use `agent-doc compact` or re-run with meaningful content.",
+            old_exchange_len, new_exchange_len, ratio * 100.0
+        );
+    }
+
+    Ok(())
+}
+
+/// Extract the byte length of the exchange component's content.
+/// Returns 0 if no exchange component is found.
+fn extract_exchange_content_len(doc: &str) -> usize {
+    if let Ok(components) = component::parse(doc) {
+        components.iter()
+            .find(|c| c.name == "exchange")
+            .map(|c| c.content(doc).trim().len())
+            .unwrap_or(0)
+    } else {
+        0
+    }
+}
+
 /// Log a write dedup event to both stderr and a persistent file for diagnosis.
 fn log_dedup(file: &Path, context: &str) {
     let msg = format!("[write] dedup: {} — {}", file.display(), context);
@@ -1029,6 +1086,9 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
                     vec![]
                 };
 
+            // Shrink guard: refuse if new exchange content is dramatically shorter
+            check_exchange_shrink_guard(&content_at_start, &content_ours, file)?;
+
             // Dedup: skip IPC if patches produce no changes (strip boundary markers)
             if strip_boundary_for_dedup(&content_ours) == strip_boundary_for_dedup(&content_at_start) {
                 log_dedup(file, "no changes after merge, skipping write");
@@ -1210,6 +1270,9 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
     if let Ok(Some(snap)) = snapshot::load(file) {
         content_ours = normalize_user_prompts_in_exchange_safe(&content_ours, base, &snap, file);
     }
+
+    // Shrink guard: refuse if new exchange content is dramatically shorter
+    check_exchange_shrink_guard(&content_at_start, &content_ours, file)?;
 
     // Re-read file to check for user edits since lock acquisition
     let content_current = std::fs::read_to_string(file)
@@ -3288,6 +3351,84 @@ mod tests {
         // At exactly 50, prefix should be applied (> is strict).
         assert!(result.contains("❯ line 0"), "at threshold, first line should get prefix: {result}");
         assert!(result.contains("❯ line 49"), "at threshold, last line should get prefix: {result}");
+    }
+
+    // --- exchange shrink guard tests ---
+
+    #[test]
+    fn shrink_guard_blocks_truncation() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+
+        let long_exchange = "a]".repeat(250); // 500 bytes
+        let old = format!(
+            "<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n",
+            long_exchange
+        );
+        let new = "<!-- agent:exchange -->\n.\n<!-- /agent:exchange -->\n";
+
+        let result = check_exchange_shrink_guard(&old, new, &doc);
+        assert!(result.is_err(), "shrink guard should block truncation from 500 to ~1 byte");
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("shrink"), "error should mention shrink: {msg}");
+    }
+
+    #[test]
+    fn shrink_guard_allows_normal_write() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+
+        let old_text = "x".repeat(200);
+        let new_text = "y".repeat(100); // 50% — well above 10%
+        let old = format!(
+            "<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n",
+            old_text
+        );
+        let new = format!(
+            "<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n",
+            new_text
+        );
+
+        let result = check_exchange_shrink_guard(&old, &new, &doc);
+        assert!(result.is_ok(), "shrink guard should allow 50% reduction: {:?}", result.err());
+    }
+
+    #[test]
+    fn shrink_guard_skips_small_exchange() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+
+        // Old exchange is only 50 bytes — below SHRINK_GUARD_MIN_BYTES
+        let old = "<!-- agent:exchange -->\nSmall content here, not much.\n<!-- /agent:exchange -->\n";
+        let new = "<!-- agent:exchange -->\n.\n<!-- /agent:exchange -->\n";
+
+        let result = check_exchange_shrink_guard(old, new, &doc);
+        assert!(result.is_ok(), "shrink guard should skip small exchanges: {:?}", result.err());
+    }
+
+    #[test]
+    fn shrink_guard_passes_no_exchange() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+
+        // No exchange component at all
+        let old = "# Just a heading\nSome content.\n";
+        let new = "# Just a heading\n.\n";
+
+        let result = check_exchange_shrink_guard(old, new, &doc);
+        assert!(result.is_ok(), "shrink guard should pass when no exchange component exists");
+    }
+
+    #[test]
+    fn extract_exchange_content_len_works() {
+        let doc = "<!-- agent:exchange -->\nHello world\n<!-- /agent:exchange -->\n";
+        assert_eq!(extract_exchange_content_len(doc), "Hello world".len());
+
+        let empty = "<!-- agent:exchange -->\n\n<!-- /agent:exchange -->\n";
+        assert_eq!(extract_exchange_content_len(empty), 0);
+
+        let no_exchange = "Just text.";
+        assert_eq!(extract_exchange_content_len(no_exchange), 0);
     }
 }
 

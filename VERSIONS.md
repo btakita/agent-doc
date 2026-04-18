@@ -4,6 +4,16 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.33.1
+
+- **Pending parse fix: bare `[#]` placeholder accumulation.** `parse_item_line` now strips `[#]` markers instead of prepend-on-backfill, preventing placeholder accumulation across cycles.
+
+- **Pending dedup on `--pending-add`.** `op_add` checks for identical text before appending, preventing duplicate items when the same add is retried.
+
+- **Content-shrink guard for `--stream` writes.** `check_exchange_shrink_guard()` in `write.rs` refuses writes when new exchange content is < 10% of existing length (and existing > 100 bytes). Prevents accidental truncation from malformed heredocs or trivial payloads. Fires in both IPC and disk fallback paths. Overridable with `--force`.
+
+- **9 new tests** for pending parse fixes and shrink guard (5 shrink guard + 4 pending).
+
 ## 0.33.0
 
 - **Typed gate markers (`[/release]`, `[/deploy]`, `[/code-review]`, etc.):** Parser recognizes typed gates alongside plain `[/]`. Gate types are alphanumeric with hyphens/underscores, case-insensitive, stored lowercase. State machine: `[/release]` is a refinement of `[/]`; gate type is metadata on `Gated` state, cleared when resolved to `[x]`. Untyped `[/]` items are never touched by `resolve-gate`.

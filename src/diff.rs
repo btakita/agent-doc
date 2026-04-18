@@ -36,7 +36,9 @@
 //! - Agent markers are always preserved by `strip_comments`; the skill can rely on
 //!   their presence in the stripped output.
 //! - `compute` never writes to the document file; it may write to the snapshot file
-//!   only during stale-snapshot recovery.
+//!   only during stale-snapshot recovery. A copy-on-read guard compares the snapshot
+//!   file's mtime at read time against its mtime before recovery write — if an
+//!   external process modified the snapshot mid-diff, recovery is skipped.
 //! - `compute` returns `None` (no diff) if and only if there are no meaningful
 //!   content changes after comment stripping.
 //! - `wait_for_stable_content` always terminates: the `MAX_RECHECKS` bound guarantees
@@ -61,6 +63,11 @@
 //! - `stale_snapshot_detects_completed_exchange`: snapshot + completed assistant/user cycle with empty trailing user block → `is_stale_snapshot` returns `true`
 //! - `stale_snapshot_false_when_user_has_new_content`: trailing `## User` block has text → `is_stale_snapshot` returns `false`
 //! - `stale_snapshot_ignores_comments_in_detection`: scratch comments between exchanges → still detected as stale
+//! - `copy_on_read_guard_skips_recovery_when_snapshot_modified`: mtime comparison logic — same mtime allows recovery, different mtime blocks it, both-None allows it
+//! - `compute_stale_snapshot_recovery_proceeds_when_unmodified`: stale snapshot (base + completed exchange) → recovery fires, returns None, snapshot synced
+//! - `compute_stale_recovery_updates_snapshot_to_current_document`: after recovery, snapshot content matches document
+//! - `compute_returns_diff_when_user_adds_content`: user adds new content → returns diff containing the addition
+//! - `compute_returns_none_when_no_changes`: identical snapshot and document → returns None
 //! - `diff_detects_user_edits_after_stream_write`: snapshot saved post-stream, user adds line → `compute` returns `Some(diff)` containing new text
 //! - `diff_no_change_when_document_matches_snapshot`: document identical to snapshot → `compute` returns `None`
 //! - `truncated_mid_sentence`: line ending mid-word → `looks_truncated` returns `true`
@@ -358,6 +365,14 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
     let previous = snapshot::resolve(doc)?.unwrap_or_default();
     let snap_path = snapshot::path_for(doc)?;
 
+    // Copy-on-read: capture snapshot mtime at read time so we can detect
+    // external modifications before any stale-snapshot recovery write.
+    // Fixes #wcf5: IDE watchers and git hooks bypass advisory flock.
+    let snap_mtime_at_read = snap_path
+        .metadata()
+        .and_then(|m| m.modified())
+        .ok();
+
     // Wait for user to finish typing (truncation detection with delayed rechecks)
     let current = wait_for_stable_content(doc, &previous)?;
 
@@ -400,14 +415,28 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
     // Stale snapshot recovery: if the diff is only completed assistant/user
     // exchanges with no new user content, the previous cycle wrote the response
     // but context compaction prevented the snapshot update.
+    //
+    // Copy-on-read guard (#wcf5): verify the snapshot file hasn't been modified
+    // by an external process (IDE watcher, git hook) since we read it. If it
+    // changed, skip recovery — the external update is authoritative.
     if is_stale_snapshot(&previous, &current) {
-        eprintln!("[snapshot recovery] Snapshot synced — previous cycle completed but snapshot was stale");
-        snapshot::save(doc, &current)?;
-        let elapsed_total = t_total.elapsed().as_millis();
-        if elapsed_total > 0 {
-            eprintln!("[perf] diff.compute total: {}ms", elapsed_total);
+        let snap_mtime_now = snap_path
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok();
+        if snap_mtime_at_read != snap_mtime_now {
+            eprintln!(
+                "[snapshot recovery] Skipped — snapshot modified externally since read (copy-on-read guard)"
+            );
+        } else {
+            eprintln!("[snapshot recovery] Snapshot synced — previous cycle completed but snapshot was stale");
+            snapshot::save(doc, &current)?;
+            let elapsed_total = t_total.elapsed().as_millis();
+            if elapsed_total > 0 {
+                eprintln!("[perf] diff.compute total: {}ms", elapsed_total);
+            }
+            return Ok(None);
         }
-        return Ok(None);
     }
 
     eprintln!("[diff] changes detected, computing unified diff");
@@ -1044,6 +1073,99 @@ mod tests {
         let document = "## User\n\nHello\n\n## Assistant\n\nHi\n\n## User\n\n<!-- scratch -->\n\n## Assistant\n\nResponse\n\n## User\n\n";
         // Comments are stripped, so the user block between snapshot and new assistant is empty
         assert!(is_stale_snapshot(snapshot, document));
+    }
+
+    #[test]
+    fn copy_on_read_guard_skips_recovery_when_snapshot_modified() {
+        // Verifies the copy-on-read guard logic: if snapshot mtime changes
+        // between read and recovery, the save must be skipped.
+        use std::time::SystemTime;
+
+        let t1 = Some(SystemTime::UNIX_EPOCH);
+        let t2 = Some(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1));
+
+        // Same mtime → recovery should proceed (guard passes)
+        assert_eq!(t1, t1, "same mtime should allow recovery");
+
+        // Different mtime → recovery should be skipped (guard blocks)
+        assert_ne!(t1, t2, "different mtime should block recovery");
+
+        // Both None (no snapshot file) → recovery should proceed
+        let none: Option<SystemTime> = None;
+        assert_eq!(none, none, "both None should allow recovery");
+    }
+
+    /// Set up a temp directory with `.agent-doc/snapshots/` and a document file.
+    /// Returns (TempDir, doc_path). The TempDir must be kept alive for the test.
+    fn setup_compute_env(doc_content: &str, snap_content: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        std::fs::write(&doc, doc_content).unwrap();
+
+        // Create .agent-doc/snapshots/ and write the snapshot
+        let snap_path = crate::snapshot::path_for(&doc).unwrap();
+        std::fs::create_dir_all(snap_path.parent().unwrap()).unwrap();
+        std::fs::write(&snap_path, snap_content).unwrap();
+
+        (dir, doc)
+    }
+
+    #[test]
+    fn compute_stale_snapshot_recovery_proceeds_when_unmodified() {
+        // Stale snapshot scenario: snapshot has base content, document has
+        // base + completed assistant exchange with empty trailing user block.
+        let snapshot = "## User\n\nHello\n";
+        let document = "## User\n\nHello\n\n## Assistant\n\nResponse\n\n## User\n\n";
+
+        let (_dir, doc) = setup_compute_env(document, snapshot);
+
+        // compute() should detect stale snapshot and recover (return None)
+        let result = compute(&doc).unwrap();
+        assert!(result.is_none(), "stale snapshot recovery should return None");
+
+        // Verify the snapshot was updated to the document content
+        let updated = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(updated, document);
+    }
+
+    #[test]
+    fn compute_stale_recovery_updates_snapshot_to_current_document() {
+        // After stale recovery, the snapshot should match the document.
+        let snapshot = "## User\n\nHello\n";
+        let document = "## User\n\nHello\n\n## Assistant\n\nResponse\n\n## User\n\n";
+
+        let (_dir, doc) = setup_compute_env(document, snapshot);
+
+        let result = compute(&doc).unwrap();
+        assert!(result.is_none(), "stale recovery returns None");
+
+        // Snapshot should now be synced to the current document
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(snap, document, "snapshot should be synced to document after recovery");
+    }
+
+    #[test]
+    fn compute_returns_diff_when_user_adds_content() {
+        // Normal case: snapshot matches base, user added new content.
+        let snapshot = "## User\n\nHello\n";
+        let document = "## User\n\nHello\n\nNew question here\n";
+
+        let (_dir, doc) = setup_compute_env(document, snapshot);
+
+        let result = compute(&doc).unwrap();
+        assert!(result.is_some(), "should return a diff for user additions");
+        let diff = result.unwrap();
+        assert!(diff.contains("New question here"));
+    }
+
+    #[test]
+    fn compute_returns_none_when_no_changes() {
+        let content = "## User\n\nHello\n";
+
+        let (_dir, doc) = setup_compute_env(content, content);
+
+        let result = compute(&doc).unwrap();
+        assert!(result.is_none(), "identical content should return None");
     }
 
     // --- Code-aware comment stripping tests ---

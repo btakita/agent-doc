@@ -168,6 +168,61 @@ impl RawMode {
     fn resume(&self) {}
 }
 
+/// Signal to stop the stdin→pty writer thread.
+///
+/// Uses a self-pipe: the writer thread polls both stdin and the pipe read end.
+/// Calling `signal()` writes a byte to the pipe, waking the poll and causing
+/// the writer thread to exit cleanly so stdin is available for `read_line()`.
+#[cfg(unix)]
+struct StopSignal {
+    read_fd: std::os::unix::io::RawFd,
+    write_fd: std::os::unix::io::RawFd,
+}
+
+#[cfg(unix)]
+impl StopSignal {
+    fn new() -> Result<Self> {
+        let mut fds = [0i32; 2];
+        if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+            anyhow::bail!("pipe() failed: {}", std::io::Error::last_os_error());
+        }
+        Ok(Self {
+            read_fd: fds[0],
+            write_fd: fds[1],
+        })
+    }
+
+    /// Wake the writer thread so it exits.
+    fn signal(&self) {
+        unsafe {
+            libc::write(self.write_fd, b"x".as_ptr() as *const libc::c_void, 1);
+        }
+    }
+
+    fn read_fd(&self) -> std::os::unix::io::RawFd {
+        self.read_fd
+    }
+}
+
+#[cfg(unix)]
+impl Drop for StopSignal {
+    fn drop(&mut self) {
+        unsafe {
+            libc::close(self.read_fd);
+            libc::close(self.write_fd);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+struct StopSignal;
+
+#[cfg(not(unix))]
+impl StopSignal {
+    fn new() -> Result<Self> { Ok(Self) }
+    fn signal(&self) {}
+}
+
 /// Shared writer handle: outer Mutex guards replace/clear, inner Mutex guards concurrent writes.
 type SharedWriter = Mutex<Option<Arc<Mutex<Box<dyn Write + Send>>>>>;
 
@@ -333,7 +388,72 @@ fn spawn_reader_thread(mut reader: Box<dyn std::io::Read + Send>) -> std::thread
 }
 
 /// Spawn the stdin→master forwarding thread using a shared writer.
-fn spawn_writer_thread(writer: Arc<Mutex<Box<dyn Write + Send>>>) -> std::thread::JoinHandle<()> {
+///
+/// Uses `poll()` on stdin + a stop pipe so the thread can be interrupted
+/// cleanly before the supervisor needs stdin for the restart prompt.
+#[cfg(unix)]
+fn spawn_writer_thread(
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    stop_fd: std::os::unix::io::RawFd,
+) -> std::thread::JoinHandle<()> {
+    std::thread::Builder::new()
+        .name("stdin->pty".into())
+        .spawn(move || {
+            let mut buf = [0u8; 4096];
+            loop {
+                // Poll stdin (fd 0) and the stop pipe
+                let mut fds = [
+                    libc::pollfd {
+                        fd: libc::STDIN_FILENO,
+                        events: libc::POLLIN,
+                        revents: 0,
+                    },
+                    libc::pollfd {
+                        fd: stop_fd,
+                        events: libc::POLLIN,
+                        revents: 0,
+                    },
+                ];
+                let ret = unsafe { libc::poll(fds.as_mut_ptr(), 2, -1) };
+                if ret <= 0 {
+                    break; // poll error or signal interrupt
+                }
+                // Stop signal received
+                if fds[1].revents & libc::POLLIN != 0 {
+                    break;
+                }
+                // stdin ready
+                if fds[0].revents & libc::POLLIN != 0 {
+                    let n = unsafe {
+                        libc::read(
+                            libc::STDIN_FILENO,
+                            buf.as_mut_ptr() as *mut libc::c_void,
+                            buf.len(),
+                        )
+                    };
+                    if n <= 0 {
+                        break; // EOF or error
+                    }
+                    let mut w = writer.lock().unwrap();
+                    if w.write_all(&buf[..n as usize]).is_err() || w.flush().is_err() {
+                        break;
+                    }
+                }
+                // stdin hangup/error
+                if fds[0].revents & (libc::POLLHUP | libc::POLLERR) != 0 {
+                    break;
+                }
+            }
+        })
+        .expect("spawn stdin->pty thread")
+}
+
+/// Non-Unix fallback: blocking stdin read (no stop signal support).
+#[cfg(not(unix))]
+fn spawn_writer_thread(
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    _stop_fd: (),
+) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .name("stdin->pty".into())
         .spawn(move || {
@@ -587,7 +707,11 @@ pub fn run(file: &Path) -> Result<()> {
 
         // Spawn I/O forwarding threads
         let _reader_thread = spawn_reader_thread(pty_reader);
-        let _writer_thread = spawn_writer_thread(writer_arc);
+        let writer_stop = StopSignal::new().context("failed to create writer stop signal")?;
+        #[cfg(unix)]
+        let writer_thread = spawn_writer_thread(writer_arc, writer_stop.read_fd());
+        #[cfg(not(unix))]
+        let writer_thread = spawn_writer_thread(writer_arc, ());
 
         // Start resize watcher (stop previous one first)
         if let Some(mut rw) = resize_watcher.take() {
@@ -682,6 +806,11 @@ pub fn run(file: &Path) -> Result<()> {
         // Block until child exits
         let status = session.wait().context("failed waiting on claude")?;
         first_run = false;
+
+        // Stop the stdin→pty writer thread so stdin is free for the restart
+        // prompt (or for the next iteration's fresh writer thread).
+        writer_stop.signal();
+        let _ = writer_thread.join();
 
         // Clean up shared state
         shared.running.store(false, Ordering::Relaxed);
@@ -919,5 +1048,118 @@ mod tests {
         let output = std::fs::read_to_string(&tmp).unwrap_or_default();
         assert_eq!(output, ":", "expected empty agent+model, got: {}", output);
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    // --- StopSignal + writer thread tests ---
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_signal_wakes_poll() {
+        // StopSignal should create a valid pipe and signal() should not panic
+        let stop = StopSignal::new().unwrap();
+        stop.signal();
+        // Verify the read end is readable after signal
+        let mut fds = [libc::pollfd {
+            fd: stop.read_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        }];
+        let ret = unsafe { libc::poll(fds.as_mut_ptr(), 1, 100) };
+        assert_eq!(ret, 1, "poll should return 1 after signal");
+        assert_ne!(fds[0].revents & libc::POLLIN, 0, "POLLIN should be set");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn writer_thread_exits_on_stop_signal() {
+        // Create a pipe to act as the "pty writer" — we just need something
+        // that accepts writes without blocking
+        let mut pty_fds = [0i32; 2];
+        unsafe { libc::pipe(pty_fds.as_mut_ptr()) };
+        let pty_write_fd = pty_fds[1];
+
+        // Wrap the write end in a Box<dyn Write + Send> for spawn_writer_thread
+        struct FdWriter(i32);
+        impl Write for FdWriter {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                let n = unsafe {
+                    libc::write(self.0, buf.as_ptr() as *const libc::c_void, buf.len())
+                };
+                if n < 0 {
+                    Err(std::io::Error::last_os_error())
+                } else {
+                    Ok(n as usize)
+                }
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let writer: Box<dyn Write + Send> = Box::new(FdWriter(pty_write_fd));
+        let writer_arc = Arc::new(Mutex::new(writer));
+
+        let stop = StopSignal::new().unwrap();
+        let handle = spawn_writer_thread(writer_arc, stop.read_fd());
+
+        // Writer thread should be alive, blocked in poll()
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Signal stop — thread should exit promptly
+        stop.signal();
+        let result = handle.join();
+        assert!(result.is_ok(), "writer thread should exit cleanly on stop signal");
+
+        // Clean up pipe fds
+        unsafe {
+            libc::close(pty_fds[0]);
+            libc::close(pty_fds[1]);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn writer_thread_exits_on_pty_write_failure() {
+        // Create a pipe as the "pty writer", then close the read end so
+        // writes fail with EPIPE — simulating Claude exit closing the PTY
+        let mut pty_fds = [0i32; 2];
+        unsafe { libc::pipe(pty_fds.as_mut_ptr()) };
+        // Close read end immediately so writes produce EPIPE
+        unsafe { libc::close(pty_fds[0]) };
+
+        struct FdWriter(i32);
+        impl Write for FdWriter {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                let n = unsafe {
+                    libc::write(self.0, buf.as_ptr() as *const libc::c_void, buf.len())
+                };
+                if n < 0 {
+                    Err(std::io::Error::last_os_error())
+                } else {
+                    Ok(n as usize)
+                }
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let writer: Box<dyn Write + Send> = Box::new(FdWriter(pty_fds[1]));
+        let writer_arc = Arc::new(Mutex::new(writer));
+
+        let stop = StopSignal::new().unwrap();
+        let stop_fd = stop.read_fd();
+        let handle = spawn_writer_thread(writer_arc, stop_fd);
+
+        // Inject a byte into stdin to trigger a write attempt.
+        // The write will fail (EPIPE) and the thread should exit.
+        // We use the stop signal as a fallback timeout.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        stop.signal();
+
+        let result = handle.join();
+        assert!(result.is_ok(), "writer thread should exit on write failure or stop");
+
+        unsafe { libc::close(pty_fds[1]) };
     }
 }

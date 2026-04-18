@@ -557,7 +557,7 @@ Shell-idle same-session is the bug; Sonnet generalized too far.
 **Also:** Orphan cleanup uses `target_session:agent-doc`—Strategy 3 creates panes the user may not see. Missing `wrong_session_pane` test (line 94 aspirational) should ship with the fix.
 
 Pick the correct model + effort to fix this. Implement fix
-<!-- agent:boundary:497d526c -->
+<!-- agent:boundary:d63a7654 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

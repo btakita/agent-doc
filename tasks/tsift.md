@@ -49,12 +49,46 @@ Expanded tsift to be the all-in-one audit + token sifter tool. Added `tsift audi
 
 This replaces the standalone skills-janitor fork (#vdyj from agent-doc-bugs). The skills-janitor *skill* stays installed as a reference implementation / comparison target until tsift audit is functional.
 ❯ Add ids to pending items that are missing ids
-### Re: Pending IDs backfilled — sonnet-4-6
+❯ ### Re: Pending IDs backfilled — sonnet-4-6 (HEAD)
 
 Preflight auto-backfilled IDs to any items that were missing them — already done. All pending items now have hash IDs.
 
 I also deduped the pending list: the five `tsift audit` items had been added three times each (#nkec/#f5ty/#jh84 were identical, same for the other groups). Removed the two redundant copies of each, keeping the first occurrence.
-<!-- agent:boundary:b70ed68a -->
+❯ re: #92bz...can we integrate directly with sift via rust...exposing the cli endpoints?
+### Re: Direct Rust integration with sift — opus-4-6
+
+Yes — sift is pure Rust and explicitly exports a library crate. The `lib.rs` opens with "sift supports embedding through the crate root" and exposes a builder API:
+
+```rust
+use sift::{Sift, SiftBuilder, SearchInput, SearchOptions};
+
+let sift = Sift::builder()
+    .root("/path/to/project")
+    .build()?;
+
+let results = sift.search(SearchInput {
+    query: "how does auth work".into(),
+    ..Default::default()
+})?;
+```
+
+**What's available directly:**
+- `sift.search()` / `search_with_progress()` — hybrid BM25 + vector
+- `sift.assemble_context()` — bounded evidence assembly (token-budget-aware)
+- `sift.search_autonomous()` — multi-turn with planner strategies
+- Structured types: `SearchResponse`, `SearchHit`, `ContextArtifact`
+- Configurable `Retriever`, `Fusion`, `Reranking` enums
+
+**Not on crates.io yet** — use as git dep: `sift = { git = "https://github.com/rupurt/sift" }`. There's a `/examples/sift-embed` reference showing embedded usage.
+
+**Tradeoff vs shell-out:**
+- **Direct:** no process spawn overhead, typed results, can share index state across calls, access to progress callbacks
+- **Shell-out:** simpler dependency (no transitive candle/tokenizer deps), binary updates independently, tsift stays thin
+
+Recommendation: start with git dep for the library. The typed API is much cleaner than parsing CLI output, and sift's pipeline (BM25 → fusion → rerank) benefits from keeping state in-process. The dependency weight (candle, tokenizers) is real but tsift is already a search tool — it's pulling its weight.
+
+Updated #92bz to reflect direct integration path.
+<!-- agent:boundary:5475441b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

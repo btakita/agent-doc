@@ -363,7 +363,7 @@ For `git push` / deploy gates, same pattern — the hook fires from the relevant
 **Edge case — parent repo operations:** Some gates apply to agent-loop itself (submodule pointer updates, cross-cutting releases). These would use explicit scope: `[/deploy:agent-loop]` or trigger from the repo root.
 
 The item-level syntax `[/release:agent-doc]` is the safest — it's self-documenting and doesn't depend on directory conventions. But for your current layout where documents already live under `tasks/<submodule>/`, cwd inference handles 90% of cases without any new syntax.
-<!-- agent:boundary:77c94111 -->
+<!-- agent:boundary:a9ed698c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

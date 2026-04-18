@@ -28,7 +28,7 @@ The patchback *did* fire — there's a boundary marker (`044e8337`) after `do #m
 This isn't an agent-doc bug — the tool did what it was told. The skill workflow just didn't pipe a real response into the write command for that cycle. The implementation work happened correctly; only the documentation of it in the exchange was lost.
 
 **Fix:** No code fix needed. The tsift.md exchange is missing a response block for #mwhg. I can backfill it next time that document is active, or you can add a note manually.
-<!-- agent:boundary:c8279dd5 -->
+<!-- agent:boundary:fda46f8f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

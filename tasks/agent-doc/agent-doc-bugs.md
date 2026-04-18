@@ -682,7 +682,7 @@ Three silent failure points in the route chain — all had INFO-level or no user
 Settings → Plugins → gear → Install from Disk → `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.62-signed.zip` → restart IDE.
 
 After restart, trigger "Run Agent Doc" and check `idea.log` (`Help → Show Log in Files`) for the `[run]` and `[route]` lines. The log will tell us exactly where the chain breaks.
-<!-- agent:boundary:d4b085ea -->
+<!-- agent:boundary:ebdb418b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

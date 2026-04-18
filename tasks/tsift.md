@@ -54,7 +54,7 @@ This replaces the standalone skills-janitor fork (#vdyj from agent-doc-bugs). Th
 Preflight auto-backfilled IDs to any items that were missing them — already done. All pending items now have hash IDs.
 
 I also deduped the pending list: the five `tsift audit` items had been added three times each (#nkec/#f5ty/#jh84 were identical, same for the other groups). Removed the two redundant copies of each, keeping the first occurrence.
-<!-- agent:boundary:6ba02e82 -->
+<!-- agent:boundary:b70ed68a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

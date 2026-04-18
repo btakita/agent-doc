@@ -122,7 +122,7 @@ This is a Claude Code wrapper / tmux-router issue. After `claude` exits cleanly,
 
 Need to check the wrapper script that displays this prompt. Is this in `tmux-router` or a separate Claude Code launcher script?
 
-### Re: Claude Code header malformed — opus-4-6
+❯ ### Re: Claude Code header malformed — opus-4-6 (HEAD)
 
 The ASCII art logo is misaligned — the three lines of the logo glyph are left-shifted relative to the text. This is a rendering issue in Claude Code v2.1.109 itself, not agent-doc. The Unicode block characters assume a specific terminal width/font. Could be:
 
@@ -131,7 +131,17 @@ The ASCII art logo is misaligned — the three lines of the logo glyph are left-
 - A regression in v2.1.109's banner rendering
 
 This is an upstream Claude Code issue — worth filing at https://github.com/anthropics/claude-code/issues if it persists across terminals.
-<!-- agent:boundary:806d76e1 -->
+
+❯ These are both supervisor issues.
+### Re: supervisor issues — opus-4-6
+
+Agreed. Both are outside agent-doc's scope:
+
+1. **Enter/q stdin** — tmux-router wrapper loses tty fd after Claude exits. Fix lives in the wrapper's respawn logic.
+2. **Header misalignment** — Claude Code v2.1.109 banner rendering. Upstream issue.
+
+Neither needs tracking here. If you want them tracked elsewhere, they'd go in a supervisor/tmux-router task doc.
+<!-- agent:boundary:2e922aea -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

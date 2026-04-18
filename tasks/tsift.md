@@ -122,7 +122,7 @@ Those were two background `tsift search` jobs I fired without timeouts to test t
 This is exactly why #92bz's follow-up noted that vector/hybrid search needs a `tsift init` command with a progress bar rather than silently blocking. For Claude Code hook usage, `lexical` (instant, no models) should be the default.
 
 ❯ Create plugin SKILL and runbook(s) if recommended...for search using sift
-### Re: tsift skill created — opus-4-6
+❯ ### Re: tsift skill created — opus-4-6 (HEAD)
 
 Created `/tsift` Claude Code skill at `~/.claude/skills/tsift/`:
 
@@ -136,7 +136,23 @@ Created `/tsift` Claude Code skill at `~/.claude/skills/tsift/`:
 The skill is live — Claude Code picked it up immediately. Test with `/tsift "search query"`.
 
 No runbook for hook integration yet — that belongs with #95as (Claude Code hook integration pending item).
-<!-- agent:boundary:28d4e56d -->
+❯ Will tsift take over all claude searches now? Will this save tokens?
+### Re: tsift scope and token savings — opus-4-6
+
+**No, tsift won't take over all searches automatically.** Right now it's a manual skill (`/tsift`) — you invoke it when you want it. Claude Code's native Grep, Glob, and Read tools remain the default for directed searches and are perfectly efficient for that.
+
+**Where tsift adds value:**
+- **Semantic/conceptual queries** ("how does auth work", "error handling patterns") where Grep requires knowing the exact string
+- **Exploratory search** across unfamiliar codebases where you don't know file names or symbols yet
+- **Ranked results** with confidence scores instead of flat grep output
+
+**Token savings potential — yes, but indirectly:**
+- Sift returns ranked, truncated snippets rather than full file contents. A `tsift search` hit list is ~200-500 tokens vs reading 3-4 full files at ~2000-8000 tokens each
+- The real savings come from *finding the right file on the first try* instead of the grep-read-wrong file-grep again loop that burns context
+- For hook integration (#95as), tsift could replace the woz:Search MCP tool calls entirely — those are the expensive ones
+
+**To make it automatic** would require #95as (Claude Code hook integration) — rewriting search commands through tsift the way rtk rewrites git/cargo commands. That's when the token savings compound.
+<!-- agent:boundary:0e8e6119 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

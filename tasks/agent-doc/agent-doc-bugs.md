@@ -36,7 +36,7 @@ The Bash tool running the `cat <<'RESPONSE' | agent-doc write ... --stream` here
 The `.` wasn't from the user (no `❯` prefix) and wasn't from `agent-doc` itself (boundaries are auto-generated). So the LLM's Bash tool call contained a heredoc whose body was just `.` — either the model generated an empty response, or the heredoc delimiter `RESPONSE` appeared in the content and truncated it early.
 
 I don't have access to the previous session's tool call log to confirm which. The session context observations (#18719) say "Batch edit implementation documented in tsift task file" — suggesting the model *thought* it wrote a full response. Most likely a heredoc truncation: if the response contained a line starting with `RESPONSE` (the delimiter), bash would close the heredoc there, and the remaining content would be interpreted as shell commands (silently failing).
-<!-- agent:boundary:24e4f5cb -->
+<!-- agent:boundary:2cfce48e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

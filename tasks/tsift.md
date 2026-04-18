@@ -89,7 +89,7 @@ Recommendation: start with git dep for the library. The typed API is much cleane
 
 Updated #92bz to reflect direct integration path.
 ❯ do #92bz
-### Re: #92bz implemented — direct sift integration — opus-4-6
+❯ ### Re: #92bz implemented — direct sift integration — opus-4-6 (HEAD)
 
 Done. tsift now links sift as a Rust library (git dep), not shell-out.
 
@@ -108,7 +108,12 @@ Done. tsift now links sift as a Rust library (git dep), not shell-out.
 - Sift indexes `target/` by default — need `.siftignore` or gitignore-aware config (sift respects `.gitignore` when `Ignore` is configured via builder)
 - Default strategy should be `lexical` for Claude Code hooks (fast) with `--strategy hybrid` opt-in for deeper search
 - First-run model download for vector search needs a `tsift init` command or progress indicator
-<!-- agent:boundary:efe119b7 -->
+
+❯ Make https://github.com/btakita/tsift private
+### Re: tsift repo set to private — sonnet-4-6
+
+Done. `gh repo edit btakita/tsift --visibility private` confirmed — `PRIVATE`.
+<!-- agent:boundary:7ba2e0cf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

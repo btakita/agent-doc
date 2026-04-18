@@ -232,7 +232,7 @@ All 9 tests pass:
 
 Closed #6jmq in pending.
 ❯ do #yscf. Use SQLite. Add tests.
-### Re: #yscf — SQL introspection with SQLite — opus-4-6
+❯ ### Re: #yscf — SQL introspection with SQLite — opus-4-6 (HEAD)
 
 Implemented `tsift sql` with full SQLite introspection:
 
@@ -259,13 +259,41 @@ Implemented `tsift sql` with full SQLite introspection:
 - `sql_empty_table_schema` — empty table with blob column
 
 **Verification:** 17 tests pass, clippy clean. `rusqlite` with `bundled` feature — no system SQLite dependency.
-<!-- agent:boundary:f71d60b6 -->
+❯ do #95as
+### Re: #95as — Claude Code hook integration — opus-4-6
+
+Implemented `tsift rewrite` subcommand + hook script, following the rtk pattern.
+
+**What was built:**
+- `tsift rewrite "<cmd>"` — parses shell commands, returns tsift equivalent or exits 1 (no match)
+- `~/.claude/hooks/tsift-rewrite.sh` — PreToolUse hook, registered in `settings.json`
+- Rewrites: `rg <pattern> [path]` and `grep -r <pattern> [path]` → `tsift search "<pattern>" --strategy lexical [--path <path>]`
+- Pipe chains, redirects, `--count`, `--files-with-matches` pass through unchanged (not translatable)
+- Handles quoted patterns, flag-value pairs (`-t rs`, `--type`, `-g`), standalone flags (`-i`, `-n`)
+- Exit code protocol matches rtk: 0+stdout = rewrite+allow, 1 = pass through
+
+**Tests added (10):**
+- `rewrite_rg_simple_pattern` — basic rg → tsift
+- `rewrite_rg_with_path` — rg with directory arg
+- `rewrite_rg_with_flags_ignored` — `-i` and other standalone flags skipped
+- `rewrite_rg_with_type_flag` — `-t rs` value-taking flag handled
+- `rewrite_rg_pipe_passthrough` — pipe chains not rewritten
+- `rewrite_grep_recursive` — `grep -r` rewritten
+- `rewrite_grep_non_recursive_passthrough` — non-recursive grep ignored
+- `rewrite_tsift_passthrough` — already-tsift commands pass through
+- `rewrite_unrelated_passthrough` — non-search commands exit 1
+- `rewrite_rg_quoted_pattern` — quoted multi-word patterns
+
+**Verification:** 27 tests pass (17 existing + 10 new), clippy clean, `cargo install` done, hook tested end-to-end with JSON pipe.
+
+**SKILL.md** updated with hook integration docs.
+<!-- agent:boundary:10238e84 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#95as] Claude Code hook integration: rewrite commands through tsift like rtk does
+- [x] [#95as] Claude Code hook integration: rewrite commands through tsift like rtk does
 - [ ] [#kq5t] CLAUDE.md with project conventions
 - [ ] [#e15f] CI: GitHub Actions for cargo test + clippy
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries

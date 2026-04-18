@@ -485,7 +485,8 @@ Bugs B + C landed. Plugin 0.2.60 built, signed, installed to IntelliJIdea2026.1.
 
 **Uncommitted submodule state:** `src/agent-doc/` still has the Bug A FFI-side changes + Bug B plugin changes + Bug C plugin change uncommitted. Not touching them until you decide bundle strategy (agent-doc 0.33.2 cut vs. plugin-only commit vs. hold).
 `Run Agent Doc` does not call `tmux-send` to the claiming tmux pane. Why?
-<!-- agent:boundary:f3c3f741 -->
+`Run Agent Doc` does not call `tmux-send` to the claiming tmux pane. Why?
+<!-- agent:boundary:affbe9b4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

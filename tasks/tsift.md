@@ -399,14 +399,49 @@ The woz:* skills (`woz:code`, `woz:explore`, `woz:plan`, `woz:woz-recall`, etc.)
 - `settings.json` — removed `attribution` block, `"woz@wozcode-marketplace": true` from `enabledPlugins`, `wozcode-marketplace` from `extraKnownMarketplaces`, and `spinnerVerbs` block
 
 ❯ Fix the malformed /home/brian/.claude/settings.json
-### Re: JSON fixed — sonnet-4-6
+❯ ### Re: JSON fixed — sonnet-4-6 (HEAD)
 
 Fixed two trailing commas in settings.json:
 - Line 72: `enabledPlugins` object (after removing woz plugin entry)
 - Line 110: `extraKnownMarketplaces` object (after removing wozcode-marketplace)
 
 JSON is now valid. ✓
-<!-- agent:boundary:d513ff00 -->
+❯ Compare woz:woz-recall and claude-mem:mem-search for token efficiency and memory search effectiveness
+### Re: woz:woz-recall vs claude-mem:mem-search — sonnet-4-6
+
+**Summary: claude-mem:mem-search is strictly better on both axes.**
+
+#### Token Efficiency
+
+| | woz:woz-recall | claude-mem:mem-search |
+|---|---|---|
+| Retrieval model | Single call, full context returned | 3-stage: index → timeline → fetch |
+| Index cost | N/A — full result in one shot | ~50–100 tokens/result |
+| Full observation cost | Bundled with every result | ~500–1000 tokens, fetched on demand |
+| Batch fetch | No — results come as-is | Yes — single HTTP request for N IDs |
+| Claimed savings | N/A | 10x vs full-fetch-on-every-query |
+
+woz-recall's single-call API is simpler, but it returns full context for every result even when you just want to scan for relevance. claude-mem front-loads a cheap index scan and only inflates to full content for IDs you actually need — that 10x figure is realistic for queries that return 10+ candidates but only 2–3 are relevant.
+
+#### Search Effectiveness
+
+| | woz:woz-recall | claude-mem:mem-search |
+|---|---|---|
+| Query type | Semantic (vector) — vague queries work | Full-text + filters |
+| Filtering | None — just a raw query string | project, date range, obs_type, type |
+| Temporal queries | No | Yes — `dateStart`/`dateEnd` |
+| Type-filtered queries | No | Yes — bugfix, feature, decision, discovery, change |
+| Timeline context | No | Yes — `timeline(anchor=...)` for surrounding session context |
+| Result ordering | Ranked by relevance | `relevance`, `date_desc`, `date_asc` |
+
+woz-recall's semantic vector search handles vague queries ("that deploy command") marginally better than BM25 keyword matching. But claude-mem's structured filtering more than compensates: if you know it was a bugfix last week, you narrow the haystack before searching. In practice, structured filtering beats raw vector recall for most session-recall use cases.
+
+#### Verdict
+
+claude-mem:mem-search wins on both fronts. Token savings are structural (staged retrieval, batch fetch). Effectiveness is equivalent or better once you use filters. woz-recall's only advantage was its 1-call simplicity — relevant if you never want to think about filtering, but that's also why it burns tokens.
+
+Since woz is uninstalled, this is the system going forward. No action needed.
+<!-- agent:boundary:af0b4089 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

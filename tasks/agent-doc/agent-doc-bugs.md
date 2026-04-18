@@ -249,7 +249,7 @@ Fixed by adding a shared FFI project-path resolver and wiring both editor plugin
 
 **Manual testing gate next:** run `Run Agent Doc` from the JB plugin on `src/session-share/tasks/claudescore.md` and confirm the spawned session gets `tasks/claudescore.md` with CWD = `src/session-share/` before publishing to crates.io / PyPI / GitHub Releases.
 ❯ Please always build so we can test locally. Making a version bump without a build makes no sense. Add to skill/runbook.
-### Re: build on every version bump — opus-4-7
+❯ ### Re: build on every version bump — opus-4-7 (HEAD)
 
 Fair — a bumped version without the built artifact is broken by construction. Built both now and codified the rule.
 
@@ -266,7 +266,71 @@ Fair — a bumped version without the built artifact is broken by construction. 
 Also saved to memory as `feedback_build_on_version_bump.md` so this doesn't need to be said twice.
 
 **Ready for manual test:** install `agent-doc-jetbrains-0.2.58.zip` (or signed variant) + `agent-doc-0.2.6.vsix`, then run `Run Agent Doc` from JB on `src/session-share/tasks/claudescore.md` — expected: spawned session sees `tasks/claudescore.md` with CWD `src/session-share/`.
-<!-- agent:boundary:7bf30f67 -->
+
+❯ `Run Agent Doc` using agent-doc-jetbrains-0.2.58 does not call `agent-doc <path>` on the tmux pane. Instead, the CPU thrashes and Idea crashes. I downgraded to agent-doc-jetbrains-0.2.57 and `Run Agent Doc` does not call `agent-doc <path>` on the tmux pane...but the editor remains. Why?
+
+❯ I closed JB Idea when an agent-doc run on src/session-share/tasks/claudescore.md completed. The patchback was not added to claudescore.md. Why not?
+### Re: 0.2.58 thrash + missing patchback — opus-4-7
+
+Two distinct bugs, neither of which is "Run Agent Doc routes wrong path" — that part of v0.2.58 is sound. Both are pre-existing latent issues the v0.2.58 changes finally tripped.
+
+#### Bug A — JNA struct-by-value return is misbound (causes the JVM crash)
+
+The new `agent_doc_resolve_project_path` returns `FfiProjectPath` **by value** (16 bytes, two pointers; on x86_64 SysV that's returned in `rax`/`rdx`). The Kotlin binding declares the return type as a plain `Structure`, **not** `Structure.ByValue`. JNA's contract here is unambiguous: a non-`ByValue` Structure return type is treated as `Structure*` — JNA reads a pointer from `rax` and dereferences it as the struct.
+
+Runtime trace:
+1. Rust returns `{project_root: "…/src/session-share", relative_path: "tasks/claudescore.md"}` in registers.
+2. JNA reads `rax` (the `project_root` `char*` — say `0x7f5c…`) and treats *that* as an `FfiProjectPath*`.
+3. JNA dereferences `0x7f5c…` and reads 16 bytes — the first 16 bytes of the path string (`"/home/brian/wor"`) — interpreting them as two pointers.
+4. Kotlin then calls `result.project_root.getString(0)` on `0x6e6169727b2f656d6f682f` (the chars `/home/br…` reinterpreted as an address) → SIGSEGV → JVM dies → IDE process exits.
+
+`FfiPatchResult` and `FfiComponentList` are bound the same way and have only "worked" because the bytes JNA reads from `rax` (a valid `char*` or `json*` pointer) point to readable memory long enough for JNA to materialize a Structure with two more random pointers, which then get treated as `null` or freed silently. Latent corruption that hadn't crashed yet — until `resolveProject()` started getting called on the action's hot path with a path that lands on unmapped memory.
+
+**The CPU thrash before the crash** is a separate, pre-existing leak in `LayoutChangeDetector.kt:73-99`: every `componentAdded` event re-runs `addRecursiveContainerListener` on the new child, recursing into already-listened sub-trees (the `WeakHashMap.add` short-circuit only blocks the top container, not its descendants). `idea.log` shows listener count climbing past 1500 within minutes; every Swing tab move fires the listener N times and spawns N debounce threads. The crash from Bug A finally tips the JVM over.
+
+**Fix for the crash:** mark every Rust-by-value return struct as `Structure.ByValue` on the Kotlin side. Concretely, replace each of `FfiPatchResult`, `FfiComponentList`, `FfiProjectPath` with the standard JNA pattern:
+
+```kotlin
+@Structure.FieldOrder("project_root", "relative_path")
+open class FfiProjectPath : Structure() {
+    @JvmField var project_root: Pointer? = null
+    @JvmField var relative_path: Pointer? = null
+    class ByValue : FfiProjectPath(), Structure.ByValue
+}
+fun agent_doc_resolve_project_path(filePath: String): FfiProjectPath.ByValue
+```
+
+Same shape for `FfiPatchResult` and `FfiComponentList`. The VS Code side uses `koffi`, which already passes structs by value correctly, so it doesn't need touching.
+
+**Fix for the thrash (separate):** in `addRecursiveContainerListener`, drop the recursive walk inside the `componentAdded` callback — rely on the 5s fallback poll to catch new sub-trees. Container-listener leaks in long-lived JB plugins are a known footgun and the recursive re-walk on every nested add is the source.
+
+#### Bug B — patchback orphaned in the submodule's `.agent-doc/patches/`
+
+`PatchWatcher` in `PluginLifecycleListener.projectOpened` is created exactly once per IDE project, watching `project.basePath/.agent-doc/patches/`. `PatchWatcher.startSocketListenerViaFfi(basePath)` binds the socket listener at the parent project's `.agent-doc/sock` only.
+
+After v0.2.58's submodule-aware FFI resolution, `Run Agent Doc` on `src/session-share/tasks/claudescore.md` correctly spawns the session with `cwd = src/session-share/`. The session's writes therefore go to `src/session-share/.agent-doc/patches/`, where:
+- No file watcher is registered → file-IPC fallback never fires.
+- No socket listener is bound → `try_ipc` times out (2s) → CLI exits 75 (`EX_TEMPFAIL`) and leaves the patch file behind for "deferred plugin pickup" that never comes.
+
+I confirmed the orphan: `src/session-share/.agent-doc/patches/dffaf6f3…json` is 67KB and contains the missing claudescore response.
+
+**Fix: multi-root `PatchWatcher`.**
+
+1. On `projectOpened`, scan `<basePath>` for nested `.agent-doc/` directories (skip `node_modules/`, `target/`, `.git/`) and add each parent as a "watched root" alongside `basePath`.
+2. When `Run Agent Doc` resolves a new project root via FFI, register that root if unseen (track via a `MutableSet<String>`).
+3. For each root: start a separate `WatchService` on `<root>/.agent-doc/patches/` AND a separate FFI socket listener (`agent_doc_start_ipc_listener(<root>, callback)`).
+4. On `projectClosed`, stop all listeners per root.
+5. On startup, sweep each root's `.agent-doc/patches/` and apply orphans (`processPendingPatches` already handles this for one dir — call it per root).
+
+For the immediate orphan: once the multi-root sweep ships, opening agent-loop in the IDE will apply the pending claudescore patch on startup. If you want the response back today, the JSON in that file has the merged document content under `fullContent` (or applies via the listed `patches`); the simplest manual recovery is `python -c "import json; print(json.load(open('src/session-share/.agent-doc/patches/dffaf6f3…json'))['fullContent'])" > src/session-share/tasks/claudescore.md` after a backup.
+
+#### What I'm proposing
+
+If you confirm, I'll bundle into a single release (one cut, manual testing gate before publish):
+1. Add `Structure.ByValue` to all three FFI return structs in `NativeLib.kt`, bump JB plugin to 0.2.59, build + sign, install locally.
+2. Refactor `PatchWatcher` to multi-root with FFI-discovered submodule roots; add tests for the orphan-sweep path.
+3. Fix the `LayoutChangeDetector` recursive-listener leak with a regression test that asserts listener count stays bounded across N container events.
+<!-- agent:boundary:d83ece39 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

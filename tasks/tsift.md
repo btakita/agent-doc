@@ -316,7 +316,7 @@ RTK is saving 32.4M tokens (83.5% reduction) across 7,283 commands — but that'
 - Each avoided wrong-file read saves ~2,000-8,000 tokens — but this isn't tracked by RTK
 
 **To get measurable savings**, the hook would need to intercept the Grep tool itself (not just Bash commands), or tsift would need to become the primary search interface via skill invocation rather than hook rewriting.
-<!-- agent:boundary:50198e2a -->
+<!-- agent:boundary:57ae42b3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -544,7 +544,7 @@ This is actually the design working correctly. These items are gated on differen
 **#6hgf** (`--status` flag) — this one IS done, it shipped in 0.33.0. Marking `[x]` now.
 
 If you want future release items to auto-resolve, set typed gates: `set-gate-type <id> release` before publishing, then wire `agent-doc resolve-gate release` as a post-publish hook.
-<!-- agent:boundary:fee1a585 -->
+<!-- agent:boundary:14170649 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -555,6 +555,5 @@ If you want future release items to auto-resolve, set typed gates: `set-gate-typ
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [x] [#6hgf] Add --status flag to agent-doc write: skill passes status text as CLI arg, binary handles component targeting with replace semantics
 <!-- /agent:pending -->
 ## Assistant

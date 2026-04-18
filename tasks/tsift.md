@@ -108,7 +108,7 @@ Done. tsift now links sift as a Rust library (git dep), not shell-out.
 - Sift indexes `target/` by default — need `.siftignore` or gitignore-aware config (sift respects `.gitignore` when `Ignore` is configured via builder)
 - Default strategy should be `lexical` for Claude Code hooks (fast) with `--strategy hybrid` opt-in for deeper search
 - First-run model download for vector search needs a `tsift init` command or progress indicator
-<!-- agent:boundary:76a72ba3 -->
+<!-- agent:boundary:efe119b7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

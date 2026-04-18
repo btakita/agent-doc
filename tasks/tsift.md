@@ -353,16 +353,27 @@ SKIP: exact symbol lookups, known file paths, regex patterns, simple
 
 Claude Code will now auto-invoke `/tsift` for exploratory queries. Each auto-trigger replaces what would have been a multi-step grep→read→wrong file loop, making the savings measurable over time.
 ❯ install update to ensure the latest changes are installed
-### Re: tsift reinstalled — sonnet-4-6
+❯ ### Re: tsift reinstalled — sonnet-4-6 (HEAD)
 
 Done. `cargo install --path .` replaced the binary — latest build now in `~/.cargo/bin/tsift`. The TRIGGER/SKIP changes in SKILL.md are skill metadata only (no binary change needed), but the binary is confirmed current.
-<!-- agent:boundary:d02b16ec -->
+❯ do #e15f
+### Re: #e15f — CI workflow added — sonnet-4-6
+
+Created `.github/workflows/ci.yml` in the tsift submodule:
+
+- Triggers on push/PR to `main`
+- `dtolnay/rust-toolchain@stable` with clippy component
+- `actions/cache@v4` for `~/.cargo/registry`, `~/.cargo/git`, and `target/` keyed on `Cargo.lock`
+- Steps: `cargo clippy --all-targets -- -D warnings`, then `cargo test`
+
+Committed in submodule (`ci: add GitHub Actions workflow for clippy + test`) and parent pointer bumped.
+<!-- agent:boundary:137ba927 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#e15f] CI: GitHub Actions for cargo test + clippy
+- [x] [#e15f] CI: GitHub Actions for cargo test + clippy
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#nkec] tsift audit: skill drift detection — scan installed skills, compare against manifest, flag stale/broken/missing
 - [ ] [#865b] tsift audit: duplicate skill detection — find overlapping skills by description similarity

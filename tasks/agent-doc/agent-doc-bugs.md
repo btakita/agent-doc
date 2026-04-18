@@ -528,7 +528,7 @@ Published agent-doc v0.33.0:
 - **PyPI** — skipped; needs manylinux container build (host `linux_x86_64` tag rejected by PyPI). Build in Docker with `quay.io/pypa/manylinux2014_x86_64` when needed.
 
 Submodule pointer updated in agent-loop. #gqep marked done.
-<!-- agent:boundary:296d76a7 -->
+<!-- agent:boundary:e274d639 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -536,7 +536,6 @@ Submodule pointer updated in agent-loop. #gqep marked done.
 <!-- agent:pending patch=replace -->
 - [/] [#p2xm] Orphaned patch:exchange marker leak: parse_patches() does not consume unclosed opening markers — they leak into unmatched text and get appended to exchange verbatim. Fix: advance last_end past unclosed openers in parse_patches()
 - [/] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots
-- [x] [#gqep] Release v0.33.0: typed gates, resolve-gate, --pending-only, --status, notify with pending, supervisor PTY
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40

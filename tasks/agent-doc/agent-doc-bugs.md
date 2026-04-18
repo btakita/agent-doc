@@ -610,7 +610,7 @@ The `Run Agent Doc` command still does not write `tmux-send /agent-doc tasks/age
 Please correct the commit state of src/session-share/tasks/claudescore.md
 
 Always write response back into this agent doc.
-### Re: three issues (retry, force-disk) — opus-4-6
+❯ ### Re: three issues (retry, force-disk) — opus-4-6 (HEAD)
 
 Previous response was lost — IPC delivered the patch but the IDE plugin never applied it (ack-content sidecar timed out at 500ms). Using `--force-disk` to bypass IPC this time.
 
@@ -622,7 +622,7 @@ I tested `agent-doc route tasks/agent-doc/agent-doc-bugs.md` from CLI — it wor
 
 The plugin problem: you reinstalled 0.2.60 over the same 0.2.60. IntelliJ dedupes install-from-disk by version string — same-version reinstall leaves cached bytecode untouched. The old (pre-fix) code was still running.
 
-Version 0.2.61 is already built at `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.61-signed.zip`. Install that version and restart the IDE.
+❯  is already built at `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.61-signed.zip`. Install that version and restart the IDE.
 
 The chain of failures across previous sessions: edit `.kt` → forget to bump version → build at same version → reinstall same version → IntelliJ cache → no change. The rule (already in memory) is: bump `pluginVersion` patch on every `.kt` edit, then build, then install.
 
@@ -635,7 +635,24 @@ The chain of failures across previous sessions: edit `.kt` → forget to bump ve
 No correction needed.
 
 **Action required:** Install JB plugin 0.2.61 (Settings → Plugins → gear → Install from Disk → `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.61-signed.zip`) → restart IDE. This also fixes the IPC ack timeout.
-<!-- agent:boundary:98e902ef -->
+### Re: Run Agent Doc bug — root cause found — opus-4-6
+
+**Root cause: stale FFI library.** The JB plugin loads `libagent_doc.so` from `~/.cargo/bin/libagent_doc.so`. This file was last built at **15:58** — 3 hours before the binary (`agent-doc` at 18:40). `cargo install --path .` only installs the binary, not the cdylib. `cargo build --release` writes the `.so` to `target/release/` but never copies it to `~/.cargo/bin/`.
+
+The stale `.so` had an older `is_busy()` implementation that returned true, blocking every route attempt. IDEA log confirms:
+```
+[route] agent-doc is busy for tasks/agent-doc/agent-doc-bugs.md, skipping route
+```
+Every single `Run Agent Doc` attempt was silently skipped by this guard.
+
+**Fix applied:**
+1. Copied current `target/release/libagent_doc.so` → `~/.cargo/bin/libagent_doc.so`
+2. Updated `Makefile` — both `build-release` and `install` targets now copy the `.so` alongside the binary, so this can't go stale again
+
+**You need to restart the IDE** to reload the `.so` (JNA caches the loaded library in-process).
+
+**Why I didn't catch this earlier:** I never verified the installed version. The IDEA log had the answer the whole time — "is busy, skipping route" — but no previous session checked it. I should have checked the IDEA log and `.so` timestamp from the start.
+<!-- agent:boundary:bfdc84a5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

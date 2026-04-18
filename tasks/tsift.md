@@ -300,13 +300,12 @@ Created `src/tsift/CLAUDE.md` with project conventions covering:
 - **Repo** — private, submodule location
 
 Committed in submodule (`docs: add CLAUDE.md with project conventions`) and parent pointer bumped.
-<!-- agent:boundary:8a1e9694 -->
+<!-- agent:boundary:4dd94390 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#kq5t] CLAUDE.md with project conventions
 - [ ] [#e15f] CI: GitHub Actions for cargo test + clippy
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#nkec] tsift audit: skill drift detection — scan installed skills, compare against manifest, flag stale/broken/missing

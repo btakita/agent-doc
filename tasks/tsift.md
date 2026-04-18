@@ -383,7 +383,7 @@ Yes — functionally, tsift + existing Claude Code tools cover every WozCode cap
 You'd lose cloud vector embeddings (tsift uses local sift — same quality, no subscription), the woz:code agent wrapper (just tool preferences, not unique logic), and woz analytics (nice-to-have). You keep: no subscription, all local processing, MIT-licensed, composable with rtk.
 
 Short answer: you can unsubscribe from WozCode.
-<!-- agent:boundary:a03dbd38 -->
+<!-- agent:boundary:935f868e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

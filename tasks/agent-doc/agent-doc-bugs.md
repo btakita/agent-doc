@@ -635,7 +635,7 @@ The chain of failures across previous sessions: edit `.kt` → forget to bump ve
 No correction needed.
 
 **Action required:** Install JB plugin 0.2.61 (Settings → Plugins → gear → Install from Disk → `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.61-signed.zip`) → restart IDE. This also fixes the IPC ack timeout.
-### Re: Run Agent Doc bug — root cause found — opus-4-6
+❯ ### Re: Run Agent Doc bug — root cause found — opus-4-6 (HEAD)
 
 **Root cause: stale FFI library.** The JB plugin loads `libagent_doc.so` from `~/.cargo/bin/libagent_doc.so`. This file was last built at **15:58** — 3 hours before the binary (`agent-doc` at 18:40). `cargo install --path .` only installs the binary, not the cdylib. `cargo build --release` writes the `.so` to `target/release/` but never copies it to `~/.cargo/bin/`.
 
@@ -654,7 +654,35 @@ Every single `Run Agent Doc` attempt was silently skipped by this guard.
 **Why I didn't catch this earlier:** I never verified the installed version. The IDEA log had the answer the whole time — "is busy, skipping route" — but no previous session checked it. I should have checked the IDEA log and `.so` timestamp from the start.
 
 Still! `Run Agent Doc` does not call `tmux-send /agent-doc tasks/agent-doc/agent-doc-bugs.md`. I saw "Waiting for typing to stop..." on the first two attempts in src/session-share/tasks/claudescore.md. Further attempts did not show the dialog. What is going on? Please add logs to debug.
-<!-- agent:boundary:1c2d78fc -->
+### Re: Run Agent Doc still failing — debug logging added — sonnet-4-6
+
+Three silent failure points in the route chain — all had INFO-level or no user feedback. Here's what likely happened:
+
+**Most likely cause: `routing` AtomicBoolean stuck at `true`.** The first two "Waiting for typing to stop..." invocations on claudescore.md started the debounce thread. If the debounce completed but `sendToTerminal()` encountered an error (or `is_busy()` returned true), `onComplete` fires immediately but subsequent invocations from a *different* file also check the same static `routing` flag — if it got stuck, every attempt after that is silently blocked.
+
+**Second suspect: `is_busy()` silently skipping.** TerminalUtil.kt:78 checked `is_busy(file.path)` and if true, logged at INFO level only — no user hint, no notification. Completely invisible without IDEA debug logs.
+
+**Changes (plugin 0.2.62):**
+
+1. **SubmitAction.kt** — all decision points now log at WARN level (visible in idea.log by default):
+   - `[run] actionPerformed: <file>` on every trigger
+   - `[run] BLOCKED: route already in progress` when AtomicBoolean blocks
+   - `[run] debounce finished: idle=<bool>` after awaitIdle returns
+   - `[run] invoking sendToTerminal` before route
+   - `[run] route complete (onComplete callback)` when route finishes
+
+2. **TerminalUtil.kt** — full route traceability:
+   - `[route] sendToTerminal: cwd=<path> rel=<path> binary=<path>` on entry
+   - `[route] is_busy(<path>) = <bool>` — explicitly logs the check result
+   - `[route] SKIPPED: agent-doc is busy` + **user-visible hint** when busy-blocked
+   - `[route] executing: <full command>` before process spawn
+   - `[route] SUCCESS: <output>` or `[route] FAILED (exit <code>): <output>`
+
+**Action required:** Install JB plugin 0.2.62:
+Settings → Plugins → gear → Install from Disk → `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.62-signed.zip` → restart IDE.
+
+After restart, trigger "Run Agent Doc" and check `idea.log` (`Help → Show Log in Files`) for the `[run]` and `[route]` lines. The log will tell us exactly where the chain breaks.
+<!-- agent:boundary:d4b085ea -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

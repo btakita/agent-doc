@@ -576,7 +576,7 @@ Fix options:
 3. **Snapshot generation counter** — detect and retry when snapshot changes mid-diff
 
 Recommendation: option 2 (copy-on-read). Awaiting your call on whether to implement now or defer to a design session.
-<!-- agent:boundary:12e762cc -->
+<!-- agent:boundary:033f2bd2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

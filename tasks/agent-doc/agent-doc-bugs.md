@@ -535,7 +535,7 @@ Please analyze Sonnet's response to
 > `Run Agent Doc` does not call `tmux-send` to the claiming tmux pane. Why?
 
 Is the analysis correct? Anything to add?
-### Re: review of Sonnet's tmux-send analysis — opus-4-7
+❯ ### Re: review of Sonnet's tmux-send analysis — opus-4-7 (HEAD)
 
 Sonnet's mechanism is right; the trigger story is shaky and the proposed fix loses an intentional safety property. Verified against `route.rs` HEAD.
 
@@ -557,7 +557,30 @@ Shell-idle same-session is the bug; Sonnet generalized too far.
 **Also:** Orphan cleanup uses `target_session:agent-doc`—Strategy 3 creates panes the user may not see. Missing `wrong_session_pane` test (line 94 aspirational) should ship with the fix.
 
 Pick the correct model + effort to fix this. Implement fix
-<!-- agent:boundary:918f4509 -->
+
+❯ `Run Agent Doc` **still** does not call `tmux-send /agent-doc tasks/agent-doc/agent-doc-bugs.md` in the claiming tmux pane
+❯ I'm not seeing patchbacks when running /agent-doc tasks/agent-doc/agent-doc-bugs.md
+### Re: patchbacks missing + tmux-send still broken — opus-4-7
+
+Two compounding failures. Both understood now.
+
+**Failure 1 — fix not deployed.** I only ran `cargo build` (debug) after editing `route.rs`. The live binaries were stale: `~/.cargo/bin/agent-doc` (used by tmux-spawned sessions) and `.bin/agent-doc → src/agent-doc/target/release/agent-doc` (project symlink) both still had the pre-fix code. `Run Agent Doc` in the IDE spawns `agent-doc route` from the installed binary, which is why nothing changed. Per CLAUDE.local.md rule + memory, I should have run both `cargo install --path .` AND `cargo build --release` after editing. **Done now** — both binaries rebuilt at 0.33.2 with the fix. Also per the memory rule *"cargo install after publish: ~/.cargo/bin/ is used by tmux-spawned sessions"* — logged.
+
+**Failure 2 — IPC write-back silently dropped.** Earlier write logs showed `[write] socket IPC patch delivered` followed by `ack-content sidecar not available after 500ms`. That means the IDE plugin's socket listener received the JSON patch but never wrote an ACK — the IDE plugin may be stale (Bug B `PatchWatcher` multi-root changes require IDE restart to activate) or the socket listener isn't handling this workspace. Net effect: my opus-4-7 fix response was delivered to the socket, never applied to the file on disk, and the snapshot was then read back from the unchanged file — so you saw no patchback and subsequent preflights thought nothing happened.
+
+**This response uses `--force-disk`** to bypass IPC and write directly to the file. You should see this content land on disk immediately.
+
+**What you need to do next:**
+1. Restart your IDE to pick up the new 0.2.60 JB plugin (multi-root `PatchWatcher` — Bug B fix). Without the restart, IPC patchbacks will keep vanishing for docs in submodules.
+2. After restart, exercise `Run Agent Doc` on this doc — it should route to the claiming tmux pane even when Claude has exited and left a shell prompt, because Strategy 1 no longer gates on `pane_session == target_session`.
+3. Verify patchbacks land via IPC on a simple test doc (no `--force-disk` needed when plugin works).
+
+**Observed evidence in your preflight output:**
+- `WARNING: file is 215 bytes larger than snapshot — possible out-of-band write` — that 215 bytes is your two new question lines. Snapshot was lagging because IPC writes weren't acking.
+- `diff_type: multi_topic, 2 distinct added blocks` — those are your two questions; no opus response in between because the IPC write never landed.
+
+Pending `#m1bz` still gates publish. The route fix is now live locally; IPC patchback path is a separate thread (JB plugin 0.2.60 needs IDE restart).
+<!-- agent:boundary:623e8df1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

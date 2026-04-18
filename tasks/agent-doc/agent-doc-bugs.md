@@ -16,7 +16,7 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange patch=append -->
 v0.33.0 session. Fixed 2 bugs in pending.rs: (1) bare [#] placeholder accumulation — parse_item_line now strips [#] instead of prepend-on-backfill; (2) --pending-add dedup — op_add checks for identical text before appending. 9 new tests, 1125 total passing, make check clean. Status: v0.32.1 env frontmatter wired into all Claude-spawning paths.
-<!-- agent:boundary:3f4098b4 -->
+<!-- agent:boundary:06b20186 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

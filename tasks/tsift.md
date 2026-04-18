@@ -88,7 +88,7 @@ let results = sift.search(SearchInput {
 Recommendation: start with git dep for the library. The typed API is much cleaner than parsing CLI output, and sift's pipeline (BM25 → fusion → rerank) benefits from keeping state in-process. The dependency weight (candle, tokenizers) is real but tsift is already a search tool — it's pulling its weight.
 
 Updated #92bz to reflect direct integration path.
-<!-- agent:boundary:5475441b -->
+<!-- agent:boundary:1bf956b4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

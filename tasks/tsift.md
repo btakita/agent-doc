@@ -305,7 +305,7 @@ Committed in submodule (`docs: add CLAUDE.md with project conventions`) and pare
 
 Yes. `tsift --version` → `0.1.0`, and the latest commit (`19d0f63`) is the CLAUDE.md docs addition — no binary change. The installed binary reflects the latest code. No reinstall needed.
 ❯ Has tsift been saving tokens since the last install
-### Re: tsift token savings — opus-4-6
+❯ ### Re: tsift token savings — opus-4-6 (HEAD)
 
 **Not yet — no search commands have been rewritten.** The hook is registered and active, but Claude Code's native Grep tool bypasses Bash entirely (it's a direct tool call, not a shell command). The tsift-rewrite hook only fires on Bash `rg`/`grep -r` invocations, which rarely happen since Claude Code prefers its dedicated Grep tool.
 
@@ -316,7 +316,26 @@ RTK is saving 32.4M tokens (83.5% reduction) across 7,283 commands — but that'
 - Each avoided wrong-file read saves ~2,000-8,000 tokens — but this isn't tracked by RTK
 
 **To get measurable savings**, the hook would need to intercept the Grep tool itself (not just Bash commands), or tsift would need to become the primary search interface via skill invocation rather than hook rewriting.
-<!-- agent:boundary:57ae42b3 -->
+❯ Would it be useful for SKILL.md prefer tsift over grep?
+### Re: SKILL.md prefer tsift over grep — opus-4-6
+
+**Yes, but as a decision heuristic, not a blanket override.** Grep is faster and more precise for directed lookups (exact symbols, known strings). tsift adds value for conceptual/exploratory queries.
+
+**What SKILL.md could say:**
+- Use `/tsift` when the query is conceptual ("how does auth work", "error handling patterns") or when you don't know the exact term/file
+- Use Grep when you know the exact string, symbol name, or regex pattern
+- Use `/tsift` when the first Grep attempt returned too many/too few results
+
+**Stronger option — auto-trigger:** Add a `TRIGGER when:` line (like claude-api skill has) so the skill fires automatically on exploratory search patterns without explicit `/tsift` invocation. Example:
+```
+TRIGGER when: user asks to search/find/locate something conceptual, explore unfamiliar code, or understand how something works
+SKIP: exact symbol lookups, known file paths, regex patterns
+```
+
+This would make tsift savings measurable — every auto-triggered `/tsift` call replaces what would have been a multi-step grep→read→wrong file loop.
+
+Want me to implement either approach in SKILL.md?
+<!-- agent:boundary:7fef2bb1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

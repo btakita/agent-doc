@@ -551,7 +551,7 @@ If you want future release items to auto-resolve, set typed gates: `set-gate-typ
 Those items **were already in pending** — they've been tracked since the v0.32.5 session. The bulleted list in my previous response was explaining what each gated item is blocked on, not proposing new additions. All five (#p2xm, #wcf5, #a002, #mchh, #ha3h) were already in the `&lt;!-- agent:pending --&gt;` component.
 
 **#mchh** marked done — JetBrains plugin installed and verified.
-<!-- agent:boundary:b98e0ace -->
+<!-- agent:boundary:2b2ddec2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -560,7 +560,6 @@ Those items **were already in pending** — they've been tracked since the v0.32
 - [/] [#p2xm] Orphaned patch:exchange marker leak: parse_patches() does not consume unclosed opening markers — they leak into unmatched text and get appended to exchange verbatim. Fix: advance last_end past unclosed openers in parse_patches()
 - [/] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
-- [x] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 ## Assistant

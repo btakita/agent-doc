@@ -18,7 +18,7 @@ claude_args: --dangerously-skip-permissions
 v0.33.0 session. Landed: tsift project extracted (btakita/tsift, src/tsift submodule, tasks/tsift.md) absorbing skills-janitor; #9v7h (--pending-add-gated + hash echo + state marker rejection); #txex (notify --pending-add/--pending-add-gated, auto-create pending, pending-only mode); #hrmt (synced repo-local SKILL.md to v0.32.0); #e46w/#f8j3/#y4da/#zvmd/#np8p/#0xka (already fixed: boundary lag, narrow_to_submodule, annotate_re_headings); #77mf (typed gate markers [/release]/[/deploy], resolve-gate per-file+project-wide, set-gate-type, skill-layer inference on do); v0.33.0 released crates.io+GitHub (typed gates, resolve-gate, --pending-only, --pending-add-gated, --status, notify pending, session clear, supervisor PTY); #p2xm already fixed (orphaned patch:exchange leak template.rs:257-265); #wcf5 (copy-on-read guard: mtime capture, skip recovery on mtime change, 4 integration tests). State: 1116 tests, 2 gated pending (#a002 awaiting production telemetry, #ha3h blocked on multi-user support).
 ❯ When I transferred pending items to tsift.md, some of the pending items have `[#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#]`. Why?
 ❯ Why no patchback?
-### Re: [#] accumulation + no patchback — sonnet-4-6
+❯ ### Re: [#] accumulation + no patchback — sonnet-4-6 (HEAD)
 
 **Why `[#] [#] [#]...` (15 copies):**
 
@@ -37,7 +37,17 @@ The previous `/agent-doc` cycle was interrupted by the WozCode hook. The hook re
 **Bugs to file:**
 - `[#]` accumulation on bare-placeholder pending items (assign-prepend bug)
 - Duplicate items from repeated `--pending-add` with identical text (no dedup)
-<!-- agent:boundary:4acdecb4 -->
+❯ Fix bugs
+### Re: Fix bugs — opus-4-6
+
+Both bugs fixed in `src/agent-doc/src/pending.rs`:
+
+**Bug 1 — bare `[#]` placeholder accumulation:** `parse_item_line` now recognizes `[#]` (empty hash) as a placeholder and strips it from the text field. Previously it fell through to the invalid-hash fallback which kept `[#]` in the text, causing `- [ ] [#xxxx] [#] Wire Sift...` after backfill. Now produces clean `- [ ] [#xxxx] Wire Sift...`.
+
+**Bug 2 — `--pending-add` dedup:** `op_add` now checks for existing items with identical text before appending. Bails with `"duplicate item text already exists"` — callers handle appropriately (`notify.rs` logs no-op, `main.rs` propagates).
+
+3 tests added, 1119 total passing. `make check` clean.
+<!-- agent:boundary:110240b9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

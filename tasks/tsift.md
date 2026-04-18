@@ -152,7 +152,7 @@ No runbook for hook integration yet — that belongs with #95as (Claude Code hoo
 - For hook integration (#95as), tsift could replace the woz:Search MCP tool calls entirely — those are the expensive ones
 
 **To make it automatic** would require #95as (Claude Code hook integration) — rewriting search commands through tsift the way rtk rewrites git/cargo commands. That's when the token savings compound.
-<!-- agent:boundary:0e8e6119 -->
+<!-- agent:boundary:2293bd61 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

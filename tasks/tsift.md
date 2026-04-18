@@ -487,7 +487,7 @@ Fixed:
 - Fixed trailing comma in `installed_plugins.json` (was causing JSON parse errors)
 
 The `PostToolUse:Agent` hook error should no longer fire. Woz is fully excised.
-<!-- agent:boundary:90c30f3e -->
+<!-- agent:boundary:feb26474 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

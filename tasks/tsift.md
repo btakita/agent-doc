@@ -384,17 +384,21 @@ You'd lose cloud vector embeddings (tsift uses local sift — same quality, no s
 
 Short answer: you can unsubscribe from WozCode.
 ❯ please uninstall wozcode
-### Re: WozCode uninstalled — sonnet-4-6
+❯ ### Re: WozCode uninstalled — sonnet-4-6 (HEAD)
 
 Done. Removed all traces:
 
-- `settings.json` — removed `attribution` block, `"woz@wozcode-marketplace": true` from `enabledPlugins`, `wozcode-marketplace` from `extraKnownMarketplaces`, and `spinnerVerbs` block
+❯ - `settings.json` — removed `attribution` block, `"woz@wozcode-marketplace": true` from `enabledPlugins`, `wozcode-marketplace` 
+❯ - from `extraKnownMarketplaces`, and `spinnerVerbs` block
 - `plugins/installed_plugins.json` — removed `woz@wozcode-marketplace` entry
 - `~/.claude/plugins/cache/wozcode-marketplace/` — deleted
 - `~/.claude/wozcode/` — deleted (recall/session data)
 
 The woz:* skills (`woz:code`, `woz:explore`, `woz:plan`, `woz:woz-recall`, etc.) and MCP tools (`mcp__plugin_woz_code__Search`, `mcp__plugin_woz_code__Edit`, `mcp__plugin_woz_code__Sql`) are gone. tsift + native Claude Code tools are the replacement.
-<!-- agent:boundary:366a95f9 -->
+
+Fix t
+- `settings.json` — removed `attribution` block, `"woz@wozcode-marketplace": true` from `enabledPlugins`, `wozcode-marketplace` from `extraKnownMarketplaces`, and `spinnerVerbs` block
+<!-- agent:boundary:439f83a4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

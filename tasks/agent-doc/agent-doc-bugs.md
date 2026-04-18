@@ -518,7 +518,7 @@ Prepared v0.33.0. Changes since 0.32.5 (~2800 insertions across 34 files):
 - `cargo build --release` — `.bin/agent-doc` symlink target updated
 
 **Manual testing gate:** Confirm the typed gate feature works in a live session before I proceed to publish. Try `agent-doc pending tasks/agent-doc/agent-doc-bugs.md set-gate-type gqep release` to set a typed gate, then verify with a preflight cycle.
-<!-- agent:boundary:14f4c352 -->
+<!-- agent:boundary:97651b91 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -332,6 +332,7 @@ If you confirm, I'll bundle into a single release (one cut, manual testing gate 
 3. Fix the `LayoutChangeDetector` recursive-listener leak with a regression test that asserts listener count stays bounded across N container events.
 confirm...do fixes
 ❯ ### Re: 0.2.58 thrash + missing patchback — opus-4-7 (HEAD)
+❯ ### Re: 0.2.58 thrash + missing patchback — opus-4-7 (HEAD)
 
 Two distinct bugs, neither of which is "Run Agent Doc routes wrong path" — that part of v0.2.58 is sound. Both are pre-existing latent issues the v0.2.58 changes finally tripped.
 
@@ -393,10 +394,41 @@ If you confirm, I'll bundle into a single release (one cut, manual testing gate 
 3. Fix the `LayoutChangeDetector` recursive-listener leak with a regression test that asserts listener count stays bounded across N container events.
 ❯ add last patchback into this doc
 ❯ go...do fixes
+### Re: orphan patchback — opus-4-7
+
+**Recovered** — `src/session-share/.agent-doc/patches/dffaf6f39bd8b7f498d760f528d559cac6fbf6133c2cd725448955b82c24048e.json` (67.4KB, `patch_id: a19f7838-7f3d-4571-88fd-e8b879fdced0`, target `src/session-share/tasks/claudescore.md`). Baseline 65300 bytes, now far diverged from live (2026-04-17 benchmark-calibration content layered on top), so a direct patch-apply would mis-merge. Preserving the two component payloads inline below as the recovery of record.
+
+#### Orphaned exchange payload (for claudescore.md, boundary_id `56101189:claudescore`)
+
+> ### Re: OpenRouter API key setup
+>
+> The `.env` syntax is correct. **The issue:** the scoring-api script doesn't automatically load `.env` — it needs the key in the shell environment when the script runs.
+>
+> **Two options:**
+>
+> 1. **Load .env before running dry_run.py:** `cd src/session-share/claudescore.com/scoring-api && set -a; source .env; set +a && uv run python scripts/dry_run.py --project /home/brian/work/btakita/agent-loop --session-doc ... --prior-session-count 20`
+>
+> 2. **Or pass it directly:** `OPENROUTER_API_KEY="$(passage dreamable/OPENROUTER_API_KEY)" uv run python scripts/dry_run.py --project ... --session-doc ... --prior-session-count 20`
+>
+> **Next:** Try option 2 (safer for this context) to run both Rob's and Brian's v3 calibrations.
+
+#### Orphaned pending payload (for claudescore.md)
+
+- Re-run Rob's + Brian's calibration with v3 rubrics (env: OPENROUTER_API_KEY set via pass)
+- Implement `--no-global-config` flag in dry_run.py (for external session isolation)
+- Add `--no-global-config` flag to dry_run.py documentation
+- Push storage bucket migration to production Supabase (blocked: credentials)
+- Set `SCORING_API_URL` in production env
+
+Interpretation check: I read "add last patchback into this doc" as "append the recovered patchback content here" (agent-doc-bugs.md). If you want the orphan applied to `src/session-share/tasks/claudescore.md` (its original target), say so and I'll append there too. Note the claudescore session is live on pane `%156`, so it would appear as a new response on that active session.
+
+Moving on to Bug A (JNA `Structure.ByValue` in NativeLib.kt) next.
+❯ add last patchback into this doc
+❯ go...do fixes
 ### Re: go — opus-4-7
 
 Acknowledged. Three fixes queued in pending plus the orphan recovery and install-gate. Starting with the orphan patchback, then Bug A (JNA ByValue), Bug B (multi-root PatchWatcher), Bug C (LayoutChangeDetector leak). Will check back before publishing — local install + your manual verification first per the release rule.
-<!-- agent:boundary:2ad414a8 -->
+<!-- agent:boundary:808e1935 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -404,5 +436,10 @@ Acknowledged. Three fixes queued in pending plus the orphan recovery and install
 <!-- agent:pending patch=replace -->
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
+- [/] [#kvbx] recover orphaned claudescore patchback (src/session-share/.agent-doc/patches/dffaf6f3…json → claudescore.md)
+- [/] [#3cmz] JNA Structure.ByValue on FfiProjectPath / FfiPatchResult / FfiComponentList in NativeLib.kt; bump JB plugin → 0.2.59; build + sign
+- [/] [#1rmb] multi-root PatchWatcher refactor — projectOpened scan + FFI-triggered registration + per-root WatchService/socket listener + startup orphan sweep + tests
+- [/] [#b025] LayoutChangeDetector.kt:73-99 recursive-listener leak — drop recursive walk in componentAdded, keep 5s fallback poll; regression test asserts bounded listener count across N container events
+- [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 <!-- /agent:pending -->
 ## Assistant

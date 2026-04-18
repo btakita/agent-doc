@@ -257,7 +257,7 @@ let (git_root, _in_submodule) = narrow_to_submodule(&super_root, &resolved);
 
 Verified live: `git show HEAD:src/boost-client/tasks/monsterrodholders.md` fails from superproject, confirming the routing fix is necessary and working.
 ❯ do #np8p
-### Re: #np8p already implemented — opus-4-6
+❯ ### Re: #np8p already implemented — opus-4-6 (HEAD)
 
 Already fixed. `resolve_pane_cwd()` at git.rs:279 uses `narrow_to_submodule()` and is wired into both pane-spawning paths:
 
@@ -265,7 +265,18 @@ Already fixed. `resolve_pane_cwd()` at git.rs:279 uses `narrow_to_submodule()` a
 - **claim.rs:350** — `let resolved_cwd = crate::git::resolve_pane_cwd(file);` — used when claiming/registering pane sessions
 
 The function returns the submodule's git toplevel when the document is inside a submodule, or the superproject root otherwise. No remaining paths use raw `std::env::current_dir()` for pane cwd in production code (only in tests).
-<!-- agent:boundary:0f6eac9f -->
+❯ do #0xka
+### Re: #0xka already implemented — opus-4-6
+
+Already done. `annotate_re_headings_with_head()` at template.rs:644 is the implementation — it's the symmetric counterpart to `strip_head_markers()` at git.rs:739:
+
+- **strip_head_markers** (commit staging side): removes `(HEAD)` from all headings so the committed blob is clean
+- **annotate_re_headings_with_head** (reposition side): strips stale `(HEAD)` from all `### Re:` headings, then appends `(HEAD)` to new ones (baseline-aware) or just the last one (no baseline)
+
+Called from `reposition_boundary_to_end_with_baseline()` at template.rs:566, which is invoked by `reposition_boundary_in_snapshot()` at git.rs:650 and git.rs:682 (both snapshot and working tree).
+
+Test coverage: template.rs:1926 verifies three `### Re:` headings → only last gets `(HEAD)`, stale markers stripped.
+<!-- agent:boundary:1552c7ff -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -277,7 +288,7 @@ The function returns the submodule's git toplevel when the document is inside a 
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
+- [x] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
 - [ ] [#77mf] Event-driven gate resolution: typed gate markers like [/release] and [/deploy] that auto-resolve on matching events (cargo publish, git push). Extends the binary [/] invariant with machine-actionable gate types — reaper checks event log before skipping.
 - [/] [#6hgf] Add --status flag to agent-doc write: skill passes status text as CLI arg, binary handles component targeting with replace semantics
 <!-- /agent:pending -->

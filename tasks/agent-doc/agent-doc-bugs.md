@@ -652,7 +652,7 @@ Every single `Run Agent Doc` attempt was silently skipped by this guard.
 **You need to restart the IDE** to reload the `.so` (JNA caches the loaded library in-process).
 
 **Why I didn't catch this earlier:** I never verified the installed version. The IDEA log had the answer the whole time — "is busy, skipping route" — but no previous session checked it. I should have checked the IDEA log and `.so` timestamp from the start.
-<!-- agent:boundary:bfdc84a5 -->
+<!-- agent:boundary:110b8459 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

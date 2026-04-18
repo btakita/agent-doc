@@ -333,6 +333,7 @@ If you confirm, I'll bundle into a single release (one cut, manual testing gate 
 confirm...do fixes
 ❯ ### Re: 0.2.58 thrash + missing patchback — opus-4-7 (HEAD)
 ❯ ### Re: 0.2.58 thrash + missing patchback — opus-4-7 (HEAD)
+❯ ### Re: 0.2.58 thrash + missing patchback — opus-4-7 (HEAD)
 
 Two distinct bugs, neither of which is "Run Agent Doc routes wrong path" — that part of v0.2.58 is sound. Both are pre-existing latent issues the v0.2.58 changes finally tripped.
 
@@ -394,6 +395,44 @@ If you confirm, I'll bundle into a single release (one cut, manual testing gate 
 3. Fix the `LayoutChangeDetector` recursive-listener leak with a regression test that asserts listener count stays bounded across N container events.
 ❯ add last patchback into this doc
 ❯ go...do fixes
+### Re: Bug A done — 0.2.59 built — opus-4-7
+
+**NativeLib.kt:** Three structs marked `open` + added `class ByValue : <Struct>(), Structure.ByValue`, return types on eight FFI functions switched to `<Struct>.ByValue` (`agent_doc_apply_patch`, `_with_caret`, `_with_boundary`, `_merge_frontmatter`, `_reposition_boundary_to_end`, `_parse_components`, `_resolve_project_path`). Callers in `NativePatching` unchanged — `ByValue` extends the base so field access is source-compatible.
+
+**gradle.properties:** `pluginVersion = 0.2.59`.
+
+**Build:** `./gradlew buildPlugin signPlugin` → both zips under `src/agent-doc/editors/jetbrains/build/distributions/`:
+- `agent-doc-jetbrains-0.2.59.zip` (184.8K, unsigned)
+- `agent-doc-jetbrains-0.2.59-signed.zip` (186.9K, signed)
+
+#### ⚠️ Submodule state advisory — not committed
+
+`src/agent-doc` has 14 other modified files I did **not** author: `src/ffi.rs` (+166: adds the `agent_doc_resolve_project_path` Rust side + `FfiProjectPath` struct — the Rust counterpart of v0.2.58's Kotlin binding), `src/start.rs` (+95), `Cargo.toml`/`Cargo.lock` bumped to 0.33.2, `pyproject.toml`, `VERSIONS.md` (+6), plus VS Code extension files and several Kotlin action files (`ClaimAction`, `ForceClaimAction`, `SubmitAction`, `TerminalUtil`, `RunWithJunieAction`). Bug A implicitly depends on `src/ffi.rs` because v0.2.58's Kotlin binding called a Rust symbol that **didn't exist at HEAD** — until `ffi.rs` lands, the native load would fail cleanly rather than crash. So: the in-flight Rust FFI + my Kotlin ByValue fix are co-dependent.
+
+I'm **not** committing until you say how to bundle. Options:
+1. Commit Bug A alone (just my two files) and leave the rest as WIP.
+2. Release the whole queue as a single `agent-doc v0.33.2` + JB `0.2.59` cut.
+3. Tell me who owns the other changes and I'll leave them untouched.
+
+#### Manual testing gate (per release rule)
+
+Install locally when ready:
+
+    # IDEA → Settings → Plugins → gear → Install Plugin from Disk
+    # → src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.59-signed.zip
+    # (uninstall 0.2.58 + restart first — structural changes to Structure subclasses)
+
+Then exercise `Run Agent Doc` on `src/session-share/tasks/claudescore.md` and a parent-project doc. Expected: no JVM crash, `resolveProjectPath` returns the nested submodule root for submodule docs and null for parent-project docs. Ping me with the result.
+
+#### Next up (gated until Bug A tested green)
+
+- Bug B (`#1rmb`): multi-root `PatchWatcher` — substantial refactor, tests for the orphan-sweep path, likely 1-2 hr.
+- Bug C (`#b025`): `LayoutChangeDetector.kt:73-99` recursive-listener leak + bounded-listener regression test — ~30 min.
+- Install gate (`#m1bz`): pause for your live-session confirmation before publishing anything upstream.
+
+Ungate `#3cmz` when you've verified Bug A works end-to-end, or tell me to keep going on faith.
+❯ add last patchback into this doc
+❯ go...do fixes
 ### Re: orphan patchback — opus-4-7
 
 **Recovered** — `src/session-share/.agent-doc/patches/dffaf6f39bd8b7f498d760f528d559cac6fbf6133c2cd725448955b82c24048e.json` (67.4KB, `patch_id: a19f7838-7f3d-4571-88fd-e8b879fdced0`, target `src/session-share/tasks/claudescore.md`). Baseline 65300 bytes, now far diverged from live (2026-04-17 benchmark-calibration content layered on top), so a direct patch-apply would mis-merge. Preserving the two component payloads inline below as the recovery of record.
@@ -428,7 +467,7 @@ Moving on to Bug A (JNA `Structure.ByValue` in NativeLib.kt) next.
 ### Re: go — opus-4-7
 
 Acknowledged. Three fixes queued in pending plus the orphan recovery and install-gate. Starting with the orphan patchback, then Bug A (JNA ByValue), Bug B (multi-root PatchWatcher), Bug C (LayoutChangeDetector leak). Will check back before publishing — local install + your manual verification first per the release rule.
-<!-- agent:boundary:025ae6b4 -->
+<!-- agent:boundary:5f93e007 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -436,7 +475,7 @@ Acknowledged. Three fixes queued in pending plus the orphan recovery and install
 <!-- agent:pending patch=replace -->
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [/] [#kvbx] recover orphaned claudescore patchback (src/session-share/.agent-doc/patches/dffaf6f3…json → claudescore.md)
+- [x] [#kvbx] recover orphaned claudescore patchback (src/session-share/.agent-doc/patches/dffaf6f3…json → claudescore.md)
 - [/] [#3cmz] JNA Structure.ByValue on FfiProjectPath / FfiPatchResult / FfiComponentList in NativeLib.kt; bump JB plugin → 0.2.59; build + sign
 - [/] [#1rmb] multi-root PatchWatcher refactor — projectOpened scan + FFI-triggered registration + per-root WatchService/socket listener + startup orphan sweep + tests
 - [/] [#b025] LayoutChangeDetector.kt:73-99 recursive-listener leak — drop recursive walk in componentAdded, keep 5s fallback poll; regression test asserts bounded listener count across N container events

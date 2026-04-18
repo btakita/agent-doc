@@ -69,7 +69,7 @@ When `--stream` would replace exchange content with something dramatically short
 **Why not append mode for `--stream`?**
 The stream buffer is cumulative — each flush contains ALL content written so far, not a delta. Append would duplicate content on every flush within a single session. Replace is correct *within* a session. The bug is a *new* session's trivial write overwriting a *previous* session's good content — which both fixes above address.
 ❯ Implement if not already done. Add tests.
-### Re: Implementation status — opus-4-6
+❯ ### Re: Implementation status — opus-4-6 (HEAD)
 
 **Fix 1 (pending-only): already exists.** The binary has `--pending-only` since it was added alongside the granular pending flags. Usage: `agent-doc write doc.md --pending-done mwhg --pending-only`. The skill just didn't use it — the model tried `--stream` with empty stdin instead. No code changes needed; this is a skill-side awareness gap.
 
@@ -85,7 +85,18 @@ The stream buffer is cumulative — each flush contains ALL content written so f
 - `shrink_guard_skips_small_exchange` — <100 byte exchange skips guard
 - `shrink_guard_passes_no_exchange` — no exchange component passes
 - `extract_exchange_content_len_works` — helper unit test
-<!-- agent:boundary:fe2420bd -->
+❯ release
+### Re: release — opus-4-6
+
+**v0.33.1 prepared.** v0.33.0 is already on crates.io, so bumped to 0.33.1. Changes:
+
+- Cargo.toml + pyproject.toml → 0.33.1
+- VERSIONS.md entry: pending parse fix ([#] accumulation), pending-add dedup, content-shrink guard, 9 new tests
+- 1130 tests passing, clippy clean
+- `cargo install --path .` + `cargo build --release` done
+
+**Manual testing gate:** Confirm the fixes work in a live session, then I'll commit → tag → publish (crates.io, PyPI, GitHub Release).
+<!-- agent:boundary:e80276af -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

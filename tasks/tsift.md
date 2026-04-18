@@ -210,13 +210,12 @@ Architecture beats edit beats search — "design and implement" routes to opus.
 - `edit_fails_when_old_equals_new`
 
 `apply_edit_op` extracted from `cmd_edit` so core replacement logic is tested directly. `cmd_edit` now delegates to it — no duplication.
-<!-- agent:boundary:1d7b2fb4 -->
+<!-- agent:boundary:e626045c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#92bz] Wire Sift as search backend (direct Rust lib integration via git dep — done)
 - [ ] [#6jmq] Agent model routing skill: haiku for search, sonnet for edits, opus for architecture
 - [ ] [#yscf] SQL introspection: connect to SQLite/Postgres, expose schema + query
 - [ ] [#95as] Claude Code hook integration: rewrite commands through tsift like rtk does

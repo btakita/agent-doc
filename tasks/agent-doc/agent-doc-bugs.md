@@ -142,7 +142,7 @@ Agreed. Both are outside agent-doc's scope:
 
 Neither needs tracking here. If you want them tracked elsewhere, they'd go in a supervisor/tmux-router task doc.
 ❯ fix **Enter/q stdin**. add tests
-### Re: fix Enter/q stdin — opus-4-6
+❯ ### Re: fix Enter/q stdin — opus-4-6 (HEAD)
 
 **Root cause:** After Claude exits, the `stdin→pty` writer thread is still blocked on `stdin.lock().read()`, holding the Rust stdin mutex. When the supervisor calls `stdin.read_line()` for the restart prompt, it deadlocks waiting for the lock the writer thread holds.
 
@@ -159,7 +159,13 @@ Neither needs tracking here. If you want them tracked elsewhere, they'd go in a 
 - `writer_thread_exits_on_pty_write_failure` — thread exits when PTY write fails (EPIPE)
 
 Changed file: `src/agent-doc/src/start.rs`
-<!-- agent:boundary:a5be62c7 -->
+❯ Install locally
+### Re: Install locally — sonnet-4-6
+
+Done. `cargo install --path .` replaced `~/.cargo/bin/agent-doc` with v0.33.1 (built with the stdin fix).
+
+Ready for live test — start a supervised Claude session and verify Enter/q works after clean exit.
+<!-- agent:boundary:69940931 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

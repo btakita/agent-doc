@@ -467,7 +467,7 @@ Moving on to Bug A (JNA `Structure.ByValue` in NativeLib.kt) next.
 ### Re: go — opus-4-7
 
 Acknowledged. Three fixes queued in pending plus the orphan recovery and install-gate. Starting with the orphan patchback, then Bug A (JNA ByValue), Bug B (multi-root PatchWatcher), Bug C (LayoutChangeDetector leak). Will check back before publishing — local install + your manual verification first per the release rule.
-<!-- agent:boundary:5f93e007 -->
+<!-- agent:boundary:0459c2f6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -475,8 +475,6 @@ Acknowledged. Three fixes queued in pending plus the orphan recovery and install
 <!-- agent:pending patch=replace -->
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [x] [#kvbx] recover orphaned claudescore patchback (src/session-share/.agent-doc/patches/dffaf6f3…json → claudescore.md)
-- [/] [#3cmz] JNA Structure.ByValue on FfiProjectPath / FfiPatchResult / FfiComponentList in NativeLib.kt; bump JB plugin → 0.2.59; build + sign
 - [/] [#1rmb] multi-root PatchWatcher refactor — projectOpened scan + FFI-triggered registration + per-root WatchService/socket listener + startup orphan sweep + tests
 - [/] [#b025] LayoutChangeDetector.kt:73-99 recursive-listener leak — drop recursive walk in componentAdded, keep 5s fallback poll; regression test asserts bounded listener count across N container events
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream

@@ -484,7 +484,8 @@ Bugs B + C landed. Plugin 0.2.60 built, signed, installed to IntelliJIdea2026.1.
 - Tab-drag a markdown file between splits — layout detector should NOT accumulate listeners (check idea.log for `[state] layout-detector: listeners=N` trending flat, not climbing).
 
 **Uncommitted submodule state:** `src/agent-doc/` still has the Bug A FFI-side changes + Bug B plugin changes + Bug C plugin change uncommitted. Not touching them until you decide bundle strategy (agent-doc 0.33.2 cut vs. plugin-only commit vs. hold).
-<!-- agent:boundary:e01674f7 -->
+`Run Agent Doc` does not call `tmux-send` to the claiming tmux pane. Why?
+<!-- agent:boundary:6724359f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

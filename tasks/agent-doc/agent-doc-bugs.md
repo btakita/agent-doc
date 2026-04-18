@@ -446,7 +446,7 @@ agent-doc write doc.md --pending-edit "gqep=[/release] Release v0.32.4"
 **So agent-doc never guesses.** It's a dumb pattern matcher: when `resolve-gate release` fires, it finds items matching `[/release]` and flips them. The intelligence is in your workflow — you decide when an item transitions from `[/]` (generic gate) to `[/release]` (typed, machine-resolvable gate).
 
 Think of it like git tags vs branches: git doesn't decide what to tag — you tag what you want, and the tooling acts on matching tags.
-<!-- agent:boundary:3e83fb1d -->
+<!-- agent:boundary:62c8a208 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -406,7 +406,7 @@ Fixed two trailing commas in settings.json:
 - Line 110: `extraKnownMarketplaces` object (after removing wozcode-marketplace)
 
 JSON is now valid. ✓
-<!-- agent:boundary:5e92377f -->
+<!-- agent:boundary:d513ff00 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

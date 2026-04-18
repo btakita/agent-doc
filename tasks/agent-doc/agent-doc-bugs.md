@@ -529,12 +529,13 @@ Published agent-doc v0.33.0:
 
 Submodule pointer updated in agent-loop. #gqep marked done.
 ❯ Why are the pending items still gated? We just released
-### Re: Why are pending items still gated? — opus-4-6
+❯ ### Re: Why are pending items still gated? — opus-4-6 (HEAD)
 
 They're gated with plain `[/]` (generic human gate), not `[/release]` (typed gate). The `resolve-gate release` command only flips `[/release]` → `[x]`. None of these items had typed gates set — they were all `[/]`.
 
 This is actually the design working correctly. These items are gated on different things:
 
+❯ add to pending. Why were these items not already in pending?
 - **#p2xm** (orphaned patch:exchange leak) — bug, needs code fix
 - **#wcf5** (advisory flock) — bug, needs code fix
 - **#a002** (normalize_threshold_exceeded telemetry) — waiting for a large-drift trip in production
@@ -544,7 +545,13 @@ This is actually the design working correctly. These items are gated on differen
 **#6hgf** (`--status` flag) — this one IS done, it shipped in 0.33.0. Marking `[x]` now.
 
 If you want future release items to auto-resolve, set typed gates: `set-gate-type <id> release` before publishing, then wire `agent-doc resolve-gate release` as a post-publish hook.
-<!-- agent:boundary:6119e0fd -->
+❯ done **#mchh**
+### Re: add to pending + done #mchh — opus-4-6
+
+Those items **were already in pending** — they've been tracked since the v0.32.5 session. The bulleted list in my previous response was explaining what each gated item is blocked on, not proposing new additions. All five (#p2xm, #wcf5, #a002, #mchh, #ha3h) were already in the `&lt;!-- agent:pending --&gt;` component.
+
+**#mchh** marked done — JetBrains plugin installed and verified.
+<!-- agent:boundary:b98e0ace -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -553,7 +560,7 @@ If you want future release items to auto-resolve, set typed gates: `set-gate-typ
 - [/] [#p2xm] Orphaned patch:exchange marker leak: parse_patches() does not consume unclosed opening markers — they leak into unmatched text and get appended to exchange verbatim. Fix: advance last_end past unclosed openers in parse_patches()
 - [/] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
-- [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
+- [x] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->
 ## Assistant

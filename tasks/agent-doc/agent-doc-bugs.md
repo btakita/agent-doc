@@ -141,7 +141,7 @@ Agreed. Both are outside agent-doc's scope:
 2. **Header misalignment** — Claude Code v2.1.109 banner rendering. Upstream issue.
 
 Neither needs tracking here. If you want them tracked elsewhere, they'd go in a supervisor/tmux-router task doc.
-<!-- agent:boundary:2e922aea -->
+<!-- agent:boundary:833831fe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

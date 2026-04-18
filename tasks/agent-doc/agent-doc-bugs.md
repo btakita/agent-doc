@@ -266,7 +266,7 @@ Already fixed. `resolve_pane_cwd()` at git.rs:279 uses `narrow_to_submodule()` a
 
 The function returns the submodule's git toplevel when the document is inside a submodule, or the superproject root otherwise. No remaining paths use raw `std::env::current_dir()` for pane cwd in production code (only in tests).
 ❯ do #0xka
-### Re: #0xka already implemented — opus-4-6
+❯ ### Re: #0xka already implemented — opus-4-6 (HEAD)
 
 Already done. `annotate_re_headings_with_head()` at template.rs:644 is the implementation — it's the symmetric counterpart to `strip_head_markers()` at git.rs:739:
 
@@ -276,7 +276,43 @@ Already done. `annotate_re_headings_with_head()` at template.rs:644 is the imple
 Called from `reposition_boundary_to_end_with_baseline()` at template.rs:566, which is invoked by `reposition_boundary_in_snapshot()` at git.rs:650 and git.rs:682 (both snapshot and working tree).
 
 Test coverage: template.rs:1926 verifies three `### Re:` headings → only last gets `(HEAD)`, stale markers stripped.
-<!-- agent:boundary:4ab1a80f -->
+❯ re #77mf: How would the harness know if it's [/release] or [/deploy]
+### Re: #77mf gate resolution architecture — opus-4-6
+
+Three viable approaches, increasing in automation:
+
+**1. Explicit resolution (simplest):**
+A new subcommand `agent-doc pending resolve <id> --gate-type release`. The skill or user calls it manually after performing the action. The reaper only checks if the gate has been resolved, not what type it is. The typed marker is just documentation — resolution is still human-triggered.
+
+**2. Hook-driven (medium):**
+Claude Code hooks fire after matching shell commands. A post-command hook pattern:
+
+```jsonc
+// settings.json
+{ "match": "cargo publish", "run": "agent-doc pending resolve-gate release" }
+{ "match": "git push",      "run": "agent-doc pending resolve-gate deploy" }
+```
+
+`resolve-gate <type>` scans all tracked documents for `[/<type>]` items and flips them to `[x]`. The harness doesn't "know" — it reacts to external events via hooks.
+
+**3. Verification commands (most robust):**
+Each gate type maps to a verification function in config:
+
+```toml
+# .agent-doc/config.toml
+[gates.release]
+verify = "cargo search agent-doc --limit 1 | grep -q '0.32.4'"
+
+[gates.deploy]
+verify = "git log origin/main --oneline -1 | grep -q $(git rev-parse --short HEAD)"
+```
+
+The reaper runs the verify command before resolving. This is the only approach that's truly event-driven — the others are event-triggered but not verified.
+
+**My recommendation:** Start with #1 (explicit `resolve-gate` subcommand), wire #2 (hooks) as sugar on top. Skip #3 unless you need idempotent verification — it adds shell-out complexity to the reaper path and the verification commands are fragile across environments.
+
+The key insight: the harness doesn't need to "know" the gate type semantically. It just needs a resolution signal. The typed marker (`[/release]`) is for human readability and hook routing — the binary treats all resolved gates identically (flip to `[x]`).
+<!-- agent:boundary:000c80f5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

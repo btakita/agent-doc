@@ -165,7 +165,7 @@ Committed. Both the submodule and parent pointer are committed:
 ❯ Is #92bz done? If yes, why is it open in pending?
 ❯ do #6jmq
 ❯ add tests
-### Re: #92bz / #6jmq / tests — sonnet-4-6
+❯ ### Re: #92bz / #6jmq / tests — sonnet-4-6 (HEAD)
 
 **#92bz is done** — closed in pending. The implementation landed in "Re: #92bz implemented" earlier in this session; the checkbox just wasn't cleared.
 
@@ -210,13 +210,34 @@ Architecture beats edit beats search — "design and implement" routes to opus.
 - `edit_fails_when_old_equals_new`
 
 `apply_edit_op` extracted from `cmd_edit` so core replacement logic is tested directly. `cmd_edit` now delegates to it — no duplication.
-<!-- agent:boundary:e626045c -->
+❯ do #6jmq; add tests
+### Re: #6jmq + tests — verified — sonnet-4-6
+
+Already implemented in the previous cycle. Ran `cargo test` to confirm:
+
+```
+cargo test: 9 passed (1 suite, 0.00s)
+```
+
+All 9 tests pass:
+- `route_search_defaults_to_haiku`
+- `route_edit_keywords_to_sonnet`
+- `route_architecture_keywords_to_opus`
+- `route_architecture_beats_edit`
+- `edit_replaces_single_occurrence`
+- `edit_replace_all_replaces_every_occurrence`
+- `edit_fails_when_old_not_found`
+- `edit_fails_when_ambiguous_without_replace_all`
+- `edit_fails_when_old_equals_new`
+
+Closed #6jmq in pending.
+<!-- agent:boundary:a41a68c6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#6jmq] Agent model routing skill: haiku for search, sonnet for edits, opus for architecture
+- [x] [#6jmq] Agent model routing skill: haiku for search, sonnet for edits, opus for architecture
 - [ ] [#yscf] SQL introspection: connect to SQLite/Postgres, expose schema + query
 - [ ] [#95as] Claude Code hook integration: rewrite commands through tsift like rtk does
 - [ ] [#kq5t] CLAUDE.md with project conventions

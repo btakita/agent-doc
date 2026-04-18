@@ -531,7 +531,7 @@ if let Some(ref registered_pane) = registered {
 ```
 
 Drop the `pane_session == target_session` guard and the `is_agent_process` branch from Strategy 1. The stash/rescue dance was only needed because of the bogus session comparison. `target_session` remains valid for Strategy 3 (where to create a new pane when none is registered).
-<!-- agent:boundary:ec3fed66 -->
+<!-- agent:boundary:60e2c969 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

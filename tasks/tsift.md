@@ -155,19 +155,68 @@ No runbook for hook integration yet — that belongs with #95as (Claude Code hoo
 ❯ do #mwhg
 .
 ❯ patchback
-### Re: patchback — committed to tsift — sonnet-4-6
+❯ ### Re: patchback — committed to tsift — sonnet-4-6 (HEAD)
 
 Committed. Both the submodule and parent pointer are committed:
 
 - `src/tsift` — `feat(edit): add batch edit command (#mwhg)` (41a188b)
 - `agent-loop` — submodule pointer bumped (68f46c77)
-<!-- agent:boundary:dd534934 -->
+
+❯ Is #92bz done? If yes, why is it open in pending?
+❯ do #6jmq
+❯ add tests
+### Re: #92bz / #6jmq / tests — sonnet-4-6
+
+**#92bz is done** — closed in pending. The implementation landed in "Re: #92bz implemented" earlier in this session; the checkbox just wasn't cleared.
+
+**#6jmq — agent model routing** — implemented as `tsift route`:
+
+```bash
+tsift route "find all usages of authenticate"
+# tier:  haiku
+# model: claude-haiku-4-5-20251001
+
+tsift route "fix the auth bug"
+# tier:  sonnet
+# model: claude-sonnet-4-6
+
+tsift route "design the new API architecture"
+# tier:  opus
+# model: claude-opus-4-6
+
+# Scripting
+MODEL=$(tsift route --id "search for auth patterns")
+```
+
+Routing logic (keyword-based, checked in order):
+1. **opus** — `architect`, `architecture`, `design`, `plan`, `strateg`, `analy`, `review`, `evaluate`, `assess`
+2. **sonnet** — `edit`, `write`, `fix`, `change`, `update`, `create`, `add `, `remove`, `delete`, `modify`, `refactor`, `implement`, `build`
+3. **haiku** — everything else (search/lookup)
+
+Architecture beats edit beats search — "design and implement" routes to opus.
+
+`~/.claude/skills/tsift/SKILL.md` updated with routing table and usage examples.
+
+**Tests** — 9 unit tests added and passing:
+
+- `route_search_defaults_to_haiku`
+- `route_edit_keywords_to_sonnet` (5 keywords)
+- `route_architecture_keywords_to_opus` (5 keywords)
+- `route_architecture_beats_edit`
+- `edit_replaces_single_occurrence`
+- `edit_replace_all_replaces_every_occurrence`
+- `edit_fails_when_old_not_found`
+- `edit_fails_when_ambiguous_without_replace_all`
+- `edit_fails_when_old_equals_new`
+
+`apply_edit_op` extracted from `cmd_edit` so core replacement logic is tested directly. `cmd_edit` now delegates to it — no duplication.
+<!-- agent:boundary:1d7b2fb4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#92bz] Wire Sift as search backend (direct Rust lib integration via git dep — done)
+- [x] [#92bz] Wire Sift as search backend (direct Rust lib integration via git dep — done)
 - [ ] [#6jmq] Agent model routing skill: haiku for search, sonnet for edits, opus for architecture
 - [ ] [#yscf] SQL introspection: connect to SQLite/Postgres, expose schema + query
 - [ ] [#95as] Claude Code hook integration: rewrite commands through tsift like rtk does

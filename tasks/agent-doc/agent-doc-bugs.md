@@ -214,7 +214,7 @@ Two root causes identified and fixed in `start.rs`:
 - `tcflush_discards_pending_input` — verifies tcflush call doesn't panic
 
 `cargo install --path .` + `cargo build --release` done. **Important:** Running supervisors still use the OLD binary. To get the fix, kill the supervisor pane and re-start with `agent-doc start`. The previously reported issue may have been on the old binary (v0.33.1 was the version number, but the running process was the pre-fix binary).
-<!-- agent:boundary:658997cd -->
+<!-- agent:boundary:dd59d77a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

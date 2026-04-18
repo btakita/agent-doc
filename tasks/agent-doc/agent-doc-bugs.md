@@ -47,7 +47,7 @@ Both bugs fixed in `src/agent-doc/src/pending.rs`:
 **Bug 2 — `--pending-add` dedup:** `op_add` now checks for existing items with identical text before appending. Bails with `"duplicate item text already exists"` — callers handle appropriately (`notify.rs` logs no-op, `main.rs` propagates).
 
 3 tests added, 1119 total passing. `make check` clean.
-<!-- agent:boundary:110240b9 -->
+<!-- agent:boundary:e002f987 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

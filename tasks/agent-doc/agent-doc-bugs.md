@@ -535,7 +535,7 @@ Please analyze Sonnet's response to
 > `Run Agent Doc` does not call `tmux-send` to the claiming tmux pane. Why?
 
 Is the analysis correct? Anything to add?
-<!-- agent:boundary:6d39e706 -->
+<!-- agent:boundary:fdfd093c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

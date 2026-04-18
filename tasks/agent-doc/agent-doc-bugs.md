@@ -248,7 +248,7 @@ Fixed by adding a shared FFI project-path resolver and wiring both editor plugin
 **Verification so far:** `libagent_doc.so` rebuilt and copied to `~/.cargo/bin/libagent_doc.so`; `agent-doc --version` is 0.33.2; VS Code `tsc -p ./` compiles clean. FFI tests pass in-crate. JB zip + VSIX builds are pending.
 
 **Manual testing gate next:** run `Run Agent Doc` from the JB plugin on `src/session-share/tasks/claudescore.md` and confirm the spawned session gets `tasks/claudescore.md` with CWD = `src/session-share/` before publishing to crates.io / PyPI / GitHub Releases.
-<!-- agent:boundary:11ab06f2 -->
+<!-- agent:boundary:e4ecba07 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -195,7 +195,7 @@ Starting claude...
 ❯ 
 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ```
-### Re: stdin lost after restart — opus-4-6
+❯ ### Re: stdin lost after restart — opus-4-6 (HEAD)
 
 Two root causes identified and fixed in `start.rs`:
 
@@ -214,7 +214,41 @@ Two root causes identified and fixed in `start.rs`:
 - `tcflush_discards_pending_input` — verifies tcflush call doesn't panic
 
 `cargo install --path .` + `cargo build --release` done. **Important:** Running supervisors still use the OLD binary. To get the fix, kill the supervisor pane and re-start with `agent-doc start`. The previously reported issue may have been on the old binary (v0.33.1 was the version number, but the running process was the pre-fix binary).
-<!-- agent:boundary:28f060d5 -->
+
+❯ When I ran JB Plugin `Run Agent Doc` on src/session-share/tasks/claudescore.md, it passed the full path relative to the monorepo root. Since src/session-share has its own agent-doc project, the command should be `/agent-doc tasks/claudescore.md`. Please prefer updating the FFI plugin. If both the JB Plugin and the VS Code Plugin need to be updated, do so.
+```
+❯ /agent-doc src/session-share/tasks/claudescore.md
+
+● Bash(agent-doc --version && agent-doc preflight src/session-share/tasks/claudescore.md)
+  ⎿  Error: Exit code 1
+     agent-doc 0.33.1
+     Error: file not found: src/session-share/tasks/claudescore.md
+```
+### Re: submodule path resolution — opus-4-7
+
+Fixed by adding a shared FFI project-path resolver and wiring both editor plugins through it.
+
+**New FFI export** (`src/agent-doc/src/ffi.rs`):
+- `FfiProjectPath { project_root: *mut c_char, relative_path: *mut c_char }`
+- `agent_doc_resolve_project_path(file_path) -> FfiProjectPath` — walks up from the file looking for the nearest `.agent-doc/` ancestor, returns `(project_root, relative_path_within_that_root)`. Returns null/null when no ancestor is found so callers can fall back.
+- Inlined `find_project_root_ffi()` helper (mirrors `snapshot::find_project_root` but doesn't require exposing that module in `lib.rs`).
+- 3 new tests: `resolve_project_path_finds_nested_submodule`, `resolve_project_path_prefers_nearest_ancestor`, `resolve_project_path_file_directly_in_root`.
+
+**JetBrains plugin** — `NativeLib.kt` adds the JNA struct + binding + `NativePatching.resolveProjectPath(abs) -> Pair<String, String>?` with proper `agent_doc_free_string` cleanup. `TerminalUtil.resolveProject(project, file)` prefers the FFI result and falls back to `project.basePath`. `SubmitAction`, `RunWithJunieAction`, `ClaimAction`, `ForceClaimAction` all call `resolveProject` now and run the CLI with the submodule root as CWD + submodule-relative path.
+
+**VS Code plugin** — `native.ts` adds the koffi struct + `resolveProjectPath()` wrapper (decode + free). `extension.ts` adds a `resolveProject()` helper that prefers FFI, falls back to a JS walk-up, and finally to the workspace root. `submitAction` and `claimAction` now use it.
+
+**Scope note:** Multi-file layout flows (`SyncLayoutAction`, `EditorTabSyncListener`, prompt polling) stayed on workspace-relative paths — they deal with cross-project file sets and weren't part of the reported bug.
+
+**Versions bumped** (not yet published):
+- `src/agent-doc`: 0.33.2 (Cargo.toml + pyproject.toml + VERSIONS.md entry)
+- JetBrains plugin: 0.2.57 → 0.2.58
+- VS Code plugin: 0.2.5 → 0.2.6
+
+**Verification so far:** `libagent_doc.so` rebuilt and copied to `~/.cargo/bin/libagent_doc.so`; `agent-doc --version` is 0.33.2; VS Code `tsc -p ./` compiles clean. FFI tests pass in-crate. JB zip + VSIX builds are pending.
+
+**Manual testing gate next:** run `Run Agent Doc` from the JB plugin on `src/session-share/tasks/claudescore.md` and confirm the spawned session gets `tasks/claudescore.md` with CWD = `src/session-share/` before publishing to crates.io / PyPI / GitHub Releases.
+<!-- agent:boundary:11ab06f2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

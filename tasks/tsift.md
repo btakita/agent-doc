@@ -231,13 +231,12 @@ All 9 tests pass:
 - `edit_fails_when_old_equals_new`
 
 Closed #6jmq in pending.
-<!-- agent:boundary:a41a68c6 -->
+<!-- agent:boundary:bc441d66 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#6jmq] Agent model routing skill: haiku for search, sonnet for edits, opus for architecture
 - [ ] [#yscf] SQL introspection: connect to SQLite/Postgres, expose schema + query
 - [ ] [#95as] Claude Code hook integration: rewrite commands through tsift like rtk does
 - [ ] [#kq5t] CLAUDE.md with project conventions

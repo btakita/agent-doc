@@ -54,7 +54,7 @@ This replaces the standalone skills-janitor fork (#vdyj from agent-doc-bugs). Th
 Preflight auto-backfilled IDs to any items that were missing them — already done. All pending items now have hash IDs.
 
 I also deduped the pending list: the five `tsift audit` items had been added three times each (#nkec/#f5ty/#jh84 were identical, same for the other groups). Removed the two redundant copies of each, keeping the first occurrence.
-<!-- agent:boundary:f0d05477 -->
+<!-- agent:boundary:6ba02e82 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -73,14 +73,4 @@ I also deduped the pending list: the five `tsift audit` items had been added thr
 - [ ] [#ay3j] tsift audit: usage tracking — analyze claude-mem/session history for skill invocation frequency, flag never-used skills
 - [ ] [#t3pq] tsift audit: cleanup recommendations — generate actionable prune list with token savings estimates per removed skill
 - [ ] [#dt80] tsift audit --report: write drift report to tasks/agent-doc/skills-audit.md (nightly cron target via /schedule)
-- [x] [#f5ty] tsift audit: skill drift detection — scan installed skills, compare against manifest, flag stale/broken/missing
-- [x] [#aed6] tsift audit: duplicate skill detection — find overlapping skills by description similarity
-- [x] [#hfh5] tsift audit: usage tracking — analyze session history for skill invocation frequency, flag never-used skills
-- [x] [#9xdz] tsift audit: cleanup recommendations — generate actionable prune list with token savings estimates per removed skill
-- [x] [#y7sf] tsift audit --report: write drift report to tasks/agent-doc/skills-audit.md (nightly cron target via /schedule)
-- [x] [#jh84] tsift audit: skill drift detection — scan installed skills, compare against manifest, flag stale/broken/missing
-- [x] [#q82z] tsift audit: duplicate skill detection — find overlapping skills by description similarity
-- [x] [#214d] tsift audit: usage tracking — analyze session history for skill invocation frequency, flag never-used skills
-- [x] [#hzhx] tsift audit: cleanup recommendations — generate actionable prune list with token savings estimates per removed skill
-- [x] [#mdth] tsift audit --report: write drift report to tasks/agent-doc/skills-audit.md (nightly cron target via /schedule)
 <!-- /agent:pending -->

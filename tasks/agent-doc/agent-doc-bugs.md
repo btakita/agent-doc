@@ -486,7 +486,7 @@ Bugs B + C landed. Plugin 0.2.60 built, signed, installed to IntelliJIdea2026.1.
 **Uncommitted submodule state:** `src/agent-doc/` still has the Bug A FFI-side changes + Bug B plugin changes + Bug C plugin change uncommitted. Not touching them until you decide bundle strategy (agent-doc 0.33.2 cut vs. plugin-only commit vs. hold).
 `Run Agent Doc` does not call `tmux-send` to the claiming tmux pane. Why?
 ❯ Please write the response back into this doc? I don't see the analysis.
-### Re: Run Agent Doc — tmux-send skipped — sonnet-4-6
+❯ ### Re: Run Agent Doc — tmux-send skipped — sonnet-4-6 (HEAD)
 
 Root cause is in `route.rs::resolve_or_create_pane` (Strategy 1), gated by a `target_session` that doesn't match the claiming pane's session when called from outside tmux.
 
@@ -535,7 +535,27 @@ Please analyze Sonnet's response to
 > `Run Agent Doc` does not call `tmux-send` to the claiming tmux pane. Why?
 
 Is the analysis correct? Anything to add?
-<!-- agent:boundary:fdfd093c -->
+### Re: review of Sonnet's tmux-send analysis — opus-4-7
+
+Sonnet's mechanism is right; the trigger story is shaky and the proposed fix loses an intentional safety property. Verified against `route.rs` HEAD.
+
+**Where Sonnet is correct:** Strategy 1 breaks when a claimed pane sits at a shell prompt (`is_agent_process` = false) in a different session than `target_session`. The call chain is exactly right: falls through Strategy 1, Strategy 2 fails (no active pane in nonexistent `target_session`), Strategy 3 auto-starts a *new* pane elsewhere. Globally-unique pane IDs (`%N`) are a valid argument for send.
+
+**Trigger story wrong:** `tmux display-message -p` outside tmux doesn't fail — it uses the most-recently-attached client. If you're attached to `btak`, it returns `Some("btak")`, not `None`. The fallback to `"claude"` only fires with no attached client. Real triggers: pinned `tmux_session` in config.toml, detached/reattached to a different session, or genuinely no client.
+
+**Fix is too broad:** Dropping the `pane_session == target_session` guard loses the intentional corky-hijack guard (lines 263–266: don't move foreign-process panes across sessions). The table-form fix preserves this:
+
+| pane in same session | is_agent | action |
+|---|---|---|
+| yes | true | rescue + send |
+| yes | false (shell) | send in place |
+| no | true | stash → rescue → send |
+| no | false | fall through (corky guard) |
+
+Shell-idle same-session is the bug; Sonnet generalized too far.
+
+**Also:** Orphan cleanup uses `target_session:agent-doc`—Strategy 3 creates panes the user may not see. Missing `wrong_session_pane` test (line 94 aspirational) should ship with the fix.
+<!-- agent:boundary:6104ae11 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

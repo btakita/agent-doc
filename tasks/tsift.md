@@ -456,7 +456,7 @@ Added `spinnerVerbs` to `~/.claude/settings.json` with `mode: "append"` (merges 
 - **Unearthing** — digging up buried results
 
 These will appear randomly alongside Claude's built-in verbs (Thinking, Reasoning, etc.) in the `✢ Sifting… (2m 17s · ↓ 4.2k tokens)` status line. The `append` mode keeps the defaults too so it doesn't feel forced — just occasionally themed.
-<!-- agent:boundary:af1e0a0b -->
+<!-- agent:boundary:54078cfe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

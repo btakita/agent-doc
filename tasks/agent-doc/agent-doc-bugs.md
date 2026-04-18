@@ -160,12 +160,26 @@ Neither needs tracking here. If you want them tracked elsewhere, they'd go in a 
 
 Changed file: `src/agent-doc/src/start.rs`
 ❯ Install locally
-### Re: Install locally — sonnet-4-6
+❯ ### Re: Install locally — sonnet-4-6 (HEAD)
 
 Done. `cargo install --path .` replaced `~/.cargo/bin/agent-doc` with v0.33.1 (built with the stdin fix).
 
 Ready for live test — start a supervised Claude session and verify Enter/q works after clean exit.
-<!-- agent:boundary:3480f0bd -->
+❯ release
+### Re: release — sonnet-4-6
+
+Published v0.33.1 to all three targets:
+
+- **crates.io**: `cargo publish` ✅
+- **PyPI**: manylinux_2_28 wheel built + `maturin upload` ✅
+- **GitHub Release**: https://github.com/btakita/agent-doc/releases/tag/v0.33.1 ✅
+
+Post-publish:
+- `cargo install --path .` — `~/.cargo/bin/agent-doc` replaced with published v0.33.1
+- Parent submodule pointer updated + committed
+
+1133 tests passing. Token path corrected: `passage btak/CARGO_REGISTRY_TOKEN` (not `crates.io/token`).
+<!-- agent:boundary:54f752f3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

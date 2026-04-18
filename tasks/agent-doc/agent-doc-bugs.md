@@ -54,7 +54,7 @@ Found the full sequence in session `fbeed7e9`. Six write attempts for the #mwhg 
 
 **Skill-side fix:** The model should have used a single write combining the exchange content AND `--pending-done mwhg` in one call, not split them across multiple attempts.
 ❯ Can we have the deterministic binary ensure this replace truncation won't occur? Perhaps --stream can append?
-### Re: Preventing stream replace truncation — opus-4-6
+❯ ### Re: Preventing stream replace truncation — opus-4-6 (HEAD)
 
 Two complementary binary-side fixes:
 
@@ -68,7 +68,24 @@ When `--stream` would replace exchange content with something dramatically short
 
 **Why not append mode for `--stream`?**
 The stream buffer is cumulative — each flush contains ALL content written so far, not a delta. Append would duplicate content on every flush within a single session. Replace is correct *within* a session. The bug is a *new* session's trivial write overwriting a *previous* session's good content — which both fixes above address.
-<!-- agent:boundary:0db1de1c -->
+❯ Implement if not already done. Add tests.
+### Re: Implementation status — opus-4-6
+
+**Fix 1 (pending-only): already exists.** The binary has `--pending-only` since it was added alongside the granular pending flags. Usage: `agent-doc write doc.md --pending-done mwhg --pending-only`. The skill just didn't use it — the model tried `--stream` with empty stdin instead. No code changes needed; this is a skill-side awareness gap.
+
+**Fix 2 (content-shrink guard): implemented.** Added `check_exchange_shrink_guard()` to `write.rs`. It fires in both the IPC path and disk fallback path of `run_stream()`:
+
+- Extracts exchange component content length from current file vs proposed content
+- If old exchange > 100 bytes and new < 10% of old, refuses with error message
+- Logged to ops_log for forensics
+
+**5 new tests added** (1130 total passing, `make check` clean):
+- `shrink_guard_blocks_truncation` — 500→1 byte exchange is blocked
+- `shrink_guard_allows_normal_write` — 50% reduction passes
+- `shrink_guard_skips_small_exchange` — <100 byte exchange skips guard
+- `shrink_guard_passes_no_exchange` — no exchange component passes
+- `extract_exchange_content_len_works` — helper unit test
+<!-- agent:boundary:5ad3247d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

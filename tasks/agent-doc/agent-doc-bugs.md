@@ -415,7 +415,7 @@ The document itself doesn't need to be associated with a gate type — **individ
 
 This keeps the design simple: no frontmatter gate declarations, no document-type taxonomy. Items self-describe what they're waiting for.
 ❯ Would agent-doc auto-detect from the repo to determine if the gate would be `/release` or `/deploy`? I'm not clear on what it is.
-### Re: Gate type is human-declared, not auto-detected — opus-4-6
+❯ ### Re: Gate type is human-declared, not auto-detected — opus-4-6 (HEAD)
 
 No auto-detection. The gate type is explicitly chosen by whoever creates or updates the pending item. Agent-doc doesn't infer what event should resolve an item — **you tell it**.
 
@@ -434,7 +434,7 @@ agent-doc write doc.md --pending-edit "gqep=[/release] Release v0.32.4"
 ```
 
 **The gate types are just conventions you define.** There's no built-in list. You could have `[/release]`, `[/deploy]`, `[/review]`, `[/merge]` — whatever makes sense for your workflow. The only thing that matters is that the hook's gate type string matches what's in the item.
-
+❯ If I'm prompting to `do #task-id`, can agent-doc infer if it's a `/release`, `/deploy`, `/review`, or `/merge`?
 **To make it concrete:**
 
 | You write this... | Because you mean... | Resolved by... |
@@ -446,7 +446,35 @@ agent-doc write doc.md --pending-edit "gqep=[/release] Release v0.32.4"
 **So agent-doc never guesses.** It's a dumb pattern matcher: when `resolve-gate release` fires, it finds items matching `[/release]` and flips them. The intelligence is in your workflow — you decide when an item transitions from `[/]` (generic gate) to `[/release]` (typed, machine-resolvable gate).
 
 Think of it like git tags vs branches: git doesn't decide what to tag — you tag what you want, and the tooling acts on matching tags.
-<!-- agent:boundary:62c8a208 -->
+### Re: Skill-layer inference on `do` — opus-4-6
+
+The **binary** won't infer gate types — it's deliberately dumb about semantics. But the **skill** (the Claude agent responding to `do #task-id`) absolutely can.
+
+When you write `do #gqep` and the item says "Release v0.32.4", the skill already understands context:
+
+- "Release" → this involves `cargo publish` → after implementation, gate as `[/release]`
+- "Deploy worker" → this involves `git push` → after implementation, gate as `[/deploy]`
+- "Get review from X" → needs human input → gate as `[/review]`
+
+**Where this logic lives:** The skill prompt, not the binary. The agent-doc skill instructions would include a convention like:
+
+> After completing a `do` task, if the remaining blocker is a known event type, set the typed gate:
+> - Item mentions publish/release/version bump → `--pending-edit "id=[/release] text"`
+> - Item mentions deploy/push to prod → `--pending-edit "id=[/deploy] text"`
+> - Item mentions review/approval → `--pending-edit "id=[/review] text"`
+> - Otherwise → leave as `[/]` (generic human gate)
+
+**The flow:**
+
+1. User writes `do #gqep`
+2. Skill implements the work (bump versions, update VERSIONS.md, build, test)
+3. Skill recognizes "Release" in the item text → sets `[/release]` gate
+4. Later, `cargo publish` hook fires → `resolve-gate release` → `[x]`
+
+So the inference is in the AI layer (where semantic understanding lives), and the resolution is in the binary layer (where pattern matching lives). Clean separation — the binary never needs to understand English, and the skill never needs to implement event detection.
+
+This is essentially what the skill already does informally — when you say `do #gqep`, the agent decides what "done" means for that item. The typed gate just makes that decision explicit and machine-actionable.
+<!-- agent:boundary:5423b675 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

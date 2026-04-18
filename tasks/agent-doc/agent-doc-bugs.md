@@ -465,7 +465,7 @@ Moving on to Bug A (JNA `Structure.ByValue` in NativeLib.kt) next.
 ❯ ### Re: go — opus-4-7 (HEAD)
 
 Acknowledged. Three fixes queued in pending plus the orphan recovery and install-gate. Starting with the orphan patchback, then Bug A (JNA ByValue), Bug B (multi-root PatchWatcher), Bug C (LayoutChangeDetector leak). Will check back before publishing — local install + your manual verification first per the release rule.
-### Re: progress — opus-4-7
+❯ ### Re: progress — opus-4-7 (HEAD)
 
 Bugs B + C landed. Plugin 0.2.60 built, signed, installed to IntelliJIdea2026.1. **Restart the IDE** to activate.
 
@@ -485,8 +485,53 @@ Bugs B + C landed. Plugin 0.2.60 built, signed, installed to IntelliJIdea2026.1.
 
 **Uncommitted submodule state:** `src/agent-doc/` still has the Bug A FFI-side changes + Bug B plugin changes + Bug C plugin change uncommitted. Not touching them until you decide bundle strategy (agent-doc 0.33.2 cut vs. plugin-only commit vs. hold).
 `Run Agent Doc` does not call `tmux-send` to the claiming tmux pane. Why?
-`Run Agent Doc` does not call `tmux-send` to the claiming tmux pane. Why?
-<!-- agent:boundary:d55e8bb4 -->
+❯ Please write the response back into this doc? I don't see the analysis.
+### Re: Run Agent Doc — tmux-send skipped — sonnet-4-6
+
+Root cause is in `route.rs::resolve_or_create_pane` (Strategy 1), gated by a `target_session` that doesn't match the claiming pane's session when called from outside tmux.
+
+#### The failure chain
+
+`SubmitAction` → `TerminalUtil.sendToTerminal()` → spawns `agent-doc route <file>` via `ProcessBuilder`. That process has **no `$TMUX` env var** — the IDE runs outside tmux.
+
+Inside `run_with_tmux()` (route.rs:168), `resolve_target_session(tmux, None)` runs:
+1. No `context_session`
+2. No pinned `tmux_session` in config.toml (unless `agent-doc session set` was run)
+3. `current_tmux_session` → `tmux display-message -p "#{session_name}"` → **fails outside tmux** → `None`
+4. Fallback: constant `"claude"`
+
+So `target_session = "claude"`.
+
+Strategy 1 (route.rs:244–290):
+```
+registered_pane = %156  (alive, in session "btak")
+pane_session ("btak") == target_session ("claude")  →  FALSE
+→ check is_agent_process(%156):
+    node/claude running  →  TRUE  →  stash/rescue + send_command  (works but messy)
+    zsh/bash idle pane   →  FALSE →  falls through       ← THE MISS
+```
+
+When the claiming pane is at a shell prompt (between Claude sessions, or before Claude Code has started), `is_agent_process` returns false. Strategy 1 does **not** call `send_command`. Strategy 2 looks for an active pane in the `"claude"` session (which doesn't exist). Strategy 3 auto-starts a **new** Claude session in `"claude"` instead of routing to the registered pane.
+
+#### Fix
+
+In Strategy 1, when the registered pane is alive, call `send_command` unconditionally — pane IDs (`%N`) are globally unique per tmux server, so session matching is irrelevant:
+
+```rust
+// Strategy 1: Alive registered pane — unconditional send
+if let Some(ref registered_pane) = registered {
+    if tmux.pane_alive(registered_pane) {
+        rescue_from_stash(tmux, registered_pane, session_id, file_path, target_session);
+        eprintln!("[route] Pane {} is alive, sending command", registered_pane);
+        send_command(tmux, registered_pane, file_path)?;
+        return Ok(registered_pane.clone());
+    }
+    eprintln!("[route] Pane {} is dead", registered_pane);
+}
+```
+
+Drop the `pane_session == target_session` guard and the `is_agent_process` branch from Strategy 1. The stash/rescue dance was only needed because of the bogus session comparison. `target_session` remains valid for Strategy 3 (where to create a new pane when none is registered).
+<!-- agent:boundary:ec3fed66 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

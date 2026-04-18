@@ -287,13 +287,12 @@ Implemented `tsift rewrite` subcommand + hook script, following the rtk pattern.
 **Verification:** 27 tests pass (17 existing + 10 new), clippy clean, `cargo install` done, hook tested end-to-end with JSON pipe.
 
 **SKILL.md** updated with hook integration docs.
-<!-- agent:boundary:10238e84 -->
+<!-- agent:boundary:1384b84f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#95as] Claude Code hook integration: rewrite commands through tsift like rtk does
 - [ ] [#kq5t] CLAUDE.md with project conventions
 - [ ] [#e15f] CI: GitHub Actions for cargo test + clippy
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries

@@ -243,7 +243,7 @@ The comments at lines 668-672 explicitly document this as the fix for the origin
 
 **Duplicates also closed:** #f8j3 and #y4da describe the same working-tree boundary lag and are resolved by this same code path.
 ❯ do #zvmd
-### Re: #zvmd already implemented — opus-4-6
+❯ ### Re: #zvmd already implemented — opus-4-6 (HEAD)
 
 Already fixed in v0.32.5 (commit 5dfb4b5c). The `show_head()` function at git.rs:885 now routes through `narrow_to_submodule()` before running `git show HEAD:<path>`:
 
@@ -256,7 +256,16 @@ let (git_root, _in_submodule) = narrow_to_submodule(&super_root, &resolved);
 **After fix:** `narrow_to_submodule` detects the submodule boundary, narrows `git_root` to `src/boost-client/`, and computes `rel_path` relative to that root → `git show HEAD:tasks/monsterrodholders.md` succeeds from the submodule → baseline headings populate correctly → new headings get `(HEAD)` as expected.
 
 Verified live: `git show HEAD:src/boost-client/tasks/monsterrodholders.md` fails from superproject, confirming the routing fix is necessary and working.
-<!-- agent:boundary:20885fdc -->
+❯ do #np8p
+### Re: #np8p already implemented — opus-4-6
+
+Already fixed. `resolve_pane_cwd()` at git.rs:279 uses `narrow_to_submodule()` and is wired into both pane-spawning paths:
+
+- **route.rs:669** — `let cwd = crate::git::resolve_pane_cwd(file);` — used when spawning new tmux panes for documents
+- **claim.rs:350** — `let resolved_cwd = crate::git::resolve_pane_cwd(file);` — used when claiming/registering pane sessions
+
+The function returns the submodule's git toplevel when the document is inside a submodule, or the superproject root otherwise. No remaining paths use raw `std::env::current_dir()` for pane cwd in production code (only in tests).
+<!-- agent:boundary:9d898df7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -268,7 +277,7 @@ Verified live: `git show HEAD:src/boost-client/tasks/monsterrodholders.md` fails
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
+- [x] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
 - [ ] [#77mf] Event-driven gate resolution: typed gate markers like [/release] and [/deploy] that auto-resolve on matching events (cargo publish, git push). Extends the binary [/] invariant with machine-actionable gate types — reaper checks event log before skipping.
 - [/] [#6hgf] Add --status flag to agent-doc write: skill passes status text as CLI arg, binary handles component targeting with replace semantics

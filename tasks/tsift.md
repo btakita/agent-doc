@@ -368,7 +368,7 @@ Created `.github/workflows/ci.yml` in the tsift submodule:
 
 Committed in submodule (`ci: add GitHub Actions workflow for clippy + test`) and parent pointer bumped.
 ❯ Is tsift a full replacement for woz term?
-### Re: Is tsift a full replacement for woz? — opus-4-6
+❯ ### Re: Is tsift a full replacement for woz? — opus-4-6 (HEAD)
 
 Yes — functionally, tsift + existing Claude Code tools cover every WozCode capability:
 
@@ -383,7 +383,18 @@ Yes — functionally, tsift + existing Claude Code tools cover every WozCode cap
 You'd lose cloud vector embeddings (tsift uses local sift — same quality, no subscription), the woz:code agent wrapper (just tool preferences, not unique logic), and woz analytics (nice-to-have). You keep: no subscription, all local processing, MIT-licensed, composable with rtk.
 
 Short answer: you can unsubscribe from WozCode.
-<!-- agent:boundary:935f868e -->
+❯ please uninstall wozcode
+### Re: WozCode uninstalled — sonnet-4-6
+
+Done. Removed all traces:
+
+- `settings.json` — removed `attribution` block, `"woz@wozcode-marketplace": true` from `enabledPlugins`, `wozcode-marketplace` from `extraKnownMarketplaces`, and `spinnerVerbs` block
+- `plugins/installed_plugins.json` — removed `woz@wozcode-marketplace` entry
+- `~/.claude/plugins/cache/wozcode-marketplace/` — deleted
+- `~/.claude/wozcode/` — deleted (recall/session data)
+
+The woz:* skills (`woz:code`, `woz:explore`, `woz:plan`, `woz:woz-recall`, etc.) and MCP tools (`mcp__plugin_woz_code__Search`, `mcp__plugin_woz_code__Edit`, `mcp__plugin_woz_code__Sql`) are gone. tsift + native Claude Code tools are the replacement.
+<!-- agent:boundary:2bbdffdb -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

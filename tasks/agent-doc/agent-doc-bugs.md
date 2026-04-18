@@ -577,7 +577,7 @@ Fix options:
 
 Recommendation: option 2 (copy-on-read). Awaiting your call on whether to implement now or defer to a design session.
 ❯ do option 2
-### Re: do option 2 — opus-4-6
+❯ ### Re: do option 2 — opus-4-6 (HEAD)
 
 Implemented copy-on-read guard for #wcf5.
 
@@ -588,7 +588,18 @@ Implemented copy-on-read guard for #wcf5.
 - Lines 420-427: guard check before recovery save — mtime mismatch skips the write
 
 **Test:** `copy_on_read_guard_skips_recovery_when_snapshot_modified` — verifies the mtime comparison logic (same → allow, different → block, both-None → allow). 1112 tests pass, clippy clean.
-<!-- agent:boundary:bdf00d3c -->
+❯ add tests
+### Re: add tests — opus-4-6
+
+Added 4 integration tests for `compute()` exercising the copy-on-read guard and stale-snapshot recovery:
+
+1. **`compute_stale_snapshot_recovery_proceeds_when_unmodified`** — stale snapshot scenario (base + completed exchange with empty trailing user block) → recovery fires, returns None, snapshot synced to document.
+2. **`compute_stale_recovery_updates_snapshot_to_current_document`** — after recovery, snapshot content matches current document.
+3. **`compute_returns_diff_when_user_adds_content`** — user adds new content beyond snapshot → returns diff containing the addition.
+4. **`compute_returns_none_when_no_changes`** — identical snapshot and document → returns None.
+
+Helper `setup_compute_env()` creates a temp directory with `.agent-doc/snapshots/`, a document file, and a pre-populated snapshot. All 1116 tests pass (was 1112), clippy clean.
+<!-- agent:boundary:5047817b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

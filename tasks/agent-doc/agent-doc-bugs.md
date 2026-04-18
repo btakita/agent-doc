@@ -560,7 +560,7 @@ Pick the correct model + effort to fix this. Implement fix
 
 ❯ `Run Agent Doc` **still** does not call `tmux-send /agent-doc tasks/agent-doc/agent-doc-bugs.md` in the claiming tmux pane
 ❯ I'm not seeing patchbacks when running /agent-doc tasks/agent-doc/agent-doc-bugs.md
-### Re: patchbacks missing + tmux-send still broken — opus-4-7
+❯ ### Re: patchbacks missing + tmux-send still broken — opus-4-7 (HEAD)
 
 Two compounding failures. Both understood now.
 
@@ -610,7 +610,32 @@ The `Run Agent Doc` command still does not write `tmux-send /agent-doc tasks/age
 Please correct the commit state of src/session-share/tasks/claudescore.md
 
 Always write response back into this agent doc.
-<!-- agent:boundary:5197b69d -->
+### Re: three issues (retry, force-disk) — opus-4-6
+
+Previous response was lost — IPC delivered the patch but the IDE plugin never applied it (ack-content sidecar timed out at 500ms). Using `--force-disk` to bypass IPC this time.
+
+**1. claudescore.md patchback — already resolved.**
+When `/graphify .` was invoked directly in the tmux pane claiming claudescore.md, graphify processed the directory and wrote patchback output. The previous preflight auto-committed it (`26a9692 agent-doc(claudescore): commit pending graphify patchback`). Tracked files are now clean — only `graphify-out/` remains as untracked output. The parent `agent-loop` submodule pointer is synced. No commit correction needed.
+
+**2. JB plugin route failure — version deduplication.**
+I tested `agent-doc route tasks/agent-doc/agent-doc-bugs.md` from CLI — it works: pane %10 alive, command sent and accepted in 0.3s. The route code is correct.
+
+The plugin problem: you reinstalled 0.2.60 over the same 0.2.60. IntelliJ dedupes install-from-disk by version string — same-version reinstall leaves cached bytecode untouched. The old (pre-fix) code was still running.
+
+Version 0.2.61 is already built at `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.61-signed.zip`. Install that version and restart the IDE.
+
+The chain of failures across previous sessions: edit `.kt` → forget to bump version → build at same version → reinstall same version → IntelliJ cache → no change. The rule (already in memory) is: bump `pluginVersion` patch on every `.kt` edit, then build, then install.
+
+**3. Commit state of claudescore.md — already clean.**
+- `src/session-share/` working tree: clean (only untracked `graphify-out/`)
+- `git diff HEAD`: empty
+- Parent submodule pointer: synced (no diff)
+- Latest commit: `26a9692 agent-doc(claudescore): commit pending graphify patchback`
+
+No correction needed.
+
+**Action required:** Install JB plugin 0.2.61 (Settings → Plugins → gear → Install from Disk → `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.61-signed.zip`) → restart IDE. This also fixes the IPC ack timeout.
+<!-- agent:boundary:89839e33 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

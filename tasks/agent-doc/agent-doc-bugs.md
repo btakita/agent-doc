@@ -652,7 +652,9 @@ Every single `Run Agent Doc` attempt was silently skipped by this guard.
 **You need to restart the IDE** to reload the `.so` (JNA caches the loaded library in-process).
 
 **Why I didn't catch this earlier:** I never verified the installed version. The IDEA log had the answer the whole time — "is busy, skipping route" — but no previous session checked it. I should have checked the IDEA log and `.so` timestamp from the start.
-<!-- agent:boundary:110b8459 -->
+
+Still! `Run Agent Doc` does not call `tmux-send /agent-doc tasks/agent-doc/agent-doc-bugs.md`. I saw "Waiting for typing to stop..." on the first two attempts in src/session-share/tasks/claudescore.md. Further attempts did not show the dialog. What is going on? Please add logs to debug.
+<!-- agent:boundary:6a9f7a4d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

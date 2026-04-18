@@ -55,7 +55,7 @@ Preflight auto-backfilled IDs to any items that were missing them — already do
 
 I also deduped the pending list: the five `tsift audit` items had been added three times each (#nkec/#f5ty/#jh84 were identical, same for the other groups). Removed the two redundant copies of each, keeping the first occurrence.
 ❯ re: #92bz...can we integrate directly with sift via rust...exposing the cli endpoints?
-### Re: Direct Rust integration with sift — opus-4-6
+❯ ### Re: Direct Rust integration with sift — opus-4-6 (HEAD)
 
 Yes — sift is pure Rust and explicitly exports a library crate. The `lib.rs` opens with "sift supports embedding through the crate root" and exposes a builder API:
 
@@ -88,13 +88,33 @@ let results = sift.search(SearchInput {
 Recommendation: start with git dep for the library. The typed API is much cleaner than parsing CLI output, and sift's pipeline (BM25 → fusion → rerank) benefits from keeping state in-process. The dependency weight (candle, tokenizers) is real but tsift is already a search tool — it's pulling its weight.
 
 Updated #92bz to reflect direct integration path.
-<!-- agent:boundary:1bf956b4 -->
+❯ do #92bz
+### Re: #92bz implemented — direct sift integration — opus-4-6
+
+Done. tsift now links sift as a Rust library (git dep), not shell-out.
+
+**What was built:**
+- Added `sift` git dep + `clap`/`anyhow`/`serde_json` to Cargo.toml
+- `tsift search <query>` command with `--path`, `--limit`, `--strategy`, `--json` flags
+- Direct call to `Sift::builder().build()` then `engine.search(SearchInput)` — typed results, no process spawning
+- Human-readable output (rank, confidence, path, score, snippet) or `--json` for machine consumption
+
+**Tested:**
+- `tsift --help` — shows search subcommand
+- `tsift search "sift search" --path src/ --strategy lexical` — returns correct hits from source files
+- Lexical strategy is instant; hybrid/vector triggers first-run model download (~30s)
+
+**Known follow-ups:**
+- Sift indexes `target/` by default — need `.siftignore` or gitignore-aware config (sift respects `.gitignore` when `Ignore` is configured via builder)
+- Default strategy should be `lexical` for Claude Code hooks (fast) with `--strategy hybrid` opt-in for deeper search
+- First-run model download for vector search needs a `tsift init` command or progress indicator
+<!-- agent:boundary:76a72ba3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#92bz] Wire Sift as search backend (shell-out to `sift` binary, parse output)
+- [ ] [#92bz] Wire Sift as search backend (direct Rust lib integration via git dep — done)
 - [ ] [#mwhg] Batch edit command: accept multiple file edits in one invocation
 - [ ] [#6jmq] Agent model routing skill: haiku for search, sonnet for edits, opus for architecture
 - [ ] [#yscf] SQL introspection: connect to SQLite/Postgres, expose schema + query

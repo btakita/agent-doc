@@ -266,7 +266,7 @@ Fair — a bumped version without the built artifact is broken by construction. 
 Also saved to memory as `feedback_build_on_version_bump.md` so this doesn't need to be said twice.
 
 **Ready for manual test:** install `agent-doc-jetbrains-0.2.58.zip` (or signed variant) + `agent-doc-0.2.6.vsix`, then run `Run Agent Doc` from JB on `src/session-share/tasks/claudescore.md` — expected: spawned session sees `tasks/claudescore.md` with CWD `src/session-share/`.
-<!-- agent:boundary:d73978ab -->
+<!-- agent:boundary:7bf30f67 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

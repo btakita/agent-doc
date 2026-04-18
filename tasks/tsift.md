@@ -460,7 +460,7 @@ These will appear randomly alongside Claude's built-in verbs (Thinking, Reasonin
 ### Re: tsift branding added — opus-4-6
 
 Added "tsifting" (lowercase, matching the tool name) to the front of the spinner verbs list. You'll now occasionally see `✢ tsifting…` in the status line — instant brand recognition.
-<!-- agent:boundary:459398ba -->
+<!-- agent:boundary:9c5b93cf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

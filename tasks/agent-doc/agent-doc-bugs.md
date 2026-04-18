@@ -277,7 +277,7 @@ Called from `reposition_boundary_to_end_with_baseline()` at template.rs:566, whi
 
 Test coverage: template.rs:1926 verifies three `### Re:` headings → only last gets `(HEAD)`, stale markers stripped.
 ❯ re #77mf: How would the harness know if it's [/release] or [/deploy]
-### Re: #77mf gate resolution architecture — opus-4-6
+❯ ### Re: #77mf gate resolution architecture — opus-4-6 (HEAD)
 
 Three viable approaches, increasing in automation:
 
@@ -312,7 +312,58 @@ The reaper runs the verify command before resolving. This is the only approach t
 **My recommendation:** Start with #1 (explicit `resolve-gate` subcommand), wire #2 (hooks) as sugar on top. Skip #3 unless you need idempotent verification — it adds shell-out complexity to the reaper path and the verification commands are fragile across environments.
 
 The key insight: the harness doesn't need to "know" the gate type semantically. It just needs a resolution signal. The typed marker (`[/release]`) is for human readability and hook routing — the binary treats all resolved gates identically (flip to `[x]`).
-<!-- agent:boundary:d3fee4a6 -->
+❯ How would these flags work in context of my monorepo?
+### Re: #77mf typed gates in monorepo context — opus-4-6
+
+The core challenge: **which release resolves which gate?** In a single-package repo it's obvious. In agent-loop with 17+ submodules, you need scope.
+
+**Three scoping strategies:**
+
+**1. Item-level scope (most explicit):**
+```markdown
+- [/release:agent-doc] [#gqep] Release v0.32.4...
+- [/deploy:cloudflare] [#xxxx] Push worker to prod...
+```
+
+The gate marker carries its target: `[/release:agent-doc]`. Resolution matches on both gate type AND scope. Hook: `agent-doc pending resolve-gate release --scope agent-doc`.
+
+**2. Document-level scope (convention-based):**
+Documents under `tasks/agent-doc/` implicitly scope to agent-doc. The resolve command infers scope from the document path:
+
+```bash
+# Hook fires from src/agent-doc/ after cargo publish
+agent-doc pending resolve-gate release
+# Binary infers scope "agent-doc" from cwd, scans tasks/agent-doc/*.md
+```
+
+This leverages the existing directory convention without new syntax. But it's fragile — cross-cutting documents (like a release-all tracker) wouldn't fit.
+
+**3. Hybrid (recommended for agent-loop):**
+
+- Default: scope inferred from document path (`tasks/<submodule>/` → that submodule)
+- Override: explicit scope on the item when it crosses boundaries (`[/release:agent-doc]`)
+- Hook integration: `cargo publish` in `src/agent-doc/` fires a hook that calls `agent-doc pending resolve-gate release` with cwd-inferred scope
+
+**Concrete example for #gqep today:**
+
+```bash
+# In src/agent-doc/ after cargo publish succeeds
+# Claude Code hook (settings.json):
+{ "match": "cargo publish", "run": "agent-doc pending resolve-gate release" }
+
+# Binary behavior:
+# 1. Detect cwd is src/agent-doc/ → scope = "agent-doc"
+# 2. Scan tasks/agent-doc/*.md for [/release] items
+# 3. Flip [/release] → [x] on matching items
+# 4. Commit snapshot
+```
+
+For `git push` / deploy gates, same pattern — the hook fires from the relevant submodule directory, cwd provides scope.
+
+**Edge case — parent repo operations:** Some gates apply to agent-loop itself (submodule pointer updates, cross-cutting releases). These would use explicit scope: `[/deploy:agent-loop]` or trigger from the repo root.
+
+The item-level syntax `[/release:agent-doc]` is the safest — it's self-documenting and doesn't depend on directory conventions. But for your current layout where documents already live under `tasks/<submodule>/`, cwd inference handles 90% of cases without any new syntax.
+<!-- agent:boundary:77c94111 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

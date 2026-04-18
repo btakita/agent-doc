@@ -552,7 +552,7 @@ Those items **were already in pending** — they've been tracked since the v0.32
 
 **#mchh** marked done — JetBrains plugin installed and verified.
 ❯ do #p2xm
-### Re: do #p2xm — opus-4-6
+❯ ### Re: do #p2xm — opus-4-6 (HEAD)
 
 Already fixed. The orphaned `patch:exchange` marker leak was resolved in a prior session:
 
@@ -561,7 +561,22 @@ Already fixed. The orphaned `patch:exchange` marker leak was resolved in a prior
 - **All 1115 tests pass**, clippy clean.
 
 Marking #p2xm done.
-<!-- agent:boundary:638c5828 -->
+❯ do #wcf5 #a002 #ha3h
+### Re: do #wcf5 #a002 #ha3h — opus-4-6
+
+**#a002** — Already fully implemented and deployed. Safety rail with 50-line threshold, forensic logging, graceful degradation on overrun. 14 tests pass. The `[/]` gate is "awaiting production telemetry" — no code to write. Stays gated until a `normalize_threshold_exceeded` event is observed or enough quiet time confirms the threshold is safe.
+
+**#ha3h** — Blocked. Description explicitly says "Ship with multi-user support, not before." Can't implement until the multi-user prerequisite lands.
+
+**#wcf5** — Real architectural gap confirmed. `diff::compute()` reads snapshots without holding any lock (`diff.rs:358`). External processes (IDE watchers, git hooks) bypass advisory flock entirely. Current mitigation is reactive stale-snapshot detection (`diff.rs:400-411`), not preventive.
+
+Fix options:
+1. **Snapshot-under-lock reads** — hold lock during `diff::compute()`, risks blocking IDE for seconds
+2. **Copy-on-read** — atomically copy snapshot content at diff start, diff against the copy (lightest touch)
+3. **Snapshot generation counter** — detect and retry when snapshot changes mid-diff
+
+Recommendation: option 2 (copy-on-read). Awaiting your call on whether to implement now or defer to a design session.
+<!-- agent:boundary:12e762cc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

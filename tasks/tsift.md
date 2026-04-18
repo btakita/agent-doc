@@ -317,7 +317,7 @@ RTK is saving 32.4M tokens (83.5% reduction) across 7,283 commands — but that'
 
 **To get measurable savings**, the hook would need to intercept the Grep tool itself (not just Bash commands), or tsift would need to become the primary search interface via skill invocation rather than hook rewriting.
 ❯ Would it be useful for SKILL.md prefer tsift over grep?
-### Re: SKILL.md prefer tsift over grep — opus-4-6
+❯ ### Re: SKILL.md prefer tsift over grep — opus-4-6 (HEAD)
 
 **Yes, but as a decision heuristic, not a blanket override.** Grep is faster and more precise for directed lookups (exact symbols, known strings). tsift adds value for conceptual/exploratory queries.
 
@@ -335,7 +335,24 @@ SKIP: exact symbol lookups, known file paths, regex patterns
 This would make tsift savings measurable — every auto-triggered `/tsift` call replaces what would have been a multi-step grep→read→wrong file loop.
 
 Want me to implement either approach in SKILL.md?
-<!-- agent:boundary:b9281516 -->
+❯ Implement TRIGGER when. Use runbook if it would save tokens.
+### Re: TRIGGER implemented — opus-4-6
+
+Added TRIGGER/SKIP lines to `~/.claude/skills/tsift/SKILL.md`:
+
+```
+TRIGGER when: user asks to search/find/locate something conceptual
+  ("how does X work", "where is Y handled", "error handling patterns"),
+  explore unfamiliar code, understand how a feature works, or when a
+  prior Grep returned too many/zero results for a non-literal query.
+SKIP: exact symbol lookups, known file paths, regex patterns, simple
+  string searches where Grep is precise and sufficient.
+```
+
+**No runbook added** — the existing `runbooks/search-strategies.md` (31 lines) already covers the strategy decision flow. A separate "when to trigger" runbook would duplicate what's now inline in SKILL.md and cost more tokens to load than it saves.
+
+Claude Code will now auto-invoke `/tsift` for exploratory queries. Each auto-trigger replaces what would have been a multi-step grep→read→wrong file loop, making the savings measurable over time.
+<!-- agent:boundary:22260f21 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

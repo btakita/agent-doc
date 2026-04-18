@@ -398,7 +398,7 @@ The woz:* skills (`woz:code`, `woz:explore`, `woz:plan`, `woz:woz-recall`, etc.)
 
 Fix t
 - `settings.json` — removed `attribution` block, `"woz@wozcode-marketplace": true` from `enabledPlugins`, `wozcode-marketplace` from `extraKnownMarketplaces`, and `spinnerVerbs` block
-<!-- agent:boundary:439f83a4 -->
+<!-- agent:boundary:39e25888 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -502,7 +502,7 @@ Implemented. Three new capabilities landed:
 **State machine:** `[/release]` is a refinement of `[/]`. The gate type is metadata on `Gated` state, cleared when resolved to `[x]`. Untyped `[/]` items are never touched by `resolve-gate`.
 
 **Tests:** 20 new tests covering parse, render, roundtrip, resolve, set-gate-type, scan, case insensitivity, and edge cases. All 1111 tests pass, clippy clean.
-<!-- agent:boundary:2eeade60 -->
+<!-- agent:boundary:5e572813 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -514,7 +514,6 @@ Implemented. Three new capabilities landed:
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [x] [#77mf] Event-driven gate resolution: typed gate markers like [/release] and [/deploy] that auto-resolve on matching events (cargo publish, git push). Extends the binary [/] invariant with machine-actionable gate types — reaper checks event log before skipping.
 - [/] [#6hgf] Add --status flag to agent-doc write: skill passes status text as CLI arg, binary handles component targeting with replace semantics
 <!-- /agent:pending -->
 ## Assistant

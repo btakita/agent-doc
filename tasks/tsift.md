@@ -260,7 +260,7 @@ Implemented `tsift sql` with full SQLite introspection:
 
 **Verification:** 17 tests pass, clippy clean. `rusqlite` with `bundled` feature — no system SQLite dependency.
 ❯ do #95as
-### Re: #95as — Claude Code hook integration — opus-4-6
+❯ ### Re: #95as — Claude Code hook integration — opus-4-6 (HEAD)
 
 Implemented `tsift rewrite` subcommand + hook script, following the rtk pattern.
 
@@ -287,13 +287,26 @@ Implemented `tsift rewrite` subcommand + hook script, following the rtk pattern.
 **Verification:** 27 tests pass (17 existing + 10 new), clippy clean, `cargo install` done, hook tested end-to-end with JSON pipe.
 
 **SKILL.md** updated with hook integration docs.
-<!-- agent:boundary:1384b84f -->
+❯ do #kq5t
+### Re: #kq5t — CLAUDE.md created — opus-4-6
+
+Created `src/tsift/CLAUDE.md` with project conventions covering:
+
+- **Architecture overview** — single-binary CLI, all 5 subcommands with purpose
+- **Dependencies** — sift (git dep), rusqlite (bundled), standard Rust stack
+- **Development** — test/clippy/install commands
+- **Conventions** — read-only SQL, atomic batch edits, rewrite exit-code protocol, lexical default strategy, test coverage expectations
+- **Hook integration** — PreToolUse hook via tsift-rewrite.sh
+- **Repo** — private, submodule location
+
+Committed in submodule (`docs: add CLAUDE.md with project conventions`) and parent pointer bumped.
+<!-- agent:boundary:8a1e9694 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#kq5t] CLAUDE.md with project conventions
+- [x] [#kq5t] CLAUDE.md with project conventions
 - [ ] [#e15f] CI: GitHub Actions for cargo test + clippy
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#nkec] tsift audit: skill drift detection — scan installed skills, compare against manifest, flag stale/broken/missing

@@ -580,7 +580,7 @@ Two compounding failures. Both understood now.
 - `diff_type: multi_topic, 2 distinct added blocks` — those are your two questions; no opus response in between because the IPC write never landed.
 
 Pending `#m1bz` still gates publish. The route fix is now live locally; IPC patchback path is a separate thread (JB plugin 0.2.60 needs IDE restart).
-<!-- agent:boundary:623e8df1 -->
+<!-- agent:boundary:6431e93e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

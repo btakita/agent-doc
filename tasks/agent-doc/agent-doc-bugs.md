@@ -474,7 +474,7 @@ When you write `do #gqep` and the item says "Release v0.32.4", the skill already
 So the inference is in the AI layer (where semantic understanding lives), and the resolution is in the binary layer (where pattern matching lives). Clean separation — the binary never needs to understand English, and the skill never needs to implement event detection.
 
 This is essentially what the skill already does informally — when you say `do #gqep`, the agent decides what "done" means for that item. The typed gate just makes that decision explicit and machine-actionable.
-<!-- agent:boundary:5423b675 -->
+<!-- agent:boundary:a723bf41 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

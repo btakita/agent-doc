@@ -2,6 +2,7 @@
 agent_doc_session: tsift-v0.1
 agent_doc_format: template
 agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
 ---
 
 ## Status
@@ -114,12 +115,28 @@ Done. tsift now links sift as a Rust library (git dep), not shell-out.
 
 Done. `gh repo edit btakita/tsift --visibility private` confirmed — `PRIVATE`.
 ❯ Why are the 2 shells using 100% cpu still? Are they still running for a legitimate reason?
-### Re: CPU usage — sonnet-4-6
+❯ ### Re: CPU usage — sonnet-4-6 (HEAD)
 
 Those were two background `tsift search` jobs I fired without timeouts to test the hybrid strategy. They were downloading sift's HuggingFace embedding models (candle + tokenizers) — first-run cold start, pulling several GB. Both killed now.
 
 This is exactly why #92bz's follow-up noted that vector/hybrid search needs a `tsift init` command with a progress bar rather than silently blocking. For Claude Code hook usage, `lexical` (instant, no models) should be the default.
-<!-- agent:boundary:5b5ad20c -->
+
+❯ Create plugin SKILL and runbook(s) if recommended...for search using sift
+### Re: tsift skill created — opus-4-6
+
+Created `/tsift` Claude Code skill at `~/.claude/skills/tsift/`:
+
+**SKILL.md** — invocable as `/tsift <query>`. Wraps `tsift search` with flags for `--path`, `--limit`, `--strategy`, `--json`. Defaults to `lexical` strategy (instant, no model download).
+
+**runbooks/search-strategies.md** — decision flow for strategy selection:
+- `lexical` → default, instant, keyword/symbol lookup
+- `hybrid` → semantic + BM25, needs model download on first run
+- `vector` → pure embedding similarity, same model requirement
+
+The skill is live — Claude Code picked it up immediately. Test with `/tsift "search query"`.
+
+No runbook for hook integration yet — that belongs with #95as (Claude Code hook integration pending item).
+<!-- agent:boundary:4415617e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

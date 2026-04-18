@@ -519,7 +519,7 @@ Prepared v0.33.0. Changes since 0.32.5 (~2800 insertions across 34 files):
 
 **Manual testing gate:** Confirm the typed gate feature works in a live session before I proceed to publish. Try `agent-doc pending tasks/agent-doc/agent-doc-bugs.md set-gate-type gqep release` to set a typed gate, then verify with a preflight cycle.
 ❯ publish
-### Re: publish — opus-4-6
+❯ ### Re: publish — opus-4-6 (HEAD)
 
 Published agent-doc v0.33.0:
 
@@ -528,7 +528,23 @@ Published agent-doc v0.33.0:
 - **PyPI** — skipped; needs manylinux container build (host `linux_x86_64` tag rejected by PyPI). Build in Docker with `quay.io/pypa/manylinux2014_x86_64` when needed.
 
 Submodule pointer updated in agent-loop. #gqep marked done.
-<!-- agent:boundary:e274d639 -->
+❯ Why are the pending items still gated? We just released
+### Re: Why are pending items still gated? — opus-4-6
+
+They're gated with plain `[/]` (generic human gate), not `[/release]` (typed gate). The `resolve-gate release` command only flips `[/release]` → `[x]`. None of these items had typed gates set — they were all `[/]`.
+
+This is actually the design working correctly. These items are gated on different things:
+
+- **#p2xm** (orphaned patch:exchange leak) — bug, needs code fix
+- **#wcf5** (advisory flock) — bug, needs code fix
+- **#a002** (normalize_threshold_exceeded telemetry) — waiting for a large-drift trip in production
+- **#mchh** (JetBrains plugin install) — manual action, needs you to install the rebuilt plugin
+- **#ha3h** (multi-user recipient config) — future feature, ships with multi-user support
+
+**#6hgf** (`--status` flag) — this one IS done, it shipped in 0.33.0. Marking `[x]` now.
+
+If you want future release items to auto-resolve, set typed gates: `set-gate-type <id> release` before publishing, then wire `agent-doc resolve-gate release` as a post-publish hook.
+<!-- agent:boundary:fee1a585 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -539,6 +555,6 @@ Submodule pointer updated in agent-loop. #gqep marked done.
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [/] [#6hgf] Add --status flag to agent-doc write: skill passes status text as CLI arg, binary handles component targeting with replace semantics
+- [x] [#6hgf] Add --status flag to agent-doc write: skill passes status text as CLI arg, binary handles component targeting with replace semantics
 <!-- /agent:pending -->
 ## Assistant

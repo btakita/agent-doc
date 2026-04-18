@@ -68,7 +68,7 @@ When `--stream` would replace exchange content with something dramatically short
 
 **Why not append mode for `--stream`?**
 The stream buffer is cumulative — each flush contains ALL content written so far, not a delta. Append would duplicate content on every flush within a single session. Replace is correct *within* a session. The bug is a *new* session's trivial write overwriting a *previous* session's good content — which both fixes above address.
-<!-- agent:boundary:a99cf7dd -->
+<!-- agent:boundary:0db1de1c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

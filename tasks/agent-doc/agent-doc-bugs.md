@@ -96,7 +96,7 @@ The stream buffer is cumulative — each flush contains ALL content written so f
 - `cargo install --path .` + `cargo build --release` done
 
 **Manual testing gate:** Confirm the fixes work in a live session, then I'll commit → tag → publish (crates.io, PyPI, GitHub Release).
-<!-- agent:boundary:8c090519 -->
+<!-- agent:boundary:d9149f83 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

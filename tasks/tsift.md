@@ -367,13 +367,12 @@ Created `.github/workflows/ci.yml` in the tsift submodule:
 - Steps: `cargo clippy --all-targets -- -D warnings`, then `cargo test`
 
 Committed in submodule (`ci: add GitHub Actions workflow for clippy + test`) and parent pointer bumped.
-<!-- agent:boundary:137ba927 -->
+<!-- agent:boundary:26a80293 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#e15f] CI: GitHub Actions for cargo test + clippy
 - [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#nkec] tsift audit: skill drift detection — scan installed skills, compare against manifest, flag stale/broken/missing
 - [ ] [#865b] tsift audit: duplicate skill detection — find overlapping skills by description similarity

@@ -635,7 +635,7 @@ The chain of failures across previous sessions: edit `.kt` → forget to bump ve
 No correction needed.
 
 **Action required:** Install JB plugin 0.2.61 (Settings → Plugins → gear → Install from Disk → `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.61-signed.zip`) → restart IDE. This also fixes the IPC ack timeout.
-<!-- agent:boundary:89839e33 -->
+<!-- agent:boundary:98e902ef -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

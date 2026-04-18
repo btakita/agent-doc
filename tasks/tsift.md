@@ -110,10 +110,16 @@ Done. tsift now links sift as a Rust library (git dep), not shell-out.
 - First-run model download for vector search needs a `tsift init` command or progress indicator
 
 ❯ Make https://github.com/btakita/tsift private
-### Re: tsift repo set to private — sonnet-4-6
+❯ ### Re: tsift repo set to private — sonnet-4-6 (HEAD)
 
 Done. `gh repo edit btakita/tsift --visibility private` confirmed — `PRIVATE`.
-<!-- agent:boundary:de676333 -->
+❯ Why are the 2 shells using 100% cpu still? Are they still running for a legitimate reason?
+### Re: CPU usage — sonnet-4-6
+
+Those were two background `tsift search` jobs I fired without timeouts to test the hybrid strategy. They were downloading sift's HuggingFace embedding models (candle + tokenizers) — first-run cold start, pulling several GB. Both killed now.
+
+This is exactly why #92bz's follow-up noted that vector/hybrid search needs a `tsift init` command with a progress bar rather than silently blocking. For Claude Code hook usage, `lexical` (instant, no models) should be the default.
+<!-- agent:boundary:352e7793 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

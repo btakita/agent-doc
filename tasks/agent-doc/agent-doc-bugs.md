@@ -654,7 +654,7 @@ Every single `Run Agent Doc` attempt was silently skipped by this guard.
 **Why I didn't catch this earlier:** I never verified the installed version. The IDEA log had the answer the whole time — "is busy, skipping route" — but no previous session checked it. I should have checked the IDEA log and `.so` timestamp from the start.
 
 Still! `Run Agent Doc` does not call `tmux-send /agent-doc tasks/agent-doc/agent-doc-bugs.md`. I saw "Waiting for typing to stop..." on the first two attempts in src/session-share/tasks/claudescore.md. Further attempts did not show the dialog. What is going on? Please add logs to debug.
-<!-- agent:boundary:6a9f7a4d -->
+<!-- agent:boundary:1c2d78fc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

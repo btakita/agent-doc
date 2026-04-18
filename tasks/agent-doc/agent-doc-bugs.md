@@ -38,7 +38,7 @@ The previous `/agent-doc` cycle was interrupted by the WozCode hook. The hook re
 - `[#]` accumulation on bare-placeholder pending items (assign-prepend bug)
 - Duplicate items from repeated `--pending-add` with identical text (no dedup)
 ❯ Fix bugs
-### Re: Fix bugs — opus-4-6
+❯ ### Re: Fix bugs — opus-4-6 (HEAD)
 
 Both bugs fixed in `src/agent-doc/src/pending.rs`:
 
@@ -47,7 +47,18 @@ Both bugs fixed in `src/agent-doc/src/pending.rs`:
 **Bug 2 — `--pending-add` dedup:** `op_add` now checks for existing items with identical text before appending. Bails with `"duplicate item text already exists"` — callers handle appropriately (`notify.rs` logs no-op, `main.rs` propagates).
 
 3 tests added, 1119 total passing. `make check` clean.
-<!-- agent:boundary:e002f987 -->
+❯ add tests
+### Re: add tests — opus-4-6
+
+Added 6 more edge-case tests (9 total new tests, 1125 passing):
+
+- `parse_bare_hash_placeholder_no_checkbox` — `- [#] text` (no checkbox) strips placeholder
+- `parse_bare_hash_placeholder_gated` — `- [/] [#] text` strips placeholder, preserves gated state
+- `backfill_strips_multiple_bare_placeholders` — two items with bare `[#]` both get unique IDs, no residual `[#]` in text
+- `backfill_idempotent_after_placeholder_strip` — second backfill pass is a no-op
+- `op_add_dedup_case_sensitive` — different casing is NOT considered duplicate (exact match)
+- `op_add_dedup_across_states` — dedup applies even when existing item is gated and new is open
+<!-- agent:boundary:5af65db7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

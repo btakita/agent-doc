@@ -394,7 +394,7 @@ Done. Removed all traces:
 - `~/.claude/wozcode/` — deleted (recall/session data)
 
 The woz:* skills (`woz:code`, `woz:explore`, `woz:plan`, `woz:woz-recall`, etc.) and MCP tools (`mcp__plugin_woz_code__Search`, `mcp__plugin_woz_code__Edit`, `mcp__plugin_woz_code__Sql`) are gone. tsift + native Claude Code tools are the replacement.
-<!-- agent:boundary:2bbdffdb -->
+<!-- agent:boundary:366a95f9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

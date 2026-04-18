@@ -312,7 +312,7 @@ The reaper runs the verify command before resolving. This is the only approach t
 **My recommendation:** Start with #1 (explicit `resolve-gate` subcommand), wire #2 (hooks) as sugar on top. Skip #3 unless you need idempotent verification — it adds shell-out complexity to the reaper path and the verification commands are fragile across environments.
 
 The key insight: the harness doesn't need to "know" the gate type semantically. It just needs a resolution signal. The typed marker (`[/release]`) is for human readability and hook routing — the binary treats all resolved gates identically (flip to `[x]`).
-<!-- agent:boundary:000c80f5 -->
+<!-- agent:boundary:d3fee4a6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

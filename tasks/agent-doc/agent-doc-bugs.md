@@ -313,7 +313,7 @@ The reaper runs the verify command before resolving. This is the only approach t
 
 The key insight: the harness doesn't need to "know" the gate type semantically. It just needs a resolution signal. The typed marker (`[/release]`) is for human readability and hook routing — the binary treats all resolved gates identically (flip to `[x]`).
 ❯ How would these flags work in context of my monorepo?
-### Re: #77mf typed gates in monorepo context — opus-4-6
+❯ ### Re: #77mf typed gates in monorepo context — opus-4-6 (HEAD)
 
 The core challenge: **which release resolves which gate?** In a single-package repo it's obvious. In agent-loop with 17+ submodules, you need scope.
 
@@ -363,7 +363,32 @@ For `git push` / deploy gates, same pattern — the hook fires from the relevant
 **Edge case — parent repo operations:** Some gates apply to agent-loop itself (submodule pointer updates, cross-cutting releases). These would use explicit scope: `[/deploy:agent-loop]` or trigger from the repo root.
 
 The item-level syntax `[/release:agent-doc]` is the safest — it's self-documenting and doesn't depend on directory conventions. But for your current layout where documents already live under `tasks/<submodule>/`, cwd inference handles 90% of cases without any new syntax.
-<!-- agent:boundary:a9ed698c -->
+❯ Would [/release] happen when an item is complete but pre-release?
+### Re: #77mf [/release] lifecycle timing — opus-4-6
+
+Yes, exactly. `[/release]` is a refinement of `[/]` — it means "implementation complete, waiting for release to close."
+
+**The state machine:**
+
+```
+[ ]  →  work starts  →  [/]  →  impl done, needs release  →  [/release]  →  cargo publish  →  [x]
+                         │
+                         └─  impl done, needs deploy  →  [/deploy]  →  git push  →  [x]
+```
+
+So the flow for an item like #gqep would be:
+
+1. `[ ] [#gqep] Release v0.32.4` — not started
+2. `[/] [#gqep] Release v0.32.4` — gated (impl done, manual testing gate)
+3. `[/release] [#gqep] Release v0.32.4` — testing passed, ready to publish, waiting on the actual `cargo publish`
+4. `[x] [#gqep] Release v0.32.4` — published, resolved by hook
+
+**Key distinction from plain `[/]`:** A `[/]` gate is human-resolved (the user or agent decides when to flip it). A `[/release]` gate is machine-resolved — the hook fires on `cargo publish` and flips it automatically. The typed marker is what enables automation; without it, the reaper can't know *what kind* of event should resolve the gate.
+
+**When to apply:** You'd transition `[/]` → `[/release]` when the only remaining blocker is the publish/deploy action itself. If there are still manual testing gates or other human decisions pending, it stays as `[/]`. The typed gate means "the next matching event closes this" — so you only apply it when you're genuinely ready for that event.
+
+This also means `[/release]` is a commitment signal: "if cargo publish succeeds, this item is done." No further review needed after the event.
+<!-- agent:boundary:ff546b4c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

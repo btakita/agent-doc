@@ -154,14 +154,13 @@ No runbook for hook integration yet — that belongs with #95as (Claude Code hoo
 **To make it automatic** would require #95as (Claude Code hook integration) — rewriting search commands through tsift the way rtk rewrites git/cargo commands. That's when the token savings compound.
 ❯ do #mwhg
 .
-<!-- agent:boundary:3ee1d745 -->
+<!-- agent:boundary:15c3fca4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
 - [ ] [#92bz] Wire Sift as search backend (direct Rust lib integration via git dep — done)
-- [x] [#mwhg] Batch edit command: accept multiple file edits in one invocation
 - [ ] [#6jmq] Agent model routing skill: haiku for search, sonnet for edits, opus for architecture
 - [ ] [#yscf] SQL introspection: connect to SQLite/Postgres, expose schema + query
 - [ ] [#95as] Claude Code hook integration: rewrite commands through tsift like rtk does

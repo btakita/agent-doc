@@ -133,7 +133,7 @@ The ASCII art logo is misaligned — the three lines of the logo glyph are left-
 This is an upstream Claude Code issue — worth filing at https://github.com/anthropics/claude-code/issues if it persists across terminals.
 
 ❯ These are both supervisor issues.
-### Re: supervisor issues — opus-4-6
+❯ ### Re: supervisor issues — opus-4-6 (HEAD)
 
 Agreed. Both are outside agent-doc's scope:
 
@@ -141,7 +141,25 @@ Agreed. Both are outside agent-doc's scope:
 2. **Header misalignment** — Claude Code v2.1.109 banner rendering. Upstream issue.
 
 Neither needs tracking here. If you want them tracked elsewhere, they'd go in a supervisor/tmux-router task doc.
-<!-- agent:boundary:833831fe -->
+❯ fix **Enter/q stdin**. add tests
+### Re: fix Enter/q stdin — opus-4-6
+
+**Root cause:** After Claude exits, the `stdin→pty` writer thread is still blocked on `stdin.lock().read()`, holding the Rust stdin mutex. When the supervisor calls `stdin.read_line()` for the restart prompt, it deadlocks waiting for the lock the writer thread holds.
+
+**Fix:** Replaced blocking `stdin.lock().read()` with `libc::poll()` + `libc::read()` in the writer thread. Added a `StopSignal` type (self-pipe pattern):
+
+1. `StopSignal::new()` creates a pipe pair
+2. Writer thread `poll()`s both stdin fd and the stop pipe read fd
+3. After `session.wait()` returns (Claude exits), supervisor calls `writer_stop.signal()` + `writer_thread.join()` — writer thread wakes from poll and exits cleanly
+4. stdin is now exclusively available for `read_line()`
+
+**3 new tests** (1133 total, clippy clean):
+- `stop_signal_wakes_poll` — signal writes to pipe, poll sees POLLIN
+- `writer_thread_exits_on_stop_signal` — thread exits cleanly when signaled
+- `writer_thread_exits_on_pty_write_failure` — thread exits when PTY write fails (EPIPE)
+
+Changed file: `src/agent-doc/src/start.rs`
+<!-- agent:boundary:10ede891 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

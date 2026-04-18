@@ -414,7 +414,7 @@ The document itself doesn't need to be associated with a gate type — **individ
 **What "tracked documents" means:** Any file with an `.agent-doc/snapshots/` entry. The `resolve-gate` command would iterate those, filter by scope, parse pending components, and match gate types. No new config or metadata required — everything is already in the document content.
 
 This keeps the design simple: no frontmatter gate declarations, no document-type taxonomy. Items self-describe what they're waiting for.
-<!-- agent:boundary:8883e140 -->
+<!-- agent:boundary:e25bc038 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

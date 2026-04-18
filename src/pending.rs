@@ -247,6 +247,9 @@ fn parse_item_line(line: &str) -> Option<PendingItem> {
             let tail = after_hash[close + 1..].trim_start();
             if is_valid_hash_id(id_raw) {
                 (id_raw.to_lowercase(), tail.to_string())
+            } else if id_raw.is_empty() {
+                // Bare [#] placeholder — consume it, text starts after ]
+                (String::new(), tail.to_string())
             } else {
                 (String::new(), after_box.to_string())
             }
@@ -487,6 +490,12 @@ pub fn op_add(body: &str, text: &str, doc_id: &str, gated: bool) -> Result<(Stri
         bail!("pending add: text must not start with a state marker ([ ], [/], [x]); use --pending-add-gated for gated items");
     }
     let (prelude, mut items, postlude) = parse_items(body);
+
+    // Dedup: reject if an item with identical text already exists.
+    if items.iter().any(|i| i.text == text) {
+        bail!("pending add: duplicate item text already exists: {}", text);
+    }
+
     let mut taken: HashSet<String> = items
         .iter()
         .filter(|i| !i.id.is_empty())
@@ -864,6 +873,94 @@ mod tests {
             let msg = format!("{}", err);
             assert!(msg.contains("state marker"), "expected state marker error for '{}', got: {}", marker, msg);
         }
+    }
+
+    #[test]
+    fn op_add_rejects_duplicate_text() {
+        let (body, _id1) = op_add("", "Wire Sift into corky", DOC_ID, false).unwrap();
+        let err = op_add(&body, "Wire Sift into corky", DOC_ID, false).unwrap_err();
+        let msg = format!("{}", err);
+        assert!(msg.contains("duplicate"), "expected duplicate error, got: {}", msg);
+    }
+
+    #[test]
+    fn parse_bare_hash_placeholder_strips_marker() {
+        let item = parse_item_line("- [ ] [#] Wire Sift into corky").unwrap();
+        assert_eq!(item.id, "");
+        assert_eq!(item.text, "Wire Sift into corky");
+    }
+
+    #[test]
+    fn backfill_strips_bare_hash_placeholder() {
+        let body = "- [ ] [#] task with placeholder\n";
+        let (new_body, changed) = backfill(body, DOC_ID, &ids());
+        assert!(changed);
+        assert!(new_body.contains("[#"), "should have a hash id");
+        // The bare [#] should be consumed — only one [# in the output
+        let hash_count = new_body.matches("[#").count();
+        assert_eq!(hash_count, 1, "expected exactly one [# in: {}", new_body);
+        assert!(new_body.contains("task with placeholder"));
+        assert!(!new_body.contains("[#] task"), "bare [#] should not survive in text");
+    }
+
+    #[test]
+    fn parse_bare_hash_placeholder_no_checkbox() {
+        // `- [#] text` — no checkbox, bare placeholder
+        let item = parse_item_line("- [#] no checkbox").unwrap();
+        assert_eq!(item.id, "");
+        assert_eq!(item.state, PendingState::Open);
+        assert_eq!(item.text, "no checkbox");
+    }
+
+    #[test]
+    fn parse_bare_hash_placeholder_gated() {
+        // `- [/] [#] gated task` — gated with bare placeholder
+        let item = parse_item_line("- [/] [#] gated task").unwrap();
+        assert_eq!(item.id, "");
+        assert_eq!(item.state, PendingState::Gated);
+        assert_eq!(item.text, "gated task");
+    }
+
+    #[test]
+    fn backfill_strips_multiple_bare_placeholders() {
+        // Multiple items each with bare [#] — all should get real IDs
+        let body = "- [ ] [#] first task\n- [ ] [#] second task\n";
+        let (new_body, changed) = backfill(body, DOC_ID, &ids());
+        assert!(changed);
+        let (_, items, _) = parse_items(&new_body);
+        assert_eq!(items.len(), 2);
+        assert!(!items[0].id.is_empty(), "first should have id");
+        assert!(!items[1].id.is_empty(), "second should have id");
+        assert_ne!(items[0].id, items[1].id, "ids should be unique");
+        // No residual [#] in text
+        assert!(!items[0].text.contains("[#]"), "first text has residual [#]: {}", items[0].text);
+        assert!(!items[1].text.contains("[#]"), "second text has residual [#]: {}", items[1].text);
+    }
+
+    #[test]
+    fn backfill_idempotent_after_placeholder_strip() {
+        // After stripping [#] and assigning ID, second backfill should be a no-op
+        let body = "- [ ] [#] task\n";
+        let (first_pass, _) = backfill(body, DOC_ID, &ids());
+        let (second_pass, changed) = backfill(&first_pass, DOC_ID, &ids());
+        assert!(!changed, "second backfill should be no-op, got: {}", second_pass);
+        assert_eq!(first_pass, second_pass);
+    }
+
+    #[test]
+    fn op_add_dedup_case_sensitive() {
+        // Different casing should NOT be considered duplicate
+        let (body, _) = op_add("", "Wire Sift", DOC_ID, false).unwrap();
+        let result = op_add(&body, "wire sift", DOC_ID, false);
+        assert!(result.is_ok(), "different case should not be duplicate");
+    }
+
+    #[test]
+    fn op_add_dedup_across_states() {
+        // Item exists as gated — adding same text as open should still dedup
+        let (body, _) = op_add("", "deploy to prod", DOC_ID, true).unwrap();
+        let err = op_add(&body, "deploy to prod", DOC_ID, false).unwrap_err();
+        assert!(format!("{}", err).contains("duplicate"));
     }
 
     #[test]

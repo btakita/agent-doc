@@ -33,11 +33,12 @@
 //! - Pane resolution priority: explicit `--pane` > `--position` (scoped to
 //!   effective window if set) > `TMUX_PANE` / active pane.
 //! - **Session validation:** After resolving `pane_id`, checks that the pane belongs to
-//!   the project's configured tmux session (`project_tmux_session()`). If the pane is in
-//!   the wrong session, `claim` exits with an error unless `--force` is passed.
-//!   `--force` allows cross-session claims with a warning. This prevents the
-//!   stash/rescue routing dance that fires whenever a document's pane is in the wrong
-//!   session (`pane_session != target_session` in `route.rs`).
+//!   the project's configured tmux session (`project_tmux_session()`). Cross-session
+//!   mismatches are auto-forced with a warning — explicit claim always succeeds.
+//!   `--force` additionally overrides the binding invariant (commandeering another
+//!   document's pane). This prevents the stash/rescue routing dance that fires
+//!   whenever a document's pane is in the wrong session (`pane_session !=
+//!   target_session` in `route.rs`).
 //! - Sets `agent_doc_format=template` and `agent_doc_write=crdt` in frontmatter when
 //!   neither `format`, `write_mode`, nor legacy `mode` is present.
 //! - Scaffolds default `## Status` and `## Exchange` component sections when the
@@ -234,11 +235,9 @@ pub fn run(file: &Path, position: Option<&str>, pane: Option<&str>, window: Opti
                 }
                 CrossSessionDecision::Reject => {
                     eprintln!(
-                        "error: pane {} is in tmux session '{}' but project session is '{}'.\n\
-                         Switch to session '{}' and re-run, or use --force to override.",
-                        pane_id, pane_tmux_session, configured, configured
+                        "warning: pane {} is in tmux session '{}' but project session is '{}' — auto-forcing claim",
+                        pane_id, pane_tmux_session, configured
                     );
-                    anyhow::bail!("session mismatch: cross-session claim rejected");
                 }
             }
         }

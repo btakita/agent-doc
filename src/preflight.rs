@@ -225,17 +225,15 @@ fn short_model_name(model_id: &str) -> &str {
 
 /// Resolve the agent model short name for attribution in `### Re:` headers.
 ///
-/// Priority: `ANTHROPIC_MODEL` env var → frontmatter `model` field.
+/// Source: frontmatter `model` field only. `ANTHROPIC_MODEL` env var is
+/// deliberately ignored — it reflects the user's shell, not the model
+/// Claude Code is actually running with (Claude Code does not export
+/// `ANTHROPIC_MODEL` to child shells). The SKILL running inside Claude
+/// Code always knows its own model identity and stamps attribution
+/// directly when `agent_model` is null.
+///
 /// Full model IDs are shortened via `short_model_name`.
 fn resolve_agent_model(frontmatter_model: Option<&str>) -> Option<String> {
-    // Prefer the env var: it reflects what Claude Code actually runs with
-    if let Ok(env_model) = std::env::var("ANTHROPIC_MODEL") {
-        let s = env_model.trim().to_string();
-        if !s.is_empty() {
-            return Some(short_model_name(&s).to_string());
-        }
-    }
-    // Fall back to frontmatter `model` field
     frontmatter_model.map(|m| short_model_name(m).to_string())
 }
 
@@ -606,17 +604,39 @@ pub fn run(file: &Path) -> Result<()> {
                     if doc_path == canonical { continue; } // already committed in step 2
                     if !doc_path.exists() { continue; }
                     // snapshot mtime > last commit? Call commit (idempotent — git skips if clean).
-                    let snap_is_newer = snapshot::path_for(&doc_path)
-                        .ok()
-                        .and_then(|snap_rel| {
-                            let snap_abs = root.join(&snap_rel);
-                            let snap_mtime = std::fs::metadata(&snap_abs).ok()?.modified().ok()?;
-                            let doc_mtime = std::fs::metadata(&doc_path).ok()?.modified().ok()?;
-                            // Proxy: snap newer than doc means an agent write landed without commit
-                            Some(snap_mtime > doc_mtime)
-                        })
-                        .unwrap_or(true); // if uncertain, try commit anyway
+                    let snap_rel = match snapshot::path_for(&doc_path) {
+                        Ok(rel) => rel,
+                        Err(_) => continue,
+                    };
+                    let snap_abs = root.join(&snap_rel);
+                    let snap_is_newer = (|| {
+                        let snap_mtime = std::fs::metadata(&snap_abs).ok()?.modified().ok()?;
+                        let doc_mtime = std::fs::metadata(&doc_path).ok()?.modified().ok()?;
+                        // Proxy: snap newer than doc means an agent write landed without commit
+                        Some(snap_mtime > doc_mtime)
+                    })()
+                    .unwrap_or(true); // if uncertain, try commit anyway
                     if snap_is_newer {
+                        // Guard: don't sweep-commit if the document has user additions
+                        // that the agent hasn't responded to yet. For inline mode this
+                        // checks ## User / ## Assistant blocks; for template mode it
+                        // falls through to a content-equality check.
+                        if let (Ok(snap_content), Ok(doc_content)) =
+                            (std::fs::read_to_string(&snap_abs), std::fs::read_to_string(&doc_path))
+                            && !crate::diff::is_stale_snapshot(&snap_content, &doc_content)
+                        {
+                            // Not a stale inline snapshot — check content equality
+                            // (covers template mode where is_stale_snapshot always returns false)
+                            let snap_stripped = crate::diff::strip_comments(&snap_content);
+                            let doc_stripped = crate::diff::strip_comments(&doc_content);
+                            if snap_stripped.trim() != doc_stripped.trim() {
+                                eprintln!(
+                                    "[preflight] sweep: skipping {} (unresponded user content)",
+                                    doc_path.display()
+                                );
+                                continue;
+                            }
+                        }
                         // Freshness gate: skip if another session committed this doc
                         // within the last 5s. Inside the CommitLock critical section
                         // this is a valid fast-path — a concurrent commit that just
@@ -1930,7 +1950,12 @@ mod tests {
         fs::write(&secondary, secondary_content).unwrap();
         snapshot::save(&secondary, secondary_content).unwrap();
         Command::new("git").current_dir(root).args(["add", "secondary.md"]).output().unwrap();
-        Command::new("git").current_dir(root).args(["commit", "-m", "add secondary", "--no-verify"]).output().unwrap();
+        // Backdate the commit so the <5s freshness gate in sweep doesn't skip it.
+        Command::new("git").current_dir(root)
+            .args(["commit", "-m", "add secondary", "--no-verify"])
+            .env("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z")
+            .env("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z")
+            .output().unwrap();
 
         // Touch snapshot to make it newer than the file (simulates agent write without commit)
         let snap_rel = snapshot::path_for(&secondary).unwrap();
@@ -1968,6 +1993,91 @@ mod tests {
         );
     }
 
+    #[test]
+    fn preflight_sweep_skips_doc_with_unresponded_user_content() {
+        use std::fs;
+        let dir = setup_project();
+        let root = dir.path();
+
+        // Create initial commit so HEAD exists
+        let readme = root.join("README.md");
+        fs::write(&readme, "# project\n").unwrap();
+        Command::new("git").current_dir(root).args(["add", "README.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "initial", "--no-verify"]).output().unwrap();
+
+        // Primary doc (the one preflight runs on)
+        let primary = root.join("primary.md");
+        let primary_content = "---\nagent_doc_session: primary\n---\n\n## User\n\nHello\n\n## Assistant\n\nReply\n\n## User\n\n";
+        fs::write(&primary, primary_content).unwrap();
+        snapshot::save(&primary, primary_content).unwrap();
+        Command::new("git").current_dir(root).args(["add", "primary.md"]).output().unwrap();
+        Command::new("git").current_dir(root).args(["commit", "-m", "add primary", "--no-verify"]).output().unwrap();
+
+        // Secondary doc with agent response in snapshot but user added new content in document
+        let secondary = root.join("secondary.md");
+        let snap_content = "---\nagent_doc_session: secondary\n---\n\n## User\n\nHi\n\n## Assistant\n\nResponse\n\n## User\n\n";
+        // Document has user additions not in the snapshot
+        let doc_content = "---\nagent_doc_session: secondary\n---\n\n## User\n\nHi\n\n## Assistant\n\nResponse\n\n## User\n\nNew question from user\n";
+        fs::write(&secondary, doc_content).unwrap();
+        snapshot::save(&secondary, snap_content).unwrap();
+        Command::new("git").current_dir(root).args(["add", "secondary.md"]).output().unwrap();
+        Command::new("git").current_dir(root)
+            .args(["commit", "-m", "add secondary", "--no-verify"])
+            .env("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z")
+            .env("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z")
+            .output().unwrap();
+
+        // Touch snapshot to make it newer than the file
+        let snap_rel = snapshot::path_for(&secondary).unwrap();
+        let snap_abs = root.join(&snap_rel);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        fs::write(&snap_abs, snap_content).unwrap();
+
+        // Write sessions.json with secondary tracked
+        let sessions_path = root.join(".agent-doc/sessions.json");
+        let sessions = serde_json::json!({
+            "secondary-session": {
+                "pane": "%1",
+                "pid": 9999,
+                "cwd": root.to_string_lossy(),
+                "started": "2026-01-01",
+                "file": "secondary.md",
+                "window": "@1"
+            }
+        });
+        fs::write(&sessions_path, serde_json::to_string_pretty(&sessions).unwrap()).unwrap();
+
+        // Count commits before sweep
+        let log_before = Command::new("git")
+            .current_dir(root)
+            .args(["log", "--oneline"])
+            .output()
+            .unwrap();
+        let count_before = String::from_utf8_lossy(&log_before.stdout).lines().count();
+
+        // Run preflight on primary — sweep should SKIP secondary due to user additions
+        run(&primary).unwrap();
+
+        // Verify secondary was NOT committed
+        let log_after = Command::new("git")
+            .current_dir(root)
+            .args(["log", "--oneline"])
+            .output()
+            .unwrap();
+        let log_str = String::from_utf8_lossy(&log_after.stdout);
+        assert!(
+            !log_str.contains("agent-doc(secondary):"),
+            "preflight sweep should NOT have committed secondary.md (has unresponded user content), got:\n{log_str}"
+        );
+        // Only primary should have been committed (by step 2, not sweep)
+        let count_after = log_str.lines().count();
+        assert!(
+            count_after <= count_before + 1,
+            "expected at most one new commit (primary), got {} new commits",
+            count_after - count_before
+        );
+    }
+
     // --- #cce5: resolve_agent_model / short_model_name tests ---
 
     #[test]
@@ -1985,55 +2095,22 @@ mod tests {
     }
 
     #[test]
-    fn resolve_agent_model_env_var_preferred_over_frontmatter() {
-        // When ANTHROPIC_MODEL is set, it must take priority regardless of frontmatter.
-        // Test is structured to observe current env state without mutating it
-        // (env mutation in parallel tests is not thread-safe).
-        let env_model = std::env::var("ANTHROPIC_MODEL").ok();
+    fn resolve_agent_model_uses_frontmatter_only() {
+        // ANTHROPIC_MODEL env var is deliberately ignored — only frontmatter matters.
         let result = resolve_agent_model(Some("claude-opus-4"));
-
-        match env_model {
-            Some(env) if !env.trim().is_empty() => {
-                // Env var is set → result must be the env model (stripped), NOT opus-4
-                let expected = short_model_name(env.trim()).to_string();
-                assert_eq!(result, Some(expected),
-                    "env var should win over frontmatter model");
-            }
-            _ => {
-                // Env var is unset → result must be from frontmatter
-                assert_eq!(result, Some("opus-4".to_string()),
-                    "frontmatter should be used when env var is absent");
-            }
-        }
+        assert_eq!(result, Some("opus-4".to_string()));
     }
 
     #[test]
-    fn resolve_agent_model_returns_some_when_frontmatter_present() {
-        // When no env var is set and frontmatter has a model, we get a Some.
-        // We verify the shape of the result rather than the exact value
-        // (which depends on env state in CI).
-        let result_with_fm = resolve_agent_model(Some("claude-haiku-4-5"));
-        // Must be Some (either env var or frontmatter provides a model)
-        assert!(result_with_fm.is_some(), "should return Some when frontmatter model provided");
-        // The result must not contain the 'claude-' prefix (always stripped)
-        if let Some(ref s) = result_with_fm {
-            assert!(!s.starts_with("claude-"), "result must not have claude- prefix, got: {s}");
-        }
+    fn resolve_agent_model_strips_claude_prefix_from_frontmatter() {
+        let result = resolve_agent_model(Some("claude-haiku-4-5"));
+        assert_eq!(result, Some("haiku-4-5".to_string()));
     }
 
     #[test]
-    fn resolve_agent_model_none_frontmatter_returns_env_or_none() {
-        // When frontmatter is None, result is the env var (if set) or None.
+    fn resolve_agent_model_none_when_no_frontmatter() {
+        // No frontmatter → None, regardless of env var state.
         let result = resolve_agent_model(None);
-        match std::env::var("ANTHROPIC_MODEL").ok() {
-            Some(env) if !env.trim().is_empty() => {
-                assert!(result.is_some(), "env var set → should return Some");
-                let s = result.unwrap();
-                assert!(!s.starts_with("claude-"), "result must not have claude- prefix");
-            }
-            _ => {
-                assert_eq!(result, None, "no env var, no frontmatter → None");
-            }
-        }
+        assert_eq!(result, None);
     }
 }

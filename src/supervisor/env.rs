@@ -87,6 +87,7 @@ impl EnvSpec {
     }
 
     /// Build a sealed spec with an explicit overlay.
+    #[allow(dead_code)] // API surface — used by tests and future callers
     pub fn sealed(overrides: EnvMap) -> Self {
         Self {
             inherit_parent: false,

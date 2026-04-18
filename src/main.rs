@@ -55,6 +55,7 @@ mod config;
 mod convert;
 mod pending;
 mod pending_cmd;
+mod status_cmd;
 mod project_config;
 mod gc;
 mod parallel;
@@ -426,6 +427,9 @@ enum Commands {
         /// Append a new pending item (repeatable). Binary assigns hash id and `[ ]`.
         #[arg(long = "pending-add")]
         pending_add: Vec<String>,
+        /// Append a new gated pending item (repeatable). Like --pending-add but assigns `[/]` instead of `[ ]`.
+        #[arg(long = "pending-add-gated")]
+        pending_add_gated: Vec<String>,
         /// Mark a pending item `[x]` by hash id (repeatable).
         #[arg(long = "pending-done")]
         pending_done: Vec<String>,
@@ -446,10 +450,23 @@ enum Commands {
         /// Errors on `[ ]` or `[x]` items — the source must be gated.
         #[arg(long = "pending-ungate")]
         pending_ungate: Vec<String>,
+        /// Resolve all items matching a typed gate (e.g., [/release] → [x]).
+        #[arg(long = "pending-resolve-gate")]
+        pending_resolve_gate: Vec<String>,
+        /// Set a typed gate on a gated item: `id=gate_type` (e.g., `gqep=release`).
+        #[arg(long = "pending-set-gate-type")]
+        pending_set_gate_type: Vec<String>,
         /// Allow `replace:pending` blocks in stdin (escape hatch, hidden).
         /// `--allow-patch-pending` is accepted as a deprecated alias (#25ag).
         #[arg(long = "allow-replace-pending", alias = "allow-patch-pending", hide = true)]
         allow_replace_pending: bool,
+        /// Only mutate pending component — skip stdin reading and exchange synthesis.
+        /// Requires at least one --pending-* flag; incompatible with --template/--stream/--ipc.
+        #[arg(long = "pending-only")]
+        pending_only: bool,
+        /// Replace the status component content (repeatable for multi-line).
+        #[arg(long = "status")]
+        status: Option<String>,
     },
     /// Stream agent output to document in real-time (CRDT merge)
     Stream {
@@ -630,8 +647,8 @@ enum Commands {
     Notify {
         /// Path to the document
         file: PathBuf,
-        /// Notification message
-        message: String,
+        /// Notification message (optional when --pending-add is used)
+        message: Option<String>,
         /// Source document or session
         #[arg(long)]
         source: Option<String>,
@@ -641,6 +658,15 @@ enum Commands {
         /// Skip git commit after notification
         #[arg(long)]
         no_commit: bool,
+        /// Add a pending item to the target document (repeatable). Auto-creates agent:pending if absent.
+        #[arg(long = "pending-add")]
+        pending_add: Vec<String>,
+        /// Add a gated pending item (repeatable). Like --pending-add but assigns [/] instead of [ ].
+        #[arg(long = "pending-add-gated")]
+        pending_add_gated: Vec<String>,
+        /// Do not auto-create agent:pending component if absent
+        #[arg(long = "no-create-pending")]
+        no_create_pending: bool,
     },
     /// Print the path to the shared library (libagent_doc.so/dylib/dll)
     LibPath,
@@ -673,6 +699,17 @@ enum Commands {
         file: PathBuf,
         #[command(subcommand)]
         action: PendingAction,
+    },
+    /// Resolve typed gates across tracked documents.
+    /// Scans documents under the project root for [/<type>] items and flips to [x].
+    /// Designed for hook integration: `agent-doc resolve-gate release`
+    #[command(name = "resolve-gate")]
+    ResolveGateCmd {
+        /// Gate type to resolve (e.g., "release", "deploy")
+        gate_type: String,
+        /// Restrict scan to documents under this directory (defaults to project root)
+        #[arg(long)]
+        scope: Option<PathBuf>,
     },
     /// Manage bidirectional IPC callbacks
     Callback {
@@ -739,6 +776,11 @@ enum PendingAction {
         /// The pending item description
         item: String,
     },
+    /// Add a gated item to the pending component (assigns stable hash id + `[/]`)
+    AddGated {
+        /// The pending item description
+        item: String,
+    },
     /// Remove an item from the pending component
     Remove {
         /// Content to match
@@ -774,6 +816,18 @@ enum PendingAction {
     },
     /// List current pending items
     List,
+    /// Resolve all items matching a typed gate (e.g., [/release] → [x])
+    ResolveGate {
+        /// Gate type to resolve (e.g., "release", "deploy")
+        gate_type: String,
+    },
+    /// Set a typed gate on a gated item ([/] → [/release])
+    SetGateType {
+        /// Hash id (without the `#` prefix)
+        id: String,
+        /// Gate type (e.g., "release", "deploy")
+        gate_type: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -825,6 +879,8 @@ enum SessionAction {
         /// Target tmux session name (e.g., "5")
         name: String,
     },
+    /// Clear the configured session, returning to auto-detect mode
+    Clear,
 }
 
 #[derive(Subcommand)]
@@ -1074,7 +1130,7 @@ fn main() -> anyhow::Result<()> {
             PluginAction::Update { editor } => plugin::update(&editor),
             PluginAction::List => plugin::list(),
         },
-        Commands::Write { file, baseline_file, template: is_template, stream: is_stream, ipc: is_ipc, force_disk, origin, commit: do_commit, pending_add, pending_done, pending_edit, pending_clear, pending_reorder, pending_gate, pending_ungate, allow_replace_pending } => {
+        Commands::Write { file, baseline_file, template: is_template, stream: is_stream, ipc: is_ipc, force_disk, origin, commit: do_commit, pending_add, pending_add_gated, pending_done, pending_edit, pending_clear, pending_reorder, pending_gate, pending_ungate, pending_resolve_gate, pending_set_gate_type, allow_replace_pending, pending_only, status } => {
             // Log write origin for tracing
             if let Some(ref orig) = origin {
                 crate::ops_log::log_op(&file, &format!("write_origin file={} origin={}", file.display(), orig));
@@ -1084,12 +1140,22 @@ fn main() -> anyhow::Result<()> {
             // land in the same atomic cycle (the pending ops write directly to disk;
             // the subsequent patch write reads the already-updated document).
             let has_pending_ops = !pending_add.is_empty()
+                || !pending_add_gated.is_empty()
                 || !pending_done.is_empty()
                 || !pending_edit.is_empty()
                 || pending_clear
                 || pending_reorder.is_some()
                 || !pending_gate.is_empty()
-                || !pending_ungate.is_empty();
+                || !pending_ungate.is_empty()
+                || !pending_resolve_gate.is_empty()
+                || !pending_set_gate_type.is_empty();
+            // Validate --pending-only constraints
+            if pending_only && !has_pending_ops {
+                anyhow::bail!("--pending-only requires at least one --pending-* flag");
+            }
+            if pending_only && (is_template || is_stream || is_ipc) {
+                anyhow::bail!("--pending-only cannot be combined with --template, --stream, or --ipc");
+            }
             if has_pending_ops {
                 // Order: clear (destructive) → add → edit → gate → ungate → done → reorder.
                 // Gate/ungate run before done so a `--pending-gate X --pending-done X`
@@ -1098,7 +1164,10 @@ fn main() -> anyhow::Result<()> {
                     pending_cmd::clear(&file)?;
                 }
                 for item in &pending_add {
-                    pending_cmd::add(&file, item)?;
+                    pending_cmd::add(&file, item, false)?;
+                }
+                for item in &pending_add_gated {
+                    pending_cmd::add(&file, item, true)?;
                 }
                 for pair in &pending_edit {
                     let (id, text) = pair
@@ -1109,8 +1178,17 @@ fn main() -> anyhow::Result<()> {
                 for id in &pending_gate {
                     pending_cmd::gate(&file, id)?;
                 }
+                for pair in &pending_set_gate_type {
+                    let (id, gt) = pair
+                        .split_once('=')
+                        .with_context(|| format!("--pending-set-gate-type expects 'id=type', got: {}", pair))?;
+                    pending_cmd::set_gate_type(&file, id, gt)?;
+                }
                 for id in &pending_ungate {
                     pending_cmd::ungate(&file, id)?;
+                }
+                for gt in &pending_resolve_gate {
+                    pending_cmd::resolve_gate(&file, gt)?;
                 }
                 for id in &pending_done {
                     pending_cmd::done(&file, id)?;
@@ -1123,6 +1201,26 @@ fn main() -> anyhow::Result<()> {
                         .collect();
                     pending_cmd::reorder(&file, &ids)?;
                 }
+            }
+
+            // Apply --status before the patch payload write (same pattern as pending).
+            if let Some(ref status_text) = status {
+                status_cmd::set(&file, status_text)?;
+            }
+
+            // --pending-only: skip stdin reading and exchange synthesis entirely.
+            // Pending ops already applied above; just commit if requested and return.
+            if pending_only {
+                if do_commit {
+                    if git::is_in_git_repo(&file) {
+                        if let Err(e) = git::commit(&file) {
+                            eprintln!("[commit] warning: {}", e);
+                        }
+                    } else {
+                        eprintln!("[commit] skipped (not in git repo)");
+                    }
+                }
+                return Ok(());
             }
 
             // Enforcement: reject `replace:pending` (and the deprecated
@@ -1239,8 +1337,8 @@ fn main() -> anyhow::Result<()> {
                 dry_run,
             })
         }
-        Commands::Notify { file, message, source, affects, no_commit } => {
-            notify::run(&file, &message, source.as_deref(), affects.as_deref(), !no_commit)
+        Commands::Notify { file, message, source, affects, no_commit, pending_add, pending_add_gated, no_create_pending } => {
+            notify::run(&file, message.as_deref(), source.as_deref(), affects.as_deref(), !no_commit, &pending_add, &pending_add_gated, no_create_pending)
         }
         Commands::Boundary { file, component } => boundary::run(&file, component.as_deref()),
         Commands::Terminal { file, session } => terminal::run(&file, session.as_deref()),
@@ -1270,6 +1368,7 @@ fn main() -> anyhow::Result<()> {
         Commands::ListCommands => commands::run(),
         Commands::Session { action } => match action {
             Some(SessionAction::Set { name }) => session_cmd::set(&name),
+            Some(SessionAction::Clear) => session_cmd::clear(),
             None => session_cmd::show(),
         },
         Commands::Hook { action } => match action {
@@ -1298,7 +1397,8 @@ fn main() -> anyhow::Result<()> {
             cleanup_cmd::run(&file, timeout, poll_interval, &fallback_model)
         }
         Commands::Pending { file, action } => match action {
-            PendingAction::Add { item } => pending_cmd::add(&file, &item),
+            PendingAction::Add { item } => pending_cmd::add(&file, &item, false),
+            PendingAction::AddGated { item } => pending_cmd::add(&file, &item, true),
             PendingAction::Remove { target, contains } => pending_cmd::remove(&file, &target, contains),
             PendingAction::Prune => pending_cmd::reap(&file),
             PendingAction::Reap => pending_cmd::reap(&file),
@@ -1311,6 +1411,24 @@ fn main() -> anyhow::Result<()> {
                 pending_cmd::reorder(&file, &ids)
             }
             PendingAction::List => pending_cmd::list(&file),
+            PendingAction::ResolveGate { gate_type } => pending_cmd::resolve_gate(&file, &gate_type),
+            PendingAction::SetGateType { id, gate_type } => pending_cmd::set_gate_type(&file, &id, &gate_type),
+        },
+        Commands::ResolveGateCmd { gate_type, scope } => {
+            // Determine scan root: explicit --scope, or cwd, or project root
+            let scan_root = if let Some(s) = scope {
+                s
+            } else {
+                let cwd = std::env::current_dir()?;
+                snapshot::find_project_root(&cwd).unwrap_or(cwd)
+            };
+            let total = pending_cmd::resolve_gate_scan(&gate_type, &scan_root)?;
+            if total == 0 {
+                eprintln!("[resolve-gate] no [/{}] items found under {}", gate_type, scan_root.display());
+            } else {
+                eprintln!("[resolve-gate] resolved {} total [/{}] item(s)", total, gate_type);
+            }
+            Ok(())
         },
         Commands::Callback { action } => match action {
             CallbackAction::Request { file, operations, context, ttl } => {

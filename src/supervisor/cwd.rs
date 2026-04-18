@@ -217,11 +217,18 @@ mod tests {
     #[test]
     fn document_parent_fallback_when_no_project_root() {
         // No .agent-doc/ anywhere above the document.
+        // Skip if system TMPDIR itself has .agent-doc/ (find_project_root walks ancestors).
         let tmp = TempDir::new().unwrap();
         let doc_dir = tmp.path().join("lonely");
         fs::create_dir_all(&doc_dir).unwrap();
         let doc = doc_dir.join("plan.md");
         fs::write(&doc, "# plan").unwrap();
+        // Guard: if an ancestor of the tempdir has .agent-doc/, find_project_root
+        // will return ProjectRoot instead of falling through to DocumentParent.
+        if find_project_root(&doc_dir.canonicalize().unwrap()).is_some() {
+            eprintln!("skipping: ancestor has .agent-doc/");
+            return;
+        }
         let resolved = resolve(None, None, &doc).unwrap();
         assert_eq!(resolved.source, CwdSource::DocumentParent);
         assert_eq!(resolved.path, doc_dir.canonicalize().unwrap());

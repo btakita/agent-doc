@@ -253,6 +253,16 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
                 pos = end;
                 continue;
             }
+
+            // No matching close found — consume the orphaned opening marker
+            // so it doesn't leak into unmatched text (#p2xm).
+            let mut orphan_end = close;
+            if orphan_end < len && bytes[orphan_end] == b'\n' {
+                orphan_end += 1;
+            }
+            last_end = orphan_end;
+            pos = orphan_end;
+            continue;
         }
 
         pos = close;
@@ -1258,6 +1268,44 @@ All systems go.
         assert_eq!(patches[1].name, "log");
         assert_eq!(patches[1].content, "- Entry 1\n");
         assert!(unmatched.is_empty());
+    }
+
+    #[test]
+    fn parse_patches_orphaned_opener_does_not_leak_into_unmatched() {
+        // Bug #p2xm: an unclosed `<!-- patch:exchange -->` was leaking into
+        // unmatched text and getting appended to exchange verbatim.
+        let response = "\
+Some real content here.
+<!-- patch:exchange -->
+This opener has no matching close.
+";
+        let (patches, unmatched) = parse_patches(response).unwrap();
+        assert!(patches.is_empty(), "orphaned opener should not produce a patch");
+        assert_eq!(
+            unmatched, "Some real content here.\nThis opener has no matching close.",
+            "unmatched should contain text before and after the orphaned marker, but not the marker itself"
+        );
+    }
+
+    #[test]
+    fn parse_patches_orphaned_opener_between_valid_patches() {
+        // Orphaned opener between two valid patches — only the valid ones parse,
+        // text around the orphan becomes unmatched, marker itself is consumed.
+        let response = "\
+<!-- patch:status -->
+All good.
+<!-- /patch:status -->
+Interstitial text.
+<!-- patch:exchange -->
+<!-- patch:log -->
+- Log entry
+<!-- /patch:log -->
+";
+        let (patches, unmatched) = parse_patches(response).unwrap();
+        assert_eq!(patches.len(), 2);
+        assert_eq!(patches[0].name, "status");
+        assert_eq!(patches[1].name, "log");
+        assert_eq!(unmatched, "Interstitial text.");
     }
 
     // --- Inline attribute mode resolution tests ---

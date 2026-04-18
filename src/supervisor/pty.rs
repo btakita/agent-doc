@@ -55,6 +55,58 @@ use portable_pty::{
     Child, CommandBuilder, ExitStatus, MasterPty, NativePtySystem, PtySize, PtySystem,
 };
 
+/// A thread-safe handle for resizing a pty session from another thread.
+///
+/// On Unix, stores the raw master fd and calls `TIOCSWINSZ` directly.
+/// This avoids the need for `MasterPty` to be `Sync` (which portable-pty
+/// doesn't provide).
+#[cfg(unix)]
+pub struct ResizeHandle {
+    fd: std::os::unix::io::RawFd,
+}
+
+#[cfg(unix)]
+impl ResizeHandle {
+    /// Resize the pty to the given dimensions.
+    pub fn resize(&self, size: PtySize) -> Result<()> {
+        let ws = libc::winsize {
+            ws_row: size.rows,
+            ws_col: size.cols,
+            ws_xpixel: size.pixel_width,
+            ws_ypixel: size.pixel_height,
+        };
+        let ret = unsafe { libc::ioctl(self.fd, libc::TIOCSWINSZ, &ws) };
+        if ret != 0 {
+            anyhow::bail!(
+                "TIOCSWINSZ ioctl failed: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ResizeHandle {
+    fn drop(&mut self) {
+        unsafe {
+            libc::close(self.fd);
+        }
+    }
+}
+
+/// Stub resize handle for non-Unix platforms.
+#[cfg(not(unix))]
+pub struct ResizeHandle;
+
+#[cfg(not(unix))]
+impl ResizeHandle {
+    pub fn resize(&self, _size: PtySize) -> Result<()> {
+        eprintln!("[supervisor::pty] resize not supported on this platform");
+        Ok(())
+    }
+}
+
 /// Configuration for spawning a child process under a pty.
 ///
 /// Built by the caller (typically `start.rs` after `cwd::resolve`) and
@@ -77,6 +129,7 @@ impl PtySpawnConfig {
     /// Construct a config with a default 24×80 pty size. Callers that know
     /// the real terminal size (from tmux, SIGWINCH, or the IPC client) should
     /// override `size` before calling `spawn`.
+    #[allow(dead_code)] // convenience constructor — used by tests
     pub fn new(program: impl Into<String>, cwd: PathBuf) -> Self {
         Self {
             program: program.into(),
@@ -102,6 +155,7 @@ impl PtySpawnConfig {
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
+    #[allow(dead_code)] // used by forward_stdio (test path)
     io_threads: Vec<JoinHandle<()>>,
 }
 
@@ -150,6 +204,7 @@ impl PtySession {
     ///
     /// Call at most once per session. Subsequent calls return an error
     /// because the writer can only be taken once from the master.
+    #[allow(dead_code)] // used by tests; start.rs does I/O manually for shared inject writer
     pub fn forward_stdio(&mut self) -> Result<()> {
         if !self.io_threads.is_empty() {
             anyhow::bail!("forward_stdio called twice on the same PtySession");
@@ -227,6 +282,7 @@ impl PtySession {
 
     /// Resize the pty. Called by `resize.rs` on SIGWINCH (Unix) or
     /// `ReadConsoleInputW` window events (Windows).
+    #[allow(dead_code)] // used by tests; start.rs uses ResizeHandle for cross-thread resize
     pub fn resize(&self, size: PtySize) -> Result<()> {
         self.master
             .resize(size)
@@ -242,9 +298,208 @@ impl PtySession {
 
     /// Attempt to kill the child. Used by the IPC `stop` handler and on
     /// supervisor shutdown when the child refuses to exit via SIGHUP.
+    #[allow(dead_code)] // API surface — used by tests; IPC stop uses libc::kill via PID
     pub fn kill(&mut self) -> Result<()> {
         self.child.kill().context("child.kill failed")
     }
+
+    /// Create a thread-safe resize handle that can be sent to other threads
+    /// (e.g., [`super::resize::ResizeWatcher`]).
+    ///
+    /// On Unix, extracts the raw master fd via `MasterPty::as_raw_fd` and
+    /// returns a handle that calls `TIOCSWINSZ` directly. This avoids
+    /// needing `MasterPty: Sync`.
+    #[cfg(unix)]
+    pub fn resize_handle(&self) -> Result<ResizeHandle> {
+        let fd = self.master.as_raw_fd()
+            .ok_or_else(|| anyhow::anyhow!("master pty does not expose a raw fd for resize"))?;
+        // dup the fd so the handle remains valid even if the session is dropped
+        let duped = unsafe { libc::dup(fd) };
+        if duped < 0 {
+            anyhow::bail!("dup(master_fd) failed: {}", std::io::Error::last_os_error());
+        }
+        Ok(ResizeHandle { fd: duped })
+    }
+
+    #[cfg(not(unix))]
+    pub fn resize_handle(&self) -> Result<ResizeHandle> {
+        Ok(ResizeHandle)
+    }
+
+    /// Take the pty writer handle for external use (e.g., shared IPC inject
+    /// writer). After calling this, [`forward_stdio`](Self::forward_stdio)
+    /// will fail because the writer has already been consumed.
+    pub fn take_writer(&self) -> Result<Box<dyn Write + Send>> {
+        self.master
+            .take_writer()
+            .context("take_writer: failed to take pty writer")
+    }
+
+    /// Clone the pty reader for external use (e.g., master→stdout I/O thread).
+    pub fn clone_reader(&self) -> Result<Box<dyn Read + Send>> {
+        self.master
+            .try_clone_reader()
+            .context("try_clone_reader: failed to clone pty reader")
+    }
+
+    /// Get the child's process ID, if available.
+    pub fn process_id(&self) -> Option<u32> {
+        self.child.process_id()
+    }
+}
+
+/// Stateful filter for terminal capability queries AND responses from pty output.
+///
+/// When a pty child (e.g. Claude Code) sends terminal queries (DSR, DA, XTVERSION),
+/// and the supervisor forwards pty output to an outer terminal (tmux pane), the
+/// outer terminal responds with escape sequences that echo as visible garbage
+/// (e.g. `^[[?997;1n^[P>|tmux 3.6a^[\`).
+///
+/// **Strategy: suppress both queries and responses.** Stripping outgoing queries
+/// prevents the outer terminal from generating responses in the first place.
+/// Stripping responses is defense-in-depth for any that leak through.
+///
+/// This filter strips:
+///
+/// **Outgoing queries (from child → outer terminal):**
+/// - CSI `c` with no prefix (DA1 query: `\x1b[c` or `\x1b[0c`)
+/// - CSI `>` sequences ending in `q` (XTVERSION query: `\x1b[>q`)
+///
+/// **Incoming responses (echoed back through pty):**
+/// - CSI `?` sequences ending in `n` (DSR responses: `\x1b[?997;1n`)
+/// - CSI `?` sequences ending in `c` (DA1 responses: `\x1b[?1;2;4c`)
+/// - CSI `?` sequences ending in `h`/`l` (DEC private mode set/reset: `\x1b[?2026h`)
+/// - CSI `>` sequences ending in `c` (DA2 query/response: `\x1b[>0;115;0c`)
+/// - CSI `>` sequences ending in `u` (Kitty keyboard push: `\x1b[>1u`)
+/// - CSI `>` sequences ending in `m` (Kitty progressive enhancement: `\x1b[>4;2m`)
+/// - CSI `<` sequences ending in `u` (Kitty keyboard pop: `\x1b[<u`)
+/// - DCS strings (`\x1b P....\x1b\` — e.g. `\x1bP>|tmux 3.6a\x1b\`)
+///
+/// Normal escape sequences (SGR colors, cursor movement, etc.) pass through.
+///
+/// **Stateful across reads:** Partial escape sequences at read boundaries are
+/// buffered internally and completed on the next `filter()` call. This prevents
+/// escape sequence leaks when an ESC byte lands at the end of one read buffer.
+pub(crate) struct PtyFilter {
+    carryover: Vec<u8>,
+}
+
+impl PtyFilter {
+    pub(crate) fn new() -> Self {
+        Self {
+            carryover: Vec::new(),
+        }
+    }
+
+    pub(crate) fn filter(&mut self, input: &[u8], output: &mut Vec<u8>) {
+        // Prepend any carryover from the previous call
+        let combined;
+        let data: &[u8] = if self.carryover.is_empty() {
+            input
+        } else {
+            combined = [self.carryover.as_slice(), input].concat();
+            self.carryover.clear();
+            &combined
+        };
+
+        let len = data.len();
+        let mut i = 0;
+        while i < len {
+            if data[i] == 0x1b {
+                if i + 1 >= len {
+                    // ESC at end of buffer — save for next call
+                    self.carryover.extend_from_slice(&data[i..]);
+                    return;
+                }
+                // ESC [ — CSI sequence
+                if data[i + 1] == b'[' {
+                    let start = i;
+                    i += 2; // skip ESC [
+                    if i >= len {
+                        self.carryover.extend_from_slice(&data[start..]);
+                        return;
+                    }
+                    // Check for ?, >, < prefix
+                    let has_question = data[i] == b'?';
+                    let has_gt = data[i] == b'>';
+                    let has_lt = data[i] == b'<';
+                    let no_prefix = !has_question && !has_gt && !has_lt;
+                    if has_question || has_gt || has_lt {
+                        i += 1; // skip prefix
+                    }
+                    // Consume parameter bytes (digits, semicolons)
+                    while i < len && (data[i].is_ascii_digit() || data[i] == b';') {
+                        i += 1;
+                    }
+                    if i >= len {
+                        // Incomplete CSI — save for next call
+                        self.carryover.extend_from_slice(&data[start..]);
+                        return;
+                    }
+                    // Check final byte
+                    if data[i].is_ascii_alphabetic() {
+                        let final_byte = data[i];
+                        i += 1; // consume final byte
+                        let should_filter = match final_byte {
+                            // CSI c with no prefix — DA1 query (\x1b[c or \x1b[0c)
+                            b'c' if no_prefix => true,
+                            // CSI ? ... n (DSR), c (DA1 response), h/l (DEC private mode set/reset)
+                            b'n' | b'c' | b'h' | b'l' if has_question => true,
+                            // CSI > ... c (DA2), q (XTVERSION), u (Kitty push), m (Kitty progressive)
+                            b'c' | b'q' | b'u' | b'm' if has_gt => true,
+                            // CSI < ... u (Kitty keyboard pop)
+                            b'u' if has_lt => true,
+                            _ => false,
+                        };
+                        if should_filter {
+                            continue; // drop this sequence
+                        }
+                        // Not filtered — emit the whole sequence
+                        output.extend_from_slice(&data[start..i]);
+                        continue;
+                    }
+                    // Malformed CSI — emit as-is
+                    output.extend_from_slice(&data[start..i]);
+                    continue;
+                }
+                // ESC P — DCS string (terminated by ESC \)
+                if data[i + 1] == b'P' {
+                    let start = i;
+                    i += 2; // skip ESC P
+                    // Scan for ESC \ (ST — String Terminator)
+                    loop {
+                        if i >= len {
+                            // Incomplete DCS — save for next call
+                            self.carryover.extend_from_slice(&data[start..]);
+                            return;
+                        }
+                        if data[i] == 0x1b {
+                            if i + 1 >= len {
+                                // ESC at end inside DCS — save from DCS start
+                                self.carryover.extend_from_slice(&data[start..]);
+                                return;
+                            }
+                            if data[i + 1] == b'\\' {
+                                i += 2; // skip ESC \
+                                break;
+                            }
+                        }
+                        i += 1;
+                    }
+                    continue; // drop the entire DCS string
+                }
+                // Unknown ESC sequence — pass ESC + next byte through
+            }
+            output.push(data[i]);
+            i += 1;
+        }
+    }
+}
+
+/// Stateless convenience wrapper for single-buffer filtering (tests).
+#[cfg(test)]
+fn filter_terminal_queries(input: &[u8], output: &mut Vec<u8>) {
+    PtyFilter::new().filter(input, output);
 }
 
 #[cfg(test)]
@@ -455,5 +710,276 @@ mod tests {
             msg.contains("spawn_command failed") || msg.contains("definitely-not-claude"),
             "error should identify the failed program, got: {msg}"
         );
+    }
+
+    // --- filter: outgoing query suppression ---
+
+    #[test]
+    fn filter_strips_da1_query() {
+        // CSI c — DA1 query (no prefix, no params)
+        let input = b"\x1b[c";
+        let mut out = Vec::new();
+        filter_terminal_queries(input, &mut out);
+        assert!(out.is_empty(), "DA1 query should be stripped");
+    }
+
+    #[test]
+    fn filter_strips_da1_query_with_param() {
+        // CSI 0 c — DA1 query with explicit param
+        let input = b"\x1b[0c";
+        let mut out = Vec::new();
+        filter_terminal_queries(input, &mut out);
+        assert!(out.is_empty(), "DA1 query with param should be stripped");
+    }
+
+    #[test]
+    fn filter_strips_xtversion_query() {
+        // CSI > q — XTVERSION query
+        let input = b"\x1b[>q";
+        let mut out = Vec::new();
+        filter_terminal_queries(input, &mut out);
+        assert!(out.is_empty(), "XTVERSION query should be stripped");
+    }
+
+    // --- filter: response stripping ---
+
+    #[test]
+    fn filter_strips_dsr_response() {
+        let input = b"\x1b[?997;1n";
+        let mut out = Vec::new();
+        filter_terminal_queries(input, &mut out);
+        assert!(out.is_empty(), "DSR response should be stripped");
+    }
+
+    #[test]
+    fn filter_strips_da1_response() {
+        let input = b"\x1b[?1;2;4c";
+        let mut out = Vec::new();
+        filter_terminal_queries(input, &mut out);
+        assert!(out.is_empty(), "DA1 response should be stripped");
+    }
+
+    #[test]
+    fn filter_strips_da2_response() {
+        let input = b"\x1b[>0;115;0c";
+        let mut out = Vec::new();
+        filter_terminal_queries(input, &mut out);
+        assert!(out.is_empty(), "DA2 response should be stripped");
+    }
+
+    #[test]
+    fn filter_strips_dcs_string() {
+        // DCS: ESC P >|tmux 3.6a ESC \
+        let input = b"\x1bP>|tmux 3.6a\x1b\\";
+        let mut out = Vec::new();
+        filter_terminal_queries(input, &mut out);
+        assert!(out.is_empty(), "DCS string should be stripped");
+    }
+
+    #[test]
+    fn filter_strips_interleaved_sequences() {
+        // Real-world: DSR + DCS + DA1 + banner text
+        let mut input = Vec::new();
+        input.extend_from_slice(b"\x1b[?997;1n");
+        input.extend_from_slice(b"\x1bP>|tmux 3.6a\x1b\\");
+        input.extend_from_slice(b"\x1b[?1;2;4c");
+        input.extend_from_slice(" Claude Code v2.1.109".as_bytes());
+        let mut out = Vec::new();
+        filter_terminal_queries(&input, &mut out);
+        assert_eq!(
+            String::from_utf8_lossy(&out),
+            " Claude Code v2.1.109",
+            "only the banner text should remain"
+        );
+    }
+
+    #[test]
+    fn filter_strips_dec_private_mode_set() {
+        // CSI ? 2026 h — synchronized output mode set
+        let input = b"\x1b[?2026h";
+        let mut out = Vec::new();
+        filter_terminal_queries(input, &mut out);
+        assert!(out.is_empty(), "DEC private mode set should be stripped");
+    }
+
+    #[test]
+    fn filter_strips_dec_private_mode_reset() {
+        // CSI ? 2026 l — synchronized output mode reset
+        let input = b"\x1b[?2026l";
+        let mut out = Vec::new();
+        filter_terminal_queries(input, &mut out);
+        assert!(out.is_empty(), "DEC private mode reset should be stripped");
+    }
+
+    #[test]
+    fn filter_strips_kitty_keyboard_push() {
+        // CSI > 1 u — Kitty keyboard push mode
+        let input = b"\x1b[>1u";
+        let mut out = Vec::new();
+        filter_terminal_queries(input, &mut out);
+        assert!(out.is_empty(), "Kitty keyboard push should be stripped");
+    }
+
+    #[test]
+    fn filter_strips_kitty_keyboard_pop() {
+        // CSI < u — Kitty keyboard pop mode
+        let input = b"\x1b[<u";
+        let mut out = Vec::new();
+        filter_terminal_queries(input, &mut out);
+        assert!(out.is_empty(), "Kitty keyboard pop should be stripped");
+    }
+
+    #[test]
+    fn filter_strips_kitty_progressive_enhancement() {
+        // CSI > 4;2 m — Kitty progressive enhancement
+        let input = b"\x1b[>4;2m";
+        let mut out = Vec::new();
+        filter_terminal_queries(input, &mut out);
+        assert!(out.is_empty(), "Kitty progressive enhancement should be stripped");
+    }
+
+    #[test]
+    fn filter_preserves_normal_csi() {
+        // SGR (color) sequence should pass through
+        let input = b"\x1b[32mhello\x1b[0m";
+        let mut out = Vec::new();
+        filter_terminal_queries(input, &mut out);
+        assert_eq!(out, input.to_vec(), "SGR sequences should be preserved");
+    }
+
+    #[test]
+    fn filter_preserves_cursor_movement() {
+        // CSI 4 A — cursor up (no prefix, should pass through)
+        let input = b"\x1b[4A";
+        let mut out = Vec::new();
+        filter_terminal_queries(input, &mut out);
+        assert_eq!(out, input.to_vec(), "cursor movement should be preserved");
+    }
+
+    #[test]
+    fn filter_preserves_plain_text() {
+        let input = b"hello world\n";
+        let mut out = Vec::new();
+        filter_terminal_queries(input, &mut out);
+        assert_eq!(out, input.to_vec(), "plain text should pass through unchanged");
+    }
+
+    // --- Cross-boundary stateful filter tests ---
+
+    #[test]
+    fn filter_stateful_esc_split_across_reads() {
+        // ESC at end of read 1, rest of DCS + DA1 in read 2
+        let mut f = PtyFilter::new();
+        let mut out = Vec::new();
+
+        // Read 1: banner text + ESC (start of DCS)
+        f.filter(b"hello\x1b", &mut out);
+        assert_eq!(
+            String::from_utf8_lossy(&out),
+            "hello",
+            "text before ESC emitted, ESC buffered"
+        );
+
+        // Read 2: P>|tmux 3.6a ESC \ + DA1 + more text
+        out.clear();
+        f.filter(b"P>|tmux 3.6a\x1b\\\x1b[?1;2;4c world", &mut out);
+        assert_eq!(
+            String::from_utf8_lossy(&out),
+            " world",
+            "DCS and DA1 stripped, trailing text preserved"
+        );
+    }
+
+    #[test]
+    fn filter_stateful_dcs_split_at_st() {
+        // DCS body spans reads, ST (ESC \) arrives in read 2
+        let mut f = PtyFilter::new();
+        let mut out = Vec::new();
+
+        // Read 1: full DCS start + partial body ending with ESC
+        f.filter(b"\x1bP>|tmux 3.6a\x1b", &mut out);
+        assert!(out.is_empty(), "incomplete DCS buffered, nothing emitted");
+
+        // Read 2: \ (completes ST) + normal text
+        out.clear();
+        f.filter(b"\\done", &mut out);
+        assert_eq!(
+            String::from_utf8_lossy(&out),
+            "done",
+            "DCS consumed after ST completed across boundary"
+        );
+    }
+
+    #[test]
+    fn filter_stateful_csi_split_at_params() {
+        // CSI ?997; split across reads
+        let mut f = PtyFilter::new();
+        let mut out = Vec::new();
+
+        // Read 1: ESC [ ? 997 (no final byte yet)
+        f.filter(b"\x1b[?997", &mut out);
+        assert!(out.is_empty(), "incomplete CSI buffered");
+
+        // Read 2: ;1n (completes DSR) + text
+        out.clear();
+        f.filter(b";1nok", &mut out);
+        assert_eq!(
+            String::from_utf8_lossy(&out),
+            "ok",
+            "DSR stripped after completion across boundary"
+        );
+    }
+
+    #[test]
+    fn filter_stateful_csi_split_at_bracket() {
+        // ESC [ split across reads
+        let mut f = PtyFilter::new();
+        let mut out = Vec::new();
+
+        // Read 1: text + ESC
+        f.filter(b"a\x1b", &mut out);
+        assert_eq!(String::from_utf8_lossy(&out), "a");
+
+        // Read 2: [?2026h (DEC private mode set)
+        out.clear();
+        f.filter(b"[?2026h", &mut out);
+        assert!(out.is_empty(), "DEC mode set stripped across boundary");
+    }
+
+    #[test]
+    fn filter_stateful_real_world_banner() {
+        // Simulate the exact real-world scenario: DSR + DCS + DA1 + banner
+        // split across 3 reads at arbitrary points
+        let mut f = PtyFilter::new();
+        let full = b"\x1b[?997;1n\x1bP>|tmux 3.6a\x1b\\\x1b[?1;2;4c Claude Code v2.1.109";
+
+        // Split at arbitrary points
+        let mut out = Vec::new();
+        f.filter(&full[..5], &mut out);   // \x1b[?99
+        f.filter(&full[5..12], &mut out);  // 7;1n\x1bP>
+        f.filter(&full[12..25], &mut out); // |tmux 3.6a\x1b
+        f.filter(&full[25..], &mut out);   // \\x1b[?1;2;4c Claude Code v2.1.109
+
+        assert_eq!(
+            String::from_utf8_lossy(&out),
+            " Claude Code v2.1.109",
+            "all escape sequences stripped despite arbitrary split points"
+        );
+    }
+
+    #[test]
+    fn filter_stateful_normal_esc_preserved_across_boundary() {
+        // SGR color code split across reads should still pass through
+        let mut f = PtyFilter::new();
+        let mut out = Vec::new();
+
+        // Read 1: text + ESC
+        f.filter(b"hi\x1b", &mut out);
+        assert_eq!(String::from_utf8_lossy(&out), "hi");
+
+        // Read 2: [32m (SGR green — should pass through)
+        out.clear();
+        f.filter(b"[32mgreen\x1b[0m", &mut out);
+        assert_eq!(out, b"\x1b[32mgreen\x1b[0m", "SGR preserved across boundary");
     }
 }

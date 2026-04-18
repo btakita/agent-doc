@@ -69,7 +69,7 @@
 //!   each produce a live pane in the correct session.
 
 use anyhow::{Context, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 // Re-export Tmux types from tmux-router.
@@ -81,9 +81,14 @@ pub use tmux_router::PaneMoveOp;
 
 const SESSIONS_FILE: &str = ".agent-doc/sessions.json";
 
-/// Return the path to the sessions registry file.
+/// Return the path to the sessions registry file (relative to CWD).
 pub fn registry_path() -> PathBuf {
     PathBuf::from(SESSIONS_FILE)
+}
+
+/// Return the path to the sessions registry file under `base_dir`.
+pub fn registry_path_in(base_dir: &Path) -> PathBuf {
+    base_dir.join(SESSIONS_FILE)
 }
 
 // ---------------------------------------------------------------------------
@@ -172,14 +177,19 @@ pub fn send_key(tmux: &Tmux, pane_id: &str, key: &str) -> Result<()> {
 /// `RegistryLock` first (or use `tmux_router::with_registry`). Read-only callers
 /// can call this directly for a point-in-time snapshot.
 pub(crate) fn load() -> Result<SessionRegistry> {
-    let path = PathBuf::from(SESSIONS_FILE);
+    load_in(&std::env::current_dir()?)
+}
+
+/// Load the session registry from `base_dir/.agent-doc/sessions.json`.
+pub(crate) fn load_in(base_dir: &Path) -> Result<SessionRegistry> {
+    let path = registry_path_in(base_dir);
     if !path.exists() {
         return Ok(SessionRegistry::new());
     }
     let content = std::fs::read_to_string(&path)
-        .with_context(|| format!("failed to read {}", SESSIONS_FILE))?;
+        .with_context(|| format!("failed to read {}", path.display()))?;
     let registry: SessionRegistry = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse {}", SESSIONS_FILE))?;
+        .with_context(|| format!("failed to parse {}", path.display()))?;
     Ok(registry)
 }
 
@@ -188,13 +198,18 @@ pub(crate) fn load() -> Result<SessionRegistry> {
 /// **Not locked internally.** Callers MUST hold `RegistryLock` before calling.
 /// Prefer `tmux_router::with_registry()` for safe read-modify-write cycles.
 pub(crate) fn save(registry: &SessionRegistry) -> Result<()> {
-    let path = PathBuf::from(SESSIONS_FILE);
+    save_in(&std::env::current_dir()?, registry)
+}
+
+/// Save the session registry to `base_dir/.agent-doc/sessions.json`.
+pub(crate) fn save_in(base_dir: &Path, registry: &SessionRegistry) -> Result<()> {
+    let path = registry_path_in(base_dir);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let content = serde_json::to_string_pretty(registry)?;
     std::fs::write(&path, content)
-        .with_context(|| format!("failed to write {}", SESSIONS_FILE))?;
+        .with_context(|| format!("failed to write {}", path.display()))?;
     Ok(())
 }
 
@@ -239,8 +254,21 @@ pub fn register_full(
     pid: u32,
     window: &str,
 ) -> Result<()> {
-    let _lock = RegistryLock::acquire(&registry_path())?;
-    let mut registry = load()?;
+    let base_dir = std::env::current_dir()?;
+    register_full_in(&base_dir, session_id, pane_id, file, pid, window)
+}
+
+/// Like `register_full` but with an explicit `base_dir` for the registry.
+pub fn register_full_in(
+    base_dir: &Path,
+    session_id: &str,
+    pane_id: &str,
+    file: &str,
+    pid: u32,
+    window: &str,
+) -> Result<()> {
+    let _lock = RegistryLock::acquire(&registry_path_in(base_dir))?;
+    let mut registry = load_in(base_dir)?;
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
@@ -271,7 +299,7 @@ pub fn register_full(
             window: window.to_string(),
         },
     );
-    save(&registry)
+    save_in(base_dir, &registry)
 }
 
 /// Like `register_full` but uses the provided `cwd` instead of querying the process cwd.
@@ -283,8 +311,22 @@ pub fn register_full_with_cwd(
     window: &str,
     cwd: &str,
 ) -> Result<()> {
-    let _lock = RegistryLock::acquire(&registry_path())?;
-    let mut registry = load()?;
+    let base_dir = std::env::current_dir()?;
+    register_full_with_cwd_in(&base_dir, session_id, pane_id, file, pid, window, cwd)
+}
+
+/// Like `register_full_with_cwd` but with an explicit `base_dir` for the registry.
+pub fn register_full_with_cwd_in(
+    base_dir: &Path,
+    session_id: &str,
+    pane_id: &str,
+    file: &str,
+    pid: u32,
+    window: &str,
+    cwd: &str,
+) -> Result<()> {
+    let _lock = RegistryLock::acquire(&registry_path_in(base_dir))?;
+    let mut registry = load_in(base_dir)?;
     let started = chrono_now();
 
     // Enforce single session per pane: remove stale entries pointing to same pane
@@ -312,7 +354,7 @@ pub fn register_full_with_cwd(
             window: window.to_string(),
         },
     );
-    save(&registry)
+    save_in(base_dir, &registry)
 }
 
 /// Query the tmux window ID for a pane.
@@ -486,7 +528,6 @@ mod tests {
     #[test]
     fn registry_roundtrip() {
         let dir = TempDir::new().unwrap();
-        let _guard = std::env::set_current_dir(dir.path());
 
         let mut reg = SessionRegistry::new();
         reg.insert(
@@ -500,8 +541,8 @@ mod tests {
                 window: String::new(),
             },
         );
-        save(&reg).unwrap();
-        let loaded = load().unwrap();
+        save_in(dir.path(), &reg).unwrap();
+        let loaded = load_in(dir.path()).unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded["test-session"].pane, "%42");
     }
@@ -509,8 +550,7 @@ mod tests {
     #[test]
     fn load_empty_returns_empty_map() {
         let dir = TempDir::new().unwrap();
-        let _guard = std::env::set_current_dir(dir.path());
-        let reg = load().unwrap();
+        let reg = load_in(dir.path()).unwrap();
         assert!(reg.is_empty());
     }
 
@@ -737,16 +777,15 @@ mod tests {
     // --- #tw4a: register_with_pid_and_cwd tests ---
 
     #[test]
-    #[ignore] // uses set_current_dir which is not thread-safe with other tests
     fn register_with_pid_and_cwd_stores_explicit_cwd() {
-        // register_full_with_cwd (called by register_with_pid_and_cwd) should
-        // store the provided cwd string rather than querying the process cwd.
+        // register_full_with_cwd_in should store the provided cwd string
+        // rather than querying the process cwd.
         let dir = TempDir::new().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
-        std::fs::create_dir_all(".agent-doc").unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
 
         let explicit_cwd = "/home/user/projects/my-submodule";
-        register_full_with_cwd(
+        register_full_with_cwd_in(
+            dir.path(),
             "session-cwd-test",
             "%77",
             "plan.md",
@@ -756,7 +795,7 @@ mod tests {
         )
         .unwrap();
 
-        let loaded = load().unwrap();
+        let loaded = load_in(dir.path()).unwrap();
         assert!(loaded.contains_key("session-cwd-test"), "session should be registered");
         let entry = &loaded["session-cwd-test"];
         assert_eq!(entry.cwd, explicit_cwd, "stored cwd must match the explicit value passed in");
@@ -766,18 +805,16 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // uses set_current_dir which is not thread-safe with other tests
     fn register_full_with_cwd_differs_from_process_cwd() {
-        // The cwd stored by register_full_with_cwd must be the explicitly passed value,
-        // even when it differs from the process cwd (which is what register_full uses).
+        // The cwd stored by register_full_with_cwd_in must be the explicitly passed value,
+        // even when it differs from the process cwd.
         let dir = TempDir::new().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
-        std::fs::create_dir_all(".agent-doc").unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
 
         let explicit_cwd = "/completely/different/path";
-        register_full_with_cwd("s-explicit", "%88", "doc.md", 1234, "@1", explicit_cwd).unwrap();
+        register_full_with_cwd_in(dir.path(), "s-explicit", "%88", "doc.md", 1234, "@1", explicit_cwd).unwrap();
 
-        let loaded = load().unwrap();
+        let loaded = load_in(dir.path()).unwrap();
         let entry = &loaded["s-explicit"];
         assert_eq!(entry.cwd, explicit_cwd);
         // Verify it differs from the actual process cwd
@@ -786,12 +823,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // uses set_current_dir which is not thread-safe with other tests
     fn register_full_deduplicates_pane() {
         // When a new session claims a pane, old sessions pointing to the same pane are removed
         let dir = TempDir::new().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
-        std::fs::create_dir_all(".agent-doc").unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
 
         // Seed registry with two sessions pointing to the same pane
         let mut reg = SessionRegistry::new();
@@ -817,12 +852,12 @@ mod tests {
                 window: "@1".to_string(),
             },
         );
-        save(&reg).unwrap();
+        save_in(dir.path(), &reg).unwrap();
 
         // Now register session-c with the same pane %42
-        register_full("session-c", "%42", "new-file.md", 200, "@1").unwrap();
+        register_full_in(dir.path(), "session-c", "%42", "new-file.md", 200, "@1").unwrap();
 
-        let loaded = load().unwrap();
+        let loaded = load_in(dir.path()).unwrap();
         // Only session-c should remain for pane %42
         assert!(loaded.contains_key("session-c"), "new session should exist");
         assert!(!loaded.contains_key("session-a"), "old session-a should be removed");

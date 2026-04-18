@@ -15,6 +15,7 @@ class AgentDocPopupAction : AnAction() {
             add(ActionManager.getInstance().getAction("AgentDoc.Submit"))
             add(ActionManager.getInstance().getAction("AgentDoc.RunWithJunie"))
             add(ActionManager.getInstance().getAction("AgentDoc.Claim"))
+            add(ActionManager.getInstance().getAction("AgentDoc.ForceClaim"))
             addSeparator()
             add(ActionManager.getInstance().getAction("AgentDoc.SyncLayout"))
             addSeparator()

@@ -36,6 +36,35 @@ class PatchWatcher(private val project: Project) : Disposable {
     private var ipcCallback: AgentDocLib.IpcMessageCallback? = null
     @Volatile private var running = false
 
+    /**
+     * Dedup set: tracks patch_ids that have already been applied.
+     * Prevents double-apply when both socket and file IPC deliver the same
+     * logical write (same patch_id). Entries are timestamped for cleanup.
+     */
+    private val appliedPatchIds = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val APPLIED_PATCH_TTL_MS = 60_000L // 60s TTL
+
+    /** Record a patch_id as applied (call after successful applyPatch). */
+    private fun recordApplied(patchId: String?) {
+        if (patchId == null) return
+        appliedPatchIds[patchId] = System.currentTimeMillis()
+        // Lazy cleanup: remove entries older than TTL
+        val cutoff = System.currentTimeMillis() - APPLIED_PATCH_TTL_MS
+        appliedPatchIds.entries.removeIf { it.value < cutoff }
+    }
+
+    /** Check if a patch_id was already applied (dedup guard). */
+    private fun isAlreadyApplied(patchId: String?): Boolean {
+        if (patchId == null) return false
+        val ts = appliedPatchIds[patchId] ?: return false
+        // Expired entries don't count
+        if (System.currentTimeMillis() - ts > APPLIED_PATCH_TTL_MS) {
+            appliedPatchIds.remove(patchId)
+            return false
+        }
+        return true
+    }
+
     fun start() {
         val basePath = project.basePath ?: return
         val patchesDir = File(basePath, ".agent-doc/patches")
@@ -172,13 +201,25 @@ class PatchWatcher(private val project: Project) : Disposable {
                     LOG.info("[socket] dedup: sentinel exists for patch_id ${patch.patchId} — skipping apply")
                     return true
                 }
+                if (isAlreadyApplied(patch.patchId)) {
+                    LOG.info("[socket] dedup: patch_id ${patch.patchId} already applied — skipping")
+                    return true
+                }
                 var applied = false
                 ApplicationManager.getApplication().invokeAndWait {
+                    // Re-check under EDT to avoid TOCTOU race with file watcher
+                    if (isAlreadyApplied(patch.patchId)) {
+                        LOG.info("[socket] dedup (EDT): patch_id ${patch.patchId} already applied — skipping")
+                        return@invokeAndWait
+                    }
                     applied = try {
                         applyPatch(patch)
                     } catch (e: Exception) {
                         LOG.warn("[socket] Failed to apply patch", e)
                         false
+                    }
+                    if (applied) {
+                        recordApplied(patch.patchId)
                     }
                 }
                 if (applied) {
@@ -268,9 +309,22 @@ class PatchWatcher(private val project: Project) : Disposable {
                 return
             }
 
+            // patch_id dedup: if socket IPC already applied this logical write, skip.
+            if (isAlreadyApplied(patch.patchId)) {
+                LOG.info("[patch-watcher] dedup: patch_id ${patch.patchId} already applied via socket — deleting: ${patchFile.name}")
+                patchFile.delete()
+                return
+            }
+
             ApplicationManager.getApplication().invokeLater {
                 if (isClaimedByForceDisk(patch.patchId) || isPatchAlreadyApplied(patch, patchFile)) {
                     LOG.info("[patch-watcher] dedup (inner): skipping apply for ${patchFile.name}")
+                    return@invokeLater
+                }
+                // Re-check patch_id dedup under EDT (socket handler may have applied between queue and EDT dispatch)
+                if (isAlreadyApplied(patch.patchId)) {
+                    LOG.info("[patch-watcher] dedup (EDT): patch_id ${patch.patchId} already applied — deleting: ${patchFile.name}")
+                    patchFile.delete()
                     return@invokeLater
                 }
                 val applyStart = System.nanoTime()
@@ -283,6 +337,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                 val applyMs = (System.nanoTime() - applyStart) / 1_000_000
                 if (applyMs > 50) LOG.info("[perf] applyPatch: ${applyMs}ms ${patch.file}")
                 if (applied) {
+                    recordApplied(patch.patchId)
                     patchFile.delete()
                 } else {
                     LOG.warn("Patch not applied, leaving file for retry: ${patchFile.name}")

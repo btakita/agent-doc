@@ -161,7 +161,7 @@ pub(crate) fn save_project_to(config: &ProjectConfig, path: &Path) -> Result<()>
 }
 
 /// Update the project's configured tmux session.
-/// Called when the configured session is dead and we fall back to a different one.
+/// Called by `agent-doc session set <name>` when the user explicitly pins a session.
 pub fn update_project_tmux_session(new_session: &str) -> Result<()> {
     let mut config = load_project();
     let old = config.tmux_session.clone();
@@ -171,6 +171,19 @@ pub fn update_project_tmux_session(new_session: &str) -> Result<()> {
         "[config] updated tmux_session: {} → {}",
         old.as_deref().unwrap_or("(none)"),
         new_session
+    );
+    Ok(())
+}
+
+/// Clear the project's configured tmux session, returning to auto-detect mode.
+pub fn clear_project_tmux_session() -> Result<()> {
+    let mut config = load_project();
+    let old = config.tmux_session.clone();
+    config.tmux_session = None;
+    save_project(&config)?;
+    eprintln!(
+        "[config] cleared tmux_session: {} → (auto-detect)",
+        old.as_deref().unwrap_or("(none)"),
     );
     Ok(())
 }

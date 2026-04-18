@@ -19,9 +19,12 @@
 //! - Opens a persistent session log at `.agent-doc/logs/<session-uuid>.log`,
 //!   appending timestamped events for session start, claude start/restart/exit,
 //!   user quit, and session end.
-//! - On `--continue` restarts, spawns a background thread that waits 5 seconds
-//!   then sends `/agent-doc <file>` via `tmux send-keys` to auto-trigger
-//!   the skill workflow in the resumed conversation.
+//! - On `--continue` restarts, spawns a background thread that polls
+//!   `tmux capture-pane` for the Claude Code prompt character (`❯`) before
+//!   sending `/agent-doc <file>` via `tmux send-keys` to auto-trigger
+//!   the skill workflow in the resumed conversation. This avoids the race
+//!   where DSR (Device Status Report) escape sequences interleave with the
+//!   injected command, corrupting Claude Code's input state.
 //!
 //! ## Agentic Contracts
 //! - The file path must exist before `run` is called; callers must not rely on
@@ -56,10 +59,17 @@
 //!   which overrides `AGENT_DOC_CLAUDE_ARGS`; each layer verified independently.
 
 use anyhow::{Context, Result};
+use portable_pty::PtySize;
 use std::io::Write;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 
-use crate::{config, frontmatter, sessions};
+use crate::supervisor::{
+    cwd, env::EnvSpec, ipc::{IpcMethod, IpcResponse, SupervisorIpc},
+    pty::PtySpawnConfig, resize, state::{CrashPolicy, RestartAction, SupervisorState},
+};
+use crate::{config, frontmatter, sessions, snapshot};
 
 /// Open (or create) the session log file at `.agent-doc/logs/<session-uuid>.log`.
 /// Returns a writable file handle in append mode, or None if the directory can't be created.
@@ -101,7 +111,252 @@ fn log_event(log: &mut Option<std::fs::File>, msg: &str) {
     }
 }
 
-/// Expand frontmatter env values through the shell, preserving document order.
+/// Put stdin into raw mode so the outer pty line discipline doesn't translate
+/// input bytes (ICRNL converts \r → \n, breaking Enter for Claude Code's TUI).
+/// Restores original termios on drop.
+#[cfg(unix)]
+struct RawMode {
+    original: libc::termios,
+}
+
+#[cfg(unix)]
+impl RawMode {
+    fn enable() -> Self {
+        unsafe {
+            let mut original: libc::termios = std::mem::zeroed();
+            libc::tcgetattr(libc::STDIN_FILENO, &mut original);
+            let mut raw = original;
+            libc::cfmakeraw(&mut raw);
+            libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &raw);
+            Self { original }
+        }
+    }
+
+    /// Temporarily restore cooked mode (for read_line prompts).
+    fn suspend(&self) {
+        unsafe {
+            libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &self.original);
+        }
+    }
+
+    /// Re-enable raw mode after a suspend.
+    fn resume(&self) {
+        unsafe {
+            let mut raw = self.original;
+            libc::cfmakeraw(&mut raw);
+            libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &raw);
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for RawMode {
+    fn drop(&mut self) {
+        unsafe {
+            libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &self.original);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+struct RawMode;
+
+#[cfg(not(unix))]
+impl RawMode {
+    fn enable() -> Self { Self }
+    fn suspend(&self) {}
+    fn resume(&self) {}
+}
+
+/// Shared writer handle: outer Mutex guards replace/clear, inner Mutex guards concurrent writes.
+type SharedWriter = Mutex<Option<Arc<Mutex<Box<dyn Write + Send>>>>>;
+
+/// Shared state between the main supervisor loop and the IPC handler thread.
+struct SupervisorShared {
+    /// Current supervisor state for IPC `state` queries.
+    supervisor_state: Mutex<SupervisorState>,
+    /// Current restart count.
+    restart_count: AtomicU32,
+    /// Whether a child is currently running.
+    running: AtomicBool,
+    /// CWD source tag for IPC `state` responses.
+    cwd_source: &'static str,
+    /// Writer handle for IPC `inject`. Replaced on each spawn, cleared between restarts.
+    inject_writer: SharedWriter,
+    /// Child PID for IPC `pid` queries and `kill` on restart/stop.
+    child_pid: AtomicU32,
+    /// Flag: IPC requested a restart.
+    restart_requested: AtomicBool,
+    /// Flag: IPC requested a stop.
+    stop_requested: AtomicBool,
+    /// Restart mode requested via IPC ("fresh" or "continue").
+    restart_mode: Mutex<String>,
+}
+
+impl SupervisorShared {
+    fn new(cwd_source: &'static str) -> Self {
+        Self {
+            supervisor_state: Mutex::new(SupervisorState::Healthy),
+            restart_count: AtomicU32::new(0),
+            running: AtomicBool::new(false),
+            cwd_source,
+            inject_writer: Mutex::new(None),
+            child_pid: AtomicU32::new(0),
+            restart_requested: AtomicBool::new(false),
+            stop_requested: AtomicBool::new(false),
+            restart_mode: Mutex::new("continue".to_string()),
+        }
+    }
+
+    /// Send SIGTERM to the child process to unblock `wait()`.
+    #[cfg(unix)]
+    fn kill_child(&self) {
+        let pid = self.child_pid.load(Ordering::Relaxed);
+        if pid > 0 {
+            unsafe {
+                libc::kill(pid as libc::pid_t, libc::SIGTERM);
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn kill_child(&self) {
+        // On non-Unix, we can't send signals. The main loop will detect
+        // the flags after the child exits naturally or via other means.
+    }
+}
+
+fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcResponse {
+    match method {
+        IpcMethod::State => {
+            let state = shared.supervisor_state.lock().unwrap();
+            IpcResponse::ok(serde_json::json!({
+                "running": shared.running.load(Ordering::Relaxed),
+                "state": state.as_str(),
+                "restart_count": shared.restart_count.load(Ordering::Relaxed),
+                "cwd_source": shared.cwd_source,
+            }))
+        }
+        IpcMethod::Pid => {
+            let pid = shared.child_pid.load(Ordering::Relaxed);
+            if pid > 0 {
+                IpcResponse::ok(serde_json::json!({ "pid": pid }))
+            } else {
+                IpcResponse::ok(serde_json::json!({ "pid": null }))
+            }
+        }
+        IpcMethod::Inject { bytes } => {
+            let guard = shared.inject_writer.lock().unwrap();
+            match guard.as_ref() {
+                Some(writer_arc) => {
+                    let mut w = writer_arc.lock().unwrap();
+                    match w.write_all(bytes.as_bytes()).and_then(|_| w.flush()) {
+                        Ok(()) => IpcResponse::ok(serde_json::json!({ "n": bytes.len() })),
+                        Err(e) => IpcResponse::err(format!("write error: {e}")),
+                    }
+                }
+                None => IpcResponse::err("no active session"),
+            }
+        }
+        IpcMethod::Restart { mode } => {
+            *shared.restart_mode.lock().unwrap() = mode;
+            shared.restart_requested.store(true, Ordering::Relaxed);
+            shared.kill_child();
+            IpcResponse::ok_empty()
+        }
+        IpcMethod::Stop { graceful: _ } => {
+            shared.stop_requested.store(true, Ordering::Relaxed);
+            shared.kill_child();
+            IpcResponse::ok_empty()
+        }
+    }
+}
+
+/// Spawn the master→stdout forwarding thread with escape sequence filtering.
+fn spawn_reader_thread(mut reader: Box<dyn std::io::Read + Send>) -> std::thread::JoinHandle<()> {
+    std::thread::Builder::new()
+        .name("pty->stdout".into())
+        .spawn(move || {
+            let mut buf = [0u8; 8192];
+            let mut filtered = Vec::with_capacity(8192);
+            let stdout = std::io::stdout();
+            let debug_filter = std::env::var("AGENT_DOC_DEBUG_FILTER").is_ok();
+            // Stateful filter — carries partial escape sequences across reads
+            let mut pty_filter = crate::supervisor::pty::PtyFilter::new();
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if debug_filter {
+                            // Log raw bytes, showing escape sequences as hex
+                            let raw = &buf[..n];
+                            let mut display = String::new();
+                            for &b in raw {
+                                if b == 0x1b {
+                                    display.push_str("\\x1b");
+                                } else if b.is_ascii_graphic() || b == b' ' {
+                                    display.push(b as char);
+                                } else {
+                                    display.push_str(&format!("\\x{b:02x}"));
+                                }
+                            }
+                            eprintln!("[pty-filter] raw ({n} bytes): {display}");
+                        }
+                        filtered.clear();
+                        pty_filter.filter(&buf[..n], &mut filtered);
+                        if debug_filter {
+                            let mut display = String::new();
+                            for &b in &filtered {
+                                if b == 0x1b {
+                                    display.push_str("\\x1b");
+                                } else if b.is_ascii_graphic() || b == b' ' {
+                                    display.push(b as char);
+                                } else {
+                                    display.push_str(&format!("\\x{b:02x}"));
+                                }
+                            }
+                            eprintln!("[pty-filter] filtered ({} bytes): {display}", filtered.len());
+                        }
+                        if filtered.is_empty() {
+                            continue;
+                        }
+                        let mut lock = stdout.lock();
+                        if lock.write_all(&filtered).is_err() || lock.flush().is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        })
+        .expect("spawn pty->stdout thread")
+}
+
+/// Spawn the stdin→master forwarding thread using a shared writer.
+fn spawn_writer_thread(writer: Arc<Mutex<Box<dyn Write + Send>>>) -> std::thread::JoinHandle<()> {
+    std::thread::Builder::new()
+        .name("stdin->pty".into())
+        .spawn(move || {
+            let mut buf = [0u8; 4096];
+            let stdin = std::io::stdin();
+            loop {
+                let mut lock = stdin.lock();
+                match std::io::Read::read(&mut lock, &mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        drop(lock);
+                        let mut w = writer.lock().unwrap();
+                        if w.write_all(&buf[..n]).is_err() || w.flush().is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        })
+        .expect("spawn stdin->pty thread")
+}
+
 pub fn run(file: &Path) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -121,12 +376,33 @@ pub fn run(file: &Path) -> Result<()> {
     let (fm, _body) = frontmatter::parse(&updated_content)?;
     let resolved_claude_args = fm
         .claude_args
+        .clone()
         .or_else(|| config::load().ok().and_then(|c| c.claude_args))
         .or_else(|| std::env::var("AGENT_DOC_CLAUDE_ARGS").ok());
 
     // Must be inside tmux
     if !sessions::in_tmux() {
-        anyhow::bail!("not running inside tmux — start a tmux session first");
+        // Distinguish "tmux not installed" from "not inside a tmux session"
+        let tmux_installed = std::process::Command::new("which")
+            .arg("tmux")
+            .output()
+            .is_ok_and(|o| o.status.success());
+        if !tmux_installed {
+            let hint = if cfg!(target_os = "macos") {
+                "brew install tmux"
+            } else if cfg!(target_os = "linux") {
+                "sudo apt install tmux  # or: sudo pacman -S tmux / sudo dnf install tmux"
+            } else {
+                "Install WSL first, then: sudo apt install tmux"
+            };
+            anyhow::bail!(
+                "tmux is not installed.\n\n  Install it:\n    {}\n\n  Then start a tmux session:\n    tmux new-session -s dev",
+                hint
+            );
+        }
+        anyhow::bail!(
+            "not running inside tmux — start a tmux session first:\n    tmux new-session -s dev"
+        );
     }
 
     let pane_id = sessions::current_pane()?;
@@ -164,50 +440,100 @@ pub fn run(file: &Path) -> Result<()> {
     // Fire document-level session_start hooks
     crate::hooks::fire_doc_hooks(&fm.hooks, "session_start", file, &session_id, &fm.agent, &fm.model);
 
-    // Run claude in a restart loop — pane never dies
+    // --- Supervisor setup ---
+
+    // Resolve CWD deterministically
+    let resolved_cwd = cwd::resolve(None, fm.cwd.as_deref(), &canonical)?;
+    log_event(
+        &mut session_log,
+        &format!(
+            "cwd_resolved path={} source={}",
+            resolved_cwd.path.display(),
+            resolved_cwd.source.as_str()
+        ),
+    );
+
+    // Resolve env once at startup — reused across all restarts for determinism
+    let env_spec = EnvSpec::from_frontmatter(&fm);
+    let mut resolved_env = env_spec.resolve()?;
+    if fm.enable_tool_search.unwrap_or(false) {
+        resolved_env.insert("ENABLE_TOOL_SEARCH".into(), "true".into());
+    }
+
+    // Build base args (resolved once, reused across restarts)
+    let mut base_args: Vec<String> = Vec::new();
+    if let Some(ref args) = resolved_claude_args {
+        base_args.extend(args.split_whitespace().map(String::from));
+    }
+    if fm.no_mcp.unwrap_or(false) {
+        base_args.push("--no-mcp".into());
+    }
+
+    // Query initial terminal size
+    let initial_size = {
+        #[cfg(unix)]
+        {
+            resize::query_terminal_size(libc::STDIN_FILENO)
+                .map(|(rows, cols)| PtySize {
+                    rows,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
+                .unwrap_or(PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
+        }
+        #[cfg(not(unix))]
+        {
+            PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            }
+        }
+    };
+
+    // Find project root for IPC socket placement
+    let project_root = snapshot::find_project_root(&canonical)
+        .unwrap_or_else(|| resolved_cwd.path.clone());
+
+    // Create shared state for IPC handler
+    let shared = Arc::new(SupervisorShared::new(resolved_cwd.source.as_str()));
+
+    // Start IPC listener
+    let shared_for_ipc = shared.clone();
+    let mut ipc = SupervisorIpc::start(&project_root, &session_id, move |method| {
+        handle_ipc(method, &shared_for_ipc)
+    })?;
+    log_event(
+        &mut session_log,
+        &format!("ipc_started project_root={}", project_root.display()),
+    );
+
+    // Crash policy state machine
+    let mut policy = CrashPolicy::new();
+
+    // Put stdin into raw mode so the outer pty's line discipline doesn't
+    // mangle input bytes (e.g. ICRNL converting \r→\n). Claude Code sets
+    // the inner pty slave to raw mode and expects \r for Enter — without
+    // this, the outer pty's cooked mode silently converts \r to \n before
+    // we even read it, breaking Enter for Claude Code's TUI.
+    let raw_mode = RawMode::enable();
+
+    // --- Supervisor restart loop ---
     let mut first_run = true;
     let mut restart_count: u32 = 0;
+    let mut resize_watcher: Option<resize::ResizeWatcher> = None;
     loop {
-        let mut cmd = std::process::Command::new("claude");
-        // Add resolved claude_args before other flags
-        if let Some(ref args) = resolved_claude_args {
-            for arg in args.split_whitespace() {
-                cmd.arg(arg);
-            }
-        }
-        // Add --no-mcp if frontmatter sets no_mcp: true
-        if fm.no_mcp.unwrap_or(false) {
-            cmd.arg("--no-mcp");
-        }
-        // Set ENABLE_TOOL_SEARCH env var if frontmatter sets enable_tool_search: true
-        if fm.enable_tool_search.unwrap_or(false) {
-            cmd.env("ENABLE_TOOL_SEARCH", "true");
-        }
-        // Expand and set frontmatter env vars on the child process.
-        // Values are expanded through the shell in document order so later
-        // values can reference earlier keys (e.g., $OPENROUTER_API_KEY).
-        if !fm.env.is_empty() {
-            match crate::env::expand_values(&fm.env) {
-                Ok(expanded) => {
-                    for (key, value) in &expanded {
-                        match value {
-                            Some(v) => {
-                                cmd.env(key, v);
-                            }
-                            None => {
-                                cmd.env_remove(key);
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("[env] warning: failed to expand env values: {}", e);
-                }
-            }
-        }
+        // Build args for this iteration
+        let mut args = base_args.clone();
         let auto_trigger = if !first_run {
-            // After first run, continue the previous session
-            cmd.arg("--continue");
+            args.push("--continue".into());
             eprintln!("Restarting claude (--continue)...");
             log_event(
                 &mut session_log,
@@ -220,22 +546,110 @@ pub fn run(file: &Path) -> Result<()> {
                 &mut session_log,
                 &format!(
                     "claude_start mode={} restart_count={}",
-                    if restart_count == 0 { "fresh" } else { "fresh_restart" },
+                    if restart_count == 0 {
+                        "fresh"
+                    } else {
+                        "fresh_restart"
+                    },
                     restart_count
                 ),
             );
             false
         };
 
-        // For --continue restarts, schedule auto-trigger of /agent-doc via tmux send-keys
-        // after a short delay to let Claude initialize
+        // Build PtySpawnConfig and spawn child under pty
+        let cfg = PtySpawnConfig {
+            program: "claude".into(),
+            args,
+            cwd: resolved_cwd.path.clone(),
+            env: resolved_env.clone(),
+            size: initial_size,
+        };
+        let mut session =
+            crate::supervisor::pty::PtySession::spawn(cfg).context("failed to spawn claude")?;
+
+        // Extract writer and reader for shared I/O
+        let pty_writer = session.take_writer()?;
+        let pty_reader = session.clone_reader()?;
+        let writer_arc = Arc::new(Mutex::new(pty_writer));
+
+        // Update shared state
+        *shared.inject_writer.lock().unwrap() = Some(writer_arc.clone());
+        shared
+            .child_pid
+            .store(session.process_id().unwrap_or(0), Ordering::Relaxed);
+        shared.running.store(true, Ordering::Relaxed);
+        shared
+            .restart_count
+            .store(restart_count, Ordering::Relaxed);
+        shared.restart_requested.store(false, Ordering::Relaxed);
+        shared.stop_requested.store(false, Ordering::Relaxed);
+
+        // Spawn I/O forwarding threads
+        let _reader_thread = spawn_reader_thread(pty_reader);
+        let _writer_thread = spawn_writer_thread(writer_arc);
+
+        // Start resize watcher (stop previous one first)
+        if let Some(mut rw) = resize_watcher.take() {
+            rw.stop();
+        }
+        let resize_handle = session.resize_handle()?;
+        resize_watcher = resize::ResizeWatcher::spawn(move |size| {
+            if let Err(e) = resize_handle.resize(size) {
+                eprintln!("[supervisor::resize] resize error: {e}");
+            }
+        })
+        .ok();
+
+        // For --continue restarts, poll for Claude Code prompt then send /agent-doc
         if auto_trigger {
             let trigger_pane = pane_id.clone();
             let trigger_file = file.to_string_lossy().to_string();
             let mut trigger_log = session_log.as_ref().and_then(|f| f.try_clone().ok());
             std::thread::spawn(move || {
-                // Wait for Claude to initialize and be ready for input
-                std::thread::sleep(std::time::Duration::from_secs(5));
+                // Poll tmux capture-pane for the Claude Code prompt character.
+                // This avoids the race where DSR escape sequences (^[[?997;1n,
+                // ^[P>|tmux...^[\) interleave with injected command bytes when
+                // using a fixed sleep, corrupting Claude Code's input state.
+                let mut ready = false;
+                for attempt in 0..60 {
+                    // Initial 2s grace period — Claude needs time to start
+                    if attempt == 0 {
+                        std::thread::sleep(std::time::Duration::from_secs(2));
+                    } else {
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                    }
+                    if let Ok(output) = std::process::Command::new("tmux")
+                        .args(["capture-pane", "-t", &trigger_pane, "-p"])
+                        .output()
+                        && output.status.success()
+                    {
+                        let text = String::from_utf8_lossy(&output.stdout);
+                        // Claude Code uses ❯ (U+276F) or ⏵ as prompt chars.
+                        // Check the last ~20 lines for a prompt on its own line.
+                        let lines: Vec<&str> = text.lines().collect();
+                        let tail = if lines.len() > 20 { &lines[lines.len() - 20..] } else { &lines };
+                        if tail.iter().any(|l| {
+                            let trimmed = l.trim();
+                            trimmed == "❯" || trimmed == "⏵" || trimmed.ends_with("❯") || trimmed.ends_with("⏵")
+                        }) {
+                            ready = true;
+                            break;
+                        }
+                    }
+                }
+                if !ready {
+                    if let Some(ref mut f) = trigger_log {
+                        let ts = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
+                        let _ = writeln!(f, "[{}] auto_trigger_timeout (no prompt after 30s)", ts);
+                    }
+                    eprintln!("[agent-doc] auto-trigger: timed out waiting for Claude prompt");
+                    return;
+                }
+
                 let trigger_cmd = format!("/agent-doc {}", trigger_file);
                 let status = std::process::Command::new("tmux")
                     .args(["send-keys", "-t", &trigger_pane, &trigger_cmd, "Enter"])
@@ -265,42 +679,106 @@ pub fn run(file: &Path) -> Result<()> {
             });
         }
 
-        let status = cmd.status().context("failed to run claude")?;
+        // Block until child exits
+        let status = session.wait().context("failed waiting on claude")?;
         first_run = false;
 
-        let code = status.code().unwrap_or(1);
+        // Clean up shared state
+        shared.running.store(false, Ordering::Relaxed);
+        *shared.inject_writer.lock().unwrap() = None;
+        shared.child_pid.store(0, Ordering::Relaxed);
+
+        // Check IPC-requested stop
+        if shared.stop_requested.load(Ordering::Relaxed) {
+            log_event(&mut session_log, "ipc_stop");
+            break;
+        }
+
+        // Check IPC-requested restart (override normal exit classification)
+        if shared.restart_requested.load(Ordering::Relaxed) {
+            let mode = shared.restart_mode.lock().unwrap().clone();
+            first_run = mode == "fresh";
+            restart_count += 1;
+            log_event(
+                &mut session_log,
+                &format!("ipc_restart mode={} restart_count={}", mode, restart_count),
+            );
+            continue;
+        }
+
+        // Normal exit classification via CrashPolicy
+        let code = status.exit_code() as i32;
         log_event(
             &mut session_log,
             &format!("claude_exit code={} restart_count={}", code, restart_count),
         );
 
-        if code == 0 {
-            // Clean exit — prompt user
-            eprintln!("\nClaude exited cleanly.");
-            eprintln!("Press Enter to restart, or 'q' to exit.");
-            let mut input = String::new();
-            if std::io::stdin().read_line(&mut input).is_err() {
-                log_event(&mut session_log, "stdin_read_failed — exiting loop");
+        let action = policy.on_exit(code);
+        *shared.supervisor_state.lock().unwrap() = policy.state;
+
+        match action {
+            RestartAction::PromptUser => {
+                // Temporarily restore cooked mode so read_line() works with
+                // normal line editing (echo, backspace, etc.)
+                raw_mode.suspend();
+                eprintln!("\nClaude exited cleanly.");
+                eprintln!("Press Enter to restart, or 'q' to exit.");
+                let mut input = String::new();
+                if std::io::stdin().read_line(&mut input).is_err() {
+                    log_event(&mut session_log, "stdin_read_failed — exiting loop");
+                    break;
+                }
+                if input.trim().eq_ignore_ascii_case("q") {
+                    log_event(&mut session_log, "user_quit");
+                    break;
+                }
+                // User pressed Enter — restart fresh
+                raw_mode.resume();
+                first_run = true;
+                restart_count += 1;
+            }
+            RestartAction::RestartAfter {
+                delay,
+                with_continue,
+            } => {
+                eprintln!(
+                    "\nClaude exited with code {}. Restarting in {:?}...",
+                    code, delay
+                );
+                log_event(
+                    &mut session_log,
+                    &format!(
+                        "auto_restart delay={:?} with_continue={} restart_count={}",
+                        delay,
+                        with_continue,
+                        restart_count + 1
+                    ),
+                );
+                std::thread::sleep(delay);
+                if !with_continue {
+                    first_run = true;
+                }
+                restart_count += 1;
+            }
+            RestartAction::Halt => {
+                eprintln!(
+                    "\nSupervisor halted after {} restarts (flapping detected).",
+                    restart_count
+                );
+                log_event(&mut session_log, "supervisor_halted");
                 break;
             }
-            if input.trim().eq_ignore_ascii_case("q") {
-                log_event(&mut session_log, "user_quit");
-                break;
-            }
-            // User pressed Enter — restart fresh
-            first_run = true;
-            restart_count += 1;
-        } else {
-            // Non-zero exit (context exhaustion, crash, etc.) — auto-restart
-            eprintln!(
-                "\nClaude exited with code {}. Auto-restarting in 2s...",
-                code
-            );
-            restart_count += 1;
-            std::thread::sleep(std::time::Duration::from_secs(2));
         }
     }
 
+    // Restore terminal to original mode before cleanup
+    drop(raw_mode);
+
+    // Cleanup
+    if let Some(mut rw) = resize_watcher.take() {
+        rw.stop();
+    }
+    ipc.stop();
     log_event(&mut session_log, "session_end");
     eprintln!("Session ended for {}", file.display());
     Ok(())
@@ -442,5 +920,4 @@ mod tests {
         assert_eq!(output, ":", "expected empty agent+model, got: {}", output);
         let _ = std::fs::remove_file(&tmp);
     }
-
 }

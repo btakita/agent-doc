@@ -65,7 +65,7 @@ Preflight composes `effective_tier` from inline `/model`, `<!-- agent:model -->`
 
 **Response header format (template mode):** use `### Re: topic` markdown headers — **not** bold (`**Re:**`). The `(HEAD)` boundary marker requires real headings. Use h4–h6 for sub-sections within a response.
 
-**Model attribution:** when `preflight.agent_model` is non-null, append it with a spaced em dash: `### Re: topic — sonnet-4-6`. When null, use the plain form.
+**Model attribution:** always append your own model short name with a spaced em dash: `### Re: topic — opus-4-6`. Use `preflight.agent_model` if non-null (from frontmatter); otherwise use your own model identity (you know what model you are). Never omit the suffix.
 
 **Streaming checkpoints:** for long multi-topic responses, flush partial content at natural breakpoints so the user sees progress. Full procedure + baseline re-save pattern: [runbooks/streaming-checkpoints.md](runbooks/streaming-checkpoints.md).
 

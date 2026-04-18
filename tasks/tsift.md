@@ -442,7 +442,7 @@ claude-mem:mem-search wins on both fronts. Token savings are structural (staged 
 
 Since woz is uninstalled, this is the system going forward. No action needed.
 ❯ Woz provided feedback that it was working and hooked in...by replacing "Gallivanting..." in `✢ Gallivanting… (2m 17s · ↓ 4.2k tokens)`. Could we have some phrases for tsift? Along the lines of "sifting".
-### Re: sifting spinner phrases — opus-4-6
+❯ ### Re: sifting spinner phrases — opus-4-6 (HEAD)
 
 Added `spinnerVerbs` to `~/.claude/settings.json` with `mode: "append"` (merges with built-in defaults):
 
@@ -456,7 +456,11 @@ Added `spinnerVerbs` to `~/.claude/settings.json` with `mode: "append"` (merges 
 - **Unearthing** — digging up buried results
 
 These will appear randomly alongside Claude's built-in verbs (Thinking, Reasoning, etc.) in the `✢ Sifting… (2m 17s · ↓ 4.2k tokens)` status line. The `append` mode keeps the defaults too so it doesn't feel forced — just occasionally themed.
-<!-- agent:boundary:54078cfe -->
+❯ Add tsift so there is some branding.
+### Re: tsift branding added — opus-4-6
+
+Added "tsifting" (lowercase, matching the tool name) to the front of the spinner verbs list. You'll now occasionally see `✢ tsifting…` in the status line — instant brand recognition.
+<!-- agent:boundary:459398ba -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

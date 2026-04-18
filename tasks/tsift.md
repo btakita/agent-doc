@@ -48,20 +48,20 @@ Expanded tsift to be the all-in-one audit + token sifter tool. Added `tsift audi
 - **Report mode** — `tsift audit --report` writes to `tasks/agent-doc/skills-audit.md` for nightly cron
 
 This replaces the standalone skills-janitor fork (#vdyj from agent-doc-bugs). The skills-janitor *skill* stays installed as a reference implementation / comparison target until tsift audit is functional.
-<!-- agent:boundary:8b2f09a0 -->
+<!-- agent:boundary:1fa78a30 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] Wire Sift as search backend (shell-out to `sift` binary, parse output)
-- [ ] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] Batch edit command: accept multiple file edits in one invocation
-- [ ] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] Agent model routing skill: haiku for search, sonnet for edits, opus for architecture
-- [ ] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] SQL introspection: connect to SQLite/Postgres, expose schema + query
-- [ ] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] Claude Code hook integration: rewrite commands through tsift like rtk does
-- [ ] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] CLAUDE.md with project conventions
-- [ ] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] CI: GitHub Actions for cargo test + clippy
-- [ ] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] [#] Release workflow: crates.io + GitHub Releases with prebuilt binaries
+- [ ] [#92bz] Wire Sift as search backend (shell-out to `sift` binary, parse output)
+- [ ] [#mwhg] Batch edit command: accept multiple file edits in one invocation
+- [ ] [#6jmq] Agent model routing skill: haiku for search, sonnet for edits, opus for architecture
+- [ ] [#yscf] SQL introspection: connect to SQLite/Postgres, expose schema + query
+- [ ] [#95as] Claude Code hook integration: rewrite commands through tsift like rtk does
+- [ ] [#kq5t] CLAUDE.md with project conventions
+- [ ] [#e15f] CI: GitHub Actions for cargo test + clippy
+- [ ] [#tmv7] Release workflow: crates.io + GitHub Releases with prebuilt binaries
 - [ ] [#nkec] tsift audit: skill drift detection — scan installed skills, compare against manifest, flag stale/broken/missing
 - [ ] [#865b] tsift audit: duplicate skill detection — find overlapping skills by description similarity
 - [ ] [#ay3j] tsift audit: usage tracking — analyze claude-mem/session history for skill invocation frequency, flag never-used skills

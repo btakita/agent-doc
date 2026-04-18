@@ -446,7 +446,7 @@ agent-doc write doc.md --pending-edit "gqep=[/release] Release v0.32.4"
 **So agent-doc never guesses.** It's a dumb pattern matcher: when `resolve-gate release` fires, it finds items matching `[/release]` and flips them. The intelligence is in your workflow — you decide when an item transitions from `[/]` (generic gate) to `[/release]` (typed, machine-resolvable gate).
 
 Think of it like git tags vs branches: git doesn't decide what to tag — you tag what you want, and the tooling acts on matching tags.
-### Re: Skill-layer inference on `do` — opus-4-6
+❯ ### Re: Skill-layer inference on `do` — opus-4-6 (HEAD)
 
 The **binary** won't infer gate types — it's deliberately dumb about semantics. But the **skill** (the Claude agent responding to `do #task-id`) absolutely can.
 
@@ -474,7 +474,35 @@ When you write `do #gqep` and the item says "Release v0.32.4", the skill already
 So the inference is in the AI layer (where semantic understanding lives), and the resolution is in the binary layer (where pattern matching lives). Clean separation — the binary never needs to understand English, and the skill never needs to implement event detection.
 
 This is essentially what the skill already does informally — when you say `do #gqep`, the agent decides what "done" means for that item. The typed gate just makes that decision explicit and machine-actionable.
-<!-- agent:boundary:a723bf41 -->
+❯ do #77mf
+### Re: do #77mf — Event-driven gate resolution — opus-4-6
+
+Implemented. Three new capabilities landed:
+
+**1. Typed gate markers** — parser now recognizes `[/release]`, `[/deploy]`, `[/code-review]`, etc. alongside plain `[/]`. Gate types are alphanumeric with hyphens/underscores, case-insensitive, stored lowercase.
+
+**2. Per-file commands** (under `agent-doc pending <FILE>`):
+- `resolve-gate <type>` — finds all `[/<type>]` items in the file and flips to `[x]`
+- `set-gate-type <id> <type>` — transitions `[/]` → `[/release]` (errors if not gated)
+
+**3. Project-wide scan** (top-level `agent-doc resolve-gate <type>`):
+- Scans all `.md` files under project root (or `--scope <dir>`)
+- Finds items with matching typed gates across all documents
+- Designed for hook integration:
+```jsonc
+// settings.json
+{ "match": "cargo publish", "run": "agent-doc resolve-gate release" }
+{ "match": "git push",      "run": "agent-doc resolve-gate deploy" }
+```
+
+**4. Write command flags** for atomic pending+response cycles:
+- `--pending-resolve-gate <type>` — resolve typed gates during write
+- `--pending-set-gate-type id=type` — set typed gate during write
+
+**State machine:** `[/release]` is a refinement of `[/]`. The gate type is metadata on `Gated` state, cleared when resolved to `[x]`. Untyped `[/]` items are never touched by `resolve-gate`.
+
+**Tests:** 20 new tests covering parse, render, roundtrip, resolve, set-gate-type, scan, case insensitivity, and edge cases. All 1111 tests pass, clippy clean.
+<!-- agent:boundary:2eeade60 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -486,7 +514,7 @@ This is essentially what the skill already does informally — when you say `do 
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [ ] [#77mf] Event-driven gate resolution: typed gate markers like [/release] and [/deploy] that auto-resolve on matching events (cargo publish, git push). Extends the binary [/] invariant with machine-actionable gate types — reaper checks event log before skipping.
+- [x] [#77mf] Event-driven gate resolution: typed gate markers like [/release] and [/deploy] that auto-resolve on matching events (cargo publish, git push). Extends the binary [/] invariant with machine-actionable gate types — reaper checks event log before skipping.
 - [/] [#6hgf] Add --status flag to agent-doc write: skill passes status text as CLI arg, binary handles component targeting with replace semantics
 <!-- /agent:pending -->
 ## Assistant

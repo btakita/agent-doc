@@ -356,7 +356,7 @@ Claude Code will now auto-invoke `/tsift` for exploratory queries. Each auto-tri
 ### Re: tsift reinstalled — sonnet-4-6
 
 Done. `cargo install --path .` replaced the binary — latest build now in `~/.cargo/bin/tsift`. The TRIGGER/SKIP changes in SKILL.md are skill metadata only (no binary change needed), but the binary is confirmed current.
-<!-- agent:boundary:582a19b4 -->
+<!-- agent:boundary:d02b16ec -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

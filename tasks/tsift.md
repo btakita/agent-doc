@@ -477,7 +477,7 @@ Added "tsifting" (lowercase, matching the tool name) to the front of the spinner
                                                                  woz/0.3.40 (woz@wozcode-marketplace — run /plugin to
                                                                  reinstall)
 ```
-### Re: woz cleanup completed — sonnet-4-6
+❯ ### Re: woz cleanup completed — sonnet-4-6 (HEAD)
 
 The hook errors were caused by the wozcode-marketplace directory still being present in `~/.claude/plugins/marketplaces/` — the marketplace hooks (PostToolUse telemetry, PreToolUse redirect, SessionStart) were still registered and firing, but `${CLAUDE_PLUGIN_ROOT}` pointed to the deleted cache.
 
@@ -487,7 +487,29 @@ Fixed:
 - Fixed trailing comma in `installed_plugins.json` (was causing JSON parse errors)
 
 The `PostToolUse:Agent` hook error should no longer fire. Woz is fully excised.
-<!-- agent:boundary:feb26474 -->
+❯ Still seeing in claudescore.md. Did I forget to restart the session?
+```
+  ⎿  Shell cwd was reset to /home/brian/work/btakita/agent-loop/src/session-share
+  ⎿  PostToolUse:Bash hook error                              ⎿  Failed to run: Plugin directory does not exist:
+                                                                 /home/brian/.claude/plugins/cache/wozcode-marketplace/
+                                                                 woz/0.3.40 (woz@wozcode-marketplace — run /plugin to
+                                                                 reinstall)
+
+● Reading 2 files… (ctrl+o to expand)
+  ⎿  docs/benchmark-repos.md
+  ⎿  PostToolUse:Read hook error                              ⎿  Failed to run: Plugin directory does not exist:
+                                                                 /home/brian/.claude/plugins/cache/wozcode-marketplace/
+                                                                 woz/0.3.40 (woz@wozcode-marketplace — run /plugin to
+                                                                 reinstall)
+```
+### Re: session restart needed — sonnet-4-6
+
+Yes — sessions load marketplace hooks at startup. The claudescore.md session was already running when we removed the wozcode-marketplace directory, so it has the woz hooks loaded in memory. The config changes don't hot-reload into existing sessions.
+
+**Fix:** restart the claudescore.md session (close the tmux pane / agent-doc session and start a fresh one). Any session started after the cleanup will be woz-free.
+
+This session (tsift.md) started after the cleanup, so it's already clean.
+<!-- agent:boundary:69fdedc2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -29,14 +29,31 @@ This isn't an agent-doc bug — the tool did what it was told. The skill workflo
 
 **Fix:** No code fix needed. The tsift.md exchange is missing a response block for #mwhg. I can backfill it next time that document is active, or you can add a note manually.
 ❯ What tool had a truncated response?
-### Re: What tool had a truncated response — opus-4-6
+❯ ### Re: What tool had a truncated response — opus-4-6 (HEAD)
 
 The Bash tool running the `cat <<'RESPONSE' | agent-doc write ... --stream` heredoc. That's the only path that writes agent content to the exchange — the skill workflow pipes the response body into `agent-doc write`, which inserts it before the boundary marker.
 
 The `.` wasn't from the user (no `❯` prefix) and wasn't from `agent-doc` itself (boundaries are auto-generated). So the LLM's Bash tool call contained a heredoc whose body was just `.` — either the model generated an empty response, or the heredoc delimiter `RESPONSE` appeared in the content and truncated it early.
 
 I don't have access to the previous session's tool call log to confirm which. The session context observations (#18719) say "Batch edit implementation documented in tsift task file" — suggesting the model *thought* it wrote a full response. Most likely a heredoc truncation: if the response contained a line starting with `RESPONSE` (the delimiter), bash would close the heredoc there, and the remaining content would be interpreted as shell commands (silently failing).
-<!-- agent:boundary:2cfce48e -->
+Please read the session logs see if there is more info on the issueu
+### Re: Session log forensics — opus-4-6
+
+Found the full sequence in session `fbeed7e9`. Six write attempts for the #mwhg response on tsift.md:
+
+1. **`cat <<'RESPONSE' | agent-doc write tasks/tsift.md ...`** (CWD: `src/tsift/`) → **`file not found`** — relative path resolved wrong because the model had `cd`'d into the submodule
+2. **`cd /home/brian/.../agent-loop && cat <<'RESPONSE' | agent-doc write ...`** → **SUCCESS** — full response written, IPC patch consumed, boundary `c28234dd` inserted. The complete batch edit documentation was delivered.
+3. **`agent-doc write ... --pending-done mwhg`** (no `--stream`, no stdin) → **`empty response — nothing to write`**
+4. **`echo ' ' | agent-doc write ... --stream --pending-done mwhg`** → **`empty response — nothing to write`**
+5. **`cat <<'RESPONSE' ... <!-- patch:pending --> ... RESPONSE`** → **`replace:pending block forbidden`**
+6. **`cat <<'RESPONSE' ... . ... RESPONSE`** with `--pending-done mwhg` → The `.` was dropped (`dedup: content already present`, `WARNING: 1 bytes of unmatched content ... will be dropped`, `0 components`). But this write still saved a new pre-response snapshot and inserted a new boundary — effectively overwriting attempt 2's successful content.
+
+**Root cause:** Attempt 2 succeeded and the full response was in the file. But the model kept retrying to mark `--pending-done mwhg` (attempts 3-6), and each `--stream` call saves a new pre-response snapshot and inserts a new boundary. Attempt 6's snapshot captured attempt 2's content, but the 0-component IPC patch + boundary repositioning overwrote it. The `.` content survived as residue.
+
+**This IS an agent-doc concern** — `agent-doc write --stream` with `--pending-done` but no meaningful exchange content should not destroy previously-written exchange content. The `--pending-done` flag should be applicable independently of exchange writes.
+
+**Skill-side fix:** The model should have used a single write combining the exchange content AND `--pending-done mwhg` in one call, not split them across multiple attempts.
+<!-- agent:boundary:700b13a8 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

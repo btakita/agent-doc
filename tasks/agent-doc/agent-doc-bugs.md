@@ -256,7 +256,7 @@ let (git_root, _in_submodule) = narrow_to_submodule(&super_root, &resolved);
 **After fix:** `narrow_to_submodule` detects the submodule boundary, narrows `git_root` to `src/boost-client/`, and computes `rel_path` relative to that root → `git show HEAD:tasks/monsterrodholders.md` succeeds from the submodule → baseline headings populate correctly → new headings get `(HEAD)` as expected.
 
 Verified live: `git show HEAD:src/boost-client/tasks/monsterrodholders.md` fails from superproject, confirming the routing fix is necessary and working.
-<!-- agent:boundary:dad073ac -->
+<!-- agent:boundary:20885fdc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -268,7 +268,6 @@ Verified live: `git show HEAD:src/boost-client/tasks/monsterrodholders.md` fails
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#mchh] Install rebuilt agent-doc-jetbrains plugin + verify Refresh Environment session picker end-to-end
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [x] [#zvmd] Submodule (HEAD) marker: fix show_head() to route via narrow_to_submodule — superproject rev-parse can't show submodule-tracked files, so add_head_marker falls through to the 'no HEAD → mark last heading only' fallback, which drops (HEAD) when the exchange component has no ### Re: heading yet or when the fallback runs during a boundary-only cycle
 - [ ] [#np8p] Submodule pane cwd: agent-doc start/route spawns tmux panes with std::env::current_dir() instead of the nearest git toplevel for the target document — add a resolve_pane_cwd(file) helper that returns narrow_to_submodule(super_root, resolved).0 so submodule docs get a pwd inside their own submodule
 - [ ] [#0xka] #hdap: reposition_boundary_to_end appends (HEAD) to last ### Re: heading in exchange, strips stale (HEAD) from earlier headings — symmetric counterpart to strip_head_markers on commit staging side
 - [ ] [#77mf] Event-driven gate resolution: typed gate markers like [/release] and [/deploy] that auto-resolve on matching events (cargo publish, git push). Extends the binary [/] invariant with machine-actionable gate types — reaper checks event log before skipping.

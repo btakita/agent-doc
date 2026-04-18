@@ -119,7 +119,7 @@ Done. `gh repo edit btakita/tsift --visibility private` confirmed — `PRIVATE`.
 Those were two background `tsift search` jobs I fired without timeouts to test the hybrid strategy. They were downloading sift's HuggingFace embedding models (candle + tokenizers) — first-run cold start, pulling several GB. Both killed now.
 
 This is exactly why #92bz's follow-up noted that vector/hybrid search needs a `tsift init` command with a progress bar rather than silently blocking. For Claude Code hook usage, `lexical` (instant, no models) should be the default.
-<!-- agent:boundary:352e7793 -->
+<!-- agent:boundary:5b5ad20c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

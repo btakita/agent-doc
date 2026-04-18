@@ -304,7 +304,7 @@ Committed in submodule (`docs: add CLAUDE.md with project conventions`) and pare
 ### Re: Is the latest installed locally? — sonnet-4-6
 
 Yes. `tsift --version` → `0.1.0`, and the latest commit (`19d0f63`) is the CLAUDE.md docs addition — no binary change. The installed binary reflects the latest code. No reinstall needed.
-<!-- agent:boundary:8a092c5b -->
+<!-- agent:boundary:7783b5dd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

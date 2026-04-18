@@ -475,7 +475,7 @@ So the inference is in the AI layer (where semantic understanding lives), and th
 
 This is essentially what the skill already does informally — when you say `do #gqep`, the agent decides what "done" means for that item. The typed gate just makes that decision explicit and machine-actionable.
 ❯ do #77mf
-### Re: do #77mf — Event-driven gate resolution — opus-4-6
+❯ ### Re: do #77mf — Event-driven gate resolution — opus-4-6 (HEAD)
 
 Implemented. Three new capabilities landed:
 
@@ -502,7 +502,23 @@ Implemented. Three new capabilities landed:
 **State machine:** `[/release]` is a refinement of `[/]`. The gate type is metadata on `Gated` state, cleared when resolved to `[x]`. Untyped `[/]` items are never touched by `resolve-gate`.
 
 **Tests:** 20 new tests covering parse, render, roundtrip, resolve, set-gate-type, scan, case insensitivity, and edge cases. All 1111 tests pass, clippy clean.
-<!-- agent:boundary:5e572813 -->
+❯ release
+### Re: release — opus-4-6
+
+Prepared v0.33.0. Changes since 0.32.5 (~2800 insertions across 34 files):
+
+**Headline:** Typed gate markers (`[/release]`, `[/deploy]`, etc.), `resolve-gate` command (per-file + project-wide scan for hook integration), `--pending-only`, `--pending-add-gated`, `--status` flag, notify with pending, `session clear`, supervisor PTY module.
+
+**Done so far:**
+- Bumped Cargo.toml + pyproject.toml → 0.33.0
+- VERSIONS.md entry written
+- Clippy clean (added `#[allow(clippy::too_many_arguments)]` on `notify::run`)
+- All 1111 tests pass, 6 ignored
+- `cargo install --path .` — v0.33.0 active
+- `cargo build --release` — `.bin/agent-doc` symlink target updated
+
+**Manual testing gate:** Confirm the typed gate feature works in a live session before I proceed to publish. Try `agent-doc pending tasks/agent-doc/agent-doc-bugs.md set-gate-type gqep release` to set a typed gate, then verify with a preflight cycle.
+<!-- agent:boundary:14f4c352 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

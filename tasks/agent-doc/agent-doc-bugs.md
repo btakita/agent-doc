@@ -389,7 +389,7 @@ So the flow for an item like #gqep would be:
 
 This also means `[/release]` is a commitment signal: "if cargo publish succeeds, this item is done." No further review needed after the event.
 ❯ How do we know if an agent doc is associated with a `/release` or a `/deploy`?
-### Re: Document-to-gate association — opus-4-6
+❯ ### Re: Document-to-gate association — opus-4-6 (HEAD)
 
 The document itself doesn't need to be associated with a gate type — **individual pending items declare their own gate type**. A single document can have items waiting on different events:
 
@@ -414,7 +414,39 @@ The document itself doesn't need to be associated with a gate type — **individ
 **What "tracked documents" means:** Any file with an `.agent-doc/snapshots/` entry. The `resolve-gate` command would iterate those, filter by scope, parse pending components, and match gate types. No new config or metadata required — everything is already in the document content.
 
 This keeps the design simple: no frontmatter gate declarations, no document-type taxonomy. Items self-describe what they're waiting for.
-<!-- agent:boundary:e25bc038 -->
+❯ Would agent-doc auto-detect from the repo to determine if the gate would be `/release` or `/deploy`? I'm not clear on what it is.
+### Re: Gate type is human-declared, not auto-detected — opus-4-6
+
+No auto-detection. The gate type is explicitly chosen by whoever creates or updates the pending item. Agent-doc doesn't infer what event should resolve an item — **you tell it**.
+
+**Who decides the gate type:**
+
+The person or agent writing the pending item picks the gate type based on what the item is actually waiting for:
+
+```bash
+# You're adding a pending item that's blocked on a crates.io publish:
+agent-doc write doc.md --pending-add-gated "Release v0.32.4" 
+# → creates: [/] [#gqep] Release v0.32.4
+
+# Later, when testing is done, you upgrade the gate to typed:
+agent-doc write doc.md --pending-edit "gqep=[/release] Release v0.32.4"
+# → becomes: [/release] [#gqep] Release v0.32.4
+```
+
+**The gate types are just conventions you define.** There's no built-in list. You could have `[/release]`, `[/deploy]`, `[/review]`, `[/merge]` — whatever makes sense for your workflow. The only thing that matters is that the hook's gate type string matches what's in the item.
+
+**To make it concrete:**
+
+| You write this... | Because you mean... | Resolved by... |
+|---|---|---|
+| `[/release]` | "Code is done, waiting for `cargo publish`" | Hook on `cargo publish` |
+| `[/deploy]` | "Published, waiting for production deploy" | Hook on `git push` to prod |
+| `[/]` | "Blocked on something only a human can decide" | Manual flip by user/agent |
+
+**So agent-doc never guesses.** It's a dumb pattern matcher: when `resolve-gate release` fires, it finds items matching `[/release]` and flips them. The intelligence is in your workflow — you decide when an item transitions from `[/]` (generic gate) to `[/release]` (typed, machine-resolvable gate).
+
+Think of it like git tags vs branches: git doesn't decide what to tag — you tag what you want, and the tooling acts on matching tags.
+<!-- agent:boundary:3e83fb1d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -441,7 +441,7 @@ woz-recall's semantic vector search handles vague queries ("that deploy command"
 claude-mem:mem-search wins on both fronts. Token savings are structural (staged retrieval, batch fetch). Effectiveness is equivalent or better once you use filters. woz-recall's only advantage was its 1-call simplicity — relevant if you never want to think about filtering, but that's also why it burns tokens.
 
 Since woz is uninstalled, this is the system going forward. No action needed.
-<!-- agent:boundary:af0b4089 -->
+<!-- agent:boundary:e667f807 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

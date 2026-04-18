@@ -16,7 +16,7 @@ claude_args: --dangerously-skip-permissions
 
 <!-- agent:exchange patch=append -->
 v0.33.0 session. Landed: tsift project extracted (btakita/tsift, src/tsift submodule, tasks/tsift.md) absorbing skills-janitor; #9v7h (--pending-add-gated + hash echo + state marker rejection); #txex (notify --pending-add/--pending-add-gated, auto-create pending, pending-only mode); #hrmt (synced repo-local SKILL.md to v0.32.0); #e46w/#f8j3/#y4da/#zvmd/#np8p/#0xka (already fixed: boundary lag, narrow_to_submodule, annotate_re_headings); #77mf (typed gate markers [/release]/[/deploy], resolve-gate per-file+project-wide, set-gate-type, skill-layer inference on do); v0.33.0 released crates.io+GitHub (typed gates, resolve-gate, --pending-only, --pending-add-gated, --status, notify pending, session clear, supervisor PTY); #p2xm already fixed (orphaned patch:exchange leak template.rs:257-265); #wcf5 (copy-on-read guard: mtime capture, skip recovery on mtime change, 4 integration tests). State: 1116 tests, 2 gated pending (#a002 awaiting production telemetry, #ha3h blocked on multi-user support).
-<!-- agent:boundary:76ad7a6e -->
+<!-- agent:boundary:41d5babd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

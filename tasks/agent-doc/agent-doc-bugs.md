@@ -58,7 +58,7 @@ Added 6 more edge-case tests (9 total new tests, 1125 passing):
 - `backfill_idempotent_after_placeholder_strip` — second backfill pass is a no-op
 - `op_add_dedup_case_sensitive` — different casing is NOT considered duplicate (exact match)
 - `op_add_dedup_across_states` — dedup applies even when existing item is gated and new is open
-<!-- agent:boundary:5af65db7 -->
+<!-- agent:boundary:97ffbc22 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

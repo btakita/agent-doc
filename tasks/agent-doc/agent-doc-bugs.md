@@ -599,7 +599,7 @@ Added 4 integration tests for `compute()` exercising the copy-on-read guard and 
 4. **`compute_returns_none_when_no_changes`** — identical snapshot and document → returns None.
 
 Helper `setup_compute_env()` creates a temp directory with `.agent-doc/snapshots/`, a document file, and a pre-populated snapshot. All 1116 tests pass (was 1112), clippy clean.
-<!-- agent:boundary:5047817b -->
+<!-- agent:boundary:4a47da29 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

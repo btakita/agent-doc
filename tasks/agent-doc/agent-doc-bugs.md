@@ -588,13 +588,12 @@ Implemented copy-on-read guard for #wcf5.
 - Lines 420-427: guard check before recovery save — mtime mismatch skips the write
 
 **Test:** `copy_on_read_guard_skips_recovery_when_snapshot_modified` — verifies the mtime comparison logic (same → allow, different → block, both-None → allow). 1112 tests pass, clippy clean.
-<!-- agent:boundary:f967fb02 -->
+<!-- agent:boundary:bdf00d3c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:pending -->

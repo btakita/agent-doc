@@ -224,7 +224,7 @@ Two root causes identified and fixed in `start.rs`:
      agent-doc 0.33.1
      Error: file not found: src/session-share/tasks/claudescore.md
 ```
-### Re: submodule path resolution — opus-4-7
+❯ ### Re: submodule path resolution — opus-4-7 (HEAD)
 
 Fixed by adding a shared FFI project-path resolver and wiring both editor plugins through it.
 
@@ -248,7 +248,25 @@ Fixed by adding a shared FFI project-path resolver and wiring both editor plugin
 **Verification so far:** `libagent_doc.so` rebuilt and copied to `~/.cargo/bin/libagent_doc.so`; `agent-doc --version` is 0.33.2; VS Code `tsc -p ./` compiles clean. FFI tests pass in-crate. JB zip + VSIX builds are pending.
 
 **Manual testing gate next:** run `Run Agent Doc` from the JB plugin on `src/session-share/tasks/claudescore.md` and confirm the spawned session gets `tasks/claudescore.md` with CWD = `src/session-share/` before publishing to crates.io / PyPI / GitHub Releases.
-<!-- agent:boundary:e4ecba07 -->
+❯ Please always build so we can test locally. Making a version bump without a build makes no sense. Add to skill/runbook.
+### Re: build on every version bump — opus-4-7
+
+Fair — a bumped version without the built artifact is broken by construction. Built both now and codified the rule.
+
+**Built now:**
+- `build/distributions/agent-doc-jetbrains-0.2.58.zip` + `-0.2.58-signed.zip` (gradle `buildPlugin signPlugin`)
+- `editors/vscode/agent-doc-0.2.6.vsix` (`npm run compile && npm run package`)
+
+**Codified in** `.claude/skills/agent-doc/runbooks/plugin-install.md` § "Build on every bump (MANDATORY)":
+- Bump `gradle.properties::pluginVersion` → run `./gradlew buildPlugin signPlugin` same turn; verify the zip.
+- Bump `editors/vscode/package.json::version` → run `npm run compile && npm run package`; verify the VSIX.
+- Bump core `Cargo.toml` → run `cargo build --release && cargo install --path .`.
+- If the build fails, fix it or revert the bump — never leave a bumped-but-unbuilt state.
+
+Also saved to memory as `feedback_build_on_version_bump.md` so this doesn't need to be said twice.
+
+**Ready for manual test:** install `agent-doc-jetbrains-0.2.58.zip` (or signed variant) + `agent-doc-0.2.6.vsix`, then run `Run Agent Doc` from JB on `src/session-share/tasks/claudescore.md` — expected: spawned session sees `tasks/claudescore.md` with CWD `src/session-share/`.
+<!-- agent:boundary:d73978ab -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

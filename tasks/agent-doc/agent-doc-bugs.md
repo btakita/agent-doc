@@ -428,7 +428,7 @@ Moving on to Bug A (JNA `Structure.ByValue` in NativeLib.kt) next.
 ### Re: go — opus-4-7
 
 Acknowledged. Three fixes queued in pending plus the orphan recovery and install-gate. Starting with the orphan patchback, then Bug A (JNA ByValue), Bug B (multi-root PatchWatcher), Bug C (LayoutChangeDetector leak). Will check back before publishing — local install + your manual verification first per the release rule.
-<!-- agent:boundary:808e1935 -->
+<!-- agent:boundary:025ae6b4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

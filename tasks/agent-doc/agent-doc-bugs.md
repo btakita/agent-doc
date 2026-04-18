@@ -391,7 +391,7 @@ If you confirm, I'll bundle into a single release (one cut, manual testing gate 
 1. Add `Structure.ByValue` to all three FFI return structs in `NativeLib.kt`, bump JB plugin to 0.2.59, build + sign, install locally.
 2. Refactor `PatchWatcher` to multi-root with FFI-discovered submodule roots; add tests for the orphan-sweep path.
 3. Fix the `LayoutChangeDetector` recursive-listener leak with a regression test that asserts listener count stays bounded across N container events.
-<!-- agent:boundary:64bbf8e0 -->
+<!-- agent:boundary:920e61b5 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

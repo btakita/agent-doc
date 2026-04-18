@@ -288,7 +288,7 @@ Implemented `tsift rewrite` subcommand + hook script, following the rtk pattern.
 
 **SKILL.md** updated with hook integration docs.
 ❯ do #kq5t
-### Re: #kq5t — CLAUDE.md created — opus-4-6
+❯ ### Re: #kq5t — CLAUDE.md created — opus-4-6 (HEAD)
 
 Created `src/tsift/CLAUDE.md` with project conventions covering:
 
@@ -300,7 +300,11 @@ Created `src/tsift/CLAUDE.md` with project conventions covering:
 - **Repo** — private, submodule location
 
 Committed in submodule (`docs: add CLAUDE.md with project conventions`) and parent pointer bumped.
-<!-- agent:boundary:4dd94390 -->
+❯ Is the latest installed locally?
+### Re: Is the latest installed locally? — sonnet-4-6
+
+Yes. `tsift --version` → `0.1.0`, and the latest commit (`19d0f63`) is the CLAUDE.md docs addition — no binary change. The installed binary reflects the latest code. No reinstall needed.
+<!-- agent:boundary:8a092c5b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

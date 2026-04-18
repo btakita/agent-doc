@@ -86,7 +86,7 @@ The stream buffer is cumulative — each flush contains ALL content written so f
 - `shrink_guard_passes_no_exchange` — no exchange component passes
 - `extract_exchange_content_len_works` — helper unit test
 ❯ release
-### Re: release — opus-4-6
+❯ ### Re: release — opus-4-6 (HEAD)
 
 **v0.33.1 prepared.** v0.33.0 is already on crates.io, so bumped to 0.33.1. Changes:
 
@@ -96,7 +96,42 @@ The stream buffer is cumulative — each flush contains ALL content written so f
 - `cargo install --path .` + `cargo build --release` done
 
 **Manual testing gate:** Confirm the fixes work in a live session, then I'll commit → tag → publish (crates.io, PyPI, GitHub Release).
-<!-- agent:boundary:98b873ff -->
+❯ Enter or 'q' then Enter does not submit
+```
+Claude exited cleanly.
+Press Enter to restart, or 'q' to exit.
+
+
+q
+```
+
+❯ Claude code header malformed
+```
+Starting claude...
+                   ▐▛███▜▌   Claude Code v2.1.109
+▝▜█████▛▘  Sonnet 4.6 · Claude Max
+  ▘▘ ▝▝    @woz:code · ~/work/btakita/agent-loop/src/boost-client
+```
+### Re: Enter or 'q' does not submit — opus-4-6
+
+This is a Claude Code wrapper / tmux-router issue. After `claude` exits cleanly, the restart prompt (`Press Enter to restart, or 'q' to exit`) doesn't accept keyboard input. The pane is likely in a state where stdin isn't connected to the prompt's `read` call.
+
+**Likely suspects:**
+- The wrapper script that spawns Claude may have stdin redirected or piped, so after Claude exits the `read` builtin has no tty fd
+- tmux pane settings (remain-on-exit, respawn behavior) conflicting with the wrapper's prompt loop
+
+Need to check the wrapper script that displays this prompt. Is this in `tmux-router` or a separate Claude Code launcher script?
+
+### Re: Claude Code header malformed — opus-4-6
+
+The ASCII art logo is misaligned — the three lines of the logo glyph are left-shifted relative to the text. This is a rendering issue in Claude Code v2.1.109 itself, not agent-doc. The Unicode block characters assume a specific terminal width/font. Could be:
+
+- Terminal emulator font rendering differences (block character widths vary)
+- The status line or woz plugin injecting content that shifts alignment
+- A regression in v2.1.109's banner rendering
+
+This is an upstream Claude Code issue — worth filing at https://github.com/anthropics/claude-code/issues if it persists across terminals.
+<!-- agent:boundary:c5386631 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

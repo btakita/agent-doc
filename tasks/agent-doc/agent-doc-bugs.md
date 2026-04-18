@@ -595,7 +595,7 @@ Pending `#m1bz` still gates publish. The route fix is now live locally; IPC patc
 src/session-share/tasks/claudescore.md has an uncommitted patchback from manually running `/graphify .` directly in the tmux pane. Why?
 
 Write response back into this agent doc.
-<!-- agent:boundary:9c2b8fb6 -->
+<!-- agent:boundary:0142b181 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

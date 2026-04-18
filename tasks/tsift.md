@@ -259,13 +259,12 @@ Implemented `tsift sql` with full SQLite introspection:
 - `sql_empty_table_schema` — empty table with blob column
 
 **Verification:** 17 tests pass, clippy clean. `rusqlite` with `bundled` feature — no system SQLite dependency.
-<!-- agent:boundary:e7d21be3 -->
+<!-- agent:boundary:f71d60b6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#yscf] SQL introspection: connect to SQLite/Postgres, expose schema + query
 - [ ] [#95as] Claude Code hook integration: rewrite commands through tsift like rtk does
 - [ ] [#kq5t] CLAUDE.md with project conventions
 - [ ] [#e15f] CI: GitHub Actions for cargo test + clippy

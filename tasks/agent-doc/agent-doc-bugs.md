@@ -37,7 +37,7 @@ The `.` wasn't from the user (no `❯` prefix) and wasn't from `agent-doc` itsel
 
 I don't have access to the previous session's tool call log to confirm which. The session context observations (#18719) say "Batch edit implementation documented in tsift task file" — suggesting the model *thought* it wrote a full response. Most likely a heredoc truncation: if the response contained a line starting with `RESPONSE` (the delimiter), bash would close the heredoc there, and the remaining content would be interpreted as shell commands (silently failing).
 Please read the session logs see if there is more info on the issueu
-### Re: Session log forensics — opus-4-6
+❯ ### Re: Session log forensics — opus-4-6 (HEAD)
 
 Found the full sequence in session `fbeed7e9`. Six write attempts for the #mwhg response on tsift.md:
 
@@ -53,7 +53,22 @@ Found the full sequence in session `fbeed7e9`. Six write attempts for the #mwhg 
 **This IS an agent-doc concern** — `agent-doc write --stream` with `--pending-done` but no meaningful exchange content should not destroy previously-written exchange content. The `--pending-done` flag should be applicable independently of exchange writes.
 
 **Skill-side fix:** The model should have used a single write combining the exchange content AND `--pending-done mwhg` in one call, not split them across multiple attempts.
-<!-- agent:boundary:59fb91f6 -->
+❯ Can we have the deterministic binary ensure this replace truncation won't occur? Perhaps --stream can append?
+### Re: Preventing stream replace truncation — opus-4-6
+
+Two complementary binary-side fixes:
+
+**1. Pending-only mutations (primary fix)**
+Allow `--pending-done`, `--pending-add`, etc. to execute *without* `--stream` and without requiring exchange content on stdin. Currently attempts 3-4 in the forensics log failed with "empty response — nothing to write" — forcing the model to fabricate a `.` payload just to carry `--pending-done mwhg`. If pending flags work independently, the exchange component is never touched.
+
+Implementation: in `write.rs`, when pending flags are present but stdin is empty/absent, apply only pending mutations and skip exchange patching entirely. Save snapshot, commit, done.
+
+**2. Content-shrink guard (safety net)**
+When `--stream` would replace exchange content with something dramatically shorter (new < 10% of existing length), refuse the write and log `WARNING: exchange content would shrink from {old_len} to {new_len} bytes — refusing (use --force to override)`. This catches accidental truncation from malformed heredocs or trivial payloads.
+
+**Why not append mode for `--stream`?**
+The stream buffer is cumulative — each flush contains ALL content written so far, not a delta. Append would duplicate content on every flush within a single session. Replace is correct *within* a session. The bug is a *new* session's trivial write overwriting a *previous* session's good content — which both fixes above address.
+<!-- agent:boundary:a99cf7dd -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

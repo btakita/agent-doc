@@ -364,7 +364,7 @@ For `git push` / deploy gates, same pattern — the hook fires from the relevant
 
 The item-level syntax `[/release:agent-doc]` is the safest — it's self-documenting and doesn't depend on directory conventions. But for your current layout where documents already live under `tasks/<submodule>/`, cwd inference handles 90% of cases without any new syntax.
 ❯ Would [/release] happen when an item is complete but pre-release?
-### Re: #77mf [/release] lifecycle timing — opus-4-6
+❯ ### Re: #77mf [/release] lifecycle timing — opus-4-6 (HEAD)
 
 Yes, exactly. `[/release]` is a refinement of `[/]` — it means "implementation complete, waiting for release to close."
 
@@ -388,7 +388,33 @@ So the flow for an item like #gqep would be:
 **When to apply:** You'd transition `[/]` → `[/release]` when the only remaining blocker is the publish/deploy action itself. If there are still manual testing gates or other human decisions pending, it stays as `[/]`. The typed gate means "the next matching event closes this" — so you only apply it when you're genuinely ready for that event.
 
 This also means `[/release]` is a commitment signal: "if cargo publish succeeds, this item is done." No further review needed after the event.
-<!-- agent:boundary:29876c69 -->
+❯ How do we know if an agent doc is associated with a `/release` or a `/deploy`?
+### Re: Document-to-gate association — opus-4-6
+
+The document itself doesn't need to be associated with a gate type — **individual pending items declare their own gate type**. A single document can have items waiting on different events:
+
+```markdown
+&lt;!-- agent:pending --&gt;
+- [/release] [#gqep] Release v0.32.4 — waiting on cargo publish
+- [/deploy]  [#xxxx] Push CDN config — waiting on git push to prod
+- [/]        [#yyyy] Manual review — human-resolved
+&lt;!-- /agent:pending --&gt;
+```
+
+**Resolution flow when a hook fires:**
+
+1. `cargo publish` succeeds in `src/agent-doc/`
+2. Hook calls `agent-doc pending resolve-gate release`
+3. Binary scans tracked documents (scoped by cwd → `tasks/agent-doc/*.md`)
+4. Finds all `[/release]` items → flips to `[x]`
+5. `[/deploy]` and `[/]` items are untouched
+
+**So there's no document-level gate declaration needed.** The gate type is per-item, and the scope (which documents to scan) comes from cwd or explicit `--scope`. The binary just pattern-matches `[/release]` vs `[/deploy]` in the pending component text.
+
+**What "tracked documents" means:** Any file with an `.agent-doc/snapshots/` entry. The `resolve-gate` command would iterate those, filter by scope, parse pending components, and match gate types. No new config or metadata required — everything is already in the document content.
+
+This keeps the design simple: no frontmatter gate declarations, no document-type taxonomy. Items self-describe what they're waiting for.
+<!-- agent:boundary:8883e140 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

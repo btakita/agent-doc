@@ -654,7 +654,7 @@ Every single `Run Agent Doc` attempt was silently skipped by this guard.
 **Why I didn't catch this earlier:** I never verified the installed version. The IDEA log had the answer the whole time — "is busy, skipping route" — but no previous session checked it. I should have checked the IDEA log and `.so` timestamp from the start.
 
 Still! `Run Agent Doc` does not call `tmux-send /agent-doc tasks/agent-doc/agent-doc-bugs.md`. I saw "Waiting for typing to stop..." on the first two attempts in src/session-share/tasks/claudescore.md. Further attempts did not show the dialog. What is going on? Please add logs to debug.
-### Re: Run Agent Doc still failing — debug logging added — sonnet-4-6
+❯ ### Re: Run Agent Doc still failing — debug logging added — sonnet-4-6 (HEAD)
 
 Three silent failure points in the route chain — all had INFO-level or no user feedback. Here's what likely happened:
 
@@ -682,7 +682,27 @@ Three silent failure points in the route chain — all had INFO-level or no user
 Settings → Plugins → gear → Install from Disk → `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.62-signed.zip` → restart IDE.
 
 After restart, trigger "Run Agent Doc" and check `idea.log` (`Help → Show Log in Files`) for the `[run]` and `[route]` lines. The log will tell us exactly where the chain breaks.
-<!-- agent:boundary:ebdb418b -->
+❯ I attempted `Run Agent Doc` on tasks/software/agent-loop.md. Got the same issue where it does not call `tmux send-keys /agent-doc tasks/agent-doc/agent-doc-bugs.md` on the claiming tmux pane.
+
+❯ Write the patchback into this agent doc
+### Re: Run Agent Doc still blocked by is_busy — root cause + fix — opus-4-6
+
+**Root cause: the `is_busy` FFI guard has no signal senders.** I traced the entire codebase — `set_status()` is only callable via the FFI export `agent_doc_set_status`, which the JB plugin declares but **never calls**. No CLI command (`write`, `route`, `preflight`, `commit`) calls `set_status` either. The status system is dead code — signals are checked but never emitted.
+
+The IDEA log at 19:41:58 shows:
+```
+[route] is_busy(/.../agent-doc-bugs.md) = true
+[route] SKIPPED: agent-doc is busy
+```
+At 19:40:23 (90s earlier), same result for `agent-loop.md`. Both files returned `is_busy = true`, yet `.agent-doc/status/` directory doesn't exist and no production code creates status files. Testing the same `.so` (v0.33.2, matching MD5) from Python returns `false`. The JVM's FFI call returned `true` through an undiagnosed mechanism — possibly a JNA memory/state artifact or transient filesystem race.
+
+**Fix: removed the `is_busy` guard entirely** from `TerminalUtil.kt`. The guard was designed for a future where write commands would set status signals, but that was never implemented. Every route attempt since the guard was added has been blocked by false positives.
+
+**Plugin 0.2.63 built:**
+Settings → Plugins → gear → Install from Disk → `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.63-signed.zip` → restart IDE.
+
+After restart, `Run Agent Doc` will proceed directly to the `agent-doc route` CLI command with no busy guard.
+<!-- agent:boundary:162c0a43 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

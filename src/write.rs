@@ -721,14 +721,19 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
     // Strip leading "## Assistant" heading if present — the write command adds its own
     let response = strip_assistant_heading(&response);
 
-    // Read document state before lock (for baseline)
+    // Save response to pending store (survives context compaction)
+    recover::save_pending(file, &response)?;
+
+    // Acquire advisory lock BEFORE reading document state.
+    // Closing the window between content_at_start read and lock acquire
+    // prevents concurrent agent-doc writes from drifting the baseline. (#08yv)
+    let doc_lock = acquire_doc_lock(file)?;
+
+    // Read document state under lock
     let content_at_start = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
 
     let base = baseline.unwrap_or(&content_at_start);
-
-    // Save response to pending store (survives context compaction)
-    recover::save_pending(file, &response)?;
 
     // Save pre-response snapshot for undo
     snapshot::save_pre_response(file, base)?;
@@ -746,10 +751,7 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
     }
     content_ours.push_str("\n## User\n\n");
 
-    // Acquire advisory lock
-    let doc_lock = acquire_doc_lock(file)?;
-
-    // Re-read file to check for user edits
+    // Re-read file to check for user edits since lock acquisition
     let content_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
 
@@ -769,12 +771,14 @@ pub fn run(file: &Path, baseline: Option<&str>) -> Result<()> {
         return Ok(());
     }
 
+    // Save snapshot BEFORE document write (#wcf5): external watchers (IDE
+    // file-change listeners, git hooks) trigger on the document rename and may
+    // compute diffs immediately.  Writing the snapshot first guarantees they
+    // always read a current baseline instead of racing against a stale one.
+    snapshot::save(file, &final_content)?;
+
     atomic_write(file, &final_content)?;
 
-    // Save snapshot as final_content (actual post-merge disk state).
-    // Using content_ours would cause snapshot drift when the baseline is stale
-    // (e.g. streaming checkpoint with outdated baseline), producing ghost diffs.
-    snapshot::save(file, &final_content)?;
     crate::ops_log::log_cycle(file, "write_inline", Some(&content_ours), Some(&final_content));
     crate::ops_log::log_op(file, &format!(
         "write_inline_done file={} snap_len={}",
@@ -826,7 +830,12 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
         anyhow::bail!("no patch blocks or content found in response");
     }
 
-    // Read document state
+    // Acquire advisory lock BEFORE reading document state.
+    // Closing the window between content_at_start read and lock acquire
+    // prevents concurrent agent-doc writes from drifting the baseline. (#08yv)
+    let doc_lock = acquire_doc_lock(file)?;
+
+    // Read document state under lock
     let content_at_start = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
 
@@ -839,10 +848,7 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
     let content_ours = template::apply_patches(base, &patches, &unmatched, file)
         .context("failed to apply template patches")?;
 
-    // Acquire advisory lock
-    let doc_lock = acquire_doc_lock(file)?;
-
-    // Re-read file to check for user edits
+    // Re-read file to check for user edits since lock acquisition
     let content_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
 
@@ -861,10 +867,14 @@ pub fn run_template(file: &Path, baseline: Option<&str>) -> Result<()> {
         return Ok(());
     }
 
+    // Save snapshot BEFORE document write (#wcf5): external watchers (IDE
+    // file-change listeners, git hooks) trigger on the document rename and may
+    // compute diffs immediately.  Writing the snapshot first guarantees they
+    // always read a current baseline instead of racing against a stale one.
+    snapshot::save(file, &final_content)?;
+
     atomic_write(file, &final_content)?;
 
-    // Save snapshot as final_content (actual post-merge disk state).
-    snapshot::save(file, &final_content)?;
     crate::ops_log::log_cycle(file, "write_template", Some(&content_ours), Some(&final_content));
     crate::ops_log::log_op(file, &format!(
         "write_template_done file={} snap_len={} patches={}",
@@ -1029,7 +1039,8 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             // Plugin is installed — try IPC
             let t_ipc = std::time::Instant::now();
             let norm_lines_opt = if normalize_prefix_lines.is_empty() { None } else { Some(normalize_prefix_lines.as_slice()) };
-            if try_ipc(file, &patches, &unmatched, None, baseline, Some(&content_ours), norm_lines_opt)? {
+            let ipc_result = try_ipc(file, &patches, &unmatched, None, baseline, Some(&content_ours), norm_lines_opt, None)?;
+            if ipc_result.success {
                 let elapsed_ipc = t_ipc.elapsed().as_millis();
                 if elapsed_ipc > 0 {
                     eprintln!("[perf] try_ipc: {}ms", elapsed_ipc);
@@ -1052,47 +1063,32 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             }
             // IPC timeout — patch file was already cleaned up by try_ipc,
             // but we want to leave a NEW patch file in place for the plugin
-            // to pick up later. Re-write it.
+            // to pick up later. Re-write it with the SAME patch_id so the
+            // plugin can deduplicate if the original IPC delivery was late.
             let hash = snapshot::doc_hash(file)?;
             let patch_file = patches_dir.join(format!("{}.json", hash));
 
-            // Read current document and reposition boundary (same as primary IPC path)
-            let raw_doc = std::fs::read_to_string(file).unwrap_or_default();
-            let current_doc_for_boundary = template::reposition_boundary_to_end_with_summary(&raw_doc, file.file_stem().and_then(|s| s.to_str()));
-
+            // Use shared helper for synthesis (same boundary-aware logic as try_ipc)
             let norm_lines_for_timeout = if normalize_prefix_lines.is_empty() { None } else { Some(normalize_prefix_lines.as_slice()) };
-            let ipc_patches: Vec<serde_json::Value> = patches
-                .iter()
-                .filter(|p| p.name != "frontmatter")
-                .map(|p| {
-                    let content = match norm_lines_for_timeout {
-                        Some(prefix_lines) if !prefix_lines.is_empty() && is_append_mode_component(&p.name) => {
-                            normalize_patch_content(&p.content, prefix_lines)
-                        }
-                        _ => p.content.clone(),
-                    };
-                    let mut patch_json = serde_json::json!({
-                        "component": p.name,
-                        "content": content,
-                    });
-                    if let Some(bid) = find_boundary_id(&current_doc_for_boundary, &p.name) {
-                        patch_json["boundary_id"] = serde_json::Value::String(bid);
-                    } else if is_append_mode_component(&p.name) {
-                        patch_json["ensure_boundary"] = serde_json::Value::Bool(true);
-                    }
-                    patch_json
-                })
-                .collect();
+            let ipc_patches = build_ipc_patches_json(file, &patches, &unmatched, norm_lines_for_timeout)?;
 
-            let patch_id = uuid::Uuid::new_v4().to_string();
+            // Same dedup guard as try_ipc: don't send unmatched when it was synthesized into a patch.
+            let effective_unmatched = if patches.is_empty() && !ipc_patches.is_empty() {
+                ""
+            } else {
+                unmatched.trim()
+            };
+
+            // Reuse the patch_id from try_ipc so the plugin deduplicates
+            // if the original socket/file delivery was applied late.
             let mut ipc_payload = serde_json::json!({
                 "file": canonical.to_string_lossy(),
                 "patches": ipc_patches,
-                "unmatched": unmatched.trim(),
+                "unmatched": effective_unmatched,
                 "baseline": baseline.unwrap_or(""),
                 "reposition_boundary": true,
             });
-            ipc_payload["patch_id"] = serde_json::Value::String(patch_id);
+            ipc_payload["patch_id"] = serde_json::Value::String(ipc_result.patch_id.clone());
 
             // Include normalize_prefix_lines so a later plugin pickup restores
             // the `❯ ` prefixes in the buffer (matches the primary IPC payload).
@@ -1127,11 +1123,14 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
             // but the working tree is stuck at pre-write content, so `git diff
             // HEAD` shows the entire response + prefix restorations as
             // uncommitted deletions until the plugin applies the patch.
-            if let Err(e) = atomic_write(file, &content_ours) {
-                eprintln!("[write] WARNING: failed to write content_ours to working tree before exit(75): {}", e);
-            }
+            //
+            // Snapshot saved BEFORE document write (#wcf5) — same ordering
+            // invariant as the main disk paths.
             if let Err(e) = snapshot::save(file, &content_ours) {
                 eprintln!("[write] WARNING: snapshot save before exit(75) failed: {}", e);
+            }
+            if let Err(e) = atomic_write(file, &content_ours) {
+                eprintln!("[write] WARNING: failed to write content_ours to working tree before exit(75): {}", e);
             }
             if crate::git::is_in_git_repo(file)
                 && let Err(e) = crate::git::commit(file) {
@@ -1176,7 +1175,12 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
         }
     let t_disk = std::time::Instant::now();
 
-    // Read document state
+    // Acquire advisory lock BEFORE reading document state.
+    // Closing the window between content_at_start read and lock acquire
+    // prevents concurrent agent-doc writes from drifting the baseline. (#08yv)
+    let doc_lock = acquire_doc_lock(file)?;
+
+    // Read document state under lock
     let content_at_start = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
 
@@ -1207,10 +1211,7 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
         content_ours = normalize_user_prompts_in_exchange_safe(&content_ours, base, &snap, file);
     }
 
-    // Acquire advisory lock
-    let doc_lock = acquire_doc_lock(file)?;
-
-    // Re-read file to check for user edits
+    // Re-read file to check for user edits since lock acquisition
     let content_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
 
@@ -1242,16 +1243,17 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
         return Ok(());
     }
 
-    atomic_write(file, &final_content)?;
-
-    // Save snapshot as final_content (actual post-merge disk state).
-    // Using content_ours risks snapshot drift when baseline is stale (streaming
-    // checkpoint with outdated baseline), producing ghost diffs on next cycle.
+    // Save snapshot BEFORE document write (#wcf5): external watchers (IDE
+    // file-change listeners, git hooks) trigger on the document rename and may
+    // compute diffs immediately.  Writing the snapshot first guarantees they
+    // always read a current baseline instead of racing against a stale one.
     snapshot::save(file, &final_content)?;
     // Save the merged CRDT state — NOT a fresh state from content_ours.
     // Using content_ours would lose user edits from the merge, causing
     // the next merge cycle to re-insert them as duplicates.
     snapshot::save_crdt(file, &crdt_state)?;
+
+    atomic_write(file, &final_content)?;
     crate::ops_log::log_cycle(file, "write_stream", Some(&content_ours), Some(&final_content));
     crate::ops_log::log_op(file, &format!(
         "write_stream_done file={} snap_len={}",
@@ -1326,41 +1328,26 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     std::fs::create_dir_all(&patches_dir)?;
     let patch_file = patches_dir.join(format!("{}.json", hash));
 
-    // Read current document and reposition boundary to end of exchange.
-    // This matches the pre-patch step in template::apply_patches_with_overrides():
-    // remove stale boundaries, insert fresh one at end. Without this, the IPC
-    // path would use the old boundary position (above the user's new prompt),
-    // causing responses to appear before the prompt instead of after.
-    let raw_doc = std::fs::read_to_string(file).unwrap_or_default();
-    let current_doc_for_boundary = template::reposition_boundary_to_end_with_summary(&raw_doc, file.file_stem().and_then(|s| s.to_str()));
+    // Use shared helper for boundary-aware synthesis (matches try_ipc socket + file paths)
+    let ipc_patches = build_ipc_patches_json(file, &patches, &unmatched, None)?;
 
-    // Separate frontmatter patch from component patches
-    let mut frontmatter_yaml: Option<String> = None;
-    let ipc_patches: Vec<serde_json::Value> = patches
+    // Same dedup guard: don't send unmatched when it was synthesized into a patch.
+    let effective_unmatched = if patches.is_empty() && !ipc_patches.is_empty() {
+        ""
+    } else {
+        unmatched.trim()
+    };
+
+    // Separate frontmatter patch
+    let frontmatter_yaml: Option<String> = patches
         .iter()
-        .filter_map(|p| {
-            if p.name == "frontmatter" {
-                frontmatter_yaml = Some(p.content.trim().to_string());
-                None
-            } else {
-                let mut patch_json = serde_json::json!({
-                    "component": p.name,
-                    "content": p.content,
-                });
-                if let Some(bid) = find_boundary_id(&current_doc_for_boundary, &p.name) {
-                    patch_json["boundary_id"] = serde_json::Value::String(bid);
-                } else if is_append_mode_component(&p.name) {
-                    patch_json["ensure_boundary"] = serde_json::Value::Bool(true);
-                }
-                Some(patch_json)
-            }
-        })
-        .collect();
+        .find(|p| p.name == "frontmatter")
+        .map(|p| p.content.trim().to_string());
 
     let mut ipc_payload = serde_json::json!({
         "file": canonical.to_string_lossy(),
         "patches": ipc_patches,
-        "unmatched": unmatched.trim(),
+        "unmatched": effective_unmatched,
         "baseline": baseline.unwrap_or(""),
     });
 
@@ -1377,7 +1364,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>) -> Result<()> {
     eprintln!(
         "[write] IPC patch written to {} ({} components)",
         patch_file.display(),
-        patches.len()
+        ipc_patches.len()
     );
 
     // Poll for ACK (plugin deletes file after applying)
@@ -1534,12 +1521,51 @@ fn read_ack_content_sidecar(project_root: &Path, patch_id: &str) -> Result<Optio
     Ok(Some(content))
 }
 
+/// Poll for the ack-content sidecar with timeout.
+///
+/// The plugin writes the sidecar asynchronously after applying the patch.
+/// Polling eliminates the old 200ms sleep race — we get the authoritative
+/// post-apply content as soon as the plugin writes it, or fall back to
+/// file read only after the timeout expires.
+fn poll_ack_content_sidecar(
+    project_root: &Path,
+    patch_id: &str,
+    timeout: std::time::Duration,
+    poll_interval: std::time::Duration,
+) -> Result<Option<String>> {
+    let start = std::time::Instant::now();
+    loop {
+        match read_ack_content_sidecar(project_root, patch_id)? {
+            Some(content) => return Ok(Some(content)),
+            None if start.elapsed() >= timeout => return Ok(None),
+            None => std::thread::sleep(poll_interval),
+        }
+    }
+}
+
+/// Result of an IPC write attempt, including the patch_id used.
+///
+/// The `patch_id` is returned so callers (e.g., `run_stream()` timeout fallback)
+/// can reuse it for deduplication — the plugin tracks applied patch_ids and skips
+/// duplicates, preventing double-apply when both socket and file IPC fire.
+pub struct IpcResult {
+    /// Whether the plugin successfully consumed the patch.
+    pub success: bool,
+    /// The patch_id used for this write attempt. Reuse in fallback writes
+    /// so the plugin can deduplicate.
+    pub patch_id: String,
+}
+
 /// Attempt to write via IPC (socket-first, file-based fallback).
 ///
 /// First tries socket IPC via `ipc_socket::send_message()` for lowest latency.
 /// Falls back to file-based IPC (JSON patch in `.agent-doc/patches/`) if socket
-/// is unavailable. Returns `Ok(true)` if either path succeeded, `Ok(false)` if
-/// no plugin is active.
+/// is unavailable. Returns `IpcResult` with success flag and the patch_id used.
+///
+/// When `reuse_patch_id` is provided, that ID is used instead of generating a new
+/// one. This ensures the plugin can deduplicate when the same logical write is
+/// retried via the timeout fallback path.
+#[allow(clippy::too_many_arguments)]
 pub fn try_ipc(
     file: &Path,
     patches: &[crate::template::PatchBlock],
@@ -1548,10 +1574,18 @@ pub fn try_ipc(
     baseline: Option<&str>,
     content_ours: Option<&str>,
     normalize_prefix_lines: Option<&[String]>,
-) -> Result<bool> {
+    reuse_patch_id: Option<&str>,
+) -> Result<IpcResult> {
     let canonical = file.canonicalize()?;
     let hash = snapshot::doc_hash(file)?;
     let project_root = resolve_ipc_project_root(&canonical);
+
+    // Single patch_id for all IPC paths (socket, file, caller's fallback).
+    // Reusing the same ID allows the plugin to deduplicate when both socket
+    // and file delivery fire for the same logical write.
+    let patch_id = reuse_patch_id
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
     // Try socket IPC first (lower latency, no inotify)
     if crate::ipc_socket::is_listener_active(&project_root) {
@@ -1577,7 +1611,6 @@ pub fn try_ipc(
         } else {
             unmatched.trim()
         };
-        let patch_id = uuid::Uuid::new_v4().to_string();
         let mut socket_payload = serde_json::json!({
             "type": "patch",
             "file": canonical.to_string_lossy(),
@@ -1608,20 +1641,25 @@ pub fn try_ipc(
         match crate::ipc_socket::send_message(&project_root, &socket_payload) {
             Ok(Some(_ack)) => {
                 eprintln!("[write] socket IPC patch delivered");
-                // Try ack-content sidecar (written by plugin for hard snapshot guarantee).
-                // Fall back to 200ms sleep + file read for backward compat with older plugins.
+                // Poll for ack-content sidecar (written by plugin after apply).
+                // The sidecar is the authoritative post-apply snapshot — polling
+                // replaces the old 200ms sleep race. Falls back to file read only
+                // after the timeout expires (old plugin, dedup skip, no-change patch).
                 // Bug 2A fix: snapshot save failure after IPC success is non-fatal.
-                let (snap_source, snap_content) = match read_ack_content_sidecar(&project_root, &patch_id) {
-                    Ok(Some(content)) => {
+                let (snap_source, snap_content) = match poll_ack_content_sidecar(
+                    &project_root, &patch_id,
+                    std::time::Duration::from_millis(500),
+                    std::time::Duration::from_millis(25),
+                )? {
+                    Some(content) => {
                         eprintln!("[write] snapshot from ack-content sidecar ({} bytes)", content.len());
                         ("ack_content_sidecar", content)
                     }
-                    _ => {
-                        std::thread::sleep(std::time::Duration::from_millis(200));
-                        eprintln!("[write] snapshot from file read (ack-content not available)");
+                    None => {
+                        eprintln!("[write] snapshot from file read (ack-content sidecar not available after 500ms)");
                         let content = std::fs::read_to_string(file)
                             .with_context(|| format!("failed to read {} after socket IPC", file.display()))?;
-                        ("file_read", content)
+                        ("file_read_no_sidecar", content)
                     }
                 };
                 crate::ops_log::log_op(file, &format!(
@@ -1648,7 +1686,7 @@ pub fn try_ipc(
                         eprintln!("[write] WARNING: CRDT state save failed: {}", e);
                     }
                 }
-                return Ok(true);
+                return Ok(IpcResult { success: true, patch_id });
             }
             Ok(None) => {
                 eprintln!("[write] socket IPC sent but no ack — falling back to file IPC");
@@ -1663,7 +1701,7 @@ pub fn try_ipc(
 
     // Only attempt file-based IPC if the patches directory exists (plugin has started)
     if !patches_dir.exists() {
-        return Ok(false);
+        return Ok(IpcResult { success: false, patch_id });
     }
 
     let patch_file = patches_dir.join(format!("{}.json", hash));
@@ -1678,7 +1716,6 @@ pub fn try_ipc(
         unmatched.trim()
     };
 
-    let patch_id = uuid::Uuid::new_v4().to_string();
     let mut ipc_payload = serde_json::json!({
         "file": canonical.to_string_lossy(),
         "patches": ipc_patches,
@@ -1686,7 +1723,7 @@ pub fn try_ipc(
         "baseline": baseline.unwrap_or(""),
         "reposition_boundary": true,
     });
-    ipc_payload["patch_id"] = serde_json::Value::String(patch_id);
+    ipc_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
 
     if let Some(yaml) = frontmatter_yaml {
         ipc_payload["frontmatter"] = serde_json::Value::String(yaml.to_string());
@@ -1726,7 +1763,8 @@ pub fn try_ipc(
         ));
     }
 
-    write_ipc_and_poll(&patch_file, &ipc_payload, file, patches.len(), content_ours, &project_root)
+    let success = write_ipc_and_poll(&patch_file, &ipc_payload, file, ipc_patches.len(), content_ours, &project_root)?;
+    Ok(IpcResult { success, patch_id })
 }
 
 /// Attempt to write full document content via IPC.
@@ -1856,22 +1894,26 @@ fn write_ipc_and_poll(
 
     while start.elapsed() < timeout {
         if !patch_file.exists() {
-            // Plugin consumed the patch — get snapshot from ack-content sidecar if available,
-            // otherwise fall back to 200ms sleep + file read.
+            // Plugin consumed the patch — poll for ack-content sidecar (authoritative
+            // post-apply snapshot). Falls back to file read after timeout.
             let patch_id = payload.get("patch_id").and_then(|v| v.as_str()).unwrap_or("");
             let current_on_disk = if !patch_id.is_empty() {
-                match read_ack_content_sidecar(project_root, patch_id) {
+                match poll_ack_content_sidecar(
+                    project_root, patch_id,
+                    std::time::Duration::from_millis(500),
+                    std::time::Duration::from_millis(25),
+                ) {
                     Ok(Some(content)) => {
                         eprintln!("[write] snapshot from ack-content sidecar ({} bytes)", content.len());
                         content
                     }
                     _ => {
-                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        eprintln!("[write] snapshot from file read (ack-content sidecar not available after 500ms)");
                         std::fs::read_to_string(doc_file).unwrap_or_default()
                     }
                 }
             } else {
-                std::thread::sleep(std::time::Duration::from_millis(200));
+                eprintln!("[write] snapshot from file read (no patch_id for sidecar lookup)");
                 std::fs::read_to_string(doc_file).unwrap_or_default()
             };
             let baseline_content = payload.get("baseline")
@@ -2425,8 +2467,8 @@ mod tests {
         fs::write(&doc, "content").unwrap();
 
         let patches: Vec<crate::template::PatchBlock> = vec![];
-        let result = try_ipc(&doc, &patches, "", None, None, None, None).unwrap();
-        assert!(!result, "should return false when patches dir doesn't exist");
+        let result = try_ipc(&doc, &patches, "", None, None, None, None, None).unwrap();
+        assert!(!result.success, "should return false when patches dir doesn't exist");
     }
 
     #[test]
@@ -2444,8 +2486,8 @@ mod tests {
         let patch = crate::template::PatchBlock::new("exchange", "new content");
 
         // This will timeout after 2s — patch file is written but never consumed
-        let result = try_ipc(&doc, &[patch], "", None, None, None, None).unwrap();
-        assert!(!result, "should return false on timeout (no plugin)");
+        let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
+        assert!(!result.success, "should return false on timeout (no plugin)");
 
         // Patch file should be cleaned up after timeout
         let patches_dir = agent_doc_dir.join("patches");
@@ -2491,8 +2533,8 @@ mod tests {
             }
         });
 
-        let result = try_ipc(&doc, &[patch], "", None, None, None, None).unwrap();
-        assert!(result, "should return true when plugin consumes patch");
+        let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
+        assert!(result.success, "should return true when plugin consumes patch");
     }
 
     #[test]
@@ -2642,9 +2684,10 @@ mod tests {
             Some(original),     // baseline
             Some(content_ours), // content_ours (no longer used for snapshot)
             None,               // normalize_prefix_lines
+            None,               // reuse_patch_id
         )
         .unwrap();
-        assert!(result, "IPC should succeed when plugin consumes patch");
+        assert!(result.success, "IPC should succeed when plugin consumes patch");
 
         // KEY ASSERTION: snapshot must match actual disk state (includes user edits)
         let snap = snapshot::load(&doc).unwrap().unwrap();
@@ -3268,6 +3311,73 @@ mod ack_content_snapshot_tests {
         assert_eq!(result, Some("applied content from plugin".to_string()));
         assert!(!sidecar.exists(), "sidecar should be deleted after read");
     }
+
+    #[test]
+    fn test_poll_sidecar_present_immediately() {
+        let tmp = TempDir::new().unwrap();
+        let project_root = tmp.path().to_path_buf();
+        let patch_id = "poll-immediate";
+
+        let ack_dir = project_root.join(".agent-doc/ack-content");
+        std::fs::create_dir_all(&ack_dir).unwrap();
+        std::fs::write(ack_dir.join(format!("{patch_id}.md")), "immediate content").unwrap();
+
+        let result = poll_ack_content_sidecar(
+            &project_root, patch_id,
+            std::time::Duration::from_millis(100),
+            std::time::Duration::from_millis(10),
+        ).unwrap();
+        assert_eq!(result, Some("immediate content".to_string()));
+    }
+
+    #[test]
+    fn test_poll_sidecar_appears_after_delay() {
+        let tmp = TempDir::new().unwrap();
+        let project_root = tmp.path().to_path_buf();
+        let patch_id = "poll-delayed";
+
+        let ack_dir = project_root.join(".agent-doc/ack-content");
+        std::fs::create_dir_all(&ack_dir).unwrap();
+
+        // Spawn a thread that writes the sidecar after 50ms using atomic
+        // rename to avoid the poll reading a partially-written file.
+        let sidecar_path = ack_dir.join(format!("{patch_id}.md"));
+        let tmp_path = ack_dir.join(format!("{patch_id}.md.tmp"));
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            std::fs::write(&tmp_path, "delayed content").unwrap();
+            std::fs::rename(&tmp_path, &sidecar_path).unwrap();
+        });
+
+        let result = poll_ack_content_sidecar(
+            &project_root, patch_id,
+            std::time::Duration::from_millis(500),
+            std::time::Duration::from_millis(10),
+        ).unwrap();
+        assert_eq!(result, Some("delayed content".to_string()));
+    }
+
+    #[test]
+    fn test_poll_sidecar_timeout() {
+        let tmp = TempDir::new().unwrap();
+        let project_root = tmp.path().to_path_buf();
+        let patch_id = "poll-timeout";
+
+        // Don't create the sidecar — poll should timeout
+        std::fs::create_dir_all(project_root.join(".agent-doc/ack-content")).unwrap();
+
+        let start = std::time::Instant::now();
+        let result = poll_ack_content_sidecar(
+            &project_root, patch_id,
+            std::time::Duration::from_millis(100),
+            std::time::Duration::from_millis(25),
+        ).unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(result, None);
+        assert!(elapsed >= std::time::Duration::from_millis(100), "should wait at least the timeout");
+        assert!(elapsed < std::time::Duration::from_millis(300), "should not wait much longer than timeout");
+    }
 }
 
 #[cfg(test)]
@@ -3357,140 +3467,123 @@ mod submodule_patch_routing_tests {
     // --show-toplevel` from `/tmp/...` walks up into the source tree. The
     // fallback path is exercised in production by non-git workspaces.
 
-    // The two `try_ipc_*` integration tests below are kept for documentation
-    // but currently fail because `write_ipc_and_poll` cleans up the patch file
-    // on timeout, leaving the directory empty by the time the assertions run.
-    // The routing itself is verified by `resolve_ipc_project_root_*` above.
-    // TODO: rewrite these to use a fake socket listener that ACKs immediately.
-    #[ignore]
+    /// Helper: start a fake socket listener that ACKs every message.
+    /// Returns a handle that keeps the listener alive until dropped.
+    fn start_fake_listener(project_root: &Path) -> std::thread::JoinHandle<()> {
+        let root = project_root.to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::thread::spawn(move || {
+            // start_listener blocks; it runs until the socket is removed (TempDir drop).
+            let _ = crate::ipc_socket::start_listener(&root, |msg| {
+                // Parse the incoming message and respond with an ack containing the patch_id.
+                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                let patch_id = v.get("patch_id").and_then(|p| p.as_str()).unwrap_or("unknown");
+                Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+            });
+        })
+    }
+
+    /// Helper: wait for the socket listener to become connectable (up to 1s).
+    fn wait_for_listener(project_root: &Path) {
+        for _ in 0..100 {
+            if crate::ipc_socket::is_listener_active(project_root) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("fake socket listener did not start within 1s");
+    }
+
     #[test]
     fn try_ipc_routes_to_superproject_when_available() {
-        // When git::resolve_to_git_root returns a superproject root different from
-        // find_project_root (indicating a submodule), verify that patches_dir points
-        // to the superproject's .agent-doc/patches directory.
-        //
-        // This test creates a real git submodule structure and verifies the routing logic.
+        // Verify that try_ipc routes patches to the superproject (parent repo)
+        // when the document lives inside a submodule. A fake socket listener
+        // on the parent root ACKs immediately, so the test doesn't hit the
+        // file-based IPC timeout that previously caused failures.
         let parent_dir = TempDir::new().unwrap();
-        let submodule_dir = TempDir::new().unwrap();
+        let sub_src_dir = TempDir::new().unwrap();
+        let parent = parent_dir.path().canonicalize().unwrap();
+        let sub_src = sub_src_dir.path().canonicalize().unwrap();
 
-        let parent = parent_dir.path();
-        let submodule = submodule_dir.path();
+        // Bootstrap "remote" submodule repo with one commit.
+        git(&sub_src, &["init"]);
+        std::fs::write(sub_src.join("README.md"), "sub").unwrap();
+        git(&sub_src, &["add", "README.md"]);
+        git(&sub_src, &["commit", "-m", "init"]);
 
-        // Initialize parent repo
-        Command::new("git")
-            .args(&["init"])
-            .current_dir(parent)
-            .output()
-            .expect("failed to init parent repo");
+        // Bootstrap parent repo and add the submodule.
+        git(&parent, &["init"]);
+        std::fs::write(parent.join("README.md"), "parent").unwrap();
+        git(&parent, &["add", "README.md"]);
+        git(&parent, &["commit", "-m", "init"]);
+        git(&parent, &[
+            "submodule", "add",
+            sub_src.to_string_lossy().as_ref(),
+            "src/submodule",
+        ]);
 
-        // Initialize submodule repo
-        Command::new("git")
-            .args(&["init"])
-            .current_dir(submodule)
-            .output()
-            .expect("failed to init submodule repo");
+        // Create .agent-doc structure on parent (snapshots + crdt for snapshot save).
+        std::fs::create_dir_all(parent.join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(parent.join(".agent-doc/crdt")).unwrap();
 
-        // Create parent .agent-doc structure
-        let parent_agent_doc = parent.join(".agent-doc");
-        std::fs::create_dir_all(parent_agent_doc.join("patches")).unwrap();
-        std::fs::create_dir_all(parent_agent_doc.join("snapshots")).unwrap();
+        // Start a fake socket listener on the parent root.
+        let _listener = start_fake_listener(&parent);
+        wait_for_listener(&parent);
 
-        // Commit submodule so we can add it as a submodule
-        let test_file = submodule.join("test.txt");
-        std::fs::write(&test_file, "submodule content").unwrap();
-        Command::new("git")
-            .args(&["add", "test.txt"])
-            .current_dir(submodule)
-            .output()
-            .expect("failed to stage in submodule");
-        Command::new("git")
-            .args(&["commit", "-m", "initial"])
-            .current_dir(submodule)
-            .output()
-            .expect("failed to commit in submodule");
+        // Place a document inside the submodule.
+        let doc = parent.join("src/submodule/test.md");
+        std::fs::write(&doc, "---\nsession: test\n---\n\n<!-- agent:exchange -->content<!-- /agent:exchange -->\n").unwrap();
 
-        // Add submodule to parent
-        Command::new("git")
-            .args(&["submodule", "add", submodule.to_string_lossy().as_ref(), "src/submodule"])
-            .current_dir(parent)
-            .output()
-            .expect("failed to add submodule");
-
-        // Create a document in the submodule
-        let submodule_src = parent.join("src/submodule");
-        let doc_in_submodule = submodule_src.join("test.md");
-        std::fs::create_dir_all(&submodule_src).ok();
-        std::fs::write(&doc_in_submodule, "---\nsession: test\n---\n\nContent\n").unwrap();
-
-        // Create parent's .agent-doc/snapshots to enable snapshot operations
-        std::fs::create_dir_all(parent_agent_doc.join("snapshots")).unwrap();
-        std::fs::create_dir_all(parent_agent_doc.join("crdt")).unwrap();
-
-        // Mock a patch block
         let patch = crate::template::PatchBlock::new("exchange", "test response");
 
-        // Call try_ipc with the submodule document
-        // This should:
-        // 1. canonicalize the submodule document path
-        // 2. Call git::resolve_to_git_root() → returns parent_root (superproject)
-        // 3. Use parent's .agent-doc/patches for the IPC directory
-        //
-        // Since no plugin is active, it should timeout and return false,
-        // but the patch file should be written to parent's patches dir, not submodule's.
-        let result = try_ipc(&doc_in_submodule, &[patch], "", None, None, None, None).unwrap_or(false);
-
-        // Verify patch was written to parent's patches dir, not submodule's (if submodule had one)
-        let parent_patches = parent.join(".agent-doc/patches");
-        let entries: Vec<_> = std::fs::read_dir(&parent_patches)
-            .ok()
-            .and_then(|rd| Some(rd.filter_map(|e| e.ok()).collect()))
-            .unwrap_or_default();
-
-        // There should be at least one patch file (written before timeout)
+        // try_ipc should route to the parent's socket listener and succeed.
+        let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
         assert!(
-            !entries.is_empty(),
-            "patch file should be written to parent's .agent-doc/patches directory for submodule documents"
+            result.success,
+            "try_ipc should succeed via socket IPC routed to the superproject"
         );
 
-        // Verify submodule doesn't have a .agent-doc/patches directory
-        let submodule_patches = submodule_src.join(".agent-doc/patches");
+        // Verify the submodule did NOT get its own .agent-doc/patches directory.
+        let submodule_patches = parent.join("src/submodule/.agent-doc/patches");
         assert!(
             !submodule_patches.exists(),
-            "submodule should NOT have its own .agent-doc/patches directory when parent handles routing"
+            "submodule should NOT have its own .agent-doc/patches when parent handles routing"
         );
     }
 
-    #[ignore]
     #[test]
-    fn try_ipc_falls_back_to_find_project_root_when_not_in_git() {
-        // When git::resolve_to_git_root fails (file not in a git repo),
-        // should fall back to find_project_root behavior
+    fn try_ipc_routes_to_git_toplevel_for_non_submodule() {
+        // Verify that try_ipc routes patches to the git toplevel (not a
+        // superproject) when the document lives in a plain git repo. This
+        // exercises the git_toplevel_at path (step 2 in resolve_ipc_project_root).
         let dir = TempDir::new().unwrap();
-        let agent_doc_dir = dir.path().join(".agent-doc");
-        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
-        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        let root = dir.path().canonicalize().unwrap();
 
-        let doc = dir.path().join("test.md");
-        std::fs::write(&doc, "---\nsession: test\n---\n\n<!-- agent:exchange -->content<!-- /agent:exchange -->\n")
-            .unwrap();
+        // Initialize a plain git repo (not a submodule of anything).
+        git(&root, &["init"]);
+        std::fs::write(root.join("README.md"), "root").unwrap();
+        git(&root, &["add", "README.md"]);
+        git(&root, &["commit", "-m", "init"]);
+
+        // Create .agent-doc structure.
+        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/crdt")).unwrap();
+
+        // Start a fake socket listener.
+        let _listener = start_fake_listener(&root);
+        wait_for_listener(&root);
+
+        // Create a document in a subdirectory.
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        let doc = root.join("tasks/test.md");
+        std::fs::write(&doc, "---\nsession: test\n---\n\n<!-- agent:exchange -->content<!-- /agent:exchange -->\n").unwrap();
 
         let patch = crate::template::PatchBlock::new("exchange", "response");
 
-        // This directory is not a git repo, so git::resolve_to_git_root will fail
-        // and fall back to find_project_root (which finds .agent-doc/ at dir level)
-        let result = try_ipc(&doc, &[patch], "", None, None, None, None).unwrap_or(false);
-
-        // Without a plugin, should timeout and return false
-        // But patches should have been written to dir/.agent-doc/patches (via fallback)
-        let patches_dir = agent_doc_dir.join("patches");
-        let entries: Vec<_> = std::fs::read_dir(&patches_dir)
-            .ok()
-            .and_then(|rd| Some(rd.filter_map(|e| e.ok()).collect()))
-            .unwrap_or_default();
-
+        let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
         assert!(
-            !entries.is_empty(),
-            "patch file should be written via find_project_root fallback when not in git"
+            result.success,
+            "try_ipc should succeed via socket IPC routed to the git toplevel"
         );
     }
 }

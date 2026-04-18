@@ -1,22 +1,25 @@
 //! # Module: session_cmd
 //!
 //! ## Spec
-//! - `agent-doc session` — show the currently configured tmux session
-//! - `agent-doc session set <name>` — update config.toml and migrate all registered
-//!   panes to the new session by moving the agent-doc window via `tmux move-window`.
+//! - `agent-doc session` — show the currently configured tmux session (or "auto-detect")
+//! - `agent-doc session set <name>` — pin to a specific session: update config.toml and
+//!   migrate all registered panes via `tmux move-window`.
+//! - `agent-doc session clear` — return to auto-detect mode (remove tmux_session from config).
 //!
 //! ## Agentic Contracts
-//! - `show()` reads config.toml and prints the configured session (or "(none)").
+//! - `show()` reads config.toml and prints the configured session (or "auto-detect").
 //! - `set()` updates config.toml, moves the agent-doc window from the old session to the
 //!   new session, and updates registry window references. If the old session has no
 //!   agent-doc window, the command still updates config for future routing.
+//! - `clear()` removes tmux_session from config.toml, returning to auto-detect mode.
 //! - Session names are not validated against live tmux sessions — tmux will error if the
 //!   target session doesn't exist, and we propagate that error.
 //!
 //! ## Evals
 //! - show_prints_configured_session: config has tmux_session="5" → prints "5"
-//! - show_prints_none_when_unconfigured: no config → prints "(none)"
+//! - show_prints_auto_detect_when_unconfigured: no config → prints "(auto-detect)"
 //! - set_updates_config: set "3" → config.toml contains tmux_session="3"
+//! - clear_removes_config: clear after set "3" → config.toml has no tmux_session
 
 use anyhow::{Context, Result};
 
@@ -27,8 +30,14 @@ pub fn show() -> Result<()> {
     let session = config::project_tmux_session();
     match session {
         Some(s) => println!("{}", s),
-        None => println!("(none)"),
+        None => println!("(auto-detect)"),
     }
+    Ok(())
+}
+
+/// Clear the configured tmux session, returning to auto-detect mode.
+pub fn clear() -> Result<()> {
+    config::clear_project_tmux_session()?;
     Ok(())
 }
 

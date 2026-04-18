@@ -170,13 +170,23 @@ fn pid_alive(pid: u32) -> bool {
 
 /// Read the PID from the PID file.
 fn read_pid() -> Option<u32> {
-    let content = std::fs::read_to_string(PID_FILE).ok()?;
+    read_pid_in(&std::env::current_dir().ok()?)
+}
+
+/// Read the PID from the PID file under `base_dir`.
+fn read_pid_in(base_dir: &Path) -> Option<u32> {
+    let content = std::fs::read_to_string(base_dir.join(PID_FILE)).ok()?;
     content.trim().parse().ok()
 }
 
 /// Write our PID to the PID file.
 fn write_pid() -> Result<()> {
-    let pid_path = Path::new(PID_FILE);
+    write_pid_in(&std::env::current_dir()?)
+}
+
+/// Write our PID to the PID file under `base_dir`.
+fn write_pid_in(base_dir: &Path) -> Result<()> {
+    let pid_path = base_dir.join(PID_FILE);
     if let Some(parent) = pid_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -187,6 +197,12 @@ fn write_pid() -> Result<()> {
 /// Remove the PID file.
 fn remove_pid() {
     let _ = std::fs::remove_file(PID_FILE);
+}
+
+/// Remove the PID file under `base_dir`.
+#[cfg(test)]
+fn remove_pid_in(base_dir: &Path) {
+    let _ = std::fs::remove_file(base_dir.join(PID_FILE));
 }
 
 /// Check if the watch daemon is currently running.
@@ -605,7 +621,11 @@ fn run_event_loop(
 /// Reads each document's frontmatter to determine whether it's
 /// file-watched (append/template) or stream-captured (stream mode).
 fn discover_entries() -> Result<Vec<WatchEntry>> {
-    let registry = sessions::load()?;
+    discover_entries_in(&std::env::current_dir()?)
+}
+
+fn discover_entries_in(base_dir: &Path) -> Result<Vec<WatchEntry>> {
+    let registry = sessions::load_in(base_dir)?;
     let mut entries = Vec::new();
     for entry in registry.values() {
         let path = PathBuf::from(&entry.file);
@@ -654,8 +674,8 @@ fn discover_entries() -> Result<Vec<WatchEntry>> {
 
 /// Discover only file paths (backward-compat wrapper used by tests).
 #[cfg(test)]
-fn discover_files() -> Result<Vec<PathBuf>> {
-    Ok(discover_entries()?
+fn discover_files_in(base_dir: &Path) -> Result<Vec<PathBuf>> {
+    Ok(discover_entries_in(base_dir)?
         .into_iter()
         .map(|e| e.path)
         .collect())
@@ -746,15 +766,14 @@ mod tests {
     #[test]
     fn pid_file_roundtrip() {
         let dir = TempDir::new().unwrap();
-        let _guard = std::env::set_current_dir(dir.path());
-        std::fs::create_dir_all(".agent-doc").unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
 
-        write_pid().unwrap();
-        let pid = read_pid().unwrap();
+        write_pid_in(dir.path()).unwrap();
+        let pid = read_pid_in(dir.path()).unwrap();
         assert_eq!(pid, std::process::id());
 
-        remove_pid();
-        assert!(read_pid().is_none());
+        remove_pid_in(dir.path());
+        assert!(read_pid_in(dir.path()).is_none());
     }
 
     #[test]
@@ -770,8 +789,7 @@ mod tests {
     #[test]
     fn discover_empty_registry() {
         let dir = TempDir::new().unwrap();
-        let _guard = std::env::set_current_dir(dir.path());
-        let files = discover_files().unwrap();
+        let files = discover_files_in(dir.path()).unwrap();
         assert!(files.is_empty());
     }
 
@@ -886,7 +904,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Integration test — requires notify to work with real filesystem
     fn watcher_detects_change() {
         use std::time::Duration;
 

@@ -56,6 +56,7 @@
 
 use anyhow::{Context, Result};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -238,6 +239,8 @@ fn stream_loop(
     let timer_interval = Duration::from_millis(interval_ms);
     let thinking_target = thinking_cfg.and_then(|c| c.target.clone());
     let has_thinking = thinking_cfg.is_some();
+    let timer_flushed_final = Arc::new(AtomicBool::new(false));
+    let timer_flushed_final_clone = Arc::clone(&timer_flushed_final);
 
     let timer_handle = std::thread::spawn(move || {
         let mut last_written = String::new();
@@ -261,7 +264,9 @@ fn stream_loop(
                 match flush_to_document(&file_path, &text, &target_name, &baseline_copy) {
                     Ok(()) => {
                         last_written = text;
-                        if !is_done {
+                        if is_done {
+                            timer_flushed_final_clone.store(true, Ordering::Release);
+                        } else {
                             eprint!(".");
                         }
                     }
@@ -354,14 +359,17 @@ fn stream_loop(
         // Save as pending for crash recovery
         recover::save_pending(file, &final_text)?;
 
-        flush_to_document(file, &final_text, target, baseline)?;
+        // Gate: skip if timer thread already flushed the final text (avoids IPC double-append)
+        if !timer_flushed_final.load(Ordering::Acquire) {
+            flush_to_document(file, &final_text, target, baseline)?;
+        }
 
         // Flush final thinking if routed to separate component
         if let Some(cfg) = thinking_cfg
             && let Some(ref tt) = cfg.target
         {
             let final_thinking = thinking_buffer.lock().unwrap().clone();
-            if !final_thinking.is_empty() {
+            if !final_thinking.is_empty() && !timer_flushed_final.load(Ordering::Acquire) {
                 flush_to_document(file, &final_thinking, tt, baseline)?;
             }
         }
@@ -415,7 +423,7 @@ pub(crate) fn flush_to_document(
 
     // Try IPC first — if plugin is active, it applies patches via Document API
     // (no "externally modified" dialog, cursor preserved, undo preserved)
-    if crate::write::try_ipc(file, &patches, &unmatched, None, None, None, None)? {
+    if crate::write::try_ipc(file, &patches, &unmatched, None, None, None, None, None)?.success {
         return Ok(());
     }
 

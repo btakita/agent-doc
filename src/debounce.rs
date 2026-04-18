@@ -201,47 +201,27 @@ pub fn await_idle_via_file(file: &str, debounce_ms: u64, timeout_ms: u64) -> boo
     }
 }
 
-// ── Response status signal (A: file, B: FFI) ──
+// ── Response status signal (file-based) ──
 
-/// Status directory for cross-process signals (Option A).
+/// Status directory for cross-process signals.
 const STATUS_DIR: &str = ".agent-doc/status";
-
-/// In-process status (Option B: FFI).
-static STATUS: Mutex<Option<HashMap<PathBuf, String>>> = Mutex::new(None);
-
-fn with_status<R>(f: impl FnOnce(&mut HashMap<PathBuf, String>) -> R) -> R {
-    let mut guard = STATUS.lock().unwrap();
-    let map = guard.get_or_insert_with(HashMap::new);
-    f(map)
-}
 
 /// Set the response status for a file.
 ///
 /// Status values: "generating", "writing", "routing", "idle"
-/// Sets both in-process state (B) and file signal (A).
+/// Writes a file signal to `.agent-doc/status/` for cross-process visibility.
 pub fn set_status(file: &str, status: &str) {
-    let path = PathBuf::from(file);
-    with_status(|map| {
-        if status == "idle" {
-            map.remove(&path);
-        } else {
-            map.insert(path, status.to_string());
-        }
-    });
     let _ = write_status_file(file, status);
 }
 
-/// Get the response status for a file (in-process, Option B).
+/// Get the response status for a file.
 ///
-/// Returns "idle" if no status is set.
+/// Returns "idle" if no status file exists or it's stale (>30s).
 pub fn get_status(file: &str) -> String {
-    let path = PathBuf::from(file);
-    with_status(|map| {
-        map.get(&path).cloned().unwrap_or_else(|| "idle".to_string())
-    })
+    get_status_via_file(file)
 }
 
-/// Check if any operation is in progress for a file (in-process, Option B).
+/// Check if any operation is in progress for a file.
 ///
 /// Returns `true` if status is NOT "idle". Used by plugins to avoid
 /// triggering routes during active operations.
@@ -249,7 +229,7 @@ pub fn is_busy(file: &str) -> bool {
     get_status(file) != "idle"
 }
 
-/// Get status from file signal (cross-process, Option A).
+/// Get status from file signal (cross-process).
 ///
 /// Returns "idle" if no status file exists or it's stale (>30s).
 pub fn get_status_via_file(file: &str) -> String {
@@ -516,7 +496,7 @@ mod tests {
         set_status(&doc_str, "generating");
         assert_eq!(get_status(&doc_str), "generating");
 
-        // Status should remain until explicitly cleared
+        // get_status now delegates to get_status_via_file
         assert_eq!(get_status_via_file(&doc_str), "generating");
 
         // After 30s, get_status_via_file returns "idle" (assumes operation crashed)
@@ -648,8 +628,7 @@ mod tests {
 
         set_status(&doc_str, "generating");
 
-        // get_status uses in-process map (always works), but cross-process file check
-        // must find .agent-doc at project root
+        // get_status delegates to file-based check — must find .agent-doc at project root
         assert_eq!(get_status_via_file(&doc_str), "generating");
     }
 }

@@ -6,20 +6,18 @@
 //!
 //! See `src/agent-doc/specs/supervisor.md` for the full design.
 //!
-//! ## Phase 1 status
+//! ## Submodules
 //! - `cwd` — CWD resolution priority chain (CLI flag > frontmatter > project root > doc parent).
-//! - `pty` — pty allocation, child spawn, stdin/stdout forwarding threads.
 //! - `env` — parent-env cascade + frontmatter overlay + unset, resolved once
-//!   per supervisor lifetime and reused across every `state.rs` restart.
-//!
-//! Remaining phase 1 submodules (`resize`, `state`, `ipc`) land in
-//! subsequent commits and get wired into `start.rs` last. Until `start.rs`
-//! consumes these, the symbols look unused to the compiler — suppress
-//! dead-code warnings at the module level rather than littering the
-//! individual structs and tests with attributes that would need to be
-//! removed later.
-#![allow(dead_code)]
+//!   per supervisor lifetime and reused across every restart.
+//! - `pty` — pty allocation, child spawn, stdin/stdout forwarding threads.
+//! - `resize` — SIGWINCH handling (Unix) for terminal resize propagation.
+//! - `state` — crash classifier, restart history ring buffer, state machine.
+//! - `ipc` — per-session Unix-domain socket for lifecycle control.
 
 pub mod cwd;
 pub mod env;
+pub mod ipc;
 pub mod pty;
+pub mod resize;
+pub mod state;

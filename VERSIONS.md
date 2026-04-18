@@ -4,6 +4,40 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.33.0
+
+- **Typed gate markers (`[/release]`, `[/deploy]`, `[/code-review]`, etc.):** Parser recognizes typed gates alongside plain `[/]`. Gate types are alphanumeric with hyphens/underscores, case-insensitive, stored lowercase. State machine: `[/release]` is a refinement of `[/]`; gate type is metadata on `Gated` state, cleared when resolved to `[x]`. Untyped `[/]` items are never touched by `resolve-gate`.
+
+- **Per-file gate commands** (`agent-doc pending <FILE>`): `resolve-gate <type>` finds all `[/<type>]` items and flips to `[x]`. `set-gate-type <id> <type>` transitions `[/]` → `[/release]` (errors if not gated).
+
+- **Project-wide `resolve-gate` command** (`agent-doc resolve-gate <type>`): Scans all `.md` files under project root (or `--scope <dir>`) for items with matching typed gates. Designed for hook integration:
+  ```jsonc
+  { "match": "cargo publish", "run": "agent-doc resolve-gate release" }
+  { "match": "git push",      "run": "agent-doc resolve-gate deploy" }
+  ```
+
+- **Write command gate flags:** `--pending-resolve-gate <type>` and `--pending-set-gate-type id=type` for atomic pending+response cycles.
+
+- **`--pending-add-gated` flag:** Add items pre-gated as `[/]` instead of `[ ]`. Available on both `write` and `notify` commands.
+
+- **`--pending-only` flag:** Skip stdin reading and exchange synthesis — only apply pending mutations. Requires at least one `--pending-*` flag; incompatible with `--template`/`--stream`/`--ipc`.
+
+- **`--status` flag on `write`:** Replace the `agent:status` component content inline during a write operation, same pattern as pending ops.
+
+- **`status` submodule (`status_cmd.rs`):** New module for status component manipulation.
+
+- **Notify with pending:** `agent-doc notify` gains `--pending-add`, `--pending-add-gated`, and `--no-create-pending` flags. Message is now optional when `--pending-add` is used.
+
+- **`session clear` subcommand:** Clear the configured tmux session, returning to auto-detect mode.
+
+- **Supervisor PTY module (`supervisor/pty.rs`):** New 526-line module for PTY-based process spawning and management within the supervisor architecture.
+
+- **Start.rs expansion:** Major rework (+627 lines) for improved tmux detection, session routing, and supervisor integration.
+
+- **Debounce simplification:** Removed redundant debounce logic in favor of the consolidated approach.
+
+- **Tests:** 20 new typed-gate tests (parse, render, roundtrip, resolve, set-gate-type, scan, case insensitivity, edge cases). All 1111 tests pass, clippy clean.
+
 ## 0.32.5
 
 - **Fix submodule auto-start `file not found` (route.rs `rewrite_start_path`):** When the spawned tmux pane's `cwd` is narrowed to a submodule root (by `git::resolve_pane_cwd`), the `agent-doc start <path>` send-keys invocation now rewrites the caller-supplied super-root-relative `file_path` to be relative to that narrowed `cwd` before composition. Previously a path like `src/session-share/tasks/foo.md` was passed verbatim to a pane already `cd`'d into `src/session-share`, producing `Error: file not found: src/session-share/tasks/foo.md` and blocking auto-claim + auto-start on every submodule-hosted document. Fix lives at a single funnel (`auto_start_in_session`) and also feeds `send_command`'s `/agent-doc <path>` slash command for the same reason. Pure helper `rewrite_start_path(file, cwd, original) -> String` canonicalizes both sides, strips the cwd prefix, and falls back to `original` on any failure (preserves behavior for non-submodule docs, ghost paths, and files outside cwd). Tests: 4 new unit tests (`rewrite_start_path_narrows_to_submodule_relative`, `rewrite_start_path_no_op_when_file_under_cwd_with_same_prefix`, `rewrite_start_path_falls_back_when_canonicalize_fails`, `rewrite_start_path_falls_back_when_file_not_under_cwd`) plus full `route::` suite (43 passing). Forward-compatible with the supervisor track (#jg0d/#b486/#40ct/#vnp0/#6ae3/#zp02/#f7d5) — when `PtySpawnConfig.args` lands, the same helper feeds path rewriting at the new spawn funnel.

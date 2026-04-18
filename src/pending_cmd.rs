@@ -28,19 +28,21 @@ fn find_pending_component(file: &Path) -> Result<(String, component::Component)>
 
 /// Compute a stable document id from a file path. Uses `snapshot::doc_hash` so
 /// the id is consistent across pending ops and backfill.
-fn doc_id_for(file: &Path) -> String {
+pub fn doc_id_for(file: &Path) -> String {
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
     snapshot::doc_hash(&canonical).unwrap_or_else(|_| file.display().to_string())
 }
 
-/// Add a new item to the pending component (assigns a stable hash id + `[ ]`).
-pub fn add(file: &Path, item: &str) -> Result<()> {
+/// Add a new item to the pending component (assigns a stable hash id + `[ ]` or `[/]`).
+/// Prints the assigned hash id to stdout.
+pub fn add(file: &Path, item: &str, gated: bool) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = doc_id_for(file);
-    let new_content = pending::op_add(existing, item, &doc_id)?;
+    let (new_content, id) = pending::op_add(existing, item, &doc_id, gated)?;
     let new_doc = comp.replace_content(&full_content, &new_content);
     std::fs::write(file, &new_doc)?;
+    println!("{}", id);
     Ok(())
 }
 
@@ -201,6 +203,89 @@ pub fn prune(file: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Resolve all items with a matching typed gate (e.g., `[/release]` → `[x]`).
+/// Prints resolved ids to stdout.
+pub fn resolve_gate(file: &Path, gate_type: &str) -> Result<()> {
+    let (full_content, comp) = find_pending_component(file)?;
+    let existing = &full_content[comp.open_end..comp.close_start];
+    let (new_content, resolved) = pending::op_resolve_gate(existing, gate_type);
+    if resolved.is_empty() {
+        eprintln!("[pending] no [/{}] items to resolve in {}", gate_type, file.display());
+        return Ok(());
+    }
+    let new_doc = comp.replace_content(&full_content, &new_content);
+    std::fs::write(file, &new_doc)?;
+    eprintln!("[pending] resolved {} [/{}] item(s): {}", resolved.len(), gate_type, resolved.join(", "));
+    for id in &resolved {
+        println!("{}", id);
+    }
+    Ok(())
+}
+
+/// Set a typed gate on a gated item (e.g., `[/]` → `[/release]`).
+pub fn set_gate_type(file: &Path, id: &str, gate_type: &str) -> Result<()> {
+    let (full_content, comp) = find_pending_component(file)?;
+    let existing = &full_content[comp.open_end..comp.close_start];
+    let new_content = pending::op_set_gate_type(existing, id, gate_type)?;
+    let new_doc = comp.replace_content(&full_content, &new_content);
+    std::fs::write(file, &new_doc)?;
+    eprintln!("[pending] set gate type [/{}] on [#{}]", gate_type, id);
+    Ok(())
+}
+
+/// Scan documents under a directory for items matching a typed gate and resolve them.
+/// Returns total number of resolved items.
+pub fn resolve_gate_scan(gate_type: &str, scope: &Path) -> Result<usize> {
+    let mut total = 0;
+    let mut dirs = vec![scope.to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            let path = entry.path();
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if path.is_dir() {
+                // Skip hidden dirs and common non-document dirs
+                if !name_str.starts_with('.') && name_str != "node_modules" && name_str != "target" {
+                    dirs.push(path);
+                }
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                continue;
+            }
+            let content = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let components = match component::parse(&content) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let comp = match components.into_iter().find(|c| c.name == "pending") {
+                Some(c) => c,
+                None => continue,
+            };
+            let existing = &content[comp.open_end..comp.close_start];
+            let (new_content, resolved) = pending::op_resolve_gate(existing, gate_type);
+            if !resolved.is_empty() {
+                let new_doc = comp.replace_content(&content, &new_content);
+                std::fs::write(&path, &new_doc)?;
+                eprintln!("[resolve-gate] {}: resolved {} item(s): {}", path.display(), resolved.len(), resolved.join(", "));
+                total += resolved.len();
+            }
+        }
+    }
+    Ok(total)
+}
+
 /// List current pending items.
 pub fn list(file: &Path) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
@@ -228,7 +313,6 @@ mod tests {
 
     fn setup_test_dir() -> (TempDir, PathBuf) {
         let tmp = TempDir::new().unwrap();
-        env::set_current_dir(tmp.path()).unwrap();
         let doc = tmp.path().join("test.md");
         (tmp, doc)
     }
@@ -243,7 +327,7 @@ mod tests {
     #[test]
     fn add_appends_to_pending_component() {
         let (_tmp, doc) = doc_with_pending("- item one");
-        add(&doc, "item two").unwrap();
+        add(&doc, "item two", false).unwrap();
 
         let content = fs::read_to_string(&doc).unwrap();
         // `add` now runs op_add which canonicalizes items with hash + checkbox.
@@ -256,7 +340,7 @@ mod tests {
     #[test]
     fn add_creates_content_if_empty() {
         let (_tmp, doc) = doc_with_pending("");
-        add(&doc, "new item").unwrap();
+        add(&doc, "new item", false).unwrap();
 
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("new item"));
@@ -309,5 +393,51 @@ mod tests {
         let (_tmp, doc) = doc_with_pending("- item one\n- item two");
         list(&doc).unwrap();
         // Just checking it doesn't panic
+    }
+
+    #[test]
+    fn resolve_gate_flips_typed_items() {
+        let (_tmp, doc) = doc_with_pending("- [/release] [#a1b2] Release v1.0\n- [/deploy] [#c3d4] Deploy\n- [/] [#e5f6] Generic");
+        resolve_gate(&doc, "release").unwrap();
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("[x]"), "release item should be done");
+        assert!(content.contains("[/deploy]"), "deploy should be untouched");
+        assert!(content.contains("[/]"), "generic gate should be untouched");
+    }
+
+    #[test]
+    fn resolve_gate_noop_no_match() {
+        let (_tmp, doc) = doc_with_pending("- [/release] [#a1b2] Release");
+        resolve_gate(&doc, "deploy").unwrap();
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("[/release]"), "should be unchanged");
+    }
+
+    #[test]
+    fn set_gate_type_on_gated_item() {
+        let (_tmp, doc) = doc_with_pending("- [/] [#a1b2] Release v1.0");
+        set_gate_type(&doc, "a1b2", "release").unwrap();
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("[/release]"));
+    }
+
+    #[test]
+    fn resolve_gate_scan_finds_across_dirs() {
+        let tmp = TempDir::new().unwrap();
+        let subdir = tmp.path().join("tasks");
+        fs::create_dir_all(&subdir).unwrap();
+        let doc1 = subdir.join("doc1.md");
+        let doc2 = subdir.join("doc2.md");
+        fs::write(&doc1, "---\nagent_doc_session: t1\n---\n\n<!-- agent:pending -->\n- [/release] [#a1b2] First\n<!-- /agent:pending -->\n").unwrap();
+        fs::write(&doc2, "---\nagent_doc_session: t2\n---\n\n<!-- agent:pending -->\n- [/release] [#c3d4] Second\n- [/deploy] [#e5f6] Deploy\n<!-- /agent:pending -->\n").unwrap();
+
+        let total = resolve_gate_scan("release", tmp.path()).unwrap();
+        assert_eq!(total, 2);
+
+        let c1 = fs::read_to_string(&doc1).unwrap();
+        assert!(c1.contains("[x]"));
+        let c2 = fs::read_to_string(&doc2).unwrap();
+        assert!(c2.contains("[x]")); // release resolved
+        assert!(c2.contains("[/deploy]")); // deploy untouched
     }
 }

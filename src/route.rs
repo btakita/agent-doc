@@ -165,7 +165,7 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
         eprintln!("[route] Generated session UUID: {}", session_id);
     }
 
-    let target_session = resolve_target_session(tmux, None, true);
+    let target_session = resolve_target_session(tmux, None);
     eprintln!("[route] target tmux session: {}", target_session);
 
     let file_path = file.to_string_lossy();
@@ -292,8 +292,15 @@ fn resolve_or_create_pane(
 
     // Strategy 2: Lazy claim (only when a registered pane died)
     // Skip panes running non-agent processes to avoid claiming corky/shells.
+    // Also skip panes already claimed by another document (pane theft prevention).
+    let claimed_panes: std::collections::HashSet<String> = sessions::load()
+        .unwrap_or_default()
+        .values()
+        .filter(|e| tmux.pane_alive(&e.pane))
+        .map(|e| e.pane.clone())
+        .collect();
     if registered.is_some()
-        && let Some(new_pane) = find_target_pane(tmux, pane, target_session)
+        && let Some(new_pane) = find_target_pane(tmux, pane, target_session, &claimed_panes)
         && is_agent_process(tmux, &new_pane)
     {
         eprintln!("[route] Lazy-claiming to pane {} (dead pane)", new_pane);
@@ -465,17 +472,14 @@ fn current_tmux_session(tmux: &Tmux) -> Option<String> {
 ///
 /// Priority:
 /// 1. `context_session` if provided (from sync --window)
-/// 2. config.toml `tmux_session` if the session is alive
-/// 3. Fallback to current tmux session or "claude" constant
+/// 2. config.toml `tmux_session` if the session is alive (user explicitly pinned via `session set`)
+/// 3. Fallback to current tmux session or "claude" constant (auto-detect)
 ///
-/// When no session is configured AND `auto_update_config` is true, writes
-/// the fallback to config.toml. When a session IS configured (even if dead),
-/// the config is NOT updated — this prevents a session-1 terminal from
-/// silently overwriting a session-0 project config.
+/// Session config is never auto-written. Only `agent-doc session set <name>` pins a session.
+/// `agent-doc session clear` returns to auto-detect mode.
 fn resolve_target_session(
     tmux: &Tmux,
     context_session: Option<&str>,
-    auto_update_config: bool,
 ) -> String {
     if let Some(ctx) = context_session {
         return ctx.to_string();
@@ -486,27 +490,22 @@ fn resolve_target_session(
         return configured.unwrap();
     }
 
-    let fallback = current_tmux_session(tmux)
-        .unwrap_or_else(|| TMUX_SESSION_NAME.to_string());
-
-    // Only auto-update config when no session was previously configured.
-    // If a session IS configured but dead (e.g. server restart), preserve the config value
-    // so a session-1 terminal cannot silently overwrite the project's session-0 target.
-    if auto_update_config && configured.is_none()
-        && let Err(e) = crate::config::update_project_tmux_session(&fallback)
-    {
-        eprintln!("warning: failed to update project tmux_session config: {}", e);
-    }
-
-    fallback
+    current_tmux_session(tmux)
+        .unwrap_or_else(|| TMUX_SESSION_NAME.to_string())
 }
 
 /// Find an active target pane for lazy claiming.
-fn find_target_pane(tmux: &Tmux, explicit_pane: Option<&str>, session_name: &str) -> Option<String> {
+/// Skips panes already claimed by another document in the session registry.
+fn find_target_pane(
+    tmux: &Tmux,
+    explicit_pane: Option<&str>,
+    session_name: &str,
+    claimed_panes: &std::collections::HashSet<String>,
+) -> Option<String> {
     let target = explicit_pane
         .map(|p| p.to_string())
         .or_else(|| tmux.active_pane(session_name));
-    target.filter(|p| tmux.pane_alive(p))
+    target.filter(|p| tmux.pane_alive(p) && !claimed_panes.contains(p))
 }
 
 /// Check if a window with the given name exists in the target tmux session.
@@ -622,7 +621,7 @@ fn auto_start_ext(
     skip_wait: bool,
     split_before: bool,
 ) -> Result<()> {
-    let session_name = resolve_target_session(tmux, context_session, true);
+    let session_name = resolve_target_session(tmux, context_session);
     auto_start_in_session(tmux, file, session_id, file_path, &session_name, skip_wait, split_before)
 }
 
@@ -1167,11 +1166,11 @@ mod tests {
 
         // Start a shell that reads a line and echoes it back with a marker
         iso.send_keys(&pane, r#"read CMD && echo "GOT:$CMD""#).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        std::thread::sleep(std::time::Duration::from_millis(1000));
 
         // Send a command (simulates what send_command does)
         iso.send_keys(&pane, "/agent-doc test.md").unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(800));
+        std::thread::sleep(std::time::Duration::from_millis(1500));
 
         // Capture and verify the command was received
         let content = sessions::capture_pane(&iso, &pane).unwrap();
@@ -1191,7 +1190,7 @@ mod tests {
 
         // Use exec to replace the shell entirely, then use bash -c to print ❯ and block
         iso.send_keys(&pane, "exec bash -c 'echo ❯; cat'").unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(1500));
+        std::thread::sleep(std::time::Duration::from_millis(2500));
 
         let content = sessions::capture_pane(&iso, &pane).unwrap_or_default();
         assert!(

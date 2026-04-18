@@ -120,14 +120,22 @@ pub struct PendingItem {
     pub id: String,
     /// Lifecycle state encoded by the GFM checkbox.
     pub state: PendingState,
+    /// Optional typed gate (e.g., "release" for `[/release]`, "deploy" for `[/deploy]`).
+    /// Only meaningful when `state == Gated`. `None` means untyped `[/]`.
+    pub gate_type: Option<String>,
     /// Bullet text after the hash prefix.
     pub text: String,
 }
 
 impl PendingItem {
     /// Render to canonical `- [<state>] [#id] text` form.
+    /// Typed gates render as `[/release]`, `[/deploy]`, etc.
     pub fn render(&self) -> String {
-        format!("- [{}] [#{}] {}", self.state.box_char(), self.id, self.text)
+        let checkbox = match (&self.state, &self.gate_type) {
+            (PendingState::Gated, Some(gt)) => format!("[/{}]", gt),
+            _ => format!("[{}]", self.state.box_char()),
+        };
+        format!("- {} [#{}] {}", checkbox, self.id, self.text)
     }
 
     /// Convenience: true when state is `Done` (`[x]`).
@@ -206,17 +214,30 @@ fn parse_item_line(line: &str) -> Option<PendingItem> {
     let rest = trimmed.strip_prefix("- ")?;
     let rest = rest.trim_start();
 
-    // Checkbox?
-    let (state, after_box) = if let Some(r) = rest.strip_prefix("[ ]") {
-        (PendingState::Open, r.trim_start())
+    // Checkbox? Supports typed gates: [/release], [/deploy], etc.
+    let (state, gate_type, after_box) = if let Some(r) = rest.strip_prefix("[ ]") {
+        (PendingState::Open, None, r.trim_start())
     } else if let Some(r) = rest.strip_prefix("[/]") {
-        (PendingState::Gated, r.trim_start())
+        (PendingState::Gated, None, r.trim_start())
+    } else if let Some(inner) = rest.strip_prefix("[/") {
+        // Typed gate: [/release], [/deploy], etc.
+        if let Some(close) = inner.find(']') {
+            let gt = &inner[..close];
+            if !gt.is_empty() && gt.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+                let r = &inner[close + 1..];
+                (PendingState::Gated, Some(gt.to_lowercase()), r.trim_start())
+            } else {
+                (PendingState::Open, None, rest)
+            }
+        } else {
+            (PendingState::Open, None, rest)
+        }
     } else if let Some(r) = rest.strip_prefix("[x]") {
-        (PendingState::Done, r.trim_start())
+        (PendingState::Done, None, r.trim_start())
     } else if let Some(r) = rest.strip_prefix("[X]") {
-        (PendingState::Done, r.trim_start())
+        (PendingState::Done, None, r.trim_start())
     } else {
-        (PendingState::Open, rest)
+        (PendingState::Open, None, rest)
     };
 
     // Hash id?
@@ -239,6 +260,7 @@ fn parse_item_line(line: &str) -> Option<PendingItem> {
     Some(PendingItem {
         id,
         state,
+        gate_type,
         text: text.trim_end().to_string(),
     })
 }
@@ -454,11 +476,15 @@ pub fn detect_reorder(snapshot_body: &str, current_body: &str) -> Option<Vec<Str
     Some(cur_ids)
 }
 
-/// Append a new item to the body. Binary assigns hash and `[ ]`.
-pub fn op_add(body: &str, text: &str, doc_id: &str) -> Result<String> {
+/// Append a new item to the body. Binary assigns hash and `[ ]` (or `[/]` if `gated`).
+/// Returns `(new_body, assigned_id)`.
+pub fn op_add(body: &str, text: &str, doc_id: &str, gated: bool) -> Result<(String, String)> {
     let text = text.trim();
     if text.is_empty() {
         bail!("pending add: text must be non-empty");
+    }
+    if text.starts_with("[ ]") || text.starts_with("[/]") || text.starts_with("[x]") || text.starts_with("[X]") {
+        bail!("pending add: text must not start with a state marker ([ ], [/], [x]); use --pending-add-gated for gated items");
     }
     let (prelude, mut items, postlude) = parse_items(body);
     let mut taken: HashSet<String> = items
@@ -471,11 +497,12 @@ pub fn op_add(body: &str, text: &str, doc_id: &str) -> Result<String> {
     taken.insert(id.clone());
 
     items.push(PendingItem {
-        id,
-        state: PendingState::Open,
+        id: id.clone(),
+        state: if gated { PendingState::Gated } else { PendingState::Open },
+        gate_type: None,
         text: text.to_string(),
     });
-    Ok(render_items(&prelude, &items, &postlude))
+    Ok((render_items(&prelude, &items, &postlude), id))
 }
 
 /// Mark an item `[x]` by id. Phase 1: state-machine validation lives in
@@ -574,6 +601,44 @@ pub fn op_reorder(body: &str, ids: &[String]) -> Result<String> {
     }
     ordered.extend(remaining);
     Ok(render_items(&prelude, &ordered, &postlude))
+}
+
+/// Resolve all gated items matching a typed gate. Finds items with `[/<gate_type>]`
+/// and flips them to `[x]`. Returns `(new_body, resolved_ids)`.
+///
+/// Only matches typed gates — untyped `[/]` items are never resolved by this op.
+pub fn op_resolve_gate(body: &str, gate_type: &str) -> (String, Vec<String>) {
+    let gt = gate_type.trim().to_lowercase();
+    let (prelude, mut items, postlude) = parse_items(body);
+    let mut resolved = Vec::new();
+    for item in &mut items {
+        if item.state == PendingState::Gated && item.gate_type.as_deref() == Some(gt.as_str()) {
+            item.state = PendingState::Done;
+            item.gate_type = None;
+            resolved.push(item.id.clone());
+        }
+    }
+    (render_items(&prelude, &items, &postlude), resolved)
+}
+
+/// Set a typed gate on a gated item. The item must already be in `[/]` state.
+/// Transitions `[/] → [/<gate_type>]`. Errors if the item is not gated.
+pub fn op_set_gate_type(body: &str, id: &str, gate_type: &str) -> Result<String> {
+    let id = id.trim().to_lowercase();
+    let gt = gate_type.trim().to_lowercase();
+    if gt.is_empty() || !gt.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        bail!("invalid gate type: must be alphanumeric/dash/underscore");
+    }
+    let (prelude, mut items, postlude) = parse_items(body);
+    let item = items
+        .iter_mut()
+        .find(|i| i.id == id)
+        .ok_or_else(|| anyhow!("pending set-gate-type: no item with id [#{}]", id))?;
+    if item.state != PendingState::Gated {
+        bail!("pending set-gate-type: item [#{}] must be gated ([/]) to set a typed gate, current state: [{}]", id, item.state.box_char());
+    }
+    item.gate_type = Some(gt);
+    Ok(render_items(&prelude, &items, &postlude))
 }
 
 #[cfg(test)]
@@ -677,6 +742,7 @@ mod tests {
         let item = PendingItem {
             id: "eg0w".to_string(),
             state: PendingState::Gated,
+            gate_type: None,
             text: "CommitLock".to_string(),
         };
         assert_eq!(item.render(), "- [/] [#eg0w] CommitLock");
@@ -780,14 +846,42 @@ mod tests {
     #[test]
     fn op_add_appends_new_item_with_hash() {
         let body = "";
-        let new_body = op_add(body, "first task", DOC_ID).unwrap();
+        let (new_body, id) = op_add(body, "first task", DOC_ID, false).unwrap();
         assert!(new_body.contains("- [ ] [#"));
         assert!(new_body.contains("first task"));
+        assert!(!id.is_empty());
     }
 
     #[test]
     fn op_add_rejects_empty() {
-        assert!(op_add("", "   ", DOC_ID).is_err());
+        assert!(op_add("", "   ", DOC_ID, false).is_err());
+    }
+
+    #[test]
+    fn op_add_rejects_state_marker_prefix() {
+        for marker in &["[ ] task", "[/] task", "[x] task", "[X] task"] {
+            let err = op_add("", marker, DOC_ID, false).unwrap_err();
+            let msg = format!("{}", err);
+            assert!(msg.contains("state marker"), "expected state marker error for '{}', got: {}", marker, msg);
+        }
+    }
+
+    #[test]
+    fn op_add_gated_produces_gated_item() {
+        let (new_body, id) = op_add("", "gated task", DOC_ID, true).unwrap();
+        assert!(new_body.contains("[/]"), "expected [/] in: {}", new_body);
+        assert!(new_body.contains(&format!("[#{}]", id)));
+        assert!(new_body.contains("gated task"));
+    }
+
+    #[test]
+    fn op_add_returns_assigned_id() {
+        let (body, id1) = op_add("", "task one", DOC_ID, false).unwrap();
+        assert!(!id1.is_empty());
+        assert!(body.contains(&format!("[#{}]", id1)));
+        let (body2, id2) = op_add(&body, "task two", DOC_ID, false).unwrap();
+        assert_ne!(id1, id2);
+        assert!(body2.contains(&format!("[#{}]", id2)));
     }
 
     #[test]
@@ -1020,5 +1114,139 @@ mod tests {
         for id in &ids {
             assert!((4..=8).contains(&id.len()), "id {} has width {}", id, id.len());
         }
+    }
+
+    // ---- Typed gates ----
+
+    #[test]
+    fn parse_typed_gate_release() {
+        let body = "- [/release] [#a1b2] Release v0.32.4\n";
+        let (_, items, _) = parse_items(body);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].state, PendingState::Gated);
+        assert_eq!(items[0].gate_type, Some("release".to_string()));
+        assert_eq!(items[0].text, "Release v0.32.4");
+    }
+
+    #[test]
+    fn parse_typed_gate_deploy() {
+        let body = "- [/deploy] [#c3d4] Push CDN config\n";
+        let (_, items, _) = parse_items(body);
+        assert_eq!(items[0].state, PendingState::Gated);
+        assert_eq!(items[0].gate_type, Some("deploy".to_string()));
+    }
+
+    #[test]
+    fn parse_untyped_gate_has_no_gate_type() {
+        let body = "- [/] [#a1b2] waiting\n";
+        let (_, items, _) = parse_items(body);
+        assert_eq!(items[0].state, PendingState::Gated);
+        assert_eq!(items[0].gate_type, None);
+    }
+
+    #[test]
+    fn parse_open_has_no_gate_type() {
+        let body = "- [ ] [#a1b2] task\n";
+        let (_, items, _) = parse_items(body);
+        assert_eq!(items[0].gate_type, None);
+    }
+
+    #[test]
+    fn render_typed_gate() {
+        let item = PendingItem {
+            id: "a1b2".to_string(),
+            state: PendingState::Gated,
+            gate_type: Some("release".to_string()),
+            text: "Release v0.32.4".to_string(),
+        };
+        assert_eq!(item.render(), "- [/release] [#a1b2] Release v0.32.4");
+    }
+
+    #[test]
+    fn render_roundtrip_typed_gate() {
+        let body = "- [/release] [#a1b2] Release v0.32.4\n- [/deploy] [#c3d4] Push\n- [/] [#e5f6] Generic\n";
+        let (p, items, post) = parse_items(body);
+        let out = render_items(&p, &items, &post);
+        assert_eq!(out, body);
+    }
+
+    #[test]
+    fn op_resolve_gate_flips_matching() {
+        let body = "- [/release] [#a1b2] Release v0.32.4\n- [/deploy] [#c3d4] Deploy\n- [/] [#e5f6] Generic gate\n";
+        let (new_body, resolved) = op_resolve_gate(body, "release");
+        assert_eq!(resolved, vec!["a1b2"]);
+        let (_, items, _) = parse_items(&new_body);
+        assert_eq!(items[0].state, PendingState::Done); // was [/release]
+        assert_eq!(items[0].gate_type, None); // cleared
+        assert_eq!(items[1].state, PendingState::Gated); // [/deploy] untouched
+        assert_eq!(items[1].gate_type, Some("deploy".to_string()));
+        assert_eq!(items[2].state, PendingState::Gated); // [/] untouched
+        assert_eq!(items[2].gate_type, None);
+    }
+
+    #[test]
+    fn op_resolve_gate_no_match() {
+        let body = "- [/release] [#a1b2] Release\n- [/] [#c3d4] Generic\n";
+        let (new_body, resolved) = op_resolve_gate(body, "deploy");
+        assert!(resolved.is_empty());
+        assert_eq!(new_body, body);
+    }
+
+    #[test]
+    fn op_resolve_gate_ignores_untyped() {
+        let body = "- [/] [#a1b2] Generic gate\n";
+        let (_, resolved) = op_resolve_gate(body, "release");
+        assert!(resolved.is_empty());
+    }
+
+    #[test]
+    fn op_resolve_gate_multiple_same_type() {
+        let body = "- [/release] [#a1b2] First\n- [/release] [#c3d4] Second\n";
+        let (_, resolved) = op_resolve_gate(body, "release");
+        assert_eq!(resolved, vec!["a1b2", "c3d4"]);
+    }
+
+    #[test]
+    fn op_set_gate_type_on_gated() {
+        let body = "- [/] [#a1b2] Release v0.32.4\n";
+        let new_body = op_set_gate_type(body, "a1b2", "release").unwrap();
+        assert!(new_body.contains("[/release]"));
+        let (_, items, _) = parse_items(&new_body);
+        assert_eq!(items[0].gate_type, Some("release".to_string()));
+    }
+
+    #[test]
+    fn op_set_gate_type_errors_on_open() {
+        let body = "- [ ] [#a1b2] task\n";
+        assert!(op_set_gate_type(body, "a1b2", "release").is_err());
+    }
+
+    #[test]
+    fn op_set_gate_type_errors_on_done() {
+        let body = "- [x] [#a1b2] task\n";
+        assert!(op_set_gate_type(body, "a1b2", "release").is_err());
+    }
+
+    #[test]
+    fn op_set_gate_type_replaces_existing() {
+        let body = "- [/release] [#a1b2] task\n";
+        let new_body = op_set_gate_type(body, "a1b2", "deploy").unwrap();
+        assert!(new_body.contains("[/deploy]"));
+        assert!(!new_body.contains("[/release]"));
+    }
+
+    #[test]
+    fn parse_typed_gate_case_insensitive() {
+        let body = "- [/Release] [#a1b2] task\n";
+        let (_, items, _) = parse_items(body);
+        assert_eq!(items[0].gate_type, Some("release".to_string()));
+    }
+
+    #[test]
+    fn parse_typed_gate_with_hyphens_underscores() {
+        let body = "- [/code-review] [#a1b2] Review PR\n- [/pre_release] [#c3d4] Pre-release check\n";
+        let (_, items, _) = parse_items(body);
+        assert_eq!(items[0].gate_type, Some("code-review".to_string()));
+        assert_eq!(items[1].gate_type, Some("pre_release".to_string()));
     }
 }

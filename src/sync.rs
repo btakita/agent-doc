@@ -786,15 +786,17 @@ fn run_with_options(
                                 "rescue_attempt pane={} file={} stash_window={} session={}",
                                 pane, file_path.display(), win_name, target_sess
                             ));
-                            // Rescue: swap the stashed pane into the agent-doc window
+                            // Rescue: swap the stashed pane into the agent-doc window.
+                            // Use the window ID directly — format!("{}:agent-doc", window_id)
+                            // is invalid because tmux parses `:` as session:window, treating
+                            // the window ID as a session name (which doesn't exist).
                             if let Some(target_win) = window {
-                                let agent_doc_window = format!("{}:agent-doc", target_win);
-                                let target_panes = tmux.list_window_panes(&agent_doc_window).unwrap_or_default();
+                                let target_panes = tmux.list_window_panes(target_win).unwrap_or_default();
                                 if let Some(target) = target_panes.first() {
                                     let swap_session = target_sess.to_string();
                                     sync_log(&format!(
-                                        "rescue_action=swap-pane src={} dst={} agent_doc_window={}",
-                                        pane, target, agent_doc_window
+                                        "rescue_action=swap-pane src={} dst={} target_window={}",
+                                        pane, target, target_win
                                     ));
                                     match sessions::swap_pane_guarded(tmux, pane, target, &swap_session) {
                                         Ok(()) => {

@@ -711,7 +711,7 @@ pub unsafe extern "C" fn agent_doc_set_status(
     crate::debounce::set_status(path, st);
 }
 
-/// Get the response status for a file (Option B: in-process).
+/// Get the response status for a file (file-based).
 ///
 /// Returns a NUL-terminated string: "generating", "writing", "routing", or "idle".
 /// Caller must free with `agent_doc_free_string`.
@@ -729,7 +729,7 @@ pub unsafe extern "C" fn agent_doc_get_status(file_path: *const c_char) -> *mut 
     CString::new(status).unwrap_or_else(|_| CString::new("idle").unwrap()).into_raw()
 }
 
-/// Check if any operation is in progress for a file (Option B: in-process).
+/// Check if any operation is in progress for a file (file-based).
 ///
 /// Returns `true` if status is NOT "idle". Plugins should skip route
 /// operations when this returns `true` to prevent cascading.

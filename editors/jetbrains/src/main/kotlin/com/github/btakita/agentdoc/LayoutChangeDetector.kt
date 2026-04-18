@@ -7,6 +7,8 @@ import com.intellij.openapi.project.Project
 import java.awt.Container
 import java.awt.event.ContainerEvent
 import java.awt.event.ContainerListener
+import java.util.Collections
+import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -29,6 +31,9 @@ class LayoutChangeDetector(private val project: Project) {
     private var pollThread: Thread? = null
     private val listenerCount = java.util.concurrent.atomic.AtomicInteger(0)
     private val containerEventCount = java.util.concurrent.atomic.AtomicLong(0)
+    // WeakHashMap so GC'd containers don't accumulate; synchronized for EDT access
+    private val listenedContainers: MutableSet<Container> =
+        Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap()))
 
     fun start() {
         // Attach ContainerListener to the splitters root (delayed — splitters may not exist yet)
@@ -83,6 +88,7 @@ class LayoutChangeDetector(private val project: Project) {
     }
 
     private fun addRecursiveContainerListener(container: Container) {
+        if (!listenedContainers.add(container)) return // already attached — skip
         container.addContainerListener(containerListener)
         listenerCount.incrementAndGet()
         for (child in container.components) {

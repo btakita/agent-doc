@@ -29,7 +29,7 @@ use std::path::PathBuf;
 use agent_doc::model_tier::ModelConfig;
 
 // Re-export project-level configuration from the shared module (for convenience)
-pub use crate::project_config::{project_tmux_session, update_project_tmux_session};
+pub use crate::project_config::{clear_project_tmux_session, project_tmux_session, update_project_tmux_session};
 
 /// Execution mode for skill-level parallelism.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

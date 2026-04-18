@@ -580,7 +580,22 @@ Two compounding failures. Both understood now.
 - `diff_type: multi_topic, 2 distinct added blocks` — those are your two questions; no opus response in between because the IPC write never landed.
 
 Pending `#m1bz` still gates publish. The route fix is now live locally; IPC patchback path is a separate thread (JB plugin 0.2.60 needs IDE restart).
-<!-- agent:boundary:6431e93e -->
+
+`Run Agent Doc` still does not call `tmux-send agent-doc tasks/agent-doc/agent-doc-bugs.md` into the claiming tmux pane. This regression happened after fixes for
+> ❯ When I ran JB Plugin `Run Agent Doc` on src/session-share/tasks/claudescore.md, it passed the full path relative to the monorepo root. Since src/session-share has its own agent-doc project, the command should be `/agent-doc tasks/claudescore.md`. Please prefer updating the FFI plugin. If both the JB Plugin and the VS Code Plugin need to be updated, do so.
+```
+❯ /agent-doc src/session-share/tasks/claudescore.md
+
+● Bash(agent-doc --version && agent-doc preflight src/session-share/tasks/claudescore.md)
+  ⎿  Error: Exit code 1
+     agent-doc 0.33.1
+     Error: file not found: src/session-share/tasks/claudescore.md
+```
+
+src/session-share/tasks/claudescore.md has an uncommitted patchback from manually running `/graphify .` directly in the tmux pane. Why?
+
+Write response back into this agent doc.
+<!-- agent:boundary:9c2b8fb6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

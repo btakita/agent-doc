@@ -396,9 +396,17 @@ Done. Removed all traces:
 
 The woz:* skills (`woz:code`, `woz:explore`, `woz:plan`, `woz:woz-recall`, etc.) and MCP tools (`mcp__plugin_woz_code__Search`, `mcp__plugin_woz_code__Edit`, `mcp__plugin_woz_code__Sql`) are gone. tsift + native Claude Code tools are the replacement.
 
-Fix t
 - `settings.json` — removed `attribution` block, `"woz@wozcode-marketplace": true` from `enabledPlugins`, `wozcode-marketplace` from `extraKnownMarketplaces`, and `spinnerVerbs` block
-<!-- agent:boundary:39e25888 -->
+
+❯ Fix the malformed /home/brian/.claude/settings.json
+### Re: JSON fixed — sonnet-4-6
+
+Fixed two trailing commas in settings.json:
+- Line 72: `enabledPlugins` object (after removing woz plugin entry)
+- Line 110: `extraKnownMarketplaces` object (after removing wozcode-marketplace)
+
+JSON is now valid. ✓
+<!-- agent:boundary:5e92377f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

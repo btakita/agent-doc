@@ -154,7 +154,14 @@ No runbook for hook integration yet — that belongs with #95as (Claude Code hoo
 **To make it automatic** would require #95as (Claude Code hook integration) — rewriting search commands through tsift the way rtk rewrites git/cargo commands. That's when the token savings compound.
 ❯ do #mwhg
 .
-<!-- agent:boundary:15c3fca4 -->
+❯ patchback
+### Re: patchback — committed to tsift — sonnet-4-6
+
+Committed. Both the submodule and parent pointer are committed:
+
+- `src/tsift` — `feat(edit): add batch edit command (#mwhg)` (41a188b)
+- `agent-loop` — submodule pointer bumped (68f46c77)
+<!-- agent:boundary:3079801b -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

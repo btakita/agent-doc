@@ -555,7 +555,7 @@ Sonnet's mechanism is right; the trigger story is shaky and the proposed fix los
 Shell-idle same-session is the bug; Sonnet generalized too far.
 
 **Also:** Orphan cleanup uses `target_session:agent-doc`—Strategy 3 creates panes the user may not see. Missing `wrong_session_pane` test (line 94 aspirational) should ship with the fix.
-<!-- agent:boundary:6104ae11 -->
+<!-- agent:boundary:6be1371f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

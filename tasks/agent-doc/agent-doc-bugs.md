@@ -159,7 +159,7 @@ Neither needs tracking here. If you want them tracked elsewhere, they'd go in a 
 - `writer_thread_exits_on_pty_write_failure` — thread exits when PTY write fails (EPIPE)
 
 Changed file: `src/agent-doc/src/start.rs`
-<!-- agent:boundary:10ede891 -->
+<!-- agent:boundary:a5be62c7 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -546,18 +546,28 @@ This is actually the design working correctly. These items are gated on differen
 
 If you want future release items to auto-resolve, set typed gates: `set-gate-type <id> release` before publishing, then wire `agent-doc resolve-gate release` as a post-publish hook.
 ❯ done **#mchh**
-### Re: add to pending + done #mchh — opus-4-6
+❯ ### Re: add to pending + done #mchh — opus-4-6 (HEAD)
 
 Those items **were already in pending** — they've been tracked since the v0.32.5 session. The bulleted list in my previous response was explaining what each gated item is blocked on, not proposing new additions. All five (#p2xm, #wcf5, #a002, #mchh, #ha3h) were already in the `&lt;!-- agent:pending --&gt;` component.
 
 **#mchh** marked done — JetBrains plugin installed and verified.
-<!-- agent:boundary:2b2ddec2 -->
+❯ do #p2xm
+### Re: do #p2xm — opus-4-6
+
+Already fixed. The orphaned `patch:exchange` marker leak was resolved in a prior session:
+
+- **Fix location:** `template.rs:257-265` — when `parse_patches()` finds an opening `<!-- patch:* -->` with no matching closer, it advances `last_end` past the orphaned marker (including trailing newline) so it doesn't leak into unmatched text.
+- **Tests:** Two dedicated tests pass — `parse_patches_orphaned_opener_does_not_leak_into_unmatched` and `parse_patches_orphaned_opener_between_valid_patches` (template.rs:1274-1309).
+- **All 1115 tests pass**, clippy clean.
+
+Marking #p2xm done.
+<!-- agent:boundary:b3d597b9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [/] [#p2xm] Orphaned patch:exchange marker leak: parse_patches() does not consume unclosed opening markers — they leak into unmatched text and get appended to exchange verbatim. Fix: advance last_end past unclosed openers in parse_patches()
+- [x] [#p2xm] Orphaned patch:exchange marker leak: parse_patches() does not consume unclosed opening markers — they leak into unmatched text and get appended to exchange verbatim. Fix: advance last_end past unclosed openers in parse_patches()
 - [/] [#wcf5] Advisory flock doesn't protect external watchers: IDE file-change listeners and git hooks race concurrent diff computations against stale snapshots
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40

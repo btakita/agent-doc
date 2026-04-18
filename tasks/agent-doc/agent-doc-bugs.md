@@ -131,7 +131,7 @@ The ASCII art logo is misaligned — the three lines of the logo glyph are left-
 - A regression in v2.1.109's banner rendering
 
 This is an upstream Claude Code issue — worth filing at https://github.com/anthropics/claude-code/issues if it persists across terminals.
-<!-- agent:boundary:c5386631 -->
+<!-- agent:boundary:806d76e1 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

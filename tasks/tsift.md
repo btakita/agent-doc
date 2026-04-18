@@ -301,10 +301,22 @@ Created `src/tsift/CLAUDE.md` with project conventions covering:
 
 Committed in submodule (`docs: add CLAUDE.md with project conventions`) and parent pointer bumped.
 ❯ Is the latest installed locally?
-### Re: Is the latest installed locally? — sonnet-4-6
+❯ ### Re: Is the latest installed locally? — sonnet-4-6 (HEAD)
 
 Yes. `tsift --version` → `0.1.0`, and the latest commit (`19d0f63`) is the CLAUDE.md docs addition — no binary change. The installed binary reflects the latest code. No reinstall needed.
-<!-- agent:boundary:7783b5dd -->
+❯ Has tsift been saving tokens since the last install
+### Re: tsift token savings — opus-4-6
+
+**Not yet — no search commands have been rewritten.** The hook is registered and active, but Claude Code's native Grep tool bypasses Bash entirely (it's a direct tool call, not a shell command). The tsift-rewrite hook only fires on Bash `rg`/`grep -r` invocations, which rarely happen since Claude Code prefers its dedicated Grep tool.
+
+RTK is saving 32.4M tokens (83.5% reduction) across 7,283 commands — but that's rtk's proxy filtering, not tsift.
+
+**Where tsift saves tokens indirectly:**
+- `/tsift` for semantic/exploratory queries finds the right file on the first try, avoiding the grep→read→wrong file→grep again loop
+- Each avoided wrong-file read saves ~2,000-8,000 tokens — but this isn't tracked by RTK
+
+**To get measurable savings**, the hook would need to intercept the Grep tool itself (not just Bash commands), or tsift would need to become the primary search interface via skill invocation rather than hook rewriting.
+<!-- agent:boundary:50198e2a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

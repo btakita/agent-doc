@@ -388,7 +388,7 @@ So the flow for an item like #gqep would be:
 **When to apply:** You'd transition `[/]` → `[/release]` when the only remaining blocker is the publish/deploy action itself. If there are still manual testing gates or other human decisions pending, it stays as `[/]`. The typed gate means "the next matching event closes this" — so you only apply it when you're genuinely ready for that event.
 
 This also means `[/release]` is a commitment signal: "if cargo publish succeeds, this item is done." No further review needed after the event.
-<!-- agent:boundary:ff546b4c -->
+<!-- agent:boundary:29876c69 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

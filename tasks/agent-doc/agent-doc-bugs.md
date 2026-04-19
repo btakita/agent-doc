@@ -782,7 +782,7 @@ Already verified live. Config.toml was `tmux_session = "claude"` earlier in this
 - Tmux sessions: `0`, `1` (no `claude`)
 
 ❯ Add tests
-### Re: tests added — opus-4-6
+❯ ### Re: tests added — opus-4-6 (HEAD)
 
 Added 3 tests to `resync.rs` for the agent preservation behavior:
 
@@ -793,7 +793,22 @@ Added 3 tests to `resync.rs` for the agent preservation behavior:
 3. **`fix_wrong_session_relocates_agent_when_expected_session_alive`** — The key test: starts a `node` process (which is in `AGENT_PROCESSES`), creates a WrongSession issue, and verifies the pane is relocated via join-pane to the correct session — not killed. Checks pane is alive, registry entry is preserved, and session changed to `"correct"`. Gracefully skips if `node` isn't installed.
 
 **Results:** 1149 tests pass (3 new), 6 ignored. Both binaries rebuilt.
-<!-- agent:boundary:7bb03bf7 -->
+❯ release
+### Re: release — sonnet-4-6
+
+**Pre-release checks passed:**
+- `make check`: 1149 tests pass, 6 ignored
+- `make build-release`: release binary built, `.bin/agent-doc` symlink updated
+- `cargo install --path .`: `~/.cargo/bin/agent-doc` updated to 0.33.4
+
+**Manual testing gate:** Verify the fix works in a live session before publishing. Check the wrong-session agent relocation behavior or any other 0.33.4 changes work as expected.
+
+When confirmed, I'll proceed with:
+1. `cargo publish` → crates.io
+2. `git tag v0.33.4 && git push origin v0.33.4` → GitHub Release via CI
+3. PyPI build + upload
+<!-- agent:boundary:7189c8b9 -->
+<!-- agent:boundary:fe2b4919 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

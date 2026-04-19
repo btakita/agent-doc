@@ -199,14 +199,12 @@ Verified end-to-end: `agent-doc gc-libs` → `[gc-libs] kept current: libagent_d
 **VS Code (native.ts):** Added `verifyVersion(libPath)` — calls `bindFunctions()` to ensure `_version` is bound, then calls `agent_doc_version()` via koffi, decodes the `char*`, frees it, and logs the version. Same warning on null/exception. Added `_version` to lazy bindings and `resetBindings()`. Called after both initial load and reload in `ensureLoaded()`. Replaces the generic `loaded ${libPath}` log message with the versioned one.
 
 **No new tests needed** — this is a best-effort log+warn sanity check. Testing would require loading the actual native library. The version function itself is already tested via the Rust test suite.
-<!-- agent:boundary:07c4c343 -->
-<!-- agent:boundary:04bf6327 -->
+<!-- agent:boundary:8010860c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [x] [#5tjq] Post-reload sanity check: call agent_doc_version() after hot-reload in both NativeLib.kt (JNA) and native.ts (koffi), log version string, fail fast on ABI mismatch
 - [ ] [#6rm4] Bump version + release agent-doc with hooks feature + this fix
 - [ ] [#mrs0] `agent-doc steer <FILE>` — inject steering message to claim pane via tmux send-keys
 - [ ] [#qyv7] (stretch) inotify watcher for automatic real-time steering on document edit

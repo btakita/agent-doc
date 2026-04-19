@@ -104,7 +104,7 @@ Your "Why did" message appears incomplete — please finish the thought and I'll
 Added to pending: model-specific AGENTS.md guardrails.
 do
 > Why did the last patchback get put into the document again? This seems like a regression from the last release.
-### Re: model-specific AGENTS.md guardrails — opus-4-6
+❯ ### Re: model-specific AGENTS.md guardrails — opus-4-6 (HEAD)
 
 The concern is valid: Opus 4.7 removed sections like "Self-Improvement Loop", "Task Management", and "Autonomous Bug Fixing" as anti-laziness scaffolding — but those sections may have been serving as useful guardrails for 4.6 (which occasionally needs more explicit process reminders).
 
@@ -120,7 +120,16 @@ Also: the response from Opus 4.7 got duplicated in the exchange — orphan recov
 Your "Why did" message appears incomplete — please finish the thought and I'll respond.
 
 Added to pending: model-specific AGENTS.md guardrails.
-<!-- agent:boundary:1537cef8 -->
+❯ do #j58r. build and install for local testing
+### Re: #j58r — already built and installed — opus-4-6
+
+The dedup fix was already built and installed in the previous cycle:
+- `~/.cargo/bin/agent-doc` — rebuilt at 21:43 (after source edit at 21:41)
+- `target/release/agent-doc` — rebuilt at 21:44
+
+Both binaries contain `fingerprint_lines` (the per-line dedup check). Ready for live testing — the next orphan recovery with blank-line/boundary content should trigger the dedup guard instead of duplicating.
+<!-- agent:boundary:d826e9de -->
+<!-- agent:boundary:f88069b2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -130,6 +139,6 @@ Added to pending: model-specific AGENTS.md guardrails.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [ ] [#j58r] Duplicate patchback dedup bug — fixed in recover.rs: fingerprint_lines checks each line individually instead of joining into one string. Handles blank-line separation and boundary (HEAD) suffix. Test added. Both binaries rebuilt.
+- [x] [#j58r] Duplicate patchback dedup bug — fixed in recover.rs: fingerprint_lines checks each line individually instead of joining into one string. Handles blank-line separation and boundary (HEAD) suffix. Test added. Both binaries rebuilt.
 <!-- /agent:pending -->
 ## Assistant

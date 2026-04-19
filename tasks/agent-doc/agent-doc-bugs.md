@@ -400,7 +400,7 @@ Shall I make the edit now? It's a ~5-line addition to the "What to decide each c
 JB plugin 0.2.64 zips are on disk only — install via IDEA → Settings → Plugins → gear → Install from Disk → `agent-doc-jetbrains-0.2.64-signed.zip` when ready.
 
 ❯ Add manylinux to fix PyPI being blocked.
-### Re: PyPI is NOT blocked — I misread — opus-4-7
+❯ ### Re: PyPI is NOT blocked — I misread — opus-4-7 (HEAD)
 
 **My earlier report was wrong.** PyPI publishing isn't broken; manylinux is already configured. v0.33.3 is live on PyPI:
 
@@ -418,7 +418,40 @@ agent-doc (0.33.3)
 **Takeaway: stop running local `maturin publish` for agent-doc releases.** The CI pipeline is the canonical path for PyPI. I've updated auto-memory to reflect this — "Publish all targets" now reads *crates.io + GitHub Release* locally; PyPI flows through `release: published` automatically. New [`reference_pypi_publish_via_ci.md`](reference) captures the full context and corrects the earlier `#18985` note.
 
 **Final status for v0.33.3:** all targets live. crates.io ✓, PyPI ✓, GitHub Release ✓, local binaries ✓, JB plugin 0.2.64 zips ✓, parent submodule pushed ✓. Nothing to do on manylinux.
-<!-- agent:boundary:9569dca3 -->
+
+❯ Why did an agent-doc run on src/session-share/tasks/claudescore.md not add pending items?
+
+```
+#### What I'd recommend
+
+1. **Immediate (data fix):** Re-audit expected-scores.toml against fixture content, recompute EXPECTED_COMPOSITE_SCORES, add hooks-present expected score. This closes ~10 points of the gap with zero code changes.
+
+2. **Next phase (rubric expansion):** Add 3-4 substance-class rubrics focused on universally observable signals (code structure, dependencies, commit hygiene). This addresses the structural coverage gap for repos like aider.
+
+3. **Don't decompose existing rubrics** — harness-infrastructure and distribution-quality are broad but they're doing the right job. The gap is in the expected scores, not in the measurement.
+```
+### Re: pending items not added on claudescore.md — opus-4-7
+
+**Not a bug in the binary — the prior agent just didn't call `--pending-add`.** I traced it:
+
+- Last committed cycle: `d364f9a agent-doc(claudescore): 2026-04-19 03:37:45` (session-share submodule).
+- That cycle produced the "What I'd recommend" numbered list you quoted, but the `&lt;!-- agent:pending --&gt;` block is empty in the same commit — the agent only wrote prose, never added `--pending-add` flags to its `agent-doc write` invocation.
+- The closing sentence was *"Want to start with the expected-scores re-audit?"* — i.e. the agent was still in "consult the user" mode rather than "materialize backlog".
+- You then typed `Add tasks to pending` inline as a follow-up — that text is in the working tree but **no /agent-doc cycle has been run on `claudescore.md` since**, so the instruction hasn't been processed yet.
+
+**Why the binary didn't auto-convert the list:** by design. Pending mutation only happens via the explicit `--pending-add` / `--pending-done` flags (per `runbooks/pending-ops.md`); the write path doesn't scan response prose for numbered lists and promote them to pending items. That's the right default — otherwise every "here are options" response would pollute the backlog.
+
+**The real gap is on the skill/agent side, not the binary:** when a response contains distinct, actionable recommendations *and* the user clearly wants a backlog (empty pending + ranked list + "recommend"), the agent should proactively `--pending-add` those items in the same cycle. The current SKILL.md § 1b only tells the agent *how* to mutate pending when it decides to, not *when* to decide to.
+
+**What I'd do to fix the pattern, not the symptom:**
+
+1. **Immediate (unblock you):** run `/agent-doc tasks/claudescore.md` now — your `Add tasks to pending` instruction will be picked up, and the responding agent should issue `--pending-add` for each of the three recommendations. I'd do it from here, but the doc lives in the session-share submodule and needs its own cycle.
+2. **Medium-term (skill tweak):** add a one-liner heuristic to § 1b: *"If your response ends with a numbered recommendation list and pending is empty (or the user asked for backlog), add each recommendation as a pending item in the same write."* Cheap to add; fixes the class.
+3. **Not a binary change:** I'd explicitly avoid teaching the binary to infer pending items from prose. Keep the agent as the judgment layer.
+
+Want me to file this under **Not Built** here (skill-side pending-promotion heuristic) while we're in this doc?
+<!-- agent:boundary:676a0280 -->
+<!-- agent:boundary:5d93f78e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

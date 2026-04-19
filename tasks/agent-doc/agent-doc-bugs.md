@@ -942,7 +942,26 @@ Plus a note that template-mode sessions require `high` as a floor — models bel
 Steps 2 (write) and 3 (commit) in SKILL.md now have `(MANDATORY — never skip)` in their headers, with bolded explanations of what breaks if skipped. Write: "Skipping write breaks the document sync." Commit: "Skipping commit desynchronizes the snapshot from git, breaking the next cycle's diff."
 
 All changes are in `.claude/skills/agent-doc/SKILL.md` and `.claude/skills/agent-doc/runbooks/model-tier-gate.md`.
-<!-- agent:boundary:efede74f -->
+Are these skill/runbook changes implemented in both the agent-doc repo and in the agent-loop repo? Will these changes be installable via `agent-doc install`?
+### Re: do #j57h #4ynf #chcb — all three implemented — opus-4-6
+
+**#j57h — Explicit skill triggers for Opus 4.7**
+Updated SKILL.md frontmatter `description` from vague "Submit a session document..." to explicit ALL-OF conditions: `(1) file is a markdown session document, (2) agent-doc binary is installed, (3) write+commit are executed every cycle without exception`. This tells 4.7's effort system that the skill has non-optional steps, reducing the chance of partial execution at lower effort levels.
+
+**#4ynf — Tier gate model mapping**
+Added a model-to-tier mapping table to `runbooks/model-tier-gate.md`:
+- `claude-opus-4-7` → high
+- `claude-opus-4-6` → high
+- `claude-sonnet-4-6` → med
+- `claude-haiku-4-5` → low
+
+Plus a note that template-mode sessions require `high` as a floor — models below high may skip mandatory steps at lower effort.
+
+**#chcb — Mandatory-step language**
+Steps 2 (write) and 3 (commit) in SKILL.md now have `(MANDATORY — never skip)` in their headers, with bolded explanations of what breaks if skipped. Write: "Skipping write breaks the document sync." Commit: "Skipping commit desynchronizes the snapshot from git, breaking the next cycle's diff."
+
+All changes are in `.claude/skills/agent-doc/SKILL.md` and `.claude/skills/agent-doc/runbooks/model-tier-gate.md`.
+<!-- agent:boundary:facc2776 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

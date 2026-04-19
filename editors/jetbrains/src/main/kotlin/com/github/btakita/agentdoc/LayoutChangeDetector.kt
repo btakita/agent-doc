@@ -73,11 +73,12 @@ class LayoutChangeDetector(private val project: Project) {
     private val containerListener = object : ContainerListener {
         override fun componentAdded(e: ContainerEvent) {
             val count = containerEventCount.incrementAndGet()
-            // Also listen on newly added containers
-            val child = e.child
-            if (child is Container) {
-                addRecursiveContainerListener(child)
-            }
+            // Do NOT recurse into the new child's sub-tree here. The initial
+            // one-shot walk from attachContainerListener covers the tree that
+            // exists at plugin start; the 5s fallback poll (checkAndSync)
+            // picks up any structural change afterwards. Recursive re-attach
+            // on every add was the source of the listener-count blow-up
+            // (listeners climbing past 1500 in minutes on heavy Swing churn).
             if (count % 100 == 0L) LOG.info("[state] containerEvents=$count listeners=${listenerCount.get()}")
             scheduleSync("containerAdd")
         }

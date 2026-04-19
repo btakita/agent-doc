@@ -25,19 +25,20 @@ class ClaimAction : AnAction() {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
-        val basePath = project.basePath ?: return
 
-        val relativePath = TerminalUtil.relativePath(project, file)
+        val (cwd, relativePath) = TerminalUtil.resolveProject(project, file)
         val windowId = TerminalUtil.projectWindowId(project)
 
         // Determine position from editor layout so claim targets the correct tmux pane.
         // Without --position, claim falls back to the last active tmux pane (wrong).
         // LayoutDetector maps horizontal splits to left/right columns, vertical to same column.
+        // LayoutDetector still uses workspace-relative paths, so compare against those.
+        val layoutRelPath = TerminalUtil.relativePath(project, file)
         val managerEx = FileEditorManagerEx.getInstanceEx(project)
         val editorLayout = if (managerEx.windows.size > 1)
             LayoutDetector.detectEditorLayout(project) else null
         val position = editorLayout?.let { layout ->
-            val colIdx = layout.columns.indexOfFirst { col -> relativePath in col.files }
+            val colIdx = layout.columns.indexOfFirst { col -> layoutRelPath in col.files }
             when {
                 colIdx < 0 -> null                         // file not found in layout
                 colIdx == 0 -> "left"
@@ -49,7 +50,7 @@ class ClaimAction : AnAction() {
         Thread {
             try {
                 // Step 1: Claim the focused file (adds frontmatter if missing)
-                val agentDoc = TerminalUtil.resolveAgentDoc(basePath)
+                val agentDoc = TerminalUtil.resolveAgentDoc(cwd)
                 val cmd = mutableListOf(agentDoc, "claim", relativePath)
                 if (windowId != null) {
                     cmd.addAll(listOf("--window", windowId))
@@ -59,7 +60,7 @@ class ClaimAction : AnAction() {
                 }
                 LOG.debug("claim: ${cmd.joinToString(" ")}")
                 val process = ProcessBuilder(cmd)
-                    .directory(java.io.File(basePath))
+                    .directory(java.io.File(cwd))
                     .redirectErrorStream(true)
                     .start()
                 val output = process.inputStream.bufferedReader().readText().trim()

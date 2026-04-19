@@ -29,19 +29,32 @@ import java.security.MessageDigest
  * 3. Reads the JSON, finds the target document, applies patches
  * 4. Saves the document and deletes the JSON file (ACK)
  * 5. agent-doc polls for deletion and updates the snapshot
+ *
+ * **Multi-root:** a single watcher tracks every nested `.agent-doc/` project
+ * under `project.basePath` (scanned at startup) plus any additional roots
+ * discovered at runtime via [registerRoot] (called by actions when they
+ * resolve a submodule root via FFI). Each root has its own NIO
+ * WatchService thread, its own FFI socket listener, and its own applied-
+ * patch dedup cache. Writes from `src/<submodule>/.agent-doc/patches/` are
+ * applied by the same plugin instance that handles the parent's patches.
  */
 class PatchWatcher(private val project: Project) : Disposable {
 
-    private var watchThread: Thread? = null
-    private var ipcCallback: AgentDocLib.IpcMessageCallback? = null
+    private data class RootState(
+        val root: String,
+        val patchesDir: File,
+        @Volatile var watchThread: Thread? = null,
+        @Volatile var ipcCallback: AgentDocLib.IpcMessageCallback? = null,
+    )
+
+    /** Registered roots, keyed by absolute path. Written through [registerRoot]. */
+    private val rootStates = java.util.concurrent.ConcurrentHashMap<String, RootState>()
+
+    /** Dedup cache keyed by patch_id (globally unique). Shared across all roots. */
+    private val appliedPatchIds = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     @Volatile private var running = false
 
-    /**
-     * Dedup set: tracks patch_ids that have already been applied.
-     * Prevents double-apply when both socket and file IPC deliver the same
-     * logical write (same patch_id). Entries are timestamped for cleanup.
-     */
-    private val appliedPatchIds = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val APPLIED_PATCH_TTL_MS = 60_000L // 60s TTL
 
     /** Record a patch_id as applied (call after successful applyPatch). */
@@ -66,51 +79,117 @@ class PatchWatcher(private val project: Project) : Disposable {
     }
 
     fun start() {
+        if (running) return
+        running = true
         val basePath = project.basePath ?: return
-        val patchesDir = File(basePath, ".agent-doc/patches")
+        registerRoot(basePath)
+        // Scan for nested .agent-doc/ dirs under basePath (submodules, nested repos).
+        // Each discovered parent (the directory CONTAINING .agent-doc/) gets its own watcher.
+        for (nested in discoverNestedRoots(basePath)) {
+            registerRoot(nested)
+        }
+    }
+
+    /**
+     * Register a root directory (must contain or will contain `.agent-doc/patches/`).
+     * Spawns a dedicated watch thread + FFI socket listener for this root.
+     * Idempotent: calling with an already-registered root is a no-op.
+     *
+     * Called at startup for [project.basePath] + nested discoveries, and at runtime
+     * by action code when a submodule root is resolved via FFI.
+     */
+    fun registerRoot(root: String) {
+        if (!running) return
+        if (rootStates.containsKey(root)) return
+        val patchesDir = File(root, ".agent-doc/patches")
         if (!patchesDir.exists()) {
             patchesDir.mkdirs()
         }
+        val state = RootState(root, patchesDir)
+        if (rootStates.putIfAbsent(root, state) != null) return // race: another caller won
 
-        if (running) return
-        running = true
-
-        // Start file-based IPC watcher (fallback when FFI unavailable)
-        watchThread = Thread({
+        state.watchThread = Thread({
             try {
-                watchLoop(patchesDir.toPath())
-            } catch (e: InterruptedException) {
+                watchLoop(state, patchesDir.toPath())
+            } catch (_: InterruptedException) {
                 // Normal shutdown
             } catch (e: Exception) {
                 if (running) {
-                    LOG.warn("PatchWatcher error", e)
+                    LOG.warn("PatchWatcher error for root $root", e)
                 }
             }
-        }, "agent-doc-patch-watcher").apply {
+        }, "agent-doc-patch-watcher-${File(root).name}").apply {
             isDaemon = true
             start()
         }
 
-        // Start socket-based IPC listener via FFI (v0.27, primary)
-        startSocketListenerViaFfi(basePath)
-
-        // Process any existing patch files on startup
+        startSocketListenerViaFfi(state)
         processPendingPatches(patchesDir)
+        LOG.info("[patch-watcher] registered root: $root")
     }
 
     /**
-     * Start socket IPC listener via FFI.
-     * The callback dispatches messages to the EDT for Document API operations.
-     * Keeps a strong reference to the callback to prevent GC.
+     * Scan under [basePath] for nested `.agent-doc/` dirs. Returns the PARENT of each
+     * match (the directory that contains `.agent-doc/`). Skips common build/VCS dirs
+     * and caps depth to avoid runaway traversals.
      */
-    private fun startSocketListenerViaFfi(basePath: String) {
+    private fun discoverNestedRoots(basePath: String): List<String> {
+        val skip = setOf(
+            ".git", ".idea", ".gradle", ".agent-doc",
+            "node_modules", "target", "build", "dist", "out",
+            "venv", ".venv", "__pycache__",
+        )
+        val found = mutableListOf<String>()
+        val base = File(basePath).absoluteFile
+        fun scan(dir: File, depth: Int) {
+            if (depth > 6) return
+            val children = dir.listFiles() ?: return
+            for (child in children) {
+                if (!child.isDirectory) continue
+                if (child.name in skip) continue
+                val agentDocDir = File(child, ".agent-doc")
+                if (agentDocDir.isDirectory) {
+                    val absolute = child.absolutePath
+                    if (absolute != base.absolutePath) {
+                        found.add(absolute)
+                    }
+                }
+                scan(child, depth + 1)
+            }
+        }
+        scan(base, 0)
+        return found
+    }
+
+    /**
+     * Walk up from [filePath] to find the enclosing `.agent-doc/` root directory.
+     * Returns the root path (parent of `.agent-doc/`) or null if not found.
+     * Mirrors find_project_root in the Rust binary.
+     */
+    private fun resolveRootFor(filePath: String): String? {
+        var dir: File? = File(filePath).absoluteFile.parentFile
+        while (dir != null) {
+            if (File(dir, ".agent-doc").isDirectory) {
+                return dir.absolutePath
+            }
+            dir = dir.parentFile
+        }
+        return null
+    }
+
+    /**
+     * Start socket IPC listener via FFI for a given root.
+     * The callback dispatches messages to the EDT for Document API operations.
+     * Keeps a strong reference to the callback (in [state]) to prevent GC.
+     */
+    private fun startSocketListenerViaFfi(state: RootState) {
         val lib = AgentDocLib.get()
         if (lib == null) {
-            LOG.info("[socket] FFI unavailable, socket listener not started (file-based IPC only)")
+            LOG.info("[socket] FFI unavailable, socket listener not started for ${state.root} (file-based IPC only)")
             return
         }
 
-        ipcCallback = object : AgentDocLib.IpcMessageCallback {
+        val callback = object : AgentDocLib.IpcMessageCallback {
             override fun invoke(message: Pointer): Boolean {
                 return try {
                     val json = message.getString(0)
@@ -121,16 +200,17 @@ class PatchWatcher(private val project: Project) : Disposable {
                 }
             }
         }
+        state.ipcCallback = callback
 
-        val started = lib.agent_doc_start_ipc_listener(basePath, ipcCallback!!)
+        val started = lib.agent_doc_start_ipc_listener(state.root, callback)
         if (started) {
-            LOG.info("[socket] IPC listener started via FFI for $basePath")
+            LOG.info("[socket] IPC listener started via FFI for ${state.root}")
         } else {
-            LOG.warn("[socket] Failed to start IPC listener via FFI")
+            LOG.warn("[socket] Failed to start IPC listener via FFI for ${state.root}")
         }
     }
 
-    private fun watchLoop(dir: Path) {
+    private fun watchLoop(state: RootState, dir: Path) {
         val watchService: WatchService = FileSystems.getDefault().newWatchService()
         dir.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY)
 
@@ -197,7 +277,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         return when (type) {
             "patch" -> {
                 val patch = parsePatchJson(json) ?: return false
-                if (isClaimedByForceDisk(patch.patchId)) {
+                if (isClaimedByForceDisk(patch.patchId, patch.file)) {
                     LOG.info("[socket] dedup: sentinel exists for patch_id ${patch.patchId} — skipping apply")
                     return true
                 }
@@ -225,10 +305,13 @@ class PatchWatcher(private val project: Project) : Disposable {
                 if (applied) {
                     // Clean up any stale patch file for this document to prevent the file
                     // watcher from applying the same content again (double-apply prevention).
-                    val basePath = project.basePath
-                    if (basePath != null) {
+                    // Resolve the root by walking up from the doc path — this handles submodule
+                    // roots whose patches live in `<submodule>/.agent-doc/patches/`, not the
+                    // parent project's `.agent-doc/patches/`.
+                    val root = resolveRootFor(patch.file) ?: project.basePath
+                    if (root != null) {
                         val hash = docHash(patch.file)
-                        val patchFile = File(basePath, ".agent-doc/patches/$hash.json")
+                        val patchFile = File(root, ".agent-doc/patches/$hash.json")
                         if (patchFile.exists()) {
                             LOG.info("[socket] cleaning stale patch file after socket delivery: ${patchFile.name}")
                             patchFile.delete()
@@ -317,7 +400,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             }
 
             ApplicationManager.getApplication().invokeLater {
-                if (isClaimedByForceDisk(patch.patchId) || isPatchAlreadyApplied(patch, patchFile)) {
+                if (isClaimedByForceDisk(patch.patchId, patch.file) || isPatchAlreadyApplied(patch, patchFile)) {
                     LOG.info("[patch-watcher] dedup (inner): skipping apply for ${patchFile.name}")
                     return@invokeLater
                 }
@@ -354,14 +437,14 @@ class PatchWatcher(private val project: Project) : Disposable {
      * snapshot source instead of the 200ms sleep + re-read heuristic.
      * Keyed by patch_id (not file path) — all path logic lives in Rust.
      */
-    private fun writeAckContent(patchId: String?, content: String) {
+    private fun writeAckContent(patchId: String?, content: String, filePath: String? = null) {
         if (patchId == null) return
-        val basePath = project.basePath ?: return
+        val root = filePath?.let { resolveRootFor(it) } ?: project.basePath ?: return
         val lib = AgentDocLib.get() ?: run {
             LOG.debug("[ack-content] FFI unavailable, skipping ack-content write")
             return
         }
-        if (!lib.agent_doc_write_ack_content(basePath, patchId, content)) {
+        if (!lib.agent_doc_write_ack_content(root, patchId, content)) {
             LOG.warn("[ack-content] FFI write_ack_content returned false for patch_id $patchId")
         }
     }
@@ -371,11 +454,11 @@ class PatchWatcher(private val project: Project) : Disposable {
      * Returns true if the sentinel exists (patch already applied by CLI disk write).
      * Sentinel is deleted by the Rust side on check (one-time use).
      */
-    private fun isClaimedByForceDisk(patchId: String?): Boolean {
+    private fun isClaimedByForceDisk(patchId: String?, filePath: String? = null): Boolean {
         if (patchId == null) return false
-        val basePath = project.basePath ?: return false
+        val root = filePath?.let { resolveRootFor(it) } ?: project.basePath ?: return false
         val lib = AgentDocLib.get() ?: return false
-        return lib.agent_doc_is_claimed_by_force_disk(basePath, patchId).also { claimed ->
+        return lib.agent_doc_is_claimed_by_force_disk(root, patchId).also { claimed ->
             if (claimed) LOG.info("[patch-watcher] dedup: patch_id $patchId claimed by force-disk — skipping apply")
         }
     }
@@ -445,7 +528,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                 LOG.info("Patch applied (full content) to ${patch.file}")
             })
             FileDocumentManager.getInstance().saveDocument(document)
-            writeAckContent(patch.patchId, document.text)
+            writeAckContent(patch.patchId, document.text, patch.file)
             return true
         }
 
@@ -498,7 +581,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         // Save the document to disk (so snapshot can read it)
         FileDocumentManager.getInstance().saveDocument(document)
-        writeAckContent(patch.patchId, document.text)
+        writeAckContent(patch.patchId, document.text, patch.file)
         // Note: do NOT call agent_doc_commit here. The plugin committing within the IPC
         // window races with the skill's `agent-doc commit` call, causing the binary commit
         // to be a no-op (FFI already committed). The binary's git::commit handles boundary
@@ -524,7 +607,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                         targetFile.setBinaryContent(patch.fullContent.toByteArray(targetFile.charset))
                     }
                     LOG.info("VFS patch applied (full content) to ${patch.file}")
-                    writeAckContent(patch.patchId, patch.fullContent)
+                    writeAckContent(patch.patchId, patch.fullContent, patch.file)
                 }
                 return true
             }
@@ -568,7 +651,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                     targetFile.setBinaryContent(result.toByteArray(targetFile.charset))
                 }
                 LOG.info("VFS patch applied to ${patch.file} (${result.length - content.length} chars changed)")
-                writeAckContent(patch.patchId, result)
+                writeAckContent(patch.patchId, result, patch.file)
             } else {
                 LOG.warn("VFS patch produced no changes for ${patch.file}")
             }
@@ -1016,14 +1099,14 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     override fun dispose() {
         running = false
-        watchThread?.interrupt()
-        watchThread = null
-        // Stop FFI socket listener (removes socket file, unblocks accept)
-        val basePath = project.basePath
-        if (basePath != null) {
-            try { AgentDocLib.get()?.agent_doc_stop_ipc_listener(basePath) } catch (_: Exception) {}
+        val lib = AgentDocLib.get()
+        for (state in rootStates.values) {
+            state.watchThread?.interrupt()
+            state.watchThread = null
+            try { lib?.agent_doc_stop_ipc_listener(state.root) } catch (_: Exception) {}
+            state.ipcCallback = null
         }
-        ipcCallback = null
+        rootStates.clear()
     }
 
     companion object {

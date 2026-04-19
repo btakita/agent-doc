@@ -35,8 +35,7 @@ class RunWithJunieAction : AnAction() {
         // Save the file before running so agent-doc sees the latest content
         FileDocumentManager.getInstance().saveAllDocuments()
 
-        val relativePath = TerminalUtil.relativePath(project, file)
-        TerminalUtil.runWithAgent(project, "junie", relativePath, onComplete = { running.set(false) })
+        TerminalUtil.runWithAgent(project, "junie", file, onComplete = { running.set(false) })
     }
 
     override fun update(e: AnActionEvent) {

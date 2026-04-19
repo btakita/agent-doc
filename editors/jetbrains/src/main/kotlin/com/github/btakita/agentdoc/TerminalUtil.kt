@@ -25,6 +25,40 @@ object TerminalUtil {
     }
 
     /**
+     * Resolve the agent-doc project root for [file].
+     *
+     * Walks up from the file's parent looking for the nearest ancestor with
+     * `.agent-doc/` (via the shared FFI helper). If the file lives inside a
+     * submodule that is itself an agent-doc project (e.g. `src/session-share/`),
+     * the submodule root is returned. Otherwise falls back to the IDE project's
+     * `basePath`.
+     *
+     * Returns `(projectRoot, relativePath)` where `relativePath` is `file.path`
+     * relative to `projectRoot`, suitable for passing to `agent-doc` commands
+     * run from that directory.
+     */
+    fun resolveProject(project: Project, file: VirtualFile): Pair<String, String> {
+        val basePath = project.basePath
+        val ffi = NativePatching.resolveProjectPath(file.path)
+        if (ffi != null) {
+            // Register resolved root with PatchWatcher on-demand. This handles submodule
+            // roots that weren't present at startup (e.g. user opens a file in a freshly
+            // cloned submodule). Idempotent — no-op if already registered.
+            if (basePath != null && ffi.first != basePath) {
+                try {
+                    PatchWatcher.getInstance(project).registerRoot(ffi.first)
+                } catch (_: Exception) { /* best-effort */ }
+            }
+            return ffi
+        }
+        // FFI unavailable or no `.agent-doc/` ancestor — fall back to workspace basePath.
+        if (basePath != null) {
+            return Pair(basePath, relativePath(project, file))
+        }
+        return Pair(java.io.File(file.path).parent ?: "/", java.io.File(file.path).name)
+    }
+
+    /**
      * Routes an /agent-doc command via `agent-doc route`.
      *
      * This calls `agent-doc route <path>` which:
@@ -33,37 +67,32 @@ object TerminalUtil {
      * 3. Sends the command via `tmux send-keys`
      * 4. Auto-starts a new Claude session if needed
      */
-    fun sendToTerminal(project: Project, relativePath: String, onComplete: (() -> Unit)? = null) {
-        val basePath = project.basePath ?: run {
-            onComplete?.invoke()
-            return
-        }
+    fun sendToTerminal(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
+        val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(TerminalUtil::class.java)
+        val (cwd, relativePath) = resolveProject(project, file)
+        val agentDoc = resolveAgentDoc(cwd)
 
-        val agentDoc = resolveAgentDoc(basePath)
+        LOG.warn("[route] sendToTerminal: cwd=$cwd rel=$relativePath binary=$agentDoc")
 
-        // FFI busy guard: skip route if an agent-doc operation is in progress
-        val lib = AgentDocLib.get()
-        if (lib != null) {
-            try {
-                val absPath = java.io.File(basePath, relativePath).absolutePath
-                if (lib.agent_doc_is_busy(absPath)) {
-                    com.intellij.openapi.diagnostic.Logger.getInstance(TerminalUtil::class.java)
-                        .info("[route] agent-doc is busy for $relativePath, skipping route")
-                    onComplete?.invoke()
-                    return
-                }
-            } catch (_: Exception) { /* FFI unavailable — proceed */ }
-        }
+        // is_busy guard removed: no production code sets the status signals,
+        // so the guard only produced false positives (blocked every route attempt)
 
         try {
             // Build route command with optional layout args
             val cmd = mutableListOf(agentDoc, "route", relativePath)
 
-            // Detect editor layout and pass as --col/--focus args
+            // Only include visible files that live under the same project root
+            // as the focused file — sibling submodules have their own sessions.
             val manager = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
+            val cwdPrefix = "$cwd/"
+            fun underProject(vf: VirtualFile): Boolean =
+                vf.path == cwd || vf.path.startsWith(cwdPrefix)
+            fun relTo(vf: VirtualFile): String =
+                if (vf.path == cwd) vf.name else vf.path.removePrefix(cwdPrefix)
+
             val visibleMdFiles = manager.selectedFiles
-                .filter { it.name.endsWith(".md") }
-                .map { relativePath(project, it) }
+                .filter { it.name.endsWith(".md") && underProject(it) }
+                .map { relTo(it) }
                 .distinct()
 
             if (visibleMdFiles.size > 1) {
@@ -81,29 +110,30 @@ object TerminalUtil {
 
             // Pass focused file
             val focusedFile = manager.selectedTextEditor?.virtualFile?.let {
-                if (it.name.endsWith(".md")) relativePath(project, it) else null
+                if (it.name.endsWith(".md") && underProject(it)) relTo(it) else null
             }
             if (focusedFile != null) {
                 cmd.addAll(listOf("--focus", focusedFile))
             }
 
+            LOG.warn("[route] executing: ${cmd.joinToString(" ")}")
+
             val process = ProcessBuilder(cmd)
-                .directory(java.io.File(basePath))
+                .directory(java.io.File(cwd))
                 .redirectErrorStream(true)
                 .start()
 
-            // Show quick inline hint near cursor
             showHint(project, "Routed $relativePath")
 
-            // Read output in background thread to avoid blocking EDT
             Thread {
                 try {
                     val output = process.inputStream.bufferedReader().readText()
                     val exitCode = process.waitFor()
                     if (exitCode != 0) {
+                        LOG.warn("[route] FAILED (exit $exitCode): $output")
                         notifyError(project, "agent-doc route failed (exit $exitCode):\n$output")
                     } else {
-                        System.err.println("[agent-doc] route succeeded:\n$output")
+                        LOG.warn("[route] SUCCESS: $output")
                     }
                 } finally {
                     onComplete?.invoke()
@@ -124,16 +154,12 @@ object TerminalUtil {
      * 3. Sends the prompt to the specified agent backend
      * 4. Updates the document with the response
      */
-    fun runWithAgent(project: Project, agent: String, relativePath: String, onComplete: (() -> Unit)? = null) {
-        val basePath = project.basePath ?: run {
-            onComplete?.invoke()
-            return
-        }
-
-        val agentDoc = resolveAgentDoc(basePath)
+    fun runWithAgent(project: Project, agent: String, file: VirtualFile, onComplete: (() -> Unit)? = null) {
+        val (cwd, relativePath) = resolveProject(project, file)
+        val agentDoc = resolveAgentDoc(cwd)
         try {
             val process = ProcessBuilder(agentDoc, "run", "--agent", agent, relativePath)
-                .directory(java.io.File(basePath))
+                .directory(java.io.File(cwd))
                 .redirectErrorStream(true)
                 .start()
 

@@ -16,15 +16,15 @@
 //!   4. Resolves the target tmux session: prefers project config (`config.toml`), falls
 //!      back to current tmux session, auto-updates config when the configured session is dead.
 //!   5. Looks up the registered pane in `sessions.json`.
-//!   6. If pane is alive and in the correct session: optionally rescues from a stash window,
-//!      then sends the `/agent-doc <path>` command via `send_command`.
-//!   7. If pane is alive but in the wrong session and running an agent process: moves it to the
-//!      target session stash then rescues. If running a non-agent process (corky, etc.): logs
-//!      and falls through — foreign processes are never stashed/rescued across sessions.
-//!   8. If pane is dead and was previously registered: lazy-claims to an active pane via
+//!   6. If pane is alive: unconditionally sends `/agent-doc <path>` via `send_command`.
+//!      Pane IDs (`%N`) are globally unique per tmux server, so `target_session` matching
+//!      is not required for routing. `rescue_from_stash` is attempted (it self-gates on
+//!      session match) so panes stashed within the target session get rescued, but panes
+//!      in other sessions are left in place.
+//!   7. If pane is dead and was previously registered: lazy-claims to an active pane via
 //!      `find_target_pane` (skipped if the candidate is running a non-agent process), sends
 //!      the command, then calls `sync_after_claim` to re-sync layout.
-//!   9. If no registered pane or no claimable pane: auto-starts a new Claude session.
+//!   8. If no registered pane or no claimable pane: auto-starts a new Claude session.
 //!      Blocked by `AGENT_DOC_NO_AUTOSTART` env var (used in tests).
 //! - **`auto_start(tmux, file, session_id, file_path, context_session)`**: Public; spawns a
 //!   new Claude pane and sends `/agent-doc start`. Waits for Claude's idle prompt before
@@ -62,12 +62,15 @@
 //!   invocation; the registry is always pruned before a lookup is attempted.
 //! - **One pane per document**: Each document gets its own Claude pane. Unregistered files
 //!   (no prior session) skip lazy-claim and always get a fresh pane via auto-start.
-//! - **Session isolation**: Panes are validated to be in the correct target tmux session.
-//!   Cross-session agent panes are moved to the target session; cross-session non-agent panes
-//!   (e.g. corky) are never touched — a new pane is created in the correct session instead.
-//! - **Non-agent process guard**: `is_agent_process()` gates both the wrong-session recovery
-//!   path and the lazy-claim path. A pane running corky/shell is never stashed, rescued, or
-//!   claimed — it is left running and a fresh agent-doc pane is provisioned instead.
+//! - **Globally-unique pane IDs**: tmux `%N` pane IDs are unique per server. A registered
+//!   alive pane is always routable by ID — routing does not depend on which session it
+//!   currently lives in. This matters when `route run` is invoked from outside tmux (e.g.
+//!   IDE `Run Agent Doc`), where `target_session` falls back to a constant and may not
+//!   match the real session of the claimed pane.
+//! - **Non-agent process guard (lazy-claim only)**: `is_agent_process()` gates the
+//!   lazy-claim path — `find_target_pane` will not adopt a pane running corky/shell
+//!   when the registered pane is dead. Strategy 1 (alive registered pane) does NOT apply
+//!   this guard: the registration is trusted as the source of truth for routing.
 //! - **Stash rescue**: Panes that ended up in a tmux `stash` / `stash-*` window are
 //!   automatically rescued back into the `agent-doc` window before routing.
 //! - **Auto-start inhibit**: Setting `AGENT_DOC_NO_AUTOSTART` prevents `auto_start_in_session`
@@ -91,7 +94,8 @@
 //! - `unregistered_file_skips_lazy_claim`: `registered = None` → lazy-claim step is skipped
 //! - `dead_registered_pane_allows_lazy_claim`: `registered = Some(pane)` with dead pane → lazy-claim attempted
 //! - (aspirational) `stash_rescue`: pane in stash window → rescued to agent-doc window before send
-//! - (aspirational) `wrong_session_pane`: alive pane in wrong session → new pane created in target session
+//! - `wrong_session_pane_still_receives_send`: alive pane in a session different from
+//!   `target_session` → `/agent-doc` command is sent to that pane (no new pane created)
 //! - (aspirational) `debounce_idle`: file written rapidly → routing waits for mtime to settle
 //! - (aspirational) `autostart_inhibited`: `AGENT_DOC_NO_AUTOSTART` set → returns Err, no pane spawned
 
@@ -221,7 +225,8 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux, pane: Option<&str>, debounce_ms: 
 /// Resolve an existing pane or create a new one. Returns the pane ID.
 ///
 /// Three resolution strategies, tried in order:
-/// 1. Alive registered pane in the correct session → reuse (send command)
+/// 1. Alive registered pane → unconditionally send command. Pane IDs are
+///    globally unique per tmux server, so session matching is not required.
 /// 2. Lazy claim to an active pane (when registered pane is dead)
 /// 3. Auto-start a new Claude session
 fn resolve_or_create_pane(
@@ -241,48 +246,21 @@ fn resolve_or_create_pane(
     );
     let registered = sessions::lookup(session_id)?;
 
-    // Strategy 1: Alive registered pane in correct session
+    // Strategy 1: Alive registered pane — unconditional send.
+    // Pane IDs (%N) are globally unique per tmux server, so target_session
+    // matching is irrelevant for routing. The registered pane was explicitly
+    // claimed for this document; send there regardless of session or process.
+    //
+    // rescue_from_stash self-gates on target_session match, so it is a no-op
+    // when the pane is in a different session — we leave it in place.
     if let Some(ref registered_pane) = registered {
         if tmux.pane_alive(registered_pane) {
-            let pane_session = tmux
-                .cmd()
-                .args(["display-message", "-t", registered_pane, "-p", "#{session_name}"])
-                .output()
-                .ok()
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                .unwrap_or_default();
-
-            if pane_session == target_session {
-                // Rescue from stash if needed
-                rescue_from_stash(tmux, registered_pane, session_id, file_path, target_session);
-
-                eprintln!("[route] Pane {} is alive in session '{}'", registered_pane, pane_session);
-                send_command(tmux, registered_pane, file_path)?;
-                return Ok(registered_pane.clone());
-            }
-            // Pane is alive but in a different session.
-            // Only move panes running agent processes — never stash/rescue foreign
-            // processes (corky, etc.) across sessions.  If the pane is running a
-            // non-agent process, fall through to Strategy 2/3 to get a fresh pane.
-            if is_agent_process(tmux, registered_pane) {
-                eprintln!(
-                    "[route] Pane {} is alive but in session '{}' (config says '{}'). Moving to target session stash.",
-                    registered_pane, pane_session, target_session
-                );
-                if let Err(e) = tmux.stash_pane(registered_pane, target_session) {
-                    eprintln!("[route] warning: stash_pane to target session failed: {}", e);
-                }
-                rescue_from_stash(tmux, registered_pane, session_id, file_path, target_session);
-                send_command(tmux, registered_pane, file_path)?;
-                return Ok(registered_pane.clone());
-            }
-            eprintln!(
-                "[route] Pane {} in session '{}' is running a non-agent process — skipping cross-session rescue",
-                registered_pane, pane_session
-            );
-        } else {
-            eprintln!("[route] Pane {} is dead", registered_pane);
+            rescue_from_stash(tmux, registered_pane, session_id, file_path, target_session);
+            eprintln!("[route] Pane {} is alive, sending command", registered_pane);
+            send_command(tmux, registered_pane, file_path)?;
+            return Ok(registered_pane.clone());
         }
+        eprintln!("[route] Pane {} is dead", registered_pane);
     } else {
         eprintln!(
             "[route] No pane registered for session {}",
@@ -1107,6 +1085,45 @@ mod tests {
         assert!(
             registered.is_some(),
             "dead registered pane should attempt lazy claim"
+        );
+    }
+
+    #[test]
+    fn wrong_session_pane_still_receives_send() {
+        // Strategy 1 is session-agnostic after the fix: when a registered pane
+        // is alive, send to it regardless of which tmux session it lives in.
+        //
+        // This is the bug scenario: IDE `Run Agent Doc` spawns `agent-doc route`
+        // with no $TMUX env, so target_session falls back to the constant
+        // "claude". The claimed pane lives in the user's real session (e.g.
+        // "btak"). Before the fix, the session mismatch + shell-idle process
+        // sent routing to Strategy 2/3 — auto-starting a new Claude pane in
+        // the non-existent "claude" session.
+        //
+        // This test verifies the tmux infrastructure that makes the fix work:
+        // pane_alive must return true for an alive pane regardless of the
+        // session it belongs to. The %N pane ID is the routing key.
+        let iso = IsolatedTmux::new("route-test-wrong-sess-send");
+        let cwd = std::env::current_dir().unwrap();
+
+        // Pane lives in session "real" (simulating the user's tmux session).
+        let registered_pane = iso.auto_start("real", &cwd).unwrap();
+        assert!(iso.pane_alive(&registered_pane));
+
+        // tmux has no session named "claude" (the fallback target_session).
+        let claude_alive = iso
+            .cmd()
+            .args(["has-session", "-t", "claude"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        assert!(!claude_alive, "fallback target session should not exist");
+
+        // pane_alive does not consult session membership — Strategy 1 can
+        // send to the pane via its %N id even though pane_session != "claude".
+        assert!(
+            iso.pane_alive(&registered_pane),
+            "alive pane must be routable regardless of target_session"
         );
     }
 

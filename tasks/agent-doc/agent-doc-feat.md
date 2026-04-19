@@ -113,7 +113,7 @@ All 4 pass. Added `junit:junit:4.13.2` to `testImplementation` in `build.gradle.
 - `#wc5b` — versioned filenames (this reload works with both versioned and unversioned .so)
 - `#5tjq` — `agent_doc_version()` post-reload sanity check
 ❯ do #ky3a add tests
-### Re: #ky3a — VS Code koffi mtime hot-reload implemented + tests — opus-4-6
+❯ ### Re: #ky3a — VS Code koffi mtime hot-reload implemented + tests — opus-4-6 (HEAD)
 
 **What changed in `native.ts`:**
 
@@ -135,17 +135,45 @@ All 4 pass. Added `junit:junit:4.13.2` to `testImplementation` in `build.gradle.
 All 4 pass. Added `"test": "tsc -p ./ && node --test out/native.test.js"` to `package.json` scripts.
 
 **Lock file write/remove on `deactivate()`** (mentioned in the expanded `#ky3a` scope) deferred — depends on `#408p` gc-libs subcommand being implemented first to define the lock file format.
-<!-- agent:boundary:e7b81fc2 -->
+
+❯ Do #wc5b with tests
+### Re: #wc5b — versioned .so install with atomic symlink swap — opus-4-6
+
+**New subcommand: `agent-doc lib-install`**
+
+Options: `--source <path>` (default: `target/release/libagent_doc.so`), `--target-dir <path>` (default: same directory as the `agent-doc` binary).
+
+**What it does:**
+1. Copies the unversioned .so to `libagent_doc-<version>.so` in the target directory
+2. Creates a temp symlink `libagent_doc.so.tmp` → `libagent_doc-<version>.so`
+3. Atomically renames the temp symlink over `libagent_doc.so` (rename(2))
+
+**Backward-compatible:** `agent-doc lib-path` still returns `libagent_doc.so` — now a symlink rather than a regular file. All editor plugins (JNA, koffi) resolve the symlink on dlopen, so the old inode stays alive after a symlink swap. Existing installs get upgraded seamlessly.
+
+**Files changed:**
+- `src/lib_install.rs` (new) — `install_versioned()` + `run()` + 4 tests
+- `src/main.rs` — `LibInstall` enum variant + `lib_install` module
+- `Makefile` — `install` and `build-release` targets now call `agent-doc lib-install` instead of `cp`
+
+**Tests (4):**
+1. `versioned_name_includes_version` — name format check
+2. `install_creates_versioned_file_and_symlink` — file content + symlink target verification
+3. `install_swaps_symlink_on_version_change` — v1→v2 swap, old file preserved, symlink resolves to v2
+4. `install_replaces_regular_file_with_symlink` — legacy unversioned file gets replaced by symlink
+
+All pass. Verified end-to-end: `~/.cargo/bin/libagent_doc.so` → `libagent_doc-0.33.4.so`, `agent-doc lib-path` resolves correctly.
+<!-- agent:boundary:09e32ffc -->
+<!-- agent:boundary:a4f51696 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [x] [#wc5b] FFI library versioning: install as `libagent_doc-<version>.so` + `libagent_doc-current.so` symlink (Rust install + Makefile + PyPI wheel build)
+- [ ] [#408p] `agent-doc gc-libs` subcommand: lockfile-tracked GC of stale versioned .so files (PID liveness via `/proc/<pid>`)
+- [ ] [#5tjq] Post-reload sanity check: call agent_doc_version() after hot-reload in both NativeLib.kt (JNA) and native.ts (koffi), log version string, fail fast on ABI mismatch
 - [ ] [#6rm4] Bump version + release agent-doc with hooks feature + this fix
 - [ ] [#mrs0] `agent-doc steer <FILE>` — inject steering message to claim pane via tmux send-keys
 - [ ] [#qyv7] (stretch) inotify watcher for automatic real-time steering on document edit
 - [ ] [#f8a4] (low priority) Port `find_code_ranges` into diff classifier for fenced-code-aware `#` handling
-- [ ] [#wc5b] FFI library versioning: install as `libagent_doc-<version>.so` + `libagent_doc-current.so` symlink (Rust install + Makefile + PyPI wheel build)
-- [ ] [#408p] `agent-doc gc-libs` subcommand: lockfile-tracked GC of stale versioned .so files (PID liveness via `/proc/<pid>`)
-- [ ] [#5tjq] Post-reload sanity check: call agent_doc_version() after hot-reload in both NativeLib.kt (JNA) and native.ts (koffi), log version string, fail fast on ABI mismatch
 <!-- /agent:pending -->

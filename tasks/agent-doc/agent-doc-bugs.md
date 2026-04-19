@@ -315,8 +315,7 @@ The `isDocumentUnsaved` guard preserves user edits that haven't been saved from 
 Plugin version bumped to 0.2.64. Both zips built (signed + unsigned).
 
 **To install:** IDEA → Settings → Plugins → gear → Install from Disk → select `agent-doc-jetbrains-0.2.64-signed.zip`. Restart IDE.
-<!-- agent:boundary:89383004 -->
-<!-- agent:boundary:27bb15f7 -->
+<!-- agent:boundary:b49a8cfe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -326,6 +325,5 @@ Plugin version bumped to 0.2.64. Both zips built (signed + unsigned).
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [x] [#s80z] IDE buffer stale after CRDT disk write — VCS refresh signal not triggering buffer reload when IPC is degraded. Investigate why commit's reposition boundary signal and VCS refresh don't cause the IDE to reload the file.
 <!-- /agent:pending -->
 ## Assistant

@@ -685,7 +685,7 @@ After restart, trigger "Run Agent Doc" and check `idea.log` (`Help → Show Log 
 ❯ I attempted `Run Agent Doc` on tasks/software/agent-loop.md. Got the same issue where it does not call `tmux send-keys /agent-doc tasks/agent-doc/agent-doc-bugs.md` on the claiming tmux pane.
 
 ❯ Write the patchback into this agent doc
-### Re: Run Agent Doc still blocked by is_busy — root cause + fix — opus-4-6
+❯ ### Re: Run Agent Doc still blocked by is_busy — root cause + fix — opus-4-6 (HEAD)
 
 **Root cause: the `is_busy` FFI guard has no signal senders.** I traced the entire codebase — `set_status()` is only callable via the FFI export `agent_doc_set_status`, which the JB plugin declares but **never calls**. No CLI command (`write`, `route`, `preflight`, `commit`) calls `set_status` either. The status system is dead code — signals are checked but never emitted.
 
@@ -705,7 +705,74 @@ After restart, `Run Agent Doc` will proceed directly to the `agent-doc route` CL
 Investigate all of my AGENTS.md/CLAUDE.md, skills, and runbooks. How can the prompts more literal so opus 4.7 understands intent without burning tokens? What are the implications for agent-doc?
 
 See https://platform.claude.com/docs/en/about-claude/models/migration-guide
-<!-- agent:boundary:e25b944a -->
+❯ Please write the patchback into this document. Why does this keep on failing?
+### Re: Patchback failure + Opus 4.7 audit (re-write) — opus-4-6
+
+**Why patchbacks keep failing:** Same root cause as the Bug B diagnosis earlier in this document (line ~569). The `agent-doc write --stream` command delivers via IPC socket → editor plugin. The plugin's socket listener receives the JSON patch but doesn't ACK within 500ms. The snapshot is then saved from the unchanged file, so the response is lost. This has happened 3+ times in this session alone. The JB plugin's PatchWatcher may need an IDE restart, or the socket listener isn't handling this workspace.
+
+**Workaround applied this cycle:** Using `--force-disk` to bypass IPC and write directly to disk.
+
+---
+
+**Opus 4.7 prompt audit — full findings:**
+
+Investigated 158+ instruction files (~7,900 lines) across root, submodules, skills, runbooks, and memory. Cross-referenced with the [Opus 4.7 migration guide](https://docs.anthropic.com/en/docs/about-claude/models/migrating-to-claude-4) and [prompting best practices](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/claude-4-best-practices).
+
+##### The core behavioral shift
+
+Opus 4.7 follows instructions **more literally** and **won't generalize**. If you say "format the first section as bullets," it formats only the first section. It also uses fewer tools and spawns fewer subagents by default, preferring to reason internally. At low/medium effort it scopes work tightly to exactly what was asked. The new tokenizer produces ~35% more tokens for the same text, so every instruction line costs more.
+
+##### What to change across the instruction corpus
+
+**1. Remove anti-laziness scaffolding (saves tokens, prevents overtriggering)**
+
+Root AGENTS.md has "No Laziness: Find root causes. No temporary fixes." — needed for older models, causes overtriggering on 4.7. Replace with the actual constraint: "Resolve root causes; don't patch symptoms."
+
+MEMORY.md entries with NEVER/ALWAYS/CRITICAL/IMPORTANT intensifiers cause 4.7 to treat them as hard constraints even in edge cases. The memory format already has "Why" and "How to apply" lines — those give 4.7 enough context for judgment calls. Remove intensifiers, let reasoning handle edge cases.
+
+**Before (4.6-style):** `NEVER use git commands with the -i flag`
+**After (4.7-style):** `Avoid interactive git flags (-i) — they require terminal input this environment can't provide`
+
+**2. Make scope explicit (prevents under-application)**
+
+Several instructions rely on implicit generalization. "Prefer editing existing files to creating new ones" — 4.7 might apply only to the immediate file, not across a multi-file refactor. Fix: "When modifying code, edit existing files rather than creating new ones. This applies across all files in the changeset."
+
+Runbooks are already good — numbered steps with explicit scope. Keep that pattern.
+
+**3. Replace conditional defaults with explicit triggers**
+
+Skill SKILL.md patterns like "Use this when..." are vague for 4.7. Better: "Invoke this skill when ALL of: (a) file is .md, (b) user references [topic], (c) no other skill matches."
+
+The agent-doc SKILL.md is well-structured for 4.7 — step-by-step with explicit conditionals ("If `no_changes: true` → stop"). Keep that pattern.
+
+**4. Consolidate repetitive rules**
+
+MEMORY.md has ~15 "Never do X" rules for agent-doc alone. Group related rules into 3-4 compound entries. Estimated savings: ~60 lines / ~1,200 tokens.
+
+**5. Remove "force progress" scaffolding**
+
+The migration guide specifically says: remove instructions forcing progress updates, tool usage, or anti-laziness behavior. 4.7 naturally provides progress updates at high/xhigh effort.
+
+##### Agent-doc implications
+
+**What works well already:** procedural SKILL.md workflow, numbered-step runbooks, deterministic binary logic (shrink guard), clear absolutes (comment stripping).
+
+**What needs adjustment:**
+
+1. **Model tier gate** — add `claude-opus-4-7` to high tier mapping.
+2. **Mandatory steps** — at medium effort, 4.7 may skip write/commit. State: "Steps 2 (write) and 3 (commit) are MANDATORY every cycle regardless of response length."
+3. **Subagent spawning** — 4.7 spawns fewer by default. Specify: "Spawn subagents for research exceeding 3 tool calls."
+4. **Tokenizer cost** — 35% more tokens per character makes compaction more important. Consider more aggressive triggers.
+5. **Effort parameter** — recommend high/xhigh for template-mode sessions with pending items.
+
+##### Recommended migration plan
+
+1. Audit root AGENTS.md: remove anti-laziness, explicit scope, remove progress scaffolding (~400 token savings)
+2. Consolidate MEMORY.md: group agent-doc rules into compound entries (~1,200 token savings)
+3. Update tier gate: add claude-opus-4-7 model ID
+4. Add mandatory-step language to SKILL.md
+5. Test on 4.7: baseline current behavior before changes, then iterate
+<!-- agent:boundary:fe3c011f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

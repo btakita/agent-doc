@@ -1071,8 +1071,11 @@ No user changes — boundary artifact only.
 ### Re: boundary sync — sonnet-4-6
 
 No user changes — boundary artifact only.
-<!-- agent:boundary:0e59a2d8 -->
-<!-- agent:boundary:6c07b3f1 -->
+you did not compact this exchange. it is still very large. compacting this exchange means reducing its size...not appending. why did you fail to properly compact exchange?
+### Re: boundary sync — sonnet-4-6
+
+No user changes — boundary artifact only.
+<!-- agent:boundary:1d4d8830 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -378,7 +378,7 @@ Shall I make the edit now? It's a ~5-line addition to the "What to decide each c
 **Not committed in `src/agent-doc/`:** change is left in the working tree unstaged. Waiting on your call — should I roll it into the next patch release (bump, VERSIONS.md entry, commit) or commit standalone now?
 
 ❯ commit + push + release
-### Re: v0.33.3 shipped — opus-4-7
+❯ ### Re: v0.33.3 shipped — opus-4-7 (HEAD)
 
 **Done — release pipeline complete.**
 
@@ -398,7 +398,28 @@ Shall I make the edit now? It's a ~5-line addition to the "What to decide each c
 **PyPI bug:** the wheel builds as `agent_doc-0.33.3-py3-none-linux_x86_64.whl`; PyPI rejects with `400 unsupported platform tag 'linux_x86_64'`. Gated pending item `#y2gr` remains open for the skill-install runbooks-sync fix; I'm leaving the PyPI manylinux fix as a separate follow-up since it's pre-existing.
 
 JB plugin 0.2.64 zips are on disk only — install via IDEA → Settings → Plugins → gear → Install from Disk → `agent-doc-jetbrains-0.2.64-signed.zip` when ready.
-<!-- agent:boundary:7553804d -->
+
+❯ Add manylinux to fix PyPI being blocked.
+### Re: PyPI is NOT blocked — I misread — opus-4-7
+
+**My earlier report was wrong.** PyPI publishing isn't broken; manylinux is already configured. v0.33.3 is live on PyPI:
+
+```
+$ pip index versions agent-doc
+agent-doc (0.33.3)
+```
+
+**What's actually happening:**
+
+- `.github/workflows/pypi.yml` fires on `release: published`. It uses `PyO3/maturin-action@v1` with `manylinux: auto` — maturin runs inside a manylinux container and emits proper `manylinux_2_28_x86_64` wheels alongside macOS (x86_64 + aarch64) and Windows wheels.
+- My `gh release create v0.33.3` already triggered it. The run completed successfully at [24623615824](https://github.com/btakita/agent-doc/actions/runs/24623615824): sdist ✓, 4 platform wheels ✓, publish-to-PyPI ✓.
+- The local `maturin publish` I ran **can't** produce a PyPI-compatible wheel on Arch/CachyOS — the host libc is too new, so the wheel is tagged `linux_x86_64`, which PyPI rejects. This is inherent to the host, not a bug.
+
+**Takeaway: stop running local `maturin publish` for agent-doc releases.** The CI pipeline is the canonical path for PyPI. I've updated auto-memory to reflect this — "Publish all targets" now reads *crates.io + GitHub Release* locally; PyPI flows through `release: published` automatically. New [`reference_pypi_publish_via_ci.md`](reference) captures the full context and corrects the earlier `#18985` note.
+
+**Final status for v0.33.3:** all targets live. crates.io ✓, PyPI ✓, GitHub Release ✓, local binaries ✓, JB plugin 0.2.64 zips ✓, parent submodule pushed ✓. Nothing to do on manylinux.
+<!-- agent:boundary:4b5205b1 -->
+<!-- agent:boundary:83f45892 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

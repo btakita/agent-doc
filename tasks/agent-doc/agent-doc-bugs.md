@@ -359,7 +359,7 @@ This is a skill/runbook issue, not a code issue. The binary already accepts mult
 
 Shall I make the edit now? It's a ~5-line addition to the "What to decide each cycle" list.
 ❯ do #31j3...add to both agent-doc and agent-loop
-### Re: #31j3 done — plus skill-install bug discovered — opus-4-7
+❯ ### Re: #31j3 done — plus skill-install bug discovered — opus-4-7 (HEAD)
 
 **Edit landed in `src/agent-doc/runbooks/pending-ops.md`.** Added a new bullet to "What to decide each cycle":
 
@@ -376,7 +376,30 @@ Shall I make the edit now? It's a ~5-line addition to the "What to decide each c
 **Bug discovered:** `agent-doc skill install` returned `Skill already up to date (v0.33.3).` and did NOT copy the updated runbook. Only `SKILL.md` propagates via the installer; the `runbooks/*.md` subdirectory is ignored. I synced the two install copies with plain `cp`. Queued as a new pending item — `skill install` should be fixed to walk the `runbooks/` tree.
 
 **Not committed in `src/agent-doc/`:** change is left in the working tree unstaged. Waiting on your call — should I roll it into the next patch release (bump, VERSIONS.md entry, commit) or commit standalone now?
-<!-- agent:boundary:c05ab16b -->
+
+❯ commit + push + release
+### Re: v0.33.3 shipped — opus-4-7
+
+**Done — release pipeline complete.**
+
+| Target | Status |
+|--------|--------|
+| `make check` | ✅ 1146 tests pass, clippy clean, version-sync ok |
+| Commit | ✅ `c0dfc6e agent-doc v0.33.3` (9 files) |
+| Push main + tag | ✅ `v0.33.3` tagged and pushed |
+| crates.io | ✅ [agent-doc v0.33.3](https://crates.io/crates/agent-doc/0.33.3) |
+| `cargo install --path .` | ✅ `~/.cargo/bin/agent-doc` → 0.33.3 |
+| `cargo build --release` | ✅ `.bin/agent-doc` → 0.33.3 (both binaries live) |
+| GitHub Release | ✅ [v0.33.3](https://github.com/btakita/agent-doc/releases/tag/v0.33.3) with prebuilt Linux binary |
+| JB plugin 0.2.64 | ✅ both `agent-doc-jetbrains-0.2.64.zip` + `-signed.zip` in `build/distributions/` |
+| Parent submodule bump | ✅ `f6b7623e chore: bump agent-doc submodule to v0.33.3` pushed |
+| **PyPI** | ❌ **blocked** — same platform tag bug as v0.33.2 (`linux_x86_64` unsupported; needs manylinux wheel) |
+
+**PyPI bug:** the wheel builds as `agent_doc-0.33.3-py3-none-linux_x86_64.whl`; PyPI rejects with `400 unsupported platform tag 'linux_x86_64'`. Gated pending item `#y2gr` remains open for the skill-install runbooks-sync fix; I'm leaving the PyPI manylinux fix as a separate follow-up since it's pre-existing.
+
+JB plugin 0.2.64 zips are on disk only — install via IDEA → Settings → Plugins → gear → Install from Disk → `agent-doc-jetbrains-0.2.64-signed.zip` when ready.
+<!-- agent:boundary:b60aa206 -->
+<!-- agent:boundary:552ea180 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -386,6 +409,6 @@ Shall I make the edit now? It's a ~5-line addition to the "What to decide each c
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [ ] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
+- [/] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
 <!-- /agent:pending -->
 ## Assistant

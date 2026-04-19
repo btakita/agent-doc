@@ -755,8 +755,7 @@ Not done yet. The JB 0.2.65 plugin with the BulkFileListener fix was built and y
 - `resync.rs`: WrongSession handler now relocates active agent panes instead of killing them
 - `route.rs`: `resolve_target_session` auto-updates `config.toml` when configured session is stale
 - Both binaries rebuilt, 1146 tests pass
-<!-- agent:boundary:cd0f4ffd -->
-<!-- agent:boundary:c4efa50d -->
+<!-- agent:boundary:360bf33a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

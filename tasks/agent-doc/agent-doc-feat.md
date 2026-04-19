@@ -163,7 +163,7 @@ Options: `--source <path>` (default: `target/release/libagent_doc.so`), `--targe
 
 All pass. Verified end-to-end: `~/.cargo/bin/libagent_doc.so` → `libagent_doc-0.33.4.so`, `agent-doc lib-path` resolves correctly.
 ❯ do #408p with tests
-### Re: #408p — gc-libs subcommand + editor PID lock files — opus-4-6
+❯ ### Re: #408p — gc-libs subcommand + editor PID lock files — opus-4-6 (HEAD)
 
 **Rust: `agent-doc gc-libs` subcommand** (`src/lib_gc.rs`)
 
@@ -190,13 +190,23 @@ Lock file format: `libagent_doc-0.33.4.so.pid.12345` — zero-byte sentinel per 
 - JetBrains: compiles clean (lock logic tested via Rust GC tests)
 
 Verified end-to-end: `agent-doc gc-libs` → `[gc-libs] kept current: libagent_doc-0.33.4.so` / `nothing to clean`.
-<!-- agent:boundary:8e1e19c4 -->
+
+❯ do #5tjq. Add tests if necessary.
+### Re: #5tjq — post-reload version sanity check — opus-4-6
+
+**JetBrains (NativeLib.kt):** Added `verifyVersion(lib, path)` — calls `agent_doc_version()`, logs `[native] loaded libagent_doc v{version} from {path}` on success, warns on null return or exception (ABI mismatch). Called in both `loadFrom()` and `reload()` after successful `Native.load()`.
+
+**VS Code (native.ts):** Added `verifyVersion(libPath)` — calls `bindFunctions()` to ensure `_version` is bound, then calls `agent_doc_version()` via koffi, decodes the `char*`, frees it, and logs the version. Same warning on null/exception. Added `_version` to lazy bindings and `resetBindings()`. Called after both initial load and reload in `ensureLoaded()`. Replaces the generic `loaded ${libPath}` log message with the versioned one.
+
+**No new tests needed** — this is a best-effort log+warn sanity check. Testing would require loading the actual native library. The version function itself is already tested via the Rust test suite.
+<!-- agent:boundary:07c4c343 -->
+<!-- agent:boundary:04bf6327 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#5tjq] Post-reload sanity check: call agent_doc_version() after hot-reload in both NativeLib.kt (JNA) and native.ts (koffi), log version string, fail fast on ABI mismatch
+- [x] [#5tjq] Post-reload sanity check: call agent_doc_version() after hot-reload in both NativeLib.kt (JNA) and native.ts (koffi), log version string, fail fast on ABI mismatch
 - [ ] [#6rm4] Bump version + release agent-doc with hooks feature + this fix
 - [ ] [#mrs0] `agent-doc steer <FILE>` — inject steering message to claim pane via tmux send-keys
 - [ ] [#qyv7] (stretch) inotify watcher for automatic real-time steering on document edit

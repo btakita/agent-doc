@@ -982,15 +982,26 @@ Fixed now. All three changes (#j57h, #4ynf, #chcb) are propagated to the agent-d
 Both the local install (`.claude/skills/agent-doc/`) and the source repo (`src/agent-doc/`) are in sync. Running `agent-doc skill install` will preserve the changes.
 (pending status update — no new content)
 ❯ ### Re: pending statuses not updated — opus-4-6 (HEAD)
+❯ ### Re: pending statuses not updated — opus-4-6 (HEAD)
 
 The `--pending-done j57h --pending-done 4ynf --pending-done chcb` flags were passed in the first cycle's `agent-doc write`, but the write exited with code 75 (IPC timeout). The response content was saved as a patch and recovered by the next preflight — but recovery only replays exchange content, not pending flag mutations. The `--pending-done` flags were lost.
 
 This is a bug in the IPC-degraded write path: pending mutations should be applied to the file before or independently of IPC. Currently, if IPC times out, any `--pending-*` flags on that write are silently dropped.
 
 ❯ plan to fix the bug with opus. Have sonnet fix the bug.
+❯ plan to fix the bug with opus. Have sonnet fix the bug.
 plan to fix the bug with opus. Have sonnet fix the bug.[]
 
 Applying the pending-done flags now in this cycle.
+### Re: IPC timeout pending mutation fix — implemented — opus-4-6
+
+Sonnet implemented `splice_pending_component(target, source)` in `write.rs`. In the IPC timeout path (exit code 75), before writing `content_ours` to disk, it splices the `&lt;!-- agent:pending --&gt;` component from the current file (which has mutations) into `content_ours`. Three edge cases handled: both have pending (splice), source missing pending (noop), target missing pending (warn + noop).
+
+Also included in Sonnet's changes: the IPC auto-degradation from #d2d4 (`is_ipc_degraded`/`mark_ipc_degraded`/`clear_ipc_degraded`) and the 500ms→1000ms sidecar timeout increase.
+
+Fixed the `test_skill_md_references_valid_commands` failure — the #j57h description contained "agent-doc binary" which the test parsed as a subcommand reference. Changed to "CLI is installed".
+
+**Build status:** clippy clean, 1148 tests passing (1 pre-existing skip), both binaries rebuilt (`cargo install --path .` + `cargo build --release`).
 ### Re: plan to fix IPC timeout pending mutation bug — opus-4-6
 
 #### Root cause
@@ -1015,7 +1026,7 @@ This is surgical — doesn't change baseline handling, patch application, or CRD
 Making the IPC timeout path use CRDT merge instead of `atomic_write` would fix this and any future component-level conflicts, but it's a bigger change and the timeout path is meant to be a fast fallback.
 
 Delegating implementation to Sonnet.
-<!-- agent:boundary:e32ded16 -->
+<!-- agent:boundary:f0987fca -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1026,6 +1037,6 @@ Delegating implementation to Sonnet.
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#vprd] Audit root AGENTS.md — remove anti-laziness scaffolding, make rule scope explicit, remove progress-forcing language (~400 token savings)
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [ ] [#phhk] Fix IPC timeout pending mutation loss — in write.rs IPC timeout path (~line 1192), atomic_write(file, content_ours) overwrites pending mutations applied by main.rs. Fix: before writing content_ours, splice the pending component from the current file into content_ours. Delegated to Sonnet.
+- [ ] [#phhk] Fix IPC timeout pending mutation loss — splice_pending_component() implemented, clippy clean, 1148 tests pass, both binaries rebuilt. Awaiting user verification.
 <!-- /agent:pending -->
 ## Assistant

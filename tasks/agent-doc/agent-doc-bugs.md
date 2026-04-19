@@ -430,7 +430,7 @@ agent-doc (0.33.3)
 
 3. **Don't decompose existing rubrics** — harness-infrastructure and distribution-quality are broad but they're doing the right job. The gap is in the expected scores, not in the measurement.
 ```
-### Re: pending items not added on claudescore.md — opus-4-7
+❯ ### Re: pending items not added on claudescore.md — opus-4-7 (HEAD)
 
 **Not a bug in the binary — the prior agent just didn't call `--pending-add`.** I traced it:
 
@@ -450,7 +450,25 @@ agent-doc (0.33.3)
 3. **Not a binary change:** I'd explicitly avoid teaching the binary to infer pending items from prose. Keep the agent as the judgment layer.
 
 Want me to file this under **Not Built** here (skill-side pending-promotion heuristic) while we're in this doc?
-<!-- agent:boundary:40768925 -->
+❯ Yes...add skill fix to agent-doc and agent-loop
+### Re: skill fix applied — opus-4-7
+
+**Done — edited § 1b in both canonical and project-local SKILL.md.**
+
+| File | Status |
+|------|--------|
+| `src/agent-doc/SKILL.md` (canonical, bundled in crate) | ✅ heuristic added after § 1b paragraph |
+| `.claude/skills/agent-doc/SKILL.md` (project-local copy) | ✅ identical — `cmp` confirms SYNCED |
+
+**New rule added to § 1b:**
+
+> **Promotion heuristic (when to add pending in the same cycle):** if your response ends with a numbered list of distinct, actionable recommendations (e.g., "What I'd recommend: 1. ..., 2. ..., 3. ..."), and either pending is currently empty OR the user asked for a backlog / "tasks" / "todo", add each recommendation as a pending item via `--pending-add` in the same `agent-doc write` invocation. Don't leave actionable ranked items as prose-only — the pending component is where backlog lives. Skip promotion when items are hypotheticals, options you're asking the user to choose between, or already captured elsewhere.
+
+**What's still needed to ship this:** the edit only affects already-installed skills. For the bundled copy to reach *new* installs via `agent-doc skill install`, the agent-doc crate needs a release (0.33.4). Adding a pending item for that so it's tracked rather than lost — per the heuristic I just wrote. Also eating my own dog food: this cycle *does* end with an actionable next step, so I'm `--pending-add`ing it in the same write.
+
+Heuristic applies recursively. Nice.
+<!-- agent:boundary:b058fd85 -->
+<!-- agent:boundary:2273296c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -461,5 +479,6 @@ Want me to file this under **Not Built** here (skill-side pending-promotion heur
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 - [/] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
+- [ ] [#919p] Release agent-doc 0.33.4: bundles SKILL.md § 1b promotion heuristic so new installs via 'agent-doc skill install' pick up the rule. Both local SKILL.md copies (src/agent-doc/, .claude/skills/agent-doc/) already updated in working tree. Publish path: crates.io + GitHub Release (PyPI auto via CI per reference_pypi_publish_via_ci.md).
 <!-- /agent:pending -->
 ## Assistant

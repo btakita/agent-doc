@@ -999,6 +999,14 @@ pub fn run_stream(file: &Path, baseline: Option<&str>, force_disk: bool) -> Resu
         anyhow::bail!("no patch blocks or content found in response");
     }
 
+    if patches.is_empty() {
+        eprintln!(
+            "[write] WARNING: 0 template patches found — response may be missing or malformed. \
+             Only normalization/boundary changes will be applied."
+        );
+        crate::ops_log::log_op(file, "zero_patches_warning: response may be empty or malformed");
+    }
+
     // Warn when patches target a file with no template components
     if patches.is_empty() && !unmatched.trim().is_empty() {
         let current = std::fs::read_to_string(file)
@@ -1716,19 +1724,6 @@ pub fn try_ipc(
 
     // Try socket IPC first (lower latency, no inotify)
     if crate::ipc_socket::is_listener_active(&project_root) {
-        // Clean up any stale patch file from a previous timeout before socket send.
-        // Without this, the file watcher could pick up and apply the stale file
-        // concurrently with the socket delivery, causing double-apply.
-        let patches_dir_for_socket = project_root.join(".agent-doc/patches");
-        if patches_dir_for_socket.exists() {
-            let stale_patch_file = patches_dir_for_socket.join(format!("{}.json", hash));
-            if stale_patch_file.exists() {
-                eprintln!("[write] cleaning stale patch file before socket send (prevent double-apply)");
-                if let Err(e) = std::fs::remove_file(&stale_patch_file) {
-                    eprintln!("[write] WARNING: failed to clean stale patch file: {}", e);
-                }
-            }
-        }
         let ipc_patches_json = build_ipc_patches_json(file, patches, unmatched, normalize_prefix_lines)?;
         // When unmatched content was synthesized into a patch (no explicit patch blocks),
         // don't also send it as "unmatched" — the plugin would apply both and duplicate.
@@ -1765,57 +1760,86 @@ pub fn try_ipc(
                 socket_payload["fullContent"] = serde_json::Value::String(ours.to_string());
             }
         }
+        // Pre-write fallback patch file before socket send. If socket delivery
+        // succeeds but sidecar ack times out, the file watcher can recover the
+        // response from this file. patch_id dedup prevents double-apply when
+        // both socket and file watcher fire. Overwrites any stale content.
+        let fallback_patch_file = {
+            let patches_dir = project_root.join(".agent-doc/patches");
+            if patches_dir.exists() {
+                let path = patches_dir.join(format!("{}.json", hash));
+                match serde_json::to_string_pretty(&socket_payload) {
+                    Ok(json) => {
+                        if let Err(e) = std::fs::write(&path, &json) {
+                            eprintln!("[write] WARNING: failed to write fallback patch file: {}", e);
+                            None
+                        } else {
+                            eprintln!("[write] fallback patch file pre-written for recovery");
+                            Some(path)
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[write] WARNING: failed to serialize fallback patch: {}", e);
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        };
         match crate::ipc_socket::send_message(&project_root, &socket_payload) {
             Ok(Some(_ack)) => {
                 eprintln!("[write] socket IPC patch delivered");
                 // Poll for ack-content sidecar (written by plugin after apply).
-                // The sidecar is the authoritative post-apply snapshot — polling
-                // replaces the old 200ms sleep race. Falls back to file read only
-                // after the timeout expires (old plugin, dedup skip, no-change patch).
-                // Bug 2A fix: snapshot save failure after IPC success is non-fatal.
-                let (snap_source, snap_content) = match poll_ack_content_sidecar(
+                let sidecar = poll_ack_content_sidecar(
                     &project_root, &patch_id,
                     std::time::Duration::from_millis(1000),
                     std::time::Duration::from_millis(25),
-                )? {
-                    Some(content) => {
-                        eprintln!("[write] snapshot from ack-content sidecar ({} bytes)", content.len());
-                        clear_ipc_degraded(&project_root);
-                        ("ack_content_sidecar", content)
+                )?;
+                if let Some(snap_content) = sidecar {
+                    // Sidecar confirmed — plugin applied the content
+                    eprintln!("[write] snapshot from ack-content sidecar ({} bytes)", snap_content.len());
+                    clear_ipc_degraded(&project_root);
+                    if let Some(ref path) = fallback_patch_file {
+                        let _ = std::fs::remove_file(path);
                     }
-                    None => {
-                        eprintln!("[write] snapshot from file read (ack-content sidecar not available after 1000ms)");
-                        mark_ipc_degraded(&project_root);
-                        let content = std::fs::read_to_string(file)
-                            .with_context(|| format!("failed to read {} after socket IPC", file.display()))?;
-                        ("file_read_no_sidecar", content)
-                    }
-                };
-                crate::ops_log::log_op(file, &format!(
-                    "ipc_socket_delivered file={} snap_source={} snap_len={}",
-                    file.display(), snap_source, snap_content.len()
-                ));
-                if let Err(e) = snapshot::save(file, &snap_content) {
-                    eprintln!(
-                        "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
-                         Commit will auto-recover via divergence detection.",
-                        e
-                    );
                     crate::ops_log::log_op(file, &format!(
-                        "snapshot_save_failed_after_ipc file={} error={}",
-                        file.display(), e
-                    ));
-                } else {
-                    crate::ops_log::log_op(file, &format!(
-                        "snapshot_saved_socket_ipc file={} snap_len={}",
+                        "ipc_socket_delivered file={} snap_source=ack_content_sidecar snap_len={}",
                         file.display(), snap_content.len()
                     ));
-                    let crdt_doc = crate::crdt::CrdtDoc::from_text(&snap_content);
-                    if let Err(e) = snapshot::save_crdt(file, &crdt_doc.encode_state()) {
-                        eprintln!("[write] WARNING: CRDT state save failed: {}", e);
+                    if let Err(e) = snapshot::save(file, &snap_content) {
+                        eprintln!(
+                            "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
+                             Commit will auto-recover via divergence detection.",
+                            e
+                        );
+                        crate::ops_log::log_op(file, &format!(
+                            "snapshot_save_failed_after_ipc file={} error={}",
+                            file.display(), e
+                        ));
+                    } else {
+                        crate::ops_log::log_op(file, &format!(
+                            "snapshot_saved_socket_ipc file={} snap_len={}",
+                            file.display(), snap_content.len()
+                        ));
+                        let crdt_doc = crate::crdt::CrdtDoc::from_text(&snap_content);
+                        if let Err(e) = snapshot::save_crdt(file, &crdt_doc.encode_state()) {
+                            eprintln!("[write] WARNING: CRDT state save failed: {}", e);
+                        }
                     }
+                    return Ok(IpcResult { success: true, patch_id });
                 }
-                return Ok(IpcResult { success: true, patch_id });
+                // Sidecar timed out — can't confirm plugin applied content.
+                // Fall through to disk write as reliable fallback.
+                eprintln!("[write] sidecar ack timed out after 1000ms — socket delivery unconfirmed, falling back to disk write");
+                if fallback_patch_file.is_some() {
+                    eprintln!("[write] fallback patch file left for file watcher recovery");
+                }
+                mark_ipc_degraded(&project_root);
+                crate::ops_log::log_op(file, &format!(
+                    "ipc_socket_sidecar_timeout file={} — falling back to disk write",
+                    file.display()
+                ));
             }
             Ok(None) => {
                 eprintln!("[write] socket IPC sent but no ack — falling back to file IPC");
@@ -3797,11 +3821,20 @@ mod submodule_patch_routing_tests {
         let root = project_root.to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::thread::spawn(move || {
-            // start_listener blocks; it runs until the socket is removed (TempDir drop).
-            let _ = crate::ipc_socket::start_listener(&root, |msg| {
-                // Parse the incoming message and respond with an ack containing the patch_id.
+            let root_clone = root.clone();
+            let _ = crate::ipc_socket::start_listener(&root, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 let patch_id = v.get("patch_id").and_then(|p| p.as_str()).unwrap_or("unknown");
+                // Write ack-content sidecar so poll_ack_content_sidecar succeeds
+                let ack_dir = root_clone.join(".agent-doc/ack-content");
+                let _ = std::fs::create_dir_all(&ack_dir);
+                let file_path = v.get("file").and_then(|f| f.as_str()).unwrap_or("");
+                let content = if !file_path.is_empty() {
+                    std::fs::read_to_string(file_path).unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), &content);
                 Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
             });
         })

@@ -43,6 +43,11 @@ one cycle.
 
 - Items completed during this response → `--pending-done <id>`
 - New items discovered → `--pending-add "text"`
+- **Agent-proposed forward actions** → `--pending-add "text"` for each concrete option.
+  Any response ending with a forward-looking question ("Ready to X?", "Should we A or
+  B first?", "Shall I capture Y as a spec?") MUST `--pending-add` each concrete
+  next-step option in the same cycle. The proposal dies if the user doesn't reply
+  immediately; capturing it preserves continuity across cycles.
 - Reword an existing item → `--pending-edit "id=new text"`
 - Reprioritize (only when `pending_reordered` is NOT true) → `--pending-reorder`
 - Block an item on external signal → `--pending-gate <id>`

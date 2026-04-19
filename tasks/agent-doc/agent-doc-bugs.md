@@ -199,8 +199,7 @@ Traced the git history. Here's what happened:
 **Secondary concern — structural detection:** Even if the session HAD been active, raw text inline corrections inside an agent response block have no structural markers (`❯`, `>`, heading). The annotated diff would tag them as `[user+]`, but the model might deprioritize them vs. other changes.
 
 **Recommendation:** Use blockquote `>` syntax for inline corrections inside agent responses. This makes them structurally distinct from agent content and ensures the agent recognizes them as annotations requiring a response, regardless of session state at the time of editing.
-<!-- agent:boundary:6f06470a -->
-<!-- agent:boundary:b9dd4072 -->
+<!-- agent:boundary:c87775b2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -177,7 +177,30 @@ This is heading-level agnostic — works for h1-h6, no hardcoded `###` or `Re:` 
 **All 1163 tests pass.** Both binaries rebuilt (`cargo install --path .` + `cargo build --release`).
 
 **Behavioral change:** standalone headings in the exchange (not `❯`-prefixed) are now treated as agent response markers. Users who type raw headings as input won't get the `❯` prefix — but this is the documented convention ("users write inline text, blockquotes, and annotations — not standalone headings").
-<!-- agent:boundary:6dfec617 -->
+I `agent-doc on src/session-share/tasks/claudescore.md` ignored my inline prompts. Why?
+See
+> This is wrong. Do not lower expert scores. We will recalibrate later. The scorer seems wrong. Remember that superpowers is a library that is installed into a harness. Please explain the rationele of 5 or 3. I'm inclined to think the score should be 8-9.
+
+> We may need to broaden the gate to update the definition of the rubric.
+### Re: why claudescore inline prompts were ignored — opus-4-6
+
+Traced the git history. Here's what happened:
+
+**Timeline:**
+- 17:34 — agent wrote `### Re: #jmh4` response (commit 0ab62e2)
+- ~17:35–17:51 — you added inline corrections (raw text between numbered items)
+- 17:51–17:52 — two preflight commits (63e4603, 0efe3e0) with boundary/normalize cleanup but **no new agent response**
+
+**Root cause: the Claude session for claudescore.md was no longer active.** The preflight's commit step captured your corrections into the snapshot, but no agent response cycle executed. Evidence:
+1. No new `### Re:` block after the corrections — just normalization commits
+2. The corrections lack `❯` prefix — no `agent-doc write` cycle ran to normalize them
+3. 17-minute gap between agent response (17:34) and next commits (17:51), suggesting the session ended
+
+**Secondary concern — structural detection:** Even if the session HAD been active, raw text inline corrections inside an agent response block have no structural markers (`❯`, `>`, heading). The annotated diff would tag them as `[user+]`, but the model might deprioritize them vs. other changes.
+
+**Recommendation:** Use blockquote `>` syntax for inline corrections inside agent responses. This makes them structurally distinct from agent content and ensures the agent recognizes them as annotations requiring a response, regardless of session state at the time of editing.
+<!-- agent:boundary:6f06470a -->
+<!-- agent:boundary:b9dd4072 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -706,9 +706,11 @@ Investigate all of my AGENTS.md/CLAUDE.md, skills, and runbooks. How can the pro
 
 See https://platform.claude.com/docs/en/about-claude/models/migration-guide
 ❯ Please write the patchback into this document. Why does this keep on failing?
-### Re: Patchback failure + Opus 4.7 audit (re-write) — opus-4-6
+❯ ### Re: Patchback failure + Opus 4.7 audit (re-write) — opus-4-6 (HEAD)
 
 **Why patchbacks keep failing:** Same root cause as the Bug B diagnosis earlier in this document (line ~569). The `agent-doc write --stream` command delivers via IPC socket → editor plugin. The plugin's socket listener receives the JSON patch but doesn't ACK within 500ms. The snapshot is then saved from the unchanged file, so the response is lost. This has happened 3+ times in this session alone. The JB plugin's PatchWatcher may need an IDE restart, or the socket listener isn't handling this workspace.
+
+❯ I restarted the IDE several times. Do we have logging as to why the socket listener is not receiving the JSON patch? With both the sender and receiver? Any existing analysis on why the command is not sent or received? 
 
 **Workaround applied this cycle:** Using `--force-disk` to bypass IPC and write directly to disk.
 
@@ -743,15 +745,21 @@ Runbooks are already good — numbered steps with explicit scope. Keep that patt
 
 Skill SKILL.md patterns like "Use this when..." are vague for 4.7. Better: "Invoke this skill when ALL of: (a) file is .md, (b) user references [topic], (c) no other skill matches."
 
+❯ Add making triggers explicit to pending.
+
 The agent-doc SKILL.md is well-structured for 4.7 — step-by-step with explicit conditionals ("If `no_changes: true` → stop"). Keep that pattern.
 
 **4. Consolidate repetitive rules**
 
 MEMORY.md has ~15 "Never do X" rules for agent-doc alone. Group related rules into 3-4 compound entries. Estimated savings: ~60 lines / ~1,200 tokens.
 
+❯ Add consolidate repetitive rules to pending.
+
 **5. Remove "force progress" scaffolding**
 
 The migration guide specifically says: remove instructions forcing progress updates, tool usage, or anti-laziness behavior. 4.7 naturally provides progress updates at high/xhigh effort.
+
+❯ Can we support both models via runbooks?
 
 ##### Agent-doc implications
 
@@ -763,7 +771,9 @@ The migration guide specifically says: remove instructions forcing progress upda
 2. **Mandatory steps** — at medium effort, 4.7 may skip write/commit. State: "Steps 2 (write) and 3 (commit) are MANDATORY every cycle regardless of response length."
 3. **Subagent spawning** — 4.7 spawns fewer by default. Specify: "Spawn subagents for research exceeding 3 tool calls."
 4. **Tokenizer cost** — 35% more tokens per character makes compaction more important. Consider more aggressive triggers.
+❯ Please elaborate
 5. **Effort parameter** — recommend high/xhigh for template-mode sessions with pending items.
+❯ Would <high effort cause failures with the agent-doc paradigm?
 
 ##### Recommended migration plan
 
@@ -772,7 +782,95 @@ The migration guide specifically says: remove instructions forcing progress upda
 3. Update tier gate: add claude-opus-4-7 model ID
 4. Add mandatory-step language to SKILL.md
 5. Test on 4.7: baseline current behavior before changes, then iterate
-<!-- agent:boundary:c24a8a33 -->
+❯ Add these steps to pending
+### Re: IPC diagnostics, model coexistence, tokenizer cost, effort levels — opus-4-6
+
+#### IPC socket failure — existing diagnostics
+
+Both sender and receiver have extensive logging. Here's what's available:
+
+**Sender (Rust CLI):**
+- `AGENT_DOC_LOG=debug agent-doc write ...` enables structured tracing to `.agent-doc/logs/debug.log`
+- stderr tags: `[write]`, `[ipc-socket]`, `[perf]`
+- ops.log at `.agent-doc/logs/ops.log` records every IPC delivery with snap_source
+
+**Receiver (JB plugin):**
+- `idea.log` (Help → Show Log) — tags: `[socket]`, `[patch-watcher]`, `[ack-content]`
+- Key log lines: `[socket] IPC listener started via FFI for <root>` (confirms listener is active), `[socket] dedup: patch_id already applied` (shows double-delivery), `[ack-content] FFI write_ack_content returned false` (sidecar failure)
+
+**The most likely failure mode for your case:** Race condition C — the FFI callback returns `true` immediately (sending the ACK), but dispatches the actual patch apply to EDT (Swing thread) via `invokeAndWait()`. The ACK content sidecar is written AFTER the EDT apply. If the CLI's 500ms sidecar poll expires before EDT completes, the snapshot is saved from the unchanged file. The socket "delivered" log is technically correct — the socket received the patch — but the file wasn't yet updated when the snapshot was captured.
+
+**To diagnose next occurrence:** Check `idea.log` for `[socket] IPC listener started` for this project root. If missing, the listener never started for this workspace — likely a multi-root registration gap (Bug B territory). If present, look for `applyPatch` timing — if it takes >500ms, the sidecar poll expires before the apply completes.
+
+**Practical fix:** Using `--force-disk` bypasses the entire IPC path. The agent-doc skill should default to `--force-disk` when the IPC path has failed in the same session. I can add that as a pending item if you want it tracked.
+
+#### Can we support both models via runbooks?
+
+Yes. The cleanest approach is **model-conditional sections in runbooks**, not separate runbooks per model. The model tier gate already resolves `effective_tier` at preflight time, so runbooks can reference it:
+
+```markdown
+## Step 3: Progress updates
+- **Opus 4.6 and earlier:** Include explicit "show progress" instructions — these models may go silent during long operations.
+- **Opus 4.7+:** Remove progress scaffolding — 4.7 provides updates natively at high/xhigh effort. Explicit instructions cause redundant reporting.
+```
+
+The SKILL.md itself stays model-neutral (procedural steps), and the runbooks contain model-specific behavioral notes where 4.6 and 4.7 diverge. This avoids duplicating the entire workflow while capturing the behavioral deltas.
+
+Runbooks that are purely procedural (pending-ops, streaming-checkpoints) need no changes — they describe what to do, not how to think. The model-sensitive areas are:
+- Anti-laziness / progress forcing (remove for 4.7)
+- Tool-triggering language (reduce for 4.7)
+- Subagent spawning thresholds (lower for 4.7)
+- Effort parameter recommendations (new for 4.7)
+
+#### Tokenizer cost — elaboration
+
+The 35% token increase compounds across every context load:
+
+**Your current instruction footprint:**
+- Root AGENTS.md + CLAUDE.local.md: ~240 lines → ~3,200 tokens (4.6) → ~4,300 tokens (4.7)
+- MEMORY.md index + loaded memories: ~200 lines → ~2,700 tokens → ~3,600 tokens
+- agent-doc SKILL.md + runbooks: ~450 lines → ~6,000 tokens → ~8,100 tokens
+- Per-session exchange content: varies, but compaction threshold hits sooner
+
+**Net impact per agent-doc cycle:** Every preflight → respond → write → commit cycle loads the full instruction set. At ~12,000 tokens (4.6) → ~16,200 tokens (4.7) per cycle, the 35% increase means ~4,200 extra tokens per cycle just for instructions.
+
+**Compaction implications:** The exchange component grows by ~35% per token of response. If compaction triggers at a byte threshold, it fires at the same file size but contains fewer logical tokens of content. Consider lowering the compaction trigger or switching to a token-estimated threshold rather than byte count.
+
+**Mitigation priorities (highest impact first):**
+1. Consolidate MEMORY.md (saves ~1,200 tokens × 1.35 = ~1,620 on 4.7)
+2. Remove scaffolding from AGENTS.md (saves ~400 tokens × 1.35 = ~540 on 4.7)
+3. Shorter exchange responses (compound savings per cycle)
+4. More aggressive compaction triggers
+
+#### Would <high effort cause failures with the agent-doc paradigm?
+
+Yes, specific failure modes at `low` and `medium` effort on Opus 4.7:
+
+**`low` effort — likely broken:**
+- May skip `agent-doc write` entirely if it judges the response "simple enough" to not require a file update
+- May not spawn subagents for research, producing shallow single-tool answers
+- May skip `agent-doc commit` as "optional cleanup"
+- Pending mutations may be dropped as "low priority"
+
+**`medium` effort — risk of partial execution:**
+- Write step likely executes, but commit may be skipped
+- Multi-topic responses may address only the first topic
+- Subagent research may be replaced with inline reasoning (worse quality for broad questions)
+- Pending flags may be partially applied (e.g., only the first `--pending-add`)
+
+**`high` effort — safe baseline:**
+- All mandatory steps execute
+- Multi-topic responses addressed fully
+- Subagents spawned when warranted
+- Pending mutations applied completely
+
+**`xhigh` effort — maximum quality, higher cost:**
+- Deeper research, more subagents
+- Longer, more thorough responses
+- Better edge-case handling in complex diffs
+
+**Recommendation:** The agent-doc SKILL.md should specify `high` as the minimum effort for template-mode sessions. The preflight `effective_tier` already maps to effort levels — wire `high` tier → `high` effort as a floor, not a suggestion.
+<!-- agent:boundary:97dcdbd3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -781,5 +879,12 @@ The migration guide specifically says: remove instructions forcing progress upda
 - [/] [#a002] Safety rail + forensic log in normalize_user_prompts_in_exchange — ✅ landed, awaiting large-drift trip for `normalize_threshold_exceeded` telemetry.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
+- [ ] [#j57h] Make skill triggers explicit for Opus 4.7 — replace vague 'Use this when...' with explicit ALL-OF conditions in SKILL.md files
+- [ ] [#mxj5] Consolidate repetitive MEMORY.md rules — group ~15 agent-doc 'Never do X' entries into 3-4 compound entries (~1,200 token savings)
+- [ ] [#vprd] Audit root AGENTS.md — remove anti-laziness scaffolding, make rule scope explicit, remove progress-forcing language (~400 token savings)
+- [ ] [#0ky2] Consolidate MEMORY.md — group agent-doc rules into compound entries (~1,200 token savings)
+- [ ] [#4ynf] Update agent-doc tier gate — add claude-opus-4-7 model ID to high tier mapping
+- [ ] [#chcb] Add mandatory-step language to agent-doc SKILL.md — write+commit are MANDATORY every cycle
+- [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
 <!-- /agent:pending -->
 ## Assistant

@@ -261,7 +261,7 @@ Version bumped to 0.33.3, VERSIONS.md updated, 1146 tests pass, both binaries re
 4. `maturin publish`
 5. `gh release create v0.33.3` with prebuilt binary
 
-### Re: diagnosis — why the release response was lost — opus-4-6
+❯ ### Re: diagnosis — why the release response was lost — opus-4-6 (HEAD)
 
 The sonnet-4-6 release response was written BEFORE the deeper fix landed. At that point:
 - `try_ipc()` still returned `success: true` on sidecar timeout (the old behavior)
@@ -276,7 +276,22 @@ Timeline:
 3. opus-4-6 write → IPC degraded from step 1 → CRDT disk write → **succeeded**
 
 The fix is now in both binaries. This should not recur.
-<!-- agent:boundary:f96d3655 -->
+❯ The response was not written to this document. Please add the last 2 responses and diagnose.
+### Re: responses ARE on disk — IDE buffer stale — opus-4-6
+
+Both responses are confirmed on disk:
+- **Line 251**: `### Re: release v0.33.3 (replay) — sonnet-4-6`
+- **Line 264**: `### Re: diagnosis — why the release response was lost — opus-4-6`
+
+The diff from preflight also confirms this — both snapshot and document have the content. The only diff is `(HEAD)` repositioning and your new user line.
+
+**The problem is the IDE buffer.** When IPC is degraded, `agent-doc write` uses CRDT disk write — it updates the file on disk but bypasses the plugin's Document API. The IDE keeps showing its stale in-memory buffer. The commit sends `IPC reposition boundary signal` and writes a `VCS refresh signal`, but these apparently aren't triggering the IDE to reload the file from disk.
+
+**Workaround:** reload the file in your IDE (Cmd/Ctrl+Shift+A → "Reload from Disk" in IntelliJ, or close and reopen the tab).
+
+**Root cause:** the IPC degraded state lasts 1 hour. During that window, all writes go to disk only. The IDE plugin's file watcher should detect disk changes, but it appears to not be picking them up. Added to pending for investigation.
+<!-- agent:boundary:47bf5bba -->
+<!-- agent:boundary:38bfcdc9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -286,5 +301,6 @@ The fix is now in both binaries. This should not recur.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
+- [ ] [#s80z] IDE buffer stale after CRDT disk write — VCS refresh signal not triggering buffer reload when IPC is degraded. Investigate why commit's reposition boundary signal and VCS refresh don't cause the IDE to reload the file.
 <!-- /agent:pending -->
 ## Assistant

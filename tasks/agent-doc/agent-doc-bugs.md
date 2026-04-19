@@ -895,7 +895,7 @@ Consolidated 18 agent-doc entries across 4 sections into 3 compound entries in 1
 **Net savings:** MEMORY.md dropped from 141 → 114 lines (27 lines / ~540 tokens on 4.6, ~730 tokens on 4.7). Individual feedback files preserved for provenance. The compound files contain all the same rules grouped by theme, with links back to the original feedback files for context.
 
 Note: #mxj5 ("Consolidate repetitive MEMORY.md rules") was a near-duplicate of #0ky2 — both addressed the same consolidation. Marking #0ky2 done covers both.
-<!-- agent:boundary:1c8a4863 -->
+<!-- agent:boundary:d22d7232 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -907,7 +907,6 @@ Note: #mxj5 ("Consolidate repetitive MEMORY.md rules") was a near-duplicate of #
 - [ ] [#j57h] Make skill triggers explicit for Opus 4.7 — replace vague 'Use this when...' with explicit ALL-OF conditions in SKILL.md files
 - [ ] [#mxj5] Consolidate repetitive MEMORY.md rules — group ~15 agent-doc 'Never do X' entries into 3-4 compound entries (~1,200 token savings)
 - [ ] [#vprd] Audit root AGENTS.md — remove anti-laziness scaffolding, make rule scope explicit, remove progress-forcing language (~400 token savings)
-- [x] [#0ky2] Consolidate MEMORY.md — group agent-doc rules into compound entries (~1,200 token savings)
 - [ ] [#4ynf] Update agent-doc tier gate — add claude-opus-4-7 model ID to high tier mapping
 - [ ] [#chcb] Add mandatory-step language to agent-doc SKILL.md — write+commit are MANDATORY every cycle
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate

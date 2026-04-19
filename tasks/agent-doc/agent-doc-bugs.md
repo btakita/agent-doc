@@ -856,8 +856,7 @@ I can't fully prove which mechanism without ltrace/perf, but **(1) is testable**
 **Recommendation:** Option 3 (mtime-based reload) is the most robust without process restart. Option 1 is the quick fix for now.
 
 Yesterday's crashes (`java_error_in_idea_2825553.log` etc.) were a different bug — NULL pointer in `Pointer.getString` from `NativePatching.repositionBoundaryToEnd`, suggesting `result.text` was null but not checked before `getString(0)`. That's a separate fix in `NativePatching.kt`.
-<!-- agent:boundary:367621ca -->
-<!-- agent:boundary:317baca2 -->
+<!-- agent:boundary:a5f0a476 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

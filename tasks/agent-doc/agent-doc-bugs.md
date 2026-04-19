@@ -705,7 +705,7 @@ After restart, `Run Agent Doc` will proceed directly to the `agent-doc route` CL
 Investigate all of my AGENTS.md/CLAUDE.md, skills, and runbooks. How can the prompts more literal so opus 4.7 understands intent without burning tokens? What are the implications for agent-doc?
 
 See https://platform.claude.com/docs/en/about-claude/models/migration-guide
-<!-- agent:boundary:80a9105f -->
+<!-- agent:boundary:e25b944a -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

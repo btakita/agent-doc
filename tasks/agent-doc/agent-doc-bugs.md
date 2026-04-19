@@ -972,7 +972,6 @@ Fixed now. All three changes (#j57h, #4ynf, #chcb) are propagated to the agent-d
 Both the local install (`.claude/skills/agent-doc/`) and the source repo (`src/agent-doc/`) are in sync. Running `agent-doc skill install` will preserve the changes.
 Why were the pending items statuses not updated?
 ❯ ### Re: installability of skill/runbook changes — opus-4-6 (HEAD)
-❯ ### Re: installability of skill/runbook changes — opus-4-6 (HEAD)
 
 No — the previous cycle only edited the agent-loop local copies (`.claude/skills/agent-doc/`). The canonical source files in `src/agent-doc/` were untouched, so `agent-doc skill install` would have overwritten the changes with the old versions.
 
@@ -982,14 +981,41 @@ Fixed now. All three changes (#j57h, #4ynf, #chcb) are propagated to the agent-d
 
 Both the local install (`.claude/skills/agent-doc/`) and the source repo (`src/agent-doc/`) are in sync. Running `agent-doc skill install` will preserve the changes.
 (pending status update — no new content)
-### Re: pending statuses not updated — opus-4-6
+❯ ### Re: pending statuses not updated — opus-4-6 (HEAD)
 
 The `--pending-done j57h --pending-done 4ynf --pending-done chcb` flags were passed in the first cycle's `agent-doc write`, but the write exited with code 75 (IPC timeout). The response content was saved as a patch and recovered by the next preflight — but recovery only replays exchange content, not pending flag mutations. The `--pending-done` flags were lost.
 
 This is a bug in the IPC-degraded write path: pending mutations should be applied to the file before or independently of IPC. Currently, if IPC times out, any `--pending-*` flags on that write are silently dropped.
 
+❯ plan to fix the bug with opus. Have sonnet fix the bug.
+plan to fix the bug with opus. Have sonnet fix the bug.[]
+
 Applying the pending-done flags now in this cycle.
-<!-- agent:boundary:5f31354e -->
+### Re: plan to fix IPC timeout pending mutation bug — opus-4-6
+
+#### Root cause
+
+In `main.rs` (~line 1194), `pending_cmd::done(&file, id)` writes the `[x]` mutation directly to disk. Then `run_stream` in `write.rs` computes `content_ours = baseline + agent_patches` using the `--baseline-file` (which predates the mutation). On IPC timeout (~line 1192), `atomic_write(file, &content_ours)` overwrites the entire file — losing the pending mutation.
+
+The `--force-disk` path doesn't have this bug because it uses CRDT merge (`content_ours` vs `theirs` from disk), which preserves the pending component. Only the IPC timeout fallback does a raw overwrite.
+
+#### Fix plan
+
+In `write.rs`, in the IPC timeout handler (~line 1190-1199), before `atomic_write(file, &content_ours)`:
+
+1. Read the current file from disk (which has pending mutations applied by main.rs)
+2. Parse the `&lt;!-- agent:pending --&gt;` component from the current file
+3. If found, replace the `&lt;!-- agent:pending --&gt;` component in `content_ours` with the version from disk
+4. Then write the spliced result
+
+This is surgical — doesn't change baseline handling, patch application, or CRDT merge logic. The exchange and pending components are independent, so splicing is safe.
+
+#### Alternative considered
+
+Making the IPC timeout path use CRDT merge instead of `atomic_write` would fix this and any future component-level conflicts, but it's a bigger change and the timeout path is meant to be a fast fallback.
+
+Delegating implementation to Sonnet.
+<!-- agent:boundary:e32ded16 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -1000,5 +1026,6 @@ Applying the pending-done flags now in this cycle.
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#vprd] Audit root AGENTS.md — remove anti-laziness scaffolding, make rule scope explicit, remove progress-forcing language (~400 token savings)
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
+- [ ] [#phhk] Fix IPC timeout pending mutation loss — in write.rs IPC timeout path (~line 1192), atomic_write(file, content_ours) overwrites pending mutations applied by main.rs. Fix: before writing content_ours, splice the pending component from the current file into content_ours. Delegated to Sonnet.
 <!-- /agent:pending -->
 ## Assistant

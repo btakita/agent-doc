@@ -646,7 +646,7 @@ No agent-doc Rust changes needed — the bug is purely in the JB plugin's handli
 ❯ When I installed the plugin and restarted idea, the tmux panes reset and a new claude code session was created. I lost track of the running claude code session + agent-doc run. Why did this happen? I remember we added logic to reset agent-doc managed tmux panes when the editor starts. It was supposed to check to see if there is a live tmux session for `tmux_session = "claude"`. There was. Did the existing session get killed? What happened to the tmux pane running the agent-doc on src/session-share/tasks/claudescore.md?
 
 ❯ Is the agent-doc run still going?
-### Re: tmux pane reset on plugin install — opus-4-6
+❯ ### Re: tmux pane reset on plugin install — opus-4-6 (HEAD)
 
 **Short answer:** The agent-doc run for claudescore.md is still alive. Pane `%51` is running `agent-doc` and its Claude Code session is at the idle `❯` prompt (finished its last cycle, waiting for the next edit).
 
@@ -670,7 +670,34 @@ The tmux panes weren't destroyed — they were reorganized to match the editor's
 **Current state:**
 - `%51` → agent-doc for `src/session-share/tasks/claudescore.md` (Claude idle at `❯`)
 - `%52` → agent-doc for `tasks/agent-doc/agent-doc-bugs.md` (this session)
-<!-- agent:boundary:134936cc -->
+
+❯ There was **another** tmux pane and claude code session that had an agent-doc run on src/session-share/tasks/claudescore.md. The diff that was running included:
+❯ > Revert these changes to the expected scores. The scores were calibrated according to an expert sentiment reality before the change was made. Now the lack of an agent harnesses misapplied penalty is creeping back in. This is why I want to isolate each factor individually to calculate scores. It seems that you are getting confused by grouping factors into a single rubric...particularly the agentic harness. The original rubrics were designed for agentic user sessions. Remember the purpose of the repo. The repo is not supposed to be an agentic user session. Revert the change to the expected score and let's apply our changes more methodically. I believe that we need to break apart the rubrics to be focused on a single factor. Plan with me.
+
+❯ When Idea restarted, the tmux pane closed and a new tmux pane `%51` took its place. What happened?
+### Re: old Claude session killed on IDEA restart — opus-4-6
+
+The old Claude Code session was killed by `resync --fix`. Here's the chain:
+
+**Root cause:** Your `.agent-doc/config.toml` has `tmux_session = "claude"`, but the old pane was in a different tmux session (likely a numeric session like `0` or `1`). When IDEA restarted:
+
+1. `PluginLifecycleListener.projectOpened()` ran `agent-doc resync --fix` (line 39)
+2. `detect_issues()` checked each registered pane's tmux session against the expected session
+3. For the claudescore pane: no `tmux_session` in frontmatter → fell back to `project_tmux_session()` → returned `"claude"` from config
+4. The old pane's actual tmux session didn't match `"claude"` → `WrongSession` issue detected
+5. `apply_fixes()` **killed the pane** and deregistered it from sessions.json (resync.rs lines 1243-1249: default behavior without `relocate_session`)
+6. After resync, `PromptPoller.startPolling()` auto-started, and the route/sync logic created a new pane `%51` with a fresh Claude Code session
+
+**The old Claude Code session with your diff is gone.** The `resync --fix` WrongSession handler kills panes by default — it doesn't check whether the pane has an active Claude Code session running.
+
+**This is a design gap:** `resync --fix` on IDEA startup is too aggressive for WrongSession. When a pane is running `claude` (an active agent process), it should relocate via `join-pane` instead of killing. The `relocate_session` parameter exists in the code but isn't used by the automatic `resync --fix` path in `PluginLifecycleListener`.
+
+**What I'd recommend:**
+1. **Fix the immediate config mismatch:** Either rename your tmux session to `claude`, or update `.agent-doc/config.toml` to match your actual session name (e.g., `tmux_session = "0"`)
+2. **Patch resync to preserve active agents:** In `apply_fixes_to_registry`, when the pane is running a process in `AGENT_PROCESSES`, use `join-pane` relocation instead of `kill_pane` — same as the `relocate_session` path but automatic
+3. **Add a safety check to PluginLifecycleListener:** Pass `--session <current>` to `resync --fix` so it uses relocation mode rather than kill mode
+<!-- agent:boundary:c75c05c0 -->
+<!-- agent:boundary:aa0795cc -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

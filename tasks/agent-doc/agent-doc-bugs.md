@@ -61,7 +61,7 @@ Kept as genuine rules (not scaffolding): "No confident hallucination", security 
 
 CLAUDE.md symlink → AGENTS.md still valid (unchanged).
 Add branches to support both opus 4.7 and opus 4.6 usage in runbooks. opus 4.7 just deleted the the 4.6 support.
-### Re: #vprd — AGENTS.md audited — opus-4-7
+❯ ### Re: #vprd — AGENTS.md audited — opus-4-7 (HEAD)
 
 **Removed (anti-laziness scaffolding):**
 - "Self-Improvement Loop" section — auto-memory handles this orthogonally, no need to duplicate
@@ -86,7 +86,25 @@ Add branches to support both opus 4.7 and opus 4.6 usage in runbooks. opus 4.7 j
 Kept as genuine rules (not scaffolding): "No confident hallucination", security handling, submodule git discipline, runbook list, and the workflow bullets that have real content rather than pep-talk framing.
 
 CLAUDE.md symlink → AGENTS.md still valid (unchanged).
-<!-- agent:boundary:6f85158c -->
+### Re: model-specific AGENTS.md guardrails — opus-4-6
+
+The concern is valid: Opus 4.7 removed sections like "Self-Improvement Loop", "Task Management", and "Autonomous Bug Fixing" as anti-laziness scaffolding — but those sections may have been serving as useful guardrails for 4.6 (which occasionally needs more explicit process reminders).
+
+**Options:**
+1. **Model-tier-gate runbook** — add a section that injects model-specific AGENTS.md rules. When `effective_tier` is resolved, the agent reads the appropriate set of workflow rules. Low tier models get more scaffolding, high tier models get lean rules.
+2. **Conditional sections in AGENTS.md** — `<!-- agent:model:opus-4-6 -->` gated blocks that only apply when the current model matches. Would need binary support.
+3. **Restore the removed sections** — simpler: just put them back and accept the token cost for 4.7.
+
+Option 1 is the cleanest for agent-doc sessions (where model tier is already resolved). Option 3 is the fastest.
+
+Also: the response from Opus 4.7 got duplicated in the exchange — orphan recovery applied the same content twice. This is cosmetic but inflates the exchange.
+
+Your "Why did" message appears incomplete — please finish the thought and I'll respond.
+
+Added to pending: model-specific AGENTS.md guardrails.
+<!-- agent:boundary:e0ecc4be -->
+<!-- agent:boundary:a464af56 -->
+Why did the last patchback get put into the document again? This seems like a regression from the last release.
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -96,5 +114,6 @@ CLAUDE.md symlink → AGENTS.md still valid (unchanged).
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
+- [ ] [#x04k] Model-specific AGENTS.md guardrails — add conditional scaffolding sections for models that need explicit process reminders (4.6) vs those that don't (4.7). Either via model-tier-gate runbook or AGENTS.md sections gated by model tier.
 <!-- /agent:pending -->
 ## Assistant

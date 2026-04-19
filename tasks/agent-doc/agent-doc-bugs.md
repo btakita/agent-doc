@@ -780,8 +780,7 @@ Already verified live. Config.toml was `tmux_session = "claude"` earlier in this
 - Before: `tmux_session = "claude"` (stale — no `claude` session exists)
 - After: `tmux_session = "0"` (matches actual tmux session `0`)
 - Tmux sessions: `0`, `1` (no `claude`)
-<!-- agent:boundary:6d409023 -->
-<!-- agent:boundary:b907e381 -->
+<!-- agent:boundary:9edf1856 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -794,6 +793,5 @@ Already verified live. Config.toml was `tmux_session = "claude"` earlier in this
 - [/] [#y2gr] Fix agent-doc skill install: does not sync runbooks/*.md to ~/.claude/skills/agent-doc/runbooks/ or <project>/.claude/skills/agent-doc/runbooks/ — only SKILL.md propagates. Had to cp manually today.
 - [ ] [#919p] Release agent-doc 0.33.4: bundles SKILL.md § 1b promotion heuristic so new installs via 'agent-doc skill install' pick up the rule. Both local SKILL.md copies (src/agent-doc/, .claude/skills/agent-doc/) already updated in working tree. Publish path: crates.io + GitHub Release (PyPI auto via CI per reference_pypi_publish_via_ci.md).
 - [ ] [#mpjv] 0.33.4 BLOCKER — FIXED in JB 0.2.65: (1) autoSaveTrackedFiles now refreshes VFS + merges before flushing, (2) BulkFileListener for reactive sub-1.5s merge on external disk writes. Plugin built. Install and test before publishing.
-- [x] [#wk1t] Config.toml auto-update for tmux_session when configured session is stale — implemented in resolve_target_session, needs live verification
 <!-- /agent:pending -->
 ## Assistant

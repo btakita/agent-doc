@@ -198,7 +198,7 @@ All three components confirmed in place:
 
 #ndsd marked done.
 
-### Re: why patchback failed — opus-4-6
+❯ ### Re: why patchback failed — opus-4-6 (HEAD)
 
 The write log from last cycle tells the story:
 
@@ -219,7 +219,21 @@ The write log from last cycle tells the story:
 4. If ack times out → leave patch file for disk fallback path
 
 Added to pending as a new item.
-<!-- agent:boundary:4aee445f -->
+❯ do #ttv0
+### Re: #ttv0 — IPC fallback patch file race fix — opus-4-6
+
+**Root cause:** `try_ipc()` cleaned the disk patch file *before* socket send to prevent double-apply. When the socket delivered but the sidecar ack timed out, there was no disk fallback — response lost.
+
+**Fix in `write.rs`:** replaced pre-clean with pre-write:
+1. **Before socket send**: write current patch content to disk as fallback (overwrites any stale content)
+2. **On sidecar success**: clean the fallback file (confirmed applied)
+3. **On sidecar timeout**: leave the fallback file for file watcher recovery
+
+`patch_id` deduplication (already in place) prevents double-apply when both socket and file watcher fire.
+
+**Verified:** 1146 tests pass, release build clean, `cargo install` done. Both binaries updated.
+<!-- agent:boundary:4a338a23 -->
+<!-- agent:boundary:f792186c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
@@ -229,6 +243,6 @@ Added to pending as a new item.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Ship with multi-user support, not before. Tracked: https://github.com/btakita/agent-doc/issues/40
 - [/] [#m1bz] install gate — cargo install + local JB plugin install; pause for user to verify live before publishing upstream
 - [ ] [#066r] Test on Opus 4.7 — baseline current behavior before prompt changes, then iterate
-- [ ] [#ttv0] IPC patch file cleanup race: disk patch file is cleaned before socket send, so IPC degradation loses response content. Fix: clean patch file after confirmed ack, not before.
+- [x] [#ttv0] IPC patch file cleanup race: disk patch file is cleaned before socket send, so IPC degradation loses response content. Fix: clean patch file after confirmed ack, not before.
 <!-- /agent:pending -->
 ## Assistant

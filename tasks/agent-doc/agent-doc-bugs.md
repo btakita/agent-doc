@@ -1058,10 +1058,14 @@ Replaced `splice_pending_component` + `atomic_write` in the IPC timeout path wit
 
 No user changes — boundary artifact only. Orphaned response from previous cycle recovered and committed (`phhk` reaped).
 compact exchange
-### Re: boundary sync — sonnet-4-6
+❯ ### Re: boundary sync — sonnet-4-6 (HEAD)
 
 No user changes — boundary artifact only. Orphaned response from previous cycle recovered and committed (`phhk` reaped).
-<!-- agent:boundary:4e3c39c4 -->
+### Re: boundary sync — sonnet-4-6
+
+No user changes — boundary artifact only.
+<!-- agent:boundary:11aa3a2f -->
+<!-- agent:boundary:788cfb43 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

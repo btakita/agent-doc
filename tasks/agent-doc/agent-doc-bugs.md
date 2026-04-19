@@ -702,7 +702,10 @@ At 19:40:23 (90s earlier), same result for `agent-loop.md`. Both files returned 
 Settings → Plugins → gear → Install from Disk → `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.63-signed.zip` → restart IDE.
 
 After restart, `Run Agent Doc` will proceed directly to the `agent-doc route` CLI command with no busy guard.
-<!-- agent:boundary:bc1e801a -->
+Investigate all of my AGENTS.md/CLAUDE.md, skills, and runbooks. How can the prompts more literal so opus 4.7 understands intent without burning tokens? What are the implications for agent-doc?
+
+See https://platform.claude.com/docs/en/about-claude/models/migration-guide
+<!-- agent:boundary:80a9105f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

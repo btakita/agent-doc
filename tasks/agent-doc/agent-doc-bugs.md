@@ -83,8 +83,7 @@ claude_args: --dangerously-skip-permissions
 **Recommendation:** Option 1 (agent-response-block tracking) as the primary fix. Low risk: `### Re:` headings are a structural convention already enforced by the SKILL.md. Lines between `### Re:` and the next `### Re:`/prompt-prefix/boundary are agent content by definition.
 
 **Immediate mitigation for claudescore.md:** strip the existing prompt prefixes from agent response table rows in the committed content. A sed pass or targeted git filter would clean up the 55 affected lines.
-<!-- agent:boundary:f26dc3bf -->
-<!-- agent:boundary:52f362fd -->
+<!-- agent:boundary:95d30a39 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

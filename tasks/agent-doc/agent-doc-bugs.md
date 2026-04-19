@@ -296,8 +296,7 @@ Two exclusion rules would eliminate both false positives:
 2. **Exclude component/structural markers from the "agent lines after" check** — lines like `<!-- /agent:... -->`, `<!-- agent:... -->`, and `## ` section headers outside the exchange shouldn't count as "agent content" for the inline annotation heuristic. Only `[agent]` lines that are response prose should qualify.
 
 Alternatively: gate the check more conservatively — require at least one `[agent]` line after that is NOT a component marker or section boundary.
-<!-- agent:boundary:f177b53e -->
-<!-- agent:boundary:aaf80e57 -->
+<!-- agent:boundary:0cc6d5ca -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -219,8 +219,7 @@ The write log from last cycle tells the story:
 4. If ack times out → leave patch file for disk fallback path
 
 Added to pending as a new item.
-<!-- agent:boundary:dd9718c4 -->
-<!-- agent:boundary:7856c087 -->
+<!-- agent:boundary:4aee445f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

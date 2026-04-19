@@ -36,8 +36,7 @@ No special logic or separate plugin required. The extension uses standard VS Cod
 - agent-doc for structured document sessions with Claude Code
 
 A future integration could theoretically use Cursor's extension API to bridge their AI, but the architectures are fundamentally different — Cursor's AI is editor-embedded while agent-doc is CLI-first with editor as a thin presentation layer.
-<!-- agent:boundary:f0b6877b -->
-<!-- agent:boundary:97ac9572 -->
+<!-- agent:boundary:ccfa4fdf -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

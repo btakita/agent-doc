@@ -232,7 +232,8 @@ Added to pending as a new item.
 `patch_id` deduplication (already in place) prevents double-apply when both socket and file watcher fire.
 
 **Verified:** 1146 tests pass, release build clean, `cargo install` done. Both binaries updated.
-<!-- agent:boundary:98ee5127 -->
+release
+<!-- agent:boundary:64acd02d -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

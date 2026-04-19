@@ -234,7 +234,48 @@ Even without the binary enhancement, the skill could instruct: "After reading th
 Blockquotes get `[user+] >` tags in the annotated diff — structurally distinct from agent prose. This is the belt-and-suspenders layer that works regardless of binary/skill changes.
 
 **Recommendation:** implement #1 (binary) + #2 (skill) as a tracked pending item. #3 is already the documented convention.
-<!-- agent:boundary:e76b8668 -->
+❯ Implement #1 + #2. Add tests
+### Re: inline annotation surfacing — #1 binary + #2 skill implemented — opus-4-6
+
+#### #1 Binary: `inline_annotations` in preflight JSON
+
+Added `extract_inline_annotations()` to `diff.rs`. Algorithm: scan annotated diff for `[user+]`/`[user~]` lines that have at least one `[agent]` line after them. These are user edits sandwiched inside agent response blocks — not new input at the end.
+
+New field in `PreflightOutput`:
+```json
+{
+  "inline_annotations": [
+    "This is wrong. Do not lower expert scores.",
+    "We may need to broaden the gate."
+  ]
+}
+```
+
+Omitted from JSON when empty (consistent with other Vec fields).
+
+#### #2 Skill: priority instruction in SKILL.md
+
+Added to the Respond step:
+
+> **Inline annotation priority:** if the preflight output contains `inline_annotations` (non-empty), address each one before generating new content.
+
+#### Tests added (9 new)
+
+| Test | Location | What it covers |
+|------|----------|---------------|
+| `inline_annotations_user_addition_between_agent_lines` | diff.rs | Core case: `[user+]` between `[agent]` lines |
+| `inline_annotations_user_modification_between_agent_lines` | diff.rs | `[user~]` between `[agent]` lines |
+| `inline_annotations_user_addition_at_end_is_not_inline` | diff.rs | `[user+]` at end = regular input, not annotation |
+| `inline_annotations_multiple` | diff.rs | Multiple annotations, end input excluded |
+| `inline_annotations_skips_blank_user_lines` | diff.rs | Blank user lines ignored |
+| `inline_annotations_empty_annotated_diff` | diff.rs | Empty input returns empty |
+| `inline_annotations_claudescore_table_scenario` | diff.rs | Reproduces the original claudescore bug pattern |
+| `preflight_output_includes_inline_annotations` | preflight.rs | JSON serialization with annotations |
+| `preflight_output_omits_inline_annotations_when_empty` | preflight.rs | JSON omits empty field |
+
+**All 1172 tests pass.** Both binaries rebuilt (`cargo install --path .` + `cargo build --release`).
+<!-- agent:boundary:6074a913 -->
+<!-- agent:boundary:e952146e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

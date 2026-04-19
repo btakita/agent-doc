@@ -37,13 +37,15 @@ No special logic or separate plugin required. The extension uses standard VS Cod
 
 A future integration could theoretically use Cursor's extension API to bridge their AI, but the architectures are fundamentally different — Cursor's AI is editor-embedded while agent-doc is CLI-first with editor as a thin presentation layer.
 ❯ Would a separate Claude Code account be needed for Cursor development or could agent-doc + claude code use the cursor AI api to interact with the models? Would interacting with Cursor models require a proxy?
-### Re: Claude Code account & Cursor AI API — opus-4-6
+❯ ### Re: Claude Code account & Cursor AI API — opus-4-6 (HEAD)
 
 **No separate Claude Code account needed.** Claude Code CLI is editor-independent — it runs in tmux, not inside Cursor. You use one Claude Code subscription (Anthropic API key or Claude Max plan) regardless of which editor you have open. Cursor as an editor is just the presentation layer for agent-doc; it doesn't touch your Claude Code billing.
 
 **agent-doc cannot use Cursor's AI API.** Cursor's AI is proprietary and tightly coupled to their editor — there's no public API for extensions or external tools to call Cursor's models. Their AI features (Tab completion, Cmd+K, Composer) route through Cursor's own backend proxy, which isn't exposed for third-party use. Even Cursor's own extension API (inherited from VS Code) doesn't expose an AI endpoint.
 
 **A proxy wouldn't help either.** The fundamental issue isn't routing — it's that agent-doc's architecture requires a long-running CLI agent with tool use, context management, and conversation state. Cursor's AI is request/response oriented (completions, edits, chat) without the persistent agent loop that agent-doc depends on. You'd essentially need to reimplement Claude Code's agent runtime on top of Cursor's API, which would be a separate product.
+
+❯ Are there any open source plugins that run Claude Code or another agentic harness using the Cursor api?
 
 **In practice, the two coexist cleanly:**
 
@@ -55,7 +57,31 @@ A future integration could theoretically use Cursor's extension API to bridge th
 | Models | GPT-4o, Claude (via Cursor proxy) | Claude (direct Anthropic API) |
 
 You'd use Cursor's AI for fast inline work and agent-doc for the deeper session-based workflows. No conflict, no sharing needed.
-<!-- agent:boundary:f9823ea8 -->
+### Re: Open source agentic plugins using Cursor API — opus-4-6
+
+**No legitimate open source project uses Cursor's AI subscription for agentic workflows.** Cursor has no public API — its AI backend is proprietary and tightly coupled to the editor.
+
+**What exists on GitHub (gray area):**
+
+- **cursor-api / cursor2api** — Reverse-engineered proxies that extract auth tokens from a Cursor installation and expose Cursor's backend as OpenAI-compatible API endpoints. These relay requests through the user's subscription to access Claude, GPT-4, etc.
+- **cursor-free-vip / cursor-vip** — Projects that bypass free-tier limits by resetting device IDs or spoofing trial tokens.
+
+These all violate Cursor's ToS, frequently get DMCA'd, and are unstable. Not a viable foundation for agent-doc integration.
+
+**Legitimate agentic extensions that work *in* Cursor (but with separate keys):**
+
+| Extension | Type | Cursor-compatible? | Uses Cursor subscription? |
+|-----------|------|-------------------|--------------------------|
+| Continue | VS Code ext | Yes | No — own API keys |
+| Cline (Claude Dev) | VS Code ext | Yes | No — own Anthropic key |
+| Roo Code | VS Code ext | Yes | No — own keys |
+| Aider | Terminal | N/A | No — own keys |
+
+All of these require their own API keys (Anthropic, OpenAI, Ollama, etc.). None can piggyback on Cursor's subscription because Cursor doesn't expose its AI as a provider to extensions.
+
+**For agent-doc specifically:** the path forward is direct Anthropic API / Claude Code, not Cursor's AI. The editor plugin handles the presentation layer (gutter decorations, IPC, submit/claim) while Claude Code handles the agent runtime — that split is clean and doesn't need Cursor's AI at all.
+<!-- agent:boundary:8f650406 -->
+<!-- agent:boundary:380a4998 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

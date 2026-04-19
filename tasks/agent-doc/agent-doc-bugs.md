@@ -696,8 +696,7 @@ The old Claude Code session was killed by `resync --fix`. Here's the chain:
 1. **Fix the immediate config mismatch:** Either rename your tmux session to `claude`, or update `.agent-doc/config.toml` to match your actual session name (e.g., `tmux_session = "0"`)
 2. **Patch resync to preserve active agents:** In `apply_fixes_to_registry`, when the pane is running a process in `AGENT_PROCESSES`, use `join-pane` relocation instead of `kill_pane` — same as the `relocate_session` path but automatic
 3. **Add a safety check to PluginLifecycleListener:** Pass `--session <current>` to `resync --fix` so it uses relocation mode rather than kill mode
-<!-- agent:boundary:c75c05c0 -->
-<!-- agent:boundary:aa0795cc -->
+<!-- agent:boundary:d9ddc150 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
